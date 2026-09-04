@@ -249,9 +249,6 @@ function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEnti
     ...(core.crossJurisdictionSwaps === undefined
       ? {}
       : { crossJurisdictionSwaps: core.crossJurisdictionSwaps }),
-    ...(core.pendingCrossJurisdictionFillAcks === undefined
-      ? {}
-      : { pendingCrossJurisdictionFillAcks: core.pendingCrossJurisdictionFillAcks }),
     ...(core.crossJurisdictionBookAdmissions === undefined
       ? {}
       : { crossJurisdictionBookAdmissions: core.crossJurisdictionBookAdmissions }),

@@ -1,6 +1,5 @@
 import { normalizeEntityRef } from '../../entity/tx/account-key';
 import {
-  CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
@@ -25,7 +24,6 @@ import {
   exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
 } from '../../orderbook/swap-execution';
-import type { AccountTx } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { EntityState } from '../../entity/types';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
@@ -272,81 +270,7 @@ export const markCrossJurisdictionBookAdmissionResolving = (
   if (!admission || admission.status === 'closed') return;
   admission.status = 'resolving';
   admission.resolvingAt = now;
-  delete admission.pendingFill;
   admission.updatedAt = now;
-};
-
-export const markCrossJurisdictionBookCancelPending = (
-  currentEntityState: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  sourceAccountId: string,
-  now: number,
-  reason = 'cancel_request',
-): CrossJurisdictionBookAdmission => {
-  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-  const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
-  const admissions = currentEntityState.crossJurisdictionBookAdmissions;
-  const admission = admissions
-    ? getEntityCollectionValueForWrite(admissions, key)
-    : undefined;
-  if (!admission) {
-    throw new Error(
-      `CROSS_J_CANCEL_ADMISSION_MISSING:order=${canonicalRoute.orderId}:source=${canonicalRoute.source.entityId}`,
-    );
-  }
-  const canonicalRouteHash = canonicalRoute.routeHash;
-  if (!canonicalRouteHash) {
-    throw new Error(`CROSS_J_CANCEL_ROUTE_HASH_MISSING:order=${canonicalRoute.orderId}`);
-  }
-  if (normalizeEntityRef(admission.routeHash) !== normalizeEntityRef(canonicalRouteHash)) {
-    throw new Error(
-      `CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:order=${canonicalRoute.orderId}:` +
-        `admission=${admission.routeHash}:route=${canonicalRoute.routeHash}`,
-    );
-  }
-  const normalizedAccountId = normalizeEntityRef(sourceAccountId);
-  if (!normalizedAccountId) {
-    throw new Error(`CROSS_J_CANCEL_SOURCE_ACCOUNT_MISSING:order=${canonicalRoute.orderId}`);
-  }
-  if (
-    admission.pendingCancel &&
-    normalizeEntityRef(admission.pendingCancel.sourceAccountId) !== normalizedAccountId
-  ) {
-    throw new Error(
-      `CROSS_J_CANCEL_SOURCE_ACCOUNT_MISMATCH:order=${canonicalRoute.orderId}:` +
-        `pending=${admission.pendingCancel.sourceAccountId}:received=${sourceAccountId}`,
-    );
-  }
-  admission.pendingCancel ??= {
-    sourceAccountId,
-    requestedAt: now,
-    reason,
-  };
-  if (admission.status !== 'closed') {
-    admission.status = 'resolving';
-    admission.resolvingAt ??= now;
-  }
-  admission.updatedAt = now;
-  return admission;
-};
-
-export const markCrossJurisdictionBookRemovalCommitted = (
-  currentEntityState: EntityState,
-  route: CrossJurisdictionSwapRoute,
-  sourceAccountId: string,
-  now: number,
-  reason = 'cancel_request',
-): CrossJurisdictionBookAdmission => {
-  const admission = markCrossJurisdictionBookCancelPending(
-    currentEntityState,
-    route,
-    sourceAccountId,
-    now,
-    reason,
-  );
-  admission.pendingCancel!.bookRemovalCommittedAt ??= now;
-  admission.updatedAt = now;
-  return admission;
 };
 
 export const markCrossJurisdictionBookAdmissionClosed = (
@@ -365,8 +289,6 @@ export const markCrossJurisdictionBookAdmissionClosed = (
   admission.status = 'closed';
   admission.closedAt = now;
   admission.closeReason = reason;
-  delete admission.pendingFill;
-  delete admission.pendingCancel;
   admission.updatedAt = now;
 };
 
@@ -424,26 +346,28 @@ export const assertCrossJurisdictionOrderAdmissible = (
   if (error) throw new Error(error);
 };
 
-type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-
+/**
+ * Hub-internal progress of one cross-j order. Fill progress never enters
+ * bilateral Account consensus: the book owner applies it to its admitted route
+ * and book row, the source Hub applies it to its route mirror, and the
+ * hash-ladder reveal at close settles both legs at `fillRatio`.
+ *
+ * Amounts are the uint16-quantized claims both Accounts and the on-chain
+ * `applyPull` will settle (`floor(total * ratio / 65535)`). The exact executed
+ * book amounts are kept only for conservation across book counterparties; the
+ * Hub absorbs the sub-step difference in its own inventory.
+ */
 export interface CrossJurisdictionFillInstruction {
   accountId: string;
   offerId: string;
+  orderId: string;
   route: CrossJurisdictionSwapRoute;
+  fillSeq: number;
   fillRatio: number;
-  fillNumerator: bigint;
-  fillDenominator: bigint;
   cancelRemainder: boolean;
-  sourceAmount: bigint;
-  targetAmount: bigint;
+  /** Exact executed book amounts; conservation across counterparties only. */
   executionSourceAmount: bigint;
   executionTargetAmount: bigint;
-  priceImprovementMode: 'source_savings';
-  priceImprovementAmount: bigint;
-  priceImprovementTokenId: number | null;
-  priceTicks: bigint;
-  pairId: string;
-  orderId: string;
 }
 
 export type CrossMarketOffer = {
@@ -494,9 +418,6 @@ export type CrossOrderbookFill = {
   weightedCost: bigint;
   cancelRemainder?: boolean;
 };
-
-const scaleByExactFillRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
-  numerator >= denominator ? total : (total * numerator) / denominator;
 
 export const getCrossJurisdictionRouteRemainingAmounts = (
   route: CrossJurisdictionSwapRoute,
@@ -595,13 +516,16 @@ export const buildCrossJurisdictionMarketOffer = (
   };
 };
 
-export const buildCrossJurisdictionFillAck = (
+const currentFillSeq = (route: CrossJurisdictionSwapRoute): number =>
+  Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+
+export const buildCrossJurisdictionFillInstruction = (
   accountId: string,
   offerId: string,
   namespacedOrderId: string,
   meta: CrossMarketOffer,
   fill: CrossOrderbookFill,
-): { instruction: CrossJurisdictionFillInstruction; tx: CrossSwapFillAckTx } | null => {
+): CrossJurisdictionFillInstruction | null => {
   const filledLotsBig = BigInt(fill.filledLots);
   if (filledLotsBig <= 0n || fill.weightedCost <= 0n) return null;
 
@@ -611,9 +535,9 @@ export const buildCrossJurisdictionFillAck = (
     meta.quoteTokenId,
     fill.weightedCost,
   );
-  const sourceAmount = meta.side === 1 ? executionBaseWei : executionQuoteWei;
-  const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
-  if (sourceAmount <= 0n || targetAmount <= 0n) return null;
+  const executionSourceAmount = meta.side === 1 ? executionBaseWei : executionQuoteWei;
+  const executionTargetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
+  if (executionSourceAmount <= 0n || executionTargetAmount <= 0n) return null;
 
   const {
     sourceTotal,
@@ -622,132 +546,48 @@ export const buildCrossJurisdictionFillAck = (
     filledTargetAmount: previousTargetClaimed,
     fillRatio: previousCumulativeRatio,
   } = getCrossJurisdictionCommittedFillAmounts(meta.route);
-  const priceImprovementMode = meta.route.priceImprovementMode ?? 'source_savings';
-  // Hash-ledger ratio is the committed order-progress ratio. Price improvement
-  // always follows target progress. A better book price spends less source;
-  // cross-j never creates a second target-side payment lane.
-  const exactFillRatio = deriveExactSwapFillRatio(
-    targetTotal,
-    previousTargetClaimed + targetAmount,
-  );
   if (
-    previousSourceClaimed + sourceAmount > sourceTotal ||
-    previousTargetClaimed + targetAmount > targetTotal
+    previousSourceClaimed + executionSourceAmount > sourceTotal ||
+    previousTargetClaimed + executionTargetAmount > targetTotal
   ) return null;
-  const fillRatio = exactFillRatioToUint16(exactFillRatio);
-  if (fillRatio <= previousCumulativeRatio) return null;
-
-  // Keep settlement amounts exact. The uint16 ratio is only a coarse
-  // hash-ladder/dispute projection; using it here creates dust-sized drift on
-  // partial fills (for example exact 1/4 becomes 16384/65535).
-  const exactCumulativeSource = scaleByExactFillRatio(
-    sourceTotal,
-    exactFillRatio.numerator,
-    exactFillRatio.denominator,
-  );
-  const exactCumulativeTarget = scaleByExactFillRatio(
+  // Order progress is the target-side fill as one uint16 ratio: the single
+  // representation shared by the cooperative close, the ladder reveal and the
+  // on-chain dispute. Both legs claim exactly floor(total * ratio / 65535);
+  // the Hub absorbs the sub-step difference to the executed book amounts.
+  const fillRatio = exactFillRatioToUint16(deriveExactSwapFillRatio(
     targetTotal,
-    exactFillRatio.numerator,
-    exactFillRatio.denominator,
-  );
-  const settlementSourceAmount = exactCumulativeSource - previousSourceClaimed;
-  const settlementTargetAmount = exactCumulativeTarget - previousTargetClaimed;
-  if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
-  // The matcher owns one exact base/quote execution pair. The proportional
-  // source claim may be larger only when this order receives price improvement;
-  // the difference is returned during clear. It may never be smaller than the
-  // shared execution amount, because that would make the paired ACKs diverge.
-  if (settlementTargetAmount !== targetAmount || settlementSourceAmount < sourceAmount) return null;
-  const sourceSavings = settlementSourceAmount - sourceAmount;
-  const priceImprovementAmount = sourceSavings;
-  const priceImprovementTokenId = priceImprovementAmount > 0n
-    ? Number(meta.route.source.tokenId)
-    : null;
-  const executionSourceAmount = sourceAmount;
-  const executionTargetAmount = targetAmount;
-  const nextActualTargetAmount = previousTargetClaimed + executionTargetAmount;
-  const terminalCancel =
-    fill.cancelRemainder === true ||
-    fillRatio >= CROSS_J_MAX_FILL_RATIO ||
-    nextActualTargetAmount >= targetTotal;
-
-  const instruction: CrossJurisdictionFillInstruction = {
+    previousTargetClaimed + executionTargetAmount,
+  ));
+  if (fillRatio <= previousCumulativeRatio) return null;
+  // A full fill is terminal through the ratio itself; `cancelRemainder` is
+  // only the matcher's explicit cancel of an unfilled remainder.
+  return {
     accountId,
     offerId,
+    orderId: namespacedOrderId,
     route: meta.route,
+    fillSeq: currentFillSeq(meta.route) + 1,
     fillRatio,
-    fillNumerator: exactFillRatio.numerator,
-    fillDenominator: exactFillRatio.denominator,
-    cancelRemainder: terminalCancel,
-    sourceAmount: settlementSourceAmount,
-    targetAmount: settlementTargetAmount,
+    cancelRemainder: fill.cancelRemainder === true,
     executionSourceAmount,
     executionTargetAmount,
-    priceImprovementMode,
-    priceImprovementAmount,
-    priceImprovementTokenId,
-    priceTicks: meta.priceTicks,
-    pairId: meta.pairId,
-    orderId: namespacedOrderId,
   };
-  const tx: CrossSwapFillAckTx = {
-    type: 'cross_swap_fill_ack',
-    data: {
-      offerId,
-      ...(meta.route.routeHash ? { routeHash: meta.route.routeHash } : {}),
-      previousFillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)),
-      fillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)) + 1,
-      incrementalSourceAmount: settlementSourceAmount,
-      incrementalTargetAmount: settlementTargetAmount,
-      cumulativeSourceAmount: previousSourceClaimed + settlementSourceAmount,
-      cumulativeTargetAmount: previousTargetClaimed + settlementTargetAmount,
-      cumulativeFillRatio: fillRatio,
-      fillNumerator: exactFillRatio.numerator,
-      fillDenominator: exactFillRatio.denominator,
-      ackKind: 'fill',
-      executionSourceAmount,
-      executionTargetAmount,
-      priceImprovementMode,
-      ...(priceImprovementAmount > 0n ? { priceImprovementAmount } : {}),
-      ...(priceImprovementTokenId !== null ? { priceImprovementTokenId } : {}),
-      cancelRemainder: terminalCancel,
-      comment: `cross-j-hashledger-fill:${fillRatio}`,
-      priceTicks: meta.priceTicks,
-      pairId: meta.pairId,
-    },
-  };
-  return { instruction, tx };
 };
 
-export const buildCrossJurisdictionCancelAck = (
+/** Terminal cancel of the unfilled remainder at the committed progress. */
+export const buildCrossJurisdictionCancelInstruction = (
+  accountId: string,
   offerId: string,
+  namespacedOrderId: string,
   route: CrossJurisdictionSwapRoute,
-): CrossSwapFillAckTx => {
-  const {
-    filledSourceAmount: cumulativeSourceAmount,
-    filledTargetAmount: cumulativeTargetAmount,
-    fillRatio: currentRatio,
-  } = getCrossJurisdictionCommittedFillAmounts(route);
-  return {
-    type: 'cross_swap_fill_ack',
-    data: {
-      offerId,
-      ...(route.routeHash ? { routeHash: route.routeHash } : {}),
-      previousFillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
-      fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
-      incrementalSourceAmount: 0n,
-      incrementalTargetAmount: 0n,
-      cumulativeSourceAmount,
-      cumulativeTargetAmount,
-      cumulativeFillRatio: currentRatio,
-      fillNumerator: route.fillNumerator ?? 0n,
-      fillDenominator: route.fillDenominator ?? 1n,
-      ackKind: 'cancel',
-      executionSourceAmount: 0n,
-      executionTargetAmount: 0n,
-      cancelRemainder: true,
-      comment: 'cross-j-cancel-request',
-      pairId: route.venueId || '',
-    },
-  };
-};
+): CrossJurisdictionFillInstruction => ({
+  accountId,
+  offerId,
+  orderId: namespacedOrderId,
+  route,
+  fillSeq: currentFillSeq(route),
+  fillRatio: getCrossJurisdictionCommittedFillAmounts(route).fillRatio,
+  cancelRemainder: true,
+  executionSourceAmount: 0n,
+  executionTargetAmount: 0n,
+});

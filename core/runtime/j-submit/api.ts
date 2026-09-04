@@ -41,9 +41,7 @@ export type CrossJurisdictionSwapSubmitParams = {
   bookHubSignerId?: string;
   expiresInMs?: number;
   priceTicks?: bigint;
-  priceImprovementMode?: CrossJurisdictionSwapRoute['priceImprovementMode'];
   riskMode?: CrossJurisdictionSwapRoute['riskMode'];
-  settlementPolicy?: CrossJurisdictionSwapRoute['settlementPolicy'];
   memo?: string;
 };
 
@@ -254,10 +252,8 @@ export function buildCrossJurisdictionSwapSubmission(
       sourceAssetRef: `${context.sourceStackId}:${Number(params.sourceTokenId)}`,
       targetAssetRef: `${context.targetStackId}:${Number(params.targetTokenId)}`,
     },
-    ...(params.settlementPolicy ? { settlementPolicy: params.settlementPolicy } : {}),
     riskMode: params.riskMode || 'fully_collateralized',
     ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
-    ...(params.priceImprovementMode ? { priceImprovementMode: params.priceImprovementMode } : {}),
     status: 'intent',
     createdAt: context.now,
     updatedAt: context.now,

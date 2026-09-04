@@ -26,7 +26,6 @@ const accountCollectionFields = new Set([
   'crossJurisdictionSwaps',
   'deltas',
   'locks',
-  'pendingCrossJurisdictionFillAcks',
   'swapOffers',
   'pulls',
   'subcontracts',

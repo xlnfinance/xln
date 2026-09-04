@@ -43,8 +43,6 @@ type CrossJInputs = Readonly<{
   sourceLock: Extract<AccountTx, { type: 'cross_pull_lock' }>;
   targetLock: Extract<AccountTx, { type: 'cross_pull_lock' }>;
   swapOffer: Extract<AccountTx, { type: 'swap_offer' }>;
-  fillAck: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-  targetProgress: Extract<AccountTx, { type: 'cross_pull_progress' }>;
   sourceClose: Extract<AccountTx, { type: 'cross_pull_close' }>;
 }>;
 
@@ -116,45 +114,6 @@ const inputs = (prepared: CrossJurisdictionSwapRoute): CrossJInputs => {
         minNetReceive: 200n,
         priceTicks: 20_000n,
         crossJurisdiction: prepared,
-      },
-    },
-    fillAck: {
-      type: 'cross_swap_fill_ack',
-      data: {
-        offerId: prepared.orderId,
-        routeHash: prepared.routeHash,
-        previousFillSeq: 0,
-        fillSeq: 1,
-        incrementalSourceAmount: 50n,
-        incrementalTargetAmount: 100n,
-        cumulativeSourceAmount: 50n,
-        cumulativeTargetAmount: 100n,
-        cumulativeFillRatio: 32_768,
-        fillNumerator: 1n,
-        fillDenominator: 2n,
-        ackKind: 'fill',
-        executionSourceAmount: 50n,
-        executionTargetAmount: 100n,
-      },
-    },
-    targetProgress: {
-      type: 'cross_pull_progress',
-      data: {
-        pullId: targetPull.pullId,
-        fill: {
-          offerId: prepared.orderId,
-          routeHash: prepared.routeHash,
-          previousFillSeq: 0,
-          fillSeq: 1,
-          incrementalSourceAmount: 50n,
-          incrementalTargetAmount: 100n,
-          cumulativeSourceAmount: 50n,
-          cumulativeTargetAmount: 100n,
-          cumulativeFillRatio: 32_768,
-          fillNumerator: 1n,
-          fillDenominator: 2n,
-          ackKind: 'fill',
-        },
       },
     },
     sourceClose: {
@@ -236,8 +195,9 @@ const applyStep = async (
     pullCount: account.state.pulls?.size ?? 0,
     offerCount: account.state.swapOffers.size,
     events: result.events,
-    outputCount: (result.candidateEffects?.length ?? 0) +
-      (result.outcome === 'swap_offer_created' || result.outcome === 'swap_cancelled' ? 1 : 0),
+    // Cross-j orderbook lifecycle is projected by the Entity transition. Only
+    // explicit Account candidate effects belong in the cross-language outbox.
+    outputCount: result.candidateEffects?.length ?? 0,
     ...(account.state.swapOffers.get('order-1')
       ? { offer: account.state.swapOffers.get('order-1') }
       : {}),
@@ -247,26 +207,25 @@ const applyStep = async (
 export const executeCrossJAccountSemanticVector = async () => {
   const prepared = route();
   const txs = inputs(prepared);
-  const sourceFill = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'));
+  const sourceOffer = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'));
   const sourceClose = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'));
-  const targetProgress = makeAccount(TARGET_HUB, TARGET_USER, 2, 31_338, address('77'));
+  const targetLock = makeAccount(TARGET_HUB, TARGET_USER, 2, 31_338, address('77'));
   return {
     version: 1,
     canonicalSource: 'TypeScript applyAccountTxToMutableReplica',
     inputs: txs,
     cases: [
-      { name: 'source-fill', steps: [
-        await applyStep(sourceFill, 'sourceLock', txs.sourceLock, false, 1, 1_000, 10),
-        await applyStep(sourceFill, 'swapOffer', txs.swapOffer, true, 1, 1_000, 10),
-        await applyStep(sourceFill, 'fillAck', txs.fillAck, false, 1, 2_000, 20),
+      { name: 'source-offer', steps: [
+        await applyStep(sourceOffer, 'sourceLock', txs.sourceLock, false, 1, 1_000, 10),
+        await applyStep(sourceOffer, 'swapOffer', txs.swapOffer, true, 1, 1_000, 10),
+        await applyStep(sourceOffer, 'sourceClose', txs.sourceClose, false, 1, 2_000, 20),
       ] },
       { name: 'source-zero-close', steps: [
         await applyStep(sourceClose, 'sourceLock', txs.sourceLock, false, 1, 1_000, 10),
         await applyStep(sourceClose, 'sourceClose', txs.sourceClose, false, 1, 2_000, 20),
       ] },
-      { name: 'target-progress', steps: [
-        await applyStep(targetProgress, 'targetLock', txs.targetLock, true, 2, 1_000, 10),
-        await applyStep(targetProgress, 'targetProgress', txs.targetProgress, true, 2, 2_000, 20),
+      { name: 'target-lock', steps: [
+        await applyStep(targetLock, 'targetLock', txs.targetLock, true, 2, 1_000, 10),
       ] },
     ],
   };

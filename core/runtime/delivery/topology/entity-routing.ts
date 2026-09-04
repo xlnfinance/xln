@@ -121,8 +121,6 @@ const crossPulls = (
     tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction?.leg === leg);
 
 type CrossJCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
-type CrossJFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-type CrossJPullProgressTx = Extract<AccountTx, { type: 'cross_pull_progress' }>;
 
 const crossCloses = (
   accountTxs: readonly AccountTx[],
@@ -149,43 +147,6 @@ const crossCloseKey = (tx: CrossJCloseTx): string => safeStringify({
   closeMode: tx.data.proof.closeMode,
   binary: tx.data.binary,
 });
-
-const crossProgressKey = (fill: CrossJFillAckTx['data']): string => safeStringify({
-  operation: 'progress',
-  offerId: fill.offerId,
-  routeHash: String(fill.routeHash || '').toLowerCase(),
-  previousFillSeq: fill.previousFillSeq,
-  fillSeq: fill.fillSeq,
-  incrementalSourceAmount: fill.incrementalSourceAmount,
-  incrementalTargetAmount: fill.incrementalTargetAmount,
-  cumulativeSourceAmount: fill.cumulativeSourceAmount,
-  cumulativeTargetAmount: fill.cumulativeTargetAmount,
-  cumulativeFillRatio: fill.cumulativeFillRatio,
-  fillNumerator: fill.fillNumerator,
-  fillDenominator: fill.fillDenominator,
-  ackKind: fill.ackKind,
-  executionSourceAmount: fill.executionSourceAmount,
-  executionTargetAmount: fill.executionTargetAmount,
-  priceImprovementMode: fill.priceImprovementMode,
-  priceImprovementAmount: fill.priceImprovementAmount,
-  priceImprovementTokenId: fill.priceImprovementTokenId,
-  cancelRemainder: fill.cancelRemainder,
-  comment: fill.comment,
-  priceTicks: fill.priceTicks,
-  pairId: fill.pairId,
-});
-
-const sourceProgresses = (accountTxs: readonly AccountTx[]): CrossJFillAckTx[] =>
-  accountTxs.filter((tx): tx is CrossJFillAckTx => tx.type === 'cross_swap_fill_ack');
-
-const targetProgresses = (accountTxs: readonly AccountTx[]): CrossJPullProgressTx[] =>
-  accountTxs.filter((tx): tx is CrossJPullProgressTx => tx.type === 'cross_pull_progress');
-
-const pairedProgressListsMatch = (
-  source: readonly CrossJFillAckTx[],
-  target: readonly CrossJPullProgressTx[],
-): boolean => source.length === target.length && source.every(sourceTx =>
-  target.filter(targetTx => crossProgressKey(targetTx.data.fill) === crossProgressKey(sourceTx.data)).length === 1);
 
 const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
@@ -408,8 +369,6 @@ type CrossJAdmissionFrameCandidate = {
   targetPulls: Array<Extract<AccountTx, { type: 'cross_pull_lock' }>>;
   sourceCloses: CrossJCloseTx[];
   targetCloses: CrossJCloseTx[];
-  sourceProgresses: CrossJFillAckTx[];
-  targetProgresses: CrossJPullProgressTx[];
   alreadyCommitted: boolean;
   valid: boolean;
   /**
@@ -446,15 +405,11 @@ const buildCrossJProposalFrameCandidate = (
   const targetPulls = crossPulls(proposal.frame.accountTxs, 'target');
   const sourceCloses = crossCloses(proposal.frame.accountTxs, 'source');
   const targetCloses = crossCloses(proposal.frame.accountTxs, 'target');
-  const sourceFillProgresses = sourceProgresses(proposal.frame.accountTxs);
-  const targetFillProgresses = targetProgresses(proposal.frame.accountTxs);
   if (
     sourcePulls.length === 0 &&
     targetPulls.length === 0 &&
     sourceCloses.length === 0 &&
-    targetCloses.length === 0 &&
-    sourceFillProgresses.length === 0 &&
-    targetFillProgresses.length === 0
+    targetCloses.length === 0
   ) return null;
   const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
   const target = targetProposalCandidate(input, inputIndex, accountInput);
@@ -464,8 +419,6 @@ const buildCrossJProposalFrameCandidate = (
       pull.data.crossJurisdiction!.routeHash,
     )}`),
     ...[...sourceCloses, ...targetCloses].map(crossCloseKey),
-    ...sourceFillProgresses.map(tx => crossProgressKey(tx.data)),
-    ...targetFillProgresses.map(tx => crossProgressKey(tx.data.fill)),
   ];
   const invalidReasons = proposalCandidateInvalidReasons(
     routeKeys,
@@ -485,8 +438,6 @@ const buildCrossJProposalFrameCandidate = (
     targetPulls,
     sourceCloses,
     targetCloses,
-    sourceProgresses: sourceFillProgresses,
-    targetProgresses: targetFillProgresses,
     alreadyCommitted: false,
     valid: invalidReasons.length === 0,
     invalidReasons,
@@ -515,15 +466,11 @@ const buildCrossJAckFrameCandidate = (
   const targetPulls = crossPulls(frame.accountTxs, 'target');
   const sourceCloses = crossCloses(frame.accountTxs, 'source');
   const targetCloses = crossCloses(frame.accountTxs, 'target');
-  const sourceFillProgresses = sourceProgresses(frame.accountTxs);
-  const targetFillProgresses = targetProgresses(frame.accountTxs);
   if (
     sourcePulls.length === 0 &&
     targetPulls.length === 0 &&
     sourceCloses.length === 0 &&
-    targetCloses.length === 0 &&
-    sourceFillProgresses.length === 0 &&
-    targetFillProgresses.length === 0
+    targetCloses.length === 0
   ) return null;
   const routeKeys = [
     ...[...sourcePulls, ...targetPulls].map(pull => `open\u0000${admissionKey(
@@ -531,8 +478,6 @@ const buildCrossJAckFrameCandidate = (
       pull.data.crossJurisdiction!.routeHash,
     )}`),
     ...[...sourceCloses, ...targetCloses].map(crossCloseKey),
-    ...sourceFillProgresses.map(tx => crossProgressKey(tx.data)),
-    ...targetFillProgresses.map(tx => crossProgressKey(tx.data.fill)),
   ];
   return {
     inputIndex,
@@ -545,8 +490,6 @@ const buildCrossJAckFrameCandidate = (
     targetPulls,
     sourceCloses,
     targetCloses,
-    sourceProgresses: sourceFillProgresses,
-    targetProgresses: targetFillProgresses,
     alreadyCommitted: frame === account?.currentFrame,
     valid: new Set(routeKeys).size === routeKeys.length,
     invalidReasons: new Set(routeKeys).size === routeKeys.length ? [] : ['duplicate-route-key'],
@@ -563,9 +506,7 @@ const admissionFramesMatch = (
   pairedPullListsMatch(left.sourcePulls, right.targetPulls) &&
   pairedPullListsMatch(right.sourcePulls, left.targetPulls) &&
   pairedCloseListsMatch(left.sourceCloses, right.targetCloses) &&
-  pairedCloseListsMatch(right.sourceCloses, left.targetCloses) &&
-  pairedProgressListsMatch(left.sourceProgresses, right.targetProgresses) &&
-  pairedProgressListsMatch(right.sourceProgresses, left.targetProgresses);
+  pairedCloseListsMatch(right.sourceCloses, left.targetCloses);
 
 /** Structural only; monetary approval happens in the state-aware selector. */
 export const selectPotentialCrossJAccountInputPairs = (
@@ -1685,9 +1626,7 @@ const assertAtomicCrossJEnvelope = (
       const proposal = accountInputProposal(accountInput);
       return proposal?.frame.accountTxs.some(tx =>
         (tx.type === 'cross_pull_lock' && tx.data.crossJurisdiction) ||
-        tx.type === 'cross_pull_close' ||
-        tx.type === 'cross_swap_fill_ack' ||
-        tx.type === 'cross_pull_progress') === true;
+        tx.type === 'cross_pull_close') === true;
     }),
   );
   if (!hasCrossJProposal && !atomicPair) return;

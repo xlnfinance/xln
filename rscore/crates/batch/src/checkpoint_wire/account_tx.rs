@@ -301,8 +301,6 @@ pub fn encode_account_tx(value: &AccountTx) -> Result<AbiValue, AccountWireEncod
         ],
         AccountTx::CrossPullLock { data } => vec![integer(19), encode_canonical_value(data)],
         AccountTx::CrossPullClose { data } => vec![integer(20), encode_canonical_value(data)],
-        AccountTx::CrossPullProgress { data } => vec![integer(21), encode_canonical_value(data)],
-        AccountTx::CrossSwapFillAck { data } => vec![integer(22), encode_canonical_value(data)],
         AccountTx::SettleTransition { data } => vec![integer(23), encode_canonical_value(data)],
     };
     Ok(tuple(fields))

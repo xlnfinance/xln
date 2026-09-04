@@ -298,7 +298,6 @@ pub struct LocalAccountFinancialView {
     pub pulls: BTreeMap<String, xln_rscore_protocol::CanonicalValue>,
     pub swap_offers: BTreeMap<String, xln_rscore_engine::SwapOfferSnapshot>,
     pub pending_cross_pull_close_ids: std::collections::BTreeSet<String>,
-    pub pending_cross_swap_ack_ids: std::collections::BTreeSet<String>,
     pub dispute: Option<xln_rscore_batch::ResidentAccountDisputeView>,
 }
 
@@ -317,7 +316,6 @@ impl From<xln_rscore_batch::ResidentAccountFinancialView> for LocalAccountFinanc
             pulls: view.pulls,
             swap_offers: view.swap_offers,
             pending_cross_pull_close_ids: view.pending_cross_pull_close_ids,
-            pending_cross_swap_ack_ids: view.pending_cross_swap_ack_ids,
             dispute: view.dispute,
         }
     }

@@ -375,20 +375,6 @@ pub(crate) fn apply_to_candidate(
         AccountTx::CrossPullClose { data } => {
             crate::tx::handlers::cross_j::apply_pull_close(candidate, data, proposer)
         }
-        AccountTx::CrossPullProgress { data } => {
-            crate::tx::handlers::cross_j::apply_pull_progress(candidate, data, proposer)
-        }
-        AccountTx::CrossSwapFillAck { data } => {
-            let context = context.ok_or(TransitionError::ExecutionContextRequired(
-                "cross_swap_fill_ack",
-            ))?;
-            crate::tx::handlers::cross_j::apply_swap_fill_ack(
-                candidate,
-                data,
-                proposer,
-                context.committed_timestamp,
-            )
-        }
         AccountTx::SettleTransition { data } => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired(
                 "settle_transition",

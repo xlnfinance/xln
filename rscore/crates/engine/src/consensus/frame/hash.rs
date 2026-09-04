@@ -416,15 +416,10 @@ fn projected_tx_value(
                 ("amount".to_string(), big(amount)),
             ],
         ),
-        AccountTx::CrossPullLock { data }
-        | AccountTx::CrossPullClose { data }
-        | AccountTx::CrossPullProgress { data }
-        | AccountTx::CrossSwapFillAck { data } => {
+        AccountTx::CrossPullLock { data } | AccountTx::CrossPullClose { data } => {
             let kind = match tx {
                 AccountTx::CrossPullLock { .. } => "cross_pull_lock",
                 AccountTx::CrossPullClose { .. } => "cross_pull_close",
-                AccountTx::CrossPullProgress { .. } => "cross_pull_progress",
-                AccountTx::CrossSwapFillAck { .. } => "cross_swap_fill_ack",
                 _ => unreachable!(),
             };
             (kind, canonical_object_fields(data, kind)?)

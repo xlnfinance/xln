@@ -247,8 +247,6 @@ export const decodeRscoreAccountTx = (value: unknown): AccountTx => {
     case 18: return decodeRebalanceRefund(row);
     case 19: return decodeCanonicalTx(row, 'cross_pull_lock');
     case 20: return decodeCanonicalTx(row, 'cross_pull_close');
-    case 21: return decodeCanonicalTx(row, 'cross_pull_progress');
-    case 22: return decodeCanonicalTx(row, 'cross_swap_fill_ack');
     case 23: return decodeCanonicalTx(row, 'settle_transition');
     default:
       return rscoreWireDecodeFail('tx.tag:unknown');
@@ -316,7 +314,7 @@ const decodeRebalanceRefund = (row: readonly unknown[]): AccountTx => {
 };
 const decodeCanonicalTx = (
   row: readonly unknown[],
-  type: 'cross_pull_lock' | 'cross_pull_close' | 'cross_pull_progress' | 'cross_swap_fill_ack' | 'settle_transition',
+  type: 'cross_pull_lock' | 'cross_pull_close' | 'settle_transition',
 ): AccountTx => {
   const f = rscoreWireTuple(row, 2, `tx.${type}`);
   const data = decodeRscoreCanonicalValue(f[1], `TX_${type.toUpperCase()}`);

@@ -67,7 +67,6 @@ pub const ENTITY_OWNED_CONSENSUS_FIELDS: &[&str] = &[
     "settlementContinuations",
     "crossJurisdictionSwaps",
     "crossJurisdictionAuthorizations",
-    "pendingCrossJurisdictionFillAcks",
     "crossJurisdictionBookAdmissions",
     "orderbookExt",
     "swapTradingPairs",

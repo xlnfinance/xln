@@ -569,10 +569,6 @@ pub fn compute_entity_owned_sections(
             state.cross_jurisdiction_authorizations.as_ref(),
         ),
         (
-            "pendingCrossJurisdictionFillAcks",
-            state.pending_cross_jurisdiction_fill_acks.as_ref(),
-        ),
-        (
             "crossJurisdictionBookAdmissions",
             state.cross_jurisdiction_book_admissions.as_ref(),
         ),

@@ -22,12 +22,10 @@ import { handleHtlcLock } from './handlers/htlc/lock';
 import { handleHtlcResolve } from './handlers/htlc/resolve';
 import {
   handleCrossPullClose,
-  handleCrossPullProgress,
   handlePullLock,
 } from './handlers/settlement/pull';
 import { handleSwapOffer } from './handlers/swap/offer';
 import { handleSwapResolve } from './handlers/swap/resolve';
-import { handleCrossSwapFillAck } from './handlers/swap/cross-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap/lifecycle/cancel';
 import {
   getSignedSettlementWorkspaceTxError,
@@ -213,11 +211,8 @@ export const applyAccountTxMutation = async (
     case 'htlc_resolve': return applyHtlcResolve(context);
     case 'cross_pull_lock': return handlePullLock(account.state, tx, byLeft, jHeight, timestamp);
     case 'cross_pull_close': return handleCrossPullClose(account.state, tx, byLeft, timestamp);
-    case 'cross_pull_progress': return handleCrossPullProgress(account.state, tx, byLeft);
     case 'swap_offer': return handleSwapOffer(account, tx, byLeft, jHeight, isValidation);
     case 'swap_resolve': return handleSwapResolve(account, tx, byLeft, jHeight, isValidation);
-    case 'cross_swap_fill_ack':
-      return handleCrossSwapFillAck(account, tx, byLeft, timestamp, jHeight);
     case 'swap_cancel_request':
       return handleSwapCancelRequest(account, tx, byLeft, jHeight, isValidation);
     case 'settle_transition':

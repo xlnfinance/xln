@@ -236,7 +236,6 @@ mod parity_evidence {
             pulls: BTreeMap::new(),
             swap_offers: BTreeMap::new(),
             pending_cross_pull_close_ids: BTreeSet::new(),
-            pending_cross_swap_ack_ids: BTreeSet::new(),
             dispute: None,
         }
     }

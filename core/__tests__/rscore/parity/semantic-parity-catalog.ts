@@ -128,11 +128,9 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
   covered('account', 'htlc_resolve', 'core/account/tx/handlers/htlc/resolve.ts', ACCOUNT_HTLC_EVIDENCE),
   covered('account', 'cross_pull_lock', 'core/account/tx/handlers/settlement/pull.ts', ACCOUNT_CROSS_J_EVIDENCE),
   covered('account', 'cross_pull_close', 'core/account/tx/handlers/settlement/pull.ts', ACCOUNT_CROSS_J_EVIDENCE),
-  covered('account', 'cross_pull_progress', 'core/account/tx/handlers/settlement/pull.ts', ACCOUNT_CROSS_J_EVIDENCE),
   covered('account', 'swap_offer', 'core/account/tx/handlers/swap/offer/index.ts', MIXED_REPLAY_EVIDENCE),
   covered('account', 'swap_cancel_request', 'core/account/tx/handlers/swap/lifecycle/cancel.ts', MIXED_REPLAY_EVIDENCE),
   covered('account', 'swap_resolve', 'core/account/tx/handlers/swap/resolve/index.ts', MIXED_REPLAY_EVIDENCE),
-  covered('account', 'cross_swap_fill_ack', 'core/account/tx/handlers/swap/cross-fill-ack/index.ts', ACCOUNT_CROSS_J_EVIDENCE),
   covered('account', 'settle_transition', 'core/account/tx/handlers/settlement/transition.ts', ACCOUNT_REBALANCE_SETTLEMENT_EVIDENCE),
   covered('account', 'j_event_claim', 'core/account/tx/handlers/j-events/claim.ts', ACCOUNT_J_EVENT_EVIDENCE),
 ] as const satisfies readonly AccountTxSemanticCatalogEntry[];
@@ -141,7 +139,6 @@ export const ACCOUNT_TX_SEMANTIC_CATALOG = [
 export const ENTITY_TX_SEMANTIC_CATALOG = [
   coveredEntity('accountInput', 'core/entity/tx/handlers/account/index.ts', MIXED_REPLAY_EVIDENCE),
   coveredEntity('admitCrossJurisdictionBookOrder', 'core/entity/tx/handlers/cross-j/book-order.ts', CROSS_J_OPENING_LIFECYCLE_EVIDENCE),
-  missingEntity('applyCrossJurisdictionBookProgress', 'core/entity/tx/handlers/cross-j/book-order.ts'),
   coveredEntity('boardHandover', 'core/entity/tx/handlers/board-handover.ts', ENTITY_CONTROL_SEMANTIC_EVIDENCE),
   coveredEntity('chat', 'core/entity/tx/handlers/system/basic.ts', ENTITY_CONTROL_SEMANTIC_EVIDENCE),
   coveredEntity('chatMessage', 'core/entity/tx/handlers/system/basic.ts', ENTITY_CONTROL_SEMANTIC_EVIDENCE),

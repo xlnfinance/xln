@@ -1,5 +1,5 @@
-import type { AccountTx, CrossSwapFillAckData } from '../account';
-import type { AllKeys, AssertNever, FieldGap } from './coverage';
+import type { AccountTx } from '../account';
+import type { AllKeys } from './coverage';
 
 type AccountTxData<K extends AccountTx['type']> = Extract<AccountTx, { type: K }>['data'];
 
@@ -35,7 +35,6 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
     'crossJurisdiction', 'crossJurisdictionRoute',
   ],
   cross_pull_close: ['pullId', 'binary', 'proof'],
-  cross_pull_progress: ['pullId', 'fill'],
   swap_offer: [
     'offerId', 'giveTokenId', 'giveTokenDecimals', 'giveAmount',
     'wantTokenId', 'wantTokenDecimals', 'wantAmount', 'maxFee',
@@ -48,14 +47,6 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
     'restingGiveTokenId', 'restingWantTokenId', 'restingPriceTicks', 'restingGiveAmount',
     'restingWantAmount', 'restingQuantizedGive', 'restingQuantizedWant',
   ],
-  cross_swap_fill_ack: [
-    'offerId', 'routeHash', 'previousFillSeq', 'fillSeq', 'incrementalSourceAmount',
-    'incrementalTargetAmount', 'cumulativeSourceAmount', 'cumulativeTargetAmount',
-    'cumulativeFillRatio', 'fillNumerator', 'fillDenominator', 'ackKind',
-    'executionSourceAmount', 'executionTargetAmount', 'priceImprovementMode',
-    'priceImprovementAmount', 'priceImprovementTokenId', 'cancelRemainder', 'comment',
-    'priceTicks', 'pairId',
-  ],
   settle_transition: [
     'kind', 'revision', 'previousWorkspaceHash', 'ops', 'executorIsLeft', 'memo',
     'workspaceHash', 'settlementNonce', 'settlementHash', 'settlementHanko', 'postProof',
@@ -64,9 +55,3 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
 } as const satisfies {
   [Kind in AccountTx['type']]: readonly AllKeys<AccountTxData<Kind>>[];
 };
-
-const HASHABLE_CROSS_SWAP_FILL_ACK_FIELDS = HASHABLE_ACCOUNT_TX_DATA_FIELDS.cross_swap_fill_ack;
-
-export type TxNestedFieldCoverage = AssertNever<
-  FieldGap<CrossSwapFillAckData, typeof HASHABLE_CROSS_SWAP_FILL_ACK_FIELDS>
->;

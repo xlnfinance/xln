@@ -152,12 +152,6 @@ pub(crate) fn prepare_entity_checkpoint(
             storage.cross_jurisdiction_authorizations,
         ),
         (
-            "pendingCrossJurisdictionFillAcks",
-            5_u8,
-            storage.pending_cross_jurisdiction_fill_acks_present,
-            storage.pending_cross_jurisdiction_fill_acks,
-        ),
-        (
             "crossJurisdictionBookAdmissions",
             6_u8,
             storage.cross_jurisdiction_book_admissions_present,

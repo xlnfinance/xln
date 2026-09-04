@@ -20,8 +20,6 @@ This folder owns bilateral account transaction application.
   Cross-j-only `cross_pull_lock` / `cross_pull_close` lifecycle.
 - `handlers/swap-offer.ts`, `swap-resolve.ts`, `swap-cancel.ts`
   Same-j order lifecycle at the bilateral layer.
-- `handlers/cross-swap-fill-ack.ts`
-  Committed cross-j fill acknowledgement at the bilateral layer.
 
 ## Called by
 

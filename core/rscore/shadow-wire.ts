@@ -951,8 +951,6 @@ export const accountTxWire = (tx: AccountTx): RscoreWireValue[] => {
       return [18, tx.data.requestId, tx.data.requestTokenId, tx.data.amount.toString(), tx.data.reason];
     case 'cross_pull_lock': return [19, canonicalValueWire(tx.data)];
     case 'cross_pull_close': return [20, canonicalValueWire(tx.data)];
-    case 'cross_pull_progress': return [21, canonicalValueWire(tx.data)];
-    case 'cross_swap_fill_ack': return [22, canonicalValueWire(tx.data)];
     case 'settle_transition': return [23, canonicalValueWire(tx.data)];
     default: {
       const exhaustive: never = tx;

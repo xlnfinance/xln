@@ -11,7 +11,7 @@ use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, encode_account_state_
 use crate::swap::{MAX_ACCOUNT_CROSS_J_SWAP_OFFERS, MAX_ACCOUNT_SWAP_OFFERS};
 use crate::tx::apply_types::MutationDecision;
 use crate::{
-    AccountOutput, AccountRejection, AccountReplica, Side, StateError, TokenId, TransitionError,
+    AccountRejection, AccountReplica, Side, StateError, TokenId, TransitionError,
     ValidationRejection,
 };
 
@@ -103,22 +103,6 @@ fn optional_uint(fields: &Fields, key: &str) -> Result<Option<u64>, String> {
     }
 }
 
-fn optional_bool(fields: &Fields, key: &str) -> Result<Option<bool>, String> {
-    match get(fields, key) {
-        None => Ok(None),
-        Some(CanonicalValue::Bool(value)) => Ok(Some(*value)),
-        _ => Err(format!("Cross-j field must be boolean: {key}")),
-    }
-}
-
-fn set(fields: &mut Fields, key: &str, value: CanonicalValue) {
-    if let Some((_, current)) = fields.iter_mut().find(|(name, _)| name == key) {
-        *current = value;
-    } else {
-        fields.push((key.to_owned(), value));
-    }
-}
-
 fn number(value: u64) -> Result<CanonicalValue, String> {
     CanonicalNumber::try_from_u64(value)
         .map(CanonicalValue::Number)
@@ -170,23 +154,8 @@ fn binding_from_route(route: &Fields, leg: &str) -> Result<CanonicalValue, Strin
         ),
         ("leg".into(), CanonicalValue::String(leg.into())),
     ];
-    for key in [
-        "sourceCloseProof",
-        "status",
-        "fillSeq",
-        "cumulativeFillRatio",
-        "fillNumerator",
-        "fillDenominator",
-        "claimedRatio",
-        "filledSourceAmount",
-        "filledTargetAmount",
-        "sourceClaimed",
-        "targetClaimed",
-        "clearingPolicy",
-    ] {
-        if let Some(value) = get(route, key) {
-            binding.push((key.into(), value.clone()));
-        }
+    if let Some(value) = get(route, "status") {
+        binding.push(("status".into(), value.clone()));
     }
     Ok(CanonicalValue::Object(binding))
 }
@@ -383,7 +352,6 @@ pub(crate) fn apply_pull_lock(
             "fillDenominator",
             "filledSourceAmount",
             "filledTargetAmount",
-            "priceImprovementSourceAmount",
             "pendingClearRequestedAt",
             "claimedRatio",
             "sourceClaimed",
@@ -518,43 +486,6 @@ pub(crate) fn apply_pull_lock(
     )]))
 }
 
-fn committed_ratio(fields: &Fields) -> Result<u64, String> {
-    let numerator = optional_bigint(fields, "fillNumerator")?;
-    let denominator = optional_bigint(fields, "fillDenominator")?;
-    if numerator.is_none() && denominator.is_none() {
-        let coarse = optional_uint(fields, "cumulativeFillRatio")?
-            .unwrap_or(0)
-            .max(optional_uint(fields, "claimedRatio")?.unwrap_or(0));
-        return if coarse == 0 {
-            Ok(0)
-        } else {
-            Err("CROSS_J_EXACT_FILL_RATIO_REQUIRED".into())
-        };
-    }
-    let numerator = numerator.ok_or("CROSS_J_EXACT_FILL_RATIO_INCOMPLETE")?;
-    let denominator = denominator.ok_or("CROSS_J_EXACT_FILL_RATIO_INCOMPLETE")?;
-    if denominator <= BigInt::from(0) || numerator < BigInt::from(0) || numerator > denominator {
-        return Err("CROSS_J_EXACT_FILL_RATIO_INVALID".into());
-    }
-    let derived = if numerator <= BigInt::from(0) {
-        0
-    } else if numerator >= denominator {
-        MAX_FILL_RATIO
-    } else {
-        let max = BigInt::from(MAX_FILL_RATIO);
-        u64::try_from((&numerator * &max + &denominator - 1) / &denominator)
-            .map_err(|_| "CROSS_J_EXACT_FILL_RATIO_INVALID")?
-    };
-    for key in ["cumulativeFillRatio", "claimedRatio"] {
-        if let Some(value) = optional_uint(fields, key)?
-            && value.min(MAX_FILL_RATIO) != derived
-        {
-            return Err("CROSS_J_COARSE_EXACT_RATIO_MISMATCH".into());
-        }
-    }
-    Ok(derived)
-}
-
 pub(crate) fn verify_ladder(
     full_hash: &str,
     partial_root: &str,
@@ -623,10 +554,25 @@ pub(crate) fn apply_pull_close(
         let binding = object(pull, "crossJurisdiction")?;
         let proof = object(data, "proof")?;
         let leg = string(binding, "leg")?;
-        if string(proof, "orderId")? != string(binding, "orderId")?
-            || !string(proof, "routeHash")?.eq_ignore_ascii_case(&string(binding, "routeHash")?)
-        {
-            return Err("Cross-j close proof mismatch: route".into());
+        let order_id = string(binding, "orderId")?;
+        let ratio = uint(proof, "fillRatio")?;
+        if ratio > MAX_FILL_RATIO {
+            return Err(format!(
+                "Cross-j close proof ratio out of uint16 range: {ratio}"
+            ));
+        }
+        let proof_order_id = string(proof, "orderId")?;
+        if proof_order_id != order_id {
+            return Err(format!(
+                "Cross-j close proof mismatch: order {proof_order_id} != {order_id}"
+            ));
+        }
+        let proof_route_hash = string(proof, "routeHash")?;
+        let binding_route_hash = string(binding, "routeHash")?;
+        if !proof_route_hash.eq_ignore_ascii_case(&binding_route_hash) {
+            return Err(format!(
+                "Cross-j close proof mismatch: routeHash {proof_route_hash} != {binding_route_hash}"
+            ));
         }
         let expected_pull = string(
             proof,
@@ -637,41 +583,33 @@ pub(crate) fn apply_pull_close(
             },
         )?;
         if expected_pull != pull_id {
-            return Err("Cross-j close proof mismatch: pull".into());
+            return Err(format!(
+                "Cross-j close proof mismatch: {leg} pull {expected_pull} != {pull_id}"
+            ));
         }
-        let ratio = uint(proof, "fillRatio")?;
-        if ratio > MAX_FILL_RATIO {
-            return Err("Cross-j close proof ratio out of uint16 range".into());
-        }
-        let binding_ratio = committed_ratio(binding)?;
-        if ratio < binding_ratio {
-            return Err("Cross-j close proof rolls back informed ratio".into());
-        }
-        if ratio == binding_ratio {
-            for (proof_key, binding_keys) in [
-                (
-                    "cumulativeSourceAmount",
-                    ["filledSourceAmount", "sourceClaimed"],
-                ),
-                (
-                    "cumulativeTargetAmount",
-                    ["filledTargetAmount", "targetClaimed"],
-                ),
-            ] {
-                let actual = bigint(proof, proof_key)?;
-                for key in binding_keys {
-                    if let Some(expected) = optional_bigint(binding, key)?
-                        && actual != expected
-                    {
-                        return Err(format!("Cross-j close {proof_key} does not match {key}"));
-                    }
-                }
-            }
-        }
-        if let Some(source_proof) = get(binding, "sourceCloseProof")
-            && source_proof != required(data, "proof")?
-        {
-            return Err("Cross-j close proof mismatch: source close proof mismatch".into());
+        // Fill progress is Hub-internal and never reaches this binding, so the
+        // close amounts are validated exactly as the chain settles a dispute at
+        // this ratio: proportional amount*ratio/65535 on this leg. Mirrors
+        // `crossProofMatchesBinding` in core/account/tx/handlers/settlement/pull.ts.
+        let amount = bigint(pull, "amount")?;
+        let absolute = abs(&amount);
+        let expected_leg_amount = if ratio >= MAX_FILL_RATIO {
+            absolute.clone()
+        } else {
+            &absolute * BigInt::from(ratio) / BigInt::from(MAX_FILL_RATIO)
+        };
+        let cumulative = bigint(
+            proof,
+            if leg == "source" {
+                "cumulativeSourceAmount"
+            } else {
+                "cumulativeTargetAmount"
+            },
+        )?;
+        if cumulative != expected_leg_amount {
+            return Err(format!(
+                "Cross-j close proof mismatch: {leg} amount {cumulative} != chain-proportional {expected_leg_amount}"
+            ));
         }
         let binary = string(data, "binary")?;
         let actual_binary_hash: [u8; 32] =
@@ -689,7 +627,6 @@ pub(crate) fn apply_pull_close(
         {
             return Err("Cross-j close ratio mismatch".into());
         }
-        let amount = bigint(pull, "amount")?;
         let beneficiary = if amount > BigInt::from(0) {
             Side::Left
         } else {
@@ -703,36 +640,26 @@ pub(crate) fn apply_pull_close(
         if proposer != hub {
             return Err(format!("Only the {leg} Hub can close cross-j pull"));
         }
-        let absolute = abs(&amount);
         let previous_ratio = optional_uint(pull, "claimedRatio")?
             .unwrap_or(0)
             .min(MAX_FILL_RATIO);
         if ratio < previous_ratio {
-            return Err("Cross-j close ratio regression".into());
+            return Err(format!(
+                "Cross-j close ratio regression: {ratio} < {previous_ratio}"
+            ));
         }
         let previous_claimed = optional_bigint(pull, "claimedAmount")?.unwrap_or_else(|| {
             &absolute * BigInt::from(previous_ratio) / BigInt::from(MAX_FILL_RATIO)
         });
-        let cumulative = bigint(
-            proof,
-            if leg == "source" {
-                "cumulativeSourceAmount"
-            } else {
-                "cumulativeTargetAmount"
-            },
-        )?;
-        if cumulative < previous_claimed || cumulative > absolute {
-            return Err("Cross-j close amount invalid".into());
+        if cumulative < previous_claimed {
+            return Err(format!(
+                "Cross-j close amount regression: {cumulative} < {previous_claimed}"
+            ));
         }
-        if ratio > binding_ratio {
-            let expected = if ratio == MAX_FILL_RATIO {
-                absolute.clone()
-            } else {
-                &absolute * BigInt::from(ratio) / BigInt::from(MAX_FILL_RATIO)
-            };
-            if cumulative != expected {
-                return Err("Cross-j close amount is not chain-proportional".into());
-            }
+        if cumulative > absolute {
+            return Err(format!(
+                "Cross-j close amount overflow: {cumulative} > {absolute}"
+            ));
         }
         let applied = &cumulative - &previous_claimed;
         let remaining = &absolute - &cumulative;
@@ -747,7 +674,10 @@ pub(crate) fn apply_pull_close(
             .map_err(|error| error.to_string())?;
         let release = &applied + &remaining;
         if delta.hold(payer) < &release {
-            return Err("Pull hold underflow".into());
+            return Err(format!(
+                "Pull {} hold underflow",
+                if payer == Side::Left { "left" } else { "right" }
+            ));
         }
         delta
             .release_hold(payer, &release)
@@ -757,9 +687,9 @@ pub(crate) fn apply_pull_close(
                 .apply_transfer(payer, &applied)
                 .map_err(|error| error.to_string())?;
         }
-        Ok((delta, ratio, applied, remaining))
+        Ok((delta, ratio, applied, remaining, leg, order_id))
     })();
-    let (delta, ratio, applied, remaining) = match outcome {
+    let (delta, ratio, applied, remaining, leg, order_id) = match outcome {
         Ok(value) => value,
         Err(error) => return Ok(reject(error)),
     };
@@ -768,500 +698,31 @@ pub(crate) fn apply_pull_close(
         .state_mut()
         .remove_pull(&pull_id)
         .map_err(map_state)?;
-    Ok(MutationDecision::applied(vec![format!(
+    let mut events = vec![format!(
         "🪝 Cross-j pull closed: {}... ratio {ratio}/{MAX_FILL_RATIO} claimed {applied} released {remaining}",
         crate::state::identity::js_prefix(&pull_id, 8),
-    )]))
-}
-
-pub(crate) fn apply_pull_progress(
-    account: &mut AccountReplica,
-    data: &CanonicalValue,
-    proposer: Side,
-) -> Result<MutationDecision, TransitionError> {
-    let data = match fields(data) {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    let pull_id = match string(data, "pullId") {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    let Some(mut pull_value) = account.state().pull(&pull_id).cloned() else {
-        return Ok(reject(format!("Cross-j target pull {pull_id} not found")));
-    };
-    let result = (|| -> Result<(String, u64), String> {
-        let fill = object(data, "fill")?;
-        let pull = fields(&pull_value)?;
-        let mut binding_value = required(pull, "crossJurisdiction")?.clone();
-        let binding = fields(&binding_value)?;
-        if string(binding, "leg")? != "target" {
-            return Err("Cross-j progress requires target pull".into());
-        }
-        let offer_id = string(fill, "offerId")?;
-        if offer_id != string(binding, "orderId")?
-            || !string(fill, "routeHash")?.eq_ignore_ascii_case(&string(binding, "routeHash")?)
-        {
-            return Err("Cross-j progress route mismatch".into());
-        }
-        let amount = bigint(pull, "amount")?;
-        let beneficiary = if amount > BigInt::from(0) {
-            Side::Left
-        } else {
-            Side::Right
-        };
-        if proposer == beneficiary {
-            return Err("Only the target Hub can advance cross-j pull".into());
-        }
-        let current_seq = optional_uint(binding, "fillSeq")?.unwrap_or(0);
-        let next_seq = uint(fill, "fillSeq")?;
-        let previous_seq = uint(fill, "previousFillSeq")?;
-        let kind = string(fill, "ackKind")?;
-        let cancelling = kind == "cancel";
-        if kind != "fill" && !cancelling {
-            return Err("Cross-j progress kind invalid".into());
-        }
-        if cancelling && optional_bool(fill, "cancelRemainder")? != Some(true) {
-            return Err("Cross-j cancel progress must clear remainder".into());
-        }
-        if previous_seq != current_seq
-            || (!cancelling && next_seq != current_seq + 1)
-            || (cancelling && next_seq != current_seq)
-        {
-            return Err("Cross-j progress sequence mismatch".into());
-        }
-        let next_ratio = committed_ratio(fill)?;
-        let current_ratio = committed_ratio(binding)?;
-        let prior_source = optional_bigint(binding, "filledSourceAmount")?.unwrap_or_default();
-        let prior_target = optional_bigint(binding, "filledTargetAmount")?.unwrap_or_default();
-        let next_source = bigint(fill, "cumulativeSourceAmount")?;
-        let next_target = bigint(fill, "cumulativeTargetAmount")?;
-        let source_increment = bigint(fill, "incrementalSourceAmount")?;
-        let target_increment = bigint(fill, "incrementalTargetAmount")?;
-        if next_source < prior_source
-            || next_target < prior_target
-            || source_increment != &next_source - &prior_source
-            || target_increment != &next_target - &prior_target
-            || next_target > abs(&amount)
-            || (!cancelling
-                && (next_ratio <= current_ratio
-                    || source_increment <= BigInt::from(0)
-                    || target_increment <= BigInt::from(0)))
-            || (cancelling
-                && (next_ratio != current_ratio
-                    || source_increment != BigInt::from(0)
-                    || target_increment != BigInt::from(0)))
-        {
-            return Err("Cross-j progress amounts mismatch".into());
-        }
-        let binding = match &mut binding_value {
-            CanonicalValue::Object(value) => value,
-            _ => unreachable!(),
-        };
-        set(binding, "fillSeq", number(next_seq)?);
-        set(binding, "cumulativeFillRatio", number(next_ratio)?);
-        for key in ["fillNumerator", "fillDenominator"] {
-            if let Some(value) = get(fill, key) {
-                set(binding, key, value.clone());
-            }
-        }
-        set(
-            binding,
-            "filledSourceAmount",
-            CanonicalValue::BigInt(next_source),
-        );
-        set(
-            binding,
-            "filledTargetAmount",
-            CanonicalValue::BigInt(next_target),
-        );
-        set(
-            binding,
-            "status",
-            CanonicalValue::String(
-                if cancelling || next_ratio == MAX_FILL_RATIO {
-                    "clear_requested"
-                } else {
-                    "partially_filled"
-                }
-                .into(),
-            ),
-        );
-        if cancelling {
-            set(
-                binding,
-                "clearingPolicy",
-                CanonicalValue::String("cancel_and_clear".into()),
-            );
-        }
-        let pull = match &mut pull_value {
-            CanonicalValue::Object(value) => value,
-            _ => unreachable!(),
-        };
-        set(pull, "crossJurisdiction", binding_value);
-        Ok((offer_id, next_ratio))
-    })();
-    let (offer_id, next_ratio) = match result {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    account
-        .state_mut()
-        .put_pull(&pull_id, pull_value)
-        .map_err(map_state)?;
-    Ok(MutationDecision::applied(vec![format!(
-        "🌉 Cross-j target progress {} {next_ratio}/{MAX_FILL_RATIO}",
-        crate::state::identity::js_prefix(&offer_id, 8),
-    )]))
-}
-
-fn route_fill_amounts(route: &Fields) -> Result<(BigInt, BigInt, BigInt, BigInt, u64), String> {
-    let source_total = bigint(object(route, "source")?, "amount")?;
-    let target_total = bigint(object(route, "target")?, "amount")?;
-    let ratio = committed_ratio(route)?;
-    let numerator = optional_bigint(route, "fillNumerator")?.unwrap_or_default();
-    let denominator = optional_bigint(route, "fillDenominator")?.unwrap_or_else(|| BigInt::from(1));
-    let source = if numerator >= denominator {
-        source_total.clone()
-    } else {
-        &source_total * &numerator / &denominator
-    };
-    let target = if numerator >= denominator {
-        target_total.clone()
-    } else {
-        &target_total * &numerator / &denominator
-    };
-    for (key, expected) in [
-        ("filledSourceAmount", &source),
-        ("sourceClaimed", &source),
-        ("filledTargetAmount", &target),
-        ("targetClaimed", &target),
-    ] {
-        if let Some(value) = optional_bigint(route, key)?
-            && &value != expected
-        {
-            return Err("CROSS_J_COMMITTED_AMOUNT_MISMATCH".into());
-        }
-    }
-    Ok((source_total, target_total, source, target, ratio))
-}
-
-fn sync_source_pull(account: &mut AccountReplica, route: &Fields) -> Result<(), TransitionError> {
-    let Ok(source_pull) = object(route, "sourcePull") else {
-        return Ok(());
-    };
-    let pull_id = string(source_pull, "pullId")
-        .map_err(|message| map_state(StateError::AccountStateRoot(message)))?;
-    let Some(mut pull) = account.state().pull(&pull_id).cloned() else {
-        return Ok(());
-    };
-    let binding = binding_from_route(route, "source")
-        .map_err(|message| map_state(StateError::AccountStateRoot(message)))?;
-    let pull_fields = match &mut pull {
-        CanonicalValue::Object(value) => value,
-        _ => {
-            return Err(map_state(StateError::AccountStateRoot(
-                "CROSS_J_PULL_OBJECT".into(),
-            )));
-        }
-    };
-    set(pull_fields, "crossJurisdiction", binding);
-    account
-        .state_mut()
-        .put_pull(&pull_id, pull)
-        .map_err(map_state)
-}
-
-pub(crate) fn apply_swap_fill_ack(
-    account: &mut AccountReplica,
-    data: &CanonicalValue,
-    proposer: Side,
-    timestamp: u64,
-) -> Result<MutationDecision, TransitionError> {
-    let data = match fields(data) {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    let offer_id = match string(data, "offerId") {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    let Some(mut offer) = account.state().swap_offer(&offer_id).cloned() else {
-        return Ok(reject(format!("Offer {offer_id} not found")));
-    };
-    let result = (|| -> Result<_, String> {
-        if optional_string(data, "priceImprovementMode")?
-            .as_deref()
-            .is_some_and(|value| value != "source_savings")
-        {
-            return Err("CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED".into());
-        }
-        let mut route_value = offer
-            .cross_jurisdiction()
-            .cloned()
-            .ok_or_else(|| format!("Offer {offer_id} is not cross-jurisdictional"))?;
-        let route = fields(&route_value)?;
-        if proposer
-            == if offer.maker_is_left() {
-                Side::Left
-            } else {
-                Side::Right
-            }
-        {
-            return Err("Only counterparty can ack cross-j fill".into());
-        }
-        if let Some(route_hash) = optional_string(data, "routeHash")?
-            && !route_hash.eq_ignore_ascii_case(&string(route, "routeHash")?)
-        {
-            return Err("Cross-j route hash mismatch".into());
-        }
-        let (source_total, target_total, current_source, current_target, current_ratio) =
-            route_fill_amounts(route)?;
-        let proof_ratio = committed_ratio(data)?;
-        let current_seq = optional_uint(route, "fillSeq")?.unwrap_or(0);
-        if let Some(previous) = optional_uint(data, "previousFillSeq")?
-            && previous != current_seq
-            && !(optional_bool(data, "cancelRemainder")? == Some(true)
-                && proof_ratio == current_ratio)
-        {
-            return Err("Cross-j previous fill seq mismatch".into());
-        }
-        if optional_bool(data, "cancelRemainder")? == Some(true) && proof_ratio == current_ratio {
-            if bigint(data, "cumulativeSourceAmount")? != current_source
-                || bigint(data, "cumulativeTargetAmount")? != current_target
-            {
-                return Err("Cross-j cancel amount mismatch".into());
-            }
-            let route = match &mut route_value {
-                CanonicalValue::Object(value) => value,
-                _ => unreachable!(),
-            };
-            set(
-                route,
-                "status",
-                CanonicalValue::String("clear_requested".into()),
-            );
-            set(route, "pendingClearRequestedAt", number(timestamp)?);
-            set(route, "updatedAt", number(timestamp)?);
-            set(
-                route,
-                "clearingPolicy",
-                CanonicalValue::String("cancel_and_clear".into()),
-            );
-            let event = format!(
-                "🌉 Cross-j offer {} cancel requested at {current_ratio}/{MAX_FILL_RATIO}",
-                crate::state::identity::js_prefix(&offer_id, 8),
-            );
-            return Ok((route_value, None, event));
-        }
-        let next_seq = optional_uint(data, "fillSeq")?.unwrap_or(current_seq + 1);
-        if next_seq != current_seq + 1 || proof_ratio <= current_ratio {
-            return Err("Cross-j fill progress invalid".into());
-        }
-        let numerator = bigint(data, "fillNumerator")?;
-        let denominator = bigint(data, "fillDenominator")?;
-        let next_source = if numerator >= denominator {
-            source_total.clone()
-        } else {
-            &source_total * &numerator / &denominator
-        };
-        let next_target = if numerator >= denominator {
-            target_total.clone()
-        } else {
-            &target_total * &numerator / &denominator
-        };
-        let source_increment = &next_source - &current_source;
-        let target_increment = &next_target - &current_target;
-        if source_increment <= BigInt::from(0) || target_increment <= BigInt::from(0) {
-            return Err("Cross-j no incremental amount".into());
-        }
-        for (key, expected) in [
-            ("cumulativeSourceAmount", &next_source),
-            ("cumulativeTargetAmount", &next_target),
-            ("incrementalSourceAmount", &source_increment),
-            ("incrementalTargetAmount", &target_increment),
-        ] {
-            if let Some(value) = optional_bigint(data, key)?
-                && &value != expected
-            {
-                return Err(format!("Cross-j {key} mismatch"));
-            }
-        }
-        let improvement = optional_bigint(data, "priceImprovementAmount")?.unwrap_or_default();
-        if improvement < BigInt::from(0) {
-            return Err("Cross-j price improvement must be non-negative".into());
-        }
-        if improvement > BigInt::from(0) {
-            let source_token = uint(object(route, "source")?, "tokenId")?;
-            if optional_uint(data, "priceImprovementTokenId")? != Some(source_token) {
-                return Err("Cross-j source savings token mismatch".into());
-            }
-        }
-        let execution_source = &source_increment - &improvement;
-        if execution_source <= BigInt::from(0) || target_increment <= BigInt::from(0) {
-            return Err("Cross-j execution amount after improvement must be positive".into());
-        }
-        if optional_bigint(data, "executionSourceAmount")?
-            .is_some_and(|value| value != execution_source)
-            || optional_bigint(data, "executionTargetAmount")?
-                .is_some_and(|value| value != target_increment)
-        {
-            return Err("Cross-j execution amount mismatch".into());
-        }
-        let route = match &mut route_value {
-            CanonicalValue::Object(value) => value,
-            _ => unreachable!(),
-        };
-        set(route, "fillSeq", number(next_seq)?);
-        set(route, "cumulativeFillRatio", number(proof_ratio)?);
-        set(route, "claimedRatio", number(proof_ratio)?);
-        set(route, "fillNumerator", CanonicalValue::BigInt(numerator));
-        set(
-            route,
-            "fillDenominator",
-            CanonicalValue::BigInt(denominator),
-        );
-        set(
-            route,
-            "filledSourceAmount",
-            CanonicalValue::BigInt(next_source.clone()),
-        );
-        set(
-            route,
-            "filledTargetAmount",
-            CanonicalValue::BigInt(next_target.clone()),
-        );
-        set(
-            route,
-            "sourceClaimed",
-            CanonicalValue::BigInt(next_source.clone()),
-        );
-        set(
-            route,
-            "targetClaimed",
-            CanonicalValue::BigInt(next_target.clone()),
-        );
-        set(route, "updatedAt", number(timestamp)?);
-        if improvement > BigInt::from(0) {
-            let accumulated = optional_bigint(route, "priceImprovementSourceAmount")?
-                .unwrap_or_default()
-                + improvement;
-            set(
-                route,
-                "priceImprovementSourceAmount",
-                CanonicalValue::BigInt(accumulated),
-            );
-        }
-        if let Some(value) = get(data, "priceTicks") {
-            set(route, "priceTicks", value.clone());
-        }
-        if get(route, "venueId").is_none()
-            && let Some(CanonicalValue::String(value)) = get(data, "pairId")
-        {
-            set(route, "venueId", CanonicalValue::String(value.clone()));
-        }
-        let source_lot = BigInt::from(10).pow(offer.give_token_decimals().saturating_sub(6));
-        let target_lot = BigInt::from(10).pow(offer.want_token_decimals().saturating_sub(6));
-        let remaining_source = &source_total - &next_source;
-        let remaining_target = &target_total - &next_target;
-        let requested_close = proof_ratio == MAX_FILL_RATIO
-            || next_source >= source_total
-            || next_target >= target_total
-            || optional_bool(data, "cancelRemainder")? == Some(true);
-        let dust_close = !requested_close
-            && source_total >= source_lot
-            && target_total >= target_lot
-            && (remaining_source < source_lot || remaining_target < target_lot);
-        let terminal = requested_close || dust_close;
-        if terminal {
-            set(
-                route,
-                "status",
-                CanonicalValue::String("clear_requested".into()),
-            );
-            set(route, "pendingClearRequestedAt", number(timestamp)?);
-            set(
-                route,
-                "clearingPolicy",
-                CanonicalValue::String(
-                    if optional_bool(data, "cancelRemainder")? == Some(true)
-                        || dust_close
-                        || proof_ratio < MAX_FILL_RATIO
-                    {
-                        "cancel_and_clear"
-                    } else {
-                        "full_fill"
-                    }
-                    .into(),
-                ),
-            );
-            let event = if dust_close {
-                format!(
-                    "🌉 Cross-j offer {} closed after dust remainder",
-                    crate::state::identity::js_prefix(&offer_id, 8),
-                )
-            } else {
-                format!(
-                    "🌉 Cross-j offer {} closed at {proof_ratio}/{MAX_FILL_RATIO}",
-                    crate::state::identity::js_prefix(&offer_id, 8),
-                )
-            };
-            Ok((route_value, None, event))
-        } else {
-            set(
-                route,
-                "status",
-                CanonicalValue::String("partially_filled".into()),
-            );
-            let price = optional_bigint(route, "priceTicks")?;
-            let event = format!(
-                "🌉 Cross-j offer {} filled to {proof_ratio}/{MAX_FILL_RATIO}, {remaining_source} source remaining",
-                crate::state::identity::js_prefix(&offer_id, 8),
-            );
-            Ok((
-                route_value,
-                Some((remaining_source, remaining_target, price)),
-                event,
-            ))
-        }
-    })();
-    let (route, remainder, event) = match result {
-        Ok(value) => value,
-        Err(error) => return Ok(reject(error)),
-    };
-    let route_fields = fields(&route)
-        .map_err(|message| map_state(StateError::AccountStateRoot(message)))?
-        .clone();
-    sync_source_pull(account, &route_fields)?;
-    if let Some((give, want, price)) = remainder {
-        offer.set_cross_jurisdiction(Some(route));
-        offer
-            .apply_cross_j_remainder(give, want, price)
-            .map_err(map_state)?;
-        let identity = account.state().identity().clone();
-        let output = AccountOutput::SwapOfferUpsert {
-            offer: Box::new(offer.snapshot(identity.left().as_hex(), identity.right().as_hex())),
-        };
+    )];
+    // The source offer is bound to this pull; the close is the only Account tx
+    // that retires it (fill progress never touches the Account offer).
+    let bound_offer = (leg == "source")
+        .then(|| account.state().swap_offer(&order_id))
+        .flatten()
+        .is_some_and(|offer| offer.cross_jurisdiction().is_some());
+    if bound_offer {
         account
             .state_mut()
-            .put_swap_offer(offer)
+            .remove_swap_offer(&order_id)
             .map_err(map_state)?;
-        Ok(MutationDecision::with_outputs(vec![event], vec![output]))
-    } else {
-        offer.set_cross_jurisdiction(Some(route));
-        let maker_is_left = offer.maker_is_left();
-        account
-            .state_mut()
-            .remove_swap_offer(&offer_id)
-            .map_err(map_state)?;
-        Ok(MutationDecision::with_outputs(
-            vec![event],
-            vec![AccountOutput::SwapOfferRemove {
-                offer_id,
-                maker_is_left,
-            }],
-        ))
+        events.push(format!(
+            "🌉 Cross-j offer {} closed with pull",
+            crate::state::identity::js_prefix(&order_id, 8),
+        ));
+        // The Entity cross-j transition owns remote-book removal and clear
+        // followup. Publishing a same-j Account removal here would create a
+        // second orderbook authority.
+        return Ok(MutationDecision::applied(events));
     }
+    Ok(MutationDecision::applied(events))
 }
 
 #[cfg(test)]
@@ -1386,7 +847,9 @@ mod tests {
         }
     }
 
-    fn fill_replica() -> AccountReplica {
+    /// One source-leg pull bound to its resting cross-J offer, with the
+    /// payer (right) hold the lock would have placed.
+    fn bound_offer_replica() -> AccountReplica {
         let base = replica();
         let identity = base.state().identity().clone();
         let route_hash = format!("0x{}", "aa".repeat(32));
@@ -1468,7 +931,21 @@ mod tests {
         let state = AccountState::restore_full(crate::AccountStateSeed {
             identity,
             dispute_config: AccountDisputeConfig::new(10, 10).expect("config"),
-            deltas: base.state().deltas().cloned().collect(),
+            deltas: vec![
+                Delta::new(
+                    TokenId::new(1).expect("token"),
+                    100.into(),
+                    0.into(),
+                    0.into(),
+                    0.into(),
+                    0.into(),
+                    0.into(),
+                    0.into(),
+                    0.into(),
+                    100.into(),
+                )
+                .expect("delta"),
+            ],
             locks: Vec::new(),
             j_nonce: 0,
             last_finalized_j_height: 0,
@@ -1479,8 +956,8 @@ mod tests {
             pulls: vec![("pull-1".into(), pull)],
             settlement_workspace: None,
         })
-        .expect("fill state");
-        AccountReplica::new(entity(0x11), state).expect("fill replica")
+        .expect("bound offer state");
+        AccountReplica::new(entity(0x11), state).expect("bound offer replica")
     }
 
     #[test]
@@ -1578,96 +1055,83 @@ mod tests {
     }
 
     #[test]
-    fn fill_ack_updates_offer_and_source_pull_from_one_exact_ratio() {
-        let tx = AccountTx::CrossSwapFillAck {
+    fn source_close_retires_bound_offer_as_swap_cancelled() {
+        let close = AccountTx::CrossPullClose {
             data: object(vec![
-                ("offerId", text("order-1")),
-                ("routeHash", text(format!("0x{}", "aa".repeat(32)))),
-                ("previousFillSeq", number(0).expect("number")),
-                ("fillSeq", number(1).expect("number")),
-                ("incrementalSourceAmount", CanonicalValue::BigInt(50.into())),
+                ("pullId", text("pull-1")),
+                ("binary", text("0x")),
                 (
-                    "incrementalTargetAmount",
-                    CanonicalValue::BigInt(100.into()),
+                    "proof",
+                    object(vec![
+                        ("orderId", text("order-1")),
+                        ("routeHash", text(format!("0x{}", "aa".repeat(32)))),
+                        ("sourcePullId", text("pull-1")),
+                        ("targetPullId", text("target-pull")),
+                        ("fillRatio", number(0).expect("number")),
+                        ("cumulativeSourceAmount", CanonicalValue::BigInt(0.into())),
+                        ("cumulativeTargetAmount", CanonicalValue::BigInt(0.into())),
+                        (
+                            "binaryHash",
+                            text(
+                                "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+                            ),
+                        ),
+                        ("closeMode", text("pure_cancel")),
+                    ]),
                 ),
-                ("cumulativeSourceAmount", CanonicalValue::BigInt(50.into())),
-                ("cumulativeTargetAmount", CanonicalValue::BigInt(100.into())),
-                ("cumulativeFillRatio", number(32_768).expect("number")),
-                ("fillNumerator", CanonicalValue::BigInt(1.into())),
-                ("fillDenominator", CanonicalValue::BigInt(2.into())),
-                ("ackKind", text("fill")),
-                ("executionSourceAmount", CanonicalValue::BigInt(50.into())),
-                ("executionTargetAmount", CanonicalValue::BigInt(100.into())),
             ]),
         };
-        let context = AccountExecutionContext::new(2_000, 2_000, 10, 2, 10);
-        let applied = SequentialAccountEngine::apply_with_context(
-            &fill_replica(),
-            Side::Right,
-            &tx,
-            &context,
-        )
-        .expect("fill ack");
+        let applied = SequentialAccountEngine::apply(&bound_offer_replica(), Side::Left, &close)
+            .expect("source close");
         assert_eq!(applied.verdict(), &AccountVerdict::Applied);
-        assert!(matches!(
-            applied.outputs(),
-            [AccountOutput::SwapOfferUpsert { .. }]
-        ));
-        let state = applied.committed().expect("candidate");
-        let offer = state.state().swap_offer("order-1").expect("remainder");
-        assert_eq!(offer.give_amount(), &BigInt::from(50));
-        assert_eq!(offer.want_amount(), &BigInt::from(100));
-        let route = fields(offer.cross_jurisdiction().expect("route")).expect("route object");
-        assert_eq!(uint(route, "fillSeq"), Ok(1));
-        assert_eq!(uint(route, "cumulativeFillRatio"), Ok(32_768));
-        let pull = fields(state.state().pull("pull-1").expect("pull")).expect("pull object");
-        let binding = super::object(pull, "crossJurisdiction").expect("binding");
+        assert!(applied.outputs().is_empty());
+        let closed = applied.committed().expect("close candidate");
+        assert_eq!(closed.state().pull_count(), 0);
+        assert_eq!(closed.state().swap_offer_count(), 0);
         assert_eq!(
-            optional_bigint(binding, "filledSourceAmount"),
-            Ok(Some(50.into()))
+            closed
+                .state()
+                .delta(TokenId::new(1).expect("token"))
+                .expect("delta")
+                .hold(Side::Right),
+            &BigInt::from(0),
         );
     }
 
     #[test]
-    fn fill_ack_applies_canonical_source_savings_price_improvement() {
-        let tx = AccountTx::CrossSwapFillAck {
+    fn source_close_rejects_amount_that_is_not_chain_proportional() {
+        let close = AccountTx::CrossPullClose {
             data: object(vec![
-                ("offerId", text("order-1")),
-                ("previousFillSeq", number(0).expect("number")),
-                ("fillSeq", number(1).expect("number")),
-                ("incrementalSourceAmount", CanonicalValue::BigInt(50.into())),
+                ("pullId", text("pull-1")),
+                ("binary", text("0x")),
                 (
-                    "incrementalTargetAmount",
-                    CanonicalValue::BigInt(100.into()),
+                    "proof",
+                    object(vec![
+                        ("orderId", text("order-1")),
+                        ("routeHash", text(format!("0x{}", "aa".repeat(32)))),
+                        ("sourcePullId", text("pull-1")),
+                        ("targetPullId", text("target-pull")),
+                        ("fillRatio", number(0).expect("number")),
+                        ("cumulativeSourceAmount", CanonicalValue::BigInt(1.into())),
+                        ("cumulativeTargetAmount", CanonicalValue::BigInt(0.into())),
+                        (
+                            "binaryHash",
+                            text(
+                                "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+                            ),
+                        ),
+                        ("closeMode", text("pure_cancel")),
+                    ]),
                 ),
-                ("cumulativeSourceAmount", CanonicalValue::BigInt(50.into())),
-                ("cumulativeTargetAmount", CanonicalValue::BigInt(100.into())),
-                ("cumulativeFillRatio", number(32_768).expect("number")),
-                ("fillNumerator", CanonicalValue::BigInt(1.into())),
-                ("fillDenominator", CanonicalValue::BigInt(2.into())),
-                ("ackKind", text("fill")),
-                ("priceImprovementMode", text("source_savings")),
-                ("priceImprovementAmount", CanonicalValue::BigInt(5.into())),
-                ("priceImprovementTokenId", number(1).expect("number")),
-                ("executionSourceAmount", CanonicalValue::BigInt(45.into())),
-                ("executionTargetAmount", CanonicalValue::BigInt(100.into())),
             ]),
         };
-        let context = AccountExecutionContext::new(2_000, 2_000, 10, 2, 10);
-        let applied = SequentialAccountEngine::apply_with_context(
-            &fill_replica(),
-            Side::Right,
-            &tx,
-            &context,
-        )
-        .expect("fill ack");
-        assert_eq!(applied.verdict(), &AccountVerdict::Applied);
-        let state = applied.committed().expect("candidate");
-        let offer = state.state().swap_offer("order-1").expect("remainder");
-        let route = fields(offer.cross_jurisdiction().expect("route")).expect("route object");
-        assert_eq!(
-            optional_bigint(route, "priceImprovementSourceAmount"),
-            Ok(Some(5.into()))
-        );
+        let applied = SequentialAccountEngine::apply(&bound_offer_replica(), Side::Left, &close)
+            .expect("source close");
+        assert!(matches!(
+            applied.verdict(),
+            AccountVerdict::Rejected(AccountRejection::Validation(
+                ValidationRejection::AccountTx { message }
+            )) if message == "Cross-j close proof mismatch: source amount 1 != chain-proportional 0"
+        ));
     }
 }

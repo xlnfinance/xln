@@ -130,7 +130,8 @@ fn field_name(tag: u8) -> Option<&'static str> {
         36 => "orderbookReferrals",
         37 => "orderbookPairDimensions",
         38 => "lending",
-        // Tree-backed fields 12, 13, 28 and 30..33 never appear as scalar rows.
+        // Tree-backed fields 12, 13, 28, 30, 31 and 33 never appear as scalar
+        // rows; 32 (pendingCrossJurisdictionFillAcks) was retired.
         _ => return None,
     })
 }
@@ -142,7 +143,6 @@ fn namespace(value: &str) -> Option<(&'static str, u8)> {
         "settlementContinuations" => ("settlementContinuations", 9),
         "crossJurisdictionSwaps" => ("crossJurisdictionSwaps", 3),
         "crossJurisdictionAuthorizations" => ("crossJurisdictionAuthorizations", 4),
-        "pendingCrossJurisdictionFillAcks" => ("pendingCrossJurisdictionFillAcks", 5),
         "crossJurisdictionBookAdmissions" => ("crossJurisdictionBookAdmissions", 6),
         "crontabHooks" => ("crontabHooks", 7),
         _ => return None,

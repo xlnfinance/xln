@@ -109,8 +109,6 @@ fn tx(input: &Value, expected_type: &str) -> AccountTx {
     match expected_type {
         "cross_pull_lock" => AccountTx::CrossPullLock { data: canonical() },
         "cross_pull_close" => AccountTx::CrossPullClose { data: canonical() },
-        "cross_pull_progress" => AccountTx::CrossPullProgress { data: canonical() },
-        "cross_swap_fill_ack" => AccountTx::CrossSwapFillAck { data: canonical() },
         "swap_offer" => AccountTx::SwapOffer {
             offer_id: data["offerId"].as_str().expect("offer id").to_string(),
             give_token_id: data["giveTokenId"].as_u64().expect("give token") as u32,
@@ -213,12 +211,7 @@ fn assert_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedS
     *account = candidate;
 }
 
-// Cross-J is out of scope until core Rust parity is final. Known shape gap:
-// Rust cross_swap_fill_ack emits SwapOfferUpsert/Remove (engine cross_j.rs)
-// while TypeScript collectSameJurisdictionSwapOutputs emits nothing for
-// cross-J offers; the fixture generator also counts outcome-based outputs.
 #[test]
-#[ignore = "cross-J out of scope until Rust parity; re-integrate after"]
 fn cross_j_account_transitions_match_the_shared_typescript_vector() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("shared cross-J fixture");
     assert_eq!(fixture.version, 1);

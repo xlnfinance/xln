@@ -7,17 +7,15 @@ import {
 } from '../../../../../../orderbook';
 import { createStructuredLogger, shortOrder } from '../../../../../../support/logger';
 import {
-  buildCrossJurisdictionCancelAck,
+  buildCrossJurisdictionCancelInstruction,
   resolveCrossJurisdictionExecutionPriceTicks,
 } from '../../../../../../extensions/cross-j/orderbook';
 import {
   aggregateCrossTradeFills,
   buildCrossMarketOfferFromBookOrder,
   collectTradeEvents,
-  parseNamespacedOrderId,
   rejectEventsForOrder,
 } from '../helpers';
-import { hasQueuedCrossSwapAckForEntityState } from '../queue';
 import { prepareCrossOrderbookOffer } from './admission';
 import { classifyCrossBookMaker } from './book';
 import { getWorkingCrossBook } from './pass';
@@ -144,7 +142,8 @@ const aggregateCrossTrades = (
       qty: event.qty,
       price: event.price.toString(),
     });
-    // Each matched route now has an Account/hash-ledger ACK in flight.
+    // A matched route is applied to its admitted book row at the end of this
+    // pass; it must not match again against stale remainder meta meanwhile.
     pass.suspendedOrderIds.add(event.makerOrderId);
     pass.suspendedOrderIds.add(event.takerOrderId);
   }
@@ -154,19 +153,6 @@ const aggregateCrossTrades = (
       buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
     if (!meta) {
       throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_META_MISSING", `ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
-    }
-    const { accountId, offerId } = parseNamespacedOrderId(
-      orderId,
-      'ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER',
-    );
-    if (
-      hasQueuedCrossSwapAckForEntityState(
-        pass.hubState,
-        accountId,
-        offerId,
-      )
-    ) {
-      continue;
     }
     const current = pass.aggregatedFills.get(orderId);
     if (current) {
@@ -193,13 +179,12 @@ const queueRejectedCrossOfferCancellation = (
   offer: PreparedCrossOffer,
 ): void => {
   pass.suspendedOrderIds.add(offer.namespacedOrderId);
-  pass.accountTxs.push({
-    accountId: offer.accountId,
-    tx: buildCrossJurisdictionCancelAck(
-      offer.rawOffer.offerId,
-      offer.marketOffer.route,
-    ),
-  });
+  pass.crossJurisdictionFills.push(buildCrossJurisdictionCancelInstruction(
+    offer.accountId,
+    offer.rawOffer.offerId,
+    offer.namespacedOrderId,
+    offer.marketOffer.route,
+  ));
 };
 
 export const processCrossOrderbookOffer = (

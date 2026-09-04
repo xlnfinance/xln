@@ -100,7 +100,7 @@ printOps('orderbook matcher ops', afterOrderbook, orderbook.trades);
 
 const setupStarted = getPerfMs();
 const { env, jurisdiction, hubId } = makeHubConsensusEnv('profile-1000-same');
-const { same } = buildHubConsensusCases(env, jurisdiction, hubId, 1_000, 1_000, 1, false);
+const { same } = buildHubConsensusCases(env, jurisdiction, hubId, 1_000, 1_000, 1);
 if (same.length !== 1 || same[0]!.txs.length !== 1_000) {
   throw new Error(`PROFILE_SAME_FRAME_SHAPE:${same.length}:${same[0]?.txs.length ?? 0}`);
 }

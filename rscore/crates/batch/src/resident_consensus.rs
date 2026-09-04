@@ -174,7 +174,6 @@ pub struct ResidentAccountFinancialView {
     pub pulls: BTreeMap<String, CanonicalValue>,
     pub swap_offers: BTreeMap<String, SwapOfferSnapshot>,
     pub pending_cross_pull_close_ids: std::collections::BTreeSet<String>,
-    pub pending_cross_swap_ack_ids: std::collections::BTreeSet<String>,
     pub dispute: Option<ResidentAccountDisputeView>,
 }
 
@@ -249,7 +248,7 @@ fn cross_j_opening_txs(txs: &[AccountTx]) -> Vec<AccountTx> {
         .collect()
 }
 
-fn pending_cross_j_ids(account: &AccountConsensus) -> (BTreeSet<String>, BTreeSet<String>) {
+fn pending_cross_pull_close_ids(account: &AccountConsensus) -> BTreeSet<String> {
     let canonical_text = |value: &CanonicalValue, name: &str| match value {
         CanonicalValue::Object(fields) => fields.iter().find_map(|(key, value)| {
             (key == name)
@@ -262,21 +261,12 @@ fn pending_cross_j_ids(account: &AccountConsensus) -> (BTreeSet<String>, BTreeSe
         _ => None,
     };
     let mut pending_cross_pull_close_ids = BTreeSet::new();
-    let mut pending_cross_swap_ack_ids = BTreeSet::new();
     let mut collect = |txs: &[AccountTx]| {
         for tx in txs {
-            match tx {
-                AccountTx::CrossPullClose { data } => {
-                    if let Some(pull_id) = canonical_text(data, "pullId") {
-                        pending_cross_pull_close_ids.insert(pull_id);
-                    }
-                }
-                AccountTx::CrossSwapFillAck { data } => {
-                    if let Some(offer_id) = canonical_text(data, "offerId") {
-                        pending_cross_swap_ack_ids.insert(offer_id);
-                    }
-                }
-                _ => {}
+            if let AccountTx::CrossPullClose { data } = tx
+                && let Some(pull_id) = canonical_text(data, "pullId")
+            {
+                pending_cross_pull_close_ids.insert(pull_id);
             }
         }
     };
@@ -284,7 +274,7 @@ fn pending_cross_j_ids(account: &AccountConsensus) -> (BTreeSet<String>, BTreeSe
         collect(&pending.frame.txs);
     }
     collect(account.mempool());
-    (pending_cross_pull_close_ids, pending_cross_swap_ack_ids)
+    pending_cross_pull_close_ids
 }
 
 /// Point projection for one explicitly disputed Account.  The worker remains
@@ -1016,7 +1006,7 @@ impl ResidentConsensusEngine {
                 .into_iter()
                 .filter(|offer_id| account.replica().state().swap_offer(offer_id).is_some())
                 .collect();
-            let (pending_cross_pull_close_ids, _) = pending_cross_j_ids(account);
+            let pending_cross_pull_close_ids = pending_cross_pull_close_ids(account);
             Ok(ResidentCrossJMaterializationView {
                 pull_ids: pulls,
                 swap_offer_ids: swap_offers,
@@ -1160,8 +1150,7 @@ impl ResidentConsensusEngine {
                             .map(|offer| (offer_id, offer.snapshot(left.clone(), right.clone())))
                     })
                     .collect();
-                let (pending_cross_pull_close_ids, pending_cross_swap_ack_ids) =
-                    pending_cross_j_ids(account);
+                let pending_cross_pull_close_ids = pending_cross_pull_close_ids(account);
                 let dispute = dispute
                     .then(|| -> Result<ResidentAccountDisputeView, BatchError> {
                         let replica = account.replica();
@@ -1255,7 +1244,6 @@ impl ResidentConsensusEngine {
                     pulls,
                     swap_offers,
                     pending_cross_pull_close_ids,
-                    pending_cross_swap_ack_ids,
                     dispute,
                 })
             })

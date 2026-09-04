@@ -14,11 +14,7 @@ import {
   buildCrossMarketOfferFromBookOrder,
   parseNamespacedOrderId,
 } from '../helpers';
-import { findQueuedCrossSwapAckForEntityState } from '../queue';
-import {
-  assertPendingBookFillAckLive,
-  committedCrossRouteStatus,
-} from './pass';
+import { committedCrossRouteStatus } from './pass';
 import type { CrossOrderbookPass } from './types';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
@@ -83,12 +79,6 @@ export const classifyCrossBookMaker = (
     });
     return 'cancel';
   }
-  const queuedAck = findQueuedCrossSwapAckForEntityState(
-    pass.hubState,
-    accountId,
-    offerId,
-  );
-  const pendingBookAck = assertPendingBookFillAckLive(pass, accountId, offerId);
   const status = committedCrossRouteStatus(pass, accountId, offerId);
   if (status && !isWorkingCrossRouteStatus(status)) {
     orderbookCrossLog.debug('book.remove_non_working', {
@@ -103,7 +93,7 @@ export const classifyCrossBookMaker = (
     buildCrossMarketOfferFromBookOrder(pass.hubState, orderId);
   if (!meta) {
     throw haltRuntimeFailure("ORDERBOOK_CROSS_J_SNAPSHOT_MISSING", `ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: pair=${pairId} order=${orderId} ` +
-      `account=${accountId} offer=${offerId} pendingAck=${queuedAck ? 'yes' : 'no'}`);
+      `account=${accountId} offer=${offerId}`);
   }
   pass.crossLiveOfferMeta.set(orderId, meta);
   if (isCrossJurisdictionRouteExpired(meta.route, Number(pass.hubState.timestamp || 0))) {
@@ -115,10 +105,7 @@ export const classifyCrossBookMaker = (
     });
     return 'cancel';
   }
-  if (pendingBookAck || queuedAck) {
-    pass.suspendedOrderIds.add(orderId);
-    return 'suspended';
-  }
+  if (pass.suspendedOrderIds.has(orderId)) return 'suspended';
   const canonicalQty = crossBookQtyLots(meta.baseTokenId, meta.baseAmount);
   if (
     meta.pairId !== pairId ||

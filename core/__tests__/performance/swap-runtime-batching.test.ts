@@ -5,17 +5,10 @@
  */
 import { describe, expect, test } from 'bun:test';
 
-import {
-  proveSwapRuntimeEconomics,
-  runSwapRuntimeBenchmark,
-} from '../../scripts/operations/benchmark/bench-swap-runtime-tps';
+import { runSwapRuntimeBenchmark } from '../../scripts/operations/benchmark/bench-swap-runtime-tps';
 
 describe('swap Account-frame batching benchmark', () => {
-  test('proves exact same-J settlement and cross-J fill progress', async () => {
-    await expect(proveSwapRuntimeEconomics()).resolves.toBeUndefined();
-  });
-
-  test('counts exact same/cross Account frames at the five-transaction ceiling', async () => {
+  test('counts exact same-J Account frames at the five-transaction ceiling', async () => {
     const result = await runSwapRuntimeBenchmark({
       swaps: 10,
       warmup: 0,
@@ -23,8 +16,8 @@ describe('swap Account-frame batching benchmark', () => {
       txsPerFrame: 5,
     });
     expect(result.txsPerFrame).toBe(5);
-    expect(result.accountFrames).toBe(4);
-    expect(result.sameSwaps + result.crossSwaps).toBe(20);
+    expect(result.accountFrames).toBe(2);
+    expect(result.sameSwaps).toBe(10);
   });
 
   test('rejects evidence that hides more than five transactions in a frame', async () => {

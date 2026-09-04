@@ -62,8 +62,6 @@ import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard 
 import { isLeftEntity } from '../../../entity/id';
 
 import {
-  CROSS_J_PENDING_FILL_ACK_TTL_MS,
-  MAX_PENDING_CROSS_J_FILL_ACKS,
   applyEntityFrame,
   applyEntityInput,
 } from '../../../entity/consensus/index';
@@ -1720,39 +1718,6 @@ describe('audit fail-fast regressions', () => {
     expect(validator.newState.accounts.get(targetEntityId)?.state.watchSeed).toBe(
       proposer.newState.accounts.get(targetEntityId)?.state.watchSeed,
     );
-  });
-
-  test('proposeAccountFrame throws instead of dropping invalid cross-j fill ack', async () => {
-    const env = createEmptyEnv('cross-fill-ack-propose-failfast');
-    env.state.timestamp = 10_000;
-    env.quietRuntimeLogs = true;
-    const left = `0x${'11'.repeat(32)}`;
-    const right = `0x${'22'.repeat(32)}`;
-    const account = makeProposalAccount(
-      [
-        {
-          type: 'cross_swap_fill_ack',
-          data: {
-            offerId: 'missing-cross-offer',
-            fillSeq: 1,
-            incrementalSourceAmount: 1n,
-            incrementalTargetAmount: 1n,
-            cumulativeSourceAmount: 1n,
-            cumulativeTargetAmount: 1n,
-            cumulativeFillRatio: 1,
-            executionSourceAmount: 1n,
-            executionTargetAmount: 1n,
-            cancelRemainder: false,
-            pairId: 'cross:testnet:1/tron:1',
-          },
-        },
-      ],
-      left,
-      right,
-    );
-
-    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
-    expect(account.mempool).toHaveLength(1);
   });
 
   test('proposeAccountFrame throws instead of dropping invalid cross-j pull close', async () => {

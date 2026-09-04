@@ -335,7 +335,7 @@ export const runSwapScenarioBenchmark = async (cli: Cli): Promise<ScenarioBenchm
     minTps: cli.minTps,
     txsPerFrame: 5,
   });
-  const aggregateOperations = scenarios.reduce((sum, scenario) => sum + scenario.operations, 0) + runtime.sameSwaps + runtime.crossSwaps;
+  const aggregateOperations = scenarios.reduce((sum, scenario) => sum + scenario.operations, 0) + runtime.sameSwaps;
   const aggregateElapsedMs = scenarios.reduce((sum, scenario) => sum + scenario.elapsedMs, 0) + runtime.elapsedMs;
   const aggregateTps = aggregateOperations / Math.max(aggregateElapsedMs / 1000, 0.001);
   const passed = scenarios.every((scenario) => scenario.passed) && runtime.passed;

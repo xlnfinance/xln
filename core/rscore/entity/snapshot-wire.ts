@@ -29,7 +29,6 @@ const OWNED_FIELDS = new Set([
   'lending',
   'crossJurisdictionSwaps',
   'crossJurisdictionAuthorizations',
-  'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',
   'paybook',
   'orderbookExt',
@@ -270,7 +269,6 @@ export const entitySnapshotWire = (state: EntityState): RscoreWireValue[] => {
     state.lending === undefined ? null : canonicalValueWire(state.lending),
     crossJurisdictionCollectionWire(state.crossJurisdictionSwaps),
     crossJurisdictionCollectionWire(state.crossJurisdictionAuthorizations),
-    crossJurisdictionCollectionWire(state.pendingCrossJurisdictionFillAcks),
     crossJurisdictionCollectionWire(state.crossJurisdictionBookAdmissions),
     canonicalValueWire(state.proposals),
     state.entityProviderActionState === undefined

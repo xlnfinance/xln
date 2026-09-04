@@ -28,7 +28,6 @@ export const ENTITY_COLLECTION_NAMESPACES = [
   'settlementContinuations',
   'crossJurisdictionSwaps',
   'crossJurisdictionAuthorizations',
-  'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',
   'crontabHooks',
 ] as const;
@@ -42,7 +41,6 @@ export const ENTITY_COLLECTION_NAMESPACE_TAG = Object.freeze({
   settlementContinuations: 9,
   crossJurisdictionSwaps: 3,
   crossJurisdictionAuthorizations: 4,
-  pendingCrossJurisdictionFillAcks: 5,
   crossJurisdictionBookAdmissions: 6,
   crontabHooks: 7,
 } as const satisfies Record<EntityCollectionNamespace, number>);

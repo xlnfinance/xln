@@ -1681,20 +1681,6 @@ fn decode_account_tx_at(
                 &data_path,
             )?,
         }),
-        "cross_pull_progress" => Ok(AccountTx::CrossPullProgress {
-            data: canonical_object(
-                field(tx, "data", operation_index, path)?,
-                operation_index,
-                &data_path,
-            )?,
-        }),
-        "cross_swap_fill_ack" => Ok(AccountTx::CrossSwapFillAck {
-            data: canonical_object(
-                field(tx, "data", operation_index, path)?,
-                operation_index,
-                &data_path,
-            )?,
-        }),
         "settle_transition" => Ok(AccountTx::SettleTransition {
             data: canonical_object(
                 field(tx, "data", operation_index, path)?,

@@ -6,9 +6,7 @@ import { FINANCIAL, LIMITS, TOKENS } from '../../../../config/constants';
 import {
   buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
-  getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
-  projectCrossJurisdictionQuantizedClaim,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../../extensions/cross-j/index';
 import { getJurisdictionStackId } from '../../../../jurisdiction/machine/jurisdiction-stack';
@@ -22,18 +20,14 @@ import { commitDeltaDraft, createDeltaDraft } from '../../delta-utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
 import { createDefaultDelta } from '../../../state/delta';
 import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import { accountTxApplied, accountTxSwapCancelled, accountTxValidationRejected } from '../../apply-result';
 
 type PullLockTx = Extract<AccountTx, { type: 'cross_pull_lock' }>;
 type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
-type CrossPullProgressTx = Extract<AccountTx, { type: 'cross_pull_progress' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
-const committedCrossJurisdictionRatio = (binding: CrossJurisdictionPullBinding): number =>
-  getCrossJurisdictionCommittedProofRatio(binding);
-
 const crossProofMatchesBinding = (
   binding: CrossJurisdictionPullBinding,
   proof: CrossPullCloseTx['data']['proof'],
@@ -46,90 +40,24 @@ const crossProofMatchesBinding = (
   }
   const expectedPullId = binding.leg === 'source' ? proof.sourcePullId : proof.targetPullId;
   if (expectedPullId !== pullId) return `${binding.leg} pull ${expectedPullId} != ${pullId}`;
-  // CANON (owner, 2026-08-07): off-chain fill progress is INFORMATIONAL only -
-  // the hub saying "matched X%" without secrets - and must never gate a close.
-  // The settlement authority is the hash-ladder reveal, which
-  // validateCrossPullCloseEvidence verifies against fullHash/partialRoot at
-  // exactly proof.fillRatio. The hub's actual fill legally runs ahead of its
-  // last progress message, so a close ABOVE the informed ratio is normal
-  // (lagging delivery, or the hub matched more since). Only a close BELOW the
-  // informed ratio is rejected: informed fill is monotonic and a rollback
-  // would let the hub un-match what both sides were already told.
-  // (The hub holding every secret can always choose the final ratio up to
-  // 100% until reveal time - that is inherent to any matcher-holds-the-proof
-  // design and is accepted, not a bug to guard against here.)
-  const bindingRatio = committedCrossJurisdictionRatio(binding);
-  if (proof.fillRatio < bindingRatio) {
-    return `ratio ${proof.fillRatio} rolls back informed ${bindingRatio}`;
-  }
-  const bindingIsCurrent = proof.fillRatio === bindingRatio;
-  const bindingSourceAmount = binding.filledSourceAmount ?? binding.sourceClaimed;
-  const bindingTargetAmount = binding.filledTargetAmount ?? binding.targetClaimed;
-  // The source Hub is the source-pull beneficiary, so its signed Account frame
-  // must never choose the payer's debit. When informational progress is
-  // current, exact rational economics from the binding are the canonical
-  // amounts (price improvement rides only this path - it is a best-effort
-  // gift from the hub, absent by design when info lags). When the close ratio
-  // runs AHEAD of the informed binding, the stale binding amounts cannot bind
-  // it; the amounts are then validated exactly as the chain would settle a
-  // dispute at this ratio: proportional amount*ratio/65535.
+  // CANON (owner, 2026-08-07): off-chain fill progress is INFORMATIONAL only
+  // and never reaches this binding. The settlement authority is the hash-ladder
+  // reveal, which validateCrossPullCloseEvidence verifies against
+  // fullHash/partialRoot at exactly proof.fillRatio; the close amounts are
+  // validated exactly as the chain settles a dispute at this ratio:
+  // proportional amount*ratio/65535 on this leg. (The hub holding every secret
+  // can always choose the final ratio up to 100% until reveal time - inherent
+  // to any matcher-holds-the-proof design and accepted.)
   const chainProportional = (total: bigint): bigint =>
     proof.fillRatio >= HASHLADDER_MAX_FILL_RATIO
       ? total
       : (total * BigInt(proof.fillRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO);
-  if (bindingIsCurrent) {
-    const expectedSourceAmount = bindingSourceAmount ?? (
-      binding.leg === 'source'
-        ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
-            cumulativeFillRatio: bindingRatio,
-            ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
-            ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
-            orderId: binding.orderId,
-          }).exactClaim
-        : undefined
-    );
-    if (expectedSourceAmount !== undefined && proof.cumulativeSourceAmount !== expectedSourceAmount) {
-      return `source amount ${proof.cumulativeSourceAmount} != committed ${expectedSourceAmount}`;
-    }
-    // The target leg mirrors the same binding: without it, a zero-progress
-    // binding would leave cumulativeTargetAmount unchecked and the cooperative
-    // path could settle what the dispute path would not.
-    const expectedTargetAmount = bindingTargetAmount ?? (
-      binding.leg === 'target'
-        ? projectCrossJurisdictionQuantizedClaim(absBigInt(pull.amount), {
-            cumulativeFillRatio: bindingRatio,
-            ...(binding.fillNumerator !== undefined ? { fillNumerator: binding.fillNumerator } : {}),
-            ...(binding.fillDenominator !== undefined ? { fillDenominator: binding.fillDenominator } : {}),
-            orderId: binding.orderId,
-          }).exactClaim
-        : undefined
-    );
-    if (expectedTargetAmount !== undefined && proof.cumulativeTargetAmount !== expectedTargetAmount) {
-      return `target amount ${proof.cumulativeTargetAmount} != committed ${expectedTargetAmount}`;
-    }
-  } else {
-    const expectedLegAmount = chainProportional(absBigInt(pull.amount));
-    const proofLegAmount = binding.leg === 'source'
-      ? proof.cumulativeSourceAmount
-      : proof.cumulativeTargetAmount;
-    if (proofLegAmount !== expectedLegAmount) {
-      return `${binding.leg} amount ${proofLegAmount} != chain-proportional ${expectedLegAmount}`;
-    }
-  }
-  if (binding.sourceCloseProof) {
-    const sourceProof = binding.sourceCloseProof;
-    if (
-      sourceProof.orderId !== proof.orderId ||
-      (sourceProof.routeHash || '').toLowerCase() !== (proof.routeHash || '').toLowerCase() ||
-      sourceProof.sourcePullId !== proof.sourcePullId ||
-      sourceProof.targetPullId !== proof.targetPullId ||
-      sourceProof.fillRatio !== proof.fillRatio ||
-      sourceProof.cumulativeSourceAmount !== proof.cumulativeSourceAmount ||
-      sourceProof.cumulativeTargetAmount !== proof.cumulativeTargetAmount ||
-      (sourceProof.binaryHash || '').toLowerCase() !== (proof.binaryHash || '').toLowerCase()
-    ) {
-      return `source close proof mismatch`;
-    }
+  const expectedLegAmount = chainProportional(absBigInt(pull.amount));
+  const proofLegAmount = binding.leg === 'source'
+    ? proof.cumulativeSourceAmount
+    : proof.cumulativeTargetAmount;
+  if (proofLegAmount !== expectedLegAmount) {
+    return `${binding.leg} amount ${proofLegAmount} != chain-proportional ${expectedLegAmount}`;
   }
   return null;
 };
@@ -193,7 +121,6 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     route.fillDenominator !== undefined ||
     route.filledSourceAmount !== undefined ||
     route.filledTargetAmount !== undefined ||
-    route.priceImprovementSourceAmount !== undefined ||
     route.pendingClearRequestedAt !== undefined ||
     route.claimedRatio !== undefined ||
     route.sourceClaimed !== undefined ||
@@ -403,94 +330,16 @@ export async function handleCrossPullClose(
   commitDeltaDraft(account, delta);
   account.pulls.del(pullId);
   events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/${HASHLADDER_MAX_FILL_RATIO} claimed ${applied} released ${remainingHold}`);
-  return accountTxApplied(events);
-}
-
-export async function handleCrossPullProgress(
-  account: AccountDraftState,
-  accountTx: CrossPullProgressTx,
-  byLeft: boolean,
-): Promise<ApplyAccountTxResult> {
-  const events: string[] = [];
-  const { pullId, fill } = accountTx.data;
-  const pull = account.pulls?.get(pullId);
-  if (!pull) return accountTxValidationRejected(`Cross-j target pull ${pullId} not found`, events);
-  const binding = cloneCrossJurisdictionPullBinding(pull.crossJurisdiction);
-  if (binding.leg !== 'target') {
-    return accountTxValidationRejected(`Cross-j progress requires target pull`, events);
-  }
-  if (
-    fill.offerId !== binding.orderId ||
-    !fill.routeHash ||
-    fill.routeHash.toLowerCase() !== binding.routeHash.toLowerCase()
-  ) {
-    return accountTxValidationRejected(`Cross-j progress route mismatch`, events);
-  }
-
-  const beneficiaryIsLeft = pull.amount > 0n;
-  if (byLeft === beneficiaryIsLeft) {
-    return accountTxValidationRejected(`Only the target Hub can advance cross-j pull`, events);
-  }
-  const currentSeq = Math.max(0, Math.floor(Number(binding.fillSeq ?? 0) || 0));
-  const nextSeq = Math.floor(Number(fill.fillSeq));
-  const previousSeq = Math.floor(Number(fill.previousFillSeq));
-  if (fill.ackKind !== 'fill' && fill.ackKind !== 'cancel') {
-    return accountTxValidationRejected(`Cross-j progress kind invalid`, events);
-  }
-  const cancelling = fill.ackKind === 'cancel';
-  if (cancelling && fill.cancelRemainder !== true) {
-    return accountTxValidationRejected(`Cross-j cancel progress must clear remainder`, events);
-  }
-  if (
-    previousSeq !== currentSeq ||
-    (!cancelling && nextSeq !== currentSeq + 1) ||
-    (cancelling && nextSeq !== currentSeq)
-  ) {
-    return accountTxValidationRejected(`Cross-j progress sequence mismatch`, events);
-  }
-
-  let nextRatio: number;
-  try {
-    nextRatio = getCrossJurisdictionCommittedProofRatio({
-      orderId: fill.offerId,
-      cumulativeFillRatio: fill.cumulativeFillRatio,
-      fillNumerator: fill.fillNumerator,
-      fillDenominator: fill.fillDenominator,
+  // The source offer is bound to this pull; the close is the only Account tx
+  // that retires it (fill progress never touches the Account offer).
+  const offer = binding.leg === 'source' ? account.swapOffers?.get(binding.orderId) : undefined;
+  if (offer?.crossJurisdiction) {
+    account.swapOffers.del(binding.orderId);
+    events.push(`🌉 Cross-j offer ${binding.orderId.slice(0, 8)} closed with pull`);
+    return accountTxSwapCancelled(events, {
+      offerId: binding.orderId,
+      accountId: offer.makerIsLeft ? account.leftEntity : account.rightEntity,
     });
-  } catch (error) {
-    return accountTxValidationRejected(error instanceof Error ? error.message : String(error), events);
   }
-  const currentRatio = committedCrossJurisdictionRatio(binding);
-  const priorSource = binding.filledSourceAmount ?? 0n;
-  const priorTarget = binding.filledTargetAmount ?? 0n;
-  const nextSource = fill.cumulativeSourceAmount;
-  const nextTarget = fill.cumulativeTargetAmount;
-  const sourceIncrement = fill.incrementalSourceAmount;
-  const targetIncrement = fill.incrementalTargetAmount;
-  if (
-    nextSource === undefined || nextTarget === undefined ||
-    sourceIncrement === undefined || targetIncrement === undefined ||
-    nextSource < priorSource || nextTarget < priorTarget ||
-    sourceIncrement !== nextSource - priorSource ||
-    targetIncrement !== nextTarget - priorTarget ||
-    nextTarget > absBigInt(pull.amount) ||
-    (!cancelling && (nextRatio <= currentRatio || sourceIncrement <= 0n || targetIncrement <= 0n)) ||
-    (cancelling && (nextRatio !== currentRatio || sourceIncrement !== 0n || targetIncrement !== 0n))
-  ) {
-    return accountTxValidationRejected(`Cross-j progress amounts mismatch`, events);
-  }
-
-  binding.fillSeq = nextSeq;
-  binding.cumulativeFillRatio = nextRatio;
-  if (fill.fillNumerator !== undefined) binding.fillNumerator = fill.fillNumerator;
-  if (fill.fillDenominator !== undefined) binding.fillDenominator = fill.fillDenominator;
-  binding.filledSourceAmount = nextSource;
-  binding.filledTargetAmount = nextTarget;
-  binding.status = cancelling || nextRatio >= HASHLADDER_MAX_FILL_RATIO
-    ? 'clear_requested'
-    : 'partially_filled';
-  if (cancelling) binding.clearingPolicy = 'cancel_and_clear';
-  account.pulls.put(pullId, { ...pull, crossJurisdiction: binding });
-  events.push(`🌉 Cross-j target progress ${fill.offerId.slice(0, 8)} ${nextRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
   return accountTxApplied(events);
 }

@@ -115,7 +115,6 @@ export type StorageEntityCoreDoc = {
   swapTradingPairs?: EntitySwapPair[];
   crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
   crossJurisdictionAuthorizations?: EntityState['crossJurisdictionAuthorizations'];
-  pendingCrossJurisdictionFillAcks?: EntityState['pendingCrossJurisdictionFillAcks'];
   crossJurisdictionBookAdmissions?: EntityState['crossJurisdictionBookAdmissions'];
   hubRebalanceConfig?: HubRebalanceConfig;
   orderbookHubProfile?: HubProfile;

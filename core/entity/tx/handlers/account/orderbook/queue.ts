@@ -27,8 +27,6 @@ export type SwapResolveEnqueueData = {
   restingQuantizedWant?: bigint;
 };
 
-type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-
 export function hasQueuedSwapResolveForEntityState(
   hubState: EntityState,
   queuedSwapResolutions: Set<string>,
@@ -42,35 +40,6 @@ export function hasQueuedSwapResolveForEntityState(
   if ((account.mempool ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
   if ((account.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
   return false;
-}
-
-export function hasQueuedCrossSwapAckForEntityState(
-  hubState: EntityState,
-  accountId: string,
-  offerId: string,
-): boolean {
-  const account = hubState.accounts.get(accountId);
-  if (!account) return false;
-  if ((account.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
-  if ((account.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
-  return false;
-}
-
-export function findQueuedCrossSwapAckForEntityState(
-  hubState: EntityState,
-  accountId: string,
-  offerId: string,
-): CrossSwapFillAckTx | null {
-  const account = hubState.accounts.get(accountId);
-  if (!account) return null;
-  const mempoolAck = (account.mempool ?? []).find(
-    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
-  );
-  if (mempoolAck) return mempoolAck;
-  const pendingAck = (account.pendingFrame?.accountTxs ?? []).find(
-    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
-  );
-  return pendingAck ?? null;
 }
 
 export function queueUniqueSwapResolveForEntityState(

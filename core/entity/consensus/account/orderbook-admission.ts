@@ -19,7 +19,7 @@ type EntityAccountState = EntityState['accounts'] extends ReadonlyMap<string, in
 
 const hasQueuedOrderLifecycleTx = (account: EntityAccountState, offerId: string): boolean => {
   const isLifecycleTx = (tx: EntityAccountState['mempool'][number]): boolean =>
-    (tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack' || tx.type === 'swap_cancel_request') &&
+    (tx.type === 'swap_resolve' || tx.type === 'swap_cancel_request') &&
     tx.data.offerId === offerId;
   return (account.mempool ?? []).some(isLifecycleTx) || (account.pendingFrame?.accountTxs ?? []).some(isLifecycleTx);
 };

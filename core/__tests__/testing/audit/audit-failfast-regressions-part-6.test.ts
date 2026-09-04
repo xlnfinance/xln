@@ -54,8 +54,6 @@ import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard 
 import { isLeftEntity } from '../../../entity/id';
 
 import {
-  CROSS_J_PENDING_FILL_ACK_TTL_MS,
-  MAX_PENDING_CROSS_J_FILL_ACKS,
   applyEntityInput,
 } from '../../../entity/consensus/index';
 import { applyEntityFrameWithMaterializedTestInfraContext } from '../../helpers/entity-frame';
@@ -725,172 +723,6 @@ const submitAuditRuntimeJOutbox = async (
 };
 
 describe('audit fail-fast regressions', () => {
-  test('cross-j fill notice waits for source offer instead of looping fatal errors', async () => {
-    const env = createEmptyEnv('cross-fill-notice-pending-source-offer');
-    env.state.timestamp = 10_000;
-    env.quietRuntimeLogs = true;
-    const lot = SWAP_LOT_SCALE;
-    const sourceHub = `0x${'20'.repeat(32)}`;
-    const sourceUser = `0x${'31'.repeat(32)}`;
-    const targetHub = `0x${'32'.repeat(32)}`;
-    const targetUser = `0x${'33'.repeat(32)}`;
-    const orderId = 'source-offer-race';
-    const pairId = 'cross:base:2/tron:1';
-    const runtimeSeed = env.runtimeSeed;
-    if (!runtimeSeed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
-    const sourceUserSignerId = deriveSignerAddressSync(runtimeSeed, '2').toLowerCase();
-    registerSignerKey(runtimeSeed, sourceUserSignerId, deriveSignerKeySync(runtimeSeed, '2'));
-    attachSigningReplica(env, sourceUser, sourceUserSignerId);
-    const route = buildPreparedCrossJurisdictionRoute(
-      {
-        orderId,
-        sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-        makerEntityId: sourceUser,
-        hubEntityId: targetHub,
-        bookOwnerEntityId: targetHub,
-        venueId: pairId,
-        sourceSignerId: sourceUserSignerId,
-        sourceHubSignerId: 'source-hub-signer',
-        targetHubSignerId: 'target-hub-signer',
-        targetSignerId: 'target-user-signer',
-        bookHubSignerId: 'target-hub-signer',
-        source: {
-          jurisdiction: 'base',
-          entityId: sourceUser,
-          counterpartyEntityId: sourceHub,
-          tokenId: 2,
-          amount: 30n * lot,
-        },
-        target: {
-          jurisdiction: 'tron',
-          entityId: targetHub,
-          counterpartyEntityId: targetUser,
-          tokenId: 1,
-          amount: 75_000n * lot,
-        },
-        status: 'resting',
-        createdAt: env.state.timestamp,
-        updatedAt: env.state.timestamp,
-        expiresAt: env.state.timestamp + 60_000,
-      },
-      { runtimeSeed: 'cross-fill-notice-pending-source-offer', now: env.state.timestamp },
-    );
-    route.status = 'resting';
-
-    const sourceState = makeEntityState(sourceHub);
-    installSingleSignerBoard(env, sourceState);
-    sourceState.crossJurisdictionSwaps = new Map([[orderId, route]]);
-    sourceState.accounts.set(sourceUser, makeProposalAccount([], sourceHub, sourceUser));
-
-    const cappedState = structuredClone(sourceState) as typeof sourceState;
-    cappedState.pendingCrossJurisdictionFillAcks = new Map();
-    for (let index = 0; index < MAX_PENDING_CROSS_J_FILL_ACKS; index += 1) {
-      const oldAck: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
-        type: 'cross_swap_fill_ack',
-        data: {
-          offerId: `old-source-offer-race-${index}`,
-          routeHash: route.routeHash,
-          fillSeq: index + 1,
-          cumulativeFillRatio: index % 65_536,
-          cumulativeSourceAmount: 1n,
-          cumulativeTargetAmount: 1n,
-        },
-      };
-      cappedState.pendingCrossJurisdictionFillAcks.set(`old-${index}`, {
-        accountId: sourceUser,
-        tx: oldAck,
-        storedAt: env.state.timestamp - 100_000 - index,
-        ttlExpiredAt: env.state.timestamp - 50_000 - index,
-        reason: 'test-cap',
-      });
-    }
-    const fillNoticeTxs: EntityTx[] = [
-      {
-        type: 'crossJurisdictionFillNotice',
-        data: {
-          orderId,
-          fillSeq: 1,
-          incrementalSourceAmount: 30n * lot,
-          incrementalTargetAmount: 75_000n * lot,
-          cumulativeSourceAmount: 30n * lot,
-          cumulativeTargetAmount: 75_000n * lot,
-          cumulativeFillRatio: 65_535,
-          fillNumerator: 1n,
-          fillDenominator: 1n,
-          pairId,
-        },
-      },
-    ];
-    await expect(
-      applyEntityFrameWithMaterializedTestInfraContext(env, cappedState, await buildQuorumAuthorizedFrameTxs(env, cappedState, fillNoticeTxs)),
-    ).rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');
-    expect(cappedState.pendingCrossJurisdictionFillAcks.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);
-    expect(
-      Array.from(cappedState.pendingCrossJurisdictionFillAcks.values()).some(
-        entry => entry.tx.data.offerId === orderId && entry.tx.data.fillSeq === 1,
-      ),
-    ).toBe(false);
-
-    const first = await applyEntityFrameWithMaterializedTestInfraContext(
-      env,
-      sourceState,
-      await buildQuorumAuthorizedFrameTxs(env, sourceState, fillNoticeTxs),
-    );
-
-    expect(first.newState.pendingCrossJurisdictionFillAcks?.size).toBe(1);
-    const pendingAccount = first.newState.accounts.get(sourceUser);
-    const prematurelyQueued = [
-      ...(pendingAccount?.mempool ?? []),
-      ...(pendingAccount?.pendingFrame?.accountTxs ?? []),
-    ].find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === orderId);
-    expect(prematurelyQueued).toBeUndefined();
-
-    const expiredState = structuredClone(first.newState) as typeof first.newState;
-    const originalTimestamp = env.state.timestamp;
-    env.state.timestamp = originalTimestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
-    const expiredEnv = env;
-    expiredState.timestamp = expiredEnv.state.timestamp;
-    const preserved = await applyEntityFrameWithMaterializedTestInfraContext(expiredEnv, expiredState, []);
-    const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
-    expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.state.timestamp);
-    expect(expiredEnv.infrastructure?.securityIncidents).toBeUndefined();
-    publishEntityCandidateEffects(expiredEnv, null, preserved.candidateEffects);
-    expect([...expiredEnv.infrastructure!.securityIncidents!.values()]).toContainEqual(
-      expect.objectContaining({
-        code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
-        status: 'active',
-        entityId: sourceState.entityId,
-        offerId: orderId,
-      }),
-    );
-    env.state.timestamp = originalTimestamp;
-
-    const stateWithOffer = first.newState;
-    const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;
-    sourceAccount.state.swapOffers.set(orderId, {
-      offerId: orderId,
-      giveTokenId: route.source.tokenId,
-      giveAmount: route.source.amount,
-      wantTokenId: route.target.tokenId,
-      wantAmount: route.target.amount,
-      maxFee: 0n,
-      minNetReceive: route.target.amount,
-      makerIsLeft: sourceAccount.state.leftEntity.toLowerCase() === sourceUser.toLowerCase(),
-      timeInForce: 0,
-      createdHeight: 1,
-      priceTicks: 25_000_000n,
-      crossJurisdiction: route,
-    });
-
-    const second = await applyEntityFrameWithMaterializedTestInfraContext(env, stateWithOffer, []);
-    expect(second.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
-    const drainedAccount = second.newState.accounts.get(sourceUser);
-    const queuedAck = [...(drainedAccount?.mempool ?? []), ...(drainedAccount?.pendingFrame?.accountTxs ?? [])].find(
-      tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === orderId,
-    );
-    expect(queuedAck).toBeDefined();
-  });
 
   test('cross-j fill ack admission secondary index requires matching route hash', () => {
     const env = createEmptyEnv('cross-fill-ack-admission-regression');
@@ -969,17 +801,6 @@ describe('audit fail-fast regressions', () => {
         signerId: committedSigner,
         entityTxs: txs,
       });
-  });
-
-  test('cross-j rejects target-side bonus economics before route commitment', () => {
-    const unsupportedRoute = {
-      orderId: 'target-bonus-unsupported',
-      priceImprovementMode: 'target_bonus',
-    } as unknown as CrossJurisdictionSwapRoute;
-
-    expect(() => withCanonicalCrossJurisdictionRouteHash(unsupportedRoute)).toThrow(
-      'CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED:target-bonus-unsupported:target_bonus',
-    );
   });
 
   test('prepareDispute removes same-account orderbook rows before disputeStart', async () => {

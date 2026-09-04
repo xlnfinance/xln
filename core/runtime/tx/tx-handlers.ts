@@ -447,7 +447,6 @@ const buildGenesisReplica = (
       swapTradingPairs: buildDefaultEntitySwapPairs(
         getTokenIdsForJurisdiction(config.jurisdiction),
       ),
-      pendingCrossJurisdictionFillAcks: PersistentEntityCollectionMap.empty(),
       crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.empty(),
     },
   };

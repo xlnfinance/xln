@@ -6,13 +6,8 @@ import {
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
-import {
-  buildCrossJurisdictionPullBinding,
-  buildPreparedCrossJurisdictionRoute,
-} from '../../../extensions/cross-j/index';
 import { getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../../orderbook';
 import type { AccountReplica, AccountTx, Delta, SwapOffer } from '../../../types/account';
-import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getPerfMs } from '../../../support/time';
 import { createDefaultDelta } from '../../../account/state/delta';
 import {
@@ -30,13 +25,11 @@ type Cli = {
 type RuntimeSwapBenchmarkResult = {
   benchmark: 'swap-account-runtime';
   sameSwaps: number;
-  crossSwaps: number;
   elapsedMs: number;
   tps: number;
   minTps: number;
   passed: boolean;
   sameTps: number;
-  crossTps: number;
   sameOffdelta: string;
   txsPerFrame: number;
   accountFrames: number;
@@ -157,92 +150,6 @@ const seedSameSwapAccount = (swaps: number): AccountReplica => {
   return account;
 };
 
-const seedCrossSwapAccount = (swaps: number): AccountReplica => {
-  const sourceUser = entity('33');
-  const sourceHub = entity('44');
-  const targetHub = entity('55');
-  const targetUser = entity('66');
-  const account = makeAccount(sourceUser, sourceHub);
-  const sourceDelta = installDelta(account, 1);
-  const sourceAmount = SWAP_LOT_SCALE;
-  const targetAmount = 2n * SWAP_LOT_SCALE;
-  sourceDelta.leftHold = sourceAmount * BigInt(swaps);
-  account.state.deltas = requirePersistentAccountStateMap(account.state.deltas, 'deltas')
-    .updated(1, sourceDelta);
-  for (let index = 0; index < swaps; index += 1) {
-    const orderId = `cross-${index}`;
-    const route: CrossJurisdictionSwapRoute = {
-      ...buildPreparedCrossJurisdictionRoute({
-        orderId,
-        makerEntityId: sourceUser,
-        hubEntityId: sourceHub,
-        bookOwnerEntityId: sourceHub,
-        venueId: 'cross:bench-source:1/bench-target:1',
-        sourceDisputeConfig: { ...account.state.disputeConfig },
-        targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-        source: {
-          jurisdiction: `stack:1:${addr('11')}`,
-          entityId: sourceUser,
-          counterpartyEntityId: sourceHub,
-          tokenId: 1,
-          amount: sourceAmount,
-        },
-        target: {
-          jurisdiction: `stack:2:${addr('22')}`,
-          entityId: targetHub,
-          counterpartyEntityId: targetUser,
-          tokenId: 1,
-          amount: targetAmount,
-        },
-        priceImprovementMode: 'source_savings',
-        status: 'intent',
-        createdAt: 1_000 + index,
-        updatedAt: 1_000 + index,
-        expiresAt: 61_000 + index,
-      }, { runtimeSeed: 'swap-runtime-bench', now: 1_000 + index }),
-      status: 'resting' as const,
-    };
-    const sourcePull = route.sourcePull!;
-    account.state.pulls = requirePersistentAccountStateMap(account.state.pulls!, 'pulls').updated(
-      sourcePull.pullId,
-      {
-        pullId: sourcePull.pullId,
-        tokenId: sourcePull.tokenId,
-        amount: sourcePull.signedAmount,
-        claimedRatio: 0,
-        claimedAmount: 0n,
-        fullHash: sourcePull.fullHash,
-        partialRoot: sourcePull.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
-        createdHeight: 0,
-        createdTimestamp: 1_000 + index,
-      },
-    );
-    const offer: SwapOffer = {
-      offerId: orderId,
-      giveTokenId: route.source.tokenId,
-      ...getStaticSwapTokenDimensions(route.source.tokenId, route.target.tokenId),
-      giveAmount: route.source.amount,
-      wantTokenId: route.target.tokenId,
-      wantAmount: route.target.amount,
-      maxFee: 0n,
-      minNetReceive: route.target.amount,
-      priceTicks: 2n * ORDERBOOK_PRICE_SCALE,
-      timeInForce: 0,
-      makerIsLeft: true,
-      createdHeight: index,
-      quantizedGive: route.source.amount,
-      quantizedWant: route.target.amount,
-      crossJurisdiction: route,
-    };
-    account.state.swapOffers = requirePersistentAccountStateMap(
-      account.state.swapOffers,
-      'swapOffers',
-    ).updated(orderId, offer);
-  }
-  return account;
-};
-
 const sameResolveTx = (index: number): AccountTx => ({
   type: 'swap_resolve',
   data: {
@@ -256,27 +163,6 @@ const sameResolveTx = (index: number): AccountTx => ({
   },
 });
 
-const crossAckTx = (index: number, cancelRemainder = true): AccountTx => ({
-  type: 'cross_swap_fill_ack',
-  data: {
-    offerId: `cross-${index}`,
-    fillSeq: 1,
-    incrementalSourceAmount: SWAP_LOT_SCALE,
-    incrementalTargetAmount: 2n * SWAP_LOT_SCALE,
-    cumulativeSourceAmount: SWAP_LOT_SCALE,
-    cumulativeTargetAmount: 2n * SWAP_LOT_SCALE,
-    cumulativeFillRatio: 65_535,
-    fillNumerator: 1n,
-    fillDenominator: 1n,
-    executionSourceAmount: SWAP_LOT_SCALE - 1n,
-    executionTargetAmount: 2n * SWAP_LOT_SCALE,
-    priceImprovementMode: 'source_savings',
-    priceImprovementAmount: 1n,
-    priceImprovementTokenId: 1,
-    cancelRemainder,
-    pairId: 'cross:bench-source:1/bench-target:1',
-  },
-});
 
 const applyAccountFrame = async (
   account: AccountReplica,
@@ -301,11 +187,9 @@ const applyAccountFrame = async (
 const runPass = async (
   swaps: number,
   txsPerFrame: number,
-  cancelCrossRemainder = true,
-): Promise<{ same: AccountReplica; cross: AccountReplica; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
+): Promise<{ same: AccountReplica; elapsedMs: number }> => {
   const same = seedSameSwapAccount(swaps);
-  const cross = seedCrossSwapAccount(swaps);
-  let sameElapsedMs = 0;
+  let elapsedMs = 0;
   for (let index = 0; index < swaps; index += txsPerFrame) {
     const txs = Array.from(
       { length: Math.min(txsPerFrame, swaps - index) },
@@ -313,89 +197,32 @@ const runPass = async (
     );
     const startedAt = getPerfMs();
     await applyAccountFrame(same, txs, 2_000 + index, 2 + index);
-    sameElapsedMs += getPerfMs() - startedAt;
+    elapsedMs += getPerfMs() - startedAt;
   }
-  let crossElapsedMs = 0;
-  for (let index = 0; index < swaps; index += txsPerFrame) {
-    const txs = Array.from(
-      { length: Math.min(txsPerFrame, swaps - index) },
-      (_, offset) => crossAckTx(index + offset, cancelCrossRemainder),
-    );
-    const startedAt = getPerfMs();
-    await applyAccountFrame(cross, txs, 2_000 + index, 2 + index);
-    crossElapsedMs += getPerfMs() - startedAt;
-  }
-  return { same, cross, elapsedMs: sameElapsedMs + crossElapsedMs, sameElapsedMs, crossElapsedMs };
-};
-
-const requireEconomicState: (condition: boolean, error: string) => asserts condition = (condition, error) => {
-  if (!condition) throw new Error(`SWAP_RUNTIME_BENCH_ECONOMICS:${error}`);
-};
-
-export const proveSwapRuntimeEconomics = async (): Promise<void> => {
-  const { same, cross } = await runPass(1, 1, false);
-  const sameGive = same.state.deltas.get(2);
-  const sameWant = same.state.deltas.get(1);
-  requireEconomicState(same.state.swapOffers.size === 0, 'SAME_OFFER_NOT_CLOSED');
-  requireEconomicState(sameGive?.leftHold === 0n, 'SAME_GIVE_HOLD_NOT_RELEASED');
-  requireEconomicState(sameGive?.offdelta === -SWAP_LOT_SCALE, 'SAME_GIVE_DELTA');
-  requireEconomicState(sameWant?.offdelta === 3_000n * SWAP_LOT_SCALE, 'SAME_WANT_DELTA');
-
-  const source = cross.state.deltas.get(1);
-  const crossPulls = cross.state.pulls;
-  requireEconomicState(crossPulls !== undefined, 'CROSS_PULLS_MISSING');
-  const pulls = [...crossPulls.values()];
-  const binding = pulls[0]?.crossJurisdiction;
-  requireEconomicState(cross.state.swapOffers.size === 0, 'CROSS_OFFER_NOT_CLOSED');
-  requireEconomicState(source?.leftHold === SWAP_LOT_SCALE, 'CROSS_SOURCE_HOLD_RELEASED_EARLY');
-  requireEconomicState(pulls.length === 1, 'CROSS_PULL_COUNT');
-  requireEconomicState(binding?.status === 'clear_requested', 'CROSS_PULL_STATUS');
-  requireEconomicState(binding?.fillSeq === 1, 'CROSS_FILL_SEQUENCE');
-  requireEconomicState(binding?.cumulativeFillRatio === 65_535, 'CROSS_FILL_RATIO');
-  requireEconomicState(binding?.fillNumerator === 1n && binding.fillDenominator === 1n, 'CROSS_EXACT_RATIO');
-  requireEconomicState(
-    binding?.filledSourceAmount === SWAP_LOT_SCALE && binding.sourceClaimed === SWAP_LOT_SCALE,
-    'CROSS_SOURCE_FILL',
-  );
-  requireEconomicState(
-    binding?.filledTargetAmount === 2n * SWAP_LOT_SCALE && binding.targetClaimed === 2n * SWAP_LOT_SCALE,
-    'CROSS_TARGET_FILL',
-  );
-  requireEconomicState(binding?.clearingPolicy === 'full_fill', 'CROSS_CLEARING_POLICY');
+  return { same, elapsedMs };
 };
 
 export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenchmarkResult> => {
   if (cli.txsPerFrame > 5) throw new Error(`SWAP_RUNTIME_BENCH_FRAME_TOO_LARGE:${cli.txsPerFrame}:5`);
-  await proveSwapRuntimeEconomics();
   if (cli.warmup > 0) await runPass(cli.warmup, cli.txsPerFrame);
-  const { same, cross, elapsedMs, sameElapsedMs, crossElapsedMs } = await runPass(cli.swaps, cli.txsPerFrame);
+  const { same, elapsedMs } = await runPass(cli.swaps, cli.txsPerFrame);
   if (same.state.swapOffers.size !== 0) throw new Error(`SAME_OFFERS_LEFT:${same.state.swapOffers.size}`);
-  if (cross.state.swapOffers.size !== 0) throw new Error(`CROSS_OFFERS_LEFT:${cross.state.swapOffers.size}`);
-  const totalSwaps = cli.swaps * 2;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
-  const tps = totalSwaps / elapsedSeconds;
-  const sameTps = cli.swaps / Math.max(sameElapsedMs / 1000, 0.001);
-  const crossTps = cli.swaps / Math.max(crossElapsedMs / 1000, 0.001);
-  const passed = tps >= cli.minTps && sameTps >= cli.minTps && crossTps >= cli.minTps;
+  const tps = cli.swaps / elapsedSeconds;
   const output: RuntimeSwapBenchmarkResult = {
     benchmark: 'swap-account-runtime',
     sameSwaps: cli.swaps,
-    crossSwaps: cli.swaps,
     elapsedMs: Number(elapsedMs.toFixed(3)),
     tps: Number(tps.toFixed(2)),
     minTps: cli.minTps,
-    passed,
-    sameTps: Number(sameTps.toFixed(2)),
-    crossTps: Number(crossTps.toFixed(2)),
+    passed: tps >= cli.minTps,
+    sameTps: Number(tps.toFixed(2)),
     sameOffdelta: String(same.state.deltas.get(2)?.offdelta ?? 0n),
     txsPerFrame: cli.txsPerFrame,
-    accountFrames: Math.ceil(cli.swaps / cli.txsPerFrame) * 2,
+    accountFrames: Math.ceil(cli.swaps / cli.txsPerFrame),
   };
   if (!output.passed) {
-    throw new Error(
-      `SWAP_RUNTIME_TPS_BELOW_TARGET:` +
-      `aggregate=${tps.toFixed(2)} same=${sameTps.toFixed(2)} cross=${crossTps.toFixed(2)}<${cli.minTps}`,
-    );
+    throw new Error(`SWAP_RUNTIME_TPS_BELOW_TARGET:same=${tps.toFixed(2)}<${cli.minTps}`);
   }
   return output;
 };

@@ -913,12 +913,6 @@ pub(crate) fn decode_tx(value: &AbiValue) -> Result<AccountTx, ProcessError> {
         20 => decode_canonical_tx(fields, "crossPullClose", |data| AccountTx::CrossPullClose {
             data,
         }),
-        21 => decode_canonical_tx(fields, "crossPullProgress", |data| {
-            AccountTx::CrossPullProgress { data }
-        }),
-        22 => decode_canonical_tx(fields, "crossSwapFillAck", |data| {
-            AccountTx::CrossSwapFillAck { data }
-        }),
         23 => decode_canonical_tx(fields, "settleTransition", |data| {
             AccountTx::SettleTransition { data }
         }),

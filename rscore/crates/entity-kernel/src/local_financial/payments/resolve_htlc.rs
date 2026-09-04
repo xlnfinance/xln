@@ -163,7 +163,6 @@ mod tests {
                 pulls: BTreeMap::new(),
                 swap_offers: BTreeMap::new(),
                 pending_cross_pull_close_ids: Default::default(),
-                pending_cross_swap_ack_ids: Default::default(),
                 dispute: None,
             },
         )]);

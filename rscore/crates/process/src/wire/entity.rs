@@ -410,7 +410,7 @@ fn decode_entity_collection(
 }
 
 pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, ProcessError> {
-    let row = exact(tuple(value)?, 30, "entityStateSnapshot")?;
+    let row = exact(tuple(value)?, 29, "entityStateSnapshot")?;
     let mut reserves = BTreeMap::new();
     for value in tuple(&row[4])? {
         let entry = exact(tuple(value)?, 2, "entityReserve")?;
@@ -457,34 +457,34 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
         timestamp: js_number(&row[2], "entityTimestamp")?,
         entity_command_nonces: decode_entity_command_nonces(&row[11])?,
         proposals: xln_rscore_entity_kernel::decode_canonical_entity_proposals(
-            &crate::canonical::canonical_value(&row[20])?,
+            &crate::canonical::canonical_value(&row[19])?,
         )?,
         last_finalized_j_height: js_number(&row[3], "lastFinalizedJHeight")?,
         reserves,
-        out_debts_by_token: if matches!(row[24], AbiValue::Nil) {
+        out_debts_by_token: if matches!(row[23], AbiValue::Nil) {
+            None
+        } else {
+            Some(xln_rscore_entity_kernel::decode_canonical_debt_ledger(
+                &crate::canonical::canonical_value(&row[23])?,
+            )?)
+        },
+        in_debts_by_token: if matches!(row[24], AbiValue::Nil) {
             None
         } else {
             Some(xln_rscore_entity_kernel::decode_canonical_debt_ledger(
                 &crate::canonical::canonical_value(&row[24])?,
             )?)
         },
-        in_debts_by_token: if matches!(row[25], AbiValue::Nil) {
-            None
-        } else {
-            Some(xln_rscore_entity_kernel::decode_canonical_debt_ledger(
-                &crate::canonical::canonical_value(&row[25])?,
-            )?)
-        },
-        external_wallet: if matches!(row[26], AbiValue::Nil) {
+        external_wallet: if matches!(row[25], AbiValue::Nil) {
             None
         } else {
             Some(xln_rscore_entity_kernel::decode_canonical_external_wallet(
-                &crate::canonical::canonical_value(&row[26])?,
+                &crate::canonical::canonical_value(&row[25])?,
             )?)
         },
-        deferred_account_proposals: decode_entity_collection(&row[27], "deferredAccountProposals")?,
-        settlement_continuations: decode_entity_collection(&row[28], "settlementContinuations")?,
-        entity_encryption_public_key: fixed_bytes(&row[29], "entityEncryptionPublicKey")?,
+        deferred_account_proposals: decode_entity_collection(&row[26], "deferredAccountProposals")?,
+        settlement_continuations: decode_entity_collection(&row[27], "settlementContinuations")?,
+        entity_encryption_public_key: fixed_bytes(&row[28], "entityEncryptionPublicKey")?,
         profile: xln_rscore_entity_kernel::EntityProfile {
             name: text(&profile[0])?.to_string(),
             is_hub: boolean(&profile[1], "entityProfileIsHub")?,
@@ -501,30 +501,30 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
                 &crate::canonical::canonical_value(&row[14])?,
             )?)
         },
-        entity_provider_action_state: if matches!(row[21], AbiValue::Nil) {
+        entity_provider_action_state: if matches!(row[20], AbiValue::Nil) {
             None
         } else {
             Some(
                 xln_rscore_entity_kernel::decode_canonical_entity_provider_action_state(
-                    &crate::canonical::canonical_value(&row[21])?,
+                    &crate::canonical::canonical_value(&row[20])?,
                 )?,
             )
         },
-        certified_board_state: if matches!(row[23], AbiValue::Nil) {
+        certified_board_state: if matches!(row[22], AbiValue::Nil) {
             None
         } else {
             Some(
                 xln_rscore_entity_kernel::decode_canonical_certified_board_state(
-                    &crate::canonical::canonical_value(&row[23])?,
+                    &crate::canonical::canonical_value(&row[22])?,
                 )?,
             )
         },
-        swap_trading_pairs: if matches!(row[22], AbiValue::Nil) {
+        swap_trading_pairs: if matches!(row[21], AbiValue::Nil) {
             None
         } else {
             Some(
                 xln_rscore_entity_kernel::decode_canonical_swap_trading_pairs(
-                    &crate::canonical::canonical_value(&row[22])?,
+                    &crate::canonical::canonical_value(&row[21])?,
                 )?,
             )
         },
@@ -540,12 +540,8 @@ pub fn decode_entity_snapshot(value: &AbiValue) -> Result<EntityStateSnapshot, P
             &row[17],
             "crossJurisdictionAuthorizations",
         )?,
-        pending_cross_jurisdiction_fill_acks: decode_entity_collection(
-            &row[18],
-            "pendingCrossJurisdictionFillAcks",
-        )?,
         cross_jurisdiction_book_admissions: decode_entity_collection(
-            &row[19],
+            &row[18],
             "crossJurisdictionBookAdmissions",
         )?,
         known_accounts,

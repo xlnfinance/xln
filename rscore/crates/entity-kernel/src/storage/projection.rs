@@ -58,8 +58,6 @@ pub struct EntityStorageProjection {
     pub cross_jurisdiction_swaps_present: bool,
     pub cross_jurisdiction_authorizations: BTreeMap<String, CanonicalValue>,
     pub cross_jurisdiction_authorizations_present: bool,
-    pub pending_cross_jurisdiction_fill_acks: BTreeMap<String, CanonicalValue>,
-    pub pending_cross_jurisdiction_fill_acks_present: bool,
     pub cross_jurisdiction_book_admissions: BTreeMap<String, CanonicalValue>,
     pub cross_jurisdiction_book_admissions_present: bool,
 }
@@ -279,12 +277,6 @@ pub fn project_entity_storage(
         )?,
         cross_jurisdiction_authorizations_present: state
             .cross_jurisdiction_authorizations
-            .is_some(),
-        pending_cross_jurisdiction_fill_acks: project_collection(
-            state.pending_cross_jurisdiction_fill_acks.as_ref(),
-        )?,
-        pending_cross_jurisdiction_fill_acks_present: state
-            .pending_cross_jurisdiction_fill_acks
             .is_some(),
         cross_jurisdiction_book_admissions: project_collection(
             state.cross_jurisdiction_book_admissions.as_ref(),

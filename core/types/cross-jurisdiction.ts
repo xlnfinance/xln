@@ -43,22 +43,6 @@ export type CrossJurisdictionBookStatus =
   | 'resolving'
   | 'closed';
 
-export interface CrossJurisdictionPendingFill {
-  fillId: string;
-  ackKind: 'fill' | 'cancel';
-  fillSeq: number;
-  previousFillSeq?: number;
-  cumulativeFillRatio: number;
-  cumulativeSourceAmount: bigint;
-  cumulativeTargetAmount: bigint;
-  fillNumerator: bigint;
-  fillDenominator: bigint;
-  routeHash: string;
-  updatedAt: number;
-  firstSeenAt: number;
-  ttlExpiredAt?: number;
-}
-
 export interface CrossJurisdictionCloseProof {
   orderId: string;
   routeHash: string;
@@ -84,14 +68,6 @@ export interface CrossJurisdictionRouteDomain {
   targetAssetRef: string;
 }
 
-export interface CrossJurisdictionSettlementPolicy {
-  roundingMode: 'uint16_ceil';
-  maxSourceDust: bigint;
-  maxTargetDust: bigint;
-  minSourceFillAmount?: bigint;
-  minTargetFillAmount?: bigint;
-}
-
 export interface CrossJurisdictionTimePolicy {
   runtimeClock: 'unix_ms';
   settlementClock: 'unix_seconds';
@@ -100,22 +76,12 @@ export interface CrossJurisdictionTimePolicy {
   finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality';
 }
 
+/** Opening-time binding of a pull to its route; fill progress never reaches it. */
 export interface CrossJurisdictionPullBinding {
   orderId: string;
   routeHash: string;
   leg: CrossJurisdictionBookLeg;
-  sourceCloseProof?: CrossJurisdictionCloseProof;
   status?: CrossJurisdictionSwapStatus;
-  cumulativeFillRatio?: number;
-  fillSeq?: number;
-  fillNumerator?: bigint;
-  fillDenominator?: bigint;
-  claimedRatio?: number;
-  filledSourceAmount?: bigint;
-  filledTargetAmount?: bigint;
-  sourceClaimed?: bigint;
-  targetClaimed?: bigint;
-  clearingPolicy?: 'manual' | 'cancel_and_clear' | 'full_fill';
 }
 
 export interface CrossJurisdictionBookAdmission {
@@ -129,18 +95,6 @@ export interface CrossJurisdictionBookAdmission {
   resolvingAt?: number;
   closedAt?: number;
   closeReason?: string;
-  pendingFill?: CrossJurisdictionPendingFill;
-  /**
-   * Durable source-hub continuation for a committed Account cancel. The book
-   * row is removed before this continuation can queue the terminal Account ACK.
-   * A previously accepted fill still commits first and advances fillSeq.
-   */
-  pendingCancel?: {
-    sourceAccountId: string;
-    requestedAt: number;
-    bookRemovalCommittedAt?: number;
-    reason?: string;
-  };
   updatedAt: number;
 }
 
@@ -172,13 +126,10 @@ export interface CrossJurisdictionSwapRoute {
   fillDenominator?: bigint;
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
-  priceImprovementSourceAmount?: bigint;
   pendingClearRequestedAt?: number;
   domain?: CrossJurisdictionRouteDomain;
-  settlementPolicy?: CrossJurisdictionSettlementPolicy;
   timePolicy?: CrossJurisdictionTimePolicy;
   clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
-  priceImprovementMode?: 'source_savings';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   /** Sticky ratio from this entity's single-shot Source registry slot. */

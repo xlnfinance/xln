@@ -575,10 +575,6 @@ pub fn entity_snapshot_from_graph(
             core.get("crossJurisdictionAuthorizations"),
             "crossJurisdictionAuthorizations",
         )?,
-        pending_cross_jurisdiction_fill_acks: entity_collection(
-            core.get("pendingCrossJurisdictionFillAcks"),
-            "pendingCrossJurisdictionFillAcks",
-        )?,
         cross_jurisdiction_book_admissions: entity_collection(
             core.get("crossJurisdictionBookAdmissions"),
             "crossJurisdictionBookAdmissions",
@@ -620,7 +616,6 @@ pub fn entity_snapshot_from_graph(
         lending: state.lending,
         cross_jurisdiction_swaps: state.cross_jurisdiction_swaps,
         cross_jurisdiction_authorizations: state.cross_jurisdiction_authorizations,
-        pending_cross_jurisdiction_fill_acks: state.pending_cross_jurisdiction_fill_acks,
         cross_jurisdiction_book_admissions: state.cross_jurisdiction_book_admissions,
         j_history_finality: state.j_history_finality,
         expected_owned_sections,

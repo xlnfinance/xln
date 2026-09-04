@@ -18,11 +18,9 @@ export const ACCOUNT_TX_TYPES = [
   'htlc_resolve',
   'cross_pull_lock',
   'cross_pull_close',
-  'cross_pull_progress',
   'swap_offer',
   'swap_cancel_request',
   'swap_resolve',
-  'cross_swap_fill_ack',
   'settle_transition',
   'j_event_claim',
 ] as const satisfies readonly AccountTx['type'][];

@@ -106,7 +106,7 @@ fn every_typescript_entity_tx_decodes_and_reencodes_byte_identically() {
         assert_eq!(encoded, bytes, "{name}: Rust changed TypeScript bytes");
     }
 
-    assert_eq!(covered.len(), 63, "shared EntityTx vector cardinality");
+    assert_eq!(covered.len(), 62, "shared EntityTx vector cardinality");
     assert_eq!(
         covered,
         ENTITY_TX_TYPES.into_iter().map(str::to_string).collect(),

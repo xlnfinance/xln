@@ -9,14 +9,8 @@ import {
 import { getSwapPairPolicyByBaseQuote } from '../../../../../../account/utils';
 import { swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../../../orderbook/swap-execution';
 import { createEmptyPairBook } from '../helpers';
-import {
-  hasQueuedCrossSwapAckForEntityState,
-  hasQueuedSwapResolveForEntityState,
-} from '../queue';
-import {
-  assertPendingBookFillAckLive,
-  getCrossMarketOffer,
-} from './pass';
+import { hasQueuedSwapResolveForEntityState } from '../queue';
+import { getCrossMarketOffer } from './pass';
 import {
   crossBookQtyLots,
 } from './book';
@@ -96,13 +90,6 @@ export const prepareCrossOrderbookOffer = (
     return null;
   }
   pass.crossLiveOfferMeta.set(namespacedOrderId, marketOffer);
-  if (
-    assertPendingBookFillAckLive(pass, accountId, rawOffer.offerId) ||
-    hasQueuedCrossSwapAckForEntityState(pass.hubState, accountId, rawOffer.offerId)
-  ) {
-    pass.suspendedOrderIds.add(namespacedOrderId);
-    return null;
-  }
   if (
     hasQueuedSwapResolveForEntityState(
       pass.hubState,

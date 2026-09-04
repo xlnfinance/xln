@@ -9,13 +9,14 @@ use crate::types::TargetedAccountTx;
 use crate::{DeterministicContext, EntityKernelError, HubProfile, LocalEntityOutput};
 
 use super::book::{
-    AddOrder, BookEvent, MakerDisposition, apply_gtc, apply_gtc_with_execution_price, cancel_order,
-    record_accepted_usd_ask_price, resume_crossed,
+    AddOrder, BookEvent, MakerDisposition, add_resting, apply_gtc, apply_gtc_with_execution_price,
+    cancel_order, record_accepted_usd_ask_price, resume_crossed,
 };
 use super::math::{
     base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions,
     quote_amount_from_weighted_lots, side_for,
 };
+use super::page::{BookPricePageLocation, page_tree_mut};
 use super::resolve::{ResolvePlan, build_resolve_plans};
 use super::{
     BookOrder, BookState, OrderbookState, PairDimensions, PairPolicy, SameJOffer, Side,
@@ -707,17 +708,14 @@ fn process_cross_jurisdiction_events(
         *net_by_asset
             .entry(market.target_asset_key)
             .or_insert_with(|| BigInt::from(0)) += &execution_target;
-        effects
-            .cross_jurisdiction_fills
-            .push(crate::cross_j::build_cross_jurisdiction_book_fill(
-                account_id,
-                offer_id,
-                route.clone(),
-                execution_source,
-                execution_target,
-                market.price_ticks,
-                market.pair_id,
-            )?);
+        if let Some(fill) = crate::cross_j::build_cross_jurisdiction_book_fill(
+            &offer_id,
+            route.clone(),
+            execution_source,
+            execution_target,
+        )? {
+            effects.cross_jurisdiction_fills.push(fill);
+        }
         state.resolving_offers.insert(key);
     }
     let mismatches = net_by_asset
@@ -1180,6 +1178,73 @@ pub(crate) fn validate_orderbook_outputs(
         effects: prepared.effects,
         outcomes,
     })
+}
+
+/// Same-frame book projection of Hub-internal cross-j fill progress: a
+/// terminal order leaves the book, a partial one is resized to the route
+/// remainder and released for matching again (TS `updateBookOrderForProgress`).
+pub(crate) fn apply_cross_jurisdiction_fill_deltas(
+    state: &mut OrderbookState,
+    deltas: &[SameJOutputDelta],
+) -> Result<(), EntityKernelError> {
+    for delta in deltas {
+        match delta {
+            SameJOutputDelta::Remove {
+                account_id,
+                offer_id,
+            } => {
+                remove_committed(state, account_id, offer_id)?;
+                let key = (account_id.clone(), offer_id.clone());
+                state.offers.remove(&key);
+                state.resolving_offers.remove(&key);
+            }
+            SameJOutputDelta::Upsert { account_id, offer } => {
+                let key = (account_id.clone(), offer.offer_id.clone());
+                state.offers.insert(key.clone(), offer.as_ref().clone());
+                state.resolving_offers.remove(&key);
+                let materialized = materialize(account_id, offer, &BigInt::from(0))?;
+                let pair_id = state
+                    .pair_by_order
+                    .get(&materialized.order_id)
+                    .cloned()
+                    .unwrap_or_else(|| materialized.pair_id.clone());
+                let book = state.books.get_mut(&pair_id).ok_or_else(|| {
+                    EntityKernelError::orderbook("CROSS_J_BOOK_PROGRESS_ORDER_MISSING")
+                })?;
+                if let Some(order) = book.orders.get(&materialized.order_id).cloned() {
+                    if order.qty_lots != materialized.qty_lots {
+                        page_tree_mut(&mut book.bid_pages, &mut book.ask_pages, order.side)
+                            .reduce(
+                                &order.price_ticks,
+                                BookPricePageLocation {
+                                    sequence: order.page_sequence,
+                                    slot: order.page_slot,
+                                },
+                                &order.order_id,
+                                &materialized.qty_lots,
+                            )?;
+                        if let Some(stored) = book.orders.get_mut(&order.order_id) {
+                            stored.qty_lots = materialized.qty_lots.clone();
+                        }
+                    }
+                } else {
+                    add_resting(
+                        book,
+                        AddOrder {
+                            order_id: materialized.order_id.clone(),
+                            owner_id: materialized.owner_id.clone(),
+                            side: materialized.side,
+                            price_ticks: offer.price_ticks.clone(),
+                            qty_lots: materialized.qty_lots.clone(),
+                        },
+                    )?;
+                    index_order_pair(state, &pair_id, &materialized.order_id);
+                }
+            }
+            SameJOutputDelta::CancelRequest { .. } | SameJOutputDelta::DisputeRemove { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn install_orderbook_outputs(

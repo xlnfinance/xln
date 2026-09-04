@@ -165,29 +165,6 @@ impl SwapOffer {
         self.cross_jurisdiction = route;
     }
 
-    pub(crate) fn apply_cross_j_remainder(
-        &mut self,
-        give_amount: BigInt,
-        want_amount: BigInt,
-        price_ticks: Option<BigInt>,
-    ) -> Result<(), StateError> {
-        if give_amount <= BigInt::from(0) || want_amount <= BigInt::from(0) {
-            return Err(StateError::AccountStateRoot(
-                "CROSS_J_REMAINDER_AMOUNT_INVALID".into(),
-            ));
-        }
-        self.give_amount = give_amount.clone();
-        self.want_amount = want_amount.clone();
-        self.quantized_give = give_amount;
-        self.quantized_want = want_amount.clone();
-        self.max_fee = BigInt::from(0);
-        self.min_net_receive = want_amount;
-        if let Some(price_ticks) = price_ticks {
-            self.price_ticks = price_ticks;
-        }
-        Ok(())
-    }
-
     /// Restore the exact committed quantized lots. They normally equal the
     /// effective resting amounts, but are committed fields in their own right
     /// and a checkpoint must not infer them.

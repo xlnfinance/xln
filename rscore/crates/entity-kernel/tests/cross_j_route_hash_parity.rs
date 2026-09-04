@@ -160,7 +160,7 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
     assert_eq!(
         hash,
         Some(&string(
-            "0x166c6b1459d2972fb90464386f629afca89b7e55c4b4404feb50f6b34af5eaa9"
+            "0xc7256dc31e315883c77c1743527b1a8b5b4966db203cecb91cfbfeab7c444f03"
         ))
     );
     assert_eq!(
@@ -172,7 +172,7 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
                 .expect("authorization map")
                 .root_hash())
         ),
-        "0xb3b260d04457301f17cb3f27ac576ca8e68fa98201bb7a08965e08138d9e9422"
+        "0x3c55d08a3e43175b173cf9bc1ed4b3cceb72fe1717f811b7800ff0277524010c"
     );
 }
 

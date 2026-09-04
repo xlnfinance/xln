@@ -85,7 +85,6 @@ pub fn is_cross_jurisdiction_entity_tx_kind(kind: EntityTxKind) -> bool {
     matches!(
         kind,
         EntityTxKind::AdmitCrossJurisdictionBookOrder
-            | EntityTxKind::ApplyCrossJurisdictionBookProgress
             | EntityTxKind::CrossJurisdictionBookOrderRemoved
             | EntityTxKind::CrossJurisdictionFillNotice
             | EntityTxKind::CrossJurisdictionForceSiblingDispute

@@ -13,7 +13,6 @@ import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settlement/transition';
-import { markCrossJurisdictionBookAdmissionResolving } from '../../../extensions/cross-j/orderbook';
 import { shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
@@ -22,7 +21,6 @@ import { replaceOrderbookPair, type OrderbookExtState } from '../../../orderbook
 import {
   applyCommittedSwapCancelsToOrderbook,
   crossJurisdictionBookOwnerRef,
-  deterministicEntityTimestamp,
   normalizeEntityRef,
 } from '../../../orderbook/cross-j/orderbook';
 import { normalizeSwapOfferForOrderbook, swapKey, type WorkingOrderbookOffer } from '../../../orderbook/swap-execution';
@@ -115,14 +113,7 @@ import {
 } from './profile';
 import { entityLog } from '../entity-log';
 import { admitOrderbookOfferForMatching } from '../account/orderbook-admission';
-import {
-  buildCrossJurisdictionFillNoticeOutput,
-  drainCommittedCrossJurisdictionCancelAcks,
-  drainPendingCrossJurisdictionFillAcks,
-  ownsSourceHubRouteForFillAck,
-  stashPendingCrossJurisdictionFillAck,
-} from '../account/cross-j-fill-ack';
-import { appendCrossJurisdictionTargetProgressAfterAdmission } from '../../tx/j-events-htlc/cross-j-outputs';
+import { applyCrossJurisdictionOrderbookFill } from '../../tx/handlers/account-cross-j-followups';
 import { isSelfBoardAuthorityTransitionFrame } from '../proposal/policy';
 import { getBoardHandoverFrameConfig } from '../authority/board-handover';
 import { admitOrderbookAccountTxBatch } from '../account/orderbook-account-admission';
@@ -916,10 +907,8 @@ const applyOrderbookAccountTxs = async (
   accountOutputVerifiedOffers: ReadonlySet<string>,
 ): Promise<void> => {
   const {
-    env,
     accountConsensusContext,
     currentEntityState: state,
-    allOutputs,
     proposableAccounts,
     storageChanges,
   } = context;
@@ -941,28 +930,6 @@ const applyOrderbookAccountTxs = async (
       ) {
         throw haltRuntimeFailure("ORDERBOOK_SWAP_OWNER_NOT_LOCAL", `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`);
       }
-    } else if (tx.type === 'cross_swap_fill_ack' && !visible?.state.swapOffers?.has(tx.data.offerId)) {
-      const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
-      if (routed) {
-        allOutputs.push(routed);
-        entityLog.info('crossj.sibling_fill_notice_routed', {
-          owner: shortId(routed.entityId, 8),
-          account: shortId(accountId, 8),
-          offer: shortOrder(tx.data.offerId, 8),
-        });
-        continue;
-      }
-      if (ownsSourceHubRouteForFillAck(state, tx)) {
-        stashPendingCrossJurisdictionFillAck(
-          env,
-          state,
-          accountId,
-          tx,
-          visible ? 'source_offer_not_committed' : 'source_account_not_committed',
-        );
-        continue;
-      }
-      throw haltRuntimeFailure("CROSS_J_FILL_ACK_OWNER_MISSING", `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`);
     }
     if (!visible) {
       throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING', `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`);
@@ -977,11 +944,6 @@ const applyOrderbookAccountTxs = async (
   }
   for (const [accountId, { account, txs }] of localBatches) {
     await admitOrderbookAccountTxBatch(accountConsensusContext, account, txs);
-    for (const tx of txs) {
-      if (tx.type === 'cross_swap_fill_ack') {
-        appendCrossJurisdictionTargetProgressAfterAdmission(state, tx, allOutputs);
-      }
-    }
     markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     entityLog.debug('orderbook.account_txs_queued', {
@@ -1004,14 +966,11 @@ const commitOrderbookMatchResult = (
   }
   if (result.crossJurisdictionFills.length > 0) {
     entityLog.info('crossj.firm_fills_recorded', { count: result.crossJurisdictionFills.length });
+    // Fill progress is Hub-internal: apply it to the admitted route and book
+    // row now, and hand the same progress to the source Hub (locally or as a
+    // sibling output). The Account offers only learn the outcome at close.
     for (const fill of result.crossJurisdictionFills) {
-      if (fill.cancelRemainder) {
-        markCrossJurisdictionBookAdmissionResolving(
-          state,
-          fill.route,
-          deterministicEntityTimestamp(state, env),
-        );
-      }
+      applyCrossJurisdictionOrderbookFill(env, state, fill, context.allOutputs, storageChanges);
     }
   }
   const ext = state.orderbookExt as OrderbookExtState;
@@ -1114,24 +1073,6 @@ async function applySwapCancelRequests(
 
   const routedCancels = routeRemoteCrossJurisdictionBookCancels(env, currentEntityState, allSwapCancelRequests);
   allOutputs.push(...routedCancels.outputs);
-  for (const { accountId, tx } of routedCancels.accountTxs) {
-    if (tx.type !== 'cross_swap_fill_ack') {
-      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_TX_INVALID", `CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
-    }
-    const account = getEntityAccountForWrite(currentEntityState.accounts, accountId);
-    if (!account) {
-      throw haltRuntimeFailure("CROSS_J_CANCEL_ACK_ACCOUNT_MISSING", `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
-    }
-    const admission = await applyAccountInput(
-      accountConsensusContext,
-      account,
-      { kind: 'enqueue', txs: [tx] },
-    );
-    if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
-    appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
-    markProposableAccount(proposableAccounts, accountId);
-    recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
-  }
 
   const localBookCancels = routedCancels.localBookCancels;
   if (localBookCancels.length === 0) return;
@@ -1150,11 +1091,11 @@ async function applySwapCancelRequests(
       { kind: 'enqueue', txs: [tx] },
     );
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
-    if (tx.type === 'cross_swap_fill_ack') {
-      appendCrossJurisdictionTargetProgressAfterAdmission(currentEntityState, tx, allOutputs);
-    }
     markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
+  }
+  for (const fill of cancelResult.crossJurisdictionFills) {
+    applyCrossJurisdictionOrderbookFill(env, currentEntityState, fill, allOutputs, storageChanges);
   }
 
   const ext = currentEntityState.orderbookExt as OrderbookExtState;
@@ -1261,24 +1202,6 @@ const primeEntityFrameAccountWork = async (
   context: ApplyEntityTxsInOrderContext,
 ): Promise<void> => {
   const state = context.currentEntityState;
-  markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-fill-acks');
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-cancel-acks');
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    state,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-account-index');
   for (const accountId of getProposableAccountIds(state)) {
     markProposableAccount(context.proposableAccounts, accountId);
@@ -1475,22 +1398,6 @@ const drainPostOrderbookAccountWork = async (
   context: ApplyEntityTxsInOrderContext,
   currentEntityState: EntityState,
 ): Promise<void> => {
-  await drainPendingCrossJurisdictionFillAcks(
-    context.env,
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.candidateEffects,
-    context.allOutputs,
-  );
-  await drainCommittedCrossJurisdictionCancelAcks(
-    context.accountConsensusContext,
-    currentEntityState,
-    context.proposableAccounts,
-    context.storageChanges,
-    context.allOutputs,
-  );
   refreshStaleUncommittedSettlementHankos(currentEntityState, context.storageChanges);
   await materializeDeferredSettlementApprovals(
     context.env,

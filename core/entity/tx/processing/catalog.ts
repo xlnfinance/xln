@@ -10,7 +10,7 @@ import type { EntityTx } from '../../../types/entity-tx';
  * whose deterministic fields are filled by Entity admission.
  */
 export const ENTITY_TX_TYPES = [
-  'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
+  'accountInput', 'admitCrossJurisdictionBookOrder',
   'boardHandover', 'chat', 'chatMessage',
   'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
   'crossJurisdictionForceSiblingDispute',

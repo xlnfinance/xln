@@ -5,10 +5,6 @@
  * shared validation/certification, input consensus, and committed-frame apply.
  */
 export {
-  CROSS_J_PENDING_FILL_ACK_TTL_MS,
-  MAX_PENDING_CROSS_J_FILL_ACKS,
-} from './account/cross-j-fill-ack';
-export {
   selectProposableEntityTxs,
 } from './proposal/policy';
 export {
