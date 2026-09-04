@@ -187,16 +187,10 @@
     }
     const xln = get(xlnInstance);
     if (!xln) throw new Error('PAYMENT_TERMINAL_RUNTIME_API_UNAVAILABLE');
-    const journals = await xln.readPersistedFrameJournals(env, {
-      fromHeight: request.fromHeight,
-      toHeight: request.toHeight,
-      limit: 500,
-    });
-    const byHeight = new Map(journals.map((journal) => [journal.height, journal]));
     const receipts = [];
     let scannedThroughHeight = request.fromHeight - 1;
     for (let height = request.fromHeight; height <= request.toHeight; height += 1) {
-      const journal = byHeight.get(height);
+      const journal = await xln.readPersistedRuntimeActivityJournal(env, height);
       if (!journal) break;
       receipts.push({ height, logs: journal.logs ?? [] });
       scannedThroughHeight = height;
