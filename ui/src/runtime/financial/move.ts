@@ -277,7 +277,7 @@ function signerPrivateKey(signerId: string): Uint8Array {
 	throw new Error('SIGNER_KEY_NOT_IN_VAULT');
 }
 
-async function hostedJAdapter(entityId: string, signerId: string) {
+export async function hostedJAdapter(entityId: string, signerId: string) {
 	const env = getEmbeddedEnv();
 	if (!env) throw new Error('ONCHAIN_ACTIONS_NEED_A_LOCAL_RUNTIME');
 	const xln = await getXLN();

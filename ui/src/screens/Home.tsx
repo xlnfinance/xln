@@ -377,7 +377,8 @@ function AccountRow({ account, first, onClick }: { account: AccountView; first: 
 					<span className="t">
 						{account.label}
 						{account.isHub ? <span className="chip hub">hub</span> : null}
-						{account.disputed ? <span className="state st-dispute">dispute</span> : null}
+						{account.dispute === 'active' || account.dispute === 'queued' || account.dispute === 'sent' ? <span className="state st-dispute">dispute</span> : account.dispute === 'preparing' ? <span className="state st-dispute">dispute preparing</span> : null}
+						{account.settlement === 'awaiting_you' ? <span className="state st-pending">sign settlement</span> : account.settlement !== 'none' ? <span className="state st-inflight">settling</span> : null}
 					</span>
 					<span className="s">
 						{meta.symbol}
@@ -409,6 +410,10 @@ function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: ()
 	const selectedTokenId = useApp(s => s.selectedTokenId);
 	const [targetId, setTargetId] = useState('');
 	const [creditText, setCreditText] = useState('');
+	const [autoCollateral, setAutoCollateral] = useState(false);
+	const [softText, setSoftText] = useState('');
+	const [hardText, setHardText] = useState('');
+	const [feeText, setFeeText] = useState('');
 	const [submitting, setSubmitting] = useState(false);
 	const meta = getTokenMeta(selectedTokenId);
 	const existing = new Set(wallet.accounts.map(account => account.counterpartyId));
@@ -421,10 +426,26 @@ function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: ()
 		setSubmitting(true);
 		try {
 			const creditAmount = creditText.trim() ? parseAmount(creditText, meta.decimals) : 0n;
+			// Same optional policy the SvelteKit hub onboarding attaches: the hub tops up
+			// collateral on its own once the soft limit is crossed, up to the hard limit.
+			let rebalancePolicy: { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } | null = null;
+			if (autoCollateral) {
+				const r2cRequestSoftLimit = parseAmount(softText || '0', meta.decimals);
+				const hardLimit = parseAmount(hardText || '0', meta.decimals);
+				const maxAcceptableFee = parseAmount(feeText || '0', meta.decimals);
+				if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) throw new Error('Soft limit must be positive and the hard limit at least as large');
+				rebalancePolicy = { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
+			}
 			await sendEntityTxs(wallet.entityId, wallet.signerId, [
 				{
 					type: 'openAccount',
-					data: { targetEntityId: targetId, creditAmount, tokenId: selectedTokenId, disputeConfig: DEFAULT_ACCOUNT_DISPUTE_CONFIG },
+					data: {
+						targetEntityId: targetId,
+						creditAmount,
+						tokenId: selectedTokenId,
+						disputeConfig: DEFAULT_ACCOUNT_DISPUTE_CONFIG,
+						...(rebalancePolicy ? { rebalancePolicy } : {}),
+					},
 				},
 			]);
 			toast('Account proposed');
@@ -471,6 +492,26 @@ function OpenAccountSheet({ wallet, onClose }: { wallet: WalletView; onClose: ()
 				</div>
 				<p className="note">Credit lets them owe you up to this amount, so they can pay you without pre-funding.</p>
 			</div>
+			{wallet.hubs.has(targetId) ? (
+				<div className="field">
+					<label className="setting" style={{ padding: '6px 0', cursor: 'pointer' }}>
+						<span className="t">Automatic collateral from the hub</span>
+						<input type="checkbox" checked={autoCollateral} onChange={event => setAutoCollateral(event.target.checked)} data-testid="open-auto-collateral" />
+					</label>
+					{autoCollateral ? (
+						<div className="fade-in">
+							<div className="field-row" style={{ marginTop: 8 }}>
+								<input className="input" placeholder="Soft limit" inputMode="decimal" value={softText} onChange={event => setSoftText(event.target.value)} />
+								<input className="input" placeholder="Hard limit" inputMode="decimal" value={hardText} onChange={event => setHardText(event.target.value)} />
+								<input className="input" placeholder="Max fee" inputMode="decimal" value={feeText} onChange={event => setFeeText(event.target.value)} />
+							</div>
+							<p className="note">
+								When what the hub owes you passes the soft limit, it locks collateral for you (up to the hard limit) and charges at most this fee per top-up.
+							</p>
+						</div>
+					) : null}
+				</div>
+			) : null}
 			<button type="button" className="btn" disabled={!/^0x[0-9a-f]{64}$/.test(targetId) || submitting} onClick={() => void openAccount()}>
 				{submitting ? 'Proposing…' : 'Propose account'}
 			</button>

@@ -17,6 +17,12 @@ const NAV: Array<{ to: string; label: string; icon: IconName; match: (pathname: 
 		match: pathname => pathname === '/' || pathname.startsWith('/accounts') || pathname === '/pay' || pathname === '/receive' || pathname === '/swap' || pathname === '/move',
 	},
 	{ to: '/activity', label: 'Activity', icon: 'activity', match: pathname => pathname.startsWith('/activity') },
+	{
+		to: '/manage',
+		label: 'Manage',
+		icon: 'accounts',
+		match: pathname => pathname.startsWith('/manage') || pathname.startsWith('/assets') || pathname.startsWith('/lend') || pathname.startsWith('/ownership'),
+	},
 	{ to: '/settings', label: 'Settings', icon: 'settings', match: pathname => pathname.startsWith('/settings') },
 ];
 

@@ -152,6 +152,21 @@ async function captureVariant(browser: Browser, variant: Variant): Promise<strin
 	await page.goBack();
 	await page.getByTestId('home-total').waitFor();
 
+	await page.getByRole('link', { name: 'Manage' }).first().click();
+	await page.getByTestId('attention').waitFor();
+	files.push(...(await shot(page, dir, '11-manage', variant)));
+	await page.getByTestId('manage-assets').click();
+	await page.getByTestId('external-balance-USDC').waitFor({ timeout: 60_000 });
+	files.push(...(await shot(page, dir, '12-assets', variant)));
+	await page.goBack();
+	await page.getByTestId('manage-lend').click();
+	await page.getByTestId('lend-submit').waitFor();
+	files.push(...(await shot(page, dir, '13-lend', variant)));
+	await page.goBack();
+	await page.getByTestId('manage-ownership').click();
+	await page.getByTestId('board').waitFor();
+	files.push(...(await shot(page, dir, '14-ownership', variant)));
+
 	await page.getByRole('link', { name: 'Settings' }).first().click();
 	await page.getByText('Dollars per pixel').waitFor();
 	files.push(...(await shot(page, dir, '09-settings', variant)));

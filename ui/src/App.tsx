@@ -14,6 +14,10 @@ import { Receive } from './screens/Receive';
 import { Move } from './screens/Move';
 import { ActivityScreen } from './screens/Activity';
 import { SettingsScreen } from './screens/Settings';
+import { Manage } from './screens/Manage';
+import { Assets } from './screens/Assets';
+import { Lending } from './screens/Lending';
+import { Ownership } from './screens/Ownership';
 
 /** `/#pay/<invoice>` is the canonical wallet link; it opens Pay with the invoice applied. */
 function useInvoiceDeepLink(): void {
@@ -58,6 +62,10 @@ export default function App() {
 				<Route path="/swap" element={<Swap />} />
 				<Route path="/receive" element={<Receive />} />
 				<Route path="/move" element={<Move />} />
+				<Route path="/manage" element={<Manage />} />
+				<Route path="/assets" element={<Assets />} />
+				<Route path="/lend" element={<Lending />} />
+				<Route path="/ownership" element={<Ownership />} />
 				<Route path="/activity" element={<ActivityScreen />} />
 				<Route path="/settings" element={<SettingsScreen />} />
 				<Route path="*" element={<Home />} />
