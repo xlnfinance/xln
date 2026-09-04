@@ -4724,6 +4724,16 @@ fn apply_clear_request(
         });
     }
 
+    if text(&route, "status") == Some("clearing") {
+        // The paired close is already queued; a later cancel or removal ACK has
+        // nothing left to decide.
+        return Ok(CrossJurisdictionApplyResult {
+            events: vec![EntityFrameEvent::Status {
+                message: format!("🌉 Cross-j clear {order_id} ignored: close already queued"),
+            }],
+            ..CrossJurisdictionApplyResult::default()
+        });
+    }
     let view = account_views
         .get(&source_user)
         .ok_or_else(|| invalid(tx.kind, format!("ACCOUNT_VIEW_MISSING:{source_user}")))?;
@@ -4998,7 +5008,7 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
     route: CanonicalValue,
     execution_source_amount: BigInt,
     execution_target_amount: BigInt,
-) -> Result<CrossJurisdictionBookFill, EntityKernelError> {
+) -> Result<Option<CrossJurisdictionBookFill>, EntityKernelError> {
     let kind = EntityTxKind::CrossJurisdictionFillNotice;
     if execution_source_amount <= BigInt::from(0) || execution_target_amount <= BigInt::from(0) {
         return Err(invalid(kind, "CROSS_J_FILL_EXECUTION_NON_POSITIVE"));
@@ -5013,8 +5023,10 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
         &(&market.filled_target + &execution_target_amount),
         &market.target_total,
     );
+    // A fill below one uint16 step does not move the ratio; the Hub absorbs
+    // it and the next fill carries the cumulative progress.
     if fill_ratio <= market.previous_fill_ratio {
-        return Err(invalid(kind, "CROSS_J_FILL_RATIO_NOT_ADVANCED"));
+        return Ok(None);
     }
     // A full fill is terminal through the ratio itself; `cancelRemainder` is
     // only the matcher's explicit cancel of an unfilled remainder.
@@ -5031,10 +5043,10 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
         ),
         ("cancelRemainder".into(), CanonicalValue::Bool(false)),
     ]);
-    Ok(CrossJurisdictionBookFill {
+    Ok(Some(CrossJurisdictionBookFill {
         route,
         data: CanonicalValue::Object(fields),
-    })
+    }))
 }
 
 fn committed_fill(

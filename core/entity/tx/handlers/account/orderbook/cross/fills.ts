@@ -71,8 +71,14 @@ const planCrossFills = (pass: CrossOrderbookPass): CrossJurisdictionFillInstruct
       fill,
     );
     if (!instruction) {
-      throw haltRuntimeFailure("ORDERBOOK_CROSS_J_FILL_INSTRUCTION_MISSING", `ORDERBOOK_CROSS_J_FILL_INSTRUCTION_MISSING: order=${orderId} ` +
-        `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`);
+      // A fill below one uint16 step does not move the ratio; the Hub absorbs
+      // it and the next fill carries the cumulative progress.
+      orderbookCrossLog.debug('fill.sub_step_absorbed', {
+        account: shortOrder(accountId, 12),
+        offer: shortOrder(offerId, 12),
+        filledLots: String(fill.filledLots),
+      });
+      continue;
     }
     planned.push(instruction);
   }

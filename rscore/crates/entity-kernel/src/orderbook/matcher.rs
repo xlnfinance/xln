@@ -708,14 +708,14 @@ fn process_cross_jurisdiction_events(
         *net_by_asset
             .entry(market.target_asset_key)
             .or_insert_with(|| BigInt::from(0)) += &execution_target;
-        effects
-            .cross_jurisdiction_fills
-            .push(crate::cross_j::build_cross_jurisdiction_book_fill(
-                &offer_id,
-                route.clone(),
-                execution_source,
-                execution_target,
-            )?);
+        if let Some(fill) = crate::cross_j::build_cross_jurisdiction_book_fill(
+            &offer_id,
+            route.clone(),
+            execution_source,
+            execution_target,
+        )? {
+            effects.cross_jurisdiction_fills.push(fill);
+        }
         state.resolving_offers.insert(key);
     }
     let mismatches = net_by_asset

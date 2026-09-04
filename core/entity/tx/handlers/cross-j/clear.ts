@@ -24,7 +24,6 @@ import { findAccountKey, normalizeEntityRef } from '../../account-key';
 import {
   accountHasCrossPullCloseQueued,
   findCrossJurisdictionOfferRoute,
-  mergeCrossJurisdictionRoute,
 } from '../../j-events-htlc/cross-jurisdiction-helpers';
 import { pushCrossJurisdictionEntityOutput } from '../../j-events-htlc/cross-j-outputs';
 import type { AccountTxTarget } from '../account';
@@ -211,11 +210,13 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
 
   const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
   if (offerRoute) {
-    // Cross-j clear is money movement. The account offer snapshot and entity
-    // route mirror must agree exactly; falling back to either side would be
-    // rehydration and could reveal a pull for stale economics.
-    route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
-    routes.set(orderId, route);
+    // The Account offer carries the opening-time route snapshot; the Entity
+    // mirror carries the live progress. They must name the same route, but the
+    // snapshot never overrides live status or fill.
+    const offerHash = (withCanonicalCrossJurisdictionRouteHash(offerRoute.route).routeHash || '').toLowerCase();
+    if (offerHash !== (route.routeHash || '').toLowerCase()) {
+      throw haltRuntimeFailure("CROSS_J_CLEAR_ROUTE_HASH_MISMATCH", `CROSS_J_CLEAR_ROUTE_HASH_MISMATCH:${orderId}`);
+    }
   }
 
   const context = { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder };
@@ -227,6 +228,12 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     throw haltRuntimeFailure("CROSS_J_CLEAR_CORRUPT_ROUTE", `CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
   }
 
+  if (canonicalRoute.status === 'clearing') {
+    // The paired close is already queued; a later cancel or removal ACK has
+    // nothing left to decide.
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: close already queued`);
+    return { newState, outputs, accountTxs };
+  }
   const committedFill = getCrossJurisdictionCommittedFillAmounts(canonicalRoute);
   const ratio = committedFill.fillRatio;
   const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
