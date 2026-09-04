@@ -33,37 +33,10 @@ import {
   buildScenarioIsolatedEnv,
   resolveScenarioIsolatedDbRoot,
 } from './harness/scenario-isolation';
+import { getScenario, SCENARIOS } from './runner/catalog';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 const SCENARIO_PORT_OFFSETS = [0, 1, 2, 3, 4] as const;
-
-type ScenarioEntry = {
-  file: string;
-  fn: string;
-  provePersistence?: boolean;
-};
-
-const SCENARIOS: Record<string, ScenarioEntry> = {
-  'rebalance': { file: './settlement/rebalance', fn: 'runRebalanceScenario' },
-  'lock-ahb':  { file: './payments/lock-ahb',  fn: 'lockAhb' },
-  'htlc-lazy': { file: './payments/htlc-lazy', fn: 'htlcLazy' },
-  'ahb':       { file: './consensus/ahb',       fn: 'ahb' },
-  'swap':      { file: './market/swap',      fn: 'runSwapScenario' },
-  'settle':    { file: './settlement/settle',    fn: 'runSettleScenario' },
-  'htlc-4hop': { file: './payments/htlc-4hop', fn: 'htlc4hop' },
-  'grid':              { file: './consensus/grid',              fn: 'grid' },
-  'swap-market':       { file: './market/swap-market',       fn: 'swapMarket' },
-  'swap-tps':          { file: './market/swap-tps',          fn: 'swapTps' },
-  'multi-sig':         { file: './consensus/multi-sig',         fn: 'multiSig' },
-  'company-ipo':       { file: './company-ipo', fn: 'companyIpo', provePersistence: true },
-  'rapid-fire':        { file: './consensus/rapid-fire',        fn: 'rapidFire' },
-  'settle-rebalance':  { file: './settlement/settle-rebalance',  fn: 'runSettleRebalance' },
-  'processbatch':      { file: './settlement/processbatch',      fn: 'runProcessBatchScenario' },
-  'dispute-lifecycle': { file: './disputes/lifecycle', fn: 'runDisputeLifecycle' },
-  'dispute-transformer': { file: './disputes/transformer', fn: 'runDisputeTransformer' },
-  'cross-j':           { file: './cross-j',           fn: 'crossJ' },
-  'mm-mesh':           { file: './cross-j/mm-mesh',           fn: 'mmMesh' },
-};
 
 const DEFAULT_PARALLEL_SET = [
   'processbatch',
@@ -112,7 +85,7 @@ const resolveParallelSet = (setName?: string): readonly string[] => {
   return DEFAULT_PARALLEL_SET;
 };
 
-const unique = <T>(items: T[]): T[] => Array.from(new Set(items));
+const availableScenarioIds = (): string[] => SCENARIOS.map((scenario) => scenario.id);
 
 const tsTag = (): string => {
   const d = new Date();
@@ -292,7 +265,7 @@ const acquireScenarioLeases = async (count: number): Promise<LocalTestPortLease[
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
   cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
-  const scenarios = resolveParallelSet(setName).filter(s => SCENARIOS[s]);
+  const scenarios = resolveParallelSet(setName).filter((id) => getScenario(id));
   if (scenarios.length === 0) {
     console.error('No scenarios configured for parallel run');
     return 1;
@@ -448,7 +421,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 async function main() {
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
     console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--single]');
-    console.log(`\nAvailable scenarios: ${unique(Object.keys(SCENARIOS)).join(', ')}`);
+    console.log(`\nAvailable scenarios: ${availableScenarioIds().join(', ')}`);
     return;
   }
   const { scenario, mode, rpc, workers, set, trail, single } = parseArgs();
@@ -457,7 +430,7 @@ async function main() {
   const runAll = !single && (!scenario || scenario === 'all');
 
   if (runAll) {
-    const selected = resolveParallelSet(set).filter(name => SCENARIOS[name]);
+    const selected = resolveParallelSet(set).filter((id) => getScenario(id));
     assertBroadRunHasNoUnresolvedReruns(undefined, { kind: 'scenario', targets: selected });
     const code = await runParallelScenarios(requestedMode, workers, set);
     process.exit(code);
@@ -465,15 +438,15 @@ async function main() {
 
   if (!scenario) {
     console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE]');
-    console.log(`\nAvailable scenarios: ${unique(Object.keys(SCENARIOS)).join(', ')}`);
+    console.log(`\nAvailable scenarios: ${availableScenarioIds().join(', ')}`);
     process.exitCode = 1;
     return;
   }
   const scenarioName = scenario;
 
-  const entry = SCENARIOS[scenarioName];
+  const entry = getScenario(scenarioName);
   if (!entry) {
-    console.error(`Unknown scenario: "${scenarioName}". Available: ${Object.keys(SCENARIOS).join(', ')}`);
+    console.error(`Unknown scenario: "${scenarioName}". Available: ${availableScenarioIds().join(', ')}`);
     process.exitCode = 1;
     return;
   }
@@ -530,12 +503,7 @@ async function main() {
       : null;
 
     try {
-      // Dynamic import and run
-      const mod = await import(entry.file);
-      const fn = mod[entry.fn];
-      if (!fn) throw new Error(`SCENARIO_FUNCTION_MISSING:${entry.fn}:${entry.file}`);
-
-      await fn(env);
+      await entry.run(env);
       if (entry.provePersistence) await verifyScenarioPersistence(env, scenarioName);
       if (trailDestination && trace) {
         const runtimeId = env.runtimeId;

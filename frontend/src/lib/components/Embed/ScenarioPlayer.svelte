@@ -14,7 +14,6 @@
   type ScenarioOption = {
     id: string;
     runtimeId: string;
-    runner?: string;
     title: string;
     description: string;
     intent: string;
@@ -55,7 +54,6 @@
     {
       id: 'hub-collapse',
       runtimeId: 'dispute-lifecycle',
-      runner: 'disputeLifecycle',
       title: 'Hub collapse',
       description: 'Unilateral last-resort dispute: user freezes the hub account, waits timeout, finalizes, then reopens.',
       intent: 'Watch what happens when the hub stops cooperating.',
@@ -65,7 +63,6 @@
     {
       id: 'ahb',
       runtimeId: 'ahb',
-      runner: 'ahb',
       title: 'Alice-Hub-Bob Triangle',
       description: 'Full bilateral flow: reserves, hub routing, collateral, settlements, disputes, and cooperative close.',
       intent: 'Inspect the full wallet and hub mechanics over time.',
@@ -75,7 +72,6 @@
     {
       id: 'settle',
       runtimeId: 'settle',
-      runner: 'settle',
       title: 'Settlement workspace',
       description: 'Bilateral settlement negotiation: propose, counter, approve, execute, reject.',
       intent: 'Build and inspect settlement UI narratives quickly.',
@@ -85,7 +81,6 @@
     {
       id: 'swap',
       runtimeId: 'swap',
-      runner: 'swap',
       title: 'Swap orderbook',
       description: 'Same-jurisdiction bilateral orderbook with limit orders, fills, holds, and cancel flow.',
       intent: 'Check how trading state evolves frame by frame.',
@@ -357,17 +352,14 @@
     env: RuntimeReplica,
   ): Promise<{ env: RuntimeReplica; frames: EnvSnapshot[] }> {
     const runtimeAny = xln as XLNModule & {
-      scenarios?: Record<string, (target: RuntimeReplica) => Promise<RuntimeReplica | void>>;
-      getScenario?: (id: string) => { run: (target: RuntimeReplica) => Promise<RuntimeReplica | void> } | undefined;
-      SCENARIOS?: Array<{ id: string; run: (target: RuntimeReplica) => Promise<RuntimeReplica | void> }>;
+      getScenario?: (id: string) => {
+        browserSafe: boolean;
+        run: (target: RuntimeReplica) => Promise<RuntimeReplica | void>;
+      } | undefined;
     };
-    const runner = option.runner ? runtimeAny.scenarios?.[option.runner] : undefined;
-    if (runner) {
-      return xln.recordRuntimeScenario(env, runner);
-    }
-    const entry = runtimeAny.getScenario?.(option.runtimeId)
-      || runtimeAny.SCENARIOS?.find((scenario) => scenario.id === option.runtimeId);
+    const entry = runtimeAny.getScenario?.(option.runtimeId);
     if (!entry) throw new Error(`SCENARIO_NOT_FOUND:${option.runtimeId}`);
+    if (!entry.browserSafe) throw new Error(`SCENARIO_NOT_BROWSER_SAFE:${option.runtimeId}`);
     return xln.recordRuntimeScenario(env, entry.run);
   }
 

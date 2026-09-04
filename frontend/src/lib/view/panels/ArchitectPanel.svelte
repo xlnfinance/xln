@@ -450,7 +450,7 @@
       env.state.eReplicas.clear();
 
       // Run the ACTUAL AHB scenario (same code as CLI)
-      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.ahb(target));
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios['ahb']!(target));
       const frames = recording.frames;
 
       publishCurrentEnv(frames);
@@ -482,7 +482,7 @@
       const XLN = await getXLN();
       const env = ensureScenarioEnv(XLN, 'Swap');
       env.state.eReplicas.clear();
-      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.swap(target));
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios['swap']!(target));
       const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = `Swap: ${frames.length} frames loaded.`;
@@ -504,7 +504,7 @@
 
       const env = ensureScenarioEnv(XLN, 'Swap Market');
       env.state.eReplicas.clear();
-      const runSwapMarketScenario = XLN.scenarios.swapMarket;
+      const runSwapMarketScenario = XLN.scenarios['swap-market'];
       if (!runSwapMarketScenario) throw new Error('Swap Market scenario is unavailable');
       const recording = await recordScenarioRun(XLN, env, runSwapMarketScenario);
       const frames = recording.frames;
@@ -527,7 +527,7 @@
 
       const env = ensureScenarioEnv(XLN, 'Rapid Fire');
       env.state.eReplicas.clear();
-      const runRapidFireScenario = XLN.scenarios.rapidFire;
+      const runRapidFireScenario = XLN.scenarios['rapid-fire'];
       if (!runRapidFireScenario) throw new Error('Rapid Fire scenario is unavailable');
       const recording = await recordScenarioRun(XLN, env, runRapidFireScenario);
       const frames = recording.frames;
@@ -584,7 +584,7 @@
       env.state.jReplicas?.clear();
 
       // Run the grid scenario
-      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.grid(target));
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios['grid']!(target));
       const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = 'Grid Scalability scenario loaded';
@@ -620,7 +620,7 @@
       env.state.jReplicas?.clear();
 
       // Run the settle scenario
-      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios.settle(target));
+      const recording = await recordScenarioRun(XLN, env, target => XLN.scenarios['settle']!(target));
       const frames = recording.frames;
       publishCurrentEnv(frames);
       lastAction = 'Settlement Workspace scenario loaded';
