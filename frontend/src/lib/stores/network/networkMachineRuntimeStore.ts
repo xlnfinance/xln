@@ -13,7 +13,7 @@ import {
   type NetworkTrail,
 } from '$lib/network3d/timeline/networkTimelineSource';
 import { getXLN } from '../bootstrap/xlnRuntimeLoader';
-import { networkMachineConfig } from './networkMachineStore';
+import { networkMachineConfig, networkMachineOperations } from './networkMachineStore';
 import { runtimes } from '../runtimeStore';
 import type { RuntimeTimelineIndex } from '$lib/network3d/timeline/runtimeGraphTimeline';
 
@@ -76,6 +76,14 @@ const requireSource = (runtimeId: string): NetworkTimelineSource => {
   return source;
 };
 
+const installSourceCues = (source: NetworkTimelineSource): void => {
+  networkMachineOperations.replace({
+    ...get(networkMachineConfig),
+    runtimeIds: [source.runtimeId],
+    cues: source.cues ?? [],
+  });
+};
+
 export const networkMachineRuntimeOperations = {
   async refresh(): Promise<NetworkMachine> {
     const requestId = ++refreshRequestId;
@@ -113,6 +121,7 @@ export const networkMachineRuntimeOperations = {
     networkMachineRuntime.update((state) => ({ ...state, loading: true, error: null }));
     try {
       const source = trailNetworkTimelineSource(trail);
+      installSourceCues(source);
       const indexes = [await source.readIndex()];
       const machine = compileCurrent(indexes);
       if (requestId !== refreshRequestId) return machine;
@@ -151,6 +160,7 @@ export const networkMachineRuntimeOperations = {
       const recording = await xln.recordScenario(scenarioKey as never, xln.createEmptyEnv());
       if (recording.frames.length === 0) throw new Error(`NETWORK_MACHINE_SCENARIO_EMPTY:${scenarioKey}`);
       const source = scenarioNetworkTimelineSource(runtimeId, recording.frames);
+      installSourceCues(source);
       const indexes = [await source.readIndex()];
       const machine = compileCurrent(indexes);
       if (requestId !== refreshRequestId) return machine;

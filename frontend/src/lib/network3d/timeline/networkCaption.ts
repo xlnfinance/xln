@@ -18,6 +18,10 @@ export type NetworkCaption = {
   extraCount: number;
   source: 'cue' | 'activity' | 'frame';
   accent?: string;
+  what?: string;
+  why?: string;
+  tradfiParallel?: string;
+  keyMetrics?: string[];
 };
 
 /**
@@ -130,6 +134,10 @@ export const captionForStep = (
       extraCount: 0,
       source: 'cue',
       ...(text(cue.accent) ? { accent: text(cue.accent) } : {}),
+      ...(text(cue.what) ? { what: text(cue.what) } : {}),
+      ...(text(cue.why) ? { why: text(cue.why) } : {}),
+      ...(text(cue.tradfiParallel) ? { tradfiParallel: text(cue.tradfiParallel) } : {}),
+      ...(cue.keyMetrics ? { keyMetrics: [...cue.keyMetrics] } : {}),
     };
   }
 

@@ -26,6 +26,10 @@ export type NetworkMachineCue = {
   until?: NetworkMachineFrameRef;
   title: string;
   subtitle?: string;
+  what?: string;
+  why?: string;
+  tradfiParallel?: string;
+  keyMetrics?: string[];
   focusEntityIds?: string[];
   focusAccountIds?: string[];
   focusJMachineIds?: string[];
@@ -134,6 +138,10 @@ const normalizeCue = (cue: NetworkMachineCue): NetworkMachineCue => {
     ...(until ? { until } : {}),
     title: nonEmpty(cue.title, 'cue_title'),
     ...(cue.subtitle?.trim() ? { subtitle: cue.subtitle.trim() } : {}),
+    ...(cue.what?.trim() ? { what: cue.what.trim() } : {}),
+    ...(cue.why?.trim() ? { why: cue.why.trim() } : {}),
+    ...(cue.tradfiParallel?.trim() ? { tradfiParallel: cue.tradfiParallel.trim() } : {}),
+    ...(cue.keyMetrics ? { keyMetrics: cue.keyMetrics.map((metric) => nonEmpty(metric, 'cue_metric')) } : {}),
     ...(focusEntityIds ? { focusEntityIds } : {}),
     ...(focusAccountIds ? { focusAccountIds } : {}),
     ...(focusJMachineIds ? { focusJMachineIds } : {}),
@@ -230,9 +238,9 @@ const decodeNetworkMachinePoint = (value: unknown, field: string): { x: number; 
   return { x: record['x'], y: record['y'], z: record['z'] };
 };
 
-const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
+export const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
   const record = requireUnknownRecord(value, 'NETWORK_MACHINE_CUE_INVALID');
-  rejectExtraKeys(record, ['id', 'at', 'until', 'title', 'subtitle', 'focusEntityIds', 'focusAccountIds', 'focusJMachineIds', 'camera', 'accent'], 'NETWORK_MACHINE_CUE_EXTRA_FIELD');
+  rejectExtraKeys(record, ['id', 'at', 'until', 'title', 'subtitle', 'what', 'why', 'tradfiParallel', 'keyMetrics', 'focusEntityIds', 'focusAccountIds', 'focusJMachineIds', 'camera', 'accent'], 'NETWORK_MACHINE_CUE_EXTRA_FIELD');
   const stringArray = (name: string): string[] | undefined => {
     const values = record[name];
     if (values === undefined) return undefined;
@@ -241,6 +249,10 @@ const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
   };
   if (typeof record['id'] !== 'string' || typeof record['title'] !== 'string' ||
     (record['subtitle'] !== undefined && typeof record['subtitle'] !== 'string') ||
+    (record['what'] !== undefined && typeof record['what'] !== 'string') ||
+    (record['why'] !== undefined && typeof record['why'] !== 'string') ||
+    (record['tradfiParallel'] !== undefined && typeof record['tradfiParallel'] !== 'string') ||
+    (record['keyMetrics'] !== undefined && (!Array.isArray(record['keyMetrics']) || !record['keyMetrics'].every((metric) => typeof metric === 'string'))) ||
     (record['accent'] !== undefined && typeof record['accent'] !== 'string')) throw new Error('NETWORK_MACHINE_CUE_FIELD_INVALID');
   const focusEntityIds = stringArray('focusEntityIds');
   const focusAccountIds = stringArray('focusAccountIds');
@@ -262,6 +274,10 @@ const decodeNetworkMachineCue = (value: unknown): NetworkMachineCue => {
     ...(record['until'] === undefined ? {} : { until: decodeNetworkMachineFrameRef(record['until'], 'cue_until') }),
     title: record['title'],
     ...(record['subtitle'] === undefined ? {} : { subtitle: record['subtitle'] }),
+    ...(record['what'] === undefined ? {} : { what: record['what'] }),
+    ...(record['why'] === undefined ? {} : { why: record['why'] }),
+    ...(record['tradfiParallel'] === undefined ? {} : { tradfiParallel: record['tradfiParallel'] }),
+    ...(record['keyMetrics'] === undefined ? {} : { keyMetrics: record['keyMetrics'] as string[] }),
     ...(focusEntityIds === undefined ? {} : { focusEntityIds }),
     ...(focusAccountIds === undefined ? {} : { focusAccountIds }),
     ...(focusJMachineIds === undefined ? {} : { focusJMachineIds }),

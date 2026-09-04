@@ -241,6 +241,36 @@ describe('network timeline source', () => {
     expect(parseNetworkTrail(serializeNetworkTrail(trail))).toEqual(trail);
   });
 
+  test('authored scenario narration survives the trail and becomes the graph caption card', () => {
+    const trail = networkTrailFromSnapshots('demo', [{
+      state: { height: 7, timestamp: 7_000, eReplicas: new Map() },
+      runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
+      runtimeOutputs: [],
+      description: 'A reserve move is committed.',
+      meta: {
+        subtitle: {
+          title: 'Reserve-to-Reserve Transfer',
+          what: 'Alice funds the hub.',
+          why: 'Capacity becomes usable.',
+          tradfiParallel: 'Correspondent banking prefunding.',
+          keyMetrics: ['100 USDC', '1 account'],
+        },
+      },
+    }] as never);
+    const restored = parseNetworkTrail(serializeNetworkTrailV1(trail));
+    const cue = restored.cues?.[0];
+    const caption = captionForStep({ runtimeId: 'demo', height: 7, cues: cue ? [cue] : [] }, []);
+
+    expect(caption).toMatchObject({
+      title: 'Reserve-to-Reserve Transfer',
+      what: 'Alice funds the hub.',
+      why: 'Capacity becomes usable.',
+      tradfiParallel: 'Correspondent banking prefunding.',
+      keyMetrics: ['100 USDC', '1 account'],
+      source: 'cue',
+    });
+  });
+
   test('a trail survives a URL round trip with its bigints and maps intact', async () => {
     // Deltas are bigints inside a Map — plain JSON drops both, and a demo without deltas
     // renders as bare spheres with no credit or collateral.

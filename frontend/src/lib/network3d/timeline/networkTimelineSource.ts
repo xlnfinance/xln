@@ -22,13 +22,12 @@ import type {
   RuntimeActivityEvent,
 } from '@xln/core/api/public/runtime-module';
 import {
-  activityEventsFromSnapshot,
-  graphFrameFromSnapshot,
-  snapshotChangedGraph,
+  networkTrailFromSnapshots,
 } from '../../../../../core/scenarios/network-trail';
 import { deserializeTaggedJson, serializeTaggedJson } from '@xln/core/protocol/serialization';
 import { normalizeRuntimeTimelineIndex, type RuntimeTimelineIndex } from './runtimeGraphTimeline';
 import { isUnknownRecord, rejectExtraKeys } from '$lib/utils/boundary';
+import { decodeNetworkMachineCue, type NetworkMachineCue } from '../networkMachine';
 
 const INDEX_PAGE_SIZE = 250;
 const INDEX_SCAN_LIMIT = 2_000;
@@ -38,6 +37,7 @@ const GRAPH_FRAME_LIMIT = 500;
 
 export type NetworkTimelineSource = {
   readonly runtimeId: string;
+  readonly cues?: NetworkMachineCue[];
   readIndex(): Promise<RuntimeTimelineIndex>;
   readGraphFrame(height: number): Promise<RuntimeAdapterGraphFrame>;
   /** Activity events inside [fromHeight, toHeight], ascending by height then id. */
@@ -51,6 +51,8 @@ export type NetworkTrail = {
   index: RuntimeTimelineIndex;
   frames: Record<string, RuntimeAdapterGraphFrame>;
   activity: RuntimeActivityEvent[];
+  /** Optional because previously exported v1 trails did not carry authored narration. */
+  cues?: NetworkMachineCue[];
 };
 
 const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -185,6 +187,7 @@ export const trailNetworkTimelineSource = (trail: NetworkTrail): NetworkTimeline
 
   return {
     runtimeId,
+    cues: trail.cues ?? [],
     readIndex: async () => index,
     readGraphFrame: async (height: number) => {
       const target = requireHeight(height, 'NETWORK_TIMELINE_FRAME_HEIGHT_INVALID');
@@ -216,50 +219,18 @@ export const scenarioNetworkTimelineSource = (
   runtimeId: string,
   snapshots: readonly EnvSnapshot[],
 ): NetworkTimelineSource => {
-  const expected = normalizeId(runtimeId);
-  if (!expected) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
-  const byHeight = new Map<number, EnvSnapshot>();
-  for (const snapshot of snapshots) {
-    const height = Math.floor(Number(snapshot.state.height));
-    if (height >= 1) byHeight.set(height, snapshot);
-  }
-
-  const snapshotAt = (height: number): EnvSnapshot => {
-    const snapshot = byHeight.get(height);
-    if (!snapshot) throw new Error(`NETWORK_SCENARIO_FRAME_MISSING:${expected}:h${height}`);
-    return snapshot;
-  };
-
+  const source = trailNetworkTimelineSource(networkTrailFromSnapshots(runtimeId, snapshots) as NetworkTrail);
   return {
-    runtimeId: expected,
-
-    readIndex: async () => normalizeRuntimeTimelineIndex({
-      runtimeId: expected,
-      frames: Array.from(byHeight.values()).map((snapshot) => ({
-        runtimeId: expected,
-        height: Math.floor(Number(snapshot.state.height)),
-        timestamp: Math.floor(Number(snapshot.state.timestamp)),
-        stateHash: '',
-        materialized: true,
-        graphChanged: snapshotChangedGraph(snapshot),
-      })),
-    }),
-
+    ...source,
     readGraphFrame: async (height: number) => {
-      const target = requireHeight(height, 'NETWORK_TIMELINE_FRAME_HEIGHT_INVALID');
-      return graphFrameFromSnapshot(expected, snapshotAt(target));
-    },
-
-    readActivity: async (fromHeight: number, toHeight: number) => {
-      const from = requireHeight(fromHeight, 'NETWORK_ACTIVITY_FROM_HEIGHT_INVALID');
-      const to = requireHeight(toHeight, 'NETWORK_ACTIVITY_TO_HEIGHT_INVALID');
-      if (to < from) throw new Error(`NETWORK_ACTIVITY_RANGE_INVALID:${from}:${to}`);
-      const events: RuntimeActivityEvent[] = [];
-      for (const [height, snapshot] of byHeight) {
-        if (height < from || height > to) continue;
-        events.push(...activityEventsFromSnapshot(expected, snapshot));
+      try {
+        return await source.readGraphFrame(height);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('NETWORK_TRAIL_FRAME_MISSING:')) {
+          throw new Error(`NETWORK_SCENARIO_FRAME_MISSING:${source.runtimeId}:h${height}`);
+        }
+        throw error;
       }
-      return events.sort(compareActivity);
     },
   };
 };
@@ -279,10 +250,11 @@ export const serializeNetworkTrail = (trail: NetworkTrail): string => {
 export const parseNetworkTrail = (text: string): NetworkTrail => {
   const parsed = deserializeTaggedJson(String(text || ''));
   if (!isUnknownRecord(parsed)) throw new Error('NETWORK_TRAIL_PAYLOAD_INVALID');
-  rejectExtraKeys(parsed, ['version', 'runtimeId', 'index', 'frames', 'activity'], 'NETWORK_TRAIL_EXTRA_FIELD');
+  rejectExtraKeys(parsed, ['version', 'runtimeId', 'index', 'frames', 'activity', 'cues'], 'NETWORK_TRAIL_EXTRA_FIELD');
   if (parsed['version'] !== 1) throw new Error('NETWORK_TRAIL_VERSION_UNSUPPORTED');
   if (typeof parsed['runtimeId'] !== 'string' || !normalizeId(parsed['runtimeId'])) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
-  if (!isUnknownRecord(parsed['index']) || !isUnknownRecord(parsed['frames']) || !Array.isArray(parsed['activity'])) {
+  if (!isUnknownRecord(parsed['index']) || !isUnknownRecord(parsed['frames']) || !Array.isArray(parsed['activity']) ||
+    (parsed['cues'] !== undefined && !Array.isArray(parsed['cues']))) {
     throw new Error('NETWORK_TRAIL_STRUCTURE_INVALID');
   }
   // The graph index/frame/activity projections are already canonical runtime adapter
@@ -304,7 +276,8 @@ export const parseNetworkTrail = (text: string): NetworkTrail => {
     }
     activity.push(event);
   }
-  return { version: 1, runtimeId: parsed['runtimeId'], index, frames, activity };
+  const cues = parsed['cues']?.map(decodeNetworkMachineCue);
+  return { version: 1, runtimeId: parsed['runtimeId'], index, frames, activity, ...(cues ? { cues } : {}) };
 };
 
 const toBase64Url = (bytes: Uint8Array): string => {
@@ -348,5 +321,5 @@ export const recordNetworkTrail = async (source: NetworkTimelineSource): Promise
   const activity = heights.length === 0
     ? []
     : await source.readActivity(Math.min(...heights), Math.max(...heights));
-  return { version: 1, runtimeId: source.runtimeId, index, frames, activity };
+  return { version: 1, runtimeId: source.runtimeId, index, frames, activity, cues: source.cues ?? [] };
 };

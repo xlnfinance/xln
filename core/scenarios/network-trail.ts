@@ -19,6 +19,18 @@ export type NetworkTrailV1 = {
   index: { runtimeId: string; frames: NetworkTrailIndexFrame[] };
   frames: Record<string, RuntimeAdapterGraphFrame>;
   activity: RuntimeActivityEvent[];
+  cues: NetworkTrailCue[];
+};
+
+export type NetworkTrailCue = {
+  id: string;
+  at: { runtimeId: string; height: number; timestamp: number };
+  title: string;
+  subtitle?: string;
+  what?: string;
+  why?: string;
+  tradfiParallel?: string;
+  keyMetrics?: string[];
 };
 
 type SnapshotAccount = {
@@ -222,10 +234,25 @@ export const networkTrailFromSnapshots = (
     .sort((left, right) => integer(left.state.height) - integer(right.state.height));
   const frames: Record<string, RuntimeAdapterGraphFrame> = {};
   const activity: RuntimeActivityEvent[] = [];
+  const cues: NetworkTrailCue[] = [];
   const indexFrames = ordered.map((snapshot) => {
     const height = integer(snapshot.state.height);
     frames[String(height)] = deterministicGraphFrame(graphFrameFromSnapshot(expected, snapshot));
     activity.push(...activityEventsFromSnapshot(expected, snapshot).map(deterministicActivity));
+    const subtitle = snapshot.meta?.subtitle;
+    if (subtitle) {
+      const shortSubtitle = String(subtitle.what || snapshot.narrative || snapshot.description || '').trim();
+      cues.push({
+        id: `authored:${expected}:h${height}`,
+        at: { runtimeId: expected, height, timestamp: height },
+        title: subtitle.title,
+        ...(shortSubtitle ? { subtitle: shortSubtitle } : {}),
+        ...(subtitle.what ? { what: subtitle.what } : {}),
+        ...(subtitle.why ? { why: subtitle.why } : {}),
+        ...(subtitle.tradfiParallel ? { tradfiParallel: subtitle.tradfiParallel } : {}),
+        ...(subtitle.keyMetrics ? { keyMetrics: [...subtitle.keyMetrics] } : {}),
+      });
+    }
     return {
       runtimeId: expected,
       height,
@@ -242,6 +269,7 @@ export const networkTrailFromSnapshots = (
     index: { runtimeId: expected, frames: indexFrames },
     frames,
     activity,
+    cues,
   };
 };
 

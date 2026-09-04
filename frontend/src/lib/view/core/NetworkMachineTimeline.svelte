@@ -12,6 +12,7 @@
   import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
   import { captionForStep } from '$lib/network3d/timeline/networkCaption';
   import { xlnFunctions } from '$lib/stores/xlnStore';
+  import FrameSubtitle from '$lib/components/TimeMachine/FrameSubtitle.svelte';
 
   let playing = false;
   let playbackInterval: number | null = null;
@@ -183,6 +184,7 @@
   <button class="refresh" data-testid="network-machine-refresh" title="Reload runtime indexes" disabled={$networkMachineRuntime.loading} on:click={() => void refresh()}><RefreshCw size={13} /></button>
   <button class="dock" data-testid="network-machine-mode-toggle" on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}>{$appState.mode === 'dev' ? 'User' : 'Dock'}</button>
 </div>
+<FrameSubtitle subtitle={caption?.source === 'cue' ? caption : undefined} visible={selected !== null} />
 {#if localError || $networkMachineRuntime.error}<div class="network-error" role="alert">{localError || $networkMachineRuntime.error}</div>{/if}
 
 <style>
