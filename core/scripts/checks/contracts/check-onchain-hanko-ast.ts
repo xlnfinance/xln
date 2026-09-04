@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -49,18 +49,31 @@ const walk = (value: unknown, visit: (node: AstNode) => void): void => {
 const artifactPath = (name: string): string =>
   `jurisdictions/artifacts/contracts/${name}.sol/${name}.json`;
 
-const dbgPath = (name: string): string =>
-  `jurisdictions/artifacts/contracts/${name}.sol/${name}.dbg.json`;
+// Hardhat 3 layout: the artifact carries `buildInfoId`; the build-info split is
+// `build-info/<id>.json` (compiler input) and `build-info/<id>.output.json`
+// (compiler output). Local sources are keyed `project/contracts/<name>.sol`.
+const BUILD_INFO_DIR = 'jurisdictions/artifacts/build-info';
 
 const readBuildInfo = (name: SourceName): BuildInfo => {
-  const debugPath = dbgPath(name);
-  const dbg = JSON.parse(readFileSync(debugPath, 'utf8')) as { buildInfo: string };
-  return JSON.parse(readFileSync(resolve(dirname(debugPath), dbg.buildInfo), 'utf8')) as BuildInfo;
+  const artifact = JSON.parse(readFileSync(artifactPath(name), 'utf8')) as { buildInfoId?: string };
+  if (!artifact.buildInfoId) fail(`artifact ${name} has no buildInfoId`);
+  const inputPath = resolve(join(BUILD_INFO_DIR, `${artifact.buildInfoId}.json`));
+  const outputPath = resolve(join(dirname(inputPath), `${artifact.buildInfoId}.output.json`));
+  const input = JSON.parse(readFileSync(inputPath, 'utf8')) as { input: BuildInfo['input'] };
+  const output = JSON.parse(readFileSync(outputPath, 'utf8')) as { output: BuildInfo['output'] };
+  return { input: input.input, output: output.output };
+};
+
+const sourceKey = (sources: Record<string, unknown>, name: SourceName): string => {
+  for (const key of [`project/contracts/${name}.sol`, `contracts/${name}.sol`]) {
+    if (key in sources) return key;
+  }
+  return `project/contracts/${name}.sol`;
 };
 
 const isFresh = (build: BuildInfo, name: SourceName): boolean => {
-  const sourceName = `contracts/${name}.sol`;
-  return build.input.sources[sourceName]?.content === readFileSync(`${CONTRACT_ROOT}/${name}.sol`, 'utf8');
+  const key = sourceKey(build.input.sources, name);
+  return build.input.sources[key]?.content === readFileSync(`${CONTRACT_ROOT}/${name}.sol`, 'utf8');
 };
 
 const readBuildMap = (): BuildMap => Object.fromEntries(
@@ -90,7 +103,7 @@ const loadFreshBuildInfo = (): BuildMap => {
 };
 
 const findContract = (build: BuildInfo, name: string): AstNode => {
-  const source = build.output.sources[`contracts/${name}.sol`]?.ast;
+  const source = build.output.sources[sourceKey(build.output.sources, name as SourceName)]?.ast;
   if (!source) fail(`missing AST for ${name}`);
   let result: AstNode | undefined;
   walk(source, (node) => {
@@ -344,6 +357,9 @@ export const checkOnchainHankoAst = (): void => {
     .map((fn) => String(fn.name));
   assertExact(currentVerifyConsumers, [
     '_requireBoardAuthority',
+    // CONTROL lane: each shareholder Entity proves its vote with a current-board
+    // Hanko over the proposal digest (reserve-weighted in Depository).
+    '_requireReserveControlMajority',
     '_authorizeFoundation',
     'entityTransferTokens', 'cancelEntityProviderAction', 'releaseControlShares',
   ], 'EntityProvider current-only Hanko verifier consumers');
@@ -371,7 +387,8 @@ export const checkOnchainHankoAst = (): void => {
   if (functions(contracts.Account).some((fn) => fn.name === 'verifyFinalDisputeProofHanko')) {
     fail('protocol-dead Account.verifyFinalDisputeProofHanko surface was reintroduced');
   }
-  const typesAst = builds.HankoEncoding.output.sources['contracts/Types.sol']?.ast;
+  const typesSources = builds.HankoEncoding.output.sources;
+  const typesAst = (typesSources['project/contracts/Types.sol'] ?? typesSources['contracts/Types.sol'])?.ast;
   if (!typesAst) fail('missing Types.sol AST');
   let messageTypeMembers: string[] | undefined;
   walk(typesAst, (node) => {
@@ -398,7 +415,7 @@ export const checkOnchainHankoAst = (): void => {
     'core/orchestrator',
     'scripts',
     'frontend/src',
-  ].flatMap(recursiveFiles).filter((path) => (
+  ].filter((directory) => existsSync(directory)).flatMap(recursiveFiles).filter((path) => (
     !path.startsWith('jurisdictions/ignition/deployments/') &&
     !path.startsWith('scripts/debug/') &&
     readFileSync(path, 'utf8').includes('HankoCodec')

@@ -101,7 +101,6 @@ for (const [path, source] of [
 }
 
 assertFunctionAllowlist(depository, depositoryPath, [
-  'accountKey',
   'adminRegisterExternalToken',
   'computeWatchtowerCounterDisputeHash',
   'enforceDebts',
@@ -126,6 +125,7 @@ assertFunctionAllowlist(deltaTransformer, deltaTransformerPath, [
 assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'activateBoard',
   'assignName',
+  'bindShareDepository',
   'cancelBoardProposal',
   'cancelEntityProviderAction',
   'computeBoardProposalCancelHash',
