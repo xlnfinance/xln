@@ -7,6 +7,7 @@ import type {
 	RuntimeAdapterViewFrame,
 } from '@xln/core/api/public/runtime-module';
 import { useAdapterRead, type ReadState } from './hooks';
+import { useApp } from './store';
 import { peekXLN } from './xln-loader';
 import { usdOf } from './financial/prices';
 import { disputeView, settlementView, type AccountDoc, type DisputePhase, type SettlementPhase } from './financial/manage';
@@ -62,6 +63,10 @@ export type TokenTotals = {
 	pending: bigint;
 	/** Sum of positive account positions: what counterparties owe us. */
 	receivable: bigint;
+	/** The part of `receivable` backed by collateral on-chain. */
+	secured: bigint;
+	/** The part of `receivable` backed by nothing but the counterparty's signature. */
+	risk: bigint;
 	/** Sum of negative account positions: what we owe. Never positive. */
 	owed: bigint;
 	net: bigint;
@@ -87,7 +92,7 @@ export type WalletView = {
 	onchain: PlaceRow[];
 	reserves: PlaceRow[];
 	totals: TokenTotals[];
-	usd: { onchain: number; reserve: number; pending: number; receivable: number; owed: number; net: number; sendCapacity: number; receiveCapacity: number };
+	usd: { onchain: number; reserve: number; pending: number; receivable: number; secured: number; risk: number; owed: number; net: number; sendCapacity: number; receiveCapacity: number };
 	loading: boolean;
 	error: string | null;
 	refresh: () => void;
@@ -119,6 +124,7 @@ function readPendingReserveByToken(entityId: string, jBatchState: JBatchState | 
 export function useWallet(entityId: string | null): WalletView {
 	const read = useViewFrame(entityId);
 	const frame = read.data;
+	const externalRows = useApp(s => s.externalRows);
 
 	return useMemo<WalletView>(() => {
 		const xln = peekXLN();
@@ -177,6 +183,12 @@ export function useWallet(entityId: string | null): WalletView {
 				onchainByToken.set(record.tokenId, (onchainByToken.get(record.tokenId) ?? 0n) + record.balance);
 			}
 		}
+		// An embedded runtime has no watcher feeding externalWallet; the page reads the chain itself.
+		if (onchainByToken.size === 0) {
+			for (const row of externalRows) {
+				if (row.balance > 0n && row.tokenId > 0) onchainByToken.set(row.tokenId, (onchainByToken.get(row.tokenId) ?? 0n) + row.balance);
+			}
+		}
 		const onchain: PlaceRow[] = Array.from(onchainByToken.entries())
 			.map(([tokenId, amount]) => ({ tokenId, amount, pending: 0n, jurisdiction }))
 			.sort((a, b) => a.tokenId - b.tokenId);
@@ -205,14 +217,21 @@ export function useWallet(entityId: string | null): WalletView {
 				const reserveAmount = reserves.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.amount, 0n);
 				const pending = reserves.filter(row => row.tokenId === tokenId).reduce((sum, row) => sum + row.pending, 0n);
 				let receivable = 0n;
+				let secured = 0n;
+				let risk = 0n;
 				let owed = 0n;
 				let sendCapacity = 0n;
 				let receiveCapacity = 0n;
 				for (const account of accounts) {
 					for (const token of account.tokens) {
 						if (token.tokenId !== tokenId) continue;
-						if (token.signed > 0n) receivable += token.signed;
-						else owed += token.signed;
+						if (token.signed > 0n) {
+							receivable += token.signed;
+							// deriveDelta splits a positive position into the slice collateral covers and the rest.
+							const unsecured = token.derived.outPeerCredit < token.signed ? token.derived.outPeerCredit : token.signed;
+							risk += unsecured;
+							secured += token.signed - unsecured;
+						} else owed += token.signed;
 						sendCapacity += token.derived.outCapacity;
 						receiveCapacity += token.derived.inCapacity;
 					}
@@ -225,6 +244,8 @@ export function useWallet(entityId: string | null): WalletView {
 					reserve: reserveAmount,
 					pending,
 					receivable,
+					secured,
+					risk,
 					owed,
 					net: onchainAmount + reserveAmount + receivable + owed,
 					sendCapacity,
@@ -234,12 +255,14 @@ export function useWallet(entityId: string | null): WalletView {
 				};
 			});
 
-		const usd = { onchain: 0, reserve: 0, pending: 0, receivable: 0, owed: 0, net: 0, sendCapacity: 0, receiveCapacity: 0 };
+		const usd = { onchain: 0, reserve: 0, pending: 0, receivable: 0, secured: 0, risk: 0, owed: 0, net: 0, sendCapacity: 0, receiveCapacity: 0 };
 		for (const total of totals) {
 			usd.onchain += usdOf(total.tokenId, total.onchain);
 			usd.reserve += usdOf(total.tokenId, total.reserve);
 			usd.pending += usdOf(total.tokenId, total.pending);
 			usd.receivable += usdOf(total.tokenId, total.receivable);
+			usd.secured += usdOf(total.tokenId, total.secured);
+			usd.risk += usdOf(total.tokenId, total.risk);
 			usd.owed += usdOf(total.tokenId, -total.owed);
 		}
 		usd.net = usd.onchain + usd.reserve + usd.receivable - usd.owed;
@@ -269,7 +292,7 @@ export function useWallet(entityId: string | null): WalletView {
 			error: read.error,
 			refresh: read.refresh,
 		};
-	}, [frame, entityId, read.loading, read.error, read.refresh]);
+	}, [frame, entityId, externalRows, read.loading, read.error, read.refresh]);
 }
 
 export type SwapOfferView = {

@@ -1,0 +1,10 @@
+{
+	"name": "xln",
+	"short_name": "xln",
+	"description": "Sovereign wallet: your keys, your ledger, every frame signed by both sides.",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#0e1014",
+	"theme_color": "#0e1014",
+	"icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

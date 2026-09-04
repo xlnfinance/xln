@@ -49,10 +49,11 @@ export function Home() {
 		});
 
 	const heroSegments = [
-		{ usd: places.onchain ? wallet.usd.onchain : 0, kind: 'slate' as const },
-		{ usd: places.reserve ? wallet.usd.reserve : 0, kind: 'coll' as const },
+		{ usd: places.onchain ? wallet.usd.onchain : 0, kind: 'onchain' as const },
+		{ usd: places.reserve ? wallet.usd.reserve : 0, kind: 'reserve' as const },
 		{ usd: places.reserve ? wallet.usd.pending : 0, kind: 'pend' as const },
-		{ usd: places.accounts ? wallet.usd.receivable : 0, kind: 'credit' as const },
+		{ usd: places.accounts ? wallet.usd.secured : 0, kind: 'coll' as const },
+		{ usd: places.accounts ? wallet.usd.risk : 0, kind: 'risk' as const },
 	];
 	const visibleNet =
 		(places.onchain ? wallet.usd.onchain : 0) +
@@ -71,6 +72,9 @@ export function Home() {
 						</span>
 					</span>
 				</span>
+				<button type="button" className="icon-btn" onClick={() => navigate('/sovereignty')} aria-label="Sovereignty" title="Keys, proofs, what is at risk" data-testid="home-sovereignty">
+					<Icon name="shield" size={18} />
+				</button>
 				<span className="hash" style={{ display: 'none' }} data-testid="home-entity-id">
 					{wallet.entityId}
 				</span>
@@ -86,26 +90,32 @@ export function Home() {
 						</div>
 						<div className="tiers">
 							{places.onchain && (
-								<span>
-									<i className="sw c-slate" />
+								<span data-testid="home-onchain">
+									<i className="sw c-onchain" />
 									On-chain <b className="num">{formatUsd(wallet.usd.onchain)}</b>
 								</span>
 							)}
 							{places.reserve && (
 								<span>
-									<i className="sw c-coll" />
+									<i className="sw c-reserve" />
 									Reserve <b className="num">{formatUsd(wallet.usd.reserve)}</b>
 									{wallet.usd.pending > 0 ? <span className="st-pending num"> +{formatUsd(wallet.usd.pending)} pending</span> : null}
 								</span>
 							)}
 							{places.accounts && (
 								<span>
-									<i className="sw c-credit" />
-									Accounts <b className="num">{formatUsd(wallet.usd.receivable)}</b>
+									<i className="sw c-coll" />
+									Secured <b className="num">{formatUsd(wallet.usd.secured)}</b>
+								</span>
+							)}
+							{places.accounts && (
+								<span data-testid="home-risk">
+									<i className="sw c-risk" />
+									At risk <b className="num">{formatUsd(wallet.usd.risk)}</b>
 									{wallet.usd.owed > 0 ? (
-										<span className="num" style={{ color: 'var(--ink-3)' }}>
+										<span className="num" style={{ color: 'var(--debt)' }}>
 											{' '}
-											owed {formatUsd(wallet.usd.owed)}
+											· you owe {formatUsd(wallet.usd.owed)}
 										</span>
 									) : null}
 								</span>
@@ -231,10 +241,11 @@ function TokenRow({
 	const meta = getTokenMeta(total.tokenId);
 	const money = (value: bigint): string => formatMoney(value, meta.decimals);
 	const segments = [
-		{ usd: places.onchain ? usdOf(total.tokenId, total.onchain) : 0, kind: 'slate' as const },
-		{ usd: places.reserve ? usdOf(total.tokenId, total.reserve) : 0, kind: 'coll' as const },
+		{ usd: places.onchain ? usdOf(total.tokenId, total.onchain) : 0, kind: 'onchain' as const },
+		{ usd: places.reserve ? usdOf(total.tokenId, total.reserve) : 0, kind: 'reserve' as const },
 		{ usd: places.reserve ? usdOf(total.tokenId, total.pending) : 0, kind: 'pend' as const },
-		{ usd: places.accounts ? usdOf(total.tokenId, total.receivable) : 0, kind: 'credit' as const },
+		{ usd: places.accounts ? usdOf(total.tokenId, total.secured) : 0, kind: 'coll' as const },
+		{ usd: places.accounts ? usdOf(total.tokenId, total.risk) : 0, kind: 'risk' as const },
 	];
 	const visibleNet =
 		(places.onchain ? total.onchain : 0n) + (places.reserve ? total.reserve : 0n) + (places.accounts ? total.receivable + total.owed : 0n);
@@ -289,7 +300,7 @@ function TokenRow({
 										</span>
 									</div>
 									<div className="rb">
-										<Bar segments={[{ usd: usdOf(total.tokenId, row.amount), kind: 'slate' }]} height={4} />
+										<Bar segments={[{ usd: usdOf(total.tokenId, row.amount), kind: 'onchain' }]} height={4} />
 									</div>
 								</div>
 							))}
@@ -318,7 +329,7 @@ function TokenRow({
 									<div className="rb">
 										<Bar
 											segments={[
-												{ usd: usdOf(total.tokenId, row.amount), kind: 'coll' },
+												{ usd: usdOf(total.tokenId, row.amount), kind: 'reserve' },
 												{ usd: usdOf(total.tokenId, row.pending), kind: 'pend' },
 											]}
 											height={4}

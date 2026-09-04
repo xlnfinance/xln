@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Shell } from './components/Shell';
 import { Toasts } from './components/Toasts';
@@ -18,6 +18,8 @@ import { Manage } from './screens/Manage';
 import { Assets } from './screens/Assets';
 import { Lending } from './screens/Lending';
 import { Ownership } from './screens/Ownership';
+import { Sovereignty } from './screens/Sovereignty';
+import { Desk } from './screens/Desk';
 
 /** `/#pay/<invoice>` is the canonical wallet link; it opens Pay with the invoice applied. */
 function useInvoiceDeepLink(): void {
@@ -28,6 +30,18 @@ function useInvoiceDeepLink(): void {
 		if (!raw.toLowerCase().startsWith('pay/')) return;
 		navigate('/pay', { replace: true, state: { invoice: window.location.href } });
 	}, [hash, navigate]);
+}
+
+/** Desk replaces Home on wide viewports when the user chose the dense layout. */
+function HomeOrDesk() {
+	const density = useApp(s => s.density);
+	const [wide, setWide] = useState(() => window.innerWidth >= 1024);
+	useEffect(() => {
+		const onResize = (): void => setWide(window.innerWidth >= 1024);
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
+	}, []);
+	return density === 'desk' && wide ? <Desk /> : <Home />;
 }
 
 export default function App() {
@@ -56,12 +70,14 @@ export default function App() {
 	return (
 		<Shell>
 			<Routes>
-				<Route path="/" element={<Home />} />
+				<Route path="/" element={<HomeOrDesk />} />
 				<Route path="/accounts/:counterpartyId" element={<AccountDetail />} />
 				<Route path="/pay" element={<Pay />} />
 				<Route path="/swap" element={<Swap />} />
 				<Route path="/receive" element={<Receive />} />
 				<Route path="/move" element={<Move />} />
+				<Route path="/sovereignty" element={<Sovereignty />} />
+				<Route path="/desk" element={<Desk />} />
 				<Route path="/manage" element={<Manage />} />
 				<Route path="/assets" element={<Assets />} />
 				<Route path="/lend" element={<Lending />} />

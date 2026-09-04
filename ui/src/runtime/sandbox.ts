@@ -480,12 +480,6 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 			]);
 			await waitFor(() => reserveOf(self.entityId) >= selfReserve, 'demo reserve mint', 45_000);
 		}
-		step('Funding the signer wallet');
-		// A little on-chain USDC in the signer's own wallet, so Move can show the
-		// external → reserve path with real approvals against the local chain.
-		const jadapter = (await getXLN()).getEntityJAdapter(env, self.entityId, self.signerId);
-		if (jadapter?.fundSignerWallet) await jadapter.fundSignerWallet(self.signerId, usd(2_500), 'USDC');
-
 		step('Placing resting orders');
 		// The merchant makes a small two-sided WETH/USDC market on the hub's book,
 		// through the same planner the wallet uses. Without it the Swap page shows
@@ -493,6 +487,14 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 		await placeMerchantOrders(adapter, env, merchant, hub);
 		markSandboxFunded(runtimeId);
 	}
+
+	step('Shaping the signer wallet');
+	// The BrowserVM bootstraps every funded signer with a trillion of each token,
+	// which would make the on-chain tier swallow the whole money scale. A wallet
+	// demo wants a plausible balance instead: 2,500 USDC and 1 WETH on-chain,
+	// nothing else. The surplus goes to the hub's signer through the same ERC20
+	// transfer an external send uses. Runs on every boot; a no-op once shaped.
+	await shapeSignerWallet(env, seed, self, hub);
 
 	step('Ready');
 	const app = useApp.getState();
@@ -503,6 +505,25 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 	}
 	app.unlockSeed(options.vaultId, seed);
 	return topology;
+}
+
+const SIGNER_WALLET_TARGETS: Record<string, bigint> = { USDC: usd(2_500), WETH: weth(1) };
+
+async function shapeSignerWallet(env: RuntimeReplica, seed: string, self: DemoActor, sink: DemoActor): Promise<void> {
+	const jadapter = (await getXLN()).getEntityJAdapter(env, self.entityId, self.signerId);
+	if (!jadapter?.fundSignerWallet) return;
+	const registry = await jadapter.getTokenRegistry();
+	if (registry.length === 0) return;
+	const snapshot = await jadapter.readWalletSnapshot({ owner: self.signerId, tokenAddresses: registry.map(token => token.address) });
+	const index = [0, 1, 2, 3, 4, 5, 6, 7].find(candidate => deriveAddress(seed, candidate).toLowerCase() === self.signerId.toLowerCase());
+	if (index === undefined) throw new Error('SANDBOX_SIGNER_NOT_IN_SEED');
+	const privateKey = derivePrivateKeyBytes(seed, index);
+	for (const [position, token] of registry.entries()) {
+		const target = SIGNER_WALLET_TARGETS[token.symbol.toUpperCase()] ?? 0n;
+		const balance = snapshot.tokenBalances[position] ?? 0n;
+		if (balance > target) await jadapter.transferErc20(privateKey, token.address, sink.signerId, balance - target);
+		else if (balance < target) await jadapter.fundSignerWallet(self.signerId, target, token.symbol);
+	}
 }
 
 /**

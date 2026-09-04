@@ -146,7 +146,7 @@ export function Assets() {
 											</span>
 										</span>
 										<span className="rb" style={{ display: 'block' }}>
-											<Bar segments={[{ usd: usdOf(row.tokenId, row.balance), kind: 'slate' }]} height={4} />
+											<Bar segments={[{ usd: usdOf(row.tokenId, row.balance), kind: 'onchain' }]} height={4} />
 										</span>
 									</div>
 								))}

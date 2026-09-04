@@ -1,6 +1,8 @@
 :root {
 	--font-ui: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	/* Sums and hero figures. A design preset swaps this; body text never changes. */
+	--font-num: var(--font-ui);
 
 	--radius-s: 10px;
 	--radius-m: 14px;
@@ -35,12 +37,19 @@
 	--accent-2: #9aa4ff;
 	--accent-dim: rgba(110, 124, 255, 0.16);
 	--credit: #6e7cff;
-	--coll: #34d399;
-	--coll-dim: rgba(52, 211, 153, 0.16);
+	/* Position palette: what is yours is green, darker the deeper it sits with a
+	   counterparty; exposure is violet; obligations amber; room is a ghost. */
+	--onchain: #4ade80;
+	--reserve: #22c55e;
+	--coll: #15a35a;
+	--coll-dim: rgba(21, 163, 90, 0.18);
+	--risk: #a78bfa;
+	--risk-dim: rgba(167, 139, 250, 0.22);
+	--room: rgba(236, 237, 239, 0.14);
 	--slate: #6e788a;
 	--debt: #e8b04b;
-	--hold: #b58cff;
-	--hold-dim: rgba(181, 140, 255, 0.28);
+	--hold: #c4b5fd;
+	--hold-dim: rgba(196, 181, 253, 0.28);
 	--dispute: #f26d6d;
 	--dispute-dim: rgba(242, 109, 109, 0.14);
 	--btn-ink: #ffffff;
@@ -65,8 +74,13 @@
 	--accent-2: #4653d6;
 	--accent-dim: rgba(91, 105, 240, 0.14);
 	--credit: #5b69f0;
-	--coll: #1fa97a;
-	--coll-dim: rgba(31, 169, 122, 0.14);
+	--onchain: #22c55e;
+	--reserve: #16a34a;
+	--coll: #15803d;
+	--coll-dim: rgba(21, 128, 61, 0.16);
+	--risk: #7c3aed;
+	--risk-dim: rgba(124, 58, 237, 0.2);
+	--room: rgba(20, 23, 30, 0.12);
 	--slate: #8b94a5;
 	--debt: #c98a16;
 	--hold: #8e5cf5;
@@ -77,4 +91,120 @@
 	--scrim: rgba(20, 23, 30, 0.5);
 	--shadow-sheet: 0 -18px 60px rgba(20, 23, 30, 0.18);
 	--fade: var(--bg);
+}
+
+/* ---------- design presets: material ---------- */
+
+:root[data-material='bank'],
+:root[data-material='bank'][data-theme='dark'] {
+	--bg: #14131a;
+	--surface: #1b1a22;
+	--surface-2: #23222c;
+	--surface-3: #2c2b37;
+	--line: rgba(240, 236, 228, 0.09);
+	--line-2: rgba(240, 236, 228, 0.16);
+	--ink: #f0ece4;
+	--ink-2: #a39d92;
+	--ink-3: #6d6860;
+	--display: #fbf8f2;
+	--fade: var(--bg);
+}
+:root[data-material='bank'][data-theme='light'] {
+	--bg: #f6f1e8;
+	--surface: #fffdf8;
+	--surface-2: #efe9dd;
+	--surface-3: #e6dfd0;
+	--line: rgba(40, 32, 20, 0.1);
+	--line-2: rgba(40, 32, 20, 0.2);
+	--ink: #1d1912;
+	--ink-2: #6b6357;
+	--ink-3: #948b7d;
+	--display: #14100a;
+	--fade: var(--bg);
+}
+
+:root[data-material='terminal'],
+:root[data-material='terminal'][data-theme='dark'] {
+	--bg: #0b0d0c;
+	--surface: #111413;
+	--surface-2: #171b19;
+	--surface-3: #1f2522;
+	--line: rgba(200, 255, 220, 0.08);
+	--line-2: rgba(200, 255, 220, 0.16);
+	--ink: #d9e6dd;
+	--ink-2: #7f9486;
+	--ink-3: #4f6157;
+	--display: #eafff0;
+	--accent: #3ddc84;
+	--accent-2: #7cf0ad;
+	--accent-dim: rgba(61, 220, 132, 0.16);
+	--credit: #3ddc84;
+	--btn-ink: #06110b;
+	--fade: var(--bg);
+}
+:root[data-material='terminal'][data-theme='light'] {
+	--bg: #eef2ef;
+	--surface: #f8faf8;
+	--surface-2: #e4eae6;
+	--surface-3: #d7dfda;
+	--line: rgba(10, 40, 24, 0.1);
+	--line-2: rgba(10, 40, 24, 0.2);
+	--ink: #0f1a14;
+	--ink-2: #4b6355;
+	--ink-3: #7a8f83;
+	--display: #07110b;
+	--accent: #148a4a;
+	--accent-2: #0f6e3b;
+	--accent-dim: rgba(20, 138, 74, 0.14);
+	--credit: #148a4a;
+	--btn-ink: #ffffff;
+	--fade: var(--bg);
+}
+:root[data-material='terminal'] .num,
+:root[data-material='terminal'] .display {
+	font-family: var(--font-mono);
+	letter-spacing: 0;
+}
+
+/* ---------- design presets: accent ---------- */
+
+:root[data-accent='mono']:not([data-material='terminal']) {
+	--accent: var(--ink);
+	--accent-2: var(--ink-2);
+	--accent-dim: rgba(128, 128, 128, 0.16);
+	--credit: var(--ink-2);
+	--btn-ink: var(--bg);
+}
+:root[data-accent='brass']:not([data-material='terminal']) {
+	--accent: #c9a962;
+	--accent-2: #e2c98a;
+	--accent-dim: rgba(201, 169, 98, 0.16);
+	--credit: #c9a962;
+	--btn-ink: #1a1508;
+}
+:root[data-accent='brass'][data-theme='light']:not([data-material='terminal']) {
+	--accent: #9a7a2e;
+	--accent-2: #7d6222;
+	--accent-dim: rgba(154, 122, 46, 0.14);
+	--credit: #9a7a2e;
+	--btn-ink: #ffffff;
+}
+
+/* ---------- design presets: risk ---------- */
+
+:root[data-risk='red'] {
+	--risk: #f26d6d;
+	--risk-dim: rgba(242, 109, 109, 0.22);
+}
+:root[data-risk='red'][data-theme='light'] {
+	--risk: #d9484f;
+	--risk-dim: rgba(217, 72, 79, 0.2);
+}
+:root[data-risk='orange'] {
+	--risk: #fb923c;
+	--risk-dim: rgba(251, 146, 60, 0.22);
+}
+:root[data-risk='orange'][data-theme='light'] {
+	--risk: #ea6c0a;
+	--risk-dim: rgba(234, 108, 10, 0.2);
 }

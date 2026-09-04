@@ -1,7 +1,14 @@
 import type { DerivedDelta } from '@xln/core/api/public/runtime-module';
 import { usdOf } from '../runtime/financial/prices';
 
-export type SegmentKind = 'slate' | 'coll' | 'credit' | 'debt' | 'pend' | 'this';
+/**
+ * Position palette. Yours: onchain (brightest green), reserve, coll (green,
+ * darker the deeper it sits with a counterparty). Exposure: risk (violet) is
+ * what a counterparty owes you with nothing on-chain behind it. Obligation:
+ * debt (amber) is what you owe. Room: an unused credit line, a ghost. `this`
+ * is the amount being typed; `credit` is kept for the accent-colored bar.
+ */
+export type SegmentKind = 'onchain' | 'reserve' | 'coll' | 'risk' | 'debt' | 'room' | 'pend' | 'credit' | 'slate' | 'this';
 
 export type BarSegment = { usd: number; kind: SegmentKind };
 
@@ -26,12 +33,13 @@ export function Bar({ segments, height = 6 }: { segments: BarSegment[]; height?:
 /**
  * The bilateral account bar, drawn from deriveDelta fields only.
  *
- *   [own unused credit][collateral][their debt] ‖ [my debt][collateral][their unused line]
+ *   [room: their line to you][collateral][risk: they owe you unsecured] ‖ [debt: you owe][collateral][room: your line to them]
  *
  * Left half is what we can send, right half what we can receive, the notch is Δ.
- * Debts sit next to the notch, unused credit lines at the edges, so the bar reads
- * as the RCPAN number line: −L_left ≤ Δ ≤ C + L_right. A hold (HTLC in flight) is
- * striped over the inner end of the half it reduces.
+ * Money next to the notch is the position; green is backed on-chain, violet is
+ * trust, amber is what you owe, and the ghost at each edge is the unused credit
+ * line. The bar reads as the RCPAN number line: −L_left ≤ Δ ≤ C + L_right. A hold
+ * (HTLC in flight) is striped over the inner end of the half it reduces.
  */
 export function DeltaBar({ derived, tokenId }: { derived: DerivedDelta; tokenId: number }) {
 	const u = (value: bigint): number => usdOf(tokenId, value);
@@ -41,9 +49,9 @@ export function DeltaBar({ derived, tokenId }: { derived: DerivedDelta; tokenId:
 		<div className="dbar" aria-hidden>
 			<div className="half out">
 				<div className="bar">
-					<Seg usd={u(derived.outOwnCredit)} kind="credit" />
+					<Seg usd={u(derived.outOwnCredit)} kind="room" />
 					<Seg usd={u(derived.outCollateral)} kind="coll" />
-					<Seg usd={u(derived.outPeerCredit)} kind="debt" />
+					<Seg usd={u(derived.outPeerCredit)} kind="risk" />
 				</div>
 				{outHold > 0n ? <i className="hold" style={{ ['--u' as string]: u(outHold) }} /> : null}
 			</div>
@@ -52,7 +60,7 @@ export function DeltaBar({ derived, tokenId }: { derived: DerivedDelta; tokenId:
 				<div className="bar">
 					<Seg usd={u(derived.inOwnCredit)} kind="debt" />
 					<Seg usd={u(derived.inCollateral)} kind="coll" />
-					<Seg usd={u(derived.inPeerCredit)} kind="credit" />
+					<Seg usd={u(derived.inPeerCredit)} kind="room" />
 				</div>
 				{inHold > 0n ? <i className="hold" style={{ ['--u' as string]: u(inHold) }} /> : null}
 			</div>
@@ -74,17 +82,30 @@ export function DeltaCaption({ derived, format }: { derived: DerivedDelta; forma
 	);
 }
 
-export function Legend() {
+export function Legend({ places = false }: { places?: boolean }) {
 	return (
 		<div className="legend">
+			{places ? (
+				<>
+					<span>
+						<i className="c-onchain" /> on-chain
+					</span>
+					<span>
+						<i className="c-reserve" /> reserve
+					</span>
+				</>
+			) : null}
 			<span>
 				<i className="c-coll" /> collateral
 			</span>
 			<span>
-				<i className="c-credit" /> credit line
+				<i className="c-risk" /> at risk
 			</span>
 			<span>
-				<i className="c-debt" /> owed
+				<i className="c-debt" /> you owe
+			</span>
+			<span>
+				<i className="c-room" /> credit room
 			</span>
 			<span>
 				<i className="c-hold" /> in flight

@@ -52,7 +52,8 @@ test.describe('wallet UI swap', () => {
 		await expect(asks).toHaveCount(2, { timeout: CONSENSUS_TIMEOUT });
 		await page.getByRole('link', { name: 'Home' }).first().click();
 		await expect(page.getByTestId('token-row-WETH')).toBeVisible({ timeout: CONSENSUS_TIMEOUT });
-		await expect(page.getByTestId('token-net-WETH')).toContainText('0.50', { timeout: CONSENSUS_TIMEOUT });
+		// 1 WETH sits on-chain in the signer wallet; the swap adds 0.5 on the hub account.
+		await expect(page.getByTestId('token-net-WETH')).toContainText('1.50', { timeout: CONSENSUS_TIMEOUT });
 
 		expect(pageErrors, 'no uncaught browser errors during the flow').toEqual([]);
 	});

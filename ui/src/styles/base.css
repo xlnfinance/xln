@@ -134,10 +134,19 @@ button.hash.copy:hover {
 }
 
 .display {
+	font-family: var(--font-num);
 	font-weight: 600;
 	letter-spacing: -0.03em;
 	line-height: 1;
 	color: var(--display);
+}
+:root[data-numbers='serif'] .display {
+	font-weight: 500;
+	letter-spacing: -0.01em;
+	font-variation-settings: 'opsz' 96;
+}
+:root[data-numbers='tight'] .display {
+	letter-spacing: -0.04em;
 }
 
 .display .dec {

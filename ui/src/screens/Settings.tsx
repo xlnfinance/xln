@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Sheet } from '../components/Sheet';
 import { Bar } from '../components/Bars';
+import { ACCENTS, MATERIALS, NUMBER_FONTS, RISK_COLORS } from '../runtime/design';
 import { CopyId } from '../components/CopyId';
 import { Icon } from '../components/Icons';
 import { clampUsdPerPx, USD_PER_PX_MAX, USD_PER_PX_MIN, useApp, type PlaceKey } from '../runtime/store';
@@ -47,6 +48,10 @@ function ScalePreview({ usdPerPx }: { usdPerPx: number }) {
 
 export function SettingsScreen() {
 	const theme = useApp(s => s.theme);
+	const density = useApp(s => s.density);
+	const setDensity = useApp(s => s.setDensity);
+	const design = useApp(s => s.design);
+	const setDesign = useApp(s => s.setDesign);
 	const setTheme = useApp(s => s.setTheme);
 	const usdPerPx = useApp(s => s.usdPerPx);
 	const setUsdPerPx = useApp(s => s.setUsdPerPx);
@@ -139,6 +144,20 @@ export function SettingsScreen() {
 				<h3 className="caps">Appearance</h3>
 			</div>
 			<div className="setting first">
+				<div>
+					<div className="t">Layout on wide screens</div>
+					<div className="s">Desk is the dense console: every account and lane in one table, the book beside it, ⌘K to jump.</div>
+				</div>
+				<span className="segc">
+					<button type="button" className={density === 'comfort' ? 'active' : ''} onClick={() => setDensity('comfort')} data-testid="density-comfort">
+						Comfort
+					</button>
+					<button type="button" className={density === 'desk' ? 'active' : ''} onClick={() => setDensity('desk')} data-testid="density-desk">
+						Desk
+					</button>
+				</span>
+			</div>
+			<div className="setting">
 				<div className="t">Theme</div>
 				<span className="segc">
 					<button type="button" className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}>
@@ -147,6 +166,100 @@ export function SettingsScreen() {
 					<button type="button" className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}>
 						<Icon name="sun" size={13} /> Light
 					</button>
+				</span>
+			</div>
+
+			<div className="sect">
+				<h3 className="caps">Design</h3>
+				<span className="faint">presets · yours to change</span>
+			</div>
+			<div className="card design-sample" data-testid="design-sample">
+				<div className="hero-label">Sample</div>
+				<div className="display num" style={{ fontSize: 34 }}>
+					$1,284,500<span className="dec">.00</span>
+				</div>
+				<div className="rb">
+					<Bar
+						segments={[
+							{ usd: 400_000, kind: 'onchain' },
+							{ usd: 300_000, kind: 'reserve' },
+							{ usd: 250_000, kind: 'coll' },
+							{ usd: 200_000, kind: 'risk' },
+							{ usd: 134_500, kind: 'debt' },
+						]}
+						height={8}
+					/>
+				</div>
+				<div className="actions" style={{ marginTop: 10 }}>
+					<button type="button" className="btn primary sm">
+						Pay
+					</button>
+					<button type="button" className="btn sm">
+						Receive
+					</button>
+				</div>
+			</div>
+			<div className="setting first">
+				<div>
+					<div className="t">Material</div>
+					<div className="s">{MATERIALS.find(entry => entry.id === design.material)?.hint}</div>
+				</div>
+				<span className="segc">
+					{MATERIALS.map(entry => (
+						<button key={entry.id} type="button" className={design.material === entry.id ? 'active' : ''} onClick={() => setDesign({ material: entry.id })} data-testid={`design-material-${entry.id}`}>
+							{entry.title}
+						</button>
+					))}
+				</span>
+			</div>
+			<div className="setting">
+				<div>
+					<div className="t">Accent</div>
+					<div className="s">{ACCENTS.find(entry => entry.id === design.accent)?.hint}</div>
+				</div>
+				<span className="segc">
+					{ACCENTS.map(entry => (
+						<button key={entry.id} type="button" className={design.accent === entry.id ? 'active' : ''} onClick={() => setDesign({ accent: entry.id })} data-testid={`design-accent-${entry.id}`} title={entry.title}>
+							{entry.swatch ? <i className="sw" style={{ background: entry.swatch }} /> : null}
+							{entry.title}
+						</button>
+					))}
+				</span>
+			</div>
+			{design.accent === 'custom' ? (
+				<div className="setting">
+					<div className="t">Custom accent</div>
+					<span className="field-row" style={{ gap: 8 }}>
+						<input type="color" value={design.accentHex} onChange={event => setDesign({ accentHex: event.target.value })} aria-label="Accent color" data-testid="design-accent-hex" />
+						<span className="mono muted">{design.accentHex}</span>
+					</span>
+				</div>
+			) : null}
+			<div className="setting">
+				<div>
+					<div className="t">Numbers</div>
+					<div className="s">{NUMBER_FONTS.find(entry => entry.id === design.numbers)?.hint}</div>
+				</div>
+				<span className="segc">
+					{NUMBER_FONTS.map(entry => (
+						<button key={entry.id} type="button" className={design.numbers === entry.id ? 'active' : ''} onClick={() => setDesign({ numbers: entry.id })} data-testid={`design-numbers-${entry.id}`}>
+							{entry.title}
+						</button>
+					))}
+				</span>
+			</div>
+			<div className="setting">
+				<div>
+					<div className="t">Risk color</div>
+					<div className="s">{RISK_COLORS.find(entry => entry.id === design.risk)?.hint}</div>
+				</div>
+				<span className="segc">
+					{RISK_COLORS.map(entry => (
+						<button key={entry.id} type="button" className={design.risk === entry.id ? 'active' : ''} onClick={() => setDesign({ risk: entry.id })} data-testid={`design-risk-${entry.id}`}>
+							<i className="sw" style={{ background: entry.swatch }} />
+							{entry.title}
+						</button>
+					))}
 				</span>
 			</div>
 

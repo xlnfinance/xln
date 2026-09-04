@@ -27,10 +27,10 @@ import {
 } from '../runtime/financial/move';
 import { displayEntityName, useWallet } from '../runtime/views';
 
-const PLACE_LABEL: Record<MoveEndpoint, { title: string; hint: string; kind: 'slate' | 'coll' | 'credit' }> = {
-	external: { title: 'Wallet', hint: 'On-chain, in your signer', kind: 'slate' },
-	reserve: { title: 'Reserve', hint: 'Depository escrow', kind: 'coll' },
-	account: { title: 'Account', hint: 'Bilateral, instant', kind: 'credit' },
+const PLACE_LABEL: Record<MoveEndpoint, { title: string; hint: string; kind: 'onchain' | 'reserve' | 'coll' }> = {
+	external: { title: 'Wallet', hint: 'On-chain, in your signer', kind: 'onchain' },
+	reserve: { title: 'Reserve', hint: 'Depository escrow', kind: 'reserve' },
+	account: { title: 'Account', hint: 'Bilateral, instant', kind: 'coll' },
 };
 
 const isPlace = (value: string | null): value is MoveEndpoint => value === 'external' || value === 'reserve' || value === 'account';

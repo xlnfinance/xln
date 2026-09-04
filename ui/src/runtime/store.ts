@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import type { RuntimeAdapterStatus } from '@xln/core/api/public/runtime-module';
+import type { ExternalWalletRow } from './financial/external';
+import { applyDesign, readDesign, saveDesign, type DesignPrefs } from './design';
 
 export type ThemeName = 'dark' | 'light';
+
+/** Comfort = the phone-first screens; Desk = the dense desktop console on wide viewports. */
+export type Density = 'comfort' | 'desk';
 
 export type VaultKind = 'brainvault' | 'mnemonic' | 'sandbox' | 'remote';
 
@@ -27,6 +32,7 @@ export type PlaceVisibility = Record<PlaceKey, boolean>;
 const VAULTS_KEY = 'xln-ui-vaults';
 const ACTIVE_VAULT_KEY = 'xln-ui-active-vault';
 const THEME_KEY = 'xln-ui-theme';
+const DENSITY_KEY = 'xln-ui-density';
 const USD_PER_PX_KEY = 'xln-ui-usd-per-px';
 const SCALE_MODE_KEY = 'xln-ui-scale-mode';
 /** Track the auto scale fits the largest balance into: the hero bar on desktop, the screen width on a phone. */
@@ -119,6 +125,13 @@ type AppState = {
 	theme: ThemeName;
 	setTheme: (theme: ThemeName) => void;
 
+	density: Density;
+	setDensity: (density: Density) => void;
+
+	/** Material, accent, number font, risk color: the brand axes anyone can set. */
+	design: DesignPrefs;
+	setDesign: (patch: Partial<DesignPrefs>) => void;
+
 	/** Dollars per pixel for every bar. Persisted; drives the --ppu CSS variable. */
 	usdPerPx: number;
 	/** `auto` fits the largest bar on Home to the track; `fixed` pins the user's own scale. */
@@ -153,6 +166,10 @@ type AppState = {
 	activeEntityId: string | null;
 	setActiveEntityId: (entityId: string | null) => void;
 
+	/** The signer's on-chain balances, read from the jurisdiction adapter when this page hosts the runtime. */
+	externalRows: ExternalWalletRow[];
+	setExternalRows: (rows: ExternalWalletRow[]) => void;
+
 	selectedTokenId: number;
 	setSelectedTokenId: (tokenId: number) => void;
 
@@ -169,6 +186,23 @@ export const useApp = create<AppState>((set, get) => ({
 		localStorage.setItem(THEME_KEY, theme);
 		document.documentElement.dataset['theme'] = theme;
 		set({ theme });
+	},
+
+	design: (() => {
+		const prefs = readDesign();
+		applyDesign(prefs);
+		return prefs;
+	})(),
+	setDesign: patch => {
+		const design = { ...get().design, ...patch };
+		saveDesign(design);
+		set({ design });
+	},
+
+	density: (localStorage.getItem(DENSITY_KEY) === 'desk' ? 'desk' : 'comfort') as Density,
+	setDensity: density => {
+		localStorage.setItem(DENSITY_KEY, density);
+		set({ density });
 	},
 
 	usdPerPx: readInitialUsdPerPx(),
@@ -241,6 +275,9 @@ export const useApp = create<AppState>((set, get) => ({
 
 	activeEntityId: null,
 	setActiveEntityId: entityId => set({ activeEntityId: entityId }),
+
+	externalRows: [],
+	setExternalRows: rows => set({ externalRows: rows }),
 
 	selectedTokenId: 1,
 	setSelectedTokenId: tokenId => set({ selectedTokenId: tokenId }),

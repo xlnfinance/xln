@@ -294,8 +294,20 @@
 .c-slate {
 	background: var(--slate);
 }
+.c-onchain {
+	background: var(--onchain);
+}
+.c-reserve {
+	background: var(--reserve);
+}
 .c-coll {
 	background: var(--coll);
+}
+.c-risk {
+	background: var(--risk);
+}
+.c-room {
+	background: var(--room);
 }
 .c-credit {
 	background: var(--credit);
@@ -307,7 +319,7 @@
 	background: var(--display);
 }
 .c-pend {
-	background: repeating-linear-gradient(135deg, var(--coll) 0 3px, var(--coll-dim) 3px 6px);
+	background: repeating-linear-gradient(135deg, var(--reserve) 0 3px, var(--coll-dim) 3px 6px);
 }
 .c-hold {
 	background: repeating-linear-gradient(135deg, var(--hold) 0 3px, var(--hold-dim) 3px 6px);
@@ -1760,4 +1772,164 @@ textarea.input.boxed {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+}
+
+/* ⌘K palette */
+.palette {
+	position: absolute;
+	left: 50%;
+	top: 12vh;
+	transform: translateX(-50%);
+	width: min(560px, calc(100vw - 32px));
+	background: var(--surface);
+	border: 1px solid var(--line-2);
+	border-radius: var(--radius-m);
+	box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+	overflow: hidden;
+}
+.palette-input {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--line);
+	color: var(--ink-2);
+}
+.palette-input .input {
+	border: 0;
+	background: transparent;
+	padding: 6px 0;
+	font-size: 16px;
+}
+.palette-list {
+	max-height: 50vh;
+	overflow-y: auto;
+	padding: 6px;
+}
+.palette-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 9px 10px;
+	border-radius: 8px;
+	text-align: left;
+	color: var(--ink);
+}
+.palette-item .t {
+	font-weight: 500;
+}
+.palette-item .s {
+	margin-left: auto;
+	color: var(--ink-3);
+	font-size: 12px;
+}
+.palette-item.active {
+	background: var(--surface-3);
+}
+
+/* Desk: the dense console */
+.desk-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 360px;
+	gap: 18px;
+	align-items: start;
+}
+.desk-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+}
+.desk-table th {
+	text-align: right;
+	font-weight: 500;
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--line-2);
+	white-space: nowrap;
+}
+.desk-table th:first-child,
+.desk-table td:first-child {
+	text-align: left;
+}
+.desk-table td {
+	text-align: right;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--line);
+	white-space: nowrap;
+	color: var(--ink);
+}
+.desk-table tr.tappable:hover td {
+	background: var(--surface-2);
+	cursor: pointer;
+}
+.desk-table td.bar-cell {
+	width: 220px;
+	padding-right: 0;
+}
+.desk-table tfoot td {
+	font-weight: 600;
+	border-top: 1px solid var(--line-2);
+	border-bottom: 0;
+}
+.desk-stat {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 10px;
+	margin-bottom: 16px;
+}
+.desk-stat .card {
+	padding: 12px 14px;
+	margin: 0;
+}
+.desk-stat .k {
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+}
+.desk-stat .v {
+	font-size: 22px;
+	font-weight: 600;
+	margin-top: 2px;
+}
+.kbd {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	padding: 1px 6px;
+	border: 1px solid var(--line-2);
+	border-radius: 5px;
+	color: var(--ink-2);
+}
+.desk-grid .card {
+	overflow: hidden;
+}
+.desk-grid .card + .card {
+	margin-top: 16px;
+}
+@media (max-width: 1200px) {
+	.desk-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* Settings: design sample + swatches inside segmented controls */
+.design-sample {
+	margin: 12px 0 14px;
+	--fade: var(--surface);
+}
+.segc button .sw {
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	margin-right: 6px;
+	vertical-align: -1px;
+}
+.segc {
+	flex-wrap: wrap;
 }

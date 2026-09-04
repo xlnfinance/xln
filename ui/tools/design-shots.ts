@@ -167,6 +167,25 @@ async function captureVariant(browser: Browser, variant: Variant): Promise<strin
 	await page.getByTestId('board').waitFor();
 	files.push(...(await shot(page, dir, '14-ownership', variant)));
 
+	await page.goBack();
+	await page.getByTestId('manage-sovereignty').click();
+	await page.getByTestId('sovereignty-hero').waitFor();
+	files.push(...(await shot(page, dir, '15-sovereignty', variant)));
+
+	if (!variant.mobile) {
+		await page.getByRole('link', { name: 'Settings' }).first().click();
+		await page.getByTestId('density-desk').click();
+		await page.getByRole('link', { name: 'Home' }).first().click();
+		await page.getByTestId('desk-table').waitFor();
+		files.push(...(await shot(page, dir, '16-desk', variant)));
+		await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+		await page.getByTestId('palette').waitFor();
+		files.push(...(await shot(page, dir, '17-palette', variant)));
+		await page.keyboard.press('Escape');
+		await page.getByRole('link', { name: 'Settings' }).first().click();
+		await page.getByTestId('density-comfort').click();
+	}
+
 	await page.getByRole('link', { name: 'Settings' }).first().click();
 	await page.getByText('Dollars per pixel').waitFor();
 	files.push(...(await shot(page, dir, '09-settings', variant)));

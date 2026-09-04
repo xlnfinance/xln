@@ -5,8 +5,10 @@
  * frontend sends them, with the sandbox's local equivalents where the page
  * hosts the chain itself.
  */
+import { useEffect } from 'react';
 import { isAddress } from 'ethers';
 import { postJson } from '../http';
+import { useApp } from '../store';
 import { demoFaucet, getDemoTopology } from '../sandbox';
 import { hostedJAdapter } from './move';
 
@@ -120,4 +122,31 @@ export async function sandboxFaucet(kind: 'offchain' | 'erc20', input: { entityI
 	const snapshot = await jadapter.readWalletSnapshot({ owner: input.signerId, tokenAddresses: [token.address] });
 	const current = snapshot.tokenBalances[0] ?? 0n;
 	await jadapter.fundSignerWallet(input.signerId, current + input.amount, token.symbol);
+}
+
+/**
+ * Keeps the store's on-chain rows fresh for the active entity: one read per
+ * committed runtime frame, throttled, embedded runtimes only (a remote runtime
+ * feeds the same numbers through its own watcher into `core.externalWallet`).
+ */
+export function useExternalWalletSync(entityId: string, signerId: string): void {
+	const height = useApp(s => s.height);
+	const setExternalRows = useApp(s => s.setExternalRows);
+	useEffect(() => {
+		if (!entityId || !signerId) return;
+		let cancelled = false;
+		const timer = setTimeout(() => {
+			readExternalWallet(entityId, signerId)
+				.then(wallet => {
+					if (!cancelled) setExternalRows(wallet.rows);
+				})
+				.catch(() => {
+					if (!cancelled) setExternalRows([]);
+				});
+		}, 400);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
+	}, [entityId, signerId, height, setExternalRows]);
 }

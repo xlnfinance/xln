@@ -4,6 +4,9 @@ import { useApp } from '../runtime/store';
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icons';
 import { Toasts } from './Toasts';
+import { Palette } from './Palette';
+import { useExternalWalletSync } from '../runtime/financial/external';
+import { useWallet } from '../runtime/views';
 
 /**
  * Destinations only. Pay, Receive and Swap are flows pushed over Home with a
@@ -21,7 +24,7 @@ const NAV: Array<{ to: string; label: string; icon: IconName; match: (pathname: 
 		to: '/manage',
 		label: 'Manage',
 		icon: 'accounts',
-		match: pathname => pathname.startsWith('/manage') || pathname.startsWith('/assets') || pathname.startsWith('/lend') || pathname.startsWith('/ownership'),
+		match: pathname => pathname.startsWith('/manage') || pathname.startsWith('/assets') || pathname.startsWith('/lend') || pathname.startsWith('/ownership') || pathname.startsWith('/sovereignty') || pathname.startsWith('/desk'),
 	},
 	{ to: '/settings', label: 'Settings', icon: 'settings', match: pathname => pathname.startsWith('/settings') },
 ];
@@ -31,12 +34,16 @@ const FLOW_ROUTES = new Set(['/pay', '/receive', '/swap', '/move']);
 
 export function Shell({ children }: { children: ReactNode }) {
 	const { pathname } = useLocation();
+	const entityId = useApp(s => s.activeEntityId);
+	const wallet = useWallet(entityId);
+	useExternalWalletSync(wallet.entityId, wallet.signerId);
 	const clearToasts = useApp(s => s.clearToasts);
 	// A toast belongs to the screen that raised it.
 	useEffect(() => clearToasts(), [pathname, clearToasts]);
 
 	return (
 		<div className="app">
+			<Palette />
 			<nav className="rail" aria-label="Primary">
 				<div className="rail-mark" aria-hidden>
 					△

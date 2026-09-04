@@ -29,6 +29,8 @@ async function enterSandbox(page: Page): Promise<void> {
 	}
 	await expect(page.getByTestId('home-total')).toBeVisible({ timeout: BOOT_TIMEOUT });
 	await expect(page.getByTestId('token-net-USDC')).toBeVisible({ timeout: CONSENSUS_TIMEOUT });
+	// The sandbox shapes the signer wallet (2,500 USDC + 1 WETH); wait for the on-chain tier so totals are stable.
+	await expect(page.getByTestId('home-onchain')).not.toContainText('$0.00', { timeout: CONSENSUS_TIMEOUT });
 }
 
 async function readUsdcNet(page: Page): Promise<number> {

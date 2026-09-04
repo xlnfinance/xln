@@ -5,6 +5,13 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 		<meta name="color-scheme" content="dark light" />
 		<title>xln</title>
+		<link rel="manifest" href="/manifest.webmanifest" />
+		<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+		<meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)" />
+		<meta name="theme-color" content="#f4f5f8" media="(prefers-color-scheme: light)" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<meta name="apple-mobile-web-app-title" content="xln" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link
 			rel="stylesheet"
@@ -19,6 +26,12 @@
 					} else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
 						document.documentElement.dataset.theme = 'light';
 					}
+					var d = JSON.parse(localStorage.getItem('xln-ui-design') || '{}');
+					var root = document.documentElement.dataset;
+					root.material = d.material || 'obsidian';
+					root.accent = d.accent || 'indigo';
+					root.numbers = d.numbers || 'sans';
+					root.risk = d.risk || 'violet';
 				} catch (_) {}
 			})();
 		</script>

@@ -22,6 +22,7 @@ export function Manage() {
 	const owed = debts.owed.reduce((sum, group) => sum + group.outstanding, 0n);
 
 	const doors: Array<{ to: string; icon: IconName; title: string; hint: string; testId: string }> = [
+		{ to: '/sovereignty', icon: 'shield', title: 'Sovereignty', hint: 'Keys, proofs, what is at risk', testId: 'manage-sovereignty' },
 		{ to: '/move', icon: 'arrow', title: 'Move', hint: 'Wallet ↔ reserve ↔ accounts', testId: 'manage-move' },
 		{ to: '/assets', icon: 'wallet', title: 'Assets', hint: 'On-chain wallet, faucets, debts', testId: 'manage-assets' },
 		{ to: '/lend', icon: 'bank', title: 'Lending', hint: 'Lend to a hub pool or borrow', testId: 'manage-lend' },

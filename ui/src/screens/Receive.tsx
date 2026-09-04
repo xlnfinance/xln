@@ -95,7 +95,7 @@ export function Receive() {
 								}}
 							/>
 						</div>
-						<Bar segments={[{ usd: usdOf(selectedTokenId, receivable), kind: 'credit' }]} height={4} />
+						<Bar segments={[{ usd: usdOf(selectedTokenId, receivable), kind: 'coll' }]} height={4} />
 					</div>
 					<div className="field">
 						<span className="field-label">Note · optional</span>
