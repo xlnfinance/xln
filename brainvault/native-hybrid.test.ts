@@ -258,6 +258,44 @@ test('accelerator child failures never disclose stderr or local paths', async ()
   expect(message).toBe('BRAINVAULT_ACCELERATOR_CHILD_FAILED:7');
 });
 
+test('one failed hybrid job promptly terminates a stalled sibling', async () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const password = new TextEncoder().encode('benchmark-password');
+  const salts = await Promise.all([0, 1].map(index => createShardSalt('benchmark-user', index, 2)));
+  const fixture = `${import.meta.dir}/test-fixtures/native-delayed.ts`;
+  const started = performance.now();
+  let message = '';
+  try {
+    await deriveHybridNativeShards({
+      engine: 'metal',
+      password,
+      salts,
+      memoryKiB: 262144,
+      requestedCpuWorkers: 1,
+      paths: {
+        packageRoot: import.meta.dir,
+        cpuExecutable: `${import.meta.dir}/test-fixtures/native-failure.ts`,
+        acceleratorExecutable: fixture,
+        metalLibrary: `${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`,
+      },
+    });
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  } finally {
+    password.fill(0);
+    for (const salt of salts) salt.fill(0);
+  }
+  const elapsed = performance.now() - started;
+  const found = Bun.spawnSync({ cmd: ['pgrep', '-f', fixture], stderr: 'pipe', stdout: 'pipe' });
+  const pids = found.exitCode === 0
+    ? found.stdout.toString().trim().split('\n').filter(Boolean).map(Number)
+    : [];
+  for (const pid of pids) if (Number.isSafeInteger(pid) && pid > 1) process.kill(pid, 'SIGKILL');
+  expect(message).toBe('BRAINVAULT_ACCELERATOR_CHILD_FAILED:7');
+  expect(elapsed).toBeLessThan(750);
+  expect(pids).toEqual([]);
+}, 5_000);
+
 test('invalid accelerator progress terminates the native child', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
   const fixture = `${import.meta.dir}/test-fixtures/native-invalid-progress.ts`;

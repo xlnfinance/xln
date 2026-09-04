@@ -13,10 +13,11 @@ kernel remains an independently written readable reference.
 
 The V1-specialized hybrid is now the measured M3 Ultra production engine.
 Automatic selection is restricted to that measured hardware class; the generic
-kernel remains selectable as an experimental independent implementation. Only
-an automatically selected accelerator may fall back to C/NEON; an explicitly
-selected accelerator fails closed. Promotion elsewhere still requires a
-real-device parity, memory-pressure, cancellation, and thermal matrix.
+kernel remains selectable as an experimental independent implementation. Auto
+chooses an available verified engine before derivation; once selected, every
+accelerator failure is fatal and never silently switches. Promotion elsewhere
+still requires a real-device parity, memory-pressure, cancellation, and thermal
+matrix.
 
 ## M3 Ultra result
 

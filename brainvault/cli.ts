@@ -10,7 +10,7 @@
  *   bun ./brainvault --lib=wasm                 # Force hash-wasm (slower, parity check)
  *   bun ./brainvault --lib=native               # Force portable @node-rs/argon2
  *   bun ./brainvault --lib=neon                 # Force bundled Apple Silicon C/NEON
- *   bun ./brainvault --engine=metal             # Force fastest Apple Metal hybrid
+ *   bun ./brainvault --engine=metal             # Force the Apple Metal hybrid
  *   bun ./brainvault --ask                      # Ask for factor, multiplier, and workers
  *   bun ./brainvault --allow-short-password     # Legacy recovery only: allow fewer than 8 chars
  *   bun ./brainvault --repeat                   # Interactive: require double entry for name/pass
@@ -36,10 +36,16 @@ import {
   factorForShardCount, formatDuration, bytesToHex,
   BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, deriveSitePassword, rootFingerprint,
 } from './core.ts';
-import { assertBrainVaultName, assertBrainVaultPassphrase, shardRequestFingerprint } from './primitives/spec.ts';
+import {
+  assertBrainVaultName,
+  assertBrainVaultPassphrase,
+  BRAINVAULT_MAX_SHARD_COUNT,
+  shardRequestFingerprint,
+} from './primitives/spec.ts';
+import { copyAndWipe } from './primitives/encoding.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import {
-  cliCreationCharacterError, cliPasswordError, cliProgressStatusLine,
+  cliCreationCharacterError, cliDomainError, cliPasswordError, cliProgressStatusLine,
   fitTerminal, publicErrorCode, publicErrorMessage,
 } from './cli-policy.ts';
 import { verifyBundledExecutable } from './binary-integrity.ts';
@@ -161,6 +167,19 @@ function supportsCursorControl(): boolean {
     && term !== 'unknown';
 }
 
+function supportsAlternateScreen(): boolean {
+  const term = process.env.TERM?.trim().toLowerCase();
+  return term !== undefined
+    && /^(?:xterm(?:[-.].*)?|screen(?:[-.].*)?|tmux(?:[-.].*)?|alacritty|foot(?:[-.].*)?|st(?:[-.].*)?)$/.test(term);
+}
+
+function hasReliableSensitiveGeometry(): boolean {
+  return Number.isSafeInteger(stdout.columns) && (stdout.columns ?? 0) >= 40
+    && Number.isSafeInteger(stdout.rows) && (stdout.rows ?? 0) >= 14
+    && terminalColumns() >= 40
+    && terminalRows() >= 14;
+}
+
 class PromptOutput extends Writable {
   muted = false;
 
@@ -172,6 +191,11 @@ class PromptOutput extends Writable {
     if (!this.muted) stdout.write(chunk, encoding);
     callback();
   }
+}
+
+// readline history can re-echo a muted answer at a later prompt via Up-arrow.
+function createPrivateReadline(output: Writable): readline.Interface {
+  return readline.createInterface({ input: stdin, output, terminal: true, historySize: 0 });
 }
 
 function printBrand(): void {
@@ -208,21 +232,26 @@ async function showPromoScreen(outro = false): Promise<void> {
   const bold = color ? '\x1b[1m' : '';
   const dim = color ? '\x1b[2m' : '';
   const reset = color ? '\x1b[0m' : '';
-  const indent = '      ';
-  const innerWidth = 52;
+  const columns = terminalColumns();
+  const innerWidth = Math.min(52, columns - 2);
+  const indent = ' '.repeat(Math.min(6, Math.max(0, Math.floor((columns - innerWidth - 2) / 2))));
   const border = (left: string, right: string): string =>
     `${indent}${cyan}${left}${'─'.repeat(innerWidth)}${right}${reset}`;
   const row = (text: string): string =>
     `${indent}${cyan}│${reset} ${fitTerminal(text, innerWidth - 2).padEnd(innerWidth - 2)} ${cyan}│${reset}`;
+  const centered = (text: string): string => {
+    const fitted = fitTerminal(text, columns);
+    return `${' '.repeat(Math.max(0, Math.floor((columns - fitted.length) / 2)))}${fitted}`;
+  };
   stdout.write('\x1b[2J\x1b[H\n\n');
   console.log(border('╭', '╮'));
   console.log(row(outro ? 'no account · no seed file · no cloud' : 'brainvault v1'));
   console.log(row(outro ? 'open source · auditable · deterministic' : 'memory-hard deterministic wallet'));
   if (!outro) console.log(row('same exact inputs → same wallet'));
   console.log(border('╰', '╯'));
-  if (!outro) console.log(`\n${dim}                  remember. derive. recover.${reset}`);
-  console.log(`\n${bold}${cyan}                       brainvault.sh${reset}`);
-  console.log(`\n${warning}              demo wallet · never fund addresses shown${reset}`);
+  if (!outro) console.log(`\n${dim}${centered('remember. derive. recover.')}${reset}`);
+  console.log(`\n${bold}${cyan}${centered('brainvault.sh')}${reset}`);
+  console.log(`\n${warning}${centered('demo wallet · never fund addresses shown')}${reset}`);
   await new Promise(resolve => setTimeout(resolve, outro ? 4_000 : 3_000));
   stdout.write('\x1b[2J\x1b[H');
 }
@@ -322,7 +351,9 @@ let sensitiveScreenOpen = false;
 
 function canUseSensitiveScreen(): boolean {
   return stdin.isTTY === true
-    && supportsCursorControl();
+    && stdout.isTTY === true
+    && supportsAlternateScreen()
+    && hasReliableSensitiveGeometry();
 }
 
 function openSensitiveScreen(): void {
@@ -414,7 +445,10 @@ async function selectOption(title: string, options: readonly string[], initial =
   if (!stdin.isTTY || !stdout.isTTY) return initial;
   if (!supportsCursorControl()) {
     console.log(`${title}:`);
-    for (const [index, option] of options.entries()) console.log(`${index + 1}. ${option}`);
+    for (const [index, option] of options.entries()) {
+      const prefix = `${index + 1}. `;
+      console.log(option.startsWith(prefix) ? option : `${prefix}${option}`);
+    }
     const plain = readline.createInterface({ input: stdin, output: stdout, terminal: false });
     try {
       const answer = (await plain.question(`${title} (enter a number; default ${initial + 1}): `)).trim();
@@ -504,7 +538,7 @@ Flags:
   Advanced interactive setup: ask for level/shards, shard multiplier, workers,
   and engine. Engine choice never changes the derived root.
   Without this flag the recommended wallet default is level 4 (10,000 shards),
-  multiplier 1, and the fastest bundled backend supported by the machine.
+  multiplier 1, and the verified production backend for the detected hardware.
 - --engine NAME
   Choose auto, metal, metal-generic, opencl, c-neon, c-neon-wipe,
   native-direct, native-sync, native, rust, rust-no-wipe, or wasm.
@@ -526,7 +560,7 @@ Flags:
   --shards is always exact. --factor preserves recovery of the legacy 1/10/100...
   scale and should not be used for new wallets.
 - --repeat
-  Interactive mode only: require second entry for Username and Password.
+  Interactive wallet and password modes: require second entry for Username and Password.
 - --show-password
   Echo password and confirmation input. Explicitly unsafe: characters appear on
   screen and may be retained by scrollback, recordings, logs, tmux, or photos.
@@ -551,7 +585,8 @@ Flags:
 - --suggest-password
   Interactive creation only: generate ${SUGGESTED_PASSWORD_CHARACTERS} random
   a-z/A-Z/0-9 characters (${SUGGESTED_PASSWORD_BITS.toFixed(2)} bits) with the
-  operating-system CSPRNG. It is shown once and must be repeated.
+  operating-system CSPRNG. It is shown once in a temporary sensitive screen,
+  must be repeated, and is then erased from the ordinary terminal view.
 - --unicode-recovery
   Permit non-ASCII input for existing V1 wallet recovery using NFKD/UTF-8 semantics.
   For values a terminal cannot represent exactly, use the library API and verify
@@ -664,6 +699,11 @@ const inlineWorkers = getPositiveIntFlag(['workers', 'w']);
 
 if ((revealRequested || showPrivateKey) && !canUseSensitiveScreen()) {
   console.error('Error: sensitive output requires a reliable interactive terminal with alternate-screen support.');
+  process.exit(1);
+}
+
+if (suggestPassword && !canUseSensitiveScreen()) {
+  console.error('Error: suggested passwords require a reliable interactive terminal with alternate-screen support.');
   process.exit(1);
 }
 
@@ -850,20 +890,41 @@ function resolveAcceleratorBundle(engine: AcceleratorEngine): AcceleratorBundle 
   return existsSync(executable) && existsSync(metalLibrary) ? { executable, metalLibrary } : undefined;
 }
 
-function getInteractiveEngineChoices(multiplier: number): EngineChoice[] {
+function getInteractiveEngineChoices(multiplier: number, shardCount: number): EngineChoice[] {
   const choices: EngineChoice[] = [];
-  if (multiplier === 1 && resolveAcceleratorBundle('metal') !== undefined && resolveNeonExecutable() !== undefined) {
+  const neonAvailable = resolveNeonExecutable() !== undefined;
+  const metalAvailable = multiplier === 1
+    && resolveAcceleratorBundle('metal') !== undefined
+    && neonAvailable;
+  const measuredMetalDefault = metalAvailable
+    && isMeasuredM3Ultra()
+    && shardCount >= 1_000;
+  const cNeon: EngineChoice = {
+    id: 'c-neon',
+    label: measuredMetalDefault
+      ? 'C/NEON final wipe (portable baseline)'
+      : 'C/NEON final wipe (portable Apple Silicon default)',
+    referenceRate: 191.87,
+  };
+  if (neonAvailable && !measuredMetalDefault) choices.push(cNeon);
+  if (metalAvailable) {
     choices.push(
-      { id: 'metal', label: 'Metal V1 + C/NEON hybrid (fastest)', referenceRate: 365.81 },
+      {
+        id: 'metal',
+        label: measuredMetalDefault
+          ? 'Metal V1 + C/NEON hybrid (measured M3 Ultra default)'
+          : 'Metal V1 + C/NEON hybrid (advanced; benchmark locally)',
+        referenceRate: 365.81,
+      },
       { id: 'metal-generic', label: '(experimental) Metal generic + C/NEON hybrid', referenceRate: 355.22 },
     );
   }
-  if (multiplier === 1 && resolveAcceleratorBundle('opencl') !== undefined && resolveNeonExecutable() !== undefined) {
+  if (multiplier === 1 && resolveAcceleratorBundle('opencl') !== undefined && neonAvailable) {
     choices.push({ id: 'opencl', label: '(experimental) OpenCL + C/NEON hybrid', referenceRate: 337.43 });
   }
-  if (resolveNeonExecutable() !== undefined) {
+  if (neonAvailable && measuredMetalDefault) choices.push(cNeon);
+  if (neonAvailable) {
     choices.push(
-      { id: 'c-neon', label: 'C/NEON final wipe (fastest)', referenceRate: 191.87 },
       { id: 'c-neon-wipe', label: '(experimental) C/NEON wipe after every shard', referenceRate: 177.11 },
     );
   }
@@ -1000,7 +1061,7 @@ async function deriveDirectAsyncShards(
         if (shardIndex >= shardCount) return;
         try {
           const salt = await createShardSalt(name, shardIndex, shardCount, algId);
-          shards[shardIndex] = new Uint8Array(await argon2Native(password, {
+          shards[shardIndex] = copyAndWipe(await argon2Native(password, {
             salt,
             memoryCost: shardMemoryKb,
             timeCost: BRAINVAULT_V1.ARGON_TIME_COST,
@@ -1042,7 +1103,8 @@ async function derive(name: string, passphrase: string, work: WorkSpec, workers 
   assertBrainVaultName(name);
   assertBrainVaultPassphrase(passphrase);
 
-  if (!Number.isSafeInteger(work.shardCount) || work.shardCount < 1) {
+  if (!Number.isSafeInteger(work.shardCount) || work.shardCount < 1
+    || work.shardCount > BRAINVAULT_MAX_SHARD_COUNT) {
     throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${work.shardCount}`);
   }
   if (!Number.isSafeInteger(workers) || workers < 1) {
@@ -1391,7 +1453,7 @@ async function showSensitiveMaterial(
 ): Promise<void> {
   const { header, pages } = sensitivePages(primary, secondary);
   openSensitiveScreen();
-  const dismissRl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
+  const dismissRl = createPrivateReadline(stdout);
   try {
     for (let index = 0; index < pages.length; index += 1) {
       if (index > 0) stdout.write('\x1b[2J\x1b[H');
@@ -1628,7 +1690,7 @@ async function runBenchmark(smoke = false) {
 
 async function interactive() {
   const promptOutput = new PromptOutput();
-  let rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+  let rl = createPrivateReadline(promptOutput);
 
   printBrand();
   console.log('\nHuman passwords have limited entropy.');
@@ -1646,6 +1708,10 @@ async function interactive() {
 
   printStep(1, 'IDENTITY');
   const name = await rl.question('Username: ');
+  if (!name) {
+    rejectPrompt(rl, 'Username cannot be empty');
+    return;
+  }
   if (requireRepeat) {
     const nameRepeat = await rl.question('Repeat Username: ');
     if (name !== nameRepeat) {
@@ -1653,25 +1719,34 @@ async function interactive() {
       return;
     }
   }
-
   let pass: string;
   if (suggestPassword) {
     pass = generateSuggestedPassword();
-    console.log(`\nGenerated recovery password · ${SUGGESTED_PASSWORD_CHARACTERS} random a-z/A-Z/0-9 characters`);
-    console.log(`${SUGGESTED_PASSWORD_BITS.toFixed(2)} bits while undisclosed:`);
-    console.log(pass);
-    console.log('BrainVault does not save it, but terminal scrollback may.');
-    console.log('This repeat checks transcription only; test a fresh recovery before funding.');
-    const passRepeat = await askPasswordInput(
-      rl,
-      promptOutput,
-      'Repeat generated password (hidden; typing works): ',
-      'Repeat generated password (VISIBLE): ',
-    );
-    if (pass !== passRepeat) {
+    let mismatch = false;
+    openSensitiveScreen();
+    try {
+      console.log(`Generated recovery password · ${SUGGESTED_PASSWORD_CHARACTERS} random a-z/A-Z/0-9 characters`);
+      console.log(`${SUGGESTED_PASSWORD_BITS.toFixed(2)} bits while undisclosed:`);
+      console.log(pass);
+      console.log('BrainVault does not save it. Recordings, terminal logs, and photographs cannot be erased.');
+      console.log('This repeat checks transcription only; test a fresh recovery before funding.');
+      const passRepeat = await askPasswordInput(
+        rl,
+        promptOutput,
+        'Repeat generated password (hidden; typing works): ',
+        'Repeat generated password (VISIBLE): ',
+      );
+      if (pass !== passRepeat) {
+        mismatch = true;
+      }
+    } finally {
+      eraseSensitiveScreen();
+    }
+    if (mismatch) {
       rejectPrompt(rl, 'Suggested password was not repeated exactly');
       return;
     }
+    console.log('Generated password confirmed. Sensitive view erased.');
   } else {
     pass = await askPasswordInput(
       rl,
@@ -1693,10 +1768,6 @@ async function interactive() {
     }
   }
 
-  if (!name) {
-    rejectPrompt(rl, 'Username cannot be empty');
-    return;
-  }
   const passwordError = getCliPasswordError(pass);
   if (passwordError !== undefined) {
     rejectPrompt(rl, passwordError);
@@ -1730,7 +1801,7 @@ async function interactive() {
       rl.close();
       const selectedIndex = await selectOption('work level', levelOptions, BRAINVAULT_DEFAULT_LEVEL - 1);
       selectedWork = workFromLevel(selectedIndex + 1);
-      rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+      rl = createPrivateReadline(promptOutput);
     }
 
     if (shardMultiplierFlag === undefined) {
@@ -1750,8 +1821,8 @@ async function interactive() {
     }
 
     if (selectedEngine === 'auto') {
-      const engineChoices = getInteractiveEngineChoices(selectedMultiplier);
-      console.log('\nAvailable engines (same tested root; reference measurement on one M3 Ultra, so your speed will differ):');
+      const engineChoices = getInteractiveEngineChoices(selectedMultiplier, selectedWork.shardCount);
+      console.log('\nAvailable engines (same tested root; rates are from one M3 Ultra, not a ranking for this Mac):');
       const engineOptions = engineChoices.map((choice, index) => {
         const warning = choice.warning === undefined ? '' : ` | WARNING: ${choice.warning}`;
         return `${index + 1}. ${choice.label} | ${choice.referenceRate.toFixed(2)} shards/s${warning}`;
@@ -1759,7 +1830,7 @@ async function interactive() {
       rl.close();
       const engineIndex = await selectOption('engine', engineOptions);
       selectedEngine = engineChoices[engineIndex]!.id;
-      rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+      rl = createPrivateReadline(promptOutput);
     }
   }
 
@@ -1837,7 +1908,7 @@ async function interactive() {
     stopIgnoringInput();
     stopIgnoringInput = undefined;
     const revealOutput = new PromptOutput();
-    const revealRl = readline.createInterface({ input: stdin, output: revealOutput, terminal: true });
+    const revealRl = createPrivateReadline(revealOutput);
     const confirmation = await askPasswordInput(
       revealRl,
       revealOutput,
@@ -1873,7 +1944,7 @@ async function interactive() {
   } catch (err) {
     progress.stop();
     if (isUserCancellation(err)) throw err;
-    const message = err instanceof Error ? err.message : String(err);
+    const message = publicErrorMessage(err, 'BRAINVAULT_DERIVATION_FAILED');
     console.error(`Derivation failed: ${message}`);
     process.exitCode = 1;
   } finally {
@@ -1888,7 +1959,7 @@ async function interactive() {
 
 async function derivePassword() {
   const promptOutput = new PromptOutput();
-  const rl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+  const rl = createPrivateReadline(promptOutput);
   let confirmationRl: readline.Interface | undefined;
   let rlPassword: readline.Interface | undefined;
   let rootKey: Uint8Array | undefined;
@@ -1900,22 +1971,46 @@ async function derivePassword() {
   console.log('\nPASSWORD MODE\n');
   printVisibleInputWarning();
   const name = await rl.question('Username: ');
+  if (!name) {
+    rejectPrompt(rl, 'Username cannot be empty');
+    return;
+  }
+  if (requireRepeat) {
+    const nameRepeat = await rl.question('Repeat Username: ');
+    if (name !== nameRepeat) {
+      rejectPrompt(rl, 'Username entries do not match');
+      return;
+    }
+  }
   const pass = await askPasswordInput(
     rl,
     promptOutput,
     'Password (hidden; typing works): ',
     'Password (VISIBLE): ',
   );
-  const inlineWork = workFromInlineSettings();
-  const selectedLevel = inlineWork === undefined
-    ? Number((await rl.question(`Level (${BRAINVAULT_DEFAULT_LEVEL}): `)).trim() || `${BRAINVAULT_DEFAULT_LEVEL}`)
-    : undefined;
+  if (requireRepeat) {
+    const passRepeat = await askPasswordInput(
+      rl,
+      promptOutput,
+      'Repeat Password (hidden; typing works): ',
+      'Repeat Password (VISIBLE): ',
+    );
+    if (pass !== passRepeat) {
+      rejectPrompt(rl, 'Password entries do not match');
+      return;
+    }
+  }
 
   const passwordError = getCliPasswordError(pass);
   if (passwordError !== undefined) {
     rejectPrompt(rl, passwordError);
     return;
   }
+
+  const inlineWork = workFromInlineSettings();
+  const selectedLevel = inlineWork === undefined
+    ? Number((await rl.question(`Level (${BRAINVAULT_DEFAULT_LEVEL}): `)).trim() || `${BRAINVAULT_DEFAULT_LEVEL}`)
+    : undefined;
   const characterError = getCliCreationCharacterError(name, pass);
   if (characterError !== undefined) {
     rejectPrompt(rl, characterError);
@@ -1959,7 +2054,7 @@ async function derivePassword() {
 
   stopIgnoringInput();
   stopIgnoringInput = undefined;
-  confirmationRl = readline.createInterface({ input: stdin, output: promptOutput, terminal: true });
+  confirmationRl = createPrivateReadline(promptOutput);
   const confirmation = await askPasswordInput(
     confirmationRl,
     promptOutput,
@@ -1973,11 +2068,21 @@ async function derivePassword() {
     return;
   }
 
-  rlPassword = readline.createInterface({ input: stdin, output: process.stdout });
+  rlPassword = createPrivateReadline(promptOutput);
 
   while (true) {
-    const domain = await rlPassword.question('Domain (or Enter to exit): ');
+    const domain = await askSecret(
+      rlPassword,
+      promptOutput,
+      'Domain (hidden; typing works; Enter exits): ',
+    );
     if (!domain) break;
+    const domainError = cliDomainError(domain);
+    if (domainError !== undefined) {
+      console.error(`Error: ${domainError}`);
+      process.exitCode = 1;
+      break;
+    }
 
     const sitePass = await deriveSitePassword(result.rootKey, domain);
     openSensitiveScreen();

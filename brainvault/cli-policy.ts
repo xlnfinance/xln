@@ -1,5 +1,6 @@
 export const MIN_CLI_PASSWORD_CHARACTERS = 8;
 const PRINTABLE_ASCII = /^[\x20-\x7e]+$/;
+const TERMINAL_CONTROL = /\p{Cc}/u;
 
 export function publicErrorCode(error: unknown, unknownCode: string): string {
   const message = error instanceof Error ? error.message : '';
@@ -42,6 +43,12 @@ export function cliPasswordError(passphrase: string, allowShort: boolean): strin
       + 'Use --allow-short-password only to recover an existing legacy wallet.';
   }
   return undefined;
+}
+
+export function cliDomainError(domain: string): string | undefined {
+  return TERMINAL_CONTROL.test(domain)
+    ? 'Domain cannot contain terminal control characters.'
+    : undefined;
 }
 
 export function cliCreationCharacterError(

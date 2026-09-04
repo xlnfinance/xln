@@ -18,7 +18,8 @@ nested inside the npm package.
    byte-identical SHA-256 output and equality with every shipped prebuild. Rust
    must build with an empty `CARGO_HOME`, `--offline --locked`, `apple-m1` for
    the portable baseline, and `apple-m3` for a separately named M3-family
-   variant, then
+   variant. Every Apple executable and Metal library must target the M1-era
+   macOS 11.0 deployment baseline, then
    run `bun run manifest` to regenerate `MANIFEST.sha256`; record `clang --version`, `rustc -Vv`, Cargo,
    Bun, macOS, SDK, CPU model, and the exact build flags in signed provenance;
 3. pack with lifecycle scripts disabled and record the tarball SHA-256 and npm

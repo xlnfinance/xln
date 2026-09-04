@@ -15,6 +15,7 @@
 
 import { argon2id } from 'hash-wasm';
 import { assertBrainVaultPassphrase, BRAINVAULT_V1 } from './spec.ts';
+import { copyAndWipe } from './encoding.ts';
 
 export interface BrainvaultKdfParams {
   algId?: string;
@@ -71,7 +72,7 @@ export async function deriveShardWithParams(
       hashLength: kdf.shardOutputBytes,
       outputType: 'binary',
     });
-    return new Uint8Array(result);
+    return copyAndWipe(result);
   } finally {
     password.fill(0);
   }

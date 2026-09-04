@@ -1,4 +1,4 @@
-type NativeChild = Pick<Bun.Subprocess, 'exited' | 'exitCode' | 'kill'>;
+export type NativeChild = Pick<Bun.Subprocess, 'exited' | 'exitCode' | 'kill'>;
 
 const activeNativeChildren = new Set<NativeChild>();
 
@@ -11,8 +11,8 @@ export function trackNativeChild<T extends NativeChild>(child: T): T {
   return child;
 }
 
-export async function terminateNativeChildren(): Promise<void> {
-  const children = [...activeNativeChildren];
+export async function terminateNativeChildGroup(group: Iterable<NativeChild>): Promise<void> {
+  const children = [...group];
   for (const child of children) {
     try { child.kill('SIGTERM'); } catch {}
   }
@@ -24,4 +24,8 @@ export async function terminateNativeChildren(): Promise<void> {
     }
   }
   await exited;
+}
+
+export async function terminateNativeChildren(): Promise<void> {
+  await terminateNativeChildGroup(activeNativeChildren);
 }

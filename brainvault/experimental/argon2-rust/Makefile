@@ -1,25 +1,26 @@
 .PHONY: all secure secure-m3 no-wipe no-wipe-m3 prebuild clean
 
-PORTABLE_FLAGS := -C target-cpu=apple-m1
-M3_FLAGS := -C target-cpu=apple-m3
+MACOS_MIN := 11.0
+PORTABLE_FLAGS := -C target-cpu=apple-m1 -C link-arg=-mmacosx-version-min=$(MACOS_MIN)
+M3_FLAGS := -C target-cpu=apple-m3 -C link-arg=-mmacosx-version-min=$(MACOS_MIN)
 CARGO_BUILD := cargo build --offline --release --locked
 PREBUILD_DIR := ../../prebuilds/darwin-arm64
 
 all: secure secure-m3 no-wipe no-wipe-m3
 
 secure:
-	RUSTFLAGS="$(PORTABLE_FLAGS)" $(CARGO_BUILD) --target-dir target-m1
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) RUSTFLAGS="$(PORTABLE_FLAGS)" $(CARGO_BUILD) --target-dir target-m1
 
 # Release artifact for M3-family Macs. Build this target only on an M3 host;
 # runtime selection checks the CPU model before executing it.
 secure-m3:
-	RUSTFLAGS="$(M3_FLAGS)" $(CARGO_BUILD) --target-dir target-m3
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) RUSTFLAGS="$(M3_FLAGS)" $(CARGO_BUILD) --target-dir target-m3
 
 no-wipe:
-	RUSTFLAGS="$(PORTABLE_FLAGS)" $(CARGO_BUILD) --no-default-features --target-dir target-m1-no-wipe
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) RUSTFLAGS="$(PORTABLE_FLAGS)" $(CARGO_BUILD) --no-default-features --target-dir target-m1-no-wipe
 
 no-wipe-m3:
-	RUSTFLAGS="$(M3_FLAGS)" $(CARGO_BUILD) --no-default-features --target-dir target-m3-no-wipe
+	MACOSX_DEPLOYMENT_TARGET=$(MACOS_MIN) RUSTFLAGS="$(M3_FLAGS)" $(CARGO_BUILD) --no-default-features --target-dir target-m3-no-wipe
 
 prebuild: all
 	mkdir -p $(PREBUILD_DIR)

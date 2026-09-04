@@ -50,16 +50,18 @@ run produced the same master root shown above.
 | Existing native worker via common harness | 6.265 s | 159.61 | 2.45x |
 | Native Rust pooled, secure wipe | 6.710 s | 149.03 | 2.29x |
 | Native Rust pooled, final wipe only | 7.303 s | 136.94 | 2.10x |
-| TypeScript/WASM (`hash-wasm`) | 13.096 s | 76.36 | 2.17x |
+| TypeScript/WASM (`hash-wasm`) | 13.096 s | 76.36 | 1.17x |
 
 The C final-wipe process does not leave a long-lived dirty arena: each worker
 reuses its arena only while processing its assigned shards, then securely wipes
 the full 256 MiB before the subprocess exits. On macOS that final erase uses the
 non-elidable, libc-vectorized C11 `memset_s`; other platforms retain the portable
 volatile fallback. The source variants and comparison
-modes remain under `experimental/`; the publishable CLI bundles release builds
-as its fast Apple Silicon default and falls back to the portable native binding.
-Both paths automatically use all CPU cores allowed by RAM.
+modes remain under `experimental/`; the publishable CLI selects a verified
+C/NEON release build as its fast Apple Silicon default when eligible, otherwise
+the portable native binding. Selection happens before derivation; a runtime
+engine failure is fatal and never silently switches. Both paths automatically
+use all CPU cores allowed by RAM.
 
 ## Apple GPU research
 

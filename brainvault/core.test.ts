@@ -25,10 +25,11 @@ import {
 } from './core.ts';
 import { BIP39_ENGLISH } from './bip39-english.ts';
 import { resolveKdfParams } from './primitives/kdf.ts';
+import { copyAndWipe } from './primitives/encoding.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, shardRequestFingerprint } from './primitives/spec.ts';
 import { acceptShard, createShardSlots, finalizeShards } from './shard-collector.ts';
 import {
-  cliCreationCharacterError, cliPasswordError, cliProgressStatusLine,
+  cliCreationCharacterError, cliDomainError, cliPasswordError, cliProgressStatusLine,
   publicErrorCode, publicErrorMessage,
 } from './cli-policy.ts';
 import { deriveBrainVaultNative } from './native.ts';
@@ -127,9 +128,43 @@ test('public errors retain codes without disclosing diagnostics', () => {
   )).toBe('BRAINVAULT_PASSWORD_MODE_TERMINAL_REQUIRED: site passwords require alternate-screen support');
 });
 
+test('site-password domains reject terminal control bytes before display', () => {
+  expect(cliDomainError('example.com')).toBeUndefined();
+  expect(cliDomainError('bücher.example')).toBeUndefined();
+  for (const domain of ['evil\x1b[?1049l.example', 'evil\u009b31m.example', 'evil\x07.example']) {
+    expect(cliDomainError(domain)).toBe('Domain cannot contain terminal control characters.');
+  }
+});
+
+test('backend-owned secret bytes are copied for the caller and wiped', () => {
+  const owned = Uint8Array.of(1, 2, 3, 255);
+  const copy = copyAndWipe(owned);
+  expect(copy).toEqual(Uint8Array.of(1, 2, 3, 255));
+  expect(owned).toEqual(Uint8Array.of(0, 0, 0, 0));
+});
+
 test('full progress status never wraps at its non-compact terminal boundary', () => {
   const line = cliProgressStatusLine(10_000, 10_000, 99.9, 'ETA 16m 59s', 32, 72);
   expect(line.length).toBeLessThanOrEqual(72);
+});
+
+test('promo banner stays inside an ultra-narrow terminal', () => {
+  const script = [
+    'set timeout 5',
+    'spawn env COLUMNS=20 NO_COLOR=1 TERM=xterm-256color bun cli.ts --promo',
+    'expect "brainvault.sh"',
+    'exec kill -INT [exp_pid]',
+    'expect eof',
+  ].join('\n');
+  const result = Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+  const lines = result.stdout.toString()
+    .replaceAll(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .split(/[\r\n]+/)
+    .filter(line => line !== '' && !line.startsWith('spawn '));
+  expect(lines.length).toBeGreaterThan(0);
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(20);
 });
 
 test('canonical manifest authenticates every listed source and native binary', async () => {
@@ -188,6 +223,15 @@ test('factor mapping is integer-only and preserves the V1 formula', () => {
   }
   expect(() => factorForShardCount(Number.NaN)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
   expect(() => factorForShardCount(1.5)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID');
+  expect(factorForShardCount(0xffff_ffff)).toBe(11);
+  expect(() => factorForShardCount(0x1_0000_0000)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID:4294967296');
+  expect(() => rootDomain(11, 0x1_0000_0000)).toThrow('BRAINVAULT_SHARD_COUNT_INVALID:4294967296');
+  expect(() => shardRequestFingerprint(
+    0,
+    0x1_0000_0000,
+    BRAINVAULT_V1.ALG_ID,
+    BRAINVAULT_V1.SHARD_MEMORY_KB,
+  )).toThrow('BRAINVAULT_WORKER_REQUEST_INVALID');
   expect(() => getShardCount(Number.NaN)).toThrow('Factor must be 1-9');
   expect(() => getShardCount(1.5)).toThrow('Factor must be 1-9');
   expect(validateInputs('a', 'a', 1).valid).toBe(true);
@@ -328,6 +372,20 @@ test('native orchestration rejects worker crash, truncation, and unsafe concurre
   await expect(deriveBrainVaultNative({
     name: 'alice', passphrase: 'secret123456', shardInput: unsafeWorkers, workers: unsafeWorkers,
   })).rejects.toThrow('BRAINVAULT_WORKERS_EXCEED_MEMORY_LIMIT');
+});
+
+test('native worker reuse preserves output across worker counts', async () => {
+  const workerPath = `${import.meta.dir}/test-fixtures/worker-deterministic.ts`;
+  const input = { name: 'reuse-audit', passphrase: 'secret123456', shardInput: 6 };
+  const progress: number[] = [];
+  const sequential = await deriveBrainVaultNative({ ...input, workers: 1 }, { workerPath });
+  const parallel = await deriveBrainVaultNative({ ...input, workers: 2 }, {
+    workerPath,
+    onProgress: state => progress.push(state.completed),
+  });
+  expect(parallel.ethereumAddress).toBe(sequential.ethereumAddress);
+  expect(parallel.mnemonic24).toBe(sequential.mnemonic24);
+  expect(progress).toEqual([1, 2, 3, 4, 5, 6]);
 });
 
 async function tinyRoot(name: string, passphrase: string, shardCount = 1): Promise<string> {
@@ -553,8 +611,11 @@ function runCliInputTty(
   commandPrefix = 'env TERM=xterm-256color COLUMNS=80 ',
 ) {
   const command = `${commandPrefix}${['bun', 'cli.ts', ...extraArgs].join(' ')}`;
+  const columns = Number(commandPrefix.match(/COLUMNS=(\d+)/)?.[1] ?? 80);
+  const rows = Number(commandPrefix.match(/LINES=(\d+)/)?.[1] ?? 24);
   const script = [
     'set timeout 10',
+    `set stty_init "rows ${rows} cols ${columns}"`,
     `spawn ${command}`,
     ...interactions,
     'expect eof',
@@ -570,6 +631,7 @@ function runCliTty(extraArgs: readonly string[], confirmation = '') {
   const command = ['env', 'TERM=xterm-256color', 'COLUMNS=80', 'bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native', ...extraArgs].join(' ');
   const script = [
     'set timeout 10',
+    'set stty_init "rows 24 cols 80"',
     `spawn ${command}`,
     'expect "Username: "',
     'send "alice\\r"',
@@ -595,12 +657,37 @@ function runCliTty(extraArgs: readonly string[], confirmation = '') {
   });
 }
 
+function runSensitivePreflight(
+  term: string,
+  columns: number,
+  rows: number,
+  modeArgs: readonly string[] = ['--password'],
+) {
+  const script = [
+    'set timeout 3',
+    `set stty_init "rows ${rows} cols ${columns}"`,
+    `spawn env -u COLUMNS -u LINES NO_COLOR=1 TERM=${term} bun cli.ts ${modeArgs.join(' ')}`,
+    'expect {',
+    '  "site passwords require alternate-screen support" {}',
+    '  "suggested passwords require a reliable interactive terminal" {}',
+    '  "Username: " { send "\\003" }',
+    '}',
+    'expect eof',
+    'catch wait result',
+    'exit [lindex $result 3]',
+  ].join('\n');
+  return Bun.spawnSync({
+    cmd: ['expect', '-c', script], cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+  });
+}
+
 function runAnimatedCliTty(noColor: boolean, columns = 80) {
   const environment = noColor
     ? `env NO_COLOR=1 TERM=xterm-256color COLUMNS=${columns}`
     : `env -u NO_COLOR TERM=xterm-256color COLUMNS=${columns}`;
   const script = [
     'set timeout 10',
+    `set stty_init "rows 24 cols ${columns}"`,
     `spawn ${environment} bun cli.ts --shards 100 --workers 32 --engine c-neon`,
     'expect "Username: "',
     'send "progress-audit\\r"',
@@ -670,6 +757,37 @@ function runBrokenAcceleratorCliTty() {
   }
 }
 
+function runMissingNativeWorkerCliTty() {
+  const temp = mkdtempSync(join(tmpdir(), 'brainvault-missing-worker-'));
+  try {
+    const packed = Bun.spawnSync({
+      cmd: ['bun', 'pm', 'pack', '--ignore-scripts', '--destination', temp, '--quiet'],
+      cwd: import.meta.dir, stderr: 'pipe', stdout: 'pipe',
+    });
+    if (packed.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_PACK_FAILED:${packed.stderr.toString()}`);
+    const reported = packed.stdout.toString().trim();
+    const archive = reported.startsWith('/') ? reported : join(temp, reported);
+    const extract = join(temp, 'extract');
+    mkdirSync(extract);
+    const unpacked = Bun.spawnSync({ cmd: ['tar', '-xzf', archive, '-C', extract], stderr: 'pipe' });
+    if (unpacked.exitCode !== 0) throw new Error(`BRAINVAULT_TEST_UNPACK_FAILED:${unpacked.stderr.toString()}`);
+    const packageRoot = join(extract, 'package');
+    const localModules = join(import.meta.dir, 'node_modules');
+    symlinkSync(existsSync(localModules) ? localModules : join(import.meta.dir, '..'), join(packageRoot, 'node_modules'));
+    rmSync(join(packageRoot, 'worker-native.ts'));
+    const script = [
+      'set timeout 10',
+      'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --shards 1 --workers 1 --engine native',
+      'expect "Username: "', 'send "alice\\r"',
+      'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+      'expect eof', 'catch wait result', 'exit [lindex $result 3]',
+    ].join('\n');
+    return Bun.spawnSync({ cmd: ['expect', '-c', script], cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+
 function runSignalDuringNativeDerivation(signal: 'TERM' | 'HUP') {
   const temp = mkdtempSync(join(tmpdir(), 'brainvault-signal-child-'));
   try {
@@ -718,7 +836,7 @@ function runSignalDuringNativeDerivation(signal: 'TERM' | 'HUP') {
       `spawn env NO_COLOR=1 TERM=xterm-256color bun ${wrapper} ${join(packageRoot, 'cli.ts')} ${cliPidFile} ${nativePidFile} --shards 100 --workers 32 --engine c-neon`,
       'expect "Username: "', 'send "signal-audit\\r"',
       'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
-      'expect "1 / 100 shards"',
+      'expect { "1 / 100 shards" {} timeout { exit 99 } }',
       `set handle [open ${cliPidFile} r]`,
       'set cli_pid [string trim [read $handle]]',
       'close $handle',
@@ -739,6 +857,7 @@ function runSignalDuringNativeDerivation(signal: 'TERM' | 'HUP') {
 function runAskCliTty() {
   const script = [
     'set timeout 10',
+    'set stty_init "rows 24 cols 80"',
     'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --ask --engine native --workers 1 --multiplier 1',
     'expect "Username: "',
     'send "alice\\r"',
@@ -839,6 +958,27 @@ test('--show-password visibly echoes password input only when explicitly request
   expect(output).not.toContain('PRIMARY (24-word)');
 });
 
+test('hidden password cannot be recalled into a later visible prompt', () => {
+  const secret = 'SYNTHETIC-HISTORY-SECRET-123';
+  const passwordMode = runCliInputTty(['--password', '--engine', 'native'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', `send "${secret}\\r"`,
+    'expect "Level (4): "', 'send "\\033\\[A"', 'after 100', 'send "\\003"',
+  ]);
+  expect(passwordMode.exitCode).toBe(130);
+  expect(passwordMode.stdout.toString()).not.toContain(secret);
+
+  const advanced = runCliInputTty([
+    '--ask', '--shards', '1', '--workers', '1', '--engine', 'native',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', `send "${secret}\\r"`,
+    'expect "Shard multiplier (1): "', 'send "\\033\\[A"', 'after 100', 'send "\\003"',
+  ]);
+  expect(advanced.exitCode).toBe(130);
+  expect(advanced.stdout.toString()).not.toContain(secret);
+});
+
 test('--show-password covers repeat and password-manager confirmation explicitly', async () => {
   const repeated = runCliInputTty([
     '--show-password', '--repeat', '--shards', '1', '--workers', '1', '--engine', 'native',
@@ -858,7 +998,13 @@ test('--show-password covers repeat and password-manager confirmation explicitly
     'expect "Repeat generated password (VISIBLE): "', 'send "deliberately-wrong\\r"',
   ]);
   expect(suggested.exitCode).toBe(1);
-  expect(suggested.stdout.toString()).toContain('Suggested password was not repeated exactly');
+  const suggestedOutput = suggested.stdout.toString();
+  expect(suggestedOutput).toContain('Suggested password was not repeated exactly');
+  expect(suggestedOutput).toContain('\x1b[?1049h');
+  expect(suggestedOutput).toContain('\x1b[?1049l');
+  expect(suggestedOutput.indexOf('\x1b[?1049l')).toBeLessThan(
+    suggestedOutput.indexOf('Suggested password was not repeated exactly'),
+  );
 
   const expectedSitePassword = await deriveSitePassword(VECTORS[0]!.expect.masterKey, 'example.com');
   const managed = runCliInputTty(['--password', '--show-password', '--engine', 'native'], [
@@ -866,21 +1012,23 @@ test('--show-password covers repeat and password-manager confirmation explicitly
     'expect "Password (VISIBLE): "', 'send "secret123456\\r"',
     'expect "Level (4): "', 'send "1\\r"',
     'expect "Re-enter password to enable site-password output (VISIBLE): "', 'send "secret123456\\r"',
-    'expect "Domain (or Enter to exit): "', 'send "example.com\\r"',
+    'expect "Domain (hidden; typing works; Enter exits): "', 'send "example.com\\r"',
     'expect "Press Enter to clear and continue: "', 'send "\\r"',
-    'expect "Domain (or Enter to exit): "', 'send "\\r"',
+    'expect "Domain (hidden; typing works; Enter exits): "', 'send "\\r"',
   ]);
   const managedOutput = managed.stdout.toString();
   expect(managed.exitCode).toBe(0);
   expect(managedOutput).toContain(expectedSitePassword);
   expect(managedOutput).toContain('\x1b[?1049h');
   expect(managedOutput).toContain('\x1b[?1049l');
+  expect(managedOutput.indexOf('\x1b[?1049h')).toBeLessThan(managedOutput.indexOf('example.com'));
 });
 
 test('password mode honors inline exact recovery work instead of prompting for a level', async () => {
   const expectedSitePassword = await deriveSitePassword(VECTORS[0]!.expect.masterKey, 'example.com');
   const script = [
     'set timeout 10',
+    'set stty_init "rows 24 cols 80"',
     'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --password --shards 1 --workers 1 --engine native',
     'expect "Username: "', 'send "alice\\r"',
     'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
@@ -889,9 +1037,9 @@ test('password mode honors inline exact recovery work instead of prompting for a
     '  "Re-enter password to enable site-password output (hidden; typing works): " {}',
     '}',
     'send "secret123456\\r"',
-    'expect "Domain (or Enter to exit): "', 'send "example.com\\r"',
+    'expect "Domain (hidden; typing works; Enter exits): "', 'send "example.com\\r"',
     'expect "Press Enter to clear and continue: "', 'send "\\r"',
-    'expect "Domain (or Enter to exit): "', 'send "\\r"',
+    'expect "Domain (hidden; typing works; Enter exits): "', 'send "\\r"',
     'expect eof',
     'catch wait result',
     'exit [lindex $result 3]',
@@ -908,10 +1056,17 @@ test('password mode honors inline exact recovery work instead of prompting for a
 test('interactive validation failures return a nonzero status', () => {
   const emptyName = runCliInputTty([], [
     'expect "Username: "', 'send "\\r"',
-    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
   ]);
   expect(emptyName.exitCode).toBe(1);
   expect(emptyName.stdout.toString()).toContain('Username cannot be empty');
+  expect(emptyName.stdout.toString()).not.toContain('Password (hidden; typing works)');
+
+  const emptyPasswordModeName = runCliInputTty(['--password'], [
+    'expect "Username: "', 'send "\\r"',
+  ]);
+  expect(emptyPasswordModeName.exitCode).toBe(1);
+  expect(emptyPasswordModeName.stdout.toString()).toContain('Username cannot be empty');
+  expect(emptyPasswordModeName.stdout.toString()).not.toContain('BRAINVAULT_ASCII_CREATION_REQUIRED');
 
   const shortPassword = runCliInputTty([], [
     'expect "Username: "', 'send "alice\\r"',
@@ -926,6 +1081,26 @@ test('interactive validation failures return a nonzero status', () => {
   ]);
   expect(repeatedName.exitCode).toBe(1);
   expect(repeatedName.stdout.toString()).toContain('Username entries do not match');
+
+  const repeatedPasswordModeName = runCliInputTty(['--password', '--repeat'], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Repeat Username: "', 'send "bob\\r"',
+  ]);
+  expect(repeatedPasswordModeName.exitCode).toBe(1);
+  expect(repeatedPasswordModeName.stdout.toString()).toContain('Username entries do not match');
+
+  for (const mode of [[], ['--password']] as const) {
+    const emptyRepeatedName = runCliInputTty([...mode, '--repeat'], [
+      'expect "Username: "', 'send "\\r"',
+      'expect {',
+      '  "Username cannot be empty" {}',
+      '  "Repeat Username: " { send "not-empty\\r" }',
+      '}',
+    ]);
+    expect(emptyRepeatedName.exitCode).toBe(1);
+    expect(emptyRepeatedName.stdout.toString()).toContain('Username cannot be empty');
+    expect(emptyRepeatedName.stdout.toString()).not.toContain('Repeat Username:');
+  }
 
   const excessiveWorkers = runCliInputTty(['--shards', '1', '--workers', '2'], [
     'expect "Username: "', 'send "alice\\r"',
@@ -951,6 +1126,7 @@ test('Ctrl+C exits the entire CLI and impossible RAM plans fail before allocatio
 
   const passwordScript = [
     'set timeout 5',
+    'set stty_init "rows 24 cols 80"',
     'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --password',
     'expect "Username: "',
     'send "alice\\r"',
@@ -1011,6 +1187,27 @@ test('CLI advanced menu accepts keyboard navigation and derives the selected lev
   ], 'env COLUMNS=40 NO_COLOR=1 TERM=xterm-256color ');
   expect(narrow.exitCode).toBe(0);
   expect(narrow.stdout.toString()).toContain('1 shards × 1 workers');
+});
+
+test('advanced engine menu defaults only the measured M3 Ultra profile to Metal', () => {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
+  const measuredM3Ultra = totalmem() >= 500 * 1024 ** 3
+    && cpus().length === 32
+    && cpus().some(cpu => cpu.model.toLowerCase().includes('apple m3'));
+  const expectedDefault = measuredM3Ultra
+    ? '> 1. Metal V1 + C/NEON hybrid (measured M3 Ultra default)'
+    : '> 1. C/NEON final wipe (portable Apple Silicon default)';
+  const result = runCliInputTty([
+    '--ask', '--shards', '1000', '--workers', '1', '--multiplier', '1',
+  ], [
+    'expect "Username: "', 'send "engine-menu-audit\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    `expect "${expectedDefault}"`, 'send "\\003"',
+  ], 'env COLUMNS=100 NO_COLOR=1 TERM=xterm-256color ');
+  const output = result.stdout.toString();
+  expect(output).not.toContain('DERIVING');
+  expect(output).toContain(expectedDefault);
+  expect(output).not.toContain('(fastest)');
 });
 
 test('inline unsafe work levels are visibly marked DO NOT FUND', () => {
@@ -1086,6 +1283,7 @@ test('Ctrl+C inside sensitive view erases it and exits the entire CLI', () => {
   const command = ['env', 'TERM=xterm-256color', 'COLUMNS=80', 'bun', 'cli.ts', '--shards', '1', '--workers', '1', '--engine', 'native'].join(' ');
   const script = [
     'set timeout 10',
+    'set stty_init "rows 24 cols 80"',
     `spawn ${command}`,
     'expect "Username: "',
     'send "alice\\r"',
@@ -1115,6 +1313,7 @@ test('SIGTERM and SIGHUP erase the sensitive screen before exiting', () => {
   for (const [signal, exitCode] of [['TERM', 143], ['HUP', 129]] as const) {
     const script = [
       'set timeout 10',
+      'set stty_init "rows 24 cols 80"',
       'spawn env TERM=xterm-256color COLUMNS=80 bun cli.ts --shards 1 --workers 1 --engine native',
       'expect "Username: "', 'send "alice\\r"',
       'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
@@ -1145,6 +1344,10 @@ test('SIGTERM and SIGHUP terminate an active native child', () => {
     expect(childAlive).toBe(false);
   }
 }, 30_000);
+
+test('native hang fixture emits the canonical progress protocol', () => {
+  expect(readFileSync(`${import.meta.dir}/test-fixtures/native-hang.ts`, 'utf8')).toContain("'BVP1 1\\n'");
+});
 
 test('TERM=dumb refuses recovery-word disclosure after a public derivation', () => {
   const script = [
@@ -1189,6 +1392,19 @@ test('TERM=dumb refuses recovery-word disclosure after a public derivation', () 
   expect(menu.exitCode).toBe(0);
   expect(menu.stdout.toString()).not.toContain('\x1b[2A');
   expect(menu.stdout.toString()).not.toContain('\x1b[2K');
+  expect(menu.stdout.toString()).not.toMatch(/(?:^|\n)1\. 1\./);
+
+  const suggested = runCliInputTty(['--suggest-password'], [
+    'expect {',
+    '  "suggested passwords require a reliable interactive terminal" {}',
+    '  "Username: " { send "alice\\r"; exp_continue }',
+    '  "Generated recovery password" { exp_continue }',
+    '  "Repeat generated password (hidden; typing works): " { send "wrong-password\\r" }',
+    '}',
+  ], 'env TERM=dumb NO_COLOR=1 ');
+  expect(suggested.exitCode).toBe(1);
+  expect(suggested.stdout.toString()).toContain('suggested passwords require a reliable interactive terminal');
+  expect(suggested.stdout.toString()).not.toContain('Generated recovery password');
 });
 
 test('missing TERM refuses recovery-word disclosure after a public derivation', () => {
@@ -1215,6 +1431,44 @@ test('missing TERM refuses recovery-word disclosure after a public derivation', 
   expect(output).not.toContain(VECTORS[0]!.expect.mnemonic24);
 });
 
+test('sensitive modes reject terminals without trusted alternate-screen geometry', () => {
+  for (const [term, columns, rows] of [
+    ['vt100', 80, 24],
+    ['xterm-256color', 19, 24],
+    ['xterm-256color', 80, 9],
+    ['xterm-256color', 80, 10],
+    ['xterm-256color', 20, 10],
+    ['xterm-256color', 0, 0],
+  ] as const) {
+    const result = runSensitivePreflight(term, columns, rows);
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode).toBe(1);
+    expect(output).toContain('site passwords require alternate-screen support');
+    expect(output).not.toContain('Username:');
+  }
+
+  const suggested = runSensitivePreflight('xterm-256color', 20, 10, ['--suggest-password']);
+  expect(suggested.exitCode).toBe(1);
+  expect(suggested.stdout.toString()).toContain('suggested passwords require a reliable interactive terminal');
+  expect(suggested.stdout.toString()).not.toContain('Username:');
+});
+
+test('a short terminal keeps public recovery usable but refuses the private view', () => {
+  const result = runCliInputTty([
+    '--shards', '1', '--workers', '1', '--engine', 'native',
+  ], [
+    'expect "Username: "', 'send "alice\\r"',
+    'expect "Password (hidden; typing works): "', 'send "secret123456\\r"',
+    'expect {',
+    '  "Recovery words unavailable" {}',
+    '  "Re-enter password to show recovery words" { send "secret123456\\r" }',
+    '}',
+  ], 'env TERM=xterm-256color COLUMNS=80 LINES=10 NO_COLOR=1 ');
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString()).toContain('Recovery words unavailable');
+  expect(result.stdout.toString()).not.toContain('BRAINVAULT_SENSITIVE_TERMINAL_TOO_SHORT');
+});
+
 test('wrong reveal confirmation fails closed without a runtime stack trace', () => {
   const rejected = runCliTty([], 'wrong-password');
   const output = rejected.stdout.toString();
@@ -1237,6 +1491,13 @@ test('derivation failures print one safe line without Bun code frames or paths',
   expect(output).toContain('Derivation failed: BRAINVAULT_ENGINE_MULTIPLIER_UNSUPPORTED');
   expect(output).not.toContain('cli.ts:');
   expect(output).not.toContain('throw new Error');
+
+  const missingWorker = runMissingNativeWorkerCliTty();
+  const missingOutput = missingWorker.stdout.toString() + missingWorker.stderr.toString();
+  expect(missingWorker.exitCode).toBe(1);
+  expect(missingOutput).toContain('Derivation failed: BRAINVAULT_DERIVATION_FAILED');
+  expect(missingOutput).not.toContain('/private/');
+  expect(missingOutput).not.toContain('worker-native.ts');
 });
 
 test('native progress animates, completes exactly, and respects NO_COLOR', () => {

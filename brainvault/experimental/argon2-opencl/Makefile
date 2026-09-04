@@ -1,5 +1,7 @@
 CXX := clang++
 CXXFLAGS ?= -O3 -DNDEBUG -std=c++11
+MACOS_MIN := 11.0
+PREBUILD_CXXFLAGS := $(CXXFLAGS) -mmacosx-version-min=$(MACOS_MIN)
 CPPFLAGS := -Iinclude -Iinclude/argon2-gpu-common -Iinclude/argon2-opencl \
 	-Ilib/argon2-gpu-common -Ilib/argon2-opencl
 SOURCES := \
@@ -21,7 +23,7 @@ HEADERS := lib/argon2-gpu-common/securezero.h
 all: $(TARGET)
 
 $(TARGET): $(SOURCES) $(HEADERS) data/kernels/argon2_kernel.cl
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
+	$(CXX) $(CPPFLAGS) $(PREBUILD_CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
 
 parity: $(TARGET)
 	bun parity.ts 2
@@ -36,7 +38,7 @@ prebuild: $(PREBUILD)
 
 $(PREBUILD): $(SOURCES) $(HEADERS) data/kernels/argon2_kernel.cl
 	mkdir -p $(dir $@)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
+	$(CXX) $(CPPFLAGS) $(PREBUILD_CXXFLAGS) $(SOURCES) -framework OpenCL -o $@
 	codesign --remove-signature $@
 	bun ../normalize-macho.ts $@
 	codesign --force --sign - --timestamp=none $@

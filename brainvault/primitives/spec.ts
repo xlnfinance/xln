@@ -52,6 +52,9 @@ export const BRAINVAULT_V1 = Object.freeze({
   MAX_FACTOR: 9,
 } as const);
 
+/** Largest shard count representable by the frozen U32BE salt field. */
+export const BRAINVAULT_MAX_SHARD_COUNT = 0xffff_ffff;
+
 /** Exact wallet inputs: whitespace is significant, but an empty string is not a wallet identity. */
 export function assertBrainVaultName(value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length < BRAINVAULT_V1.MIN_NAME_LENGTH) {
@@ -84,7 +87,7 @@ export function shardRequestFingerprint(
   argonParallelism = BRAINVAULT_V1.ARGON_PARALLELISM,
   shardOutputBytes = BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
 ): string {
-  if (!Number.isSafeInteger(shardCount) || shardCount < 1
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > BRAINVAULT_MAX_SHARD_COUNT
     || !Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount
     || typeof algId !== 'string' || algId.length === 0) {
     throw new Error('BRAINVAULT_WORKER_REQUEST_INVALID');
@@ -112,7 +115,7 @@ export async function createShardSalt(
   algId: string = BRAINVAULT_V1.ALG_ID,
 ): Promise<Uint8Array> {
   assertBrainVaultName(name);
-  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > 0xffff_ffff) {
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1 || shardCount > BRAINVAULT_MAX_SHARD_COUNT) {
     throw new Error(`BRAINVAULT_SHARD_COUNT_INVALID:${shardCount}`);
   }
   if (!Number.isSafeInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {

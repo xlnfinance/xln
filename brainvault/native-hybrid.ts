@@ -1,7 +1,7 @@
 import { cpus, totalmem } from 'node:os';
 import { verifyBundledExecutable, verifyBundledFile } from './binary-integrity.ts';
 import { BRAINVAULT_NATIVE_PROGRESS_ENV, readNativeProgress } from './native/progress.ts';
-import { trackNativeChild } from './native/children.ts';
+import { terminateNativeChildGroup, trackNativeChild, type NativeChild } from './native/children.ts';
 
 const INPUT_MAGIC = 0x32435642;
 const HEADER_BYTES = 24;
@@ -129,6 +129,7 @@ type NativeJob = Readonly<{
 async function runJob(
   job: NativeJob,
   input: Buffer,
+  children: Set<NativeChild>,
   onProgress?: (completed: number) => void,
 ): Promise<Readonly<{ first: number; output: Buffer }>> {
   let lastProgress = 0;
@@ -153,6 +154,7 @@ async function runJob(
     stdout: 'pipe',
     stderr: 'pipe',
   }));
+  children.add(child);
   child.stdin.write(input);
   child.stdin.end();
   let stdout: ArrayBuffer;
@@ -249,19 +251,42 @@ export async function deriveHybridNativeShards(options: Readonly<{
     throw error;
   }
   let totalCompleted = 0;
-  const settled = await Promise.allSettled(jobs.map((job, index) => {
+  const children = new Set<NativeChild>();
+  let inputsWiped = false;
+  const wipeInputs = (): void => {
+    if (inputsWiped) return;
+    inputsWiped = true;
+    for (const input of inputs) input.fill(0);
+  };
+  let failureRecorded = false;
+  let firstFailure: unknown;
+  let cancellation: Promise<void> | undefined;
+  const tasks = jobs.map((job, index) => {
     let jobCompleted = 0;
-    return runJob(job, inputs[index]!, onProgress === undefined ? undefined : completed => {
+    return runJob(job, inputs[index]!, children, onProgress === undefined ? undefined : completed => {
       totalCompleted += completed - jobCompleted;
       jobCompleted = completed;
       onProgress(totalCompleted, shardCount);
+    }).catch(async error => {
+      if (!failureRecorded) {
+        failureRecorded = true;
+        firstFailure = error;
+        wipeInputs();
+        cancellation = terminateNativeChildGroup(children);
+      }
+      await cancellation;
+      throw error;
     });
-  }));
-  for (const input of inputs) input.fill(0);
-  const failure = settled.find(result => result.status === 'rejected');
-  if (failure !== undefined) {
+  });
+  let settled: PromiseSettledResult<Readonly<{ first: number; output: Buffer }>>[];
+  try {
+    settled = await Promise.allSettled(tasks);
+  } finally {
+    wipeInputs();
+  }
+  if (failureRecorded) {
     for (const result of settled) if (result.status === 'fulfilled') result.value.output.fill(0);
-    throw failure.reason;
+    throw firstFailure;
   }
   const runs = settled.map(result => {
     if (result.status === 'rejected') throw result.reason;

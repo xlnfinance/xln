@@ -6,7 +6,7 @@
  */
 import { parentPort } from 'worker_threads';
 import { hashRaw as argon2Native } from '@node-rs/argon2';
-import { bytesToHex } from './primitives/encoding.ts';
+import { bytesToHex, copyAndWipe } from './primitives/encoding.ts';
 import { deriveBrainVaultNativeShard } from './native.ts';
 import {
   assertBrainVaultName,
@@ -36,7 +36,7 @@ parentPort?.on('message', async ({ specId, name, passphrase, shardIndex, shardCo
   } else {
     const password = new TextEncoder().encode(passphrase.normalize('NFKD'));
     try {
-      result = new Uint8Array(await argon2Native(password, {
+      result = copyAndWipe(await argon2Native(password, {
         salt: Buffer.from(await createShardSalt(name, shardIndex, shardCount, effectiveAlgId)),
         memoryCost: memoryKb,
         timeCost: BRAINVAULT_V1.ARGON_TIME_COST,

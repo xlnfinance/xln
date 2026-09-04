@@ -34,12 +34,13 @@ import {
 import {
   assertBrainVaultName,
   assertBrainVaultPassphrase,
+  BRAINVAULT_MAX_SHARD_COUNT,
   BRAINVAULT_V1,
   BRAINVAULT_V1_SPEC_ID,
   createShardSalt,
   shardRequestFingerprint,
 } from './primitives/spec.ts';
-import { hexToBytes } from './primitives/encoding.ts';
+import { copyAndWipe, hexToBytes } from './primitives/encoding.ts';
 
 type BrainVaultNativeInput = Readonly<{
   name: string;
@@ -84,7 +85,8 @@ const requireNotAborted = (signal: AbortSignal | undefined): void => {
 const validateInput = (input: BrainVaultNativeInput): { shardCount: number; factor: number; workers: number } => {
   assertBrainVaultName(input.name);
   assertBrainVaultPassphrase(input.passphrase);
-  if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1) {
+  if (!Number.isSafeInteger(input.shardInput) || input.shardInput < 1
+    || input.shardInput > BRAINVAULT_MAX_SHARD_COUNT) {
     throw new Error(`BRAINVAULT_SHARD_INPUT_INVALID:${String(input.shardInput)}`);
   }
   if (!Number.isSafeInteger(input.workers) || input.workers < 1) {
@@ -125,7 +127,7 @@ export const deriveBrainVaultNativeShard = async (
       algorithm: 2, // @node-rs/argon2 Algorithm.Argon2id.
       version: 1, // @node-rs/argon2 Version.V0x13; part of BRAINVAULT_V1_SPEC_ID.
     });
-    return new Uint8Array(output);
+    return copyAndWipe(output);
   } finally {
     password.fill(0);
   }

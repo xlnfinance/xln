@@ -25,7 +25,12 @@ import { BRAINVAULT_V1 } from './primitives/spec.ts';
 export { bytesToHex, hexToBytes } from './primitives/encoding.ts';
 export { deriveShard, deriveShardWithParams } from './primitives/kdf.ts';
 export type { BrainvaultKdfParams } from './primitives/kdf.ts';
-export { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt } from './primitives/spec.ts';
+export {
+  BRAINVAULT_MAX_SHARD_COUNT,
+  BRAINVAULT_V1,
+  BRAINVAULT_V1_SPEC_ID,
+  createShardSalt,
+} from './primitives/spec.ts';
 export { combineShards, combineShardsWithParams, factorForShardCount, rootDomain, rootFingerprint } from './canonical.ts';
 
 /**

@@ -11,6 +11,7 @@ import {
   factorForShardCount,
   hexToBytes,
 } from '../core.ts';
+import { copyAndWipe } from '../primitives/encoding.ts';
 import { BRAINVAULT_V1, BRAINVAULT_V1_SPEC_ID, createShardSalt, shardRequestFingerprint } from '../primitives/spec.ts';
 import { verifyBundledExecutable } from '../binary-integrity.ts';
 import { deriveHybridNativeShards, type AcceleratorEngine } from '../native-hybrid.ts';
@@ -159,7 +160,7 @@ if (backend === 'direct-async') {
         const index = next++;
         if (index >= shardCount) return;
         const salt = await createShardSalt(name, index, shardCount, kdfAlgId);
-        directShards[index] = new Uint8Array(await argon2Native(password, {
+        directShards[index] = copyAndWipe(await argon2Native(password, {
           salt,
           memoryCost: shardMemoryKb,
           timeCost: BRAINVAULT_V1.ARGON_TIME_COST,

@@ -203,7 +203,39 @@ test('shipped experimental documentation matches the production Metal plan and l
   expect(metal).toMatch(/8,000 Metal \/\s+2,000 C\/NEON/);
   expect(metal).not.toContain('588 shards to Metal and 412 to C/NEON');
   expect(metal).not.toContain('147 workers in each of two Metal processes');
+  expect(metal).not.toContain('may fall back to C/NEON');
   const experimental = readFileSync(`${import.meta.dir}/experimental/README.md`, 'utf8');
   expect(experimental).toMatch(/source-only\s+`experimental\/results\/m3-ultra-re-audit-2026-09-03\.md`/);
   expect(experimental).toMatch(/Raw run output and prior model-review notes are source-only under\s+`experimental\/results\/`/);
+  const readme = readFileSync(`${import.meta.dir}/readme.md`, 'utf8');
+  expect(readme).not.toContain('accelerator failure falls back');
+  expect(readme).not.toContain('safe fallbacks are automatic');
+  expect(readme).toContain("from './core.ts'");
+  expect(readme).toContain('bun test core.test.ts');
+  expect(readme).not.toContain("from './brainvault/core.ts'");
+  expect(readme).not.toContain('bun test brainvault/core.test.ts');
+  expect(readme).toMatch(/`--reveal` requests an early\s+sensitive-terminal capability check/);
+});
+
+test('published benchmark math and canonical audit-surface size cannot drift', () => {
+  const experimental = readFileSync(`${import.meta.dir}/experimental/README.md`, 'utf8');
+  const table = experimental.slice(experimental.indexOf('## 32-worker results'));
+  const rows = [...table.matchAll(
+    /^\| .*? \| \*{0,2}([\d.]+) s\*{0,2} \| \*{0,2}[\d.]+\*{0,2} \| \*{0,2}([\d.]+)x\*{0,2} \|$/gm,
+  )];
+  expect(rows).toHaveLength(8);
+  for (const row of rows) {
+    expect(row[2]).toBe((15.335 / Number(row[1])).toFixed(2));
+  }
+
+  const canonicalLines = ['primitives/spec.ts', 'primitives/kdf.ts', 'canonical.ts']
+    .reduce((total, path) => total + readFileSync(`${import.meta.dir}/${path}`, 'utf8').split('\n').length - 1, 0);
+  const readme = readFileSync(`${import.meta.dir}/readme.md`, 'utf8');
+  expect(readme).toMatch(new RegExp(`items 2–4 is currently ${canonicalLines}\\s+lines`));
+});
+
+test('native source verification fails instead of passing vacuously on unsupported hosts', () => {
+  const verifier = readFileSync(`${import.meta.dir}/native-build.test.ts`, 'utf8');
+  expect(verifier).toContain('BRAINVAULT_NATIVE_BUILD_HOST_UNSUPPORTED');
+  expect(verifier).not.toContain("if (process.platform !== 'darwin' || process.arch !== 'arm64') return;");
 });

@@ -24,7 +24,8 @@ bun ./brainvault --bench
 
 ```bash
 # Run immediately without installing. The bundled Metal V1 + C/NEON hybrid is
-# the default for 1,000+ shards on the measured M3 Ultra; safe fallbacks are automatic.
+# the default for 1,000+ shards on the measured M3 Ultra. Auto chooses one
+# available verified engine before starting; a runtime engine failure is fatal.
 # BrainVault has no install/build lifecycle script. On supported Apple Silicon it
 # hash-verifies its bundled prebuild before use. bunx still registry-resolves npm
 # dependencies; audit them against dependency-lock.audit or use the source flow below.
@@ -39,7 +40,8 @@ brainvault
 bun ./brainvault
 
 # Optional: generate ten random a-z/A-Z/0-9 characters (59.54 bits while
-# undisclosed) with unbiased OS-CSPRNG choices. A same-run repeat checks only transcription.
+# undisclosed) with unbiased OS-CSPRNG choices in a temporary sensitive screen.
+# A same-run repeat checks only transcription.
 bunx brainvault --suggest-password
 
 # Default success output is only the root fingerprint and first address.
@@ -63,11 +65,11 @@ bunx brainvault --bench --level 3 --multiplier 10 --workers 32
 # Ten shards is no longer a creation preset, but exact legacy recovery remains:
 bunx brainvault --ask --shards 10
 
-# Programmatic
-import { createShardSalt, deriveShard, combineShards } from './brainvault/core.ts';
+# Programmatic (from xln/brainvault)
+import { createShardSalt, deriveShard, combineShards } from './core.ts';
 
 # Compatibility vectors
-bun test brainvault/core.test.ts
+bun test core.test.ts
 ```
 
 BrainVault has one frozen protocol: V1. The npm package version is only the
@@ -98,9 +100,11 @@ memory-hard option sized to about 25% of RAM across all CPU workers. For
 example, 32 workers yield multiplier 8 on 256GB (64GB arenas) and multiplier 16
 on 512GB (128GB arenas). This option is stronger but proportionally slower,
 changes the root, must be remembered for recovery, and currently uses the CPU
-engines; it is never selected automatically. Multiplier 1 is both the portable
-choice and the fastest path, including the default native Metal CPU/GPU hybrid
-on supported Macs.
+engines; it is never selected automatically. Multiplier 1 is the portable
+choice and avoids the proportional custom-memory cost. The Metal CPU/GPU hybrid
+is automatic only for the exact measured M3 Ultra profile; other Macs default
+to verified C/NEON or portable native code unless the owner explicitly selects
+and benchmarks another engine.
 
 ## Measured M3 Ultra benchmark
 
@@ -144,6 +148,19 @@ Every run produced the frozen default-work root
 This profile is exact rather than extrapolated: 1,000 shards remain 640/360,
 and unmeasured custom, level-5, and level-6 counts retain their prior plan.
 
+## Independent AI review
+
+Two independent post-fix reviews of the same executable candidate returned
+**1000/1000 PASS** with no findings. GPT-5.6 Sol at max effort reported:
+“All ten remediations are present in shipped source with targeted regression
+assertions.” Claude Opus 5 at max effort independently verified the same fixes,
+including the hard failure: “Domain cannot contain terminal control characters.”
+
+These reviews are advisory social proof, not formal security certification.
+Only completed verdicts are counted; timed-out or unavailable models are not.
+They supplement rather than replace the frozen vectors, manifest, reproducible
+native builds, release matrix, and direct source review described below.
+
 ## No recovery receipt by design
 
 BrainVault intentionally writes no recovery file, QR code, seed receipt, or
@@ -157,10 +174,12 @@ multiplier 1.
 
 `--suggest-password` is opt-in. It makes ten independent unbiased choices from
 `a-zA-Z0-9` using the operating-system CSPRNG: 62^10 possibilities, or 59.54
-bits while the result remains undisclosed. It displays the result once and
-requires exact re-entry, which checks transcription only, not long-term memory.
-Terminal scrollback may retain that display, so use it only on a trusted device
-and perform a fresh independent recovery before sending funds.
+bits while the result remains undisclosed. It displays the result once in the
+same isolated alternate screen used for recovery words, then requires exact
+re-entry and erases that screen. This checks transcription only, not long-term
+memory. Recordings, terminal logging, photographs, swap, and crash dumps remain
+outside BrainVault's control. Use a trusted private device and perform a fresh
+independent recovery before sending funds.
 
 After derivation BrainVault prints only an eight-hex root fingerprint and the
 first receiving address, then shows one password-confirmation prompt. The
@@ -171,8 +190,10 @@ SIGTERM, or SIGHUP erases that view and returns to ordinary scrollback, which
 still contains only the privacy-sensitive public result. This cannot defeat
 screen recording, tmux logging, terminal capture, photography, SIGKILL, OS swap,
 or crash dumps. Any wrong password fails closed. `--show-private-key` adds raw
-keys only after the same confirmation. `--reveal` remains an inert compatibility
-alias. Passwords are forbidden in argv; automation must import the library API.
+keys only after the same confirmation. `--reveal` requests an early
+sensitive-terminal capability check; it remains a compatibility alias and never
+bypasses confirmation or reveals anything by itself. Passwords are forbidden in
+argv; automation must import the library API.
 
 `--show-password` is an explicit convenience trade-off for a trusted private
 screen. It echoes every password and confirmation entry, so those characters can
@@ -222,9 +243,10 @@ This directory is the complete npm package boundary. Nothing above
 - bundled Apple Silicon executables and Metal library under
   `prebuilds/darwin-arm64/` provide the fastest default for frozen multiplier-1
   mode at 1,000+ shards only on the measured 32-CPU-core, approximately
-  512-GiB M3 Ultra configuration; unmeasured Apple Silicon and
-  smaller jobs use the lower-overhead native
-  path, and accelerator failure falls back to C/NEON then portable native;
+  512-GiB M3 Ultra configuration. Other Apple Silicon selects C/NEON for jobs
+  of at least 100 shards when its verified prebuild is present, otherwise the
+  portable native path. Selection happens before derivation; any runtime engine
+  failure is fatal and never silently switches to another engine;
 - `@node-rs/argon2` is the portable native fallback and handles custom multipliers;
 - `hash-wasm` is the cross-platform compatibility engine;
 - `experimental/argon2-c/` contains the complete C/NEON source and vendored
@@ -232,7 +254,8 @@ This directory is the complete npm package boundary. Nothing above
 - `experimental/argon2-rust/` contains the complete Rust source, vendored locked
   Cargo dependencies, and secure-wipe/no-wipe comparison variants. Its offline
   build emits an Apple M1 baseline plus a separate M3-family prebuild; M3 Macs
-  select the latter and other Apple Silicon Macs use the M1-compatible binary;
+  select the latter and other Apple Silicon Macs use the M1-compatible binary.
+  Every shipped Apple executable and Metal library targets macOS 11.0;
 - `experimental/argon2-metal/` contains the complete native Apple GPU source,
   raw parity harness, generic kernel, frozen-V1-specialized kernel, and retained
   upstream MIT notice. On the measured 80-GPU-core, 512-GiB M3 Ultra, the
@@ -402,7 +425,7 @@ by exactly these files:
 4. `canonical.ts` — factor, domain string, ordered shard fold, and fingerprint;
 5. `vectors-v1.json` — external expected bytes and roots.
 
-The executable TypeScript root implementation in items 2–4 is currently 284
+The executable TypeScript root implementation in items 2–4 is currently 289
 lines. It has no CLI, filesystem, network, wallet UI, or native scheduler. Audit
 its two cryptographic imports against the exact versions and integrity hashes in
 the source checkout's `bun.lock`: `hash-wasm` for Argon2id and
@@ -545,7 +568,8 @@ the CLI's deliberately memory-only recovery model.
 The shipped default test command runs 1–2-shard frozen vectors, default-secret-output tests,
 Unicode/NFKD/NUL corpus checks, domain separation, ordered scheduling, malformed
 worker results, native worker crash, Ctrl+C, RAM admission, manifest integrity,
-network-denied derivation, and inert package install. A source checkout additionally
+worker reuse across worker counts, network-denied derivation, and inert package
+install. A source checkout additionally
 runs `bun test historical.test.ts` as a release gate over retained archives.
 
 Release candidates additionally run `release-matrix.test.ts` against frozen

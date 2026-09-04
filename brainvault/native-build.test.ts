@@ -3,6 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+  throw new Error(`BRAINVAULT_NATIVE_BUILD_HOST_UNSUPPORTED:${process.platform}:${process.arch}`);
+}
+
 function sha256(path: string): string {
   return new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
 }
@@ -28,8 +32,33 @@ function normalize(path: string): void {
   expect(signed.exitCode).toBe(0);
 }
 
+test('shipped Apple Silicon artifacts target the M1-era macOS baseline', () => {
+  for (const artifact of [
+    'brainvault-argon2',
+    'brainvault-argon2-m3',
+    'brainvault-argon2-metal',
+    'brainvault-argon2-opencl',
+    'brainvault-argon2-rust',
+    'brainvault-argon2-rust-m3',
+    'brainvault-argon2-rust-no-wipe',
+    'brainvault-argon2-rust-no-wipe-m3',
+  ]) {
+    const inspected = Bun.spawnSync({
+      cmd: ['vtool', '-show-build', `${import.meta.dir}/prebuilds/darwin-arm64/${artifact}`],
+      stderr: 'pipe', stdout: 'pipe',
+    });
+    expect(inspected.exitCode).toBe(0);
+    expect(inspected.stdout.toString()).toMatch(/minos 11\.0(?:\s|$)/);
+  }
+  const metalStrings = Bun.spawnSync({
+    cmd: ['strings', `${import.meta.dir}/prebuilds/darwin-arm64/argon2.metallib`],
+    stderr: 'pipe', stdout: 'pipe',
+  });
+  expect(metalStrings.exitCode).toBe(0);
+  expect(metalStrings.stdout.toString()).toContain('apple-macosx11.0.0');
+});
+
 test('locked native release builds are byte-reproducible', () => {
-  if (process.platform !== 'darwin' || process.arch !== 'arm64') return;
   const temp = mkdtempSync(join(tmpdir(), 'brainvault-repro-'));
   try {
     const cRoot = `${import.meta.dir}/experimental/argon2-c`;
@@ -40,7 +69,7 @@ test('locked native release builds are byte-reproducible', () => {
     ];
     const compileC = (output: string, cpu: 'apple-m1' | 'apple-m3') => Bun.spawnSync({
       cmd: [
-        'clang', '-std=c11', '-O3', '-flto', `-mcpu=${cpu}`, '-pthread',
+        'clang', '-std=c11', '-O3', '-flto', `-mcpu=${cpu}`, '-mmacosx-version-min=11.0', '-pthread',
         '-D_DARWIN_C_SOURCE', '-D__SSE2__', '-Icompat', '-Ivendor/sse2neon',
         '-Ivendor/argon2/include', '-Ivendor/argon2/src', ...sources, '-o', output,
       ],
@@ -80,7 +109,8 @@ test('locked native release builds are byte-reproducible', () => {
       env: {
         ...process.env,
         CARGO_HOME: cargoHome,
-        RUSTFLAGS: `-C target-cpu=${cpu}`,
+        MACOSX_DEPLOYMENT_TARGET: '11.0',
+        RUSTFLAGS: `-C target-cpu=${cpu} -C link-arg=-mmacosx-version-min=11.0`,
       },
       stderr: 'pipe',
       stdout: 'pipe',
@@ -116,7 +146,7 @@ test('locked native release builds are byte-reproducible', () => {
     ];
     const compileMetalHost = (output: string) => Bun.spawnSync({
       cmd: [
-        'clang', '-std=c11', '-O3', '-flto', '-mcpu=apple-m1', '-fobjc-arc',
+        'clang', '-std=c11', '-O3', '-flto', '-mcpu=apple-m1', '-mmacosx-version-min=11.0', '-fobjc-arc',
         '-D_DARWIN_C_SOURCE', '-D__SSE2__', '-I../argon2-c/compat',
         '-I../argon2-c/vendor/sse2neon', '-I../argon2-c/vendor/argon2/include',
         '-I../argon2-c/vendor/argon2/src', ...metalSources,
@@ -137,7 +167,7 @@ test('locked native release builds are byte-reproducible', () => {
 
     const compileMetalLibrary = (air: string, library: string) => {
       const compile = Bun.spawnSync({
-        cmd: ['xcrun', 'metal', '-O3', '-c', 'argon2.metal', '-o', air],
+        cmd: ['xcrun', 'metal', '-O3', '-mmacosx-version-min=11.0', '-c', 'argon2.metal', '-o', air],
         cwd: metalRoot, stderr: 'pipe', stdout: 'pipe',
       });
       if (compile.exitCode !== 0) return compile;
@@ -171,6 +201,7 @@ test('locked native release builds are byte-reproducible', () => {
       cmd: [
         'clang++', '-Iinclude', '-Iinclude/argon2-gpu-common', '-Iinclude/argon2-opencl',
         '-Ilib/argon2-gpu-common', '-Ilib/argon2-opencl', '-O3', '-DNDEBUG',
+        '-mmacosx-version-min=11.0',
         '-std=c++11', ...openclSources, '-framework', 'OpenCL', '-o', output,
       ],
       cwd: openclRoot,

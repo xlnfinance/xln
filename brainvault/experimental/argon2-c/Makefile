@@ -1,11 +1,12 @@
 CC := clang
 ARGON2 := vendor/argon2
+MACOS_MIN := 11.0
 CFLAGS := -std=c11 -O3 -flto -mcpu=native -pthread -D_DARWIN_C_SOURCE -D__SSE2__ \
 	-Icompat -Ivendor/sse2neon -I$(ARGON2)/include -I$(ARGON2)/src
-PREBUILD_CFLAGS := -std=c11 -O3 -flto -mcpu=apple-m1 -pthread -D_DARWIN_C_SOURCE -D__SSE2__ \
+PREBUILD_CFLAGS := -std=c11 -O3 -flto -mcpu=apple-m1 -mmacosx-version-min=$(MACOS_MIN) -pthread -D_DARWIN_C_SOURCE -D__SSE2__ \
 	-Icompat -Ivendor/sse2neon -I$(ARGON2)/include -I$(ARGON2)/src
 PREBUILD := ../../prebuilds/darwin-arm64/brainvault-argon2
-PREBUILD_M3_CFLAGS := -std=c11 -O3 -flto -mcpu=apple-m3 -pthread -D_DARWIN_C_SOURCE -D__SSE2__ \
+PREBUILD_M3_CFLAGS := -std=c11 -O3 -flto -mcpu=apple-m3 -mmacosx-version-min=$(MACOS_MIN) -pthread -D_DARWIN_C_SOURCE -D__SSE2__ \
 	-Icompat -Ivendor/sse2neon -I$(ARGON2)/include -I$(ARGON2)/src
 PREBUILD_M3 := ../../prebuilds/darwin-arm64/brainvault-argon2-m3
 SOURCES := brainvault_argon2.c \
