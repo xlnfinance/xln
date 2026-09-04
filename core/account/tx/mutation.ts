@@ -61,47 +61,37 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
   if (context.tx.type !== 'request_collateral') {
     throw new Error('ACCOUNT_TX_ROUTE_MISMATCH:request_collateral');
   }
+  const tokenId = Number(context.tx.data.tokenId);
+  const previousRequested = context.account.state.requestedRebalance.get(tokenId) ?? 0n;
   const result = handleRequestCollateral(
     context.account,
     context.tx,
     context.byLeft,
     context.timestamp,
   );
-  const tokenId = Number(context.tx.data.tokenId);
-  const feeState = context.account.state.requestedRebalanceFeeState?.get(tokenId);
-  if (!result.ok) {
-    return result;
-  }
+  if (!result.ok) return result;
   const requested = context.account.state.requestedRebalance.get(tokenId) ?? 0n;
-  const committed = {
-    step: 1,
-    status: 'ok',
-    event: 'request_collateral_committed',
-    tokenId,
-    requestedAmount: requested.toString(),
-    prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
-    requestedAt: Number(feeState?.requestedAt ?? context.timestamp),
-  };
+  if (previousRequested > 0n || requested <= 0n) return result;
+  const feeState = context.account.state.requestedRebalanceFeeState.get(tokenId);
+  if (!feeState) throw new Error(`REQUEST_COLLATERAL_COMMITTED_FEE_STATE_MISSING:${tokenId}`);
   // Account effects are inert values until the enclosing Entity transition
   // commits them. Collect them during deterministic validation as well: the
   // receiver can then publish the already-validated transition without
   // executing the same financial transaction a second time. A rejected draft
   // drops this array together with its overlay, so validation cannot emit an
   // external effect on its own.
-  if (context.consensusContext?.emitRuntimeEvents) {
-    context.candidateEffects.push({
-      kind: 'runtimeEvent',
-      eventName: 'request_collateral_committed',
-      data: {
-        entityId: context.myEntityId,
-        accountId: context.counterparty,
-        tokenId,
-        requestedAmount: committed.requestedAmount,
-        prepaidFee: committed.prepaidFee,
-        requestedAt: committed.requestedAt,
-      },
-    });
-  }
+  context.candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'request_collateral_committed',
+    data: {
+      entityId: context.myEntityId,
+      accountId: context.counterparty,
+      tokenId,
+      requestedAmount: requested.toString(),
+      prepaidFee: feeState.feePaidUpfront.toString(),
+      requestedAt: feeState.requestedAt,
+    },
+  });
   return result;
 };
 

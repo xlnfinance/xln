@@ -5,14 +5,14 @@
 use num_bigint::BigInt;
 use xln_rscore_engine::{
     ACCOUNT_MEMPOOL_SIZE, AccountConsensus, AccountDisputeConfig, AccountDisputeFinality,
-    AccountDomain, AccountIdentity, AccountInputEnvelope, AccountProposalSelection, AccountReplica,
-    AccountSettledEvent, AccountState, AccountTx, AckFrameOutcome, BoardDelays,
-    BoardHankoRefreshInput, CanonicalValue, CertifiedBoardAuthority, CounterpartyDispute,
-    DeliveryMode, Delta, DepositoryAddress, DisputeDraft, EntityId, IncomingAck, IncomingFrame,
-    IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent, ProposalOutcome,
-    ProposedFrame, ReceiverClock, RolledBackProposal, SettlementHankoDraft, SigningIdentity,
-    StandaloneInputOutcome, StateError, TokenId, WatchSeed, apply_board_hanko_refresh,
-    apply_incoming_ack as apply_exact_incoming_ack,
+    AccountDomain, AccountEnvelope, AccountIdentity, AccountInputEnvelope, AccountOutput,
+    AccountProposalSelection, AccountReplica, AccountSettledEvent, AccountState, AccountTx,
+    AckFrameOutcome, BoardDelays, BoardHankoRefreshInput, CanonicalValue, CertifiedBoardAuthority,
+    CounterpartyDispute, DeliveryMode, Delta, DepositoryAddress, DisputeDraft, EntityId,
+    IncomingAck, IncomingFrame, IncomingOutcome, JEventClaimTx, JEventMetadata, JurisdictionEvent,
+    ProposalOutcome, ProposedFrame, ReceiverClock, RolledBackProposal, SettlementHankoDraft,
+    SigningIdentity, StandaloneInputOutcome, StateError, TokenId, WatchSeed,
+    apply_board_hanko_refresh, apply_incoming_ack as apply_exact_incoming_ack,
     apply_incoming_frame as apply_exact_incoming_frame, apply_standalone_dispute,
     canonical_tx_value, dispute_proof_hash, propose_account_frame,
     propose_account_frame_with_selection,
@@ -45,7 +45,7 @@ fn entity_hex(bytes: &[u8; 32]) -> String {
     output
 }
 
-fn account_state(left: &EntityId, right: &EntityId) -> AccountState {
+fn account_state(left: &EntityId, right: &EntityId, collateral: i64) -> AccountState {
     let domain = AccountDomain::new(
         31_337,
         DepositoryAddress::parse(&format!("0x{}", "88".repeat(20))).expect("depository"),
@@ -60,7 +60,7 @@ fn account_state(left: &EntityId, right: &EntityId) -> AccountState {
     .expect("identity");
     let delta = Delta::new(
         TokenId::new(1).expect("token"),
-        BigInt::from(1_000_000),
+        BigInt::from(collateral),
         BigInt::from(0),
         BigInt::from(0),
         BigInt::from(500_000),
@@ -86,6 +86,18 @@ fn parties() -> (Party, Party) {
 }
 
 fn parties_with_transformer(delta_transformer: Option<[u8; 20]>) -> (Party, Party) {
+    parties_with_collateral_and_transformer(1_000_000, delta_transformer, false)
+}
+
+fn parties_with_collateral(collateral: i64) -> (Party, Party) {
+    parties_with_collateral_and_transformer(collateral, None, true)
+}
+
+fn parties_with_collateral_and_transformer(
+    collateral: i64,
+    delta_transformer: Option<[u8; 20]>,
+    with_rebalance_shadow: bool,
+) -> (Party, Party) {
     let first = SigningIdentity::lazy_from_seed(SEED, "1", 1, 1, BoardDelays::default())
         .expect("identity 1");
     let second = SigningIdentity::lazy_from_seed(SEED, "2", 1, 1, BoardDelays::default())
@@ -98,11 +110,35 @@ fn parties_with_transformer(delta_transformer: Option<[u8; 20]>) -> (Party, Part
         } else {
             (second_entity, first_entity, second, first)
         };
-    let state = account_state(&left_entity, &right_entity);
+    let state = account_state(&left_entity, &right_entity, collateral);
     let mut left_replica =
         AccountReplica::new(left_entity.clone(), state.clone()).expect("left replica");
     let mut right_replica =
         AccountReplica::new(right_entity.clone(), state).expect("right replica");
+    if with_rebalance_shadow {
+        let empty = format!("0x{}", hex::encode(xln_rscore_protocol::EMPTY_RADIX_ROOT));
+        let envelope = || {
+            AccountEnvelope::new(
+                vec![(
+                    "shadow".into(),
+                    CanonicalValue::Object(vec![(
+                        "rebalance".into(),
+                        CanonicalValue::Object(vec![
+                            ("policyRoot".into(), CanonicalValue::String(empty.clone())),
+                            (
+                                "submittedAtByTokenRoot".into(),
+                                CanonicalValue::String(empty.clone()),
+                            ),
+                        ]),
+                    )]),
+                )],
+                Vec::new(),
+            )
+            .expect("rebalance envelope")
+        };
+        left_replica.set_envelope(envelope());
+        right_replica.set_envelope(envelope());
+    }
     if let Some(delta_transformer) = delta_transformer {
         left_replica.set_delta_transformer(delta_transformer);
         right_replica.set_delta_transformer(delta_transformer);
@@ -217,8 +253,36 @@ fn apply_incoming_frame(
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
 ) -> Result<xln_rscore_engine::IncomingOutcome, xln_rscore_engine::StateError> {
+    apply_incoming_frame_for_role(
+        account,
+        identity,
+        from_entity_id,
+        clock,
+        incoming,
+        swap_market,
+        false,
+    )
+}
+
+fn apply_incoming_frame_for_role(
+    account: &mut AccountConsensus,
+    identity: &SigningIdentity,
+    from_entity_id: &[u8; 32],
+    clock: ReceiverClock,
+    incoming: IncomingFrame,
+    swap_market: &std::sync::Arc<xln_rscore_engine::SwapMarketPolicy>,
+    owning_entity_is_hub: bool,
+) -> Result<xln_rscore_engine::IncomingOutcome, xln_rscore_engine::StateError> {
     let envelope = envelope(account, from_entity_id);
-    apply_exact_incoming_frame(account, identity, &envelope, clock, incoming, swap_market)
+    apply_exact_incoming_frame(
+        account,
+        identity,
+        &envelope,
+        clock,
+        incoming,
+        swap_market,
+        owning_entity_is_hub,
+    )
 }
 
 fn apply_incoming_ack(
@@ -228,6 +292,26 @@ fn apply_incoming_ack(
     state_hash: &[u8; 32],
     hanko: &[u8],
     dispute: Option<CounterpartyDispute>,
+) -> Result<xln_rscore_engine::AckOutcome, xln_rscore_engine::StateError> {
+    apply_incoming_ack_for_role(
+        account,
+        from_entity_id,
+        height,
+        state_hash,
+        hanko,
+        dispute,
+        false,
+    )
+}
+
+fn apply_incoming_ack_for_role(
+    account: &mut AccountConsensus,
+    from_entity_id: &[u8; 32],
+    height: u64,
+    state_hash: &[u8; 32],
+    hanko: &[u8],
+    dispute: Option<CounterpartyDispute>,
+    owning_entity_is_hub: bool,
 ) -> Result<xln_rscore_engine::AckOutcome, xln_rscore_engine::StateError> {
     let envelope = envelope(account, from_entity_id);
     apply_exact_incoming_ack(
@@ -239,7 +323,101 @@ fn apply_incoming_ack(
             frame_hanko: Some(hanko.to_vec()),
             dispute,
         },
+        owning_entity_is_hub,
     )
+}
+
+fn auto_rebalance_shadow_policy() -> CanonicalValue {
+    CanonicalValue::Object(vec![
+        (
+            "r2cRequestSoftLimit".into(),
+            CanonicalValue::BigInt(BigInt::from(500)),
+        ),
+        (
+            "hardLimit".into(),
+            CanonicalValue::BigInt(BigInt::from(10_000)),
+        ),
+        (
+            "maxAcceptableFee".into(),
+            CanonicalValue::BigInt(BigInt::from(1)),
+        ),
+    ])
+}
+
+fn hub_rebalance_fee_policy() -> AccountTx {
+    AccountTx::RebalancePolicy {
+        token_id: 1,
+        policy_version: 1,
+        base_fee: BigInt::from(1),
+        liquidity_fee_bps: BigInt::from(0),
+        gas_fee: BigInt::from(0),
+    }
+}
+
+fn commit_txs_bilaterally(
+    proposer: &mut Party,
+    receiver: &mut Party,
+    txs: Vec<AccountTx>,
+    timestamp: u64,
+    proposer_is_hub: bool,
+    receiver_is_hub: bool,
+) {
+    proposer
+        .account
+        .admit_txs(txs, "test:bilateralCommit")
+        .expect("admit bilateral txs");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut proposer.account,
+        &proposer.identity,
+        timestamp,
+        7,
+        &market(),
+    )
+    .expect("propose bilateral txs") else {
+        panic!("expected bilateral proposal");
+    };
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame_for_role(
+        &mut receiver.account,
+        &receiver.identity,
+        proposer.identity.entity_id(),
+        CLOCK,
+        incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone()),
+        &market(),
+        receiver_is_hub,
+    )
+    .expect("commit bilateral frame") else {
+        panic!("expected bilateral commit");
+    };
+    let ack = apply_incoming_ack_for_role(
+        &mut proposer.account,
+        receiver.identity.entity_id(),
+        proposed.frame.height,
+        &proposed.state_hash,
+        &ack_hanko,
+        None,
+        proposer_is_hub,
+    )
+    .expect("commit bilateral ACK");
+    assert!(matches!(
+        ack,
+        xln_rscore_engine::AckOutcome::Committed { .. }
+    ));
+}
+
+fn assert_auto_rebalance_request(account: &AccountConsensus) {
+    assert!(matches!(
+        account.mempool(),
+        [AccountTx::RequestCollateral {
+            token_id,
+            amount,
+            fee_token_id: Some(fee_token_id),
+            fee_amount,
+            policy_version: 1,
+        }] if token_id.get() == 1
+            && fee_token_id == token_id
+            && amount == &BigInt::from(500)
+            && fee_amount == &BigInt::from(1)
+    ));
 }
 
 fn certify_dispute(identity: &SigningIdentity, draft: &DisputeDraft) -> CounterpartyDispute {
@@ -1106,7 +1284,7 @@ fn a_checkpoint_restore_replays_the_pending_frame() {
     // the frame in flight.
     let committed = AccountReplica::new(
         left.entity_id.clone(),
-        account_state(&left.entity_id, &right.entity_id),
+        account_state(&left.entity_id, &right.entity_id, 1_000_000),
     )
     .expect("committed replica");
     let snapshot = |pending: Option<PendingFrameSnapshot>| ConsensusSnapshot {
@@ -1337,6 +1515,7 @@ fn ack_frame_keeps_a_valid_ack_when_the_bundled_frame_is_invalid() {
         },
         invalid,
         &market(),
+        false,
     )
     .expect("sequential ack_frame");
 
@@ -1768,6 +1947,7 @@ fn duplicate_ack_frame_authenticates_bundled_predecessor_before_replay() {
         valid_ack.clone(),
         incoming_of(&second.frame, second.state_hash, second.hanko.clone()),
         &market(),
+        false,
     )
     .expect("valid predecessor under duplicate frame");
     assert!(matches!(replay, AckFrameOutcome::Replay { .. }));
@@ -1792,6 +1972,7 @@ fn duplicate_ack_frame_authenticates_bundled_predecessor_before_replay() {
         conflicting_ack,
         incoming_of(&second.frame, second.state_hash, second.hanko),
         &market(),
+        false,
     )
     .expect("conflicting ACK is a typed rejection");
     assert!(matches!(
@@ -2161,6 +2342,247 @@ fn rebalance_policy_is_hashable_at_admission_and_cross_peer_replay() {
         IncomingOutcome::Committed { height: 1, .. }
     ));
     assert_eq!(right.account.current_height(), 1);
+}
+
+#[test]
+fn fresh_request_collateral_emits_typed_receipt_but_duplicate_noop_does_not() {
+    let (mut left, mut right) = parties();
+    let request = AccountTx::RequestCollateral {
+        token_id: TokenId::new(1).expect("token"),
+        amount: BigInt::from(100),
+        fee_token_id: Some(TokenId::new(1).expect("fee token")),
+        fee_amount: BigInt::from(1),
+        policy_version: 1,
+    };
+    left.account
+        .admit_txs(vec![request.clone()], "fresh-request-receipt")
+        .expect("admit request");
+    let ProposalOutcome::Proposed(first) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_000,
+        7,
+        &market(),
+    )
+    .expect("propose request") else {
+        panic!("expected request proposal");
+    };
+    assert!(matches!(
+        first.outputs_by_tx.as_slice(),
+        [outputs] if matches!(outputs.as_slice(), [AccountOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        }] if entity_id == &left.entity_id.to_string()
+            && account_id == &right.entity_id.to_string()
+            && token_id.get() == 1
+            && requested_amount == &BigInt::from(99)
+            && prepaid_fee == &BigInt::from(1)
+            && *requested_at == 1_700_000_000_000)
+    ));
+
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame(
+        &mut right.account,
+        &right.identity,
+        left.identity.entity_id(),
+        CLOCK,
+        incoming_of(&first.frame, first.state_hash, first.hanko.clone()),
+        &market(),
+    )
+    .expect("commit request") else {
+        panic!("expected request commit");
+    };
+    apply_incoming_ack(
+        &mut left.account,
+        right.identity.entity_id(),
+        first.frame.height,
+        &first.state_hash,
+        &ack_hanko,
+        None,
+    )
+    .expect("ack request");
+
+    left.account
+        .admit_txs(vec![request], "duplicate-request-noop")
+        .expect("admit duplicate");
+    let ProposalOutcome::Proposed(duplicate) = propose_account_frame(
+        &mut left.account,
+        &left.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose duplicate") else {
+        panic!("expected duplicate proposal");
+    };
+    assert_eq!(duplicate.outputs_by_tx.as_slice(), &[Vec::new()]);
+}
+
+#[test]
+fn peer_frame_commit_auto_rebalances_at_the_inclusive_soft_limit_exactly_once() {
+    let (mut user, mut hub) = parties_with_collateral(0);
+    let token = TokenId::new(1).expect("token");
+    user.account
+        .set_rebalance_shadow_policy(token, auto_rebalance_shadow_policy())
+        .expect("install user policy");
+    commit_txs_bilaterally(
+        &mut hub,
+        &mut user,
+        vec![hub_rebalance_fee_policy()],
+        1_700_000_000_000,
+        true,
+        false,
+    );
+
+    let transfer = payment(&hub.entity_id, &user.entity_id, 500);
+    hub.account
+        .admit_txs(vec![transfer], "test:peerAutoRebalance")
+        .expect("admit threshold transfer");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut hub.account,
+        &hub.identity,
+        1_700_000_000_001,
+        7,
+        &market(),
+    )
+    .expect("propose threshold transfer") else {
+        panic!("expected threshold proposal");
+    };
+    let incoming = incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone());
+    let IncomingOutcome::Committed { events, .. } = apply_incoming_frame_for_role(
+        &mut user.account,
+        &user.identity,
+        hub.identity.entity_id(),
+        CLOCK,
+        incoming.clone(),
+        &market(),
+        false,
+    )
+    .expect("commit threshold transfer") else {
+        panic!("expected threshold commit");
+    };
+    assert!(
+        events
+            .iter()
+            .any(|event| event == "🔄 Auto-rebalance queued 1 tx(s) after frame commit")
+    );
+    assert_auto_rebalance_request(&user.account);
+
+    let duplicate = apply_incoming_frame_for_role(
+        &mut user.account,
+        &user.identity,
+        hub.identity.entity_id(),
+        CLOCK,
+        incoming,
+        &market(),
+        false,
+    )
+    .expect("duplicate frame");
+    assert!(matches!(duplicate, IncomingOutcome::Duplicate { .. }));
+    assert_auto_rebalance_request(&user.account);
+}
+
+#[test]
+fn ack_commit_auto_rebalances_at_the_inclusive_soft_limit_and_hub_role_skips() {
+    let (mut user, mut hub) = parties_with_collateral(0);
+    commit_txs_bilaterally(
+        &mut hub,
+        &mut user,
+        vec![hub_rebalance_fee_policy()],
+        1_700_000_000_000,
+        true,
+        false,
+    );
+    let transfer = payment(&hub.entity_id, &user.entity_id, 500);
+    commit_txs_bilaterally(
+        &mut hub,
+        &mut user,
+        vec![transfer],
+        1_700_000_000_001,
+        true,
+        false,
+    );
+    let token = TokenId::new(1).expect("token");
+    user.account
+        .set_rebalance_shadow_policy(token, auto_rebalance_shadow_policy())
+        .expect("install user policy");
+    commit_txs_bilaterally(
+        &mut hub,
+        &mut user,
+        vec![AccountTx::AddDelta { token_id: token }],
+        1_700_000_000_002,
+        true,
+        true,
+    );
+    assert!(
+        user.account.mempool().is_empty(),
+        "hub role must not originate a request"
+    );
+
+    user.account
+        .admit_txs(
+            vec![AccountTx::AddDelta { token_id: token }],
+            "test:ackAutoRebalance",
+        )
+        .expect("admit ACK trigger");
+    let ProposalOutcome::Proposed(proposed) = propose_account_frame(
+        &mut user.account,
+        &user.identity,
+        1_700_000_000_003,
+        7,
+        &market(),
+    )
+    .expect("propose ACK trigger") else {
+        panic!("expected ACK-trigger proposal");
+    };
+    let IncomingOutcome::Committed { ack_hanko, .. } = apply_incoming_frame_for_role(
+        &mut hub.account,
+        &hub.identity,
+        user.identity.entity_id(),
+        CLOCK,
+        incoming_of(&proposed.frame, proposed.state_hash, proposed.hanko.clone()),
+        &market(),
+        true,
+    )
+    .expect("peer commits ACK trigger") else {
+        panic!("expected peer commit");
+    };
+    let ack = apply_incoming_ack_for_role(
+        &mut user.account,
+        hub.identity.entity_id(),
+        proposed.frame.height,
+        &proposed.state_hash,
+        &ack_hanko,
+        None,
+        false,
+    )
+    .expect("commit ACK trigger");
+    assert!(matches!(
+        ack,
+        xln_rscore_engine::AckOutcome::Committed { ref events, .. }
+            if events.iter().any(|event| event
+                == "🔄 Auto-rebalance queued 1 tx(s) after ACK commit")
+    ));
+    assert_auto_rebalance_request(&user.account);
+
+    let repeated = apply_incoming_ack_for_role(
+        &mut user.account,
+        hub.identity.entity_id(),
+        proposed.frame.height,
+        &proposed.state_hash,
+        &ack_hanko,
+        None,
+        false,
+    )
+    .expect("repeat ACK");
+    assert!(matches!(
+        repeated,
+        xln_rscore_engine::AckOutcome::Accepted { .. }
+    ));
+    assert_auto_rebalance_request(&user.account);
 }
 
 #[test]
@@ -3300,6 +3722,7 @@ fn exact_dispute_hash_is_account_bound_before_mutation() {
         CLOCK,
         incoming,
         &market(),
+        false,
     )
     .expect("wrong wire hash is an Account input rejection, not an engine failure");
     assert!(matches!(
@@ -3342,6 +3765,7 @@ fn envelope_sentinels_precede_mutation_and_watch_seed_absence_is_preserved() {
         CLOCK,
         incoming.clone(),
         &market(),
+        false,
     )
     .expect("envelope mismatch is a typed rejection");
     assert!(matches!(
@@ -3367,6 +3791,7 @@ fn envelope_sentinels_precede_mutation_and_watch_seed_absence_is_preserved() {
         CLOCK,
         incoming,
         &market(),
+        false,
     )
     .expect("omitted seed remains absent instead of being defaulted");
     assert!(matches!(
@@ -3442,6 +3867,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             frame_hanko: Some(ack_hanko.clone()),
             dispute: None,
         },
+        false,
     )
     .expect("exact current ACK is accepted without touching the pending frame");
     assert!(matches!(
@@ -3466,6 +3892,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
                 frame_hanko,
                 dispute: None,
             },
+            false,
         )
         .expect("a non-current ACK is rejected");
         assert!(matches!(
@@ -3482,6 +3909,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             frame_hanko: Some(vec![0]),
             dispute: None,
         },
+        false,
     )
     .expect("bad active ACK certificate is an Account input rejection");
     assert!(matches!(
@@ -3539,6 +3967,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             frame_hanko: Some(delayed_predecessor_hanko.clone()),
             dispute: None,
         },
+        false,
     )
     .expect("authenticated immediate predecessor ACK is an idempotent no-op");
     assert!(matches!(
@@ -3577,6 +4006,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
         },
         incoming_of(&third.frame, third.state_hash, third.hanko.clone()),
         &market(),
+        false,
     )
     .expect("stale ACK cannot authorize a bundled successor");
     assert!(matches!(
@@ -3606,6 +4036,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
                 frame_hanko,
                 dispute: None,
             },
+            false,
         )
         .expect("only exact authenticated current/predecessor ACKs are no-ops");
         assert!(matches!(
@@ -3622,6 +4053,7 @@ fn standalone_ack_replay_boundaries_match_typescript_certificate_gates() {
             frame_hanko: Some(vec![0]),
             dispute: None,
         },
+        false,
     )
     .expect("unmatched future ACK is an Account input rejection");
     assert!(matches!(

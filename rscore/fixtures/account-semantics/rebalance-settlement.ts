@@ -110,7 +110,7 @@ const applyStep = async (
     rightHold: delta.rightHold.toString(),
     workspaceHash: account.state.settlementWorkspace?.workspaceHash,
     events: result.events,
-    outputCount: result.candidateEffects?.length ?? 0,
+    outputs: result.candidateEffects ?? [],
   };
 };
 

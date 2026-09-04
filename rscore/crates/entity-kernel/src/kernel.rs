@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use num_bigint::BigInt;
 use xln_rscore_engine::{
-    AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx, SwapOfferSnapshot,
+    AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx, SwapOfferSnapshot, TokenId,
 };
 use xln_rscore_protocol::CanonicalValue;
 
@@ -371,6 +371,81 @@ fn preapply_resolves(
     Ok((timed_out, revealed))
 }
 
+fn project_request_collateral_output(
+    state: &EntityStateSlice,
+    commit: &OrderedAccountCommit,
+    token_id: TokenId,
+    account_outputs: &[AccountOutput],
+    outputs: &mut Vec<EntityKernelOutput>,
+) -> Result<(), EntityKernelError> {
+    let [output] = account_outputs else {
+        if account_outputs.is_empty() {
+            return Ok(());
+        }
+        return Err(EntityKernelError::output("REQUEST_COLLATERAL_OUTPUT_COUNT"));
+    };
+    let AccountOutput::RequestCollateralCommitted {
+        entity_id,
+        account_id,
+        token_id: output_token_id,
+        requested_amount,
+        prepaid_fee,
+        requested_at,
+    } = output
+    else {
+        return Err(EntityKernelError::output(
+            "REQUEST_COLLATERAL_COMMITTED_OUTPUT",
+        ));
+    };
+    if entity_id != &state.entity_id
+        || account_id != &commit.account_id
+        || output_token_id != &token_id
+        || requested_amount <= &BigInt::from(0_u8)
+        || prepaid_fee <= &BigInt::from(0_u8)
+        || *requested_at != commit.frame_timestamp
+    {
+        return Err(EntityKernelError::output(
+            "REQUEST_COLLATERAL_COMMITTED_BINDING",
+        ));
+    }
+    outputs.push(EntityKernelOutput::RequestCollateralCommitted {
+        entity_id: entity_id.clone(),
+        account_id: account_id.clone(),
+        token_id: output_token_id.get(),
+        requested_amount: requested_amount.clone(),
+        prepaid_fee: prepaid_fee.clone(),
+        requested_at: *requested_at,
+    });
+    Ok(())
+}
+
+fn preproject_account_runtime_outputs(
+    state: &EntityStateSlice,
+    commit: &OrderedAccountCommit,
+    outputs: &mut Vec<EntityKernelOutput>,
+) -> Result<(), EntityKernelError> {
+    for transition in &commit.transitions {
+        match &transition.tx {
+            AccountTx::JEventClaim(claim) => apply_committed_j_event_claim(
+                &state.entity_id,
+                &commit.account_id,
+                claim,
+                &transition.outputs,
+                outputs,
+            )?,
+            AccountTx::RequestCollateral { token_id, .. } => project_request_collateral_output(
+                state,
+                commit,
+                *token_id,
+                &transition.outputs,
+                outputs,
+            )?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_commit_transitions(
     state: &mut EntityStateSlice,
@@ -530,18 +605,9 @@ fn apply_commit_transitions(
                     )?);
                 }
             }
-            AccountTx::JEventClaim(claim) => {
-                apply_committed_j_event_claim(
-                    &state.entity_id,
-                    &commit.account_id,
-                    claim,
-                    &transition.outputs,
-                    outputs,
-                )?;
-            }
+            AccountTx::JEventClaim(_) | AccountTx::RequestCollateral { .. } => {}
             AccountTx::AddDelta { .. }
             | AccountTx::SetCreditLimit { .. }
-            | AccountTx::RequestCollateral { .. }
             | AccountTx::RebalanceRefund { .. }
             | AccountTx::RebalancePolicy { .. } => {
                 if !transition.outputs.is_empty() {
@@ -835,6 +901,7 @@ pub(crate) fn apply_entity_transitions(
     for mut commit in commits {
         validate_commit(&state, &commit)?;
         let account_txs_before = account_txs.len();
+        preproject_account_runtime_outputs(&state, &commit, &mut outputs)?;
         let started = profile.then(Instant::now);
         let (timed_out, revealed) = preapply_resolves(
             &mut state,

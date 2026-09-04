@@ -11,7 +11,6 @@ use crate::{
 };
 
 pub(crate) const HUB_PENDING_BROADCAST_STALE_MS: u64 = 120_000;
-const HUB_SUBMITTED_REQUEST_STALE_MS: u64 = 5 * 60 * 1_000;
 const HUB_MAX_R2C_PER_TICK: usize = 10;
 const HUB_MAX_C2R_PER_TICK: usize = 10;
 
@@ -351,13 +350,14 @@ fn collect_r2c_targets(
                 .get(token_id)
                 .copied()
                 .unwrap_or(0);
-            let submitted_age = state.timestamp.saturating_sub(submitted_at);
-            let submitted_stale =
-                submitted_at > 0 && submitted_age >= HUB_SUBMITTED_REQUEST_STALE_MS;
-            if submitted_at > 0 && !submitted_stale {
+            // Exact-once latch, not a lease. Redrafting on elapsed time can
+            // execute the same request twice when J succeeded but the peer's
+            // bilateral AccountSettled claim is delayed. Sent-batch recovery
+            // retries the sealed batch; finality or explicit drop clears this.
+            if submitted_at > 0 {
                 continue;
             }
-            if submitted_at == 0 && fee.policy_version != policy_version {
+            if fee.policy_version != policy_version {
                 effects.push(diagnostic(
                     state,
                     2,
@@ -382,27 +382,6 @@ fn collect_r2c_targets(
                     ],
                 ));
                 continue;
-            }
-            if submitted_stale {
-                effects.push(diagnostic(
-                    state,
-                    2,
-                    "retry",
-                    "request_submitted_stale_retry_reset",
-                    vec![
-                        (
-                            "counterpartyId".into(),
-                            CanonicalValue::String(view.account_id.clone()),
-                        ),
-                        (
-                            "tokenId".into(),
-                            CanonicalValue::Number(CanonicalNumber::from_u32(u32::from(
-                                token_id.get(),
-                            ))),
-                        ),
-                        ("submittedAgeMs".into(), number_u64(submitted_age)?),
-                    ],
-                ));
             }
             let minimum_fee = default_base_fee(*token_id)?
                 + requested_raw * liquidity_fee_bps / BigInt::from(10_000_u32);
@@ -1114,6 +1093,66 @@ mod tests {
                 .map(diagnostic_event)
                 .collect::<Vec<_>>(),
             ["batch_add", "j_broadcast_queued"]
+        );
+    }
+
+    #[test]
+    fn old_submitted_request_remains_exact_once_latched() {
+        let mut state = hub_state(1_000_000);
+        let token = TokenId::new(1).expect("token");
+        state
+            .reserves
+            .insert(token.get(), BigInt::from(1_000_000_u64));
+        let delta = Delta::new(
+            token,
+            BigInt::from(0_u8),
+            BigInt::from(-500_000_i64),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+            BigInt::from(0_u8),
+        )
+        .expect("delta");
+        let account_id = format!("0x{}", "22".repeat(32));
+        let view = HubRebalanceAccountView {
+            account_id,
+            owner_side: Side::Left,
+            pending_frame: false,
+            settlement_transition_pending: false,
+            settlement_workspace: None,
+            requested_rebalance: [(token, BigInt::from(500_000_u64))].into_iter().collect(),
+            fee_state: [(
+                token,
+                HubRebalanceFeeState {
+                    request_id: "already-submitted-request".into(),
+                    fee_paid_upfront: BigInt::from(100_000_u64),
+                    policy_version: 1,
+                    requested_at: 1,
+                    refund: false,
+                    refunded_amount: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            submitted_at_by_token: [(token, 1)].into_iter().collect(),
+            deltas: [(token, delta)].into_iter().collect(),
+        };
+
+        let result = apply_hub_rebalance(&mut state, &[view], false).expect("rebalance");
+
+        assert!(result.envelope_mutations.is_empty());
+        assert!(result.outputs.is_empty());
+        assert!(
+            state
+                .j_batch_state
+                .as_ref()
+                .expect("batch")
+                .batch
+                .reserve_to_collateral
+                .is_empty()
         );
     }
 }

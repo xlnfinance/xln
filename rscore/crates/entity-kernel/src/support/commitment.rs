@@ -839,6 +839,28 @@ fn kernel_output(value: &EntityKernelOutput) -> Result<CanonicalValue, EntityKer
                 ]),
             ),
         ]),
+        EntityKernelOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        } => object(vec![
+            ("kind", text("runtimeEvent")),
+            ("eventName", text("request_collateral_committed")),
+            (
+                "data",
+                object(vec![
+                    ("entityId", text(entity_id)),
+                    ("accountId", text(account_id)),
+                    ("tokenId", number_u16(*token_id)),
+                    ("requestedAmount", text(requested_amount.to_string())),
+                    ("prepaidFee", text(prepaid_fee.to_string())),
+                    ("requestedAt", number("requestedAt", *requested_at)?),
+                ]),
+            ),
+        ]),
         EntityKernelOutput::HtlcInitiated {
             entity_id,
             from_entity,

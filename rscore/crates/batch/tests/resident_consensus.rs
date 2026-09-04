@@ -88,6 +88,7 @@ fn enter_resident(engine: &mut ResidentConsensusEngine, owner: [u8; 32]) {
     engine
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: owner,
+            owning_entity_is_hub: false,
             expected_accounts_root: engine.accounts_root(),
             clock: fixture::clock(TIMESTAMP),
             rows: Vec::new(),
@@ -305,6 +306,7 @@ fn wait_for_sibling_routes_required_ack_without_proposing() {
     payer
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: pair.payer_entity,
+            owning_entity_is_hub: false,
             expected_accounts_root: payer.accounts_root(),
             clock: fixture::clock(TIMESTAMP),
             rows: vec![AccountInputRow {
@@ -478,6 +480,7 @@ fn inbound_request_updates_rebalance_index_before_same_frame_scheduler() {
     payee
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: pair.payee_entity,
+            owning_entity_is_hub: false,
             expected_accounts_root: payee.accounts_root(),
             clock: fixture::clock(TIMESTAMP),
             rows: vec![AccountInputRow {
@@ -772,6 +775,7 @@ fn prepared_account_ignores_a_signed_peer_frame_before_replay_or_commit() {
     let ignored = payer
         .entity_inbound(EntityInboundRequest {
             owner_entity_id: pair.payer_entity,
+            owning_entity_is_hub: false,
             expected_accounts_root: frozen_root,
             clock: fixture::clock(TIMESTAMP),
             rows: vec![AccountInputRow {
@@ -1397,6 +1401,7 @@ fn create_admit_propose_and_force_ack_share_one_outbound_worker_wave() {
         engine
             .entity_inbound(EntityInboundRequest {
                 owner_entity_id: owner,
+                owning_entity_is_hub: false,
                 expected_accounts_root: engine.accounts_root(),
                 clock: fixture::clock(TIMESTAMP),
                 rows: vec![AccountInputRow {
@@ -1544,6 +1549,7 @@ fn duplicate_predecessor_reacks_only_and_preserves_pending_successor() {
         engine
             .entity_inbound(EntityInboundRequest {
                 owner_entity_id,
+                owning_entity_is_hub: false,
                 expected_accounts_root: engine.accounts_root(),
                 clock: fixture::clock(TIMESTAMP),
                 rows: vec![AccountInputRow {

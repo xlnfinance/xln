@@ -66,7 +66,6 @@ export const createAccountConsensusContext = (
         },
       }),
   quietLogs: env.quietRuntimeLogs === true,
-  emitRuntimeEvents: true,
   jReplicas: env.state.jReplicas,
   jClaimNodeStore,
   verifyHanko: (hanko, hash, expectedEntityId, authority) =>

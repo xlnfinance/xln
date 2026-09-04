@@ -62,6 +62,22 @@ pub fn error(error: &crate::ProcessError) -> BodyTuple {
 
 fn account_output(value: &AccountOutput) -> AbiValue {
     match value {
+        AccountOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        } => tuple(vec![
+            AbiValue::Integer(7),
+            AbiValue::Text(entity_id.clone()),
+            AbiValue::Text(account_id.clone()),
+            integer(token_id.get()),
+            big(requested_amount),
+            big(prepaid_fee),
+            integer(*requested_at),
+        ]),
         AccountOutput::AccountSettledFinalized {
             token_id,
             j_height,

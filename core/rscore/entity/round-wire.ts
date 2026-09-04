@@ -33,8 +33,12 @@ type RscoreEntityOutput =
       amount: bigint | null; description: string | null; startedAtMs: number | null;
       jurisdictionId: string | null;
       finalizedAtMs: number;
-    }>
+  }>
   | Readonly<{ kind: 'swapMatched'; entityId: string; count: number }>
+  | Readonly<{
+      kind: 'requestCollateralCommitted'; entityId: string; accountId: string;
+      tokenId: number; requestedAmount: bigint; prepaidFee: bigint; requestedAt: number;
+    }>
   | Readonly<{ kind: 'debug'; payload: Readonly<Record<string, unknown>> }>;
 
 export type RscoreEntityRound = Readonly<{
@@ -263,9 +267,24 @@ const entityOutput = (value: unknown): RscoreEntityOutput => {
       }
       return { kind: 'debug', payload: payload as Readonly<Record<string, unknown>> };
     }
+    case 8: {
+      const row = tuple(value, 7, 'RSCORE_ENTITY_REQUEST_COLLATERAL_COMMITTED');
+      return {
+        kind: 'requestCollateralCommitted',
+        entityId: digest(row[1], 32, 'RSCORE_ENTITY_OUTPUT_ENTITY'),
+        accountId: digest(row[2], 32, 'RSCORE_ENTITY_OUTPUT_ACCOUNT'),
+        tokenId: integer(row[3], 'RSCORE_ENTITY_OUTPUT_TOKEN'),
+        requestedAmount: BigInt(text(row[4], 'RSCORE_ENTITY_OUTPUT_REQUESTED_AMOUNT')),
+        prepaidFee: BigInt(text(row[5], 'RSCORE_ENTITY_OUTPUT_PREPAID_FEE')),
+        requestedAt: integer(row[6], 'RSCORE_ENTITY_OUTPUT_REQUESTED_AT'),
+      };
+    }
     default: throw new Error(`RSCORE_ENTITY_OUTPUT_TAG:${String(value[0])}`);
   }
 };
+
+export const decodeEntityOutputForTests = (value: unknown): RscoreEntityOutput =>
+  entityOutput(value);
 
 const sections = (value: unknown): ReadonlyArray<Readonly<{ field: string; digest: string }>> => {
   if (!Array.isArray(value)) throw new Error('RSCORE_ENTITY_SECTIONS_INVALID');

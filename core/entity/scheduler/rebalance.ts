@@ -30,7 +30,6 @@ import { applyEntityAccountEnvelopeUpdate } from '../account-envelope-update';
 const crontabLog = createStructuredLogger('entity.crontab');
 
 export const HUB_PENDING_BROADCAST_STALE_MS = 120_000;
-const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1_000;
 const HUB_MAX_R2C_PER_TICK = 10;
 const HUB_MAX_C2R_PER_TICK = 10;
 
@@ -139,26 +138,6 @@ const resolveBatchAvailability = (run: RebalanceRun): {
   return { canTouchBatch: false, terminal: true };
 };
 
-const recordStaleR2CRetry = (
-  run: RebalanceRun,
-  counterpartyId: string,
-  tokenId: number,
-  submittedAgeMs: number,
-): void => {
-  console.warn(
-    `⚠️ R→C stale submission reset for retry: token=${tokenId} ` +
-    `cp=${counterpartyId.slice(-4)} submittedAgeMs=${submittedAgeMs}`,
-  );
-  run.debug({
-    step: 2,
-    status: 'retry',
-    event: 'request_submitted_stale_retry_reset',
-    counterpartyId,
-    tokenId,
-    submittedAgeMs,
-  });
-};
-
 const validateR2CRequestPolicy = (
   run: RebalanceRun,
   account: AccountReplica,
@@ -183,11 +162,13 @@ const validateR2CRequestPolicy = (
     return null;
   }
   const submittedAt = account.shadow.rebalance.submittedAtByToken.get(tokenId) ?? 0;
-  const submittedAgeMs = submittedAt > 0 ? run.now - submittedAt : 0;
-  const submittedStale =
-    submittedAt > 0 && submittedAgeMs >= HUB_SUBMITTED_REQUEST_STALE_MS;
-  if (submittedAt > 0 && !submittedStale) return null;
-  if (submittedAt <= 0 && (feeState.policyVersion || 0) !== run.policyVersion) {
+  // This is an exact-once latch, not a lease. Timeout-based redrafting can
+  // spend the same request twice after the J transaction succeeds but before
+  // the bilateral AccountSettled claim arrives. The sent-batch recovery path
+  // retries the identical sealed batch; only finalized Account state or an
+  // explicit drop clears this marker and permits a new economic operation.
+  if (submittedAt > 0) return null;
+  if ((feeState.policyVersion || 0) !== run.policyVersion) {
     console.warn(
       `⏸️ R→C request pending (policy mismatch, manual action required): ` +
       `token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
@@ -203,9 +184,6 @@ const validateR2CRequestPolicy = (
       hubPolicyVersion: run.policyVersion,
     });
     return null;
-  }
-  if (submittedStale) {
-    recordStaleR2CRetry(run, counterpartyId, tokenId, submittedAgeMs);
   }
   const minFee =
     getDefaultRebalanceBaseFeeForToken(tokenId) +

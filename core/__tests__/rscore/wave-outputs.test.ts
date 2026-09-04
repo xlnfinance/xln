@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { packWireValue, unpackWireValue, type RscoreWireValue } from '../../rscore/client';
+import { decodeEntityOutputForTests } from '../../rscore/entity/round-wire';
 import { decodeWaveOutputForTests, waveOutputRow, waveOutputWireForTests } from '../../rscore/wave-decode';
 
 /**
@@ -69,6 +70,19 @@ const CASES: { name: string; wire: RscoreWireValue[]; row: unknown[] }[] = [
     wire: [6, 1, 43, '-12', '34'],
     row: ['accountSettledFinalized', 1, 43, '-12', '34'],
   },
+  {
+    name: 'requestCollateralCommitted',
+    wire: [7, `0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`, 1, '499', '1', 1_000],
+    row: [
+      'requestCollateralCommitted',
+      `0x${'11'.repeat(32)}`,
+      `0x${'22'.repeat(32)}`,
+      1,
+      '499',
+      '1',
+      1_000,
+    ],
+  },
 ];
 
 describe('wave outputs', () => {
@@ -110,5 +124,19 @@ describe('wave outputs', () => {
     expect(() => decodeWaveOutputForTests([0, 1, '25', [], null, 0, `0x${'aa'.repeat(32)}`]))
       .toThrow('output.deliveryMode:0');
     expect(() => decodeWaveOutputForTests([9, 'offer-1'])).toThrow('output.tag:9');
+  });
+
+  test('the committed Entity receipt preserves the typed Account fields', () => {
+    expect(decodeEntityOutputForTests([
+      8, Buffer.alloc(32, 0x11), Buffer.alloc(32, 0x22), 1, '499', '1', 1_000,
+    ])).toEqual({
+      kind: 'requestCollateralCommitted',
+      entityId: `0x${'11'.repeat(32)}`,
+      accountId: `0x${'22'.repeat(32)}`,
+      tokenId: 1,
+      requestedAmount: 499n,
+      prepaidFee: 1n,
+      requestedAt: 1_000,
+    });
   });
 });

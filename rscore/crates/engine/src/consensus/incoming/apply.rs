@@ -7,6 +7,7 @@
 
 use crate::consensus::frame::hash::{AccountFrame, parse_root_hex};
 use crate::consensus::proposal::propose::{WindowExecution, execute_window};
+use crate::consensus::rebalance::queue_post_commit_auto_rebalance;
 use crate::consensus::replica::AccountConsensus;
 use crate::consensus::signing::{
     CertifiedBoardAuthority, SigningIdentity, verify_ack_hanko_with_authority,
@@ -56,6 +57,9 @@ pub struct ReceiverClock {
 #[derive(Clone, Copy, Debug)]
 pub struct IncomingFrameSecurityContext<'a> {
     pub clock: ReceiverClock,
+    /// Transient parent Entity role. Hub replicas service requests; only user
+    /// replicas may originate them automatically.
+    pub owning_entity_is_hub: bool,
     pub peer_certified_board_authority: Option<&'a CertifiedBoardAuthority>,
     /// Parent-certified authority for the Account owner. Kept separate from
     /// the untrusted sender's record because duplicate ACKs authenticate our
@@ -515,6 +519,7 @@ pub fn apply_incoming_frame(
     clock: ReceiverClock,
     incoming: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+    owning_entity_is_hub: bool,
 ) -> Result<IncomingOutcome, StateError> {
     apply_incoming_frame_with_authority(
         account,
@@ -524,6 +529,7 @@ pub fn apply_incoming_frame(
         swap_market,
         IncomingFrameSecurityContext {
             clock,
+            owning_entity_is_hub,
             peer_certified_board_authority: None,
             local_certified_board_authority: None,
         },
@@ -701,7 +707,7 @@ pub fn apply_incoming_frame_with_authority(
         mut candidate,
         applied,
         outputs_by_tx,
-        events,
+        mut events,
         consensus_effects,
         dropped,
     } = execution;
@@ -793,6 +799,16 @@ pub fn apply_incoming_frame_with_authority(
     // the same secondary manifest entry and signed bytes.
     if let (Some(dispute), Some(hanko)) = (&ack_dispute, &ack_dispute_hanko) {
         account.attach_locally_signed_dispute_hanko(dispute.hash, hanko.clone())?;
+    }
+    let queued = queue_post_commit_auto_rebalance(
+        account,
+        security.owning_entity_is_hub,
+        "accountConsensus:postCommitAutoRebalance",
+    )?;
+    if queued > 0 {
+        events.push(format!(
+            "🔄 Auto-rebalance queued {queued} tx(s) after frame commit"
+        ));
     }
     Ok(IncomingOutcome::Committed {
         height: frame.height,
@@ -910,6 +926,7 @@ pub fn apply_incoming_ack(
     account: &mut AccountConsensus,
     envelope: &AccountInputEnvelope,
     incoming: IncomingAck,
+    owning_entity_is_hub: bool,
 ) -> Result<AckOutcome, StateError> {
     apply_incoming_ack_with_authority(
         account,
@@ -920,6 +937,7 @@ pub fn apply_incoming_ack(
         },
         incoming,
         None,
+        owning_entity_is_hub,
     )
 }
 
@@ -933,8 +951,17 @@ pub fn apply_incoming_ack_with_authority(
     clock: ReceiverClock,
     incoming: IncomingAck,
     authority: Option<&CertifiedBoardAuthority>,
+    owning_entity_is_hub: bool,
 ) -> Result<AckOutcome, StateError> {
-    apply_incoming_ack_with_authority_mode(account, envelope, clock, incoming, authority, true)
+    apply_incoming_ack_with_authority_mode(
+        account,
+        envelope,
+        clock,
+        incoming,
+        authority,
+        owning_entity_is_hub,
+        true,
+    )
 }
 
 fn apply_incoming_ack_with_authority_mode(
@@ -943,6 +970,7 @@ fn apply_incoming_ack_with_authority_mode(
     clock: ReceiverClock,
     incoming: IncomingAck,
     authority: Option<&CertifiedBoardAuthority>,
+    owning_entity_is_hub: bool,
     allow_predecessor_noop: bool,
 ) -> Result<AckOutcome, StateError> {
     if let Err(error) = validate_account_input_envelope(account, envelope) {
@@ -1100,7 +1128,7 @@ fn apply_incoming_ack_with_authority_mode(
     let domain = pending.candidate.state().identity().domain().clone();
     let outputs_by_tx = std::sync::Arc::try_unwrap(pending.outputs_by_tx)
         .unwrap_or_else(|shared| shared.as_ref().clone());
-    let events = vec![format!("✅ Frame {height} confirmed and committed")];
+    let mut events = vec![format!("✅ Frame {height} confirmed and committed")];
     account.commit_from_ack(
         pending.candidate,
         &pending.frame,
@@ -1108,6 +1136,16 @@ fn apply_incoming_ack_with_authority_mode(
         frame_hanko,
         pending.hanko,
     );
+    let queued = queue_post_commit_auto_rebalance(
+        account,
+        owning_entity_is_hub,
+        "accountConsensus:ackAutoRebalance",
+    )?;
+    if queued > 0 {
+        events.push(format!(
+            "🔄 Auto-rebalance queued {queued} tx(s) after ACK commit"
+        ));
+    }
     Ok(AckOutcome::Committed {
         height,
         state_hash: pending.state_hash,
@@ -1128,6 +1166,10 @@ fn apply_incoming_ack_with_authority_mode(
 /// completed bilateral certificate and remains committed even when the bundled
 /// proposal is invalid. Rolling it back would fork the two implementations at
 /// the next height.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the no-authority ACK+frame boundary keeps both ordered inputs and the transient owner role explicit; wrapping them would duplicate the canonical authority entrypoint"
+)]
 pub fn apply_incoming_ack_frame(
     account: &mut AccountConsensus,
     identity: &SigningIdentity,
@@ -1136,6 +1178,7 @@ pub fn apply_incoming_ack_frame(
     ack: IncomingAck,
     frame: IncomingFrame,
     swap_market: &std::sync::Arc<crate::SwapMarketPolicy>,
+    owning_entity_is_hub: bool,
 ) -> Result<AckFrameOutcome, StateError> {
     apply_incoming_ack_frame_with_authority(
         account,
@@ -1146,6 +1189,7 @@ pub fn apply_incoming_ack_frame(
         swap_market,
         IncomingFrameSecurityContext {
             clock,
+            owning_entity_is_hub,
             peer_certified_board_authority: None,
             local_certified_board_authority: None,
         },
@@ -1191,6 +1235,7 @@ pub fn apply_incoming_ack_frame_with_authority(
             security.clock,
             ack,
             security.peer_certified_board_authority,
+            security.owning_entity_is_hub,
             true,
         )?;
         match replay_ack {
@@ -1217,6 +1262,7 @@ pub fn apply_incoming_ack_frame_with_authority(
         security.clock,
         ack,
         security.peer_certified_board_authority,
+        security.owning_entity_is_hub,
         false,
     )?;
     if let AckOutcome::Rejected { reason } = &ack {

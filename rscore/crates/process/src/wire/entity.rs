@@ -861,6 +861,22 @@ fn entity_output(value: &EntityKernelOutput) -> Result<AbiValue, ProcessError> {
             AbiValue::Text(collateral.to_string()),
             AbiValue::Text(ondelta.to_string()),
         ],
+        EntityKernelOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        } => vec![
+            AbiValue::Integer(8),
+            AbiValue::Bytes(fixed_hex_bytes(entity_id, 32, "entityId")?),
+            AbiValue::Bytes(fixed_hex_bytes(account_id, 32, "accountId")?),
+            AbiValue::Integer(i128::from(*token_id)),
+            AbiValue::Text(requested_amount.to_string()),
+            AbiValue::Text(prepaid_fee.to_string()),
+            AbiValue::Integer(i128::from(*requested_at)),
+        ],
         EntityKernelOutput::HtlcInitiated {
             entity_id,
             from_entity,

@@ -539,6 +539,7 @@ fn rejects_every_lending_peer_kind_before_replay_without_mutation() {
             CLOCK,
             incoming,
             &market(),
+            false,
         )
         .unwrap_or_else(|error| panic!("{kind} is a rejection, not a fault: {error}"));
         let IncomingOutcome::Rejected { reason } = outcome else {
@@ -578,6 +579,7 @@ fn an_incoming_frame_with_an_out_of_range_policy_version_is_rejected_before_repl
         CLOCK,
         incoming,
         &market(),
+        false,
     )
     .expect("a range violation is a rejection, not a fault");
     let IncomingOutcome::Rejected { reason } = outcome else {

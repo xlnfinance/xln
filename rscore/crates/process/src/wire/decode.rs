@@ -347,7 +347,7 @@ fn decode_account_input(value: &AbiValue) -> Result<xln_rscore_batch::AccountInp
 fn decode_account_ingress_request(
     fields: &[AbiValue],
 ) -> Result<xln_rscore_batch::EntityInboundRequest, ProcessError> {
-    let fields = exact(fields, 5, "accountIngress")?;
+    let fields = exact(fields, 6, "accountIngress")?;
     let rows = tuple(&fields[3])?;
     if rows.len() > MAX_WAVE_OP_ROWS {
         return Err(ProcessError::Expected("waveOpRows"));
@@ -360,11 +360,12 @@ fn decode_account_ingress_request(
             entity_timestamp: js_number(&clock[0], "entityTimestamp")?,
             finalized_j_height: js_number(&clock[1], "finalizedJHeight")?,
         },
+        owning_entity_is_hub: strict_boolean(&fields[4], "owningEntityIsHub")?,
         rows: rows
             .iter()
             .map(decode_input_row)
             .collect::<Result<_, _>>()?,
-        post_accounts: strict_boolean(&fields[4], "postAccounts")?,
+        post_accounts: strict_boolean(&fields[5], "postAccounts")?,
     })
 }
 

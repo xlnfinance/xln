@@ -12,6 +12,7 @@ import type { FrameLogEntry } from '../../../../types/logging';
 const ENTITY_EFFECTS_PARITY_DOMAIN = Buffer.from('xln.rscore.entity-effects-parity.v1', 'utf8');
 const ENTITY_EFFECT_EVENT_NAMES = new Set([
   'account_settled_finalized_bilateral',
+  'request_collateral_committed',
   'HtlcInitiated',
   'HtlcForwardAccepted',
   'HtlcFailed',
@@ -47,6 +48,12 @@ const requireHex32 = (data: Record<string, unknown>, field: string, code: string
 const requireDecimal = (data: Record<string, unknown>, field: string, code: string): string => {
   const value = requireText(data, field, code);
   if (!/^(0|-?[1-9][0-9]*)$/.test(value)) throw new Error(`${code}:${field}`);
+  return value;
+};
+
+const requirePositiveDecimal = (data: Record<string, unknown>, field: string, code: string): string => {
+  const value = requireDecimal(data, field, code);
+  if (BigInt(value) <= 0n) throw new Error(`${code}:${field}`);
   return value;
 };
 
@@ -101,6 +108,30 @@ const accountSettledEffect = (entry: FrameLogEntry, index: number): Record<strin
       jHeight: requireBoundaryInteger(data['jHeight'], `${code}:jHeight`),
       collateral: requireDecimal(data, 'collateral', code),
       ondelta: requireDecimal(data, 'ondelta', code),
+    },
+  };
+};
+
+const requestCollateralCommittedEffect = (entry: FrameLogEntry, index: number): Record<string, unknown> => {
+  const data = eventData(entry, index, [
+    'entityId',
+    'accountId',
+    'tokenId',
+    'requestedAmount',
+    'prepaidFee',
+    'requestedAt',
+  ]);
+  const code = `HLT_ENTITY_EFFECT_REQUEST_COLLATERAL_COMMITTED_INVALID:${index}`;
+  return {
+    kind: 'runtimeEvent',
+    eventName: entry.message,
+    data: {
+      entityId: requireEntityId(data, 'entityId', code),
+      accountId: requireEntityId(data, 'accountId', code),
+      tokenId: requireTokenId(data, 'tokenId', code),
+      requestedAmount: requirePositiveDecimal(data, 'requestedAmount', code),
+      prepaidFee: requirePositiveDecimal(data, 'prepaidFee', code),
+      requestedAt: requireBoundaryInteger(data['requestedAt'], `${code}:requestedAt`),
     },
   };
 };
@@ -231,6 +262,7 @@ const swapMatchedEffect = (entry: FrameLogEntry, index: number): Record<string, 
 const projectEntityEffect = (entry: FrameLogEntry, index: number): Record<string, unknown> => {
   switch (entry.message) {
     case 'account_settled_finalized_bilateral': return accountSettledEffect(entry, index);
+    case 'request_collateral_committed': return requestCollateralCommittedEffect(entry, index);
     case 'HtlcInitiated': return htlcInitiatedEffect(entry, index);
     case 'HtlcForwardAccepted': return htlcForwardAcceptedEffect(entry, index);
     case 'HtlcFailed': return htlcFailedEffect(entry, index);

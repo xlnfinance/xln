@@ -15,7 +15,20 @@
           "input": "request",
           "leftHold": "0",
           "offdelta": "-10",
-          "outputCount": 0,
+          "outputs": [
+            {
+              "data": {
+                "accountId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+                "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                "prepaidFee": "10",
+                "requestedAmount": "90",
+                "requestedAt": 1000,
+                "tokenId": 1
+              },
+              "eventName": "request_collateral_committed",
+              "kind": "runtimeEvent"
+            }
+          ],
           "requestedAmount": "90",
           "requestedCount": 1,
           "requestedRebalanceFeeStateRoot": "0x4177cf33198720777df195147627bcc8f7bde9840d69ed92aa4d2814798073e2",
@@ -35,7 +48,7 @@
           "input": "partialRefund",
           "leftHold": "0",
           "offdelta": "-7",
-          "outputCount": 0,
+          "outputs": [],
           "requestedAmount": "90",
           "requestedCount": 1,
           "requestedRebalanceFeeStateRoot": "0x71a9ae535f3427d2286113bcf278ed4e824048ad196f404c31d4e956a7b4386c",
@@ -55,7 +68,7 @@
           "input": "finalRefund",
           "leftHold": "0",
           "offdelta": "0",
-          "outputCount": 0,
+          "outputs": [],
           "requestedAmount": "0",
           "requestedCount": 0,
           "requestedRebalanceFeeStateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -80,7 +93,7 @@
           "input": "settlementUpsert",
           "leftHold": "20",
           "offdelta": "0",
-          "outputCount": 0,
+          "outputs": [],
           "requestedAmount": "0",
           "requestedCount": 0,
           "requestedRebalanceFeeStateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",

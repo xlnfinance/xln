@@ -5,6 +5,17 @@ use crate::{DeliveryMode, TokenId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccountOutput {
+    /// A fresh collateral request became committed Account state. The local
+    /// owner/counterparty pair is carried explicitly because both bilateral
+    /// replicas publish their own receipt after their respective commit.
+    RequestCollateralCommitted {
+        entity_id: String,
+        account_id: String,
+        token_id: TokenId,
+        requested_amount: BigInt,
+        prepaid_fee: BigInt,
+        requested_at: u64,
+    },
     AccountSettledFinalized {
         token_id: TokenId,
         j_height: u64,

@@ -3333,6 +3333,7 @@ fn apply_entity_group(
                 entity_timestamp: frame.timestamp,
                 finalized_j_height: frame.finalized_j_height,
             },
+            owning_entity_is_hub: slot.state.entity.hub_rebalance_config.is_some(),
             rows,
             post_accounts: false,
         },

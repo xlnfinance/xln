@@ -206,7 +206,6 @@ export const createWorkerConsensusContext = (
   accountAuthorityFrameId: null,
   entityClock: { timestamp, finalizedJHeight },
   quietLogs: true,
-  emitRuntimeEvents: false,
   jReplicas: worker.jReplicas,
   jClaimNodeStore,
   verifyHanko: async (hanko, hash, expectedEntityId, authority) => {

@@ -58,6 +58,8 @@ pub struct DeltaPerspective {
     pub out_capacity: BigInt,
     pub own_credit_limit: BigInt,
     pub peer_credit_limit: BigInt,
+    pub in_own_credit: BigInt,
+    pub out_peer_credit: BigInt,
 }
 
 impl Delta {
@@ -226,6 +228,8 @@ impl Delta {
                 out_capacity: left.in_capacity,
                 own_credit_limit: left.peer_credit_limit,
                 peer_credit_limit: left.own_credit_limit,
+                in_own_credit: left.out_peer_credit,
+                out_peer_credit: left.in_own_credit,
             }
         }
     }
@@ -249,17 +253,19 @@ impl Delta {
         let in_peer_credit = non_negative(&self.right_credit_limit - &out_peer_credit);
         DeltaPerspective {
             in_capacity: non_negative(
-                in_own_credit + in_collateral + in_peer_credit
+                &in_own_credit + in_collateral + in_peer_credit
                     - &self.right_allowance
                     - &self.right_hold,
             ),
             out_capacity: non_negative(
-                out_peer_credit + out_collateral + out_own_credit
+                &out_peer_credit + out_collateral + out_own_credit
                     - &self.left_allowance
                     - &self.left_hold,
             ),
             own_credit_limit: self.left_credit_limit.clone(),
             peer_credit_limit: self.right_credit_limit.clone(),
+            in_own_credit,
+            out_peer_credit,
         }
     }
 

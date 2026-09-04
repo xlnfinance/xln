@@ -1547,6 +1547,7 @@ impl ResidentConsensusEngine {
         need_accounts_root: bool,
     ) -> Result<EntityRoundResult, BatchError> {
         let post_accounts = request.post_accounts;
+        let owning_entity_is_hub = request.owning_entity_is_hub;
         let uses_candidate = if continue_inbound {
             if self.inbound_proposable.is_none()
                 || self.inbound_rebalance_work.is_none()
@@ -1642,6 +1643,7 @@ impl ResidentConsensusEngine {
                 let pure_ack = matches!(&row.input.kind, crate::AccountInputKind::Ack(_));
                 let security = xln_rscore_engine::IncomingFrameSecurityContext {
                     clock,
+                    owning_entity_is_hub,
                     peer_certified_board_authority: authority,
                     local_certified_board_authority: local_authority,
                 };

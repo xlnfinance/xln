@@ -659,6 +659,15 @@ export type ShadowOutputRow =
       ondelta: string,
     ]
   | readonly [
+      kind: 'requestCollateralCommitted',
+      entityId: string,
+      accountId: string,
+      tokenId: number,
+      requestedAmount: string,
+      prepaidFee: string,
+      requestedAt: number,
+    ]
+  | readonly [
       kind: 'error',
       lockId: string,
       hashlock: string,
@@ -727,6 +736,40 @@ export const shadowOutputRows = (result: ApplyAccountTxOk): ShadowOutputRow[] =>
         rows.push(['cancelRequest', output.offerId]);
         break;
       case 'runtimeEvent': {
+        if (output.eventName === 'request_collateral_committed') {
+          const {
+            entityId,
+            accountId,
+            tokenId,
+            requestedAmount,
+            prepaidFee,
+            requestedAt,
+          } = output.data;
+          if (
+            typeof entityId !== 'string'
+            || typeof accountId !== 'string'
+            || typeof tokenId !== 'number'
+            || !Number.isSafeInteger(tokenId)
+            || typeof requestedAmount !== 'string'
+            || !/^\d+$/.test(requestedAmount)
+            || typeof prepaidFee !== 'string'
+            || !/^\d+$/.test(prepaidFee)
+            || typeof requestedAt !== 'number'
+            || !Number.isSafeInteger(requestedAt)
+          ) {
+            throw new Error('SHADOW_OUTPUT_REQUEST_COLLATERAL_COMMITTED_INVALID');
+          }
+          rows.push([
+            'requestCollateralCommitted',
+            entityId,
+            accountId,
+            tokenId,
+            requestedAmount,
+            prepaidFee,
+            requestedAt,
+          ]);
+          break;
+        }
         if (output.eventName !== 'account_settled_finalized_bilateral') {
           throw new Error(`SHADOW_OUTPUT_RUNTIME_EVENT_UNSUPPORTED:${output.eventName}`);
         }

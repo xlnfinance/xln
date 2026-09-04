@@ -174,6 +174,92 @@ fn canonical_account_outputs_fuse_direct_and_htlc_forward_work() {
 }
 
 #[test]
+fn account_runtime_output_precedes_htlc_forward_followup_in_mixed_frame() {
+    let base = account(MAKER, &[1]);
+    let envelope = OpaqueHtlcCiphertext::from_packed(vec![0x52; 48]).expect("outer envelope");
+    let inner = OpaqueHtlcCiphertext::from_packed(vec![0x62; 48]).expect("inner envelope");
+    let hashlock = format!("0x{}", "bc".repeat(32));
+    let lock = AccountTx::HtlcLock(HtlcLockTx {
+        lock_id: hashlock.clone(),
+        hashlock: HtlcHashlock::parse(&hashlock).expect("hashlock"),
+        timelock: BigInt::from(200_000),
+        reveal_before_height: 1_000,
+        amount: BigInt::from(90),
+        token_id: token(1),
+        delivery_mode: None,
+        envelope: Some(envelope.clone()),
+    });
+    let (after_lock, lock_outputs) = apply_account(&base, Side::Right, &lock, 0, 1);
+    assert!(lock_outputs.is_empty());
+    let request = AccountTx::RequestCollateral {
+        token_id: token(1),
+        amount: BigInt::from(100),
+        fee_token_id: Some(token(1)),
+        fee_amount: BigInt::from(1),
+        policy_version: 1,
+    };
+    let (_, request_outputs) = apply_account(&after_lock, Side::Right, &request, 0, 1);
+
+    let mut state = entity_state(2_000);
+    state.known_accounts = BTreeSet::from([MAKER.to_string(), NEXT.to_string()]).into();
+    let frame_state_hash = format!("0x{}", "32".repeat(32));
+    let mut context = DeterministicContext::hlt_default();
+    context.prepared_htlcs.insert(
+        (frame_state_hash.clone(), hashlock.clone()),
+        PreparedHtlcEntry {
+            binding: HtlcPreparedBinding {
+                from_entity_id: MAKER.to_string(),
+                to_entity_id: HUB.to_string(),
+                domain: support::domain(),
+                account_frame_hash: frame_state_hash,
+                account_height: 1,
+                envelope_hash: hex(&envelope.integrity_hash()),
+                hashlock: hashlock.clone(),
+                token_id: 1,
+                amount: BigInt::from(90),
+                timelock: BigInt::from(200_000),
+                reveal_before_height: 1_000,
+            },
+            outcome: HtlcPreparedOutcome::Forward {
+                next_hop_entity_id: NEXT.to_string(),
+                forward_amount: BigInt::from(87),
+                inner_envelope: inner,
+            },
+        },
+    );
+    let mut inbound = commit(MAKER, 0x32, 1, lock, lock_outputs);
+    inbound
+        .transitions
+        .push(xln_rscore_entity_kernel::CommittedAccountTransition {
+            tx: request,
+            outputs: request_outputs,
+        });
+
+    let result = apply_entity_kernel(state, &[inbound], &context).expect("mixed Account frame");
+    assert_eq!(
+        result.outputs,
+        vec![
+            EntityKernelOutput::RequestCollateralCommitted {
+                entity_id: HUB.to_string(),
+                account_id: MAKER.to_string(),
+                token_id: 1,
+                requested_amount: BigInt::from(99),
+                prepaid_fee: BigInt::from(1),
+                requested_at: 1_000,
+            },
+            EntityKernelOutput::HtlcForwardAccepted {
+                entity_id: HUB.to_string(),
+                hashlock,
+            },
+        ]
+    );
+    assert_eq!(
+        result.commitments.ordered_outbox_digest,
+        "0xbd4e74de209ba29e00ec452215ee6d73d2c04128cd16e1c23ca3a86fdaf0c037"
+    );
+}
+
+#[test]
 fn canonical_account_secret_resolve_completes_final_htlc_in_two_fused_passes() {
     let secret = format!("0x{}", "77".repeat(32));
     let secret_bytes = [0x77_u8; 32];

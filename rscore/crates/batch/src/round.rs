@@ -42,6 +42,9 @@ pub struct EntityInboundRequest {
     pub expected_accounts_root: [u8; 32],
     /// The clock this Entity judges arrivals with.
     pub clock: ReceiverClock,
+    /// Transient role certified by the parent Entity state. It is never part
+    /// of Account committed state.
+    pub owning_entity_is_hub: bool,
     pub rows: Vec<AccountInputRow>,
     pub post_accounts: bool,
 }

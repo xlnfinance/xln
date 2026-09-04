@@ -142,6 +142,15 @@ export type WaveOutput =
       jHeight: number;
       collateral: string;
       ondelta: string;
+    }
+  | {
+      kind: 'requestCollateralCommitted';
+      entityId: string;
+      accountId: string;
+      tokenId: number;
+      requestedAmount: string;
+      prepaidFee: string;
+      requestedAt: number;
     };
 
 type WaveSwapOffer = {
@@ -853,6 +862,18 @@ const decodeOutput = (value: unknown): WaveOutput => {
         ondelta: rscoreWireBig(fields[4], 'output.ondelta').toString(),
       };
     }
+    case 7: {
+      const fields = rscoreWireTuple(row, 7, 'output.requestCollateralCommitted');
+      return {
+        kind: 'requestCollateralCommitted',
+        entityId: rscoreWireText(fields[1], 'output.entityId'),
+        accountId: rscoreWireText(fields[2], 'output.accountId'),
+        tokenId: rscoreWireInt(fields[3], 'output.tokenId'),
+        requestedAmount: rscoreWireBig(fields[4], 'output.requestedAmount').toString(),
+        prepaidFee: rscoreWireBig(fields[5], 'output.prepaidFee').toString(),
+        requestedAt: rscoreWireInt(fields[6], 'output.requestedAt'),
+      };
+    }
     default:
       return rscoreWireDecodeFail(`output.tag:${String(row[0])}`);
   }
@@ -922,6 +943,16 @@ export const waveOutputRow = (output: WaveOutput): ShadowOutputRow => {
         output.jHeight,
         output.collateral,
         output.ondelta,
+      ];
+    case 'requestCollateralCommitted':
+      return [
+        'requestCollateralCommitted',
+        output.entityId,
+        output.accountId,
+        output.tokenId,
+        output.requestedAmount,
+        output.prepaidFee,
+        output.requestedAt,
       ];
   }
 };
@@ -1012,6 +1043,16 @@ const outputWire = (output: WaveOutput): RscoreWireValue => {
       return [5, output.offerId];
     case 'accountSettledFinalized':
       return [6, output.tokenId, output.jHeight, output.collateral, output.ondelta];
+    case 'requestCollateralCommitted':
+      return [
+        7,
+        output.entityId,
+        output.accountId,
+        output.tokenId,
+        output.requestedAmount,
+        output.prepaidFee,
+        output.requestedAt,
+      ];
   }
 };
 

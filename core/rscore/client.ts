@@ -108,7 +108,7 @@ const RSCORE_ABI_VERSION = 1;
 // loaded root, so an idle Runtime persists one canonical restore base.
 // 39: one explicit checkpoint barrier exports the accepted Account forest
 // without manufacturing an Entity round.
-export const RSCORE_PROCESS_ABI_VERSION = 39;
+export const RSCORE_PROCESS_ABI_VERSION = 40;
 export const RSCORE_PROCESS_PROFILE = 'payment-v1';
 const RSCORE_PROTOCOL_VERSION = 1;
 const RSCORE_STORAGE_SCHEMA_VERSION = 1;
@@ -640,6 +640,7 @@ export class RscoreProcessClient {
     inboundTimestamp: number;
     inboundJHeight: number;
     inboundRows: readonly RscoreWireValue[];
+    owningEntityIsHub: boolean;
     inboundPostAccounts?: boolean;
     entityHeight: number;
     outboundTimestamp: number;
@@ -654,6 +655,7 @@ export class RscoreProcessClient {
         Buffer.from(round.expectedAccountsRoot),
         [round.inboundTimestamp, round.inboundJHeight],
         [...round.inboundRows],
+        round.owningEntityIsHub,
         round.inboundPostAccounts ?? false,
       ],
       round.entityHeight,

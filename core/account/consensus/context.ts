@@ -88,7 +88,6 @@ export type AccountConsensusContext = Readonly<{
    */
   entityClock?: Readonly<{ timestamp: number; finalizedJHeight: number }>;
   quietLogs: boolean;
-  emitRuntimeEvents: boolean;
   jReplicas: ReadonlyMap<string, JReplica>;
   jClaimNodeStore: AccountJClaimNodeStore;
   verifyHanko(

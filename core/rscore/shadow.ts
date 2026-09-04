@@ -168,6 +168,18 @@ const decodeEngineOutput = (value: unknown): ShadowOutputRow => {
       wireText(output[4], 'SHADOW_ENGINE_ACCOUNT_SETTLED_ONDELTA'),
     ];
   }
+  if (tag === 7) {
+    wireTuple(output, 'SHADOW_ENGINE_REQUEST_COLLATERAL_COMMITTED', 7);
+    return [
+      'requestCollateralCommitted',
+      wireText(output[1], 'SHADOW_ENGINE_REQUEST_COLLATERAL_ENTITY'),
+      wireText(output[2], 'SHADOW_ENGINE_REQUEST_COLLATERAL_ACCOUNT'),
+      wireInteger(output[3], 'SHADOW_ENGINE_REQUEST_COLLATERAL_TOKEN'),
+      wireText(output[4], 'SHADOW_ENGINE_REQUEST_COLLATERAL_AMOUNT'),
+      wireText(output[5], 'SHADOW_ENGINE_REQUEST_COLLATERAL_FEE'),
+      wireInteger(output[6], 'SHADOW_ENGINE_REQUEST_COLLATERAL_TIMESTAMP'),
+    ];
+  }
   throw new Error(`SHADOW_ENGINE_OUTPUT_TAG_UNSUPPORTED:${tag}`);
 };
 

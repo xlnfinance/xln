@@ -88,6 +88,8 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
     ]);
     account.rollbackCount = 3;
     state.accounts.set(counterparty, account);
+    state.profile = { ...state.profile, isHub: true };
+    expect(state.hubRebalanceConfig).toBeUndefined();
 
     let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 32, stpPolicy: 1 });
     for (const offerId of ['offer-a', 'hole', 'offer-c']) {
@@ -183,6 +185,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         inboundTimestamp: state.timestamp,
         inboundJHeight: state.lastFinalizedJHeight,
         inboundRows: [],
+        owningEntityIsHub: state.hubRebalanceConfig !== undefined,
         entityHeight: state.height + 1,
         outboundTimestamp: state.timestamp + 1,
         outboundJHeight: state.lastFinalizedJHeight,
@@ -206,6 +209,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         inboundTimestamp: state.timestamp,
         inboundJHeight: state.lastFinalizedJHeight,
         inboundRows: [],
+        owningEntityIsHub: state.hubRebalanceConfig !== undefined,
         entityHeight: state.height + 1,
         outboundTimestamp: state.timestamp + 2,
         outboundJHeight: state.lastFinalizedJHeight,
@@ -223,6 +227,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         inboundTimestamp: state.timestamp + 2,
         inboundJHeight: state.lastFinalizedJHeight,
         inboundRows: [],
+        owningEntityIsHub: state.hubRebalanceConfig !== undefined,
         entityHeight: state.height + 2,
         outboundTimestamp: state.timestamp + 3,
         outboundJHeight: state.lastFinalizedJHeight,
@@ -250,6 +255,7 @@ describe.skipIf(!existsSync(BINARY))('resident Rust Entity process', () => {
         inboundTimestamp: state.timestamp + 3,
         inboundJHeight: state.lastFinalizedJHeight,
         inboundRows: [],
+        owningEntityIsHub: state.hubRebalanceConfig !== undefined,
         entityHeight: state.height + 3,
         outboundTimestamp: state.timestamp + 4,
         outboundJHeight: state.lastFinalizedJHeight,

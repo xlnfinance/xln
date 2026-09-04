@@ -4,9 +4,10 @@ use num_bigint::BigInt;
 use serde::Deserialize;
 use serde_json::Value;
 use xln_rscore_engine::{
-    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountReplica,
-    AccountState, AccountTx, AccountVerdict, CanonicalValue, Delta, DepositoryAddress, EntityId,
-    RebalanceRefundReason, SequentialAccountEngine, Side, SwapMarketPolicy, TokenId, WatchSeed,
+    AccountDisputeConfig, AccountDomain, AccountExecutionContext, AccountIdentity, AccountOutput,
+    AccountReplica, AccountState, AccountTx, AccountVerdict, CanonicalValue, Delta,
+    DepositoryAddress, EntityId, RebalanceRefundReason, SequentialAccountEngine, Side,
+    SwapMarketPolicy, TokenId, WatchSeed,
 };
 use xln_rscore_runtime::canonical_value_from_tagged_json;
 
@@ -47,7 +48,7 @@ struct ExpectedStep {
     right_hold: String,
     workspace_hash: Option<String>,
     events: Vec<String>,
-    output_count: usize,
+    outputs: Vec<Value>,
 }
 
 fn entity(byte: u8) -> EntityId {
@@ -149,12 +150,32 @@ fn workspace_hash(value: Option<&CanonicalValue>) -> Option<String> {
     })
 }
 
-fn apply_step(
-    account: &mut AccountReplica,
-    input: &Value,
-    expected: &ExpectedStep,
-    assert_outputs: bool,
-) {
+fn output_value(output: &AccountOutput) -> Value {
+    match output {
+        AccountOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        } => serde_json::json!({
+            "kind": "runtimeEvent",
+            "eventName": "request_collateral_committed",
+            "data": {
+                "entityId": entity_id,
+                "accountId": account_id,
+                "tokenId": token_id.get(),
+                "requestedAmount": requested_amount.to_string(),
+                "prepaidFee": prepaid_fee.to_string(),
+                "requestedAt": requested_at,
+            },
+        }),
+        other => panic!("unsupported shared-vector Account output {other:?}"),
+    }
+}
+
+fn apply_step(account: &mut AccountReplica, input: &Value, expected: &ExpectedStep) {
     let transaction = tx(input, &expected.tx_type);
     assert_eq!(transaction.wire_name(), expected.tx_type);
     let side = if expected.by_left {
@@ -175,7 +196,16 @@ fn apply_step(
             .expect("shared rebalance/settlement transition");
     assert_eq!(transition.verdict(), &AccountVerdict::Applied);
     assert_eq!(transition.events(), expected.events);
-    let output_count = transition.outputs().len();
+    assert_eq!(
+        transition
+            .outputs()
+            .iter()
+            .map(output_value)
+            .collect::<Vec<_>>(),
+        expected.outputs,
+        "{} outputs",
+        expected.input
+    );
     let candidate = transition.committed().expect("shared candidate");
     let state = candidate.state();
     assert_eq!(root(state.deltas_root()), expected.deltas_root);
@@ -218,13 +248,6 @@ fn apply_step(
         workspace_hash(state.settlement_workspace()),
         expected.workspace_hash
     );
-    if assert_outputs {
-        assert_eq!(
-            output_count, expected.output_count,
-            "{} outputs",
-            expected.input
-        );
-    }
     *account = candidate;
 }
 
@@ -243,12 +266,7 @@ fn request_collateral_matches_the_shared_typescript_vector() {
         .expect("rebalance fixture case");
     let expected = test_case.steps.first().expect("request step");
     let mut replica = account();
-    apply_step(
-        &mut replica,
-        &fixture.inputs[&expected.input],
-        expected,
-        true,
-    );
+    apply_step(&mut replica, &fixture.inputs[&expected.input], expected);
 }
 
 #[test]
@@ -260,13 +278,8 @@ fn rebalance_refund_matches_the_shared_typescript_vector() {
         .find(|test_case| test_case.name == "rebalance-request-refund")
         .expect("rebalance fixture case");
     let mut replica = account();
-    for (index, expected) in test_case.steps.iter().enumerate() {
-        apply_step(
-            &mut replica,
-            &fixture.inputs[&expected.input],
-            expected,
-            index != 0,
-        );
+    for expected in &test_case.steps {
+        apply_step(&mut replica, &fixture.inputs[&expected.input], expected);
     }
 }
 
@@ -280,11 +293,6 @@ fn settle_transition_matches_the_shared_typescript_vector() {
         .expect("settlement fixture case");
     let mut replica = account();
     for expected in &test_case.steps {
-        apply_step(
-            &mut replica,
-            &fixture.inputs[&expected.input],
-            expected,
-            true,
-        );
+        apply_step(&mut replica, &fixture.inputs[&expected.input], expected);
     }
 }

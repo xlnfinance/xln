@@ -136,7 +136,7 @@ pub fn encode_resident_entity_round(
 // loaded root, so an idle Runtime persists one canonical restore base.
 // 39: one explicit checkpoint barrier exports the accepted Account forest
 // without manufacturing an Entity round.
-pub const PROCESS_ABI_VERSION: u64 = 39;
+pub const PROCESS_ABI_VERSION: u64 = 40;
 pub const PROCESS_PROFILE: &str = "payment-v1";
 pub const PAYMENT_PROFILE_BINDING: xln_rscore_abi::ProtocolBinding =
     xln_rscore_abi::ProtocolBinding {

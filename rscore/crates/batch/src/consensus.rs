@@ -533,6 +533,7 @@ pub(crate) fn apply_one(
                 clock,
                 ack,
                 peer_authority,
+                security.owning_entity_is_hub,
             ) {
                 Ok(outcome) => ack_verdict(outcome),
                 Err(error) => AccountInputVerdict::Failed(error.to_string()),
@@ -548,6 +549,7 @@ pub(crate) fn apply_one(
                 swap_market,
                 IncomingFrameSecurityContext {
                     clock,
+                    owning_entity_is_hub: security.owning_entity_is_hub,
                     peer_certified_board_authority: peer_authority,
                     local_certified_board_authority: local_authority,
                 },
@@ -563,6 +565,7 @@ pub(crate) fn apply_one(
                 swap_market,
                 IncomingFrameSecurityContext {
                     clock,
+                    owning_entity_is_hub: security.owning_entity_is_hub,
                     peer_certified_board_authority: peer_authority,
                     local_certified_board_authority: local_authority,
                 },

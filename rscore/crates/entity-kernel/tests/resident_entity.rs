@@ -281,6 +281,7 @@ fn entity_owned_envelope_change_moves_root_without_account_history_touch() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -355,6 +356,7 @@ fn real_account_input_remains_an_account_history_touch() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -474,6 +476,7 @@ fn inbound_genesis_bundles_required_ack_with_hub_policy_proposal() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: true,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -626,6 +629,7 @@ fn accepted_and_duplicate_account_proposals_force_the_same_pure_ack() {
             ResidentEntityRequest {
                 inbound: EntityInboundRequest {
                     owner_entity_id: *hub.as_bytes(),
+                    owning_entity_is_hub: false,
                     expected_accounts_root,
                     clock: ReceiverClock {
                         entity_timestamp: TIMESTAMP + entity_height,
@@ -749,6 +753,7 @@ fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
                 dispute: None,
             },
             &support::market(),
+            true,
         )
         .expect("hub accepts first"),
         IncomingOutcome::Committed { height: 1, .. }
@@ -797,6 +802,7 @@ fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
             dispute: None,
         },
         &support::market(),
+        false,
     )
     .expect("peer accepts ACK plus H=2");
     let AckFrameOutcome::Applied { frame, .. } = peer_result else {
@@ -835,6 +841,7 @@ fn later_pure_ack_clears_earlier_duplicate_force_in_one_inbound_batch() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP + 2,
@@ -991,6 +998,7 @@ fn authenticated_j_projection_joins_the_single_outbound_account_visit() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: before_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -1145,6 +1153,7 @@ fn local_direct_and_originated_htlc_join_one_resident_account_proposal() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -1300,6 +1309,7 @@ fn resident_entity_fuses_inbound_paybook_and_outbound_account_visit() {
     let base_root = accounts.accounts_root();
     let inbound = EntityInboundRequest {
         owner_entity_id: *hub.as_bytes(),
+        owning_entity_is_hub: false,
         expected_accounts_root: base_root,
         clock: ReceiverClock {
             entity_timestamp: TIMESTAMP,
@@ -1457,6 +1467,7 @@ fn resident_entity_same_j_swap_is_root_identical_across_worker_counts() {
             ResidentEntityRequest {
                 inbound: EntityInboundRequest {
                     owner_entity_id: *hub.as_bytes(),
+                    owning_entity_is_hub: false,
                     expected_accounts_root,
                     clock: ReceiverClock {
                         entity_timestamp: TIMESTAMP,
@@ -1610,6 +1621,7 @@ fn failed_books_stage_rolls_back_account_candidate_and_exact_retry_matches_fresh
     let make_request = |expected_accounts_root, row: AccountInputRow| ResidentEntityRequest {
         inbound: EntityInboundRequest {
             owner_entity_id: *hub.as_bytes(),
+            owning_entity_is_hub: false,
             expected_accounts_root,
             clock: ReceiverClock {
                 entity_timestamp: TIMESTAMP,
@@ -1753,6 +1765,7 @@ fn due_htlc_timeout_is_admitted_and_proposed_in_the_same_resident_round() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: due_at,
@@ -1855,6 +1868,7 @@ fn forged_scheduled_wake_is_rejected_before_resident_account_mutation() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: base_root,
                 clock: ReceiverClock {
                     entity_timestamp: 200,
@@ -1971,6 +1985,7 @@ fn short_lock_fails_the_resident_entity_round_without_account_mutation() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root: accounts_root_before,
                 clock: ReceiverClock {
                     entity_timestamp: TIMESTAMP,
@@ -2136,6 +2151,7 @@ fn reserve_window_secret_is_consumed_by_the_resident_entity_dispute_flow() {
             dispute: lock_dispute,
         },
         &support::market(),
+        true,
     )
     .expect("hub commits lock")
     else {
@@ -2165,6 +2181,7 @@ fn reserve_window_secret_is_consumed_by_the_resident_entity_dispute_flow() {
             frame_hanko: Some(ack_hanko),
             dispute: ack_dispute,
         },
+        false,
     )
     .expect("peer accepts lock ACK");
     assert!(matches!(
@@ -2235,6 +2252,7 @@ fn reserve_window_secret_is_consumed_by_the_resident_entity_dispute_flow() {
         ResidentEntityRequest {
             inbound: EntityInboundRequest {
                 owner_entity_id: *hub.as_bytes(),
+                owning_entity_is_hub: false,
                 expected_accounts_root,
                 clock: ReceiverClock {
                     entity_timestamp: timelock - 10_000,

@@ -2002,6 +2002,13 @@ fn apply_resident_entity_round_core_attempt(
             request: request_owner,
         });
     }
+    let owning_entity_is_hub = state.hub_rebalance_config.is_some();
+    if request.inbound.owning_entity_is_hub != owning_entity_is_hub {
+        return Err(ResidentEntityError::OperationPlan(format!(
+            "OWNER_HUB_ROLE_MISMATCH:{}:{}",
+            request.inbound.owning_entity_is_hub, owning_entity_is_hub
+        )));
+    }
     state.height = request.entity_height;
     state.timestamp = request.outbound_timestamp;
     validate_operation_plan(&request.operations, request.inbound.rows.len())?;
@@ -2053,6 +2060,7 @@ fn apply_resident_entity_round_core_attempt(
             owner_entity_id,
             expected_accounts_root: expected_root,
             clock,
+            owning_entity_is_hub,
             rows,
             post_accounts: false,
         },
@@ -2955,6 +2963,7 @@ mod tests {
                     entity_timestamp: 1_700_000_000_000,
                     finalized_j_height: 100,
                 },
+                owning_entity_is_hub: false,
                 rows: Vec::new(),
                 post_accounts: false,
             })

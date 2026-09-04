@@ -16,7 +16,6 @@ const HEX32 = (byte: string): string => `0x${byte.repeat(32)}`;
 const consensusContext = (): AccountConsensusContext => ({
   runtimeTimestamp: 1_000,
   quietLogs: true,
-  emitRuntimeEvents: false,
   jReplicas: new Map(),
   jClaimNodeStore: new Map(),
   verifyHanko: async () => ({ valid: true, entityId: null }),

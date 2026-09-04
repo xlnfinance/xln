@@ -653,6 +653,16 @@ pub enum EntityKernelOutput {
         collateral: BigInt,
         ondelta: BigInt,
     },
+    /// Exact fresh-request receipt emitted by Account. No receipt exists for
+    /// an applied duplicate/no-op request.
+    RequestCollateralCommitted {
+        entity_id: String,
+        account_id: String,
+        token_id: u16,
+        requested_amount: BigInt,
+        prepaid_fee: BigInt,
+        requested_at: u64,
+    },
     HtlcInitiated {
         entity_id: String,
         from_entity: String,

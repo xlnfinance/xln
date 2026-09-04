@@ -172,6 +172,16 @@ const CASES: readonly Case[] = [
     { outcome: 'error', reason: 'timeout' },
     htlcContext(2_000, 1),
   ),
+  {
+    id: 'request-collateral',
+    byLeft: true,
+    context: htlcContext(3_000, 2),
+    tx: {
+      type: 'request_collateral',
+      data: { tokenId: 1, amount: 100n, feeTokenId: 1, feeAmount: 10n, policyVersion: 3 },
+    },
+    wire: [5, 1, '100', 1, '10', 3],
+  },
 ];
 
 const concatBytes = (...parts: readonly Uint8Array[]): Uint8Array => {
@@ -301,18 +311,40 @@ const stateEvidence = (
 };
 
 const outputWire = (output: AccountOutput): WireValue[] => {
-  if (output.kind !== 'directPaymentForward') {
-    throw new Error(`DIFFERENTIAL_OUTPUT_UNSUPPORTED:${output.kind}`);
+  if (output.kind === 'directPaymentForward') {
+    return [
+      output.kind,
+      output.tokenId,
+      output.amount.toString(),
+      [...output.route],
+      output.description ?? null,
+      output.deliveryMode,
+      output.trustedGatewayEntityId,
+    ];
   }
-  return [
-    output.kind,
-    output.tokenId,
-    output.amount.toString(),
-    [...output.route],
-    output.description ?? null,
-    output.deliveryMode,
-    output.trustedGatewayEntityId,
-  ];
+  if (output.kind === 'runtimeEvent' && output.eventName === 'request_collateral_committed') {
+    const fields = output.data;
+    const keys = Object.keys(fields).sort().join(',');
+    if (keys !== 'accountId,entityId,prepaidFee,requestedAmount,requestedAt,tokenId'
+      || typeof fields.entityId !== 'string'
+      || typeof fields.accountId !== 'string'
+      || !Number.isSafeInteger(fields.tokenId)
+      || typeof fields.requestedAmount !== 'string'
+      || typeof fields.prepaidFee !== 'string'
+      || !Number.isSafeInteger(fields.requestedAt)) {
+      throw new Error('DIFFERENTIAL_REQUEST_COLLATERAL_OUTPUT_INVALID');
+    }
+    return [
+      'requestCollateralCommitted',
+      fields.entityId,
+      fields.accountId,
+      fields.tokenId as number,
+      fields.requestedAmount,
+      fields.prepaidFee,
+      fields.requestedAt as number,
+    ];
+  }
+  throw new Error(`DIFFERENTIAL_OUTPUT_UNSUPPORTED:${output.kind}`);
 };
 
 type ApplyResult = Awaited<ReturnType<typeof applyAccountTxToMutableReplica>>;

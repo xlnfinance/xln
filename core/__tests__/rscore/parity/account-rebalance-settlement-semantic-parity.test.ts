@@ -18,4 +18,16 @@ test('rebalance and settlement AccountTx variants match the shared TypeScript se
     'rebalance_refund',
     'settle_transition',
   ]);
+  expect(actual.cases[0]?.steps[0]?.outputs).toEqual([{
+    kind: 'runtimeEvent',
+    eventName: 'request_collateral_committed',
+    data: {
+      entityId: `0x${'11'.repeat(32)}`,
+      accountId: `0x${'22'.repeat(32)}`,
+      tokenId: 1,
+      requestedAmount: '90',
+      prepaidFee: '10',
+      requestedAt: 1_000,
+    },
+  }]);
 });

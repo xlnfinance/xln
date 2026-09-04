@@ -88,4 +88,15 @@ describe('rscore shadow first divergence', () => {
       [0, 0, ['accountSettledFinalized', 1, 26, '100', '-2']],
     ]);
   });
+
+  test('decodes the fresh collateral-request receipt emitted by Rust', () => {
+    const accountId = new Uint8Array(32).fill(7);
+    const owner = `0x${'11'.repeat(32)}`;
+    const peer = `0x${'22'.repeat(32)}`;
+    expect(engineOutputProjection([
+      [0, 0, accountId, [7, owner, peer, 1, '499', '1', 1_000]],
+    ], Buffer.from(accountId).toString('hex'))).toEqual([
+      [0, 0, ['requestCollateralCommitted', owner, peer, 1, '499', '1', 1_000]],
+    ]);
+  });
 });

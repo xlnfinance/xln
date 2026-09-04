@@ -5,8 +5,8 @@ use num_bigint::BigInt;
 use crate::state::{RebalanceRefundState, RebalanceRequestFeeState};
 use crate::tx::apply_types::MutationDecision;
 use crate::{
-    AccountRejection, AccountReplica, RebalanceRefundReason, Side, TokenId, TransitionError,
-    ValidationRejection,
+    AccountOutput, AccountRejection, AccountReplica, RebalanceRefundReason, Side, TokenId,
+    TransitionError, ValidationRejection,
 };
 
 pub use policy::*;
@@ -108,9 +108,19 @@ pub(crate) fn apply_request_collateral(
             refund: None,
         },
     )?;
-    Ok(MutationDecision::applied(vec![format!(
-        "🔄 Collateral requested: {effective_request} token {token_id}, prepaidFee={fee_amount} (hub will deposit R→C)"
-    )]))
+    Ok(MutationDecision::with_outputs(
+        vec![format!(
+            "🔄 Collateral requested: {effective_request} token {token_id}, prepaidFee={fee_amount} (hub will deposit R→C)"
+        )],
+        vec![AccountOutput::RequestCollateralCommitted {
+            entity_id: replica.owner().to_string(),
+            account_id: replica.counterparty().to_string(),
+            token_id,
+            requested_amount: effective_request,
+            prepaid_fee: fee_amount.clone(),
+            requested_at: timestamp,
+        }],
+    ))
 }
 
 pub(crate) fn apply_rebalance_refund(

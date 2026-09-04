@@ -5,7 +5,7 @@
  * This is the V1 rebalance mechanism — no quotes, no custody, no bilateral negotiation.
  *
  * Flow:
- * 1. Post-frame hook detects: outPeerCredit > r2cRequestSoftLimit
+ * 1. Post-frame hook detects: outPeerCredit >= r2cRequestSoftLimit
  * 2. Auto-queues request_collateral into account mempool
  * 3. Request frame debits prepaid fee immediately (user pays hub upfront)
  * 4. Hub crontab picks up pendingRebalanceRequest → adds R→C to jBatch
@@ -245,7 +245,7 @@ export function checkAutoRebalance(account: AccountReplica, ourEntityId: string,
       continue;
     }
 
-    if (rebalanceTrigger > policy.r2cRequestSoftLimit) {
+    if (rebalanceTrigger >= policy.r2cRequestSoftLimit) {
       const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
       const baseFee = feePolicy.baseFee ?? getDefaultRebalanceBaseFeeForToken(tokenId);
       const feeAmount = baseFee + feePolicy.gasFee + liquidityFee;

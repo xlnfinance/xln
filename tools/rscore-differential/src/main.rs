@@ -54,6 +54,13 @@ fn token(value: &AbiValue) -> Result<TokenId, Box<dyn Error>> {
     Ok(TokenId::new(raw)?)
 }
 
+fn optional_token(value: &AbiValue) -> Result<Option<TokenId>, Box<dyn Error>> {
+    match value {
+        AbiValue::Nil => Ok(None),
+        _ => token(value).map(Some),
+    }
+}
+
 fn bigint(value: &AbiValue) -> Result<BigInt, Box<dyn Error>> {
     Ok(text(value)?.parse()?)
 }
@@ -195,6 +202,13 @@ fn parse_tx(value: &AbiValue) -> Result<AccountTx, Box<dyn Error>> {
                 outcome,
             }))
         }
+        5 if fields.len() == 6 => Ok(AccountTx::RequestCollateral {
+            token_id: token(&fields[1])?,
+            amount: bigint(&fields[2])?,
+            fee_token_id: optional_token(&fields[3])?,
+            fee_amount: bigint(&fields[4])?,
+            policy_version: unsigned(&fields[5])?,
+        }),
         tag => Err(invalid(format!(
             "DIFFERENTIAL_TX_TAG_OR_ARITY:{tag}:{}",
             fields.len()
@@ -257,6 +271,22 @@ fn observable_locks<'a>(
 
 fn output_value(output: &AccountOutput) -> AbiValue {
     match output {
+        AccountOutput::RequestCollateralCommitted {
+            entity_id,
+            account_id,
+            token_id,
+            requested_amount,
+            prepaid_fee,
+            requested_at,
+        } => values_tuple(vec![
+            AbiValue::Text("requestCollateralCommitted".into()),
+            AbiValue::Text(entity_id.clone()),
+            AbiValue::Text(account_id.clone()),
+            AbiValue::Integer(i128::from(token_id.get())),
+            AbiValue::Text(requested_amount.to_string()),
+            AbiValue::Text(prepaid_fee.to_string()),
+            AbiValue::Integer(i128::from(*requested_at)),
+        ]),
         AccountOutput::DirectPaymentForward {
             token_id,
             amount,

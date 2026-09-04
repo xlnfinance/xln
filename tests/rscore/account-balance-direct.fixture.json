@@ -11,7 +11,8 @@
     "htlc-secret-lock",
     "htlc-secret-resolve",
     "htlc-timeout-lock",
-    "htlc-timeout-resolve"
+    "htlc-timeout-resolve",
+    "request-collateral"
   ],
   "rootFields": [
     "deltasRadixRoot",
@@ -19,11 +20,11 @@
     "paymentProfileAccountStateRoot"
   ],
   "request": {
-    "bytes": 2076,
-    "sha256": "9957c0bcd3b78bead532d9ca142dfe094cb56821b619d5456b79caa75e97c471"
+    "bytes": 2119,
+    "sha256": "f866ee734a4f018b6013d5297dea043c0a0fdd1d086f594f6e76d030654d7ccb"
   },
   "response": {
-    "bytes": 3221,
-    "sha256": "77f9bd3ae63649de3b867f0488f2b252316f21545eebc40893df9599ba1a7ce3"
+    "bytes": 3658,
+    "sha256": "406ab882e3e919e7b171d61fc8aef4c00c29b199631ad66b5a793b584c401b50"
   }
 }

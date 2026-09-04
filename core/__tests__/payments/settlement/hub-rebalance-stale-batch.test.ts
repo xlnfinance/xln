@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test';
 
 import { computeAccountStateRoot } from '../../../account/commitment/state-root';
+import { requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { computeEntityAccountValueHash } from '../../../entity/consensus/state-root';
 import { executeCrontab, initCrontab, HUB_PENDING_BROADCAST_STALE_MS } from '../../../entity/scheduler';
+import { PersistentEntityAccountMap } from '../../../entity/state/persistent-account-map';
 import { createEmptyEnv } from '../../../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../../../entity/types';
 import { makeAccount } from '../../helpers/cross-j';
@@ -31,7 +34,7 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
     jurisdiction,
   },
   reserves: new Map(),
-  accounts: new Map(),
+  accounts: PersistentEntityAccountMap.empty(entityId, computeEntityAccountValueHash),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   profile: { name: 'H1', isHub: true, avatar: '', bio: '', website: '' },
@@ -135,8 +138,14 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
   const tokenId = 1;
   const requestedAmount = 500n;
   const hubAccount = makeAccount(entityId, userId, jurisdiction);
-  hubAccount.state.requestedRebalance.set(tokenId, requestedAmount);
-  hubAccount.state.requestedRebalanceFeeState.set(tokenId, {
+  hubAccount.state.requestedRebalance = requirePersistentAccountStateMap(
+    hubAccount.state.requestedRebalance,
+    'requestedRebalance',
+  ).updated(tokenId, requestedAmount);
+  hubAccount.state.requestedRebalanceFeeState = requirePersistentAccountStateMap(
+    hubAccount.state.requestedRebalanceFeeState,
+    'requestedRebalanceFeeState',
+  ).updated(tokenId, {
     requestId: 'bilateral-request',
     feeTokenId: tokenId,
     feePaidUpfront: 10n ** 30n,
@@ -145,8 +154,7 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
     requestedAt: 1,
     requestedByLeft: false,
   });
-  const userAccount = structuredClone(hubAccount);
-  const bilateralRoot = computeAccountStateRoot(userAccount.state);
+  const bilateralRoot = computeAccountStateRoot(hubAccount.state);
 
   const env = createEmptyEnv('hub-rebalance-bilateral-clear');
   env.scenarioMode = true;
@@ -154,7 +162,7 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
   env.state.timestamp = 1_000_000;
   const state = makeHubState(env.state.timestamp, 0);
   state.jBatchState = undefined;
-  state.accounts.set(userId, hubAccount);
+  state.accounts = state.accounts.updated(userId, hubAccount);
   state.crontabState = initCrontab();
   for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
   const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
@@ -168,4 +176,58 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
   expect(computeAccountStateRoot(hubAccount.state)).toBe(bilateralRoot);
   expect(hubAccount.state.requestedRebalance.get(tokenId)).toBe(requestedAmount);
   expect(hubAccount.state.requestedRebalanceFeeState.has(tokenId)).toBe(true);
+});
+
+test('an old submitted request remains latched until bilateral finality or explicit drop', async () => {
+  const userId = `0x${'f5'.repeat(32)}`;
+  const tokenId = 1;
+  const requestedAmount = 500n;
+  const hubAccount = makeAccount(entityId, userId, jurisdiction);
+  hubAccount.state.requestedRebalance = requirePersistentAccountStateMap(
+    hubAccount.state.requestedRebalance,
+    'requestedRebalance',
+  ).updated(tokenId, requestedAmount);
+  hubAccount.state.requestedRebalanceFeeState = requirePersistentAccountStateMap(
+    hubAccount.state.requestedRebalanceFeeState,
+    'requestedRebalanceFeeState',
+  ).updated(tokenId, {
+    requestId: 'already-submitted-request',
+    feeTokenId: tokenId,
+    feePaidUpfront: 10n ** 30n,
+    requestedAmount,
+    policyVersion: 1,
+    requestedAt: 1,
+    requestedByLeft: false,
+  });
+  hubAccount.shadow.rebalance.submittedAtByToken = requirePersistentAccountStateMap(
+    hubAccount.shadow.rebalance.submittedAtByToken,
+    'rebalanceShadowSubmitted',
+  ).updated(tokenId, 1);
+  const delta = hubAccount.state.deltas.get(tokenId)!;
+  hubAccount.state.deltas = requirePersistentAccountStateMap(
+    hubAccount.state.deltas,
+    'deltas',
+  ).updated(tokenId, { ...delta, offdelta: -requestedAmount });
+
+  const env = createEmptyEnv('hub-rebalance-exact-once-latch');
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+  env.state.timestamp = 1_000_000;
+  const state = makeHubState(env.state.timestamp, 0);
+  state.reserves.set(tokenId, requestedAmount);
+  state.jBatchState = undefined;
+  state.accounts = state.accounts.updated(userId, hubAccount);
+  state.crontabState = initCrontab();
+  for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
+  const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+  const outputs = await executeCrontab(env, replica, state.crontabState, {
+    manualBroadcastInInput: false,
+    accountChanges: new Set(),
+  });
+
+  expect(outputs.flatMap(output => output.entityTxs ?? []).some(tx => tx.type === 'j_broadcast')).toBe(false);
+  expect(state.jBatchState?.batch.reserveToCollateral ?? []).toEqual([]);
+  expect(state.accounts.get(userId)?.shadow.rebalance.submittedAtByToken.get(tokenId)).toBe(1);
 });
