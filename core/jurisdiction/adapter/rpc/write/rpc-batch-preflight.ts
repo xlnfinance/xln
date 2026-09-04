@@ -1,10 +1,14 @@
+import { ethers } from 'ethers';
 import type { Depository } from '../../../../../jurisdictions/typechain-types/index.ts';
 import { safeStringify } from '../../../../protocol/serialization';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from '../../kernel/failure';
 import { decodeStandardSolidityRevertData, rpcErrorText, rpcLog } from '../../rpc-public';
 import type { JSubmitResult } from '../../types';
 
-const NO_ACTIVE_DISPUTE_SELECTOR = '0x88d0662b';
+// Derived, never hardcoded: a renamed/reshuffled contract error must not
+// silently stop classifying the E5 (NoActiveDispute) race. Same derivation as
+// rpc-submission.ts.
+const NO_ACTIVE_DISPUTE_SELECTOR = ethers.id('E5()').slice(0, 10).toLowerCase();
 
 type RevertSource = {
   data?: unknown;
