@@ -15,23 +15,23 @@ import { ethers } from 'ethers';
 import type { EntityProvider } from '../../../../jurisdictions/typechain-types/index.ts';
 import { buildSingleSignerHanko } from '../../../hanko/batch';
 
-export const FOUNDATION_ENTITY_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32) as `0x${string}`;
+const FOUNDATION_ENTITY_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32) as `0x${string}`;
 
-export type FoundationTokenListing = Readonly<{
+type FoundationTokenListing = Readonly<{
   depository: string;
   tokenType: number;
   contractAddress: string;
   externalTokenId: bigint;
 }>;
 
-export const foundationTokenListingArgumentsHash = (listing: FoundationTokenListing): string =>
+const foundationTokenListingArgumentsHash = (listing: FoundationTokenListing): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
     ['address', 'uint8', 'address', 'uint256'],
     [listing.depository, listing.tokenType, listing.contractAddress, listing.externalTokenId],
   ));
 
 /** Build (hankoData, actionNonce) for foundationRegisterExternalToken from the Foundation signer key. */
-export const buildFoundationTokenListingAuthorization = async (
+const buildFoundationTokenListingAuthorization = async (
   entityProvider: Pick<EntityProvider, 'entityActionNonces' | 'computeFoundationActionHash' | 'FOUNDATION_REGISTER_TOKEN'>,
   listing: FoundationTokenListing,
   foundationSignerPrivateKey: string | Uint8Array,
