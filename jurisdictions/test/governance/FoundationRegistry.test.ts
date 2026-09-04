@@ -112,36 +112,6 @@ describe('Foundation authority and name registry', function () {
     expect(await provider.nameToNumber('alpha')).to.equal(entities[2]);
   });
 
-  it('lets Foundation reserve and unreserve a name', async function () {
-    const { provider } = await fixture();
-    const name = 'coinbase';
-    const reserveAuthorization = await buildFoundationAction(
-      provider,
-      await provider.FOUNDATION_SET_RESERVED_NAME(),
-      actionArgumentsHash(['string', 'bool'], [name, true]),
-    );
-    await provider.setReservedName(
-      name,
-      true,
-      reserveAuthorization.hankoData,
-      reserveAuthorization.actionNonce,
-    );
-    expect(await provider.reservedNames(name)).to.equal(true);
-
-    const clearAuthorization = await buildFoundationAction(
-      provider,
-      await provider.FOUNDATION_SET_RESERVED_NAME(),
-      actionArgumentsHash(['string', 'bool'], [name, false]),
-    );
-    await provider.setReservedName(
-      name,
-      false,
-      clearAuthorization.hankoData,
-      clearAuthorization.actionNonce,
-    );
-    expect(await provider.reservedNames(name)).to.equal(false);
-  });
-
   it('does not turn minority Foundation control ownership into admin authority', async function () {
     const { provider, signers } = await fixture();
     const [controlTokenId] = await provider.getTokenIds(1);
@@ -153,38 +123,45 @@ describe('Foundation authority and name registry', function () {
       '0x',
     );
 
-    const user = signers[6]!.address;
-    const argumentsHash = actionArgumentsHash(['address', 'uint8'], [user, 7]);
+    // foundationRegisterEntity is the Foundation action whose replay reaches the
+    // nonce fence: a repeated board hash is a valid new numbered entity, so the
+    // only thing that can reject the second call is the consumed action nonce.
+    const boardHash = singleSignerLazyEntityId(signers[6]!.address);
+    const argumentsHash = actionArgumentsHash(
+      ['bytes32', 'tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)'],
+      [boardHash, articles],
+    );
+    const nextNumberBefore = await provider.nextNumber();
     const attackerAuthorization = await buildFoundationAction(
       provider,
-      await provider.FOUNDATION_SET_NAME_QUOTA(),
+      await provider.FOUNDATION_REGISTER_ENTITY(),
       argumentsHash,
       deriveHardhatPrivateKey(4),
     );
-    await expect(provider.connect(signers[4]).setNameQuota(
-      user,
-      7,
+    await expect(provider.connect(signers[4]).foundationRegisterEntity(
+      boardHash,
+      articles,
       attackerAuthorization.hankoData,
       attackerAuthorization.actionNonce,
     )).to.be.revertedWithCustomError(provider, 'InvalidFoundationAuthorization');
-    expect(await provider.nameQuota(user)).to.equal(0);
+    expect(await provider.nextNumber()).to.equal(nextNumberBefore);
 
     const validAuthorization = await buildFoundationAction(
       provider,
-      await provider.FOUNDATION_SET_NAME_QUOTA(),
+      await provider.FOUNDATION_REGISTER_ENTITY(),
       argumentsHash,
     );
-    await provider.connect(signers[4]).setNameQuota(
-      user,
-      7,
+    await provider.connect(signers[4]).foundationRegisterEntity(
+      boardHash,
+      articles,
       validAuthorization.hankoData,
       validAuthorization.actionNonce,
     );
-    expect(await provider.nameQuota(user)).to.equal(7);
+    expect(await provider.nextNumber()).to.equal(nextNumberBefore + 1n);
 
-    await expect(provider.connect(signers[4]).setNameQuota(
-      user,
-      7,
+    await expect(provider.connect(signers[4]).foundationRegisterEntity(
+      boardHash,
+      articles,
       validAuthorization.hankoData,
       validAuthorization.actionNonce,
     )).to.be.revertedWithCustomError(provider, 'InvalidFoundationActionNonce');

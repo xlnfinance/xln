@@ -45,8 +45,6 @@ export interface EntityProviderInterface extends Interface {
       | "FOUNDATION_ASSIGN_NAME"
       | "FOUNDATION_ENTITY"
       | "FOUNDATION_REGISTER_ENTITY"
-      | "FOUNDATION_SET_NAME_QUOTA"
-      | "FOUNDATION_SET_RESERVED_NAME"
       | "FOUNDATION_TRANSFER_NAME"
       | "MAX_SHARE_SUPPORTERS"
       | "TOTAL_CONTROL_SUPPLY"
@@ -73,14 +71,12 @@ export interface EntityProviderInterface extends Interface {
       | "encodeReleaseControlSharesHankoPayload"
       | "entities"
       | "entityActionNonces"
-      | "entityIdToNumber"
       | "entityTransferTokens"
       | "foundationDeployer"
       | "foundationRegisterEntity"
       | "getEntityInfo"
       | "getTokenIds"
       | "isApprovedForAll"
-      | "nameQuota"
       | "nameToNumber"
       | "nextNumber"
       | "numberToName"
@@ -88,12 +84,9 @@ export interface EntityProviderInterface extends Interface {
       | "registerNumberedEntitiesBatch"
       | "registerNumberedEntity"
       | "releaseControlShares"
-      | "reservedNames"
       | "safeBatchTransferFrom"
       | "safeTransferFrom"
       | "setApprovalForAll"
-      | "setNameQuota"
-      | "setReservedName"
       | "shareDepository"
       | "supportsInterface"
       | "transferName"
@@ -149,14 +142,6 @@ export interface EntityProviderInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "FOUNDATION_REGISTER_ENTITY",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "FOUNDATION_SET_NAME_QUOTA",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "FOUNDATION_SET_RESERVED_NAME",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -287,10 +272,6 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "entityIdToNumber",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
     functionFragment: "entityTransferTokens",
     values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
@@ -313,10 +294,6 @@ export interface EntityProviderInterface extends Interface {
   encodeFunctionData(
     functionFragment: "isApprovedForAll",
     values: [AddressLike, AddressLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "nameQuota",
-    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "nameToNumber",
@@ -354,10 +331,6 @@ export interface EntityProviderInterface extends Interface {
     ]
   ): string;
   encodeFunctionData(
-    functionFragment: "reservedNames",
-    values: [string]
-  ): string;
-  encodeFunctionData(
     functionFragment: "safeBatchTransferFrom",
     values: [
       AddressLike,
@@ -374,14 +347,6 @@ export interface EntityProviderInterface extends Interface {
   encodeFunctionData(
     functionFragment: "setApprovalForAll",
     values: [AddressLike, boolean]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setNameQuota",
-    values: [AddressLike, BigNumberish, BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setReservedName",
-    values: [string, boolean, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "shareDepository",
@@ -431,14 +396,6 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "FOUNDATION_REGISTER_ENTITY",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "FOUNDATION_SET_NAME_QUOTA",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "FOUNDATION_SET_RESERVED_NAME",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -537,10 +494,6 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "entityIdToNumber",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "entityTransferTokens",
     data: BytesLike
   ): Result;
@@ -564,7 +517,6 @@ export interface EntityProviderInterface extends Interface {
     functionFragment: "isApprovedForAll",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "nameQuota", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "nameToNumber",
     data: BytesLike
@@ -591,10 +543,6 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "reservedNames",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "safeBatchTransferFrom",
     data: BytesLike
   ): Result;
@@ -604,14 +552,6 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "setApprovalForAll",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setNameQuota",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setReservedName",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -1085,10 +1025,6 @@ export interface EntityProvider extends BaseContract {
 
   FOUNDATION_REGISTER_ENTITY: TypedContractMethod<[], [string], "view">;
 
-  FOUNDATION_SET_NAME_QUOTA: TypedContractMethod<[], [string], "view">;
-
-  FOUNDATION_SET_RESERVED_NAME: TypedContractMethod<[], [string], "view">;
-
   FOUNDATION_TRANSFER_NAME: TypedContractMethod<[], [string], "view">;
 
   MAX_SHARE_SUPPORTERS: TypedContractMethod<[], [bigint], "view">;
@@ -1313,8 +1249,6 @@ export interface EntityProvider extends BaseContract {
 
   entityActionNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
-  entityIdToNumber: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
   entityTransferTokens: TypedContractMethod<
     [
       entityNumber: BigNumberish,
@@ -1366,8 +1300,6 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
 
-  nameQuota: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
-
   nameToNumber: TypedContractMethod<[arg0: string], [bigint], "view">;
 
   nextNumber: TypedContractMethod<[], [bigint], "view">;
@@ -1410,8 +1342,6 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
 
-  reservedNames: TypedContractMethod<[arg0: string], [boolean], "view">;
-
   safeBatchTransferFrom: TypedContractMethod<
     [
       from: AddressLike,
@@ -1438,28 +1368,6 @@ export interface EntityProvider extends BaseContract {
 
   setApprovalForAll: TypedContractMethod<
     [operator: AddressLike, approved: boolean],
-    [void],
-    "nonpayable"
-  >;
-
-  setNameQuota: TypedContractMethod<
-    [
-      user: AddressLike,
-      quota: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
-
-  setReservedName: TypedContractMethod<
-    [
-      name: string,
-      reserved: boolean,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
     [void],
     "nonpayable"
   >;
@@ -1521,12 +1429,6 @@ export interface EntityProvider extends BaseContract {
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "FOUNDATION_REGISTER_ENTITY"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "FOUNDATION_SET_NAME_QUOTA"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "FOUNDATION_SET_RESERVED_NAME"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "FOUNDATION_TRANSFER_NAME"
@@ -1771,9 +1673,6 @@ export interface EntityProvider extends BaseContract {
     nameOrSignature: "entityActionNonces"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
-    nameOrSignature: "entityIdToNumber"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-  getFunction(
     nameOrSignature: "entityTransferTokens"
   ): TypedContractMethod<
     [
@@ -1831,9 +1730,6 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "nameQuota"
-  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
-  getFunction(
     nameOrSignature: "nameToNumber"
   ): TypedContractMethod<[arg0: string], [bigint], "view">;
   getFunction(
@@ -1875,9 +1771,6 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "reservedNames"
-  ): TypedContractMethod<[arg0: string], [boolean], "view">;
-  getFunction(
     nameOrSignature: "safeBatchTransferFrom"
   ): TypedContractMethod<
     [
@@ -1907,30 +1800,6 @@ export interface EntityProvider extends BaseContract {
     nameOrSignature: "setApprovalForAll"
   ): TypedContractMethod<
     [operator: AddressLike, approved: boolean],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "setNameQuota"
-  ): TypedContractMethod<
-    [
-      user: AddressLike,
-      quota: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "setReservedName"
-  ): TypedContractMethod<
-    [
-      name: string,
-      reserved: boolean,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
     [void],
     "nonpayable"
   >;

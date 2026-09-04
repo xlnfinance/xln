@@ -169,6 +169,34 @@ struct InitialDisputeProof {
   // starterCounterArguments: H(nonce, proposerIsLeft, proofbodyHash).
   // bytes32(0) means no counter branch was admitted at dispute start.
   bytes32 starterCounterProofCommitment;
+  //
+  // Why the starter's evidence is frozen at start and cannot be improved later:
+  // - Starter args must be public at start so the NON-starter can finalize at T
+  //   without the starter's cooperation. A hash-only commitment would let the
+  //   starter grief by never revealing and lock the Account forever.
+  // - Starter args cannot be supplied at finalize because the starter would then
+  //   choose evidence with hindsight of the counter-proof (withhold a secret,
+  //   pick a lower fill) after the bilateral clocks were already set.
+  // - Starter args are positional per transformer clause, so any clause change
+  //   at or before a position (add, remove, reorder, requantize) invalidates
+  //   the blob for the newer body. That is one reason a second blob exists.
+  // - The other reason is binding, not indexing: the second blob is tied to ONE
+  //   exact newer branch via starterCounterProofCommitment, and every other
+  //   branch the non-starter may select receives empty starter evidence
+  //   (Account._counterStarterArgumentsCommitment). The starter thus cannot
+  //   pre-load evidence for branches it did not name at start.
+  //
+  // Tempting simplification, reviewed and rejected as-is: key each argument by
+  // keccak256(clause) instead of clause index so one starter blob serves every
+  // body containing the clause, and drop both counter fields. It fails today
+  // because (1) _validateProofBody does not forbid two byte-identical clauses,
+  // so a keyed lookup would double-execute one entry; (2) an open limit order
+  // keeps identical clause bytes while its intended taker fill moves from N to
+  // N+1, so one key cannot carry both fills and a starter would precommit the
+  // higher one; (3) it silently widens starter evidence to branches the starter
+  // never named, reversing the empty-evidence rule above. It would need a
+  // duplicate-clause rejection, a key over (transformer, encodedBatch,
+  // allowances), and an explicit decision on (3). Until then, two blobs stay.
 }
 
 struct FinalDisputeProof {

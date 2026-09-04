@@ -1027,6 +1027,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     // Δ is LEFT's allocation (ondelta + offdelta), bounded by RCPAN:
     //   −leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
     //
+    // Credit limits are deliberately NOT known to the jurisdiction. Both parties
+    // sign offdelta; Δ = stored ondelta + that signed offdelta settles as-is,
+    // however large the implied debt. Signing the offdelta IS the consent to it;
+    // the runtime enforces RCPAN before it signs. An on-chain limit would be a
+    // second source of truth that can only disagree with the signature.
+    //
     // Collateral only exists on the right side of 0. Therefore:
     // - If Δ ≤ 0: LEFT gets 0, RIGHT gets all collateral, and LEFT owes −Δ (credit/debt).
     // - If 0 < Δ < collateral: split collateral (LEFT = Δ, RIGHT = collateral − Δ).
@@ -1052,6 +1058,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   }
 
   /// @notice Settle shortfall via reserves, then debt
+  /// @dev The debt booked here is unsecured by construction. It carries no
+  ///      interest, no external claim and no seizure right: the jurisdiction can
+  ///      only intercept this debtor's FUTURE reserve inflows of the same token
+  ///      at this Depository (enforceDebts runs before every outflow and
+  ///      _spendableReserve nets outstanding debt). Nothing else is possible
+  ///      without an off-chain legal wrapper. The economic meaning of a credit
+  ///      line is therefore exactly: "I trust this counterparty's future J-reserve
+  ///      inflows and reputation up to this amount." Hubs must size credit by
+  ///      that, not by any assumption of on-chain recourse.
   function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) private {
     if (amount == 0) return;
 

@@ -52,18 +52,14 @@ contract EntityProvider is ERC1155 {
   
   // Sequential numbering for registered entities
   uint256 public nextNumber = 1;
-  mapping(bytes32 => uint256) public entityIdToNumber;
-  
+  // A numbered entity's id is bytes32(entityNumber); no reverse map is stored.
 
-  
-  // Name system (decoupled from entity IDs)
+  // Name system (decoupled from entity IDs). Names are assigned only by a
+  // Foundation Hanko. There is no self-service claim path, so no reserved-name
+  // list or per-user quota exists on chain.
   mapping(string => uint256) public nameToNumber;  // "coinbase" => 42
   mapping(uint256 => string) public numberToName;  // 42 => "coinbase"
-  mapping(string => bool) public reservedNames;    // Admin-controlled names
-  
-  // Foundation controls (no centralized admin)
-  mapping(address => uint8) public nameQuota;      // User name allowances
-  
+
   // Governance system
   mapping(bytes32 => uint256) public entityActionNonces;       // entity-authorized ERC1155 actions
   mapping(bytes32 => uint256) public boardActionNonces;        // board proposal/cancel replay fence
@@ -82,8 +78,6 @@ contract EntityProvider is ERC1155 {
   bytes32 public constant FOUNDATION_ACTION_DOMAIN = keccak256("XLN_ENTITY_PROVIDER_FOUNDATION_ACTION_V1");
   bytes32 public constant FOUNDATION_ASSIGN_NAME = keccak256("ASSIGN_NAME");
   bytes32 public constant FOUNDATION_TRANSFER_NAME = keccak256("TRANSFER_NAME");
-  bytes32 public constant FOUNDATION_SET_RESERVED_NAME = keccak256("SET_RESERVED_NAME");
-  bytes32 public constant FOUNDATION_SET_NAME_QUOTA = keccak256("SET_NAME_QUOTA");
   bytes32 public constant FOUNDATION_REGISTER_ENTITY = keccak256("REGISTER_ENTITY");
 
   // Foundation entity (always #1)
@@ -161,12 +155,6 @@ contract EntityProvider is ERC1155 {
     require(foundationRecipient != address(0), "Invalid foundation recipient");
     foundationDeployer = foundationRecipient;
 
-    // Reserve some premium names
-    reservedNames["coinbase"] = true;
-    reservedNames["ethereum"] = true;
-    reservedNames["bitcoin"] = true;
-    reservedNames["uniswap"] = true;
-
     // Create foundation entity #1 with governance
     bytes32 foundationQuorum = _singleSignerBoardHash(foundationRecipient);
     bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
@@ -185,8 +173,6 @@ contract EntityProvider is ERC1155 {
         foundationDelay: 0 // Foundation can't replace itself
       })
     });
-    entityIdToNumber[foundationId] = FOUNDATION_ENTITY;
-    
     // Setup governance for foundation entity
     (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(FOUNDATION_ENTITY);
     
@@ -547,22 +533,6 @@ contract EntityProvider is ERC1155 {
     }
   }
 
-  // Admin functions
-  function setReservedName(
-    string calldata name,
-    bool reserved,
-    bytes calldata hankoData,
-    uint256 actionNonce
-  ) external {
-    _authorizeFoundation(
-      FOUNDATION_SET_RESERVED_NAME,
-      keccak256(abi.encode(name, reserved)),
-      hankoData,
-      actionNonce
-    );
-    reservedNames[name] = reserved;
-  }
-
   // === HANKO SIGNATURE VERIFICATION ===
   //
   // Claims form one bottom-up authorization proof. EOA signatures are leaves;
@@ -623,21 +593,6 @@ contract EntityProvider is ERC1155 {
     return HankoVerifier.verify(entities, hankoData, hash, true);
   }
 
-  function setNameQuota(
-    address user,
-    uint8 quota,
-    bytes calldata hankoData,
-    uint256 actionNonce
-  ) external {
-    _authorizeFoundation(
-      FOUNDATION_SET_NAME_QUOTA,
-      keccak256(abi.encode(user, quota)),
-      hankoData,
-      actionNonce
-    );
-    nameQuota[user] = quota;
-  }
-
   // === GOVERNANCE FUNCTIONS ===
 
   /**
@@ -677,7 +632,6 @@ contract EntityProvider is ERC1155 {
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-    entityIdToNumber[entityId] = entityNumber;
     emit EntityRegistered(entityId, entityNumber, boardHash);
     emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
   }

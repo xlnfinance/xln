@@ -536,7 +536,8 @@ describe("Hanko Authorization", function () {
     const entityNumber = event?.args?.entityNumber as bigint;
     const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
 
-    expect(await entityProvider.entityIdToNumber(entityId)).to.equal(entityNumber);
+    const [registered] = await entityProvider.getEntityInfo(entityId);
+    expect(registered).to.equal(true);
     const hanko = buildSingleSignerHanko(entityId, hash, deriveHardhatPrivateKey(1));
     const [recoveredEntityId, valid] = await entityProvider.verifyHankoSignature(hanko, hash);
     expect(valid).to.equal(true);

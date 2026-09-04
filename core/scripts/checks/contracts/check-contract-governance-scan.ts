@@ -147,8 +147,6 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'registerNumberedEntitiesBatch',
   'registerNumberedEntity',
   'releaseControlShares',
-  'setNameQuota',
-  'setReservedName',
   'transferName',
   'verifyHankoSignature',
   'verifyCurrentHankoSignature',
@@ -223,8 +221,6 @@ assertIncludes(entityProvider, 'entityActionNonces[foundationId] = actionNonce;'
 for (const name of [
   'assignName',
   'transferName',
-  'setReservedName',
-  'setNameQuota',
   'foundationRegisterEntity',
 ] as const) {
   assertIncludes(
