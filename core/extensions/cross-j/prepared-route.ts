@@ -9,6 +9,7 @@ import {
   signedCrossJurisdictionAmountForBeneficiary,
   withCanonicalCrossJurisdictionRouteHash,
 } from './index';
+import { TIMING } from '../../config/constants';
 import { toUnixS, unixSToUnixMs } from '../../protocol/units';
 
 const normalizeEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
@@ -137,10 +138,12 @@ export const validatePreparedCrossJurisdictionRoute = (
   if (!Number.isSafeInteger(preparedAt) || preparedAt <= 0) {
     throw haltRuntimeFailure("CROSS_J_PREPARED_TIMESTAMP_INVALID", `CROSS_J_PREPARED_TIMESTAMP_INVALID:${route.orderId}`);
   }
-  // A prepared route crosses an Entity boundary, so its authenticated origin
-  // timestamp is normally older than the receiving Entity frame. Future data
-  // is invalid; requiring equality would make ordinary transport delay fatal.
-  if (!Number.isSafeInteger(currentTimestamp) || preparedAt > currentTimestamp) {
+  // Independent Runtimes cannot share an exact millisecond clock. Bound the
+  // proposer-controlled time like an Entity frame so it cannot drive expiry.
+  if (
+    !Number.isSafeInteger(currentTimestamp) ||
+    preparedAt - currentTimestamp > TIMING.TIMESTAMP_DRIFT_MS
+  ) {
     throw haltRuntimeFailure("CROSS_J_PREPARED_TIMESTAMP_FUTURE", `CROSS_J_PREPARED_TIMESTAMP_FUTURE:${route.orderId}`);
   }
   assertEqual(sourcePull.pullId, deriveCrossJurisdictionPullId(route, 'source'), 'CROSS_J_PREPARED_SOURCE_PULL_ID');

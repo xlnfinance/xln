@@ -7,6 +7,8 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../../../extensions/cross-j/index';
+import { validatePreparedCrossJurisdictionRoute } from '../../../extensions/cross-j/prepared-route';
+import { TIMING } from '../../../config/constants';
 import { validateCrossJurisdictionLocalBinding } from '../../../entity/tx/j-events-htlc/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../../../runtime';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
@@ -59,6 +61,19 @@ const buildRoute = (
 }, { runtimeSeed: seed, now: 1_000 });
 
 describe('cross-jurisdiction security invariants', () => {
+  test('prepared route accepts bounded Runtime clock skew and rejects larger future time', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const route = buildRoute('cross-clock-skew', 'cross-clock-skew', eth);
+    const state = makeState(route.source.entityId, addr('30'), eth, route.source.counterpartyEntityId);
+    state.timestamp = route.updatedAt - 1;
+
+    expect(() => validatePreparedCrossJurisdictionRoute(state, route)).not.toThrow();
+    expect(() => validatePreparedCrossJurisdictionRoute(state, {
+      ...route,
+      updatedAt: state.timestamp + TIMING.TIMESTAMP_DRIFT_MS + 1,
+    })).toThrow('CROSS_J_PREPARED_TIMESTAMP_FUTURE');
+  });
+
   test('route preparation rejects missing signed response clocks without defaults', () => {
     const route = buildRoute('cross-clock-required', 'cross-clock-required');
     const { sourceDisputeConfig: _source, ...withoutSourceClock } = route;
