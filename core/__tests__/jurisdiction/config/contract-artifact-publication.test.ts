@@ -7,7 +7,10 @@ describe('contract artifact publication', () => {
     const config = readFileSync('jurisdictions/hardhat.config.ts', 'utf8');
     const generator = readFileSync('jurisdictions/scripts/generate-typechain.cjs', 'utf8');
 
-    expect(config).toContain('process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types"');
+    // A plain `hardhat test` must not write into the committed tree; only the
+    // sync script (via XLN_TYPECHAIN_OUT_DIR) publishes typechain-types.
+    expect(config).toContain('process.env.XLN_TYPECHAIN_OUT_DIR || ".typechain-hardhat"');
+    expect(config).not.toContain('process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types"');
     expect(generator).toContain("process.env.XLN_TYPECHAIN_OUT_DIR || 'typechain-types'");
     expect(sync).toContain('export XLN_TYPECHAIN_OUT_DIR="$TYPECHAIN_BUILD_DIR"');
     expect(sync).toContain("rsync -a --checksum --exclude='/index.ts'");

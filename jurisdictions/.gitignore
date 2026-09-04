@@ -7,7 +7,9 @@ node_modules
 /build-tron
 
 # TypeChain files
-# typechain-types now tracked in git for consistency
+# typechain-types is tracked in git; the hardhat plugin writes elsewhere.
+/.typechain-hardhat
+/.typechain-types-build-*
 
 # solidity-coverage files
 /coverage

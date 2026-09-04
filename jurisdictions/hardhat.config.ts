@@ -7,7 +7,11 @@ const deployerAccounts = () => {
   return [key.startsWith("0x") ? key : `0x${key}`];
 };
 const requiredRpcPlaceholder = (envName: string) => process.env[envName] || "http://127.0.0.1:0";
-const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types";
+// The committed `typechain-types` tree is published only by
+// scripts/sync-contract-artifacts.sh (which sets XLN_TYPECHAIN_OUT_DIR). A plain
+// `hardhat test`/`compile` must never overwrite it: the plugin's own emitter
+// formats imports differently and produced a 92-file phantom diff.
+const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || ".typechain-hardhat";
 const etherscanApiKey = process.env.ETHERSCAN_API_KEY || "";
 const stackManagerChainId = Number(process.env.XLN_STACK_MANAGER_CHAIN_ID || 0);
 
