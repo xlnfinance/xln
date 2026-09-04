@@ -432,6 +432,7 @@ const submitBatch = async (
       options.signerId,
       context.config.chainId,
       context.stack.addresses.depository,
+      context.stack.addresses.deltaTransformer,
     );
   } catch (error) {
     return makeJAdapterFailureResult(error);

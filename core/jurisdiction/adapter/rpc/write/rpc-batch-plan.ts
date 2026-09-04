@@ -48,10 +48,26 @@ export const planRpcBatchSubmission = (
   signerId: string | undefined,
   chainId: number,
   depositoryAddress: string,
+  canonicalDeltaTransformer?: string,
 ): RpcBatchPlanResult => {
   assertSealedJBatchBinding(jTx, { chainId, depositoryAddress });
   const { batch } = jTx.data;
   if (isBatchEmpty(batch)) return { kind: 'skip' };
+
+  // Mirror of Depository._processBatch: a secret reveal may target only the
+  // immutable canonical DeltaTransformer (on-chain it reverts E2 otherwise).
+  // Reject here so a mis-wired registry never spends gas on a doomed batch.
+  if (canonicalDeltaTransformer) {
+    const canonical = canonicalDeltaTransformer.toLowerCase();
+    for (const reveal of batch.revealSecrets) {
+      if (String(reveal.transformer || '').toLowerCase() !== canonical) {
+        return {
+          kind: 'reject',
+          error: `REVEAL_TRANSFORMER_NOT_CANONICAL:${String(reveal.transformer)}:expected=${canonicalDeltaTransformer}`,
+        };
+      }
+    }
+  }
 
   const normalizedEntityId = normalizeEntityId(jTx.entityId);
   for (const settlement of batch.settlements) {

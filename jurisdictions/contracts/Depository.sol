@@ -540,11 +540,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       Account.processCounterDisputes(_accounts, entityId, batch.counterDisputes, entityProvider);
     }
 
-    // HTLC secret reveals (must run before dispute finalizations)
+    // HTLC secret reveals (must run before dispute finalizations).
+    // Only the immutable canonical transformer may be called here. This is the
+    // sole CALL inside processBatch whose target came from the batch itself;
+    // it executes while _status == 2 and flash-minted reserves are live, so an
+    // arbitrary target would be untrusted code running in the settlement window.
     for (uint i = 0; i < batch.revealSecrets.length; i++) {
       SecretReveal memory reveal = batch.revealSecrets[i];
-      if (reveal.transformer == address(0)) revert E2();
-      DeltaTransformer(reveal.transformer).revealSecret(reveal.secret);
+      if (reveal.transformer != deltaTransformer) revert E2();
+      DeltaTransformer(deltaTransformer).revealSecret(reveal.secret);
       emit SecretRevealed(keccak256(abi.encode(reveal.secret)), entityId, reveal.secret);
     }
 
