@@ -15,6 +15,10 @@ import {
   captionForStep,
   describeEvent,
 } from '../../../frontend/src/lib/network3d/timeline/networkCaption';
+import {
+  networkTrailFromSnapshots,
+  serializeNetworkTrailV1,
+} from '../../../core/scenarios/network-trail';
 
 type ReadCall = { path: string; query?: Record<string, unknown> };
 
@@ -92,6 +96,28 @@ const fakeAdapter = (options: { heights: number[]; events: ReturnType<typeof act
 };
 
 describe('network timeline source', () => {
+  test('CLI trail projection removes host-clock and hash variance', () => {
+    const snapshot = (timestamp: number, prevFrameHash: string) => ({
+      state: {
+        height: 2,
+        timestamp,
+        eReplicas: new Map([['alice:1', {
+          entityId: 'alice',
+          signerId: '1',
+          state: { height: 2, timestamp, prevFrameHash, accounts: new Map(), reserves: new Map() },
+        }]]),
+      },
+      runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] },
+      runtimeOutputs: [],
+      description: '',
+    }) as never;
+
+    const first = networkTrailFromSnapshots('demo', [snapshot(4_102_534_803_100, 'hash-a')]);
+    const second = networkTrailFromSnapshots('demo', [snapshot(4_102_534_804_100, 'hash-b')]);
+
+    expect(serializeNetworkTrailV1(first)).toBe(serializeNetworkTrailV1(second));
+  });
+
   test('reads a paged timeline index through the adapter, local or remote alike', async () => {
     const adapter = fakeAdapter({ heights: [1, 2, 3, 4, 5], events: [] });
     const source = adapterNetworkTimelineSource('H1', adapter);

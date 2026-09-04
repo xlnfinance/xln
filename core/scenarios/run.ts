@@ -9,9 +9,9 @@
  *   bun core/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://127.0.0.1:18545
  */
 
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
+import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import {
   cleanupTestArtifactsBeforeRun,
@@ -127,6 +127,7 @@ function parseArgs(): {
   rpc?: string;
   workers?: number;
   set?: string;
+  trail?: string;
   single: boolean;
 } {
   const args = process.argv.slice(2);
@@ -152,6 +153,7 @@ function parseArgs(): {
     rpc?: string;
     workers?: number;
     set?: string;
+    trail?: string;
     single: boolean;
   } = { single: args.includes('--single') };
   if (scenario !== undefined) parsed.scenario = scenario;
@@ -162,8 +164,41 @@ function parseArgs(): {
   if (Number.isFinite(workers as number)) parsed.workers = Math.max(1, Math.floor(workers as number));
   const set = getFlag('set');
   if (set !== undefined) parsed.set = set;
+  const trail = getFlag('trail') ?? process.env['XLN_SCENARIO_TRAIL_DIR'];
+  if (trail !== undefined) parsed.trail = trail;
   return parsed;
 }
+
+const utcTag = (): string => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+
+const writeScenarioTrail = async (
+  scenario: string,
+  seed: string,
+  runtimeId: string,
+  snapshots: readonly import('../runtime/types').EnvSnapshot[],
+  destination: string,
+): Promise<string> => {
+  const { networkTrailFromSnapshots, serializeNetworkTrailV1 } = await import('./network-trail');
+  const { safeStringify } = await import('../protocol/serialization');
+  const requested = resolve(destination);
+  const trailPath = requested.endsWith('.trail.json')
+    ? requested
+    : join(requested, `${scenario}-${utcTag()}.trail.json`);
+  mkdirSync(dirname(trailPath), { recursive: true });
+  const trail = networkTrailFromSnapshots(runtimeId, snapshots);
+  writeFileSync(trailPath, serializeNetworkTrailV1(trail), 'utf8');
+  const manifestPath = trailPath.replace(/\.trail\.json$/, '.manifest.json');
+  const manifest = {
+    scenario,
+    seed,
+    gitSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    frameCount: trail.index.frames.length,
+    trail: basename(trailPath),
+  };
+  writeFileSync(manifestPath, `${safeStringify(manifest, 2)}\n`, 'utf8');
+  console.log(`SCENARIO_TRAIL_WRITTEN:${trailPath}:frames=${manifest.frameCount}`);
+  return trailPath;
+};
 
 function tail(path: string, lines = 60): string {
   try {
@@ -412,11 +447,11 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 
 async function main() {
   if (process.argv.slice(2).some(argument => argument === '--help' || argument === '-h')) {
-    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--single]');
+    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE] [--single]');
     console.log(`\nAvailable scenarios: ${unique(Object.keys(SCENARIOS)).join(', ')}`);
     return;
   }
-  const { scenario, mode, rpc, workers, set, single } = parseArgs();
+  const { scenario, mode, rpc, workers, set, trail, single } = parseArgs();
 
   const requestedMode = (mode || process.env['JADAPTER_MODE'] || 'rpc').toLowerCase();
   const runAll = !single && (!scenario || scenario === 'all');
@@ -429,15 +464,18 @@ async function main() {
   }
 
   if (!scenario) {
-    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N]');
+    console.log('Usage: bun core/scenarios/run.ts [all|<scenario>] [--mode=browservm|rpc] [--rpc=URL] [--workers=N] [--trail=DIR|FILE]');
     console.log(`\nAvailable scenarios: ${unique(Object.keys(SCENARIOS)).join(', ')}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
+  const scenarioName = scenario;
 
-  const entry = SCENARIOS[scenario];
+  const entry = SCENARIOS[scenarioName];
   if (!entry) {
-    console.error(`Unknown scenario: "${scenario}". Available: ${Object.keys(SCENARIOS).join(', ')}`);
-    process.exit(1);
+    console.error(`Unknown scenario: "${scenarioName}". Available: ${Object.keys(SCENARIOS).join(', ')}`);
+    process.exitCode = 1;
+    return;
   }
 
   cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) });
@@ -484,19 +522,33 @@ async function main() {
   try {
     // Create fresh env — scenario self-boots from here
     const { createEmptyEnv } = await import('../runtime');
-    const env = createEmptyEnv(`${scenario}-cli-seed-42`);
+    const seed = String(process.env['XLN_RUNTIME_SEED'] || `${scenarioName}-cli-seed-42`);
+    const env = createEmptyEnv(seed);
+    const trailDestination = trail;
+    const trace = trailDestination
+      ? (await import('../runtime/observability/runtime-trace')).startRuntimeTraceForTesting(env)
+      : null;
 
-    // Dynamic import and run
-    const mod = await import(entry.file);
-    const fn = mod[entry.fn];
-    if (!fn) throw new Error(`SCENARIO_FUNCTION_MISSING:${entry.fn}:${entry.file}`);
+    try {
+      // Dynamic import and run
+      const mod = await import(entry.file);
+      const fn = mod[entry.fn];
+      if (!fn) throw new Error(`SCENARIO_FUNCTION_MISSING:${entry.fn}:${entry.file}`);
 
-    await fn(env);
-    if (entry.provePersistence) await verifyScenarioPersistence(env, scenario);
-    recordSelectiveRerunPass('scenario', scenario);
+      await fn(env);
+      if (entry.provePersistence) await verifyScenarioPersistence(env, scenarioName);
+      if (trailDestination && trace) {
+        const runtimeId = env.runtimeId;
+        if (!runtimeId) throw new Error('SCENARIO_TRAIL_RUNTIME_ID_MISSING');
+        await writeScenarioTrail(scenarioName, seed, runtimeId, trace.snapshots, trailDestination);
+      }
+    } finally {
+      trace?.stop();
+    }
+    recordSelectiveRerunPass('scenario', scenarioName);
 
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`  ${scenario} COMPLETE`);
+    console.log(`  ${scenarioName} COMPLETE`);
     console.log(`  Frames: ${env.state.height}`);
     console.log(`${'='.repeat(60)}\n`);
     return;
