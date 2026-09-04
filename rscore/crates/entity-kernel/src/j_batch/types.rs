@@ -6,7 +6,6 @@ pub type Address = [u8; 20];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct JBatch {
-    pub flashloans: Vec<Flashloan>,
     pub reserve_to_reserve: Vec<ReserveToReserve>,
     pub reserve_to_collateral: Vec<ReserveToCollateral>,
     pub collateral_to_reserve: Vec<CollateralToReserve>,
@@ -21,8 +20,7 @@ pub struct JBatch {
 }
 
 pub(crate) fn batch_is_empty(batch: &JBatch) -> bool {
-    batch.flashloans.is_empty()
-        && batch.reserve_to_reserve.is_empty()
+    batch.reserve_to_reserve.is_empty()
         && batch.reserve_to_collateral.is_empty()
         && batch.collateral_to_reserve.is_empty()
         && batch.settlements.is_empty()
@@ -36,8 +34,7 @@ pub(crate) fn batch_is_empty(batch: &JBatch) -> bool {
 }
 
 pub(crate) fn batch_op_count(batch: &JBatch) -> usize {
-    batch.flashloans.len()
-        + batch.reserve_to_reserve.len()
+    batch.reserve_to_reserve.len()
         + batch.reserve_to_collateral.len()
         + batch.collateral_to_reserve.len()
         + batch.settlements.len()
@@ -48,12 +45,6 @@ pub(crate) fn batch_op_count(batch: &JBatch) -> usize {
         + batch.reserve_to_external_token.len()
         + batch.reveal_secrets.len()
         + batch.hash_ladder_registrations.len()
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Flashloan {
-    pub token_id: U256,
-    pub amount: U256,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

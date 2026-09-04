@@ -132,8 +132,7 @@ fn view<'a>(
 }
 
 fn batch_op_count(batch: &JBatch) -> usize {
-    batch.flashloans.len()
-        + batch.reserve_to_reserve.len()
+    batch.reserve_to_reserve.len()
         + batch.reserve_to_collateral.len()
         + batch.collateral_to_reserve.len()
         + batch.settlements.len()

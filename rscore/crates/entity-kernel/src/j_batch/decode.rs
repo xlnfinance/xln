@@ -132,14 +132,6 @@ fn map_tuples<T>(
         .collect()
 }
 
-fn decode_flashloan(mut f: Fields) -> Result<Flashloan, JSubmitError> {
-    let v = Flashloan {
-        token_id: f.uint()?,
-        amount: f.uint()?,
-    };
-    f.done()?;
-    Ok(v)
-}
 fn decode_r2r(mut f: Fields) -> Result<ReserveToReserve, JSubmitError> {
     let v = ReserveToReserve {
         receiving_entity: f.word()?,
@@ -366,7 +358,6 @@ fn decode_ladder(mut f: Fields) -> Result<HashLadderRegistration, JSubmitError> 
 fn batch_from_token(token: Token) -> Result<JBatch, JSubmitError> {
     let mut f = Fields::new(token)?;
     let batch = JBatch {
-        flashloans: map_tuples(f.array()?, decode_flashloan)?,
         reserve_to_reserve: map_tuples(f.array()?, decode_r2r)?,
         reserve_to_collateral: map_tuples(f.array()?, decode_r2c)?,
         collateral_to_reserve: map_tuples(f.array()?, decode_c2r)?,

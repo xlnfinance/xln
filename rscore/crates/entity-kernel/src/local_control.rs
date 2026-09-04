@@ -1142,8 +1142,7 @@ fn apply_activate_board(
 
 fn j_batch_op_count(state: &JBatchState) -> usize {
     let batch = &state.batch;
-    batch.flashloans.len()
-        + batch.reserve_to_reserve.len()
+    batch.reserve_to_reserve.len()
         + batch.reserve_to_collateral.len()
         + batch.collateral_to_reserve.len()
         + batch.settlements.len()

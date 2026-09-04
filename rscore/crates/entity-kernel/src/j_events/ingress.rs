@@ -2492,10 +2492,13 @@ mod tests {
     fn hanko_batch_ack_matches_hash_and_nonce_then_queues_one_self_broadcast() {
         let mut state = EntityStateSlice::empty(entity(0x11).as_hex(), 77);
         let mut batch = crate::JBatch::default();
-        batch.flashloans.push(crate::j_batch::Flashloan {
-            token_id: U256::one(),
-            amount: U256::one(),
-        });
+        batch
+            .reserve_to_reserve
+            .push(crate::j_batch::ReserveToReserve {
+                receiving_entity: [0x22; 32],
+                token_id: U256::one(),
+                amount: U256::one(),
+            });
         state.j_batch_state = Some(crate::JBatchState {
             batch,
             sent_batch: Some(sent_batch(3, [0x44; 32])),

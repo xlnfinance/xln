@@ -314,7 +314,9 @@ fn render_hex(value: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xln_rscore_hanko::{BoardDelays, BoardMember, build_single_signer_hanko, lazy_entity_id};
+    use xln_rscore_hanko::{
+        BoardDelays, BoardMember, build_single_signer_hanko_envelope, lazy_entity_id,
+    };
 
     #[test]
     fn authenticated_lazy_profile_binds_exact_runtime_and_default_proposer() {
@@ -361,7 +363,7 @@ mod tests {
             encode_canonical_consensus_bytes(&canonical).expect("descriptor bytes"),
         )
         .into();
-        let hanko = build_single_signer_hanko(
+        let hanko = build_single_signer_hanko_envelope(
             &entity_id,
             &profile_hash,
             &private_key,

@@ -292,6 +292,16 @@ pub fn verify_canonical_hanko(
     if envelope.claims.is_empty() {
         return Err(HankoError::Invalid("HANKO_CLAIM_REQUIRED"));
     }
+    // ERC-1271 member proofs are contract state only the jurisdiction can
+    // evaluate. Off-chain consensus grants no weight it cannot verify, so an
+    // envelope relying on one is rejected here (the chain may still accept it).
+    if envelope
+        .member_signatures
+        .iter()
+        .any(|signature| !signature.is_empty())
+    {
+        return Err(HankoError::Invalid("HANKO_MEMBER_SIGNATURE_UNSUPPORTED"));
+    }
     assert_unique_words(
         envelope.placeholders.iter().copied(),
         "HANKO_DUPLICATE_PLACEHOLDER",

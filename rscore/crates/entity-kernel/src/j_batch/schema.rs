@@ -52,7 +52,6 @@ pub fn final_dispute() -> ParamType {
 
 pub(crate) fn batch() -> ParamType {
     ParamType::Tuple(vec![
-        array(vec![uint(), uint()]),
         array(vec![word(), uint(), uint()]),
         array(vec![uint(), word(), array(vec![word(), uint()])]),
         array(vec![word(), uint(), uint(), uint(), bytes()]),

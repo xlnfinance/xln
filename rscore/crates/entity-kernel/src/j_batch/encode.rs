@@ -7,6 +7,23 @@ use super::types::*;
 
 const MAX_BATCH_BYTES: usize = 256 * 1024;
 const MAX_BATCH_OPS: usize = 50;
+/// Depository `MAX_MONEY = 1 << 200`: every reserve, collateral, allowance and
+/// |delta| the contract stores is capped there, so no amount above it can be
+/// signed or submitted. Mirrors TypeScript `MONEY_CAP_EXCEEDED`.
+pub const MAX_MONEY_BITS: u32 = 200;
+const MONEY_CAP_EXCEEDED: &str = "MONEY_CAP_EXCEEDED";
+
+fn max_money() -> U256 {
+    U256::one() << MAX_MONEY_BITS
+}
+
+/// A uint256 amount the contract bounds by `MAX_MONEY`.
+fn money(value: U256) -> Result<Token, JSubmitError> {
+    if value > max_money() {
+        return Err(JSubmitError::Batch(MONEY_CAP_EXCEEDED));
+    }
+    Ok(Token::Uint(value))
+}
 
 fn tuple(values: impl IntoIterator<Item = Token>) -> Token {
     Token::Tuple(values.into_iter().collect())
@@ -24,10 +41,11 @@ fn address(value: &Address) -> Token {
     Token::Address(H160::from_slice(value))
 }
 
+/// An int256 amount whose magnitude the contract bounds by `MAX_MONEY`.
 fn signed(value: &BigInt) -> Result<Token, JSubmitError> {
-    let limit = BigInt::from(1_u8) << 255_u32;
-    if value < &-limit.clone() || value >= &limit {
-        return Err(JSubmitError::Batch("int256-range"));
+    let limit = BigInt::from(1_u8) << MAX_MONEY_BITS;
+    if value < &-limit.clone() || value > &limit {
+        return Err(JSubmitError::Batch(MONEY_CAP_EXCEEDED));
     }
     let bits: BigUint = if value.sign() == Sign::Minus {
         ((BigInt::from(1_u8) << 256_u32) + value)
@@ -55,25 +73,35 @@ pub(crate) fn proof_body_token(body: &ProofBody) -> Result<Token, JSubmitError> 
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         array(body.token_ids.iter().copied().map(uint)),
-        array(body.transformers.iter().map(|clause| {
-            tuple([
-                address(&clause.transformer_address),
-                Token::Bytes(clause.encoded_batch.clone()),
-                array(clause.allowances.iter().map(|allowance| {
-                    tuple([
-                        uint(allowance.delta_index),
-                        uint(allowance.right_allowance),
-                        uint(allowance.left_allowance),
-                    ])
-                })),
-            ])
-        })),
+        array(
+            body.transformers
+                .iter()
+                .map(|clause| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        address(&clause.transformer_address),
+                        Token::Bytes(clause.encoded_batch.clone()),
+                        array(
+                            clause
+                                .allowances
+                                .iter()
+                                .map(|allowance| -> Result<Token, JSubmitError> {
+                                    Ok(tuple([
+                                        uint(allowance.delta_index),
+                                        money(allowance.right_allowance)?,
+                                        money(allowance.left_allowance)?,
+                                    ]))
+                                })
+                                .collect::<Result<Vec<_>, JSubmitError>>()?,
+                        ),
+                    ]))
+                })
+                .collect::<Result<Vec<_>, JSubmitError>>()?,
+        ),
     ]))
 }
 
 fn validate_limits(batch: &JBatch) -> Result<(), JSubmitError> {
-    let total = batch.flashloans.len()
-        + batch.reserve_to_reserve.len()
+    let total = batch.reserve_to_reserve.len()
         + batch.reserve_to_collateral.len()
         + batch.collateral_to_reserve.len()
         + batch.settlements.len()
@@ -87,8 +115,7 @@ fn validate_limits(batch: &JBatch) -> Result<(), JSubmitError> {
     if total > MAX_BATCH_OPS {
         return Err(JSubmitError::Batch("operation-limit"));
     }
-    if batch.flashloans.len() > 8
-        || batch.settlements.len() > 32
+    if batch.settlements.len() > 32
         || batch.dispute_starts.len() > 8
         || batch.counter_disputes.len() > 8
         || batch.dispute_finalizations.len() > 1
@@ -122,36 +149,52 @@ pub(crate) fn batch_token(batch: &JBatch) -> Result<Token, JSubmitError> {
     Ok(tuple([
         array(
             batch
-                .flashloans
+                .reserve_to_reserve
                 .iter()
-                .map(|v| tuple([uint(v.token_id), uint(v.amount)])),
+                .map(|v| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        fixed(&v.receiving_entity),
+                        uint(v.token_id),
+                        money(v.amount)?,
+                    ]))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         array(
             batch
-                .reserve_to_reserve
+                .reserve_to_collateral
                 .iter()
-                .map(|v| tuple([fixed(&v.receiving_entity), uint(v.token_id), uint(v.amount)])),
+                .map(|v| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        uint(v.token_id),
+                        fixed(&v.receiving_entity),
+                        array(
+                            v.pairs
+                                .iter()
+                                .map(|p| -> Result<Token, JSubmitError> {
+                                    Ok(tuple([fixed(&p.entity), money(p.amount)?]))
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        ),
+                    ]))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         ),
-        array(batch.reserve_to_collateral.iter().map(|v| {
-            tuple([
-                uint(v.token_id),
-                fixed(&v.receiving_entity),
-                array(
-                    v.pairs
-                        .iter()
-                        .map(|p| tuple([fixed(&p.entity), uint(p.amount)])),
-                ),
-            ])
-        })),
-        array(batch.collateral_to_reserve.iter().map(|v| {
-            tuple([
-                fixed(&v.counterparty),
-                uint(v.token_id),
-                uint(v.amount),
-                uint(v.nonce),
-                Token::Bytes(v.sig.clone()),
-            ])
-        })),
+        array(
+            batch
+                .collateral_to_reserve
+                .iter()
+                .map(|v| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        fixed(&v.counterparty),
+                        uint(v.token_id),
+                        money(v.amount)?,
+                        uint(v.nonce),
+                        Token::Bytes(v.sig.clone()),
+                    ]))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         array(
             batch
                 .settlements
@@ -239,21 +282,34 @@ pub(crate) fn batch_token(batch: &JBatch) -> Result<Token, JSubmitError> {
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ),
-        array(batch.external_token_to_reserve.iter().map(|v| {
-            tuple([
-                fixed(&v.entity),
-                address(&v.contract_address),
-                uint(v.external_token_id),
-                uint(U256::from(v.token_type)),
-                uint(v.internal_token_id),
-                uint(v.amount),
-            ])
-        })),
+        array(
+            batch
+                .external_token_to_reserve
+                .iter()
+                .map(|v| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        fixed(&v.entity),
+                        address(&v.contract_address),
+                        uint(v.external_token_id),
+                        uint(U256::from(v.token_type)),
+                        uint(v.internal_token_id),
+                        money(v.amount)?,
+                    ]))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         array(
             batch
                 .reserve_to_external_token
                 .iter()
-                .map(|v| tuple([fixed(&v.receiving_entity), uint(v.token_id), uint(v.amount)])),
+                .map(|v| -> Result<Token, JSubmitError> {
+                    Ok(tuple([
+                        fixed(&v.receiving_entity),
+                        uint(v.token_id),
+                        money(v.amount)?,
+                    ]))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         array(
             batch

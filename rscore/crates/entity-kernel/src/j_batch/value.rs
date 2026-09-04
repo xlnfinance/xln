@@ -117,15 +117,6 @@ fn proof_body(value: &ProofBody) -> Result<CanonicalValue, JBatchError> {
 pub fn canonical_j_batch(value: &JBatch) -> Result<CanonicalValue, JBatchError> {
     Ok(object([
         (
-            "flashloans",
-            array(&value.flashloans, |op| {
-                Ok(object([
-                    ("tokenId", u256_number(&op.token_id, "flashloans.tokenId")?),
-                    ("amount", u256_big(&op.amount)),
-                ]))
-            })?,
-        ),
-        (
             "reserveToReserve",
             array(&value.reserve_to_reserve, |op| {
                 Ok(object([
@@ -769,7 +760,6 @@ fn decode_batch_at(value: &CanonicalValue, context: &str) -> Result<JBatch, JBat
         value,
         context,
         &[
-            "flashloans",
             "reserveToReserve",
             "reserveToCollateral",
             "collateralToReserve",
@@ -785,13 +775,6 @@ fn decode_batch_at(value: &CanonicalValue, context: &str) -> Result<JBatch, JBat
         &[],
     )?;
     Ok(JBatch {
-        flashloans: decode_vec(f.get("flashloans")?, "batch.flashloans", |v, c| {
-            let x = Fields::new(v, c, &["tokenId", "amount"], &[])?;
-            Ok(Flashloan {
-                token_id: number_uint(x.get("tokenId")?, c)?,
-                amount: big_uint(x.get("amount")?, c)?,
-            })
-        })?,
         reserve_to_reserve: decode_vec(
             f.get("reserveToReserve")?,
             "batch.reserveToReserve",

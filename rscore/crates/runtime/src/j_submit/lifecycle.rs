@@ -181,8 +181,7 @@ pub fn build_j_submit_attempt_id(
 }
 
 fn batch_size(batch: &xln_rscore_entity_kernel::JBatch) -> usize {
-    batch.flashloans.len()
-        + batch.reserve_to_reserve.len()
+    batch.reserve_to_reserve.len()
         + batch.reserve_to_collateral.len()
         + batch.collateral_to_reserve.len()
         + batch.settlements.len()
@@ -367,11 +366,17 @@ pub(super) fn hanko_for_kind(
     )
 }
 
+/// The batch Hanko as the chain receives it: the certified envelope, compacted
+/// to the 65-byte form when it is one EOA proving its own lazy entity (parity:
+/// `compactHankoForChain` at `rpc-submission.ts`).
 fn hanko_for(
     replica: &RuntimeEntityReplica,
     batch_hash: &str,
 ) -> Result<Vec<u8>, JSubmitLifecycleError> {
-    hanko_for_kind(replica, batch_hash, "jBatch")
+    let hanko = hanko_for_kind(replica, batch_hash, "jBatch")?;
+    let digest: [u8; 32] = fixed_hex(batch_hash, "BATCH_HASH")?;
+    xln_rscore_hanko::compact_hanko_for_chain(&hanko, &digest)
+        .map_err(|cause| error(format!("BATCH_HANKO_SHAPE:{cause}")))
 }
 
 pub(super) fn pending_tx_type(value: &Value) -> Result<&str, JSubmitLifecycleError> {
@@ -1226,6 +1231,16 @@ mod tests {
             }),
             ..JBatchState::default()
         });
+        // A quorum-shaped envelope (2-of-2) is not compacted at submission.
+        let witness_hanko = xln_rscore_hanko::build_single_signer_hanko_envelope(
+            &entity_id,
+            &batch_hash,
+            &[7_u8; 32],
+            2,
+            2,
+            xln_rscore_hanko::BoardDelays::default(),
+        )
+        .expect("witness hanko");
         entity_replica.replica_metadata = json!({
             "entityId": retry.entity_id,
             "signerId": retry.signer_id,
@@ -1233,7 +1248,7 @@ mod tests {
             "hankoWitness": {
                 "__xlnType": "Map",
                 "value": [[retry.batch_hash, {
-                    "hanko": "0xaa",
+                    "hanko": hex(&witness_hanko),
                     "type": "jBatch",
                     "entityHeight": 1,
                     "createdAt": 100

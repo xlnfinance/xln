@@ -11,13 +11,21 @@ pub mod abi;
 pub mod batch;
 pub mod claims;
 pub mod codec;
+pub mod short;
 
-pub use batch::{build_single_signer_hanko, encode_single_signer_hanko_from_signature};
+pub use batch::{
+    build_single_signer_hanko, build_single_signer_hanko_envelope,
+    encode_single_signer_hanko_from_signature,
+};
 pub use claims::{
     BoardDelays, BoardMember, SemanticClaim, VerifiedHanko, hash_hanko_board_claim, lazy_entity_id,
     verify_canonical_hanko,
 };
 pub use codec::{HankoEnvelope, decode_hanko_envelope, encode_hanko_envelope};
+pub use short::{
+    chain_hanko_target_entity_id, compact_hanko_for_chain, is_short_hanko,
+    lazy_single_signer_entity_id, recover_short_hanko_entity_id,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum HankoError {

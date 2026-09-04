@@ -15,10 +15,10 @@ fn address(byte: u8) -> Address {
 #[test]
 fn empty_batch_matches_typescript_and_roundtrips() {
     let encoded = encode_j_batch(&JBatch::default()).expect("encode");
-    assert_eq!(encoded.len(), 800);
+    assert_eq!(encoded.len(), 736);
     assert_eq!(
         hex::encode(Keccak256::digest(&encoded)),
-        "8e9add77c9216e8c8a5b29b7bb72662fe986f8ec672f618b366a2e1c2cef7a32"
+        "142f9752c591222cece787c2b1522d5ed2530f234d03a3104ca6f2cb9dccb488"
     );
     assert_eq!(decode_j_batch(&encoded).expect("decode"), JBatch::default());
 }
@@ -26,10 +26,6 @@ fn empty_batch_matches_typescript_and_roundtrips() {
 #[test]
 fn operation_sections_match_the_typescript_batch_vector() {
     let mut batch = JBatch::default();
-    batch.flashloans.push(Flashloan {
-        token_id: 2.into(),
-        amount: 3.into(),
-    });
     batch.reserve_to_reserve.push(ReserveToReserve {
         receiving_entity: word(0x11),
         token_id: 4.into(),
@@ -99,10 +95,10 @@ fn operation_sections_match_the_typescript_batch_vector() {
             },
         });
     let encoded = encode_j_batch(&batch).expect("encode");
-    assert_eq!(encoded.len(), 2_656);
+    assert_eq!(encoded.len(), 2_528);
     assert_eq!(
         hex::encode(Keccak256::digest(&encoded)),
-        "d1bb6c003a0345b076877be7ad56447cc6e7ecafa23ae9885a545cbfbf7fa9ad"
+        "49bf13be382ff056a6e3ec3e7fcf34eb529dc970da5a4c84281696291cbbcf38"
     );
     assert_eq!(decode_j_batch(&encoded).expect("decode"), batch);
 }
@@ -114,13 +110,13 @@ fn domain_calldata_and_eip1559_signing_match_ethers() {
     let batch_hash = depository_batch_hash(31_337, &depository, &encoded, 23.into());
     assert_eq!(
         hex::encode(batch_hash),
-        "3768b8bba4b93e67fbda2f7d3ecb94a7e9fa2bcc4cbf61393d530f93068e7d64"
+        "ba1a8679e355e10071dbd528bfaa8009a23801358d7407f2721d1c053ceefd99"
     );
     let calldata = process_batch_calldata(&encoded, &[0xaa, 0xbb], 23.into());
-    assert_eq!(calldata.len(), 996);
+    assert_eq!(calldata.len(), 932);
     assert_eq!(
         hex::encode(Keccak256::digest(&calldata)),
-        "b09859498bf8cfb89f2391d3dd003a5b7e0b7e4233addc9316cda90bf6f4d51f"
+        "46e64080d3a9b49fea9e4b77941cc194201d45981290ab02eb59c9d770cbcc05"
     );
     assert_eq!(
         decode_process_batch_calldata(&calldata).expect("decode").0,
@@ -140,6 +136,6 @@ fn domain_calldata_and_eip1559_signing_match_ethers() {
     .expect("sign");
     assert_eq!(
         hex::encode(signed.hash),
-        "58e600bb1c9c6cab210366c01830aa1ff50370f1ce3ec532d30efcc3edbc2d79"
+        "690a0d2d4d11daba52308a213ca511a0fe368fad3171db1d7688d6a41017f7be"
     );
 }

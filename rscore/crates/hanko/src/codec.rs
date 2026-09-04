@@ -15,6 +15,7 @@ const HANKO_MAX_ENTITIES: usize = 256;
 const HANKO_MAX_CLAIMS: usize = 64;
 const HANKO_MAX_MEMBERS_PER_CLAIM: usize = 256;
 const HANKO_MAX_TOTAL_MEMBERS: usize = 1024;
+const HANKO_MAX_MEMBER_SIGNATURES: usize = 8;
 const SECP256K1_HALF_ORDER: [u8; 32] = [
     0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d, 0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0,
@@ -29,6 +30,10 @@ pub struct HankoEnvelope {
     pub placeholders: Vec<Word>,
     pub packed_signatures: Vec<u8>,
     pub claims: Vec<WireClaim>,
+    /// `HankoBytes.memberSignatures`: empty, or one ERC-1271 proof (possibly
+    /// empty bytes) per placeholder. Off-chain consensus never grants weight
+    /// through one; the shape is still enforced so the chain can decode it.
+    pub member_signatures: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,6 +58,19 @@ pub fn signature_count(byte_length: usize) -> HankoResult<usize> {
 }
 
 fn assert_contract_hanko_shape(envelope: &HankoEnvelope) -> HankoResult<()> {
+    if !envelope.member_signatures.is_empty()
+        && envelope.member_signatures.len() != envelope.placeholders.len()
+    {
+        return Err(HankoError::Invalid("HANKO_MEMBER_SIGNATURES_INVALID"));
+    }
+    let member_count = envelope
+        .member_signatures
+        .iter()
+        .filter(|signature| !signature.is_empty())
+        .count();
+    if member_count > HANKO_MAX_MEMBER_SIGNATURES {
+        return Err(HankoError::Invalid("HANKO_PROOF_TOO_LARGE"));
+    }
     let signatures = signature_count(envelope.packed_signatures.len())?;
     let total_entities = envelope.placeholders.len() + signatures + envelope.claims.len();
     if envelope.claims.len() > HANKO_MAX_CLAIMS
@@ -82,6 +100,7 @@ pub fn encode_hanko_envelope(envelope: &HankoEnvelope) -> HankoResult<Vec<u8>> {
         placeholders: envelope.placeholders.clone(),
         packed_signatures: envelope.packed_signatures.clone(),
         claims: envelope.claims.clone(),
+        member_signatures: envelope.member_signatures.clone(),
     });
     if encoded.len() > HANKO_MAX_BYTES {
         return Err(HankoError::Invalid("HANKO_PROOF_TOO_LARGE"));
@@ -98,6 +117,7 @@ pub fn decode_hanko_envelope(encoded: &[u8]) -> HankoResult<HankoEnvelope> {
         placeholders: decoded.placeholders,
         packed_signatures: decoded.packed_signatures,
         claims: decoded.claims,
+        member_signatures: decoded.member_signatures,
     };
     assert_contract_hanko_shape(&envelope)?;
     if encode_hanko_envelope(&envelope)? != encoded {

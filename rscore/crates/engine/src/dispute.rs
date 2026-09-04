@@ -94,10 +94,20 @@ fn word_from_u64(value: u64) -> [u8; 32] {
     word
 }
 
-/// A signed integer as Solidity holds it: two's complement over 32 bytes.
+/// Depository `MAX_MONEY = 1 << 200`: the contract reverts on any reserve,
+/// collateral, allowance or |delta| above it, so a body carrying a larger
+/// amount can never be finalized and must not be signed.
+fn max_money() -> BigInt {
+    BigInt::from(1) << 200_u32
+}
+
+/// A signed money amount as Solidity holds it: two's complement over 32
+/// bytes, |value| capped at `MAX_MONEY` (TypeScript `MONEY_CAP_EXCEEDED`).
 fn word_from_int(value: &BigInt, field: &'static str) -> Result<[u8; 32], StateError> {
-    if *value < int256_min() || *value > int256_max() {
-        return Err(StateError::DisputeProof(format!("{field}:int256")));
+    if *value < -max_money() || *value > max_money() {
+        return Err(StateError::DisputeProof(format!(
+            "{field}:MONEY_CAP_EXCEEDED"
+        )));
     }
     let mut word = if value.sign() == Sign::Minus {
         [0xff_u8; 32]

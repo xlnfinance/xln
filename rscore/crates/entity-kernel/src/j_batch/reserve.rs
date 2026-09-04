@@ -13,7 +13,6 @@ pub enum DraftBatchReserveOpType {
     Settlement,
     ReserveToCollateral,
     ReserveToExternalToken,
-    Flashloan,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +24,10 @@ pub struct DraftBatchReserveIssue {
     pub available_after_debt: BigInt,
     pub debt_claim_paid: BigInt,
     pub remaining_debt_after_sweep: BigInt,
+    /// Implicit flash credit this op opened that the batch never repaid
+    /// (Depository reverts unless every deficit is zero at the end). Zero when
+    /// the op itself is rejected on the spot.
+    pub unrepaid_deficit: BigInt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +35,10 @@ pub struct DraftBatchReserveSimulation {
     pub issues: Vec<DraftBatchReserveIssue>,
     pub reserves_by_token: BTreeMap<u16, BigInt>,
     pub outgoing_debt_by_token: BTreeMap<u16, BigInt>,
+    /// Depository `BatchScratch.deficit` for the initiator: reserve spent ahead
+    /// of holding (only while the token has no outstanding debt). Inflows repay
+    /// it first; every entry must be zero when the batch ends.
+    pub flash_deficit_by_token: BTreeMap<u16, BigInt>,
 }
 
 #[derive(Clone, Debug)]
@@ -39,6 +46,33 @@ struct DebtSweep {
     available_after_debt: BigInt,
     debt_claim_paid: BigInt,
     remaining_debt_after_sweep: BigInt,
+}
+
+/// The op that first overdrew a token; reported if its deficit is never repaid.
+#[derive(Clone, Debug)]
+struct DeficitOrigin {
+    sweep: DebtSweep,
+    op_type: DraftBatchReserveOpType,
+    op_index: usize,
+    required_amount: BigInt,
+}
+
+type DeficitOrigins = BTreeMap<u16, DeficitOrigin>;
+
+fn record_deficit_origin(
+    origins: &mut DeficitOrigins,
+    token_id: u16,
+    sweep: DebtSweep,
+    op_type: DraftBatchReserveOpType,
+    op_index: usize,
+    required_amount: BigInt,
+) {
+    origins.entry(token_id).or_insert(DeficitOrigin {
+        sweep,
+        op_type,
+        op_index,
+        required_amount,
+    });
 }
 
 fn invalid(detail: impl Into<String>) -> EntityKernelError {
@@ -112,6 +146,7 @@ fn issue(
     op_type: DraftBatchReserveOpType,
     op_index: usize,
     required_amount: BigInt,
+    unrepaid_deficit: BigInt,
 ) {
     state.issues.push(DraftBatchReserveIssue {
         token_id,
@@ -121,26 +156,56 @@ fn issue(
         available_after_debt: sweep.available_after_debt,
         debt_claim_paid: sweep.debt_claim_paid,
         remaining_debt_after_sweep: sweep.remaining_debt_after_sweep,
+        unrepaid_deficit,
     });
+}
+
+/// `Account._increaseReserve` for the initiator: repay the open flash deficit
+/// first, credit the remainder to the reserve.
+fn inflow(state: &mut DraftBatchReserveSimulation, token_id: u16, value: BigInt) {
+    let owed = read(&state.flash_deficit_by_token, token_id);
+    let repaid = value.clone().min(owed.clone());
+    write(&mut state.flash_deficit_by_token, token_id, owed - &repaid);
+    add(&mut state.reserves_by_token, token_id, value - repaid);
+}
+
+/// `Account._canSpend`: the plain reserve net of outstanding debt, or unlimited
+/// for a debt-free batch initiator (implicit flash, repaid before the end).
+fn can_spend(state: &DraftBatchReserveSimulation, token_id: u16, value: &BigInt) -> bool {
+    spendable(state, token_id) >= *value
+        || read(&state.outgoing_debt_by_token, token_id) == BigInt::from(0)
+}
+
+/// `Account._decreaseReserve` after `_canSpend` passed: a shortfall becomes
+/// initiator flash deficit and the reserve drops to zero. Returns whether a
+/// deficit was opened.
+fn decrease(state: &mut DraftBatchReserveSimulation, token_id: u16, value: BigInt) -> bool {
+    let current = read(&state.reserves_by_token, token_id);
+    if current >= value {
+        write(&mut state.reserves_by_token, token_id, current - value);
+        return false;
+    }
+    add(&mut state.flash_deficit_by_token, token_id, value - current);
+    write(&mut state.reserves_by_token, token_id, BigInt::from(0));
+    true
 }
 
 fn spend_or_issue(
     state: &mut DraftBatchReserveSimulation,
+    origins: &mut DeficitOrigins,
     token_id: u16,
     value: BigInt,
     op_type: DraftBatchReserveOpType,
     op_index: usize,
 ) -> bool {
     let swept = sweep(state, token_id);
-    if swept.available_after_debt < value {
-        issue(state, swept, token_id, op_type, op_index, value);
+    if !can_spend(state, token_id, &value) {
+        issue(state, swept, token_id, op_type, op_index, value, BigInt::from(0));
         return false;
     }
-    write(
-        &mut state.reserves_by_token,
-        token_id,
-        swept.available_after_debt - value,
-    );
+    if decrease(state, token_id, value.clone()) {
+        record_deficit_origin(origins, token_id, swept, op_type, op_index, value);
+    }
     true
 }
 
@@ -156,9 +221,6 @@ fn settlement_side(entity_id: &[u8; 32], settlement: &Settlement) -> Option<bool
 
 fn touched_tokens(batch: &JBatch) -> Result<BTreeSet<u16>, EntityKernelError> {
     let mut tokens = BTreeSet::new();
-    for value in &batch.flashloans {
-        tokens.insert(token(value.token_id)?);
-    }
     for value in &batch.reserve_to_reserve {
         tokens.insert(token(value.token_id)?);
     }
@@ -202,23 +264,16 @@ pub fn simulate_draft_batch_reserve_availability(
         issues: Vec::new(),
         reserves_by_token: starting_reserves.clone(),
         outgoing_debt_by_token: starting_debts.clone(),
+        flash_deficit_by_token: BTreeMap::new(),
     };
-    let mut flashloans = BTreeMap::<u16, BigInt>::new();
     let mut settlement_sweeps = BTreeMap::<u16, DebtSweep>::new();
+    let mut deficit_origins = DeficitOrigins::new();
 
-    for op in &batch.flashloans {
-        add(&mut flashloans, token(op.token_id)?, amount(op.amount));
-    }
-    for (&token_id, value) in &flashloans {
-        add(&mut state.reserves_by_token, token_id, value.clone());
-    }
+    // Same order as Depository._processBatch: inflows first, then outflows,
+    // then the initiator's implicit flash deficit must be back to zero.
     for op in &batch.external_token_to_reserve {
-        if op.entity == entity_id {
-            add(
-                &mut state.reserves_by_token,
-                token(op.internal_token_id)?,
-                amount(op.amount),
-            );
+        if op.entity == entity_id || op.entity == [0_u8; 32] {
+            inflow(&mut state, token(op.internal_token_id)?, amount(op.amount));
         }
     }
     for (index, op) in batch.reserve_to_reserve.iter().enumerate() {
@@ -226,21 +281,18 @@ pub fn simulate_draft_batch_reserve_availability(
         let value = amount(op.amount);
         if spend_or_issue(
             &mut state,
+            &mut deficit_origins,
             token_id,
             value.clone(),
             DraftBatchReserveOpType::ReserveToReserve,
             index,
         ) && op.receiving_entity == entity_id
         {
-            add(&mut state.reserves_by_token, token_id, value);
+            inflow(&mut state, token_id, value);
         }
     }
     for op in &batch.collateral_to_reserve {
-        add(
-            &mut state.reserves_by_token,
-            token(op.token_id)?,
-            amount(op.amount),
-        );
+        inflow(&mut state, token(op.token_id)?, amount(op.amount));
     }
 
     for settlement in &batch.settlements {
@@ -285,7 +337,7 @@ pub fn simulate_draft_batch_reserve_availability(
             let token_id = token(diff.token_id)?;
             let required = -own.clone();
             let available = spendable(&state, token_id);
-            if available < required {
+            if !can_spend(&state, token_id, &required) {
                 let swept = settlement_sweeps
                     .get(&token_id)
                     .cloned()
@@ -301,6 +353,7 @@ pub fn simulate_draft_batch_reserve_availability(
                     DraftBatchReserveOpType::Settlement,
                     index,
                     required,
+                    BigInt::from(0),
                 );
                 failed = true;
                 break;
@@ -315,7 +368,30 @@ pub fn simulate_draft_batch_reserve_availability(
             } else {
                 diff.right_diff.clone()
             };
-            add(&mut state.reserves_by_token, token(diff.token_id)?, own);
+            let token_id = token(diff.token_id)?;
+            if own.sign() == Sign::Minus {
+                let required = -own;
+                let swept = DebtSweep {
+                    available_after_debt: read(&state.reserves_by_token, token_id),
+                    debt_claim_paid: settlement_sweeps
+                        .get(&token_id)
+                        .map(|prior| prior.debt_claim_paid.clone())
+                        .unwrap_or_default(),
+                    remaining_debt_after_sweep: read(&state.outgoing_debt_by_token, token_id),
+                };
+                if decrease(&mut state, token_id, required.clone()) {
+                    record_deficit_origin(
+                        &mut deficit_origins,
+                        token_id,
+                        swept,
+                        DraftBatchReserveOpType::Settlement,
+                        index,
+                        required,
+                    );
+                }
+            } else {
+                inflow(&mut state, token_id, own);
+            }
         }
     }
     for (index, op) in batch.reserve_to_collateral.iter().enumerate() {
@@ -325,6 +401,7 @@ pub fn simulate_draft_batch_reserve_availability(
             .fold(BigInt::from(0), |sum, pair| sum + amount(pair.amount));
         spend_or_issue(
             &mut state,
+            &mut deficit_origins,
             token(op.token_id)?,
             total,
             DraftBatchReserveOpType::ReserveToCollateral,
@@ -334,44 +411,39 @@ pub fn simulate_draft_batch_reserve_availability(
     for (index, op) in batch.reserve_to_external_token.iter().enumerate() {
         spend_or_issue(
             &mut state,
+            &mut deficit_origins,
             token(op.token_id)?,
             amount(op.amount),
             DraftBatchReserveOpType::ReserveToExternalToken,
             index,
         );
     }
-    for (&token_id, loan) in &flashloans {
-        let required = read(&starting_reserves, token_id) + loan;
-        let available = read(&state.reserves_by_token, token_id);
-        if available < required {
-            let remaining_debt_after_sweep = read(&state.outgoing_debt_by_token, token_id);
-            issue(
-                &mut state,
-                DebtSweep {
-                    available_after_debt: available,
-                    debt_claim_paid: BigInt::from(0),
-                    remaining_debt_after_sweep,
-                },
-                token_id,
-                DraftBatchReserveOpType::Flashloan,
-                0,
-                required,
-            );
-            break;
-        }
-    }
-    if state
-        .issues
+    let deficits: Vec<(u16, BigInt)> = state
+        .flash_deficit_by_token
         .iter()
-        .all(|issue| issue.op_type != DraftBatchReserveOpType::Flashloan)
-    {
-        for (token_id, loan) in flashloans {
-            add(&mut state.reserves_by_token, token_id, -loan);
-        }
+        .filter(|(_, owed)| **owed != BigInt::from(0))
+        .map(|(token_id, owed)| (*token_id, owed.clone()))
+        .collect();
+    // Depository._processBatch tail: an unrepaid deficit reverts the batch and
+    // is reported against the op that opened it (same shape as TS).
+    if let Some((token_id, owed)) = deficits.into_iter().next() {
+        let origin = deficit_origins.get(&token_id).cloned().ok_or_else(|| {
+            invalid(format!("DEFICIT_WITHOUT_ORIGIN:{token_id}"))
+        })?;
+        issue(
+            &mut state,
+            origin.sweep,
+            token_id,
+            origin.op_type,
+            origin.op_index,
+            origin.required_amount,
+            owed,
+        );
     }
     if !state.issues.is_empty() {
         state.reserves_by_token = starting_reserves;
         state.outgoing_debt_by_token = starting_debts;
+        state.flash_deficit_by_token = BTreeMap::new();
     }
     Ok(state)
 }

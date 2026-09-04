@@ -1,5 +1,7 @@
 //! Direct ABI codec for the Hanko envelope tuple
-//! `tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])`.
+//! `tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])`
+//! (HankoVerifier.HankoBytes: placeholders, packedSignatures, claims,
+//! memberSignatures).
 //!
 //! Parity target: core/hanko/abi.ts. Byte-identical to what `AbiCoder` writes
 //! for that type. Decoding is bounds-checked and, like TypeScript, lenient
@@ -28,6 +30,9 @@ pub struct AbiEnvelope {
     pub placeholders: Vec<Word>,
     pub packed_signatures: Vec<u8>,
     pub claims: Vec<AbiClaim>,
+    /// Aligned with `placeholders` (or empty): an ERC-1271 proof for the
+    /// placeholder at the same index. Only the jurisdiction can evaluate one.
+    pub member_signatures: Vec<Vec<u8>>,
 }
 
 pub fn word_from_usize(value: usize) -> Word {
@@ -60,6 +65,32 @@ fn encode_claim(claim: &AbiClaim, output: &mut Vec<u8>) {
     }
 }
 
+/// ABI `bytes`: length word + payload right-padded to a word boundary.
+fn encode_bytes(value: &[u8], output: &mut Vec<u8>) {
+    let padding = (WORD - value.len() % WORD) % WORD;
+    output.extend_from_slice(&word_from_usize(value.len()));
+    output.extend_from_slice(value);
+    output.resize(output.len() + padding, 0);
+}
+
+/// ABI `bytes[]`: length word, one offset word per item, then each `bytes`.
+fn encode_bytes_array(values: &[Vec<u8>]) -> Vec<u8> {
+    let mut heads = Vec::with_capacity(WORD * values.len());
+    let mut tails = Vec::new();
+    let mut offset = WORD * values.len();
+    for value in values {
+        heads.extend_from_slice(&word_from_usize(offset));
+        let before = tails.len();
+        encode_bytes(value, &mut tails);
+        offset += tails.len() - before;
+    }
+    let mut output = Vec::with_capacity(WORD + heads.len() + tails.len());
+    output.extend_from_slice(&word_from_usize(values.len()));
+    output.extend_from_slice(&heads);
+    output.extend_from_slice(&tails);
+    output
+}
+
 pub fn encode_hanko_abi(envelope: &AbiEnvelope) -> Vec<u8> {
     let mut placeholders = Vec::with_capacity(WORD * (1 + envelope.placeholders.len()));
     placeholders.extend_from_slice(&word_from_usize(envelope.placeholders.len()));
@@ -67,11 +98,8 @@ pub fn encode_hanko_abi(envelope: &AbiEnvelope) -> Vec<u8> {
         placeholders.extend_from_slice(placeholder);
     }
 
-    let padding = (WORD - envelope.packed_signatures.len() % WORD) % WORD;
-    let mut packed = Vec::with_capacity(WORD + envelope.packed_signatures.len() + padding);
-    packed.extend_from_slice(&word_from_usize(envelope.packed_signatures.len()));
-    packed.extend_from_slice(&envelope.packed_signatures);
-    packed.resize(packed.len() + padding, 0);
+    let mut packed = Vec::with_capacity(2 * WORD + envelope.packed_signatures.len());
+    encode_bytes(&envelope.packed_signatures, &mut packed);
 
     let mut heads = Vec::with_capacity(WORD * envelope.claims.len());
     let mut tails = Vec::new();
@@ -87,18 +115,24 @@ pub fn encode_hanko_abi(envelope: &AbiEnvelope) -> Vec<u8> {
     claims.extend_from_slice(&heads);
     claims.extend_from_slice(&tails);
 
-    let placeholders_offset = 3 * WORD;
+    let members = encode_bytes_array(&envelope.member_signatures);
+
+    let placeholders_offset = 4 * WORD;
     let packed_offset = placeholders_offset + placeholders.len();
     let claims_offset = packed_offset + packed.len();
-    let mut output =
-        Vec::with_capacity(4 * WORD + placeholders.len() + packed.len() + claims.len());
+    let members_offset = claims_offset + claims.len();
+    let mut output = Vec::with_capacity(
+        5 * WORD + placeholders.len() + packed.len() + claims.len() + members.len(),
+    );
     output.extend_from_slice(&word_from_usize(WORD));
     output.extend_from_slice(&word_from_usize(placeholders_offset));
     output.extend_from_slice(&word_from_usize(packed_offset));
     output.extend_from_slice(&word_from_usize(claims_offset));
+    output.extend_from_slice(&word_from_usize(members_offset));
     output.extend_from_slice(&placeholders);
     output.extend_from_slice(&packed);
     output.extend_from_slice(&claims);
+    output.extend_from_slice(&members);
     output
 }
 
@@ -168,6 +202,7 @@ pub fn decode_hanko_abi(encoded: &[u8]) -> Result<AbiEnvelope, HankoError> {
     let placeholders_at = tuple + reader.size(tuple)?;
     let packed_at = tuple + reader.size(tuple + WORD)?;
     let claims_at = tuple + reader.size(tuple + 2 * WORD)?;
+    let members_at = tuple + reader.size(tuple + 3 * WORD)?;
 
     let placeholders = reader.word_array(placeholders_at)?;
     let packed_signatures = reader.bytes(packed_at)?;
@@ -189,9 +224,18 @@ pub fn decode_hanko_abi(encoded: &[u8]) -> Result<AbiEnvelope, HankoError> {
             dividend_change_delay: reader.uint32(claim_at + 6 * WORD)?,
         });
     }
+
+    let member_count = reader.size(members_at)?;
+    let members_base = members_at + WORD;
+    let mut member_signatures = Vec::with_capacity(member_count);
+    for index in 0..member_count {
+        let at = members_base + reader.size(members_base + WORD * index)?;
+        member_signatures.push(reader.bytes(at)?);
+    }
     Ok(AbiEnvelope {
         placeholders,
         packed_signatures,
         claims,
+        member_signatures,
     })
 }
