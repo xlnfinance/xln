@@ -16,6 +16,7 @@ import {
   saveEnvToDB,
 } from '../../../runtime';
 import {
+  appendRuntimeActivityViewFrame,
   readRuntimeActivityViewStatus,
   resetRuntimeActivityViewAtFloor,
 } from '../../../storage/history/runtime-activity-view';
@@ -127,6 +128,22 @@ describe('disposable Runtime activity view', () => {
     expect((await readPersistedRuntimeActivityJournal(env, 2))?.logs.map(log => log.message))
       .toEqual(['RuntimeTick']);
     expect(env.infrastructure?.runtimeActivityViewFailure).toBeUndefined();
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    cleanup(runtimeId);
+  });
+
+  test('accepts an exact late append after the disposable view advanced', async () => {
+    const { env, runtimeId } = await createStoredRuntime('activity-late-append');
+    await commitRuntimeTick(env);
+    const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
+    if (!frame) throw new Error('TEST_RUNTIME_FRAME_MISSING:2');
+    await commitRuntimeTick(env);
+    expect((await readRuntimeActivityViewStatus(env))?.latestHeight).toBe(3);
+
+    expect(await appendRuntimeActivityViewFrame(env, frame, [])).toBe('idempotent');
+    expect((await readRuntimeActivityViewStatus(env))?.latestHeight).toBe(3);
+
     await closeRuntimeDb(env);
     await closeInfraDb(env);
     cleanup(runtimeId);

@@ -209,7 +209,7 @@ const appendFrame = async (
 ): Promise<'written' | 'idempotent' | 'gap'> => {
   if (!frame.frameHash) throw new Error(`RUNTIME_ACTIVITY_VIEW_FRAME_HASH_MISSING:${frame.height}`);
   const head = await readRuntimeActivityViewHead(db);
-  if (head?.latestHeight === frame.height) {
+  if (head && frame.height <= head.latestHeight) {
     const existing = await readOptional(db, heightKey(KEY_FRAME_MARKER, frame.height));
     const marker = existing === null ? null : validateMarker(existing);
     if (marker?.frameHash === frame.frameHash) return 'idempotent';
