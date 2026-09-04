@@ -6,6 +6,27 @@ const hre = require("hardhat");
 
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
+const { buildFoundationTokenListing, foundationEntityId } = require("./foundation-hanko.cjs");
+
+const DEFAULT_HARDHAT_MNEMONIC = "test test test test test test test test test test test junk";
+
+/**
+ * The Foundation single signer at genesis is foundationRecipient. Listing the
+ * stablecoin needs its raw key (DEPLOYER_PRIVATE_KEY, or the well-known
+ * Hardhat/Anvil account #0 on local nodes that unlock it).
+ */
+const resolveFoundationSignerKey = (deployerAddress) => {
+  const configured = String(process.env.DEPLOYER_PRIVATE_KEY || "").trim();
+  const candidates = [];
+  if (configured) candidates.push(configured.startsWith("0x") ? configured : `0x${configured}`);
+  candidates.push(
+    hre.ethers.HDNodeWallet.fromPhrase(DEFAULT_HARDHAT_MNEMONIC, undefined, "m/44'/60'/0'/0/0").privateKey,
+  );
+  for (const key of candidates) {
+    if (new hre.ethers.Wallet(key).address.toLowerCase() === deployerAddress.toLowerCase()) return key;
+  }
+  throw new Error(`FOUNDATION_SIGNER_KEY_UNAVAILABLE:${deployerAddress}`);
+};
 
 const deploymentEvidence = async (contract, address, label) => {
   const transaction = contract.deploymentTransaction();
@@ -164,7 +185,42 @@ async function main() {
   if (stablecoinDecimals !== 6) {
     throw new Error(`STABLECOIN_DECIMALS_MISMATCH:expected=6:actual=${stablecoinDecimals}`);
   }
-  const registration = await depository.registerExternalToken(0, stablecoinAddress, 0);
+  // Depository.registerExternalToken is callable only by the EntityProvider.
+  // Listing goes through EntityProvider.foundationRegisterExternalToken under a
+  // Foundation Hanko; at genesis the Foundation board is the 1-of-1
+  // foundationRecipient EOA, which must be this deployer to sign here.
+  if (foundationRecipient.toLowerCase() !== deployer.address.toLowerCase()) {
+    throw new Error(
+      `FOUNDATION_LISTING_SIGNER_MISMATCH:foundation=${foundationRecipient}:deployer=${deployer.address}`,
+    );
+  }
+  const foundationSignerKey = resolveFoundationSignerKey(deployer.address);
+  const listing = buildFoundationTokenListing(hre.ethers, {
+    chainId: network.chainId,
+    entityProviderAddress: entityProviderAddr,
+    foundationNonce: await entityProvider.entityActionNonces(foundationEntityId(hre.ethers)),
+    depository: depositoryAddr,
+    tokenType: 0,
+    contractAddress: stablecoinAddress,
+    externalTokenId: 0,
+    privateKey: foundationSignerKey,
+  });
+  const onchainActionHash = await entityProvider.computeFoundationActionHash(
+    await entityProvider.FOUNDATION_REGISTER_TOKEN(),
+    listing.argumentsHash,
+    listing.actionNonce,
+  );
+  if (onchainActionHash.toLowerCase() !== listing.actionHash.toLowerCase()) {
+    throw new Error(`FOUNDATION_ACTION_HASH_MISMATCH:${onchainActionHash}:${listing.actionHash}`);
+  }
+  const registration = await entityProvider.foundationRegisterExternalToken(
+    depositoryAddr,
+    0,
+    stablecoinAddress,
+    0,
+    listing.hankoData,
+    listing.actionNonce,
+  );
   const registrationReceipt = await registration.wait();
   if (!registrationReceipt || registrationReceipt.status !== 1) {
     throw new Error("STABLECOIN_REGISTRATION_RECEIPT_INVALID");

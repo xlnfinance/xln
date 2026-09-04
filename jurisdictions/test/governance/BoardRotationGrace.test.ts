@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import hre from 'hardhat';
 
 import {
+  boardHashOf,
   buildClaimsHanko,
   buildSingleSignerHanko,
   canonicalAccountKey,
@@ -11,16 +12,19 @@ import {
   deriveHardhatPrivateKey,
   emptyBatch,
   encodeBatch,
+  encodeBoard,
+  encodeSingleSignerBoard,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { mine, time } = networkHelpers;
 
+// Default articles are SECONDS after the redesign (1 day / 3 days / 10 days).
 const DEFAULT_ARTICLES = {
-  controlDelay: 1_000,
-  dividendDelay: 3_000,
-  foundationDelay: 10_000,
+  controlDelay: 24 * 60 * 60,
+  dividendDelay: 3 * 24 * 60 * 60,
+  foundationDelay: 10 * 24 * 60 * 60,
 };
 
 const BOARD_GRACE_SECONDS = 7 * 24 * 60 * 60;
@@ -32,11 +36,10 @@ const SETTLEMENT_DIFFS_ABI =
 const PROOF_BODY_ABI =
   'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
+const anchoredEntityMemberBoard = (anchor: string, memberEntityId: string): string =>
+  encodeBoard(1, [anchor, memberEntityId], [1, 1]);
 const anchoredEntityMemberBoardHash = (anchor: string, memberEntityId: string): string =>
-  ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
-    [[1, [ethers.zeroPadValue(anchor, 32), memberEntityId], [1, 1], 0, 0, 0]],
-  ));
+  boardHashOf(anchoredEntityMemberBoard(anchor, memberEntityId));
 
 const emptyProofBody = () => ({
   watchSeed: WATCH_SEED,
@@ -90,12 +93,16 @@ const cooperativeUpdateHash = async (
 
 describe('EntityProvider board rotation grace', function () {
   async function fixture() {
-    const [foundation, oldSigner, newSigner, , outsider] = await ethers.getSigners();
+    const [foundation, oldSigner, newSigner, , outsider, fourthSigner] = await ethers.getSigners();
     const provider = await deployEntityProvider(foundation.address);
 
     const oldBoardHash = singleSignerLazyEntityId(oldSigner.address);
     const newBoardHash = singleSignerLazyEntityId(newSigner.address);
-    await provider.registerNumberedEntity(oldBoardHash);
+    await provider.registerNumberedEntity(encodeSingleSignerBoard(oldSigner.address));
+    // proposeBoard accepts only committed (validated) preimages.
+    await provider.commitBoard(encodeSingleSignerBoard(newSigner.address));
+    await provider.commitBoard(encodeSingleSignerBoard(outsider.address));
+    await provider.commitBoard(encodeSingleSignerBoard(fourthSigner!.address));
     const entityNumber = 2n;
     const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
     const proposalSignature = async (newHash: string, privateKey: string): Promise<string> => {
@@ -110,6 +117,7 @@ describe('EntityProvider board rotation grace', function () {
       oldSigner,
       newSigner,
       outsider,
+      fourthSigner: fourthSigner!,
       entityId,
       oldBoardHash,
       newBoardHash,
@@ -130,7 +138,7 @@ describe('EntityProvider board rotation grace', function () {
     } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
 
     const activation = await provider.activateBoard(entityId);
     const receipt = await activation.wait();
@@ -187,13 +195,17 @@ describe('EntityProvider board rotation grace', function () {
     expect(await provider.verifyHankoSignature(newNestedHanko, digest)).to.deep.equal([parentId, true]);
   });
 
-  it('cannot evict the previous board before its exact grace boundary', async function () {
+  it('cannot evict a retired board before its exact grace boundary (two historical slots)', async function () {
+    // Redesign: two retired slots. The rotation right after old->new lands at
+    // once (old moves to slot 2); only a THIRD rotation must wait until the
+    // oldest retired board's seven-day evidence window has elapsed.
     const {
       provider,
       foundation,
       oldSigner,
       newSigner,
       outsider,
+      fourthSigner,
       entityId,
       oldBoardHash,
       newBoardHash,
@@ -201,44 +213,60 @@ describe('EntityProvider board rotation grace', function () {
     } = await fixture();
     const firstSupport = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [firstSupport]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
     const firstActivation = await (await provider.activateBoard(entityId)).wait();
     const firstActivationBlock = await ethers.provider.getBlock(firstActivation!.blockNumber);
     const firstValidUntil = BigInt(firstActivationBlock!.timestamp + BOARD_GRACE_SECONDS);
 
     const thirdBoardHash = singleSignerLazyEntityId(outsider.address);
-    const nonce = await provider.boardActionNonces(entityId) + 1n;
-    const proposalDigest = await provider.computeBoardProposalHash(entityId, thirdBoardHash, 0, nonce);
-    const currentBoardHanko = buildSingleSignerHanko(
-      entityId,
-      proposalDigest,
-      deriveHardhatPrivateKey(2),
-    );
-    await provider.proposeBoard(entityId, thirdBoardHash, 0, [currentBoardHanko]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    const secondSupport = await proposalSignature(thirdBoardHash, deriveHardhatPrivateKey(2));
+    await provider.proposeBoard(entityId, thirdBoardHash, 0, [secondSupport]);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
+    const secondActivation = await (await provider.activateBoard(entityId)).wait();
+    const secondActivationBlock = await ethers.provider.getBlock(secondActivation!.blockNumber);
+    const secondValidUntil = BigInt(secondActivationBlock!.timestamp + BOARD_GRACE_SECONDS);
+    const afterSecond = await provider.entities(entityId);
+    expect(afterSecond.currentBoardHash).to.equal(thirdBoardHash);
+    expect(afterSecond.previousBoardHash).to.equal(newBoardHash);
+    expect(afterSecond.previousBoardValidUntil).to.equal(secondValidUntil);
+    expect(afterSecond.previousBoardHash2).to.equal(oldBoardHash);
+    expect(afterSecond.previousBoardValidUntil2).to.equal(firstValidUntil);
+    expect(await provider.boardEpochs(entityId)).to.equal(2n);
+
+    const fourthBoardHash = singleSignerLazyEntityId(fourthSigner.address);
+    const thirdSupport = await proposalSignature(fourthBoardHash, deriveHardhatPrivateKey(4));
+    await provider.proposeBoard(entityId, fourthBoardHash, 0, [thirdSupport]);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
 
     const proofDigest = ethers.keccak256(ethers.toUtf8Bytes('board-grace-overlap-regression'));
     const oldHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(1));
-    const currentHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(2));
+    const middleHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(2));
+    const currentHanko = buildSingleSignerHanko(entityId, proofDigest, deriveHardhatPrivateKey(4));
     await time.setNextBlockTimestamp(Number(firstValidUntil) - 1);
     await expect(provider.activateBoard(entityId)).to.be.revertedWithCustomError(
       provider,
       'BoardGracePeriodActive',
     );
     const unchanged = await provider.entities(entityId);
-    expect(unchanged.currentBoardHash).to.equal(newBoardHash);
-    expect(unchanged.previousBoardHash).to.equal(oldBoardHash);
-    expect(unchanged.proposedBoardHash).to.equal(thirdBoardHash);
-    expect(await provider.boardEpochs(entityId)).to.equal(1n);
+    expect(unchanged.currentBoardHash).to.equal(thirdBoardHash);
+    expect(unchanged.previousBoardHash).to.equal(newBoardHash);
+    expect(unchanged.previousBoardHash2).to.equal(oldBoardHash);
+    expect(unchanged.proposedBoardHash).to.equal(fourthBoardHash);
+    expect(await provider.boardEpochs(entityId)).to.equal(2n);
     expect(await provider.verifyHankoSignature(oldHanko, proofDigest)).to.deep.equal([entityId, true]);
+    expect(await provider.verifyHankoSignature(middleHanko, proofDigest)).to.deep.equal([entityId, true]);
+    expect(await provider.verifyCurrentHankoSignature(oldHanko, proofDigest)).to.deep.equal([ethers.ZeroHash, false]);
 
     await time.setNextBlockTimestamp(Number(firstValidUntil));
     await expect(provider.activateBoard(entityId)).to.emit(provider, 'BoardActivated');
     const rotated = await provider.entities(entityId);
-    expect(rotated.currentBoardHash).to.equal(thirdBoardHash);
-    expect(rotated.previousBoardHash).to.equal(newBoardHash);
-    expect(await provider.boardEpochs(entityId)).to.equal(2n);
+    expect(rotated.currentBoardHash).to.equal(fourthBoardHash);
+    expect(rotated.previousBoardHash).to.equal(thirdBoardHash);
+    expect(rotated.previousBoardHash2).to.equal(newBoardHash);
+    expect(rotated.previousBoardValidUntil2).to.equal(secondValidUntil);
+    expect(await provider.boardEpochs(entityId)).to.equal(3n);
     expect(await provider.verifyHankoSignature(oldHanko, proofDigest)).to.deep.equal([ethers.ZeroHash, false]);
+    expect(await provider.verifyHankoSignature(middleHanko, proofDigest)).to.deep.equal([entityId, true]);
     expect(await provider.verifyHankoSignature(currentHanko, proofDigest)).to.deep.equal([entityId, true]);
     expect(oldSigner.address).not.to.equal(newSigner.address);
   });
@@ -247,10 +275,10 @@ describe('EntityProvider board rotation grace', function () {
     const { provider, foundation, outsider, entityId, newBoardHash, proposalSignature } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
-    const thirdBoard = ethers.keccak256(ethers.toUtf8Bytes('third-board'));
+    const thirdBoard = singleSignerLazyEntityId(outsider.address);
     const nonce = await provider.boardActionNonces(entityId) + 1n;
     const digest = await provider.computeBoardProposalHash(entityId, thirdBoard, 0, nonce);
     const oldBoardHanko = buildSingleSignerHanko(entityId, digest, deriveHardhatPrivateKey(1));
@@ -262,8 +290,7 @@ describe('EntityProvider board rotation grace', function () {
     )).to.be.revertedWithCustomError(provider, 'InvalidAuthorityAuthorization');
 
     const anchor = ethers.zeroPadValue(foundation.address, 32);
-    const parentBoardHash = anchoredEntityMemberBoardHash(foundation.address, entityId);
-    await provider.registerNumberedEntity(parentBoardHash);
+    await provider.registerNumberedEntity(anchoredEntityMemberBoard(foundation.address, entityId));
     const parentId = ethers.zeroPadValue(ethers.toBeHex(3), 32);
     const parentNextBoard = singleSignerLazyEntityId(outsider.address);
     const parentNonce = await provider.boardActionNonces(parentId) + 1n;
@@ -293,7 +320,7 @@ describe('EntityProvider board rotation grace', function () {
     } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
     const { depository } = await deployDepositoryStack(await provider.getAddress());
@@ -333,7 +360,7 @@ describe('EntityProvider board rotation grace', function () {
     } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
     const { depository } = await deployDepositoryStack(await provider.getAddress());
@@ -550,7 +577,7 @@ describe('EntityProvider board rotation grace', function () {
     } = await fixture();
     const support = await proposalSignature(newBoardHash, deriveHardhatPrivateKey(1));
     await provider.connect(foundation).proposeBoard(entityId, newBoardHash, 0, [support]);
-    await mine(DEFAULT_ARTICLES.controlDelay);
+    await time.increase(DEFAULT_ARTICLES.controlDelay);
     await provider.activateBoard(entityId);
 
     const { depository } = await deployDepositoryStack(await provider.getAddress());

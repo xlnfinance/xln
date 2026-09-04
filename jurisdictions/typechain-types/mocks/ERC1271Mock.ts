@@ -3,6 +3,7 @@
 /* eslint-disable */
 import type {
   BaseContract,
+  BigNumberish,
   BytesLike,
   FunctionFragment,
   Result,
@@ -17,48 +18,38 @@ import type {
   TypedEventLog,
   TypedListener,
   TypedContractMethod,
-} from "./common";
+} from "../common";
 
-export interface IEntityProviderInterface extends Interface {
+export interface ERC1271MockInterface extends Interface {
   getFunction(
-    nameOrSignature:
-      | "verifyCurrentHankoSignature"
-      | "verifyHankoSignature"
-      | "watchtowerMinSequence"
+    nameOrSignature: "isValidSignature" | "mode" | "owner" | "setMode"
   ): FunctionFragment;
 
   encodeFunctionData(
-    functionFragment: "verifyCurrentHankoSignature",
+    functionFragment: "isValidSignature",
     values: [BytesLike, BytesLike]
   ): string;
+  encodeFunctionData(functionFragment: "mode", values?: undefined): string;
+  encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "verifyHankoSignature",
-    values: [BytesLike, BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "watchtowerMinSequence",
-    values: [BytesLike]
+    functionFragment: "setMode",
+    values: [BigNumberish]
   ): string;
 
   decodeFunctionResult(
-    functionFragment: "verifyCurrentHankoSignature",
+    functionFragment: "isValidSignature",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifyHankoSignature",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "watchtowerMinSequence",
-    data: BytesLike
-  ): Result;
+  decodeFunctionResult(functionFragment: "mode", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "setMode", data: BytesLike): Result;
 }
 
-export interface IEntityProvider extends BaseContract {
-  connect(runner?: ContractRunner | null): IEntityProvider;
+export interface ERC1271Mock extends BaseContract {
+  connect(runner?: ContractRunner | null): ERC1271Mock;
   waitForDeployment(): Promise<this>;
 
-  interface: IEntityProviderInterface;
+  interface: ERC1271MockInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -97,45 +88,38 @@ export interface IEntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  verifyCurrentHankoSignature: TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
+  isValidSignature: TypedContractMethod<
+    [hash: BytesLike, signature: BytesLike],
+    [string],
     "view"
   >;
 
-  verifyHankoSignature: TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
+  mode: TypedContractMethod<[], [bigint], "view">;
 
-  watchtowerMinSequence: TypedContractMethod<
-    [entityId: BytesLike],
-    [bigint],
-    "view"
-  >;
+  owner: TypedContractMethod<[], [string], "view">;
+
+  setMode: TypedContractMethod<[mode_: BigNumberish], [void], "nonpayable">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
   getFunction(
-    nameOrSignature: "verifyCurrentHankoSignature"
+    nameOrSignature: "isValidSignature"
   ): TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
+    [hash: BytesLike, signature: BytesLike],
+    [string],
     "view"
   >;
   getFunction(
-    nameOrSignature: "verifyHankoSignature"
-  ): TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
+    nameOrSignature: "mode"
+  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "watchtowerMinSequence"
-  ): TypedContractMethod<[entityId: BytesLike], [bigint], "view">;
+    nameOrSignature: "owner"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "setMode"
+  ): TypedContractMethod<[mode_: BigNumberish], [void], "nonpayable">;
 
   filters: {};
 }

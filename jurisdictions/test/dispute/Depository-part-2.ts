@@ -7,7 +7,7 @@ const { loadFixture, mine, time } = networkHelpers;
 
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
 
-import type { Depository } from '../../typechain-types/index.js';
+import type { Depository, EntityProvider } from '../../typechain-types/index.js';
 
 import { Contract, type ContractTransactionReceipt } from 'ethers';
 
@@ -21,6 +21,8 @@ import {
   deriveHardhatPrivateKey,
   emptyBatch,
   encodeBatch,
+  encodeSingleSignerBoard,
+  foundationListExternalToken,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
@@ -258,6 +260,8 @@ describe('Depository', () => {
 
   let depository: Depository;
 
+  let entityProvider: EntityProvider;
+
   let erc20: Contract;
 
   let erc721: Contract;
@@ -268,7 +272,7 @@ describe('Depository', () => {
     [user0, user1] = await ethers.getSigners();
 
     // Deploy EntityProvider
-    const entityProvider = await deployEntityProvider(user0.address);
+    entityProvider = await deployEntityProvider(user0.address);
 
     const stack = await deployDepositoryStack(await entityProvider.getAddress());
     depository = stack.depository;
@@ -301,11 +305,21 @@ describe('Depository', () => {
     };
   }
 
+  // Listing is a Foundation action routed through the EntityProvider.
+  async function listExternalToken(
+    target: Depository,
+    tokenType: number,
+    contractAddress: string,
+    externalTokenId: bigint | number = 0,
+  ): Promise<void> {
+    await foundationListExternalToken(entityProvider, await target.getAddress(), tokenType, contractAddress, externalTokenId);
+  }
+
   async function registerFixedSupplyErc20(target: Depository, supply: bigint): Promise<bigint> {
     const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     const token = await ERC20Mock.deploy('Fixed Supply', 'FIX', 18, supply);
     await token.waitForDeployment();
-    await (await target.registerExternalToken(0, await token.getAddress(), 0)).wait();
+    await listExternalToken(target, 0, await token.getAddress(), 0);
     return (await target.getTokensLength()) - 1n;
   }
 
@@ -535,6 +549,120 @@ describe('Depository', () => {
           ownerAuthorization,
         ),
     ).to.be.revertedWithCustomError(depository, 'E2');
+  });
+
+  it('fences watchtower appointments below watchtowerMinSequence raised by the owner board', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , tower] = await ethers.getSigners();
+
+    // The fence lives on the EntityProvider per entity id, so the account owner
+    // must be a NUMBERED entity (the starter stays lazy). bytes32(2) sorts first.
+    await (await entityProvider.registerNumberedEntity(encodeSingleSignerBoard(user1.address))).wait();
+    const ownerNumber = 2n;
+    const owner: TestActor = {
+      signer: user1,
+      entityId: ethers.zeroPadValue(ethers.toBeHex(ownerNumber), 32),
+      privateKey: deriveHardhatPrivateKey(1),
+    };
+    const starter = lazyActor(user0, 0);
+    const [left, right] = orderedActors(owner, starter);
+    expect(left).to.equal(owner);
+    const tokenId = 1n;
+    const lastResortWindowSeconds = 16n;
+
+    await depository.mintToReserve(right.entityId, tokenId, 1_000n);
+    const fundCollateral = await signDepositoryBatch(depository, right.entityId, right.privateKey, emptyBatch({
+      reserveToCollateral: [{ tokenId, receivingEntity: right.entityId, pairs: [{ entity: left.entityId, amount: 300n }] }],
+    }));
+    await depository.connect(right.signer).processBatch(fundCollateral.encodedBatch, fundCollateral.hankoData, fundCollateral.nonce);
+
+    // RIGHT starts the dispute on a proof signed by LEFT (proposerIsLeft = true).
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash, TEST_WATCH_SEED, true);
+    const start = await signDepositoryBatch(depository, right.entityId, right.privateKey, emptyBatch({
+      disputeStarts: [{
+        counterentity: left.entityId,
+        nonce: disputeNonce,
+        proposerIsLeft: true,
+        proofbodyHash: initialProofbodyHash,
+        initialProofbody,
+        watchSeed: TEST_WATCH_SEED,
+        sig: signEntityHash(left.entityId, startHash, left.privateKey),
+        starterInitialArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      }],
+    }));
+    await depository.connect(right.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    // Newer state signed by the starter (RIGHT), submitted for the owner (LEFT) by its tower.
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([100n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash, TEST_WATCH_SEED, false);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce,
+      proposerIsLeft: false,
+      initialProofbodyHash,
+      finalProofbody,
+      starterArguments: '0x',
+      otherArguments: '0x',
+      sig: signEntityHash(right.entityId, finalHash, right.privateKey),
+      startedByLeft: false,
+      cooperative: false,
+    };
+    const appointment = async (sequence: bigint) => signEntityHash(
+      left.entityId,
+      await watchtowerCounterDisputeHash(
+        depository, tower.address, left.entityId, right.entityId, finalNonce, finalProofbodyHash, lastResortWindowSeconds, sequence,
+      ),
+      left.privateKey,
+    );
+
+    // Owner raises the fence with one current-board action on the entity nonce lane.
+    expect(await entityProvider.watchtowerMinSequence(left.entityId)).to.equal(0n);
+    const actionNonce = await entityProvider.entityActionNonces(left.entityId) + 1n;
+    const fenceHash = await entityProvider.computeWatchtowerMinSequenceHankoHash(ownerNumber, 5n, actionNonce);
+    await expect(entityProvider.setWatchtowerMinSequence(ownerNumber, 5n, signEntityHash(left.entityId, fenceHash, left.privateKey)))
+      .to.emit(entityProvider, 'EntityProviderActionExecuted')
+      .withArgs(left.entityId, actionNonce, fenceHash, 2n);
+    expect(await entityProvider.watchtowerMinSequence(left.entityId)).to.equal(5n);
+    expect(await entityProvider.entityActionNonces(left.entityId)).to.equal(actionNonce);
+    // Monotonic: equal or lower minimums are rejected before any signature check.
+    await expect(entityProvider.setWatchtowerMinSequence(ownerNumber, 5n, '0x'))
+      .to.be.revertedWithCustomError(entityProvider, 'InvalidAuthorityAuthorization');
+    await expect(entityProvider.setWatchtowerMinSequence(ownerNumber, 4n, '0x'))
+      .to.be.revertedWithCustomError(entityProvider, 'InvalidAuthorityAuthorization');
+    // A stale-nonce Hanko (signed over nonce N) does not replay.
+    await expect(entityProvider.setWatchtowerMinSequence(ownerNumber, 6n, signEntityHash(left.entityId, fenceHash, left.privateKey)))
+      .to.be.revertedWith('Invalid entity signature');
+
+    const timeoutTimestamp = (await depository._accounts(acctKey)).disputeTimeout;
+    const lastResortStart = timeoutTimestamp - lastResortWindowSeconds;
+    if (lastResortStart > BigInt(await time.latest())) await time.increaseTo(Number(lastResortStart));
+
+    // Appointment sequence 4 < 5: revoked, E2 even though the owner signed it.
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId, finalization, lastResortWindowSeconds, 4n, await appointment(4n),
+      ),
+    ).to.be.revertedWithCustomError(depository, 'E2');
+    // Higher than the minimum is fine (checked without committing) and equal is accepted.
+    expect(await depository.connect(tower).watchtowerCounterDispute.staticCall(
+      left.entityId, finalization, lastResortWindowSeconds, 6n, await appointment(6n),
+    )).to.equal(true);
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId, finalization, lastResortWindowSeconds, 5n, await appointment(5n),
+      ),
+    )
+      .to.emit(depository, 'CounterDisputeRegistered')
+      .withArgs(left.entityId, right.entityId, finalNonce, false, finalProofbodyHash);
   });
 
   it('waits the signed window for a newer Pull proof and settles only registry evidence', async function () {
@@ -768,7 +896,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
     expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
-    expect(await depository._activeDebtsByToken(left.entityId, tokenId)).to.equal(1n);
+    expect(await depository.activeDebts(left.entityId)).to.equal(1n);
 
     await depository.mintToReserve(left.entityId, tokenId, 100n);
 
@@ -882,7 +1010,7 @@ describe('Depository', () => {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(300n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(50n);
     expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
-    expect(await depository._activeDebtsByToken(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository.activeDebts(left.entityId)).to.equal(0n);
   });
 
   it('requires timeout for unilateral dispute finalization and bumps account nonce once', async function () {
@@ -1013,29 +1141,268 @@ describe('Depository', () => {
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
   });
 
-  it('aggregates duplicate-token flashloans before enforcing repayment', async function () {
-    const { depository } = await loadFixture(deployFixture);
+  // ── implicit flash: Batch has no Flashloan[]; the initiator may spend ahead of
+  //    holding on a token where it owes nothing, the shortfall is a deficit that
+  //    later same-batch inflows repay first, and processBatch reverts E3 unless
+  //    every deficit is zero at the end. Batch order: deposits, R2R, C2R,
+  //    settlements, ..., R2C, external withdrawals.
 
-    const actor = lazyActor(user0, 0);
+  async function fundCollateral(target: Depository, from: TestActor, to: TestActor, tokenId: bigint, amount: bigint) {
+    await target.mintToReserve(from.entityId, tokenId, amount);
+    const fund = await signDepositoryBatch(target, from.entityId, from.privateKey, emptyBatch({
+      reserveToCollateral: [{ tokenId, receivingEntity: from.entityId, pairs: [{ entity: to.entityId, amount }] }],
+    }));
+    await target.connect(from.signer).processBatch(fund.encodedBatch, fund.hankoData, fund.nonce);
+  }
+
+  /** C2R leg pulling `amount` of `me`'s collateral with `cp` back to `me`'s reserve, signed by `cp`. */
+  async function c2rLeg(target: Depository, me: TestActor, cp: TestActor, tokenId: bigint, amount: bigint) {
+    const isLeft = BigInt(me.entityId) < BigInt(cp.entityId);
+    const diffs = [{
+      tokenId,
+      leftDiff: isLeft ? amount : 0n,
+      rightDiff: isLeft ? 0n : amount,
+      collateralDiff: -amount,
+      ondeltaDiff: isLeft ? -amount : 0n,
+    }];
+    const acctKey = await accountKeyFor(target, me.entityId, cp.entityId);
+    const nonce = (await target._accounts(acctKey)).nonce + 1n;
+    const sig = signEntityHash(cp.entityId, await cooperativeUpdateHash(target, acctKey, nonce, diffs), cp.privateKey);
+    return { counterparty: cp.entityId, tokenId, amount, nonce, sig };
+  }
+
+  /** Settlement in which `payer` hands `amount` of reserve to `payee`, signed by `signer` (the non-initiator). */
+  async function paySettlement(
+    target: Depository, payer: TestActor, payee: TestActor, tokenId: bigint, amount: bigint, signer: TestActor,
+  ) {
+    const [left, right] = orderedActors(payer, payee);
+    const payerIsLeft = left === payer;
+    const diffs = [{
+      tokenId,
+      leftDiff: payerIsLeft ? -amount : amount,
+      rightDiff: payerIsLeft ? amount : -amount,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const acctKey = await accountKeyFor(target, left.entityId, right.entityId);
+    const nonce = (await target._accounts(acctKey)).nonce + 1n;
+    const sig = signEntityHash(signer.entityId, await cooperativeUpdateHash(target, acctKey, nonce, diffs), signer.privateKey);
+    return { leftEntity: left.entityId, rightEntity: right.entityId, diffs, forgiveDebtsInTokenIds: [] as bigint[], sig, nonce };
+  }
+
+  it('implicit flash (a): repays an R2R overdraw from a same-batch collateral withdrawal, exactly', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const initiator = lazyActor(user0, 0);
+    const counterparty = lazyActor(user1, 1);
     const recipient = addressEntityId(user1.address);
     const tokenId = 1n;
+    await depository.mintToReserve(initiator.entityId, tokenId, 100n);
+    await fundCollateral(depository, initiator, counterparty, tokenId, 1_000n);
+    const acctKey = await accountKeyFor(depository, initiator.entityId, counterparty.entityId);
 
-    const exploitBatch = emptyBatch({
-      flashloans: [
-        { tokenId, amount: 10n },
-        { tokenId, amount: 10n },
-      ],
-      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 10n }],
+    const batch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 700n }], // holds 100
+      collateralToReserve: [await c2rLeg(depository, initiator, counterparty, tokenId, 700n)],
     });
-    const exploit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, exploitBatch);
+    const signed = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, batch);
+    const receipt = await (await depository
+      .connect(initiator.signer)
+      .processBatch(signed.encodedBatch, signed.hankoData, signed.nonce)).wait();
 
+    // No inflated intermediate reserve is ever visible: the overdraw shows 0,
+    // the repayment shows the exact final balance.
+    const initiatorUpdates = decodedEvents(receipt, 'ReserveUpdated')
+      .filter(event => event.entity === initiator.entityId)
+      .map(event => event.newBalance);
+    expect(initiatorUpdates).to.deep.equal([0n, 100n]);
+    expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(100n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(700n);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(300n);
+    expect(await depository.entityNonces(initiator.entityId)).to.equal(2n);
+  });
+
+  it('implicit flash (b): reverts E3 when the deficit is not repaid inside the batch', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const initiator = lazyActor(user0, 0);
+    const counterparty = lazyActor(user1, 1);
+    const recipient = addressEntityId(user1.address);
+    const tokenId = 1n;
+    await depository.mintToReserve(initiator.entityId, tokenId, 100n);
+    await fundCollateral(depository, initiator, counterparty, tokenId, 1_000n);
+
+    const unpaid = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 500n }],
+    }));
     await expect(
-      depository.connect(user0).processBatch(exploit.encodedBatch, exploit.hankoData, exploit.nonce),
+      depository.connect(initiator.signer).processBatch(unpaid.encodedBatch, unpaid.hankoData, unpaid.nonce),
     ).to.be.revertedWithCustomError(depository, 'E3');
 
-    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
-    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(0n);
+    // A partial repayment is not enough either: deficit 400, inflow 300.
+    const partial = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 500n }],
+      collateralToReserve: [await c2rLeg(depository, initiator, counterparty, tokenId, 300n)],
+    }));
+    await expect(
+      depository.connect(initiator.signer).processBatch(partial.encodedBatch, partial.hankoData, partial.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E3');
+
+    expect(await depository.entityNonces(initiator.entityId)).to.equal(1n);
+    expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
+  });
+
+  it("implicit flash (a'): a settlement overdraw is repaid by a later settlement in the same batch", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , user2] = await ethers.getSigners();
+    const initiator = lazyActor(user0, 0);
+    const payee = lazyActor(user1, 1);
+    const funder = lazyActor(user2!, 2);
+    const tokenId = 1n;
+    await depository.mintToReserve(funder.entityId, tokenId, 1_000n);
+
+    const batch = emptyBatch({
+      settlements: [
+        await paySettlement(depository, initiator, payee, tokenId, 400n, payee),   // initiator pays 400 from nothing
+        await paySettlement(depository, funder, initiator, tokenId, 400n, funder), // funder pays initiator 400
+      ],
+    });
+    const signed = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, batch);
+    await depository.connect(initiator.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(payee.entityId, tokenId)).to.equal(400n);
+    expect(await depository._reserves(funder.entityId, tokenId)).to.equal(600n);
+  });
+
+  it('implicit flash (c): an initiator with outstanding debt on the token gets no credit', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , user2] = await ethers.getSigners();
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const funder = lazyActor(user2!, 2);
+    const recipient = addressEntityId(user2!.address);
+    const tokenId = 1n;
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+
+    // Dispute with delta -500 and no collateral: LEFT owes RIGHT 500.
+    const disputeNonce = 1n;
+    const proofbody = proofBody([-500n], [tokenId]);
+    const hash = proofBodyHash(proofbody);
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, hash);
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proposerIsLeft: false,
+        proofbodyHash: hash,
+        initialProofbody: proofbody,
+        watchSeed: TEST_WATCH_SEED,
+        sig: signEntityHash(right.entityId, startHash, right.privateKey),
+        starterInitialArguments: '0x',
+        starterCounterArguments: '0x',
+        starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      }],
+    }));
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
+    const finalize = await signDepositoryBatch(depository, left.entityId, left.privateKey, emptyBatch({
+      disputeFinalizations: [{
+        counterentity: right.entityId,
+        initialNonce: disputeNonce,
+        finalNonce: disputeNonce,
+        proposerIsLeft: false,
+        initialProofbodyHash: hash,
+        finalProofbody: proofbody,
+        starterArguments: '0x',
+        otherArguments: '0x',
+        sig: '0x',
+        startedByLeft: true,
+        cooperative: false,
+      }],
+    }));
+    await depository.connect(left.signer).processBatch(finalize.encodedBatch, finalize.hankoData, finalize.nonce);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(500n);
+    expect(await depository.activeDebts(left.entityId)).to.equal(1n);
+
+    // Exactly the shape that succeeds for a debt-free initiator in (a'): the
+    // same-batch inflow would repay the overdraw, but a debtor may not open one.
+    await depository.mintToReserve(funder.entityId, tokenId, 1_000n);
+    const batch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 50n }],
+      settlements: [await paySettlement(depository, funder, left, tokenId, 50n, funder)],
+    });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E3');
+    expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
+    expect(await depository._reserves(funder.entityId, tokenId)).to.equal(1_000n);
+  });
+
+  it('implicit flash (d): a non-initiator reserve never goes negative, however rich the initiator', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const initiator = lazyActor(user0, 0);
+    const counterparty = lazyActor(user1, 1);
+    const tokenId = 1n;
+    await depository.mintToReserve(initiator.entityId, tokenId, 1_000n);
+    await depository.mintToReserve(counterparty.entityId, tokenId, 50n);
+
+    // Counterparty signs a settlement paying 100 it does not have.
+    const batch = emptyBatch({
+      settlements: [await paySettlement(depository, counterparty, initiator, tokenId, 100n, counterparty)],
+    });
+    const signed = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, batch);
+    await expect(
+      depository.connect(initiator.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E3');
+    expect(await depository._reserves(counterparty.entityId, tokenId)).to.equal(50n);
+    expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(1_000n);
+  });
+
+  it('implicit flash (e): deposit, overdraw, repay from collateral and withdraw the external token in one batch', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const initiator = lazyActor(user0, 0);
+    const counterparty = lazyActor(user1, 1);
+    const recipient = addressEntityId(user1.address);
+    const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
+    const token = await ERC20Mock.deploy('Flash', 'FLS', 18, 1_000_000n);
+    await token.waitForDeployment();
+    await listExternalToken(depository, 0, await token.getAddress(), 0);
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    const depositoryAddress = await depository.getAddress();
+    await fundCollateral(depository, initiator, counterparty, tokenId, 1_000n);
+    const acctKey = await accountKeyFor(depository, initiator.entityId, counterparty.entityId);
+    await token.connect(user0).approve(depositoryAddress, 400n);
+
+    const batch = emptyBatch({
+      externalTokenToReserve: [{
+        entity: initiator.entityId,
+        contractAddress: await token.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: tokenId,
+        amount: 400n,
+      }],
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 1_000n }], // holds 400 after the deposit
+      collateralToReserve: [await c2rLeg(depository, initiator, counterparty, tokenId, 900n)], // repays 600, leaves 300
+      reserveToExternalToken: [{ receivingEntity: addressEntityId(user0.address), tokenId, amount: 300n }],
+    });
+    const signed = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, batch);
+    await depository.connect(initiator.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+
+    expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(1_000n);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(100n);
+    expect(await token.balanceOf(depositoryAddress)).to.equal(100n); // deposit 400 - withdrawal 300
+    expect(await token.balanceOf(user0.address)).to.equal(1_000_000n - 100n);
+
+    // The withdrawal runs last, so a deficit it opens can never be repaid.
+    const overdrawWithdrawal = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: addressEntityId(user0.address), tokenId, amount: 1n }],
+    }));
+    await expect(
+      depository.connect(initiator.signer).processBatch(
+        overdrawWithdrawal.encodedBatch, overdrawWithdrawal.hankoData, overdrawWithdrawal.nonce,
+      ),
+    ).to.be.revertedWithCustomError(depository, 'E3');
   });
 
   it('rejects non-admin use of local dev bootstrap helpers', async function () {

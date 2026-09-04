@@ -60,7 +60,8 @@ library XlnHanko {
     return abi.encode(HankoVerifier.HankoBytes({
       placeholders: new bytes32[](0),
       packedSignatures: packSignature(v, r, s),
-      claims: claims
+      claims: claims,
+      memberSignatures: new bytes[](0)
     }));
   }
 
@@ -128,7 +129,6 @@ library XlnHanko {
   }
 
   function emptyBatch() internal pure returns (Batch memory batch) {
-    batch.flashloans = new Flashloan[](0);
     batch.reserveToReserve = new ReserveToReserve[](0);
     batch.reserveToCollateral = new ReserveToCollateral[](0);
     batch.collateralToReserve = new CollateralToReserve[](0);

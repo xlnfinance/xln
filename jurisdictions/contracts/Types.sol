@@ -24,6 +24,14 @@ error E10(); // BatchTooLarge
 // This bound does not apply to money or other true uint256 quantities.
 uint256 constant JS_SAFE_NONCE_MAX = 9007199254740991;
 
+// Every financial magnitude (reserve, collateral, |ondelta|, |offdelta|,
+// transformer allowance) is capped at 2^200 ≈ 1.6e60 base units. This keeps
+// ondelta + offdelta and every clamp bound inside int256 with 50+ bits to
+// spare, so settlement arithmetic is plain checked int256: no 257-bit
+// sign/magnitude encoding, no ordered-uint clamping, no int256.min sentinel.
+uint256 constant MAX_MONEY = 1 << 200;
+int256 constant MAX_MONEY_INT = int256(1 << 200);
+
 interface IDepositoryDelegateErrorAbi {
   // E5 is emitted only inside the linked Account library. Keeping the same
   // selector in Depository's inherited ABI lets operators and tests decode a
@@ -242,11 +250,6 @@ struct Settlement {
   uint256 nonce;
 }
 
-struct Flashloan {
-  uint tokenId;
-  uint amount;
-}
-
 struct ReserveToReserve {
   bytes32 receivingEntity;
   uint tokenId;
@@ -318,7 +321,6 @@ struct CollateralToReserve {
 }
 
 struct Batch {
-  Flashloan[] flashloans;
   ReserveToReserve[] reserveToReserve;
   ReserveToCollateral[] reserveToCollateral;
   CollateralToReserve[] collateralToReserve;  // C2R shortcut (expands to Settlement)
@@ -330,6 +332,31 @@ struct Batch {
   ReserveToExternalToken[] reserveToExternalToken;
   SecretReveal[] revealSecrets;
   HashLadderRegistration[] hashLadderRegistrations;
+}
+
+// ========== BATCH SCRATCH (implicit flash) ==========
+
+/// @notice Per-batch scratch state living at a fixed storage slot of the
+///         Depository, reachable from the Depository and from the linked
+///         Account library (DELEGATECALL) without threading parameters.
+/// @dev Implicit flash credit: only the batch initiator may spend a reserve it
+///      does not hold yet; the shortfall is tracked per token as a deficit and
+///      the whole batch reverts unless every deficit is back to zero at the end.
+///      Same dynamics as an explicit flash mint, without a Flashloan[] op and
+///      without inflated reserves being visible to anyone mid-batch.
+struct BatchScratch {
+  bytes32 initiator;
+  mapping(uint256 => uint256) deficit;
+  uint256[] tokens;
+}
+
+bytes32 constant BATCH_SCRATCH_SLOT = 0xa2fbb51d6470b0d4773f0089bf135099aa86e6507b49f85c9c1a42e122e6b91c;
+
+library BatchScratchLib {
+  function get() internal pure returns (BatchScratch storage s) {
+    bytes32 slot = BATCH_SCRATCH_SLOT;
+    assembly ("memory-safe") { s.slot := slot }
+  }
 }
 
 // ========== ENUMS ==========

@@ -24,7 +24,7 @@ contract DepositoryInvariants is XlnFixture {
     _deployXln(); // registers `erc20` as internal token 1
 
     tokenB = new ERC20Mock("MockB", "MKB", 18, 1e30);
-    dep.registerExternalToken(0, address(tokenB), 0);
+    _listToken(address(tokenB));
 
     uint256[4] memory keys = [pk[0], pk[1], pk[2], pk[3]];
     handler = new DepositoryHandler(dep, erc20, tokenB, keys, address(this));
@@ -33,14 +33,14 @@ contract DepositoryInvariants is XlnFixture {
     // contract; the handler pranks it, so no ownership transfer is needed.
     targetContract(address(handler));
 
-    bytes4[] memory selectors = new bytes4[](15);
+    bytes4[] memory selectors = new bytes4[](16);
     selectors[0] = handler.mint.selector;
     selectors[1] = handler.reserveToReserve.selector;
     selectors[2] = handler.reserveToCollateral.selector;
     selectors[3] = handler.collateralToReserve.selector;
     selectors[4] = handler.settle.selector;
-    selectors[5] = handler.flashloanRepaidByCollateral.selector;
-    selectors[6] = handler.flashloanIntoCollateral.selector;
+    selectors[5] = handler.flashR2RRepaidByCollateral.selector;
+    selectors[6] = handler.flashDepositOverdrawWithdraw.selector;
     selectors[7] = handler.depositExternal.selector;
     selectors[8] = handler.withdrawExternal.selector;
     selectors[9] = handler.pokeEnforceDebts.selector;
@@ -49,6 +49,7 @@ contract DepositoryInvariants is XlnFixture {
     selectors[12] = handler.advance.selector;
     selectors[13] = handler.advancePastDisputeDelay.selector;
     selectors[14] = handler.disputeFullCycle.selector;
+    selectors[15] = handler.flashDeniedToDebtor.selector;
     targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
   }
 
@@ -122,14 +123,15 @@ contract DepositoryInvariants is XlnFixture {
     }
   }
 
-  // ═══════════════ invariant 2: flashloans close ═══════════════
+  // ═══════════════ invariant 2: implicit flash closes ═══════════════
 
-  /// @notice INVARIANT 2. Handler-side oracle: no successful batch containing
-  ///         flashloans ever ended with the borrower holding more reserve than
-  ///         it held before the batch, for any flashloan token — including
-  ///         duplicate tokenIds and a same-batch reserve-to-collateral leg.
-  function invariant_flashloanNeverProfits() public view {
-    assertEq(handler.flashloanViolations(), 0, "flashloan left the borrower richer");
+  /// @notice INVARIANT 2. Handler-side oracle over implicit flash credit: every
+  ///         accepted batch in which the initiator spent ahead of holding ended
+  ///         with its reserve at exactly (before + inflows - outflows), the
+  ///         inflows covered the whole shortfall, and a debtor on that token
+  ///         was never allowed to overdraw. Rejected batches moved nothing.
+  function invariant_implicitFlashNeverProfits() public view {
+    assertEq(handler.flashViolations(), 0, "implicit flash left the initiator richer or leaked");
   }
 
   // ═══════════════ invariant 3: debt bookkeeping ═══════════════
@@ -145,14 +147,16 @@ contract DepositoryInvariants is XlnFixture {
     }
   }
 
-  /// @notice INVARIANT 3b. _activeDebtsByToken equals the number of live entries.
+  /// @notice INVARIANT 3b. activeDebts(entity) equals the number of live
+  ///         entries across every token queue of that entity.
   function invariant_activeDebtCountMatchesQueue() public view {
     for (uint256 i = 0; i < ACTORS; i++) {
+      uint256 live;
       for (uint256 k = 0; k < 3; k++) {
-        uint256 t = TOKENS[k];
-        (, uint256 live) = _walkDebtQueue(entity[i], t);
-        assertEq(live, dep._activeDebtsByToken(entity[i], t), "_activeDebtsByToken desynced");
+        (, uint256 liveForToken) = _walkDebtQueue(entity[i], TOKENS[k]);
+        live += liveForToken;
       }
+      assertEq(live, dep.activeDebts(entity[i]), "activeDebts desynced");
     }
   }
 
@@ -299,8 +303,9 @@ contract DepositoryInvariants is XlnFixture {
     console.log("reserveToCollateral       ", handler.callCount("reserveToCollateral"));
     console.log("collateralToReserve       ", handler.callCount("collateralToReserve"));
     console.log("settle                    ", handler.callCount("settle"));
-    console.log("flashloanRepaidByCollat.  ", handler.callCount("flashloanRepaidByCollateral"));
-    console.log("flashloanIntoCollateral   ", handler.callCount("flashloanIntoCollateral"));
+    console.log("flashR2RRepaidByCollateral", handler.callCount("flashR2RRepaidByCollateral"));
+    console.log("flashDepositOverdrawWdr   ", handler.callCount("flashDepositOverdrawWithdraw"));
+    console.log("flashDeniedToDebtor       ", handler.callCount("flashDeniedToDebtor"));
     console.log("depositExternal           ", handler.callCount("depositExternal"));
     console.log("withdrawExternal          ", handler.callCount("withdrawExternal"));
     console.log("pokeEnforceDebts          ", handler.callCount("pokeEnforceDebts"));

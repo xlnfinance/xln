@@ -31,14 +31,19 @@ abstract contract XlnFixture is Test {
   /// which keeps a purely internal accounting surface under test.
   uint256 internal constant TOKEN_ERC20 = 1;
 
+  uint256 internal constant FOUNDATION_PK = uint256(keccak256("xln.foundation"));
+
   function _deployXln() internal {
-    ep = new EntityProvider(address(uint160(0xF0)));
+    ep = new EntityProvider(vm.addr(FOUNDATION_PK));
     deltaTransformer = new DeltaTransformer();
     dep = new Depository(address(ep), address(deltaTransformer));
+    vm.prank(vm.addr(FOUNDATION_PK));
+    ep.bindShareDepository(address(dep));
 
-    // registerExternalToken requires a non-zero totalSupply.
+    // registerExternalToken requires a non-zero totalSupply and is callable
+    // only through the EntityProvider's Foundation lane.
     erc20 = new ERC20Mock("Mock", "MCK", 18, 1e30);
-    dep.registerExternalToken(0 /* TypeERC20 */, address(erc20), 0);
+    _listToken(address(erc20));
 
     for (uint256 i = 0; i < ACTORS; i++) {
       pk[i] = uint256(keccak256(abi.encodePacked("xln.actor", i)));
@@ -48,6 +53,21 @@ abstract contract XlnFixture is Test {
   }
 
   // ── signing ──
+
+  /// @dev Foundation-lane listing of an ERC20 on `dep` (tokenType 0, externalTokenId 0).
+  function _listToken(address token) internal returns (uint256 tokenId) {
+    bytes32 foundationId = bytes32(uint256(1));
+    uint256 nonce = ep.entityActionNonces(foundationId) + 1;
+    bytes32 actionHash = ep.computeFoundationActionHash(
+      ep.FOUNDATION_REGISTER_TOKEN(),
+      keccak256(abi.encode(address(dep), uint8(0), token, uint256(0))),
+      nonce
+    );
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(FOUNDATION_PK, actionHash);
+    return ep.foundationRegisterExternalToken(
+      address(dep), 0, token, 0, XlnHanko.encodeSingleSignerHanko(foundationId, v, r, s), nonce
+    );
+  }
 
   function _hanko(uint256 actorIndex, bytes32 hash) internal view returns (bytes memory) {
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk[actorIndex], hash);

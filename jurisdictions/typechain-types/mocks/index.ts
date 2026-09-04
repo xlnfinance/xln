@@ -6,6 +6,7 @@ export type { noReturnErc20MockSol };
 import type * as noopNftMocksSol from "./NoopNftMocks.sol";
 export type { noopNftMocksSol };
 export type { DepositoryDebtHarness } from "./DepositoryDebtHarness";
+export type { ERC1271Mock } from "./ERC1271Mock";
 export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness";
 export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";
 export type { HashLadderHarness } from "./HashLadderHarness";

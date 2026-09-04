@@ -80,11 +80,27 @@ contract TransformerFaultModes is Test {
   ///         Add with allowance applies the exact value (no clamp at 50+50).
   function test_wellBehavedAddAppliesExactValue() public {
     (int256 delta0, uint256 bitmap, bool reverted, bool gasArtifact) =
-      harness.run(100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2);
+      harness.run(100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY);
     assertFalse(reverted, "well-behaved Add must not revert");
     assertFalse(gasArtifact, "no gas artifact on a real EVM run");
     assertEq(delta0, 107, "Add must apply exactly");
     assertEq(bitmap, 0, "positive result must clear the negative bitmap");
+  }
+
+  /// @notice MAX_MONEY: an allowance above 2^200 fails _validateAllowances, so
+  ///         the signed clause cannot execute and the batch reverts
+  ///         (TransformerExecutionFailed), exactly like any other malformed
+  ///         clause. The boundary itself is accepted (see the control above).
+  function test_allowanceAboveMaxMoneyFailsTheClause() public {
+    (int256 delta0, , bool reverted, bool gasArtifact) =
+      harness.run(100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY + 1, 0);
+    assertTrue(reverted, "rightAllowance > MAX_MONEY must fail the clause");
+    assertFalse(gasArtifact, "cap rejection is not the gas artifact");
+    assertEq(delta0, 0);
+    (, , reverted, gasArtifact) =
+      harness.run(100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, 0, MAX_MONEY + 1);
+    assertTrue(reverted, "leftAllowance > MAX_MONEY must fail the clause");
+    assertFalse(gasArtifact);
   }
 
   // ═══════════════ partial allowances across two delta indices ═══════════════
@@ -160,7 +176,7 @@ contract TransformerFaultModes is Test {
 
       // With allowance + no clamp pressure: executes with the empty evidence.
       (int256 delta0, , bool reverted2, ) = harness.runWithArguments(
-        100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2, bad[i], "", address(decoder)
+        100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY, bad[i], "", address(decoder)
       );
       assertFalse(reverted2, "malformed evidence soft-decodes; clause still runs");
       assertEq(delta0, 107, "Add applies exactly over empty evidence");
@@ -178,7 +194,7 @@ contract TransformerFaultModes is Test {
     assertTrue(revertedGate, "gate must hold under oversized evidence");
 
     (int256 delta0, , bool reverted2, ) = harness.runWithArguments(
-      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2, oversized, "", address(decoder)
+      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY, oversized, "", address(decoder)
     );
     assertFalse(reverted2, "oversized evidence soft-decodes; clause still runs");
     assertEq(delta0, 107, "Add applies exactly over empty (oversized) evidence");
@@ -186,7 +202,7 @@ contract TransformerFaultModes is Test {
     // Just under the bound: decodes (empty inner list) and still executes.
     bytes memory edge = new bytes((1 << 18) - 1);
     (int256 delta1, , bool reverted3, ) = harness.runWithArguments(
-      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2, edge, "", address(decoder)
+      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY, edge, "", address(decoder)
     );
     assertFalse(reverted3, "edge-size evidence must decode, not revert");
     assertEq(delta1, 107, "Add applies exactly over the edge-size evidence");
@@ -207,7 +223,7 @@ contract TransformerFaultModes is Test {
     assertTrue(revertedGate, "gate must hold when the decoder call fails");
 
     (int256 delta0, , bool reverted2, ) = harness.runWithArguments(
-      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2, hex"01", "", address(transformer)
+      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY, hex"01", "", address(transformer)
     );
     assertFalse(reverted2, "failed decoder call soft-decodes; clause still runs");
     assertEq(delta0, 107, "Add applies exactly over empty evidence");
@@ -215,7 +231,7 @@ contract TransformerFaultModes is Test {
     // Codeless decoder: staticcall returns success + empty returndata, so the
     // strict decode reverts — fatal, not soft.
     (, , bool reverted3, ) = harness.runWithArguments(
-      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, type(uint256).max / 2, type(uint256).max / 2, hex"01", "", address(0xdead)
+      100, 0, 1, TransformerLivenessHarness.Mode.Add, 7, true, MAX_MONEY, MAX_MONEY, hex"01", "", address(0xdead)
     );
     assertTrue(reverted3, "codeless decoder must be fatal, never silently empty");
   }

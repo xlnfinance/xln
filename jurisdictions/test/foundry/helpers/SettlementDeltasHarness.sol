@@ -29,6 +29,16 @@ contract SettlementDeltasHarness {
     transformer = _transformer;
   }
 
+  /// @dev prepareSettlementDeltas returns plain int256[] since MAX_MONEY (every
+  ///      term is bounded, no 257-bit sign/magnitude any more); the bitmap the
+  ///      lemmas consume is derived here from the signs so their contract with
+  ///      Depository._disputeFinalizeInternal (delta < 0 => negative) stays checked.
+  function _signBitmap(int[] memory deltas) internal pure returns (uint256 bitmap) {
+    for (uint256 i = 0; i < deltas.length; i++) {
+      if (deltas[i] < 0) bitmap |= 1 << i;
+    }
+  }
+
   /// @dev One ProofBody-shaped input; leftArguments/rightArguments stay empty
   ///      (malformed wrappers decode to empty evidence by design).
   ///      Returns (delta0, negativeDeltaBitmap, reverted, gasArtifact).
@@ -88,9 +98,9 @@ contract SettlementDeltasHarness {
       0,
       0,
       0
-    ) returns (int[] memory deltas, uint256 bitmap) {
+    ) returns (int[] memory deltas) {
       delta0 = deltas[0];
-      negativeDeltaBitmap = bitmap;
+      negativeDeltaBitmap = _signBitmap(deltas);
       reverted = false;
       gasArtifact = false;
     } catch (bytes memory lowLevelData) {
@@ -204,9 +214,9 @@ contract SettlementDeltasHarness {
       0,
       0,
       0
-    ) returns (int[] memory deltas, uint256 bitmap) {
+    ) returns (int[] memory deltas) {
       delta0 = deltas[0];
-      negativeDeltaBitmap = bitmap;
+      negativeDeltaBitmap = _signBitmap(deltas);
       reverted = false;
       gasArtifact = false;
     } catch (bytes memory lowLevelData) {
@@ -279,10 +289,10 @@ contract SettlementDeltasHarness {
       0,
       0,
       0
-    ) returns (int[] memory deltas, uint256 bitmap) {
+    ) returns (int[] memory deltas) {
       delta0 = deltas[0];
       delta1 = deltas[1];
-      negativeDeltaBitmap = bitmap;
+      negativeDeltaBitmap = _signBitmap(deltas);
       reverted = false;
       gasArtifact = false;
     } catch (bytes memory lowLevelData) {

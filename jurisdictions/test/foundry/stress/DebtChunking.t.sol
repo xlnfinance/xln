@@ -103,7 +103,7 @@ contract DebtChunkingTest is XlnFixture {
   function _assertBooksAgree(string memory tag) internal view {
     (uint256 sum, uint256 count) = _liveDebt(debtor);
     assertEq(sum, dep.debtOutstanding(debtor, T), string.concat(tag, ": debtOutstanding desynced"));
-    assertEq(count, dep._activeDebtsByToken(debtor, T), string.concat(tag, ": activeDebts desynced"));
+    assertEq(count, dep.activeDebts(debtor), string.concat(tag, ": activeDebts desynced"));
 
     uint256 cursor = dep._debtIndex(debtor, T);
     uint256 len = _queueLength(debtor);
@@ -116,7 +116,7 @@ contract DebtChunkingTest is XlnFixture {
   function _buildDebts(uint256 n) internal {
     for (uint256 i = 0; i < n; i++) _mintOneDebt();
     assertEq(dep.debtOutstanding(debtor, T), n * DEBT_SIZE, "setup: wrong total debt");
-    assertEq(dep._activeDebtsByToken(debtor, T), n, "setup: wrong active count");
+    assertEq(dep.activeDebts(debtor), n, "setup: wrong active count");
   }
 
   /// @notice A queue longer than one chunk must drain across several calls
@@ -133,14 +133,14 @@ contract DebtChunkingTest is XlnFixture {
     dep.enforceDebts(debtor, T, DEBT_CHUNK);
     _assertBooksAgree("after chunk 1");
     assertEq(dep.debtOutstanding(debtor, T), (n - DEBT_CHUNK) * DEBT_SIZE, "chunk 1 paid the wrong amount");
-    assertEq(dep._activeDebtsByToken(debtor, T), n - DEBT_CHUNK, "chunk 1 count wrong");
+    assertEq(dep.activeDebts(debtor), n - DEBT_CHUNK, "chunk 1 count wrong");
     assertEq(dep._debtIndex(debtor, T), DEBT_CHUNK, "cursor did not advance one full chunk");
 
     // Second chunk drains the rest and resets the queue.
     dep.enforceDebts(debtor, T, DEBT_CHUNK);
     _assertBooksAgree("after chunk 2");
     assertEq(dep.debtOutstanding(debtor, T), 0, "debt survived full enforcement");
-    assertEq(dep._activeDebtsByToken(debtor, T), 0, "active count survived full enforcement");
+    assertEq(dep.activeDebts(debtor), 0, "active count survived full enforcement");
     assertEq(dep._debtIndex(debtor, T), 0, "cursor not reset after drain");
     assertEq(_queueLength(debtor), 0, "queue not cleared after drain");
 
@@ -161,7 +161,7 @@ contract DebtChunkingTest is XlnFixture {
     _assertBooksAgree("after partial");
 
     assertEq(dep.debtOutstanding(debtor, T), 5 * DEBT_SIZE - (2 * DEBT_SIZE + DEBT_SIZE / 2));
-    assertEq(dep._activeDebtsByToken(debtor, T), 3, "partially paid entry must stay active");
+    assertEq(dep.activeDebts(debtor), 3, "partially paid entry must stay active");
     assertEq(dep._debtIndex(debtor, T), 2, "cursor must rest on the partially paid entry");
     (, uint256 remainder) = dep._debts(debtor, T, 2);
     assertEq(remainder, DEBT_SIZE / 2, "partial remainder wrong");
@@ -175,7 +175,7 @@ contract DebtChunkingTest is XlnFixture {
     dep.enforceDebts(debtor, T, 0);
     _assertBooksAgree("after uncapped drain");
     assertEq(dep.debtOutstanding(debtor, T), 0);
-    assertEq(dep._activeDebtsByToken(debtor, T), 0);
+    assertEq(dep.activeDebts(debtor), 0);
     assertEq(_queueLength(debtor), 0);
   }
 
@@ -186,7 +186,7 @@ contract DebtChunkingTest is XlnFixture {
     dep.mintToReserve(debtor, T, DEBT_CHUNK * DEBT_SIZE);
     dep.enforceDebts(debtor, T, DEBT_CHUNK);
     _assertBooksAgree("after chunk");
-    assertEq(dep._activeDebtsByToken(debtor, T), 3);
+    assertEq(dep.activeDebts(debtor), 3);
 
     // Forgive the remainder through a signed settlement between the two parties.
     uint256[] memory forgiveIds = new uint256[](1);
@@ -211,7 +211,7 @@ contract DebtChunkingTest is XlnFixture {
 
     _assertBooksAgree("after forgiveness");
     assertEq(dep.debtOutstanding(debtor, T), 0, "forgiveness left residual debt");
-    assertEq(dep._activeDebtsByToken(debtor, T), 0, "forgiveness left an active count");
+    assertEq(dep.activeDebts(debtor), 0, "forgiveness left an active count");
 
     // A later enforcement pass must be a no-op, not an underflow.
     dep.enforceDebts(debtor, T, DEBT_CHUNK);

@@ -3,10 +3,12 @@ import hre from 'hardhat';
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { loadFixture, mine, time } = networkHelpers;
 import type { HardhatEthersSigner } from '@nomicfoundation/hardhat-ethers/signers.js';
-import type { Depository } from '../../typechain-types/index.js';
+import type { Depository, EntityProvider } from '../../typechain-types/index.js';
 import { Contract, type ContractTransactionReceipt } from 'ethers';
 import {
   addressEntityId,
+  buildFoundationAction,
+  foundationListExternalToken,
   buildSingleSignerHanko,
   canonicalAccountKey,
   computeDepositoryBatchHash,
@@ -193,13 +195,14 @@ describe('Depository', () => {
   let user0: HardhatEthersSigner;
   let user1: HardhatEthersSigner;
   let depository: Depository;
+  let entityProvider: EntityProvider;
   let erc20: Contract;
   let erc721: Contract;
   let erc1155: Contract;
   async function deployFixture() {
     [user0, user1] = await ethers.getSigners();
     // Deploy EntityProvider
-    const entityProvider = await deployEntityProvider(user0.address);
+    entityProvider = await deployEntityProvider(user0.address);
     ({ depository } = await deployDepositoryStack(await entityProvider.getAddress()));
     // Deploy ERC20 mock contract
     const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
@@ -217,11 +220,21 @@ describe('Depository', () => {
     await erc1155.mint(user0.address, 0, 100, '0x');
     return { depository, erc20, erc721, erc1155, user0, user1 };
   }
+  // Listing is a Foundation action routed through the EntityProvider; the
+  // deployer key has no listing power on the Depository.
+  async function listExternalToken(
+    target: Depository,
+    tokenType: number,
+    contractAddress: string,
+    externalTokenId: bigint | number = 0,
+  ): Promise<void> {
+    await foundationListExternalToken(entityProvider, await target.getAddress(), tokenType, contractAddress, externalTokenId);
+  }
   async function registerFixedSupplyErc20(target: Depository, supply: bigint): Promise<bigint> {
     const ERC20Mock = await ethers.getContractFactory('ERC20Mock');
     const token = await ERC20Mock.deploy('Fixed Supply', 'FIX', 18, supply);
     await token.waitForDeployment();
-    await (await target.registerExternalToken(0, await token.getAddress(), 0)).wait();
+    await listExternalToken(target, 0, await token.getAddress(), 0);
     return (await target.getTokensLength()) - 1n;
   }
   type TransformerClauseInput = {
@@ -542,7 +555,9 @@ describe('Depository', () => {
     ).to.be.revertedWithCustomError(depository, 'E11');
     expect(await depository.getTokensLength()).to.equal(registryLengthBefore);
   });
-  it('assigns stable token IDs only through the deployment admin', async function () {
+  it('assigns stable token IDs only through a Foundation listing', async function () {
+    // Redesign: Depository.registerExternalToken admits only the EntityProvider;
+    // the deployment admin EOA (user0) is rejected like any other caller.
     const { depository, erc20 } = await loadFixture(deployFixture);
     const readWatchedTokens = createWatchedErc20TokenReader(depository, () => undefined);
     const tokenAddress = await erc20.getAddress();
@@ -550,12 +565,23 @@ describe('Depository', () => {
       depository,
       'E2',
     );
+    await expect(depository.connect(user0).registerExternalToken(0, tokenAddress, 0)).to.be.revertedWithCustomError(
+      depository,
+      'E2',
+    );
     expect(await readWatchedTokens()).to.deep.equal([]);
-    await expect(depository.connect(user0).registerExternalToken(0, tokenAddress, 0))
+    const argumentsHash = ethers.keccak256(abi.encode(
+      ['address', 'uint8', 'address', 'uint256'],
+      [await depository.getAddress(), 0, tokenAddress, 0],
+    ));
+    const listing = await buildFoundationAction(entityProvider, await entityProvider.FOUNDATION_REGISTER_TOKEN(), argumentsHash);
+    await expect(entityProvider.foundationRegisterExternalToken(
+      await depository.getAddress(), 0, tokenAddress, 0, listing.hankoData, listing.actionNonce,
+    ))
       .to.emit(depository, 'TokenRegistered')
       .withArgs(1n, 0, tokenAddress, 0n);
     expect(await readWatchedTokens()).to.deep.equal([{ tokenId: 1, address: tokenAddress.toLowerCase() }]);
-    await depository.connect(user0).registerExternalToken(0, tokenAddress, 0);
+    await listExternalToken(depository, 0, tokenAddress, 0);
     expect(await depository.getTokensLength()).to.equal(2n);
   });
   it('accepts ERC1155 custody without allocating an unregistered token ID', async function () {
@@ -571,7 +597,7 @@ describe('Depository', () => {
     const { depository, erc20 } = await loadFixture(deployFixture);
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    await depository.registerExternalToken(0, await erc20.getAddress(), 0);
+    await listExternalToken(depository, 0, await erc20.getAddress(), 0);
     await erc20.approve(await depository.getAddress(), 10_000n);
     const depositBatch = emptyBatch({
       externalTokenToReserve: [
@@ -609,7 +635,7 @@ describe('Depository', () => {
     await noReturnToken.waitForDeployment();
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    await depository.registerExternalToken(0, await noReturnToken.getAddress(), 0);
+    await listExternalToken(depository, 0, await noReturnToken.getAddress(), 0);
     await noReturnToken.approve(await depository.getAddress(), 10_000n);
     const depositBatch = emptyBatch({
       externalTokenToReserve: [
@@ -647,7 +673,7 @@ describe('Depository', () => {
     await token.waitForDeployment();
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    await depository.registerExternalToken(0, await token.getAddress(), 0);
+    await listExternalToken(depository, 0, await token.getAddress(), 0);
     await token.approve(await depository.getAddress(), 10_000n);
     const deposit = await signDepositoryBatch(
       depository,
@@ -688,7 +714,7 @@ describe('Depository', () => {
     await token.waitForDeployment();
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    await depository.registerExternalToken(0, await token.getAddress(), 0);
+    await listExternalToken(depository, 0, await token.getAddress(), 0);
     await token.approve(await depository.getAddress(), 10_000n);
     const depositBatch = emptyBatch({
       externalTokenToReserve: [
@@ -720,7 +746,7 @@ describe('Depository', () => {
     const { depository, erc721 } = await loadFixture(deployFixture);
     const actor = lazyActor(user0, 0);
     const recipientEntity = addressEntityId(user1.address);
-    await depository.registerExternalToken(1, await erc721.getAddress(), 1);
+    await listExternalToken(depository, 1, await erc721.getAddress(), 1);
     await erc721.approve(await depository.getAddress(), 1);
     const depositBatch = emptyBatch({
       externalTokenToReserve: [
@@ -754,7 +780,7 @@ describe('Depository', () => {
     const ToggleNoopERC721 = await ethers.getContractFactory('ToggleNoopERC721Mock');
     const token = await ToggleNoopERC721.deploy(user0.address);
     await token.waitForDeployment();
-    await depository.registerExternalToken(1, await token.getAddress(), 1);
+    await listExternalToken(depository, 1, await token.getAddress(), 1);
     const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
       externalTokenToReserve: [{
         entity: ethers.ZeroHash,
@@ -784,7 +810,7 @@ describe('Depository', () => {
     const ToggleNoopERC1155 = await ethers.getContractFactory('ToggleNoopERC1155Mock');
     const token = await ToggleNoopERC1155.deploy(user0.address);
     await token.waitForDeployment();
-    await depository.registerExternalToken(2, await token.getAddress(), 1);
+    await listExternalToken(depository, 2, await token.getAddress(), 1);
     const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
       externalTokenToReserve: [{
         entity: ethers.ZeroHash,
@@ -1095,9 +1121,9 @@ describe('Depository', () => {
       );
     expect((await depository._accounts(dispute.accountKey)).nonce).to.equal(maxSafeNonce);
   });
-  it('reverts settlement with E8 when a reserve would exceed int256.max and leaves no partial diff', async function () {
+  it('reverts settlement with E8 when a reserve would exceed MAX_MONEY and leaves no partial diff', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const INT256_MAX = (1n << 255n) - 1n;
+    const INT256_MAX = 1n << 200n; // MAX_MONEY (Types.sol); name kept for the assertions below
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
@@ -1136,9 +1162,9 @@ describe('Depository', () => {
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
     expect(await depository.entityNonces(left.entityId)).to.equal(0n);
   });
-  it('reverts settlement and R2C with E8 when collateral would exceed int256.max', async function () {
+  it('reverts settlement and R2C with E8 when collateral would exceed MAX_MONEY', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const INT256_MAX = (1n << 255n) - 1n;
+    const INT256_MAX = 1n << 200n; // MAX_MONEY (Types.sol): exactly 2^200 is accepted, 2^200 + 1 is E8
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
@@ -1360,11 +1386,11 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(200n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
-  it('rejects C2R amounts outside the signed int256 domain before mutation', async function () {
+  it('rejects C2R amounts above MAX_MONEY before mutation', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    const amount = 1n << 255n;
+    const amount = (1n << 200n) + 1n;
     const batch = emptyBatch({
       collateralToReserve: [
         {
@@ -2572,14 +2598,18 @@ describe('Depository', () => {
     expect(await depository.debtOutstanding(dispute.left.entityId, tokenB)).to.equal(25n);
   });
 
-  it('never returns int256.min when a transformer has the maximum right allowance', async function () {
+  it('clamps to the maximum legal allowance band (2^200) and rejects allowances above it', async function () {
     const { depository } = await loadFixture(deployFixture);
     const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
     const harness = await Harness.deploy();
     await harness.waitForDeployment();
-    const tokenId = await registerFixedSupplyErc20(depository, (1n << 255n) - 1n);
+    const MAX_MONEY = 1n << 200n;
+    const tokenId = await registerFixedSupplyErc20(depository, MAX_MONEY);
     const int256Min = -(1n << 255n);
-    const uint256Max = (1n << 256n) - 1n;
+
+    // rightAllowance == MAX_MONEY: prev delta is 0 (ondelta +100 from funding,
+    // offdelta -100), so int256.min clamps to exactly -2^200 and finalizes:
+    // RIGHT takes the 100 collateral and LEFT owes the full 2^200 as debt.
     const dispute = await buildTimedOutTransformerFinalization(
       depository,
       [tokenId],
@@ -2588,52 +2618,99 @@ describe('Depository', () => {
         {
           transformerAddress: await harness.getAddress(),
           encodedBatch: await harness.encode(TRANSFORMER_MODE.absolute, 0n, int256Min, tokenId),
-          allowances: [{ deltaIndex: 0n, rightAllowance: uint256Max, leftAllowance: 0n }],
+          allowances: [{ deltaIndex: 0n, rightAllowance: MAX_MONEY, leftAllowance: 0n }],
         },
       ],
     );
-
-    await expect(
-      depository
-        .connect(dispute.left.signer)
-        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
-          gasLimit: 15_000_000n,
-        }),
-    ).to.emit(depository, 'DisputeFinalized');
+    const tx = await depository
+      .connect(dispute.left.signer)
+      .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+        gasLimit: 15_000_000n,
+      });
+    const receipt = await tx.wait();
+    const clamps = decodedEvents(receipt, 'TransformerDeltaClamped');
+    expect(clamps).to.have.length(1);
+    expect(clamps[0]!.appliedValue).to.equal(-MAX_MONEY);
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal((1n << 255n) - 1n);
-  });
+    expect(await depository._reserves(dispute.right.entityId, tokenId)).to.equal(100n);
+    expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal(MAX_MONEY);
 
-  it('rejects a transformer when its exact base delta cannot fit the signed ABI', async function () {
-    const { depository } = await loadFixture(deployFixture);
-    const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
-    const harness = await Harness.deploy();
-    await harness.waitForDeployment();
-    const tokenId = await registerFixedSupplyErc20(depository, (1n << 255n) - 1n);
-    const int256Min = -(1n << 255n);
-    const dispute = await buildTimedOutTransformerFinalization(
+    // rightAllowance == MAX_MONEY + 1 fails _validateAllowances: the signed clause
+    // cannot execute, so the dispute stays open (TransformerExecutionFailed).
+    // (A unilateral finalization bumps the account nonce once; start past it.)
+    const nextDisputeNonce = (await depository._accounts(dispute.accountKey)).nonce + 1n;
+    const overCap = await buildTimedOutTransformerFinalization(
       depository,
       [tokenId],
-      [int256Min],
+      [0n],
       [
         {
           transformerAddress: await harness.getAddress(),
-          encodedBatch: await harness.encode(TRANSFORMER_MODE.absolute, 0n, int256Min, tokenId),
-          allowances: [{ deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 0n }],
+          encodedBatch: await harness.encode(TRANSFORMER_MODE.absolute, 0n, 0n, tokenId),
+          allowances: [{ deltaIndex: 0n, rightAllowance: MAX_MONEY + 1n, leftAllowance: 0n }],
         },
       ],
-      { skipFunding: true },
+      { skipFunding: true, disputeNonce: nextDisputeNonce },
     );
-
     await expect(
       depository
-        .connect(dispute.left.signer)
-        .processBatch(dispute.final.encodedBatch, dispute.final.hankoData, dispute.final.nonce, {
+        .connect(overCap.left.signer)
+        .processBatch(overCap.final.encodedBatch, overCap.final.hankoData, overCap.final.nonce, {
           gasLimit: 15_000_000n,
         }),
     ).to.be.revertedWithCustomError(depository, 'TransformerExecutionFailed');
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
-    expect(await depository.debtOutstanding(dispute.left.entityId, tokenId)).to.equal(0n);
+    expect((await depository._accounts(overCap.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+  });
+
+  it('rejects a proof body with |offdelta| above MAX_MONEY at dispute start, accepts the exact bound', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const MAX_MONEY = 1n << 200n;
+    const tokenId = 1n;
+    const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const disputeNonce = 1n;
+
+    const startBatch = async (offdelta: bigint) => {
+      const proofbody = proofBody([offdelta], [tokenId]);
+      const hash = proofBodyHash(proofbody);
+      const startHash = await disputeProofHash(depository, accountKey, disputeNonce, hash);
+      return signDepositoryBatch(
+        depository,
+        left.entityId,
+        left.privateKey,
+        emptyBatch({
+          disputeStarts: [
+            {
+              counterentity: right.entityId,
+              nonce: disputeNonce,
+              proposerIsLeft: false,
+              proofbodyHash: hash,
+              initialProofbody: proofbody,
+              watchSeed: TEST_WATCH_SEED,
+              sig: signEntityHash(right.entityId, startHash, right.privateKey),
+              starterInitialArguments: '0x',
+              starterCounterArguments: '0x',
+              starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
+            },
+          ],
+        }),
+      );
+    };
+
+    for (const offdelta of [MAX_MONEY + 1n, -(MAX_MONEY + 1n), (1n << 255n) - 1n, -(1n << 255n)]) {
+      const start = await startBatch(offdelta);
+      await expect(
+        depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce),
+      ).to.be.revertedWithCustomError(depository, 'E8');
+    }
+    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+
+    const exact = await startBatch(-MAX_MONEY);
+    await expect(
+      depository.connect(left.signer).processBatch(exact.encodedBatch, exact.hankoData, exact.nonce),
+    ).to.emit(depository, 'DisputeStarted');
+    expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
   });
 
   it('executes the runtime maximum swap book inside the bounded transformer call', async function () {

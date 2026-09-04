@@ -83,8 +83,8 @@ contract DebtLifecycleInvariants is XlnFixture {
 
   /// @notice INVARIANT (books, ghost-vs-real). For every actor × token the
   ///         real debt book equals the independently simulated FIFO ghost:
-  ///         debtOutstanding == Σ live queue, activeDebtsByToken == live
-  ///         count, cursor exact, every queue element (creditor, amount)
+  ///         debtOutstanding == Σ live queue, activeDebts (per entity, all
+  ///         tokens) == live count, cursor exact, every queue element (creditor, amount)
   ///         equal, and a fully-drained queue deleted with cursor 0. This is
   ///         the stateful port of DebtChunking's `_assertBooksAgree`, plus
   ///         element-wise equality the frozen test never checked.

@@ -21,13 +21,6 @@ import type {
   TypedContractMethod,
 } from "./common";
 
-export type FlashloanStruct = { tokenId: BigNumberish; amount: BigNumberish };
-
-export type FlashloanStructOutput = [tokenId: bigint, amount: bigint] & {
-  tokenId: bigint;
-  amount: bigint;
-};
-
 export type ReserveToReserveStruct = {
   receivingEntity: BytesLike;
   tokenId: BigNumberish;
@@ -376,7 +369,6 @@ export type HashLadderRegistrationStructOutput = [
 };
 
 export type BatchStruct = {
-  flashloans: FlashloanStruct[];
   reserveToReserve: ReserveToReserveStruct[];
   reserveToCollateral: ReserveToCollateralStruct[];
   collateralToReserve: CollateralToReserveStruct[];
@@ -391,7 +383,6 @@ export type BatchStruct = {
 };
 
 export type BatchStructOutput = [
-  flashloans: FlashloanStructOutput[],
   reserveToReserve: ReserveToReserveStructOutput[],
   reserveToCollateral: ReserveToCollateralStructOutput[],
   collateralToReserve: CollateralToReserveStructOutput[],
@@ -404,7 +395,6 @@ export type BatchStructOutput = [
   revealSecrets: SecretRevealStructOutput[],
   hashLadderRegistrations: HashLadderRegistrationStructOutput[]
 ] & {
-  flashloans: FlashloanStructOutput[];
   reserveToReserve: ReserveToReserveStructOutput[];
   reserveToCollateral: ReserveToCollateralStructOutput[];
   collateralToReserve: CollateralToReserveStructOutput[];

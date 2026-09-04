@@ -7,6 +7,12 @@ import { expect } from "chai";
 import hre from "hardhat";
 const { ethers } = await hre.network.getOrCreate("hardhat");
 
+// Redesign: shares are minted to the namespaced treasury, never to address(uint160(N)).
+const ENTITY_TREASURY_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes("XLN_ENTITY_TREASURY_V1"));
+const entityTreasury = (entityNumber) => ethers.getAddress(ethers.dataSlice(ethers.keccak256(
+  ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "uint256"], [ENTITY_TREASURY_DOMAIN, entityNumber]),
+), 12));
+
 async function entityProviderFactory() {
   const HankoVerifier = await ethers.getContractFactory("HankoVerifier");
   const verifier = await HankoVerifier.deploy();
@@ -20,6 +26,7 @@ describe("Entity Control-Shares System", function () {
   let entityProvider;
   let depository;
   let owner, entity1, entity2, investor1, investor2;
+  let encodedBoard1, encodedBoard2;
   let boardHash1, boardHash2;
 
   // Mock board and signature data for testing
@@ -33,8 +40,8 @@ describe("Entity Control-Shares System", function () {
   };
 
   const mockHanko = ethers.AbiCoder.defaultAbiCoder().encode(
-    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])'],
-    [[[], `0x${'00'.repeat(65)}`, [[ethers.ZeroHash, [0], [1], 1, 0, 0, 0]]]],
+    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])'],
+    [[[], `0x${'00'.repeat(65)}`, [[ethers.ZeroHash, [0], [1], 1, 0, 0, 0]], []]],
   );
 
   beforeEach(async function () {
@@ -85,7 +92,8 @@ describe("Entity Control-Shares System", function () {
 
     // Create mock board hashes
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    boardHash1 = ethers.keccak256(abiCoder.encode(
+    // registerNumberedEntity takes the abi-encoded Board preimage (validated on chain).
+    encodedBoard1 = abiCoder.encode(
       ["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"],
       [[
         mockBoard.votingThreshold,
@@ -95,9 +103,10 @@ describe("Entity Control-Shares System", function () {
         mockBoard.controlChangeDelay,
         mockBoard.dividendChangeDelay
       ]]
-    ));
+    );
+    boardHash1 = ethers.keccak256(encodedBoard1);
 
-    boardHash2 = ethers.keccak256(abiCoder.encode(
+    encodedBoard2 = abiCoder.encode(
       ["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"],
       [[
         mockBoard.votingThreshold,
@@ -107,13 +116,14 @@ describe("Entity Control-Shares System", function () {
         mockBoard.controlChangeDelay,
         mockBoard.dividendChangeDelay
       ]]
-    ));
+    );
+    boardHash2 = ethers.keccak256(encodedBoard2);
   });
 
   describe("Entity Registration with Automatic Governance", function () {
     it("Should register entity with control and dividend tokens", async function () {
       // Register entity
-      const tx = await entityProvider.registerNumberedEntity(boardHash1);
+      const tx = await entityProvider.registerNumberedEntity(encodedBoard1);
       const receipt = await tx.wait();
 
       // Check EntityRegistered event
@@ -135,8 +145,9 @@ describe("Entity Control-Shares System", function () {
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
       expect(controlTokenId).to.equal(entityNumber);
 
-      // Verify entity owns all tokens initially
-      const entityAddress = ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+      // Verify the entity treasury owns all tokens initially
+      const entityAddress = entityTreasury(entityNumber);
+      expect(await entityProvider.balanceOf(ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20)), controlTokenId)).to.equal(0n);
       const controlBalance = await entityProvider.balanceOf(entityAddress, controlTokenId);
       const dividendBalance = await entityProvider.balanceOf(entityAddress, dividendTokenId);
 
@@ -146,10 +157,10 @@ describe("Entity Control-Shares System", function () {
 
     it("Should track governance info correctly", async function () {
       // Register entity
-      await entityProvider.registerNumberedEntity(boardHash1);
+      await entityProvider.registerNumberedEntity(encodedBoard1);
       const entityNumber = 2n;
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-      const entityAddress = ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+      const entityAddress = entityTreasury(entityNumber);
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32));
 
       expect(controlTokenId).to.equal(entityNumber);
@@ -164,7 +175,7 @@ describe("Entity Control-Shares System", function () {
 
     beforeEach(async function () {
       // Register an entity first
-      const tx = await entityProvider.registerNumberedEntity(boardHash1);
+      const tx = await entityProvider.registerNumberedEntity(encodedBoard1);
       const receipt = await tx.wait();
       const entityRegisteredEvent = receipt.logs.find(log => {
         try {

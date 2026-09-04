@@ -17,7 +17,7 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 /// one reverts inside the Depository — the handler never pre-filters away a
 /// state transition the contract would have accepted. Handler-side oracles
 /// (`*Violations` counters) record facts the post-state alone cannot show,
-/// e.g. "this flashloan batch ended with more reserve than it started with".
+/// e.g. "this implicit-flash batch ended with more reserve than it started with".
 contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6; // C(4,2)
@@ -40,7 +40,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   mapping(uint256 => uint256) public ghostMinted; // tokenId => admin-minted total
 
   // handler-side oracles
-  uint256 public flashloanViolations;
+  uint256 public flashViolations;
   uint256 public disputeEarlyFinalizeViolations;
   uint256 public disputeDoubleFinalizeViolations;
   uint256 public disputeOverwriteViolations;
@@ -293,7 +293,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     if (_submit(from, b)) _bump("settle");
   }
 
-  // ── flashloans ──
+  // ── implicit flash ──
 
   /// @dev Builds a counterparty-signed C2R leg pulling `amount` out of collateral.
   function _c2rLeg(uint256 from, uint256 cp, uint256 t, uint256 amount)
@@ -320,76 +320,111 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     });
   }
 
-  /// @notice A flashloan can only clear if the same batch brings real value in.
-  ///         Repayment source here is a collateral withdrawal, and the loan is
-  ///         split across several entries on the SAME tokenId so the aggregation
-  ///         at Depository.sol:485-504 is under test on every call.
-  ///
-  ///         Oracle: the borrower's reserve may grow by at most the amount
-  ///         actually pulled out of collateral. Any excess is flash-minted value
-  ///         that survived the burn.
-  function flashloanRepaidByCollateral(
+  /// @dev Ghost-tracked mint + R2C so the implicit-flash handlers see collateral
+  ///      often enough for their accept-branch oracles to be non-vacuous.
+  function _seedCollateral(uint256 from, uint256 cp, uint256 t, uint256 amount) internal returns (bool) {
+    vm.prank(admin);
+    try dep.mintToReserve(entityOf[from], t, amount) {
+      ghostMinted[t] += amount;
+    } catch {
+      return false;
+    }
+    Batch memory b = XlnHanko.emptyBatch();
+    b.reserveToCollateral = new ReserveToCollateral[](1);
+    EntityAmount[] memory pairs = new EntityAmount[](1);
+    pairs[0] = EntityAmount({ entity: entityOf[cp], amount: amount });
+    b.reserveToCollateral[0] = ReserveToCollateral({ tokenId: t, receivingEntity: entityOf[from], pairs: pairs });
+    return _submit(from, b);
+  }
+
+  /// @notice Implicit flash: the initiator R2Rs strictly more than it holds and
+  ///         is made whole by a same-batch collateral withdrawal (batch order is
+  ///         R2R before C2R, so the deficit is open when the C2R lands and is
+  ///         repaid first). Debtors are skipped here; flashDeniedToDebtor covers
+  ///         them. Oracle: accept => pull covered the shortfall and the reserve
+  ///         is exactly pre + pull - send; reject => nothing moved.
+  function flashR2RRepaidByCollateral(
     uint256 fromSeed,
     uint256 cpSeed,
+    uint256 toSeed,
     uint256 tokenSeed,
-    uint256 loan,
-    uint256 pull,
-    uint256 parts
+    uint256 overdraw,
+    uint256 pull
   ) external {
     (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
+    uint256 to = _actor(toSeed);
+    if (to == from) to = (to + 1) % ACTORS;
     uint256 t = _token(tokenSeed);
+    if (dep.debtOutstanding(entityOf[from], t) != 0) return;
     uint256 col = _collateral(entityOf[from], entityOf[cp], t);
-    if (col == 0) return;
+    if (col == 0) {
+      if (!_seedCollateral(from, cp, t, bound(pull, 1, 1e21))) return;
+      col = _collateral(entityOf[from], entityOf[cp], t);
+      if (col == 0) return;
+    }
 
     pull = bound(pull, 1, col);
-    loan = bound(loan, 1, 1e24);
-    uint256 n = bound(parts, 1, 4);
+    overdraw = bound(overdraw, 1, 1e24);
+    uint256 pre = _reserve(from, t);
+    uint256 preTo = _reserve(to, t);
+    uint256 send = pre + overdraw;
 
     Batch memory b = XlnHanko.emptyBatch();
-    b.flashloans = new Flashloan[](n);
-    uint256 assigned;
-    for (uint256 i = 0; i < n; i++) {
-      uint256 slice = i == n - 1 ? loan - assigned : loan / n;
-      assigned += slice;
-      b.flashloans[i] = Flashloan({ tokenId: t, amount: slice });
-    }
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entityOf[to], tokenId: t, amount: send });
     b.collateralToReserve = new CollateralToReserve[](1);
     b.collateralToReserve[0] = _c2rLeg(from, cp, t, pull);
 
-    uint256 pre = _reserve(from, t);
     if (_submit(from, b)) {
-      _bump("flashloanRepaidByCollateral");
-      if (_reserve(from, t) > pre + pull) flashloanViolations++;
+      _bump("flashR2RRepaidByCollateral");
+      if (pull < overdraw) flashViolations++; // deficit could not have been repaid
+      if (_reserve(from, t) != pre + pull - send) flashViolations++;
+      if (_reserve(to, t) != preTo + send) flashViolations++;
+    } else {
+      if (_reserve(from, t) != pre || _reserve(to, t) != preTo) flashViolations++;
     }
   }
 
-  /// @notice Same idea, repaid by a real external deposit, and with the borrowed
-  ///         token simultaneously routed into collateral in the same batch
-  ///         (task item 2: flashloan ∩ reserve-to-collateral).
-  function flashloanIntoCollateral(
+  /// @notice Deposit, overdraw via R2R, repay from collateral, withdraw the net
+  ///         to the external token: the full implicit-flash round trip in one
+  ///         batch. Oracle: accept => pull >= overdraw, withdrawal <= net, and
+  ///         the reserve is exactly pull - overdraw - withdrawal.
+  function flashDepositOverdrawWithdraw(
     uint256 actorSeed,
     uint256 cpSeed,
+    uint256 toSeed,
     bool useA,
-    uint256 loanAmount,
-    uint256 collateralAmount,
-    uint256 depositAmount
+    uint256 depositAmount,
+    uint256 overdraw,
+    uint256 pull,
+    uint256 withdrawAmount
   ) external {
     (uint256 a, uint256 cp) = _distinct(actorSeed, cpSeed);
+    uint256 to = _actor(toSeed);
+    if (to == a) to = (to + 1) % ACTORS;
     ERC20Mock tok = useA ? tokenA : tokenB;
     uint256 t = useA ? 1 : 2;
-    loanAmount = bound(loanAmount, 1, 1e24);
-    collateralAmount = bound(collateralAmount, 0, loanAmount);
-    depositAmount = bound(depositAmount, 0, 1e24);
+    if (dep.debtOutstanding(entityOf[a], t) != 0) return;
+    uint256 col = _collateral(entityOf[a], entityOf[cp], t);
+    if (col == 0) {
+      if (!_seedCollateral(a, cp, t, bound(pull, 1, 1e21))) return;
+      col = _collateral(entityOf[a], entityOf[cp], t);
+      if (col == 0) return;
+    }
+    depositAmount = bound(depositAmount, 1, 1e24);
+    overdraw = bound(overdraw, 1, 1e24);
+    pull = bound(pull, 1, col);
+    withdrawAmount = bound(withdrawAmount, 0, pull);
 
     address caller = vm.addr(pk[a]);
     tok.mint(caller, depositAmount);
     vm.prank(caller);
     tok.approve(address(dep), depositAmount);
 
+    uint256 pre = _reserve(a, t);
+    uint256 send = pre + depositAmount + overdraw;
+
     Batch memory b = XlnHanko.emptyBatch();
-    b.flashloans = new Flashloan[](2);
-    b.flashloans[0] = Flashloan({ tokenId: t, amount: loanAmount });
-    b.flashloans[1] = Flashloan({ tokenId: t, amount: 0 }); // duplicate id, zero slice
     b.externalTokenToReserve = new ExternalTokenToReserve[](1);
     b.externalTokenToReserve[0] = ExternalTokenToReserve({
       entity: entityOf[a],
@@ -399,24 +434,51 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       internalTokenId: t,
       amount: depositAmount
     });
-    b.reserveToCollateral = new ReserveToCollateral[](1);
-    EntityAmount[] memory pairs = new EntityAmount[](1);
-    pairs[0] = EntityAmount({ entity: entityOf[cp], amount: collateralAmount });
-    b.reserveToCollateral[0] = ReserveToCollateral({
-      tokenId: t, receivingEntity: entityOf[a], pairs: pairs
-    });
-
-    uint256 pre = _reserve(a, t);
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entityOf[to], tokenId: t, amount: send });
+    b.collateralToReserve = new CollateralToReserve[](1);
+    b.collateralToReserve[0] = _c2rLeg(a, cp, t, pull);
+    if (withdrawAmount > 0) {
+      b.reserveToExternalToken = new ReserveToExternalToken[](1);
+      b.reserveToExternalToken[0] = ReserveToExternalToken({
+        receivingEntity: bytes32(uint256(uint160(caller))), tokenId: t, amount: withdrawAmount
+      });
+    }
 
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
     vm.prank(caller);
     try dep.processBatch(encoded, _hanko(a, h), nonce) {
-      _bump("flashloanIntoCollateral");
-      // Reserve may grow by the deposit only; the loan must be fully burned.
-      if (_reserve(a, t) > pre + depositAmount) flashloanViolations++;
-    } catch {}
+      _bump("flashDepositOverdrawWithdraw");
+      if (pull < overdraw) flashViolations++;
+      else if (withdrawAmount > pull - overdraw) flashViolations++;
+      else if (_reserve(a, t) != pull - overdraw - withdrawAmount) flashViolations++;
+    } catch {
+      if (_reserve(a, t) != pre) flashViolations++;
+    }
+  }
+
+  /// @notice A debtor whose own reserve cannot clear its debt must never be
+  ///         granted implicit flash credit, however the batch would repay it.
+  function flashDeniedToDebtor(uint256 fromSeed, uint256 cpSeed, uint256 tokenSeed, uint256 extra) external {
+    (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
+    uint256 t = _token(tokenSeed);
+    uint256 owed = dep.debtOutstanding(entityOf[from], t);
+    uint256 pre = _reserve(from, t);
+    if (owed == 0 || owed <= pre) return; // enforcement inside the batch could clear it
+    uint256 col = _collateral(entityOf[from], entityOf[cp], t);
+    extra = bound(extra, 1, 1e24);
+
+    Batch memory b = XlnHanko.emptyBatch();
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entityOf[cp], tokenId: t, amount: pre + extra });
+    if (col > 0) {
+      b.collateralToReserve = new CollateralToReserve[](1);
+      b.collateralToReserve[0] = _c2rLeg(from, cp, t, col);
+    }
+    _bump("flashDeniedToDebtor");
+    if (_submit(from, b)) flashViolations++;
   }
 
   // ── external token flows ──

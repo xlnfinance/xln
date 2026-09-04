@@ -7,7 +7,6 @@ import "./Types.sol";
 /// @dev Linked to keep the settlement contract below EIP-170 while retaining
 ///      fail-loud validation before the first financial mutation.
 library DepositoryBounds {
-  uint256 private constant MAX_BATCH_FLASHLOANS = 8;
   uint256 private constant MAX_BATCH_RESERVE_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL = 64;
   uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
@@ -25,7 +24,6 @@ library DepositoryBounds {
 
   function assertBatch(Batch memory batch) external pure {
     if (
-      batch.flashloans.length +
       batch.reserveToReserve.length +
       batch.reserveToCollateral.length +
       batch.collateralToReserve.length +
@@ -39,7 +37,6 @@ library DepositoryBounds {
       batch.hashLadderRegistrations.length > MAX_BATCH_TOTAL_OPS
     ) revert E10();
 
-    if (batch.flashloans.length > MAX_BATCH_FLASHLOANS) revert E10();
     if (batch.reserveToReserve.length > MAX_BATCH_RESERVE_TO_RESERVE) revert E10();
     if (batch.reserveToCollateral.length > MAX_BATCH_RESERVE_TO_COLLATERAL) revert E10();
     if (batch.collateralToReserve.length > MAX_BATCH_COLLATERAL_TO_RESERVE) revert E10();

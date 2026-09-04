@@ -58,6 +58,8 @@ export type { DepositoryDebtHarness } from "./mocks/DepositoryDebtHarness";
 export { DepositoryDebtHarness__factory } from "./factories/mocks/DepositoryDebtHarness__factory";
 export type { EntityProviderSupplyHarness } from "./mocks/EntityProviderSupplyHarness";
 export { EntityProviderSupplyHarness__factory } from "./factories/mocks/EntityProviderSupplyHarness__factory";
+export type { ERC1271Mock } from "./mocks/ERC1271Mock";
+export { ERC1271Mock__factory } from "./factories/mocks/ERC1271Mock__factory";
 export type { FeeOnTransferERC20 } from "./mocks/FeeOnTransferERC20";
 export { FeeOnTransferERC20__factory } from "./factories/mocks/FeeOnTransferERC20__factory";
 export type { HashLadderHarness } from "./mocks/HashLadderHarness";

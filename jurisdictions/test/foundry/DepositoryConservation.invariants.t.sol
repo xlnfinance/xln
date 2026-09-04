@@ -28,7 +28,7 @@ contract DepositoryConservationInvariants is XlnFixture {
     _deployXln(); // registers `erc20` as internal token 1
 
     tokenB = new ERC20Mock("MockB", "MKB", 18, 1e30);
-    dep.registerExternalToken(0, address(tokenB), 0);
+    _listToken(address(tokenB));
 
     uint256[4] memory keys = [pk[0], pk[1], pk[2], pk[3]];
     handler = new ConservationHandler(dep, erc20, tokenB, keys, address(this));

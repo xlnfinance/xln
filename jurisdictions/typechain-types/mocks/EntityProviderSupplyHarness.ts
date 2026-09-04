@@ -42,15 +42,16 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "BOARD_PROPOSAL_CANCEL_DOMAIN"
       | "BOARD_PROPOSAL_DOMAIN"
       | "FOUNDATION_ACTION_DOMAIN"
-      | "FOUNDATION_ASSIGN_NAME"
+      | "FOUNDATION_ADD_SHARE_DEPOSITORY"
       | "FOUNDATION_ENTITY"
       | "FOUNDATION_REGISTER_ENTITY"
-      | "FOUNDATION_TRANSFER_NAME"
+      | "FOUNDATION_REGISTER_TOKEN"
+      | "MAX_BOARD_MEMBERS"
+      | "MAX_SHARE_DEPOSITORIES"
       | "MAX_SHARE_SUPPORTERS"
       | "TOTAL_CONTROL_SUPPLY"
       | "TOTAL_DIVIDEND_SUPPLY"
       | "activateBoard"
-      | "assignName"
       | "balanceOf"
       | "balanceOfBatch"
       | "bindShareDepository"
@@ -58,12 +59,16 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "boardEpochs"
       | "cancelBoardProposal"
       | "cancelEntityProviderAction"
+      | "commitBoard"
+      | "committedBoards"
       | "computeBoardProposalCancelHash"
       | "computeBoardProposalHash"
       | "computeCancelEntityProviderActionHankoHash"
       | "computeEntityTransferHankoHash"
       | "computeFoundationActionHash"
       | "computeReleaseControlSharesHankoHash"
+      | "computeWatchtowerMinSequenceHankoHash"
+      | "dividendBalanceAt"
       | "encodeBoardProposalCancelHankoPayload"
       | "encodeBoardProposalHankoPayload"
       | "encodeCancelEntityProviderActionHankoPayload"
@@ -72,16 +77,16 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "entities"
       | "entityActionNonces"
       | "entityTransferTokens"
+      | "foundationAddShareDepository"
       | "foundationDeployer"
       | "foundationRegisterEntity"
+      | "foundationRegisterExternalToken"
       | "getEntityInfo"
       | "getTokenIds"
       | "harnessBurn"
       | "harnessMint"
       | "isApprovedForAll"
-      | "nameToNumber"
       | "nextNumber"
-      | "numberToName"
       | "proposeBoard"
       | "registerNumberedEntitiesBatch"
       | "registerNumberedEntity"
@@ -89,28 +94,30 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "safeBatchTransferFrom"
       | "safeTransferFrom"
       | "setApprovalForAll"
+      | "setWatchtowerMinSequence"
+      | "shareDepositories"
       | "shareDepository"
       | "supportsInterface"
-      | "transferName"
       | "uri"
       | "verifyCurrentHankoSignature"
       | "verifyHankoSignature"
+      | "watchtowerMinSequence"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
       | "ApprovalForAll"
       | "BoardActivated"
+      | "BoardCommitted"
       | "BoardProposed"
       | "ControlSharesReleased"
       | "EntityProviderActionCancelled"
       | "EntityProviderActionExecuted"
       | "EntityRegistered"
+      | "ExternalTokenListed"
       | "FoundationActionExecuted"
       | "FoundationBootstrapped"
       | "GovernanceEnabled"
-      | "NameAssigned"
-      | "NameTransferred"
       | "ProposalCancelled"
       | "ShareDepositoryBound"
       | "TransferBatch"
@@ -135,7 +142,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "FOUNDATION_ASSIGN_NAME",
+    functionFragment: "FOUNDATION_ADD_SHARE_DEPOSITORY",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -147,7 +154,15 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "FOUNDATION_TRANSFER_NAME",
+    functionFragment: "FOUNDATION_REGISTER_TOKEN",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "MAX_BOARD_MEMBERS",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "MAX_SHARE_DEPOSITORIES",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -165,10 +180,6 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "activateBoard",
     values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "assignName",
-    values: [string, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "balanceOf",
@@ -197,6 +208,14 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "cancelEntityProviderAction",
     values: [BigNumberish, BytesLike, BigNumberish, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "commitBoard",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "committedBoards",
+    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "computeBoardProposalCancelHash",
@@ -234,6 +253,14 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       string,
       BigNumberish
     ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeWatchtowerMinSequenceHankoHash",
+    values: [BigNumberish, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "dividendBalanceAt",
+    values: [AddressLike, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeBoardProposalCancelHankoPayload",
@@ -278,12 +305,27 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "foundationAddShareDepository",
+    values: [AddressLike, BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "foundationDeployer",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "foundationRegisterEntity",
     values: [BytesLike, EntityArticlesStruct, BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "foundationRegisterExternalToken",
+    values: [
+      AddressLike,
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "getEntityInfo",
@@ -306,16 +348,8 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values: [AddressLike, AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "nameToNumber",
-    values: [string]
-  ): string;
-  encodeFunctionData(
     functionFragment: "nextNumber",
     values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "numberToName",
-    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "proposeBoard",
@@ -359,16 +393,20 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values: [AddressLike, boolean]
   ): string;
   encodeFunctionData(
+    functionFragment: "setWatchtowerMinSequence",
+    values: [BigNumberish, BigNumberish, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "shareDepositories",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "shareDepository",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
     values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "transferName",
-    values: [string, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(functionFragment: "uri", values: [BigNumberish]): string;
   encodeFunctionData(
@@ -378,6 +416,10 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "verifyHankoSignature",
     values: [BytesLike, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "watchtowerMinSequence",
+    values: [BytesLike]
   ): string;
 
   decodeFunctionResult(
@@ -397,7 +439,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "FOUNDATION_ASSIGN_NAME",
+    functionFragment: "FOUNDATION_ADD_SHARE_DEPOSITORY",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -409,7 +451,15 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "FOUNDATION_TRANSFER_NAME",
+    functionFragment: "FOUNDATION_REGISTER_TOKEN",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "MAX_BOARD_MEMBERS",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "MAX_SHARE_DEPOSITORIES",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -428,7 +478,6 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     functionFragment: "activateBoard",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "assignName", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "balanceOfBatch",
@@ -455,6 +504,14 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "commitBoard",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "committedBoards",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "computeBoardProposalCancelHash",
     data: BytesLike
   ): Result;
@@ -476,6 +533,14 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "computeReleaseControlSharesHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeWatchtowerMinSequenceHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "dividendBalanceAt",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -508,11 +573,19 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "foundationAddShareDepository",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "foundationDeployer",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "foundationRegisterEntity",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "foundationRegisterExternalToken",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -535,15 +608,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     functionFragment: "isApprovedForAll",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "nameToNumber",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(functionFragment: "nextNumber", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "numberToName",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(
     functionFragment: "proposeBoard",
     data: BytesLike
@@ -573,15 +638,19 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "setWatchtowerMinSequence",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "shareDepositories",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "shareDepository",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "supportsInterface",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "transferName",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "uri", data: BytesLike): Result;
@@ -591,6 +660,10 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "verifyHankoSignature",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "watchtowerMinSequence",
     data: BytesLike
   ): Result;
 }
@@ -642,27 +715,39 @@ export namespace BoardActivatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace BoardCommittedEvent {
+  export type InputTuple = [boardHash: BytesLike];
+  export type OutputTuple = [boardHash: string];
+  export interface OutputObject {
+    boardHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace BoardProposedEvent {
   export type InputTuple = [
     entityId: BytesLike,
     proposedBoardHash: BytesLike,
     authority: BigNumberish,
     proposalNonce: BigNumberish,
-    activateAtBlock: BigNumberish
+    activateAt: BigNumberish
   ];
   export type OutputTuple = [
     entityId: string,
     proposedBoardHash: string,
     authority: bigint,
     proposalNonce: bigint,
-    activateAtBlock: bigint
+    activateAt: bigint
   ];
   export interface OutputObject {
     entityId: string;
     proposedBoardHash: string;
     authority: bigint;
     proposalNonce: bigint;
-    activateAtBlock: bigint;
+    activateAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -773,6 +858,34 @@ export namespace EntityRegisteredEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace ExternalTokenListedEvent {
+  export type InputTuple = [
+    depository: AddressLike,
+    tokenType: BigNumberish,
+    contractAddress: AddressLike,
+    externalTokenId: BigNumberish,
+    tokenId: BigNumberish
+  ];
+  export type OutputTuple = [
+    depository: string,
+    tokenType: bigint,
+    contractAddress: string,
+    externalTokenId: bigint,
+    tokenId: bigint
+  ];
+  export interface OutputObject {
+    depository: string;
+    tokenType: bigint;
+    contractAddress: string;
+    externalTokenId: bigint;
+    tokenId: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace FoundationActionExecutedEvent {
   export type InputTuple = [
     actionType: BytesLike,
@@ -835,41 +948,6 @@ export namespace GovernanceEnabledEvent {
     entityId: string;
     controlTokenId: bigint;
     dividendTokenId: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace NameAssignedEvent {
-  export type InputTuple = [name: string, entityNumber: BigNumberish];
-  export type OutputTuple = [name: string, entityNumber: bigint];
-  export interface OutputObject {
-    name: string;
-    entityNumber: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace NameTransferredEvent {
-  export type InputTuple = [
-    name: string,
-    fromNumber: BigNumberish,
-    toNumber: BigNumberish
-  ];
-  export type OutputTuple = [
-    name: string,
-    fromNumber: bigint,
-    toNumber: bigint
-  ];
-  export interface OutputObject {
-    name: string;
-    fromNumber: bigint;
-    toNumber: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1037,13 +1115,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
 
   FOUNDATION_ACTION_DOMAIN: TypedContractMethod<[], [string], "view">;
 
-  FOUNDATION_ASSIGN_NAME: TypedContractMethod<[], [string], "view">;
+  FOUNDATION_ADD_SHARE_DEPOSITORY: TypedContractMethod<[], [string], "view">;
 
   FOUNDATION_ENTITY: TypedContractMethod<[], [bigint], "view">;
 
   FOUNDATION_REGISTER_ENTITY: TypedContractMethod<[], [string], "view">;
 
-  FOUNDATION_TRANSFER_NAME: TypedContractMethod<[], [string], "view">;
+  FOUNDATION_REGISTER_TOKEN: TypedContractMethod<[], [string], "view">;
+
+  MAX_BOARD_MEMBERS: TypedContractMethod<[], [bigint], "view">;
+
+  MAX_SHARE_DEPOSITORIES: TypedContractMethod<[], [bigint], "view">;
 
   MAX_SHARE_SUPPORTERS: TypedContractMethod<[], [bigint], "view">;
 
@@ -1053,17 +1135,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
 
   activateBoard: TypedContractMethod<
     [entityId: BytesLike],
-    [void],
-    "nonpayable"
-  >;
-
-  assignName: TypedContractMethod<
-    [
-      name: string,
-      entityNumber: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
     [void],
     "nonpayable"
   >;
@@ -1110,6 +1181,14 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     [void],
     "nonpayable"
   >;
+
+  commitBoard: TypedContractMethod<
+    [encodedBoard: BytesLike],
+    [string],
+    "nonpayable"
+  >;
+
+  committedBoards: TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
 
   computeBoardProposalCancelHash: TypedContractMethod<
     [
@@ -1177,6 +1256,22 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       actionNonce: BigNumberish
     ],
     [string],
+    "view"
+  >;
+
+  computeWatchtowerMinSequenceHankoHash: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      newMinimum: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  dividendBalanceAt: TypedContractMethod<
+    [account: AddressLike, tokenId: BigNumberish, timestamp: BigNumberish],
+    [bigint],
     "view"
   >;
 
@@ -1250,16 +1345,20 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         bigint,
         bigint,
         bigint,
-        EntityArticlesStructOutput
+        EntityArticlesStructOutput,
+        string,
+        bigint
       ] & {
         currentBoardHash: string;
         previousBoardHash: string;
         previousBoardValidUntil: bigint;
         proposedBoardHash: string;
-        activateAtBlock: bigint;
+        activateAt: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
         articles: EntityArticlesStructOutput;
+        previousBoardHash2: string;
+        previousBoardValidUntil2: bigint;
       }
     ],
     "view"
@@ -1279,12 +1378,31 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "nonpayable"
   >;
 
+  foundationAddShareDepository: TypedContractMethod<
+    [depository: AddressLike, hankoData: BytesLike, actionNonce: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   foundationDeployer: TypedContractMethod<[], [string], "view">;
 
   foundationRegisterEntity: TypedContractMethod<
     [
-      boardHash: BytesLike,
+      encodedBoard: BytesLike,
       articles: EntityArticlesStruct,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
+    [bigint],
+    "nonpayable"
+  >;
+
+  foundationRegisterExternalToken: TypedContractMethod<
+    [
+      depository: AddressLike,
+      tokenType: BigNumberish,
+      contractAddress: AddressLike,
+      externalTokenId: BigNumberish,
       hankoData: BytesLike,
       actionNonce: BigNumberish
     ],
@@ -1295,12 +1413,11 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getEntityInfo: TypedContractMethod<
     [entityId: BytesLike],
     [
-      [boolean, string, string, bigint, string] & {
+      [boolean, string, string, bigint] & {
         exists: boolean;
         currentBoardHash: string;
         proposedBoardHash: string;
         registrationBlock: bigint;
-        name: string;
       }
     ],
     "view"
@@ -1330,11 +1447,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "view"
   >;
 
-  nameToNumber: TypedContractMethod<[arg0: string], [bigint], "view">;
-
   nextNumber: TypedContractMethod<[], [bigint], "view">;
-
-  numberToName: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
 
   proposeBoard: TypedContractMethod<
     [
@@ -1348,13 +1461,13 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
 
   registerNumberedEntitiesBatch: TypedContractMethod<
-    [boardHashes: BytesLike[]],
+    [encodedBoards: BytesLike[]],
     [bigint[]],
     "nonpayable"
   >;
 
   registerNumberedEntity: TypedContractMethod<
-    [boardHash: BytesLike],
+    [encodedBoard: BytesLike],
     [bigint],
     "nonpayable"
   >;
@@ -1402,23 +1515,24 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "nonpayable"
   >;
 
+  setWatchtowerMinSequence: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      newMinimum: BigNumberish,
+      hankoData: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
+
+  shareDepositories: TypedContractMethod<[], [string[]], "view">;
+
   shareDepository: TypedContractMethod<[], [string], "view">;
 
   supportsInterface: TypedContractMethod<
     [interfaceId: BytesLike],
     [boolean],
     "view"
-  >;
-
-  transferName: TypedContractMethod<
-    [
-      name: string,
-      newEntityNumber: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
-    [void],
-    "nonpayable"
   >;
 
   uri: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
@@ -1432,6 +1546,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   verifyHankoSignature: TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
     [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
+  >;
+
+  watchtowerMinSequence: TypedContractMethod<
+    [arg0: BytesLike],
+    [bigint],
     "view"
   >;
 
@@ -1452,7 +1572,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     nameOrSignature: "FOUNDATION_ACTION_DOMAIN"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
-    nameOrSignature: "FOUNDATION_ASSIGN_NAME"
+    nameOrSignature: "FOUNDATION_ADD_SHARE_DEPOSITORY"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "FOUNDATION_ENTITY"
@@ -1461,8 +1581,14 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     nameOrSignature: "FOUNDATION_REGISTER_ENTITY"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
-    nameOrSignature: "FOUNDATION_TRANSFER_NAME"
+    nameOrSignature: "FOUNDATION_REGISTER_TOKEN"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "MAX_BOARD_MEMBERS"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "MAX_SHARE_DEPOSITORIES"
+  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "MAX_SHARE_SUPPORTERS"
   ): TypedContractMethod<[], [bigint], "view">;
@@ -1475,18 +1601,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getFunction(
     nameOrSignature: "activateBoard"
   ): TypedContractMethod<[entityId: BytesLike], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "assignName"
-  ): TypedContractMethod<
-    [
-      name: string,
-      entityNumber: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
   getFunction(
     nameOrSignature: "balanceOf"
   ): TypedContractMethod<
@@ -1533,6 +1647,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     [void],
     "nonpayable"
   >;
+  getFunction(
+    nameOrSignature: "commitBoard"
+  ): TypedContractMethod<[encodedBoard: BytesLike], [string], "nonpayable">;
+  getFunction(
+    nameOrSignature: "committedBoards"
+  ): TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "computeBoardProposalCancelHash"
   ): TypedContractMethod<
@@ -1606,6 +1726,24 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       actionNonce: BigNumberish
     ],
     [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeWatchtowerMinSequenceHankoHash"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      newMinimum: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "dividendBalanceAt"
+  ): TypedContractMethod<
+    [account: AddressLike, tokenId: BigNumberish, timestamp: BigNumberish],
+    [bigint],
     "view"
   >;
   getFunction(
@@ -1685,16 +1823,20 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         bigint,
         bigint,
         bigint,
-        EntityArticlesStructOutput
+        EntityArticlesStructOutput,
+        string,
+        bigint
       ] & {
         currentBoardHash: string;
         previousBoardHash: string;
         previousBoardValidUntil: bigint;
         proposedBoardHash: string;
-        activateAtBlock: bigint;
+        activateAt: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
         articles: EntityArticlesStructOutput;
+        previousBoardHash2: string;
+        previousBoardValidUntil2: bigint;
       }
     ],
     "view"
@@ -1716,14 +1858,35 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "foundationAddShareDepository"
+  ): TypedContractMethod<
+    [depository: AddressLike, hankoData: BytesLike, actionNonce: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "foundationDeployer"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "foundationRegisterEntity"
   ): TypedContractMethod<
     [
-      boardHash: BytesLike,
+      encodedBoard: BytesLike,
       articles: EntityArticlesStruct,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
+    [bigint],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "foundationRegisterExternalToken"
+  ): TypedContractMethod<
+    [
+      depository: AddressLike,
+      tokenType: BigNumberish,
+      contractAddress: AddressLike,
+      externalTokenId: BigNumberish,
       hankoData: BytesLike,
       actionNonce: BigNumberish
     ],
@@ -1735,12 +1898,11 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   ): TypedContractMethod<
     [entityId: BytesLike],
     [
-      [boolean, string, string, bigint, string] & {
+      [boolean, string, string, bigint] & {
         exists: boolean;
         currentBoardHash: string;
         proposedBoardHash: string;
         registrationBlock: bigint;
-        name: string;
       }
     ],
     "view"
@@ -1774,14 +1936,8 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "nameToNumber"
-  ): TypedContractMethod<[arg0: string], [bigint], "view">;
-  getFunction(
     nameOrSignature: "nextNumber"
   ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "numberToName"
-  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
   getFunction(
     nameOrSignature: "proposeBoard"
   ): TypedContractMethod<
@@ -1796,10 +1952,14 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "registerNumberedEntitiesBatch"
-  ): TypedContractMethod<[boardHashes: BytesLike[]], [bigint[]], "nonpayable">;
+  ): TypedContractMethod<
+    [encodedBoards: BytesLike[]],
+    [bigint[]],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "registerNumberedEntity"
-  ): TypedContractMethod<[boardHash: BytesLike], [bigint], "nonpayable">;
+  ): TypedContractMethod<[encodedBoard: BytesLike], [bigint], "nonpayable">;
   getFunction(
     nameOrSignature: "releaseControlShares"
   ): TypedContractMethod<
@@ -1848,23 +2008,25 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "setWatchtowerMinSequence"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      newMinimum: BigNumberish,
+      hankoData: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "shareDepositories"
+  ): TypedContractMethod<[], [string[]], "view">;
+  getFunction(
     nameOrSignature: "shareDepository"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "transferName"
-  ): TypedContractMethod<
-    [
-      name: string,
-      newEntityNumber: BigNumberish,
-      hankoData: BytesLike,
-      actionNonce: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
   getFunction(
     nameOrSignature: "uri"
   ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
@@ -1882,6 +2044,9 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     [[string, boolean] & { entityId: string; success: boolean }],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "watchtowerMinSequence"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   getEvent(
     key: "ApprovalForAll"
@@ -1896,6 +2061,13 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     BoardActivatedEvent.InputTuple,
     BoardActivatedEvent.OutputTuple,
     BoardActivatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "BoardCommitted"
+  ): TypedContractEvent<
+    BoardCommittedEvent.InputTuple,
+    BoardCommittedEvent.OutputTuple,
+    BoardCommittedEvent.OutputObject
   >;
   getEvent(
     key: "BoardProposed"
@@ -1933,6 +2105,13 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     EntityRegisteredEvent.OutputObject
   >;
   getEvent(
+    key: "ExternalTokenListed"
+  ): TypedContractEvent<
+    ExternalTokenListedEvent.InputTuple,
+    ExternalTokenListedEvent.OutputTuple,
+    ExternalTokenListedEvent.OutputObject
+  >;
+  getEvent(
     key: "FoundationActionExecuted"
   ): TypedContractEvent<
     FoundationActionExecutedEvent.InputTuple,
@@ -1952,20 +2131,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     GovernanceEnabledEvent.InputTuple,
     GovernanceEnabledEvent.OutputTuple,
     GovernanceEnabledEvent.OutputObject
-  >;
-  getEvent(
-    key: "NameAssigned"
-  ): TypedContractEvent<
-    NameAssignedEvent.InputTuple,
-    NameAssignedEvent.OutputTuple,
-    NameAssignedEvent.OutputObject
-  >;
-  getEvent(
-    key: "NameTransferred"
-  ): TypedContractEvent<
-    NameTransferredEvent.InputTuple,
-    NameTransferredEvent.OutputTuple,
-    NameTransferredEvent.OutputObject
   >;
   getEvent(
     key: "ProposalCancelled"
@@ -2026,6 +2191,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       BoardActivatedEvent.OutputObject
     >;
 
+    "BoardCommitted(bytes32)": TypedContractEvent<
+      BoardCommittedEvent.InputTuple,
+      BoardCommittedEvent.OutputTuple,
+      BoardCommittedEvent.OutputObject
+    >;
+    BoardCommitted: TypedContractEvent<
+      BoardCommittedEvent.InputTuple,
+      BoardCommittedEvent.OutputTuple,
+      BoardCommittedEvent.OutputObject
+    >;
+
     "BoardProposed(bytes32,bytes32,uint8,uint256,uint256)": TypedContractEvent<
       BoardProposedEvent.InputTuple,
       BoardProposedEvent.OutputTuple,
@@ -2081,6 +2257,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       EntityRegisteredEvent.OutputObject
     >;
 
+    "ExternalTokenListed(address,uint8,address,uint256,uint256)": TypedContractEvent<
+      ExternalTokenListedEvent.InputTuple,
+      ExternalTokenListedEvent.OutputTuple,
+      ExternalTokenListedEvent.OutputObject
+    >;
+    ExternalTokenListed: TypedContractEvent<
+      ExternalTokenListedEvent.InputTuple,
+      ExternalTokenListedEvent.OutputTuple,
+      ExternalTokenListedEvent.OutputObject
+    >;
+
     "FoundationActionExecuted(bytes32,uint256,bytes32)": TypedContractEvent<
       FoundationActionExecutedEvent.InputTuple,
       FoundationActionExecutedEvent.OutputTuple,
@@ -2112,28 +2299,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       GovernanceEnabledEvent.InputTuple,
       GovernanceEnabledEvent.OutputTuple,
       GovernanceEnabledEvent.OutputObject
-    >;
-
-    "NameAssigned(string,uint256)": TypedContractEvent<
-      NameAssignedEvent.InputTuple,
-      NameAssignedEvent.OutputTuple,
-      NameAssignedEvent.OutputObject
-    >;
-    NameAssigned: TypedContractEvent<
-      NameAssignedEvent.InputTuple,
-      NameAssignedEvent.OutputTuple,
-      NameAssignedEvent.OutputObject
-    >;
-
-    "NameTransferred(string,uint256,uint256)": TypedContractEvent<
-      NameTransferredEvent.InputTuple,
-      NameTransferredEvent.OutputTuple,
-      NameTransferredEvent.OutputObject
-    >;
-    NameTransferred: TypedContractEvent<
-      NameTransferredEvent.InputTuple,
-      NameTransferredEvent.OutputTuple,
-      NameTransferredEvent.OutputObject
     >;
 
     "ProposalCancelled(bytes32,bytes32,uint8,uint8,uint256)": TypedContractEvent<

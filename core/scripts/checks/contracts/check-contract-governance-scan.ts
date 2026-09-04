@@ -124,9 +124,16 @@ assertFunctionAllowlist(deltaTransformer, deltaTransformerPath, [
 
 assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'activateBoard',
-  'assignName',
   'bindShareDepository',
   'cancelBoardProposal',
+  'commitBoard',
+  'dividendBalanceAt',
+  'foundationAddShareDepository',
+  'foundationRegisterExternalToken',
+  'shareDepositories',
+  'shareDepository',
+  'computeWatchtowerMinSequenceHankoHash',
+  'setWatchtowerMinSequence',
   'cancelEntityProviderAction',
   'computeBoardProposalCancelHash',
   'computeBoardProposalHash',
@@ -147,7 +154,6 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'registerNumberedEntitiesBatch',
   'registerNumberedEntity',
   'releaseControlShares',
-  'transferName',
   'verifyHankoSignature',
   'verifyCurrentHankoSignature',
 ]);
@@ -167,16 +173,19 @@ assertFunctionHeaderIncludes(depository, depositoryPath, 'watchtowerCounterDispu
 assertFunctionHeaderIncludes(depository, depositoryPath, 'mintToReserve', 'external onlyLocalDevAdmin');
 assertFunctionHeaderIncludes(depository, depositoryPath, 'adminRegisterExternalToken', 'external onlyLocalDevAdmin nonReentrant');
 const tokenRegistration = getFunctionBody(depository, 'registerExternalToken', depositoryPath);
+// Listing authority is the EntityProvider (Foundation Hanko), never a key.
 assertIncludes(
   tokenRegistration,
-  'msg.sender != admin && (tokenType != TypeERC1155 || contractAddress != entityProvider)',
+  'if (msg.sender != entityProvider) revert E2();',
   `${depositoryPath}:registerExternalToken`,
 );
+assertNotIncludes(tokenRegistration, 'admin', `${depositoryPath}:registerExternalToken`);
+assertFunctionHeaderIncludes(depository, depositoryPath, 'enforceDebts', 'external nonReentrant');
 const erc1155Receiver = getFunctionBody(depository, 'onERC1155Received', depositoryPath);
 assertIncludes(erc1155Receiver, 'msg.sender != entityProvider', `${depositoryPath}:onERC1155Received`);
 assertIncludes(
   erc1155Receiver,
-  'from != address(uint160(id))',
+  'from != entityTreasury(entityNumber)',
   `${depositoryPath}:onERC1155Received`,
 );
 assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);
@@ -219,9 +228,9 @@ assertNotIncludes(entityProvider, 'onlyFoundation', entityProviderPath);
 assertIncludes(entityProvider, '_verifyCurrentHankoSignature(hankoData, actionHash)', entityProviderPath);
 assertIncludes(entityProvider, 'entityActionNonces[foundationId] = actionNonce;', entityProviderPath);
 for (const name of [
-  'assignName',
-  'transferName',
   'foundationRegisterEntity',
+  'foundationRegisterExternalToken',
+  'foundationAddShareDepository',
 ] as const) {
   assertIncludes(
     getFunctionBody(entityProvider, name, entityProviderPath),
@@ -240,10 +249,11 @@ for (const [name, requiredText] of [
 }
 assertIncludes(
   getFunctionBody(entityProvider, 'activateBoard', entityProviderPath),
-  'require(block.number >= entity.activateAtBlock, "Delay period not met");',
+  'require(block.timestamp >= entity.activateAt, "Delay period not met");',
   `${entityProviderPath}:activateBoard`,
 );
-assertIncludes(hankoVerifier, 'if (signatureCount == 0 || hanko.claims.length == 0)', hankoVerifierPath);
+assertIncludes(hankoVerifier, 'if (hanko.claims.length == 0) return (bytes32(0), false);', hankoVerifierPath);
+assertIncludes(hankoVerifier, 'if (signatureCount == 0 && memberCount == 0) return (bytes32(0), false);', hankoVerifierPath);
 assertIncludes(hankoVerifier, 'if (signer == address(0)) return new address[](0);', hankoVerifierPath);
 assertIncludes(hankoVerifier, 'if (nestedIndex >= claimIndex) revert InvalidHankoClaimOrder();', hankoVerifierPath);
 assertIncludes(hankoVerifier, 'revert DuplicateHankoClaimEntity();', hankoVerifierPath);

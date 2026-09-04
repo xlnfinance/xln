@@ -102,6 +102,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.EntityProviderSupplyHarness__factory>;
     getContractFactory(
+      name: "ERC1271Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.ERC1271Mock__factory>;
+    getContractFactory(
       name: "FeeOnTransferERC20",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.FeeOnTransferERC20__factory>;
@@ -265,6 +269,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.EntityProviderSupplyHarness>;
     getContractAt(
+      name: "ERC1271Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.ERC1271Mock>;
+    getContractAt(
       name: "FeeOnTransferERC20",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -419,6 +428,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.EntityProviderSupplyHarness>;
     deployContract(
+      name: "ERC1271Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC1271Mock>;
+    deployContract(
       name: "FeeOnTransferERC20",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.FeeOnTransferERC20>;
@@ -581,6 +594,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.EntityProviderSupplyHarness>;
+    deployContract(
+      name: "ERC1271Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC1271Mock>;
     deployContract(
       name: "FeeOnTransferERC20",
       args: any[],

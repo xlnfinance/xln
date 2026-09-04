@@ -4,6 +4,7 @@
 export * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
 export * as noopNftMocksSol from "./NoopNftMocks.sol";
 export { DepositoryDebtHarness__factory } from "./DepositoryDebtHarness__factory";
+export { ERC1271Mock__factory } from "./ERC1271Mock__factory";
 export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarness__factory";
 export { FeeOnTransferERC20__factory } from "./FeeOnTransferERC20__factory";
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";

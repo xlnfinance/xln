@@ -75,8 +75,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   mapping (bytes32 => mapping (uint => uint)) public _debtIndex;
   // total reserve locked by unpaid debt, scoped by debtor and token
   mapping (bytes32 => mapping (uint => uint)) public debtOutstanding;
-  // total number of active debts of an entity for a token
-  mapping (bytes32 => mapping (uint => uint)) public _activeDebtsByToken;
+  // Number of live (unpaid) debt entries per entity across all tokens. One
+  // observability counter, not per token: watchers only need "has debts".
+  mapping (bytes32 => uint256) public activeDebts;
 
 
   address private immutable admin;
@@ -238,11 +239,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     return _tokens.length;
   }
 
+  /// @notice Listing entrypoint. Only the immutable EntityProvider may call it:
+  ///         EP share releases auto-register, and every external token is
+  ///         listed through EntityProvider.foundationRegisterExternalToken under
+  ///         a Foundation Hanko. No deployer key holds listing power on any chain.
   function registerExternalToken(uint8 tokenType, address contractAddress, uint256 externalTokenId)
     external
     returns (uint256 tokenId)
   {
-    if (msg.sender != admin && (tokenType != TypeERC1155 || contractAddress != entityProvider)) revert E2();
+    if (msg.sender != entityProvider) revert E2();
     tokenId = _registerExternalToken(tokenType, contractAddress, externalTokenId);
   }
 
@@ -437,38 +442,11 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private {
-    // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
-    uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
-    uint256[] memory flashloanStarting = new uint256[](batch.flashloans.length);
-    uint256[] memory flashloanTotals = new uint256[](batch.flashloans.length);
-    uint uniqueCount = 0;
-
-    // Aggregate flashloans per tokenId
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      uint tid = batch.flashloans[i].tokenId;
-      uint amt = batch.flashloans[i].amount;
-
-      // Find if this tokenId already seen
-      uint j = 0;
-      for (; j < uniqueCount; j++) {
-        if (flashloanTokenIds[j] == tid) break;
-      }
-
-      // New tokenId - record starting reserve
-      if (j == uniqueCount) {
-        flashloanTokenIds[uniqueCount] = tid;
-        flashloanStarting[uniqueCount] = _reserves[entityId][tid];
-        uniqueCount++;
-      }
-
-      // Accumulate total for this tokenId
-      flashloanTotals[j] += amt;
-    }
-
-    // Grant aggregated flashloans (flash-mint)
-    for (uint j = 0; j < uniqueCount; j++) {
-      _increaseReserve(entityId, flashloanTokenIds[j], flashloanTotals[j]);
-    }
+    // Implicit flash credit for the initiator (see Types.BatchScratch). No
+    // reserve is ever inflated; a debt-free initiator may spend ahead of
+    // holding and must be whole again before this function returns.
+    BatchScratch storage scratch = BatchScratchLib.get();
+    scratch.initiator = entityId;
 
     // the order is important: first go methods that increase entity's balance
     // then methods that deduct from it
@@ -539,7 +517,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     // HTLC secret reveals (must run before dispute finalizations).
     // Only the immutable canonical transformer may be called here. This is the
     // sole CALL inside processBatch whose target came from the batch itself;
-    // it executes while _status == 2 and flash-minted reserves are live, so an
+    // it executes while _status == 2 and implicit-flash deficits are open, so an
     // arbitrary target would be untrusted code running in the settlement window.
     for (uint i = 0; i < batch.revealSecrets.length; i++) {
       SecretReveal memory reveal = batch.revealSecrets[i];
@@ -579,21 +557,14 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       if (!_reserveToExternalToken(entityId, batch.reserveToExternalToken[i])) revert E3();
     }
 
-    // SECURITY FIX: Check aggregated flashloan return + burn
-    for (uint j = 0; j < uniqueCount; j++) {
-      uint tid = flashloanTokenIds[j];
-      uint expectedFinal = flashloanStarting[j] + flashloanTotals[j];
-
-      // Check entity returned borrowed amount
-      if (_reserves[entityId][tid] < expectedFinal) revert E3(); // Flashloan not returned
-
-      // Burn flashloan (remove temporary mint)
-      _decreaseReserve(entityId, tid, flashloanTotals[j]);
-      // The pre-burn inequality proves the post-burn reserve is at least the
-      // starting reserve; _decreaseReserve subtracts exactly flashloanTotals
-      // or reverts, so a second branch here would be unreachable.
+    // Every deficit the initiator opened must be repaid inside this batch.
+    uint256 touched = scratch.tokens.length;
+    for (uint256 i = 0; i < touched; i++) {
+      uint256 tokenId = scratch.tokens[i];
+      if (scratch.deficit[tokenId] != 0) revert E3();
     }
-
+    delete scratch.tokens;
+    scratch.initiator = bytes32(0);
   }
 
   // MessageType enum is in Types.sol
@@ -616,13 +587,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       creditor,
       amount
     );
-    _activeDebtsByToken[debtor][tokenId]++;
+    activeDebts[debtor]++;
   }
 
-  function _afterDebtCleared(bytes32 entity, uint256 tokenId) internal {
-    if (_activeDebtsByToken[entity][tokenId] > 0) {
+  function _afterDebtCleared(bytes32 entity) internal {
+    if (activeDebts[entity] > 0) {
       unchecked {
-        _activeDebtsByToken[entity][tokenId]--;
+        activeDebts[entity]--;
       }
     }
   }
@@ -642,6 +613,11 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     return reserve > outstanding ? reserve - outstanding : 0;
   }
 
+  /// @dev Outflow gate incl. the initiator's implicit flash allowance.
+  function _canSpend(bytes32 entity, uint256 tokenId, uint256 amount) internal view returns (bool) {
+    return Account.canSpend(_reserves, debtOutstanding, entity, tokenId, amount);
+  }
+
   function _packTokenReference(uint8 tokenType, address contractAddress, uint256 externalTokenId) private pure returns (bytes32) {
     return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
   }
@@ -651,8 +627,8 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       Settlement memory settlement = settlements[i];
       for (uint256 j = 0; j < settlement.diffs.length; j++) {
         SettlementDiff memory diff = settlement.diffs[j];
-        if (diff.leftDiff < 0) enforceDebts(settlement.leftEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
-        if (diff.rightDiff < 0) enforceDebts(settlement.rightEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+        if (diff.leftDiff < 0) _enforceDebts(settlement.leftEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+        if (diff.rightDiff < 0) _enforceDebts(settlement.rightEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
       }
     }
   }
@@ -707,10 +683,10 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   // ReserveToExternalToken struct is in Types.sol
   function _reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal returns (bool) {
     if (params.amount == 0) revert E1();
-    enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
+    _enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
 
     TokenMetadata memory meta = _tokens[params.tokenId];
-    if (params.amount > _spendableReserve(entity, params.tokenId)) return false;
+    if (!_canSpend(entity, params.tokenId, params.amount)) return false;
     if (uint256(params.receivingEntity) > type(uint160).max) revert E2();
     address recipient = address(uint160(uint256(params.receivingEntity)));
     if (meta.tokenType == TypeERC721 && params.amount != 1) revert E1();
@@ -737,21 +713,30 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   }
   // ReserveToReserve struct is in Types.sol
   function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal returns (bool) {
-    enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
-    if (params.amount > _spendableReserve(entity, params.tokenId)) return false;
+    // Entity 0 can never sign; a transfer there burns reserves silently.
+    if (params.receivingEntity == bytes32(0)) revert E7();
+    _enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
+    if (!_canSpend(entity, params.tokenId, params.amount)) return false;
     _decreaseReserve(entity, params.tokenId, params.amount);
     _increaseReserve(params.receivingEntity, params.tokenId, params.amount);
     return true;
   }
 
   // FIFO debt enforcement. `maxIterations == 0` drains without a slot cap.
-  function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) public {
+  // The public wrapper is reentrancy-guarded: a listed token's transfer hook
+  // must not interleave debt movements with a live batch. Internal callers use
+  // _enforceDebts, which runs inside the already-guarded batch.
+  function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) external nonReentrant {
+    _enforceDebts(entity, tokenId, maxIterations);
+  }
+
+  function _enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) internal {
     Account.enforceDebts(
       _reserves,
       _debts,
       _debtIndex,
       debtOutstanding,
-      _activeDebtsByToken,
+      activeDebts,
       entity,
       tokenId,
       maxIterations
@@ -770,17 +755,17 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (receivingEntity == bytes32(0) || params.pairs.length == 0) revert E7();
    
     // debts must be paid before any transfers from reserve 
-    enforceDebts(entity, tokenId, DEBT_ENFORCEMENT_CHUNK);
+    _enforceDebts(entity, tokenId, DEBT_ENFORCEMENT_CHUNK);
 
     uint256 totalAmount = 0;
     for (uint i = 0; i < params.pairs.length; i++) {
       uint256 amount = params.pairs[i].amount;
       if (amount == 0) revert E1();
       if (params.pairs[i].entity == bytes32(0) || params.pairs[i].entity == receivingEntity) revert E7();
-      if (amount > uint256(type(int256).max)) revert E8();
+      if (amount > MAX_MONEY) revert E8();
       totalAmount += amount;
     }
-    if (totalAmount > _spendableReserve(entity, tokenId)) return false;
+    if (!_canSpend(entity, tokenId, totalAmount)) return false;
 
     for (uint i = 0; i < params.pairs.length; i++) {
       bytes32 counterentity = params.pairs[i].entity;
@@ -798,6 +783,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
         Account.increaseCollateral(col, amount);
         if (receivingEntity < counterentity) { // if receiver is left
           col.ondelta += signedAmount;
+          if (col.ondelta > MAX_MONEY_INT) revert E8();
         }
 
         // Emit unionified AccountSettled event (canonical ordering: left < right)
@@ -846,7 +832,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (current.creditor != creditor) return (true, false);
     current.amount = 0;
     _reduceDebtOutstanding(debtor, tokenId, amount);
-    _afterDebtCleared(debtor, tokenId);
+    _afterDebtCleared(debtor);
     emit DebtForgiven(debtor, creditor, tokenId, amount, idx);
     if (idx + 1 == len) {
       _debtIndex[debtor][tokenId] = 0;
@@ -971,8 +957,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     // Account owns bilateral delta arithmetic and signed transformer execution;
     // Depository owns only the resulting custody, reserve, and debt effects.
-    (int[] memory transformerDeltas, uint256 negativeDeltaBitmap) =
-      Account.prepareSettlementDeltas(
+    int[] memory transformerDeltas = Account.prepareSettlementDeltas(
       _collaterals,
       acct_key,
       proofbody,
@@ -989,16 +974,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       rightResponseSeconds
     );
 
-    // Apply exact mathematical deltas. The signed-magnitude representation
-    // covers every valid same-nonce R2C trajectory even when ondelta+offdelta
-    // exceeds int256; no narrowing or saturating financial approximation occurs.
+    // Every term is MAX_MONEY-bounded (see Types.sol), so the delta is a plain
+    // int256 and its magnitude is exact.
     for (uint256 i = 0; i < proofbody.tokenIds.length; i++) {
-      bool negativeDelta = negativeDeltaBitmap & (1 << i) != 0;
-      uint256 deltaMagnitude;
-      assembly ("memory-safe") {
-        deltaMagnitude := mload(add(add(transformerDeltas, 0x20), mul(i, 0x20)))
-        if negativeDelta { deltaMagnitude := sub(0, deltaMagnitude) }
-      }
+      int256 delta = transformerDeltas[i];
+      bool negativeDelta = delta < 0;
+      uint256 deltaMagnitude = negativeDelta ? uint256(-delta) : uint256(delta);
       _applyAccountDelta(
         acct_key,
         proofbody.tokenIds[i],
@@ -1070,7 +1051,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) private {
     if (amount == 0) return;
 
-    enforceDebts(debtor, tokenId, DEBT_ENFORCEMENT_CHUNK);
+    _enforceDebts(debtor, tokenId, DEBT_ENFORCEMENT_CHUNK);
     uint256 available = _spendableReserve(debtor, tokenId);
     uint256 payAmount = available >= amount ? amount : available;
     if (payAmount > 0) {
@@ -1091,10 +1072,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     external returns (bytes4)
   {
     if (data.length != 0) {
-      if (msg.sender != entityProvider || from != address(uint160(id))) revert E11();
+      // Entity number rides in the low 160 bits of both share ids; the sender
+      // must be that entity's namespaced treasury and the credit goes to its id.
+      uint256 entityNumber = uint256(uint160(id));
+      if (msg.sender != entityProvider || from != entityTreasury(entityNumber)) revert E11();
       uint256 tokenId = tokenToId[_packTokenReference(TypeERC1155, entityProvider, id)];
       if (tokenId == 0) revert E11();
-      _increaseReserve(bytes32(uint256(uint160(from))), tokenId, amount);
+      _increaseReserve(bytes32(entityNumber), tokenId, amount);
     }
     return 0xf23a6e61;
   }

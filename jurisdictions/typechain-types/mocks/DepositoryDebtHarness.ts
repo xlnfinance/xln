@@ -188,13 +188,13 @@ export interface DepositoryDebtHarnessInterface extends Interface {
       | "DOMAIN_SEPARATOR"
       | "WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR"
       | "_accounts"
-      | "_activeDebtsByToken"
       | "_collaterals"
       | "_debtIndex"
       | "_debts"
       | "_reserves"
       | "_status"
       | "_tokens"
+      | "activeDebts"
       | "adminRegisterExternalToken"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
@@ -245,10 +245,6 @@ export interface DepositoryDebtHarnessInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "_activeDebtsByToken",
-    values: [BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "_collaterals",
     values: [BytesLike, BigNumberish]
   ): string;
@@ -268,6 +264,10 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "_tokens",
     values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "activeDebts",
+    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
@@ -358,10 +358,6 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   ): Result;
   decodeFunctionResult(functionFragment: "_accounts", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "_activeDebtsByToken",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "_collaterals",
     data: BytesLike
   ): Result;
@@ -370,6 +366,10 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   decodeFunctionResult(functionFragment: "_reserves", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_status", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "_tokens", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "activeDebts",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
     data: BytesLike
@@ -943,12 +943,6 @@ export interface DepositoryDebtHarness extends BaseContract {
     "view"
   >;
 
-  _activeDebtsByToken: TypedContractMethod<
-    [arg0: BytesLike, arg1: BigNumberish],
-    [bigint],
-    "view"
-  >;
-
   _collaterals: TypedContractMethod<
     [arg0: BytesLike, arg1: BigNumberish],
     [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
@@ -986,6 +980,8 @@ export interface DepositoryDebtHarness extends BaseContract {
     ],
     "view"
   >;
+
+  activeDebts: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   adminRegisterExternalToken: TypedContractMethod<
     [params: ExternalTokenToReserveStruct],
@@ -1153,13 +1149,6 @@ export interface DepositoryDebtHarness extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "_activeDebtsByToken"
-  ): TypedContractMethod<
-    [arg0: BytesLike, arg1: BigNumberish],
-    [bigint],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "_collaterals"
   ): TypedContractMethod<
     [arg0: BytesLike, arg1: BigNumberish],
@@ -1203,6 +1192,9 @@ export interface DepositoryDebtHarness extends BaseContract {
     ],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "activeDebts"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "adminRegisterExternalToken"
   ): TypedContractMethod<

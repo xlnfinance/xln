@@ -7,6 +7,7 @@ import type { Depository, EntityProvider } from "../../typechain-types/index.js"
 import {
   addressEntityId,
   buildClaimsHanko,
+  buildRawSignerHanko,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
   deployDepositoryStack,
@@ -14,11 +15,13 @@ import {
   deriveHardhatPrivateKey,
   emptyBatch,
   encodeBatch,
+  encodeSingleSignerBoard,
   singleSignerLazyEntityId,
 } from "../helpers/hanko.ts";
 
+// Single envelope: abi.encode(HankoBytes{placeholders, packedSignatures, claims, memberSignatures}).
 const HANKO_ABI = [
-  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',
+  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])',
 ];
 const BOARD_ABI = [
   'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)'
@@ -36,6 +39,7 @@ function buildHighSHanko(entityId: string, hash: string, privateKey: string): st
     [],
     packedSig,
     [[ethers.zeroPadValue(entityId, 32), [0], [1], 1, 0, 0, 0]],
+    [],
   ]]);
 }
 
@@ -56,6 +60,7 @@ function buildSingleSignerClaimHanko(
     placeholders,
     packedSig,
     [[ethers.zeroPadValue(entityId, 32), entityIndexes, weights, threshold, 0, 0, 0]],
+    [],
   ]]);
 }
 
@@ -97,6 +102,7 @@ function buildClaimHanko(
     placeholders,
     packedSignatures,
     [[ethers.zeroPadValue(entityId, 32), entityIndexes, weights, threshold, 0, 0, 0]],
+    [],
   ]]);
 }
 
@@ -128,13 +134,14 @@ describe("Hanko Authorization", function () {
     const coder = ethers.AbiCoder.defaultAbiCoder();
     const emptyHanko = coder.encode(
       [
-        "tuple(bytes32[] placeholders, bytes packedSignatures, tuple(bytes32 entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold)[] claims)"
+        "tuple(bytes32[] placeholders, bytes packedSignatures, tuple(bytes32 entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold)[] claims, bytes[] memberSignatures)"
       ],
       [
         {
           placeholders: [],
           packedSignatures: "0x",
-          claims: []
+          claims: [],
+          memberSignatures: []
         }
       ]
     );
@@ -156,6 +163,7 @@ describe("Hanko Authorization", function () {
     const oversizedShape = ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
       Array.from({ length: 257 }, (_, index) => ethers.zeroPadValue(ethers.toBeHex(index + 1), 32)),
       "0x",
+      [],
       [],
     ]]);
     await expect(
@@ -417,6 +425,84 @@ describe("Hanko Authorization", function () {
       .to.be.revertedWithCustomError(entityProvider, "UnusedHankoClaim");
   });
 
+  it("accepts a raw 65-byte signature as the signer's own lazy 1-of-1 entity", async function () {
+    const { depository, entityProvider, entity1, entity2 } = await loadFixture(deployFixture);
+    const privateKey = deriveHardhatPrivateKey(1);
+    const lazyId = singleSignerLazyEntityId(entity1.address);
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("raw signature shortcut"));
+
+    const raw = buildRawSignerHanko(hash, privateKey);
+    expect(ethers.dataLength(raw)).to.equal(65);
+    const envelope = buildSingleSignerHanko(lazyId, hash, privateKey);
+    expect(ethers.dataLength(envelope)).to.be.greaterThan(65);
+    // Same verdict and the same id from both shapes, in both verification modes.
+    expect(await entityProvider.verifyHankoSignature(raw, hash)).to.deep.equal([lazyId, true]);
+    expect(await entityProvider.verifyCurrentHankoSignature(raw, hash)).to.deep.equal([lazyId, true]);
+    expect(await entityProvider.verifyHankoSignature(envelope, hash)).to.deep.equal([lazyId, true]);
+    expect(await entityProvider.verifyCurrentHankoSignature(envelope, hash)).to.deep.equal([lazyId, true]);
+    // v may be encoded as 0/1 instead of 27/28.
+    const v = BigInt(ethers.dataSlice(raw, 64, 65));
+    const rawV01 = ethers.concat([ethers.dataSlice(raw, 0, 64), ethers.toBeHex(v - 27n, 1)]);
+    expect(await entityProvider.verifyHankoSignature(rawV01, hash)).to.deep.equal([lazyId, true]);
+    // A different hash recovers a different key, i.e. a different lazy entity.
+    const [otherId, otherOk] = await entityProvider.verifyHankoSignature(raw, ethers.keccak256("0x01"));
+    expect(otherOk).to.equal(true);
+    expect(otherId).to.not.equal(lazyId);
+
+    // processBatch: raw signature and full envelope drive the same entity nonce lane.
+    const tokenId = 1;
+    const recipient = addressEntityId(entity2.address);
+    await depository.mintToReserve(lazyId, tokenId, 300n);
+    const encoded = encodeBatch(emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 100n }],
+    }));
+    for (const [nonce, useRaw] of [[1n, true], [2n, false], [3n, true]] as const) {
+      const batchHash = await computeDepositoryBatchHash(depository, encoded, nonce);
+      const hankoData = useRaw
+        ? buildRawSignerHanko(batchHash, privateKey)
+        : buildSingleSignerHanko(lazyId, batchHash, privateKey);
+      await expect(depository.processBatch(encoded, hankoData, nonce))
+        .to.emit(depository, "HankoBatchProcessed")
+        .withArgs(lazyId, batchHash, nonce);
+    }
+    expect(await depository.entityNonces(lazyId)).to.equal(3n);
+    expect(await depository._reserves(lazyId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(300n);
+  });
+
+  it("rejects malformed raw signatures: high-s and bad v fail softly, wrong lengths do not decode", async function () {
+    const { depository, entityProvider, entity1 } = await loadFixture(deployFixture);
+    const privateKey = deriveHardhatPrivateKey(1);
+    const lazyId = singleSignerLazyEntityId(entity1.address);
+    const encoded = encodeBatch(emptyBatch());
+    const nonce = 1n;
+    const batchHash = await computeDepositoryBatchHash(depository, encoded, nonce);
+    const signature = new ethers.SigningKey(privateKey).sign(ethers.getBytes(batchHash));
+    const good = signature.serialized;
+    expect(await entityProvider.verifyHankoSignature(good, batchHash)).to.deep.equal([lazyId, true]);
+
+    const highS = ethers.concat([
+      signature.r,
+      ethers.toBeHex(SECP256K1_N - BigInt(signature.s), 32),
+      ethers.toBeHex(signature.v === 28 ? 27 : 28, 1),
+    ]);
+    expect(await entityProvider.verifyHankoSignature(highS, batchHash)).to.deep.equal([ethers.ZeroHash, false]);
+    await expect(depository.processBatch(encoded, highS, nonce)).to.be.revertedWithCustomError(depository, "E4");
+
+    const badV = ethers.concat([signature.r, signature.s, "0x1d"]); // v = 29
+    expect(await entityProvider.verifyHankoSignature(badV, batchHash)).to.deep.equal([ethers.ZeroHash, false]);
+    await expect(depository.processBatch(encoded, badV, nonce)).to.be.revertedWithCustomError(depository, "E4");
+
+    // 64 or 66 bytes are neither the raw shape nor a valid abi.encode(HankoBytes).
+    const short = ethers.dataSlice(good, 0, 64);
+    const long = ethers.concat([good, "0x00"]);
+    await expect(entityProvider.verifyHankoSignature(short, batchHash)).to.be.revert(ethers);
+    await expect(entityProvider.verifyHankoSignature(long, batchHash)).to.be.revert(ethers);
+    await expect(depository.processBatch(encoded, short, nonce)).to.be.revert(ethers);
+    await expect(depository.processBatch(encoded, long, nonce)).to.be.revert(ethers);
+    expect(await depository.entityNonces(lazyId)).to.equal(0n);
+  });
+
   it("binds all three Board delays into the lazy Entity id", async function () {
     const { entityProvider } = await loadFixture(deployFixture);
     const privateKey = ethers.toBeHex(1n, 32);
@@ -431,7 +517,8 @@ describe("Hanko Authorization", function () {
       [[entityId, [0], [1], 1, delays]],
     );
     expect(entityId).to.equal("0xe3d6aa2ac02777d0796e2996d73c3e203011357aff8b877ee86beab827a8e4f0");
-    expect(ethers.keccak256(hanko)).to.equal("0x560d730cce926ec199d5dc8386d2494414ff218ebb940c9d2a69d3b6a08964fb");
+    // Golden over the single 4-field envelope (memberSignatures = []).
+    expect(ethers.keccak256(hanko)).to.equal("0x2ff6529255ffbfc79b506c9c3dce1a61bf644942ad38b5c1dcbd63617af6173f");
     expect(await entityProvider.verifyHankoSignature(hanko, hash)).to.deep.equal([entityId, true]);
   });
 
@@ -465,8 +552,7 @@ describe("Hanko Authorization", function () {
   it("binds every registered child claim to its on-chain board", async function () {
     const { entityProvider, admin, entity1 } = await loadFixture(deployFixture);
     const hash = ethers.keccak256(ethers.toUtf8Bytes("registered recursive child"));
-    const childBoard = singleSignerLazyEntityId(entity1.address);
-    await entityProvider.registerNumberedEntity(childBoard);
+    await entityProvider.registerNumberedEntity(encodeSingleSignerBoard(entity1.address));
     const childId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
     const anchor = addressEntityId(admin.address);
     const parentId = boardHash(1, [anchor, childId], [1, 1]);
@@ -522,7 +608,7 @@ describe("Hanko Authorization", function () {
     const hash = ethers.keccak256(ethers.toUtf8Bytes("indexed recovery"));
     const boardHash = singleSignerLazyEntityId(entity1.address);
 
-    const tx = await entityProvider.registerNumberedEntity(boardHash);
+    const tx = await entityProvider.registerNumberedEntity(encodeSingleSignerBoard(entity1.address));
     const receipt = await tx.wait();
     const event = receipt?.logs
       .map((log) => {
@@ -549,8 +635,8 @@ describe("Hanko Authorization", function () {
     const boardHash = singleSignerLazyEntityId(entity1.address);
     const hash = ethers.keccak256(ethers.toUtf8Bytes("shared board principals"));
 
-    await entityProvider.registerNumberedEntity(boardHash);
-    await entityProvider.registerNumberedEntity(boardHash);
+    await entityProvider.registerNumberedEntity(encodeSingleSignerBoard(entity1.address));
+    await entityProvider.registerNumberedEntity(encodeSingleSignerBoard(entity1.address));
     const firstId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
     const secondId = ethers.zeroPadValue(ethers.toBeHex(3), 32);
     expect((await entityProvider.entities(firstId)).currentBoardHash).to.equal(boardHash);

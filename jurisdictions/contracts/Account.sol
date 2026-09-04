@@ -5,6 +5,7 @@ import "./Types.sol";
 import "./DeltaTransformer.sol";
 import "./IEntityProvider.sol";
 import "./HankoEncoding.sol";
+import "./EntityTypes.sol";
 
 /**
  * Account.sol - Library for bilateral account operations
@@ -105,7 +106,7 @@ library Account {
         ? bytes4(keccak256("totalSupply()"))
         : bytes4(keccak256("totalSupply(uint256)"));
     bytes memory callData = entityProviderShare
-      ? abi.encodeWithSelector(selector, address(uint160(externalTokenId)), externalTokenId)
+      ? abi.encodeWithSelector(selector, entityTreasury(uint256(uint160(externalTokenId))), externalTokenId)
       : tokenType == 0
         ? abi.encodeWithSelector(selector)
         : abi.encodeWithSelector(selector, externalTokenId);
@@ -122,7 +123,7 @@ library Account {
       supply := mload(data)
     }
     if (!success || returnSize != 32) return (0, false);
-    valid = supply > 0 && supply <= uint256(type(int256).max);
+    valid = supply > 0 && supply <= MAX_MONEY;
   }
 
   function readFixedTokenSupply(
@@ -162,7 +163,7 @@ library Account {
     mapping(bytes32 => mapping(uint256 => Debt[])) storage debts,
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
-    mapping(bytes32 => mapping(uint256 => uint256)) storage activeDebtsByToken,
+    mapping(bytes32 => uint256) storage activeDebts,
     bytes32 entity,
     uint256 tokenId,
     uint256 maxIterations
@@ -206,10 +207,10 @@ library Account {
       if (amount == 0) {
         debt.amount = 0;
         emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
-        uint256 active = activeDebtsByToken[entity][tokenId];
+        uint256 active = activeDebts[entity];
         if (active > 0) {
           unchecked {
-            activeDebtsByToken[entity][tokenId] = active - 1;
+            activeDebts[entity] = active - 1;
           }
         }
         delete queue[cursor];
@@ -244,9 +245,20 @@ library Account {
     uint256 amount
   ) private {
     if (amount == 0) return;
+    // Implicit flash: an inflow to the batch initiator first repays what it
+    // spent ahead of holding it.
+    BatchScratch storage scratch = BatchScratchLib.get();
+    if (entity == scratch.initiator) {
+      uint256 owed = scratch.deficit[tokenId];
+      if (owed != 0) {
+        uint256 repaid = amount < owed ? amount : owed;
+        scratch.deficit[tokenId] = owed - repaid;
+        amount -= repaid;
+        if (amount == 0) return;
+      }
+    }
     uint256 current = reserves[entity][tokenId];
-    uint256 limit = uint256(type(int256).max);
-    if (current > limit || amount > limit - current) revert E8();
+    if (current > MAX_MONEY || amount > MAX_MONEY - current) revert E8();
     reserves[entity][tokenId] = current + amount;
     emit ReserveUpdated(entity, tokenId, current + amount);
   }
@@ -260,27 +272,10 @@ library Account {
     _decreaseReserve(reserves, entity, tokenId, amount);
   }
 
-  /// @notice Exact int256 + int256 as a 257-bit sign/magnitude result.
-  /// @dev Account owns signed delta arithmetic; Depository only applies the
-  ///      resulting financial effects to collateral/reserve storage.
-  function _addSignedInt256(int256 left, int256 right)
-    private pure returns (bool negative, uint256 rawSum, bool transformerRepresentable)
-  {
-    int256 signedSum;
-    assembly ("memory-safe") {
-      rawSum := add(left, right)
-      signedSum := rawSum
-    }
-    bool leftNegative = left < 0;
-    bool rightNegative = right < 0;
-    bool sumNegative = signedSum < 0;
-    if (leftNegative == rightNegative && leftNegative != sumNegative) {
-      if (!leftNegative) return (false, rawSum, false);
-      if (rawSum == 0) revert E8();
-      return (true, rawSum, false);
-    }
-    if (!sumNegative) return (false, rawSum, true);
-    return (true, rawSum, signedSum != type(int256).min);
+  /// @dev |ondelta| ≤ MAX_MONEY after every mutation, so ondelta + offdelta
+  ///      always fits int256 (see Types.MAX_MONEY).
+  function _requireBoundedOndelta(int256 ondelta) private pure {
+    if (ondelta > MAX_MONEY_INT || ondelta < -MAX_MONEY_INT) revert E8();
   }
 
   function _decreaseReserve(
@@ -291,18 +286,58 @@ library Account {
   ) private {
     if (amount == 0) return;
     uint256 current = reserves[entity][tokenId];
-    if (current < amount) revert E3();
-    reserves[entity][tokenId] = current - amount;
-    emit ReserveUpdated(entity, tokenId, current - amount);
+    if (current >= amount) {
+      reserves[entity][tokenId] = current - amount;
+      emit ReserveUpdated(entity, tokenId, current - amount);
+      return;
+    }
+    // Implicit flash: only the batch initiator may overdraw, and only inside
+    // processBatch (initiator is zero otherwise). Callers gate this on the
+    // initiator having no outstanding debt for the token, so a debtor cannot
+    // route value around FIFO enforcement. Depository reverts the batch unless
+    // every deficit is repaid by its end.
+    BatchScratch storage scratch = BatchScratchLib.get();
+    if (entity == bytes32(0) || entity != scratch.initiator) revert E3();
+    uint256 shortfall = amount - current;
+    uint256 owed = scratch.deficit[tokenId];
+    if (owed == 0) scratch.tokens.push(tokenId);
+    if (shortfall > MAX_MONEY - owed) revert E8();
+    scratch.deficit[tokenId] = owed + shortfall;
+    reserves[entity][tokenId] = 0;
+    emit ReserveUpdated(entity, tokenId, 0);
   }
 
-  /// @dev Same int256.max ceiling as `_increaseReserve`: collateral feeds RCPAN
-  ///      and off-chain signed mirrors, so it must stay representable as int256.
+  /// @dev Spendable-balance gate shared by every reserve outflow: the plain
+  ///      reserve net of outstanding debt, or unlimited for a debt-free batch
+  ///      initiator (implicit flash, repaid before the batch ends).
+  function _canSpend(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) private view returns (bool) {
+    if (amount <= _spendableReserve(reserves, debtOutstanding, entity, tokenId)) return true;
+    return entity != bytes32(0)
+      && entity == BatchScratchLib.get().initiator
+      && debtOutstanding[entity][tokenId] == 0;
+  }
+
+  function canSpend(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) external view returns (bool) {
+    return _canSpend(reserves, debtOutstanding, entity, tokenId, amount);
+  }
+
+  /// @dev Same MAX_MONEY ceiling as `_increaseReserve`.
   function _increaseCollateral(AccountCollateral storage col, uint256 amount) private {
     if (amount == 0) return;
     uint256 current = col.collateral;
-    uint256 limit = uint256(type(int256).max);
-    if (current > limit || amount > limit - current) revert E8();
+    if (current > MAX_MONEY || amount > MAX_MONEY - current) revert E8();
     col.collateral = current + amount;
   }
 
@@ -336,7 +371,6 @@ library Account {
   bytes4 private constant CONTAINS_PULL_SELECTOR = bytes4(keccak256("containsPull(bytes)"));
   uint256 private constant TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000;
   uint256 private constant TRANSFORMER_ARGUMENT_DECODE_GAS_LIMIT = 500_000;
-  uint256 private constant INT256_SIGN_BIT = 1 << 255;
 
   // ========== PURE HELPERS ==========
 
@@ -459,8 +493,10 @@ library Account {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
     if (proofbody.tokenIds.length > MAX_DISPUTE_PROOF_TOKENS) revert E10();
     if (proofbody.transformers.length > MAX_DISPUTE_TRANSFORMERS) revert E10();
-    for (uint256 i = 1; i < proofbody.tokenIds.length; i++) {
-      if (proofbody.tokenIds[i - 1] >= proofbody.tokenIds[i]) revert E8();
+    for (uint256 i = 0; i < proofbody.tokenIds.length; i++) {
+      if (i > 0 && proofbody.tokenIds[i - 1] >= proofbody.tokenIds[i]) revert E8();
+      int256 offdelta = proofbody.offdeltas[i];
+      if (offdelta > MAX_MONEY_INT || offdelta < -MAX_MONEY_INT) revert E8();
     }
     bytes memory encodedProofbody = abi.encode(proofbody);
     if (encodedProofbody.length > MAX_DISPUTE_PROOF_BODY_BYTES) revert E10();
@@ -951,7 +987,6 @@ library Account {
     bytes32 accountKeyHash,
     ProofBody memory proofbody,
     int[] memory deltas,
-    bool exactTransformerInputs,
     bytes memory leftArguments,
     bytes memory rightArguments,
     uint256 leftArgumentsTimestamp,
@@ -965,10 +1000,6 @@ library Account {
     uint32 rightResponseSeconds
   ) private returns (int[] memory) {
     if (proofbody.transformers.length == 0) return deltas;
-    // The transformer ABI is int256[]. A wide signed-magnitude base delta has
-    // no truthful ABI value; substituting zero or saturation would execute a
-    // different contract than the parties signed.
-    if (!exactTransformerInputs) revert IDepositoryDelegateErrorAbi.TransformerExecutionFailed();
     bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArguments, argumentDecoder);
     bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArguments, argumentDecoder);
     for (uint256 i = 0; i < proofbody.transformers.length; i++) {
@@ -1045,22 +1076,14 @@ library Account {
     uint256 disputeTimeout,
     uint32 leftResponseSeconds,
     uint32 rightResponseSeconds
-  ) external returns (int[] memory deltas, uint256 negativeDeltaBitmap) {
+  ) external returns (int[] memory deltas) {
     uint256 tokenCount = proofbody.tokenIds.length;
     deltas = new int[](tokenCount);
-    bool exactTransformerInputs = true;
     for (uint256 i = 0; i < tokenCount; i++) {
       uint256 tokenId = proofbody.tokenIds[i];
       if (i > 0 && proofbody.tokenIds[i - 1] >= tokenId) revert E8();
-      (bool negative, uint256 rawDelta, bool representable) = _addSignedInt256(
-        collaterals[acctKey][tokenId].ondelta,
-        proofbody.offdeltas[i]
-      );
-      assembly ("memory-safe") {
-        mstore(add(add(deltas, 0x20), mul(i, 0x20)), rawDelta)
-      }
-      if (negative) negativeDeltaBitmap |= 1 << i;
-      if (!representable) exactTransformerInputs = false;
+      // Both terms are bounded by MAX_MONEY, so plain checked int256 is exact.
+      deltas[i] = collaterals[acctKey][tokenId].ondelta + proofbody.offdeltas[i];
     }
 
     // Every signed clause must execute. Missing code, revert/OOG, malformed
@@ -1069,7 +1092,6 @@ library Account {
       keccak256(acctKey),
       proofbody,
       deltas,
-      exactTransformerInputs,
       leftArguments,
       rightArguments,
       leftArgumentsTimestamp,
@@ -1082,15 +1104,6 @@ library Account {
       leftResponseSeconds,
       rightResponseSeconds
     );
-
-    // A transformer requires exact int256 inputs, so after successful execution
-    // every returned value can be classified directly by its sign.
-    if (exactTransformerInputs) {
-      negativeDeltaBitmap = 0;
-      for (uint256 i = 0; i < tokenCount; i++) {
-        if (deltas[i] < 0) negativeDeltaBitmap |= 1 << i;
-      }
-    }
   }
 
   function _decodeTransformerArgumentList(bytes memory encoded, address argumentDecoder) private view returns (bytes[] memory) {
@@ -1124,6 +1137,7 @@ library Account {
     if (allowances.length > deltaCount) return false;
     for (uint256 i = 0; i < allowances.length; i++) {
       if (allowances[i].deltaIndex >= deltaCount) return false;
+      if (allowances[i].leftAllowance > MAX_MONEY || allowances[i].rightAllowance > MAX_MONEY) return false;
       for (uint256 j = 0; j < i; j++) {
         if (allowances[j].deltaIndex == allowances[i].deltaIndex) return false;
       }
@@ -1131,38 +1145,19 @@ library Account {
     return true;
   }
 
+  /// @dev Plain int256 clamp. previousValue is bounded by 2·MAX_MONEY and each
+  ///      allowance by MAX_MONEY, so both bounds fit int256 with room to spare.
   function _clampTransformerValue(
     int256 previousValue,
     int256 requestedValue,
     uint256 rightAllowance,
     uint256 leftAllowance
   ) private pure returns (int256) {
-    uint256 previousOrdered = uint256(previousValue) ^ INT256_SIGN_BIT;
-    uint256 requestedOrdered = uint256(requestedValue) ^ INT256_SIGN_BIT;
-    uint256 lowerOrdered = rightAllowance >= previousOrdered ? 0 : previousOrdered - rightAllowance;
-    // Ordered zero maps back to int256.min. Depository._applyAccountDelta must
-    // negate every negative result, and -type(int256).min always reverts. A
-    // hostile transformer with a maximum allowance must not be able to turn an
-    // otherwise valid dispute into an unfinalizable one, so the reachable
-    // signed range starts at int256.min + 1 (ordered value 1).
-    if (lowerOrdered == 0) lowerOrdered = 1;
-    uint256 upperOrdered = leftAllowance > type(uint256).max - previousOrdered
-      ? type(uint256).max
-      : previousOrdered + leftAllowance;
-
-    uint256 appliedOrdered = requestedOrdered;
-    if (appliedOrdered < lowerOrdered) appliedOrdered = lowerOrdered;
-    if (appliedOrdered > upperOrdered) appliedOrdered = upperOrdered;
-    // If corrupt signed state itself supplied int256.min, upperOrdered
-    // can also be zero. Preserve the liveness floor after both bounds so this
-    // helper has no path that returns the un-negatable sentinel.
-    if (appliedOrdered == 0) appliedOrdered = 1;
-    uint256 rawValue = appliedOrdered ^ INT256_SIGN_BIT;
-    int256 appliedValue;
-    assembly ("memory-safe") {
-      appliedValue := rawValue
-    }
-    return appliedValue;
+    int256 lower = previousValue - int256(rightAllowance);
+    int256 upper = previousValue + int256(leftAllowance);
+    if (requestedValue < lower) return lower;
+    if (requestedValue > upper) return upper;
+    return requestedValue;
   }
 
   // ========== ENTRY POINTS ==========
@@ -1214,7 +1209,7 @@ library Account {
     if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
 
     uint amount = c2r.amount;
-    if (amount > uint256(type(int256).max)) revert E8();
+    if (amount > MAX_MONEY) revert E8();
     int256 signedAmount = int256(amount);
 
     // Reconstruct diffs for signature verification (C2R is a calldata shortcut).
@@ -1246,6 +1241,7 @@ library Account {
     _decreaseCollateral(col, amount);
     if (isLeft) {
       col.ondelta -= signedAmount;
+      _requireBoundedOndelta(col.ondelta);
     }
 
     // SET nonce (not increment)
@@ -1324,6 +1320,9 @@ library Account {
     ) revert E2();
     bool ownerIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
     if (!ownerIsNonstarter) revert E2();
+    // Revocation fence: the entity raises watchtowerMinSequence with one
+    // current-board action; every older appointment stops working at once.
+    if (appointmentSequence < IEntityProvider(entityProvider).watchtowerMinSequence(entityId)) revert E2();
     if (
       params.finalNonce < account.nonce ||
       (
@@ -1518,11 +1517,11 @@ library Account {
       if (diff.leftDiff + diff.rightDiff + diff.collateralDiff != 0) revert E2();
       if (
         diff.leftDiff < 0 &&
-        _spendableReserve(_reserves, debtOutstanding, leftEntity, tokenId) < uint(-diff.leftDiff)
+        !_canSpend(_reserves, debtOutstanding, leftEntity, tokenId, uint(-diff.leftDiff))
       ) revert E3();
       if (
         diff.rightDiff < 0 &&
-        _spendableReserve(_reserves, debtOutstanding, rightEntity, tokenId) < uint(-diff.rightDiff)
+        !_canSpend(_reserves, debtOutstanding, rightEntity, tokenId, uint(-diff.rightDiff))
       ) revert E3();
       if (
         diff.collateralDiff < 0 &&
@@ -1558,6 +1557,7 @@ library Account {
         _increaseCollateral(col, uint(diff.collateralDiff));
       }
       col.ondelta += diff.ondeltaDiff;
+      _requireBoundedOndelta(col.ondelta);
     }
 
     // SET nonce = signedNonce (not +1)

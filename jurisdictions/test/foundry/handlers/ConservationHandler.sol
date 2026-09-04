@@ -15,8 +15,10 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 /// Differences from DepositoryHandler (the pattern this extends):
 /// - `mixedBatch` submits MULTI-item batches: several R2R/R2C legs, an
 ///   optional C2R, an optional settlement, several deposits/withdrawals and
-///   duplicate-tokenId flashloans, all in one processBatch. The per-batch
-///   conservation oracle therefore sees composed orderings, not single ops.
+///   an optional implicit-flash overdraw (an R2R leg above the spendable
+///   reserve, legal only for a debt-free initiator that is repaid by a later
+///   C2R/settlement leg), all in one processBatch. The per-batch conservation
+///   oracle therefore sees composed orderings, not single ops.
 /// - every accepted submission is nonce-ghosted (`ghostEntityNonce`) and its
 ///   exact (encoded, hanko, nonce) triple is retained for `replayLast`, so
 ///   replay-resistance is exercised under any call order the fuzzer picks.
@@ -189,19 +191,11 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     bool useSettle = s3 % 2 == 1;
     uint256 nDep = s4 % 3; // 0..2 external deposits
     uint256 nWdr = s5 % 3; // 0..2 external withdrawals
-    uint256 nFlash = s6 % 3; // 0..2 flashloans (duplicate tokenIds possible)
+    bool overdraw = s6 % 3 == 0; // implicit flash: first R2R leg spends ahead of holding
     uint256 nR2C = s7 % 3; // 0..2
+    if (overdraw && nR2R == 0) nR2R = 1;
 
     Batch memory b = XlnHanko.emptyBatch();
-
-    // flashloans: duplicate tokenIds exercise the per-token aggregation
-    if (nFlash > 0) {
-      uint256 ft = _token(s1);
-      b.flashloans = new Flashloan[](nFlash);
-      for (uint256 i = 0; i < nFlash; i++) {
-        b.flashloans[i] = Flashloan({ tokenId: ft, amount: bound(s2 + i, 1, 1e21) });
-      }
-    }
 
     // external deposits (increase reserves + external backing)
     if (nDep > 0) {
@@ -234,10 +228,12 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
       for (uint256 i = 0; i < nR2R; i++) {
         uint256 t = _token(s1 + i);
         (uint256 to,) = _distinct(a, s2 + i);
+        uint256 amount = bound(s3 + i, 0, _spendable(a, t) + 1);
+        if (overdraw && i == 0) amount = _spendable(a, t) + bound(s6, 1, 1e21);
         b.reserveToReserve[i] = ReserveToReserve({
           receivingEntity: entityOf[to],
           tokenId: t,
-          amount: bound(s3 + i, 0, _spendable(a, t) + 1)
+          amount: amount
         });
       }
     }

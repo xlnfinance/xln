@@ -361,7 +361,7 @@
   "linkReferences": {},
   "deployedLinkReferences": {},
   "immutableReferences": {
-    "21779": [
+    "24280": [
       {
         "length": 32,
         "start": 777
@@ -369,5 +369,5 @@
     ]
   },
   "inputSourceName": "project/contracts/ERC20Mock.sol",
-  "buildInfoId": "solc-0_8_36-ad880273cfe2662404878ed384938534b6f5ba27"
+  "buildInfoId": "solc-0_8_36-a14f700287a1ced36180779bb8c7dc02672f2c19"
 }

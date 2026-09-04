@@ -4,6 +4,8 @@ const { spawnSync } = require('node:child_process');
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
+const { buildFoundationTokenListing, foundationEntityId } = require('./foundation-hanko.cjs');
+
 const repoRoot = path.resolve(__dirname, '..');
 const deploymentsDir = path.join(repoRoot, 'deployments');
 const jurisdictionsPath = path.join(repoRoot, 'jurisdictions.json');
@@ -435,7 +437,34 @@ const deployTron = async (chain, options) => {
   });
   const depositoryArtifact = loadTronArtifact('Depository');
   const depositoryContract = await tronWeb.contract(depositoryArtifact.abi, depository.base58);
-  await depositoryContract.registerExternalToken(0, usdt.base58, 0).send({
+  // UNTESTED on TRON: Depository.registerExternalToken is callable only by the
+  // EntityProvider, so USDT is listed through
+  // EntityProvider.foundationRegisterExternalToken under a Foundation Hanko
+  // signed by the deployer key (the genesis 1-of-1 Foundation board). The
+  // action hash binds block.chainid (TRON EVM chain id) and the EVM-form
+  // EntityProvider address; abi.encode uses the EVM-form addresses.
+  const { ethers: tronEthers } = require('ethers');
+  const foundationNonce = BigInt(
+    (await entityProviderContract.entityActionNonces(foundationEntityId(tronEthers)).call()).toString(),
+  );
+  const usdtListing = buildFoundationTokenListing(tronEthers, {
+    chainId: chain.chainId,
+    entityProviderAddress: entityProvider.evm,
+    foundationNonce,
+    depository: depository.evm,
+    tokenType: 0,
+    contractAddress: usdt.evm,
+    externalTokenId: 0,
+    privateKey,
+  });
+  await entityProviderContract.foundationRegisterExternalToken(
+    depository.base58,
+    0,
+    usdt.base58,
+    0,
+    usdtListing.hankoData,
+    usdtListing.actionNonce.toString(),
+  ).send({
     feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
     shouldPollResponse: true,
   });

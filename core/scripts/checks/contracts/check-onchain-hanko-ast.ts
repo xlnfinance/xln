@@ -289,6 +289,7 @@ export const checkOnchainHankoAst = (): void => {
     'EntityProvider.encodeBoardProposalCancelHankoPayload:encodeBoardProposalCancel',
     'EntityProvider.encodeEntityTransferHankoPayload:encodeEntityTransfer',
     'EntityProvider.encodeReleaseControlSharesHankoPayload:encodeReleaseControlShares',
+    'EntityProvider.computeWatchtowerMinSequenceHankoHash:encodeWatchtowerMinSequence',
     'EntityProvider.encodeCancelEntityProviderActionHankoPayload:encodeCancelEntityProviderAction',
   ], 'production HankoEncoding inventory');
 
@@ -360,8 +361,13 @@ export const checkOnchainHankoAst = (): void => {
     // CONTROL lane: each shareholder Entity proves its vote with a current-board
     // Hanko over the proposal digest (reserve-weighted in Depository).
     '_requireReserveControlMajority',
+    // DIVIDEND lane: a numbered entity votes its treasury's dividend shares
+    // with a current-board Hanko (EOAs use a raw 65-byte signature).
+    '_requireDividendShareMajority',
     '_authorizeFoundation',
     'entityTransferTokens', 'cancelEntityProviderAction', 'releaseControlShares',
+    // Watchtower appointment fence is a current-board entity action.
+    'setWatchtowerMinSequence',
   ], 'EntityProvider current-only Hanko verifier consumers');
 
   const verifyConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>

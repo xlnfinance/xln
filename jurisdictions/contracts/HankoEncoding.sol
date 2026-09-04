@@ -228,4 +228,23 @@ library HankoEncoding {
       actionNonce
     );
   }
+
+  function encodeWatchtowerMinSequence(
+    uint256 chainId,
+    address contractAddress,
+    uint256 entityNumber,
+    uint256 boardEpoch,
+    uint256 newMinimum,
+    uint256 actionNonce
+  ) internal pure returns (bytes memory) {
+    return abi.encodePacked(
+      "WATCHTOWER_MIN_SEQUENCE",
+      chainId,
+      contractAddress,
+      entityNumber,
+      boardEpoch,
+      newMinimum,
+      actionNonce
+    );
+  }
 }

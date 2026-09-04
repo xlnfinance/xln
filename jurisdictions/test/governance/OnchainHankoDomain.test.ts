@@ -42,6 +42,7 @@ import {
   deployEntityProvider,
   emptyBatch,
   encodeBatch,
+  entityTreasuryAddress,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
 
@@ -71,8 +72,8 @@ const encodeSingleSignerBoard = (signerAddress: string): string =>
     0,
   ]]);
 
-const entityAddress = (entityNumber: bigint): string =>
-  ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+// Shares are minted to the namespaced treasury, never to address(uint160(N)).
+const entityAddress = (entityNumber: bigint): string => entityTreasuryAddress(entityNumber);
 
 const entityId = (entityNumber: bigint): string =>
   ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
@@ -110,8 +111,8 @@ describe('canonical on-chain Hanko domains', function () {
 
     const encodedBoard = encodeSingleSignerBoard(entitySigner.address);
     const boardHash = ethers.keccak256(encodedBoard);
-    await (await entityProvider.registerNumberedEntity(boardHash)).wait();
-    await (await otherEntityProvider.registerNumberedEntity(boardHash)).wait();
+    await (await entityProvider.registerNumberedEntity(encodedBoard)).wait();
+    await (await otherEntityProvider.registerNumberedEntity(encodedBoard)).wait();
 
     return {
       account,
@@ -781,9 +782,10 @@ describe('canonical on-chain Hanko domains', function () {
     const nextReleaseHash = hashReleaseControlSharesHankoPayload(providerDomain, nextReleaseAuthorization);
     const nextReleaseHanko = buildSingleSignerHanko(numberedEntityId, nextReleaseHash, entityPrivateKey);
     const [controlTokenId] = await entityProvider.getTokenIds(entityNumber);
-    await depository.connect(recipient).registerExternalToken(
+    // Redesign: only the EntityProvider may list; the release below self-registers the share id.
+    await expect(depository.connect(recipient).registerExternalToken(
       2, await entityProvider.getAddress(), controlTokenId,
-    );
+    )).to.be.revertedWithCustomError(depository, 'E2');
     const releaseTx = await entityProvider.releaseControlShares(
       entityNumber,
       depositoryAddress,

@@ -11,4 +11,7 @@ interface IEntityProvider {
     external
     view
     returns (bytes32 entityId, bool success);
+
+  /// @notice Minimum watchtower appointment sequence an entity still honours.
+  function watchtowerMinSequence(bytes32 entityId) external view returns (uint256);
 }

@@ -228,6 +228,11 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     }
   }
 
+  /// @dev Depository.activeDebts is one per-entity counter across ALL tokens.
+  function _ghostActiveCountAll(uint256 a) internal view returns (uint256 count) {
+    for (uint256 ti = 0; ti < 2; ti++) count += _ghostActiveCount(a, TOKENS[ti]);
+  }
+
   /// @dev Exact simulation of Account.enforceDebts (Account.sol:160-229) on
   ///      the ghost queue, given the debtor's real reserve at call time.
   ///      Returns the total paid. Mirrors: zero-amount skip, full-reserve
@@ -303,7 +308,7 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
     DebtQueue storage g = debtGhosts[a][t];
     uint256 len = g.queue.length;
     if (dep.debtOutstanding(entityOf[a], t) != _ghostOutstanding(a, t)) bookDesyncs++;
-    if (dep._activeDebtsByToken(entityOf[a], t) != _ghostActiveCount(a, t)) bookDesyncs++;
+    if (dep.activeDebts(entityOf[a]) != _ghostActiveCountAll(a)) bookDesyncs++;
     if (len == 0) {
       if (dep._debtIndex(entityOf[a], t) != 0) bookDesyncs++;
       return;
@@ -826,7 +831,7 @@ contract DebtLifecycleHandler is CommonBase, StdCheats, StdUtils {
         DebtQueue storage g = debtGhosts[a][t];
         uint256 len = g.queue.length;
         if (dep.debtOutstanding(entityOf[a], t) != _ghostOutstanding(a, t)) violations++;
-        if (dep._activeDebtsByToken(entityOf[a], t) != _ghostActiveCount(a, t)) violations++;
+        if (dep.activeDebts(entityOf[a]) != _ghostActiveCountAll(a)) violations++;
         if (len == 0) {
           if (dep._debtIndex(entityOf[a], t) != 0) violations++;
           continue;

@@ -112,7 +112,8 @@ contract HankoThresholdInvariants is XlnFixture {
     bytes memory hanko = abi.encode(HankoVerifier.HankoBytes({
       placeholders: new bytes32[](0),
       packedSignatures: abi.encodePacked(r1, s1, r2, s2, bits),
-      claims: claims
+      claims: claims,
+      memberSignatures: new bytes[](0)
     }));
 
     (bytes32 entityId, bool ok) = ep.verifyCurrentHankoSignature(hanko, hash);
@@ -167,7 +168,8 @@ contract HankoThresholdInvariants is XlnFixture {
     bytes memory hanko = abi.encode(HankoVerifier.HankoBytes({
       placeholders: placeholders,
       packedSignatures: abi.encodePacked(r1, s1, bits),
-      claims: claims
+      claims: claims,
+      memberSignatures: new bytes[](0)
     }));
 
     (bytes32 entityId, bool ok) = ep.verifyCurrentHankoSignature(hanko, hash);

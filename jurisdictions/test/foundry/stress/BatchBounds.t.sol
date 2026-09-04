@@ -83,13 +83,6 @@ contract BatchBoundsTest is XlnFixture {
     _expectBoundsRevert(0, b); // rejected by TOTAL_OPS, never by the 64 cap
   }
 
-  function test_flashloanCapRejectsNine() public {
-    Batch memory b = XlnHanko.emptyBatch();
-    b.flashloans = new Flashloan[](9);
-    for (uint256 i = 0; i < 9; i++) b.flashloans[i] = Flashloan({ tokenId: T, amount: 0 });
-    _expectBoundsRevert(0, b);
-  }
-
   function test_settlementCapRejectsThirtyThree() public {
     Batch memory b = XlnHanko.emptyBatch();
     b.settlements = new Settlement[](33);

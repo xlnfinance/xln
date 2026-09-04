@@ -79,7 +79,7 @@ Stored as `keccak256(abi.encode(articles))`:
 
 ### Step 1: Entity Registration
 ```solidity
-registerNumberedEntity(boardHash) → entityNumber = 42
+registerNumberedEntity(encodedBoard) → entityNumber = 42   // abi.encode(Board); boardHash = keccak256(encodedBoard)
 ```
 
 ### Step 2: Governance Setup
@@ -168,7 +168,7 @@ executeQuorumReplacement(
 
 ### Entity & Governance
 ```solidity
-registerNumberedEntity(boardHash) → entityNumber
+registerNumberedEntity(encodedBoard) → entityNumber
 setupGovernance(entityNumber, holders[], controlAmounts[], dividendAmounts[], articles)
 ```
 

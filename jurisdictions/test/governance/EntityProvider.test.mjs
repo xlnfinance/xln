@@ -3,6 +3,12 @@ import hre from "hardhat";
 const { ethers } = await hre.network.getOrCreate("hardhat");
 const FOUNDATION_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const FOUNDATION_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+// Redesign: shares (Foundation's included) sit at the namespaced treasury, delays are seconds.
+const ENTITY_TREASURY_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes("XLN_ENTITY_TREASURY_V1"));
+const entityTreasury = (entityNumber) => ethers.getAddress(ethers.dataSlice(ethers.keccak256(
+  ethers.AbiCoder.defaultAbiCoder().encode(["bytes32", "uint256"], [ENTITY_TREASURY_DOMAIN, entityNumber]),
+), 12));
+const ONE_DAY = 24 * 60 * 60;
 
 async function entityProviderFactory() {
   const HankoVerifier = await ethers.getContractFactory("HankoVerifier");
@@ -17,8 +23,8 @@ function singleSignerHanko(hash, privateKey = FOUNDATION_PRIVATE_KEY) {
   const signature = new ethers.SigningKey(privateKey).sign(hash);
   const packed = ethers.concat([signature.r, signature.s, signature.v === 28 ? "0x01" : "0x00"]);
   return ethers.AbiCoder.defaultAbiCoder().encode(
-    ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])"],
-    [[[], packed, [[FOUNDATION_ID, [0], [1], 1, 0, 0, 0]]]],
+    ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])"],
+    [[[], packed, [[FOUNDATION_ID, [0], [1], 1, 0, 0, 0]], []]],
   );
 }
 
@@ -27,18 +33,20 @@ describe("EntityProvider with Automatic Governance", function () {
   let owner, alice, bob, carol;
   let foundationEntityId;
 
-  function singleSignerBoardHash(address) {
-    return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+  // registerNumberedEntity takes the abi-encoded Board preimage; a blind hash is rejected.
+  function singleSignerBoard(address, delays = [0, 0, 0]) {
+    return ethers.AbiCoder.defaultAbiCoder().encode(
       ["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"],
       [[
         1,
         [ethers.zeroPadValue(address, 32)],
         [1],
-        0,
-        0,
-        0
+        ...delays,
       ]]
-    ));
+    );
+  }
+  function singleSignerBoardHash(address, delays = [0, 0, 0]) {
+    return ethers.keccak256(singleSignerBoard(address, delays));
   }
 
   beforeEach(async function () {
@@ -70,81 +78,64 @@ describe("EntityProvider with Automatic Governance", function () {
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(1), 32));
       expect(entity.currentBoardHash).to.equal(singleSignerBoardHash(owner.address));
       expect(entity.registrationBlock).to.be.gt(0);
-      expect(entity.articles.controlDelay).to.equal(1000);
+      expect(entity.articles.controlDelay).to.equal(ONE_DAY);
 
-      // Check foundation governance tokens are controlled by a real deploy-time recipient.
+      // Foundation governance tokens live in the Foundation treasury, not the recipient EOA.
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(1);
       const expectedSupply = 100_000_000_000n;
 
-      expect(await entityProvider.balanceOf(owner.address, controlTokenId)).to.equal(expectedSupply);
-      expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(entityTreasury(1), controlTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(entityTreasury(1), dividendTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(owner.address, controlTokenId)).to.equal(0n);
+      expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(0n);
     });
 
     it("Should authorize foundation functions with the current Foundation Hanko", async function () {
       const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
-      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(100_000_000_000n);
+      expect(await entityProvider.balanceOf(entityTreasury(1), foundationControlTokenId)).to.equal(100_000_000_000n);
 
-      // Should be able to assign names
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
-      await entityProvider.registerNumberedEntity(boardHash);
-
+      // No name registry on chain any more; foundationRegisterEntity is the
+      // Foundation action that stays reachable from a plain fixture.
+      const encodedBoard = singleSignerBoard(alice.address);
+      const customArticles = { controlDelay: 3, dividendDelay: 5, foundationDelay: 7 };
       const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string", "uint256"],
-        ["testname", 2],
+        ["bytes32", "tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)"],
+        [ethers.keccak256(encodedBoard), customArticles],
       ));
       const authorization = await foundationAuthorization(
-        await entityProvider.FOUNDATION_ASSIGN_NAME(),
+        await entityProvider.FOUNDATION_REGISTER_ENTITY(),
         argumentsHash,
       );
-      await expect(entityProvider.connect(alice).assignName(
-        "testname",
-        2,
+      await expect(entityProvider.connect(alice).foundationRegisterEntity(
+        encodedBoard,
+        customArticles,
         authorization.hankoData,
         authorization.actionNonce,
-      )).to.not.revert(ethers);
+      )).to.emit(entityProvider, "EntityRegistered");
+      expect(await entityProvider.nextNumber()).to.equal(3n);
     });
 
-    it("keeps name forward and reverse mappings bijective on replacement", async function () {
-      await entityProvider.registerNumberedEntity(ethers.keccak256(ethers.toUtf8Bytes("board-2")));
-      await entityProvider.registerNumberedEntity(ethers.keccak256(ethers.toUtf8Bytes("board-3")));
-      for (const [name, entityNumber] of [["alpha", 2], ["beta", 3]]) {
-        const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-          ["string", "uint256"],
-          [name, entityNumber],
-        ));
-        const authorization = await foundationAuthorization(
-          await entityProvider.FOUNDATION_ASSIGN_NAME(),
-          argumentsHash,
-        );
-        await entityProvider.assignName(name, entityNumber, authorization.hankoData, authorization.actionNonce);
-      }
-      const transferArgumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string", "uint256"],
-        ["alpha", 3],
-      ));
-      const transferAuthorization = await foundationAuthorization(
-        await entityProvider.FOUNDATION_TRANSFER_NAME(),
-        transferArgumentsHash,
-      );
-      await entityProvider.transferName(
-        "alpha",
-        3,
-        transferAuthorization.hankoData,
-        transferAuthorization.actionNonce,
-      );
-
-      expect(await entityProvider.nameToNumber("beta")).to.equal(0n);
-      expect(await entityProvider.numberToName(2)).to.equal("");
-      expect(await entityProvider.numberToName(3)).to.equal("alpha");
-      expect(await entityProvider.nameToNumber("alpha")).to.equal(3n);
+    it("exposes no name registry (names are a relay/UI concern)", async function () {
+      const surface = entityProvider.interface.fragments
+        .map((fragment) => fragment.name ?? "")
+        .filter((name) => /name/i.test(name));
+      expect(surface).to.deep.equal([]);
+      await entityProvider.registerNumberedEntity(singleSignerBoard(alice.address));
+      const info = await entityProvider.getEntityInfo(ethers.zeroPadValue(ethers.toBeHex(2), 32));
+      expect(info.length).to.equal(4);
+      expect(info[0]).to.equal(true);
+      expect(info[1]).to.equal(singleSignerBoardHash(alice.address));
+      expect(info[2]).to.equal(ethers.ZeroHash);
+      expect(info[3]).to.be.gt(0n);
     });
   });
 
   describe("Automatic Entity Registration", function () {
     it("Should register new numbered entity with automatic governance", async function () {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
+      const encodedBoard = singleSignerBoard(alice.address);
+      const boardHash = ethers.keccak256(encodedBoard);
 
-      const tx = await entityProvider.registerNumberedEntity(boardHash);
+      const tx = await entityProvider.registerNumberedEntity(encodedBoard);
       const receipt = await tx.wait();
 
       // Check for events
@@ -160,19 +151,21 @@ describe("EntityProvider with Automatic Governance", function () {
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
       expect(entity.currentBoardHash).to.equal(boardHash);
-      expect(entity.articles.controlDelay).to.equal(1000);
+      expect(entity.articles.controlDelay).to.equal(ONE_DAY);
 
-      // Check governance tokens were created with fixed supply
+      // Check governance tokens were created with fixed supply in the entity treasury
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-      const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
+      const entityAddress = entityTreasury(entityNumber);
       const expectedSupply = 100_000_000_000n;
+      expect(await entityProvider.balanceOf(ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`), controlTokenId)).to.equal(0n);
 
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
     });
 
     it("Should allow foundation to create entity with custom governance", async function () {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("custom_board"));
+      const encodedBoard = singleSignerBoard(alice.address, [1, 2, 3]);
+      const boardHash = ethers.keccak256(encodedBoard);
       const customArticles = {
         controlDelay: 500,
         dividendDelay: 1500,
@@ -188,7 +181,7 @@ describe("EntityProvider with Automatic Governance", function () {
         argumentsHash,
       );
       await expect(entityProvider.connect(alice).foundationRegisterEntity(
-        boardHash,
+        encodedBoard,
         customArticles,
         authorization.hankoData,
         authorization.actionNonce,
@@ -227,27 +220,24 @@ describe("EntityProvider with Automatic Governance", function () {
     let controlTokenId, dividendTokenId;
 
     beforeEach(async function () {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
-      await entityProvider.registerNumberedEntity(boardHash);
+      await entityProvider.registerNumberedEntity(singleSignerBoard(alice.address));
       entityNumber = 2;
 
       [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
 
       // Note: In real usage, tokens would be distributed via Depository.sol using entity hanko signatures
-      // For testing, we'll just verify tokens exist in entity address
-      const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
+      // For testing, we'll just verify tokens exist in the entity treasury
+      const entityAddress = entityTreasury(entityNumber);
       const expectedSupply = 100_000_000_000n;
 
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
 
-      // For testing transfers, we'll manually transfer some tokens to test accounts
+      // For testing transfers, impersonate the namespaced treasury (redesign) and move some tokens.
       // In production, this would be done via entityTransferTokens() with proper hanko signatures
-      const foundationAddress = ethers.getAddress(`0x${(1).toString(16).padStart(40, '0')}`);
       await ethers.provider.send("hardhat_impersonateAccount", [entityAddress]);
+      await ethers.provider.send("hardhat_setBalance", [entityAddress, ethers.toBeHex(ethers.parseEther("1.0"))]);
       const entitySigner = await ethers.getSigner(entityAddress);
-
-      await owner.sendTransaction({ to: entityAddress, value: ethers.parseEther("1.0") });
 
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, controlTokenId, 1000, "0x");
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, 500, "0x");
@@ -304,11 +294,12 @@ describe("EntityProvider with Automatic Governance", function () {
 
   describe("Governance Information", function () {
     it("Should track governance info correctly", async function () {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
-      await entityProvider.registerNumberedEntity(boardHash);
+      const encodedBoard = singleSignerBoard(alice.address);
+      const boardHash = ethers.keccak256(encodedBoard);
+      await entityProvider.registerNumberedEntity(encodedBoard);
       const entityNumber = 2n;
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-      const entityAddress = ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+      const entityAddress = entityTreasury(entityNumber);
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
       const expectedSupply = 100_000_000_000n;
@@ -325,12 +316,30 @@ describe("EntityProvider with Automatic Governance", function () {
 
   describe("Foundation Access Control", function () {
     it("Should reject calls without a valid current Foundation Hanko", async function () {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
-      await entityProvider.registerNumberedEntity(boardHash);
+      await entityProvider.registerNumberedEntity(singleSignerBoard(alice.address));
 
-      // Alice doesn't have foundation tokens
+      // Alice's key is not the Foundation board: a Hanko she signs over the
+      // right hash still fails the Foundation lane.
+      const encodedBoard = singleSignerBoard(bob.address);
+      const customArticles = { controlDelay: 3, dividendDelay: 5, foundationDelay: 7 };
+      const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ["bytes32", "tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)"],
+        [ethers.keccak256(encodedBoard), customArticles],
+      ));
+      const actionNonce = await entityProvider.entityActionNonces(FOUNDATION_ID) + 1n;
+      const actionHash = await entityProvider.computeFoundationActionHash(
+        await entityProvider.FOUNDATION_REGISTER_ENTITY(), argumentsHash, actionNonce,
+      );
+      const alicePrivateKey = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
       await expect(
-        entityProvider.connect(alice).assignName("testname", 2, singleSignerHanko(ethers.ZeroHash), 1)
+        entityProvider.connect(alice).foundationRegisterEntity(
+          encodedBoard, customArticles, singleSignerHanko(actionHash, alicePrivateKey), actionNonce,
+        )
+      ).to.be.revertedWithCustomError(entityProvider, "InvalidFoundationAuthorization");
+      await expect(
+        entityProvider.connect(alice).foundationRegisterEntity(
+          encodedBoard, customArticles, singleSignerHanko(ethers.ZeroHash), actionNonce,
+        )
       ).to.be.revertedWithCustomError(entityProvider, "InvalidFoundationAuthorization");
     });
   });
@@ -358,8 +367,7 @@ describe("EntityProvider with Automatic Governance", function () {
             [[board.votingThreshold, board.entityIds, board.votingPowers, board.boardChangeDelay, board.controlChangeDelay, board.dividendChangeDelay]]
         );
 
-        const boardHash = ethers.keccak256(encodedBoard);
-        await entityProvider.registerNumberedEntity(boardHash); // This creates Entity #2
+        await entityProvider.registerNumberedEntity(encodedBoard); // This creates Entity #2
 
         const parsedSignature = ethers.Signature.from(signature);
         const packedSignature = ethers.concat([
@@ -369,7 +377,7 @@ describe("EntityProvider with Automatic Governance", function () {
         ]);
         const entityId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
         const hanko = ethers.AbiCoder.defaultAbiCoder().encode(
-          ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])'],
+          ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])'],
           [[[], packedSignature, [[
             entityId,
             [0],
@@ -378,7 +386,7 @@ describe("EntityProvider with Automatic Governance", function () {
             board.boardChangeDelay,
             board.controlChangeDelay,
             board.dividendChangeDelay,
-          ]]]],
+          ]], []]],
         );
         const [recoveredEntityId, valid] = await entityProvider.verifyHankoSignature(hanko, testHash);
         expect(valid).to.equal(true);

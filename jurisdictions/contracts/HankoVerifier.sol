@@ -17,6 +17,7 @@ library HankoVerifier {
   error InvalidHankoFirstMember();
   error InvalidHankoPackedSignatureLength();
   error InvalidHankoPackedSignaturePadding();
+  error InvalidHankoMemberSignatures();
   error NonCanonicalHankoPlaceholder();
   error UnusedHankoPlaceholder();
   error UnusedHankoSignature();
@@ -27,6 +28,12 @@ library HankoVerifier {
   uint256 internal constant MAX_HANKO_CLAIMS = 64;
   uint256 internal constant MAX_HANKO_MEMBERS_PER_CLAIM = 256;
   uint256 internal constant MAX_HANKO_TOTAL_MEMBERS = 1024;
+  // Contract (ERC-1271) members per proof. Each costs one capped STATICCALL.
+  uint256 internal constant MAX_HANKO_MEMBER_SIGNATURES = 8;
+  // Enough for software P-256 today and precompile-backed schemes later; the
+  // batch submitter pays it, and MAX_HANKO_MEMBER_SIGNATURES bounds the total.
+  uint256 internal constant MEMBER_SIGNATURE_GAS_LIMIT = 1_000_000;
+  bytes4 private constant ERC1271_MAGIC = 0x1626ba7e;
   uint256 private constant SECP256K1_HALF_ORDER =
     0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0;
 
@@ -34,6 +41,12 @@ library HankoVerifier {
     bytes32[] placeholders;
     bytes packedSignatures;
     HankoClaim[] claims;
+    // Aligned with placeholders (or empty). A non-empty entry lets the
+    // placeholder, which must then be a CONTRACT address, prove its vote via
+    // ERC-1271 and count its full weight. Signature agility lives here: smart
+    // accounts, P-256/passkey wallets and future post-quantum wrapper contracts
+    // join a board with no new EntityProvider and no new identities.
+    bytes[] memberSignatures;
   }
 
   struct HankoClaim {
@@ -46,6 +59,15 @@ library HankoVerifier {
     uint32 dividendChangeDelay;
   }
 
+  /// @notice Verify a Hanko proof.
+  /// @dev Two shapes, one model ("everything is an entity, an EOA too"):
+  ///      - 65 bytes r||s||v: the EOA's own lazy entity, id = keccak256 of its
+  ///        canonical 1-of-1 board. Same result as the full envelope for that
+  ///        board at a fraction of the calldata; the common wallet case.
+  ///      - abi.encode(HankoBytes): the general recursive proof.
+  ///      ERC-1271 validity is contract state; a wallet that rotates its keys
+  ///      may stop validating old dispute evidence, exactly like a Safe owner in
+  ///      any channel construction. Boards opt in per member.
   function verify(
     mapping(bytes32 => Entity) storage entities,
     bytes calldata hankoData,
@@ -53,13 +75,28 @@ library HankoVerifier {
     bool currentOnly
   ) external view returns (bytes32 entityId, bool success) {
     if (hankoData.length > MAX_HANKO_BYTES) revert HankoProofTooLarge();
+    if (hankoData.length == 65) {
+      address signer = _recoverRaw(hash, hankoData);
+      if (signer == address(0)) return (bytes32(0), false);
+      entityId = singleSignerEntityId(signer);
+      if (!_boardMatches(entities[entityId], entityId, entityId, currentOnly)) return (bytes32(0), false);
+      return (entityId, true);
+    }
     HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+    bytes[] memory memberSignatures = hanko.memberSignatures;
+    if (memberSignatures.length != 0 && memberSignatures.length != hanko.placeholders.length) {
+      revert InvalidHankoMemberSignatures();
+    }
     uint256 signatureCount = _signatureCount(hanko.packedSignatures);
     uint256 totalEntities = hanko.placeholders.length + signatureCount + hanko.claims.length;
     _assertShape(hanko, signatureCount, totalEntities);
-    if (signatureCount == 0 || hanko.claims.length == 0) return (bytes32(0), false);
+    if (hanko.claims.length == 0) return (bytes32(0), false);
 
     _assertUniquePlaceholders(hanko.placeholders);
+    (bool[] memory memberValid, uint256 memberCount, bool membersOk) =
+      _validateMemberSignatures(hash, hanko.placeholders, memberSignatures);
+    if (!membersOk) return (bytes32(0), false);
+    if (signatureCount == 0 && memberCount == 0) return (bytes32(0), false);
     address[] memory signers = _recoverSigners(hash, hanko.placeholders, hanko.packedSignatures, signatureCount);
     if (signers.length != signatureCount) return (bytes32(0), false);
     bool[] memory usedPlaceholders = new bool[](hanko.placeholders.length);
@@ -73,6 +110,7 @@ library HankoVerifier {
       (bytes32 boardHash, uint256 votingPower) = _evaluateClaim(
         hanko,
         signers,
+        memberValid,
         claimIndex,
         totalEntities,
         usedPlaceholders,
@@ -86,6 +124,33 @@ library HankoVerifier {
 
     _assertMinimalProof(hanko, signatureCount, usedPlaceholders, usedSignatures);
     return (hanko.claims[hanko.claims.length - 1].entityId, true);
+  }
+
+  /// @notice Lazy entity id of an EOA: keccak256 of its canonical 1-of-1 board.
+  function singleSignerEntityId(address signer) internal pure returns (bytes32) {
+    bytes32[] memory members = new bytes32[](1);
+    members[0] = bytes32(uint256(uint160(signer)));
+    uint16[] memory powers = new uint16[](1);
+    powers[0] = 1;
+    return keccak256(abi.encode(Board({
+      votingThreshold: 1,
+      entityIds: members,
+      votingPowers: powers,
+      boardChangeDelay: 0,
+      controlChangeDelay: 0,
+      dividendChangeDelay: 0
+    })));
+  }
+
+  /// @dev 65-byte r||s||v (v = 27/28 or 0/1), low-s enforced, zero on failure.
+  function _recoverRaw(bytes32 hash, bytes calldata signature) private pure returns (address) {
+    bytes32 r = bytes32(signature[0:32]);
+    bytes32 s = bytes32(signature[32:64]);
+    uint8 v = uint8(signature[64]);
+    if (v < 27) v += 27;
+    if (v != 27 && v != 28) return address(0);
+    if (uint256(s) > SECP256K1_HALF_ORDER) return address(0);
+    return ecrecover(hash, v, r, s);
   }
 
   function _assertShape(
@@ -132,6 +197,46 @@ library HankoVerifier {
     }
   }
 
+  /// @dev A non-empty memberSignatures[i] asserts that placeholder i is a
+  /// contract account that validates `hash` under ERC-1271. Verification is a
+  /// gas-capped STATICCALL with exactly 32 return bytes; any other outcome fails
+  /// the whole proof (soft, like a bad EOA signature). Empty entries keep the
+  /// legacy zero-power placeholder semantics.
+  function _validateMemberSignatures(
+    bytes32 hash,
+    bytes32[] memory placeholders,
+    bytes[] memory memberSignatures
+  ) private view returns (bool[] memory memberValid, uint256 memberCount, bool ok) {
+    memberValid = new bool[](placeholders.length);
+    if (memberSignatures.length == 0) return (memberValid, 0, true);
+    for (uint256 i = 0; i < placeholders.length; i++) {
+      bytes memory signature = memberSignatures[i];
+      if (signature.length == 0) continue;
+      memberCount++;
+      if (memberCount > MAX_HANKO_MEMBER_SIGNATURES) revert HankoProofTooLarge();
+      uint256 rawId = uint256(placeholders[i]);
+      if (rawId == 0 || rawId > type(uint160).max) return (memberValid, memberCount, false);
+      address member = address(uint160(rawId));
+      if (member.code.length == 0) return (memberValid, memberCount, false);
+      bytes memory callData = abi.encodeWithSelector(ERC1271_MAGIC, hash, signature);
+      bool callOk;
+      uint256 returnSize;
+      bytes32 magic;
+      uint256 gasLimit = MEMBER_SIGNATURE_GAS_LIMIT;
+      assembly ("memory-safe") {
+        let data := add(callData, 0x20)
+        callOk := staticcall(gasLimit, member, data, mload(callData), data, 0x20)
+        returnSize := returndatasize()
+        magic := mload(data)
+      }
+      if (!callOk || returnSize != 32 || magic != bytes32(ERC1271_MAGIC)) {
+        return (memberValid, memberCount, false);
+      }
+      memberValid[i] = true;
+    }
+    return (memberValid, memberCount, true);
+  }
+
   function _recoverSigners(
     bytes32 hash,
     bytes32[] memory placeholders,
@@ -167,6 +272,7 @@ library HankoVerifier {
   function _evaluateClaim(
     HankoBytes memory hanko,
     address[] memory signers,
+    bool[] memory memberValid,
     uint256 claimIndex,
     uint256 totalEntities,
     bool[] memory usedPlaceholders,
@@ -192,6 +298,9 @@ library HankoVerifier {
         for (uint256 priorClaim = 0; priorClaim < claimIndex; priorClaim++) {
           if (hanko.claims[priorClaim].entityId == memberId) revert NonCanonicalHankoPlaceholder();
         }
+        // A contract member that validated `hash` under ERC-1271 votes with
+        // its full weight, exactly like a recovered EOA signer.
+        if (memberValid[index]) votingPower += claim.weights[i];
       } else if (index < placeholderCount + signatureCount) {
         uint256 signerIndex = index - placeholderCount;
         usedSignatures[signerIndex] = true;
@@ -231,6 +340,9 @@ library HankoVerifier {
     })));
   }
 
+  /// @dev Historical boards verify dispute evidence only (`currentOnly=false`)
+  /// and only until their own expiry. Two slots exist so an emergency rotation
+  /// never erases a still-live retired board (see EntityTypes.Entity).
   function _boardMatches(
     Entity storage entity,
     bytes32 entityId,
@@ -239,11 +351,9 @@ library HankoVerifier {
   ) private view returns (bool) {
     if (entity.currentBoardHash == bytes32(0)) return entityId == boardHash;
     if (boardHash == entity.currentBoardHash) return true;
-    return
-      !currentOnly &&
-      boardHash == entity.previousBoardHash &&
-      boardHash != bytes32(0) &&
-      block.timestamp < entity.previousBoardValidUntil;
+    if (currentOnly || boardHash == bytes32(0)) return false;
+    if (boardHash == entity.previousBoardHash && block.timestamp < entity.previousBoardValidUntil) return true;
+    return boardHash == entity.previousBoardHash2 && block.timestamp < entity.previousBoardValidUntil2;
   }
 
   function _assertMinimalProof(
