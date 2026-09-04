@@ -52,6 +52,8 @@ export function SettingsScreen() {
 	const setDensity = useApp(s => s.setDensity);
 	const design = useApp(s => s.design);
 	const setDesign = useApp(s => s.setDesign);
+	const tour = useApp(s => s.tour);
+	const setTour = useApp(s => s.setTour);
 	const setTheme = useApp(s => s.setTheme);
 	const usdPerPx = useApp(s => s.usdPerPx);
 	const setUsdPerPx = useApp(s => s.setUsdPerPx);
@@ -260,6 +262,26 @@ export function SettingsScreen() {
 							{entry.title}
 						</button>
 					))}
+				</span>
+			</div>
+
+			<div className="sect">
+				<h3 className="caps">Tour</h3>
+			</div>
+			<div className="setting first">
+				<div>
+					<div className="t">Guided tour</div>
+					<div className="s">{tour.completed ? 'Finished once. Replay any time on the sandbox.' : tour.index > 0 ? `Paused at step ${tour.index + 1}.` : 'Credit, payment, collateral, swap, dispute: five minutes on a live sandbox.'}</div>
+				</div>
+				<span className="segc">
+					{tour.index > 0 && !tour.completed ? (
+						<button type="button" onClick={() => setTour({ active: true })} data-testid="tour-resume">
+							Resume
+						</button>
+					) : null}
+					<button type="button" onClick={() => setTour({ active: true, index: 0 })} data-testid="tour-replay">
+						{tour.completed || tour.index > 0 ? 'Replay' : 'Start'}
+					</button>
 				</span>
 			</div>
 

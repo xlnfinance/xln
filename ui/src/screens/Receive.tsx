@@ -65,7 +65,7 @@ export function Receive() {
 		<div className="screen fade-in">
 			<div className="screen-header">
 				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
+					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
 						<Icon name="chevronLeft" size={18} />
 					</button>
 					Receive
@@ -87,7 +87,7 @@ export function Receive() {
 							<span className="num">receive up to {formatMoney(receivable, meta.decimals)} instantly</span>
 						</div>
 						<div className="field-row">
-							<input className="input big" placeholder="0.00" inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} />
+							<input className="input big" placeholder="0.00" inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} data-testid="receive-amount" />
 							<TokenPicker
 								tokenId={selectedTokenId}
 								onChange={tokenId => {

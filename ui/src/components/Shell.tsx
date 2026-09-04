@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icons';
 import { Toasts } from './Toasts';
 import { Palette } from './Palette';
+import { Tour } from './Tour';
 import { useExternalWalletSync } from '../runtime/financial/external';
 import { useWallet } from '../runtime/views';
 
@@ -44,6 +45,7 @@ export function Shell({ children }: { children: ReactNode }) {
 	return (
 		<div className="app">
 			<Palette />
+			<Tour />
 			<nav className="rail" aria-label="Primary">
 				<div className="rail-mark" aria-hidden>
 					△
@@ -53,6 +55,7 @@ export function Shell({ children }: { children: ReactNode }) {
 						key={item.to}
 						to={item.to}
 						className={`rail-item${item.match(pathname) ? ' active' : ''}`}
+						data-testid={`nav-${item.label.toLowerCase()}`}
 						aria-label={item.label}
 						title={item.label}
 					>
@@ -66,7 +69,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
 			<nav className={`tabbar${FLOW_ROUTES.has(pathname) ? ' flow' : ''}`} aria-label="Primary">
 				{NAV.map(item => (
-					<NavLink key={item.to} to={item.to} className={`tabbar-item${item.match(pathname) ? ' active' : ''}`}>
+					<NavLink key={item.to} to={item.to} className={`tabbar-item${item.match(pathname) ? ' active' : ''}`} data-testid={`nav-${item.label.toLowerCase()}`}>
 						<Icon name={item.icon} size={20} />
 						<span>{item.label}</span>
 					</NavLink>

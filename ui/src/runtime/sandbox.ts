@@ -4,6 +4,7 @@ import { connectEmbedded, disconnectAdapter, getEmbeddedEnv, requireAdapter } fr
 import { deriveAddress, derivePrivateKeyBytes } from './keys';
 import { DEFAULT_ACCOUNT_DISPUTE_CONFIG, waitFor } from './tx';
 import { jurisdictionRef, planSwap, submitSwapPlan } from './financial/swap';
+import { quotePaymentRoutes, submitPayment } from './financial/payments';
 import type { AccountState, RuntimeAdapterViewFrame } from '@xln/core/api/public/runtime-module';
 import { useApp, type VaultKind } from './store';
 
@@ -469,16 +470,16 @@ async function bootEmbeddedDemoInner(seed: string, options: VaultRuntimeOptions)
 			await waitFor(() => received() >= amount, `demo opening balance ${recipient.label}`, 45_000);
 		}
 
-		step('Funding reserve');
+		step('Funding reserves');
 		// A small Depository reserve for the user so the wallet shows all three
-		// places money lives. Minted through the jurisdiction like any testnet faucet.
-		const selfReserve = usd(1_500);
+		// places money lives, and a hub reserve so Hub One can answer collateral
+		// requests with a real reserve → collateral batch. Minted through the
+		// jurisdiction like any testnet faucet.
 		const reserveOf = (entityId: string): bigint => findReplicaState(env, entityId)?.state?.reserves?.get?.(USDC) ?? 0n;
-		if (reserveOf(self.entityId) < selfReserve) {
-			await sendEntity(self.entityId, self.signerId, [
-				{ type: 'mintReserves', data: { tokenId: USDC, amount: selfReserve - reserveOf(self.entityId) } },
-			]);
-			await waitFor(() => reserveOf(self.entityId) >= selfReserve, 'demo reserve mint', 45_000);
+		for (const [actor, target] of [[self, usd(1_500)], [hub, usd(200_000)]] as Array<[DemoActor, bigint]>) {
+			if (reserveOf(actor.entityId) >= target) continue;
+			await sendEntity(actor.entityId, actor.signerId, [{ type: 'mintReserves', data: { tokenId: USDC, amount: target - reserveOf(actor.entityId) } }]);
+			await waitFor(() => reserveOf(actor.entityId) >= target, `demo reserve mint ${actor.label}`, 45_000);
 		}
 		step('Placing resting orders');
 		// The merchant makes a small two-sided WETH/USDC market on the hub's book,
@@ -558,4 +559,19 @@ export async function connectSandbox(onStep?: (step: string) => void): Promise<D
 		selfLabel: 'Alice',
 		...(onStep ? { onStep } : {}),
 	});
+}
+
+/**
+ * The shop pays an invoice: Meridian Desk sends the user `amount` USDC through
+ * Hub One over the same planner and submit path the Pay screen uses. Lets the
+ * tour show a real inbound payment without a second human.
+ */
+export async function demoMerchantPays(recipientEntityId: string, amount: bigint, description: string): Promise<void> {
+	const demo = topology;
+	if (!demo) throw new Error('The shop exists only on a local demo runtime');
+	const recipient = recipientEntityId.trim().toLowerCase();
+	const routes = await quotePaymentRoutes({ sourceEntityId: demo.merchant.entityId, targetEntityId: recipient, tokenId: USDC, amount });
+	const route = routes[0];
+	if (!route) throw new Error('The shop has no route to you right now');
+	await submitPayment({ entityId: demo.merchant.entityId, signerId: demo.merchant.signerId, targetEntityId: recipient, tokenId: USDC, deliveryMode: 'instant', description, route });
 }

@@ -17,6 +17,7 @@ export function Palette() {
 	const setTheme = useApp(s => s.setTheme);
 	const density = useApp(s => s.density);
 	const setDensity = useApp(s => s.setDensity);
+	const setTour = useApp(s => s.setTour);
 	const wallet = useWallet(entityId);
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState('');
@@ -58,6 +59,7 @@ export function Palette() {
 			{ id: 'lend', title: 'Lending', icon: 'bank', run: go('/lend') },
 			{ id: 'ownership', title: 'Ownership', icon: 'shield', run: go('/ownership') },
 			{ id: 'settings', title: 'Settings', icon: 'settings', run: go('/settings') },
+			{ id: 'tour', title: 'Guided tour', hint: 'five minutes, live sandbox', icon: 'bolt', run: () => setTour({ active: true, index: 0 }), keywords: 'learn tutorial help' },
 			{ id: 'theme', title: theme === 'dark' ? 'Light theme' : 'Dark theme', icon: theme === 'dark' ? 'sun' : 'moon', run: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keywords: 'theme appearance' },
 			{ id: 'density', title: density === 'desk' ? 'Comfort layout' : 'Desk layout', icon: 'filter', run: () => setDensity(density === 'desk' ? 'comfort' : 'desk'), keywords: 'layout density' },
 		];
@@ -73,7 +75,7 @@ export function Palette() {
 			list.push({ id: `pay-${account.counterpartyId}`, title: `Pay ${account.label}`, icon: 'pay', run: go(`/pay?to=${account.counterpartyId}`), keywords: 'send' });
 		}
 		return list;
-	}, [navigate, theme, setTheme, density, setDensity, wallet.accounts]);
+	}, [navigate, theme, setTheme, density, setDensity, setTour, wallet.accounts]);
 
 	const matches = useMemo(() => {
 		const needle = query.trim().toLowerCase();

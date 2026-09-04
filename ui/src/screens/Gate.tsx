@@ -61,6 +61,14 @@ export function Gate() {
 		});
 	};
 
+	/** Same sandbox, with the guided tour open from step one. */
+	const learn = (): void => {
+		void run(async () => {
+			await connectSandbox(step => setBusyStep(step));
+			useApp.getState().setTour({ active: true, index: 0 });
+		});
+	};
+
 	const createVault = (): void => {
 		if (!work) return;
 		void run(async () => {
@@ -226,8 +234,18 @@ export function Gate() {
 						<Icon name="chevronRight" size={16} />
 					</button>
 
+					<button type="button" className="gate-card gate-learn" onClick={learn} data-testid="gate-learn">
+						<span className="gate-card-icon">
+							<Icon name="bolt" size={18} />
+						</span>
+						<span>
+							<span className="gate-card-title">Learn xln in five minutes</span>
+							<span className="gate-card-sub muted">A guided tour on a live sandbox: credit, payment, collateral, a swap and a dispute</span>
+						</span>
+						<Icon name="chevronRight" size={16} />
+					</button>
 					<button type="button" className="btn quiet gate-sandbox" onClick={enterSandbox} data-testid="gate-sandbox">
-						Enter the sandbox: three actors, funded, instant
+						Enter the sandbox without the tour
 					</button>
 				</div>
 			)}

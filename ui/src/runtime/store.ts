@@ -33,6 +33,7 @@ const VAULTS_KEY = 'xln-ui-vaults';
 const ACTIVE_VAULT_KEY = 'xln-ui-active-vault';
 const THEME_KEY = 'xln-ui-theme';
 const DENSITY_KEY = 'xln-ui-density';
+const TOUR_KEY = 'xln-ui-tour';
 const USD_PER_PX_KEY = 'xln-ui-usd-per-px';
 const SCALE_MODE_KEY = 'xln-ui-scale-mode';
 /** Track the auto scale fits the largest balance into: the hero bar on desktop, the screen width on a phone. */
@@ -132,6 +133,10 @@ type AppState = {
 	design: DesignPrefs;
 	setDesign: (patch: Partial<DesignPrefs>) => void;
 
+	/** The guided tour: which step is open, whether it ever finished. Progress persists per device. */
+	tour: { active: boolean; index: number; completed: boolean };
+	setTour: (patch: Partial<{ active: boolean; index: number; completed: boolean }>) => void;
+
 	/** Dollars per pixel for every bar. Persisted; drives the --ppu CSS variable. */
 	usdPerPx: number;
 	/** `auto` fits the largest bar on Home to the track; `fixed` pins the user's own scale. */
@@ -197,6 +202,20 @@ export const useApp = create<AppState>((set, get) => ({
 		const design = { ...get().design, ...patch };
 		saveDesign(design);
 		set({ design });
+	},
+
+	tour: (() => {
+		try {
+			const raw = JSON.parse(localStorage.getItem(TOUR_KEY) || '{}') as { index?: number; completed?: boolean };
+			return { active: false, index: Number.isInteger(raw.index) ? Number(raw.index) : 0, completed: raw.completed === true };
+		} catch {
+			return { active: false, index: 0, completed: false };
+		}
+	})(),
+	setTour: patch => {
+		const tour = { ...get().tour, ...patch };
+		localStorage.setItem(TOUR_KEY, JSON.stringify({ index: tour.index, completed: tour.completed }));
+		set({ tour });
 	},
 
 	density: (localStorage.getItem(DENSITY_KEY) === 'desk' ? 'desk' : 'comfort') as Density,

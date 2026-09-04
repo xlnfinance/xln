@@ -58,7 +58,7 @@ export function Sovereignty() {
 		<div className="screen fade-in">
 			<div className="screen-header">
 				<span className="screen-title">
-					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back">
+					<button type="button" className="icon-btn" onClick={() => navigate(-1)} aria-label="Back" data-testid="back">
 						<Icon name="chevronLeft" size={18} />
 					</button>
 					Sovereignty
