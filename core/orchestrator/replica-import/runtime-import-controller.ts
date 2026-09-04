@@ -42,10 +42,11 @@ export const createRuntimeImportController = (deps: RuntimeImportControllerDeps)
 
   const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
     const candidates: RuntimeImportCandidate[] = deps.hubChildren.flatMap(child => {
+      if (child.engine !== 'typescript') return [];
       const runtimeId = runtimeIdFromChild(child);
       return runtimeId ? [{
         label: child.name,
-        engine: child.engine === 'rust' ? 'rust' : 'ts',
+        engine: 'ts',
         wsUrl: buildRuntimeNodeRpcUrl(
           deps.publicWsBaseUrl,
           isLoopbackPublicBase,
