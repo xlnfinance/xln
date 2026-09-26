@@ -21814,22 +21814,19 @@ const frameHtlcInfra = (
   originated: readonly PreparedOriginated[],
   included: readonly EntityTx[],
 ): Result<HtlcFrameInfra, EntityError> => {
-  const observer = onlineObserver(infra);
   const payments = included.filter((tx): tx is HtlcPaymentTx => tx.type === "htlcPayment");
-  const entries = htlcFrameTxs(included) ? inboundHtlcEntries({ ...v, online: observer.online }, included) : ok([]);
-  return chain(entries, (prepared) =>
+  const inbound = htlcFrameTxs(included)
+    ? materializeInbound({ ...v, online: onlineOf(infra) }, included)
+    : ok({ entries: [], asked: [] });
+  return chain(inbound, ({ entries, asked }) =>
     map(traverse(payments, htlcPaymentTxHash), (hashes) => {
       const kept = new Set(hashes);
       const final = originated.filter((o) => kept.has(o.txHash));
-      final.forEach((o) => observer.online(o.nextHopEntityId));
-      const peerAssertions = [...observer.observed.keys()]
-        .toSorted(asc)
-        .map((entityId) => ({ entityId, online: observer.observed.get(entityId) === true }));
       return {
         gossipProfiles: frameProfiles(infra?.profiles ?? [], final),
-        peerAssertions,
+        peerAssertions: peerAssertionsOf(infra, [...asked, ...final.map((o) => o.nextHopEntityId)]),
         originated: final,
-        entries: prepared,
+        entries,
       };
     }),
   );
@@ -21929,272 +21926,852 @@ const frameInfraOf = (frame: EntityFrame): Result<HtlcFrameInfra, EntityError> =
 // ---- og inbound HTLC: entity/paybook/{materialize-context,prepared-context-validation,lifecycle}.ts, tx/handlers/account/committed-{htlc,frame}-followups.ts ----
 /** og PreparedHtlcInboundBinding: the committed Account facts of one inbound lock. */
 export type PreparedHtlcBinding = {
-  readonly fromEntityId: string; readonly toEntityId: string; readonly domain: Domain; readonly accountFrameHash: string; readonly accountHeight: number; readonly envelopeHash: string;
-  readonly hashlock: string; readonly tokenId: number; readonly amount: bigint; readonly timelock: bigint; readonly revealBeforeHeight: number;
+  readonly fromEntityId: string;
+  readonly toEntityId: string;
+  readonly domain: Domain;
+  readonly accountFrameHash: string;
+  readonly accountHeight: number;
+  readonly envelopeHash: string;
+  readonly hashlock: string;
+  readonly tokenId: number;
+  readonly amount: bigint;
+  readonly timelock: bigint;
+  readonly revealBeforeHeight: number;
 };
-export type HtlcRejectReason = "ciphertext_invalid" | "decrypt_failed" | "next_hop_account_missing" | "next_hop_offline" | "insufficient_capacity" | "fee_below_policy" | "deadline_unsafe";
+export type HtlcRejectReason =
+  | "ciphertext_invalid"
+  | "decrypt_failed"
+  | "next_hop_account_missing"
+  | "next_hop_offline"
+  | "insufficient_capacity"
+  | "fee_below_policy"
+  | "deadline_unsafe";
 export type PreparedHtlcOutcome =
-  | { readonly kind: "forward"; readonly nextHopEntityId: string; readonly forwardAmount: bigint; readonly innerEnvelope: HtlcEnvelope }
-  | { readonly kind: "final"; readonly secret: string; readonly description?: string | undefined; readonly startedAtMs?: number | undefined }
+  | {
+      readonly kind: "forward";
+      readonly nextHopEntityId: string;
+      readonly forwardAmount: bigint;
+      readonly innerEnvelope: HtlcEnvelope;
+    }
+  | {
+      readonly kind: "final";
+      readonly secret: string;
+      readonly description?: string | undefined;
+      readonly startedAtMs?: number | undefined;
+    }
   | { readonly kind: "reject"; readonly reason: HtlcRejectReason };
-/** og PreparedHtlcEntry: the proposer's decrypted outcome for one inbound lock, committed in entityContext.htlc.entries. */
+/**
+ * og PreparedHtlcEntry: the proposer's decrypted outcome for one inbound lock, committed in entityContext.htlc.entries.
+ */
 export type PreparedHtlcEntry = { readonly binding: PreparedHtlcBinding; readonly outcome: PreparedHtlcOutcome };
 export const preparedHtlcKey = (b: PreparedHtlcBinding): string => `${b.accountFrameHash}:${b.hashlock}`;
-const HTLC_REJECT_REASONS: ReadonlySet<string> = new Set(["ciphertext_invalid", "decrypt_failed", "next_hop_account_missing", "next_hop_offline", "insufficient_capacity", "fee_below_policy", "deadline_unsafe"]);
-/** og validatePreparedEntries: exact fields, canonical ids and domain, strictly sorted binding keys, a well-formed outcome. */
-export const preparedEntryOf = (b: Binary, previousKey: string): PreparedHtlcEntry | null => {
-  const isRecord = (v: unknown): v is { readonly [k: string]: unknown } => v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map);
-  const keys = (v: { readonly [k: string]: unknown }): string => Object.keys(v).sort().join(",");
-  const id = (v: unknown): boolean => typeof v === "string" && /^0x[0-9a-f]{64}$/.test(v);
-  if (!isRecord(b) || keys(b) !== "binding,outcome" || !isRecord(b["binding"]) || !isRecord(b["outcome"])) return null;
-  const x = b["binding"], o = b["outcome"];
-  if (keys(x) !== "accountFrameHash,accountHeight,amount,domain,envelopeHash,fromEntityId,hashlock,revealBeforeHeight,timelock,toEntityId,tokenId") return null;
-  if (![x["fromEntityId"], x["toEntityId"], x["accountFrameHash"], x["envelopeHash"], x["hashlock"]].every(id)) return null;
-  const height = x["accountHeight"], token = x["tokenId"], reveal = x["revealBeforeHeight"], domain = x["domain"];
-  if (!Number.isSafeInteger(height) || (height as number) < 1 || !Number.isSafeInteger(token) || (token as number) < 0 || (token as number) > MAX_TOKEN_ID) return null;
-  if (typeof x["amount"] !== "bigint" || x["amount"] <= 0n || typeof x["timelock"] !== "bigint" || x["timelock"] <= 0n || !Number.isSafeInteger(reveal) || (reveal as number) < 1) return null;
-  const dom = isRecord(domain) ? domain : undefined, canonical = dom === undefined ? undefined : domainOf({ chainId: Number(dom["chainId"]), depositoryAddress: String(dom["depositoryAddress"] || "") });
-  if (dom === undefined || canonical === undefined || !canonical.ok || canonical.value.depositoryAddress !== dom["depositoryAddress"]) return null;
-  const key = `${String(x["accountFrameHash"])}:${String(x["hashlock"])}`;
-  if (key <= previousKey) return null;
-  const outcomeOk = o["kind"] === "forward"
-    ? keys(o) === "forwardAmount,innerEnvelope,kind,nextHopEntityId" && id(o["nextHopEntityId"]) && typeof o["forwardAmount"] === "bigint" && o["forwardAmount"] > 0n && o["forwardAmount"] <= (x["amount"] as bigint) && htlcEnvelopeHash(o["innerEnvelope"]) !== null
-    : o["kind"] === "final"
-      ? Object.keys(o).every((k) => ["kind", "secret", "description", "startedAtMs"].includes(k)) && id(o["secret"])
-        && (o["description"] === undefined || (typeof o["description"] === "string" && utf8(o["description"]).byteLength <= HTLC_NOTE_MAX_BYTES))
-        && (o["startedAtMs"] === undefined || (Number.isSafeInteger(o["startedAtMs"]) && (o["startedAtMs"] as number) >= 0))
-      : o["kind"] === "reject" && keys(o) === "kind,reason" && HTLC_REJECT_REASONS.has(String(o["reason"]));
-  return outcomeOk ? (b as unknown as PreparedHtlcEntry) : null;
+const HTLC_REJECT_REASONS: ReadonlySet<string> = new Set<HtlcRejectReason>([
+  "ciphertext_invalid",
+  "decrypt_failed",
+  "next_hop_account_missing",
+  "next_hop_offline",
+  "insufficient_capacity",
+  "fee_below_policy",
+  "deadline_unsafe",
+]);
+const isFields = (v: unknown): v is Fields =>
+  v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map);
+const fieldNames = (v: Fields): string => Object.keys(v).toSorted().join(",");
+const BINDING_FIELDS = [
+  "accountFrameHash",
+  "accountHeight",
+  "amount",
+  "domain",
+  "envelopeHash",
+  "fromEntityId",
+  "hashlock",
+  "revealBeforeHeight",
+  "timelock",
+  "toEntityId",
+  "tokenId",
+].join(",");
+const FINAL_FIELDS: ReadonlySet<string> = new Set(["kind", "secret", "description", "startedAtMs"]);
+const positiveSafeInt = (v: unknown): boolean => Number.isSafeInteger(v) && (v as number) >= 1;
+/** A committed domain must already be canonical: the same bytes domainOf would produce. */
+const canonicalDomainField = (v: unknown): boolean => {
+  if (!isFields(v)) return false;
+  const canonical = domainOf({
+    chainId: Number(v["chainId"]),
+    depositoryAddress: String(v["depositoryAddress"] || ""),
+  });
+  return canonical.ok && canonical.value.depositoryAddress === v["depositoryAddress"];
 };
-/** The proposer's (or a validator's) inbound decryption view: the pre-frame Entity, the frame clock, the Entity keypair and the liveness it asserts. */
-type HtlcInboundView = { readonly state: EntityState; readonly replicas: Replicas; readonly timestamp: number; readonly publicKey: string; readonly privateKey: string | undefined; readonly online: (entityId: string) => boolean };
-const preparedReject = (binding: PreparedHtlcBinding, reason: HtlcRejectReason): PreparedHtlcEntry => ({ binding, outcome: { kind: "reject", reason } });
-/** og buildInboundBinding + computeHtlcEnvelopeContextHash: a lock without an opaque layer, or whose id is not its hashlock, fails the whole frame. */
-const inboundBinding = (m: Extract<AccountPeerInput, { kind: "ack_frame" }>, lock: HtlcLockTx): Result<{ readonly binding: PreparedHtlcBinding; readonly contextHash: string }, EntityError> => {
+const bindingSound = (x: Fields): boolean =>
+  fieldNames(x) === BINDING_FIELDS &&
+  [x["fromEntityId"], x["toEntityId"], x["accountFrameHash"], x["envelopeHash"], x["hashlock"]].every(isWordId) &&
+  positiveSafeInt(x["accountHeight"]) &&
+  Number.isSafeInteger(x["tokenId"]) &&
+  (x["tokenId"] as number) >= 0 &&
+  (x["tokenId"] as number) <= MAX_TOKEN_ID &&
+  typeof x["amount"] === "bigint" &&
+  x["amount"] > 0n &&
+  typeof x["timelock"] === "bigint" &&
+  x["timelock"] > 0n &&
+  positiveSafeInt(x["revealBeforeHeight"]) &&
+  canonicalDomainField(x["domain"]);
+/** A forward never grows the amount; a final outcome carries a canonical secret; a reject names a known reason. */
+const outcomeSound = (o: Fields, amount: bigint): boolean => {
+  switch (o["kind"]) {
+    case "forward":
+      return (
+        fieldNames(o) === "forwardAmount,innerEnvelope,kind,nextHopEntityId" &&
+        isWordId(o["nextHopEntityId"]) &&
+        typeof o["forwardAmount"] === "bigint" &&
+        o["forwardAmount"] > 0n &&
+        o["forwardAmount"] <= amount &&
+        htlcEnvelopeHash(o["innerEnvelope"]) !== null
+      );
+    case "final":
+      return (
+        Object.keys(o).every((k) => FINAL_FIELDS.has(k)) &&
+        isWordId(o["secret"]) &&
+        (o["description"] === undefined ||
+          (typeof o["description"] === "string" && utf8(o["description"]).byteLength <= HTLC_NOTE_MAX_BYTES)) &&
+        (o["startedAtMs"] === undefined ||
+          (Number.isSafeInteger(o["startedAtMs"]) && (o["startedAtMs"] as number) >= 0))
+      );
+    case "reject":
+      return fieldNames(o) === "kind,reason" && HTLC_REJECT_REASONS.has(String(o["reason"]));
+    default:
+      return false;
+  }
+};
+/**
+ * og validatePreparedEntries: exact fields, canonical ids and domain, strictly sorted binding keys, a well-formed
+ * outcome.
+ */
+export const preparedEntryOf = (b: Binary, previousKey: string): PreparedHtlcEntry | null => {
+  if (!isFields(b) || fieldNames(b) !== "binding,outcome") return null;
+  const x = b["binding"];
+  const o = b["outcome"];
+  if (!isFields(x) || !isFields(o) || !bindingSound(x)) return null;
+  const key = `${String(x["accountFrameHash"])}:${String(x["hashlock"])}`;
+  return key > previousKey && outcomeSound(o, x["amount"] as bigint) ? (b as unknown as PreparedHtlcEntry) : null;
+};
+/**
+ * The proposer's (or a validator's) inbound decryption view: the pre-frame Entity, the frame clock, the Entity keypair
+ * and the liveness it asserts.
+ */
+type HtlcInboundView = {
+  readonly state: EntityState;
+  readonly replicas: Replicas;
+  readonly timestamp: number;
+  readonly publicKey: string;
+  readonly privateKey: string | undefined;
+  readonly online: (entityId: string) => boolean;
+};
+type AckFrameInput = Extract<AccountPeerInput, { kind: "ack_frame" }>;
+const preparedReject = (binding: PreparedHtlcBinding, reason: HtlcRejectReason): PreparedHtlcEntry => ({
+  binding,
+  outcome: { kind: "reject", reason },
+});
+/**
+ * og buildInboundBinding + computeHtlcEnvelopeContextHash: a lock without an opaque layer, or whose id is not its
+ * hashlock, fails the whole frame.
+ */
+const inboundBinding = (
+  m: AckFrameInput,
+  lock: HtlcLockTx,
+): Result<{ readonly binding: PreparedHtlcBinding; readonly contextHash: string }, EntityError> => {
   const envelopeHash = htlcEnvelopeHash(lock.envelope);
   if (envelopeHash === null) return htlcReject(`HTLC_PREPARED_LAYER_REQUIRED:${lock.lockId}`);
-  if (lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase()) return htlcReject(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
-  return chain(mapErr(domainOf(m.domain), (): EntityError => ({ _tag: "htlc_payment", code: "HTLC_PREPARED_DOMAIN_INVALID" })), (domain) => {
+  if (lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase()) {
+    return htlcReject(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
+  }
+  const domain = mapErr(domainOf(m.domain), (): EntityError => ({
+    _tag: "htlc_payment",
+    code: "HTLC_PREPARED_DOMAIN_INVALID",
+  }));
+  return chain(domain, (canonical) => {
     const binding: PreparedHtlcBinding = {
-      fromEntityId: m.fromEntityId.toLowerCase(), toEntityId: m.toEntityId.toLowerCase(), domain, accountFrameHash: m.frame.stateHash.toLowerCase(), accountHeight: Number(m.frame.height), envelopeHash,
-      hashlock: lock.hashlock.toLowerCase(), tokenId: Number(lock.tokenId), amount: lock.amount, timelock: lock.timelock, revealBeforeHeight: Number(lock.revealBeforeHeight),
+      fromEntityId: m.fromEntityId.toLowerCase(),
+      toEntityId: m.toEntityId.toLowerCase(),
+      domain: canonical,
+      accountFrameHash: m.frame.stateHash.toLowerCase(),
+      accountHeight: Number(m.frame.height),
+      envelopeHash,
+      hashlock: lock.hashlock.toLowerCase(),
+      tokenId: Number(lock.tokenId),
+      amount: lock.amount,
+      timelock: lock.timelock,
+      revealBeforeHeight: Number(lock.revealBeforeHeight),
     };
-    return map(fromOnion(htlcEnvelopeContextHash({ fromEntityId: binding.fromEntityId, toEntityId: binding.toEntityId, domain, hashlock: binding.hashlock, tokenId: binding.tokenId, amount: binding.amount, timelock: binding.timelock, revealBeforeHeight: binding.revealBeforeHeight })),
-      (contextHash) => ({ binding, contextHash }));
-  });
-};
-/** og validateEnvelope on a decoded layer: a final layer needs a canonical secret, a note of at most 256 characters and a positive start time. */
-const envelopeValid = (layer: OnionLayer): boolean => ("finalRecipient" in layer
-  ? /^0x[0-9a-f]{64}$/.test(layer.secret) && (layer.description === undefined || layer.description.length <= 256) && (layer.startedAtMs === undefined || layer.startedAtMs > 0)
-  : layer.nextHop.length > 0 && BigInt(layer.forwardAmount) > 0n);
-/** og calculateHopFee with the hub policy (routingFeePPM ?? 1, baseFee ?? 0n) at the Account's directional utilization. */
-const hubForwardFee = (state: EntityState, amount: bigint, out: bigint, inn: bigint): bigint => {
-  const cfg = state.committed["hubRebalanceConfig"] as { readonly [k: string]: unknown } | null | undefined;
-  const ppm = directionalFeePpm(sanitizeFeePpm(cfg?.["routingFeePPM"] ?? 1, 1), out, inn), base = typeof cfg?.["baseFee"] === "bigint" && cfg["baseFee"] > 0n ? cfg["baseFee"] : 0n;
-  return base + ((amount < 0n ? 0n : amount) * BigInt(sanitizeFeePpm(ppm, 1))) / 1_000_000n;
-};
-/** og materializeForwardOutcome: the next hop's Account, liveness, committed capacity, the hub fee and a safe onward deadline, in that order. */
-const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer: Extract<OnionLayer, { nextHop: string }>): PreparedHtlcEntry => {
-  const nextHopEntityId = layer.nextHop.toLowerCase(), child = v.replicas.get(nextHopEntityId as EntityId);
-  if (child === undefined) return preparedReject(binding, "next_hop_account_missing");
-  if (!v.online(nextHopEntityId)) return preparedReject(binding, "next_hop_offline");
-  const tk = String(binding.tokenId) as TokenId, body = child.state, byLeft = isLeft(v.state.id, replicaId(child)), forwardAmount = BigInt(layer.forwardAmount);
-  if (!body.account.deltas.has(tk)) return preparedReject(binding, "insufficient_capacity");
-  const d = getDelta(body.account, tk), out = outCapacity(d, byLeft, holds(body, tk, byLeft)), inn = outCapacity(d, !byLeft, holds(body, tk, !byLeft));
-  if (out < forwardAmount) return preparedReject(binding, "insufficient_capacity");
-  if (binding.amount - forwardAmount < hubForwardFee(v.state, binding.amount, out, inn)) return preparedReject(binding, "fee_below_policy");
-  if (binding.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) <= BigInt(v.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS) || binding.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS <= Number(entityJHeight(v.state))) return preparedReject(binding, "deadline_unsafe");
-  return { binding, outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope } };
-};
-/** og materializeInboundEntry: decrypt the layer addressed to this Entity; only an AEAD failure is a peer-rejectable outcome. */
-const inboundEntry = (v: HtlcInboundView, m: Extract<AccountPeerInput, { kind: "ack_frame" }>, lock: HtlcLockTx): Result<PreparedHtlcEntry, EntityError> => chain(inboundBinding(m, lock), ({ binding, contextHash }) => {
-  if (v.privateKey === undefined) return htlcReject("HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID");
-  const plain = decryptOpaqueHtlc(lock.envelope as HtlcEnvelope, v.publicKey, v.privateKey, contextHash);
-  if (!plain.ok) return plain.error.code === "HTLC_CIPHERTEXT_AUTHENTICATION_FAILED" ? ok(preparedReject(binding, "decrypt_failed")) : fromOnion(plain);
-  const layer = decodeOnionLayer(plain.value);
-  if (!layer.ok || !envelopeValid(layer.value)) return ok(preparedReject(binding, "ciphertext_invalid"));
-  const l = layer.value;
-  return ok("finalRecipient" in l ? { binding, outcome: { kind: "final", secret: l.secret, ...opt("description", l.description), ...opt("startedAtMs", l.startedAtMs) } } : forwardOutcome(v, binding, l));
-});
-/** og collectInboundEntries + canonicalizeInboundEntries: every enveloped lock in a peer's Account frame, sorted by binding key; a repeat collapses, a contradiction fails. */
-export const inboundHtlcEntries = (v: HtlcInboundView, txs: readonly EntityTx[]): Result<readonly PreparedHtlcEntry[], EntityError> => {
-  const locks = txs.flatMap((tx) => (tx.type === "accountInput" && tx.data.kind === "ack_frame" ? tx.data.frame.txs.flatMap((a) => (a.type === "htlc_lock" && a.envelope !== undefined ? [[tx.data as Extract<AccountPeerInput, { kind: "ack_frame" }>, a] as const] : [])) : []));
-  return chain(traverse(locks, ([m, lock]) => inboundEntry(v, m, lock)), (entries) => {
-    const sorted = [...entries].sort((a, b) => asc(preparedHtlcKey(a.binding), preparedHtlcKey(b.binding))), out: PreparedHtlcEntry[] = [];
-    for (const e of sorted) {
-      const prev = out[out.length - 1];
-      if (prev === undefined || preparedHtlcKey(prev.binding) !== preparedHtlcKey(e.binding)) { out.push(e); continue; }
-      if (canon(prev) !== canon(e)) return htlcReject(`HTLC_PREPARED_BINDING_CONFLICT:${e.binding.accountFrameHash}:${e.binding.hashlock}`);
-    }
-    return ok(out);
+    const context = htlcEnvelopeContextHash({
+      fromEntityId: binding.fromEntityId,
+      toEntityId: binding.toEntityId,
+      domain: canonical,
+      hashlock: binding.hashlock,
+      tokenId: binding.tokenId,
+      amount: binding.amount,
+      timelock: binding.timelock,
+      revealBeforeHeight: binding.revealBeforeHeight,
+    });
+    return map(fromOnion(context), (contextHash) => ({ binding, contextHash }));
   });
 };
 /**
- * og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair (start.ts startInboundLayerPriming, replay.ts assertHtlcPreparedInfraContext):
- * every proposal and every replayed frame needs this validator's Entity key, and it must derive the committed public key, whatever the frame's txs.
- * Plain Errors in og, so the whole input fails. An Entity with no committed public key never exists in og (registration always provisions one).
+ * og validateEnvelope on a decoded layer: a final layer needs a canonical secret, a note of at most 256 characters and
+ * a positive start time.
+ */
+const envelopeValid = (layer: OnionLayer): boolean =>
+  "finalRecipient" in layer
+    ? WORD32.test(layer.secret) &&
+      (layer.description === undefined || layer.description.length <= 256) &&
+      (layer.startedAtMs === undefined || layer.startedAtMs > 0)
+    : layer.nextHop.length > 0 && BigInt(layer.forwardAmount) > 0n;
+/**
+ * og calculateHopFee with the hub policy (routingFeePPM ?? 1, baseFee ?? 0n) at the Account's directional utilization.
+ */
+const hubForwardFee = (state: EntityState, amount: bigint, out: bigint, inn: bigint): bigint => {
+  const cfg = state.committed["hubRebalanceConfig"] as Fields | null | undefined;
+  const ppm = directionalFeePpm(sanitizeFeePpm(cfg?.["routingFeePPM"] ?? 1, 1), out, inn);
+  const baseFee = cfg?.["baseFee"];
+  const base = typeof baseFee === "bigint" && baseFee > 0n ? baseFee : 0n;
+  return base + ((amount < 0n ? 0n : amount) * BigInt(sanitizeFeePpm(ppm, 1))) / 1_000_000n;
+};
+/** The onward lock must still expire, in time and in J height, safely after this frame. */
+const onwardDeadlineSafe = (v: HtlcInboundView, binding: PreparedHtlcBinding): boolean =>
+  binding.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) > BigInt(v.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS) &&
+  binding.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS > Number(entityJHeight(v.state));
+/**
+ * og materializeForwardOutcome: the next hop's Account, liveness, committed capacity, the hub fee and a safe onward
+ * deadline, in that order.
+ */
+const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer: ForwardLayer): PreparedHtlcEntry => {
+  const nextHopEntityId = layer.nextHop.toLowerCase();
+  const child = v.replicas.get(nextHopEntityId as EntityId);
+  if (child === undefined) return preparedReject(binding, "next_hop_account_missing");
+  if (!v.online(nextHopEntityId)) return preparedReject(binding, "next_hop_offline");
+  const tk = String(binding.tokenId) as TokenId;
+  const body = child.state;
+  const byLeft = isLeft(v.state.id, replicaId(child));
+  const forwardAmount = BigInt(layer.forwardAmount);
+  if (!body.account.deltas.has(tk)) return preparedReject(binding, "insufficient_capacity");
+  const d = getDelta(body.account, tk);
+  const out = outCapacity(d, byLeft, holds(body, tk, byLeft));
+  const inn = outCapacity(d, !byLeft, holds(body, tk, !byLeft));
+  switch (true) {
+    case out < forwardAmount:
+      return preparedReject(binding, "insufficient_capacity");
+    case binding.amount - forwardAmount < hubForwardFee(v.state, binding.amount, out, inn):
+      return preparedReject(binding, "fee_below_policy");
+    case !onwardDeadlineSafe(v, binding):
+      return preparedReject(binding, "deadline_unsafe");
+    default:
+      return {
+        binding,
+        outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope },
+      };
+  }
+};
+/**
+ * One inbound lock's prepared entry, and the next hop whose liveness deciding it asked (a forward over an existing
+ * Account).
+ */
+type InboundMaterialized = { readonly entry: PreparedHtlcEntry; readonly asked: readonly string[] };
+const decidedLayer = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer: OnionLayer): InboundMaterialized => {
+  if ("finalRecipient" in layer) {
+    const outcome: PreparedHtlcOutcome = {
+      kind: "final",
+      secret: layer.secret,
+      ...opt("description", layer.description),
+      ...opt("startedAtMs", layer.startedAtMs),
+    };
+    return { entry: { binding, outcome }, asked: [] };
+  }
+  const nextHop = layer.nextHop.toLowerCase();
+  return { entry: forwardOutcome(v, binding, layer), asked: v.replicas.has(nextHop as EntityId) ? [nextHop] : [] };
+};
+/**
+ * og materializeInboundEntry: decrypt the layer addressed to this Entity; only an AEAD failure is a peer-rejectable
+ * outcome.
+ */
+const inboundEntry = (
+  v: HtlcInboundView,
+  m: AckFrameInput,
+  lock: HtlcLockTx,
+): Result<InboundMaterialized, EntityError> =>
+  chain(inboundBinding(m, lock), ({ binding, contextHash }) => {
+    const refused = (reason: HtlcRejectReason): InboundMaterialized => ({
+      entry: preparedReject(binding, reason),
+      asked: [],
+    });
+    if (v.privateKey === undefined) return htlcReject("HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID");
+    const plain = decryptOpaqueHtlc(lock.envelope as HtlcEnvelope, v.publicKey, v.privateKey, contextHash);
+    if (!plain.ok) {
+      return plain.error.code === "HTLC_CIPHERTEXT_AUTHENTICATION_FAILED"
+        ? ok(refused("decrypt_failed"))
+        : fromOnion(plain);
+    }
+    const layer = decodeOnionLayer(plain.value);
+    return ok(
+      layer.ok && envelopeValid(layer.value) ? decidedLayer(v, binding, layer.value) : refused("ciphertext_invalid"),
+    );
+  });
+/** Every enveloped lock in the frame's peer Account frames, with the frame that carried it. */
+const inboundLocks = (txs: readonly EntityTx[]): readonly (readonly [AckFrameInput, HtlcLockTx])[] =>
+  txs.flatMap((tx) => {
+    if (tx.type !== "accountInput" || tx.data.kind !== "ack_frame") return [];
+    const m = tx.data;
+    return m.frame.txs.flatMap((a) => (a.type === "htlc_lock" && a.envelope !== undefined ? [[m, a] as const] : []));
+  });
+/** Sorted by binding key; a repeated binding collapses into one entry, a contradicting one fails. */
+const collapsedEntries = (entries: readonly PreparedHtlcEntry[]): Result<readonly PreparedHtlcEntry[], EntityError> => {
+  const sorted = entries.toSorted((a, b) => asc(preparedHtlcKey(a.binding), preparedHtlcKey(b.binding)));
+  return foldResult(sorted, [] as readonly PreparedHtlcEntry[], (out, e) => {
+    const prev = out[out.length - 1];
+    if (prev === undefined || preparedHtlcKey(prev.binding) !== preparedHtlcKey(e.binding)) return ok([...out, e]);
+    return canon(prev) === canon(e)
+      ? ok(out)
+      : htlcReject(`HTLC_PREPARED_BINDING_CONFLICT:${e.binding.accountFrameHash}:${e.binding.hashlock}`);
+  });
+};
+/** The frame's inbound entries, and every next hop whose liveness they asked. */
+const materializeInbound = (
+  v: HtlcInboundView,
+  txs: readonly EntityTx[],
+): Result<{ readonly entries: readonly PreparedHtlcEntry[]; readonly asked: readonly string[] }, EntityError> =>
+  chain(traverse(inboundLocks(txs), ([m, lock]) => inboundEntry(v, m, lock)), (materialized) =>
+    map(collapsedEntries(materialized.map((x) => x.entry)), (entries) => ({
+      entries,
+      asked: materialized.flatMap((x) => x.asked),
+    })),
+  );
+/**
+ * og collectInboundEntries + canonicalizeInboundEntries: every enveloped lock in a peer's Account frame, sorted by
+ * binding key; a repeat collapses, a contradiction fails.
+ */
+export const inboundHtlcEntries = (
+  v: HtlcInboundView,
+  txs: readonly EntityTx[],
+): Result<readonly PreparedHtlcEntry[], EntityError> => map(materializeInbound(v, txs), (m) => m.entries);
+/**
+ * og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair (start.ts startInboundLayerPriming, replay.ts
+ * assertHtlcPreparedInfraContext): every proposal and every replayed frame needs this validator's Entity key, and it
+ * must derive the committed public key, whatever the frame's txs. Plain Errors in og, so the whole input fails. An
+ * Entity with no committed public key never exists in og (registration always provisions one).
  */
 const entityKeypair = (state: EntityState, ctx: EntityContext): Result<void, EntityError> => {
   const publicKey = state.committed["entityEncryptionPublicKey"];
   if (publicKey === undefined) return ok(undefined);
   const privateKey = ctx.htlc?.encryptionPrivateKey;
-  if (privateKey === undefined || privateKey === "") return invariant(`ENTITY_ENCRYPTION_PRIVATE_KEY_UNAVAILABLE:entity=${state.id}`);
-  const checked = chain(x25519KeyBytes(String(publicKey), "HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID"), (pub) => chain(x25519KeyBytes(privateKey, "HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID"),
-    (priv): Result<void, OnionError> => (bytesToHex(x25519.getPublicKey(priv)) === bytesToHex(pub) ? ok(undefined) : onionErr("HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH"))));
-  return checked.ok ? ok(undefined) : invariant(checked.error.code);
+  if (privateKey === undefined || privateKey === "")
+    return invariant(`ENTITY_ENCRYPTION_PRIVATE_KEY_UNAVAILABLE:entity=${state.id}`);
+  const checked = chain(x25519KeyBytes(String(publicKey), "HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID"), (pub) =>
+    chain(x25519KeyBytes(privateKey, "HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID"), (priv): Result<void, OnionError> =>
+      bytesToHex(x25519.getPublicKey(priv)) === bytesToHex(pub)
+        ? ok(undefined)
+        : onionErr("HTLC_ENTITY_ENCRYPTION_KEYPAIR_MISMATCH"),
+    ),
+  );
+  return mapErr(checked, (e): EntityError => ({ _tag: "entity_invariant", reason: e.code }));
 };
-const htlcFrameTxs = (txs: readonly EntityTx[]): boolean => txs.some((tx) => tx.type === "htlcPayment" || (tx.type === "accountInput" && tx.data.kind === "ack_frame" && tx.data.frame.txs.some((a) => a.type === "htlc_lock" && a.envelope !== undefined)));
-/** og entityEncryptionPrivateKey (registration/entity-creation/crypto.ts): HKDF-SHA256(seed, salt=entityId, "xln:entity-encryption:v1"). */
-export const entityEncryptionPrivateKey = (seed: string, entity: string): string => bytesToHex(hkdf(sha256, hexToBytes(seed), utf8(lower(entity)), utf8("xln:entity-encryption:v1"), 32)).toLowerCase();
-/** og createOnlineObservation: a peer without a known Profile is offline and never asserted; every other answer is recorded once. */
-const onlineObserver = (infra: HtlcProposerInfra | undefined): { readonly online: (entityId: string) => boolean; readonly observed: Map<string, boolean> } => {
-  const observed = new Map<string, boolean>(), known = new Set((infra?.profiles ?? []).map((b) => lower((b as { readonly entityId?: unknown } | null)?.entityId)));
-  return {
-    observed,
-    online: (entityId) => {
-      const id = entityId.toLowerCase(), seen = observed.get(id);
-      if (seen !== undefined) return seen;
-      if (!known.has(id)) return false;
-      const up = infra?.online?.(id) === true;
-      observed.set(id, up);
-      return up;
-    },
+const htlcFrameTxs = (txs: readonly EntityTx[]): boolean =>
+  txs.some((tx) => tx.type === "htlcPayment") || inboundLocks(txs).length > 0;
+/**
+ * og entityEncryptionPrivateKey (registration/entity-creation/crypto.ts): HKDF-SHA256(seed, salt=entityId,
+ * "xln:entity-encryption:v1").
+ */
+export const entityEncryptionPrivateKey = (seed: string, entity: string): string =>
+  bytesToHex(hkdf(sha256, hexToBytes(seed), utf8(lower(entity)), utf8("xln:entity-encryption:v1"), 32)).toLowerCase();
+const knownPeers = (infra: HtlcProposerInfra | undefined): ReadonlySet<string> =>
+  new Set((infra?.profiles ?? []).map(profileEntityId));
+/**
+ * og createOnlineObservation's answer: a peer without a known Profile is offline; any other takes the proposer's
+ * liveness view.
+ */
+const onlineOf = (infra: HtlcProposerInfra | undefined): ((entityId: string) => boolean) => {
+  const known = knownPeers(infra);
+  return (entityId) => {
+    const id = entityId.toLowerCase();
+    return known.has(id) && infra?.online?.(id) === true;
   };
 };
-// og paybook writes (books/book-intents.ts) and returned Account work (AccountTxTarget): the Entity-local hashlock-keyed payment machine.
+/** og's committed peer assertions: every known peer the frame asked about, once, sorted, with its answer. */
+const peerAssertionsOf = (infra: HtlcProposerInfra | undefined, asked: readonly string[]): readonly Binary[] => {
+  const known = knownPeers(infra);
+  const ids = [...new Set(asked.map((id) => id.toLowerCase()))].filter((id) => known.has(id));
+  return ids.toSorted(asc).map((entityId) => ({ entityId, online: infra?.online?.(entityId) === true }));
+};
+// og paybook writes (books/book-intents.ts) and returned Account work (AccountTxTarget): the Entity-local
+// hashlock-keyed payment machine.
 /** One Account tx the Entity returns to an Account after a committed frame (og AccountTxTarget). */
 export type AccountTxTarget = { readonly accountId: string; readonly tx: AccountTx };
 /** `runtimeEvents`: og's Htlc* candidateEffects runtime events, in emission order. */
-export type PaybookFlow = { readonly paybook: Paybook; readonly queue: readonly AccountTxTarget[]; readonly runtimeEvents?: readonly EntityRuntimeEvent[] | undefined };
-const emitRuntime = (f: PaybookFlow, eventName: string, data: { readonly [k: string]: unknown }): PaybookFlow => ({ ...f, runtimeEvents: [...(f.runtimeEvents ?? []), { eventName, data }] });
+export type PaybookFlow = {
+  readonly paybook: Paybook;
+  readonly queue: readonly AccountTxTarget[];
+  readonly runtimeEvents?: readonly EntityRuntimeEvent[] | undefined;
+};
+const emitRuntime = (f: PaybookFlow, eventName: string, data: Fields): PaybookFlow => ({
+  ...f,
+  runtimeEvents: [...(f.runtimeEvents ?? []), { eventName, data }],
+});
+type HtlcEventSubject = {
+  readonly entityId: string;
+  readonly fromEntity?: string | undefined;
+  readonly toEntity?: string | undefined;
+  readonly hashlock: string;
+  readonly secret?: string | undefined;
+  readonly lockId?: string | undefined;
+  readonly amount?: bigint | undefined;
+  readonly tokenId?: number | undefined;
+  readonly jurisdictionId?: string | undefined;
+  readonly description?: string | undefined;
+};
 /**
- * og protocol/htlc/events.ts buildHtlcReceivedEventPayload / buildHtlcFinalizedEventPayload common fields, in og's key order. og's jurisdictionId
- * is `config.jurisdiction.name` (else the Runtime's activeJurisdiction), trimmed; an empty one is omitted.
+ * og protocol/htlc/events.ts buildHtlcReceivedEventPayload / buildHtlcFinalizedEventPayload common fields, in og's key
+ * order. og's jurisdictionId is `config.jurisdiction.name` (else the Runtime's activeJurisdiction), trimmed; an empty
+ * one is omitted.
  */
-const htlcEventFields = (a: { readonly entityId: string; readonly fromEntity?: string | undefined; readonly toEntity?: string | undefined; readonly hashlock: string; readonly secret?: string | undefined; readonly lockId?: string | undefined; readonly amount?: bigint | undefined; readonly tokenId?: number | undefined; readonly jurisdictionId?: string | undefined; readonly description?: string | undefined }): { readonly [k: string]: unknown } => ({
-  entityId: a.entityId, ...(a.fromEntity ? { fromEntity: a.fromEntity } : {}), ...(a.toEntity ? { toEntity: a.toEntity } : {}), hashlock: a.hashlock, ...(a.secret ? { secret: a.secret } : {}), ...(a.lockId ? { lockId: a.lockId } : {}),
-  ...(a.amount !== undefined ? { amount: a.amount.toString() } : {}), ...(a.tokenId !== undefined ? { tokenId: a.tokenId } : {}), ...(a.jurisdictionId ? { jurisdictionId: a.jurisdictionId } : {}), ...(a.description ? { description: a.description } : {}),
+const htlcEventFields = (a: HtlcEventSubject): Fields => ({
+  entityId: a.entityId,
+  ...opt("fromEntity", a.fromEntity || undefined),
+  ...opt("toEntity", a.toEntity || undefined),
+  hashlock: a.hashlock,
+  ...opt("secret", a.secret || undefined),
+  ...opt("lockId", a.lockId || undefined),
+  ...opt("amount", a.amount?.toString()),
+  ...opt("tokenId", a.tokenId),
+  ...opt("jurisdictionId", a.jurisdictionId || undefined),
+  ...opt("description", a.description || undefined),
 });
 /** og jurisdictionIdFor / getJurisdictionId: the Entity's jurisdiction name, trimmed. */
-const htlcJurisdictionId = (state: EntityState, active?: string): string => String(state.jurisdictionConfig?.name || active || "").trim();
+const htlcJurisdictionId = (state: EntityState, active?: string): string =>
+  String(state.jurisdictionConfig?.name || active || "").trim();
 /** og buildHtlcReceivedTimingFields / buildHtlcFinalizedTimingFields. */
-const receivedTiming = (startedAtMs: number | undefined, receivedAtMs: number): { readonly [k: string]: number } => (!startedAtMs ? { receivedAtMs } : { startedAtMs, receivedAtMs, elapsedMs: Math.max(1, receivedAtMs - startedAtMs) });
+const receivedTiming = (startedAtMs: number | undefined, receivedAtMs: number): { readonly [k: string]: number } =>
+  !startedAtMs ? { receivedAtMs } : { startedAtMs, receivedAtMs, elapsedMs: Math.max(1, receivedAtMs - startedAtMs) };
 const finalizedTiming = (startedAtMs: number | undefined, finalizedAtMs: number): { readonly [k: string]: number } => {
   if (!startedAtMs) return { finalizedAtMs };
   const elapsedMs = Math.max(1, finalizedAtMs - startedAtMs);
   return { startedAtMs, finalizedAtMs, elapsedMs, finalizedInMs: elapsedMs };
 };
-const putPaybookEntry = (f: PaybookFlow, entry: PaybookEntry): PaybookFlow => ({ ...f, paybook: { ...f.paybook, entries: mapSet(f.paybook.entries, entry.hashlock, entry) } });
-const pushTarget = (f: PaybookFlow, accountId: string, tx: AccountTx): PaybookFlow => ({ ...f, queue: [...f.queue, { accountId, tx }] });
+const putPaybookEntry = (f: PaybookFlow, entry: PaybookEntry): PaybookFlow => ({
+  ...f,
+  paybook: { ...f.paybook, entries: mapSet(f.paybook.entries, entry.hashlock, entry) },
+});
+const pushTarget = (f: PaybookFlow, accountId: string, tx: AccountTx): PaybookFlow => ({
+  ...f,
+  queue: [...f.queue, { accountId, tx }],
+});
 /** og programPaymentTermination. */
-const terminatePaybookEntry = (f: PaybookFlow, hashlock: string): PaybookFlow => (f.paybook.entries.has(hashlock) ? { ...f, paybook: { ...f.paybook, entries: mapDelete(f.paybook.entries, hashlock) } } : f);
-const hasInbound = (e: PaybookEntry): boolean => typeof e.inboundEntity === "string" && e.inboundEntity.length > 0;
-/** og applyCommittedHtlcResolveFollowup (both roles, per committed frame): a committed secret closes the route leg it resolves. */
-export const resolveFollowup = (f0: PaybookFlow, peer: string, tx: Extract<WireAccountTx, { type: "htlc_resolve" }>, self = "", timestamp = 0, jurisdictionId = ""): Result<PaybookFlow, EntityError> => {
+const terminatePaybookEntry = (f: PaybookFlow, hashlock: string): PaybookFlow =>
+  f.paybook.entries.has(hashlock)
+    ? { ...f, paybook: { ...f.paybook, entries: mapDelete(f.paybook.entries, hashlock) } }
+    : f;
+/** The Entity a route came in from, when it came in from one. */
+const inboundOf = (e: PaybookEntry): string | undefined =>
+  typeof e.inboundEntity === "string" && e.inboundEntity.length > 0 ? e.inboundEntity : undefined;
+const hasInbound = (e: PaybookEntry): boolean => inboundOf(e) !== undefined;
+type ResolvedLegs = {
+  readonly inbound: boolean;
+  readonly originatedOutbound: boolean;
+  readonly forwardedOutbound: boolean;
+};
+/** Which legs of a route a committed secret from `peer` resolves. */
+const resolvedLegs = (route: PaybookEntry, peer: string): ResolvedLegs => {
+  const cp = peer.toLowerCase();
+  const outbound = route.outboundEntity?.toLowerCase() === cp;
+  const originated = route.originated === true;
+  return {
+    inbound: route.inboundEntity?.toLowerCase() === cp,
+    originatedOutbound: outbound && (originated || !hasInbound(route)),
+    forwardedOutbound:
+      outbound &&
+      hasInbound(route) &&
+      typeof route.outboundEntity === "string" &&
+      route.outboundEntity.length > 0 &&
+      !originated,
+  };
+};
+/**
+ * og applyCommittedHtlcResolveFollowup (both roles, per committed frame): a committed secret closes the route leg it
+ * resolves.
+ */
+export const resolveFollowup = (
+  f0: PaybookFlow,
+  peer: string,
+  tx: Extract<WireAccountTx, { type: "htlc_resolve" }>,
+  self = "",
+  timestamp = 0,
+  jurisdictionId = "",
+): Result<PaybookFlow, EntityError> => {
   if (tx.outcome !== "secret") return ok(f0);
   const hashlock = hashHtlcSecret(tx.secret);
   if (hashlock !== tx.lockId.toLowerCase()) return htlcReject(`PAYBOOK_RESOLVE_ID_MISMATCH:${tx.lockId}:${hashlock}`);
   const route = f0.paybook.entries.get(hashlock);
   if (route === undefined) return ok(f0);
-  const cp = peer.toLowerCase(), inbound = route.inboundEntity?.toLowerCase() === cp, outbound = route.outboundEntity?.toLowerCase() === cp;
-  const originatedOutbound = outbound && (route.originated === true || !hasInbound(route));
-  const forwardedOutbound = outbound && hasInbound(route) && typeof route.outboundEntity === "string" && route.outboundEntity.length > 0 && route.originated !== true;
-  if (!inbound && !originatedOutbound && !forwardedOutbound) return ok(f0);
-  const common = { lockId: tx.lockId, amount: route.amount, tokenId: route.tokenId, jurisdictionId, description: route.description };
-  const received = inbound ? emitRuntime(f0, "HtlcReceived", { ...htlcEventFields({ ...common, entityId: self, fromEntity: peer, toEntity: self, hashlock }), ...receivedTiming(route.startedAtMs, timestamp) }) : f0;
-  if (forwardedOutbound) return ok(received);
+  const legs = resolvedLegs(route, peer);
+  if (!legs.inbound && !legs.originatedOutbound && !legs.forwardedOutbound) return ok(f0);
+  const common = {
+    lockId: tx.lockId,
+    amount: route.amount,
+    tokenId: route.tokenId,
+    jurisdictionId,
+    description: route.description,
+  };
+  const receivedFields = htlcEventFields({ ...common, entityId: self, fromEntity: peer, toEntity: self, hashlock });
+  const received = legs.inbound
+    ? emitRuntime(f0, "HtlcReceived", { ...receivedFields, ...receivedTiming(route.startedAtMs, timestamp) })
+    : f0;
+  if (legs.forwardedOutbound) return ok(received);
   // og emitOriginatedHtlcFinalized: only the committed outbound leg of an originated payment finalizes it
-  const f = originatedOutbound && !(route.originated !== true && hasInbound(route)) && route.hashlock === tx.lockId
-    ? emitRuntime(received, "HtlcFinalized", { ...htlcEventFields({ ...common, entityId: self, fromEntity: self, toEntity: route.outboundEntity, hashlock: route.hashlock, secret: tx.secret }), ...finalizedTiming(route.startedAtMs, timestamp) }) : received;
+  const finalizedFields = htlcEventFields({
+    ...common,
+    entityId: self,
+    fromEntity: self,
+    toEntity: route.outboundEntity,
+    hashlock: route.hashlock,
+    secret: tx.secret,
+  });
+  const f =
+    legs.originatedOutbound && route.hashlock === tx.lockId
+      ? emitRuntime(received, "HtlcFinalized", { ...finalizedFields, ...finalizedTiming(route.startedAtMs, timestamp) })
+      : received;
+  // a self-cycle (originated, and back in) stays until both its legs settle
   if (route.originated === true && hasInbound(route)) {
-    const settled: PaybookEntry = { ...route, ...(inbound ? { inboundSettled: true as const } : {}), ...(originatedOutbound ? { outboundSettled: true as const } : {}) };
+    const settled: PaybookEntry = {
+      ...route,
+      ...(legs.inbound ? { inboundSettled: true as const } : {}),
+      ...(legs.originatedOutbound ? { outboundSettled: true as const } : {}),
+    };
     if (settled.inboundSettled !== true || settled.outboundSettled !== true) return ok(putPaybookEntry(f, settled));
   }
   return ok(terminatePaybookEntry(f, hashlock));
 };
 /** The committed Account facts a receiver checks a prepared entry against (og ctx.input + the committed frame). */
-export type InboundLockFacts = { readonly from: string; readonly to: string; readonly domain: Domain; readonly frame: Pick<AccountFrame, "height" | "stateHash"> };
-/** og applyCommittedHtlcLockFollowup (receiver only): consume the frame's prepared entry once, check its binding, then reject, pay out or forward. */
-export const lockFollowup = (f: PaybookFlow, m: InboundLockFacts, lock: HtlcLockTx, entries: ReadonlyMap<string, PreparedHtlcEntry>, consumed: Set<string>, timestamp: number, self = ""): Result<PaybookFlow, EntityError> => {
-  const envelopeHash = htlcEnvelopeHash(lock.envelope), frame = m.frame;
-  if (envelopeHash === null) return htlcReject(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
-  const key = `${frame.stateHash.toLowerCase()}:${lock.lockId.toLowerCase()}`, prepared = entries.get(key);
-  if (prepared === undefined) return htlcReject(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
-  const b = prepared.binding, bindingKey = preparedHtlcKey(b);
-  if (consumed.has(bindingKey)) return htlcReject(`HTLC_PREPARED_CONTEXT_REUSED:${bindingKey}`);
-  consumed.add(bindingKey);
+export type InboundLockFacts = {
+  readonly from: string;
+  readonly to: string;
+  readonly domain: Domain;
+  readonly frame: Pick<AccountFrame, "height" | "stateHash">;
+};
+/** The key a committed lock's prepared entry is filed under. */
+const lockEntryKey = (frame: Pick<AccountFrame, "stateHash">, lock: HtlcLockTx): string =>
+  `${frame.stateHash.toLowerCase()}:${lock.lockId.toLowerCase()}`;
+/** The prepared binding must be exactly the committed lock: its Account, frame, envelope, domain and lock terms. */
+const bindingMatchesLock = (
+  b: PreparedHtlcBinding,
+  m: InboundLockFacts,
+  lock: HtlcLockTx,
+  envelopeHash: string,
+): boolean => {
   const domain = domainOf(m.domain);
-  if (b.fromEntityId !== m.from.toLowerCase() || b.toEntityId !== m.to.toLowerCase() || b.accountHeight !== Number(frame.height) || b.accountFrameHash !== frame.stateHash.toLowerCase() || b.envelopeHash !== envelopeHash
-    || !domain.ok || domain.value.chainId !== b.domain.chainId || domain.value.depositoryAddress !== b.domain.depositoryAddress || b.hashlock !== lock.hashlock.toLowerCase() || b.tokenId !== Number(lock.tokenId)
-    || b.amount !== lock.amount || b.timelock !== lock.timelock || b.revealBeforeHeight !== Number(lock.revealBeforeHeight)) return htlcReject(`HTLC_PREPARED_BINDING_MISMATCH:${lock.lockId}`);
-  if (lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase()) return htlcReject(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
-  const inboundEntity = m.from.toLowerCase(), existing = f.paybook.entries.get(lock.hashlock), outcome = prepared.outcome;
-  const closesSelfCycle = outcome.kind === "final" && existing?.originated === true && !hasInbound(existing);
-  if ((existing !== undefined && !closesSelfCycle) || outcome.kind === "reject") {
-    const reason = existing !== undefined ? "hashlock_already_active" : outcome.kind === "reject" ? outcome.reason : "hashlock_already_active";
-    return ok(pushTarget(f, inboundEntity, { type: "htlc_resolve", lockId: lock.lockId, outcome: "error", reason }));
+  return (
+    b.fromEntityId === m.from.toLowerCase() &&
+    b.toEntityId === m.to.toLowerCase() &&
+    b.accountHeight === Number(m.frame.height) &&
+    b.accountFrameHash === m.frame.stateHash.toLowerCase() &&
+    b.envelopeHash === envelopeHash &&
+    domain.ok &&
+    domain.value.chainId === b.domain.chainId &&
+    domain.value.depositoryAddress === b.domain.depositoryAddress &&
+    b.hashlock === lock.hashlock.toLowerCase() &&
+    b.tokenId === Number(lock.tokenId) &&
+    b.amount === lock.amount &&
+    b.timelock === lock.timelock &&
+    b.revealBeforeHeight === Number(lock.revealBeforeHeight)
+  );
+};
+type ForwardOutcome = Extract<PreparedHtlcOutcome, { kind: "forward" }>;
+type FinalOutcome = Extract<PreparedHtlcOutcome, { kind: "final" }>;
+/** What a receiver does with a bound lock: refuse it back to its sender, pay out the secret, or forward it onward. */
+type LockAction =
+  | { readonly kind: "refuse"; readonly reason: string }
+  | { readonly kind: "pay"; readonly outcome: FinalOutcome; readonly existing: PaybookEntry | undefined }
+  | { readonly kind: "forward"; readonly outcome: ForwardOutcome };
+/**
+ * A hashlock already in the paybook refuses the lock, unless a final layer closes this Entity's own originated
+ * self-cycle.
+ */
+const lockAction = (existing: PaybookEntry | undefined, outcome: PreparedHtlcOutcome): LockAction => {
+  const active: LockAction = { kind: "refuse", reason: "hashlock_already_active" };
+  switch (outcome.kind) {
+    case "reject":
+      return existing !== undefined ? active : { kind: "refuse", reason: outcome.reason };
+    case "final":
+      return existing === undefined || (existing.originated === true && !hasInbound(existing))
+        ? { kind: "pay", outcome, existing }
+        : active;
+    case "forward":
+      return existing === undefined ? { kind: "forward", outcome } : active;
   }
-  if (outcome.kind === "final") {
-    const paid = closesSelfCycle && existing !== undefined ? putPaybookEntry(f, { ...existing, inboundEntity })
-      : putPaybookEntry(f, { hashlock: lock.hashlock, tokenId: Number(lock.tokenId), amount: lock.amount, ...opt("startedAtMs", outcome.startedAtMs), ...(outcome.description ? { description: outcome.description } : {}), inboundEntity, createdTimestamp: timestamp });
-    return ok(pushTarget(paid, inboundEntity, { type: "htlc_resolve", lockId: lock.lockId, outcome: "secret", secret: outcome.secret }));
+};
+/**
+ * Act on a bound lock: refuse it back with its reason, record and pay out the secret, or record the route and lock
+ * onward.
+ */
+const actOnLock = (
+  f: PaybookFlow,
+  inboundEntity: string,
+  lock: HtlcLockTx,
+  outcome: PreparedHtlcOutcome,
+  timestamp: number,
+  self: string,
+): PaybookFlow => {
+  const action = lockAction(f.paybook.entries.get(lock.hashlock), outcome);
+  switch (action.kind) {
+    case "refuse": {
+      const refusal: AccountTx = { type: "htlc_resolve", lockId: lock.lockId, outcome: "error", reason: action.reason };
+      return pushTarget(f, inboundEntity, refusal);
+    }
+    case "pay": {
+      const { outcome: paid, existing } = action;
+      const entry: PaybookEntry =
+        existing !== undefined
+          ? { ...existing, inboundEntity }
+          : {
+              hashlock: lock.hashlock,
+              tokenId: Number(lock.tokenId),
+              amount: lock.amount,
+              ...opt("startedAtMs", paid.startedAtMs),
+              ...opt("description", paid.description || undefined),
+              inboundEntity,
+              createdTimestamp: timestamp,
+            };
+      const resolve: AccountTx = { type: "htlc_resolve", lockId: lock.lockId, outcome: "secret", secret: paid.secret };
+      return pushTarget(putPaybookEntry(f, entry), inboundEntity, resolve);
+    }
+    case "forward": {
+      const forward = action.outcome;
+      const entry: PaybookEntry = {
+        hashlock: lock.hashlock,
+        tokenId: Number(lock.tokenId),
+        amount: lock.amount,
+        inboundEntity,
+        outboundEntity: forward.nextHopEntityId,
+        pendingFee: lock.amount - forward.forwardAmount,
+        createdTimestamp: timestamp,
+      };
+      const onward: AccountTx = {
+        type: "htlc_lock",
+        lockId: lock.hashlock,
+        hashlock: lock.hashlock,
+        tokenId: lock.tokenId,
+        amount: forward.forwardAmount,
+        timelock: lock.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS),
+        revealBeforeHeight: lock.revealBeforeHeight - BigInt(HTLC_REVEAL_DELTA_BLOCKS),
+        envelope: forward.innerEnvelope,
+      };
+      const accepted = emitRuntime(putPaybookEntry(f, entry), "HtlcForwardAccepted", {
+        entityId: self,
+        hashlock: lock.hashlock,
+      });
+      return pushTarget(accepted, forward.nextHopEntityId, onward);
+    }
   }
-  const forwarding = emitRuntime(putPaybookEntry(f, { hashlock: lock.hashlock, tokenId: Number(lock.tokenId), amount: lock.amount, inboundEntity, outboundEntity: outcome.nextHopEntityId, pendingFee: lock.amount - outcome.forwardAmount, createdTimestamp: timestamp }),
-    "HtlcForwardAccepted", { entityId: self, hashlock: lock.hashlock });
-  return ok(pushTarget(forwarding, outcome.nextHopEntityId, {
-    type: "htlc_lock", lockId: lock.hashlock, hashlock: lock.hashlock, tokenId: lock.tokenId, amount: outcome.forwardAmount, timelock: lock.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS),
-    revealBeforeHeight: lock.revealBeforeHeight - BigInt(HTLC_REVEAL_DELTA_BLOCKS), envelope: outcome.innerEnvelope,
-  }));
+};
+/**
+ * og applyCommittedHtlcLockFollowup (receiver only): the frame's prepared entry, not consumed before, must bind the
+ * lock exactly; then reject, pay out or forward.
+ */
+export const lockFollowup = (
+  f: PaybookFlow,
+  m: InboundLockFacts,
+  lock: HtlcLockTx,
+  entries: ReadonlyMap<string, PreparedHtlcEntry>,
+  consumed: ReadonlySet<string>,
+  timestamp: number,
+  self = "",
+): Result<PaybookFlow, EntityError> => {
+  const envelopeHash = htlcEnvelopeHash(lock.envelope);
+  if (envelopeHash === null) return htlcReject(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
+  const prepared = entries.get(lockEntryKey(m.frame, lock));
+  if (prepared === undefined) return htlcReject(`HTLC_PREPARED_CONTEXT_REQUIRED:${lock.lockId}`);
+  const bindingKey = preparedHtlcKey(prepared.binding);
+  switch (true) {
+    case consumed.has(bindingKey):
+      return htlcReject(`HTLC_PREPARED_CONTEXT_REUSED:${bindingKey}`);
+    case !bindingMatchesLock(prepared.binding, m, lock, envelopeHash):
+      return htlcReject(`HTLC_PREPARED_BINDING_MISMATCH:${lock.lockId}`);
+    case lock.lockId.toLowerCase() !== lock.hashlock.toLowerCase():
+      return htlcReject(`PAYBOOK_LOCK_ID_MUST_EQUAL_HASHLOCK:${lock.lockId}:${lock.hashlock}`);
+    default:
+      return ok(actOnLock(f, m.from.toLowerCase(), lock, prepared.outcome, timestamp, self));
+  }
 };
 /** og HTLC_SECRET_ACK_TIMEOUT_MS (paybook/lifecycle.ts). */
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 120_000;
-/** og applyHtlcTimeoutFollowups: a failed lock fails its route upstream (downstream_error) or ends an originated payment; the entry terminates. */
+/**
+ * og applyHtlcTimeoutFollowups: a failed lock fails its route upstream (downstream_error) or ends an originated
+ * payment; the entry terminates.
+ */
 export const timeoutFollowup = (f: PaybookFlow, hashlock: string, self = ""): PaybookFlow => {
   const route = f.paybook.entries.get(hashlock);
   if (route === undefined) return f;
-  const failed = hasInbound(route) ? pushTarget(f, route.inboundEntity as string, { type: "htlc_resolve", lockId: hashlock, outcome: "error", reason: "downstream_error" })
-    : emitRuntime(f, "HtlcFailed", { hashlock, lockId: hashlock, reason: "timeout", entityId: self, ...(route.description ? { description: route.description } : {}) });
+  const upstream = inboundOf(route);
+  const failed =
+    upstream !== undefined
+      ? pushTarget(f, upstream, {
+          type: "htlc_resolve",
+          lockId: hashlock,
+          outcome: "error",
+          reason: "downstream_error",
+        })
+      : emitRuntime(f, "HtlcFailed", {
+          hashlock,
+          lockId: hashlock,
+          reason: "timeout",
+          entityId: self,
+          ...opt("description", route.description || undefined),
+        });
   return terminatePaybookEntry(failed, hashlock);
 };
-/** og applyHtlcSecretFollowups: record the preimage once, earn the pending fee, pass the secret upstream and arm its ACK deadline, or end an originated payment. */
-export const secretFollowup = (f: PaybookFlow, hashlock: string, secret: string, timestamp: number, self = "", jurisdictionId = ""): PaybookFlow => {
+/**
+ * og applyHtlcSecretFollowups: record the preimage once, earn the pending fee, pass the secret upstream and arm its ACK
+ * deadline, or end an originated payment.
+ */
+export const secretFollowup = (
+  f: PaybookFlow,
+  hashlock: string,
+  secret: string,
+  timestamp: number,
+  self = "",
+  jurisdictionId = "",
+): PaybookFlow => {
   const route = f.paybook.entries.get(hashlock);
   if (route === undefined || (route.secret !== undefined && route.secret !== "")) return f;
-  const earns = route.pendingFee !== undefined && route.pendingFee !== 0n;
-  const { pendingFee: _fee, ...rest } = route, learned: PaybookEntry = earns ? { ...rest, secret } : { ...route, secret };
-  const earned: PaybookFlow = earns ? { ...f, paybook: { ...f.paybook, feesEarned: f.paybook.feesEarned + (route.pendingFee as bigint) } } : f;
-  if (hasInbound(route)) {
-    const armed: PaybookEntry = { ...learned, secretAckPending: true, secretAckStartedAt: timestamp, secretAckDeadlineAt: timestamp + HTLC_SECRET_ACK_TIMEOUT_MS };
-    return pushTarget(putPaybookEntry(earned, armed), route.inboundEntity as string, { type: "htlc_resolve", lockId: hashlock, outcome: "secret", secret });
+  const fee = route.pendingFee;
+  const earns = fee !== undefined && fee !== 0n;
+  const { pendingFee: _fee, ...rest } = route;
+  const learned: PaybookEntry = earns ? { ...rest, secret } : { ...route, secret };
+  const earned: PaybookFlow = earns ? { ...f, paybook: { ...f.paybook, feesEarned: f.paybook.feesEarned + fee } } : f;
+  const upstream = inboundOf(route);
+  if (upstream !== undefined) {
+    const armed: PaybookEntry = {
+      ...learned,
+      secretAckPending: true,
+      secretAckStartedAt: timestamp,
+      secretAckDeadlineAt: timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+    };
+    return pushTarget(putPaybookEntry(earned, armed), upstream, {
+      type: "htlc_resolve",
+      lockId: hashlock,
+      outcome: "secret",
+      secret,
+    });
   }
+  const finalized = htlcEventFields({
+    entityId: self,
+    fromEntity: self,
+    toEntity: route.outboundEntity,
+    hashlock,
+    secret,
+    lockId: hashlock,
+    amount: route.amount,
+    tokenId: route.tokenId,
+    jurisdictionId,
+    description: route.description,
+  });
   return emitRuntime(terminatePaybookEntry(putPaybookEntry(earned, learned), hashlock), "HtlcFinalized", {
-    ...htlcEventFields({ entityId: self, fromEntity: self, toEntity: route.outboundEntity, hashlock, secret, lockId: hashlock, amount: route.amount, tokenId: route.tokenId, jurisdictionId, description: route.description }), ...finalizedTiming(route.startedAtMs, timestamp),
+    ...finalized,
+    ...finalizedTiming(route.startedAtMs, timestamp),
   });
 };
-/** A committed Account frame as the HTLC followups see it: our own frame (ACKed by the peer) or the peer's frame we just signed. */
-export type CommittedHtlcFrame = { readonly frame: Pick<AccountFrame, "height" | "stateHash" | "txs">; readonly viaNewFrame: boolean };
 /**
- * og applyCommittedFrameTransactions + applyCommittedHtlcFollowups for one Account input: per committed frame the resolve followups then the
- * receiver-only lock followups; then every timed-out lock of the committed frames; then the preimages of the peer frame.
+ * A committed Account frame as the HTLC followups see it: our own frame (ACKed by the peer) or the peer's frame we just
+ * signed.
  */
-export const paybookFollowups = (f: PaybookFlow, peer: string, frames: readonly CommittedHtlcFrame[], received: Omit<InboundLockFacts, "frame"> | undefined, entries: readonly PreparedHtlcEntry[], timestamp: number, self = "", jurisdictionId = ""): Result<PaybookFlow, EntityError> => {
-  const byKey = new Map(entries.map((e) => [preparedHtlcKey(e.binding), e])), consumed = new Set<string>();
-  return map(foldResult(frames, f, (acc, c) => paybookFrameFollowups(acc, peer, c, received, byKey, consumed, timestamp, self, jurisdictionId)), (followed) => paybookTailFollowups(followed, frames, timestamp, self, jurisdictionId));
+export type CommittedHtlcFrame = {
+  readonly frame: Pick<AccountFrame, "height" | "stateHash" | "txs">;
+  readonly viaNewFrame: boolean;
 };
+/**
+ * og applyCommittedFrameTransactions + applyCommittedHtlcFollowups for one Account input: per committed frame the
+ * resolve followups then the receiver-only lock followups; then every timed-out lock of the committed frames; then the
+ * preimages of the peer frame.
+ */
+export const paybookFollowups = (
+  f: PaybookFlow,
+  peer: string,
+  frames: readonly CommittedHtlcFrame[],
+  received: Omit<InboundLockFacts, "frame"> | undefined,
+  entries: readonly PreparedHtlcEntry[],
+  timestamp: number,
+  self = "",
+  jurisdictionId = "",
+): Result<PaybookFlow, EntityError> => {
+  const at: FollowupAt = { peer, received, byKey: entriesByKey(entries), timestamp, self, jurisdictionId };
+  const start: PaybookRun = { flow: f, consumed: new Set() };
+  const run = foldResult(frames, start, (r, c) => paybookFrameFollowups(r, c, at));
+  return map(run, ({ flow }) => paybookTailFollowups(flow, frames, at));
+};
+/**
+ * What every paybook followup of one Account input shares: the peer, the received frame's facts, the prepared entries
+ * and the clock.
+ */
+type FollowupAt = {
+  readonly peer: string;
+  readonly received: Omit<InboundLockFacts, "frame"> | undefined;
+  readonly byKey: ReadonlyMap<string, PreparedHtlcEntry>;
+  readonly timestamp: number;
+  readonly self: string;
+  readonly jurisdictionId: string;
+};
+/** The paybook flow so far, and the prepared entries already consumed by a lock. */
+type PaybookRun = { readonly flow: PaybookFlow; readonly consumed: ReadonlySet<string> };
+const entriesByKey = (entries: readonly PreparedHtlcEntry[]): ReadonlyMap<string, PreparedHtlcEntry> =>
+  new Map(entries.map((e) => [preparedHtlcKey(e.binding), e]));
 /** One committed frame of paybookFollowups: its resolve followups, then (receiver only) its lock followups. */
-const paybookFrameFollowups = (f: PaybookFlow, peer: string, { frame, viaNewFrame }: CommittedHtlcFrame, received: Omit<InboundLockFacts, "frame"> | undefined, byKey: ReadonlyMap<string, PreparedHtlcEntry>, consumed: Set<string>, timestamp: number, self: string, jurisdictionId: string): Result<PaybookFlow, EntityError> =>
-  chain(foldResult(frame.txs, f, (a, tx) => (tx.type === "htlc_resolve" ? resolveFollowup(a, peer, tx, self, timestamp, jurisdictionId) : ok(a))), (resolved) =>
-    !viaNewFrame || received === undefined ? ok(resolved)
-      : foldResult(frame.txs, resolved, (a, tx) => (tx.type === "htlc_lock" && tx.envelope !== undefined ? lockFollowup(a, { ...received, frame }, tx, byKey, consumed, timestamp, self) : ok(a))));
-/** og applyHtlcTimeoutFollowups then applyHtlcSecretFollowups, after every committed frame: the timed-out locks, then the peer frame's preimages. */
-const paybookTailFollowups = (f: PaybookFlow, frames: readonly CommittedHtlcFrame[], timestamp: number, self: string, jurisdictionId: string): PaybookFlow => {
-  const timedOut = frames.flatMap(({ frame }) => frame.txs.flatMap((tx) => (tx.type === "htlc_resolve" && tx.outcome === "error" ? [tx.lockId.toLowerCase()] : [])));
-  const secrets = frames.flatMap(({ frame, viaNewFrame }) => (viaNewFrame ? frame.txs.flatMap((tx) => (tx.type === "htlc_resolve" && tx.outcome === "secret" ? [{ hashlock: tx.lockId.toLowerCase(), secret: tx.secret }] : [])) : []));
-  return secrets.reduce((a, s) => secretFollowup(a, s.hashlock, s.secret, timestamp, self, jurisdictionId), timedOut.reduce((a, h) => timeoutFollowup(a, h, self), f));
+const paybookFrameFollowups = (
+  r: PaybookRun,
+  { frame, viaNewFrame }: CommittedHtlcFrame,
+  at: FollowupAt,
+): Result<PaybookRun, EntityError> => {
+  const resolveOne = (
+    a: PaybookFlow,
+    tx: CommittedHtlcFrame["frame"]["txs"][number],
+  ): Result<PaybookFlow, EntityError> =>
+    tx.type === "htlc_resolve" ? resolveFollowup(a, at.peer, tx, at.self, at.timestamp, at.jurisdictionId) : ok(a);
+  return chain(foldResult(frame.txs, r.flow, resolveOne), (resolved) => {
+    const received = at.received;
+    const afterResolves: PaybookRun = { ...r, flow: resolved };
+    if (!viaNewFrame || received === undefined) return ok(afterResolves);
+    return foldResult(frame.txs, afterResolves, (run, tx): Result<PaybookRun, EntityError> => {
+      if (tx.type !== "htlc_lock" || tx.envelope === undefined) return ok(run);
+      const facts: InboundLockFacts = { ...received, frame };
+      return map(lockFollowup(run.flow, facts, tx, at.byKey, run.consumed, at.timestamp, at.self), (flow) => ({
+        flow,
+        consumed: new Set([...run.consumed, lockEntryKey(frame, tx)]),
+      }));
+    });
+  });
 };
-/** og applyLocalAccountEffects: each returned Account tx is admitted alone; a missing, frozen or refusing Account drops it silently. */
+/**
+ * og applyHtlcTimeoutFollowups then applyHtlcSecretFollowups, after every committed frame: the timed-out locks, then
+ * the peer frame's preimages.
+ */
+const paybookTailFollowups = (f: PaybookFlow, frames: readonly CommittedHtlcFrame[], at: FollowupAt): PaybookFlow => {
+  const resolves = (c: CommittedHtlcFrame) => c.frame.txs.flatMap((tx) => (tx.type === "htlc_resolve" ? [tx] : []));
+  const timedOut = frames.flatMap((c) =>
+    resolves(c).flatMap((tx) => (tx.outcome === "error" ? [tx.lockId.toLowerCase()] : [])),
+  );
+  const secrets = frames
+    .filter((c) => c.viaNewFrame)
+    .flatMap((c) =>
+      resolves(c).flatMap((tx) =>
+        tx.outcome === "secret" ? [{ hashlock: tx.lockId.toLowerCase(), secret: tx.secret }] : [],
+      ),
+    );
+  const failed = timedOut.reduce((a, h) => timeoutFollowup(a, h, at.self), f);
+  return secrets.reduce(
+    (a, s) => secretFollowup(a, s.hashlock, s.secret, at.timestamp, at.self, at.jurisdictionId),
+    failed,
+  );
+};
+/**
+ * og applyLocalAccountEffects: each returned Account tx is admitted alone; a missing, frozen or refusing Account drops
+ * it silently.
+ */
 const queueReturned = (d: Draft, target: AccountTxTarget): Draft => {
-  const peer = target.accountId.toLowerCase() as EntityId, child = d.accountReplicas.get(peer);
+  const peer = target.accountId.toLowerCase() as EntityId;
+  const child = d.accountReplicas.get(peer);
   if (child === undefined) return d;
   const admitted = admitAt(child, [target.tx], d.state.id, L0_CLOCK);
   return admitted.ok ? { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value) } : d;
@@ -22514,8 +23091,9 @@ export const committedFollowups = (d0: Draft, peer: EntityId, own: AccountFrame 
   const frames: readonly { readonly frame: AccountFrame; readonly viaNewFrame: boolean }[] = [...(own === undefined ? [] : [{ frame: own, viaNewFrame: false }]), ...(received === undefined ? [] : [{ frame: received.frame, viaNewFrame: true }])];
   const forwards = effects.flatMap((e) => (e._tag === "direct_payment_forward" && sameHex(e.route[0], self) ? [e] : []));
   const swapOutputs = effects.flatMap((e): SwapOutputEffect[] => (e._tag === "swap_offer_upsert" || e._tag === "swap_cancelled" || e._tag === "swap_cancel_requested" ? [e] : []));
-  const byKey = new Map((ctx.htlc?.entries ?? []).map((e) => [preparedHtlcKey(e.binding), e])), consumed = new Set<string>(), jid = htlcJurisdictionId(d0.state, ctx.activeJurisdiction), paybook0 = d0.state.paybook ?? EMPTY_PAYBOOK;
-  let d = d0, targets: readonly AccountTxTarget[] = [], flow: PaybookFlow = { paybook: paybook0, queue: [] }, cross: CommittedCrossStep | undefined, crontab0: Crontab | undefined, cursor = 0;
+  const byKey = new Map((ctx.htlc?.entries ?? []).map((e) => [preparedHtlcKey(e.binding), e])), jid = htlcJurisdictionId(d0.state, ctx.activeJurisdiction), paybook0 = d0.state.paybook ?? EMPTY_PAYBOOK;
+  const at: FollowupAt = { peer, received, byKey, timestamp: now, self, jurisdictionId: jid };
+  let d = d0, targets: readonly AccountTxTarget[] = [], flow: PaybookFlow = { paybook: paybook0, queue: [] }, cross: CommittedCrossStep | undefined, crontab0: Crontab | undefined, cursor = 0, consumed: ReadonlySet<string> = new Set<string>();
   let created: readonly SwapOfferEvent[] = [], cancelled: readonly SwapRef[] = [], cancelRequests: readonly SwapRef[] = [];
   for (const c of frames) {
     const lent = lendingFollowups(d.state, d.accountReplicas, peer, [{ frame: c.frame, proposer: c.viaNewFrame ? peer : self }], ctx.timestamp, targets);
@@ -22523,9 +23101,10 @@ export const committedFollowups = (d0: Draft, peer: EntityId, own: AccountFrame 
     if (lent.value.state !== d.state) d = { ...d, state: lent.value.state };
     targets = lent.value.accountTxs;
     if (c.frame.txs.some((tx) => tx.type === "htlc_lock" || tx.type === "htlc_resolve")) {
-      const paid = paybookFrameFollowups({ ...flow, queue: [] }, peer, c, received, byKey, consumed, now, self, jid);
+      const paid = paybookFrameFollowups({ flow: { ...flow, queue: [] }, consumed }, c, at);
       if (!paid.ok) return paid;
-      flow = paid.value;
+      flow = paid.value.flow;
+      consumed = paid.value.consumed;
       targets = [...targets, ...flow.queue];
     }
     for (const tx of c.frame.txs) {
@@ -22581,7 +23160,7 @@ export const committedFollowups = (d0: Draft, peer: EntityId, own: AccountFrame 
     if (!leg.ok) return leg;
     targets = [...targets, leg.value];
   }
-  flow = paybookTailFollowups({ ...flow, queue: [] }, frames, now, self, jid);
+  flow = paybookTailFollowups({ ...flow, queue: [] }, frames, at);
   targets = [...targets, ...flow.queue];
   if (cross !== undefined) {
     const s = cross, state: EntityState = { ...(s.host.crontab === undefined || s.host.crontab === crontab0 ? d.state : withCrontab(d.state, s.host.crontab)), ...opt("crossJurisdictionAuthorizations", s.host.auths) };
@@ -23714,7 +24293,7 @@ const proposeSelected = (queued: OpenEntity, authority: OpenEntity, selected: re
   if (txs.length === 0 && firstRefusal !== undefined) return err(firstRefusal);
   // og materializeHtlcPreparedInfraContext: the proposer decrypts every inbound onion layer against the pre-frame state; validators replay the same bytes.
   const inbound = { state: queued.state, replicas: queued.accountReplicas, timestamp: Number(timestamp), publicKey: String(queued.state.committed["entityEncryptionPublicKey"] ?? ""), privateKey: ctx.htlc?.encryptionPrivateKey };
-  return chain(htlcFrameTxs(txs) ? inboundHtlcEntries({ ...inbound, online: onlineObserver(ctx.htlc).online }, txs) : ok([]), (entries) =>
+  return chain(htlcFrameTxs(txs) ? inboundHtlcEntries({ ...inbound, online: onlineOf(ctx.htlc) }, txs) : ok([]), (entries) =>
   chain(foldTxs(queued.state, queued.accountReplicas, txs, { verify: ctx.verify, timestamp, htlc: { ...EMPTY_HTLC_INFRA, originated: prepared.originated, entries }, ...opt("activeJurisdiction", ctx.activeJurisdiction), ...opt("siblings", ctx.siblings), ...opt("boardAuthority", ctx.boardAuthority), ...opt("jReplicas", ctx.jReplicas), ...opt("runtimeSeed", ctx.runtimeSeed) }), ({ draft, included, evicted, accountFrames }) => chain(frameHtlcInfra(ctx.htlc, inbound, prepared.originated, included), (infra) => {
     if (keep !== undefined && !keep(accountFrames ?? 0)) return ok(done<OpenEntity | ProposedEntity, EntityOutput>(queued));
     const pool = withoutTxs(queued.mempool, [...prepared.refused.keys(), ...evicted]);
