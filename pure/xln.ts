@@ -37862,8 +37862,8 @@ type DueReplica = { readonly key: string; readonly r: EntityReplica; readonly du
 /** og's deadline heap order: (dueAt, entityId, signerId). */
 const byDeadline = (a: DueReplica, b: DueReplica): number =>
   a.dueAt - b.dueAt ||
-  compareText(lower(a.r.state.id), lower(b.r.state.id)) ||
-  compareText(signerId(a.r.signerId), signerId(b.r.signerId));
+  asc(lower(a.r.state.id), lower(b.r.state.id)) ||
+  asc(signerId(a.r.signerId), signerId(b.r.signerId));
 /**
  * og createDueScheduledWakeInputs: in deadline order, one wake (a leader) or timeout vote (a validator) per due
  * replica, none while one is queued.
@@ -42252,60 +42252,177 @@ export const decodeTowerLookupDoc = (raw: string, expectedLookupKey?: string): R
   });
 
 // ---- orderbook: og orderbook/core.ts (price-page limit order book), orderbook/pages/{page,key}.ts, orderbook/commitment.ts ----
-// og keeps liquidity in two Patricia trees of 16-slot FIFO price pages; the rewrite keeps each side as its pages in key-byte order
-// (price, then page sequence) and seals the same radix-16 root. og throws on a broken invariant; here every such case is a `book` refusal.
+// og keeps liquidity in two Patricia trees of 16-slot FIFO price pages; the rewrite keeps each side as its pages in
+// key-byte order (price, then page sequence) and seals the same radix-16 root. og throws on a broken invariant; here
+// every such case is a `book` refusal.
 export type BookSide = 0 | 1;
-export type BookEntry = { readonly orderId: string; readonly ownerId: string; readonly qtyLots: bigint; readonly seq: number };
-export type BookPage = { readonly headSlot: number; readonly nextSlot: number; readonly liveCount: number; readonly totalQtyLots: bigint; readonly slots: readonly (BookEntry | null)[] };
+export type BookEntry = {
+  readonly orderId: string;
+  readonly ownerId: string;
+  readonly qtyLots: bigint;
+  readonly seq: number;
+};
+export type BookPage = {
+  readonly headSlot: number;
+  readonly nextSlot: number;
+  readonly liveCount: number;
+  readonly totalQtyLots: bigint;
+  readonly slots: readonly (BookEntry | null)[];
+};
 export type BookPageKey = { readonly priceTicks: bigint; readonly pageSequence: number };
 export type BookPageRow = { readonly key: BookPageKey; readonly page: BookPage };
 /** og BookOrderState: the RAM locator of a resting order (never committed). */
-export type BookOrder = BookEntry & { readonly side: BookSide; readonly priceTicks: bigint; readonly pageSequence: number; readonly pageSlot: number };
+export type BookOrder = BookEntry & {
+  readonly side: BookSide;
+  readonly priceTicks: bigint;
+  readonly pageSequence: number;
+  readonly pageSlot: number;
+};
 export type BookParams = { readonly bucketWidthTicks: bigint; readonly maxOrders: number; readonly stpPolicy: 0 | 1 };
 export type Book = {
-  readonly params: BookParams; readonly orders: ReadonlyMap<string, BookOrder>; readonly bidPages: readonly BookPageRow[]; readonly askPages: readonly BookPageRow[];
-  readonly nextSeq: number; readonly tradeCount: number; readonly tradeQtySum: bigint; readonly lastTradePriceTicks: bigint; readonly lastAcceptedUsdAskPriceTicks: bigint; readonly eventHash: bigint;
+  readonly params: BookParams;
+  readonly orders: ReadonlyMap<string, BookOrder>;
+  readonly bidPages: readonly BookPageRow[];
+  readonly askPages: readonly BookPageRow[];
+  readonly nextSeq: number;
+  readonly tradeCount: number;
+  readonly tradeQtySum: bigint;
+  readonly lastTradePriceTicks: bigint;
+  readonly lastAcceptedUsdAskPriceTicks: bigint;
+  readonly eventHash: bigint;
 };
 export type BookTif = 0 | 1 | 2;
 export type OrderCmd =
-  | { readonly kind: 0; readonly ownerId: string; readonly orderId: string; readonly side: BookSide; readonly tif: BookTif; readonly postOnly: boolean; readonly priceTicks: bigint; readonly qtyLots: bigint }
+  | {
+      readonly kind: 0;
+      readonly ownerId: string;
+      readonly orderId: string;
+      readonly side: BookSide;
+      readonly tif: BookTif;
+      readonly postOnly: boolean;
+      readonly priceTicks: bigint;
+      readonly qtyLots: bigint;
+    }
   | { readonly kind: 1; readonly ownerId: string; readonly orderId: string }
-  | { readonly kind: 2; readonly ownerId: string; readonly orderId: string; readonly newPriceTicks: bigint | null; readonly qtyDeltaLots: bigint };
+  | {
+      readonly kind: 2;
+      readonly ownerId: string;
+      readonly orderId: string;
+      readonly newPriceTicks: bigint | null;
+      readonly qtyDeltaLots: bigint;
+    };
+type PlaceCmd = Extract<OrderCmd, { readonly kind: 0 }>;
 export type BookEvent =
   | { readonly type: "ACK"; readonly orderId: string; readonly ownerId: string }
-  | { readonly type: "REJECT"; readonly orderId: string; readonly ownerId: string; readonly reason: string; readonly blockingOrderId?: string | undefined }
-  | { readonly type: "TRADE"; readonly price: bigint; readonly qty: bigint; readonly makerOwnerId: string; readonly takerOwnerId: string; readonly makerOrderId: string; readonly takerOrderId: string; readonly makerQtyBefore: bigint; readonly takerQtyTotal: bigint }
-  | { readonly type: "REDUCED"; readonly orderId: string; readonly ownerId: string; readonly delta: bigint; readonly remain: bigint }
+  | {
+      readonly type: "REJECT";
+      readonly orderId: string;
+      readonly ownerId: string;
+      readonly reason: string;
+      readonly blockingOrderId?: string | undefined;
+    }
+  | {
+      readonly type: "TRADE";
+      readonly price: bigint;
+      readonly qty: bigint;
+      readonly makerOwnerId: string;
+      readonly takerOwnerId: string;
+      readonly makerOrderId: string;
+      readonly takerOrderId: string;
+      readonly makerQtyBefore: bigint;
+      readonly takerQtyTotal: bigint;
+    }
+  | {
+      readonly type: "REDUCED";
+      readonly orderId: string;
+      readonly ownerId: string;
+      readonly delta: bigint;
+      readonly remain: bigint;
+    }
   | { readonly type: "CANCELED"; readonly orderId: string; readonly ownerId: string };
 export type MakerDisposition = "eligible" | "suspended" | "cancel";
-export type BookOptions = {
+/** A maker judgment, and anything the caller learned making it (og's memo write inside the classifier). */
+export type MakerVerdict<L = never> = { readonly disposition: MakerDisposition; readonly learned?: L | undefined };
+/**
+ * `F`: the caller's fault a maker judgment can raise; the first one ends the command with it. `L`: what the caller
+ * learns while judging.
+ */
+export type BookOptions<F = never, L = never> = {
   readonly suspendedOrderIds?: ReadonlySet<string> | undefined;
-  /** Consulted lazily, once per maker per command (og cacheMakerDisposition). */
+  /** og's classifier, consulted lazily, once per maker per command (og cacheMakerDisposition). */
   readonly makerDisposition?: ((maker: BookOrder) => MakerDisposition) | undefined;
+  /** The same, for a caller whose judgment can refuse or learn; it takes the place of `makerDisposition`. */
+  readonly makerVerdict?: ((maker: BookOrder) => Result<MakerVerdict<L>, F>) | undefined;
   readonly executionPriceTicksForMatch?: ((maker: bigint, taker: bigint, side: BookSide) => bigint) | undefined;
   readonly executionQtyMultipleAtPrice?: ((priceTicks: bigint) => bigint) | undefined;
 };
 export type BookError = Tagged<"book", { code: string }>;
 export type BookStep = { readonly state: Book; readonly events: readonly BookEvent[] };
+/** A command's answer with what the caller learned judging makers, in judgment order. */
+export type Judged<T, L> = { readonly value: T; readonly learned: readonly L[] };
 export const BOOK_PAGE_CAPACITY = 16;
 export const MAX_ORDERBOOK_QTY_LOTS = 10n ** 24n;
 const bookErr = (code: string): Result<never, BookError> => err({ _tag: "book", code });
-const unsignedBytes = (v: bigint): Uint8Array => { const h = v.toString(16); return hexToBytes(h.length % 2 === 0 ? h : `0${h}`); };
+
+
+// Commitment: both sides' pages sealed as og's Patricia roots, with the params and counters.
+
+const unsignedBytes = (v: bigint): Uint8Array => {
+  const h = v.toString(16);
+  return hexToBytes(h.length % 2 === 0 ? h : `0${h}`);
+};
 /** og encodeBookPricePrefix / encodeBookPricePageKey: length-prefixed minimal price, then the uint16 page. */
-const bookPriceKeyBytes = (k: BookPageKey): Uint8Array => { const price = unsignedBytes(k.priceTicks); return concat([Uint8Array.of(price.length), price, u16(k.pageSequence)]); };
+const bookPriceKeyBytes = (k: BookPageKey): Uint8Array => {
+  const price = unsignedBytes(k.priceTicks);
+  return concat([Uint8Array.of(price.length), price, u16(k.pageSequence)]);
+};
 const u16Framed = (b: Uint8Array): Uint8Array => concat([u16(b.length), b]);
 const bookEntryBytes = (e: BookEntry | null): Uint8Array =>
-  e === null ? Uint8Array.of(0) : concat([Uint8Array.of(1), u16Framed(utf8(e.orderId)), u16Framed(utf8(e.ownerId)), u16Framed(unsignedBytes(e.qtyLots)), u16Framed(unsignedBytes(BigInt(e.seq)))]);
+  e === null
+    ? Uint8Array.of(0)
+    : concat([
+        Uint8Array.of(1),
+        u16Framed(utf8(e.orderId)),
+        u16Framed(utf8(e.ownerId)),
+        u16Framed(unsignedBytes(e.qtyLots)),
+        u16Framed(unsignedBytes(BigInt(e.seq))),
+      ]);
 /** og pageHash: the integrity digest of the page's slot layout. */
 const bookPageDigest = (p: BookPage): Uint8Array =>
-  sha256(concat([u16(p.headSlot), u16(p.nextSlot), u16(p.liveCount), u16Framed(unsignedBytes(p.totalQtyLots)), ...p.slots.map(bookEntryBytes)]));
-/** og BookPricePageTree.rootHash(): radix-16 Patricia over key bytes, leaf value = page digest; empty is the zero word. */
-export const bookPagesRoot = (rows: readonly BookPageRow[]): string =>
-  sealRadix(rows.map((r) => { const key = bookPriceKeyBytes(r.key); return { nibbles: nibblesOf(key), key, digest: bookPageDigest(r.page) }; }));
-/** og computeBookCommitmentHash: integrity checksum of the length-framed params, both page roots and the trade/event counters. */
+  sha256(concat([
+    u16(p.headSlot),
+    u16(p.nextSlot),
+    u16(p.liveCount),
+    u16Framed(unsignedBytes(p.totalQtyLots)),
+    ...p.slots.map(bookEntryBytes),
+  ]));
+const pageLeaf = (r: BookPageRow) => {
+  const key = bookPriceKeyBytes(r.key);
+  return { nibbles: nibblesOf(key), key, digest: bookPageDigest(r.page) };
+};
+/**
+ * og BookPricePageTree.rootHash(): radix-16 Patricia over key bytes, leaf value = page digest; empty is the zero word.
+ */
+export const bookPagesRoot = (rows: readonly BookPageRow[]): string => sealRadix(rows.map(pageLeaf));
+/**
+ * og computeBookCommitmentHash: integrity checksum of the length-framed params, both page roots and the trade/event
+ * counters.
+ */
 export const bookCommitmentHash = (b: Book): string => {
-  const parts = ["xln.orderbook.book", String(b.params.bucketWidthTicks), String(b.params.maxOrders), String(b.params.stpPolicy), bookPagesRoot(b.bidPages), bookPagesRoot(b.askPages),
-    String(b.nextSeq), String(b.tradeCount), String(b.tradeQtySum), String(b.lastTradePriceTicks), String(b.lastAcceptedUsdAskPriceTicks), String(b.eventHash)].map(utf8);
+  const parts = [
+    "xln.orderbook.book",
+    String(b.params.bucketWidthTicks),
+    String(b.params.maxOrders),
+    String(b.params.stpPolicy),
+    bookPagesRoot(b.bidPages),
+    bookPagesRoot(b.askPages),
+    String(b.nextSeq),
+    String(b.tradeCount),
+    String(b.tradeQtySum),
+    String(b.lastTradePriceTicks),
+    String(b.lastAcceptedUsdAskPriceTicks),
+    String(b.eventHash),
+  ].map(utf8);
   return bytesToHex(sha256(concat(parts.flatMap((p) => [u32(p.length), p]))).slice(0, 16));
 };
 /** og createBook. */
@@ -42313,858 +42430,1880 @@ export const createBook = (params: BookParams): Result<Book, BookError> => {
   if (params.bucketWidthTicks <= 0n) return bookErr("bucketWidthTicks must be positive");
   if (!Number.isFinite(params.maxOrders) || params.maxOrders <= 0) return bookErr("maxOrders must be positive");
   if (params.stpPolicy !== 0 && params.stpPolicy !== 1) return bookErr("unsupported stpPolicy");
-  return ok({ params: { ...params, maxOrders: Math.max(1, Math.floor(params.maxOrders)) }, orders: new Map(), bidPages: [], askPages: [], nextSeq: 1, tradeCount: 0, tradeQtySum: 0n, lastTradePriceTicks: 0n, lastAcceptedUsdAskPriceTicks: 0n, eventHash: 0n });
+  return ok({
+    params: { ...params, maxOrders: Math.max(1, Math.floor(params.maxOrders)) },
+    orders: new Map(),
+    bidPages: [],
+    askPages: [],
+    nextSeq: 1,
+    tradeCount: 0,
+    tradeQtySum: 0n,
+    lastTradePriceTicks: 0n,
+    lastAcceptedUsdAskPriceTicks: 0n,
+    eventHash: 0n,
+  });
 };
-/** The working copy of one command (og forkBookState overlay). */
-type BookWork = { -readonly [K in keyof Book]: Book[K] } & { orders: Map<string, BookOrder>; bidPages: BookPageRow[]; askPages: BookPageRow[] };
-const forkBook = (b: Book): BookWork => ({ ...b, orders: new Map(b.orders), bidPages: [...b.bidPages], askPages: [...b.askPages] });
-const sideRows = (w: Book, side: BookSide): readonly BookPageRow[] => (side === 0 ? w.bidPages : w.askPages);
-const keyOrder = (a: BookPageKey, b: BookPageKey): number => (a.priceTicks !== b.priceTicks ? (a.priceTicks < b.priceTicks ? -1 : 1) : a.pageSequence - b.pageSequence);
+const EVENT_HASH_PRIME = 0x1_0000_01n;
+const EVENT_HASH_MASK = 0x1f_ffff_ffff_ffffn;
+/** og bumpHash tags: what moved the book. */
+const BOOK_EVENT_TAG = { rest: 1, trade: 3, usdAsk: 4, cancel: 5 } as const;
+/** og bumpHash: the rolling event hash (JS int32 mixing kept bit-exact). */
+const bumped = (book: Book, tag: number, a: number | bigint, b: number | bigint): Book => {
+  const a32 = Number(BigInt(a) & 0xffff_ffffn);
+  const b32 = Number(BigInt(b) & 0xffff_ffffn);
+  const mixed = ((tag * 2_654_435_761) >>> 0) ^ a32 ^ (b32 << 7);
+  return { ...book, eventHash: (book.eventHash * EVENT_HASH_PRIME + BigInt(mixed)) & EVENT_HASH_MASK };
+};
+
+
+// Pages: each side is its page rows in key order; a page is 16 FIFO slots between its head and its next free slot.
+
+const sideRows = (book: Book, side: BookSide): readonly BookPageRow[] => (side === 0 ? book.bidPages : book.askPages);
+const keyOrder = (a: BookPageKey, b: BookPageKey): number =>
+  a.priceTicks !== b.priceTicks ? asc(a.priceTicks, b.priceTicks) : a.pageSequence - b.pageSequence;
+const pageKeyOf = (o: BookOrder): BookPageKey => ({ priceTicks: o.priceTicks, pageSequence: o.pageSequence });
 /** og tree.updated / tree.removed (`page` undefined): one row, key order kept. */
-const setPage = (w: BookWork, side: BookSide, key: BookPageKey, page: BookPage | undefined): void => {
-  const rows = side === 0 ? w.bidPages : w.askPages;
-  let lo = 0, hi = rows.length;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (keyOrder((rows[mid] as BookPageRow).key, key) < 0) lo = mid + 1; else hi = mid; }
-  const hit = lo < rows.length && keyOrder((rows[lo] as BookPageRow).key, key) === 0;
-  if (page === undefined) { if (hit) rows.splice(lo, 1); } else rows.splice(lo, hit ? 1 : 0, { key, page });
+const withPage = (
+  rows: readonly BookPageRow[],
+  key: BookPageKey,
+  page: BookPage | undefined,
+): readonly BookPageRow[] => {
+  const found = rows.findIndex((r) => keyOrder(r.key, key) >= 0);
+  const at = found < 0 ? rows.length : found;
+  const hit = at < rows.length && keyOrder((rows[at] as BookPageRow).key, key) === 0;
+  return [...rows.slice(0, at), ...(page === undefined ? [] : [{ key, page }]), ...rows.slice(hit ? at + 1 : at)];
 };
-const getPage = (w: Book, side: BookSide, key: BookPageKey): BookPage | undefined => sideRows(w, side).find((r) => keyOrder(r.key, key) === 0)?.page;
+const withSidePage = (book: Book, side: BookSide, key: BookPageKey, page: BookPage | undefined): Book =>
+  side === 0
+    ? { ...book, bidPages: withPage(book.bidPages, key, page) }
+    : { ...book, askPages: withPage(book.askPages, key, page) };
+const getPage = (book: Book, side: BookSide, key: BookPageKey): BookPage | undefined =>
+  sideRows(book, side).find((r) => keyOrder(r.key, key) === 0)?.page;
+/** A side's pages grouped by price, in key order. */
+const priceLevels = (rows: readonly BookPageRow[]): readonly (readonly BookPageRow[])[] =>
+  [...Map.groupBy(rows, (r) => r.key.priceTicks).values()];
 /** og orderedPages: asks ascending; bids by descending price, FIFO page sequence within a price. */
-const orderedPages = (rows: readonly BookPageRow[], side: BookSide): readonly BookPageRow[] => {
-  if (side === 1) return rows;
-  const byPrice: BookPageRow[][] = [];
-  for (const r of rows) { const last = byPrice[byPrice.length - 1]; if (last !== undefined && last[0]?.key.priceTicks === r.key.priceTicks) last.push(r); else byPrice.push([r]); }
-  return byPrice.reverse().flat();
+const orderedPages = (rows: readonly BookPageRow[], side: BookSide): readonly BookPageRow[] =>
+  side === 1 ? rows : priceLevels(rows).toReversed().flat();
+const slotRange = (page: BookPage): readonly number[] =>
+  Array.from({ length: Math.max(0, page.nextSlot - page.headSlot) }, (_, i) => page.headSlot + i);
+/** The first live slot at or after `from`: a page's head once the slots before it emptied. */
+const nextLive = (slots: readonly (BookEntry | null)[], from: number): number => {
+  const live = slots.findIndex((e, i) => i >= from && e !== null);
+  return live < 0 ? slots.length : live;
 };
 const pageOrder = (side: BookSide, row: BookPageRow, slot: number): BookOrder | null => {
   const e = row.page.slots[slot];
   return e ? { ...e, side, priceTicks: row.key.priceTicks, pageSequence: row.key.pageSequence, pageSlot: slot } : null;
 };
-const pageOrders = (side: BookSide, row: BookPageRow): readonly BookOrder[] => {
-  const out: BookOrder[] = [];
-  for (let slot = row.page.headSlot; slot < row.page.nextSlot; slot++) { const o = pageOrder(side, row, slot); if (o) out.push(o); }
-  return out;
-};
-const cachedDisposition = (opts: BookOptions): BookOptions => {
-  const classify = opts.makerDisposition;
-  if (!classify) return opts;
-  const verdicts = new Map<string, MakerDisposition>();
-  return { ...opts, makerDisposition: (maker) => { const hit = verdicts.get(maker.orderId); if (hit) return hit; const v = classify(maker); verdicts.set(maker.orderId, v); return v; } };
-};
-/** og findBestOrder: the top of `side` (with suspensions/dispositions, the first eligible maker in price-time order). */
-const findBestOrder = (w: Book, side: BookSide, opts: BookOptions): BookOrder | null => {
-  const rows = sideRows(w, side);
-  if (!opts.suspendedOrderIds && !opts.makerDisposition) {
-    const extreme = side === 0 ? rows[rows.length - 1] : rows[0], first = extreme && rows.find((r) => r.key.priceTicks === extreme.key.priceTicks);
-    return first ? pageOrders(side, first)[0] ?? null : null;
-  }
-  for (const row of orderedPages(rows, side)) for (const o of pageOrders(side, row)) {
-    if (opts.suspendedOrderIds?.has(o.orderId)) continue;
-    if ((opts.makerDisposition?.(o) ?? "eligible") === "eligible") return o;
-  }
-  return null;
-};
-const bookCrosses = (side: BookSide, taker: bigint, maker: bigint): boolean => (side === 0 ? maker <= taker : maker >= taker);
-const PRIME = 0x1_0000_01n;
-/** og bumpHash: the rolling event hash (JS int32 mixing kept bit-exact). */
-const bumpHash = (w: BookWork, tag: number, a: number | bigint, b: number | bigint): void => {
-  const a32 = Number(BigInt(a) & 0xffff_ffffn), b32 = Number(BigInt(b) & 0xffff_ffffn);
-  w.eventHash = (w.eventHash * PRIME + BigInt(((tag * 2_654_435_761) >>> 0) ^ a32 ^ (b32 << 7))) & 0x1f_ffff_ffff_ffffn;
-};
+const pageOrders = (side: BookSide, row: BookPageRow): readonly BookOrder[] =>
+  slotRange(row.page).flatMap((slot) => pageOrder(side, row, slot) ?? []);
+/** A side's resting orders in price-time priority. */
+const makersOf = (book: Book, side: BookSide): readonly BookOrder[] =>
+  orderedPages(sideRows(book, side), side).flatMap((row) => pageOrders(side, row));
+const bookCrosses = (side: BookSide, taker: bigint, maker: bigint): boolean =>
+  side === 0 ? maker <= taker : maker >= taker;
 /** og requireEntry. */
 const bookEntryCode = (e: BookEntry): string | undefined => {
-  const ob = utf8(e.orderId).length, wb = utf8(e.ownerId).length;
-  if (ob === 0 || ob > 323) return `BOOK_PAGE_ORDER_ID_BYTES_INVALID:${ob}`;
-  if (wb === 0 || wb > 66) return `BOOK_PAGE_OWNER_ID_BYTES_INVALID:${wb}`;
-  if (e.qtyLots <= 0n || e.qtyLots > MAX_ORDERBOOK_QTY_LOTS) return "BOOK_PAGE_ORDER_QTY_INVALID";
-  return !Number.isSafeInteger(e.seq) || e.seq < 0 ? "BOOK_PAGE_ORDER_SEQ_INVALID" : undefined;
+  const ob = utf8(e.orderId).length;
+  const wb = utf8(e.ownerId).length;
+  switch (true) {
+    case ob === 0 || ob > 323:
+      return `BOOK_PAGE_ORDER_ID_BYTES_INVALID:${ob}`;
+    case wb === 0 || wb > 66:
+      return `BOOK_PAGE_OWNER_ID_BYTES_INVALID:${wb}`;
+    case e.qtyLots <= 0n || e.qtyLots > MAX_ORDERBOOK_QTY_LOTS:
+      return "BOOK_PAGE_ORDER_QTY_INVALID";
+    case !Number.isSafeInteger(e.seq) || e.seq < 0:
+      return "BOOK_PAGE_ORDER_SEQ_INVALID";
+    default:
+      return undefined;
+  }
 };
-const EMPTY_BOOK_PAGE: BookPage = { headSlot: 0, nextSlot: 0, liveCount: 0, totalQtyLots: 0n, slots: Array<BookEntry | null>(BOOK_PAGE_CAPACITY).fill(null) };
-/** og addOrder + appendBookPricePageOrder: FIFO append to the price's tail page, opening the next page sequence when it is full. */
-const addBookOrder = (w: BookWork, o: Omit<BookOrder, "pageSequence" | "pageSlot">): string | undefined => {
+const EMPTY_BOOK_PAGE: BookPage = {
+  headSlot: 0,
+  nextSlot: 0,
+  liveCount: 0,
+  totalQtyLots: 0n,
+  slots: Array<BookEntry | null>(BOOK_PAGE_CAPACITY).fill(null),
+};
+/**
+ * og addOrder + appendBookPricePageOrder: FIFO append to the price's tail page, opening the next page sequence when it
+ * is full.
+ */
+const addBookOrder = (book: Book, o: Omit<BookOrder, "pageSequence" | "pageSlot">): Result<Book, BookError> => {
   const entry: BookEntry = { orderId: o.orderId, ownerId: o.ownerId, qtyLots: o.qtyLots, seq: o.seq };
   const bad = bookEntryCode(entry);
-  if (bad !== undefined) return bad;
-  if (o.priceTicks <= 0n) return `BOOK_PAGE_PRICE_INVALID:${o.priceTicks}`;
-  const rows = sideRows(w, o.side);
-  let tail: BookPageRow | undefined;
-  for (const r of rows) if (r.key.priceTicks === o.priceTicks) tail = r;
-  const sequence = tail?.page.nextSlot === BOOK_PAGE_CAPACITY ? (tail?.key.pageSequence ?? 0) + 1 : tail?.key.pageSequence ?? 0;
-  if (sequence > 0xffff) return "BOOK_PAGE_SEQUENCE_EXHAUSTED";
-  const page = tail?.key.pageSequence === sequence ? tail.page : EMPTY_BOOK_PAGE, slot = page.nextSlot, slots = [...page.slots];
-  slots[slot] = entry;
-  setPage(w, o.side, { priceTicks: o.priceTicks, pageSequence: sequence }, { headSlot: page.liveCount === 0 ? slot : page.headSlot, nextSlot: slot + 1, liveCount: page.liveCount + 1, totalQtyLots: page.totalQtyLots + entry.qtyLots, slots });
-  w.orders.set(o.orderId, { ...o, pageSequence: sequence, pageSlot: slot });
-  return undefined;
+  if (bad !== undefined) return bookErr(bad);
+  if (o.priceTicks <= 0n) return bookErr(`BOOK_PAGE_PRICE_INVALID:${o.priceTicks}`);
+  const tail = sideRows(book, o.side).findLast((r) => r.key.priceTicks === o.priceTicks);
+  const tailSequence = tail?.key.pageSequence ?? 0;
+  const sequence = tail?.page.nextSlot === BOOK_PAGE_CAPACITY ? tailSequence + 1 : tailSequence;
+  if (sequence > 0xffff) return bookErr("BOOK_PAGE_SEQUENCE_EXHAUSTED");
+  const page = tail?.key.pageSequence === sequence ? tail.page : EMPTY_BOOK_PAGE;
+  const slot = page.nextSlot;
+  const appended: BookPage = {
+    headSlot: page.liveCount === 0 ? slot : page.headSlot,
+    nextSlot: slot + 1,
+    liveCount: page.liveCount + 1,
+    totalQtyLots: page.totalQtyLots + entry.qtyLots,
+    slots: page.slots.with(slot, entry),
+  };
+  const placed = withSidePage(book, o.side, { priceTicks: o.priceTicks, pageSequence: sequence }, appended);
+  return ok({ ...placed, orders: mapSet(book.orders, o.orderId, { ...o, pageSequence: sequence, pageSlot: slot }) });
 };
-/** og removeOrder + removeBookPricePageOrder. */
-const removeBookOrder = (w: BookWork, orderId: string): BookOrder | null => {
-  const o = w.orders.get(orderId);
-  if (!o) return null;
-  const key = { priceTicks: o.priceTicks, pageSequence: o.pageSequence }, page = getPage(w, o.side, key);
-  if (!page) return null;
-  const slots = [...page.slots], entry = slots[o.pageSlot];
-  if (!entry) return null;
-  slots[o.pageSlot] = null;
+/** og removeOrder + removeBookPricePageOrder; nothing when the order's slot is not where its locator says. */
+const removeBookOrder = (book: Book, orderId: string): Book | undefined => {
+  const o = book.orders.get(orderId);
+  if (!o) return undefined;
+  const key = pageKeyOf(o);
+  const page = getPage(book, o.side, key);
+  const entry = page?.slots[o.pageSlot];
+  if (!page || !entry) return undefined;
+  const slots = page.slots.with(o.pageSlot, null);
   const liveCount = page.liveCount - 1;
-  let head = page.headSlot;
-  if (o.pageSlot === page.headSlot) { head = o.pageSlot + 1; while (head < slots.length && slots[head] === null) head++; }
-  setPage(w, o.side, key, liveCount === 0 ? undefined : { ...page, headSlot: head, liveCount, totalQtyLots: page.totalQtyLots - entry.qtyLots, slots });
-  w.orders.delete(orderId);
-  return o;
+  const headSlot = o.pageSlot === page.headSlot ? nextLive(slots, o.pageSlot + 1) : page.headSlot;
+  const left = liveCount === 0
+    ? undefined
+    : { ...page, headSlot, liveCount, totalQtyLots: page.totalQtyLots - entry.qtyLots, slots };
+  return { ...withSidePage(book, o.side, key, left), orders: mapDelete(book.orders, orderId) };
 };
 /** og reduceOrder + reduceBookPricePageOrder. */
-const reduceBookOrder = (w: BookWork, o: BookOrder, qtyLots: bigint): string | undefined => {
-  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return "BOOK_PAGE_ORDER_QTY_INVALID";
-  const key = { priceTicks: o.priceTicks, pageSequence: o.pageSequence }, page = getPage(w, o.side, key), entry = page?.slots[o.pageSlot];
-  if (!page || !entry || entry.orderId !== o.orderId) return "BOOK_PAGE_LOCATION_MISMATCH";
-  if (qtyLots >= entry.qtyLots) return "BOOK_PAGE_REDUCTION_INVALID";
-  const slots = [...page.slots];
-  slots[o.pageSlot] = { ...entry, qtyLots };
-  setPage(w, o.side, key, { ...page, totalQtyLots: page.totalQtyLots - entry.qtyLots + qtyLots, slots });
-  const indexed = w.orders.get(o.orderId);
-  if (!indexed) return `BOOK_ORDER_INDEX_MISSING:${o.orderId}`;
-  w.orders.set(o.orderId, { ...indexed, qtyLots });
-  return undefined;
+const reduceBookOrder = (book: Book, o: BookOrder, qtyLots: bigint): Result<Book, BookError> => {
+  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return bookErr("BOOK_PAGE_ORDER_QTY_INVALID");
+  const key = pageKeyOf(o);
+  const page = getPage(book, o.side, key);
+  const entry = page?.slots[o.pageSlot];
+  if (!page || !entry || entry.orderId !== o.orderId) return bookErr("BOOK_PAGE_LOCATION_MISMATCH");
+  if (qtyLots >= entry.qtyLots) return bookErr("BOOK_PAGE_REDUCTION_INVALID");
+  const indexed = book.orders.get(o.orderId);
+  if (!indexed) return bookErr(`BOOK_ORDER_INDEX_MISSING:${o.orderId}`);
+  const reduced: BookPage = {
+    ...page,
+    totalQtyLots: page.totalQtyLots - entry.qtyLots + qtyLots,
+    slots: page.slots.with(o.pageSlot, { ...entry, qtyLots }),
+  };
+  return ok({
+    ...withSidePage(book, o.side, key, reduced),
+    orders: mapSet(book.orders, o.orderId, { ...indexed, qtyLots }),
+  });
 };
-type BookTaker = { readonly side: BookSide; readonly ownerId: string; readonly orderId: string; readonly priceTicks: bigint; readonly qtyLots: bigint };
-type Matched = { readonly remaining: bigint; readonly blockingOrderId?: string | undefined };
-/** og matchPricePages: walk the opposite side in price-time order over the pre-match snapshot, publishing each touched page once. */
-const matchBook = (w: BookWork, taker: BookTaker, events: BookEvent[], opts: BookOptions): Result<Matched, BookError> => {
-  let remaining = taker.qtyLots;
-  const makerSide: BookSide = taker.side === 0 ? 1 : 0;
-  for (const row of orderedPages([...sideRows(w, makerSide)], makerSide)) {
-    if (remaining <= 0n || !bookCrosses(taker.side, taker.priceTicks, row.key.priceTicks)) break;
-    const src = row.page, slots = [...src.slots];
-    let live = src.liveCount, total = src.totalQtyLots, stop = false, changed = false;
-    const publish = (): void => {
-      if (!changed) return;
-      let head = src.headSlot;
-      while (head < slots.length && slots[head] === null) head++;
-      setPage(w, makerSide, row.key, live === 0 ? undefined : { ...src, headSlot: head, liveCount: live, totalQtyLots: total, slots });
-    };
-    for (let slot = src.headSlot; slot < src.nextSlot && remaining > 0n; slot++) {
-      const entry = slots[slot];
-      if (!entry) continue;
-      const maker: BookOrder = { ...entry, side: makerSide, priceTicks: row.key.priceTicks, pageSequence: row.key.pageSequence, pageSlot: slot };
-      if (opts.suspendedOrderIds?.has(maker.orderId)) continue;
-      const disposition = opts.makerDisposition?.(maker) ?? "eligible";
-      if (disposition === "suspended") continue;
-      if (disposition === "cancel") {
-        slots[slot] = null; live -= 1; total -= maker.qtyLots; w.orders.delete(maker.orderId); bumpHash(w, 5, maker.priceTicks, 0); changed = true;
-        continue;
-      }
-      if (maker.ownerId === taker.ownerId && w.params.stpPolicy === 1) {
-        publish();
-        events.push({ type: "REJECT", orderId: taker.orderId, ownerId: taker.ownerId, reason: "STP cancel taker", blockingOrderId: maker.orderId });
-        return ok({ remaining, blockingOrderId: maker.orderId });
-      }
-      const price = opts.executionPriceTicksForMatch?.(maker.priceTicks, taker.priceTicks, taker.side) ?? maker.priceTicks;
-      if (price <= 0n) return bookErr("BOOK_EXECUTION_PRICE_INVALID");
-      const multiple = opts.executionQtyMultipleAtPrice?.(price) ?? 1n;
-      if (multiple <= 0n) return bookErr("BOOK_EXECUTION_QTY_MULTIPLE_INVALID");
-      const qty = ((maker.qtyLots < remaining ? maker.qtyLots : remaining) / multiple) * multiple;
-      if (qty <= 0n) { stop = true; break; }
-      w.tradeCount += 1; w.tradeQtySum += qty; w.lastTradePriceTicks = price;
-      bumpHash(w, 3, price, qty);
-      events.push({ type: "TRADE", price, qty, makerOwnerId: maker.ownerId, takerOwnerId: taker.ownerId, makerOrderId: maker.orderId, takerOrderId: taker.orderId, makerQtyBefore: maker.qtyLots, takerQtyTotal: taker.qtyLots });
-      remaining -= qty; total -= qty; changed = true;
-      if (qty === maker.qtyLots) { slots[slot] = null; live -= 1; w.orders.delete(maker.orderId); continue; }
-      const next = maker.qtyLots - qty, indexed = w.orders.get(maker.orderId);
-      slots[slot] = { ...entry, qtyLots: next };
-      if (!indexed) return bookErr(`BOOK_ORDER_INDEX_MISSING:${maker.orderId}`);
-      w.orders.set(maker.orderId, { ...indexed, qtyLots: next });
-      events.push({ type: "REDUCED", orderId: maker.orderId, ownerId: maker.ownerId, delta: -qty, remain: next });
-      stop = true;
-      break;
+
+
+// Judging makers: og consults the caller once per maker per command and remembers the verdict. Whatever the caller
+// learned while judging (og writes it into its own memo from inside the classifier) comes back with the answer.
+
+/** The verdicts given so far in this command, and what the caller learned giving them, in judgment order. */
+type Judge<L> = { readonly verdicts: ReadonlyMap<string, MakerDisposition>; readonly learned: readonly L[] };
+const NO_JUDGE: Judge<never> = { verdicts: new Map(), learned: [] };
+type Judgment<L> = { readonly disposition: MakerDisposition; readonly judge: Judge<L> };
+const judgeMaker = <F, L>(opts: BookOptions<F, L>, judge: Judge<L>, maker: BookOrder): Result<Judgment<L>, F> => {
+  const held = judge.verdicts.get(maker.orderId);
+  const classify = opts.makerDisposition;
+  const verdict = opts.makerVerdict ?? (classify && ((m: BookOrder) => ok({ disposition: classify(m) })));
+  if (opts.suspendedOrderIds?.has(maker.orderId)) return ok({ disposition: "suspended", judge });
+  if (held !== undefined) return ok({ disposition: held, judge });
+  if (verdict === undefined) return ok({ disposition: "eligible", judge });
+  return map(verdict(maker), ({ disposition, learned }: MakerVerdict<L>) => ({
+    disposition,
+    judge: {
+      verdicts: mapSet(judge.verdicts, maker.orderId, disposition),
+      learned: learned === undefined ? judge.learned : [...judge.learned, learned],
+    },
+  }));
+};
+type Best<L> = { readonly best: BookOrder | null; readonly judge: Judge<L> };
+/** og findBestOrder: the first eligible maker of `side` in price-time order. */
+const findBestOrder = <F, L>(
+  book: Book,
+  side: BookSide,
+  opts: BookOptions<F, L>,
+  judge: Judge<L>,
+): Result<Best<L>, F> => {
+  const start: Best<L> = { best: null, judge };
+  return foldResult(makersOf(book, side), start, (found, maker) =>
+    found.best !== null
+      ? ok(found)
+      : map(judgeMaker(opts, found.judge, maker), (j) => ({
+          best: j.disposition === "eligible" ? maker : null,
+          judge: j.judge,
+        })));
+};
+
+
+// Matching: the taker walks the opposite side in price-time order over the pre-match pages, publishing each touched
+// page once.
+
+type BookTaker = {
+  readonly side: BookSide;
+  readonly ownerId: string;
+  readonly orderId: string;
+  readonly priceTicks: bigint;
+  readonly qtyLots: bigint;
+};
+/** The walk so far: the book as it moves, what is left to fill, the events, and whether the walk has ended. */
+type MatchRun<L> = {
+  readonly book: Book;
+  readonly judge: Judge<L>;
+  readonly remaining: bigint;
+  readonly events: readonly BookEvent[];
+  readonly halted: boolean;
+  readonly blockingOrderId?: string | undefined;
+};
+/** The walk inside one maker page: the page's slots, live count and total as the taker leaves them. */
+type PageWalk<L> = MatchRun<L> & {
+  readonly slots: readonly (BookEntry | null)[];
+  readonly live: number;
+  readonly total: bigint;
+  readonly changed: boolean;
+};
+type WalkScope<F, L> = {
+  readonly taker: BookTaker;
+  readonly makerSide: BookSide;
+  readonly row: BookPageRow;
+  readonly opts: BookOptions<F, L>;
+};
+const withoutOrder = (book: Book, orderId: string): Book => ({ ...book, orders: mapDelete(book.orders, orderId) });
+/** og's cancel disposition: the maker leaves the book without trading. */
+const cancelMaker = <L,>(walk: PageWalk<L>, maker: BookOrder): PageWalk<L> => ({
+  ...walk,
+  book: bumped(withoutOrder(walk.book, maker.orderId), BOOK_EVENT_TAG.cancel, maker.priceTicks, 0),
+  slots: walk.slots.with(maker.pageSlot, null),
+  live: walk.live - 1,
+  total: walk.total - maker.qtyLots,
+  changed: true,
+});
+/** og self-trade prevention: the taker is refused at its own resting order, and the walk ends there. */
+const selfTradeHalt = <L,>(walk: PageWalk<L>, taker: BookTaker, maker: BookOrder): PageWalk<L> => {
+  const reject: BookEvent = {
+    type: "REJECT",
+    orderId: taker.orderId,
+    ownerId: taker.ownerId,
+    reason: "STP cancel taker",
+    blockingOrderId: maker.orderId,
+  };
+  return { ...walk, events: [...walk.events, reject], halted: true, blockingOrderId: maker.orderId };
+};
+/** One fill: counters, rolling hash and TRADE; a filled maker leaves, a partly filled one shrinks and ends the walk. */
+const tradeWith = <L,>(
+  walk: PageWalk<L>,
+  { taker, row }: WalkScope<unknown, L>,
+  maker: BookOrder,
+  price: bigint,
+  qty: bigint,
+): Result<PageWalk<L>, BookError> => {
+  const counted: Book = {
+    ...walk.book,
+    tradeCount: walk.book.tradeCount + 1,
+    tradeQtySum: walk.book.tradeQtySum + qty,
+    lastTradePriceTicks: price,
+  };
+  const trade: BookEvent = {
+    type: "TRADE",
+    price,
+    qty,
+    makerOwnerId: maker.ownerId,
+    takerOwnerId: taker.ownerId,
+    makerOrderId: maker.orderId,
+    takerOrderId: taker.orderId,
+    makerQtyBefore: maker.qtyLots,
+    takerQtyTotal: taker.qtyLots,
+  };
+  const book = bumped(counted, BOOK_EVENT_TAG.trade, price, qty);
+  const traded = {
+    ...walk,
+    book,
+    remaining: walk.remaining - qty,
+    total: walk.total - qty,
+    changed: true,
+    events: [...walk.events, trade],
+  };
+  if (qty === maker.qtyLots) {
+    return ok({
+      ...traded,
+      book: withoutOrder(book, maker.orderId),
+      slots: walk.slots.with(maker.pageSlot, null),
+      live: walk.live - 1,
+    });
+  }
+  const remain = maker.qtyLots - qty;
+  const entry = row.page.slots[maker.pageSlot] as BookEntry;
+  const indexed = book.orders.get(maker.orderId);
+  if (!indexed) return bookErr(`BOOK_ORDER_INDEX_MISSING:${maker.orderId}`);
+  const reduced: BookEvent = { type: "REDUCED", orderId: maker.orderId, ownerId: maker.ownerId, delta: -qty, remain };
+  return ok({
+    ...traded,
+    book: { ...book, orders: mapSet(book.orders, maker.orderId, { ...indexed, qtyLots: remain }) },
+    slots: walk.slots.with(maker.pageSlot, { ...entry, qtyLots: remain }),
+    events: [...traded.events, reduced],
+    halted: true,
+  });
+};
+/**
+ * The fill a maker offers at the execution price, rounded down to the execution multiple; nothing fillable ends the
+ * walk.
+ */
+const fillMaker = <F, L>(
+  walk: PageWalk<L>,
+  scope: WalkScope<F, L>,
+  maker: BookOrder,
+): Result<PageWalk<L>, BookError> => {
+  const { taker, opts } = scope;
+  const price = opts.executionPriceTicksForMatch?.(maker.priceTicks, taker.priceTicks, taker.side) ?? maker.priceTicks;
+  if (price <= 0n) return bookErr("BOOK_EXECUTION_PRICE_INVALID");
+  const multiple = opts.executionQtyMultipleAtPrice?.(price) ?? 1n;
+  if (multiple <= 0n) return bookErr("BOOK_EXECUTION_QTY_MULTIPLE_INVALID");
+  const fillable = maker.qtyLots < walk.remaining ? maker.qtyLots : walk.remaining;
+  const qty = (fillable / multiple) * multiple;
+  return qty <= 0n ? ok({ ...walk, halted: true }) : tradeWith(walk, scope, maker, price, qty);
+};
+const walkSlot = <F, L>(
+  walk: PageWalk<L>,
+  scope: WalkScope<F, L>,
+  slot: number,
+): Result<PageWalk<L>, BookError | F> => {
+  const maker = walk.halted || walk.remaining <= 0n ? null : pageOrder(scope.makerSide, scope.row, slot);
+  if (maker === null) return ok(walk);
+  return chain(judgeMaker(scope.opts, walk.judge, maker), ({ disposition, judge }) => {
+    const judged: PageWalk<L> = { ...walk, judge };
+    const selfTrade = maker.ownerId === scope.taker.ownerId && judged.book.params.stpPolicy === 1;
+    switch (true) {
+      case disposition === "suspended":
+        return ok(judged);
+      case disposition === "cancel":
+        return ok(cancelMaker(judged, maker));
+      case selfTrade:
+        return ok(selfTradeHalt(judged, scope.taker, maker));
+      default:
+        return fillMaker(judged, scope, maker);
     }
-    publish();
-    if (stop) break;
-  }
-  return ok({ remaining });
-};
-/** og applyCommand: place (GTC/IOC/FOK, post-only, STP) or cancel; replace is refused. A refusal event leaves the book unchanged. */
-export const applyBookCommand = (book: Book, cmd: OrderCmd, options: BookOptions = {}): Result<BookStep, BookError> => {
-  const reject = (reason: string): Result<BookStep, BookError> => ok({ state: book, events: [{ type: "REJECT", orderId: cmd.orderId, ownerId: cmd.ownerId, reason }] });
-  if (cmd.kind === 2) return reject("replace unsupported");
-  const w = forkBook(book);
-  if (cmd.kind === 1) {
-    const existing = w.orders.get(cmd.orderId);
-    if (!existing) return reject("not found");
-    if (existing.ownerId !== cmd.ownerId) return reject("not owner");
-    if (removeBookOrder(w, cmd.orderId) === null) return bookErr("BOOK_PAGE_LOCATION_MISMATCH");
-    bumpHash(w, 5, existing.priceTicks, 0);
-    return ok({ state: w, events: [{ type: "CANCELED", orderId: cmd.orderId, ownerId: cmd.ownerId }] });
-  }
-  const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots } = cmd, opts = cachedDisposition(options);
-  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return reject("qty out of range");
-  if (priceTicks <= 0n) return reject("price must be positive");
-  if (w.orders.has(orderId)) return reject("duplicate orderId");
-  const opposite = postOnly ? findBestOrder(w, side === 0 ? 1 : 0, opts) : null;
-  if (postOnly && opposite && bookCrosses(side, priceTicks, opposite.priceTicks)) return reject("postOnly would cross");
-  const events: BookEvent[] = [];
-  return chain(matchBook(w, { side, ownerId, orderId, priceTicks, qtyLots }, events, opts), (matched): Result<BookStep, BookError> => {
-    if (tif === 2 && matched.remaining > 0n) return reject("FOK cannot fill entirely");
-    if (matched.remaining > 0n && matched.blockingOrderId === undefined && tif === 0) {
-      if (w.orders.size >= w.params.maxOrders) return bookErr("Out of order slots");
-      const multiple = options.executionQtyMultipleAtPrice?.(priceTicks) ?? 1n;
-      if (multiple <= 0n) return bookErr("BOOK_EXECUTION_QTY_MULTIPLE_INVALID");
-      const resting = (matched.remaining / multiple) * multiple;
-      if (resting > 0n) {
-        const bad = addBookOrder(w, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq: w.nextSeq });
-        if (bad !== undefined) return bookErr(bad);
-        w.nextSeq += 1;
-        events.push({ type: "ACK", orderId, ownerId });
-        bumpHash(w, 1, priceTicks, resting);
-      }
-    } else if (matched.remaining === qtyLots && events.length === 0) events.push({ type: "REJECT", orderId, ownerId, reason: "no fill" });
-    return ok({ state: w, events });
   });
 };
+/** A walked page goes back into the book once, only if the walk touched it; an emptied page leaves. */
+const publishPage = <L,>(walk: PageWalk<L>, side: BookSide, row: BookPageRow): MatchRun<L> => {
+  const { slots, live, total, changed, ...run } = walk;
+  if (!changed) return run;
+  const page = live === 0
+    ? undefined
+    : { ...row.page, headSlot: nextLive(slots, row.page.headSlot), liveCount: live, totalQtyLots: total, slots };
+  return { ...run, book: withSidePage(run.book, side, row.key, page) };
+};
+const walkPage = <F, L>(
+  run: MatchRun<L>,
+  taker: BookTaker,
+  row: BookPageRow,
+  opts: BookOptions<F, L>,
+): Result<MatchRun<L>, BookError | F> => {
+  if (run.halted || run.remaining <= 0n || !bookCrosses(taker.side, taker.priceTicks, row.key.priceTicks)) {
+    return ok({ ...run, halted: true });
+  }
+  const makerSide: BookSide = taker.side === 0 ? 1 : 0;
+  const scope: WalkScope<F, L> = { taker, makerSide, row, opts };
+  const start: PageWalk<L> = {
+    ...run,
+    slots: row.page.slots,
+    live: row.page.liveCount,
+    total: row.page.totalQtyLots,
+    changed: false,
+  };
+  const walked = foldResult(slotRange(row.page), start, (walk, slot) => walkSlot(walk, scope, slot));
+  return map(walked, (walk) => publishPage(walk, makerSide, row));
+};
+/**
+ * og matchPricePages: walk the opposite side in price-time order over the pre-match snapshot, publishing each touched
+ * page once.
+ */
+const matchBook = <F, L>(
+  book: Book,
+  judge: Judge<L>,
+  taker: BookTaker,
+  opts: BookOptions<F, L>,
+): Result<MatchRun<L>, BookError | F> => {
+  const makerSide: BookSide = taker.side === 0 ? 1 : 0;
+  const start: MatchRun<L> = { book, judge, remaining: taker.qtyLots, events: [], halted: false };
+  return foldResult(orderedPages(sideRows(book, makerSide), makerSide), start, (run, row) =>
+    walkPage(run, taker, row, opts),
+  );
+};
+
+
+// Commands.
+
+const rejected = (
+  book: Book,
+  cmd: { readonly orderId: string; readonly ownerId: string },
+  reason: string,
+): BookStep => ({
+  state: book,
+  events: [{ type: "REJECT", orderId: cmd.orderId, ownerId: cmd.ownerId, reason }],
+});
+const unjudged = <T,>(value: T): Judged<T, never> => ({ value, learned: [] });
+const cancelCommand = (book: Book, cmd: Extract<OrderCmd, { readonly kind: 1 }>): Result<BookStep, BookError> => {
+  const existing = book.orders.get(cmd.orderId);
+  if (!existing) return ok(rejected(book, cmd, "not found"));
+  if (existing.ownerId !== cmd.ownerId) return ok(rejected(book, cmd, "not owner"));
+  const removed = removeBookOrder(book, cmd.orderId);
+  if (removed === undefined) return bookErr("BOOK_PAGE_LOCATION_MISMATCH");
+  return ok({
+    state: bumped(removed, BOOK_EVENT_TAG.cancel, existing.priceTicks, 0),
+    events: [{ type: "CANCELED", orderId: cmd.orderId, ownerId: cmd.ownerId }],
+  });
+};
+const placementRefusal = (book: Book, cmd: PlaceCmd): string | undefined => {
+  switch (true) {
+    case cmd.qtyLots <= 0n || cmd.qtyLots > MAX_ORDERBOOK_QTY_LOTS:
+      return "qty out of range";
+    case cmd.priceTicks <= 0n:
+      return "price must be positive";
+    case book.orders.has(cmd.orderId):
+      return "duplicate orderId";
+    default:
+      return undefined;
+  }
+};
+/** A GTC remainder rests at the book's next sequence, rounded down to the execution multiple. */
+const restRemainder = <F, L>(
+  run: MatchRun<L>,
+  cmd: PlaceCmd,
+  options: BookOptions<F, L>,
+): Result<BookStep, BookError> => {
+  const { orderId, ownerId, side, priceTicks } = cmd;
+  const settled: BookStep = { state: run.book, events: run.events };
+  if (run.book.orders.size >= run.book.params.maxOrders) return bookErr("Out of order slots");
+  const multiple = options.executionQtyMultipleAtPrice?.(priceTicks) ?? 1n;
+  if (multiple <= 0n) return bookErr("BOOK_EXECUTION_QTY_MULTIPLE_INVALID");
+  const resting = (run.remaining / multiple) * multiple;
+  if (resting <= 0n) return ok(settled);
+  const seq = run.book.nextSeq;
+  return map(addBookOrder(run.book, { orderId, ownerId, side, priceTicks, qtyLots: resting, seq }), (added) => ({
+    state: bumped({ ...added, nextSeq: seq + 1 }, BOOK_EVENT_TAG.rest, priceTicks, resting),
+    events: [...run.events, { type: "ACK", orderId, ownerId }],
+  }));
+};
+/** After the walk: FOK is all or nothing, a GTC remainder rests, and a taker that met nothing is refused. */
+const settlePlacement = <F, L>(
+  book: Book,
+  cmd: PlaceCmd,
+  run: MatchRun<L>,
+  options: BookOptions<F, L>,
+): Result<BookStep, BookError> => {
+  const unfilled = run.remaining > 0n;
+  switch (true) {
+    case cmd.tif === 2 && unfilled:
+      return ok(rejected(book, cmd, "FOK cannot fill entirely"));
+    case unfilled && run.blockingOrderId === undefined && cmd.tif === 0:
+      return restRemainder(run, cmd, options);
+    case run.remaining === cmd.qtyLots && run.events.length === 0:
+      return ok(rejected(run.book, cmd, "no fill"));
+    default:
+      return ok({ state: run.book, events: run.events });
+  }
+};
+const placeCommand = <F, L>(
+  book: Book,
+  cmd: PlaceCmd,
+  options: BookOptions<F, L>,
+): Result<Judged<BookStep, L>, BookError | F> => {
+  const refusal = placementRefusal(book, cmd);
+  if (refusal !== undefined) return ok(unjudged(rejected(book, cmd, refusal)));
+  const { ownerId, orderId, side, postOnly, priceTicks, qtyLots } = cmd;
+  const blocker: Result<Best<L>, F> = postOnly
+    ? findBestOrder(book, side === 0 ? 1 : 0, options, NO_JUDGE)
+    : ok({ best: null, judge: NO_JUDGE });
+  return chain(blocker, ({ best, judge }) => {
+    if (best !== null && bookCrosses(side, priceTicks, best.priceTicks)) {
+      return ok({ value: rejected(book, cmd, "postOnly would cross"), learned: judge.learned });
+    }
+    const taker: BookTaker = { side, ownerId, orderId, priceTicks, qtyLots };
+    return chain(matchBook(book, judge, taker, options), (run) =>
+      map(settlePlacement(book, cmd, run, options), (step) => ({ value: step, learned: run.judge.learned })),
+    );
+  });
+};
+/**
+ * og applyCommand: place (GTC/IOC/FOK, post-only, STP) or cancel; replace is refused. A refusal event leaves the book
+ * unchanged. The answer carries what the caller learned judging makers.
+ */
+export const judgedBookCommand = <F = never, L = never>(
+  book: Book,
+  cmd: OrderCmd,
+  options: BookOptions<F, L> = {},
+): Result<Judged<BookStep, L>, BookError | F> => {
+  switch (cmd.kind) {
+    case 0:
+      return placeCommand(book, cmd, options);
+    case 1:
+      return map(cancelCommand(book, cmd), unjudged);
+    case 2:
+      return ok(unjudged(rejected(book, cmd, "replace unsupported")));
+  }
+};
+/** og applyCommand, for a caller that learns nothing while judging makers. */
+export const applyBookCommand = <F = never,>(
+  book: Book,
+  cmd: OrderCmd,
+  options: BookOptions<F> = {},
+): Result<BookStep, BookError | F> => map(judgedBookCommand(book, cmd, options), (j) => j.value);
 export type ResumedBook = BookStep & { readonly takerOrderId: string };
-/** og resumeCrossedBook: when the eligible tops cross, the younger resting order takes against the older side. */
-export const resumeCrossedBook = (book: Book, options: BookOptions = {}): Result<ResumedBook | null, BookError> => {
-  const w = forkBook(book), opts = cachedDisposition(options);
-  const bid = findBestOrder(w, 0, opts), ask = findBestOrder(w, 1, opts);
-  if (!bid || !ask || bid.priceTicks < ask.priceTicks) return ok(null);
-  if (bid.seq === ask.seq) return bookErr(`BOOK_CORRUPTION: crossed top orders share seq ${bid.seq}`);
-  const taker = bid.seq > ask.seq ? bid : ask, events: BookEvent[] = [];
-  return chain(matchBook(w, taker, events, opts), (matched): Result<ResumedBook | null, BookError> => {
-    if (matched.blockingOrderId !== undefined) { removeBookOrder(w, taker.orderId); bumpHash(w, 5, taker.priceTicks, 0); }
-    else if (matched.remaining === 0n) removeBookOrder(w, taker.orderId);
-    else if (matched.remaining < taker.qtyLots) { const bad = reduceBookOrder(w, taker, matched.remaining); if (bad !== undefined) return bookErr(bad); }
-    return events.length === 0 ? ok(null) : ok({ state: w, events, takerOrderId: taker.orderId });
+/**
+ * The younger top after its walk: blocked by its own owner it is cancelled, filled it leaves, partly filled it shrinks.
+ */
+const resumedTaker = <L,>(run: MatchRun<L>, taker: BookOrder): Result<Book, BookError> => {
+  switch (true) {
+    case run.blockingOrderId !== undefined:
+      return ok(
+        bumped(removeBookOrder(run.book, taker.orderId) ?? run.book, BOOK_EVENT_TAG.cancel, taker.priceTicks, 0),
+      );
+    case run.remaining === 0n:
+      return ok(removeBookOrder(run.book, taker.orderId) ?? run.book);
+    case run.remaining < taker.qtyLots:
+      return reduceBookOrder(run.book, taker, run.remaining);
+    default:
+      return ok(run.book);
+  }
+};
+type Tops<L> = { readonly bid: BookOrder | null; readonly ask: BookOrder | null; readonly judge: Judge<L> };
+/**
+ * og resumeCrossedBook: when the eligible tops cross, the younger resting order takes against the older side. The
+ * answer carries what the caller learned judging makers.
+ */
+export const judgedResume = <F = never, L = never>(
+  book: Book,
+  options: BookOptions<F, L> = {},
+): Result<Judged<ResumedBook | null, L>, BookError | F> => {
+  const tops = chain(findBestOrder(book, 0, options, NO_JUDGE), (bid) =>
+    map(findBestOrder(book, 1, options, bid.judge), (ask): Tops<L> => ({
+      bid: bid.best,
+      ask: ask.best,
+      judge: ask.judge,
+    })),
+  );
+  return chain(tops, ({ bid, ask, judge }): Result<Judged<ResumedBook | null, L>, BookError | F> => {
+    if (!bid || !ask || bid.priceTicks < ask.priceTicks) return ok({ value: null, learned: judge.learned });
+    if (bid.seq === ask.seq) return bookErr(`BOOK_CORRUPTION: crossed top orders share seq ${bid.seq}`);
+    const taker = bid.seq > ask.seq ? bid : ask;
+    return chain(matchBook(book, judge, taker, options), (run) =>
+      map(resumedTaker(run, taker), (state) => ({
+        value: run.events.length === 0 ? null : { state, events: run.events, takerOrderId: taker.orderId },
+        learned: run.judge.learned,
+      })),
+    );
   });
 };
+/** og resumeCrossedBook, for a caller that learns nothing while judging makers. */
+export const resumeCrossedBook = <F = never,>(
+  book: Book,
+  options: BookOptions<F> = {},
+): Result<ResumedBook | null, BookError | F> => map(judgedResume(book, options), (j) => j.value);
 /** og materializeCommittedRemainder: rest a committed remainder at the book's next sequence. */
-export const materializeCommittedRemainder = (book: Book, o: Pick<BookOrder, "orderId" | "ownerId" | "side" | "priceTicks" | "qtyLots">): Result<Book, BookError> => {
+export const materializeCommittedRemainder = (
+  book: Book,
+  o: Pick<BookOrder, "orderId" | "ownerId" | "side" | "priceTicks" | "qtyLots">,
+): Result<Book, BookError> => {
   if (o.qtyLots <= 0n || o.qtyLots > MAX_ORDERBOOK_QTY_LOTS) return bookErr("BOOK_REMAINDER_QTY_INVALID");
   if (o.priceTicks <= 0n) return bookErr("BOOK_REMAINDER_PRICE_INVALID");
   if (book.orders.has(o.orderId)) return bookErr("BOOK_REMAINDER_DUPLICATE");
   if (book.orders.size >= book.params.maxOrders) return bookErr("Out of order slots");
-  const w = forkBook(book), bad = addBookOrder(w, { ...o, seq: w.nextSeq });
-  if (bad !== undefined) return bookErr(bad);
-  w.nextSeq += 1;
-  bumpHash(w, 1, o.priceTicks, o.qtyLots);
-  return ok(w);
+  const seq = book.nextSeq;
+  return map(addBookOrder(book, { ...o, seq }), (added) =>
+    bumped({ ...added, nextSeq: seq + 1 }, BOOK_EVENT_TAG.rest, o.priceTicks, o.qtyLots));
 };
 /** og reduceBookOrderQuantity: committed cross-j fill progress. */
 export const reduceBookOrderQuantity = (book: Book, orderId: string, nextQtyLots: bigint): Result<Book, BookError> => {
   const current = book.orders.get(orderId);
   if (!current) return bookErr(`BOOK_ORDER_INDEX_MISSING:${orderId}`);
   if (nextQtyLots <= 0n || nextQtyLots >= current.qtyLots) return bookErr(`BOOK_ORDER_REDUCTION_INVALID:${orderId}`);
-  const w = forkBook(book), bad = reduceBookOrder(w, current, nextQtyLots);
-  return bad === undefined ? ok(w) : bookErr(bad);
+  return reduceBookOrder(book, current, nextQtyLots);
 };
 /** og recordAcceptedUsdAskPrice. */
 export const recordAcceptedUsdAskPrice = (book: Book, priceTicks: bigint): Result<Book, BookError> => {
   if (priceTicks <= 0n) return bookErr("BOOK_USD_ASK_PRICE_INVALID");
   if (book.lastAcceptedUsdAskPriceTicks === priceTicks) return ok(book);
-  const w = forkBook(book);
-  w.lastAcceptedUsdAskPriceTicks = priceTicks;
-  bumpHash(w, 4, priceTicks, 0);
-  return ok(w);
+  return ok(bumped({ ...book, lastAcceptedUsdAskPriceTicks: priceTicks }, BOOK_EVENT_TAG.usdAsk, priceTicks, 0));
 };
-export const bestBid = (b: Book): bigint | null => { const top = b.bidPages[b.bidPages.length - 1]; return top ? top.key.priceTicks : null; };
+
+
+// Views.
+
+export const bestBid = (b: Book): bigint | null => b.bidPages.at(-1)?.key.priceTicks ?? null;
 export const bestAsk = (b: Book): bigint | null => b.askPages[0]?.key.priceTicks ?? null;
 /** og getBookOrders: resting orders by sequence. */
-export const bookOrders = (b: Book): readonly BookOrder[] => [...b.orders.values()].sort((l, r) => l.seq - r.seq);
-export type BookLevel = { readonly priceTicks: bigint; readonly qtyLots: bigint; readonly ownerIds: readonly string[]; readonly orderIds: readonly string[] };
+export const bookOrders = (b: Book): readonly BookOrder[] => [...b.orders.values()].toSorted((l, r) => l.seq - r.seq);
+export type BookLevel = {
+  readonly priceTicks: bigint;
+  readonly qtyLots: bigint;
+  readonly ownerIds: readonly string[];
+  readonly orderIds: readonly string[];
+};
+const levelOf = (side: BookSide, rows: readonly BookPageRow[]): BookLevel => {
+  const orders = rows.flatMap((row) => pageOrders(side, row));
+  return {
+    priceTicks: (rows[0] as BookPageRow).key.priceTicks,
+    qtyLots: orders.reduce((sum, o) => sum + o.qtyLots, 0n),
+    ownerIds: [...new Set(orders.map((o) => o.ownerId))],
+    orderIds: orders.map((o) => o.orderId),
+  };
+};
 /** og getBookSideLevels: aggregated price levels in priority order. */
-export const bookSideLevels = (b: Book, side: BookSide, depth = 10): readonly BookLevel[] => {
-  const levels: { priceTicks: bigint; qtyLots: bigint; ownerIds: string[]; orderIds: string[] }[] = [];
-  for (const row of orderedPages(sideRows(b, side), side)) {
-    let level = levels[levels.length - 1];
-    if (!level || level.priceTicks !== row.key.priceTicks) {
-      if (levels.length >= depth) break;
-      level = { priceTicks: row.key.priceTicks, qtyLots: 0n, ownerIds: [], orderIds: [] };
-      levels.push(level);
-    }
-    for (const o of pageOrders(side, row)) { level.qtyLots += o.qtyLots; if (!level.ownerIds.includes(o.ownerId)) level.ownerIds.push(o.ownerId); level.orderIds.push(o.orderId); }
-  }
-  return levels;
+export const bookSideLevels = (b: Book, side: BookSide, depth = 10): readonly BookLevel[] =>
+  priceLevels(orderedPages(sideRows(b, side), side))
+    .filter((_, i) => i < depth)
+    .map((rows) => levelOf(side, rows));
+/** The rows before the first one `keep` refuses. */
+const leadingRows = (rows: readonly BookPageRow[], keep: (r: BookPageRow) => boolean): readonly BookPageRow[] => {
+  const stop = rows.findIndex((r) => !keep(r));
+  return stop < 0 ? rows : rows.slice(0, stop);
 };
-/** og bookOrdersOutsidePriceRange: orders priced below `min` or above `max` (asks/bids, low tail first then high tail per side). */
-export const bookOrdersOutsidePriceRange = (b: Book, min: bigint, max: bigint): Result<readonly BookOrder[], BookError> => {
+/**
+ * og bookOrdersOutsidePriceRange: orders priced below `min` or above `max` (asks/bids, low tail first then high tail
+ * per side).
+ */
+export const bookOrdersOutsidePriceRange = (
+  b: Book,
+  min: bigint,
+  max: bigint,
+): Result<readonly BookOrder[], BookError> => {
   if (min <= 0n || max < min) return bookErr("BOOK_PRICE_RANGE_INVALID");
-  return ok(([0, 1] as const).flatMap((side) => {
-    const rows = sideRows(b, side), low: BookOrder[] = [], high: BookOrder[] = [];
-    for (const r of rows) { if (r.key.priceTicks >= min) break; low.push(...pageOrders(side, r)); }
-    for (const r of orderedPages(rows, 0)) { if (r.key.priceTicks <= max) break; high.push(...pageOrders(side, r)); }
-    return [...low, ...high];
-  }));
+  const outside = (side: BookSide): readonly BookOrder[] => {
+    const rows = sideRows(b, side);
+    const low = leadingRows(rows, (r) => r.key.priceTicks < min);
+    const high = leadingRows(orderedPages(rows, 0), (r) => r.key.priceTicks > max);
+    return [...low, ...high].flatMap((row) => pageOrders(side, row));
+  };
+  return ok([...outside(0), ...outside(1)]);
 };
-// ---- hub order book inside entity consensus: og entity/tx/handlers/account/orderbook/{index,queue,cancels,helpers,same/*}.ts, orderbook/cross-j/orderbook.ts
-// applyCommittedSwapCancelsToOrderbook, account/utils.ts pair policy, and the cross-j book pass (cross/*), remote cancel routing and book lifecycle (see the end of this file).
-// og throws halts from deep inside the pass; here every halt is an `entity_invariant` with og's message, returned through the pass. ----
+
+// ---- hub order book inside entity consensus: og entity/tx/handlers/account/orderbook/
+// {index,queue,cancels,helpers,same/*}.ts, orderbook/cross-j/orderbook.ts applyCommittedSwapCancelsToOrderbook,
+// account/utils.ts pair policy, and the cross-j book pass (cross/*); remote cancel routing and the book lifecycle come
+// after it. og mutates one pass object from deep inside and throws its halts; here each step takes the pass and hands
+// back the next one, and every halt is an `entity_invariant` with og's message. ----
 export type SwapRef = { readonly offerId: string; readonly accountId: string };
-/** og SwapOfferEvent for a committed same-j offer (committed-input.ts buildSameJurisdictionSwapOfferEvent); og marks it accountOutputVerified. */
-export type SwapOfferEvent = SwapRef & {
-  readonly makerIsLeft: boolean; readonly fromEntity: string; readonly toEntity: string; readonly createdHeight: number;
-  readonly giveTokenId: number; readonly giveTokenDecimals: number; readonly giveAmount: bigint; readonly wantTokenId: number; readonly wantTokenDecimals: number; readonly wantAmount: bigint;
-  readonly maxFee: bigint; readonly minNetReceive: bigint; readonly priceTicks?: bigint | undefined; readonly timeInForce?: 0 | 1 | 2 | undefined;
-  /** og SwapOfferEvent.crossJurisdiction: a cross-j order the book owner admitted (book-order.ts buildCommittedCrossJurisdictionOfferEvent). */
+/** The signed terms of one swap offer, as the book reads them. */
+type OfferTerms = {
+  readonly makerIsLeft: boolean;
+  readonly fromEntity: string;
+  readonly toEntity: string;
+  readonly createdHeight: number;
+  readonly giveTokenId: number;
+  readonly giveTokenDecimals: number;
+  readonly giveAmount: bigint;
+  readonly wantTokenId: number;
+  readonly wantTokenDecimals: number;
+  readonly wantAmount: bigint;
+  readonly maxFee: bigint;
+  readonly minNetReceive: bigint;
+};
+/**
+ * og SwapOfferEvent for a committed same-j offer (committed-input.ts buildSameJurisdictionSwapOfferEvent); og marks it
+ * accountOutputVerified.
+ */
+export type SwapOfferEvent = SwapRef & OfferTerms & {
+  readonly priceTicks?: bigint | undefined;
+  readonly timeInForce?: 0 | 1 | 2 | undefined;
+  /**
+   * og SwapOfferEvent.crossJurisdiction: a cross-j order the book owner admitted (book-order.ts
+   * buildCommittedCrossJurisdictionOfferEvent).
+   */
   readonly crossJurisdiction?: CrossRoute | undefined;
-  /** og same-j-swap-output.ts: the Account output is the commitment evidence for a same-j offer (orderbook-admission.ts skips the committed-state re-read). */
+  /**
+   * og same-j-swap-output.ts: the Account output is the commitment evidence for a same-j offer (orderbook-admission.ts
+   * skips the committed-state re-read).
+   */
   readonly accountOutputVerified?: true | undefined;
 };
-/** og CommittedAccountEffects swapOffersCreated / swapOffersCancelled / swapCancelRequests, collected over one Entity frame. */
-export type SwapEvents = { readonly created: readonly SwapOfferEvent[]; readonly cancelled: readonly SwapRef[]; readonly cancelRequests: readonly SwapRef[] };
-export const joinSwapEvents = (a: SwapEvents | undefined, b: SwapEvents | undefined): SwapEvents | undefined =>
-  a === undefined ? b : b === undefined ? a : { created: [...a.created, ...b.created], cancelled: [...a.cancelled, ...b.cancelled], cancelRequests: [...a.cancelRequests, ...b.cancelRequests] };
+/**
+ * og CommittedAccountEffects swapOffersCreated / swapOffersCancelled / swapCancelRequests, collected over one Entity
+ * frame.
+ */
+export type SwapEvents = {
+  readonly created: readonly SwapOfferEvent[];
+  readonly cancelled: readonly SwapRef[];
+  readonly cancelRequests: readonly SwapRef[];
+};
+export const joinSwapEvents = (a: SwapEvents | undefined, b: SwapEvents | undefined): SwapEvents | undefined => {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return {
+    created: [...a.created, ...b.created],
+    cancelled: [...a.cancelled, ...b.cancelled],
+    cancelRequests: [...a.cancelRequests, ...b.cancelRequests],
+  };
+};
 const tif = (t: number | undefined): 0 | 1 | 2 | undefined => (t === 0 || t === 1 || t === 2 ? t : undefined);
 /** og buildSameJurisdictionSwapOfferEvent from the Account's swapOfferUpsert snapshot. */
 export const swapOfferEvent = (accountId: string, e: Of<Effect, "swap_offer_upsert">): SwapOfferEvent => ({
-  offerId: e.offer.offerId, accountId, makerIsLeft: e.offer.makerIsLeft, fromEntity: e.left, toEntity: e.right, createdHeight: e.offer.createdHeight,
-  giveTokenId: Number(e.offer.giveTokenId), giveTokenDecimals: e.offer.giveTokenDecimals, giveAmount: e.offer.giveAmount, wantTokenId: Number(e.offer.wantTokenId), wantTokenDecimals: e.offer.wantTokenDecimals, wantAmount: e.offer.wantAmount,
-  maxFee: e.offer.maxFee, minNetReceive: e.offer.minNetReceive, priceTicks: e.offer.priceTicks, ...opt("timeInForce", tif(e.offer.timeInForce)), accountOutputVerified: true,
+  offerId: e.offer.offerId,
+  accountId,
+  makerIsLeft: e.offer.makerIsLeft,
+  fromEntity: e.left,
+  toEntity: e.right,
+  createdHeight: e.offer.createdHeight,
+  giveTokenId: Number(e.offer.giveTokenId),
+  giveTokenDecimals: e.offer.giveTokenDecimals,
+  giveAmount: e.offer.giveAmount,
+  wantTokenId: Number(e.offer.wantTokenId),
+  wantTokenDecimals: e.offer.wantTokenDecimals,
+  wantAmount: e.offer.wantAmount,
+  maxFee: e.offer.maxFee,
+  minNetReceive: e.offer.minNetReceive,
+  priceTicks: e.offer.priceTicks,
+  ...opt("timeInForce", tif(e.offer.timeInForce)),
+  accountOutputVerified: true,
 });
-/** The matcher's view of one hub Account (og hubState.accounts row): status, committed offers, and the resolves already queued (mempool + our pending frame). */
-export type HubAccount = { readonly active: boolean; readonly left: string; readonly right: string; readonly offers: ReadonlyMap<string, SwapOffer>; readonly queued: readonly WireAccountTx[];
+/**
+ * The matcher's view of one hub Account (og hubState.accounts row): status, committed offers, and the resolves already
+ * queued (mempool + our pending frame).
+ */
+export type HubAccount = {
+  readonly active: boolean;
+  readonly left: string;
+  readonly right: string;
+  readonly offers: ReadonlyMap<string, SwapOffer>;
+  readonly queued: readonly WireAccountTx[];
   /** og account.state.pulls: the committed cross-j pulls the clear lifecycle reads (not read by the matcher). */
-  readonly pulls?: ReadonlyMap<string, PullRow> | undefined };
+  readonly pulls?: ReadonlyMap<string, PullRow> | undefined;
+};
 export type Hub = {
-  readonly id: string; readonly ext: OrderbookExt; readonly accounts: ReadonlyMap<string, HubAccount>; readonly takerFeeBps: number;
+  readonly id: string;
+  readonly ext: OrderbookExt;
+  readonly accounts: ReadonlyMap<string, HubAccount>;
+  readonly takerFeeBps: number;
   /** og hubState.timestamp, crossJurisdictionSwaps and crossJurisdictionBookAdmissions: what the cross-j pass reads. */
-  readonly timestamp?: number | undefined; readonly crossSwaps?: ReadonlyMap<string, CrossRoute> | undefined; readonly crossAdmissions?: BookAdmissions | undefined;
+  readonly timestamp?: number | undefined;
+  readonly crossSwaps?: ReadonlyMap<string, CrossRoute> | undefined;
+  readonly crossAdmissions?: BookAdmissions | undefined;
 };
 export type BookTx = { readonly accountId: string; readonly tx: AccountTx };
-/** og MatchResult (same-j): Account txs in queue order, the final book of every touched pair in first-touch order, and the committed pair dimensions. */
-export type BookMatch = { readonly accountTxs: readonly BookTx[]; readonly books: ReadonlyMap<string, Book>; readonly pairDimensions: ReadonlyMap<string, PairDimensions>; readonly crossFills: readonly CrossFillInstruction[] };
+/**
+ * og MatchResult (same-j): Account txs in queue order, the final book of every touched pair in first-touch order, and
+ * the committed pair dimensions.
+ */
+export type BookMatch = {
+  readonly accountTxs: readonly BookTx[];
+  readonly books: ReadonlyMap<string, Book>;
+  readonly pairDimensions: ReadonlyMap<string, PairDimensions>;
+  readonly crossFills: readonly CrossFillInstruction[];
+};
 /** og NormalizedOrderbookOffer (same-j). */
-type BookOffer = SwapRef & {
-  readonly makerIsLeft: boolean; readonly fromEntity: string; readonly toEntity: string; readonly createdHeight: number;
-  readonly giveTokenId: number; readonly giveTokenDecimals: number; readonly giveAmount: bigint; readonly wantTokenId: number; readonly wantTokenDecimals: number; readonly wantAmount: bigint;
-  readonly maxFee: bigint; readonly minNetReceive: bigint; readonly priceTicks: bigint; readonly timeInForce: 0 | 1 | 2;
+type BookOffer = SwapRef & OfferTerms & { readonly priceTicks: bigint; readonly timeInForce: 0 | 1 | 2 };
+/** An offer as signed, before the book normalizes its price and time in force. */
+type RawOffer = { readonly offerId: string } & OfferTerms & {
+  readonly priceTicks?: bigint | undefined;
+  readonly timeInForce?: number | undefined;
 };
 const halt = (message: string): Result<never, EntityError> => err({ _tag: "entity_invariant", reason: message });
 const haltMessage = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
+/** A book refusal where the hub cannot refuse: og throws it, so it halts the frame. */
+const bookFault = (e: BookError): EntityError => ({ _tag: "entity_invariant", reason: e.code });
+type Mismatch = readonly [field: string, stored: unknown, canonical: unknown];
+/** og's mismatch report: each stored field beside its canonical value. */
+const mismatchText = (fields: readonly Mismatch[]): string =>
+  fields.map(([field, stored, canonical]) => `stored${field}=${stored} canonical${field}=${canonical}`).join(" ");
 const swapKeyOf = (accountId: string, offerId: string): string => `${accountId}:${offerId}`;
 /** og parseNamespacedOrderId: the account id is everything before the last colon. */
 const parseOrderId = (orderId: string, code: string): Result<SwapRef, EntityError> => {
   const i = orderId.lastIndexOf(":");
-  return i <= 0 || i === orderId.length - 1 ? halt(`${code}: order=${orderId}`) : ok({ accountId: orderId.slice(0, i), offerId: orderId.slice(i + 1) });
+  if (i <= 0 || i === orderId.length - 1) return halt(`${code}: order=${orderId}`);
+  return ok({ accountId: orderId.slice(0, i), offerId: orderId.slice(i + 1) });
 };
 const dimsOf = (give: number, want: number, giveDecimals: number, wantDecimals: number): SwapDims => {
   const side = swapSide(give, want);
   return side === 1 ? { side, bd: giveDecimals, qd: wantDecimals } : { side, bd: wantDecimals, qd: giveDecimals };
 };
+type OfferTokens = Pick<OfferTerms, "giveTokenId" | "wantTokenId" | "giveTokenDecimals" | "wantTokenDecimals">;
+const offerDims = (o: OfferTokens): SwapDims =>
+  dimsOf(o.giveTokenId, o.wantTokenId, o.giveTokenDecimals, o.wantTokenDecimals);
+/** The base amount of an offer: what it gives when it sells the base, what it wants when it buys it. */
+const baseAmountOf = (o: OfferTerms, d: SwapDims): bigint => (d.side === 1 ? o.giveAmount : o.wantAmount);
+const quoteAmountOf = (o: OfferTerms, d: SwapDims): bigint => (d.side === 1 ? o.wantAmount : o.giveAmount);
+const makerOf = (o: OfferTerms): string => (o.makerIsLeft ? o.fromEntity : o.toEntity);
+const termsOf = (o: OfferTerms): OfferTerms => ({
+  makerIsLeft: o.makerIsLeft,
+  fromEntity: o.fromEntity,
+  toEntity: o.toEntity,
+  createdHeight: o.createdHeight,
+  giveTokenId: o.giveTokenId,
+  giveTokenDecimals: o.giveTokenDecimals,
+  giveAmount: o.giveAmount,
+  wantTokenId: o.wantTokenId,
+  wantTokenDecimals: o.wantTokenDecimals,
+  wantAmount: o.wantAmount,
+  maxFee: o.maxFee,
+  minNetReceive: o.minNetReceive,
+});
+/** A committed Account offer in the book's terms, before normalization. */
+const storedOffer = (account: HubAccount, offerId: string, o: SwapOffer): RawOffer => ({
+  offerId,
+  makerIsLeft: o.makerIsLeft,
+  fromEntity: account.left,
+  toEntity: account.right,
+  createdHeight: o.createdHeight,
+  giveTokenId: Number(o.giveTokenId),
+  giveTokenDecimals: o.giveTokenDecimals,
+  giveAmount: o.giveAmount,
+  wantTokenId: Number(o.wantTokenId),
+  wantTokenDecimals: o.wantTokenDecimals,
+  wantAmount: o.wantAmount,
+  maxFee: o.maxFee,
+  minNetReceive: o.minNetReceive,
+  priceTicks: o.priceTicks,
+  timeInForce: o.timeInForce,
+});
 /** og normalizeSwapOfferForOrderbook: a missing price is recomputed from the amounts; a non-positive one halts. */
-const normalizeOffer = (o: Omit<BookOffer, "priceTicks" | "timeInForce" | "accountId"> & { readonly priceTicks?: bigint | undefined; readonly timeInForce?: number | undefined }, accountId: string): Result<BookOffer, EntityError> => {
-  const d = dimsOf(o.giveTokenId, o.wantTokenId, o.giveTokenDecimals, o.wantTokenDecimals);
-  const priceTicks = o.priceTicks !== undefined && o.priceTicks > 0n ? o.priceTicks : priceTicksOf(d, d.side === 1 ? o.giveAmount : o.wantAmount, d.side === 1 ? o.wantAmount : o.giveAmount);
+const normalizeOffer = (o: RawOffer, accountId: string): Result<BookOffer, EntityError> => {
+  const d = offerDims(o);
+  const signed = o.priceTicks !== undefined && o.priceTicks > 0n ? o.priceTicks : undefined;
+  const priceTicks = signed ?? priceTicksOf(d, baseAmountOf(o, d), quoteAmountOf(o, d));
   if (priceTicks <= 0n) return halt(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${o.offerId}`);
-  return ok({
-    offerId: o.offerId, accountId, makerIsLeft: o.makerIsLeft, fromEntity: o.fromEntity, toEntity: o.toEntity, createdHeight: o.createdHeight,
-    giveTokenId: o.giveTokenId, giveTokenDecimals: o.giveTokenDecimals, giveAmount: o.giveAmount, wantTokenId: o.wantTokenId, wantTokenDecimals: o.wantTokenDecimals, wantAmount: o.wantAmount,
-    maxFee: o.maxFee, minNetReceive: o.minNetReceive, priceTicks, timeInForce: tif(o.timeInForce) ?? 0,
-  });
+  return ok({ offerId: o.offerId, accountId, ...termsOf(o), priceTicks, timeInForce: tif(o.timeInForce) ?? 0 });
 };
+
+
+// -- pair policy: which pair an offer trades on, its book bucket, and the price band around the book's anchor
+
 /** og account/utils.ts SWAP_PAIR_POLICY_BY_BASE_QUOTE: book bucket width and MM mid price per base/quote. */
 type PairPolicy = { readonly bucket: number; readonly mid: bigint };
 const PAIR_POLICIES: ReadonlyMap<string, PairPolicy> = new Map([
-  ["2/1", { bucket: 10_000, mid: 25_000_000n }], ["2/3", { bucket: 10_000, mid: 25_000_000n }], ["1/3", { bucket: 10_000, mid: 10_000n }],
-  ["4/1", { bucket: 100, mid: 1_200n }], ["4/3", { bucket: 100, mid: 1_200n }], ["5/1", { bucket: 10, mid: 200n }], ["5/3", { bucket: 10, mid: 200n }],
+  ["2/1", { bucket: 10_000, mid: 25_000_000n }],
+  ["2/3", { bucket: 10_000, mid: 25_000_000n }],
+  ["1/3", { bucket: 10_000, mid: 10_000n }],
+  ["4/1", { bucket: 100, mid: 1_200n }],
+  ["4/3", { bucket: 100, mid: 1_200n }],
+  ["5/1", { bucket: 10, mid: 200n }],
+  ["5/3", { bucket: 10, mid: 200n }],
 ]);
 const DEFAULT_PAIR_POLICY: PairPolicy = { bucket: 10_000, mid: 10_000n };
-/** og getSwapPairOrientation: a reference stable is the quote; the book is keyed by the numerically ordered pair. */
-const canonicalPairOf = (a: number, b: number): { readonly base: number; readonly quote: number; readonly pairId: string } => {
-  const lo = Math.min(a, b), hi = Math.max(a, b), al = REFERENCE_STABLES.has(a), bl = REFERENCE_STABLES.has(b);
-  const [base, quote] = al && !bl ? [b, a] : !al && bl ? [a, b] : [lo, hi];
-  return { base, quote, pairId: `${lo}/${hi}` };
+/** The pair's policy, and whether it is the built-in one (only then is its mid an anchor). */
+type PairRule = { readonly policy: PairPolicy; readonly explicit: boolean };
+type CanonicalPair = { readonly base: number; readonly quote: number; readonly pairId: string };
+/** og getSwapPairOrientation: a reference stable is the quote; otherwise the lower id is the base. */
+const orientation = (a: number, b: number): readonly [base: number, quote: number] => {
+  const aStable = REFERENCE_STABLES.has(a);
+  const bStable = REFERENCE_STABLES.has(b);
+  switch (true) {
+    case aStable && !bStable:
+      return [b, a];
+    case bStable && !aStable:
+      return [a, b];
+    default:
+      return [Math.min(a, b), Math.max(a, b)];
+  }
 };
-/** og hasSwapPairPolicyForDimensions: the static policy is authority only when both signed decimals match the built-in tokens. */
-const pairPolicyOf = (base: number, quote: number, bd: number, qd: number): { readonly policy: PairPolicy; readonly explicit: boolean } => {
+/** The book is keyed by the numerically ordered pair, whichever token is the base. */
+const canonicalPairOf = (a: number, b: number): CanonicalPair => {
+  const [base, quote] = orientation(a, b);
+  return { base, quote, pairId: `${Math.min(a, b)}/${Math.max(a, b)}` };
+};
+/**
+ * og hasSwapPairPolicyForDimensions: the static policy is authority only when both signed decimals match the built-in
+ * tokens.
+ */
+const pairRuleOf = (base: number, quote: number, bd: number, qd: number): PairRule => {
   const policy = PAIR_POLICIES.get(`${base}/${quote}`);
   const explicit = policy !== undefined && TOKEN_DECIMALS.get(base) === bd && TOKEN_DECIMALS.get(quote) === qd;
   return explicit ? { policy, explicit } : { policy: DEFAULT_PAIR_POLICY, explicit };
 };
-const MAX_ORDERBOOK_ORDERS_PER_PAIR = 10_000, PRICE_REJECT_BPS = 3_000n;
-/** og resolvePairBandReference. */
-const bandAnchor = (p: { readonly policy: PairPolicy; readonly explicit: boolean }, bid: bigint | null, ask: bigint | null): bigint | null =>
-  bid !== null && ask !== null ? (bid + ask) / 2n : bid !== null ? bid : ask !== null ? ask : p.explicit ? p.policy.mid : null;
+const MAX_ORDERBOOK_ORDERS_PER_PAIR = 10_000;
+const PRICE_REJECT_BPS = 3_000n;
+/** An empty book for a pair the hub has not traded yet. */
+const freshBook = (policy: PairPolicy): Result<Book, EntityError> => {
+  const params = {
+    bucketWidthTicks: BigInt(Math.max(1, policy.bucket)),
+    maxOrders: MAX_ORDERBOOK_ORDERS_PER_PAIR,
+    stpPolicy: 1,
+  } as const;
+  return mapErr(createBook(params), bookFault);
+};
+/** og resolvePairBandReference: the mid of the touch, else its one side, else the built-in mid. */
+const bandAnchor = (rule: PairRule, bid: bigint | null, ask: bigint | null): bigint | null => {
+  switch (true) {
+    case bid !== null && ask !== null:
+      return (bid + ask) / 2n;
+    case bid !== null:
+      return bid;
+    case ask !== null:
+      return ask;
+    default:
+      return rule.explicit ? rule.policy.mid : null;
+  }
+};
+type Band = { readonly min: bigint; readonly max: bigint };
 /** og deriveSameOrderbookPriceBandBounds: +/-30% around the anchor. */
-const bandBounds = (anchor: bigint): Result<{ readonly min: bigint; readonly max: bigint }, EntityError> => {
+const bandBounds = (anchor: bigint): Result<Band, EntityError> => {
   if (anchor <= 0n) return halt("ORDERBOOK_PRICE_BAND_ANCHOR_INVALID");
   const offset = (anchor * PRICE_REJECT_BPS) / 10_000n;
   return ok({ min: anchor - offset, max: anchor + offset });
 };
+/** The book's band, when it has an anchor. */
+const bookBand = (rule: PairRule, book: Book): Result<Band | undefined, EntityError> => {
+  const anchor = bandAnchor(rule, bestBid(book), bestAsk(book));
+  return anchor === null ? ok(undefined) : bandBounds(anchor);
+};
+
+
+// -- materializing an offer: its pair, side, lots and price as one book order
+
 type Materialized = {
-  readonly offer: BookOffer; readonly bookKey: string; readonly bd: number; readonly qd: number; readonly side: BookSide; readonly priceTicks: bigint; readonly qtyLots: bigint;
-  readonly makerId: string; readonly orderId: string; readonly pair: { readonly policy: PairPolicy; readonly explicit: boolean };
+  readonly offer: BookOffer;
+  readonly bookKey: string;
+  readonly bd: number;
+  readonly qd: number;
+  readonly side: BookSide;
+  readonly priceTicks: bigint;
+  readonly qtyLots: bigint;
+  readonly makerId: string;
+  readonly orderId: string;
+  readonly pair: PairRule;
 };
-type Prepared = Materialized & { readonly book: Book; readonly bestBid: bigint | null; readonly bestAsk: bigint | null };
-/** og deriveSameOrderbookMaterialization: direction, amounts, minimum trade size, lot and exact-quote alignment, then the order's bounds. */
-const materialization = (o: BookOffer, minTradeSize: bigint): Result<Tagged<"ok", { m: Materialized }> | Tagged<"reject", { reason: string }>, EntityError> => {
-  const { base, quote, pairId } = canonicalPairOf(o.giveTokenId, o.wantTokenId), side = swapSide(o.giveTokenId, o.wantTokenId);
-  const amounts = o.giveTokenId === base && o.wantTokenId === quote ? { b: o.giveAmount, q: o.wantAmount } : o.giveTokenId === quote && o.wantTokenId === base ? { b: o.wantAmount, q: o.giveAmount } : undefined;
-  const reject = (reason: string) => ok({ _tag: "reject" as const, reason });
-  if (amounts === undefined) return reject("invalid-direction");
-  const d = dimsOf(o.giveTokenId, o.wantTokenId, o.giveTokenDecimals, o.wantTokenDecimals), pair = pairPolicyOf(base, quote, d.bd, d.qd), lot = lotScale(d.bd);
-  if (amounts.b <= 0n || amounts.q <= 0n) return reject("zero-amount");
-  if (minTradeSize > 0n && amounts.q < minTradeSize) return reject(`below-minTradeSize:${amounts.q}`);
-  if (amounts.b % lot !== 0n) return reject(`lot-misaligned:${amounts.b}`);
+/** An offer ready to trade: materialized, against its pair's hot book as the offer found it. */
+type Prepared = Materialized & {
+  readonly book: Book;
+  readonly bestBid: bigint | null;
+  readonly bestAsk: bigint | null;
+};
+type Materialization = Tagged<"ok", { m: Materialized }> | Tagged<"reject", { reason: string }>;
+const refuseOffer = (reason: string): Result<Materialization, never> => ok({ _tag: "reject", reason });
+/** The offer's amounts as base and quote of its canonical pair; an offer across any other pair has none. */
+const pairAmounts = (
+  o: BookOffer,
+  { base, quote }: CanonicalPair,
+): { readonly b: bigint; readonly q: bigint } | undefined => {
+  switch (true) {
+    case o.giveTokenId === base && o.wantTokenId === quote:
+      return { b: o.giveAmount, q: o.wantAmount };
+    case o.giveTokenId === quote && o.wantTokenId === base:
+      return { b: o.wantAmount, q: o.giveAmount };
+    default:
+      return undefined;
+  }
+};
+/**
+ * og deriveSameOrderbookMaterialization: direction, amounts, minimum trade size, lot and exact-quote alignment, then
+ * the order's bounds.
+ */
+const materialization = (o: BookOffer, minTradeSize: bigint): Result<Materialization, EntityError> => {
+  const pair = canonicalPairOf(o.giveTokenId, o.wantTokenId);
+  const amounts = pairAmounts(o, pair);
+  if (amounts === undefined) return refuseOffer("invalid-direction");
+  const d = offerDims(o);
+  const lot = lotScale(d.bd);
+  if (amounts.b <= 0n || amounts.q <= 0n) return refuseOffer("zero-amount");
+  if (minTradeSize > 0n && amounts.q < minTradeSize) return refuseOffer(`below-minTradeSize:${amounts.q}`);
+  if (amounts.b % lot !== 0n) return refuseOffer(`lot-misaligned:${amounts.b}`);
   if (o.priceTicks <= 0n) return halt("SWAP_EXACT_QUOTE_PRICE_INVALID");
-  const qtyLots = amounts.b / lot, multiple = exactQuoteLots(d.bd, d.qd, o.priceTicks);
-  if (qtyLots % multiple !== 0n) return reject(`quote-lot-misaligned:${qtyLots}:${multiple}`);
-  if (qtyLots === 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return reject(`invalid-order:${qtyLots}:${o.priceTicks}`);
-  return ok({ _tag: "ok", m: { offer: o, bookKey: pairId, bd: d.bd, qd: d.qd, side, priceTicks: o.priceTicks, qtyLots, makerId: o.makerIsLeft ? o.fromEntity : o.toEntity, orderId: swapKeyOf(o.accountId, o.offerId), pair } });
-};
-/** One og same-j pass: the hot book cache, queued resolves, suspended makers and committed dimensions. Local to processOrderbookSwaps. */
-type Pass = {
-  readonly hub: Hub; readonly accountTxs: BookTx[]; readonly queued: Set<string>; readonly suspended: Set<string>; readonly meta: Map<string, BookOffer>; readonly swept: Set<string>;
-  readonly cache: Map<string, Book>; readonly updates: Map<string, Book>; readonly dims: Map<string, PairDimensions>;
-};
-const newPass = (hub: Hub): Pass => ({ hub, accountTxs: [], queued: new Set(), suspended: new Set(), meta: new Map(), swept: new Set(), cache: new Map(), updates: new Map(), dims: new Map(hub.ext.pairDimensions) });
-/** og hasQueuedSwapResolveForEntityState. */
-const hasQueuedResolve = (pass: Pick<Pass, "hub" | "queued">, accountId: string, offerId: string): boolean =>
-  pass.queued.has(swapKeyOf(accountId, offerId)) || (pass.hub.accounts.get(accountId)?.queued ?? []).some((tx) => tx.type === "swap_resolve" && tx.offerId === offerId);
-/** og queueUniqueSwapResolveForEntityState. */
-const queueUniqueResolve = (pass: Pick<Pass, "hub" | "queued" | "accountTxs">, accountId: string, data: SwapResolveTerms): boolean => {
-  if (hasQueuedResolve(pass, accountId, data.offerId)) return false;
-  pass.queued.add(swapKeyOf(accountId, data.offerId));
-  pass.accountTxs.push({ accountId, tx: { type: "swap_resolve", ...data } });
-  return true;
-};
-const cancelTerms = (offerId: string, comment: string): SwapResolveTerms => ({ offerId, fillRatio: 0, cancelRemainder: true, comment });
-/** og queueSameSwapResolve: the resolving row never trades again in this pass, even when an identical resolve was already queued. */
-const queueSame = (pass: Pass, accountId: string, data: SwapResolveTerms): boolean => {
-  const queued = queueUniqueResolve(pass, accountId, data);
-  pass.suspended.add(swapKeyOf(accountId, data.offerId));
-  return queued;
-};
-/** og buildLiveSameOfferMeta: the committed Account offer behind a book row; a cross-j or missing offer has none. */
-const liveMeta = (pass: Pass, orderId: string): Result<BookOffer | null, EntityError> => chain(parseOrderId(orderId, "ORDERBOOK_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
-  const account = pass.hub.accounts.get(accountId), o = account?.offers.get(offerId);
-  if (account === undefined || o === undefined || o.crossJurisdiction !== undefined) return ok(null);
-  return normalizeOffer({ offerId, makerIsLeft: o.makerIsLeft, fromEntity: account.left, toEntity: account.right, createdHeight: o.createdHeight, giveTokenId: Number(o.giveTokenId), giveTokenDecimals: o.giveTokenDecimals,
-    giveAmount: o.giveAmount, wantTokenId: Number(o.wantTokenId), wantTokenDecimals: o.wantTokenDecimals, wantAmount: o.wantAmount, maxFee: o.maxFee, minNetReceive: o.minNetReceive, priceTicks: o.priceTicks, timeInForce: o.timeInForce }, accountId);
-});
-/** og classifySameBookMaker: an inactive Account cancels, a resolving row is suspended, and the row must equal its committed offer. */
-const classifyMaker = (pass: Pass, pairId: string, order: BookOrder): Result<MakerDisposition, EntityError> => chain(parseOrderId(order.orderId, "ORDERBOOK_MALFORMED_BOOK_ORDER"), ({ accountId }) => {
-  const account = pass.hub.accounts.get(accountId);
-  if (account === undefined) return halt(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
-  if (!account.active) return ok("cancel");
-  const cached = pass.meta.get(order.orderId);
-  return chain(cached === undefined ? liveMeta(pass, order.orderId) : ok(cached), (meta): Result<MakerDisposition, EntityError> => {
-    if (meta === null) return halt(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
-    if (hasQueuedResolve(pass, meta.accountId, meta.offerId)) return ok("suspended");
-    pass.meta.set(order.orderId, meta);
-    const d = dimsOf(meta.giveTokenId, meta.wantTokenId, meta.giveTokenDecimals, meta.wantTokenDecimals), baseAmount = d.side === 1 ? meta.giveAmount : meta.wantAmount;
-    const owner = meta.makerIsLeft ? meta.fromEntity : meta.toEntity, qtyLots = baseAmount / lotScale(d.bd);
-    if (order.side !== d.side || order.priceTicks !== meta.priceTicks || order.ownerId !== owner || order.qtyLots !== qtyLots)
-      return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} storedOwner=${order.ownerId} canonicalOwner=${owner} storedSide=${order.side} canonicalSide=${d.side} `
-        + `storedPrice=${order.priceTicks} canonicalPrice=${meta.priceTicks} storedQtyLots=${order.qtyLots} canonicalQtyLots=${qtyLots}`);
-    return ok("eligible");
-  });
-});
-/** og applyCommand options for a same-j pair; a halt raised while classifying a maker is kept and surfaces after the command. */
-const bookOptions = (pass: Pass, pairId: string, bd: number, qd: number): { readonly options: BookOptions; readonly fault: () => EntityError | undefined } => {
-  let fault: EntityError | undefined;
-  return {
-    fault: () => fault,
-    options: {
-      suspendedOrderIds: pass.suspended,
-      makerDisposition: (maker) => { if (fault !== undefined) return "suspended"; const r = classifyMaker(pass, pairId, maker); if (!r.ok) { fault = r.error; return "suspended"; } return r.value; },
-      executionQtyMultipleAtPrice: (price) => exactQuoteLots(bd, qd, price),
+  const qtyLots = amounts.b / lot;
+  const multiple = exactQuoteLots(d.bd, d.qd, o.priceTicks);
+  if (qtyLots % multiple !== 0n) return refuseOffer(`quote-lot-misaligned:${qtyLots}:${multiple}`);
+  if (qtyLots === 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return refuseOffer(`invalid-order:${qtyLots}:${o.priceTicks}`);
+  return ok({
+    _tag: "ok",
+    m: {
+      offer: o,
+      bookKey: pair.pairId,
+      bd: d.bd,
+      qd: d.qd,
+      side: swapSide(o.giveTokenId, o.wantTokenId),
+      priceTicks: o.priceTicks,
+      qtyLots,
+      makerId: makerOf(o),
+      orderId: swapKeyOf(o.accountId, o.offerId),
+      pair: pairRuleOf(pair.base, pair.quote, d.bd, d.qd),
     },
+  });
+};
+
+
+// -- the same-j pass: what one processOrderbookSwaps run has learned and queued so far
+
+/** One og same-j pass: the hot book cache, queued resolves, suspended makers and committed dimensions. */
+type Pass = {
+  readonly hub: Hub;
+  readonly accountTxs: readonly BookTx[];
+  readonly queued: ReadonlySet<string>;
+  readonly suspended: ReadonlySet<string>;
+  readonly meta: ReadonlyMap<string, BookOffer>;
+  readonly swept: ReadonlySet<string>;
+  readonly cache: ReadonlyMap<string, Book>;
+  readonly updates: ReadonlyMap<string, Book>;
+  readonly dims: ReadonlyMap<string, PairDimensions>;
+};
+/** A step's answer, and the pass as the step leaves it. */
+type Passed<T> = { readonly pass: Pass; readonly value: T };
+const newPass = (hub: Hub): Pass => ({
+  hub,
+  accountTxs: [],
+  queued: new Set(),
+  suspended: new Set(),
+  meta: new Map(),
+  swept: new Set(),
+  cache: new Map(),
+  updates: new Map(),
+  dims: new Map(hub.ext.pairDimensions),
+});
+const withMember = <T,>(s: ReadonlySet<T>, x: T): ReadonlySet<T> => (s.has(x) ? s : new Set([...s, x]));
+/** A book the pass now works on and will commit: og writes both the hot cache and the touched books. */
+const publishBook = (pass: Pass, pairId: string, book: Book): Pass => ({
+  ...pass,
+  cache: mapSet(pass.cache, pairId, book),
+  updates: mapSet(pass.updates, pairId, book),
+});
+/** og hasQueuedSwapResolveForEntityState. */
+const hasQueuedResolve = (q: Pick<Pass, "hub" | "queued">, accountId: string, offerId: string): boolean => {
+  const pending = q.hub.accounts.get(accountId)?.queued ?? [];
+  return q.queued.has(swapKeyOf(accountId, offerId))
+    || pending.some((tx) => tx.type === "swap_resolve" && tx.offerId === offerId);
+};
+type ResolveQueue = Pick<Pass, "hub" | "queued" | "accountTxs">;
+/** og queueUniqueSwapResolveForEntityState: a second resolve for the same offer is dropped. */
+const queueUniqueResolve = <Q extends ResolveQueue>(q: Q, accountId: string, data: SwapResolveTerms): Q => {
+  if (hasQueuedResolve(q, accountId, data.offerId)) return q;
+  return {
+    ...q,
+    queued: withMember(q.queued, swapKeyOf(accountId, data.offerId)),
+    accountTxs: [...q.accountTxs, { accountId, tx: { type: "swap_resolve", ...data } }],
   };
 };
-/** og containSamePairFailure (live mode): a failed pair command halts the frame. */
-const pairFailure = (pairId: string, accountId: string, offerId: string, message: string): Result<never, EntityError> =>
-  halt(`ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} offer=${offerId} error=${message}`);
-/** og sweepSamePairOutOfBandOffers: once per pair and pass, every resting row outside the anchor band leaves the book. */
-const sweepPair = (pass: Pass, pairId: string, pair: Materialized["pair"], book: Book): Result<Book, EntityError> => {
-  const anchor = bandAnchor(pair, bestBid(book), bestAsk(book));
-  if (anchor === null) return ok(book);
-  return chain(bandBounds(anchor), ({ min, max }) => chain(mapErr(bookOrdersOutsidePriceRange(book, min, max), (e) => ({ _tag: "entity_invariant", reason: e.code }) as EntityError), (outside) => {
-    let next = book, removed = 0;
-    for (const order of outside) {
-      const d = classifyMaker(pass, pairId, order);
-      if (!d.ok) return d;
-      if (d.value === "suspended") continue;
-      const live = d.value === "eligible" ? liveMeta(pass, order.orderId) : ok(null);
-      if (!live.ok) return live;
-      removed += 1;
-      const cancelled = applyBookCommand(next, { kind: 1, ownerId: order.ownerId, orderId: order.orderId });
-      if (!cancelled.ok) return halt(cancelled.error.code);
-      next = cancelled.value.state;
-      if (live.value !== null) queueSame(pass, live.value.accountId, cancelTerms(live.value.offerId, `outside-anchor-band:${order.priceTicks}`));
-    }
-    return ok(removed === 0 ? book : next);
-  }));
+const cancelTerms = (offerId: string, comment: string): SwapResolveTerms => ({
+  offerId,
+  fillRatio: 0,
+  cancelRemainder: true,
+  comment,
+});
+/**
+ * og queueSameSwapResolve: the resolving row never trades again in this pass, even when an identical resolve was
+ * already queued.
+ */
+const queueSame = (pass: Pass, accountId: string, data: SwapResolveTerms): Pass => ({
+  ...queueUniqueResolve(pass, accountId, data),
+  suspended: withMember(pass.suspended, swapKeyOf(accountId, data.offerId)),
+});
+const cancelSame = (pass: Pass, ref: SwapRef, comment: string): Pass =>
+  queueSame(pass, ref.accountId, cancelTerms(ref.offerId, comment));
+/** A resting row cancelled by its owner; og throws a refusal, so it halts. */
+const cancelRow = (book: Book, order: Pick<BookOrder, "orderId" | "ownerId">): Result<Book, EntityError> => {
+  const cancelled = applyBookCommand(book, { kind: 1, ownerId: order.ownerId, orderId: order.orderId });
+  return map(mapErr(cancelled, bookFault), (step) => step.state);
 };
-/** og materializeSameOffer: a resolving offer is skipped; a malformed one or one against the pair's committed dimensions is cancelled. */
-const materializeSame = (pass: Pass, o: BookOffer, minTradeSize: bigint): Result<Materialized | null, EntityError> => {
-  if (hasQueuedResolve(pass, o.accountId, o.offerId)) return ok(null);
+
+
+// -- judging a resting same-j row
+
+/** og buildLiveSameOfferMeta: the committed Account offer behind a book row; a cross-j or missing offer has none. */
+const liveMeta = (hub: Hub, orderId: string): Result<BookOffer | null, EntityError> =>
+  chain(parseOrderId(orderId, "ORDERBOOK_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
+    const account = hub.accounts.get(accountId);
+    const o = account?.offers.get(offerId);
+    if (account === undefined || o === undefined || o.crossJurisdiction !== undefined) return ok(null);
+    return normalizeOffer(storedOffer(account, offerId, o), accountId);
+  });
+/** og classifySameBookMaker's last word: the resting row must be exactly its committed offer. */
+const sameRowMatches = (pairId: string, order: BookOrder, meta: BookOffer): Result<void, EntityError> => {
+  const d = offerDims(meta);
+  const owner = makerOf(meta);
+  const qtyLots = baseAmountOf(meta, d) / lotScale(d.bd);
+  const same =
+    order.side === d.side &&
+    order.priceTicks === meta.priceTicks &&
+    order.ownerId === owner &&
+    order.qtyLots === qtyLots;
+  const fields = mismatchText([
+    ["Owner", order.ownerId, owner],
+    ["Side", order.side, d.side],
+    ["Price", order.priceTicks, meta.priceTicks],
+    ["QtyLots", order.qtyLots, qtyLots],
+  ]);
+  return same ? ok(undefined) : halt(`ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ${fields}`);
+};
+/**
+ * og classifySameBookMaker: an inactive Account cancels, a resolving row is suspended, and the row must equal its
+ * committed offer. og also memoizes the live offer it read; that memo only ever repeats liveMeta over a hub that
+ * does not change during the pass, so the rewrite reads it again instead.
+ */
+const classifyMaker = (pass: Pass, pairId: string, order: BookOrder): Result<MakerDisposition, EntityError> =>
+  chain(parseOrderId(order.orderId, "ORDERBOOK_MALFORMED_BOOK_ORDER"), ({ accountId }) => {
+    const account = pass.hub.accounts.get(accountId);
+    const missing = `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`;
+    if (account === undefined) return halt(missing);
+    if (!account.active) return ok("cancel");
+    const cached = pass.meta.get(order.orderId);
+    const meta = cached === undefined ? liveMeta(pass.hub, order.orderId) : ok(cached);
+    return chain(meta, (m): Result<MakerDisposition, EntityError> => {
+      if (m === null) return halt(missing);
+      if (hasQueuedResolve(pass, m.accountId, m.offerId)) return ok("suspended");
+      return map(sameRowMatches(pairId, order, m), () => "eligible");
+    });
+  });
+/** og applyCommand options for a same-j pair; a halt raised while judging a maker ends the command with it. */
+const bookOptions = (pass: Pass, p: Prepared): BookOptions<EntityError> => ({
+  suspendedOrderIds: pass.suspended,
+  makerVerdict: (maker) => map(classifyMaker(pass, p.bookKey, maker), (disposition) => ({ disposition })),
+  executionQtyMultipleAtPrice: (price) => exactQuoteLots(p.bd, p.qd, price),
+});
+/** A book refusal's code, or the halt a maker judgment raised. */
+const bookFailureText = (e: BookError | EntityError): string => (e._tag === "book" ? e.code : haltMessage(e));
+/** og containSamePairFailure (live mode): a failed pair command halts the frame. */
+const pairFailure = (p: Prepared, message: string): Result<never, EntityError> => {
+  const at = `pair=${p.bookKey} account=${p.offer.accountId} offer=${p.offer.offerId}`;
+  return halt(`ORDERBOOK_PAIR_COMMAND_FAILED: ${at} error=${message}`);
+};
+
+
+// -- preparing a same-j offer against its pair's hot book
+
+/** A step that moves the pass and one book together. */
+type WithBook = { readonly pass: Pass; readonly book: Book };
+/** One out-of-band row leaves the book; a live same-j row queues its cancel, a suspended one stays. */
+const sweepRow = (pairId: string) => (s: WithBook, order: BookOrder): Result<WithBook, EntityError> =>
+  chain(classifyMaker(s.pass, pairId, order), (disposition) => {
+    if (disposition === "suspended") return ok(s);
+    const live = disposition === "eligible" ? liveMeta(s.pass.hub, order.orderId) : ok(null);
+    return chain(live, (meta) => map(cancelRow(s.book, order), (book) => ({
+      book,
+      pass: meta === null ? s.pass : cancelSame(s.pass, meta, `outside-anchor-band:${order.priceTicks}`),
+    })));
+  });
+/**
+ * og sweepSamePairOutOfBandOffers: once per pair and pass, every resting row outside the anchor band leaves the book.
+ */
+const sweepPair = (pass: Pass, pairId: string, rule: PairRule, book: Book): Result<WithBook, EntityError> =>
+  chain(bookBand(rule, book), (band) => {
+    if (band === undefined) return ok({ pass, book });
+    const outside = mapErr(bookOrdersOutsidePriceRange(book, band.min, band.max), bookFault);
+    return chain(outside, (rows) => foldResult(rows, { pass, book }, sweepRow(pairId)));
+  });
+/** og sweeps each pair once per pass, the first time an offer touches it. */
+const sweptOnce = (pass: Pass, m: Materialized, book: Book): Result<WithBook, EntityError> =>
+  pass.swept.has(m.bookKey)
+    ? ok({ pass, book })
+    : sweepPair({ ...pass, swept: withMember(pass.swept, m.bookKey) }, m.bookKey, m.pair, book);
+/** The pair's hot book: the pass's working copy, else the committed one (now hot), else a fresh one. */
+const hotBook = (pass: Pass, pairId: string, fresh: () => Result<Book, EntityError>): Result<WithBook, EntityError> => {
+  const cached = pass.cache.get(pairId);
+  const committed = pass.hub.ext.books.get(pairId);
+  if (cached !== undefined) return ok({ pass, book: cached });
+  if (committed !== undefined)
+    return ok({ pass: { ...pass, cache: mapSet(pass.cache, pairId, committed) }, book: committed });
+  return map(fresh(), (book) => ({ pass, book }));
+};
+/**
+ * og materializeSameOffer: a resolving offer is skipped; a malformed one or one against the pair's committed dimensions
+ * is cancelled.
+ */
+const materializeSame = (
+  pass: Pass,
+  o: BookOffer,
+  minTradeSize: bigint,
+): Result<Passed<Materialized | null>, EntityError> => {
+  if (hasQueuedResolve(pass, o.accountId, o.offerId)) return ok({ pass, value: null });
   return map(materialization(o, minTradeSize), (r) => {
-    if (r._tag === "reject") { queueSame(pass, o.accountId, cancelTerms(o.offerId, r.reason)); return null; }
+    if (r._tag === "reject") return { pass: cancelSame(pass, o, r.reason), value: null };
     const committed = pass.dims.get(r.m.bookKey);
-    if (committed !== undefined && (committed.baseTokenDecimals !== r.m.bd || committed.quoteTokenDecimals !== r.m.qd)) { queueSame(pass, o.accountId, cancelTerms(o.offerId, "pair-decimals-mismatch")); return null; }
-    return r.m;
+    const clashes =
+      committed !== undefined && (committed.baseTokenDecimals !== r.m.bd || committed.quoteTokenDecimals !== r.m.qd);
+    return clashes ? { pass: cancelSame(pass, o, "pair-decimals-mismatch"), value: null } : { pass, value: r.m };
   });
 };
-/** og prepareSameOffer: the pair's hot book (or a fresh one), its one sweep, then the price band. */
-const prepareSame = (pass: Pass, m: Materialized): Result<Prepared | null, EntityError> => {
-  const cached = pass.cache.get(m.bookKey), committed = cached === undefined ? pass.hub.ext.books.get(m.bookKey) : undefined;
-  if (committed !== undefined) pass.cache.set(m.bookKey, committed);
-  const held = cached ?? committed;
-  const fresh: Result<Book, EntityError> = held !== undefined ? ok(held)
-    : mapErr(createBook({ bucketWidthTicks: BigInt(Math.max(1, m.pair.policy.bucket)), maxOrders: MAX_ORDERBOOK_ORDERS_PER_PAIR, stpPolicy: 1 }), (e) => ({ _tag: "entity_invariant", reason: e.code }) as EntityError);
-  return chain(fresh, (start) => chain(pass.swept.has(m.bookKey) ? ok(start) : (pass.swept.add(m.bookKey), sweepPair(pass, m.bookKey, m.pair, start)), (book) => {
-    if (book !== start) { pass.cache.set(m.bookKey, book); pass.updates.set(m.bookKey, book); }
-    const bid = bestBid(book), ask = bestAsk(book), anchor = bandAnchor(m.pair, bid, ask);
-    return chain(anchor === null ? ok(undefined) : bandBounds(anchor), (bounds): Result<Prepared | null, EntityError> => {
-      if (bounds !== undefined && (m.priceTicks < bounds.min || m.priceTicks > bounds.max)) { queueSame(pass, m.offer.accountId, cancelTerms(m.offer.offerId, `outside-anchor-band:${m.priceTicks}`)); return ok(null); }
-      pass.meta.set(m.orderId, { ...m.offer, priceTicks: m.priceTicks });
-      return ok({ ...m, book, bestBid: bid, bestAsk: ask });
-    });
-  }));
-};
+/** og prepareSameOffer: the pair's hot book, its one sweep, then the price band. */
+const prepareSame = (pass: Pass, m: Materialized): Result<Passed<Prepared | null>, EntityError> =>
+  chain(hotBook(pass, m.bookKey, () => freshBook(m.pair.policy)), (hot) =>
+    chain(sweptOnce(hot.pass, m, hot.book), (swept) => {
+      const { book } = swept;
+      const touched = book === hot.book ? swept.pass : publishBook(swept.pass, m.bookKey, book);
+      return map(bookBand(m.pair, book), (band): Passed<Prepared | null> => {
+        if (band !== undefined && (m.priceTicks < band.min || m.priceTicks > band.max)) {
+          return { pass: cancelSame(touched, m.offer, `outside-anchor-band:${m.priceTicks}`), value: null };
+        }
+        const meta = mapSet(touched.meta, m.orderId, { ...m.offer, priceTicks: m.priceTicks });
+        return { pass: { ...touched, meta }, value: { ...m, book, bestBid: bestBid(book), bestAsk: bestAsk(book) } };
+      });
+    }));
+/** Materialize then prepare: the offer ready against its pair's hot book, or null once it was cancelled or skipped. */
+const readySame = (pass: Pass, o: BookOffer, minTradeSize: bigint): Result<Passed<Prepared | null>, EntityError> =>
+  chain(materializeSame(pass, o, minTradeSize), ({ pass: next, value: m }) =>
+    m === null ? ok({ pass: next, value: null }) : prepareSame(next, m));
 /** og keepIdenticalRestingOrder: an offer already resting unchanged stays; a changed one halts. */
-const keepResting = (pass: Pass, p: Prepared): Result<boolean, EntityError> => {
+const keepResting = (pass: Pass, p: Prepared): Result<Passed<boolean>, EntityError> => {
   const existing = p.book.orders.get(p.orderId);
-  if (existing === undefined) return ok(false);
-  if (existing.ownerId !== p.makerId || existing.side !== p.side || existing.qtyLots !== p.qtyLots || existing.priceTicks !== p.priceTicks) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${p.bookKey} order=${p.orderId}`);
-  pass.cache.set(p.bookKey, p.book);
-  return ok(true);
+  if (existing === undefined) return ok({ pass, value: false });
+  const same = existing.ownerId === p.makerId && existing.side === p.side && existing.qtyLots === p.qtyLots
+    && existing.priceTicks === p.priceTicks;
+  if (!same) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${p.bookKey} order=${p.orderId}`);
+  return ok({ pass: { ...pass, cache: mapSet(pass.cache, p.bookKey, p.book) }, value: true });
 };
+
+
+// -- placing a same-j offer
+
 /** og applySameOfferCommand: place the offer; a full book cancels it, any other refusal halts. */
-const placeSame = (pass: Pass, p: Prepared): Result<BookStep | null, EntityError> => {
-  const { options, fault } = bookOptions(pass, p.bookKey, p.bd, p.qd);
-  const r = applyBookCommand(p.book, { kind: 0, ownerId: p.makerId, orderId: p.orderId, side: p.side, tif: p.offer.timeInForce, postOnly: false, priceTicks: p.priceTicks, qtyLots: p.qtyLots }, options);
-  const f = fault();
-  if (f !== undefined) return pairFailure(p.bookKey, p.offer.accountId, p.offer.offerId, haltMessage(f));
-  if (r.ok) return ok(r.value);
-  if (r.error.code !== "Out of order slots") return pairFailure(p.bookKey, p.offer.accountId, p.offer.offerId, r.error.code);
-  queueSame(pass, p.offer.accountId, cancelTerms(p.offer.offerId, `book-full:${p.book.params.maxOrders}`));
-  return ok(null);
+const placeSame = (pass: Pass, p: Prepared): Result<Passed<BookStep | null>, EntityError> => {
+  const cmd: OrderCmd = {
+    kind: 0,
+    ownerId: p.makerId,
+    orderId: p.orderId,
+    side: p.side,
+    tif: p.offer.timeInForce,
+    postOnly: false,
+    priceTicks: p.priceTicks,
+    qtyLots: p.qtyLots,
+  };
+  const r = applyBookCommand(p.book, cmd, bookOptions(pass, p));
+  if (r.ok) return ok({ pass, value: r.value });
+  const full = r.error._tag === "book" && r.error.code === "Out of order slots";
+  if (!full) return pairFailure(p, bookFailureText(r.error));
+  return ok({ pass: cancelSame(pass, p.offer, `book-full:${p.book.params.maxOrders}`), value: null });
 };
 /** og resumeCrossedSameBook. */
 const resumeSame = (pass: Pass, p: Prepared): Result<ResumedBook | null, EntityError> => {
-  const { options, fault } = bookOptions(pass, p.bookKey, p.bd, p.qd);
-  const r = resumeCrossedBook(p.book, options), f = fault();
-  if (f !== undefined) return pairFailure(p.bookKey, p.offer.accountId, p.offer.offerId, haltMessage(f));
-  return r.ok ? ok(r.value) : pairFailure(p.bookKey, p.offer.accountId, p.offer.offerId, r.error.code);
+  const r = resumeCrossedBook(p.book, bookOptions(pass, p));
+  return r.ok ? ok(r.value) : pairFailure(p, bookFailureText(r.error));
 };
+
+
+// -- settling a same-j command: every fill becomes the exact swap_resolve of its Account
+
 /** og SwapNetAuthorizationError (a fee-authority refusal of one fill) versus a halt. */
 type FillFault = Tagged<"auth"> | Tagged<"halt", { message: string }>;
 const AUTH: FillFault = { _tag: "auth" };
 const fillHalt = (message: string): Result<never, FillFault> => err({ _tag: "halt", message });
-const fromEntityError = <T,>(r: Result<T, EntityError>): Result<T, FillFault> => mapErr(r, (e): FillFault => ({ _tag: "halt", message: haltMessage(e) }));
-type ExecOffer = { readonly giveTokenId: number; readonly giveTokenDecimals: number; readonly wantTokenId: number; readonly wantTokenDecimals: number; readonly giveAmount: bigint; readonly wantAmount: bigint; readonly quantizedGive: bigint; readonly quantizedWant: bigint; readonly maxFee: bigint; readonly minNetReceive: bigint; readonly priceTicks: bigint };
-type RestingTerms = { readonly giveTokenId: number; readonly giveTokenDecimals: number; readonly wantTokenId: number; readonly wantTokenDecimals: number; readonly giveAmount: bigint; readonly wantAmount: bigint; readonly maxFee: bigint; readonly minNetReceive: bigint };
+const fromEntityError = <T,>(r: Result<T, EntityError>): Result<T, FillFault> =>
+  mapErr(r, (e): FillFault => ({ _tag: "halt", message: haltMessage(e) }));
+/** The terms a resting row trades on: its tokens, amounts and net authority. */
+type RestingTerms = Authorized & {
+  readonly giveTokenId: number;
+  readonly giveTokenDecimals: number;
+  readonly wantTokenId: number;
+  readonly wantTokenDecimals: number;
+};
+/** The offer a fill executes against, quantized, at the price it rests at. */
+type ExecOffer = RestingTerms & {
+  readonly quantizedGive: bigint;
+  readonly quantizedWant: bigint;
+  readonly priceTicks: bigint;
+};
 /** og materializeCanonicalRestingOffer: the resting row's original lots at its resting price, as give/want. */
-const canonicalResting = (r: RestingTerms, priceTicks: bigint, qtyLots: bigint): Omit<ExecOffer, "maxFee" | "minNetReceive"> => {
-  const d = dimsOf(r.giveTokenId, r.wantTokenId, r.giveTokenDecimals, r.wantTokenDecimals), base = qtyLots <= 0n ? 0n : qtyLots * lotScale(d.bd), quote = quoteAt(d.bd, d.qd, base, priceTicks);
+const canonicalResting = (r: RestingTerms, priceTicks: bigint, qtyLots: bigint): Omit<ExecOffer, keyof NetAuth> => {
+  const d = offerDims(r);
+  const base = qtyLots <= 0n ? 0n : qtyLots * lotScale(d.bd);
+  const quote = quoteAt(d.bd, d.qd, base, priceTicks);
   const [give, want] = d.side === 1 ? [base, quote] : [quote, base];
-  return { giveTokenId: r.giveTokenId, giveTokenDecimals: r.giveTokenDecimals, wantTokenId: r.wantTokenId, wantTokenDecimals: r.wantTokenDecimals, giveAmount: give, wantAmount: want, quantizedGive: give, quantizedWant: want, priceTicks };
+  return {
+    giveTokenId: r.giveTokenId,
+    giveTokenDecimals: r.giveTokenDecimals,
+    wantTokenId: r.wantTokenId,
+    wantTokenDecimals: r.wantTokenDecimals,
+    giveAmount: give,
+    wantAmount: want,
+    quantizedGive: give,
+    quantizedWant: want,
+    priceTicks,
+  };
 };
-/** og deriveSwapFillPolicyFee: the hub's taker fee, bounded by the same pro-rata authority as the maker's signed limit. */
-const policyFee = (o: { readonly giveAmount: bigint; readonly wantAmount: bigint }, fG: bigint, fW: bigint, bps: number, closes: boolean): Result<bigint, FillFault> => {
+/**
+ * og deriveSwapFillPolicyFee: the hub's taker fee, bounded by the same pro-rata authority as the maker's signed limit.
+ */
+const policyFee = (
+  o: Pick<Authorized, "giveAmount" | "wantAmount">,
+  executed: Pick<Fill, "give" | "want">,
+  bps: number,
+  closes: boolean,
+): Result<bigint, FillFault> => {
   if (o.wantAmount <= 0n || !Number.isSafeInteger(bps) || bps < 0 || bps > 10_000) return err(AUTH);
-  const maxFee = (o.wantAmount * BigInt(bps)) / 10_000n, policy = { maxFee, minNetReceive: o.wantAmount - maxFee };
-  if (policy.maxFee >= o.wantAmount || policy.minNetReceive <= 0n || offerAuthError({ giveAmount: 1n, wantAmount: o.wantAmount, ...policy }) !== undefined) return err(AUTH);
-  const authorized = { ...o, ...policy };
-  if (offerAuthError(authorized) !== undefined || fG < 0n || fG > o.giveAmount || fW < 0n) return err(AUTH);
-  let num = fG, den = o.giveAmount;
-  if (closes) { const capped = fW < o.wantAmount ? fW : o.wantAmount; if (capped * den > num * o.wantAmount) { num = capped; den = o.wantAmount; } }
-  return ok((policy.maxFee * num) / den);
+  const maxFee = (o.wantAmount * BigInt(bps)) / 10_000n;
+  const policy: NetAuth = { maxFee, minNetReceive: o.wantAmount - maxFee };
+  const authorized: Authorized = { ...o, ...policy };
+  const refused = maxFee >= o.wantAmount
+    || policy.minNetReceive <= 0n
+    || offerAuthError({ giveAmount: 1n, wantAmount: o.wantAmount, ...policy }) !== undefined
+    || offerAuthError(authorized) !== undefined
+    || executed.give < 0n || executed.give > o.giveAmount || executed.want < 0n;
+  if (refused) return err(AUTH);
+  const { num, den } = usedShare(authorized, { ...executed, fee: 0n }, closes);
+  return ok((maxFee * num) / den);
 };
-type SameFill = { filledLots: bigint; readonly originalLots: bigint; weightedCost: bigint };
+type Trade = Extract<BookEvent, { type: "TRADE" }>;
+type SameFill = { readonly filledLots: bigint; readonly originalLots: bigint; readonly weightedCost: bigint };
+/** Each trade counts once for its maker and once for its taker. */
+const tradeLegs = (t: Trade) => [
+  { orderId: t.makerOrderId, originalLots: t.makerQtyBefore, t },
+  { orderId: t.takerOrderId, originalLots: t.takerQtyTotal, t },
+] as const;
 /** og aggregateSameTradeFills: per order, maker then taker, in trade order. */
-const aggregateFills = (trades: readonly Extract<BookEvent, { type: "TRADE" }>[]): ReadonlyMap<string, SameFill> => {
-  const fills = new Map<string, SameFill>();
-  for (const t of trades) for (const [orderId, original] of [[t.makerOrderId, t.makerQtyBefore], [t.takerOrderId, t.takerQtyTotal]] as const) {
+const aggregateFills = (trades: readonly Trade[]): ReadonlyMap<string, SameFill> =>
+  trades.flatMap(tradeLegs).reduce<ReadonlyMap<string, SameFill>>((fills, { orderId, originalLots, t }) => {
     const e = fills.get(orderId);
-    if (e === undefined) fills.set(orderId, { filledLots: t.qty, originalLots: original, weightedCost: t.price * t.qty });
-    else { e.filledLots += t.qty; e.weightedCost += t.price * t.qty; }
-  }
-  return fills;
+    const fill = e === undefined
+      ? { filledLots: t.qty, originalLots, weightedCost: t.price * t.qty }
+      : { ...e, filledLots: e.filledLots + t.qty, weightedCost: e.weightedCost + t.price * t.qty };
+    return mapSet(fills, orderId, fill);
+  }, new Map());
+/** Everything one command's settlement reads: the pass before it, the taker, and the book the command left. */
+type Settling = {
+  readonly pass: Pass;
+  readonly p: Prepared;
+  readonly book: Book;
+  readonly comment: string | undefined;
 };
-/** og buildSameFillResolvePlan: the exact execution of one fill as a swap_resolve, authorized against the executing offer. */
-const fillResolve = (pass: Pass, p: Prepared, book: Book, ref: SwapRef, orderId: string, fill: SameFill, account: HubAccount, comment: string | undefined): Result<SwapResolveTerms, FillFault> => {
-  const { filledLots, originalLots, weightedCost } = fill, taker = orderId === p.orderId;
-  if (filledLots <= 0n || weightedCost <= 0n) return fillHalt(`ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost} filledLots=${filledLots}`);
-  if (!taker && weightedCost % filledLots !== 0n) return fillHalt(`ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost} filledLots=${filledLots}`);
-  const restingPrice = weightedCost / filledLots;
-  const exec: Result<ExecOffer, FillFault> = (() => {
-    if (taker) return ok({ ...p.offer, quantizedGive: p.offer.giveAmount, quantizedWant: p.offer.wantAmount });
-    const meta = pass.meta.get(orderId), stored = account.offers.get(ref.offerId);
-    const resting: RestingTerms | undefined = meta ?? (stored === undefined ? undefined : { ...stored, giveTokenId: Number(stored.giveTokenId), wantTokenId: Number(stored.wantTokenId) });
-    if (resting === undefined) return fillHalt(`ORDERBOOK_FILL_SOURCE_MISSING: order=${orderId} pair=${p.bookKey} account=${ref.accountId} offer=${ref.offerId}`);
-    const canonical = canonicalResting(resting, restingPrice, originalLots), auth = requantizeAuth(resting, canonical.giveAmount, canonical.wantAmount);
-    return auth.ok ? ok({ ...canonical, ...auth.value }) : err(AUTH);
-  })();
-  return chain(exec, (o) => {
-    const d = dimsOf(o.giveTokenId, o.wantTokenId, o.giveTokenDecimals, o.wantTokenDecimals), lot = lotScale(d.bd);
-    const execBase = filledLots * lot, execQuote = quoteAt(d.bd, d.qd, lot, weightedCost), cancelRemainder = !book.orders.has(orderId);
-    // og buildSwapResolveDataFromOrderbookFill
-    const eG = d.side === 0 ? execQuote : execBase, eW = d.side === 0 ? execBase : execQuote, executed = eG > 0n && eW > 0n;
-    const exact = executed ? exactFillRatio(o.quantizedGive, eG) : { n: 0n, d: 1n };
-    const base: SwapResolveTerms = {
-      offerId: ref.offerId, restingGiveTokenId: String(o.giveTokenId) as TokenId, restingWantTokenId: String(o.wantTokenId) as TokenId, fillRatio: Math.min(fillRatioOf(exact), MAX_FILL), fillNumerator: exact.n, fillDenominator: exact.d, cancelRemainder,
-      ...(executed ? { executionGiveAmount: eG, executionWantAmount: eW } : {}), restingPriceTicks: o.priceTicks, restingGiveAmount: o.giveAmount, restingWantAmount: o.wantAmount, restingQuantizedGive: o.quantizedGive, restingQuantizedWant: o.quantizedWant,
-      ...(taker && comment ? { comment } : {}),
-    };
-    return chain(taker ? policyFee(o, executed ? eG : 0n, executed ? eW : 0n, pass.hub.takerFeeBps, cancelRemainder) : ok(0n), (fee): Result<SwapResolveTerms, FillFault> => {
-      const data: SwapResolveTerms = fee > 0n ? { ...base, feeTokenId: String(o.wantTokenId) as TokenId, feeAmount: fee } : base;
-      return netAuthError(o, { give: data.executionGiveAmount ?? 0n, want: data.executionWantAmount ?? 0n, fee: data.feeAmount ?? 0n }, cancelRemainder) === undefined ? ok(data) : err(AUTH);
+/** The taker's own terms, or the resting row's original lots re-authorized at its resting price. */
+const executingOffer = (
+  s: Settling,
+  ref: SwapRef,
+  orderId: string,
+  fill: SameFill,
+  account: HubAccount,
+): Result<ExecOffer, FillFault> => {
+  const { p, pass } = s;
+  if (orderId === p.orderId)
+    return ok({ ...p.offer, quantizedGive: p.offer.giveAmount, quantizedWant: p.offer.wantAmount });
+  const stored = account.offers.get(ref.offerId);
+  const fromStore: RestingTerms | undefined =
+    stored === undefined
+      ? undefined
+      : { ...stored, giveTokenId: Number(stored.giveTokenId), wantTokenId: Number(stored.wantTokenId) };
+  const resting = pass.meta.get(orderId) ?? fromStore;
+  if (resting === undefined) {
+    return fillHalt(
+      `ORDERBOOK_FILL_SOURCE_MISSING: order=${orderId} pair=${p.bookKey} account=${ref.accountId} offer=${ref.offerId}`,
+    );
+  }
+  const canonical = canonicalResting(resting, fill.weightedCost / fill.filledLots, fill.originalLots);
+  const auth = requantizeAuth(resting, canonical.giveAmount, canonical.wantAmount);
+  return auth.ok ? ok({ ...canonical, ...auth.value }) : err(AUTH);
+};
+/** og buildSwapResolveDataFromOrderbookFill: the executed amounts in the offer's give/want terms, as an exact ratio. */
+const fillTerms = (s: Settling, ref: SwapRef, orderId: string, o: ExecOffer, fill: SameFill): SwapResolveTerms => {
+  const taker = orderId === s.p.orderId;
+  const d = offerDims(o);
+  const lot = lotScale(d.bd);
+  const execBase = fill.filledLots * lot;
+  const execQuote = quoteAt(d.bd, d.qd, lot, fill.weightedCost);
+  const [give, want] = d.side === 0 ? [execQuote, execBase] : [execBase, execQuote];
+  const executed = give > 0n && want > 0n;
+  const exact = executed ? exactFillRatio(o.quantizedGive, give) : { n: 0n, d: 1n };
+  return {
+    offerId: ref.offerId,
+    restingGiveTokenId: String(o.giveTokenId) as TokenId,
+    restingWantTokenId: String(o.wantTokenId) as TokenId,
+    fillRatio: Math.min(fillRatioOf(exact), MAX_FILL),
+    fillNumerator: exact.n,
+    fillDenominator: exact.d,
+    cancelRemainder: !s.book.orders.has(orderId),
+    ...(executed ? { executionGiveAmount: give, executionWantAmount: want } : {}),
+    restingPriceTicks: o.priceTicks,
+    restingGiveAmount: o.giveAmount,
+    restingWantAmount: o.wantAmount,
+    restingQuantizedGive: o.quantizedGive,
+    restingQuantizedWant: o.quantizedWant,
+    ...(taker && s.comment ? { comment: s.comment } : {}),
+  };
+};
+/**
+ * og buildSameFillResolvePlan: the exact execution of one fill as a swap_resolve, fee included, authorized against the
+ * executing offer.
+ */
+const fillResolve = (
+  s: Settling,
+  ref: SwapRef,
+  orderId: string,
+  fill: SameFill,
+  account: HubAccount,
+): Result<SwapResolveTerms, FillFault> => {
+  const { filledLots, weightedCost } = fill;
+  const taker = orderId === s.p.orderId;
+  if (filledLots <= 0n || weightedCost <= 0n) {
+    return fillHalt(
+      `ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost} filledLots=${filledLots}`,
+    );
+  }
+  if (!taker && weightedCost % filledLots !== 0n) {
+    return fillHalt(
+      `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost} filledLots=${filledLots}`,
+    );
+  }
+  return chain(executingOffer(s, ref, orderId, fill, account), (o) => {
+    const base = fillTerms(s, ref, orderId, o, fill);
+    const executed = { give: base.executionGiveAmount ?? 0n, want: base.executionWantAmount ?? 0n };
+    const fee = taker ? policyFee(o, executed, s.pass.hub.takerFeeBps, base.cancelRemainder) : ok(0n);
+    return chain(fee, (feeAmount) => {
+      const data: SwapResolveTerms =
+        feeAmount > 0n ? { ...base, feeTokenId: String(o.wantTokenId) as TokenId, feeAmount } : base;
+      return netAuthError(o, { ...executed, fee: feeAmount }, base.cancelRemainder) === undefined
+        ? ok(data)
+        : err(AUTH);
     });
   });
 };
-/** og isAuthorizedUsdReferenceAsk: only the hub's USD quote authority, selling a volatile base for the reference token, moves the USD reference. */
+type FillPlan = { readonly accountId: string; readonly data: SwapResolveTerms };
+/** One aggregated fill as the swap_resolve its Account will carry; a participant already resolving halts. */
+const planFill = (s: Settling, orderId: string, fill: SameFill): Result<FillPlan, FillFault> =>
+  chain(fromEntityError(parseOrderId(orderId, "ORDERBOOK_FILL_LOOKUP_FAILED")), (ref) => {
+    const account = s.pass.hub.accounts.get(ref.accountId);
+    if (hasQueuedResolve(s.pass, ref.accountId, ref.offerId)) {
+      return fillHalt(`ORDERBOOK_TRADE_PARTICIPANT_ALREADY_RESOLVING: account=${ref.accountId} offer=${ref.offerId}`);
+    }
+    if (account === undefined) {
+      return fillHalt(`ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${ref.offerId} accountId=${ref.accountId}`);
+    }
+    return map(fillResolve(s, ref, orderId, fill, account), (data) => ({ accountId: ref.accountId, data }));
+  });
+/**
+ * og isAuthorizedUsdReferenceAsk: only the hub's USD quote authority, selling a volatile base for the reference token,
+ * moves the USD reference.
+ */
 const usdReferenceAsk = (profile: HubProfile, p: Prepared): boolean =>
-  p.side === 1 && p.offer.giveTokenId !== profile.referenceTokenId && p.offer.wantTokenId === profile.referenceTokenId && p.makerId.toLowerCase() === profile.usdQuoteAuthorityEntityId.toLowerCase();
-/** og processSameCommandEvents: an unfilled reject cancels the offer; fills are all authorized before any is queued. Returns the book to commit. */
-const commandEvents = (pass: Pass, p: Prepared, result: BookStep): Result<Book, FillFault> => {
+  p.side === 1
+    && p.offer.giveTokenId !== profile.referenceTokenId
+    && p.offer.wantTokenId === profile.referenceTokenId
+    && p.makerId.toLowerCase() === profile.usdQuoteAuthorityEntityId.toLowerCase();
+/** The book after an accepted USD authority ask records its price. */
+const withUsdReference = (pass: Pass, p: Prepared, book: Book): Result<Book, FillFault> =>
+  usdReferenceAsk(pass.hub.ext.hubProfile, p)
+    ? mapErr(recordAcceptedUsdAskPrice(book, p.priceTicks), (e): FillFault => ({ _tag: "halt", message: e.code }))
+    : ok(book);
+/**
+ * og processSameCommandEvents: an unfilled reject cancels the offer; fills are all authorized before any is queued.
+ * Returns the book to commit.
+ */
+const commandEvents = (pass: Pass, p: Prepared, result: BookStep): Result<Passed<Book>, FillFault> => {
   const rejects = result.events.flatMap((e) => (e.type === "REJECT" && e.orderId === p.orderId ? [e] : []));
   const trades = result.events.flatMap((e) => (e.type === "TRADE" ? [e] : []));
-  const stp = rejects.find((e) => e.reason === "STP cancel taker"), comment = stp === undefined ? undefined : `STP:${String(stp.blockingOrderId || "")}`;
+  const stp = rejects.find((e) => e.reason === "STP cancel taker");
+  const comment = stp === undefined ? undefined : `STP:${String(stp.blockingOrderId || "")}`;
   if (rejects.length > 0 && trades.length === 0) {
-    const reasons = rejects.map((e) => e.reason).filter(Boolean).join(", ");
-    queueSame(pass, p.offer.accountId, cancelTerms(p.offer.offerId, comment ?? `post-only-reject:${reasons || "unknown"}`));
-    return ok(result.state);
+    const reasons = rejects
+      .map((e) => e.reason)
+      .filter(Boolean)
+      .join(", ");
+    return ok({
+      pass: cancelSame(pass, p.offer, comment ?? `post-only-reject:${reasons || "unknown"}`),
+      value: result.state,
+    });
   }
-  const recorded = usdReferenceAsk(pass.hub.ext.hubProfile, p) ? mapErr(recordAcceptedUsdAskPrice(result.state, p.priceTicks), (e): FillFault => ({ _tag: "halt", message: e.code })) : ok(result.state);
-  return chain(recorded, (book) => {
-    const plans: { readonly accountId: string; readonly data: SwapResolveTerms }[] = [];
-    for (const [orderId, fill] of aggregateFills(trades)) {
-      const ref = fromEntityError(parseOrderId(orderId, "ORDERBOOK_FILL_LOOKUP_FAILED"));
-      if (!ref.ok) return ref;
-      if (hasQueuedResolve(pass, ref.value.accountId, ref.value.offerId)) return fillHalt(`ORDERBOOK_TRADE_PARTICIPANT_ALREADY_RESOLVING: account=${ref.value.accountId} offer=${ref.value.offerId}`);
-      const account = pass.hub.accounts.get(ref.value.accountId);
-      if (account === undefined) return fillHalt(`ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${ref.value.offerId} accountId=${ref.value.accountId}`);
-      const plan = fillResolve(pass, p, book, ref.value, orderId, fill, account, comment);
-      if (!plan.ok) return plan;
-      plans.push({ accountId: ref.value.accountId, data: plan.value });
-    }
-    for (const plan of plans) queueSame(pass, plan.accountId, plan.data);
-    return ok(book);
+  return chain(withUsdReference(pass, p, result.state), (book) => {
+    const s: Settling = { pass, p, book, comment };
+    const plans = traverse(aggregateFills(trades), ([orderId, fill]) => planFill(s, orderId, fill));
+    return map(plans, (ps) => ({
+      pass: ps.reduce((queued, plan) => queueSame(queued, plan.accountId, plan.data), pass),
+      value: book,
+    }));
   });
 };
 /** og commitSameCommandResult: a fee-authority refusal cancels the taker instead; anything else halts the pair. */
-const commitSame = (pass: Pass, p: Prepared, result: BookStep): Result<void, EntityError> => {
+const commitSame = (pass: Pass, p: Prepared, result: BookStep): Result<Pass, EntityError> => {
   const r = commandEvents(pass, p, result);
   if (!r.ok) {
-    if (r.error._tag === "auth") { queueSame(pass, p.offer.accountId, cancelTerms(p.offer.offerId, "fee-authorization-exceeded")); return ok(undefined); }
-    return pairFailure(p.bookKey, p.offer.accountId, p.offer.offerId, r.error.message);
+    return r.error._tag === "auth"
+      ? ok(cancelSame(pass, p.offer, "fee-authorization-exceeded"))
+      : pairFailure(p, r.error.message);
   }
-  pass.dims.set(p.bookKey, { baseTokenDecimals: p.bd, quoteTokenDecimals: p.qd });
-  pass.cache.set(p.bookKey, r.value);
-  pass.updates.set(p.bookKey, r.value);
-  return ok(undefined);
+  const { pass: settled, value: book } = r.value;
+  const dims = mapSet(settled.dims, p.bookKey, { baseTokenDecimals: p.bd, quoteTokenDecimals: p.qd });
+  return ok(publishBook({ ...settled, dims }, p.bookKey, book));
 };
+
+
+// -- draining a crossed same-j book
+
 /** og prepareCrossedRestingTaker: the younger crossed row must still be its committed offer, unchanged. */
-const crossedTaker = (pass: Pass, trigger: Prepared, takerOrderId: string, minTradeSize: bigint): Result<Prepared, EntityError> => chain(liveMeta(pass, takerOrderId), (live) => {
-  if (live === null) return halt(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${trigger.bookKey} order=${takerOrderId}`);
-  return chain(materializeSame(pass, live, minTradeSize), (m) => chain(m === null ? ok(null) : prepareSame(pass, m), (p) =>
-    chain(p === null ? ok(false) : keepResting(pass, p), (kept): Result<Prepared, EntityError> => (p === null || !kept ? halt(`ORDERBOOK_CACHE_MISMATCH: pair=${trigger.bookKey} order=${takerOrderId}`) : ok(p)))));
-});
-/** og drainCrossedSameBook: settle crossed resting rows until the book no longer crosses, bounded by its order count. */
-const drainSame = (pass: Pass, seed: Prepared, minTradeSize: bigint): Result<void, EntityError> => {
-  let current = seed;
-  const limit = seed.book.orders.size;
-  for (let resumedCount = 0; ; resumedCount += 1) {
-    const resumed = resumeSame(pass, current);
-    if (!resumed.ok) return resumed;
-    if (resumed.value === null) return ok(undefined);
-    if (resumedCount >= limit) return halt(`ORDERBOOK_SAME_DRAIN_NON_TERMINATING: pair=${seed.bookKey} limit=${limit}`);
-    const taker = crossedTaker(pass, current, resumed.value.takerOrderId, minTradeSize);
-    if (!taker.ok) return taker;
-    const committed = commitSame(pass, taker.value, resumed.value);
-    if (!committed.ok) return committed;
-    const next = pass.cache.get(seed.bookKey);
-    if (next === undefined) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${seed.bookKey} missing-after-resume`);
-    current = { ...current, book: next };
-  }
-};
-/** og findSamePairResumeSeed: the first eligible resting row, by sequence, that is still its committed offer. */
-const resumeSeed = (pass: Pass, pairId: string, minTradeSize: bigint): Result<Prepared | null, EntityError> => {
-  const book = pass.cache.get(pairId) ?? pass.hub.ext.books.get(pairId);
-  if (book === undefined) return ok(null);
-  for (const order of bookOrders(book)) {
-    const d = classifyMaker(pass, pairId, order);
-    if (!d.ok) return d;
-    if (d.value !== "eligible") continue;
-    const live = liveMeta(pass, order.orderId);
-    if (!live.ok) return live;
-    if (live.value === null) continue;
-    const m = materializeSame(pass, live.value, minTradeSize);
-    if (!m.ok) return m;
-    const p = m.value === null ? ok(null) : prepareSame(pass, m.value);
-    if (!p.ok) return p;
-    if (p.value === null) continue;
-    const kept = keepResting(pass, p.value);
-    if (!kept.ok) return kept;
-    if (kept.value) return ok(p.value);
-  }
-  return ok(null);
-};
-/** og processSameOrderbookOffer. */
-const processSameOffer = (pass: Pass, o: BookOffer, minTradeSize: bigint): Result<void, EntityError> =>
-  chain(materializeSame(pass, o, minTradeSize), (m) => chain(m === null ? ok(null) : prepareSame(pass, m), (p) => {
-    if (p === null) return ok(undefined);
-    return chain(keepResting(pass, p), (kept) => (kept ? drainSame(pass, p, minTradeSize) : chain(placeSame(pass, p), (step) => (step === null ? ok(undefined) : commitSame(pass, p, step)))));
-  }));
-const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-/**
- * og processOrderbookSwaps (same-j pass): offers by (createdHeight, accountId, offerId), then each touched pair's crossed resting rows in pair order.
- * The committed offers come from Account outputs (og accountOutputVerified), so no second committed-state check runs here.
- */
-export const processOrderbookSwaps = (hub: Hub, offers: readonly BookOfferInput[], resumePairIds: readonly string[] = []): Result<BookMatch, EntityError> => {
-  const pass = newPass(hub), minTradeSize = hub.ext.hubProfile.minTradeSize;
-  const sorted = [...offers].sort((l, r) => l.createdHeight - r.createdHeight || compareText(l.accountId, r.accountId) || compareText(l.offerId, r.offerId));
-  // og runs the cross-j pass first, on the same hot book cache
-  const cross = processCrossOffers(pass, sorted.flatMap((o) => (o.crossJurisdiction === undefined ? [] : [{ ...o, crossJurisdiction: o.crossJurisdiction }])));
-  if (!cross.ok) return cross;
-  for (const o of sorted) {
-    if (o.crossJurisdiction !== undefined) continue;
-    const done = processSameOffer(pass, o, minTradeSize);
-    if (!done.ok) return done;
-  }
-  for (const pairId of [...new Set(resumePairIds)].sort()) {
-    if (pairId.startsWith("cross:")) continue;
-    const seed = resumeSeed(pass, pairId, minTradeSize);
-    if (!seed.ok) return seed;
-    if (seed.value === null) continue;
-    const drained = drainSame(pass, seed.value, minTradeSize);
-    if (!drained.ok) return drained;
-  }
-  return ok({ accountTxs: pass.accountTxs, books: pass.updates, pairDimensions: pass.dims, crossFills: cross.value });
-};
-export type BookOfferInput = BookOffer & { readonly crossJurisdiction?: CrossRoute | undefined };
-/**
- * og collectOffersForMatching + admitOrderbookOfferForMatching: each committed offer once, keyed by the counterparty Account; a hub's own
- * maker offer is never listed in its own book; an inactive Account's offer is skipped; a missing Account halts. A cross-j offer is matched only by
- * its canonical book owner and only once its admission is live (admitCrossForMatching).
- */
-export const offersForMatching = (hub: Hub, created: readonly SwapOfferEvent[]): Result<readonly BookOfferInput[], EntityError> => {
-  const self = hub.id.toLowerCase();
-  return chain(traverse(created, (e) => map(normalizeOffer(e, e.fromEntity.toLowerCase() === self ? e.toEntity.toLowerCase() : e.fromEntity.toLowerCase()),
-    (o): BookOfferInput => (e.crossJurisdiction === undefined ? o : { ...o, crossJurisdiction: e.crossJurisdiction }))), (enriched) => {
-    const seen = new Set<string>(), admitted: BookOfferInput[] = [];
-    for (const o of enriched) {
-      const key = swapKeyOf(o.accountId, o.offerId), route = o.crossJurisdiction;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (route === undefined && (o.makerIsLeft ? o.fromEntity : o.toEntity) === self) continue;
-      // og collectOffersForMatching: a cross-j order is listed only by its canonical book owner, then admitOrderbookOfferForMatching's cross branch
-      if (route !== undefined) {
-        if (crossBookOwnerRef(route) !== self) continue;
-        const ready = admitCrossForMatching(hub, { ...o, crossJurisdiction: route });
-        if (!ready.ok) return ready;
-        if (ready.value) admitted.push(o);
-        continue;
-      }
-      const account = hub.accounts.get(o.accountId.toLowerCase());
-      if (account === undefined) return halt(`ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING: account=${o.accountId} offer=${o.offerId}`);
-      if (account.active) admitted.push(o);
-    }
-    return ok(admitted);
+const crossedTaker = (
+  pass: Pass,
+  trigger: Prepared,
+  takerOrderId: string,
+  minTradeSize: bigint,
+): Result<Passed<Prepared>, EntityError> => {
+  const mismatch = `ORDERBOOK_CACHE_MISMATCH: pair=${trigger.bookKey} order=${takerOrderId}`;
+  return chain(liveMeta(pass.hub, takerOrderId), (live) => {
+    if (live === null) return halt(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${trigger.bookKey} order=${takerOrderId}`);
+    return chain(readySame(pass, live, minTradeSize), ({ pass: ready, value: p }) =>
+      p === null
+        ? halt(mismatch)
+        : chain(keepResting(ready, p), (kept) => (kept.value ? ok({ pass: kept.pass, value: p }) : halt(mismatch))));
   });
 };
-/** og getOrderbookPairsForOrder over the derived order-pair index: every pair whose book holds the row, in pair order. */
-const pairsHolding = (books: ReadonlyMap<string, Book>, orderId: string): readonly string[] => [...books].filter(([, b]) => b.orders.has(orderId)).map(([pairId]) => pairId).sort();
-/** og applyCommittedSwapCancelsToOrderbook: a committed offer removal takes its row off the book; returns the touched pairs, sorted. */
-export const applyCommittedSwapCancels = (ext: OrderbookExt, cancels: readonly SwapRef[]): Result<{ readonly ext: OrderbookExt; readonly resumePairIds: readonly string[] }, EntityError> => {
-  let books = ext.books;
-  const touched = new Set<string>();
-  for (const { accountId, offerId } of cancels) {
-    const orderId = swapKeyOf(accountId, offerId), pairs = pairsHolding(books, orderId);
-    if (pairs.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
-    const pairId = pairs[0], book = pairId === undefined ? undefined : books.get(pairId), order = book?.orders.get(orderId);
-    if (pairId === undefined || book === undefined || order === undefined) continue;
-    const r = applyBookCommand(book, { kind: 1, ownerId: order.ownerId, orderId });
-    if (!r.ok) return halt(r.error.code);
-    books = mapSet(books, pairId, r.value.state);
-    touched.add(pairId);
-  }
-  return ok({ ext: books === ext.books ? ext : { ...ext, books }, resumePairIds: [...touched].sort() });
+type Drain = { readonly pass: Pass; readonly current: Prepared; readonly done: boolean };
+/** One resume of the crossed book: the younger top takes, and the result commits like any command. */
+const drainStep =
+  (seed: Prepared, minTradeSize: bigint, limit: number) =>
+  (d: Drain, resumedCount: number): Result<Drain, EntityError> => {
+    if (d.done) return ok(d);
+    return chain(resumeSame(d.pass, d.current), (resumed): Result<Drain, EntityError> => {
+      if (resumed === null) return ok({ ...d, done: true });
+      if (resumedCount >= limit)
+        return halt(`ORDERBOOK_SAME_DRAIN_NON_TERMINATING: pair=${seed.bookKey} limit=${limit}`);
+      return chain(crossedTaker(d.pass, d.current, resumed.takerOrderId, minTradeSize), (taker) =>
+        chain(commitSame(taker.pass, taker.value, resumed), (committed) => {
+          const next = committed.cache.get(seed.bookKey);
+          if (next === undefined) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${seed.bookKey} missing-after-resume`);
+          return ok({ pass: committed, current: { ...d.current, book: next }, done: false });
+        }),
+      );
+    });
+  };
+/**
+ * og drainCrossedSameBook: settle crossed resting rows until the book no longer crosses, bounded by its order count.
+ */
+const drainSame = (pass: Pass, seed: Prepared, minTradeSize: bigint): Result<Pass, EntityError> => {
+  const limit = seed.book.orders.size;
+  const start: Drain = { pass, current: seed, done: false };
+  return map(foldResult(Array(limit + 1).keys(), start, drainStep(seed, minTradeSize, limit)), (d) => d.pass);
 };
-/** og processOrderbookCancels: take the row off its book; a same-j offer queues its zero-fill cancel resolve, a cross-j one a hub-internal cancel instruction at its admitted progress. */
-export const processOrderbookCancels = (hub: Hub, cancels: readonly SwapRef[]): Result<{ readonly accountTxs: readonly BookTx[]; readonly books: ReadonlyMap<string, Book>; readonly crossFills: readonly CrossFillInstruction[] }, EntityError> => {
-  const q = { hub, queued: new Set<string>(), accountTxs: [] as BookTx[] }, working = new Map<string, Book>(), crossFills: CrossFillInstruction[] = [];
-  for (const { offerId, accountId } of cancels) {
-    const account = hub.accounts.get(accountId);
-    if (account === undefined || !account.offers.has(offerId)) continue;
+type SeedSearch = { readonly pass: Pass; readonly found: Prepared | null };
+/** A resting row seeds the drain when it is eligible, live, and still exactly its committed offer. */
+const trySeed =
+  (pairId: string, minTradeSize: bigint) =>
+  (s: SeedSearch, order: BookOrder): Result<SeedSearch, EntityError> => {
+    if (s.found !== null) return ok(s);
+    return chain(classifyMaker(s.pass, pairId, order), (disposition) =>
+      disposition !== "eligible"
+        ? ok(s)
+        : chain(liveMeta(s.pass.hub, order.orderId), (live) =>
+            live === null
+              ? ok(s)
+              : chain(readySame(s.pass, live, minTradeSize), ({ pass, value: p }) =>
+                  p === null
+                    ? ok({ pass, found: null })
+                    : map(keepResting(pass, p), (kept) => ({ pass: kept.pass, found: kept.value ? p : null })),
+                ),
+          ),
+    );
+  };
+/** og findSamePairResumeSeed: the first eligible resting row, by sequence, that is still its committed offer. */
+const resumeSeed = (pass: Pass, pairId: string, minTradeSize: bigint): Result<SeedSearch, EntityError> => {
+  const book = pass.cache.get(pairId) ?? pass.hub.ext.books.get(pairId);
+  const start: SeedSearch = { pass, found: null };
+  return book === undefined ? ok(start) : foldResult(bookOrders(book), start, trySeed(pairId, minTradeSize));
+};
+/** og processSameOrderbookOffer: an identical resting row drains its crossed book; a new one is placed and settled. */
+const processSameOffer = (pass: Pass, o: BookOffer, minTradeSize: bigint): Result<Pass, EntityError> =>
+  chain(readySame(pass, o, minTradeSize), ({ pass: ready, value: p }) => {
+    if (p === null) return ok(ready);
+    return chain(keepResting(ready, p), ({ pass: kept, value: resting }) => {
+      if (resting) return drainSame(kept, p, minTradeSize);
+      return chain(placeSame(kept, p), ({ pass: placed, value: step }) =>
+        step === null ? ok(placed) : commitSame(placed, p, step));
+    });
+  });
+/** Resume each touched same-j pair whose book may still cross, in pair order. */
+const resumePair = (minTradeSize: bigint) => (pass: Pass, pairId: string): Result<Pass, EntityError> =>
+  chain(resumeSeed(pass, pairId, minTradeSize), ({ pass: seeded, found }) =>
+    found === null ? ok(seeded) : drainSame(seeded, found, minTradeSize));
+const byCreation = (l: BookOfferInput, r: BookOfferInput): number =>
+  l.createdHeight - r.createdHeight || asc(l.accountId, r.accountId) || asc(l.offerId, r.offerId);
+/**
+ * og processOrderbookSwaps (same-j pass): offers by (createdHeight, accountId, offerId), then each touched pair's
+ * crossed resting rows in pair order. The committed offers come from Account outputs (og accountOutputVerified), so no
+ * second committed-state check runs here.
+ */
+export const processOrderbookSwaps = (
+  hub: Hub,
+  offers: readonly BookOfferInput[],
+  resumePairIds: readonly string[] = [],
+): Result<BookMatch, EntityError> => {
+  const minTradeSize = hub.ext.hubProfile.minTradeSize;
+  const sorted = offers.toSorted(byCreation);
+  const crossOffers = sorted.flatMap((o) =>
+    o.crossJurisdiction === undefined ? [] : [{ ...o, crossJurisdiction: o.crossJurisdiction }],
+  );
+  const sameOffers = sorted.filter((o) => o.crossJurisdiction === undefined);
+  const resumed = [...new Set(resumePairIds)].toSorted().filter((pairId) => !pairId.startsWith("cross:"));
+  // og runs the cross-j pass first, on the same hot book cache
+  return chain(processCrossOffers(newPass(hub), crossOffers), (cross) => {
+    const matched = foldResult(sameOffers, cross.pass, (pass, o) => processSameOffer(pass, o, minTradeSize));
+    return map(
+      chain(matched, (pass) => foldResult(resumed, pass, resumePair(minTradeSize))),
+      (pass) => ({
+        accountTxs: pass.accountTxs,
+        books: pass.updates,
+        pairDimensions: pass.dims,
+        crossFills: cross.value,
+      }),
+    );
+  });
+};
+
+
+// -- what enters the book, and what leaves it on a committed cancel
+
+export type BookOfferInput = BookOffer & { readonly crossJurisdiction?: CrossRoute | undefined };
+/**
+ * og admitOrderbookOfferForMatching: a hub's own maker offer is never listed in its own book; an inactive Account's
+ * offer is skipped.
+ */
+const isAdmitted = (hub: Hub, self: string, o: BookOfferInput): Result<boolean, EntityError> => {
+  const route = o.crossJurisdiction;
+  // og collectOffersForMatching: a cross-j order is listed only by its canonical book owner, then
+  // admitOrderbookOfferForMatching's cross branch
+  if (route !== undefined) {
+    return crossBookOwnerRef(route) === self
+      ? admitCrossForMatching(hub, { ...o, crossJurisdiction: route })
+      : ok(false);
+  }
+  if (makerOf(o) === self) return ok(false);
+  const account = hub.accounts.get(o.accountId.toLowerCase());
+  if (account === undefined)
+    return halt(`ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING: account=${o.accountId} offer=${o.offerId}`);
+  return ok(account.active);
+};
+/**
+ * og collectOffersForMatching + admitOrderbookOfferForMatching: each committed offer once, keyed by the counterparty
+ * Account; a missing Account halts. A cross-j offer is matched only by its canonical book owner and only once its
+ * admission is live (admitCrossForMatching).
+ */
+export const offersForMatching = (
+  hub: Hub,
+  created: readonly SwapOfferEvent[],
+): Result<readonly BookOfferInput[], EntityError> => {
+  const self = hub.id.toLowerCase();
+  const enrich = (e: SwapOfferEvent): Result<BookOfferInput, EntityError> => {
+    const counterparty = e.fromEntity.toLowerCase() === self ? e.toEntity.toLowerCase() : e.fromEntity.toLowerCase();
+    return map(normalizeOffer(e, counterparty), (o) =>
+      e.crossJurisdiction === undefined ? o : { ...o, crossJurisdiction: e.crossJurisdiction },
+    );
+  };
+  return chain(traverse(created, enrich), (enriched) => {
+    const unique = firstBy(enriched, (o) => swapKeyOf(o.accountId, o.offerId));
+    return map(
+      traverse(unique, (o) => isAdmitted(hub, self, o)),
+      (admits) => unique.filter((_, i) => admits[i]),
+    );
+  });
+};
+/**
+ * og getOrderbookPairsForOrder over the derived order-pair index: every pair whose book holds the row, in pair order.
+ */
+const pairsHolding = (books: ReadonlyMap<string, Book>, orderId: string): readonly string[] =>
+  [...books].filter(([, b]) => b.orders.has(orderId)).map(([pairId]) => pairId).toSorted();
+type CancelSweep = { readonly books: ReadonlyMap<string, Book>; readonly touched: ReadonlySet<string> };
+/** One committed removal: the row leaves the one book that holds it. */
+const takeOffBook = (s: CancelSweep, { accountId, offerId }: SwapRef): Result<CancelSweep, EntityError> => {
+  const orderId = swapKeyOf(accountId, offerId);
+  const pairs = pairsHolding(s.books, orderId);
+  if (pairs.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
+  const pairId = pairs[0];
+  const book = pairId === undefined ? undefined : s.books.get(pairId);
+  const order = book?.orders.get(orderId);
+  if (pairId === undefined || book === undefined || order === undefined) return ok(s);
+  return map(cancelRow(book, order), (next) => ({
+    books: mapSet(s.books, pairId, next),
+    touched: withMember(s.touched, pairId),
+  }));
+};
+/**
+ * og applyCommittedSwapCancelsToOrderbook: a committed offer removal takes its row off the book; returns the touched
+ * pairs, sorted.
+ */
+export const applyCommittedSwapCancels = (
+  ext: OrderbookExt,
+  cancels: readonly SwapRef[],
+): Result<{ readonly ext: OrderbookExt; readonly resumePairIds: readonly string[] }, EntityError> => {
+  const start: CancelSweep = { books: ext.books, touched: new Set() };
+  return map(foldResult(cancels, start, takeOffBook), ({ books, touched }) => ({
+    ext: books === ext.books ? ext : { ...ext, books },
+    resumePairIds: [...touched].toSorted(),
+  }));
+};
+type CancelRun = {
+  readonly queue: ResolveQueue;
+  readonly working: ReadonlyMap<string, Book>;
+  readonly crossFills: readonly CrossFillInstruction[];
+};
+/**
+ * A requested cancel: the row leaves its book; a same-j offer queues its zero-fill resolve, a cross-j one a cancel
+ * instruction.
+ */
+const cancelRequested =
+  (hub: Hub) =>
+  (run: CancelRun, { offerId, accountId }: SwapRef): Result<CancelRun, EntityError> => {
+    const offer = hub.accounts.get(accountId)?.offers.get(offerId);
+    if (offer === undefined) return ok(run);
     const orderId = swapKeyOf(accountId, offerId);
     const matching = pairsHolding(hub.ext.books, orderId).flatMap((pairId) => {
-      const book = working.get(pairId) ?? hub.ext.books.get(pairId), order = book?.orders.get(orderId);
-      return book === undefined || order === undefined ? [] : [{ pairId, book, ownerId: order.ownerId }];
+      const book = run.working.get(pairId) ?? hub.ext.books.get(pairId);
+      const order = book?.orders.get(orderId);
+      return book === undefined || order === undefined ? [] : [{ pairId, book, order }];
     });
     if (matching.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${matching.length}`);
-    for (const { pairId, book, ownerId } of matching) {
-      const r = applyBookCommand(book, { kind: 1, ownerId, orderId });
-      if (!r.ok) return halt(r.error.code);
-      working.set(pairId, r.value.state);
-    }
-    const route = account.offers.get(offerId)?.crossJurisdiction;
-    if (route !== undefined) {
-      const i = crossCancelInstruction(accountId, offerId, orderId, hub.crossAdmissions?.get(bookAdmissionKey(accountId, offerId))?.route ?? route);
-      if (!i.ok) return i;
-      crossFills.push(i.value);
-      continue;
-    }
-    queueUniqueResolve(q, accountId, cancelTerms(offerId, "cancel_request"));
-  }
-  return ok({ accountTxs: q.accountTxs, books: working, crossFills });
+    const removed = foldResult(matching, run.working, (working, { pairId, book, order }) =>
+      map(cancelRow(book, order), (next) => mapSet(working, pairId, next)),
+    );
+    return chain(removed, (working): Result<CancelRun, EntityError> => {
+      const route = offer.crossJurisdiction;
+      if (route === undefined) {
+        return ok({
+          ...run,
+          working,
+          queue: queueUniqueResolve(run.queue, accountId, cancelTerms(offerId, "cancel_request")),
+        });
+      }
+      const admitted = hub.crossAdmissions?.get(bookAdmissionKey(accountId, offerId))?.route ?? route;
+      return map(crossCancelInstruction(accountId, offerId, orderId, admitted), (i) => ({
+        ...run,
+        working,
+        crossFills: [...run.crossFills, i],
+      }));
+    });
+  };
+/**
+ * og processOrderbookCancels: take the row off its book; a same-j offer queues its zero-fill cancel resolve, a cross-j
+ * one a hub-internal cancel instruction at its admitted progress.
+ */
+export const processOrderbookCancels = (
+  hub: Hub,
+  cancels: readonly SwapRef[],
+): Result<
+  {
+    readonly accountTxs: readonly BookTx[];
+    readonly books: ReadonlyMap<string, Book>;
+    readonly crossFills: readonly CrossFillInstruction[];
+  },
+  EntityError
+> => {
+  const start: CancelRun = { queue: { hub, queued: new Set(), accountTxs: [] }, working: new Map(), crossFills: [] };
+  return map(foldResult(cancels, start, cancelRequested(hub)), (run) => ({
+    accountTxs: run.queue.accountTxs,
+    books: run.working,
+    crossFills: run.crossFills,
+  }));
 };
-// ---- cross-j hub book: og extensions/cross-j/orderbook.ts (admissions, USD caps, market offer, fill and cancel instructions), orderbook/cross-j/*,
-// entity/tx/handlers/account/orderbook/cross/* and cancels.ts (cross branch). og throws from deep inside; here each halt is an `entity_invariant` with og's message. ----
+
+// ---- cross-j hub book: og extensions/cross-j/orderbook.ts (admissions, USD caps, market offer, fill and cancel
+// instructions), orderbook/cross-j/*, entity/tx/handlers/account/orderbook/cross/* and cancels.ts (cross branch). og
+// throws from deep inside; here each halt is an `entity_invariant` with og's message. ----
 export type BookAdmissionStatus = "pending" | "admitted" | "resolving" | "closed";
 /** og CrossJurisdictionBookAdmission: the book owner's record of one admitted route, keyed by source user and order. */
 export type BookAdmission = {
-  readonly orderId: string; readonly routeHash: string; readonly sourceEntityId: string; readonly bookOwnerEntityId: string; readonly status: BookAdmissionStatus; readonly route: CrossRoute;
-  readonly admittedAt?: number | undefined; readonly resolvingAt?: number | undefined; readonly closedAt?: number | undefined; readonly closeReason?: string | undefined; readonly updatedAt: number;
+  readonly orderId: string;
+  readonly routeHash: string;
+  readonly sourceEntityId: string;
+  readonly bookOwnerEntityId: string;
+  readonly status: BookAdmissionStatus;
+  readonly route: CrossRoute;
+  readonly admittedAt?: number | undefined;
+  readonly resolvingAt?: number | undefined;
+  readonly closedAt?: number | undefined;
+  readonly closeReason?: string | undefined;
+  readonly updatedAt: number;
 };
 export type BookAdmissions = ReadonlyMap<string, BookAdmission>;
 /** og crossJurisdictionBookAdmissionKeyFor (also the book's namespaced order id for a cross-j row). */
-export const bookAdmissionKey = (sourceEntityId: string, orderId: string): string => `${entityRef(sourceEntityId)}:${String(orderId || "")}`;
+export const bookAdmissionKey = (sourceEntityId: string, orderId: string): string =>
+  `${entityRef(sourceEntityId)}:${String(orderId || "")}`;
 /** og crossJurisdictionBookOwnerRef. */
-export const crossBookOwnerRef = (r: CrossRoute): string => entityRef(r.bookOwnerEntityId || r.source.counterpartyEntityId || r.hubEntityId || "");
+export const crossBookOwnerRef = (r: CrossRoute): string =>
+  entityRef(r.bookOwnerEntityId || r.source.counterpartyEntityId || r.hubEntityId || "");
 /** og withCanonicalCrossJurisdictionRouteHash where a throw is a halt. */
-const canonRoute = (r: CrossRoute): Result<CrossRoute, EntityError> => { const c = canonicalCrossRoute(r); return c.ok ? c : invariant(crossRouteErrorText(r, c.error.reason)); };
+const canonRoute = (r: CrossRoute): Result<CrossRoute, EntityError> => {
+  const c = canonicalCrossRoute(r);
+  return c.ok ? ok(c.value) : invariant(crossRouteErrorText(r, c.error.reason));
+};
 const cloneRouteE = (r: CrossRoute): Result<CrossRoute, EntityError> => fatalCross(cloneCrossRoute(r));
 /** og cloneCrossJurisdictionBookAdmission: the collection forks a leaf through it before any in-place write. */
-export const cloneBookAdmission = (a: BookAdmission): Result<BookAdmission, EntityError> => map(cloneRouteE(a.route), (route): BookAdmission => ({
-  orderId: String(a.orderId || ""), routeHash: String(a.routeHash || ""), sourceEntityId: String(a.sourceEntityId || ""), bookOwnerEntityId: String(a.bookOwnerEntityId || ""), status: a.status, route,
-  updatedAt: Number(a.updatedAt || 0), ...opt("admittedAt", optNum(a.admittedAt)), ...opt("resolvingAt", optNum(a.resolvingAt)), ...opt("closedAt", optNum(a.closedAt)), ...opt("closeReason", optText(a.closeReason)),
-}));
+export const cloneBookAdmission = (a: BookAdmission): Result<BookAdmission, EntityError> =>
+  map(cloneRouteE(a.route), (route): BookAdmission => ({
+    orderId: String(a.orderId || ""),
+    routeHash: String(a.routeHash || ""),
+    sourceEntityId: String(a.sourceEntityId || ""),
+    bookOwnerEntityId: String(a.bookOwnerEntityId || ""),
+    status: a.status,
+    route,
+    updatedAt: Number(a.updatedAt || 0),
+    ...opt("admittedAt", optNum(a.admittedAt)),
+    ...opt("resolvingAt", optNum(a.resolvingAt)),
+    ...opt("closedAt", optNum(a.closedAt)),
+    ...opt("closeReason", optText(a.closeReason)),
+  }));
 /** og getEntityCollectionValueForWrite + an in-place edit: a missing key is a no-op. */
-const writeAdmission = (admissions: BookAdmissions | undefined, key: string, edit: (a: BookAdmission) => BookAdmission | undefined): Result<BookAdmissions | undefined, EntityError> => {
+const writeAdmission = (
+  admissions: BookAdmissions | undefined,
+  key: string,
+  edit: (a: BookAdmission) => BookAdmission | undefined,
+): Result<BookAdmissions | undefined, EntityError> => {
   const current = admissions?.get(key);
   if (admissions === undefined || current === undefined) return ok(admissions);
-  return map(cloneBookAdmission(current), (forked) => { const next = edit(forked); return next === undefined ? admissions : mapSet(admissions, key, next); });
+  return map(cloneBookAdmission(current), (forked) => {
+    const next = edit(forked);
+    return next === undefined ? admissions : mapSet(admissions, key, next);
+  });
 };
-/** og mergeAdmissionRoute: the later route wins field by field, but never lowers the status or drops a pull or the hash. */
-const mergeAdmissionRoute = (existing: CrossRoute | undefined, next: CrossRoute): Result<CrossRoute, EntityError> => chain(cloneRouteE(next), (n) => existing === undefined ? ok(n) : map(cloneRouteE(existing), (e) => {
-  const merged: MutableRoute = { ...e, ...n };
-  if (compareCrossStatus(e.status, n.status) < 0) merged.status = e.status;
-  if (e.sourcePull && !merged.sourcePull) merged.sourcePull = e.sourcePull;
-  if (e.targetPull && !merged.targetPull) merged.targetPull = e.targetPull;
-  if (e.routeHash && !merged.routeHash) merged.routeHash = e.routeHash;
-  return merged;
-}));
-/** og mergeCrossJurisdictionBookAdmission: a new admission starts `pending`; an existing one keeps its status and takes the merged route. */
-export const mergeBookAdmission = (admissions: BookAdmissions | undefined, route: CrossRoute, now: number): Result<{ readonly admissions: BookAdmissions; readonly admission: BookAdmission }, EntityError> =>
+/**
+ * og mergeAdmissionRoute: the later route wins field by field, but never lowers the status or drops a pull or the hash.
+ */
+const mergeAdmissionRoute = (existing: CrossRoute | undefined, next: CrossRoute): Result<CrossRoute, EntityError> =>
+  chain(cloneRouteE(next), (n) => existing === undefined ? ok(n) : map(cloneRouteE(existing), (e): CrossRoute => {
+    const merged: CrossRoute = { ...e, ...n };
+    const kept = <K extends "sourcePull" | "targetPull" | "routeHash">(k: K) =>
+      opt(k, e[k] && !merged[k] ? e[k] : undefined);
+    return {
+      ...merged,
+      ...opt("status", compareCrossStatus(e.status, n.status) < 0 ? e.status : undefined),
+      ...kept("sourcePull"),
+      ...kept("targetPull"),
+      ...kept("routeHash"),
+    };
+  }));
+/**
+ * og mergeCrossJurisdictionBookAdmission: a new admission starts `pending`; an existing one keeps its status and takes
+ * the merged route.
+ */
+export const mergeBookAdmission = (
+  admissions: BookAdmissions | undefined,
+  route: CrossRoute,
+  now: number,
+): Result<{ readonly admissions: BookAdmissions; readonly admission: BookAdmission }, EntityError> =>
   chain(canonRoute(route), (c) => {
-    const key = bookAdmissionKey(c.source.entityId, c.orderId), existing = admissions?.get(key);
+    const key = bookAdmissionKey(c.source.entityId, c.orderId);
+    const existing = admissions?.get(key);
     return map(mergeAdmissionRoute(existing?.route, c), (merged) => {
-      const admission: BookAdmission = existing !== undefined ? { ...existing, route: merged, updatedAt: now }
-        : { orderId: c.orderId, routeHash: c.routeHash || "", sourceEntityId: entityRef(c.source.entityId), bookOwnerEntityId: crossBookOwnerRef(c), status: "pending", route: merged, updatedAt: now };
+      const admission: BookAdmission = existing !== undefined
+        ? { ...existing, route: merged, updatedAt: now }
+        : {
+          orderId: c.orderId,
+          routeHash: c.routeHash || "",
+          sourceEntityId: entityRef(c.source.entityId),
+          bookOwnerEntityId: crossBookOwnerRef(c),
+          status: "pending",
+          route: merged,
+          updatedAt: now,
+        };
       return { admissions: mapSet(admissions ?? new Map<string, BookAdmission>(), key, admission), admission };
     });
   });
 /** og markCrossJurisdictionBookAdmissionResolving: a live (not closed) admission starts resolving. */
-export const markAdmissionResolving = (admissions: BookAdmissions | undefined, route: CrossRoute, now: number): Result<BookAdmissions | undefined, EntityError> =>
-  chain(canonRoute(route), (c) => writeAdmission(admissions, bookAdmissionKey(c.source.entityId, c.orderId), (a) => (a.status === "closed" ? undefined : { ...a, status: "resolving", resolvingAt: now, updatedAt: now })));
+export const markAdmissionResolving = (
+  admissions: BookAdmissions | undefined,
+  route: CrossRoute,
+  now: number,
+): Result<BookAdmissions | undefined, EntityError> =>
+  chain(canonRoute(route), (c) =>
+    writeAdmission(admissions, bookAdmissionKey(c.source.entityId, c.orderId), (a) =>
+      a.status === "closed" ? undefined : { ...a, status: "resolving", resolvingAt: now, updatedAt: now }));
 /** og markCrossJurisdictionBookAdmissionClosed. */
-export const markAdmissionClosed = (admissions: BookAdmissions | undefined, sourceEntityId: string, orderId: string, now: number, reason: string): Result<BookAdmissions | undefined, EntityError> =>
-  writeAdmission(admissions, bookAdmissionKey(sourceEntityId, orderId), (a) => ({ ...a, status: "closed", closedAt: now, closeReason: reason, updatedAt: now }));
-/** og getCrossJurisdictionBookAdmissionError: owner, both pulls, expiry, then the admitted record for exactly this route. USD risk is not rechecked here. */
-export const bookAdmissionError = (entityId: string, admissions: BookAdmissions | undefined, route: CrossRoute, now: number): Result<string | null, EntityError> => map(canonRoute(route), (c) => {
-  const current = entityRef(entityId), owner = crossBookOwnerRef(c);
+export const markAdmissionClosed = (
+  admissions: BookAdmissions | undefined,
+  sourceEntityId: string,
+  orderId: string,
+  now: number,
+  reason: string,
+): Result<BookAdmissions | undefined, EntityError> =>
+  writeAdmission(admissions, bookAdmissionKey(sourceEntityId, orderId), (a) => ({
+    ...a,
+    status: "closed",
+    closedAt: now,
+    closeReason: reason,
+    updatedAt: now,
+  }));
+/**
+ * og getCrossJurisdictionBookAdmissionError: owner, both pulls, expiry, then the admitted record for exactly this
+ * route. USD risk is not rechecked here.
+ */
+export const bookAdmissionError = (
+  entityId: string,
+  admissions: BookAdmissions | undefined,
+  route: CrossRoute,
+  now: number,
+): Result<string | null, EntityError> => map(canonRoute(route), (c) => {
+  const current = entityRef(entityId);
+  const owner = crossBookOwnerRef(c);
   if (owner !== current) return `CROSS_J_ORDER_WRONG_BOOK_OWNER: order=${c.orderId} owner=${owner} current=${current}`;
   if (!c.sourcePull || !c.targetPull) return `CROSS_J_ORDER_LOCK_REF_MISSING: order=${c.orderId}`;
   if (isCrossExpired(c, now)) return `CROSS_J_ORDER_ROUTE_EXPIRED: order=${c.orderId}`;
@@ -43172,15 +44311,39 @@ export const bookAdmissionError = (entityId: string, admissions: BookAdmissions 
   if (a === undefined) return `CROSS_J_BOOK_ADMISSION_PENDING: order=${c.orderId} leg=both`;
   if (a.status === "closed") return `CROSS_J_BOOK_ADMISSION_CLOSED: order=${c.orderId} reason=${a.closeReason || ""}`;
   if (a.status === "resolving") return `CROSS_J_BOOK_ADMISSION_RESOLVING: order=${c.orderId}`;
-  if (a.orderId !== c.orderId || a.routeHash.toLowerCase() !== (c.routeHash || "").toLowerCase() || entityRef(a.bookOwnerEntityId) !== owner) return `CROSS_J_BOOK_ADMISSION_ROUTE_MISMATCH: order=${c.orderId}`;
-  return null;
+  const exact = a.orderId === c.orderId
+    && a.routeHash.toLowerCase() === (c.routeHash || "").toLowerCase()
+    && entityRef(a.bookOwnerEntityId) === owner;
+  return exact ? null : `CROSS_J_BOOK_ADMISSION_ROUTE_MISMATCH: order=${c.orderId}`;
 });
 export type BookAdmissionFailure = { readonly kind: "pending" | "risk_reject" | "invalid"; readonly message: string };
+const failureKind = (message: string): BookAdmissionFailure["kind"] => {
+  switch (true) {
+    case message.startsWith("CROSS_J_BOOK_ADMISSION_PENDING:"):
+      return "pending";
+    case message.startsWith("CROSS_J_BOOK_USD_CAP_EXCEEDED:"):
+      return "risk_reject";
+    default:
+      return "invalid";
+  }
+};
 /** og getTypedCrossJurisdictionBookAdmissionFailure. */
-export const bookAdmissionFailure = (entityId: string, admissions: BookAdmissions | undefined, route: CrossRoute, now: number): Result<BookAdmissionFailure | null, EntityError> =>
-  map(bookAdmissionError(entityId, admissions, route, now), (message) => message === null ? null
-    : { kind: message.startsWith("CROSS_J_BOOK_ADMISSION_PENDING:") ? "pending" : message.startsWith("CROSS_J_BOOK_USD_CAP_EXCEEDED:") ? "risk_reject" : "invalid", message });
-/** og internalUsdPrice: a reference stable at par; any other token at the hub's last accepted USD authority ask against its reference token, when one exists. */
+export const bookAdmissionFailure = (
+  entityId: string,
+  admissions: BookAdmissions | undefined,
+  route: CrossRoute,
+  now: number,
+): Result<BookAdmissionFailure | null, EntityError> =>
+  map(bookAdmissionError(entityId, admissions, route, now), (message) =>
+    message === null ? null : { kind: failureKind(message), message });
+
+
+// -- USD risk: what one leg is worth at the hub's own accepted reference price
+
+/**
+ * og internalUsdPrice: a reference stable at par; any other token at the hub's last accepted USD authority ask against
+ * its reference token, when one exists.
+ */
 const internalUsdPrice = (ext: OrderbookExt | undefined, tokenId: number): Result<bigint | null, EntityError> => {
   if (REFERENCE_STABLES.has(tokenId)) return ok(PRICE_SCALE);
   if (ext === undefined) return ok(null);
@@ -43190,134 +44353,364 @@ const internalUsdPrice = (ext: OrderbookExt | undefined, tokenId: number): Resul
   return ok(price > 0n ? price : null);
 };
 const usdMicrosAt = (tokenId: number, amount: bigint, price: bigint): Result<bigint, EntityError> =>
-  amount <= 0n ? invariant(`CROSS_J_BOOK_USD_AMOUNT_INVALID:token=${tokenId}`) : map(tokenDecimals(tokenId), (d) => ceilDiv(amount * price * 1_000_000n, 10n ** d * PRICE_SCALE));
+  amount <= 0n
+    ? invariant(`CROSS_J_BOOK_USD_AMOUNT_INVALID:token=${tokenId}`)
+    : map(tokenDecimals(tokenId), (d) => ceilDiv(amount * price * 1_000_000n, 10n ** d * PRICE_SCALE));
 /** og crossJurisdictionLegUsdMicros. */
-export const crossLegUsdMicros = (ext: OrderbookExt | undefined, tokenId: number, amount: bigint): Result<bigint, EntityError> =>
-  chain(internalUsdPrice(ext, tokenId), (price) => (price === null ? invariant(`CROSS_J_USD_PRICE_UNAVAILABLE:token=${tokenId}`) : usdMicrosAt(tokenId, amount, price)));
-/** og getCrossJurisdictionLegUsdCapError: only the leg this hub bears, and only once it has a price for it (unpriced is permissionless). */
-export const crossLegUsdCapError = (ext: OrderbookExt | undefined, route: CrossRoute, role: "source" | "target"): Result<string | null, EntityError> => {
-  const leg = route[role], tokenId = Number(leg.tokenId);
-  return chain(internalUsdPrice(ext, tokenId), (price) => price === null ? ok(null) : map(usdMicrosAt(tokenId, BigInt(leg.amount), price), (usdMicros) =>
-    usdMicros > CROSS_J_BOOK_MAX_USD_MICROS ? `CROSS_J_BOOK_USD_CAP_EXCEEDED:order=${route.orderId}:leg=${role}:usdMicros=${usdMicros}:cap=${CROSS_J_BOOK_MAX_USD_MICROS}` : null));
+export const crossLegUsdMicros = (
+  ext: OrderbookExt | undefined,
+  tokenId: number,
+  amount: bigint,
+): Result<bigint, EntityError> =>
+  chain(internalUsdPrice(ext, tokenId), (price) =>
+    price === null ? invariant(`CROSS_J_USD_PRICE_UNAVAILABLE:token=${tokenId}`) : usdMicrosAt(tokenId, amount, price),
+  );
+type LegRole = "source" | "target";
+const LEG_ROLES: readonly LegRole[] = ["source", "target"];
+/**
+ * og getCrossJurisdictionLegUsdCapError: only the leg this hub bears, and only once it has a price for it (unpriced is
+ * permissionless).
+ */
+export const crossLegUsdCapError = (
+  ext: OrderbookExt | undefined,
+  route: CrossRoute,
+  role: LegRole,
+): Result<string | null, EntityError> => {
+  const leg = route[role];
+  const tokenId = Number(leg.tokenId);
+  const cap = CROSS_J_BOOK_MAX_USD_MICROS;
+  return chain(internalUsdPrice(ext, tokenId), (price) =>
+    price === null
+      ? ok(null)
+      : map(usdMicrosAt(tokenId, BigInt(leg.amount), price), (usdMicros) =>
+          usdMicros > cap
+            ? `CROSS_J_BOOK_USD_CAP_EXCEEDED:order=${route.orderId}:leg=${role}:usdMicros=${usdMicros}:cap=${cap}`
+            : null,
+        ),
+  );
 };
-/** og getCrossJurisdictionLocalUsdCapError: exactly one local hub leg (by entity and stack), else a validator-leg error. */
-export const crossLocalUsdCapError = (v: { readonly id: string; readonly jurisdiction: Domain; readonly ext?: OrderbookExt | undefined }, route: CrossRoute): Result<string | null, EntityError> => {
-  const entity = entityRef(v.id), stack = stackIdOf(v.jurisdiction).toLowerCase(), roles: ("source" | "target")[] = [];
-  if (entity === entityRef(route.source.counterpartyEntityId) && stack === String(route.source.jurisdiction).toLowerCase()) roles.push("source");
-  if (entity === entityRef(route.target.entityId) && stack === String(route.target.jurisdiction).toLowerCase()) roles.push("target");
+/**
+ * og getCrossJurisdictionLocalUsdCapError: exactly one local hub leg (by entity and stack), else a validator-leg error.
+ */
+export const crossLocalUsdCapError = (
+  v: { readonly id: string; readonly jurisdiction: Domain; readonly ext?: OrderbookExt | undefined },
+  route: CrossRoute,
+): Result<string | null, EntityError> => {
+  const entity = entityRef(v.id);
+  const stack = stackIdOf(v.jurisdiction).toLowerCase();
+  const hubOf = { source: route.source.counterpartyEntityId, target: route.target.entityId };
+  const bears = (role: LegRole): boolean =>
+    entity === entityRef(hubOf[role]) && stack === String(route[role].jurisdiction).toLowerCase();
+  const roles = LEG_ROLES.filter(bears);
   const role = roles[0];
-  return roles.length === 1 && role !== undefined ? crossLegUsdCapError(v.ext, route, role)
-    : ok(`CROSS_J_BOOK_USD_VALIDATOR_LEG_INVALID:order=${route.orderId}:entity=${entity}:stack=${stack}:matches=${roles.length}`);
+  const at = `order=${route.orderId}:entity=${entity}:stack=${stack}`;
+  if (roles.length === 1 && role !== undefined) return crossLegUsdCapError(v.ext, route, role);
+  return ok(`CROSS_J_BOOK_USD_VALIDATOR_LEG_INVALID:${at}:matches=${roles.length}`);
 };
+
+
+// -- a cross-j route as one book order, and its fills as hub-internal progress
+
 /** og crossJurisdictionBookQtyLots: the floor of the base remainder in book lots. */
 export const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): Result<bigint, EntityError> =>
   baseAmount <= 0n ? ok(0n) : map(tokenDecimals(baseTokenId), (d) => baseAmount / lotScale(Number(d)));
-export type CrossRemaining = { readonly sourceTotal: bigint; readonly targetTotal: bigint; readonly filledSourceAmount: bigint; readonly filledTargetAmount: bigint; readonly sourceRemaining: bigint; readonly targetRemaining: bigint; readonly fillRatio: number };
+export type CrossRemaining = {
+  readonly sourceTotal: bigint;
+  readonly targetTotal: bigint;
+  readonly filledSourceAmount: bigint;
+  readonly filledTargetAmount: bigint;
+  readonly sourceRemaining: bigint;
+  readonly targetRemaining: bigint;
+  readonly fillRatio: number;
+};
 /** og getCrossJurisdictionRouteRemainingAmounts. */
 export const crossRemaining = (r: CrossRoute): Result<CrossRemaining, EntityError> => {
-  const sourceTotal = BigInt(r.source.amount), targetTotal = BigInt(r.target.amount);
+  const sourceTotal = BigInt(r.source.amount);
+  const targetTotal = BigInt(r.target.amount);
   if (sourceTotal <= 0n || targetTotal <= 0n) return invariant(`CROSS_J_ROUTE_AMOUNT_INVALID: order=${r.orderId}`);
-  return chain(fatalCross(crossFillAmounts(r)), (c): Result<CrossRemaining, EntityError> => c.filledSourceAmount < 0n || c.filledTargetAmount < 0n || c.filledSourceAmount > sourceTotal || c.filledTargetAmount > targetTotal
-    ? invariant(`CROSS_J_ROUTE_FILL_INVALID: order=${r.orderId} source=${c.filledSourceAmount}/${sourceTotal} target=${c.filledTargetAmount}/${targetTotal}`)
-    : ok({ sourceTotal, targetTotal, filledSourceAmount: c.filledSourceAmount, filledTargetAmount: c.filledTargetAmount, sourceRemaining: sourceTotal - c.filledSourceAmount, targetRemaining: targetTotal - c.filledTargetAmount, fillRatio: c.fillRatio }));
+  return chain(fatalCross(crossFillAmounts(r)), (c): Result<CrossRemaining, EntityError> => {
+    const { filledSourceAmount, filledTargetAmount } = c;
+    const valid =
+      filledSourceAmount >= 0n &&
+      filledTargetAmount >= 0n &&
+      filledSourceAmount <= sourceTotal &&
+      filledTargetAmount <= targetTotal;
+    const progress = `source=${filledSourceAmount}/${sourceTotal} target=${filledTargetAmount}/${targetTotal}`;
+    if (!valid) return invariant(`CROSS_J_ROUTE_FILL_INVALID: order=${r.orderId} ${progress}`);
+    return ok({
+      sourceTotal,
+      targetTotal,
+      filledSourceAmount,
+      filledTargetAmount,
+      sourceRemaining: sourceTotal - filledSourceAmount,
+      targetRemaining: targetTotal - filledTargetAmount,
+      fillRatio: c.fillRatio,
+    });
+  });
 };
 /** og NormalizedOrderbookOffer carrying its cross-j route. */
 export type CrossBookOffer = BookOffer & { readonly crossJurisdiction: CrossRoute };
 /** og CrossMarketOffer: the route's committed remainder as one book order on the canonical cross venue. */
 export type CrossMarketOffer = {
-  readonly offer: CrossBookOffer; readonly route: CrossRoute; readonly pairId: string; readonly side: BookSide; readonly baseTokenId: number; readonly quoteTokenId: number;
-  readonly baseAmount: bigint; readonly quoteAmount: bigint; readonly priceTicks: bigint; readonly makerId: string;
+  readonly offer: CrossBookOffer;
+  readonly route: CrossRoute;
+  readonly pairId: string;
+  readonly side: BookSide;
+  readonly baseTokenId: number;
+  readonly quoteTokenId: number;
+  readonly baseAmount: bigint;
+  readonly quoteAmount: bigint;
+  readonly priceTicks: bigint;
+  readonly makerId: string;
 };
-/** og buildCrossJurisdictionMarketOffer: only this book owner's working route; side, amounts and price come from the route remainder, never from the Account offer. */
-export const crossMarketOffer = (offer: CrossBookOffer, hubEntityId: string): Result<CrossMarketOffer | null, EntityError> => {
-  const route = offer.crossJurisdiction, owner = entityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
+/**
+ * og buildCrossJurisdictionMarketOffer: only this book owner's working route; side, amounts and price come from the
+ * route remainder, never from the Account offer.
+ */
+export const crossMarketOffer = (
+  offer: CrossBookOffer,
+  hubEntityId: string,
+): Result<CrossMarketOffer | null, EntityError> => {
+  const route = offer.crossJurisdiction;
+  const owner = entityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
   if (owner && owner !== entityRef(hubEntityId)) return ok(null);
   if (route.status !== "resting" && route.status !== "partially_filled") return ok(null);
   return chain(fatalCross(crossMarket(route)), (m) => {
     if (!m.sourceKey || !m.targetKey || m.sourceKey === m.targetKey) return ok(null);
     const side: BookSide = m.sourceIsBase ? 1 : 0;
+    const [baseLeg, quoteLeg] = m.sourceIsBase ? [route.source, route.target] : [route.target, route.source];
+    const baseTokenId = Number(baseLeg.tokenId);
+    const quoteTokenId = Number(quoteLeg.tokenId);
     return chain(crossRemaining(route), (rem) => {
-      const baseTokenId = Number(m.sourceIsBase ? route.source.tokenId : route.target.tokenId), quoteTokenId = Number(m.sourceIsBase ? route.target.tokenId : route.source.tokenId);
-      const baseAmount = m.sourceIsBase ? rem.sourceRemaining : rem.targetRemaining, quoteAmount = m.sourceIsBase ? rem.targetRemaining : rem.sourceRemaining;
-      return chain(tokenDecimals(baseTokenId), (bd) => map(tokenDecimals(quoteTokenId), (qd): CrossMarketOffer | null => {
+      const [baseAmount, quoteAmount] = m.sourceIsBase
+        ? [rem.sourceRemaining, rem.targetRemaining]
+        : [rem.targetRemaining, rem.sourceRemaining];
+      const decimals = all({ bd: tokenDecimals(baseTokenId), qd: tokenDecimals(quoteTokenId) });
+      return map(decimals, ({ bd, qd }): CrossMarketOffer | null => {
         const priceTicks = priceTicksOf({ side, bd: Number(bd), qd: Number(qd) }, baseAmount, quoteAmount);
-        return baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n ? null
-          : { offer, route, pairId: m.venueId, side, baseTokenId, quoteTokenId, baseAmount, quoteAmount, priceTicks, makerId: offer.makerIsLeft ? offer.fromEntity : offer.toEntity };
-      }));
+        if (baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n) return null;
+        return {
+          offer,
+          route,
+          pairId: m.venueId,
+          side,
+          baseTokenId,
+          quoteTokenId,
+          baseAmount,
+          quoteAmount,
+          priceTicks,
+          makerId: makerOf(offer),
+        };
+      });
     });
   });
 };
-/** og resolveCrossJurisdictionExecutionPriceTicks: one price-improvement lane, so a cross-j trade always executes at the ask. */
+/**
+ * og resolveCrossJurisdictionExecutionPriceTicks: one price-improvement lane, so a cross-j trade always executes at the
+ * ask.
+ */
 export const crossExecutionPrice = (first: CrossMarketOffer, second: CrossMarketOffer): Result<bigint, EntityError> => {
-  if (first.pairId !== second.pairId || first.baseTokenId !== second.baseTokenId || first.quoteTokenId !== second.quoteTokenId) return invariant(`CROSS_J_TRADE_PAIR_MISMATCH:${first.pairId}:${second.pairId}`);
+  const samePair =
+    first.pairId === second.pairId &&
+    first.baseTokenId === second.baseTokenId &&
+    first.quoteTokenId === second.quoteTokenId;
+  if (!samePair) return invariant(`CROSS_J_TRADE_PAIR_MISMATCH:${first.pairId}:${second.pairId}`);
   if (first.side === second.side) return invariant(`CROSS_J_TRADE_SIDE_MISMATCH:${first.side}:${second.side}`);
-  const sell = first.side === 1 ? first : second, buy = first.side === 0 ? first : second;
-  return sell.priceTicks <= 0n || buy.priceTicks <= 0n || sell.priceTicks > buy.priceTicks ? invariant(`CROSS_J_TRADE_PRICE_NOT_CROSSED:ask=${sell.priceTicks}:bid=${buy.priceTicks}`) : ok(sell.priceTicks);
+  const [sell, buy] = first.side === 1 ? [first, second] : [second, first];
+  const crossed = sell.priceTicks > 0n && buy.priceTicks > 0n && sell.priceTicks <= buy.priceTicks;
+  return crossed
+    ? ok(sell.priceTicks)
+    : invariant(`CROSS_J_TRADE_PRICE_NOT_CROSSED:ask=${sell.priceTicks}:bid=${buy.priceTicks}`);
 };
-export type CrossBookFill = { readonly filledLots: bigint; readonly weightedCost: bigint; readonly cancelRemainder?: boolean | undefined };
-/** og crossJurisdictionExecutionAmounts: the executed book amounts of one aggregated fill in route (source/target) terms. */
-export const crossExecutionAmounts = (meta: CrossMarketOffer, fill: CrossBookFill): Result<{ readonly executionSourceAmount: bigint; readonly executionTargetAmount: bigint } | null, EntityError> => {
+export type CrossBookFill = {
+  readonly filledLots: bigint;
+  readonly weightedCost: bigint;
+  readonly cancelRemainder?: boolean | undefined;
+};
+type CrossExecution = { readonly executionSourceAmount: bigint; readonly executionTargetAmount: bigint };
+/**
+ * og crossJurisdictionExecutionAmounts: the executed book amounts of one aggregated fill in route (source/target)
+ * terms.
+ */
+export const crossExecutionAmounts = (
+  meta: CrossMarketOffer,
+  fill: CrossBookFill,
+): Result<CrossExecution | null, EntityError> => {
   if (fill.filledLots <= 0n || fill.weightedCost <= 0n) return ok(null);
-  return chain(tokenDecimals(meta.baseTokenId), (bd) => map(tokenDecimals(meta.quoteTokenId), (qd) => {
-    const lot = lotScale(Number(bd)), base = fill.filledLots * lot, quote = quoteAt(Number(bd), Number(qd), lot, fill.weightedCost);
-    const executionSourceAmount = meta.side === 1 ? base : quote, executionTargetAmount = meta.side === 1 ? quote : base;
-    return executionSourceAmount <= 0n || executionTargetAmount <= 0n ? null : { executionSourceAmount, executionTargetAmount };
-  }));
+  return map(all({ bd: tokenDecimals(meta.baseTokenId), qd: tokenDecimals(meta.quoteTokenId) }), ({ bd, qd }) => {
+    const lot = lotScale(Number(bd));
+    const base = fill.filledLots * lot;
+    const quote = quoteAt(Number(bd), Number(qd), lot, fill.weightedCost);
+    const [executionSourceAmount, executionTargetAmount] = meta.side === 1 ? [base, quote] : [quote, base];
+    return executionSourceAmount <= 0n || executionTargetAmount <= 0n
+      ? null
+      : { executionSourceAmount, executionTargetAmount };
+  });
 };
-/** og CrossJurisdictionFillInstruction: hub-internal progress of one order, one uint16 ratio; the exact executed amounts only feed conservation. */
-export type CrossFillInstruction = {
-  readonly accountId: string; readonly offerId: string; readonly orderId: string; readonly route: CrossRoute; readonly fillSeq: number; readonly fillRatio: number; readonly cancelRemainder: boolean;
-  readonly executionSourceAmount: bigint; readonly executionTargetAmount: bigint;
+/**
+ * og CrossJurisdictionFillInstruction: hub-internal progress of one order, one uint16 ratio; the exact executed amounts
+ * only feed conservation.
+ */
+export type CrossFillInstruction = SwapRef & CrossExecution & {
+  readonly orderId: string;
+  readonly route: CrossRoute;
+  readonly fillSeq: number;
+  readonly fillRatio: number;
+  readonly cancelRemainder: boolean;
 };
 const currentFillSeq = (r: CrossRoute): number => Math.max(0, Math.floor(Number(r.fillSeq ?? 0) || 0));
-/** og buildCrossJurisdictionFillInstruction: the cumulative target-side ratio; a step that moves neither or only one leg's claim is absorbed by the hub (null). */
-export const crossFillInstruction = (accountId: string, offerId: string, orderId: string, meta: CrossMarketOffer, fill: CrossBookFill): Result<CrossFillInstruction | null, EntityError> =>
-  chain(crossExecutionAmounts(meta, fill), (execution) => execution === null ? ok(null) : map(fatalCross(crossFillAmounts(meta.route)), (c): CrossFillInstruction | null => {
-    const { executionSourceAmount, executionTargetAmount } = execution;
-    if (c.filledSourceAmount + executionSourceAmount > c.sourceTotal || c.filledTargetAmount + executionTargetAmount > c.targetTotal) return null;
-    const fillRatio = fillRatioOf(exactFillRatio(c.targetTotal, c.filledTargetAmount + executionTargetAmount));
-    if (fillRatio <= c.fillRatio) return null;
-    const ratio = BigInt(fillRatio), max = BigInt(MAX_FILL), project = (total: bigint): bigint => (ratio >= max ? total : (total * ratio) / max);
-    if (project(c.sourceTotal) <= c.filledSourceAmount || project(c.targetTotal) <= c.filledTargetAmount) return null;
-    return { accountId, offerId, orderId, route: meta.route, fillSeq: currentFillSeq(meta.route) + 1, fillRatio, cancelRemainder: fill.cancelRemainder === true, executionSourceAmount, executionTargetAmount };
+/**
+ * og buildCrossJurisdictionFillInstruction: the cumulative target-side ratio; a step that moves neither or only one
+ * leg's claim is absorbed by the hub (null).
+ */
+export const crossFillInstruction = (
+  accountId: string,
+  offerId: string,
+  orderId: string,
+  meta: CrossMarketOffer,
+  fill: CrossBookFill,
+): Result<CrossFillInstruction | null, EntityError> =>
+  chain(crossExecutionAmounts(meta, fill), (execution) =>
+    execution === null
+      ? ok(null)
+      : map(fatalCross(crossFillAmounts(meta.route)), (c): CrossFillInstruction | null => {
+          const { executionSourceAmount, executionTargetAmount } = execution;
+          const overfills =
+            c.filledSourceAmount + executionSourceAmount > c.sourceTotal ||
+            c.filledTargetAmount + executionTargetAmount > c.targetTotal;
+          if (overfills) return null;
+          const fillRatio = fillRatioOf(exactFillRatio(c.targetTotal, c.filledTargetAmount + executionTargetAmount));
+          if (fillRatio <= c.fillRatio) return null;
+          const ratio = BigInt(fillRatio);
+          const max = BigInt(MAX_FILL);
+          const project = (total: bigint): bigint => (ratio >= max ? total : (total * ratio) / max);
+          if (project(c.sourceTotal) <= c.filledSourceAmount || project(c.targetTotal) <= c.filledTargetAmount)
+            return null;
+          return {
+            accountId,
+            offerId,
+            orderId,
+            route: meta.route,
+            fillSeq: currentFillSeq(meta.route) + 1,
+            fillRatio,
+            cancelRemainder: fill.cancelRemainder === true,
+            executionSourceAmount,
+            executionTargetAmount,
+          };
+        }),
+  );
+/**
+ * og buildCrossJurisdictionCancelInstruction: a terminal cancel of the unfilled remainder at the committed progress.
+ */
+export const crossCancelInstruction = (
+  accountId: string,
+  offerId: string,
+  orderId: string,
+  route: CrossRoute,
+): Result<CrossFillInstruction, EntityError> =>
+  map(fatalCross(crossFillAmounts(route)), (c) => ({
+    accountId,
+    offerId,
+    orderId,
+    route,
+    fillSeq: currentFillSeq(route),
+    fillRatio: c.fillRatio,
+    cancelRemainder: true,
+    executionSourceAmount: 0n,
+    executionTargetAmount: 0n,
   }));
-/** og buildCrossJurisdictionCancelInstruction: a terminal cancel of the unfilled remainder at the committed progress. */
-export const crossCancelInstruction = (accountId: string, offerId: string, orderId: string, route: CrossRoute): Result<CrossFillInstruction, EntityError> =>
-  map(fatalCross(crossFillAmounts(route)), (c) => ({ accountId, offerId, orderId, route, fillSeq: currentFillSeq(route), fillRatio: c.fillRatio, cancelRemainder: true, executionSourceAmount: 0n, executionTargetAmount: 0n }));
 /** og normalizeSwapOfferForOrderbook for a cross-j offer: the book view keeps the route. */
-const normalizeCross = (o: Parameters<typeof normalizeOffer>[0], accountId: string, route: CrossRoute): Result<CrossBookOffer, EntityError> =>
+const normalizeCross = (o: RawOffer, accountId: string, route: CrossRoute): Result<CrossBookOffer, EntityError> =>
   map(normalizeOffer(o, accountId), (b) => ({ ...b, crossJurisdiction: route }));
-/** og buildCrossMarketOfferFromBookOrder: the Account offer at its progressed (admitted) route, else a remote admitted route without a local Account. */
-const crossMetaFromBookOrder = (hub: Hub, orderId: string): Result<CrossMarketOffer | null, EntityError> => chain(parseOrderId(orderId, "ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
-  const account = hub.accounts.get(accountId), o = account?.offers.get(offerId), admission = hub.crossAdmissions?.get(bookAdmissionKey(accountId, offerId));
-  if (account !== undefined && o?.crossJurisdiction !== undefined) {
-    return chain(normalizeCross({ offerId, makerIsLeft: o.makerIsLeft, fromEntity: account.left, toEntity: account.right, createdHeight: o.createdHeight, giveTokenId: Number(o.giveTokenId), giveTokenDecimals: o.giveTokenDecimals,
-      giveAmount: o.giveAmount, wantTokenId: Number(o.wantTokenId), wantTokenDecimals: o.wantTokenDecimals, wantAmount: o.wantAmount, maxFee: o.maxFee, minNetReceive: o.minNetReceive, priceTicks: o.priceTicks, timeInForce: o.timeInForce },
-    accountId, admission?.route ?? o.crossJurisdiction), (n) => crossMarketOffer(n, hub.id));
-  }
-  if (admission === undefined || admission.status !== "admitted") return ok(null);
-  const route = admission.route;
-  return chain(crossRemaining(route), (rem) => chain(tokenDecimals(Number(route.source.tokenId)), (gd) => chain(tokenDecimals(Number(route.target.tokenId)), (wd) =>
-    chain(normalizeCross({ offerId, makerIsLeft: true, fromEntity: route.source.entityId, toEntity: route.source.counterpartyEntityId, createdHeight: 0, giveTokenId: Number(route.source.tokenId), giveTokenDecimals: Number(gd),
-      giveAmount: rem.sourceRemaining, wantTokenId: Number(route.target.tokenId), wantTokenDecimals: Number(wd), wantAmount: rem.targetRemaining, maxFee: 0n, minNetReceive: rem.targetRemaining, ...opt("priceTicks", route.priceTicks === undefined ? undefined : BigInt(route.priceTicks)) },
-    accountId, route), (n) => crossMarketOffer(n, hub.id)))));
-});
-type CrossFillAgg = { filledLots: bigint; weightedCost: bigint; cancelRemainder: boolean };
-/** og CrossOrderbookPass: shares the same-j pass's hot book cache, touched books and queued resolves; working books stay speculative until committed. */
+/**
+ * A remote user's admitted route as the offer it stands for: its remainder, source to target, with no Account behind
+ * it.
+ */
+const remoteOffer = (offerId: string, route: CrossRoute): Result<RawOffer, EntityError> => {
+  const facts = all({
+    rem: crossRemaining(route),
+    gd: tokenDecimals(Number(route.source.tokenId)),
+    wd: tokenDecimals(Number(route.target.tokenId)),
+  });
+  return map(facts, ({ rem, gd, wd }) => ({
+    offerId,
+    makerIsLeft: true,
+    fromEntity: route.source.entityId,
+    toEntity: route.source.counterpartyEntityId,
+    createdHeight: 0,
+    giveTokenId: Number(route.source.tokenId),
+    giveTokenDecimals: Number(gd),
+    giveAmount: rem.sourceRemaining,
+    wantTokenId: Number(route.target.tokenId),
+    wantTokenDecimals: Number(wd),
+    wantAmount: rem.targetRemaining,
+    maxFee: 0n,
+    minNetReceive: rem.targetRemaining,
+    ...opt("priceTicks", route.priceTicks === undefined ? undefined : BigInt(route.priceTicks)),
+  }));
+};
+/**
+ * og buildCrossMarketOfferFromBookOrder: the Account offer at its progressed (admitted) route, else a remote admitted
+ * route without a local Account.
+ */
+const crossMetaFromBookOrder = (hub: Hub, orderId: string): Result<CrossMarketOffer | null, EntityError> =>
+  chain(parseOrderId(orderId, "ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
+    const account = hub.accounts.get(accountId);
+    const o = account?.offers.get(offerId);
+    const admission = hub.crossAdmissions?.get(bookAdmissionKey(accountId, offerId));
+    const market = (raw: RawOffer, route: CrossRoute) =>
+      chain(normalizeCross(raw, accountId, route), (n) => crossMarketOffer(n, hub.id));
+    if (account !== undefined && o?.crossJurisdiction !== undefined) {
+      return market(storedOffer(account, offerId, o), admission?.route ?? o.crossJurisdiction);
+    }
+    if (admission === undefined || admission.status !== "admitted") return ok(null);
+    return chain(remoteOffer(offerId, admission.route), (raw) => market(raw, admission.route));
+  });
+
+
+// -- the cross-j pass: speculative placement on working books, fills aggregated into hub-internal progress
+
+type CrossFillAgg = { readonly filledLots: bigint; readonly weightedCost: bigint; readonly cancelRemainder: boolean };
+/**
+ * og CrossOrderbookPass: shares the same-j pass's hot book cache, touched books and queued resolves; working books stay
+ * speculative until committed.
+ */
 type CrossPass = {
-  readonly pass: Pass; readonly meta: Map<string, CrossMarketOffer>; readonly fills: Map<string, CrossFillAgg>; readonly suspended: Set<string>;
-  readonly working: Map<string, Book>; readonly speculative: Set<string>; readonly aliased: Set<string>; readonly out: CrossFillInstruction[];
+  readonly pass: Pass;
+  readonly meta: ReadonlyMap<string, CrossMarketOffer>;
+  readonly fills: ReadonlyMap<string, CrossFillAgg>;
+  readonly suspended: ReadonlySet<string>;
+  readonly working: ReadonlyMap<string, Book>;
+  readonly speculative: ReadonlySet<string>;
+  readonly aliased: ReadonlySet<string>;
+  readonly out: readonly CrossFillInstruction[];
 };
+type CrossPassed<T> = { readonly cp: CrossPass; readonly value: T };
+/** What judging a cross-j maker taught the pass: the row's market offer, remembered under its order id. */
+type LearnedMeta = readonly [orderId: string, meta: CrossMarketOffer];
+const learnMeta = (cp: CrossPass, learned: readonly LearnedMeta[]): CrossPass => ({
+  ...cp,
+  meta: learned.reduce((meta, [orderId, m]) => mapSet(meta, orderId, m), cp.meta),
+});
 /** og rejectInvalidCrossOffer in live mode: every invalid cross-j offer halts the frame. */
-const liveReject = (accountId: string, offerId: string, reason: string): Result<never, EntityError> => halt(`ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
+const liveReject = (accountId: string, offerId: string, reason: string): Result<never, EntityError> =>
+  halt(`ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
 /** og getCrossMarketOffer: the admitted route (or the hub's route mirror) carries the progressed remainder. */
-const crossMetaOf = (cp: CrossPass, o: CrossBookOffer): Result<CrossMarketOffer | null, EntityError> => {
-  const key = swapKeyOf(o.accountId, o.offerId), cached = cp.meta.get(key), hub = cp.pass.hub;
-  if (cached !== undefined) return ok(cached);
-  const progressed = hub.crossAdmissions?.get(bookAdmissionKey(o.accountId, o.offerId))?.route ?? hub.crossSwaps?.get(o.offerId) ?? o.crossJurisdiction;
-  return map(crossMarketOffer(progressed === o.crossJurisdiction ? o : { ...o, crossJurisdiction: progressed }, hub.id), (m) => { if (m !== null) cp.meta.set(key, m); return m; });
+const crossMetaOf = (cp: CrossPass, o: CrossBookOffer): Result<CrossPassed<CrossMarketOffer | null>, EntityError> => {
+  const key = swapKeyOf(o.accountId, o.offerId);
+  const cached = cp.meta.get(key);
+  const hub = cp.pass.hub;
+  if (cached !== undefined) return ok({ cp, value: cached });
+  const progressed = hub.crossAdmissions?.get(bookAdmissionKey(o.accountId, o.offerId))?.route
+    ?? hub.crossSwaps?.get(o.offerId)
+    ?? o.crossJurisdiction;
+  const offer = progressed === o.crossJurisdiction ? o : { ...o, crossJurisdiction: progressed };
+  return map(crossMarketOffer(offer, hub.id), (m) => ({ cp: m === null ? cp : learnMeta(cp, [[key, m]]), value: m }));
 };
-const crossMeta = (cp: CrossPass, orderId: string): Result<CrossMarketOffer | null, EntityError> => { const m = cp.meta.get(orderId); return m !== undefined ? ok(m) : crossMetaFromBookOrder(cp.pass.hub, orderId); };
+const crossMeta = (cp: CrossPass, orderId: string): Result<CrossMarketOffer | null, EntityError> => {
+  const m = cp.meta.get(orderId);
+  return m !== undefined ? ok(m) : crossMetaFromBookOrder(cp.pass.hub, orderId);
+};
 /** og committedCrossRouteStatus. */
 const committedCrossStatus = (hub: Hub, accountId: string, offerId: string): string | undefined => {
   const admission = hub.crossAdmissions?.get(bookAdmissionKey(accountId, offerId));
@@ -43326,147 +44719,325 @@ const committedCrossStatus = (hub: Hub, accountId: string, offerId: string): str
   if (mirror?.status) return mirror.status;
   return hub.accounts.get(accountId)?.offers.get(offerId)?.crossJurisdiction?.status ?? admission?.route.status;
 };
-/** og classifyCrossBookMaker: a disputed local Account, a non-working or expired route cancels the row; a matched row is suspended; the row must equal its route remainder. */
-const classifyCrossMaker = (cp: CrossPass, pairId: string, order: BookOrder): Result<MakerDisposition, EntityError> => chain(parseOrderId(order.orderId, "ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
-  const hub = cp.pass.hub, account = hub.accounts.get(accountId);
-  if (account !== undefined && !account.active) return ok("cancel");
-  const status = committedCrossStatus(hub, accountId, offerId);
-  if (status && status !== "resting" && status !== "partially_filled") return ok("cancel");
-  return chain(crossMeta(cp, order.orderId), (meta): Result<MakerDisposition, EntityError> => {
-    if (meta === null) return halt(`ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId} account=${accountId} offer=${offerId}`);
-    cp.meta.set(order.orderId, meta);
-    if (isCrossExpired(meta.route, Number(hub.timestamp ?? 0))) return ok("cancel");
-    if (cp.suspended.has(order.orderId)) return ok("suspended");
-    return chain(crossBookQtyLots(meta.baseTokenId, meta.baseAmount), (qty): Result<MakerDisposition, EntityError> => {
-      if (meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId)
-        return halt(`ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} storedPair=${pairId} canonicalPair=${meta.pairId} storedOwner=${order.ownerId} canonicalOwner=${meta.makerId} `
-          + `storedQty=${order.qtyLots} canonicalQty=${qty} storedPrice=${order.priceTicks} canonicalPrice=${meta.priceTicks}`);
-      if (order.qtyLots !== qty) return halt(`ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} storedQty=${order.qtyLots} canonicalQty=${qty} storedPrice=${order.priceTicks} canonicalPrice=${meta.priceTicks}`);
-      return ok("eligible");
+/** The resting cross-j row must be exactly its route remainder. */
+const crossRowMatches = (pairId: string, order: BookOrder, meta: CrossMarketOffer): Result<void, EntityError> =>
+  chain(crossBookQtyLots(meta.baseTokenId, meta.baseAmount), (qty) => {
+    const at = `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${order.orderId}`;
+    const sized: readonly Mismatch[] = [["Qty", order.qtyLots, qty], ["Price", order.priceTicks, meta.priceTicks]];
+    const placed: readonly Mismatch[] = [["Pair", pairId, meta.pairId], ["Owner", order.ownerId, meta.makerId]];
+    if (meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId) {
+      return halt(`${at} ${mismatchText([...placed, ...sized])}`);
+    }
+    return order.qtyLots === qty ? ok(undefined) : halt(`${at} ${mismatchText(sized)}`);
+  });
+/**
+ * og classifyCrossBookMaker: a disputed local Account, a non-working or expired route cancels the row; a matched row is
+ * suspended; the row must equal its route remainder. Once the row's market offer is known, og remembers it for the rest
+ * of the pass.
+ */
+const classifyCrossMaker = (
+  cp: CrossPass,
+  pairId: string,
+  order: BookOrder,
+): Result<MakerVerdict<LearnedMeta>, EntityError> =>
+  chain(parseOrderId(order.orderId, "ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER"), ({ accountId, offerId }) => {
+    const hub = cp.pass.hub;
+    const account = hub.accounts.get(accountId);
+    const status = committedCrossStatus(hub, accountId, offerId);
+    if (account !== undefined && !account.active) return ok({ disposition: "cancel" });
+    if (status && status !== "resting" && status !== "partially_filled") return ok({ disposition: "cancel" });
+    return chain(crossMeta(cp, order.orderId), (meta): Result<MakerVerdict<LearnedMeta>, EntityError> => {
+      const at = `pair=${pairId} order=${order.orderId} account=${accountId} offer=${offerId}`;
+      if (meta === null) return halt(`ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: ${at}`);
+      const learned: LearnedMeta = [order.orderId, meta];
+      if (isCrossExpired(meta.route, Number(hub.timestamp ?? 0))) return ok({ disposition: "cancel", learned });
+      if (cp.suspended.has(order.orderId)) return ok({ disposition: "suspended", learned });
+      return map(crossRowMatches(pairId, order, meta), () => ({ disposition: "eligible", learned }));
     });
   });
+type PreparedCross = {
+  readonly raw: CrossBookOffer;
+  readonly orderId: string;
+  readonly meta: CrossMarketOffer;
+  readonly qtyLots: bigint;
+  readonly bd: number;
+  readonly qd: number;
+  readonly book: Book;
+};
+/**
+ * og processCrossOrderbookOffer's book options: the pass's matched rows sit out, and a cross-j trade executes at the
+ * ask.
+ */
+const crossBookOptions = (cp: CrossPass, p: PreparedCross): BookOptions<EntityError, LearnedMeta> => ({
+  suspendedOrderIds: cp.suspended,
+  makerVerdict: (maker) => classifyCrossMaker(cp, p.meta.pairId, maker),
+  executionPriceTicksForMatch: (maker, taker, takerSide) => (takerSide === 1 ? taker : maker),
+  executionQtyMultipleAtPrice: (price) => exactQuoteLots(p.bd, p.qd, price),
 });
-type PreparedCross = { readonly raw: CrossBookOffer; readonly orderId: string; readonly meta: CrossMarketOffer; readonly qtyLots: bigint; readonly bd: number; readonly qd: number; readonly book: Book };
-/** og prepareCrossOrderbookOffer: dust, size and exact-quote alignment; a resolving offer or an identical resting row is skipped, a changed row halts. */
-const prepareCross = (cp: CrossPass, raw: CrossBookOffer): Result<PreparedCross | null, EntityError> => {
-  const { accountId, offerId } = raw, orderId = swapKeyOf(accountId, offerId), pass = cp.pass;
-  return chain(crossMetaOf(cp, raw), (meta) => meta === null ? liveReject(accountId, offerId, "invalid-cross-j-route") : chain(crossBookQtyLots(meta.baseTokenId, meta.baseAmount), (qtyLots) => {
+/** The route's remainder in book lots: dust, oversize and a quote-misaligned remainder are invalid. */
+const crossLots = (
+  raw: CrossBookOffer,
+  meta: CrossMarketOffer,
+): Result<Omit<PreparedCross, "orderId" | "book">, EntityError> => {
+  const { accountId, offerId } = raw;
+  return chain(crossBookQtyLots(meta.baseTokenId, meta.baseAmount), (qtyLots) => {
+    const n = meta.offer;
+    const [bd, qd] =
+      meta.side === 1 ? [n.giveTokenDecimals, n.wantTokenDecimals] : [n.wantTokenDecimals, n.giveTokenDecimals];
     if (qtyLots <= 0n) return liveReject(accountId, offerId, `cross-dust-remainder:${meta.baseAmount}`);
     if (qtyLots > MAX_ORDERBOOK_QTY_LOTS) return liveReject(accountId, offerId, `invalid-cross-qty:${qtyLots}`);
-    const n = meta.offer, bd = meta.side === 1 ? n.giveTokenDecimals : n.wantTokenDecimals, qd = meta.side === 1 ? n.wantTokenDecimals : n.giveTokenDecimals, multiple = exactQuoteLots(bd, qd, meta.priceTicks);
-    if (qtyLots % multiple !== 0n) return liveReject(accountId, offerId, `cross-quote-lot-misaligned:${qtyLots}:${multiple}`);
-    cp.meta.set(orderId, meta);
-    if (hasQueuedResolve(pass, accountId, offerId)) return ok(null);
-    const cached = pass.cache.get(meta.pairId), published = cached === undefined ? pass.hub.ext.books.get(meta.pairId) : undefined;
-    const fresh: Result<Book, EntityError> = cached !== undefined ? ok(cached) : published !== undefined ? ok(published)
-      : mapErr(createBook({ bucketWidthTicks: BigInt(Math.max(1, (PAIR_POLICIES.get(`${raw.giveTokenId}/${raw.wantTokenId}`) ?? DEFAULT_PAIR_POLICY).bucket)), maxOrders: MAX_ORDERBOOK_ORDERS_PER_PAIR, stpPolicy: 1 }), (e) => ({ _tag: "entity_invariant", reason: e.code }) as EntityError);
-    return chain(fresh, (book): Result<PreparedCross | null, EntityError> => {
-      pass.cache.set(meta.pairId, book);
-      const existing = book.orders.get(orderId);
-      if (existing === undefined) return ok({ raw, orderId, meta, qtyLots, bd, qd, book });
-      return existing.ownerId !== meta.makerId || existing.side !== meta.side || existing.priceTicks !== meta.priceTicks || existing.qtyLots !== qtyLots
-        ? halt(`ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: pair=${meta.pairId} order=${orderId} storedOwner=${existing.ownerId} canonicalOwner=${meta.makerId} storedQty=${existing.qtyLots} canonicalQty=${qtyLots} `
-          + `storedPrice=${existing.priceTicks} canonicalPrice=${meta.priceTicks}`) : ok(null);
+    const multiple = exactQuoteLots(bd, qd, meta.priceTicks);
+    if (qtyLots % multiple !== 0n)
+      return liveReject(accountId, offerId, `cross-quote-lot-misaligned:${qtyLots}:${multiple}`);
+    return ok({ raw, meta, qtyLots, bd, qd });
+  });
+};
+/**
+ * og prepareCrossOrderbookOffer: dust, size and exact-quote alignment; a resolving offer or an identical resting row is
+ * skipped, a changed row halts.
+ */
+const prepareCross = (cp: CrossPass, raw: CrossBookOffer): Result<CrossPassed<PreparedCross | null>, EntityError> => {
+  const { accountId, offerId } = raw;
+  const orderId = swapKeyOf(accountId, offerId);
+  return chain(crossMetaOf(cp, raw), ({ cp: known, value: meta }) => {
+    if (meta === null) return liveReject(accountId, offerId, "invalid-cross-j-route");
+    return chain(crossLots(raw, meta), (lots) => {
+      const skip = ok({ cp: known, value: null });
+      if (hasQueuedResolve(known.pass, accountId, offerId)) return skip;
+      const policy = PAIR_POLICIES.get(`${raw.giveTokenId}/${raw.wantTokenId}`) ?? DEFAULT_PAIR_POLICY;
+      return chain(
+        hotBook(known.pass, meta.pairId, () => freshBook(policy)),
+        ({ pass, book }): Result<CrossPassed<PreparedCross | null>, EntityError> => {
+          const hot: CrossPass = { ...known, pass: { ...pass, cache: mapSet(pass.cache, meta.pairId, book) } };
+          const existing = book.orders.get(orderId);
+          if (existing === undefined) return ok({ cp: hot, value: { ...lots, orderId, book } });
+          const same =
+            existing.ownerId === meta.makerId &&
+            existing.side === meta.side &&
+            existing.priceTicks === meta.priceTicks &&
+            existing.qtyLots === lots.qtyLots;
+          if (same) return ok({ cp: hot, value: null });
+          const fields = mismatchText([
+            ["Owner", existing.ownerId, meta.makerId],
+            ["Qty", existing.qtyLots, lots.qtyLots],
+            ["Price", existing.priceTicks, meta.priceTicks],
+          ]);
+          return halt(`ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: pair=${meta.pairId} order=${orderId} ${fields}`);
+        },
+      );
     });
-  }));
+  });
 };
 /** og removeCrossBookOrderAfterFill: a terminal fill takes the row off its committed book. */
-const removeCrossRowAfterFill = (cp: CrossPass, pairId: string, orderId: string): Result<void, EntityError> => {
-  const pass = cp.pass, book = pass.cache.get(pairId) ?? pass.hub.ext.books.get(pairId), order = book?.orders.get(orderId);
-  if (book === undefined || order === undefined) return ok(undefined);
-  const r = applyBookCommand(book, { kind: 1, ownerId: order.ownerId, orderId });
-  if (!r.ok) return halt(r.error.code);
-  pass.cache.set(pairId, r.value.state);
-  pass.updates.set(pairId, r.value.state);
-  return ok(undefined);
+const removeCrossRowAfterFill = (cp: CrossPass, pairId: string, orderId: string): Result<CrossPass, EntityError> => {
+  const pass = cp.pass;
+  const book = pass.cache.get(pairId) ?? pass.hub.ext.books.get(pairId);
+  const order = book?.orders.get(orderId);
+  if (book === undefined || order === undefined) return ok(cp);
+  return map(cancelRow(book, order), (next) => ({ ...cp, pass: publishBook(pass, pairId, next) }));
 };
-const EXPECTED_CROSS_REJECTS: ReadonlySet<string> = new Set(["no fill", "FOK cannot fill entirely", "STP cancel taker"]);
-/** og processCrossOrderbookOffer: speculative placement on the working book; a resting-only placement commits, trades aggregate into hub-internal fills. */
-const processCrossOffer = (cp: CrossPass, raw: CrossBookOffer): Result<void, EntityError> => chain(prepareCross(cp, raw), (p): Result<void, EntityError> => {
-  if (p === null) return ok(undefined);
-  const { accountId, offerId } = raw, pairId = p.meta.pairId, pass = cp.pass;
-  const start = cp.working.get(pairId) ?? p.book;
-  cp.working.set(pairId, start);
-  let fault: EntityError | undefined;
-  const placed = applyBookCommand(start, { kind: 0, ownerId: p.meta.makerId, orderId: p.orderId, side: p.meta.side, tif: raw.timeInForce, postOnly: false, priceTicks: p.meta.priceTicks, qtyLots: p.qtyLots }, {
-    suspendedOrderIds: cp.suspended,
-    makerDisposition: (maker) => { if (fault !== undefined) return "suspended"; const d = classifyCrossMaker(cp, pairId, maker); if (!d.ok) { fault = d.error; return "suspended"; } return d.value; },
-    executionPriceTicksForMatch: (maker, taker, takerSide) => (takerSide === 1 ? taker : maker),
-    executionQtyMultipleAtPrice: (price) => exactQuoteLots(p.bd, p.qd, price),
-  });
-  if (fault !== undefined) return liveReject(accountId, offerId, `cross-pair-error:${haltMessage(fault)}`);
-  if (!placed.ok) return liveReject(accountId, offerId, `cross-pair-error:${placed.error.code}`);
-  const result = placed.value, rejects = result.events.flatMap((e) => (e.type === "REJECT" && e.orderId === p.orderId ? [e] : []));
-  const rawTrades = result.events.flatMap((e) => (e.type === "TRADE" ? [e] : []));
-  // og canonicalCrossTradeEvents: both sides' metadata must exist; the price is the ask
-  const trades = traverse(rawTrades, (t) => chain(crossMeta(cp, t.makerOrderId), (maker) => chain(crossMeta(cp, t.takerOrderId), (taker) => {
-    if (maker === null || taker === null) return halt(`ORDERBOOK_CROSS_J_TRADE_META_MISSING:maker=${t.makerOrderId}:taker=${t.takerOrderId}`);
-    cp.meta.set(t.makerOrderId, maker); cp.meta.set(t.takerOrderId, taker);
-    return map(crossExecutionPrice(maker, taker), (price) => ({ ...t, price }));
-  })));
-  if (!trades.ok) return trades;
-  const expected = rejects.length > 0 && rejects.every((e) => EXPECTED_CROSS_REJECTS.has(e.reason)), reasons = rejects.map((e) => e.reason).join(",");
-  if (rejects.length > 0 && trades.value.length === 0) {
+const EXPECTED_CROSS_REJECTS: ReadonlySet<string> = new Set([
+  "no fill",
+  "FOK cannot fill entirely",
+  "STP cancel taker",
+]);
+type CrossTrade = { readonly trade: Trade; readonly maker: CrossMarketOffer; readonly taker: CrossMarketOffer };
+/** og canonicalCrossTradeEvents: both sides' market offers must exist, and the trade executes at the ask. */
+const crossTrade = (cp: CrossPass, t: Trade): Result<CrossTrade, EntityError> =>
+  chain(crossMeta(cp, t.makerOrderId), (maker) =>
+    chain(crossMeta(cp, t.takerOrderId), (taker) => {
+      if (maker === null || taker === null)
+        return halt(`ORDERBOOK_CROSS_J_TRADE_META_MISSING:maker=${t.makerOrderId}:taker=${t.takerOrderId}`);
+      return map(crossExecutionPrice(maker, taker), (price) => ({ trade: { ...t, price }, maker, taker }));
+    }),
+  );
+const addCrossFill = (fills: ReadonlyMap<string, CrossFillAgg>, orderId: string, fill: SameFill, cancels: boolean) => {
+  const current = fills.get(orderId);
+  const next: CrossFillAgg = current === undefined
+    ? { filledLots: fill.filledLots, weightedCost: fill.weightedCost, cancelRemainder: cancels }
+    : {
+      filledLots: current.filledLots + fill.filledLots,
+      weightedCost: current.weightedCost + fill.weightedCost,
+      cancelRemainder: current.cancelRemainder || cancels,
+    };
+  return mapSet(fills, orderId, next);
+};
+/**
+ * og commitRestingCrossOffer publishes the working overlay itself: from then on the pair's committed book and working
+ * book are one object, so later speculative trades on that pair land in the published book too (commitBookOverlay folds
+ * each step into the shared overlay).
+ */
+const settleWorking = (cp: CrossPass, pairId: string, book: Book, traded: boolean): CrossPass => {
+  const working: CrossPass = { ...cp, working: mapSet(cp.working, pairId, book) };
+  const publishes = (!traded && !cp.speculative.has(pairId)) || cp.aliased.has(pairId);
+  const published: CrossPass = publishes
+    ? { ...working, pass: publishBook(working.pass, pairId, book), aliased: withMember(working.aliased, pairId) }
+    : working;
+  return traded ? { ...published, speculative: withMember(published.speculative, pairId) } : published;
+};
+/**
+ * og aggregateCrossTrades: a matched route never matches again in this pass; each order's fills add up, and the taker's
+ * remainder is cancelled for IOC/FOK or an expected reject.
+ */
+const aggregateCrossTrades = (
+  cp: CrossPass,
+  trades: readonly CrossTrade[],
+  takerOrderId: string,
+  cancelTaker: boolean,
+): CrossPass => {
+  const matched = trades.flatMap(({ trade }) => [trade.makerOrderId, trade.takerOrderId]);
+  const perOrder = aggregateFills(trades.map(({ trade }) => trade));
+  return {
+    ...cp,
+    suspended: matched.reduce((suspended, orderId) => withMember(suspended, orderId), cp.suspended),
+    fills: [...perOrder].reduce(
+      (fills, [orderId, fill]) => addCrossFill(fills, orderId, fill, orderId === takerOrderId && cancelTaker),
+      cp.fills,
+    ),
+  };
+};
+/**
+ * The placement's outcome once its trades are known: a lone expected reject cancels the offer, anything else unexpected
+ * halts.
+ */
+const crossOutcome = (
+  cp: CrossPass,
+  p: PreparedCross,
+  result: BookStep,
+  trades: readonly CrossTrade[],
+): Result<CrossPass, EntityError> => {
+  const { accountId, offerId } = p.raw;
+  const rejects = result.events.flatMap((e) => (e.type === "REJECT" && e.orderId === p.orderId ? [e] : []));
+  const expected = rejects.length > 0 && rejects.every((e) => EXPECTED_CROSS_REJECTS.has(e.reason));
+  const reasons = rejects.map((e) => e.reason).join(",");
+  if (rejects.length > 0 && trades.length === 0) {
     if (!expected) return liveReject(accountId, offerId, `cross-post-only-reject:${reasons}`);
-    cp.suspended.add(p.orderId);
-    return map(crossCancelInstruction(accountId, offerId, p.orderId, p.meta.route), (i) => { cp.out.push(i); });
+    return map(crossCancelInstruction(accountId, offerId, p.orderId, p.meta.route), (i) => ({
+      ...cp,
+      suspended: withMember(cp.suspended, p.orderId),
+      out: [...cp.out, i],
+    }));
   }
   if (rejects.length > 0 && !expected) return liveReject(accountId, offerId, `cross-order-reject:${reasons}`);
-  cp.working.set(pairId, result.state);
-  // og commitRestingCrossOffer publishes the working overlay itself: from then on the pair's committed book and working book are one object, so later
-  // speculative trades on that pair land in the published book too (commitBookOverlay folds each step into the shared overlay)
-  if ((trades.value.length === 0 && !cp.speculative.has(pairId)) || cp.aliased.has(pairId)) { pass.cache.set(pairId, result.state); pass.updates.set(pairId, result.state); cp.aliased.add(pairId); }
-  if (trades.value.length > 0) cp.speculative.add(pairId);
-  // og aggregateCrossTrades: a matched route never matches again in this pass; the taker remainder is cancelled for IOC/FOK or an expected reject
-  const cancelTaker = raw.timeInForce !== 0 || expected;
-  for (const t of trades.value) { cp.suspended.add(t.makerOrderId); cp.suspended.add(t.takerOrderId); }
-  const perOrder = new Map<string, { filledLots: bigint; weightedCost: bigint }>();
-  for (const t of trades.value) for (const orderId of [t.makerOrderId, t.takerOrderId]) {
-    const e = perOrder.get(orderId), cost = t.price * t.qty;
-    if (e === undefined) perOrder.set(orderId, { filledLots: t.qty, weightedCost: cost }); else { e.filledLots += t.qty; e.weightedCost += cost; }
-  }
-  for (const [orderId, fill] of perOrder) {
-    const meta = crossMeta(cp, orderId);
-    if (!meta.ok) return meta;
-    if (meta.value === null) return halt(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
-    const current = cp.fills.get(orderId), cancels = orderId === p.orderId && cancelTaker;
-    if (current === undefined) cp.fills.set(orderId, { ...fill, cancelRemainder: cancels });
-    else { current.filledLots += fill.filledLots; current.weightedCost += fill.weightedCost; if (cancels) current.cancelRemainder = true; }
-  }
-  return ok(undefined);
-});
-/** og planCrossFills + commitCrossFill: fills in order-id order, conserved per asset across every executed amount; a terminal one leaves the book. */
-const finalizeCrossFills = (cp: CrossPass): Result<void, EntityError> => {
-  const net = new Map<string, bigint>(), planned: CrossFillInstruction[] = [];
-  for (const orderId of [...cp.fills.keys()].sort(compareText)) {
-    const fill = cp.fills.get(orderId);
-    if (fill === undefined) continue;
-    const step = chain(crossMeta(cp, orderId), (meta) => meta === null ? halt(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`) : chain(crossExecutionAmounts(meta, fill), (execution) => {
-      const netted = execution === null ? ok(undefined) : chain(fatalCross(assetKey(meta.route.source.jurisdiction, meta.route.source.tokenId)), (s) => map(fatalCross(assetKey(meta.route.target.jurisdiction, meta.route.target.tokenId)), (t) => {
-        net.set(s, (net.get(s) ?? 0n) - execution.executionSourceAmount); net.set(t, (net.get(t) ?? 0n) + execution.executionTargetAmount);
-      }));
-      return chain(netted, () => chain(parseOrderId(orderId, "ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER"), ({ accountId, offerId }) => chain(crossFillInstruction(accountId, offerId, orderId, meta, fill), (i) =>
-        i === null && fill.cancelRemainder ? map(crossCancelInstruction(accountId, offerId, orderId, meta.route), (c) => { planned.push(c); }) : ok(i === null ? undefined : (planned.push(i), undefined)))));
-    }));
-    if (!step.ok) return step;
-  }
-  const bad = [...net].filter(([, v]) => v !== 0n).sort(([a], [b]) => compareText(a, b));
-  if (bad.length > 0) return halt(`CROSS_J_TRADE_CONSERVATION_FAILED:${bad.map(([asset, v]) => `${asset}=${v}`).join(",")}`);
-  for (const i of planned) {
-    const meta = crossMeta(cp, i.orderId);
-    if (!meta.ok) return meta;
-    if (meta.value === null) return halt(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${i.orderId}`);
-    if (i.cancelRemainder) { const removed = removeCrossRowAfterFill(cp, meta.value.pairId, i.orderId); if (!removed.ok) return removed; }
-    cp.out.push(i);
-  }
-  return ok(undefined);
+  const settled = settleWorking(cp, p.meta.pairId, result.state, trades.length > 0);
+  return ok(aggregateCrossTrades(settled, trades, p.orderId, p.raw.timeInForce !== 0 || expected));
+};
+/**
+ * og processCrossOrderbookOffer: speculative placement on the working book; a resting-only placement commits, trades
+ * aggregate into hub-internal fills.
+ */
+const processCrossOffer = (cp: CrossPass, raw: CrossBookOffer): Result<CrossPass, EntityError> =>
+  chain(prepareCross(cp, raw), ({ cp: prepared, value: p }): Result<CrossPass, EntityError> => {
+    if (p === null) return ok(prepared);
+    const pairId = p.meta.pairId;
+    const start = prepared.working.get(pairId) ?? p.book;
+    const placing: CrossPass = { ...prepared, working: mapSet(prepared.working, pairId, start) };
+    const cmd: OrderCmd = {
+      kind: 0,
+      ownerId: p.meta.makerId,
+      orderId: p.orderId,
+      side: p.meta.side,
+      tif: raw.timeInForce,
+      postOnly: false,
+      priceTicks: p.meta.priceTicks,
+      qtyLots: p.qtyLots,
+    };
+    const placed = judgedBookCommand(start, cmd, crossBookOptions(placing, p));
+    if (!placed.ok) return liveReject(raw.accountId, raw.offerId, `cross-pair-error:${bookFailureText(placed.error)}`);
+    const judged = learnMeta(placing, placed.value.learned);
+    const result = placed.value.value;
+    const rawTrades = result.events.flatMap((e) => (e.type === "TRADE" ? [e] : []));
+    return chain(traverse(rawTrades, (t) => crossTrade(judged, t)), (trades) => {
+      const known = learnMeta(judged, trades.flatMap(({ trade, maker, taker }) => [
+        [trade.makerOrderId, maker] as const,
+        [trade.takerOrderId, taker] as const,
+      ]));
+      return crossOutcome(known, p, result, trades);
+    });
+  });
+type CrossPlan = { readonly net: ReadonlyMap<string, bigint>; readonly planned: readonly PlannedCrossFill[] };
+type PlannedCrossFill = { readonly instruction: CrossFillInstruction; readonly pairId: string };
+/** Per asset, what the hub paid out (negative) and took in (positive) across every executed amount. */
+const netted = (
+  net: ReadonlyMap<string, bigint>,
+  route: CrossRoute,
+  execution: CrossExecution | null,
+): Result<ReadonlyMap<string, bigint>, EntityError> => {
+  if (execution === null) return ok(net);
+  const assets = all({
+    source: fatalCross(assetKey(route.source.jurisdiction, route.source.tokenId)),
+    target: fatalCross(assetKey(route.target.jurisdiction, route.target.tokenId)),
+  });
+  return map(assets, ({ source, target }) =>
+    bump(bump(net, source, -execution.executionSourceAmount), target, execution.executionTargetAmount),
+  );
+};
+/**
+ * og planCrossFills: one order's aggregated fill as its instruction, or its terminal cancel when the fill moves
+ * nothing.
+ */
+const planCrossFill =
+  (cp: CrossPass) =>
+  (plan: CrossPlan, [orderId, fill]: readonly [string, CrossFillAgg]): Result<CrossPlan, EntityError> =>
+    chain(crossMeta(cp, orderId), (meta) => {
+      if (meta === null) return halt(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
+      return chain(crossExecutionAmounts(meta, fill), (execution) => {
+        const ref = parseOrderId(orderId, "ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER");
+        return chain(netted(plan.net, meta.route, execution), (net) =>
+          chain(ref, ({ accountId, offerId }) => {
+            const instruction = chain(crossFillInstruction(accountId, offerId, orderId, meta, fill), (i) =>
+              i === null && fill.cancelRemainder
+                ? crossCancelInstruction(accountId, offerId, orderId, meta.route)
+                : ok(i),
+            );
+            return map(instruction, (i) => ({
+              net,
+              planned: i === null ? plan.planned : [...plan.planned, { instruction: i, pairId: meta.pairId }],
+            }));
+          }),
+        );
+      });
+    });
+/** og commitCrossFill: a terminal fill leaves its book; every instruction goes out. */
+const commitCrossFill = (cp: CrossPass, { instruction, pairId }: PlannedCrossFill): Result<CrossPass, EntityError> => {
+  const removed = instruction.cancelRemainder ? removeCrossRowAfterFill(cp, pairId, instruction.orderId) : ok(cp);
+  return map(removed, (next) => ({ ...next, out: [...next.out, instruction] }));
+};
+/**
+ * og planCrossFills + commitCrossFill: fills in order-id order, conserved per asset across every executed amount; a
+ * terminal one leaves the book.
+ */
+const finalizeCrossFills = (cp: CrossPass): Result<CrossPass, EntityError> => {
+  const fills = [...cp.fills].toSorted(([a], [b]) => asc(a, b));
+  const start: CrossPlan = { net: new Map(), planned: [] };
+  return chain(foldResult(fills, start, planCrossFill(cp)), ({ net, planned }) => {
+    const bad = [...net].toSorted(([a], [b]) => asc(a, b));
+    if (bad.length > 0)
+      return halt(`CROSS_J_TRADE_CONSERVATION_FAILED:${bad.map(([asset, v]) => `${asset}=${v}`).join(",")}`);
+    return foldResult(planned, cp, commitCrossFill);
+  });
 };
 /** og processCrossJurisdictionOrderbookOffers: each cross-j offer in book order, then the pass's fills. */
-const processCrossOffers = (pass: Pass, offers: readonly CrossBookOffer[]): Result<readonly CrossFillInstruction[], EntityError> => {
-  const cp: CrossPass = { pass, meta: new Map(), fills: new Map(), suspended: new Set(), working: new Map(), speculative: new Set(), aliased: new Set(), out: [] };
-  for (const o of offers) { const done = processCrossOffer(cp, o); if (!done.ok) return done; }
-  return map(finalizeCrossFills(cp), () => cp.out);
+const processCrossOffers = (
+  pass: Pass,
+  offers: readonly CrossBookOffer[],
+): Result<Passed<readonly CrossFillInstruction[]>, EntityError> => {
+  const start: CrossPass = {
+    pass,
+    meta: new Map(),
+    fills: new Map(),
+    suspended: new Set(),
+    working: new Map(),
+    speculative: new Set(),
+    aliased: new Set(),
+    out: [],
+  };
+  return map(chain(foldResult(offers, start, processCrossOffer), finalizeCrossFills), (cp) => ({
+    pass: cp.pass,
+    value: cp.out,
+  }));
 };
+
 // ---- cross-j book owner and source hub lifecycle: og entity/tx/handlers/cross-j/{book-order,book-removal-ack,fill}.ts, account-cross-j-followups.ts
 // (applyCrossJurisdictionOrderbookFill, applySourceHubCrossJurisdictionFillProgress), orderbook/cross-j/index.ts (row resize / materialize / remove),
 // account/orderbook/cancels.ts routeRemoteCrossJurisdictionBookCancels. og mutates the Entity candidate in place; each step here returns the next host. ----
