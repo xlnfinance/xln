@@ -37145,162 +37145,431 @@ const recordAuthenticatedJAuthority = (rt: Runtime, e: RegistrationEvidence): Re
 
 // ---- og runtime/registration/numbered-registration-{codec,intent}.ts + ethers v6 Transaction.from: durable numbered-registration intents ----
 /**
- * An EVM transaction as ethers Transaction.from reads it: `hash` / `from` are null for an unsigned transaction; `from` is ethers' lazy sender
- * recovery, so an unrecoverable signature is an error only when the sender is asked for.
+ * An EVM transaction as ethers Transaction.from reads it: `hash` / `from` are null for an unsigned transaction; `from`
+ * is ethers' lazy sender recovery, so an unrecoverable signature is an error only when the sender is asked for.
  */
-export type EvmTx = { readonly type: 0 | 1 | 2 | 3 | 4; readonly hash: string | null; readonly from: Result<string, string> | null; readonly chainId: bigint; readonly nonce: number; readonly to: string | null; readonly value: bigint; readonly data: string };
+export type EvmTx = {
+  readonly type: 0 | 1 | 2 | 3 | 4;
+  readonly hash: string | null;
+  readonly from: Result<string, string> | null;
+  readonly chainId: bigint;
+  readonly nonce: number;
+  readonly to: string | null;
+  readonly value: bigint;
+  readonly data: string;
+};
 type EvmRlp = Uint8Array | readonly EvmRlp[];
-/** ethers decodeRlp: length prefixes are taken as given (no canonical-form check), a child may not overrun its list, nothing may trail. */
+/** One decoded item and how many bytes it took. */
+type EvmDecoded = { readonly item: EvmRlp; readonly consumed: number };
+/** A big-endian length of `n` bytes at `at`, taken as given. */
+const evmLength = (data: Uint8Array, at: number, n: number): number =>
+  Array.from({ length: n }, (_, i) => data[at + i] ?? 0).reduce((r, b) => r * 256 + b, 0);
+/** The items from `at` up to `end`; a child may not overrun its list. */
+const evmChildren = (data: Uint8Array, at: number, end: number): readonly EvmRlp[] | null => {
+  if (at >= end) return [];
+  const d = evmDecodeAt(data, at);
+  if (d === null || at + d.consumed > end) return null;
+  const rest = evmChildren(data, at + d.consumed, end);
+  return rest === null ? null : [d.item, ...rest];
+};
+/** A list at `offset` whose body starts at `start`; it takes its prefix byte plus `length`. */
+const evmList = (data: Uint8Array, offset: number, start: number, length: number): EvmDecoded | null => {
+  const items = evmChildren(data, start, offset + 1 + length);
+  return items === null ? null : { item: items, consumed: 1 + length };
+};
+/** A string at `offset` of `n` bytes after a `header`-byte prefix. */
+const evmString = (data: Uint8Array, offset: number, header: number, n: number): EvmDecoded | null =>
+  offset + header + n <= data.length
+    ? { item: data.slice(offset + header, offset + header + n), consumed: header + n }
+    : null;
+/** The length that follows a long-form prefix, when its `ll` bytes are there. */
+const evmLongLength = (data: Uint8Array, offset: number, ll: number): number | null =>
+  offset + 1 + ll <= data.length ? evmLength(data, offset + 1, ll) : null;
+const evmDecodeAt = (data: Uint8Array, offset: number): EvmDecoded | null => {
+  const b = data[offset] ?? 0;
+  const fits = (end: number): boolean => end <= data.length;
+  switch (true) {
+    case b >= 0xf8: {
+      const ll = b - 0xf7;
+      const n = evmLongLength(data, offset, ll);
+      return n !== null && fits(offset + 1 + ll + n) ? evmList(data, offset, offset + 1 + ll, ll + n) : null;
+    }
+    case b >= 0xc0:
+      return fits(offset + 1 + b - 0xc0) ? evmList(data, offset, offset + 1, b - 0xc0) : null;
+    case b >= 0xb8: {
+      const ll = b - 0xb7;
+      const n = evmLongLength(data, offset, ll);
+      return n === null ? null : evmString(data, offset, 1 + ll, n);
+    }
+    case b >= 0x80:
+      return evmString(data, offset, 1, b - 0x80);
+    default:
+      return { item: data.slice(offset, offset + 1), consumed: 1 };
+  }
+};
+/**
+ * ethers decodeRlp: length prefixes are taken as given (no canonical-form check), a child may not overrun its list,
+ * nothing may trail.
+ */
 const evmRlpDecode = (data: Uint8Array): EvmRlp | null => {
-  const int = (at: number, n: number): number => { let r = 0; for (let i = 0; i < n; i++) r = r * 256 + (data[at + i] ?? 0); return r; };
-  const decode = (offset: number): { readonly item: EvmRlp; readonly consumed: number } | null => {
-    const b = data[offset] ?? 0, fits = (end: number): boolean => end <= data.length;
-    const children = (start: number, length: number): { readonly item: EvmRlp; readonly consumed: number } | null => {
-      const items: EvmRlp[] = [];
-      for (let at = start; at < offset + 1 + length;) { const d = decode(at); if (d === null) return null; items.push(d.item); at += d.consumed; if (at > offset + 1 + length) return null; }
-      return { item: items, consumed: 1 + length };
-    };
-    if (b >= 0xf8) { const ll = b - 0xf7; if (!fits(offset + 1 + ll)) return null; const n = int(offset + 1, ll); return fits(offset + 1 + ll + n) ? children(offset + 1 + ll, ll + n) : null; }
-    if (b >= 0xc0) { const n = b - 0xc0; return fits(offset + 1 + n) ? children(offset + 1, n) : null; }
-    if (b >= 0xb8) { const ll = b - 0xb7; if (!fits(offset + 1 + ll)) return null; const n = int(offset + 1, ll); return fits(offset + 1 + ll + n) ? { item: data.slice(offset + 1 + ll, offset + 1 + ll + n), consumed: 1 + ll + n } : null; }
-    if (b >= 0x80) { const n = b - 0x80; return fits(offset + 1 + n) ? { item: data.slice(offset + 1, offset + 1 + n), consumed: 1 + n } : null; }
-    return { item: data.slice(offset, offset + 1), consumed: 1 };
-  };
   if (data.length === 0) return null;
-  const d = decode(0);
+  const d = evmDecodeAt(data, 0);
   return d === null || d.consumed !== data.length ? null : d.item;
 };
-const EVM_MAX_UINT = (1n << 256n) - 1n, SECP_N = secp256k1.CURVE.n;
+const EVM_MAX_UINT = (1n << 256n) - 1n;
+const SECP_N = secp256k1.CURVE.n;
 /** ethers toBeArray: the minimal big-endian bytes (0 is empty). */
 const evmBytes = (n: bigint): Uint8Array => (n === 0n ? new Uint8Array(0) : magnitude(n));
-const bytesItem = (x: EvmRlp | undefined, label: string): Result<Uint8Array, string> => (x instanceof Uint8Array ? ok(x) : err(`invalid ${label}`));
+const EMPTY_BYTES = new Uint8Array(0);
+const bytesItem = (x: EvmRlp | undefined, label: string): Result<Uint8Array, string> =>
+  x instanceof Uint8Array ? ok(x) : err(`invalid ${label}`);
+const bigOfBytes = (b: Uint8Array): bigint => (b.length === 0 ? 0n : BigInt(bytesToHex(b)));
 /** ethers handleUint: any byte string up to 2^256 - 1 (leading zeros are accepted). */
-const evmUint = (x: EvmRlp | undefined, label: string): Result<bigint, string> => chain(bytesItem(x, label), (b) => {
-  const n = b.length === 0 ? 0n : BigInt(bytesToHex(b));
-  return n > EVM_MAX_UINT ? err(`value exceeds uint size: ${label}`) : ok(n);
-});
+const evmUint = (x: EvmRlp | undefined, label: string): Result<bigint, string> =>
+  chain(bytesItem(x, label), (b) => {
+    const n = bigOfBytes(b);
+    return n > EVM_MAX_UINT ? err(`value exceeds uint size: ${label}`) : ok(n);
+  });
 /** ethers handleNumber: a safe integer. */
-const evmNumber = (x: EvmRlp | undefined, label: string): Result<number, string> => chain(evmUint(x, label), (n) => (n > BigInt(Number.MAX_SAFE_INTEGER) ? err(`overflow: ${label}`) : ok(Number(n))));
+const evmNumber = (x: EvmRlp | undefined, label: string): Result<number, string> =>
+  chain(evmUint(x, label), (n) => (n > BigInt(Number.MAX_SAFE_INTEGER) ? err(`overflow: ${label}`) : ok(Number(n))));
+const evmYParity = (x: EvmRlp | undefined): Result<number, string> =>
+  chain(evmNumber(x, "yParity"), (y) => (y !== 0 && y !== 1 ? err("invalid yParity") : ok(y)));
 /** ethers handleAddress: empty is contract creation, anything else must be 20 bytes. */
-const evmTo = (x: EvmRlp | undefined): Result<Uint8Array | null, string> => chain(bytesItem(x, "to"), (b) => (b.length === 0 ? ok(null) : b.length === 20 ? ok(b) : err("invalid address")));
-/** ethers accessListify on decoded fields: [address(20), [slot(32)...]] rows, re-encoded as read. */
-const evmAccessList = (x: EvmRlp | undefined): Result<EvmRlp, string> => {
-  if (!Array.isArray(x)) return err("invalid access list");
-  for (const row of x as readonly EvmRlp[]) {
-    if (!Array.isArray(row) || row.length !== 2) return err("invalid slot set");
-    const [addr, keys] = row as readonly EvmRlp[];
-    if (!(addr instanceof Uint8Array) || addr.length !== 20 || !Array.isArray(keys)) return err("invalid address-slot set");
-    if ((keys as readonly EvmRlp[]).some((k) => !(k instanceof Uint8Array) || k.length !== 32)) return err("invalid slot");
-  }
-  return ok(x);
+const evmTo = (x: EvmRlp | undefined): Result<Uint8Array | null, string> =>
+  chain(bytesItem(x, "to"), (b) => {
+    switch (b.length) {
+      case 0:
+        return ok(null);
+      case 20:
+        return ok(b);
+      default:
+        return err("invalid address");
+    }
+  });
+const evmAddress = (x: EvmRlp | undefined): Result<Uint8Array, string> =>
+  chain(bytesItem(x, "address"), (b) => (b.length !== 20 ? err("invalid address") : ok(b)));
+/** ethers: one access-list row is [address(20), [slot(32)...]]. */
+const accessRowValid = (row: EvmRlp): Result<void, string> => {
+  if (!Array.isArray(row) || row.length !== 2) return err("invalid slot set");
+  const [addr, keys] = row as readonly EvmRlp[];
+  if (!(addr instanceof Uint8Array) || addr.length !== 20 || !Array.isArray(keys))
+    return err("invalid address-slot set");
+  const badSlot = (keys as readonly EvmRlp[]).some((k) => !(k instanceof Uint8Array) || k.length !== 32);
+  return badSlot ? err("invalid slot") : ok(undefined);
 };
+/** ethers accessListify on decoded fields, re-encoded as read. */
+const evmAccessList = (x: EvmRlp | undefined): Result<EvmRlp, string> =>
+  Array.isArray(x) ? map(traverse(x as readonly EvmRlp[], accessRowValid), () => x) : err("invalid access list");
 /** ethers zeroPadValue(_, 32) then Signature.from: r / s are at most 32 bytes. */
-const evmSigWord = (x: EvmRlp | undefined, label: string): Result<bigint, string> => chain(bytesItem(x, label), (b) => (b.length > 32 ? err(`invalid ${label}`) : ok(b.length === 0 ? 0n : BigInt(bytesToHex(b)))));
+const evmSigWord = (x: EvmRlp | undefined, label: string): Result<bigint, string> =>
+  chain(bytesItem(x, label), (b) => (b.length > 32 ? err(`invalid ${label}`) : ok(bigOfBytes(b))));
 type EvmSig = { readonly r: bigint; readonly s: bigint; readonly yParity: number };
-/** ethers _parseEip4844 sidecar: the network format [tx, blobs, commitments, proofs] or EIP-7594 [tx, 1, blobs, commitments, cellProofs]; each blob's versioned hash is recomputed from its commitment (getVersionedHash). */
 const EVM_CELL_COUNT = 128;
-const evmBlobSidecar = (fields: EvmRlp | null): Result<{ readonly fields: EvmRlp | null; readonly hashes: readonly Uint8Array[] | null }, string> => {
-  if (!Array.isArray(fields) || !Array.isArray(fields[0]) || (fields.length !== 4 && fields.length !== 5)) return ok({ fields, hashes: null });
-  const f = fields as readonly EvmRlp[], seven = f.length === 5;
-  if (seven) { const version = f[1]; if (!(version instanceof Uint8Array) || version.length === 0 || BigInt(bytesToHex(version)) !== 1n) return err("unsupported EIP-7594 network format version"); }
-  const [blobs, commits, proofs] = seven ? [f[2], f[3], f[4]] : [f[1], f[2], f[3]];
+type BlobSidecar = { readonly fields: EvmRlp | null; readonly hashes: readonly Uint8Array[] | null };
+/** ethers getVersionedHash: a commitment's sha256 with its first byte set to the KZG version. */
+const versionedHash = (commitment: Uint8Array): Uint8Array =>
+  concat([Uint8Array.of(1), sha256(commitment).subarray(1)]);
+/**
+ * ethers _parseEip4844 sidecar: the network format [tx, blobs, commitments, proofs] or EIP-7594 [tx, 1, blobs,
+ * commitments, cellProofs]; each blob's versioned hash is recomputed from its commitment.
+ */
+const evmBlobSidecar = (fields: EvmRlp | null): Result<BlobSidecar, string> => {
+  if (!Array.isArray(fields) || !Array.isArray(fields[0]) || (fields.length !== 4 && fields.length !== 5)) {
+    return ok({ fields, hashes: null });
+  }
+  const f = fields as readonly EvmRlp[];
+  const cellProofs = f.length === 5;
+  const version = f[1];
+  const [blobs, commits, proofs] = cellProofs ? [f[2], f[3], f[4]] : [f[1], f[2], f[3]];
+  if (cellProofs && (!(version instanceof Uint8Array) || version.length === 0 || bigOfBytes(version) !== 1n)) {
+    return err("unsupported EIP-7594 network format version");
+  }
   if (!Array.isArray(blobs) || !Array.isArray(commits) || !Array.isArray(proofs)) return err("invalid network format");
-  if (blobs.length !== commits.length || blobs.length * (seven ? EVM_CELL_COUNT : 1) !== proofs.length) return err("invalid network format: length mismatch");
-  // ethers hexlify(blob.data / commitment / proof) and concat(cell proofs): every part is a byte string
+  if (blobs.length !== commits.length || blobs.length * (cellProofs ? EVM_CELL_COUNT : 1) !== proofs.length) {
+    return err("invalid network format: length mismatch");
+  }
+  // ethers hexlify(blob.data / commitment / proof) and concat(cell proofs): every part is a byte string.
   if (![...blobs, ...commits, ...proofs].every((x) => x instanceof Uint8Array)) return err("invalid BytesLike value");
-  return ok({ fields: f[0] ?? null, hashes: (commits as readonly Uint8Array[]).map((c) => { const h = sha256(c); h[0] = 1; return h; }) });
+  return ok({ fields: f[0] ?? null, hashes: (commits as readonly Uint8Array[]).map(versionedHash) });
 };
-/** ethers handleAuthorizationList then authorizationify: [chainId, address(20), nonce, yParity(0|1), r, s (unchecked: ethers encodes ._s)] rows, re-encoded minimal (formatAuthorizationList). */
+/**
+ * ethers handleAuthorizationList then authorizationify: [chainId, address(20), nonce, yParity(0|1), r, s (unchecked:
+ * ethers encodes ._s)] rows, re-encoded minimal (formatAuthorizationList).
+ */
 const evmAuthorizationList = (x: EvmRlp | undefined): Result<EvmRlp, string> => {
   if (!Array.isArray(x)) return err("authorizationList: invalid array");
-  return traverse(x as readonly EvmRlp[], (auth): Result<EvmRlp, string> => {
+  const authorization = (auth: EvmRlp): Result<EvmRlp, string> => {
     if (!Array.isArray(auth) || auth.length !== 6) return err("invalid authorization");
     const a = auth as readonly EvmRlp[];
-    return chain(bytesItem(a[1], "address"), (address) => (address.length !== 20 ? err("invalid address") : chain(evmUint(a[2], "nonce"), (nonce) => chain(evmUint(a[0], "chainId"), (chainId) =>
-      chain(evmNumber(a[3], "yParity"), (yParity) => (yParity !== 0 && yParity !== 1 ? err("invalid yParity") : chain(evmSigWord(a[4], "r"), (r) => chain(evmSigWord(a[5], "s"), (sw) =>
-        ok([evmBytes(chainId), address, evmBytes(nonce), evmBytes(BigInt(yParity)), evmBytes(r), evmBytes(sw)] as EvmRlp)))))))));
+    const fields = all({
+      address: evmAddress(a[1]),
+      nonce: evmUint(a[2], "nonce"),
+      chainId: evmUint(a[0], "chainId"),
+      yParity: evmYParity(a[3]),
+      r: evmSigWord(a[4], "r"),
+      s: evmSigWord(a[5], "s"),
+    });
+    return map(fields, (f): EvmRlp => [
+      evmBytes(f.chainId),
+      f.address,
+      evmBytes(f.nonce),
+      evmBytes(BigInt(f.yParity)),
+      evmBytes(f.r),
+      evmBytes(f.s),
+    ]);
+  };
+  return traverse(x as readonly EvmRlp[], authorization);
+};
+/**
+ * ethers Transaction.hash (keccak of the re-serialized signed form) and .from (recovery over the unsigned hash; a high
+ * s recovers the same key).
+ */
+type EvmSigned = { readonly hash: string | null; readonly from: Result<string, string> | null };
+const UNSIGNED: EvmSigned = { hash: null, from: null };
+const inCurveOrder = (n: bigint): boolean => n !== 0n && n < SECP_N;
+const evmSigned = (
+  sig: EvmSig,
+  unsigned: Uint8Array,
+  signed: (sig: EvmSig) => Result<Uint8Array, string>,
+): Result<EvmSigned, string> =>
+  map(signed(sig), (serialized) => {
+    const key =
+      inCurveOrder(sig.r) && inCurveOrder(sig.s)
+        ? recoverPublicKey(keccak_256(unsigned), wordOf(sig.r), wordOf(sig.s), sig.yParity)
+        : null;
+    return {
+      hash: bytesToHex(keccak_256(serialized)),
+      from: key === null ? err("invalid signature") : ok(addressOf(key).toLowerCase()),
+    };
+  });
+const rlpOfEvm = (items: readonly EvmRlp[]): Uint8Array => rlp(items as Rlp);
+/** The fields every transaction shares once decoded. */
+type EvmBody = {
+  readonly nonce: number;
+  readonly to: Uint8Array | null;
+  readonly value: bigint;
+  readonly data: Uint8Array;
+};
+const evmTxOf = (type: EvmTx["type"], chainId: bigint, b: EvmBody, signed: EvmSigned): EvmTx => ({
+  type,
+  ...signed,
+  chainId,
+  nonce: b.nonce,
+  to: b.to === null ? null : bytesToHex(b.to),
+  value: b.value,
+  data: bytesToHex(b.data),
+});
+/** ethers: a legacy v names its chain (EIP-155) or none (27 / 28), and the signature's parity. */
+const legacyChain = (v: bigint): Result<{ readonly chainId: bigint; readonly yParity: number }, string> => {
+  const derived = (v - 35n) / 2n;
+  const chainId = derived < 0n ? 0n : derived;
+  if (chainId === 0n && v !== 27n && v !== 28n) return err("non-canonical legacy v");
+  const yParity = v === 27n ? 0 : v === 28n ? 1 : v % 2n === 1n ? 0 : 1;
+  return ok({ chainId, yParity });
+};
+/** ethers Transaction.from for a legacy transaction (pre-EIP-155 or EIP-155). */
+const legacyEvmTx = (payload: Uint8Array): Result<EvmTx, string> => {
+  const fields = evmRlpDecode(payload);
+  if (!Array.isArray(fields) || (fields.length !== 9 && fields.length !== 6)) {
+    return err("invalid field count for legacy transaction");
+  }
+  const f = fields as readonly EvmRlp[];
+  const decoded = all({
+    nonce: evmNumber(f[0], "nonce"),
+    gasPrice: evmUint(f[1], "gasPrice"),
+    gasLimit: evmUint(f[2], "gasLimit"),
+    to: evmTo(f[3]),
+    value: evmUint(f[4], "value"),
+    data: bytesItem(f[5], "data"),
+  });
+  return chain(decoded, (d) => {
+    const body = [
+      evmBytes(BigInt(d.nonce)),
+      evmBytes(d.gasPrice),
+      evmBytes(d.gasLimit),
+      d.to ?? EMPTY_BYTES,
+      evmBytes(d.value),
+      d.data,
+    ];
+    if (f.length === 6) return ok(evmTxOf(0, 0n, d, UNSIGNED));
+    const vrs = all({ v: evmUint(f[6], "v"), r: evmUint(f[7], "r"), s: evmUint(f[8], "s") });
+    return chain(vrs, ({ v, r, s }) => {
+      if (r === 0n && s === 0n) return ok(evmTxOf(0, v, d, UNSIGNED));
+      return chain(legacyChain(v), ({ chainId, yParity }) =>
+        chain(all({ rw: evmSigWord(f[7], "r"), sw: evmSigWord(f[8], "s") }), ({ rw, sw }) => {
+          const eip155 = chainId !== 0n;
+          const unsigned = rlpOfEvm(eip155 ? [...body, evmBytes(chainId), EMPTY_BYTES, EMPTY_BYTES] : body);
+          const vOut = eip155 ? chainId * 2n + 35n + BigInt(yParity) : 27n + BigInt(yParity);
+          const serialize = (sig: EvmSig) => ok(rlpOfEvm([...body, evmBytes(vOut), evmBytes(sig.r), evmBytes(sig.s)]));
+          return map(evmSigned({ r: rw, s: sw, yParity }, unsigned, serialize), (signed) =>
+            evmTxOf(0, chainId, d, signed),
+          );
+        }),
+      );
+    });
   });
 };
-/** ethers Transaction.hash (keccak of the re-serialized signed form) and .from (recovery over the unsigned hash; a high s recovers the same key). */
-type EvmSigned = { readonly hash: string | null; readonly from: Result<string, string> | null };
-const evmSigned = (sig: EvmSig, unsigned: Uint8Array, signed: (sig: EvmSig) => Result<Uint8Array, string>): Result<EvmSigned, string> =>
-  map(signed(sig), (serialized) => {
-    const key = sig.r === 0n || sig.r >= SECP_N || sig.s === 0n || sig.s >= SECP_N ? null : recoverPublicKey(keccak_256(unsigned), wordOf(sig.r), wordOf(sig.s), sig.yParity);
-    return { hash: bytesToHex(keccak_256(serialized)), from: key === null ? err("invalid signature") : ok(addressOf(key).toLowerCase()) };
-  });
+type TypedTx = 1 | 2 | 3 | 4;
+/** The unsigned field count of each typed transaction. */
+const TYPED_FIELD_COUNT: { readonly [T in TypedTx]: number } = { 1: 8, 2: 9, 3: 11, 4: 10 };
+/** ethers _parseEip4844 / _parseEip7702: the fields a blob or set-code transaction adds after its access list. */
+const typedExtras = (
+  typed: TypedTx,
+  f: readonly EvmRlp[],
+  sidecarHashes: readonly Uint8Array[] | null,
+): Result<EvmRlp[], string> => {
+  switch (typed) {
+    case 3:
+      return chain(evmUint(f[9], "maxFeePerBlobGas"), (maxFeePerBlobGas): Result<EvmRlp[], string> => {
+        const hashes = f[10];
+        const to = f[5];
+        if (
+          !Array.isArray(hashes) ||
+          (hashes as readonly EvmRlp[]).some((h) => !(h instanceof Uint8Array) || h.length !== 32)
+        ) {
+          return err("invalid blobVersionedHashes");
+        }
+        return to instanceof Uint8Array && to.length === 0
+          ? err("invalid address for transaction type: 3")
+          : ok([evmBytes(maxFeePerBlobGas), sidecarHashes ?? hashes]);
+      });
+    case 4:
+      return map(evmAuthorizationList(f[9]), (auths): EvmRlp[] => [auths]);
+    default:
+      return ok([]);
+  }
+};
 /**
- * ethers v6 Transaction.from(raw) for a legacy (pre-EIP-155 or EIP-155), EIP-2930 (type 1) or EIP-1559 (type 2) transaction: RLP-decode the fields,
- * derive the chain id from a legacy v, hash the re-serialized signed form, recover the sender. Blob (3, with or without its network sidecar) and set-code (4) transactions too.
+ * ethers: serializing the signed form refuses an EIP-1559 fee cap below its priority fee, and a signature whose s has
+ * its top bit set.
+ */
+const signedFormIssue = (typed: TypedTx, maxFee: bigint, priorityFee: bigint, sig: EvmSig): string | null => {
+  switch (true) {
+    case typed >= 2 && maxFee < priorityFee:
+      return "priorityFee cannot be more than maxFee";
+    case sig.s >> 255n !== 0n:
+      return "non-canonical s; use ._s";
+    default:
+      return null;
+  }
+};
+/**
+ * ethers Transaction.from for an EIP-2930 (1), EIP-1559 (2), blob (3, with or without its network sidecar) or set-code
+ * (4) transaction.
+ */
+const typedEvmTx = (typed: TypedTx, payload: Uint8Array): Result<EvmTx, string> => {
+  const plain = TYPED_FIELD_COUNT[typed];
+  const decoded = evmRlpDecode(payload.subarray(1));
+  const unwrapped: Result<BlobSidecar, string> =
+    typed === 3 ? evmBlobSidecar(decoded) : ok({ fields: decoded, hashes: null });
+  return chain(unwrapped, ({ fields, hashes }) => {
+    if (!Array.isArray(fields) || (fields.length !== plain && fields.length !== plain + 3)) {
+      return err(`invalid field count for transaction type: ${typed}`);
+    }
+    const f = fields as readonly EvmRlp[];
+    const o = typed >= 2 ? 1 : 0;
+    return chain(typedExtras(typed, f, hashes), (extras) => {
+      const common = all({
+        chainId: evmUint(f[0], "chainId"),
+        nonce: evmNumber(f[1], "nonce"),
+        fee0: evmUint(f[2], typed >= 2 ? "maxPriorityFeePerGas" : "gasPrice"),
+        fee1: typed >= 2 ? evmUint(f[3], "maxFeePerGas") : ok(0n),
+        gasLimit: evmUint(f[3 + o], "gasLimit"),
+        to: evmTo(f[4 + o]),
+        value: evmUint(f[5 + o], "value"),
+        data: bytesItem(f[6 + o], "data"),
+        accessList: evmAccessList(f[7 + o]),
+      });
+      return chain(common, (d) => {
+        const body: EvmRlp[] = [
+          evmBytes(d.chainId),
+          evmBytes(BigInt(d.nonce)),
+          evmBytes(d.fee0),
+          ...(typed >= 2 ? [evmBytes(d.fee1)] : []),
+          evmBytes(d.gasLimit),
+          d.to ?? EMPTY_BYTES,
+          evmBytes(d.value),
+          d.data,
+          d.accessList,
+          ...extras,
+        ];
+        const envelope = (items: readonly EvmRlp[]): Uint8Array => concat([Uint8Array.of(typed), rlpOfEvm(items)]);
+        if (f.length === plain) return ok(evmTxOf(typed, d.chainId, d, UNSIGNED));
+        const sig = all({
+          yParity: evmYParity(f[plain]),
+          r: evmSigWord(f[plain + 1], "r"),
+          s: evmSigWord(f[plain + 2], "s"),
+        });
+        return chain(sig, (s) => {
+          const serialize = (x: EvmSig): Result<Uint8Array, string> => {
+            const issue = signedFormIssue(typed, d.fee1, d.fee0, x);
+            return issue !== null
+              ? err(issue)
+              : ok(envelope([...body, evmBytes(BigInt(x.yParity)), evmBytes(x.r), evmBytes(x.s)]));
+          };
+          return map(evmSigned(s, envelope(body), serialize), (signed) => evmTxOf(typed, d.chainId, d, signed));
+        });
+      });
+    });
+  });
+};
+/**
+ * ethers v6 Transaction.from(raw): RLP-decode the fields, derive the chain id from a legacy v, hash the re-serialized
+ * signed form, recover the sender.
  */
 export const parseEvmTx = (raw: string): Result<EvmTx, string> => {
   if (!/^0x([0-9a-fA-F]{2})+$/.test(raw)) return err("invalid BytesLike value");
-  const payload = hexToBytes(raw), first = payload[0] ?? 0;
-  const rlpOf = (items: readonly EvmRlp[]): Uint8Array => rlp(items as Rlp);
-  if (first >= 0x7f) {
-    const fields = evmRlpDecode(payload);
-    if (!Array.isArray(fields) || (fields.length !== 9 && fields.length !== 6)) return err("invalid field count for legacy transaction");
-    const f = fields as readonly EvmRlp[];
-    return chain(evmNumber(f[0], "nonce"), (nonce) => chain(evmUint(f[1], "gasPrice"), (gasPrice) => chain(evmUint(f[2], "gasLimit"), (gasLimit) => chain(evmTo(f[3]), (to) =>
-      chain(evmUint(f[4], "value"), (value) => chain(bytesItem(f[5], "data"), (data) => {
-        const body = [evmBytes(BigInt(nonce)), evmBytes(gasPrice), evmBytes(gasLimit), to ?? new Uint8Array(0), evmBytes(value), data];
-        const tx = (chainId: bigint, signed: EvmSigned): EvmTx => ({ type: 0, ...signed, chainId, nonce, to: to === null ? null : bytesToHex(to), value, data: bytesToHex(data) });
-        if (f.length === 6) return ok(tx(0n, { hash: null, from: null }));
-        return chain(evmUint(f[6], "v"), (v) => chain(evmUint(f[7], "r"), (r) => chain(evmUint(f[8], "s"), (s) => {
-          if (r === 0n && s === 0n) return ok(tx(v, { hash: null, from: null }));
-          const derived = (v - 35n) / 2n, chainId = derived < 0n ? 0n : derived;
-          if (chainId === 0n && v !== 27n && v !== 28n) return err("non-canonical legacy v");
-          return chain(evmSigWord(f[7], "r"), (rw) => chain(evmSigWord(f[8], "s"), (sw) => {
-            const yParity = v === 27n ? 0 : v === 28n ? 1 : v % 2n === 1n ? 0 : 1;
-            const unsigned = rlpOf(chainId === 0n ? body : [...body, evmBytes(chainId), new Uint8Array(0), new Uint8Array(0)]);
-            const vOut = chainId === 0n ? 27n + BigInt(yParity) : chainId * 2n + 35n + BigInt(yParity);
-            return map(evmSigned({ r: rw, s: sw, yParity }, unsigned, (sig) => ok(rlpOf([...body, evmBytes(vOut), evmBytes(sig.r), evmBytes(sig.s)]))), (signed) => tx(chainId, signed));
-          }));
-        })));
-      }))))));
+  const payload = hexToBytes(raw);
+  const first = payload[0] ?? 0;
+  switch (true) {
+    case first >= 0x7f:
+      return legacyEvmTx(payload);
+    case first < 1 || first > 4:
+      return err("unsupported transaction type");
+    default:
+      return typedEvmTx(first as TypedTx, payload);
   }
-  if (first < 1 || first > 4) return err("unsupported transaction type");
-  const typed = first as 1 | 2 | 3 | 4, plain = typed === 1 ? 8 : typed === 2 ? 9 : typed === 3 ? 11 : 10, unwrapped = typed === 3 ? evmBlobSidecar(evmRlpDecode(payload.subarray(1))) : ok({ fields: evmRlpDecode(payload.subarray(1)), hashes: null });
-  if (!unwrapped.ok) return unwrapped;
-  const { fields, hashes: sidecarHashes } = unwrapped.value;
-  if (!Array.isArray(fields) || (fields.length !== plain && fields.length !== plain + 3)) return err(`invalid field count for transaction type: ${typed}`);
-  const f = fields as readonly EvmRlp[], o = typed >= 2 ? 1 : 0;
-  // ethers _parseEip4844: maxFeePerBlobGas, a non-null to, and 32-byte versioned hashes; _parseEip7702: the authorization list
-  const blob = typed !== 3 ? ok([] as EvmRlp[]) : chain(evmUint(f[9], "maxFeePerBlobGas"), (maxFeePerBlobGas): Result<EvmRlp[], string> => {
-    const hashes = f[10];
-    if (!Array.isArray(hashes) || (hashes as readonly EvmRlp[]).some((h) => !(h instanceof Uint8Array) || h.length !== 32)) return err("invalid blobVersionedHashes");
-    const t = f[5];
-    return t instanceof Uint8Array && t.length === 0 ? err("invalid address for transaction type: 3") : ok([evmBytes(maxFeePerBlobGas), sidecarHashes ?? hashes]);
-  });
-  const extra = typed === 4 ? map(evmAuthorizationList(f[9]), (auths): EvmRlp[] => [auths]) : blob;
-  if (!extra.ok) return extra;
-  return chain(evmUint(f[0], "chainId"), (chainId) => chain(evmNumber(f[1], "nonce"), (nonce) => chain(evmUint(f[2], typed >= 2 ? "maxPriorityFeePerGas" : "gasPrice"), (fee0) =>
-    chain(typed >= 2 ? evmUint(f[3], "maxFeePerGas") : ok(0n), (fee1) => chain(evmUint(f[3 + o], "gasLimit"), (gasLimit) => chain(evmTo(f[4 + o]), (to) => chain(evmUint(f[5 + o], "value"), (value) =>
-      chain(bytesItem(f[6 + o], "data"), (data) => chain(evmAccessList(f[7 + o]), (accessList) => {
-        const body: EvmRlp[] = [evmBytes(chainId), evmBytes(BigInt(nonce)), evmBytes(fee0), ...(typed >= 2 ? [evmBytes(fee1)] : []), evmBytes(gasLimit), to ?? new Uint8Array(0), evmBytes(value), data, accessList, ...extra.value];
-        const tx = (signed: EvmSigned): EvmTx => ({ type: typed, ...signed, chainId, nonce, to: to === null ? null : bytesToHex(to), value, data: bytesToHex(data) });
-        const envelope = (items: readonly EvmRlp[]): Uint8Array => concat([Uint8Array.of(typed), rlpOf(items)]);
-        if (f.length === plain) return ok(tx({ hash: null, from: null }));
-        return chain(evmNumber(f[plain], "yParity"), (yParity) => {
-          if (yParity !== 0 && yParity !== 1) return err("invalid yParity");
-          return chain(evmSigWord(f[plain + 1], "r"), (r) => chain(evmSigWord(f[plain + 2], "s"), (s) =>
-            // ethers inferTypes refuses an EIP-1559 fee cap below its priority fee, and Signature.s a word with its top bit set, when the signed form is serialized.
-            map(evmSigned({ r, s, yParity }, envelope(body), (sig) => (typed >= 2 && fee1 < fee0 ? err("priorityFee cannot be more than maxFee") : sig.s >> 255n !== 0n ? err("non-canonical s; use ._s")
-              : ok(envelope([...body, evmBytes(BigInt(sig.yParity)), evmBytes(sig.r), evmBytes(sig.s)])))), tx)));
-        });
-      })))))))));
 };
-const REGISTER_NUMBERED_ENTITIES_BATCH_SELECTOR = nobleHex(keccak_256(utf8("registerNumberedEntitiesBatch(bytes[])")).slice(0, 4));
-/** og encodeNumberedRegistrationCalldata: EntityProvider.registerNumberedEntitiesBatch(bytes[] encodedBoards), lowercased. */
-export const numberedRegistrationCalldata = (encodedBoards: readonly string[]): string =>
-  `0x${REGISTER_NUMBERED_ENTITIES_BATCH_SELECTOR}${hexBody(abiEncodeHex([A.array(encodedBoards.map((b) => A.bytes(b)))]))}`.toLowerCase();
+const REGISTER_NUMBERED_ENTITIES_BATCH_SELECTOR = nobleHex(
+  keccak_256(utf8("registerNumberedEntitiesBatch(bytes[])")).slice(0, 4),
+);
+/**
+ * og encodeNumberedRegistrationCalldata: EntityProvider.registerNumberedEntitiesBatch(bytes[] encodedBoards),
+ * lowercased.
+ */
+export const numberedRegistrationCalldata = (encodedBoards: readonly string[]): string => {
+  const args = abiEncodeHex([A.array(encodedBoards.map((b) => A.bytes(b)))]);
+  return `0x${REGISTER_NUMBERED_ENTITIES_BATCH_SELECTOR}${hexBody(args)}`.toLowerCase();
+};
 const MAX_NUMBERED_REGISTRATION_ENTITIES = 128;
+const MAX_RAW_TX_HEX = 524_290;
 type Loose = { readonly [k: string]: unknown };
-const looseRecord = (v: unknown): Loose => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Loose) : {});
+const looseRecord = (v: unknown): Loose =>
+  v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Loose) : {};
+const looseList = (v: unknown): readonly unknown[] => (Array.isArray(v) ? v : []);
 /** og numberedRegistrationBytes32. */
-const numberedBytes32 = (v: unknown, label: string): Result<string, RuntimeError> => { const s = String(v || "").toLowerCase(); return /^0x[0-9a-f]{64}$/.test(s) ? ok(s) : txErr(`NUMBERED_REGISTRATION_${label}_INVALID`); };
+const numberedBytes32 = (v: unknown, label: string): Result<string, RuntimeError> => {
+  const s = String(v || "").toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(s) ? ok(s) : txErr(`NUMBERED_REGISTRATION_${label}_INVALID`);
+};
 /** og codec `address`: ethers.getAddress, lowercased. */
-const numberedAddress = (v: unknown, label: string): Result<string, RuntimeError> => { const a = ethAddress(v); return a === null ? txErr(`NUMBERED_REGISTRATION_${label}_INVALID:${String(v)}`) : ok(a); };
-const boardStack = (j: unknown): Result<string, RuntimeError> => { const x = looseRecord(j); return mapErr(boardStackKey({ chainId: x["chainId"] as number, depositoryAddress: x["depositoryAddress"] as string, entityProviderAddress: x["entityProviderAddress"] as string }), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code })); };
+const numberedAddress = (v: unknown, label: string): Result<string, RuntimeError> => {
+  const a = ethAddress(v);
+  return a === null ? txErr(`NUMBERED_REGISTRATION_${label}_INVALID:${String(v)}`) : ok(a);
+};
+const boardStack = (j: unknown): Result<string, RuntimeError> => {
+  const x = looseRecord(j);
+  const stack = {
+    chainId: x["chainId"] as number,
+    depositoryAddress: x["depositoryAddress"] as string,
+    entityProviderAddress: x["entityProviderAddress"] as string,
+  };
+  return mapErr(boardStackKey(stack), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code }));
+};
+/** og: one of this Runtime's J replicas serves the stack. */
+const stackCommitted = (rt: Runtime, stackKey: string): Result<boolean, RuntimeError> =>
+  someResult(rt.jReplicas.values(), (r) => map(jReplicaStackKey(r), (k) => k === stackKey));
 /** og assertNumberedRegistrationRequest. */
 const numberedRegistrationRequestValid = (rt: Runtime, request: Loose): Result<void, RuntimeError> => {
   if (request["version"] !== 1) return txErr("NUMBERED_REGISTRATION_INTENT_VERSION_INVALID");
@@ -37308,113 +37577,259 @@ const numberedRegistrationRequestValid = (rt: Runtime, request: Loose): Result<v
     if (request["intentId"] !== intentId) return txErr("NUMBERED_REGISTRATION_INTENT_ID_NON_CANONICAL");
     return chain(numberedBytes32(request["stackKey"], "STACK_KEY"), (stackKey) => {
       if (request["stackKey"] !== stackKey) return txErr("NUMBERED_REGISTRATION_STACK_KEY_NON_CANONICAL");
-      return chain(numberedAddress(request["payerSignerId"], "PAYER"), () => chain(numberedAddress(request["entityProviderAddress"], "ENTITY_PROVIDER"), (): Result<void, RuntimeError> => {
-        let committed = false;
-        for (const r of rt.jReplicas.values()) { const k = jReplicaStackKey(r); if (!k.ok) return k; if (k.value === stackKey) { committed = true; break; } }
-        if (!committed) return txErr("NUMBERED_REGISTRATION_COMMITTED_STACK_MISSING");
-        const entities = Array.isArray(request["entities"]) ? (request["entities"] as readonly unknown[]) : [];
-        if (entities.length === 0) return txErr("NUMBERED_REGISTRATION_INTENT_EMPTY");
-        if (entities.length > MAX_NUMBERED_REGISTRATION_ENTITIES) return txErr(`NUMBERED_REGISTRATION_ENTITY_LIMIT_EXCEEDED:${entities.length}`);
-        for (const [index, raw] of entities.entries()) { const r = numberedEntityValid(request, looseRecord(raw), index); if (!r.ok) return r; }
-        return ok(undefined);
-      }));
+      const addresses = all({
+        payer: numberedAddress(request["payerSignerId"], "PAYER"),
+        provider: numberedAddress(request["entityProviderAddress"], "ENTITY_PROVIDER"),
+      });
+      return chain(addresses, () =>
+        chain(stackCommitted(rt, stackKey), (committed): Result<void, RuntimeError> => {
+          const entities = looseList(request["entities"]);
+          switch (true) {
+            case !committed:
+              return txErr("NUMBERED_REGISTRATION_COMMITTED_STACK_MISSING");
+            case entities.length === 0:
+              return txErr("NUMBERED_REGISTRATION_INTENT_EMPTY");
+            case entities.length > MAX_NUMBERED_REGISTRATION_ENTITIES:
+              return txErr(`NUMBERED_REGISTRATION_ENTITY_LIMIT_EXCEEDED:${entities.length}`);
+            default:
+              return map(
+                traverse(entities, (raw, i) => numberedEntityValid(request, looseRecord(raw), i)),
+                () => undefined,
+              );
+          }
+        }),
+      );
     });
   });
 };
-const numberedEntityValid = (request: Loose, entity: Loose, index: number): Result<void, RuntimeError> => {
-  const name = entity["name"], config = looseRecord(entity["config"]), jurisdiction = config["jurisdiction"];
-  if (!name || (typeof name === "string" && name.length > 256)) return txErr(`NUMBERED_REGISTRATION_NAME_INVALID:${index}`);
-  if (!jurisdiction) return txErr(`NUMBERED_REGISTRATION_STACK_MISSING:${index}`);
-  return chain(boardStack(jurisdiction), (stack) => {
+/** og: the entity's jurisdiction is the request's stack, under the request's EntityProvider. */
+const entityStackValid = (request: Loose, jurisdiction: unknown, index: number): Result<void, RuntimeError> =>
+  chain(boardStack(jurisdiction), (stack) => {
     if (stack !== request["stackKey"]) return txErr(`NUMBERED_REGISTRATION_STACK_MISMATCH:${index}`);
-    return chain(numberedAddress(looseRecord(jurisdiction)["entityProviderAddress"], "CONFIG_ENTITY_PROVIDER"), (provider) => {
-      if (provider !== request["entityProviderAddress"]) return txErr(`NUMBERED_REGISTRATION_ENTITY_PROVIDER_MISMATCH:${index}`);
-      return chain(numberedBytes32(entity["boardHash"], "BOARD_HASH"), (expectedBoard) => {
-        const encoded = entity["encodedBoard"];
-        if (typeof encoded !== "string" || !/^0x(?:[0-9a-f]{2})+$/.test(encoded)) return txErr(`NUMBERED_REGISTRATION_ENCODED_BOARD_INVALID:${index}`);
-        const validators = Array.isArray(config["validators"]) ? (config["validators"] as readonly unknown[]).map(String) : [];
-        return chain(lazyBoardEncoding({ mode: "proposer-based", validators, shares: looseRecord(config["shares"]) as EntityRootConfig["shares"], threshold: config["threshold"] as bigint }), (board): Result<void, RuntimeError> => {
-          if (board.toLowerCase() !== encoded) return txErr(`NUMBERED_REGISTRATION_ENCODED_BOARD_MISMATCH:${index}`);
-          if (keccak256Hex(hexToBytes(encoded)) !== expectedBoard) return txErr(`NUMBERED_REGISTRATION_BOARD_HASH_MISMATCH:${index}`);
-          const seed = entity["entitySeed"], position = entity["position"];
-          if (entity["localSignerId"] !== null) {
-            const local = numberedAddress(entity["localSignerId"], "LOCAL_SIGNER");
-            if (!local.ok) return local;
-            if (!validators.some((v) => v.toLowerCase() === local.value)) return txErr(`NUMBERED_REGISTRATION_LOCAL_SIGNER_NOT_ON_BOARD:${index}`);
-            // og canonicalEntitySeed(seed) !== seed: only a lowercase 0x-prefixed 64-byte hex seed is its own canonical form.
-            if (typeof seed !== "string" || !/^0x[0-9a-f]{128}$/.test(seed)) return txErr(`NUMBERED_REGISTRATION_ENTITY_SEED_NON_CANONICAL:${index}`);
-          } else if (seed !== null) return txErr(`NUMBERED_REGISTRATION_PAYER_ONLY_SEED_FORBIDDEN:${index}`);
-          if (position) { const p = looseRecord(position); if (![p["x"], p["y"], p["z"]].every(Number.isFinite)) return txErr(`NUMBERED_REGISTRATION_POSITION_INVALID:${index}`); }
+    const provider = numberedAddress(looseRecord(jurisdiction)["entityProviderAddress"], "CONFIG_ENTITY_PROVIDER");
+    return chain(provider, (p) =>
+      p !== request["entityProviderAddress"]
+        ? txErr(`NUMBERED_REGISTRATION_ENTITY_PROVIDER_MISMATCH:${index}`)
+        : ok(undefined),
+    );
+  });
+/** og: the encoded board is the config's board, and hashes to the planned board hash. */
+const entityBoardValid = (
+  entity: Loose,
+  config: Loose,
+  validators: readonly string[],
+  index: number,
+): Result<void, RuntimeError> =>
+  chain(numberedBytes32(entity["boardHash"], "BOARD_HASH"), (expectedBoard) => {
+    const encoded = entity["encodedBoard"];
+    if (typeof encoded !== "string" || !/^0x(?:[0-9a-f]{2})+$/.test(encoded)) {
+      return txErr(`NUMBERED_REGISTRATION_ENCODED_BOARD_INVALID:${index}`);
+    }
+    const board = lazyBoardEncoding({
+      mode: "proposer-based",
+      validators,
+      shares: looseRecord(config["shares"]) as EntityRootConfig["shares"],
+      threshold: config["threshold"] as bigint,
+    });
+    return chain(board, (b): Result<void, RuntimeError> => {
+      switch (true) {
+        case b.toLowerCase() !== encoded:
+          return txErr(`NUMBERED_REGISTRATION_ENCODED_BOARD_MISMATCH:${index}`);
+        case keccak256Hex(hexToBytes(encoded)) !== expectedBoard:
+          return txErr(`NUMBERED_REGISTRATION_BOARD_HASH_MISMATCH:${index}`);
+        default:
           return ok(undefined);
-        });
-      });
+      }
     });
   });
+/**
+ * og: a locally signed entity's signer sits on its board and carries a canonical seed (a lowercase 0x-prefixed
+ * 64-byte hex seed is its own canonical form); a payer-only entity carries no seed.
+ */
+const entitySignerValid = (entity: Loose, validators: readonly string[], index: number): Result<void, RuntimeError> => {
+  const seed = entity["entitySeed"];
+  if (entity["localSignerId"] === null) {
+    return seed !== null ? txErr(`NUMBERED_REGISTRATION_PAYER_ONLY_SEED_FORBIDDEN:${index}`) : ok(undefined);
+  }
+  return chain(numberedAddress(entity["localSignerId"], "LOCAL_SIGNER"), (local) => {
+    switch (true) {
+      case !validators.some((v) => v.toLowerCase() === local):
+        return txErr(`NUMBERED_REGISTRATION_LOCAL_SIGNER_NOT_ON_BOARD:${index}`);
+      case typeof seed !== "string" || !/^0x[0-9a-f]{128}$/.test(seed):
+        return txErr(`NUMBERED_REGISTRATION_ENTITY_SEED_NON_CANONICAL:${index}`);
+      default:
+        return ok(undefined);
+    }
+  });
+};
+const positionValid = (position: unknown, index: number): Result<void, RuntimeError> => {
+  const p = looseRecord(position);
+  return !position || [p["x"], p["y"], p["z"]].every(Number.isFinite)
+    ? ok(undefined)
+    : txErr(`NUMBERED_REGISTRATION_POSITION_INVALID:${index}`);
+};
+/**
+ * og: one planned entity: named, on the request's stack, with its exact board, signer and seed, and a finite position.
+ */
+const numberedEntityValid = (request: Loose, entity: Loose, index: number): Result<void, RuntimeError> => {
+  const name = entity["name"];
+  const config = looseRecord(entity["config"]);
+  const jurisdiction = config["jurisdiction"];
+  const validators = looseList(config["validators"]).map(String);
+  if (!name || (typeof name === "string" && name.length > 256))
+    return txErr(`NUMBERED_REGISTRATION_NAME_INVALID:${index}`);
+  if (!jurisdiction) return txErr(`NUMBERED_REGISTRATION_STACK_MISSING:${index}`);
+  return chain(entityStackValid(request, jurisdiction, index), () =>
+    chain(entityBoardValid(entity, config, validators, index), () =>
+      chain(entitySignerValid(entity, validators, index), () => positionValid(entity["position"], index)),
+    ),
+  );
 };
 /** og computeNumberedRegistrationRequestHash. */
-export const numberedRegistrationRequestHash = (request: unknown): Result<string, RuntimeError> => authHash({ domain: "xln.numbered-registration.intent.v1", request });
-/** og parseNumberedRegistrationIntentTransaction: the durable raw transaction is exactly the payer's registerNumberedEntitiesBatch call. */
+export const numberedRegistrationRequestHash = (request: unknown): Result<string, RuntimeError> =>
+  authHash({ domain: "xln.numbered-registration.intent.v1", request });
+/** og: the transaction is signed, and by the request's payer. */
+const signedByPayer = (tx: EvmTx, request: Loose): Result<void, RuntimeError> => {
+  if (tx.from !== null && !tx.from.ok) return txErr(`NUMBERED_REGISTRATION_RAW_TX_INVALID:${tx.from.error}`);
+  return tx.from === null || tx.from.value !== request["payerSignerId"]
+    ? txErr("NUMBERED_REGISTRATION_TX_SIGNER_MISMATCH")
+    : ok(undefined);
+};
+/**
+ * og: the transaction calls the request's EntityProvider on its chain, with the planned boards, at the planned nonce.
+ */
+const intentCallValid = (tx: EvmTx, pending: Loose, request: Loose): Result<EvmTx, RuntimeError> => {
+  const entities = request["entities"] as readonly unknown[];
+  // The request check proved this chain id a positive safe integer (its certified stack key).
+  const chainId = Number(looseRecord(looseRecord(looseRecord(entities[0])["config"])["jurisdiction"])["chainId"]);
+  const calldata = (): string =>
+    numberedRegistrationCalldata(entities.map((e) => String(looseRecord(e)["encodedBoard"])));
+  switch (true) {
+    case tx.chainId !== BigInt(chainId) || tx.to !== request["entityProviderAddress"]:
+      return txErr("NUMBERED_REGISTRATION_TX_DOMAIN_MISMATCH");
+    case tx.value !== 0n || tx.data !== calldata():
+      return txErr("NUMBERED_REGISTRATION_TX_CALLDATA_MISMATCH");
+    case tx.nonce !== pending["transactionNonce"]:
+      return txErr("NUMBERED_REGISTRATION_TX_NONCE_MISMATCH");
+    default:
+      return ok(tx);
+  }
+};
+/**
+ * og parseNumberedRegistrationIntentTransaction: the durable raw transaction is exactly the payer's
+ * registerNumberedEntitiesBatch call.
+ */
 const numberedRegistrationTx = (pending: Loose): Result<EvmTx, RuntimeError> => {
-  const raw = pending["rawTransaction"], request = looseRecord(pending["request"]);
-  if (typeof raw !== "string" || !/^0x[0-9a-f]+$/i.test(raw) || raw.length > 524_290) return txErr("NUMBERED_REGISTRATION_RAW_TX_INVALID");
-  return chain(mapErr(parseEvmTx(raw), (reason): RuntimeError => ({ _tag: "runtime_tx", code: `NUMBERED_REGISTRATION_RAW_TX_INVALID:${reason}` })), (tx) => {
+  const raw = pending["rawTransaction"];
+  const request = looseRecord(pending["request"]);
+  if (typeof raw !== "string" || !/^0x[0-9a-f]+$/i.test(raw) || raw.length > MAX_RAW_TX_HEX) {
+    return txErr("NUMBERED_REGISTRATION_RAW_TX_INVALID");
+  }
+  const parsed = mapErr(parseEvmTx(raw), (reason): RuntimeError => ({
+    _tag: "runtime_tx",
+    code: `NUMBERED_REGISTRATION_RAW_TX_INVALID:${reason}`,
+  }));
+  return chain(parsed, (tx) => {
     if (!tx.hash) return txErr("NUMBERED_REGISTRATION_TX_HASH_MISMATCH");
     return chain(numberedBytes32(pending["transactionHash"], "TX_HASH"), (txHash) => {
       if (tx.hash !== txHash) return txErr("NUMBERED_REGISTRATION_TX_HASH_MISMATCH");
-      if (tx.from !== null && !tx.from.ok) return txErr(`NUMBERED_REGISTRATION_RAW_TX_INVALID:${tx.from.error}`);
-      if (tx.from === null || tx.from.value !== request["payerSignerId"]) return txErr("NUMBERED_REGISTRATION_TX_SIGNER_MISMATCH");
-      // The request check proved this chain id a positive safe integer (its certified stack key).
-      const entities = request["entities"] as readonly unknown[], chainId = Number(looseRecord(looseRecord(looseRecord(entities[0])["config"])["jurisdiction"])["chainId"]);
-      if (tx.chainId !== BigInt(chainId) || tx.to !== request["entityProviderAddress"]) return txErr("NUMBERED_REGISTRATION_TX_DOMAIN_MISMATCH");
-      if (tx.value !== 0n || tx.data !== numberedRegistrationCalldata(entities.map((e) => String(looseRecord(e)["encodedBoard"])))) return txErr("NUMBERED_REGISTRATION_TX_CALLDATA_MISMATCH");
-      return tx.nonce !== pending["transactionNonce"] ? txErr("NUMBERED_REGISTRATION_TX_NONCE_MISMATCH") : ok(tx);
+      return chain(signedByPayer(tx, request), () => intentCallValid(tx, pending, request));
     });
   });
 };
-/** og applyNumberedRegistrationIntent: a validated pending intent is stored once; the same payload again is a no-op, a different one is refused. */
+const withIntent = (rt: Runtime, intentId: string, intent: RuntimeData): Runtime => ({
+  ...rt,
+  numberedRegistrationIntents: mapSet(rt.numberedRegistrationIntents, intentId, intent),
+});
+/**
+ * og applyNumberedRegistrationIntent: a validated pending intent is stored once; the same payload again is a no-op, a
+ * different one is refused.
+ */
 const recordNumberedRegistrationIntent = (rt: Runtime, pending: RuntimeData): Result<Runtime, RuntimeError> => {
   const request = looseRecord(pending["request"]);
-  return chain(numberedRegistrationRequestValid(rt, request), () => chain(numberedRegistrationRequestHash(request), (hash) => {
-    if (hash !== pending["requestHash"]) return txErr("NUMBERED_REGISTRATION_REQUEST_HASH_MISMATCH");
-    return chain(numberedRegistrationTx(pending), (): Result<Runtime, RuntimeError> => {
-      const intentId = String(request["intentId"]), existing = rt.numberedRegistrationIntents.get(intentId);
-      if (existing === undefined) return ok({ ...rt, numberedRegistrationIntents: mapSet(rt.numberedRegistrationIntents, intentId, pending) });
-      if (existing["requestHash"] !== pending["requestHash"]) return txErr("NUMBERED_REGISTRATION_INTENT_PAYLOAD_CONFLICT");
-      return existing["status"] === "pending" && existing["transactionHash"] !== pending["transactionHash"] ? txErr("NUMBERED_REGISTRATION_INTENT_TX_CONFLICT") : ok(rt);
-    });
-  }));
+  return chain(numberedRegistrationRequestValid(rt, request), () =>
+    chain(numberedRegistrationRequestHash(request), (hash) => {
+      if (hash !== pending["requestHash"]) return txErr("NUMBERED_REGISTRATION_REQUEST_HASH_MISMATCH");
+      return chain(numberedRegistrationTx(pending), (): Result<Runtime, RuntimeError> => {
+        const intentId = String(request["intentId"]);
+        const existing = rt.numberedRegistrationIntents.get(intentId);
+        if (existing === undefined) return ok(withIntent(rt, intentId, pending));
+        if (existing["requestHash"] !== pending["requestHash"])
+          return txErr("NUMBERED_REGISTRATION_INTENT_PAYLOAD_CONFLICT");
+        return existing["status"] === "pending" && existing["transactionHash"] !== pending["transactionHash"]
+          ? txErr("NUMBERED_REGISTRATION_INTENT_TX_CONFLICT")
+          : ok(rt);
+      });
+    }),
+  );
 };
-/** og applyNumberedRegistrationResolution: quarantine, or complete once every result has certified evidence and every local replica exists on the planned board. */
+/** og: one result has certified evidence, and a locally signed entity's replica exists on the planned board. */
+const completedEntityValid = (rt: Runtime, request: Loose, plan: Loose, result: Loose): Result<void, RuntimeError> => {
+  const local = plan["localSignerId"];
+  const entityId = result["entityId"];
+  const incomplete = `NUMBERED_REGISTRATION_COMPLETION_INCOMPLETE:${String(entityId)}`;
+  return chain(registrationEvidenceKey(request["stackKey"], entityId), (key) => {
+    const evidence = rt.registrationEvidence.get(key);
+    const replica =
+      local !== null
+        ? [...rt.entities.values()].find(
+            (r) => r.state.id.toLowerCase() === entityId && r.signerId.toLowerCase() === local,
+          )
+        : undefined;
+    if (evidence === undefined) return txErr(incomplete);
+    return chain(registrationEvidenceHash(evidence), (evidenceHash) => {
+      switch (true) {
+        case evidenceHash !== result["evidenceHash"] || (local !== null && replica === undefined):
+          return txErr(incomplete);
+        case replica !== undefined && configBoardHash(replica.state.quorum) !== plan["boardHash"]:
+          return txErr(`NUMBERED_REGISTRATION_COMPLETION_BOARD_MISMATCH:${String(entityId)}`);
+        default:
+          return ok(undefined);
+      }
+    });
+  });
+};
+/** og: a completed intent resolved as completed again, for the same request, is a no-op. */
+const alreadyCompleted = (intent: RuntimeData | undefined, resolution: RuntimeData): boolean =>
+  intent?.["status"] === "completed" &&
+  resolution["kind"] === "completed" &&
+  intent["requestHash"] === resolution["requestHash"];
+/**
+ * og applyNumberedRegistrationResolution: quarantine, or complete once every result has certified evidence and every
+ * local replica exists on the planned board.
+ */
 const resolveNumberedRegistrationIntent = (rt: Runtime, resolution: RuntimeData): Result<Runtime, RuntimeError> =>
   chain(numberedBytes32(resolution["intentId"], "INTENT_ID"), (intentId): Result<Runtime, RuntimeError> => {
     const pending = rt.numberedRegistrationIntents.get(intentId);
     if (pending === undefined || pending["status"] !== "pending") {
-      if (pending?.["status"] === "completed" && resolution["kind"] === "completed" && pending["requestHash"] === resolution["requestHash"]) return ok(rt);
-      return txErr("NUMBERED_REGISTRATION_PENDING_INTENT_MISSING");
+      return alreadyCompleted(pending, resolution) ? ok(rt) : txErr("NUMBERED_REGISTRATION_PENDING_INTENT_MISSING");
     }
-    if (pending["requestHash"] !== resolution["requestHash"] || pending["transactionHash"] !== resolution["transactionHash"]) return txErr("NUMBERED_REGISTRATION_RESOLUTION_IDENTITY_MISMATCH");
-    const request = looseRecord(pending["request"]), key = String(request["intentId"]);
-    if (resolution["kind"] === "quarantined") return ok({ ...rt, numberedRegistrationIntents: mapSet(rt.numberedRegistrationIntents, key, { ...pending, status: "quarantined", reason: resolution["reason"] as Binary }) });
-    const results = Array.isArray(resolution["results"]) ? (resolution["results"] as readonly unknown[]) : [], planned = request["entities"] as readonly unknown[];
+    if (
+      pending["requestHash"] !== resolution["requestHash"] ||
+      pending["transactionHash"] !== resolution["transactionHash"]
+    ) {
+      return txErr("NUMBERED_REGISTRATION_RESOLUTION_IDENTITY_MISMATCH");
+    }
+    const request = looseRecord(pending["request"]);
+    const key = String(request["intentId"]);
+    if (resolution["kind"] === "quarantined") {
+      return ok(withIntent(rt, key, { ...pending, status: "quarantined", reason: resolution["reason"] as Binary }));
+    }
+    const results = looseList(resolution["results"]);
+    const planned = request["entities"] as readonly unknown[];
     if (results.length !== planned.length) return txErr("NUMBERED_REGISTRATION_RESULT_COUNT_MISMATCH");
-    for (const [index, raw] of results.entries()) {
-      const result = looseRecord(raw), plan = looseRecord(planned[index]), local = plan["localSignerId"], entityId = result["entityId"];
-      const evidenceKey = registrationEvidenceKey(request["stackKey"], entityId);
-      if (!evidenceKey.ok) return evidenceKey;
-      const evidence = rt.registrationEvidence.get(evidenceKey.value);
-      const replica = local !== null ? [...rt.entities.values()].find((r) => r.state.id.toLowerCase() === entityId && r.signerId.toLowerCase() === local) : undefined;
-      if (evidence === undefined) return txErr(`NUMBERED_REGISTRATION_COMPLETION_INCOMPLETE:${String(entityId)}`);
-      const evidenceHash = registrationEvidenceHash(evidence);
-      if (!evidenceHash.ok) return evidenceHash;
-      if (evidenceHash.value !== result["evidenceHash"] || (local !== null && replica === undefined)) return txErr(`NUMBERED_REGISTRATION_COMPLETION_INCOMPLETE:${String(entityId)}`);
-      if (replica !== undefined && configBoardHash(replica.state.quorum) !== plan["boardHash"]) return txErr(`NUMBERED_REGISTRATION_COMPLETION_BOARD_MISMATCH:${String(entityId)}`);
-    }
+    const each = traverse(results, (raw, i) =>
+      completedEntityValid(rt, request, looseRecord(planned[i]), looseRecord(raw)),
+    );
     const { kind: _kind, ...completed } = resolution;
-    return ok({ ...rt, numberedRegistrationIntents: mapSet(rt.numberedRegistrationIntents, key, { status: "completed", ...completed }) });
+    return map(each, () => withIntent(rt, key, { status: "completed", ...completed }));
   });
 
 // ---- og runtime/mempool/wake.ts generateHookPings: the Runtime tick's due Entity wakes, leader timeout votes and J submit / EntityProvider action retries ----
-/** og scheduled-wake.ts nextReplicaDeadline: the leader's earliest wake, or a validator's leader-timeout deadline from its last consensus progress. */
+/**
+ * og scheduled-wake.ts nextReplicaDeadline: the leader's earliest wake, or a validator's leader-timeout deadline from
+ * its last consensus progress.
+ */
 const replicaDeadline = (r: EntityReplica, local: ReplicaLocal | undefined): number | undefined => {
   if (isActiveLeader(r)) return nextWakeAt(r);
   const due = leaderTimeoutDue(r, BigInt(local?.lastConsensusProgressAt ?? Number(r.state.timestamp)), local?.jHistory);
@@ -37422,131 +37837,353 @@ const replicaDeadline = (r: EntityReplica, local: ReplicaLocal | undefined): num
 };
 /** og isBatchEmpty over the committed sent batch. */
 const sentBatchEmpty = (sent: SentJBatch): boolean => batchOpCount(sent.batch) === 0;
-/**
- * og generateHookPingsWithDeps (createDueScheduledWakeInputs, collectDueJSubmitRuntimeTxs, collectDueEntityProviderActionRuntimeTxs) at Runtime time `now`:
- * `queued` is the Runtime mempool not yet applied; `canSubmit` is og canSubmitLocally (this Runtime holds the signer's key; default: the Runtime id).
- * The returned `local` set is og's process-local markers: pass it as RuntimeCtx.local so the frame admits exactly these wakes and retries.
- */
-export const runtimeWake = (rt: Runtime, now: number, queued: RuntimeInput = { runtimeTxs: [], entityInputs: [] }, canSubmit: (signer: string) => boolean = (signer) => submitId(signer) === submitId(rt.runtimeId)):
-  { readonly input: RuntimeInput; readonly local: ReadonlySet<RuntimeTx | EntityTx> } => {
-  const replicas = [...rt.entities];
-  // og createDueScheduledWakeInputs: the deadline heap in (dueAt, entityId, signerId) order; one wake or vote per replica, none while one is queued
-  const busy = new Set([
-    ...queued.entityInputs.filter((i) => i.input.kind === "leaderTimeoutVote" || (i.input.kind === "txs" && i.input.txs.some((tx) => tx.type === "scheduledWake"))).map((i) => replicaKey(i.entityId, i.signerId)),
-    ...replicas.filter(([, r]) => r.mempool.some((tx) => tx.type === "scheduledWake")).map(([key]) => key),
+type ReplicaEntry = readonly [string, EntityReplica];
+type RetryJSubmitData = Extract<RuntimeTx, { type: "retryJSubmit" }>["data"];
+type RetryEpActionData = Extract<RuntimeTx, { type: "retryEntityProviderAction" }>["data"];
+/** What a Runtime tick sees: the Runtime, its clock, what is already queued, and whose keys it holds. */
+type WakeScan = {
+  readonly rt: Runtime;
+  readonly now: number;
+  readonly queued: RuntimeInput;
+  readonly canSubmit: (signer: string) => boolean;
+};
+const queuedTxs = (i: RoutedEntityInput): readonly EntityTx[] => (i.input.kind === "txs" ? i.input.txs : []);
+/** og: a replica with a wake or timeout vote already queued, or a wake already in its mempool, gets no second one. */
+const wakeBusy = (w: WakeScan): ReadonlySet<string> =>
+  new Set([
+    ...w.queued.entityInputs
+      .filter((i) => i.input.kind === "leaderTimeoutVote" || queuedTxs(i).some((tx) => tx.type === "scheduledWake"))
+      .map((i) => replicaKey(i.entityId, i.signerId)),
+    ...[...w.rt.entities]
+      .filter(([, r]) => r.mempool.some((tx) => tx.type === "scheduledWake"))
+      .map(([key]) => key),
   ]);
-  const due = replicas.flatMap(([key, r]): { readonly key: string; readonly r: EntityReplica; readonly dueAt: number }[] => {
-    const dueAt = replicaDeadline(r, rt.replicaLocal.get(key));
-    return dueAt === undefined || dueAt > now ? [] : [{ key, r, dueAt }];
-  }).sort((a, b) => a.dueAt - b.dueAt || compareText(lower(a.r.state.id), lower(b.r.state.id)) || compareText(signerId(a.r.signerId), signerId(b.r.signerId)));
-  const at = BigInt(now);
-  const entityInputs = due.flatMap(({ key, r }): RoutedEntityInput[] => {
+type DueReplica = { readonly key: string; readonly r: EntityReplica; readonly dueAt: number };
+/** og's deadline heap order: (dueAt, entityId, signerId). */
+const byDeadline = (a: DueReplica, b: DueReplica): number =>
+  a.dueAt - b.dueAt ||
+  compareText(lower(a.r.state.id), lower(b.r.state.id)) ||
+  compareText(signerId(a.r.signerId), signerId(b.r.signerId));
+/**
+ * og createDueScheduledWakeInputs: in deadline order, one wake (a leader) or timeout vote (a validator) per due
+ * replica, none while one is queued.
+ */
+const dueWakes = (w: WakeScan, at: bigint): readonly RoutedEntityInput[] => {
+  const busy = wakeBusy(w);
+  const due = [...w.rt.entities]
+    .flatMap(([key, r]): DueReplica[] => {
+      const dueAt = replicaDeadline(r, w.rt.replicaLocal.get(key));
+      return dueAt === undefined || dueAt > w.now ? [] : [{ key, r, dueAt }];
+    })
+    .toSorted(byDeadline);
+  return due.flatMap(({ key, r }): RoutedEntityInput[] => {
     if (busy.has(key)) return [];
-    const input = isActiveLeader(r) ? localScheduledWake(r, at) : localTimeoutVote(r, at, rt.replicaLocal.get(key)?.jHistory);
+    const input = isActiveLeader(r)
+      ? localScheduledWake(r, at)
+      : localTimeoutVote(r, at, w.rt.replicaLocal.get(key)?.jHistory);
     return input === undefined ? [] : [{ entityId: r.state.id, signerId: r.signerId, input }];
   });
-  // og collectDueJSubmitRuntimeTxs: the active leader's sealed batch, once per retry window, unless an abort, a retry or a committed attempt is pending
-  const queuedRetry = (d: Extract<RuntimeTx, { type: "retryJSubmit" }>["data"]): boolean => queued.runtimeTxs.some((tx) => tx.type === "retryJSubmit" && submitId(tx.data.jurisdictionName) === submitId(d.jurisdictionName)
-    && submitId(tx.data.entityId) === submitId(d.entityId) && submitId(tx.data.signerId) === submitId(d.signerId) && submitId(tx.data.batchHash) === submitId(d.batchHash) && Number(tx.data.entityNonce) === Number(d.entityNonce) && tx.data.batchGeneration === d.batchGeneration);
-  const aborting = (entity: EntityId): boolean => queued.entityInputs.some((i) => submitId(i.entityId) === submitId(entity) && i.input.kind === "txs" && i.input.txs.some((tx) => (tx.type as string) === "j_abort_sent_batch"));
-  const jRetries = replicas.flatMap(([key, r]): RuntimeTx[] => {
-    const jb = jBatchOf(r.state), sent = jb?.sentBatch;
-    if (!isActiveLeader(r) || !canSubmit(r.signerId) || sent === undefined || sent.terminalFailure || sentBatchEmpty(sent) || aborting(r.state.id)) return [];
-    const data = { entityId: r.state.id, signerId: r.signerId, jurisdictionName: String(r.state.jurisdictionConfig?.name || ""), batchHash: sent.batchHash, entityNonce: sent.entityNonce, batchGeneration: jb?.broadcastCount ?? 0, ...(sent.feeOverrides ? { feeOverrides: { ...sent.feeOverrides } as unknown as Binary } : {}) };
-    const local = matchingJSubmitState(r.state, rt.replicaLocal.get(key)?.jSubmitState);
-    if (local?.terminalFailure || local?.lastResultOutcome === "reconciled" || queuedRetry(data)) return [];
-    const pending = rt.pendingCommittedJOutbox.some((input) => input.jTxs.some((raw) => {
-      const t = rowOf(raw);
-      return t.type === "batch" && submitId(input.jurisdictionName) === submitId(data.jurisdictionName) && submitId(t.entityId) === submitId(data.entityId) && submitId(t.data["signerId"]) === submitId(data.signerId)
-        && submitId(t.data["batchHash"]) === submitId(data.batchHash) && Number(t.data["entityNonce"]) === Number(data.entityNonce) && Number(t.data["batchGeneration"]) === Number(data.batchGeneration);
-    }));
-    const dueAt = local === undefined || local.submitAttempts <= 0 ? 0 : local.lastResultOutcome === "eventBarrier" ? local.lastResultAt ?? local.lastSubmittedAt : local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
-    return pending || dueAt > now ? [] : [{ type: "retryJSubmit", data }];
-  });
-  // og collectDueEntityProviderActionRuntimeTxs: the committed pending action, once per retry window
-  const epRetries = replicas.flatMap(([key, r]): RuntimeTx[] => {
-    const pending = epActionState(r.state).pending, name = jurisdictionNameOf(r.state);
-    if (!isActiveLeader(r) || !canSubmit(r.signerId) || pending === undefined || !name) return [];
-    const data = { entityId: r.state.id, signerId: r.signerId, jurisdictionName: name, actionHash: pending.actionHash, actionNonce: pending.actionNonce, generation: pending.generation };
-    const local = matchingEpSubmitState(r.state, rt.replicaLocal.get(key)?.entityProviderActionSubmitState);
+};
+/** The same submitting replica: jurisdiction, Entity and signer, case-blind. */
+type SubmitterIds = { readonly jurisdictionName: unknown; readonly entityId: unknown; readonly signerId: unknown };
+const sameSubmitter = (a: SubmitterIds, b: SubmitterIds): boolean =>
+  submitId(a.jurisdictionName) === submitId(b.jurisdictionName) &&
+  submitId(a.entityId) === submitId(b.entityId) &&
+  submitId(a.signerId) === submitId(b.signerId);
+const sameBatchRetry = (a: RetryJSubmitData, b: RetryJSubmitData): boolean =>
+  sameSubmitter(a, b) &&
+  submitId(a.batchHash) === submitId(b.batchHash) &&
+  Number(a.entityNonce) === Number(b.entityNonce) &&
+  a.batchGeneration === b.batchGeneration;
+/** Whether a committed J outbox row still carries this batch attempt. */
+const outboxHoldsBatch = (input: JInput, raw: Binary, d: RetryJSubmitData): boolean => {
+  const t = rowOf(raw);
+  return (
+    t.type === "batch" &&
+    sameSubmitter(
+      { jurisdictionName: input.jurisdictionName, entityId: t.entityId, signerId: t.data["signerId"] },
+      d,
+    ) &&
+    submitId(t.data["batchHash"]) === submitId(d.batchHash) &&
+    Number(t.data["entityNonce"]) === Number(d.entityNonce) &&
+    Number(t.data["batchGeneration"]) === Number(d.batchGeneration)
+  );
+};
+/** og: a J batch abort for this Entity is queued. */
+const abortQueued = (w: WakeScan, entity: EntityId): boolean =>
+  w.queued.entityInputs.some(
+    (i) =>
+      submitId(i.entityId) === submitId(entity) &&
+      queuedTxs(i).some((tx) => (tx.type as string) === "j_abort_sent_batch"),
+  );
+/** og: the next retry is immediate before any attempt, at the event barrier after one, else a retry window later. */
+const batchRetryAt = (local: JSubmitState | undefined): number => {
+  if (local === undefined || local.submitAttempts <= 0) return 0;
+  return local.lastResultOutcome === "eventBarrier"
+    ? local.lastResultAt ?? local.lastSubmittedAt
+    : local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
+};
+/** The retry of the active leader's sealed batch. */
+const batchRetryData = (r: EntityReplica, sent: SentJBatch, generation: number): RetryJSubmitData => ({
+  entityId: r.state.id,
+  signerId: r.signerId,
+  jurisdictionName: String(r.state.jurisdictionConfig?.name || ""),
+  batchHash: sent.batchHash,
+  entityNonce: sent.entityNonce,
+  batchGeneration: generation,
+  ...opt("feeOverrides", sent.feeOverrides ? ({ ...sent.feeOverrides } as unknown as Binary) : undefined),
+});
+/**
+ * og collectDueJSubmitRuntimeTxs: the active leader's sealed batch, once per retry window, unless an abort, a retry
+ * or a committed attempt is pending.
+ */
+const batchRetryDue =
+  (w: WakeScan) =>
+  ([key, r]: ReplicaEntry): RuntimeTx[] => {
+    const jb = jBatchOf(r.state);
+    const sent = jb?.sentBatch;
+    const unsendable =
+      !isActiveLeader(r) ||
+      !w.canSubmit(r.signerId) ||
+      sent === undefined ||
+      sent.terminalFailure ||
+      sentBatchEmpty(sent);
+    if (unsendable || abortQueued(w, r.state.id)) return [];
+    const data = batchRetryData(r, sent, jb?.broadcastCount ?? 0);
+    const local = matchingJSubmitState(r.state, w.rt.replicaLocal.get(key)?.jSubmitState);
+    const queued = w.queued.runtimeTxs.some((tx) => tx.type === "retryJSubmit" && sameBatchRetry(tx.data, data));
+    if (local?.terminalFailure || local?.lastResultOutcome === "reconciled" || queued) return [];
+    const pending = w.rt.pendingCommittedJOutbox.some((input) =>
+      input.jTxs.some((raw) => outboxHoldsBatch(input, raw, data)),
+    );
+    return pending || batchRetryAt(local) > w.now ? [] : [{ type: "retryJSubmit", data }];
+  };
+const sameActionRetry = (a: RetryEpActionData, b: RetryEpActionData): boolean =>
+  sameSubmitter(a, b) &&
+  submitId(a.actionHash) === submitId(b.actionHash) &&
+  a.actionNonce === b.actionNonce &&
+  a.generation === b.generation;
+/** Whether a committed J outbox row still carries this EntityProvider action attempt. */
+const outboxHoldsAction = (input: JInput, raw: Binary, d: RetryEpActionData): boolean => {
+  const t = rowOf(raw);
+  const intent = t.data?.["intent"] as EntityProviderActionIntent | undefined;
+  return (
+    isEpActionJTx(t.type) &&
+    intent !== undefined &&
+    sameSubmitter(
+      { jurisdictionName: input.jurisdictionName, entityId: t.entityId, signerId: t.data["signerId"] },
+      d,
+    ) &&
+    submitId(intent.actionHash) === submitId(d.actionHash) &&
+    intent.actionNonce === d.actionNonce &&
+    intent.generation === d.generation
+  );
+};
+/** og collectDueEntityProviderActionRuntimeTxs: the committed pending action, once per retry window. */
+const actionRetryDue =
+  (w: WakeScan) =>
+  ([key, r]: ReplicaEntry): RuntimeTx[] => {
+    const pending = epActionState(r.state).pending;
+    const name = jurisdictionNameOf(r.state);
+    if (!isActiveLeader(r) || !w.canSubmit(r.signerId) || pending === undefined || !name) return [];
+    const data: RetryEpActionData = {
+      entityId: r.state.id,
+      signerId: r.signerId,
+      jurisdictionName: name,
+      actionHash: pending.actionHash,
+      actionNonce: pending.actionNonce,
+      generation: pending.generation,
+    };
+    const local = matchingEpSubmitState(r.state, w.rt.replicaLocal.get(key)?.entityProviderActionSubmitState);
     if (local?.terminalFailure) return [];
-    const held = rt.pendingCommittedJOutbox.some((input) => input.jTxs.some((raw) => {
-      const t = rowOf(raw), intent = t.data?.["intent"] as EntityProviderActionIntent | undefined;
-      return isEpActionJTx(t.type) && intent !== undefined && submitId(input.jurisdictionName) === submitId(data.jurisdictionName) && submitId(t.entityId) === submitId(data.entityId)
-        && submitId(t.data["signerId"]) === submitId(data.signerId) && submitId(intent.actionHash) === submitId(data.actionHash) && intent.actionNonce === data.actionNonce && intent.generation === data.generation;
-    }));
-    const queuedEp = queued.runtimeTxs.some((tx) => tx.type === "retryEntityProviderAction" && submitId(tx.data.jurisdictionName) === submitId(data.jurisdictionName) && submitId(tx.data.entityId) === submitId(data.entityId)
-      && submitId(tx.data.signerId) === submitId(data.signerId) && submitId(tx.data.actionHash) === submitId(data.actionHash) && tx.data.actionNonce === data.actionNonce && tx.data.generation === data.generation);
-    const dueAt = local === undefined || local.submitAttempts <= 0 ? 0 : local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
-    return held || queuedEp || dueAt > now ? [] : [{ type: "retryEntityProviderAction", data }];
-  });
-  const runtimeTxs = [...jRetries, ...epRetries];
-  const local = new Set<RuntimeTx | EntityTx>([...runtimeTxs, ...entityInputs.flatMap((i) => (i.input.kind === "txs" ? i.input.txs : []))]);
+    const held = w.rt.pendingCommittedJOutbox.some((input) =>
+      input.jTxs.some((raw) => outboxHoldsAction(input, raw, data)),
+    );
+    const queued = w.queued.runtimeTxs.some(
+      (tx) => tx.type === "retryEntityProviderAction" && sameActionRetry(tx.data, data),
+    );
+    const dueAt =
+      local === undefined || local.submitAttempts <= 0 ? 0 : local.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
+    return held || queued || dueAt > w.now ? [] : [{ type: "retryEntityProviderAction", data }];
+  };
+/** A Runtime tick's wakes and retries, and the process-local markers that let exactly them in. */
+export type RuntimeWake = { readonly input: RuntimeInput; readonly local: ReadonlySet<RuntimeTx | EntityTx> };
+/**
+ * og generateHookPingsWithDeps (createDueScheduledWakeInputs, collectDueJSubmitRuntimeTxs,
+ * collectDueEntityProviderActionRuntimeTxs) at Runtime time `now`: `queued` is the Runtime mempool not yet applied;
+ * `canSubmit` is og canSubmitLocally (this Runtime holds the signer's key; default: the Runtime id). The returned
+ * `local` set is og's process-local markers: pass it as RuntimeCtx.local so the frame admits exactly these wakes and
+ * retries.
+ */
+export const runtimeWake = (
+  rt: Runtime,
+  now: number,
+  queued: RuntimeInput = { runtimeTxs: [], entityInputs: [] },
+  canSubmit: (signer: string) => boolean = (signer) => submitId(signer) === submitId(rt.runtimeId),
+): RuntimeWake => {
+  const w: WakeScan = { rt, now, queued, canSubmit };
+  const at = BigInt(now);
+  const replicas = [...rt.entities];
+  const entityInputs = dueWakes(w, at);
+  const runtimeTxs = [...replicas.flatMap(batchRetryDue(w)), ...replicas.flatMap(actionRetryDue(w))];
+  const local = new Set<RuntimeTx | EntityTx>([...runtimeTxs, ...entityInputs.flatMap(queuedTxs)]);
   return { input: { runtimeTxs, entityInputs, timestamp: at }, local };
 };
-/** og assertScheduledWakeTxAuthorized, then assertProposeAccountsNowTxAuthorized, per Entity tx in ingress order: outside replay only this Runtime's own marked txs enter. */
-const forgedIngress = (input: RuntimeInput, ctx: RuntimeCtx): string | undefined => {
-  if (ctx.replay === true) return undefined;
-  for (const i of input.entityInputs) {
-    if (i.input.kind !== "txs") continue;
-    for (const tx of i.input.txs) {
-      if (tx.type === "scheduledWake" && ctx.local?.has(tx) !== true) return "SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED";
-      if (tx.type === "proposeAccountsNow" && ctx.local?.has(tx) !== true) return "PROPOSE_ACCOUNTS_NOW_EXTERNAL_INGRESS_REJECTED";
-    }
-  }
-  return undefined;
-};
-/** og lastConsensusProgressAt writes: commit (finalization.ts), an accepted proposal's precommit (proposal/input.ts), a signed local timeout vote or a new leader certificate (timeout-input.ts), and a non-proposer's first admitted txs (input/admission.ts). */
-const consensusProgressed = (before: EntityReplica, after: EntityReplica, input: EntityInput, local: ReplicaLocal | undefined): boolean =>
-  after.head.height > before.head.height
-  || (input.kind === "proposal" && after._tag === "locked" && (before._tag !== "locked" || before.frame !== after.frame))
-  || (input.kind === "leaderTimeoutVote" && (input.local === true || (after.pendingLeaderCertificate !== undefined && after.pendingLeaderCertificate !== before.pendingLeaderCertificate)))
-  || (input.kind === "txs" && local?.lastConsensusProgressAt === undefined && !isProposalLeader(before) && after.mempool.length > before.mempool.length)
-  // og ensureLocalJPrefixAttestation / handleJPrefixAttestations: a new or merged head in this validator's J-prefix round
-  || (after.jPrefixRound !== undefined && after.jPrefixRound !== before.jPrefixRound && !consensusEqual(after.jPrefixRound.attestations, before.jPrefixRound?.attestations ?? new Map()));
-/** og applyRuntimeTx. */
-export const applyRuntimeTxStep = (rt: Runtime, tx: RuntimeTx, ctx: Pick<RuntimeCtx, "replay" | "local">): Result<TxStep, RuntimeError> => chain(runtimeTxAuthorized(tx, ctx), (): Result<TxStep, RuntimeError> => {
-  const state = (r: Result<Runtime, RuntimeError>): Result<TxStep, RuntimeError> => map(r, noJ);
+/** og: a wake or an accounts-now nudge enters only as this Runtime's own marked tx. */
+const forgeryOf = (tx: EntityTx, ctx: RuntimeCtx): string | undefined => {
+  const marked = ctx.local?.has(tx) === true;
   switch (tx.type) {
-    case "checkpointBarrier": return ok(noJ(rt));
-    case "recordRuntimeAdapterCommand": return state(adapterCommand(rt, tx.data));
-    case "importReplica": return state(importReplica(rt, tx));
-    case "importJ": return state(importJ(rt, tx.data));
-    case "completeImportJ": return state(completeImportJ(rt, tx.data));
-    case "advanceJWatcherCursor": return state(advanceJWatcherCursor(rt, tx.data));
-    case "observeJRange": return state(observeJRange(rt, tx.data));
-    case "rewindJHistory": return state(rewindJHistory(rt, tx.data));
-    case "recordAuthenticatedJAuthority": return state(recordAuthenticatedJAuthority(rt, tx.data));
-    case "recordNumberedRegistrationIntent": return state(recordNumberedRegistrationIntent(rt, tx.data));
-    case "resolveNumberedRegistrationIntent": return state(resolveNumberedRegistrationIntent(rt, tx.data));
-    case "retryJSubmit": return retryJSubmit(rt, tx.data);
-    case "recordJSubmitResult": return state(recordJSubmitResult(rt, tx.data));
-    case "retryEntityProviderAction": return retryEntityProviderAction(rt, tx.data);
-    case "recordEntityProviderActionSubmitResult": return state(recordEpActionResult(rt, tx.data));
-    case "recordGovernanceJSubmitResult": return state(recordGovernanceResult(rt, tx.data));
-    default: { const exhaustive: never = tx; return txErr(`RUNTIME_TX_UNKNOWN: ${(exhaustive as { readonly type?: string }).type ?? "unknown"}`); }
+    case "scheduledWake":
+      return marked ? undefined : "SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED";
+    case "proposeAccountsNow":
+      return marked ? undefined : "PROPOSE_ACCOUNTS_NOW_EXTERNAL_INGRESS_REJECTED";
+    default:
+      return undefined;
   }
-});
+};
+/**
+ * og assertScheduledWakeTxAuthorized, then assertProposeAccountsNowTxAuthorized, per Entity tx in ingress order:
+ * outside replay only this Runtime's own marked txs enter.
+ */
+const forgedIngress = (input: RuntimeInput, ctx: RuntimeCtx): string | undefined =>
+  ctx.replay === true
+    ? undefined
+    : input.entityInputs
+        .flatMap(queuedTxs)
+        .reduce<string | undefined>((found, tx) => found ?? forgeryOf(tx, ctx), undefined);
+/** og lastConsensusProgressAt writes, per input kind (proposal/input.ts, timeout-input.ts, input/admission.ts). */
+const progressedBy = (
+  before: EntityReplica,
+  after: EntityReplica,
+  input: EntityInput,
+  local: ReplicaLocal | undefined,
+): boolean => {
+  switch (input.kind) {
+    case "proposal":
+      return after._tag === "locked" && (before._tag !== "locked" || before.frame !== after.frame);
+    case "leaderTimeoutVote":
+      return (
+        input.local === true ||
+        (after.pendingLeaderCertificate !== undefined &&
+          after.pendingLeaderCertificate !== before.pendingLeaderCertificate)
+      );
+    case "txs":
+      return (
+        local?.lastConsensusProgressAt === undefined &&
+        !isProposalLeader(before) &&
+        after.mempool.length > before.mempool.length
+      );
+    default:
+      return false;
+  }
+};
+/**
+ * og ensureLocalJPrefixAttestation / handleJPrefixAttestations: a new or merged head in this validator's J-prefix
+ * round.
+ */
+const jPrefixRoundMoved = (before: EntityReplica, after: EntityReplica): boolean =>
+  after.jPrefixRound !== undefined &&
+  after.jPrefixRound !== before.jPrefixRound &&
+  !consensusEqual(after.jPrefixRound.attestations, before.jPrefixRound?.attestations ?? new Map());
+/**
+ * og lastConsensusProgressAt writes: commit (finalization.ts), an accepted proposal's precommit, a signed local
+ * timeout vote or a new leader certificate, a non-proposer's first admitted txs, and a moved J-prefix round.
+ */
+const consensusProgressed = (
+  before: EntityReplica,
+  after: EntityReplica,
+  input: EntityInput,
+  local: ReplicaLocal | undefined,
+): boolean =>
+  after.head.height > before.head.height ||
+  progressedBy(before, after, input, local) ||
+  jPrefixRoundMoved(before, after);
+/** og applyRuntimeTx. */
+export const applyRuntimeTxStep = (
+  rt: Runtime,
+  tx: RuntimeTx,
+  ctx: Pick<RuntimeCtx, "replay" | "local">,
+): Result<TxStep, RuntimeError> =>
+  chain(runtimeTxAuthorized(tx, ctx), (): Result<TxStep, RuntimeError> => {
+    const state = (r: Result<Runtime, RuntimeError>): Result<TxStep, RuntimeError> => map(r, noJ);
+    switch (tx.type) {
+      case "checkpointBarrier":
+        return ok(noJ(rt));
+      case "recordRuntimeAdapterCommand":
+        return state(adapterCommand(rt, tx.data));
+      case "importReplica":
+        return state(importReplica(rt, tx));
+      case "importJ":
+        return state(importJ(rt, tx.data));
+      case "completeImportJ":
+        return state(completeImportJ(rt, tx.data));
+      case "advanceJWatcherCursor":
+        return state(advanceJWatcherCursor(rt, tx.data));
+      case "observeJRange":
+        return state(observeJRange(rt, tx.data));
+      case "rewindJHistory":
+        return state(rewindJHistory(rt, tx.data));
+      case "recordAuthenticatedJAuthority":
+        return state(recordAuthenticatedJAuthority(rt, tx.data));
+      case "recordNumberedRegistrationIntent":
+        return state(recordNumberedRegistrationIntent(rt, tx.data));
+      case "resolveNumberedRegistrationIntent":
+        return state(resolveNumberedRegistrationIntent(rt, tx.data));
+      case "retryJSubmit":
+        return retryJSubmit(rt, tx.data);
+      case "recordJSubmitResult":
+        return state(recordJSubmitResult(rt, tx.data));
+      case "retryEntityProviderAction":
+        return retryEntityProviderAction(rt, tx.data);
+      case "recordEntityProviderActionSubmitResult":
+        return state(recordEpActionResult(rt, tx.data));
+      case "recordGovernanceJSubmitResult":
+        return state(recordGovernanceResult(rt, tx.data));
+      default: {
+        const exhaustive: never = tx;
+        return txErr(`RUNTIME_TX_UNKNOWN: ${(exhaustive as { readonly type?: string }).type ?? "unknown"}`);
+      }
+    }
+  });
 /** og applyRuntimeTx, the Runtime state half (the J outputs of a retry are in applyRuntimeTxStep). */
-export const applyRuntimeTx = (rt: Runtime, tx: RuntimeTx, ctx: Pick<RuntimeCtx, "replay" | "local">): Result<Runtime, RuntimeError> => map(applyRuntimeTxStep(rt, tx, ctx), (s) => s.runtime);
+export const applyRuntimeTx = (
+  rt: Runtime,
+  tx: RuntimeTx,
+  ctx: Pick<RuntimeCtx, "replay" | "local">,
+): Result<Runtime, RuntimeError> => map(applyRuntimeTxStep(rt, tx, ctx), (s) => s.runtime);
 
 /**
- * One applied Runtime frame: `outbox` is positional (merged input order, then each input's outputs); `jOutbox` is og's frame jOutbox (every pending
- * committed J submit attempt, then the maintenance J txs); `queuedRetries` are og queuedJSubmitRetries, the local retry RuntimeTxs for the next frame.
+ * One applied Runtime frame: `outbox` is positional (merged input order, then each input's outputs); `jOutbox` is
+ * og's frame jOutbox (every pending committed J submit attempt, then the maintenance J txs); `queuedRetries` are og
+ * queuedJSubmitRetries, the local retry RuntimeTxs for the next frame; `events` are og env.emit(eventName, data) of
+ * every committed frame's runtimeEvent candidate effects, on every committing replica, in commit order
+ * (publishEntityCandidateEffects).
  */
-/** `events`: og env.emit(eventName, data) of every committed frame's runtimeEvent candidate effects, on every committing replica, in commit order (publishEntityCandidateEffects). */
-export type RuntimeStep = { readonly runtime: Runtime; readonly applied: RuntimeInput; readonly outbox: readonly EntityOutput[]; readonly jOutbox: readonly JInput[]; readonly queuedRetries: readonly RuntimeTx[]; readonly rejected: readonly RuntimeError[]; readonly advanced: boolean; readonly events: readonly EntityRuntimeEvent[] };
-/**
- * og createRuntimeInputReducer: validate shape/limits, apply every RuntimeTx in order (any failure refuses the whole frame), merge the entity inputs,
- * discard inputs whose replica is unknown (og drop policy for unroutable ingress), apply the rest, and advance the Runtime height only when the frame
- * did work (og advanceAppliedRuntimeFrame). The frame timestamp is max(previous, ingress seed) and stamps every txs input (og env.state.timestamp).
- */
-/** og requireEntityEncryptionPrivateKey: the Entity key comes from the Runtime's encryption seed unless the host supplies it. */
-const runtimeHtlcInfra = (ctx: RuntimeCtx, rt: Runtime, entityId: EntityId): HtlcProposerInfra | undefined => {
-  const given = ctx.htlcInfra?.(entityId), seed = rt.encryptionSeeds.get(entityId);
-  return given?.encryptionPrivateKey !== undefined || seed === undefined ? given : { profiles: [], ...given, encryptionPrivateKey: entityEncryptionPrivateKey(seed, entityId) };
+export type RuntimeStep = {
+  readonly runtime: Runtime;
+  readonly applied: RuntimeInput;
+  readonly outbox: readonly EntityOutput[];
+  readonly jOutbox: readonly JInput[];
+  readonly queuedRetries: readonly RuntimeTx[];
+  readonly rejected: readonly RuntimeError[];
+  readonly advanced: boolean;
+  readonly events: readonly EntityRuntimeEvent[];
 };
-/** og replica.jHistory as the Entity reads it: pruned to the committed finality (og prunes at every commit; a failed prune fails that commit). */
+/**
+ * og requireEntityEncryptionPrivateKey: the Entity key comes from the Runtime's encryption seed unless the host
+ * supplies it.
+ */
+const runtimeHtlcInfra = (ctx: RuntimeCtx, rt: Runtime, entityId: EntityId): HtlcProposerInfra | undefined => {
+  const given = ctx.htlcInfra?.(entityId);
+  const seed = rt.encryptionSeeds.get(entityId);
+  return given?.encryptionPrivateKey !== undefined || seed === undefined
+    ? given
+    : { profiles: [], ...given, encryptionPrivateKey: entityEncryptionPrivateKey(seed, entityId) };
+};
+/**
+ * og replica.jHistory as the Entity reads it: pruned to the committed finality (og prunes at every commit; a failed
+ * prune fails that commit).
+ */
 const replicaJHistory = (rt: Runtime, key: string, r: EntityReplica): ValidatorJHistory | undefined => {
   const h = rt.replicaLocal.get(key)?.jHistory;
   return unwrapOr(pruneFinalizedJHistory(h, Number(r.state.committed["lastFinalizedJHeight"] || 0)), () => h);
@@ -38571,6 +39208,12 @@ const commitLocal = (afterTxs: Runtime, store: ReadonlyMap<string, EntityReplica
     return mapSet(local, key, { ...current, hankoWitness: state === undefined ? witness : pruneWitnesses(witness, state) });
   }, pruned);
 };
+/**
+ * og createRuntimeInputReducer: validate shape/limits, apply every RuntimeTx in order (any failure refuses the whole
+ * frame), merge the entity inputs, discard inputs whose replica is unknown (og drop policy for unroutable ingress),
+ * apply the rest, and advance the Runtime height only when the frame did work (og advanceAppliedRuntimeFrame). The
+ * frame timestamp is max(previous, ingress seed) and stamps every txs input (og env.state.timestamp).
+ */
 export const applyRuntime = (rt: Runtime, input: RuntimeInput, ctx: RuntimeCtx): Result<RuntimeStep, RuntimeError> => chain(validateRuntimeInput(rt, input), (jOutbox) => {
   const forged = forgedIngress(input, ctx);
   if (forged !== undefined) return frameErr(forged);
