@@ -31560,379 +31560,968 @@ const pruneWitnesses = (
 // ---- og jurisdiction/machine/{local-history,event-observation,events/event-normalization,event-normalizers,event-normalizers-wallet,batch-validation}.ts ----
 type JRec = Readonly<Record<string, unknown>>;
 type Decoded = Result<unknown, RuntimeError>;
+/** One payload field's decoder; a null value rejects the whole payload. */
 type Field = (v: unknown) => Decoded;
-const recOf = (v: unknown): JRec | null => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as JRec) : null);
+const recOf = (v: unknown): JRec | null =>
+  v !== null && typeof v === "object" && !Array.isArray(v) ? (v as JRec) : null;
 const nText = (v: unknown): string => String(v ?? "").trim().toLowerCase();
-const nPattern = (re: RegExp) => (v: unknown): string | null => { if (typeof v !== "string") return null; const s = v.trim().toLowerCase(); return re.test(s) ? s : null; };
+const nPattern =
+  (re: RegExp) =>
+  (v: unknown): string | null => {
+    const s = typeof v === "string" ? v.trim().toLowerCase() : null;
+    return s !== null && re.test(s) ? s : null;
+  };
 const nEntity = (v: unknown): string | null => (typeof v === "string" ? v.trim().toLowerCase() || null : null);
-const nAddress = nPattern(/^0x[0-9a-f]{40}$/), nBytes32 = nPattern(/^0x[0-9a-f]{64}$/), nHexBytes = nPattern(/^0x(?:[0-9a-f]{2})*$/);
-/** og normalizeBigNumberish: a decimal integer (bigint, integral number, decimal text or `BigInt(n)` text) as its decimal string. */
+const nAddress = nPattern(/^0x[0-9a-f]{40}$/);
+const nBytes32 = nPattern(/^0x[0-9a-f]{64}$/);
+const nHexBytes = nPattern(/^0x(?:[0-9a-f]{2})*$/);
+/** Decimal text, bare or as `BigInt(n)`, re-spelled as its canonical decimal. */
+const decimalText = (t: string): string | null => {
+  const wrapped = /^BigInt\((-?\d+)\)$/.exec(t);
+  switch (true) {
+    case !t:
+      return null;
+    case wrapped !== null:
+      return BigInt(wrapped[1] ?? "0").toString();
+    case /^-?\d+$/.test(t):
+      return BigInt(t).toString();
+    default:
+      return null;
+  }
+};
+/** og normalizeBigNumberish: a decimal integer (bigint, integral number or decimal text) as its decimal string. */
 const nBig = (v: unknown): string | null => {
-  if (typeof v === "bigint") return v.toString();
-  if (typeof v === "number") return Number.isFinite(v) && Number.isInteger(v) ? String(v) : null;
-  if (typeof v !== "string") return null;
-  const t = v.trim(), wrapped = /^BigInt\((-?\d+)\)$/.exec(t);
-  if (!t) return null;
-  if (wrapped) return BigInt(wrapped[1] ?? "0").toString();
-  return /^-?\d+$/.test(t) ? BigInt(t).toString() : null;
+  switch (typeof v) {
+    case "bigint":
+      return v.toString();
+    case "number":
+      return Number.isInteger(v) ? String(v) : null;
+    case "string":
+      return decimalText(v.trim());
+    default:
+      return null;
+  }
 };
 const nInt = (v: unknown): number | null => {
-  if (typeof v === "number") return Number.isFinite(v) && Number.isInteger(v) ? v : null;
+  if (typeof v === "number") return Number.isInteger(v) ? v : null;
   const i = nBig(v);
-  return i === null || !Number.isSafeInteger(Number(i)) ? null : Number(i);
+  return i !== null && Number.isSafeInteger(Number(i)) ? Number(i) : null;
 };
 const nBool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 const nString = (v: unknown): string | null => (typeof v === "string" ? v : null);
-const plain = (f: (v: unknown) => unknown): Field => (v) => ok(f(v));
+const plain =
+  (f: (v: unknown) => unknown): Field =>
+  (v) =>
+    ok(f(v));
 /** og decodeFields: every schema field in order; the first null decodes the whole payload to null. */
-const decodeFields = (data: JRec, schema: Readonly<Record<string, Field>>): Result<Record<string, unknown> | null, RuntimeError> => {
-  const out: Record<string, unknown> = {};
-  for (const [key, field] of Object.entries(schema)) {
-    const r = field(data[key]);
-    if (!r.ok) return r;
-    if (r.value === null) return ok(null);
-    out[key] = r.value;
-  }
-  return ok(out);
-};
-/** og requireBoundaryRecord after structuredClone: an object that is not an array, Map, Set, Date, RegExp, Error or binary view. */
+const decodeFields = (
+  data: JRec,
+  schema: Readonly<Record<string, Field>>,
+): Result<Record<string, unknown> | null, RuntimeError> =>
+  foldResult(Object.entries(schema), {} as Record<string, unknown> | null, (out, [key, field]) =>
+    out === null ? ok(null) : map(field(data[key]), (v) => (v === null ? null : { ...out, [key]: v })),
+  );
+/** What structuredClone keeps as something other than a plain record. */
+const NON_RECORDS: readonly (new (...args: never[]) => object)[] = [Map, Set, Date, RegExp, Error, ArrayBuffer];
+/** og requireBoundaryRecord after structuredClone: an object that is not an array, collection, date or binary. */
 const boundaryRec = (v: unknown): JRec | null =>
-  v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map) && !(v instanceof Set) && !(v instanceof Date) && !(v instanceof RegExp) && !(v instanceof Error) && !ArrayBuffer.isView(v) && !(v instanceof ArrayBuffer) ? (v as JRec) : null;
-const jExactKeys = (v: JRec, required: readonly string[], optional: readonly string[], code: string): Result<void, RuntimeError> => {
-  const allowed = new Set([...required, ...optional]), missing = required.filter((k) => !Object.hasOwn(v, k)), extra = Object.keys(v).filter((k) => !allowed.has(k));
-  return missing.length > 0 || extra.length > 0 ? txErr(`${code}:missing=${missing.join(",") || "none"}:extra=${extra.join(",") || "none"}`) : ok(undefined);
+  recOf(v) !== null && !ArrayBuffer.isView(v) && !NON_RECORDS.some((C) => v instanceof C) ? (v as JRec) : null;
+const jExactKeys = (
+  v: JRec,
+  required: readonly string[],
+  optional: readonly string[],
+  code: string,
+): Result<void, RuntimeError> => {
+  const allowed = new Set([...required, ...optional]);
+  const missing = required.filter((k) => !Object.hasOwn(v, k));
+  const extra = Object.keys(v).filter((k) => !allowed.has(k));
+  return missing.length > 0 || extra.length > 0
+    ? txErr(`${code}:missing=${missing.join(",") || "none"}:extra=${extra.join(",") || "none"}`)
+    : ok(undefined);
 };
+/** A value checked against the ABI shape it must already have; the code names the field. */
 type JCheck = (v: unknown, code: string) => Decoded;
-const PB_UINT256_MAX = (1n << 256n) - 1n, PB_INT256_MAX = (1n << 255n) - 1n, PB_INT256_MIN = -(1n << 255n);
+const PB_UINT256_MAX = (1n << 256n) - 1n;
+const PB_INT256_MAX = (1n << 255n) - 1n;
+const PB_INT256_MIN = -(1n << 255n);
 const checkString: JCheck = (v, code) => (typeof v === "string" && v.length > 0 ? ok(v) : txErr(code));
-const checkBig = (min?: bigint): JCheck => (v, code) => (typeof v === "bigint" && (min === undefined || v >= min) ? ok(v) : txErr(code));
+const checkBig =
+  (min?: bigint): JCheck =>
+  (v, code) =>
+    typeof v === "bigint" && (min === undefined || v >= min) ? ok(v) : txErr(code);
 const checkInteger: JCheck = (v, code) => {
-  if (typeof v === "bigint") return v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER) ? txErr(`${code}:${v.toString()}`) : ok(Number(v));
-  return Number.isSafeInteger(v) && Number(v) >= 0 ? ok(Number(v)) : txErr(`${code}:${String(v)}`);
-};
-const moneyRange = (v: unknown, min: bigint, max: bigint, label: string): Result<bigint, RuntimeError> =>
-  typeof v !== "bigint" ? txErr(`ABI_MONEY_INTEGER:${label}`) : v < min || v > max ? txErr(`ABI_MONEY_WIDTH:${label}`) : ok(v);
-const checkMoney: JCheck = (v, code) => chain(checkBig()(v, code), (b) => moneyRange(b, 0n, PB_UINT256_MAX, code));
-/** og decodeInt512 then encodeInt512: a positional pair or an exact {high, low} record, re-emitted as {high, low}. */
-const int512 = (v: unknown): Decoded => {
-  let limbs: readonly unknown[];
-  if (Array.isArray(v)) {
-    if (v.length !== 2) return txErr("ABI_MONEY_TUPLE_LENGTH:Int512");
-    if (Object.keys(v).some((k, i) => k !== String(i))) return txErr("ABI_MONEY_TUPLE_FIELDS:Int512");
-    limbs = v;
-  } else {
-    const r = boundaryRec(v);
-    if (r === null) return txErr("ABI_MONEY_TUPLE:Int512");
-    const keys = jExactKeys(r, ["high", "low"], [], "ABI_MONEY_TUPLE_FIELDS:Int512");
-    if (!keys.ok) return keys;
-    limbs = [r["high"], r["low"]];
+  switch (true) {
+    case typeof v === "bigint":
+      return v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER) ? txErr(`${code}:${v}`) : ok(Number(v));
+    case naturalSafeInt(v):
+      return ok(Number(v));
+    default:
+      return txErr(`${code}:${String(v)}`);
   }
-  return chain(moneyRange(limbs[0], PB_INT256_MIN, PB_INT256_MAX, "Int512.high"), (high) => map(moneyRange(limbs[1], 0n, PB_UINT256_MAX, "Int512.low"), (low) => {
-    const n = (high << 256n) + low;
-    return { high: n >> 256n, low: n & PB_UINT256_MAX };
-  }));
 };
-const eachOf = (v: unknown, code: string, f: (x: unknown, i: number) => Decoded): Result<readonly unknown[], RuntimeError> =>
-  Array.isArray(v) ? traverse(v.map((x, i) => [x, i] as const), ([x, i]) => f(x, i)) : txErr(code);
-/** og validateRecordArray: exact keys per record, each field checked in schema order. */
-const recordArray = (v: unknown, code: string, fields: Readonly<Record<string, JCheck>>): Result<readonly unknown[], RuntimeError> =>
-  eachOf(v, code, (raw, index) => {
-    const itemCode = `${code}_${index}`, item = boundaryRec(raw);
-    if (item === null) return txErr(itemCode);
-    return chain(jExactKeys(item, Object.keys(fields), [], `${itemCode}_FIELDS`), () => foldResult(Object.entries(fields), { ...item } as Record<string, unknown>, (acc, [key, check]) =>
-      map(check(item[key], `${itemCode}_${key.toUpperCase()}`), (x) => ({ ...acc, [key]: x }))));
+const moneyRange = (v: unknown, min: bigint, max: bigint, label: string): Result<bigint, RuntimeError> => {
+  if (typeof v !== "bigint") return txErr(`ABI_MONEY_INTEGER:${label}`);
+  return v < min || v > max ? txErr(`ABI_MONEY_WIDTH:${label}`) : ok(v);
+};
+const checkMoney: JCheck = (v, code) => chain(checkBig()(v, code), (b) => moneyRange(b, 0n, PB_UINT256_MAX, code));
+/** og decodeInt512's limbs: a positional pair or an exact {high, low} record. */
+const int512Limbs = (v: unknown): Result<readonly [unknown, unknown], RuntimeError> => {
+  if (Array.isArray(v)) {
+    switch (true) {
+      case v.length !== 2:
+        return txErr("ABI_MONEY_TUPLE_LENGTH:Int512");
+      case Object.keys(v).some((k, i) => k !== String(i)):
+        return txErr("ABI_MONEY_TUPLE_FIELDS:Int512");
+      default:
+        return ok([v[0], v[1]]);
+    }
+  }
+  const r = boundaryRec(v);
+  if (r === null) return txErr("ABI_MONEY_TUPLE:Int512");
+  return map(jExactKeys(r, ["high", "low"], [], "ABI_MONEY_TUPLE_FIELDS:Int512"), () => [r["high"], r["low"]] as const);
+};
+/** og decodeInt512 then encodeInt512: the limbs in range, re-emitted as a canonical {high, low}. */
+const int512 = (v: unknown): Decoded =>
+  chain(int512Limbs(v), ([high, low]) => {
+    const limbs = all({
+      high: moneyRange(high, PB_INT256_MIN, PB_INT256_MAX, "Int512.high"),
+      low: moneyRange(low, 0n, PB_UINT256_MAX, "Int512.low"),
+    });
+    return map(limbs, (l) => {
+      const n = (l.high << 256n) + l.low;
+      return { high: n >> 256n, low: n & PB_UINT256_MAX };
+    });
   });
+const eachOf = (
+  v: unknown,
+  code: string,
+  f: (x: unknown, i: number) => Decoded,
+): Result<readonly unknown[], RuntimeError> => (Array.isArray(v) ? traverse(v, f) : txErr(code));
+/** og validateRecordArray: exact keys per record, each field checked in schema order. */
+const recordArray = (
+  v: unknown,
+  code: string,
+  fields: Readonly<Record<string, JCheck>>,
+): Result<readonly unknown[], RuntimeError> =>
+  eachOf(v, code, (raw, index) => {
+    const itemCode = `${code}_${index}`;
+    const item = boundaryRec(raw);
+    if (item === null) return txErr(itemCode);
+    const checked = (acc: Record<string, unknown>, [key, check]: readonly [string, JCheck]) =>
+      map(check(item[key], `${itemCode}_${key.toUpperCase()}`), (x) => ({ ...acc, [key]: x }));
+    return chain(jExactKeys(item, Object.keys(fields), [], `${itemCode}_FIELDS`), () =>
+      foldResult(Object.entries(fields), { ...item } as Record<string, unknown>, checked),
+    );
+  });
+const PROOF_BODY_KEYS = [
+  "watchSeed",
+  "leftResponseSeconds",
+  "rightResponseSeconds",
+  "offdeltas",
+  "tokenIds",
+  "transformers",
+];
 /** og validateProofBody(structuredClone(value), 'J_EVENT_PROOFBODY'). */
 const proofBodyField: Field = (value) => {
-  const code = "J_EVENT_PROOFBODY", proof = boundaryRec(value);
+  const code = "J_EVENT_PROOFBODY";
+  const proof = boundaryRec(value);
   if (proof === null) return txErr(code);
-  return chain(jExactKeys(proof, ["watchSeed", "leftResponseSeconds", "rightResponseSeconds", "offdeltas", "tokenIds", "transformers"], [], `${code}_FIELDS`), () =>
-    chain(checkString(proof["watchSeed"], `${code}_WATCH_SEED`), () =>
-      chain(checkInteger(proof["leftResponseSeconds"], `${code}_LEFT_RESPONSE_SECONDS`), (leftResponseSeconds) =>
-        chain(checkInteger(proof["rightResponseSeconds"], `${code}_RIGHT_RESPONSE_SECONDS`), (rightResponseSeconds) =>
-          chain(eachOf(proof["offdeltas"], `${code}_OFFDELTAS`, int512), (offdeltas) =>
-            chain(eachOf(proof["tokenIds"], `${code}_TOKEN_IDS`, (x, i) => checkBig(0n)(x, `${code}_TOKEN_IDS_${i}`)), (tokenIds) =>
-              map(recordArray(proof["transformers"], `${code}_TRANSFORMERS`, {
-                transformerAddress: checkString, encodedBatch: checkString,
-                allowances: (x, c) => recordArray(x, c, { deltaIndex: checkBig(), rightAllowance: checkMoney, leftAllowance: checkMoney }),
-              }), (transformers) => ({ ...proof, leftResponseSeconds, rightResponseSeconds, offdeltas, tokenIds, transformers }))))))));
+  const allowances: JCheck = (x, c) =>
+    recordArray(x, c, { deltaIndex: checkBig(), rightAllowance: checkMoney, leftAllowance: checkMoney });
+  const checked = all({
+    watchSeed: checkString(proof["watchSeed"], `${code}_WATCH_SEED`),
+    leftResponseSeconds: checkInteger(proof["leftResponseSeconds"], `${code}_LEFT_RESPONSE_SECONDS`),
+    rightResponseSeconds: checkInteger(proof["rightResponseSeconds"], `${code}_RIGHT_RESPONSE_SECONDS`),
+    offdeltas: eachOf(proof["offdeltas"], `${code}_OFFDELTAS`, int512),
+    tokenIds: eachOf(proof["tokenIds"], `${code}_TOKEN_IDS`, (x, i) => checkBig(0n)(x, `${code}_TOKEN_IDS_${i}`)),
+    transformers: recordArray(proof["transformers"], `${code}_TRANSFORMERS`, {
+      transformerAddress: checkString,
+      encodedBatch: checkString,
+      allowances,
+    }),
+  });
+  return chain(jExactKeys(proof, PROOF_BODY_KEYS, [], `${code}_FIELDS`), () =>
+    map(checked, (body) => ({ ...proof, ...body })),
+  );
 };
+/** og: one J event type's payload decoder; null means the payload is not that event. */
 type Normalizer = (data: JRec) => Result<Record<string, unknown> | null, RuntimeError>;
-const fields = (schema: Readonly<Record<string, Field>>, then: (d: Record<string, unknown>, data: JRec) => Record<string, unknown> | null = (d) => d): Normalizer =>
-  (data) => map(decodeFields(data, schema), (d) => (d === null ? null : then(d, data)));
-const withBatchNonce = (d: Record<string, unknown>, data: JRec): Record<string, unknown> => { const n = nInt(data["batchNonce"]); return n === null ? d : { ...d, batchNonce: n }; };
-const positiveUint256 = (v: unknown): boolean => typeof v === "string" && BigInt(v) >= 1n && BigInt(v) <= PB_UINT256_MAX;
+/** A schema-decoded payload, then refined by the event's own rule. */
+type Refine = (d: Record<string, unknown>, data: JRec) => Record<string, unknown> | null;
+const fields =
+  (schema: Readonly<Record<string, Field>>, refine: Refine = (d) => d): Normalizer =>
+  (data) =>
+    map(decodeFields(data, schema), (d) => (d === null ? null : refine(d, data)));
+const withBatchNonce: Refine = (d, data) => {
+  const n = nInt(data["batchNonce"]);
+  return n === null ? d : { ...d, batchNonce: n };
+};
+const positiveUint256 = (v: unknown): boolean =>
+  typeof v === "string" && BigInt(v) >= 1n && BigInt(v) <= PB_UINT256_MAX;
 const entityPair = { debtor: plain(nEntity), creditor: plain(nEntity), tokenId: plain(nInt) };
-const walletList = (entry: JRec, schema: Readonly<Record<string, Field>>): Record<string, unknown> | null => { const d = decodeFields(entry, schema); return d.ok ? d.value : null; };
+/** og: every entry decoded, or null when one is not. */
+const decodedEntries = (
+  v: unknown,
+  decode: (entry: JRec) => Record<string, unknown> | null,
+): Record<string, unknown>[] | null => {
+  const decoded = (Array.isArray(v) ? v : []).map((raw) => {
+    const entry = recOf(raw);
+    return entry === null ? null : decode(entry);
+  });
+  return decoded.every((d): d is Record<string, unknown> => d !== null) ? decoded : null;
+};
+const walletList = (entry: JRec, schema: Readonly<Record<string, Field>>): Record<string, unknown> | null => {
+  const d = decodeFields(entry, schema);
+  return d.ok ? d.value : null;
+};
+const textAt = (r: Record<string, unknown>, k: string): string => String(r[k]);
+const tokenBalanceOrder = (l: Record<string, unknown>, r: Record<string, unknown>): number =>
+  asc(textAt(l, "tokenAddress"), textAt(r, "tokenAddress")) ||
+  Number(l["tokenId"] ?? -1) - Number(r["tokenId"] ?? -1) ||
+  asc(textAt(l, "balance"), textAt(r, "balance"));
+const allowanceOrder = (l: Record<string, unknown>, r: Record<string, unknown>): number =>
+  asc(textAt(l, "tokenAddress"), textAt(r, "tokenAddress")) ||
+  asc(textAt(l, "spender"), textAt(r, "spender")) ||
+  asc(textAt(l, "allowance"), textAt(r, "allowance"));
+/** og: an external wallet's token balances, each decoded, in canonical order. */
 const tokenBalances = (v: unknown): unknown => {
-  const out: Record<string, unknown>[] = [];
-  for (const raw of Array.isArray(v) ? v : []) {
-    const entry = recOf(raw), d = entry === null ? null : walletList(entry, { tokenAddress: plain(nAddress), balance: plain(nBig) });
-    if (entry === null || d === null) return null;
-    const tokenId = nInt(entry["tokenId"]);
-    out.push({ ...d, ...(tokenId !== null ? { tokenId } : {}) });
-  }
-  const text = (r: Record<string, unknown>, k: string): string => String(r[k]);
-  return out.sort((l, r) => asc(text(l, "tokenAddress"), text(r, "tokenAddress")) || (Number(l["tokenId"] ?? -1) - Number(r["tokenId"] ?? -1)) || asc(text(l, "balance"), text(r, "balance")));
+  const balances = decodedEntries(v, (entry) => {
+    const d = walletList(entry, { tokenAddress: plain(nAddress), balance: plain(nBig) });
+    return d === null ? null : { ...d, ...opt("tokenId", nInt(entry["tokenId"]) ?? undefined) };
+  });
+  return balances?.toSorted(tokenBalanceOrder) ?? null;
 };
+/** og: an external wallet's allowances, each decoded, in canonical order. */
 const walletAllowances = (v: unknown): unknown => {
-  const out: Record<string, unknown>[] = [];
-  for (const raw of Array.isArray(v) ? v : []) {
-    const entry = recOf(raw), d = entry === null ? null : walletList(entry, { tokenAddress: plain(nAddress), spender: plain(nAddress), allowance: plain(nBig) });
-    if (entry === null || d === null) return null;
-    out.push(d);
-  }
-  const text = (r: Record<string, unknown>, k: string): string => String(r[k]);
-  return out.sort((l, r) => asc(text(l, "tokenAddress"), text(r, "tokenAddress")) || asc(text(l, "spender"), text(r, "spender")) || asc(text(l, "allowance"), text(r, "allowance")));
+  const allowances = decodedEntries(v, (entry) =>
+    walletList(entry, { tokenAddress: plain(nAddress), spender: plain(nAddress), allowance: plain(nBig) }),
+  );
+  return allowances?.toSorted(allowanceOrder) ?? null;
 };
+/** og: a BoardActivated without a previous-board expiry is not an activation. */
+const expiringPreviousBoard: Refine = (d) => (BigInt(String(d["previousBoardValidUntil"])) > 0n ? d : null);
+/** og: the snapshot's native balance, when given, must decode; empty lists are left out. */
+const walletSnapshot: Refine = (d, data) => {
+  const hasNative = data["nativeBalance"] !== undefined;
+  const native = hasNative ? nBig(data["nativeBalance"]) : null;
+  if (hasNative && native === null) return null;
+  const balances = d["tokenBalances"] as readonly unknown[];
+  const allowances = d["allowances"] as readonly unknown[];
+  return {
+    entityId: d["entityId"],
+    owner: d["owner"],
+    ...opt("nativeBalance", native ?? undefined),
+    ...opt("tokenBalances", balances.length ? balances : undefined),
+    ...opt("allowances", allowances.length ? allowances : undefined),
+  };
+};
+/** og: a wallet delta moves a balance, an allowance (spender and amount together), or both; never nothing. */
+const walletDelta: Refine = (d, data) => {
+  const hasBalance = data["balanceDelta"] !== undefined;
+  const hasAllowance = data["allowance"] !== undefined || data["spender"] !== undefined;
+  const balanceDelta = hasBalance ? nBig(data["balanceDelta"]) : null;
+  const spender = data["spender"] === undefined ? null : nAddress(data["spender"]);
+  const allowance = data["allowance"] === undefined ? null : nBig(data["allowance"]);
+  switch (true) {
+    case hasBalance && balanceDelta === null:
+    case hasAllowance && (!spender || allowance === null):
+    case !hasBalance && !hasAllowance:
+      return null;
+    default:
+      return {
+        ...d,
+        ...opt("tokenId", nInt(data["tokenId"]) ?? undefined),
+        ...opt("balanceDelta", balanceDelta ?? undefined),
+        ...(hasAllowance ? { spender, allowance } : {}),
+      };
+  }
+};
+const lowerRevealer: Refine = (d) => ({ ...d, revealer: String(d["revealer"]).toLowerCase() });
+/** og: a dispute starts at a positive time and times out exactly after both response windows. */
+const timedDispute: Refine = (d, data) => {
+  const start = Number(d["disputeStartTimestamp"]);
+  const left = Number(d["leftResponseSeconds"]);
+  const right = Number(d["rightResponseSeconds"]);
+  const timed = start > 0 && left >= 0 && right >= 0 && Number(d["disputeTimeout"]) === start + left + right;
+  return timed ? withBatchNonce(d, data) : null;
+};
+/** og: exactly four ladder reveals, each a 32-byte word. */
+const fourReveals = (v: unknown): readonly string[] | null => {
+  if (!Array.isArray(v) || v.length !== 4) return null;
+  const reveals = v.map(nBytes32);
+  return reveals.every((r): r is string => r !== null) ? reveals : null;
+};
+/** og: a fill ratio in (0, 0xffff], revealed at a positive time. */
+const ladderReveal: Refine = (d) => {
+  const ratio = Number(d["fillRatio"]);
+  return ratio > 0 && ratio <= 0xffff && Number(d["revealedAt"]) > 0 ? d : null;
+};
+const processedBatch: Refine = (d) => (Number(d["nonce"]) >= 1 ? d : null);
+/** og: an EntityProvider action event names a positive nonce and a known action kind (0 or 1). */
+const actionKindAt =
+  (field: string): Refine =>
+  (d, data) => {
+    const kind = nInt(data[field]);
+    return positiveUint256(d["actionNonce"]) && (kind === 0 || kind === 1) ? { ...d, [field]: kind } : null;
+  };
 /** og EVENT_NORMALIZERS: the only J event decoding registry; an unknown type decodes to null. */
 const EVENT_NORMALIZERS: ReadonlyMap<string, Normalizer> = new Map<string, Normalizer>([
-  ["FoundationBootstrapped", fields({ recipient: plain(nAddress), boardHash: plain(nBytes32), controlTokenId: plain(nBig), dividendTokenId: plain(nBig) })],
+  [
+    "FoundationBootstrapped",
+    fields({
+      recipient: plain(nAddress),
+      boardHash: plain(nBytes32),
+      controlTokenId: plain(nBig),
+      dividendTokenId: plain(nBig),
+    }),
+  ],
   ["EntityRegistered", fields({ entityId: plain(nBytes32), entityNumber: plain(nBig), boardHash: plain(nBytes32) })],
-  ["BoardActivated", fields({ entityId: plain(nBytes32), previousBoardHash: plain(nBytes32), newBoardHash: plain(nBytes32), previousBoardValidUntil: plain(nBig) }, (d) => (BigInt(String(d["previousBoardValidUntil"])) > 0n ? d : null))],
+  [
+    "BoardActivated",
+    fields(
+      {
+        entityId: plain(nBytes32),
+        previousBoardHash: plain(nBytes32),
+        newBoardHash: plain(nBytes32),
+        previousBoardValidUntil: plain(nBig),
+      },
+      expiringPreviousBoard,
+    ),
+  ],
   ["ReserveUpdated", fields({ entity: plain(nEntity), tokenId: plain(nInt), newBalance: plain(nBig) })],
-  ["ExternalWalletSnapshot", fields({ entityId: plain(nEntity), owner: plain(nAddress), tokenBalances: plain(tokenBalances), allowances: plain(walletAllowances) }, (d, data) => {
-    const native = data["nativeBalance"] === undefined ? null : nBig(data["nativeBalance"]);
-    if (data["nativeBalance"] !== undefined && native === null) return null;
-    const balances = d["tokenBalances"] as readonly unknown[], allowances = d["allowances"] as readonly unknown[];
-    return { entityId: d["entityId"], owner: d["owner"], ...(native !== null ? { nativeBalance: native } : {}), ...(balances.length ? { tokenBalances: balances } : {}), ...(allowances.length ? { allowances } : {}) };
-  })],
-  ["ExternalWalletDelta", fields({ entityId: plain(nEntity), owner: plain(nAddress), tokenAddress: plain(nAddress) }, (d, data) => {
-    const tokenId = nInt(data["tokenId"]), balanceDelta = data["balanceDelta"] === undefined ? null : nBig(data["balanceDelta"]);
-    const spender = data["spender"] === undefined ? null : nAddress(data["spender"]), allowance = data["allowance"] === undefined ? null : nBig(data["allowance"]);
-    const hasBalance = data["balanceDelta"] !== undefined, hasAllowance = data["allowance"] !== undefined || data["spender"] !== undefined;
-    if ((hasBalance && balanceDelta === null) || (hasAllowance && (!spender || allowance === null)) || (!hasBalance && !hasAllowance)) return null;
-    return { ...d, ...(tokenId !== null ? { tokenId } : {}), ...(balanceDelta !== null ? { balanceDelta } : {}), ...(spender && allowance !== null ? { spender, allowance } : {}) };
-  })],
-  ["SecretRevealed", fields({ hashlock: plain(nString), revealer: plain(nString), secret: plain(nString) }, (d) => ({ ...d, revealer: String(d["revealer"]).toLowerCase() }))],
-  ["AccountSettled", fields({ leftEntity: plain(nEntity), rightEntity: plain(nEntity), tokenId: plain(nInt), leftReserve: plain(nBig), rightReserve: plain(nBig), collateral: plain(nBig), ondelta: plain(nBig), nonce: plain(nInt) })],
-  ["DisputeStarted", fields({
-    sender: plain(nEntity), counterentity: plain(nEntity), nonce: plain(nBig), proposerIsLeft: plain(nBool), proofbodyHash: plain(nString), watchSeed: plain(nBytes32), starterInitialArguments: plain(nHexBytes),
-    starterCounterArguments: plain(nHexBytes), starterCounterProofCommitment: plain(nBytes32), initialProofbody: proofBodyField, disputeTimeout: plain(nInt), disputeStartTimestamp: plain(nInt), leftResponseSeconds: plain(nInt), rightResponseSeconds: plain(nInt),
-  }, (d, data) => {
-    const start = Number(d["disputeStartTimestamp"]), left = Number(d["leftResponseSeconds"]), right = Number(d["rightResponseSeconds"]);
-    return start <= 0 || left < 0 || right < 0 || Number(d["disputeTimeout"]) !== start + left + right ? null : withBatchNonce(d, data);
-  })],
-  ["DisputeFinalized", fields({ sender: plain(nEntity), counterentity: plain(nEntity), initialNonce: plain(nBig), initialProofbodyHash: plain(nString), finalProofbodyHash: plain(nString), finalizationEvidenceHash: plain(nString), finalProofbody: proofBodyField }, withBatchNonce)],
-  ["CounterDisputeRegistered", fields({ sender: plain(nEntity), counterentity: plain(nEntity), nonce: plain(nInt), proposerIsLeft: plain(nBool), proofbodyHash: plain(nBytes32), counterProofbody: proofBodyField })],
-  ["HashLadderRevealRegistered", fields({
-    entity: plain(nEntity), counterpartyEntity: plain(nEntity), ladderHash: plain(nBytes32), fillRatio: plain(nInt), fullSecret: plain(nBytes32),
-    reveals: plain((v) => { if (!Array.isArray(v) || v.length !== 4) return null; const r = v.map(nBytes32); return r.some((x) => x === null) ? null : r; }), targetRole: plain(nBool), revealedAt: plain(nInt),
-  }, (d) => { const ratio = Number(d["fillRatio"]); return ratio <= 0 || ratio > 0xffff || Number(d["revealedAt"]) <= 0 ? null : d; })],
+  [
+    "ExternalWalletSnapshot",
+    fields(
+      {
+        entityId: plain(nEntity),
+        owner: plain(nAddress),
+        tokenBalances: plain(tokenBalances),
+        allowances: plain(walletAllowances),
+      },
+      walletSnapshot,
+    ),
+  ],
+  [
+    "ExternalWalletDelta",
+    fields({ entityId: plain(nEntity), owner: plain(nAddress), tokenAddress: plain(nAddress) }, walletDelta),
+  ],
+  [
+    "SecretRevealed",
+    fields({ hashlock: plain(nString), revealer: plain(nString), secret: plain(nString) }, lowerRevealer),
+  ],
+  [
+    "AccountSettled",
+    fields({
+      leftEntity: plain(nEntity),
+      rightEntity: plain(nEntity),
+      tokenId: plain(nInt),
+      leftReserve: plain(nBig),
+      rightReserve: plain(nBig),
+      collateral: plain(nBig),
+      ondelta: plain(nBig),
+      nonce: plain(nInt),
+    }),
+  ],
+  [
+    "DisputeStarted",
+    fields(
+      {
+        sender: plain(nEntity),
+        counterentity: plain(nEntity),
+        nonce: plain(nBig),
+        proposerIsLeft: plain(nBool),
+        proofbodyHash: plain(nString),
+        watchSeed: plain(nBytes32),
+        starterInitialArguments: plain(nHexBytes),
+        starterCounterArguments: plain(nHexBytes),
+        starterCounterProofCommitment: plain(nBytes32),
+        initialProofbody: proofBodyField,
+        disputeTimeout: plain(nInt),
+        disputeStartTimestamp: plain(nInt),
+        leftResponseSeconds: plain(nInt),
+        rightResponseSeconds: plain(nInt),
+      },
+      timedDispute,
+    ),
+  ],
+  [
+    "DisputeFinalized",
+    fields(
+      {
+        sender: plain(nEntity),
+        counterentity: plain(nEntity),
+        initialNonce: plain(nBig),
+        initialProofbodyHash: plain(nString),
+        finalProofbodyHash: plain(nString),
+        finalizationEvidenceHash: plain(nString),
+        finalProofbody: proofBodyField,
+      },
+      withBatchNonce,
+    ),
+  ],
+  [
+    "CounterDisputeRegistered",
+    fields({
+      sender: plain(nEntity),
+      counterentity: plain(nEntity),
+      nonce: plain(nInt),
+      proposerIsLeft: plain(nBool),
+      proofbodyHash: plain(nBytes32),
+      counterProofbody: proofBodyField,
+    }),
+  ],
+  [
+    "HashLadderRevealRegistered",
+    fields(
+      {
+        entity: plain(nEntity),
+        counterpartyEntity: plain(nEntity),
+        ladderHash: plain(nBytes32),
+        fillRatio: plain(nInt),
+        fullSecret: plain(nBytes32),
+        reveals: plain(fourReveals),
+        targetRole: plain(nBool),
+        revealedAt: plain(nInt),
+      },
+      ladderReveal,
+    ),
+  ],
   ["DebtCreated", fields({ ...entityPair, amount: plain(nBig), debtIndex: plain(nInt) })],
-  ["DebtEnforced", fields({ ...entityPair, amountPaid: plain(nBig), remainingAmount: plain(nBig), newDebtIndex: plain(nInt) })],
+  [
+    "DebtEnforced",
+    fields({ ...entityPair, amountPaid: plain(nBig), remainingAmount: plain(nBig), newDebtIndex: plain(nInt) }),
+  ],
   ["DebtForgiven", fields({ ...entityPair, amountForgiven: plain(nBig), debtIndex: plain(nInt) })],
-  ["HankoBatchProcessed", fields({ entityId: plain(nBytes32), batchHash: plain(nBytes32), nonce: plain(nInt) }, (d) => (Number(d["nonce"]) >= 1 ? d : null))],
-  ["EntityProviderActionExecuted", fields({ entityId: plain(nBytes32), actionNonce: plain(nBig), actionHash: plain(nBytes32) }, (d, data) => {
-    const actionKind = nInt(data["actionKind"]);
-    return positiveUint256(d["actionNonce"]) && (actionKind === 0 || actionKind === 1) ? { ...d, actionKind } : null;
-  })],
-  ["EntityProviderActionCancelled", fields({ entityId: plain(nBytes32), actionNonce: plain(nBig), cancelledActionHash: plain(nBytes32), cancelHash: plain(nBytes32) }, (d, data) => {
-    const cancelledActionKind = nInt(data["cancelledActionKind"]);
-    return positiveUint256(d["actionNonce"]) && (cancelledActionKind === 0 || cancelledActionKind === 1) ? { ...d, cancelledActionKind } : null;
-  })],
+  [
+    "HankoBatchProcessed",
+    fields({ entityId: plain(nBytes32), batchHash: plain(nBytes32), nonce: plain(nInt) }, processedBatch),
+  ],
+  [
+    "EntityProviderActionExecuted",
+    fields(
+      { entityId: plain(nBytes32), actionNonce: plain(nBig), actionHash: plain(nBytes32) },
+      actionKindAt("actionKind"),
+    ),
+  ],
+  [
+    "EntityProviderActionCancelled",
+    fields(
+      {
+        entityId: plain(nBytes32),
+        actionNonce: plain(nBig),
+        cancelledActionHash: plain(nBytes32),
+        cancelHash: plain(nBytes32),
+      },
+      actionKindAt("cancelledActionKind"),
+    ),
+  ],
 ]);
-type WireJEvent = { readonly type: string; readonly data: Record<string, unknown>; readonly blockNumber?: number; readonly blockHash?: string; readonly transactionHash?: string; readonly logIndex?: number; readonly eventIndex?: number };
-/** og normalizeMetadata. */
+/** A decoded J event with the EVM coordinates the watcher saw it at. */
+type WireJEvent = {
+  readonly type: string;
+  readonly data: Record<string, unknown>;
+  readonly blockNumber?: number;
+  readonly blockHash?: string;
+  readonly transactionHash?: string;
+  readonly logIndex?: number;
+  readonly eventIndex?: number;
+};
+/** og normalizeMetadata: only well-formed coordinates are kept. */
 const eventMetadata = (raw: JRec): Omit<WireJEvent, "type" | "data"> => {
-  const blockNumber = nInt(raw["blockNumber"]), logIndex = nInt(raw["logIndex"]), eventIndex = nInt(raw["eventIndex"]);
-  const text = (k: string): string | undefined => { const v = raw[k]; return typeof v === "string" && v.trim() ? v : undefined; };
-  return { ...opt("blockNumber", blockNumber ?? undefined), ...opt("blockHash", text("blockHash")), ...opt("transactionHash", text("transactionHash")),
-    ...opt("logIndex", logIndex !== null && logIndex >= 0 ? logIndex : undefined), ...opt("eventIndex", eventIndex !== null && eventIndex >= 0 ? eventIndex : undefined) };
+  const text = (k: string): string | undefined => {
+    const v = raw[k];
+    return typeof v === "string" && v.trim() ? v : undefined;
+  };
+  const index = (k: string): number | undefined => {
+    const i = nInt(raw[k]);
+    return i !== null && i >= 0 ? i : undefined;
+  };
+  return {
+    ...opt("blockNumber", nInt(raw["blockNumber"]) ?? undefined),
+    ...opt("blockHash", text("blockHash")),
+    ...opt("transactionHash", text("transactionHash")),
+    ...opt("logIndex", index("logIndex")),
+    ...opt("eventIndex", index("eventIndex")),
+  };
 };
 /** og normalizeJurisdictionEvent. */
 const normalizeJEvent = (value: unknown): Result<WireJEvent | null, RuntimeError> => {
-  const raw = recOf(value), data = raw === null ? null : recOf(raw["data"]), type = raw !== null && typeof raw["type"] === "string" ? raw["type"] : "";
+  const raw = recOf(value);
+  const data = raw === null ? null : recOf(raw["data"]);
+  const type = raw !== null && typeof raw["type"] === "string" ? raw["type"] : "";
   const normalize = EVENT_NORMALIZERS.get(type);
   if (raw === null || data === null || normalize === undefined) return ok(null);
   return map(normalize(data), (d) => (d === null ? null : { ...eventMetadata(raw), type, data: d }));
 };
 /** og requireCanonicalJurisdictionEvents: every member canonical, none filtered. */
-const canonicalJEvents = (value: unknown): Result<WireJEvent[], RuntimeError> => {
+const canonicalJEvents = (value: unknown): Result<readonly WireJEvent[], RuntimeError> => {
   if (!Array.isArray(value)) return txErr("JURISDICTION_EVENTS_ARRAY_REQUIRED");
-  const out: WireJEvent[] = [];
-  for (const [index, item] of value.entries()) {
-    const e = normalizeJEvent(item);
-    if (!e.ok) return e;
-    if (e.value === null) return txErr(`JURISDICTION_EVENT_INVALID:${index}`);
-    out.push(e.value);
-  }
-  return ok(out);
+  return traverse(value, (item, index) =>
+    chain(normalizeJEvent(item), (e) => (e === null ? txErr(`JURISDICTION_EVENT_INVALID:${index}`) : ok(e))),
+  );
 };
-const jEventPayloadKey = (e: WireJEvent): string => e.type === "AccountSettled"
-  ? ["AccountSettled", String(e.data["leftEntity"]).toLowerCase(), String(e.data["rightEntity"]).toLowerCase(), e.data["tokenId"], e.data["leftReserve"], e.data["rightReserve"], e.data["collateral"], e.data["ondelta"], e.data["nonce"]].join(":")
-  : `${e.type}:${stableJson(e.data)}`;
-const jEventKey = (e: WireJEvent): string => stableJson([e.blockNumber ?? null, e.blockHash?.toLowerCase() ?? null, e.transactionHash?.toLowerCase() ?? null, e.logIndex ?? null, e.eventIndex ?? null, jEventPayloadKey(e)]);
-const optionalIndex = (l: number | undefined, r: number | undefined): number => (l !== undefined && r !== undefined ? l - r : l !== undefined ? -1 : r !== undefined ? 1 : 0);
+/** og: a settlement is keyed by its economic fields; any other event by its whole payload. */
+const jEventPayloadKey = (e: WireJEvent): string => {
+  if (e.type !== "AccountSettled") return `${e.type}:${stableJson(e.data)}`;
+  const d = e.data;
+  const entity = (k: string): string => String(d[k]).toLowerCase();
+  return [
+    "AccountSettled",
+    entity("leftEntity"),
+    entity("rightEntity"),
+    d["tokenId"],
+    d["leftReserve"],
+    d["rightReserve"],
+    d["collateral"],
+    d["ondelta"],
+    d["nonce"],
+  ].join(":");
+};
+const jEventKey = (e: WireJEvent): string =>
+  stableJson([
+    e.blockNumber ?? null,
+    e.blockHash?.toLowerCase() ?? null,
+    e.transactionHash?.toLowerCase() ?? null,
+    e.logIndex ?? null,
+    e.eventIndex ?? null,
+    jEventPayloadKey(e),
+  ]);
+/** A known coordinate sorts before an unknown one. */
+const optionalIndex = (l: number | undefined, r: number | undefined): number => {
+  switch (true) {
+    case l !== undefined && r !== undefined:
+      return l - r;
+    case l !== undefined:
+      return -1;
+    case r !== undefined:
+      return 1;
+    default:
+      return 0;
+  }
+};
 /** og compareCanonicalJurisdictionEvents: EVM order, then transaction hash, then payload. */
 const compareJEvents = (l: WireJEvent, r: WireJEvent): number =>
-  optionalIndex(l.blockNumber, r.blockNumber) || optionalIndex(l.logIndex, r.logIndex) || optionalIndex(l.eventIndex, r.eventIndex)
-  || asc(l.transactionHash?.toLowerCase() ?? "", r.transactionHash?.toLowerCase() ?? "") || asc(jEventPayloadKey(l), jEventPayloadKey(r));
+  optionalIndex(l.blockNumber, r.blockNumber) ||
+  optionalIndex(l.logIndex, r.logIndex) ||
+  optionalIndex(l.eventIndex, r.eventIndex) ||
+  asc(l.transactionHash?.toLowerCase() ?? "", r.transactionHash?.toLowerCase() ?? "") ||
+  asc(jEventPayloadKey(l), jEventPayloadKey(r));
 /** og canonicalJurisdictionEventsHash. */
 const jEventsHash = (events: unknown): Result<string, RuntimeError> =>
-  map(canonicalJEvents(events), (es) => `0x${keccakUtf8(JSON.stringify(es.sort(compareJEvents).map(jEventKey)))}`);
-const normHex = (v: unknown): string => { const t = String(v || "").trim(); return t.startsWith("0x") ? t.toLowerCase() : t; };
-const normDecimal = (v: unknown): string => (typeof v === "bigint" ? v.toString() : typeof v === "number" ? (Number.isFinite(v) ? Math.floor(v).toString() : "") : String(v || "").trim());
-const evidenceKey = (e: JRec): string => JSON.stringify([normHex(e["sender"]), normHex(e["counterentity"]), normDecimal(e["initialNonce"]), normDecimal(e["finalNonce"]), normHex(e["initialProofbodyHash"]),
-  normHex(e["finalProofbodyHash"]), e["proposerIsLeft"], normHex(e["leftArguments"]), normHex(e["rightArguments"]), e["startedByLeft"], normHex(e["sig"])]);
-/** og normalizeDisputeFinalizationEvidence: sorted by canonical key, no duplicates. */
-const normalizeEvidence = (evidence: unknown): Result<readonly { readonly key: string; readonly entry: JRec }[], RuntimeError> => {
-  if (!Array.isArray(evidence)) return txErr("J_DISPUTE_FINALIZATION_EVIDENCE_INVALID");
-  const ordered = evidence.map((entry: JRec) => ({ key: evidenceKey(entry), entry })).sort((l, r) => asc(l.key, r.key));
-  return ordered.some((x, i) => i > 0 && ordered[i - 1]?.key === x.key) ? txErr("J_DISPUTE_FINALIZATION_EVIDENCE_DUPLICATE") : ok(ordered);
+  map(canonicalJEvents(events), (es) => `0x${keccakUtf8(JSON.stringify(es.toSorted(compareJEvents).map(jEventKey)))}`);
+const normHex = (v: unknown): string => {
+  const t = String(v || "").trim();
+  return t.startsWith("0x") ? t.toLowerCase() : t;
 };
-export type ValidatorJBlock = { readonly jurisdictionRef: string; readonly jHeight: number; readonly jBlockHash: string; readonly eventsHash: string; readonly events: readonly unknown[]; readonly disputeFinalizationEvidence?: readonly unknown[] | undefined; readonly disputeFinalizationEvidenceHash?: string | undefined };
+const normDecimal = (v: unknown): string => {
+  switch (typeof v) {
+    case "bigint":
+      return v.toString();
+    case "number":
+      return Number.isFinite(v) ? Math.floor(v).toString() : "";
+    default:
+      return String(v || "").trim();
+  }
+};
+const evidenceKey = (e: JRec): string =>
+  JSON.stringify([
+    normHex(e["sender"]),
+    normHex(e["counterentity"]),
+    normDecimal(e["initialNonce"]),
+    normDecimal(e["finalNonce"]),
+    normHex(e["initialProofbodyHash"]),
+    normHex(e["finalProofbodyHash"]),
+    e["proposerIsLeft"],
+    normHex(e["leftArguments"]),
+    normHex(e["rightArguments"]),
+    e["startedByLeft"],
+    normHex(e["sig"]),
+  ]);
+type KeyedEvidence = { readonly key: string; readonly entry: JRec };
+/** og normalizeDisputeFinalizationEvidence: sorted by canonical key, no duplicates. */
+const normalizeEvidence = (evidence: unknown): Result<readonly KeyedEvidence[], RuntimeError> => {
+  if (!Array.isArray(evidence)) return txErr("J_DISPUTE_FINALIZATION_EVIDENCE_INVALID");
+  const ordered = evidence
+    .map((entry: JRec) => ({ key: evidenceKey(entry), entry }))
+    .toSorted((l, r) => asc(l.key, r.key));
+  const duplicated = ordered.some((x, i) => i > 0 && ordered[i - 1]?.key === x.key);
+  return duplicated ? txErr("J_DISPUTE_FINALIZATION_EVIDENCE_DUPLICATE") : ok(ordered);
+};
+export type ValidatorJBlock = {
+  readonly jurisdictionRef: string;
+  readonly jHeight: number;
+  readonly jBlockHash: string;
+  readonly eventsHash: string;
+  readonly events: readonly unknown[];
+  readonly disputeFinalizationEvidence?: readonly unknown[] | undefined;
+  readonly disputeFinalizationEvidenceHash?: string | undefined;
+};
 /** og ValidatorJHistory: this validator's private J-chain view above the Entity-certified anchor. */
-export type ValidatorJHistory = { readonly jurisdictionRef: string; readonly scannedThroughHeight: number; readonly contiguousThroughHeight: number; readonly tipBlockHash: string; readonly eventBlocks: ReadonlyMap<number, ValidatorJBlock>; readonly blockHashes: ReadonlyMap<number, string> };
+export type ValidatorJHistory = {
+  readonly jurisdictionRef: string;
+  readonly scannedThroughHeight: number;
+  readonly contiguousThroughHeight: number;
+  readonly tipBlockHash: string;
+  readonly eventBlocks: ReadonlyMap<number, ValidatorJBlock>;
+  readonly blockHashes: ReadonlyMap<number, string>;
+};
 /** og normalizeEventBlock: the block's events and dispute evidence must hash to what it claims. */
 const normalizeEventBlock = (jurisdictionRef: string, raw: unknown): Result<ValidatorJBlock, RuntimeError> => {
-  const block = recOf(raw) ?? {}, jHeight = Number(block["jHeight"]);
-  if (!Number.isSafeInteger(jHeight) || jHeight <= 0) return txErr("J_HISTORY_LOCAL_BLOCK_HEIGHT_INVALID");
-  if (nText(block["jurisdictionRef"]) !== jurisdictionRef) return txErr("J_HISTORY_LOCAL_JURISDICTION_MISMATCH");
+  const block = recOf(raw) ?? {};
+  const jHeight = Number(block["jHeight"]);
   const jBlockHash = nText(block["jBlockHash"]);
-  if (!jBlockHash) return txErr("J_HISTORY_LOCAL_BLOCK_HASH_MISSING");
-  return chain(canonicalJEvents(block["events"]), (events) => chain(jEventsHash(events.sort(compareJEvents)), (eventsHash) => {
-    if (nText(block["eventsHash"]) !== eventsHash) return txErr("J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH");
-    return chain(normalizeEvidence(block["disputeFinalizationEvidence"] ?? []), (evidence) => {
-      const evidenceHash = evidence.length > 0 ? `0x${keccakUtf8(JSON.stringify(evidence.map((x) => x.key)))}` : "";
-      if (nText(block["disputeFinalizationEvidenceHash"]) !== evidenceHash) return txErr("J_HISTORY_LOCAL_EVIDENCE_HASH_MISMATCH");
-      return ok({ jurisdictionRef, jHeight, jBlockHash, eventsHash, events, ...(evidence.length > 0 ? { disputeFinalizationEvidence: evidence.map((x) => x.entry) } : {}), ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}) });
-    });
-  }));
+  switch (true) {
+    case !positiveSafeInt(jHeight):
+      return txErr("J_HISTORY_LOCAL_BLOCK_HEIGHT_INVALID");
+    case nText(block["jurisdictionRef"]) !== jurisdictionRef:
+      return txErr("J_HISTORY_LOCAL_JURISDICTION_MISMATCH");
+    case !jBlockHash:
+      return txErr("J_HISTORY_LOCAL_BLOCK_HASH_MISSING");
+  }
+  const sorted = map(canonicalJEvents(block["events"]), (es) => es.toSorted(compareJEvents));
+  return chain(sorted, (events) =>
+    chain(jEventsHash(events), (eventsHash) => {
+      if (nText(block["eventsHash"]) !== eventsHash) return txErr("J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH");
+      return chain(normalizeEvidence(block["disputeFinalizationEvidence"] ?? []), (evidence) => {
+        const evidenceHash = evidence.length > 0 ? `0x${keccakUtf8(JSON.stringify(evidence.map((x) => x.key)))}` : "";
+        if (nText(block["disputeFinalizationEvidenceHash"]) !== evidenceHash)
+          return txErr("J_HISTORY_LOCAL_EVIDENCE_HASH_MISMATCH");
+        return ok({
+          jurisdictionRef,
+          jHeight,
+          jBlockHash,
+          eventsHash,
+          events,
+          ...opt("disputeFinalizationEvidence", evidence.length > 0 ? evidence.map((x) => x.entry) : undefined),
+          ...opt("disputeFinalizationEvidenceHash", evidenceHash || undefined),
+        });
+      });
+    }),
+  );
 };
-const blockIdentity = (b: ValidatorJBlock): string => `${nText(b.jBlockHash)}:${nText(b.eventsHash)}:${nText(b.disputeFinalizationEvidenceHash)}`;
-type JAnchor = { readonly height: number; readonly hash: string; readonly jurisdictionRef: string; readonly eventHistoryRoot: string };
+const blockIdentity = (b: ValidatorJBlock): string =>
+  `${nText(b.jBlockHash)}:${nText(b.eventsHash)}:${nText(b.disputeFinalizationEvidenceHash)}`;
+/** A known hash at a height that differs from the one now claimed there. */
+const conflicts = (known: string | undefined, hash: string): boolean => Boolean(known) && nText(known) !== hash;
+/** The Entity-certified J head: the height, block hash and event-history root consensus signed. */
+type JAnchor = {
+  readonly height: number;
+  readonly hash: string;
+  readonly jurisdictionRef: string;
+  readonly eventHistoryRoot: string;
+};
 /** og getJHistoryRegistrationBaseHeight: certify EntityProvider history from its deployment block. */
 const jHistoryRegistrationBase = (config: JurisdictionConfig | undefined): number => {
   const d = Number(config?.entityProviderDeploymentBlock ?? 0);
   return !Number.isSafeInteger(d) || d <= 1 ? 0 : d - 1;
 };
 /** og getJEventJurisdictionRef: the Entity's jurisdiction stack id, or `unconfigured`. */
-const jEventJurisdictionRef = (state: EntityState): string =>
-  stackIdOf({ depositoryAddress: usableAddress(state.jurisdiction.depositoryAddress) ?? "", ...opt("chainId", stackChainId(state.jurisdiction.chainId) ?? undefined) }) || "unconfigured";
+const jEventJurisdictionRef = (state: EntityState): string => {
+  const stack = {
+    depositoryAddress: usableAddress(state.jurisdiction.depositoryAddress) ?? "",
+    ...opt("chainId", stackChainId(state.jurisdiction.chainId) ?? undefined),
+  };
+  return stackIdOf(stack) || "unconfigured";
+};
+/** og: before the first certified range, the finalized height sits at the registration base. */
+const unanchored = (state: EntityState, stateHeight: number): Result<null, RuntimeError> => {
+  const base = jHistoryRegistrationBase(state.jurisdictionConfig);
+  return stateHeight !== base
+    ? txErr(`J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${base}`)
+    : ok(null);
+};
+/** og: the certified finality record, which must agree with the finalized height. */
+const finalityAnchor = (finality: JRec, stateHeight: number): Result<JAnchor, RuntimeError> => {
+  const claimed = finality["finalizedThroughHeight"];
+  const height = Number(claimed);
+  const hash = nText(finality["tipBlockHash"]);
+  const jurisdictionRef = nText(finality["jurisdictionRef"]);
+  const eventHistoryRoot = nText(finality["eventHistoryRoot"]);
+  switch (true) {
+    case !positiveSafeInt(height) || height !== stateHeight:
+      return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(claimed)}`);
+    case !HASH_32.test(hash):
+      return txErr("J_HISTORY_FINALITY_HASH_CORRUPTION");
+    case !jurisdictionRef:
+      return txErr("J_HISTORY_FINALITY_JURISDICTION_CORRUPTION");
+    case !HASH_32.test(eventHistoryRoot):
+      return txErr("J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid");
+    default:
+      return ok({ height, hash, jurisdictionRef, eventHistoryRoot });
+  }
+};
 /** og getEntityCertifiedJAnchor: the one Entity-certified J head (null before the first certified range). */
 const certifiedJAnchor = (state: EntityState): Result<JAnchor | null, RuntimeError> => {
-  const finality = recOf(state.committed["jHistoryFinality"]), raw = state.committed["lastFinalizedJHeight"], stateHeight = Number(raw || 0);
-  if (!Number.isSafeInteger(stateHeight) || stateHeight < 0) return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${String(raw)}`);
-  if (finality === null) {
-    const base = jHistoryRegistrationBase(state.jurisdictionConfig);
-    return stateHeight !== base ? txErr(`J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${base}`) : ok(null);
+  const finality = recOf(state.committed["jHistoryFinality"]);
+  const raw = state.committed["lastFinalizedJHeight"];
+  const stateHeight = Number(raw || 0);
+  if (!naturalSafeInt(stateHeight)) return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${String(raw)}`);
+  return finality === null ? unanchored(state, stateHeight) : finalityAnchor(finality, stateHeight);
+};
+/** og: the cached history is on the anchor's jurisdiction and holds no other block at the anchor height. */
+const historyAgreesWithAnchor = (anchor: JAnchor, h: ValidatorJHistory): Result<void, RuntimeError> => {
+  const localBlock = h.eventBlocks.get(anchor.height);
+  switch (true) {
+    case nText(h.jurisdictionRef) !== anchor.jurisdictionRef:
+      return txErr("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
+    case conflicts(h.blockHashes.get(anchor.height), anchor.hash):
+    case localBlock !== undefined && nText(localBlock.jBlockHash) !== anchor.hash:
+      return txErr(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
+    default:
+      return ok(undefined);
   }
-  const height = Number(finality["finalizedThroughHeight"]);
-  if (!Number.isSafeInteger(height) || height <= 0 || height !== stateHeight) return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(finality["finalizedThroughHeight"])}`);
-  const hash = nText(finality["tipBlockHash"]), jurisdictionRef = nText(finality["jurisdictionRef"]), eventHistoryRoot = nText(finality["eventHistoryRoot"]);
-  if (!/^0x[0-9a-f]{64}$/.test(hash)) return txErr("J_HISTORY_FINALITY_HASH_CORRUPTION");
-  if (!jurisdictionRef) return txErr("J_HISTORY_FINALITY_JURISDICTION_CORRUPTION");
-  if (!/^0x[0-9a-f]{64}$/.test(eventHistoryRoot)) return txErr("J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid");
-  return ok({ height, hash, jurisdictionRef, eventHistoryRoot });
 };
 /** og assertValidatorJHistoryMatchesAnchor: a sane cached frontier that never contradicts the certified anchor. */
 const historyMatchesAnchor = (anchor: JAnchor | null, h: ValidatorJHistory | undefined): Result<void, RuntimeError> => {
   if (h === undefined) return ok(undefined);
-  const scanned = Number(h.scannedThroughHeight), contiguous = Number(h.contiguousThroughHeight);
-  if (!Number.isSafeInteger(scanned) || scanned <= 0) return txErr(`J_HISTORY_LOCAL_SCANNED_HEIGHT_CORRUPTION:${String(h.scannedThroughHeight)}`);
-  if (!Number.isSafeInteger(contiguous) || contiguous < 0 || contiguous > scanned) return txErr(`J_HISTORY_LOCAL_CONTIGUOUS_HEIGHT_CORRUPTION:${String(h.contiguousThroughHeight)}:${scanned}`);
+  const scanned = Number(h.scannedThroughHeight);
+  const contiguous = Number(h.contiguousThroughHeight);
   const tip = h.blockHashes.get(scanned);
-  if (!tip || nText(tip) !== nText(h.tipBlockHash)) return txErr(`J_HISTORY_LOCAL_TIP_CORRUPTION:${scanned}`);
-  if (anchor === null) return ok(undefined);
-  if (nText(h.jurisdictionRef) !== anchor.jurisdictionRef) return txErr("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
-  const localHash = h.blockHashes.get(anchor.height), localBlock = h.eventBlocks.get(anchor.height);
-  return (localHash && nText(localHash) !== anchor.hash) || (localBlock && nText(localBlock.jBlockHash) !== anchor.hash) ? txErr(`J_HISTORY_FINALIZED_REORG:${anchor.height}`) : ok(undefined);
+  switch (true) {
+    case !positiveSafeInt(scanned):
+      return txErr(`J_HISTORY_LOCAL_SCANNED_HEIGHT_CORRUPTION:${String(h.scannedThroughHeight)}`);
+    case !naturalSafeInt(contiguous) || contiguous > scanned:
+      return txErr(`J_HISTORY_LOCAL_CONTIGUOUS_HEIGHT_CORRUPTION:${String(h.contiguousThroughHeight)}:${scanned}`);
+    case !tip || nText(tip) !== nText(h.tipBlockHash):
+      return txErr(`J_HISTORY_LOCAL_TIP_CORRUPTION:${scanned}`);
+    default:
+      return anchor === null ? ok(undefined) : historyAgreesWithAnchor(anchor, h);
+  }
 };
-type JRangeObservation = { readonly jurisdictionRef: unknown; readonly scannedThroughHeight: unknown; readonly tipBlockHash: unknown; readonly headers?: readonly unknown[] | undefined; readonly blocks: readonly unknown[] };
-/** og recordValidatorJHistory: merge one watcher page; a different hash at a known height is a reorg, never an overwrite. */
-const recordJHistory = (current: ValidatorJHistory | undefined, input: JRangeObservation, state?: EntityState): Result<ValidatorJHistory, RuntimeError> => {
-  const jurisdictionRef = nText(input.jurisdictionRef), scannedThroughHeight = Number(input.scannedThroughHeight), tipBlockHash = nText(input.tipBlockHash);
-  if (!jurisdictionRef) return txErr("J_HISTORY_LOCAL_JURISDICTION_MISSING");
-  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= 0) return txErr("J_HISTORY_LOCAL_SCANNED_HEIGHT_INVALID");
-  if (!tipBlockHash) return txErr("J_HISTORY_LOCAL_TIP_HASH_MISSING");
-  if (current && nText(current.jurisdictionRef) !== jurisdictionRef) return txErr("J_HISTORY_LOCAL_JURISDICTION_REBIND");
-  return chain(state === undefined ? ok(null) : certifiedJAnchor(state), (anchor): Result<ValidatorJHistory, RuntimeError> => {
-    if (anchor && anchor.jurisdictionRef !== jurisdictionRef) return txErr("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
-    if (anchor && scannedThroughHeight < anchor.height) return txErr(`J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${scannedThroughHeight}:${anchor.height}`);
-    const matched = historyMatchesAnchor(anchor, current);
-    if (!matched.ok) return matched;
-    const minimum = state === undefined ? 0 : Number(state.committed["lastFinalizedJHeight"]);
-    const eventBlocks = new Map([...(current?.eventBlocks ?? [])].filter(([h]) => h > minimum));
-    const blockHashes = new Map([...(current?.blockHashes ?? [])].filter(([h]) => h >= minimum));
-    const reorg = (h: number, local: string): Result<never, RuntimeError> => txErr(anchor?.height === h ? `J_HISTORY_FINALIZED_REORG:${h}` : `${local}:${h}`);
-    if (anchor) blockHashes.set(anchor.height, anchor.hash);
-    for (const raw of input.headers ?? []) {
-      const header = recOf(raw) ?? {}, jHeight = Number(header["jHeight"]), jBlockHash = nText(header["jBlockHash"]);
-      if (!Number.isSafeInteger(jHeight) || jHeight <= 0 || jHeight > scannedThroughHeight) return txErr("J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID");
-      if (!jBlockHash) return txErr("J_HISTORY_LOCAL_HEADER_HASH_MISSING");
-      if (anchor && jHeight < anchor.height) continue;
-      if (anchor && jHeight === anchor.height && jBlockHash !== anchor.hash) return txErr(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
-      const existing = blockHashes.get(jHeight);
-      if (existing && nText(existing) !== jBlockHash) return reorg(jHeight, "J_HISTORY_LOCAL_REORG_AT_BLOCK");
-      blockHashes.set(jHeight, jBlockHash);
+type JRangeObservation = {
+  readonly jurisdictionRef: unknown;
+  readonly scannedThroughHeight: unknown;
+  readonly tipBlockHash: unknown;
+  readonly headers?: readonly unknown[] | undefined;
+  readonly blocks: readonly unknown[];
+};
+type HistoryMaps = Pick<ValidatorJHistory, "eventBlocks" | "blockHashes">;
+/** og: at the anchor height a different hash is a finalized reorg; above it, a local one. */
+const reorgAt = (anchor: JAnchor | null, height: number, local: string): Result<never, RuntimeError> =>
+  txErr(anchor?.height === height ? `J_HISTORY_FINALIZED_REORG:${height}` : `${local}:${height}`);
+/** og: what survives of the cached history: the heights above the finalized one, plus the anchor's hash. */
+const retainedHistory = (
+  current: ValidatorJHistory | undefined,
+  anchor: JAnchor | null,
+  minimum: number,
+): HistoryMaps => {
+  const eventBlocks = new Map([...(current?.eventBlocks ?? [])].filter(([h]) => h > minimum));
+  const blockHashes = new Map([...(current?.blockHashes ?? [])].filter(([h]) => h >= minimum));
+  return { eventBlocks, blockHashes: anchor === null ? blockHashes : mapSet(blockHashes, anchor.height, anchor.hash) };
+};
+/** og: one header joins the known hashes; below the anchor it is ignored, a different known hash is a reorg. */
+const withHeader =
+  (anchor: JAnchor | null, scannedThroughHeight: number) =>
+  (hashes: ReadonlyMap<number, string>, raw: unknown): Result<ReadonlyMap<number, string>, RuntimeError> => {
+    const header = recOf(raw) ?? {};
+    const jHeight = Number(header["jHeight"]);
+    const jBlockHash = nText(header["jBlockHash"]);
+    switch (true) {
+      case !positiveSafeInt(jHeight) || jHeight > scannedThroughHeight:
+        return txErr("J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID");
+      case !jBlockHash:
+        return txErr("J_HISTORY_LOCAL_HEADER_HASH_MISSING");
+      case anchor !== null && jHeight < anchor.height:
+        return ok(hashes);
+      case anchor !== null && jHeight === anchor.height && jBlockHash !== anchor.hash:
+        return txErr(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
+      case conflicts(hashes.get(jHeight), jBlockHash):
+        return reorgAt(anchor, jHeight, "J_HISTORY_LOCAL_REORG_AT_BLOCK");
+      default:
+        return ok(mapSet(hashes, jHeight, jBlockHash));
     }
-    for (const raw of input.blocks) {
-      const normalized = normalizeEventBlock(jurisdictionRef, raw);
-      if (!normalized.ok) return normalized;
-      const block = normalized.value;
-      if (block.jHeight > scannedThroughHeight) return txErr("J_HISTORY_LOCAL_BLOCK_ABOVE_SCAN_TIP");
-      if (anchor && block.jHeight <= anchor.height) {
-        if (block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) return txErr(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
-        continue;
+  };
+/** og: one event block joins the history; at or below the anchor it is ignored, a different known block is a reorg. */
+const withEventBlock =
+  (jurisdictionRef: string, anchor: JAnchor | null, scannedThroughHeight: number) =>
+  (maps: HistoryMaps, raw: unknown): Result<HistoryMaps, RuntimeError> =>
+    chain(normalizeEventBlock(jurisdictionRef, raw), (block) => {
+      const h = block.jHeight;
+      const existing = maps.eventBlocks.get(h);
+      switch (true) {
+        case h > scannedThroughHeight:
+          return txErr("J_HISTORY_LOCAL_BLOCK_ABOVE_SCAN_TIP");
+        case anchor !== null && h === anchor.height && block.jBlockHash !== anchor.hash:
+          return txErr(`J_HISTORY_FINALIZED_REORG:${h}`);
+        case anchor !== null && h <= anchor.height:
+          return ok(maps);
+        case existing !== undefined && blockIdentity(existing) !== blockIdentity(block):
+          return reorgAt(anchor, h, "J_HISTORY_LOCAL_REORG_AT_EVENT_BLOCK");
+        case conflicts(maps.blockHashes.get(h), block.jBlockHash):
+          return reorgAt(anchor, h, "J_HISTORY_LOCAL_REORG_AT_BLOCK");
+        default:
+          return ok({
+            eventBlocks: mapSet(maps.eventBlocks, h, block),
+            blockHashes: mapSet(maps.blockHashes, h, block.jBlockHash),
+          });
       }
-      const existing = eventBlocks.get(block.jHeight);
-      if (existing && blockIdentity(existing) !== blockIdentity(block)) return reorg(block.jHeight, "J_HISTORY_LOCAL_REORG_AT_EVENT_BLOCK");
-      const existingHash = blockHashes.get(block.jHeight);
-      if (existingHash && nText(existingHash) !== block.jBlockHash) return reorg(block.jHeight, "J_HISTORY_LOCAL_REORG_AT_BLOCK");
-      eventBlocks.set(block.jHeight, block);
-      blockHashes.set(block.jHeight, block.jBlockHash);
+    });
+/** og: from `from`, the known heights that run on without a gap, never past the scan tip. */
+const contiguousThrough = (from: number, scanned: number, known: ReadonlyMap<number, string>): number => {
+  const runEnd = [...known.keys()]
+    .filter((h) => h > from)
+    .toSorted((a, b) => a - b)
+    .reduce((end, h) => (h === end + 1 ? h : end), from);
+  return Math.max(from, Math.min(runEnd, scanned));
+};
+/**
+ * og recordValidatorJHistory: merge one watcher page; a different hash at a known height is a reorg, never an
+ * overwrite.
+ */
+const recordJHistory = (
+  current: ValidatorJHistory | undefined,
+  input: JRangeObservation,
+  state?: EntityState,
+): Result<ValidatorJHistory, RuntimeError> => {
+  const jurisdictionRef = nText(input.jurisdictionRef);
+  const scannedThroughHeight = Number(input.scannedThroughHeight);
+  const tipBlockHash = nText(input.tipBlockHash);
+  switch (true) {
+    case !jurisdictionRef:
+      return txErr("J_HISTORY_LOCAL_JURISDICTION_MISSING");
+    case !positiveSafeInt(scannedThroughHeight):
+      return txErr("J_HISTORY_LOCAL_SCANNED_HEIGHT_INVALID");
+    case !tipBlockHash:
+      return txErr("J_HISTORY_LOCAL_TIP_HASH_MISSING");
+    case current !== undefined && nText(current.jurisdictionRef) !== jurisdictionRef:
+      return txErr("J_HISTORY_LOCAL_JURISDICTION_REBIND");
+  }
+  const anchored = state === undefined ? ok(null) : certifiedJAnchor(state);
+  return chain(anchored, (anchor): Result<ValidatorJHistory, RuntimeError> => {
+    switch (true) {
+      case anchor !== null && anchor.jurisdictionRef !== jurisdictionRef:
+        return txErr("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
+      case anchor !== null && scannedThroughHeight < anchor.height:
+        return txErr(`J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${scannedThroughHeight}:${anchor.height}`);
     }
-    const existingTip = blockHashes.get(scannedThroughHeight);
-    if (existingTip && nText(existingTip) !== tipBlockHash) return reorg(scannedThroughHeight, "J_HISTORY_LOCAL_REORG_AT_TIP");
-    blockHashes.set(scannedThroughHeight, tipBlockHash);
-    const previous = current?.scannedThroughHeight ?? 0, scanned = Math.max(previous, scannedThroughHeight);
-    let contiguous = Math.max(current?.contiguousThroughHeight ?? minimum, minimum);
-    while (contiguous < scanned && blockHashes.has(contiguous + 1)) contiguous += 1;
-    const recorded: ValidatorJHistory = { jurisdictionRef, scannedThroughHeight: scanned, contiguousThroughHeight: contiguous, tipBlockHash: scannedThroughHeight >= previous || current === undefined ? tipBlockHash : current.tipBlockHash, eventBlocks, blockHashes };
-    return map(historyMatchesAnchor(anchor, recorded), () => recorded);
+    const minimum = state === undefined ? 0 : Number(state.committed["lastFinalizedJHeight"]);
+    const merged = chain(historyMatchesAnchor(anchor, current), () => {
+      const retained = retainedHistory(current, anchor, minimum);
+      const headed = foldResult(input.headers ?? [], retained.blockHashes, withHeader(anchor, scannedThroughHeight));
+      return chain(headed, (blockHashes) =>
+        foldResult(
+          input.blocks,
+          { eventBlocks: retained.eventBlocks, blockHashes },
+          withEventBlock(jurisdictionRef, anchor, scannedThroughHeight),
+        ),
+      );
+    });
+    return chain(merged, (maps) => {
+      if (conflicts(maps.blockHashes.get(scannedThroughHeight), tipBlockHash))
+        return reorgAt(anchor, scannedThroughHeight, "J_HISTORY_LOCAL_REORG_AT_TIP");
+      const blockHashes = mapSet(maps.blockHashes, scannedThroughHeight, tipBlockHash);
+      const previous = current?.scannedThroughHeight ?? 0;
+      const scanned = Math.max(previous, scannedThroughHeight);
+      const from = Math.max(current?.contiguousThroughHeight ?? minimum, minimum);
+      const recorded: ValidatorJHistory = {
+        jurisdictionRef,
+        scannedThroughHeight: scanned,
+        contiguousThroughHeight: contiguousThrough(from, scanned, blockHashes),
+        tipBlockHash: scannedThroughHeight >= previous || current === undefined ? tipBlockHash : current.tipBlockHash,
+        eventBlocks: maps.eventBlocks,
+        blockHashes,
+      };
+      return map(historyMatchesAnchor(anchor, recorded), () => recorded);
+    });
   });
 };
-/** og rewindValidatorJHistory: drop the validator-private suffix and resume from the Entity-certified head (none before one). */
-const rewindJHistoryTo = (state: EntityState, h: ValidatorJHistory | undefined): Result<ValidatorJHistory | undefined, RuntimeError> => {
+/** The history reset to exactly the certified anchor. */
+const anchoredHistory = (jurisdictionRef: string, anchor: JAnchor): ValidatorJHistory => ({
+  jurisdictionRef: nText(jurisdictionRef),
+  scannedThroughHeight: anchor.height,
+  contiguousThroughHeight: anchor.height,
+  tipBlockHash: anchor.hash,
+  eventBlocks: new Map(),
+  blockHashes: new Map([[anchor.height, anchor.hash]]),
+});
+/**
+ * og rewindValidatorJHistory: drop the validator-private suffix and resume from the Entity-certified head (none before
+ * one).
+ */
+const rewindJHistoryTo = (
+  state: EntityState,
+  h: ValidatorJHistory | undefined,
+): Result<ValidatorJHistory | undefined, RuntimeError> => {
   if (h === undefined) return ok(undefined);
   return chain(certifiedJAnchor(state), (anchor) => {
     if (anchor === null) return ok(undefined);
-    const local = h.blockHashes.get(anchor.height);
-    if (local && nText(local) !== anchor.hash) return txErr(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
-    return ok({ jurisdictionRef: nText(h.jurisdictionRef), scannedThroughHeight: anchor.height, contiguousThroughHeight: anchor.height, tipBlockHash: anchor.hash, eventBlocks: new Map(), blockHashes: new Map([[anchor.height, anchor.hash]]) });
+    return conflicts(h.blockHashes.get(anchor.height), anchor.hash)
+      ? txErr(`J_HISTORY_FINALIZED_REORG:${anchor.height}`)
+      : ok(anchoredHistory(h.jurisdictionRef, anchor));
   });
 };
 /** og findExistingReplicaCaseInsensitive: the replica keyed exactly `entity:signer`, ignoring case. */
-const replicaByKeyCI = (rt: Runtime, entityId: string, signerId: string): readonly [string, EntityReplica] | undefined =>
-  [...rt.entities].find(([key]) => { const [e = "", s = ""] = key.split(":"); return e.toLowerCase() === entityId && s.toLowerCase() === signerId; });
+const replicaByKeyCI = (
+  rt: Runtime,
+  entityId: string,
+  signerId: string,
+): readonly [string, EntityReplica] | undefined =>
+  [...rt.entities].find(([key]) => {
+    const [entity = "", signer = ""] = key.split(":");
+    return entity.toLowerCase() === entityId && signer.toLowerCase() === signerId;
+  });
+type ObserveJRange = Extract<RuntimeTx, { type: "observeJRange" }>["data"];
 /**
- * og observeJRangeRuntimeTx: a watcher page for this validator's Entity. A page behind the certified anchor is validated and dropped;
- * otherwise it is merged into the validator's local J history.
+ * og observeJRangeRuntimeTx: a watcher page for this validator's Entity. A page behind the certified anchor is
+ * validated and dropped; otherwise it is merged into the validator's local J history.
  */
-const observeJRange = (rt: Runtime, d: Extract<RuntimeTx, { type: "observeJRange" }>["data"]): Result<Runtime, RuntimeError> => {
-  const entityId = String(d.entityId || "").trim().toLowerCase(), signerId = String(d.signerId || "").trim().toLowerCase(), match = replicaByKeyCI(rt, entityId, signerId);
+const observeJRange = (rt: Runtime, d: ObserveJRange): Result<Runtime, RuntimeError> => {
+  const entityId = lower(d.entityId);
+  const signerId = lower(d.signerId);
+  const match = replicaByKeyCI(rt, entityId, signerId);
   if (match === undefined) return txErr(`J_HISTORY_LOCAL_REPLICA_MISSING:${entityId}:${signerId}`);
-  const [key, replica] = match, expected = jEventJurisdictionRef(replica.state), observed = nText(d.jurisdictionRef);
-  if (observed !== expected) return txErr(`J_HISTORY_OBSERVATION_JURISDICTION_MISMATCH:${entityId}:${signerId}:expected=${expected}:observed=${observed || "missing"}`);
-  const observation: JRangeObservation = { jurisdictionRef: d.jurisdictionRef, scannedThroughHeight: d.scannedThroughHeight, tipBlockHash: d.tipBlockHash, ...(d.headers ? { headers: d.headers } : {}), blocks: d.blocks };
+  const [key, replica] = match;
+  const expected = jEventJurisdictionRef(replica.state);
+  const observed = nText(d.jurisdictionRef);
+  if (observed !== expected) {
+    const where = `${entityId}:${signerId}:expected=${expected}:observed=${observed || "missing"}`;
+    return txErr(`J_HISTORY_OBSERVATION_JURISDICTION_MISMATCH:${where}`);
+  }
+  const observation: JRangeObservation = {
+    jurisdictionRef: d.jurisdictionRef,
+    scannedThroughHeight: d.scannedThroughHeight,
+    tipBlockHash: d.tipBlockHash,
+    ...opt("headers", d.headers || undefined),
+    blocks: d.blocks,
+  };
   const history = localOf(rt, key).jHistory;
   return chain(certifiedJAnchor(replica.state), (anchor) => {
-    if (anchor && Number(observation.scannedThroughHeight) < anchor.height)
+    const behind = anchor !== null && Number(observation.scannedThroughHeight) < anchor.height;
+    if (behind)
       return chain(recordJHistory(undefined, observation), () => map(historyMatchesAnchor(anchor, history), () => rt));
     return map(recordJHistory(history, observation, replica.state), (jHistory) => withLocal(rt, key, { jHistory }));
   });
 };
-/** og rewindJHistoryRuntimeTx: never below the certified anchor, never into a range this validator's locked frame signed (a precommit cannot be revoked). */
-const rewindJHistory = (rt: Runtime, d: Extract<RuntimeTx, { type: "rewindJHistory" }>["data"]): Result<Runtime, RuntimeError> => {
-  const entityId = String(d.entityId || "").trim().toLowerCase(), signerId = String(d.signerId || "").trim().toLowerCase(), match = replicaByKeyCI(rt, entityId, signerId);
+/** og: a J range the locked frame signed covers this height. */
+const lockedFrameCovers = (frame: LockedEntity["frame"], height: number): boolean =>
+  frame.txs.some(
+    (tx) =>
+      tx.type === "j_event" &&
+      height > Number(tx.data["baseHeight"]) &&
+      height <= Number(tx.data["scannedThroughHeight"]),
+  );
+type RewindJHistory = Extract<RuntimeTx, { type: "rewindJHistory" }>["data"];
+/**
+ * og rewindJHistoryRuntimeTx: never below the certified anchor, never into a range this validator's locked frame signed
+ * (a precommit cannot be revoked).
+ */
+const rewindJHistory = (rt: Runtime, d: RewindJHistory): Result<Runtime, RuntimeError> => {
+  const entityId = lower(d.entityId);
+  const signerId = lower(d.signerId);
+  const match = replicaByKeyCI(rt, entityId, signerId);
   if (match === undefined) return txErr(`J_HISTORY_LOCAL_REPLICA_MISSING:${entityId}:${signerId}`);
-  const [key, replica] = match, history = localOf(rt, key).jHistory;
-  if (nText(history?.jurisdictionRef) !== nText(d.jurisdictionRef)) return txErr(`J_HISTORY_REWIND_JURISDICTION_MISMATCH:${entityId}:${signerId}`);
+  const [key, replica] = match;
+  const history = localOf(rt, key).jHistory;
+  if (nText(history?.jurisdictionRef) !== nText(d.jurisdictionRef))
+    return txErr(`J_HISTORY_REWIND_JURISDICTION_MISMATCH:${entityId}:${signerId}`);
+  const height = d.conflictingHeight;
   return chain(certifiedJAnchor(replica.state), (anchor) => {
-    if (anchor && d.conflictingHeight <= anchor.height) return txErr(`J_HISTORY_FINALIZED_REORG:${d.conflictingHeight}`);
-    const signed = replica._tag === "locked" && replica.frame.txs.some((tx) => tx.type === "j_event" && d.conflictingHeight > Number(tx.data["baseHeight"]) && d.conflictingHeight <= Number(tx.data["scannedThroughHeight"]));
-    if (signed && replica._tag === "locked") return txErr(`J_HISTORY_SIGNED_LOCK_REORG:entity=${entityId}:signer=${signerId}:frameHeight=${replica.frame.height}:frameHash=${unwrapOr(hashEntityFrame(replica.frame), () => "")}:jHeight=${d.conflictingHeight}`);
+    if (anchor !== null && height <= anchor.height) return txErr(`J_HISTORY_FINALIZED_REORG:${height}`);
+    if (replica._tag === "locked" && lockedFrameCovers(replica.frame, height)) {
+      const frameHash = unwrapOr(hashEntityFrame(replica.frame), () => "");
+      const frame = `frameHeight=${replica.frame.height}:frameHash=${frameHash}`;
+      return txErr(`J_HISTORY_SIGNED_LOCK_REORG:entity=${entityId}:signer=${signerId}:${frame}:jHeight=${height}`);
+    }
     return map(rewindJHistoryTo(replica.state, history), (jHistory) => withLocal(rt, key, { jHistory }));
   });
 };
