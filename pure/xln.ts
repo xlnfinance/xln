@@ -24601,220 +24601,530 @@ export const crossRegister = (v: CrossEntityView, raw: CrossRoute): CrossStep =>
       : chain(mergeCrossRoute(existing, route), record),
   );
 };
-/** og assertRuntimeOutputAuthorization for the rewrite's tx kinds: self control continuations, or the two sibling edges a committed route names. */
-/** og requireSemanticRoute: the stored route, else the supplied one, for exactly this order; both present must share a route hash. */
-const semanticRouteError = (state: EntityState, orderId: string, supplied?: CrossRoute | undefined): { readonly route: CrossRoute } | { readonly error: string } => {
-  const id = String(orderId ?? ""), stored = state.crossJurisdictionSwaps?.get(id), route = stored ?? supplied;
-  if (route === undefined || route.orderId !== id) return { error: `RUNTIME_OUTPUT_ROUTE_MISSING:${id || "missing"}` };
-  if (stored !== undefined && supplied !== undefined) {
-    const s = trimLower(stored.routeHash), t = trimLower(supplied.routeHash);
-    if (!s || !t || s !== t) return { error: `RUNTIME_OUTPUT_ROUTE_HASH_MISMATCH:${id}:${t || "missing"}:${s || "missing"}` };
-  }
-  return { route };
+/**
+ * og requireSemanticRoute: the stored route, else the supplied one, for exactly this order; both present must share a
+ * route hash.
+ */
+const semanticRoute = (
+  state: EntityState,
+  orderId: string,
+  supplied?: CrossRoute | undefined,
+): Result<CrossRoute, string> => {
+  const id = String(orderId ?? "");
+  const stored = state.crossJurisdictionSwaps?.get(id);
+  const route = stored ?? supplied;
+  if (route === undefined || route.orderId !== id) return err(`RUNTIME_OUTPUT_ROUTE_MISSING:${id || "missing"}`);
+  if (stored === undefined || supplied === undefined) return ok(route);
+  const s = trimLower(stored.routeHash);
+  const t = trimLower(supplied.routeHash);
+  return s && t && s === t
+    ? ok(route)
+    : err(`RUNTIME_OUTPUT_ROUTE_HASH_MISMATCH:${id}:${t || "missing"}:${s || "missing"}`);
 };
 /** og routeBookOwner (auth/authorization.ts). */
-const authBookOwner = (route: CrossRoute): string => trimLower(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
-/** og selfRuntimeContinuationTxTypes this port carries: exact next-frame work a certified frame emitted back to its own Entity. */
-const SELF_CONTINUATIONS: ReadonlySet<string> = new Set(["orderbookSweepCrossJurisdiction", "prepareDispute", "requestCrossJurisdictionClear"]);
+const authBookOwner = (route: CrossRoute): string =>
+  trimLower(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
 /**
- * og assertRuntimeOutputAuthorization: a certified command lane between sibling hubs of one cross-j route (or an Entity's own continuation). The
- * semantic route comes from this Entity's stored route for the book-lifecycle variants that name only an order, else from the tx's own route.
+ * og selfRuntimeContinuationTxTypes this port carries: exact next-frame work a certified frame emitted back to its own
+ * Entity.
+ */
+const SELF_CONTINUATIONS: ReadonlySet<string> = new Set([
+  "orderbookSweepCrossJurisdiction",
+  "prepareDispute",
+  "requestCrossJurisdictionClear",
+]);
+/**
+ * One certified runtime output's edge, normalized: who sent it, under which signer, to whom, and the receiver's state.
+ */
+type OutputLane = {
+  readonly state: EntityState;
+  readonly source: string;
+  readonly signer: string;
+  readonly target: string;
+};
+const sourceIssue = (lane: OutputLane, type: string, allowed: readonly unknown[]): string | undefined => {
+  const senders = new Set(allowed.map(trimLower).filter(Boolean));
+  const named = [...senders].join(",") || "none";
+  return senders.has(lane.source)
+    ? undefined
+    : `RUNTIME_OUTPUT_SEMANTIC_SOURCE_MISMATCH:${type}:${lane.source || "missing"}:${named}`;
+};
+const targetIssue = (lane: OutputLane, type: string, expected: unknown): string | undefined => {
+  const e = trimLower(expected);
+  return e && lane.target === e
+    ? undefined
+    : `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${type}:${lane.target || "missing"}:${e || "missing"}`;
+};
+/** The sender is one the variant allows and the receiver the one it expects. */
+const edgeIssue = (lane: OutputLane, type: string, from: readonly unknown[], to: unknown): string | undefined =>
+  sourceIssue(lane, type, from) ?? targetIssue(lane, type, to);
+const fieldIssue = (code: string, claimed: string, committed: string): string | undefined =>
+  trimLower(claimed) !== trimLower(committed) ? `${code}:${claimed}:${committed}` : undefined;
+const onSemanticRoute = (
+  lane: OutputLane,
+  orderId: string,
+  supplied: CrossRoute | undefined,
+  check: (route: CrossRoute) => string | undefined,
+): string | undefined => {
+  const r = semanticRoute(lane.state, orderId, supplied);
+  return r.ok ? check(r.value) : r.error;
+};
+/** The route id a cross-j recovery tx must name, else the refusal for its absence. */
+const recoveryRouteId = (routeId: string | undefined, missing: string): Result<string, string> => {
+  const id = String(routeId ?? "");
+  return id ? ok(id) : err(missing);
+};
+/** og's salvage edge: between the source user and the target user, in either direction. */
+const salvageEdgeIssue = (lane: OutputLane, type: string, r: CrossRoute): string | undefined => {
+  switch (lane.target) {
+    case trimLower(r.target.counterpartyEntityId):
+      return edgeIssue(lane, type, [r.source.entityId], r.target.counterpartyEntityId);
+    case trimLower(r.source.entityId):
+      return edgeIssue(lane, type, [r.target.counterpartyEntityId], r.source.entityId);
+    default:
+      return `RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID:${lane.target}`;
+  }
+};
+type OutputAuthority<T extends EntityTx> = (lane: OutputLane, tx: T, route: CrossRoute) => string | undefined;
+/**
+ * The sibling-edge authority of every tx a certified runtime output may carry, keyed by tx type (og
+ * assertRuntimeBookOutputAuthority, assertRuntimeBookLifecycleAuthority, assertRuntimeCrossJRecoveryAuthority and the
+ * setup variants). The book lifecycle variants that name only an order read this Entity's stored route; the rest check
+ * the route the tx carries. Any other variant is forbidden.
+ */
+const OUTPUT_AUTHORITY: { readonly [K in EntityTx["type"]]?: OutputAuthority<Extract<EntityTx, { type: K }>> } = {
+  admitCrossJurisdictionBookOrder: (lane, tx) =>
+    edgeIssue(lane, tx.type, [tx.data.route.source.counterpartyEntityId], authBookOwner(tx.data.route)),
+  crossJurisdictionFillNotice: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.orderId, undefined, (r) =>
+      lane.target !== trimLower(r.source.counterpartyEntityId)
+        ? `RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${lane.target}`
+        : sourceIssue(lane, tx.type, [authBookOwner(r)]),
+    ),
+  removeCrossJurisdictionBookOrder: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.orderId, tx.data.route, (r) =>
+      firstDefined(
+        () => fieldIssue("RUNTIME_OUTPUT_BOOK_SOURCE_ENTITY_MISMATCH", tx.data.sourceEntityId, r.source.entityId),
+        () => edgeIssue(lane, tx.type, [r.source.counterpartyEntityId], authBookOwner(r)),
+      ),
+    ),
+  crossJurisdictionBookOrderRemoved: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.orderId, tx.data.route, (r) =>
+      firstDefined(
+        () => fieldIssue("RUNTIME_OUTPUT_BOOK_REMOVAL_SOURCE_MISMATCH", tx.data.sourceEntityId, r.source.entityId),
+        () => fieldIssue("RUNTIME_OUTPUT_BOOK_REMOVAL_ACCOUNT_MISMATCH", tx.data.sourceAccountId, r.source.entityId),
+        () => edgeIssue(lane, tx.type, [authBookOwner(r)], r.source.counterpartyEntityId),
+      ),
+    ),
+  crossPullClose: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.proof.orderId, tx.data.route, (r) => {
+      const counterparty = tx.data.counterpartyEntityId;
+      const expected = r.target.counterpartyEntityId;
+      return (
+        edgeIssue(lane, tx.type, [r.source.counterpartyEntityId], r.target.entityId) ??
+        (entityRef(counterparty) !== entityRef(expected)
+          ? `RUNTIME_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:${counterparty}:${expected}`
+          : undefined)
+      );
+    }),
+  requestCrossJurisdictionClear: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.orderId, tx.data.route, (r) => {
+      const hubs = [r.source.counterpartyEntityId, r.target.entityId, authBookOwner(r)];
+      return edgeIssue(lane, tx.type, hubs, r.source.counterpartyEntityId);
+    }),
+  crossJurisdictionSalvage: (lane, tx) =>
+    onSemanticRoute(lane, tx.data.routeId, undefined, (r) =>
+      firstDefined(
+        () => fieldIssue("RUNTIME_OUTPUT_SALVAGE_SOURCE_ENTITY_MISMATCH", tx.data.sourceEntityId, r.source.entityId),
+        () =>
+          fieldIssue(
+            "RUNTIME_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH",
+            tx.data.sourceCounterpartyEntityId,
+            r.source.counterpartyEntityId,
+          ),
+        () => salvageEdgeIssue(lane, tx.type, r),
+      ),
+    ),
+  resolveHtlcLock: (lane, tx) => {
+    const routeId = recoveryRouteId(tx.data.crossJurisdictionRouteId, "RUNTIME_OUTPUT_CROSS_J_HTLC_ROUTE_REQUIRED");
+    if (!routeId.ok) return routeId.error;
+    return onSemanticRoute(lane, routeId.value, undefined, (r) =>
+      firstDefined(
+        () => edgeIssue(lane, tx.type, [r.source.entityId], r.target.counterpartyEntityId),
+        () =>
+          trimLower(tx.data.counterpartyEntityId) !== trimLower(r.target.entityId)
+            ? `RUNTIME_OUTPUT_CROSS_J_HTLC_COUNTERPARTY_MISMATCH:${routeId.value}`
+            : undefined,
+      ),
+    );
+  },
+  // og assertRuntimeCrossJSourceDispute: only the route's source dispute, while the route is live and prepared
+  disputeStart: (lane, tx) => {
+    const routeId = recoveryRouteId(tx.data.crossJurisdictionRouteId, "RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_REQUIRED");
+    if (!routeId.ok) return routeId.error;
+    const extra = Object.keys(tx.data).some((k) => k !== "counterpartyEntityId" && k !== "crossJurisdictionRouteId");
+    return onSemanticRoute(lane, routeId.value, undefined, (r) =>
+      firstDefined(
+        () => (extra ? "RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN" : undefined),
+        () =>
+          isCrossTerminal(r.status) || !r.targetPull
+            ? `RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${r.orderId}:${r.status}`
+            : undefined,
+        () =>
+          fieldIssue(
+            "RUNTIME_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH",
+            tx.data.counterpartyEntityId,
+            r.source.counterpartyEntityId,
+          ),
+        () => edgeIssue(lane, tx.type, [r.target.counterpartyEntityId], r.source.entityId),
+      ),
+    );
+  },
+  prepareCrossJurisdictionSwap: (lane, tx, route) =>
+    edgeIssue(lane, tx.type, [route.source.entityId], route.source.counterpartyEntityId),
+  registerCrossJurisdictionSwap: (lane, tx, route) => {
+    const sourceHub = trimLower(route.source.counterpartyEntityId);
+    const targetHub = trimLower(route.target.entityId);
+    return (
+      sourceIssue(lane, tx.type, [route.source.counterpartyEntityId]) ??
+      (lane.target !== sourceHub && lane.target !== targetHub
+        ? `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${lane.target}:${sourceHub},${targetHub}`
+        : undefined)
+    );
+  },
+};
+const outputAuthority = (tx: EntityTx): OutputAuthority<EntityTx> | undefined =>
+  OUTPUT_AUTHORITY[tx.type] as OutputAuthority<EntityTx> | undefined;
+/** og runtimeOutputRouteId: the order an order-naming tx points at. */
+const outputRouteId = (tx: EntityTx): string | undefined => {
+  switch (tx.type) {
+    case "crossJurisdictionFillNotice":
+    case "removeCrossJurisdictionBookOrder":
+    case "requestCrossJurisdictionClear":
+      return tx.data.orderId;
+    case "crossJurisdictionSalvage":
+      return tx.data.routeId;
+    case "resolveHtlcLock":
+    case "disputeStart":
+      return tx.data.crossJurisdictionRouteId;
+    default:
+      return undefined;
+  }
+};
+/** og runtimeOutputSemanticRoute: the stored route an order-naming tx points at, else the route the tx carries. */
+const outputRoute = (state: EntityState, tx: EntityTx): CrossRoute | undefined => {
+  const routeId = outputRouteId(tx);
+  if (routeId) return state.crossJurisdictionSwaps?.get(routeId);
+  const data: unknown = "data" in tx ? tx.data : undefined;
+  return data !== null && typeof data === "object" && "route" in data
+    ? (data as { readonly route?: CrossRoute }).route
+    : undefined;
+};
+/** og's sibling edge: the route names both ends, and the sender signs as the board signer the route commits for it. */
+const siblingIssue = (lane: OutputLane, type: string, route: CrossRoute | undefined): string | undefined => {
+  const { source, signer, target } = lane;
+  const named = (r: CrossRoute): boolean => isCrossRouteParticipant(r, source) && isCrossRouteParticipant(r, target);
+  if (route === undefined || typeof route !== "object" || !named(route)) {
+    return `RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${type}:${source}:${target}`;
+  }
+  const expected = crossRouteSigner(route, source);
+  return expected && expected === signer
+    ? undefined
+    : `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${signer}:${expected || "missing"}`;
+};
+/** One tx between sibling hubs: never a nested protocol tx, on a sibling edge, within its variant's authority. */
+const siblingOutputIssue = (lane: OutputLane, tx: EntityTx): string | undefined => {
+  if (isProtocolTx(tx)) return `RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`;
+  const route = outputRoute(lane.state, tx);
+  const edge = siblingIssue(lane, tx.type, route);
+  if (edge !== undefined || route === undefined) return edge;
+  const authority = outputAuthority(tx);
+  return authority === undefined ? `RUNTIME_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:${tx.type}` : authority(lane, tx, route);
+};
+/**
+ * og assertSelfRuntimeContinuations: the current board's own continuation; a clear request must also sit on a stored
+ * route it signs for.
+ */
+const selfContinuationIssue = (lane: OutputLane, txs: readonly EntityTx[]): string | undefined => {
+  const board = new Set(rootConfig(lane.state).validators);
+  if (!board.has(lane.signer))
+    return `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${lane.source}:${lane.signer}:current-board`;
+  const clearIssue = (tx: EntityTx): string | undefined => {
+    if (tx.type !== "requestCrossJurisdictionClear") return undefined;
+    const route = lane.state.crossJurisdictionSwaps?.get(tx.data.orderId);
+    return siblingIssue(lane, tx.type, route) ?? outputAuthority(tx)?.(lane, tx, route as CrossRoute);
+  };
+  return firstDefined(...txs.map((tx) => () => clearIssue(tx)));
+};
+/**
+ * og assertRuntimeOutputAuthorization: a certified command lane between sibling hubs of one cross-j route (or an
+ * Entity's own continuation). An Entity may send itself only continuations, or registrations of routes it is the source
+ * hub of.
  */
 export const runtimeOutputAuthError = (state: EntityState, o: RuntimeOutputData): string | null => {
-  const source = trimLower(o.sourceEntityId), signer = trimLower(o.sourceSignerId), target = trimLower(o.targetEntityId);
-  if (!source || !signer || !target || target !== trimLower(state.id)) return `RUNTIME_OUTPUT_TARGET_MISMATCH:${target || "missing"}:${state.id}`;
-  if (o.entityTxs.length === 0) return "RUNTIME_OUTPUT_TXS_MISSING";
-  const srcOf = (type: string, allowed: readonly unknown[]): string | null => {
-    const set = new Set(allowed.map(trimLower).filter(Boolean));
-    return set.has(source) ? null : `RUNTIME_OUTPUT_SEMANTIC_SOURCE_MISMATCH:${type}:${source || "missing"}:${[...set].join(",") || "none"}`;
+  const lane: OutputLane = {
+    state,
+    source: trimLower(o.sourceEntityId),
+    signer: trimLower(o.sourceSignerId),
+    target: trimLower(o.targetEntityId),
   };
-  const tgtOf = (type: string, expected: unknown): string | null => { const e = trimLower(expected); return e && target === e ? null : `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${type}:${target || "missing"}:${e || "missing"}`; };
-  /** og assertRuntimeBookOutputAuthority + assertRuntimeBookLifecycleAuthority for the book variants; undefined for the rest. */
-  const bookAuthority = (tx: EntityTx): string | null | undefined => {
-    switch (tx.type) {
-      case "admitCrossJurisdictionBookOrder": return srcOf(tx.type, [tx.data.route.source.counterpartyEntityId]) ?? tgtOf(tx.type, authBookOwner(tx.data.route));
-      case "crossJurisdictionFillNotice": {
-        const r = semanticRouteError(state, tx.data.orderId);
-        if ("error" in r) return r.error;
-        if (target !== trimLower(r.route.source.counterpartyEntityId)) return `RUNTIME_OUTPUT_CROSS_J_PROGRESS_TARGET_INVALID:${target}`;
-        return srcOf(tx.type, [authBookOwner(r.route)]);
-      }
-      case "removeCrossJurisdictionBookOrder": {
-        const r = semanticRouteError(state, tx.data.orderId, tx.data.route);
-        if ("error" in r) return r.error;
-        if (trimLower(tx.data.sourceEntityId) !== trimLower(r.route.source.entityId)) return `RUNTIME_OUTPUT_BOOK_SOURCE_ENTITY_MISMATCH:${tx.data.sourceEntityId}:${r.route.source.entityId}`;
-        return srcOf(tx.type, [r.route.source.counterpartyEntityId]) ?? tgtOf(tx.type, authBookOwner(r.route));
-      }
-      case "crossJurisdictionBookOrderRemoved": {
-        const r = semanticRouteError(state, tx.data.orderId, tx.data.route);
-        if ("error" in r) return r.error;
-        if (trimLower(tx.data.sourceEntityId) !== trimLower(r.route.source.entityId)) return `RUNTIME_OUTPUT_BOOK_REMOVAL_SOURCE_MISMATCH:${tx.data.sourceEntityId}:${r.route.source.entityId}`;
-        if (trimLower(tx.data.sourceAccountId) !== trimLower(r.route.source.entityId)) return `RUNTIME_OUTPUT_BOOK_REMOVAL_ACCOUNT_MISMATCH:${tx.data.sourceAccountId}:${r.route.source.entityId}`;
-        return srcOf(tx.type, [authBookOwner(r.route)]) ?? tgtOf(tx.type, r.route.source.counterpartyEntityId);
-      }
-      case "crossPullClose": {
-        const r = semanticRouteError(state, tx.data.proof.orderId, tx.data.route);
-        if ("error" in r) return r.error;
-        const e = srcOf(tx.type, [r.route.source.counterpartyEntityId]) ?? tgtOf(tx.type, r.route.target.entityId);
-        if (e) return e;
-        return entityRef(tx.data.counterpartyEntityId) !== entityRef(r.route.target.counterpartyEntityId) ? `RUNTIME_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:${tx.data.counterpartyEntityId}:${r.route.target.counterpartyEntityId}` : null;
-      }
-      case "requestCrossJurisdictionClear": {
-        const r = semanticRouteError(state, tx.data.orderId, tx.data.route);
-        if ("error" in r) return r.error;
-        return srcOf(tx.type, [r.route.source.counterpartyEntityId, r.route.target.entityId, authBookOwner(r.route)]) ?? tgtOf(tx.type, r.route.source.counterpartyEntityId);
-      }
-      default: return undefined;
-    }
-  };
-  /** og assertRuntimeCrossJRecoveryAuthority (salvage, cross-j HTLC resolve, assertRuntimeCrossJSourceDispute); undefined for the rest. */
-  const recoveryAuthority = (tx: EntityTx): string | null | undefined => {
-    switch (tx.type) {
-      case "crossJurisdictionSalvage": {
-        const r = semanticRouteError(state, tx.data.routeId);
-        if ("error" in r) return r.error;
-        if (trimLower(tx.data.sourceEntityId) !== trimLower(r.route.source.entityId)) return `RUNTIME_OUTPUT_SALVAGE_SOURCE_ENTITY_MISMATCH:${tx.data.sourceEntityId}:${r.route.source.entityId}`;
-        if (trimLower(tx.data.sourceCounterpartyEntityId) !== trimLower(r.route.source.counterpartyEntityId)) return `RUNTIME_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH:${tx.data.sourceCounterpartyEntityId}:${r.route.source.counterpartyEntityId}`;
-        if (target === trimLower(r.route.target.counterpartyEntityId)) return srcOf(tx.type, [r.route.source.entityId]) ?? tgtOf(tx.type, r.route.target.counterpartyEntityId);
-        if (target === trimLower(r.route.source.entityId)) return srcOf(tx.type, [r.route.target.counterpartyEntityId]) ?? tgtOf(tx.type, r.route.source.entityId);
-        return `RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID:${target}`;
-      }
-      case "resolveHtlcLock": {
-        const routeId = String(tx.data.crossJurisdictionRouteId ?? "");
-        if (!routeId) return "RUNTIME_OUTPUT_CROSS_J_HTLC_ROUTE_REQUIRED";
-        const r = semanticRouteError(state, routeId);
-        if ("error" in r) return r.error;
-        return srcOf(tx.type, [r.route.source.entityId]) ?? tgtOf(tx.type, r.route.target.counterpartyEntityId)
-          ?? (trimLower(tx.data.counterpartyEntityId) !== trimLower(r.route.target.entityId) ? `RUNTIME_OUTPUT_CROSS_J_HTLC_COUNTERPARTY_MISMATCH:${routeId}` : null);
-      }
-      case "disputeStart": {
-        const routeId = String(tx.data.crossJurisdictionRouteId ?? "");
-        if (!routeId) return "RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_REQUIRED";
-        const r = semanticRouteError(state, routeId);
-        if ("error" in r) return r.error;
-        if (Object.keys(tx.data).some((k) => k !== "counterpartyEntityId" && k !== "crossJurisdictionRouteId")) return "RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN";
-        if (isCrossTerminal(r.route.status) || !r.route.targetPull) return `RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${r.route.orderId}:${r.route.status}`;
-        if (trimLower(tx.data.counterpartyEntityId) !== trimLower(r.route.source.counterpartyEntityId)) return `RUNTIME_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH:${tx.data.counterpartyEntityId}:${r.route.source.counterpartyEntityId}`;
-        return srcOf(tx.type, [r.route.target.counterpartyEntityId]) ?? tgtOf(tx.type, r.route.source.entityId);
-      }
-      default: return undefined;
-    }
-  };
-  // og assertSelfRuntimeContinuations
-  if (source === target && o.entityTxs.every((tx) => SELF_CONTINUATIONS.has(tx.type))) {
-    const board = new Set(rootConfig(state).validators);
-    if (!board.has(signer)) return `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${signer}:current-board`;
-    for (const tx of o.entityTxs) {
-      if (tx.type !== "requestCrossJurisdictionClear") continue;
-      const route = state.crossJurisdictionSwaps?.get(tx.data.orderId), expected = route === undefined ? null : crossRouteSigner(route, source);
-      if (route === undefined || !isCrossRouteParticipant(route, source)) return `RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`;
-      if (!expected || expected !== signer) return `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${signer}:${expected || "missing"}`;
-      const e = bookAuthority(tx);
-      if (e) return e;
-    }
-    return null;
+  const { source, signer, target } = lane;
+  const txs = o.entityTxs;
+  const toSelf = source === target;
+  const ownRegistration = (tx: EntityTx): boolean =>
+    tx.type === "registerCrossJurisdictionSwap" && trimLower(tx.data.route.source.counterpartyEntityId) === source;
+  switch (true) {
+    case !source || !signer || !target || target !== trimLower(state.id):
+      return `RUNTIME_OUTPUT_TARGET_MISMATCH:${target || "missing"}:${state.id}`;
+    case txs.length === 0:
+      return "RUNTIME_OUTPUT_TXS_MISSING";
+    case toSelf && txs.every((tx) => SELF_CONTINUATIONS.has(tx.type)):
+      return selfContinuationIssue(lane, txs) ?? null;
+    case toSelf && !txs.every(ownRegistration):
+      return `RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}:${txs.map((tx) => tx.type).join(",")}`;
+    default:
+      return firstDefined(...txs.map((tx) => () => siblingOutputIssue(lane, tx))) ?? null;
   }
-  if (source === target && !o.entityTxs.every((tx) => tx.type === "registerCrossJurisdictionSwap" && trimLower(tx.data.route.source.counterpartyEntityId) === source))
-    return `RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}:${o.entityTxs.map((tx) => tx.type).join(",")}`;
-  for (const tx of o.entityTxs) {
-    if (isProtocolTx(tx)) return `RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`;
-    // og runtimeOutputRouteId / runtimeOutputSemanticRoute
-    const routeId = tx.type === "crossJurisdictionFillNotice" || tx.type === "removeCrossJurisdictionBookOrder" || tx.type === "requestCrossJurisdictionClear" ? tx.data.orderId
-      : tx.type === "crossJurisdictionSalvage" ? tx.data.routeId : tx.type === "resolveHtlcLock" || tx.type === "disputeStart" ? tx.data.crossJurisdictionRouteId : undefined;
-    const route = routeId ? state.crossJurisdictionSwaps?.get(routeId)
-      : "data" in tx && tx.data !== null && typeof tx.data === "object" && "route" in tx.data ? (tx.data as { readonly route?: CrossRoute }).route : undefined;
-    if (route === undefined || typeof route !== "object" || !isCrossRouteParticipant(route, source) || !isCrossRouteParticipant(route, target)) return `RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`;
-    const expected = crossRouteSigner(route, source);
-    if (!expected || expected !== signer) return `RUNTIME_OUTPUT_SOURCE_SIGNER_MISMATCH:${source}:${signer}:${expected || "missing"}`;
-    const book = bookAuthority(tx);
-    if (book !== undefined) { if (book) return book; continue; }
-    const recovery = recoveryAuthority(tx);
-    if (recovery !== undefined) { if (recovery) return recovery; continue; }
-    if (tx.type === "prepareCrossJurisdictionSwap") {
-      const e = srcOf(tx.type, [route.source.entityId]), want = trimLower(route.source.counterpartyEntityId);
-      if (e) return e;
-      if (!want || target !== want) return `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target || "missing"}:${want || "missing"}`;
-    } else if (tx.type === "registerCrossJurisdictionSwap") {
-      const e = srcOf(tx.type, [route.source.counterpartyEntityId]), sh = trimLower(route.source.counterpartyEntityId), th = trimLower(route.target.entityId);
-      if (e) return e;
-      if (target !== sh && target !== th) return `RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sh},${th}`;
-    } else return `RUNTIME_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:${tx.type}`;
-  }
-  return null;
 };
-/** A cross-j setup's effects on the Entity draft: both collections, frame messages, raw outputs (wrapped at commit), the hub's Account work. */
+/**
+ * og's certified runtimeOutput wrapper for one raw cross-j command, left unsigned for the frame's emitter to stamp; a
+ * wake carries no tx.
+ */
+const crossOutputInput = (self: EntityId, o: CrossEntityOutput, timestamp: bigint): EntityOutput => {
+  const command: EntityTx = {
+    type: "runtimeOutput",
+    data: {
+      protocol: "cross-j",
+      sourceEntityId: lower(self),
+      sourceSignerId: "",
+      targetEntityId: o.entityId,
+      entityTxs: o.txs,
+    },
+  };
+  const txs = o.txs.length === 0 ? [] : [command];
+  return { to: o.entityId as EntityId, signerId: o.signerId as Address, input: { kind: "txs", timestamp, txs } };
+};
+/** A returned Account tx admitted alone; its Account joins the worklist whether or not it admitted. */
+const queueTouching = (d: Draft, t: AccountTxTarget): Draft => {
+  const queued = queueReturned(d, t);
+  return { ...queued, touched: [...(queued.touched ?? []), t.accountId as EntityId] };
+};
+/**
+ * A cross-j setup's effects on the Entity draft: both collections, frame messages, raw outputs (wrapped at commit),
+ * the hub's Account work.
+ */
 const crossDraft = (state: EntityState, replicas: Replicas, s: CrossSetup, timestamp: bigint): Draft => {
-  const next: EntityState = { ...state, ...opt("crossJurisdictionSwaps", s.swaps), ...opt("crossJurisdictionAuthorizations", s.auths) };
-  const outputs = s.outputs.map((o): EntityOutput => o.txs.length === 0
-    ? { to: o.entityId as EntityId, signerId: o.signerId as Address, input: { kind: "txs", timestamp, txs: [] } }
-    : { to: o.entityId as EntityId, signerId: o.signerId as Address, input: { kind: "txs", timestamp, txs: [{ type: "runtimeOutput", data: { protocol: "cross-j", sourceEntityId: lower(state.id), sourceSignerId: "", targetEntityId: o.entityId, entityTxs: o.txs } }] } });
-  const start: Draft = { state: next, accountReplicas: replicas, outputs, events: s.messages.map(status), touched: [] };
-  return s.accountTxs.reduce((d, t) => ({ ...queueReturned(d, t), events: d.events, touched: [...(d.touched ?? []), t.accountId as EntityId] }), start);
+  const next: EntityState = {
+    ...state,
+    ...opt("crossJurisdictionSwaps", s.swaps),
+    ...opt("crossJurisdictionAuthorizations", s.auths),
+  };
+  const start: Draft = {
+    state: next,
+    accountReplicas: replicas,
+    outputs: s.outputs.map((o) => crossOutputInput(state.id, o, timestamp)),
+    events: s.messages.map(status),
+    touched: [],
+  };
+  return s.accountTxs.reduce(queueTouching, start);
 };
 /** The book lifecycle's view of this Entity (og EntityState fields it reads). */
 const bookHostOf = (state: EntityState, replicas: Replicas, timestamp: bigint): BookHost => ({
-  id: state.id, timestamp: Number(timestamp), validators: rootConfig(state).validators, ext: state.orderbookExt, swaps: state.crossJurisdictionSwaps, admissions: state.crossJurisdictionBookAdmissions,
+  id: state.id,
+  timestamp: Number(timestamp),
+  validators: rootConfig(state).validators,
+  ext: state.orderbookExt,
+  swaps: state.crossJurisdictionSwaps,
+  admissions: state.crossJurisdictionBookAdmissions,
   accounts: hubView(state, replicas, state.orderbookExt ?? EMPTY_EXT).accounts,
 });
-const EMPTY_EXT: OrderbookExt = { books: new Map(), pairDimensions: new Map(), referrals: new Map(), hubProfile: { entityId: "", name: "", spreadDistribution: { makerBps: 0, takerBps: 0, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 0, usdQuoteAuthorityEntityId: "", minTradeSize: 0n, supportedPairs: [] } };
-/** One book lifecycle step on a draft: the host's fields, its raw outputs (wrapped as og runtimeOutput commands), its messages, the offers it created for this frame's matcher. */
+const EMPTY_EXT: OrderbookExt = {
+  books: new Map(),
+  pairDimensions: new Map(),
+  referrals: new Map(),
+  hubProfile: {
+    entityId: "",
+    name: "",
+    spreadDistribution: { makerBps: 0, takerBps: 0, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+    referenceTokenId: 0,
+    usdQuoteAuthorityEntityId: "",
+    minTradeSize: 0n,
+    supportedPairs: [],
+  },
+};
+/**
+ * One book lifecycle step on a draft: the host's fields, its raw outputs (wrapped as og runtimeOutput commands), its
+ * messages, the offers it created for this frame's matcher.
+ */
 const hostDraft = (d: Draft, s: BookHostStep, timestamp: bigint): Draft => {
-  const state: EntityState = { ...d.state, ...opt("orderbookExt", s.host.ext), ...opt("crossJurisdictionSwaps", s.host.swaps), ...opt("crossJurisdictionBookAdmissions", s.host.admissions) };
-  const wrapped = crossDraft(state, d.accountReplicas, { swaps: s.host.swaps, auths: state.crossJurisdictionAuthorizations, messages: s.messages, outputs: s.outputs, accountTxs: [] }, timestamp);
-  const created: SwapEvents | undefined = s.created.length === 0 ? undefined : { created: s.created, cancelled: [], cancelRequests: [] };
-  return { ...d, state, outputs: [...d.outputs, ...wrapped.outputs], events: [...(d.events ?? []), ...(wrapped.events ?? [])], touched: d.touched ?? [], ...opt("swaps", joinSwapEvents(d.swaps, created)) };
+  const { host } = s;
+  const state: EntityState = {
+    ...d.state,
+    ...opt("orderbookExt", host.ext),
+    ...opt("crossJurisdictionSwaps", host.swaps),
+    ...opt("crossJurisdictionBookAdmissions", host.admissions),
+  };
+  const created: SwapEvents | undefined =
+    s.created.length === 0 ? undefined : { created: s.created, cancelled: [], cancelRequests: [] };
+  return {
+    ...d,
+    state,
+    outputs: [...d.outputs, ...s.outputs.map((o) => crossOutputInput(state.id, o, timestamp))],
+    events: [...(d.events ?? []), ...s.messages.map(status)],
+    touched: d.touched ?? [],
+    ...opt("swaps", joinSwapEvents(d.swaps, created)),
+  };
 };
-/** A clear-lifecycle step on a draft: the book-host effects, then each returned Account tx admitted alone (og applyLocalAccountEffects). */
+/**
+ * A clear-lifecycle step on a draft: the book-host effects, then each returned Account tx admitted alone (og
+ * applyLocalAccountEffects).
+ */
 const clearDraft = (d: Draft, s: CrossHostStep, timestamp: bigint): Draft =>
-  s.accountTxs.reduce((x, t) => ({ ...queueReturned(x, t), events: x.events, touched: [...(x.touched ?? []), t.accountId as EntityId] }), hostDraft(d, s, timestamp));
-/** og materializeCommittedEntityOutputs: a cross-j command leaves only from the frame's emitter, stamped with its signer; wakes pass on every replica. */
-const publishCommitted = (outputs: readonly EntityOutput[], self: Address, emitter: string): readonly EntityOutput[] => outputs.flatMap((o): readonly EntityOutput[] => {
-  const tx = "input" in o && o.input.kind === "txs" && o.input.txs.length === 1 ? o.input.txs[0] : undefined;
-  if (tx === undefined || tx.type !== "runtimeOutput" || tx.data.sourceSignerId !== "" || !("input" in o) || o.input.kind !== "txs") return [o];
-  return signerId(self) !== signerId(emitter) ? [] : [{ ...o, input: { ...o.input, txs: [{ ...tx, data: { ...tx.data, sourceSignerId: signerId(self) } }] } }];
-});
-/** og appendDefaultProposerCrossJMaterializations: the source hub's default proposer prepares each stored raw intent it owns, outside a commit phase. */
-const crossMaterializations = (r: EntityReplica, txs: readonly EntityTx[], ctx: EntityContext, now: bigint): Result<readonly EntityTx[], EntityError> => {
-  const proposer = trimLower(rootConfig(r.state).validators[0]);
-  if (!proposer || signerId(r.signerId) !== proposer) return ok(txs);
-  const nested = (tx: EntityTx): readonly EntityTx[] => (tx.type === "entityCommand" ? tx.data.txs : tx.type === "runtimeOutput" && tx.data.protocol === "cross-j" ? tx.data.entityTxs : [tx]);
-  if (txs.some((tx) => nested(tx).some((n) => n.type === "accountInput" || n.type === "crossJurisdictionFillNotice" || n.type === "registerCrossJurisdictionSwap"))) return ok(txs);
-  const pending = new Set([...r.mempool, ...txs].flatMap((tx) => nested(tx).flatMap((n) => (n.type === "materializeCrossJurisdictionSwap" || n.type === "registerCrossJurisdictionSwap" ? [`setup:${n.data.route.orderId}`]
-    : n.type === "materializeCrossJurisdictionClear" ? [`clear:${n.data.orderId}`] : []))));
-  const routes = [...(r.state.crossJurisdictionSwaps?.values() ?? [])].sort((a, b) => a.orderId.localeCompare(b.orderId));
-  const setups = foldResult<readonly EntityTx[], CrossRoute, EntityError>(routes, [], (added, route) => {
-    if (route.status !== "intent" || route.sourcePull || route.targetPull || pending.has(`setup:${route.orderId}`) || trimLower(route.source.counterpartyEntityId) !== trimLower(r.state.id)) return ok(added);
-    pending.add(`setup:${route.orderId}`);
-    return map(fatalCross(prepareCrossRoute(route, { runtimeSeed: ctx.runtimeSeed, now: Number(now) })), (prepared): readonly EntityTx[] => [...added, { type: "materializeCrossJurisdictionSwap", data: { proposerSignerId: signerId(r.signerId), route: prepared } }]);
+  s.accountTxs.reduce(queueTouching, hostDraft(d, s, timestamp));
+/**
+ * og materializeCommittedEntityOutputs: a cross-j command leaves only from the frame's emitter, stamped with its
+ * signer; wakes pass on every replica.
+ */
+const publishCommitted = (outputs: readonly EntityOutput[], self: Address, emitter: string): readonly EntityOutput[] =>
+  outputs.flatMap((o): readonly EntityOutput[] => {
+    if (!("input" in o) || o.input.kind !== "txs") return [o];
+    const input = o.input;
+    const tx = input.txs.length === 1 ? input.txs[0] : undefined;
+    if (tx?.type !== "runtimeOutput" || tx.data.sourceSignerId !== "") return [o];
+    if (signerId(self) !== signerId(emitter)) return [];
+    const stamped: EntityTx = { ...tx, data: { ...tx.data, sourceSignerId: signerId(self) } };
+    return [{ ...o, input: { ...input, txs: [stamped] } }];
   });
-  const clears = (added: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> => map(crossClearReveals(bookHostOf(r.state, r.accountReplicas, now), signerId(r.signerId), ctx.runtimeSeed, pending), (c) => [...added, ...c]);
-  return map(chain(setups, clears), (added) => (added.length > 0 ? [...txs, ...added] : txs));
+const byOrderId = (a: CrossRoute, b: CrossRoute): number => a.orderId.localeCompare(b.orderId);
+/** The materialization a mempool or frame tx already carries for an order: its setup, or its clear. */
+const materializationKey = (tx: EntityTx): string | undefined => {
+  switch (tx.type) {
+    case "materializeCrossJurisdictionSwap":
+    case "registerCrossJurisdictionSwap":
+      return `setup:${tx.data.route.orderId}`;
+    case "materializeCrossJurisdictionClear":
+      return `clear:${tx.data.orderId}`;
+    default:
+      return undefined;
+  }
 };
-/** og appendDefaultProposerCrossJMaterializations (clear branch): each clear_requested route with a committed fill, an open source pull and no queued close gets the proposer's ladder reveal. */
-export const crossClearReveals = (h: BookHost, proposer: string, runtimeSeed: string | undefined, pending: ReadonlySet<string>): Result<readonly EntityTx[], EntityError> =>
-  foldResult<readonly EntityTx[], CrossRoute, EntityError>([...(h.swaps?.values() ?? [])].sort((a, b) => a.orderId.localeCompare(b.orderId)), [], (added, route) => {
-    const sp = route.sourcePull;
-    if (route.status !== "clear_requested" || sp === undefined || !route.targetPull || pending.has(`clear:${route.orderId}`) || entityRef(route.source.counterpartyEntityId) !== entityRef(h.id)) return ok(added);
-    return chain(fillRatioE(route), (fillRatio) => {
-      const account = h.accounts.get(entityRef(route.source.entityId));
-      if (fillRatio <= 0 || account === undefined || !(account.pulls?.has(sp.pullId) ?? false) || pullCloseQueued(account, sp.pullId)) return ok(added);
-      return chain(fatalCross(crossPrivateSeed(runtimeSeed, route)), (seed) => chain(fatalCross(crossPullReveal(fillRatio, seed)), (reveal) => map(closeProofE(route, reveal.binary), (proof): readonly EntityTx[] =>
-        [...added, { type: "materializeCrossJurisdictionClear", data: { proposerSignerId: proposer, orderId: route.orderId, binary: reveal.binary, proof } }])));
-    });
+/**
+ * og appendDefaultProposerCrossJMaterializations: the source hub's default proposer prepares each stored raw intent it
+ * owns (each order once), outside a commit phase, then reveals each due clear.
+ */
+const crossMaterializations = (
+  r: EntityReplica,
+  txs: readonly EntityTx[],
+  ctx: EntityContext,
+  now: bigint,
+): Result<readonly EntityTx[], EntityError> => {
+  const proposer = trimLower(rootConfig(r.state).validators[0]);
+  const self = signerId(r.signerId);
+  const registers = (tx: EntityTx): boolean =>
+    nestedFrameTxs(tx).some((n) => n.type === "registerCrossJurisdictionSwap");
+  if (!proposer || self !== proposer) return ok(txs);
+  if (txs.some((tx) => accountTransitionTx(tx) || registers(tx))) return ok(txs);
+  const pending: ReadonlySet<string> = new Set(
+    [...r.mempool, ...txs].flatMap((tx) =>
+      nestedFrameTxs(tx).flatMap((n) => {
+        const key = materializationKey(n);
+        return key === undefined ? [] : [key];
+      }),
+    ),
+  );
+  const owned = [...(r.state.crossJurisdictionSwaps?.values() ?? [])]
+    .toSorted(byOrderId)
+    .filter(
+      (route) =>
+        route.status === "intent" &&
+        !route.sourcePull &&
+        !route.targetPull &&
+        trimLower(route.source.counterpartyEntityId) === trimLower(r.state.id),
+    );
+  const raw = owned.filter(
+    (route, i) => !pending.has(`setup:${route.orderId}`) && owned.findIndex((o) => o.orderId === route.orderId) === i,
+  );
+  const clock = { runtimeSeed: ctx.runtimeSeed, now: Number(now) };
+  const setups = traverse(raw, (route) =>
+    map(fatalCross(prepareCrossRoute(route, clock)), (prepared): EntityTx => ({
+      type: "materializeCrossJurisdictionSwap",
+      data: { proposerSignerId: self, route: prepared },
+    })),
+  );
+  const host = bookHostOf(r.state, r.accountReplicas, now);
+  return chain(setups, (prepared) =>
+    map(crossClearReveals(host, self, ctx.runtimeSeed, pending), (reveals) => {
+      const added = [...prepared, ...reveals];
+      return added.length > 0 ? [...txs, ...added] : txs;
+    }),
+  );
+};
+/**
+ * The proposer's ladder reveal for one clear-requested route, when a fill is committed and its source pull still open.
+ */
+const clearReveal = (
+  h: BookHost,
+  proposer: string,
+  runtimeSeed: string | undefined,
+  route: CrossRoute,
+): Result<readonly EntityTx[], EntityError> => {
+  const sp = route.sourcePull;
+  if (sp === undefined) return ok([]);
+  return chain(fillRatioE(route), (fillRatio) => {
+    const account = h.accounts.get(entityRef(route.source.entityId));
+    const open =
+      account !== undefined && (account.pulls?.has(sp.pullId) ?? false) && !pullCloseQueued(account, sp.pullId);
+    if (fillRatio <= 0 || !open) return ok([]);
+    return chain(fatalCross(crossPrivateSeed(runtimeSeed, route)), (seed) =>
+      chain(fatalCross(crossPullReveal(fillRatio, seed)), (reveal) =>
+        map(closeProofE(route, reveal.binary), (proof): readonly EntityTx[] => [
+          {
+            type: "materializeCrossJurisdictionClear",
+            data: { proposerSignerId: proposer, orderId: route.orderId, binary: reveal.binary, proof },
+          },
+        ]),
+      ),
+    );
   });
-/** og selectCrossJCommitPhaseTxs: an Account transition and a cross-j setup never share a frame; setup (and a deferred author's later commands) waits. */
+};
+/**
+ * og appendDefaultProposerCrossJMaterializations (clear branch): each clear_requested route with a committed fill, an
+ * open source pull and no queued close gets the proposer's ladder reveal.
+ */
+export const crossClearReveals = (
+  h: BookHost,
+  proposer: string,
+  runtimeSeed: string | undefined,
+  pending: ReadonlySet<string>,
+): Result<readonly EntityTx[], EntityError> => {
+  const due = [...(h.swaps?.values() ?? [])]
+    .toSorted(byOrderId)
+    .filter(
+      (route) =>
+        route.status === "clear_requested" &&
+        route.sourcePull !== undefined &&
+        Boolean(route.targetPull) &&
+        !pending.has(`clear:${route.orderId}`) &&
+        entityRef(route.source.counterpartyEntityId) === entityRef(h.id),
+    );
+  return map(traverse(due, (route) => clearReveal(h, proposer, runtimeSeed, route)), (reveals) => reveals.flat());
+};
+/** Commands selected so far, and the authors whose later commands wait behind a deferred one. */
+type CommitPhase = { readonly kept: readonly EntityTx[]; readonly deferred: ReadonlySet<string> };
+/**
+ * og selectCrossJCommitPhaseTxs: an Account transition and a cross-j setup never share a frame; setup (and a deferred
+ * author's later commands) waits.
+ */
 export const selectCommitPhaseTxs = (txs: readonly EntityTx[]): readonly EntityTx[] => {
-  const nested = (tx: EntityTx): readonly EntityTx[] => (tx.type === "entityCommand" ? tx.data.txs : tx.type === "runtimeOutput" && tx.data.protocol === "cross-j" ? tx.data.entityTxs : [tx]);
-  const transition = (tx: EntityTx): boolean => nested(tx).some((n) => n.type === "accountInput" || n.type === "crossJurisdictionFillNotice");
-  const setup = (tx: EntityTx): boolean => nested(tx).some((n) => n.type === "materializeCrossJurisdictionSwap" || n.type === "materializeCrossJurisdictionClear" || n.type === "registerCrossJurisdictionSwap");
-  if (!txs.some(transition) || !txs.some(setup)) return txs;
-  const deferred = new Set<string>();
-  return txs.filter((tx) => {
-    if (tx.type !== "entityCommand") return !setup(tx);
+  if (!txs.some(accountTransitionTx) || !txs.some(crossSetupTx)) return txs;
+  const select = (acc: CommitPhase, tx: EntityTx): CommitPhase => {
+    const keep: CommitPhase = { ...acc, kept: [...acc.kept, tx] };
+    if (tx.type !== "entityCommand") return crossSetupTx(tx) ? acc : keep;
     const author = `${tx.data.boardHash}:${tx.data.boardEpoch}:${tx.data.authorSignerId}`.toLowerCase();
-    if (deferred.has(author) || setup(tx)) { deferred.add(author); return false; }
-    return true;
-  });
+    const waits = acc.deferred.has(author) || crossSetupTx(tx);
+    return waits ? { ...acc, deferred: new Set([...acc.deferred, author]) } : keep;
+  };
+  return txs.reduce(select, { kept: [], deferred: new Set<string>() }).kept;
 };
 export const foldTx = (state: EntityState, replicas: Replicas, tx: EntityTx, ctx: FoldContext, lane: TxLane = "top"): Result<Draft, EntityError> => {
   const origin = originOf(tx, state.id), peer = peerOf(tx, state.id);
