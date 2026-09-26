@@ -25126,300 +25126,873 @@ export const selectCommitPhaseTxs = (txs: readonly EntityTx[]): readonly EntityT
   };
   return txs.reduce(select, { kept: [], deferred: new Set<string>() }).kept;
 };
-export const foldTx = (state: EntityState, replicas: Replicas, tx: EntityTx, ctx: FoldContext, lane: TxLane = "top"): Result<Draft, EntityError> => {
-  const origin = originOf(tx, state.id), peer = peerOf(tx, state.id);
-  const authorized = laneRefusal(tx, lane);
-  if (authorized !== undefined) return err(authorized);
-  const say = (d: Draft, ...messages: readonly string[]): Draft => ({ ...d, events: [...(d.events ?? []), ...messages.map(status)] });
-  const enqueue = (target: EntityId, accountTxs: readonly AccountTx[], outputs: readonly EntityOutput[]): Result<Draft, EntityError> =>
-    withChild(replicas, target, (child) => map(admitAt(child, accountTxs, state.id, L0_CLOCK, ctx.verify), (admitted) => ({ ...putChild(state, replicas, target, admitted), outputs })));
+/** What every Entity tx handler of one fold step reads: the Entity before the tx, its Accounts, the frame context. */
+type TxScope = {
+  readonly state: EntityState;
+  readonly replicas: Replicas;
+  readonly ctx: FoldContext;
+  /** The draft of a tx that changes nothing. */
+  readonly skip: Draft;
+};
+type EntityTxOf<K extends EntityTx["type"]> = Extract<EntityTx, { readonly type: K }>;
+/** The proposer's wake that follows queued Account work. */
+const wakeOf = (s: TxScope): readonly EntityOutput[] => [wake(s.state, s.ctx.timestamp)];
+/** Account txs admitted on one Account at the L0 clock, with the draft's outputs. */
+const enqueueTo = (
+  s: TxScope,
+  target: EntityId,
+  accountTxs: readonly AccountTx[],
+  outputs: readonly EntityOutput[],
+): Result<Draft, EntityError> =>
+  withChild(s.replicas, target, (child) =>
+    map(admitAt(child, accountTxs, s.state.id, L0_CLOCK, s.ctx.verify), (admitted) => ({
+      ...putChild(s.state, s.replicas, target, admitted),
+      outputs,
+    })),
+  );
+/**
+ * og open-account.ts: the two status events around the insert, and insertLocalAccount's AccountOpening runtime event.
+ */
+const openAccountTx = (s: TxScope, x: EntityTxOf<"openAccount">): Result<Draft, EntityError> =>
+  map(openChild(s.state, s.replicas, x, s.ctx.timestamp), (d) => {
+    const peer = lower(x.data.targetEntityId);
+    const opening: EntityRuntimeEvent = {
+      eventName: "AccountOpening",
+      data: { entityId: s.state.id, counterpartyId: peer },
+    };
+    const said = withStatus(
+      withStatus(d, `💳 Opening account with Entity ${x.data.targetEntityId}...`),
+      `✅ Account opening request sent to Entity ${peer}`,
+    );
+    return { ...said, runtimeEvents: [...(d.runtimeEvents ?? []), opening] };
+  });
+const extendCreditTx = (s: TxScope, x: EntityTxOf<"extendCredit">): Result<Draft, EntityError> => {
+  const { counterpartyEntityId: to, tokenId, amount } = x.data;
+  if (!s.replicas.has(to)) return ok(s.skip);
+  const limit: AccountTx = { type: "set_credit_limit", tokenId, limit: amount };
+  return map(enqueueTo(s, to, [limit], wakeOf(s)), (d) =>
+    withStatus(d, `💳 Extended credit of ${amount} to ${to.slice(-4)}`),
+  );
+};
+/**
+ * og's direct payment: a route from us to the target of at most 100 hops, delivered directly or through a trusted
+ * gateway. og requireTrustedPaymentGateway: exactly [source, gateway, target], the declared gateway distinct from both
+ * ends. og buildNextHopPayment: the first leg carries the remaining route, the default description and the mode.
+ */
+const directPaymentTx = (s: TxScope, x: EntityTxOf<"directPayment">): Result<Draft, EntityError> => {
+  const { route, targetEntityId, amount, deliveryMode, trustedGatewayEntityId, tokenId, description } = x.data;
+  const badRoute = err<EntityError>({ _tag: "payment_route" });
+  const gateway = route[1];
+  const ends = route.length > 0 && route.length <= 100 && route[0] === s.state.id && route.at(-1) === targetEntityId;
+  const shaped =
+    deliveryMode === "trusted"
+      ? route.length === 3 && gateway === trustedGatewayEntityId && gateway !== route[0] && gateway !== targetEntityId
+      : trustedGatewayEntityId === undefined && route.length === 2;
+  if (!ends || (deliveryMode !== "direct" && deliveryMode !== "trusted")) return badRoute;
+  if (amount < 1n || amount > UINT256_MAX) return ok(withStatus(s.skip, "❌ Payment failed: amount out of bounds"));
+  if (!shaped) return badRoute;
+  const next = gateway as EntityId;
+  const leg: AccountTx = {
+    type: "payment",
+    tokenId,
+    amount,
+    route: route.slice(1),
+    description: description || `Payment to ${targetEntityId}`,
+    fromEntityId: s.state.id,
+    toEntityId: next,
+    deliveryMode,
+    ...opt("trustedGatewayEntityId", trustedGatewayEntityId),
+  };
+  const sent = `💸 Sending ${amount} (token ${Number(tokenId)}) to ${targetEntityId} via ${route.length - 1} hops`;
+  if (!s.replicas.has(next)) return err({ _tag: "no_such_account", target: next });
+  return map(enqueueTo(s, next, [leg], wakeOf(s)), (d) => withStatus(d, sent));
+};
+const lendingTx = (s: TxScope, x: LendingEntityTx): Result<Draft, EntityError> =>
+  entityLending(s.state, s.replicas, x, (hub, accountTx) =>
+    map(enqueueTo(s, hub, [accountTx], wakeOf(s)), (d) => withStatus(d, lendingMessage(x))),
+  );
+/**
+ * og system/basic.ts: a chat message is a frame event (certified in the frame hash, never in the state root); an
+ * invalid one is a silent no-op.
+ */
+const chatTx = (s: TxScope, x: EntityTxOf<"chat">): Draft => {
+  const { message, from } = x.data;
+  const valid = typeof message === "string" && message.length > 0 && message.length <= 1000;
+  return valid ? { ...s.skip, events: [{ type: "text", validatorId: lower(from), message }] } : s.skip;
+};
+/**
+ * og admin.ts handleRequestCollateralEntityTx: a missing Account is a no-op; otherwise queue request_collateral and
+ * wake.
+ */
+const requestCollateralTx = (s: TxScope, x: EntityTxOf<"requestCollateral">): Result<Draft, EntityError> => {
+  const { counterpartyEntityId: to, tokenId, amount, feeTokenId, feeAmount, policyVersion } = x.data;
+  const request: AccountTx = {
+    type: "request_collateral",
+    tokenId,
+    amount,
+    ...opt("feeTokenId", feeTokenId),
+    feeAmount,
+    policyVersion,
+  };
+  return s.replicas.has(to) ? enqueueTo(s, to, [request], wakeOf(s)) : ok(s.skip);
+};
+/**
+ * og payments/swap-requests.ts: one swap Account tx on the hub Account and a wake; a missing Account halts
+ * (SWAP_REQUEST_ACCOUNT_MISSING, the whole input).
+ */
+const swapRequest = (s: TxScope, to: EntityId, tx: AccountTx): Result<Draft, EntityError> =>
+  s.replicas.has(to) ? enqueueTo(s, to, [tx], wakeOf(s)) : err({ _tag: "swap_request_account_missing", target: to });
+const placeSwapOfferTx = (s: TxScope, x: EntityTxOf<"placeSwapOffer">): Result<Draft, EntityError> => {
+  const { counterpartyEntityId, priceTicks, timeInForce, ...o } = x.data;
+  const offer: AccountTx = {
+    type: "swap_offer",
+    offerId: o.offerId,
+    giveTokenId: o.giveTokenId,
+    giveTokenDecimals: o.giveTokenDecimals,
+    giveAmount: o.giveAmount,
+    wantTokenId: o.wantTokenId,
+    wantTokenDecimals: o.wantTokenDecimals,
+    wantAmount: o.wantAmount,
+    maxFee: o.maxFee,
+    minNetReceive: o.minNetReceive,
+    ...opt("priceTicks", priceTicks),
+    ...opt("timeInForce", timeInForce),
+  };
+  return swapRequest(s, counterpartyEntityId, offer);
+};
+/**
+ * og re-emits each peer's retained proposal bytes unchanged; a peer with no Account or no unanswered proposal is owed
+ * nothing.
+ */
+const proposeAccountsNowTx = (s: TxScope, x: EntityTxOf<"proposeAccountsNow">): Result<Draft, EntityError> => {
+  const resend = (peer: string): readonly EntityOutput[] => {
+    const child = s.replicas.get(peer as EntityId);
+    const sent = child === undefined ? undefined : pendingAccountInput(child, s.state.id);
+    return sent === undefined ? [] : [{ to: peer as EntityId, tx: { type: "accountInput", data: sent } }];
+  };
+  return map(proposeAccountsNowOk(s.state, x.data), () => ({
+    ...s.skip,
+    outputs: x.data.counterparties.flatMap(resend),
+  }));
+};
+/** Every (Account, token) pair a hub's fee terms cover: Accounts ascending, each Account's tokens ascending. */
+const hubPolicyPairs = (replicas: Replicas): readonly (readonly [EntityId, TokenId])[] =>
+  [...replicas.keys()].toSorted(asc).flatMap((peer) => {
+    const tokens = [...(replicas.get(peer)?.state.account.deltas.keys() ?? [])];
+    return tokens.toSorted((a, b) => Number(a) - Number(b)).map((t) => [peer, t] as const);
+  });
+const hubConfigMessage = (config: HubConfig): string => {
+  const fees = `${config.routingFeePPM}ppm routing fee, swapTakerFee=${config.swapTakerFeeBps}bps`;
+  const rebalance =
+    `rebalance(base=token-default, liqBps=${config.rebalanceLiquidityFeeBps}, gas=token-default, ` +
+    "c2rWithdrawSoftLimit=token-default)";
+  return `🏦 Hub config activated: ${config.matchingStrategy} strategy v${config.policyVersion}, ${fees}, ${rebalance}`;
+};
+/**
+ * og handleSetHubConfigEntityTx: commit the config, mark the profile a hub, then queue the fee terms on every Account's
+ * tokens (ids and tokens ascending) and wake.
+ */
+const setHubConfigTx = (s: TxScope, x: EntityTxOf<"setHubConfig">): Result<Draft, EntityError> =>
+  chain(buildHubConfig(hubConfigOf(s.state), x.data), (config) => {
+    const profile = { ...((s.state.committed["profile"] ?? {}) as { readonly [k: string]: Binary }), isHub: true };
+    const committed = { ...s.state.committed, hubRebalanceConfig: config as unknown as Binary, profile };
+    const targets = hubPolicyPairs(s.replicas);
+    const clock = { ...L0_CLOCK, timestamp: s.ctx.timestamp };
+    const start: Draft = {
+      state: { ...s.state, committed },
+      accountReplicas: s.replicas,
+      outputs: [],
+      touched: [...new Set(targets.map(([peer]) => peer))],
+    };
+    const queuePolicy = (d: Draft, [peer, t]: readonly [EntityId, TokenId]): Result<Draft, EntityError> =>
+      chain(hubPolicyTx(config, t), (policyTx) =>
+        withChild(d.accountReplicas, peer, (child) =>
+          map(admitAt(child, [policyTx], s.state.id, clock, s.ctx.verify), (admitted) => ({
+            ...d,
+            ...putChild(d.state, d.accountReplicas, peer, admitted),
+          })),
+        ),
+      );
+    return map(foldResult(targets, start, queuePolicy), (d) =>
+      withStatus({ ...d, outputs: targets.length > 0 ? wakeOf(s) : [] }, hubConfigMessage(config)),
+    );
+  });
+/** og handleProcessHtlcTimeoutsEntityTx: each expired lock's timeout resolve, through og applyLocalAccountEffects. */
+const processHtlcTimeoutsTx = (s: TxScope, x: EntityTxOf<"processHtlcTimeouts">): Draft =>
+  (x.data.expiredLocks ?? []).reduce(
+    (d, l) =>
+      queueReturned(d, {
+        accountId: l.accountId,
+        tx: { type: "htlc_resolve", lockId: l.lockId, outcome: "error", reason: "timeout" },
+      }),
+    s.skip,
+  );
+const disputeStartTx = (s: TxScope, x: EntityTxOf<"disputeStart">): Result<Draft, EntityError> => {
+  const d = x.data;
+  const intent = {
+    description: d.description ?? "",
+    ...opt("crossJurisdictionRouteId", d.crossJurisdictionRouteId),
+    ...opt("starterInitialArguments", d.starterInitialArguments),
+    ...opt("starterCounterArguments", d.starterCounterArguments),
+  };
+  return startDispute(s.skip, d.counterpartyEntityId, intent, s.ctx);
+};
+/**
+ * og handleSetRebalancePolicyEntityTx: a missing Account is a no-op; an invalid policy is a plain Error; without a hub
+ * config, checkAutoRebalance queues the Account's requests at once.
+ */
+const setRebalancePolicyTx = (s: TxScope, x: EntityTxOf<"setRebalancePolicy">): Result<Draft, EntityError> => {
+  const { counterpartyEntityId: to, tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee } = x.data;
+  const child = s.replicas.get(to);
+  if (child === undefined) return ok(s.skip);
+  if (r2cRequestSoftLimit < 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) {
+    return invariant(`REBALANCE_POLICY_INVALID: token=${Number(tokenId)}`);
+  }
+  const policies = child.rebalancePolicy ?? new Map<number, RebalancePolicy>();
+  const policy: RebalancePolicy = { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
+  const updated: AccountReplica = { ...child, rebalancePolicy: mapSet(policies, Number(tokenId), policy) };
+  const requests = hubConfigOf(s.state) === undefined ? autoRebalance(updated, s.state.id) : [];
+  if (requests.length === 0) return ok({ ...putChild(s.state, s.replicas, to, updated), outputs: [] });
+  return map(admitAt(updated, requests, s.state.id, L0_CLOCK, s.ctx.verify), (admitted) => ({
+    ...putChild(s.state, s.replicas, to, admitted),
+    outputs: wakeOf(s),
+  }));
+};
+/** og's certified runtimeOutput lane: a cross-j command from a sibling hub, authorized, then folded as a nested run. */
+const runtimeOutputTx = (s: TxScope, x: EntityTxOf<"runtimeOutput">): Result<Draft, EntityError> => {
+  if (x.data.protocol !== "cross-j") return invariant(`RUNTIME_OUTPUT_PROTOCOL_INVALID:${String(x.data.protocol)}`);
+  const refused = runtimeOutputAuthError(s.state, x.data);
+  return refused !== null ? invariant(refused) : foldNested(s.state, s.replicas, x.data.entityTxs, s.ctx, "runtime");
+};
+/** og recordOriginatedHtlc: the HtlcInitiated runtime event. */
+const htlcInitiated = (self: EntityId, p: PreparedOriginated): EntityRuntimeEvent => ({
+  eventName: "HtlcInitiated",
+  data: {
+    entityId: self,
+    fromEntity: self,
+    toEntity: p.targetEntityId,
+    tokenId: p.tokenId,
+    amount: p.recipientAmount.toString(),
+    senderAmount: p.senderLockAmount.toString(),
+    fee: p.totalFee.toString(),
+    hashlock: p.hashlock,
+    lockId: p.hashlock,
+    route: p.route,
+    ...(p.description ? { description: p.description } : {}),
+    startedAtMs: p.startedAtMs,
+  },
+});
+/** og's HTLC origination: the proposer-prepared payment's first lock, its paybook entry and the initiation event. */
+const htlcPaymentTx = (s: TxScope, x: EntityTxOf<"htlcPayment">): Result<Draft, EntityError> => {
+  const view = originView(s.state, s.replicas, s.ctx.timestamp);
+  return chain(validatePreparedHtlcPayment(view, x, s.ctx.htlc ?? EMPTY_HTLC_INFRA), (p) => {
+    const next = htlcPaymentStep(p, s.state.paybook ?? EMPTY_PAYBOOK, Number(s.ctx.timestamp));
+    return map(enqueueTo(s, p.nextHopEntityId as EntityId, [next.lock], []), (d) => ({
+      ...d,
+      state: { ...d.state, paybook: next.paybook },
+      runtimeEvents: [htlcInitiated(s.state.id, p)],
+    }));
+  });
+};
+/**
+ * One accountInput being applied: the Entity before it, the peer, the Account door, and our pending frame the peer's
+ * ACK may commit.
+ */
+type AccountInputRun = {
+  readonly scope: TxScope;
+  readonly input: AccountPeerInput;
+  readonly peer: EntityId;
+  readonly door: DoorContext;
+  readonly held: Folded;
+  readonly pendingOwn: AccountFrame | undefined;
+};
+type AccountInputStep = (
+  child: AccountReplica,
+  applied: Result<AccountApply, AccountReplicaError>,
+) => Result<Draft, EntityError>;
+/**
+ * og input-phases.ts: the Account door of an input; the sender's record in this Entity's certified registry is the
+ * Account's counterpartyCertifiedBoard.
+ */
+const accountDoor = (s: TxScope, record: CertifiedBoardRecord | null, peer: EntityId): DoorContext => {
+  const child = s.replicas.get(peer);
+  return {
+    verify: s.ctx.verify,
+    self: s.state.id,
+    now: s.ctx.timestamp,
+    autoRebalance: hubConfigOf(s.state) === undefined,
+    ...(record === null
+      ? {}
+      : {
+          counterpartyBoard: {
+            boardHash: record.boardHash,
+            activatedAtJHeight: record.activatedAtJHeight,
+            logIndex: record.logIndex,
+          },
+        }),
+    ...(child === undefined ? {} : { deltaTransformer: accountDt(s.ctx, child) }),
+    ...opt("boardAuthority", s.ctx.boardAuthority),
+  };
+};
+/**
+ * The input applied on the peer's Account at `at`; og finishDisputedAccountInput: a 'dispute' disposition ends the
+ * input in handleUnsafeAccountFrame, with no committed followups.
+ */
+const onAccount = (
+  run: AccountInputRun,
+  at: Folded,
+  created: boolean,
+  step: AccountInputStep,
+): Result<Draft, EntityError> => {
+  const child = at.accountReplicas.get(run.peer);
+  if (child === undefined) return err({ _tag: "no_such_account", target: run.peer });
+  const applied = applyAccountInput(child, run.input, run.door);
+  const unsafe = applied.ok
+    ? undefined
+    : unsafeAccountFrame(run.held, at, run.peer, applied.error, created, run.scope.ctx);
+  return unsafe ?? step(child, applied);
+};
+/** The applied input routed as raw Account outputs and effects, for the committed followups after it. */
+const applyRaw = (
+  run: AccountInputRun,
+  at: Folded,
+  then: (r: Routed) => Result<Draft, EntityError>,
+  created = false,
+): Result<Draft, EntityError> =>
+  onAccount(run, at, created, (child, applied) =>
+    chain(routedRaw(at.state, at.accountReplicas, run.peer, disputeUnsafe(child, applied, run.door)), then),
+  );
+const applyRouted = (run: AccountInputRun, at: Folded): Result<Draft, EntityError> =>
+  onAccount(run, at, false, (child, applied) =>
+    routed(at.state, at.accountReplicas, run.peer, disputeUnsafe(child, applied, run.door)),
+  );
+/** og committedFrames: our own frame commits when the peer's ACK for it lands (the Account reached its height). */
+const ownCommitted = (run: AccountInputRun, d: Draft): AccountFrame | undefined => {
+  const after = d.accountReplicas.get(run.peer);
+  const own = run.pendingOwn;
+  return own !== undefined && after !== undefined && after.head.height >= own.height ? own : undefined;
+};
+/** og answerFrame on a received peer frame: we sign it, and it commits once installed at its height. */
+const signReceived = (
+  run: AccountInputRun,
+  d: Draft,
+  own: readonly Effect[],
+  i: Extract<AccountPeerInput, { kind: "ack_frame" }>,
+  from: EntityId,
+  created: boolean,
+): Result<Draft, EntityError> => {
+  const pending = d.accountReplicas.get(from);
+  const frame = pending !== undefined && pending._tag === "received" ? pending.candidate.frame : undefined;
+  return chain(answerFrame(d, from, run.scope.ctx), ({ draft: answered, effects: signed }) => {
+    const after = answered.accountReplicas.get(from);
+    const installed = frame !== undefined && after !== undefined && after.head.height >= frame.height;
+    const received = installed ? { frame, from: i.fromEntityId, to: i.toEntityId, domain: i.domain } : undefined;
+    const effects = [...own, ...signed];
+    return committedFollowups(answered, from, ownCommitted(run, answered), received, effects, run.scope.ctx, created);
+  });
+};
+/**
+ * A peer frame (with its ACK of ours): only L0 txs a peer may send; an unknown peer's genesis frame opens the inbound
+ * Account.
+ */
+const receivedFrame = (
+  run: AccountInputRun,
+  i: Extract<AccountPeerInput, { kind: "ack_frame" }>,
+  from: EntityId,
+): Result<Draft, EntityError> => {
+  const { state, replicas } = run.scope;
+  const created = !replicas.has(from);
+  const at: Result<Folded, EntityError> = !i.frame.txs.every(entityAcceptsPeerTx)
+    ? err({ _tag: "not_l0" })
+    : created
+      ? inboundChild(state, replicas, from, i)
+      : ok(run.held);
+  return chain(at, (a) =>
+    applyRaw(run, a, ({ draft, effects }) => signReceived(run, draft, effects, i, from, created), created),
+  );
+};
+/**
+ * og's accountInput lane: the delivered peer input on its Account, then the committed followups of what it committed.
+ */
+const accountInputTx = (
+  s: TxScope,
+  x: EntityTxOf<"accountInput">,
+  origin: Delivery,
+  peer: EntityId,
+): Result<Draft, EntityError> =>
+  chain(deliveredBy(x.data, s.state.id, origin), () =>
+    chain(observerBoardRecord(s.state, x.data.fromEntityId), (record) => {
+      const before = s.replicas.get(peer);
+      const run: AccountInputRun = {
+        scope: s,
+        input: x.data,
+        peer,
+        door: accountDoor(s, record, peer),
+        held: { state: s.state, accountReplicas: s.replicas },
+        pendingOwn: before !== undefined && before._tag === "proposed" ? before.candidate.frame : undefined,
+      };
+      return matchBy("kind", x.data, {
+        ack: () =>
+          applyRaw(run, run.held, ({ draft, effects }) =>
+            committedFollowups(draft, peer, ownCommitted(run, draft), undefined, effects, s.ctx),
+          ),
+        // og routes the standalone peer dispute witness through the same lane; an unknown Account has no genesis for it
+        // (og ACCOUNT_GENESIS_FRAME_REQUIRED)
+        dispute: () => applyRouted(run, run.held),
+        // og board-hanko-refresh.ts: checked against the sender's certified board (certified_board_missing without a
+        // record)
+        board_hanko_refresh: () => applyRouted(run, run.held),
+        ack_frame: (i) =>
+          match(origin, {
+            local: (): Result<Draft, EntityError> => err({ _tag: "from_not_converted" }),
+            received: ({ from }) => receivedFrame(run, i, from),
+          }),
+      });
+    }),
+  );
+/** One Entity tx on the Entity: the og handler its type names, refused when its lane may not carry it. */
+export const foldTx = (
+  state: EntityState,
+  replicas: Replicas,
+  tx: EntityTx,
+  ctx: FoldContext,
+  lane: TxLane = "top",
+): Result<Draft, EntityError> => {
+  const refused = laneRefusal(tx, lane);
+  if (refused !== undefined) return err(refused);
   const skip: Draft = { state, accountReplicas: replicas, outputs: [] };
+  const s: TxScope = { state, replicas, ctx, skip };
+  const now = ctx.timestamp;
+  const book = (): BookHost => bookHostOf(state, replicas, now);
+  const view = (): CrossEntityView => crossView(state, replicas, now);
+  const cross = (step: CrossStep): Result<Draft, EntityError> => map(step, (c) => crossDraft(state, replicas, c, now));
+  const hosted = (step: Result<BookHostStep, EntityError>): Result<Draft, EntityError> =>
+    map(step, (h) => hostDraft(skip, h, now));
+  const cleared = (step: Result<CrossHostStep, EntityError>): Result<Draft, EntityError> =>
+    map(step, (h) => clearDraft(skip, h, now));
   return matchBy("type", tx, {
-    // og open-account.ts: the two status events around the insert
-    // og insertLocalAccount: the AccountOpening runtime event
-    openAccount: (x) => map(openChild(state, replicas, x, ctx.timestamp), (d) => ({ ...say(d, `💳 Opening account with Entity ${x.data.targetEntityId}...`, `✅ Account opening request sent to Entity ${lower(x.data.targetEntityId)}`),
-      runtimeEvents: [...(d.runtimeEvents ?? []), { eventName: "AccountOpening", data: { entityId: state.id, counterpartyId: lower(x.data.targetEntityId) } }] })),
-    extendCredit: (x) => (replicas.has(x.data.counterpartyEntityId) ? map(enqueue(x.data.counterpartyEntityId, [{ type: "set_credit_limit", tokenId: x.data.tokenId, limit: x.data.amount }], [wake(state, ctx.timestamp)]), (d) => say(d, `💳 Extended credit of ${x.data.amount} to ${x.data.counterpartyEntityId.slice(-4)}`)) : ok(skip)),
-    directPayment: (x) => {
-      const { route, targetEntityId, amount, deliveryMode, trustedGatewayEntityId, tokenId, description } = x.data;
-      if (route.length === 0 || route.length > 100 || route[0] !== state.id || route[route.length - 1] !== targetEntityId) return err({ _tag: "payment_route" });
-      if (deliveryMode !== "direct" && deliveryMode !== "trusted") return err({ _tag: "payment_route" });
-      if (amount < 1n || amount > UINT256_MAX) return ok(say(skip, "❌ Payment failed: amount out of bounds"));
-      // og requireTrustedPaymentGateway: exactly [source, gateway, target] with the declared gateway distinct from both ends
-      if (deliveryMode === "trusted" ? route.length !== 3 || route[1] !== trustedGatewayEntityId || route[1] === route[0] || route[1] === targetEntityId : trustedGatewayEntityId !== undefined || route.length !== 2) return err({ _tag: "payment_route" });
-      const next = route[1] as EntityId;
-      // og buildNextHopPayment: the first leg carries the remaining route, the default description and the delivery mode
-      const leg: AccountTx = { type: "payment", tokenId, amount, route: route.slice(1), description: description || `Payment to ${targetEntityId}`, fromEntityId: state.id, toEntityId: next, deliveryMode, ...opt("trustedGatewayEntityId", trustedGatewayEntityId) };
-      return replicas.has(next) ? map(enqueue(next, [leg], [wake(state, ctx.timestamp)]), (d) => say(d, `💸 Sending ${amount} (token ${Number(tokenId)}) to ${targetEntityId} via ${route.length - 1} hops`)) : err({ _tag: "no_such_account", target: next });
-    },
-    lendingOffer: (x) => entityLending(state, replicas, x, (hub, accountTx) => map(enqueue(hub, [accountTx], [wake(state, ctx.timestamp)]), (d) => say(d, lendingMessage(x)))),
-    lendingBorrow: (x) => entityLending(state, replicas, x, (hub, accountTx) => map(enqueue(hub, [accountTx], [wake(state, ctx.timestamp)]), (d) => say(d, lendingMessage(x)))),
-    lendingRepay: (x) => entityLending(state, replicas, x, (hub, accountTx) => map(enqueue(hub, [accountTx], [wake(state, ctx.timestamp)]), (d) => say(d, lendingMessage(x)))),
-    lendingClosePosition: (x) => entityLending(state, replicas, x, (hub, accountTx) => map(enqueue(hub, [accountTx], [wake(state, ctx.timestamp)]), (d) => say(d, lendingMessage(x)))),
-    // og system/basic.ts: chat messages are frame events (certified in the frame hash, never in the state root); an invalid chat message is a silent no-op
-    chat: (x) => ok(typeof x.data.message === "string" && x.data.message.length > 0 && x.data.message.length <= 1000 ? { ...skip, events: [{ type: "text", validatorId: lower(x.data.from), message: x.data.message }] } : skip),
-    chatMessage: (x) => ok(say(skip, x.data.message)),
+    openAccount: (x) => openAccountTx(s, x),
+    extendCredit: (x) => extendCreditTx(s, x),
+    directPayment: (x) => directPaymentTx(s, x),
+    lendingOffer: (x) => lendingTx(s, x),
+    lendingBorrow: (x) => lendingTx(s, x),
+    lendingRepay: (x) => lendingTx(s, x),
+    lendingClosePosition: (x) => lendingTx(s, x),
+    chat: (x) => ok(chatTx(s, x)),
+    chatMessage: (x) => ok(withStatus(skip, x.data.message)),
     entityCommand: (x) => foldCommand(state, replicas, x.data, ctx),
-    entityProviderTransfer: (x) => entityProviderAction(state, replicas, x, ctx.timestamp),
-    entityProviderReleaseControlShares: (x) => entityProviderAction(state, replicas, x, ctx.timestamp),
-    entityProviderCancelAction: (x) => entityProviderCancel(state, replicas, x, ctx.timestamp),
+    entityProviderTransfer: (x) => entityProviderAction(state, replicas, x, now),
+    entityProviderReleaseControlShares: (x) => entityProviderAction(state, replicas, x, now),
+    entityProviderCancelAction: (x) => entityProviderCancel(state, replicas, x, now),
     entityProviderProposeControlBoard: (x) => proposeControlBoard(state, replicas, x, ctx),
-    entityProviderActivateBoard: (x) => activateBoard(state, replicas, x, ctx.timestamp),
+    entityProviderActivateBoard: (x) => activateBoard(state, replicas, x, now),
     propose: (x) => foldPropose(state, replicas, x.data, ctx),
     vote: (x) => foldVote(state, replicas, x.data, ctx),
-    // og admin.ts handleRequestCollateralEntityTx: a missing Account is a no-op; otherwise queue request_collateral and wake validators[0]
-    requestCollateral: (x) => {
-      const { counterpartyEntityId: to, tokenId, amount, feeTokenId, feeAmount, policyVersion } = x.data;
-      return replicas.has(to) ? enqueue(to, [{ type: "request_collateral", tokenId, amount, ...opt("feeTokenId", feeTokenId), feeAmount, policyVersion }], [wake(state, ctx.timestamp)]) : ok(skip);
-    },
-    // og payments/swap-requests.ts: a missing Account halts (SWAP_REQUEST_ACCOUNT_MISSING, the whole input); otherwise queue the swap Account tx and wake validators[0]
-    placeSwapOffer: (x) => {
-      const { counterpartyEntityId: to, offerId, giveTokenId, giveTokenDecimals, giveAmount, wantTokenId, wantTokenDecimals, wantAmount, maxFee, minNetReceive, priceTicks, timeInForce } = x.data;
-      const offer: AccountTx = { type: "swap_offer", offerId, giveTokenId, giveTokenDecimals, giveAmount, wantTokenId, wantTokenDecimals, wantAmount, maxFee, minNetReceive, ...opt("priceTicks", priceTicks), ...opt("timeInForce", timeInForce) };
-      return replicas.has(to) ? enqueue(to, [offer], [wake(state, ctx.timestamp)]) : err({ _tag: "swap_request_account_missing", target: to });
-    },
-    proposeAccountsNow: (x) => map(proposeAccountsNowOk(state, x.data), () => ({ ...skip, outputs: x.data.counterparties.flatMap((peer): EntityOutput[] => {
-      // og re-emits the retained bytes unchanged; a peer with no Account or no unanswered proposal is owed nothing
-      const child = replicas.get(peer as EntityId), sent = child === undefined ? undefined : pendingAccountInput(child, state.id);
-      return sent === undefined ? [] : [{ to: peer as EntityId, tx: { type: "accountInput", data: sent } }];
-    }) })),
-    initOrderbookExt: (x) => map(initOrderbookExt(state, x.data), (orderbookExt): Draft => (orderbookExt === state.orderbookExt ? skip : { ...skip, state: { ...state, orderbookExt } })),
-    proposeCancelSwap: (x) => (replicas.has(x.data.counterpartyEntityId) ? enqueue(x.data.counterpartyEntityId, [{ type: "swap_cancel_request", offerId: x.data.offerId }], [wake(state, ctx.timestamp)]) : err({ _tag: "swap_request_account_missing", target: x.data.counterpartyEntityId })),
-    "profile-update": (x) => map(profileUpdate(state, x.data.profile), (profile) => ({ ...skip, state: { ...state, committed: { ...state.committed, profile } } })),
-    // og handleSetHubConfigEntityTx: commit the config, mark the profile a hub, then queue the fee terms on every Account's tokens (ids and tokens ascending) and wake
-    setHubConfig: (x) => chain(buildHubConfig(hubConfigOf(state), x.data), (config) => {
-      const committed = { ...state.committed, hubRebalanceConfig: config as unknown as Binary, profile: { ...((state.committed["profile"] ?? {}) as { readonly [k: string]: Binary }), isHub: true } };
-      const targets = [...replicas.keys()].sort(asc).flatMap((peer) => [...(replicas.get(peer)?.state.account.deltas.keys() ?? [])].sort((a, b) => Number(a) - Number(b)).map((t) => [peer, t] as const));
-      const message = `🏦 Hub config activated: ${config.matchingStrategy} strategy v${config.policyVersion}, ${config.routingFeePPM}ppm routing fee, swapTakerFee=${config.swapTakerFeeBps}bps, rebalance(base=token-default, liqBps=${config.rebalanceLiquidityFeeBps}, gas=token-default, c2rWithdrawSoftLimit=token-default)`;
-      const start: Draft = { state: { ...state, committed }, accountReplicas: replicas, outputs: [], touched: [...new Set(targets.map(([peer]) => peer))] };
-      return map(foldResult<Draft, readonly [EntityId, TokenId], EntityError>(targets, start, (d, [peer, t]) => chain(hubPolicyTx(config, t), (policyTx) =>
-        withChild(d.accountReplicas, peer, (child) => map(admitAt(child, [policyTx], state.id, { ...L0_CLOCK, timestamp: ctx.timestamp }, ctx.verify), (admitted) => ({ ...d, ...putChild(d.state, d.accountReplicas, peer, admitted) }))))),
-      (d) => say({ ...d, outputs: targets.length > 0 ? [wake(state, ctx.timestamp)] : [] }, message));
-    }),
+    requestCollateral: (x) => requestCollateralTx(s, x),
+    placeSwapOffer: (x) => placeSwapOfferTx(s, x),
+    proposeAccountsNow: (x) => proposeAccountsNowTx(s, x),
+    initOrderbookExt: (x) =>
+      map(initOrderbookExt(state, x.data), (orderbookExt): Draft =>
+        orderbookExt === state.orderbookExt ? skip : { ...skip, state: { ...state, orderbookExt } },
+      ),
+    proposeCancelSwap: (x) =>
+      swapRequest(s, x.data.counterpartyEntityId, { type: "swap_cancel_request", offerId: x.data.offerId }),
+    "profile-update": (x) =>
+      map(profileUpdate(state, x.data.profile), (profile) => ({
+        ...skip,
+        state: { ...state, committed: { ...state.committed, profile } },
+      })),
+    setHubConfig: (x) => setHubConfigTx(s, x),
     prepareDispute: (x) => prepareDispute(skip, x.data, ctx),
     disputeFinalize: (x) => finalizeDispute(skip, x.data, ctx),
     crossJurisdictionSalvage: (x) => crossSalvage(skip, x.data, ctx),
     crossJurisdictionForceSiblingDispute: (x) => forceSiblingDispute(skip, x.data, ctx),
     resolveHtlcLock: (x) => resolveHtlcLockTx(skip, x.data, ctx),
     scheduledWake: (x) => foldWake(state, replicas, x.data, ctx),
-    // og handleProcessHtlcTimeoutsEntityTx: each expired lock's timeout resolve through og applyLocalAccountEffects
-    processHtlcTimeouts: (x) => ok((x.data.expiredLocks ?? []).reduce((d, l) => queueReturned(d, { accountId: l.accountId, tx: { type: "htlc_resolve", lockId: l.lockId, outcome: "error", reason: "timeout" } }), skip)),
-    disputeStart: (x) => startDispute(skip, x.data.counterpartyEntityId, { description: x.data.description ?? "", ...opt("crossJurisdictionRouteId", x.data.crossJurisdictionRouteId), ...opt("starterInitialArguments", x.data.starterInitialArguments), ...opt("starterCounterArguments", x.data.starterCounterArguments) }, ctx),
-    // og handleSetRebalancePolicyEntityTx: a missing Account is a no-op; an invalid policy is a plain Error; without a hub config, run checkAutoRebalance
-    setRebalancePolicy: (x) => {
-      const { counterpartyEntityId: to, tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee } = x.data, child = replicas.get(to);
-      if (child === undefined) return ok(skip);
-      if (r2cRequestSoftLimit < 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return invariant(`REBALANCE_POLICY_INVALID: token=${Number(tokenId)}`);
-      const updated: AccountReplica = { ...child, rebalancePolicy: mapSet(child.rebalancePolicy ?? new Map<number, RebalancePolicy>(), Number(tokenId), { r2cRequestSoftLimit, hardLimit, maxAcceptableFee }) };
-      const requests = hubConfigOf(state) === undefined ? autoRebalance(updated, state.id) : [];
-      const put = putChild(state, replicas, to, updated);
-      return requests.length === 0 ? ok({ ...put, outputs: [] }) : map(admitAt(updated, requests, state.id, L0_CLOCK, ctx.verify), (admitted) => ({ ...putChild(state, replicas, to, admitted), outputs: [wake(state, ctx.timestamp)] }));
-    },
+    processHtlcTimeouts: (x) => ok(processHtlcTimeoutsTx(s, x)),
+    disputeStart: (x) => disputeStartTx(s, x),
+    setRebalancePolicy: (x) => setRebalancePolicyTx(s, x),
     settle_propose: (x) => settlePropose(skip, x.data, settleQueue(ctx)),
     settle_update: (x) => settleUpdate(skip, x.data, settleQueue(ctx)),
     settle_approve: (x) => settleApprove(skip, x.data),
     settle_execute: (x) => settleExecute(skip, x.data, ctx.verify, settleQueue(ctx), ctx.jReplicas),
     settle_reject: (x) => settleReject(skip, x.data, settleQueue(ctx)),
-    // og cross-j setup handlers (setup.ts) and the certified runtimeOutput lane (consensus/frame/application.ts applyRuntimeOutput)
-    prepareCrossJurisdictionSwap: (x) => map(crossPrepare(crossView(state, replicas, ctx.timestamp), x.data.route), (s) => crossDraft(state, replicas, s, ctx.timestamp)),
-    materializeCrossJurisdictionSwap: (x) => map(crossMaterialize(crossView(state, replicas, ctx.timestamp), x.data), (s) => crossDraft(state, replicas, s, ctx.timestamp)),
-    registerCrossJurisdictionSwap: (x) => map(crossRegister(crossView(state, replicas, ctx.timestamp), x.data.route), (s) => crossDraft(state, replicas, s, ctx.timestamp)),
+    // og cross-j setup handlers (setup.ts) and the certified runtimeOutput lane (consensus/frame/application.ts
+    // applyRuntimeOutput)
+    prepareCrossJurisdictionSwap: (x) => cross(crossPrepare(view(), x.data.route)),
+    materializeCrossJurisdictionSwap: (x) => cross(crossMaterialize(view(), x.data)),
+    registerCrossJurisdictionSwap: (x) => cross(crossRegister(view(), x.data.route)),
     // og cross-j book lifecycle handlers (book-order.ts, book-removal-ack.ts, fill.ts)
-    admitCrossJurisdictionBookOrder: (x) => map(admitBookOrder(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => hostDraft(skip, s, ctx.timestamp)),
-    removeCrossJurisdictionBookOrder: (x) => map(removeCrossBookOrder(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => hostDraft(skip, s, ctx.timestamp)),
-    crossJurisdictionBookOrderRemoved: (x) => disputeRemovalAck(skip, x.data, ctx) ?? map(bookOrderRemoved(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => hostDraft(skip, s, ctx.timestamp)),
-    crossJurisdictionFillNotice: (x) => map(crossFillNotice(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => hostDraft(skip, s, ctx.timestamp)),
-    // og clear.ts (clear request, proposer reveal), payments/pull.ts crossPullClose, sweep.ts: book-host steps whose Account work goes through applyLocalAccountEffects
-    requestCrossJurisdictionClear: (x) => map(requestCrossClear(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => clearDraft(skip, s, ctx.timestamp)),
-    materializeCrossJurisdictionClear: (x) => map(materializeCrossClear(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => clearDraft(skip, s, ctx.timestamp)),
-    crossPullClose: (x) => map(crossPullCloseTx(bookHostOf(state, replicas, ctx.timestamp), x.data), (s) => clearDraft(skip, s, ctx.timestamp)),
-    orderbookSweepCrossJurisdiction: (x) => map(crossSweep(bookHostOf(state, replicas, ctx.timestamp), x.data.reason), (s) => clearDraft(skip, s, ctx.timestamp)),
+    admitCrossJurisdictionBookOrder: (x) => hosted(admitBookOrder(book(), x.data)),
+    removeCrossJurisdictionBookOrder: (x) => hosted(removeCrossBookOrder(book(), x.data)),
+    crossJurisdictionBookOrderRemoved: (x) =>
+      disputeRemovalAck(skip, x.data, ctx) ?? hosted(bookOrderRemoved(book(), x.data)),
+    crossJurisdictionFillNotice: (x) => hosted(crossFillNotice(book(), x.data)),
+    // og clear.ts (clear request, proposer reveal), payments/pull.ts crossPullClose, sweep.ts: their Account work goes
+    // through applyLocalAccountEffects
+    requestCrossJurisdictionClear: (x) => cleared(requestCrossClear(book(), x.data)),
+    materializeCrossJurisdictionClear: (x) => cleared(materializeCrossClear(book(), x.data)),
+    crossPullClose: (x) => cleared(crossPullCloseTx(book(), x.data)),
+    orderbookSweepCrossJurisdiction: (x) => cleared(crossSweep(book(), x.data.reason)),
     // og entity/tx/handlers/j-batch on the committed jBatchState
-    r2r: (x) => entityR2R(skip, x.data), r2e: (x) => entityR2E(skip, x.data), e2r: (x) => entityE2R(skip, x.data), r2c: (x) => entityR2C(skip, x.data),
-    j_broadcast: (x) => entityJBroadcast(skip, x.data, ctx.timestamp), j_rebroadcast: (x) => entityJRebroadcast(skip, x.data, ctx.timestamp),
-    j_abort_sent_batch: (x) => ok(entityJAbort(skip, x.data)), j_clear_batch: (x) => ok(entityJClear(skip, x.data)), mintReserves: (x) => ok(entityMint(skip, x.data, ctx.timestamp)),
+    r2r: (x) => entityR2R(skip, x.data),
+    r2e: (x) => entityR2E(skip, x.data),
+    e2r: (x) => entityE2R(skip, x.data),
+    r2c: (x) => entityR2C(skip, x.data),
+    j_broadcast: (x) => entityJBroadcast(skip, x.data, now),
+    j_rebroadcast: (x) => entityJRebroadcast(skip, x.data, now),
+    j_abort_sent_batch: (x) => ok(entityJAbort(skip, x.data)),
+    j_clear_batch: (x) => ok(entityJClear(skip, x.data)),
+    mintReserves: (x) => ok(entityMint(skip, x.data, now)),
     j_event: (x) => entityJEvent(skip, x.data as JRec, ctx),
     boardHandover: (x) => entityBoardHandover(skip, x.data.board, ctx.boardHandover),
-    runtimeOutput: (x) => {
-      if (x.data.protocol !== "cross-j") return invariant(`RUNTIME_OUTPUT_PROTOCOL_INVALID:${String(x.data.protocol)}`);
-      const refused = runtimeOutputAuthError(state, x.data);
-      return refused !== null ? invariant(refused) : foldNested(state, replicas, x.data.entityTxs, ctx, "runtime");
-    },
-    htlcPayment: (x) => chain(validatePreparedHtlcPayment(originView(state, replicas, ctx.timestamp), x, ctx.htlc ?? EMPTY_HTLC_INFRA), (p) => {
-      const next = htlcPaymentStep(p, state.paybook ?? EMPTY_PAYBOOK, Number(ctx.timestamp));
-      // og recordOriginatedHtlc: the HtlcInitiated runtime event
-      const initiated: EntityRuntimeEvent = { eventName: "HtlcInitiated", data: { entityId: state.id, fromEntity: state.id, toEntity: p.targetEntityId, tokenId: p.tokenId, amount: p.recipientAmount.toString(), senderAmount: p.senderLockAmount.toString(),
-        fee: p.totalFee.toString(), hashlock: p.hashlock, lockId: p.hashlock, route: p.route, ...(p.description ? { description: p.description } : {}), startedAtMs: p.startedAtMs } };
-      return map(enqueue(p.nextHopEntityId as EntityId, [next.lock], []), (d) => ({ ...d, state: { ...d.state, paybook: next.paybook }, runtimeEvents: [initiated] }));
-    }),
-    // og input-phases.ts: the sender's record in this Entity's certified registry is the Account's counterpartyCertifiedBoard
-    accountInput: (x) => chain(deliveredBy(x.data, state.id, origin), () => chain(observerBoardRecord(state, x.data.fromEntityId), (record) => {
-      const at = replicas.get(peer), door: DoorContext = { verify: ctx.verify, self: state.id, now: ctx.timestamp, autoRebalance: hubConfigOf(state) === undefined, ...(record === null ? {} : { counterpartyBoard: { boardHash: record.boardHash, activatedAtJHeight: record.activatedAtJHeight, logIndex: record.logIndex } }), ...(at === undefined ? {} : { deltaTransformer: accountDt(ctx, at) }), ...opt("boardAuthority", ctx.boardAuthority) };
-      const held: Folded = { state, accountReplicas: replicas };
-      // og finishDisputedAccountInput: a 'dispute' disposition ends the input in handleUnsafeAccountFrame (no committed followups)
-      const unsafeOr = (at: Folded, created: boolean, go: (child: AccountReplica, applied: Result<AccountApply, AccountReplicaError>) => Result<Draft, EntityError>): Result<Draft, EntityError> => {
-        const child = at.accountReplicas.get(peer);
-        if (child === undefined) return err({ _tag: "no_such_account", target: peer });
-        const applied = applyAccountInput(child, x.data, door);
-        return (applied.ok ? undefined : unsafeAccountFrame(held, at, peer, applied.error, created, ctx)) ?? go(child, applied);
-      };
-      const applyRaw = (at: Folded, then: (r: Routed) => Result<Draft, EntityError>, created = false): Result<Draft, EntityError> =>
-        unsafeOr(at, created, (child, applied) => chain(routedRaw(at.state, at.accountReplicas, peer, disputeUnsafe(child, applied, door)), then));
-      const apply = (at: Folded): Result<Draft, EntityError> => unsafeOr(at, false, (child, applied) => routed(at.state, at.accountReplicas, peer, disputeUnsafe(child, applied, door)));
-      // og committedFrames: our own frame commits when the peer's ACK for it lands; the peer's frame commits when we sign it (answerFrame).
-      const before = replicas.get(peer), pendingOwn = before !== undefined && before._tag === "proposed" ? before.candidate.frame : undefined;
-      const ownCommitted = (d: Draft): AccountFrame | undefined => { const after = d.accountReplicas.get(peer); return pendingOwn !== undefined && after !== undefined && after.head.height >= pendingOwn.height ? pendingOwn : undefined; };
-      return matchBy("kind", x.data, {
-        ack: () => applyRaw(held, ({ draft, effects }) => committedFollowups(draft, peer, ownCommitted(draft), undefined, effects, ctx)),
-        // og routes the standalone peer dispute witness through the same accountInput lane; an unknown Account has no genesis for it (og ACCOUNT_GENESIS_FRAME_REQUIRED).
-        dispute: () => apply(held),
-        // og board-hanko-refresh.ts: checked against the sender's certified board (certified_board_missing without a record)
-        board_hanko_refresh: () => apply(held),
-        ack_frame: (i) => match(origin, {
-          local: (): Result<Draft, EntityError> => err({ _tag: "from_not_converted" }),
-          received: ({ from }) => chain(!i.frame.txs.every(entityAcceptsPeerTx) ? err({ _tag: "not_l0" }) : replicas.has(from) ? ok(held) : inboundChild(state, replicas, from, i), (at) => applyRaw(at, ({ draft: d, effects: own }) => {
-            const pending = d.accountReplicas.get(from), frame = pending !== undefined && pending._tag === "received" ? pending.candidate.frame : undefined;
-            return chain(answerFrame(d, from, ctx), ({ draft: answered, effects: signed }) => {
-              const after = answered.accountReplicas.get(from), installed = frame !== undefined && after !== undefined && after.head.height >= frame.height;
-              return committedFollowups(answered, from, ownCommitted(answered), installed ? { frame, from: i.fromEntityId, to: i.toEntityId, domain: i.domain } : undefined, [...own, ...signed], ctx, !replicas.has(from));
-            });
-          }, !replicas.has(from))),
-        }),
-      });
-    })),
+    runtimeOutput: (x) => runtimeOutputTx(s, x),
+    htlcPayment: (x) => htlcPaymentTx(s, x),
+    accountInput: (x) => accountInputTx(s, x, originOf(tx, state.id), peerOf(tx, state.id)),
   });
 };
 /** og swapTakerFeeBps as the matcher reads it: a finite number floored into 0..10000, else 0. */
-const takerFeeBpsOf = (raw: unknown): number => { const n = Number(raw); return Number.isFinite(n) ? Math.max(0, Math.min(10_000, Math.floor(n))) : 0; };
-/** The matcher's view of this Entity: og status 'active' is a live Account; queued work is the mempool plus our pending frame. */
-export const hubView = (state: EntityState, replicas: Replicas, ext: OrderbookExt, timestamp?: bigint): Hub => ({
-  id: state.id, ext, takerFeeBps: takerFeeBpsOf(hubConfigOf(state)?.swapTakerFeeBps), ...opt("timestamp", timestamp === undefined ? undefined : Number(timestamp)),
-  ...opt("crossSwaps", state.crossJurisdictionSwaps), ...opt("crossAdmissions", state.crossJurisdictionBookAdmissions),
-  accounts: new Map([...replicas].map(([peer, c]): [string, HubAccount] => [peer, {
-    active: isLive(c), left: c.state.account.id.left, right: c.state.account.id.right, offers: c.state.offers, queued: c._tag === "proposed" ? [...c.mempool, ...c.candidate.frame.txs] : c.mempool, ...opt("pulls", c.state.pulls),
-  }])),
-});
-/** og replaceOrderbookPair for each final book: an existing pair keeps its place, a new pair is appended. */
-const withBooks = (ext: OrderbookExt, books: ReadonlyMap<string, Book>): OrderbookExt => (books.size === 0 ? ext : { ...ext, books: new Map([...ext.books, ...books]) });
-/** og commitOrderbookMatchResult: a pair's trade counter never moves backwards; the new trades across the updated pairs are the frame's SwapMatched count. */
-export const tradesMatched = (ext: OrderbookExt, books: ReadonlyMap<string, Book>): Result<number, EntityError> => {
-  let matched = 0;
-  for (const [pairId, book] of books) {
-    const previous = ext.books.get(pairId)?.tradeCount ?? 0;
-    if (book.tradeCount < previous) return invariant(`ORDERBOOK_TRADE_COUNT_REGRESSION:pair=${pairId}:previous=${previous}:next=${book.tradeCount}`);
-    matched += book.tradeCount - previous;
-  }
-  return ok(matched);
+const takerFeeBpsOf = (raw: unknown): number => {
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(0, Math.min(10_000, Math.floor(n))) : 0;
 };
 /**
- * og applyPostEntityTxPhases book work, after every Entity tx and before Account proposals:
- * committed offer removals leave the book (a still-visible cross-j offer's admission closes); cancel requests whose cross-j book lives on a sibling hub
- * become removal requests there, the rest queue their zero-fill resolve or a hub-internal cross-j cancel; then the frame's committed offers are matched
- * and the matcher's cross-j fills are applied after its books are installed. Matcher resolves are admitted as one batch per Account (og
- * admitOrderbookAccountTxBatch); a short admission halts.
+ * The matcher's view of one Account: og status 'active' is a live Account; queued work is the mempool plus our pending
+ * frame.
+ */
+const hubAccountOf = (c: AccountReplica): HubAccount => ({
+  active: isLive(c),
+  left: c.state.account.id.left,
+  right: c.state.account.id.right,
+  offers: c.state.offers,
+  queued: c._tag === "proposed" ? [...c.mempool, ...c.candidate.frame.txs] : c.mempool,
+  ...opt("pulls", c.state.pulls),
+});
+/** The matcher's view of this Entity. */
+export const hubView = (state: EntityState, replicas: Replicas, ext: OrderbookExt, timestamp?: bigint): Hub => ({
+  id: state.id,
+  ext,
+  takerFeeBps: takerFeeBpsOf(hubConfigOf(state)?.swapTakerFeeBps),
+  ...opt("timestamp", timestamp === undefined ? undefined : Number(timestamp)),
+  ...opt("crossSwaps", state.crossJurisdictionSwaps),
+  ...opt("crossAdmissions", state.crossJurisdictionBookAdmissions),
+  accounts: new Map([...replicas].map(([peer, c]): [string, HubAccount] => [peer, hubAccountOf(c)])),
+});
+/** og replaceOrderbookPair for each final book: an existing pair keeps its place, a new pair is appended. */
+const withBooks = (ext: OrderbookExt, books: ReadonlyMap<string, Book>): OrderbookExt =>
+  books.size === 0 ? ext : { ...ext, books: new Map([...ext.books, ...books]) };
+const withDraftBooks = (d: Draft, books: ReadonlyMap<string, Book>): Draft => {
+  const ext = d.state.orderbookExt;
+  return ext === undefined ? d : { ...d, state: { ...d.state, orderbookExt: withBooks(ext, books) } };
+};
+/**
+ * og commitOrderbookMatchResult: a pair's trade counter never moves backwards; the new trades across the updated pairs
+ * are the frame's SwapMatched count.
+ */
+export const tradesMatched = (ext: OrderbookExt, books: ReadonlyMap<string, Book>): Result<number, EntityError> =>
+  foldResult(books, 0, (matched, [pairId, book]) => {
+    const previous = ext.books.get(pairId)?.tradeCount ?? 0;
+    return book.tradeCount < previous
+      ? invariant(`ORDERBOOK_TRADE_COUNT_REGRESSION:pair=${pairId}:previous=${previous}:next=${book.tradeCount}`)
+      : ok(matched + (book.tradeCount - previous));
+  });
+/** Each cross-j fill the matcher produced, applied to the book host in order. */
+const crossFills = (d: Draft, fills: readonly CrossFillInstruction[], timestamp: bigint): Result<Draft, EntityError> =>
+  foldResult(fills, d, (acc, f) =>
+    map(orderbookFill(bookHostOf(acc.state, acc.accountReplicas, timestamp), f), (r) =>
+      hostDraft(acc, hostStep(r.host, { outputs: r.outputs }), timestamp),
+    ),
+  );
+/** The draft after the committed cancels, and the pairs they paused that the matcher must resume. */
+type CancelsApplied = { readonly d: Draft; readonly resumePairIds: readonly string[] };
+/**
+ * og applyCommittedSwapCancelsToOrderbook: committed offer removals leave the book; a still-visible cross-j offer's
+ * admission closes.
+ */
+const applyCommittedCancels = (
+  d: Draft,
+  cancelled: readonly SwapRef[],
+  timestamp: bigint,
+): Result<CancelsApplied, EntityError> => {
+  const ext = d.state.orderbookExt;
+  if (ext === undefined || cancelled.length === 0) return ok({ d, resumePairIds: [] });
+  return chain(closeCommittedCrossCancels(bookHostOf(d.state, d.accountReplicas, timestamp), cancelled), (host) =>
+    map(applyCommittedSwapCancels(ext, cancelled), ({ ext: orderbookExt, resumePairIds }) => ({
+      d: { ...d, state: { ...d.state, orderbookExt, ...opt("crossJurisdictionBookAdmissions", host.admissions) } },
+      resumePairIds,
+    })),
+  );
+};
+/** Each cancel's resolve admitted alone; an Account that is missing or refuses it keeps its state. */
+const admitCancelResolves = (d: Draft, txs: readonly BookTx[]): Draft =>
+  txs.reduce((acc, { accountId, tx }) => {
+    const id = accountId as EntityId;
+    const child = acc.accountReplicas.get(id);
+    const admitted = child === undefined ? undefined : admit(child, [tx], acc.state.id);
+    return admitted !== undefined && admitted.ok
+      ? { ...acc, ...putChild(acc.state, acc.accountReplicas, id, admitted.value) }
+      : acc;
+  }, d);
+/**
+ * og applySwapCancelRequests: a request whose cross-j book lives on a sibling hub becomes a removal request there; the
+ * rest queue their zero-fill resolve or a hub-internal cross-j cancel.
+ */
+const applyCancelRequests = (d: Draft, requests: readonly SwapRef[], timestamp: bigint): Result<Draft, EntityError> => {
+  if (requests.length === 0) return ok(d);
+  return chain(routeRemoteCancels(bookHostOf(d.state, d.accountReplicas, timestamp), requests), (routed) => {
+    const hosted = hostDraft(d, hostStep(routed.host, { outputs: routed.outputs }), timestamp);
+    const ext = hosted.state.orderbookExt;
+    if (routed.local.length === 0 || ext === undefined) return ok(hosted);
+    const hub = hubView(hosted.state, hosted.accountReplicas, ext, timestamp);
+    return chain(processOrderbookCancels(hub, routed.local), (cancels) => {
+      const resolved = admitCancelResolves(hosted, cancels.accountTxs);
+      return map(crossFills(resolved, cancels.crossFills, timestamp), (filled) =>
+        withDraftBooks(filled, cancels.books),
+      );
+    });
+  });
+};
+/**
+ * The matcher's Account txs grouped per Account in first-seen order. A resolve of a cross-j offer is the book's own;
+ * any other resolve must own an offer the Account shows or the frame verified.
+ */
+const matcherBatches = (
+  hub: Hub,
+  txs: readonly BookTx[],
+  verified: ReadonlySet<string>,
+  self: EntityId,
+): Result<ReadonlyMap<string, readonly AccountTx[]>, EntityError> =>
+  foldResult(
+    txs,
+    new Map<string, readonly AccountTx[]>() as ReadonlyMap<string, readonly AccountTx[]>,
+    (batches, { accountId, tx }) => {
+      const visible = hub.accounts.get(accountId);
+      const resolve = tx.type === "swap_resolve" ? tx : undefined;
+      const bookOwned = resolve !== undefined && visible?.offers.get(resolve.offerId)?.crossJurisdiction !== undefined;
+      const owned =
+        resolve === undefined ||
+        visible?.offers.has(resolve.offerId) ||
+        verified.has(`${accountId}:${resolve.offerId}`);
+      if (bookOwned) return ok(batches);
+      if (!owned)
+        return invariant(
+          `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${resolve?.offerId} entity=${self}`,
+        );
+      if (visible === undefined)
+        return invariant(`ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${self} tx=${tx.type}`);
+      return ok(mapSet(batches, accountId, [...(batches.get(accountId) ?? []), tx]));
+    },
+  );
+/** og admitOrderbookAccountTxBatch: one Account's matcher txs admitted together; a short admission halts. */
+const admitMatcherBatch = (
+  at: Folded,
+  [accountId, txs]: readonly [string, readonly AccountTx[]],
+): Result<Folded, EntityError> => {
+  const child = at.accountReplicas.get(accountId as EntityId);
+  if (child === undefined) {
+    return invariant(
+      `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${at.state.id} tx=${txs[0]?.type ?? ""}`,
+    );
+  }
+  const queued = chain(partyOf(replicaId(child), at.state.id), (p) => enqueue(child, txs, p.left));
+  const admitted = queued.ok ? queued.value.queued.length : 0;
+  const { left, right } = child.state.account.id;
+  if (!queued.ok || admitted !== txs.length) {
+    return invariant(
+      `ORDERBOOK_ACCOUNT_TX_ADMISSION_FAILED: account=${left}:${right} expected=${txs.length} admitted=${admitted}`,
+    );
+  }
+  return ok(putChild(at.state, at.accountReplicas, accountId as EntityId, queued.value.replica));
+};
+/**
+ * og commitOrderbookMatchResult: the matcher's Account txs are admitted per Account, its books and pair dimensions
+ * installed, then its cross-j fills applied; a frame with new trades reports SwapMatched.
+ */
+const installMatch = (
+  d: Draft,
+  hub: Hub,
+  offers: readonly BookOfferInput[],
+  match: BookMatch,
+  ext: OrderbookExt,
+  timestamp: bigint,
+): Result<Draft, EntityError> => {
+  const sameJ = offers.filter((o) => o.crossJurisdiction === undefined);
+  const verified = new Set(sameJ.map((o) => `${o.accountId}:${o.offerId}`));
+  const start: Folded = { state: d.state, accountReplicas: d.accountReplicas };
+  const admitted = chain(matcherBatches(hub, match.accountTxs, verified, d.state.id), (batches) =>
+    foldResult(batches, start, admitMatcherBatch),
+  );
+  return chain(admitted, (installed) =>
+    chain(tradesMatched(ext, match.books), (matched) => {
+      const orderbookExt = { ...withBooks(ext, match.books), pairDimensions: match.pairDimensions };
+      const booked: Draft = {
+        ...d,
+        state: { ...installed.state, orderbookExt },
+        accountReplicas: installed.accountReplicas,
+      };
+      const reported: EntityRuntimeEvent = {
+        eventName: "SwapMatched",
+        data: { entityId: installed.state.id, count: matched },
+      };
+      return map(crossFills(booked, match.crossFills, timestamp), (filled): Draft =>
+        matched === 0 ? filled : { ...filled, runtimeEvents: [...(filled.runtimeEvents ?? []), reported] },
+      );
+    }),
+  );
+};
+/** og processOrderbookSwaps over the frame's committed offers and resumed pairs; a live cross-j book always runs. */
+const matchCommittedOffers = (
+  d: Draft,
+  created: readonly SwapOfferEvent[],
+  resumePairIds: readonly string[],
+  timestamp: bigint,
+): Result<Draft, EntityError> => {
+  const ext = d.state.orderbookExt;
+  if (ext === undefined) return ok(d);
+  const crossBook = [...ext.books.keys()].some((pairId) => pairId.startsWith("cross:"));
+  if (created.length === 0 && resumePairIds.length === 0 && !crossBook) return ok(d);
+  const hub = hubView(d.state, d.accountReplicas, ext, timestamp);
+  return chain(offersForMatching(hub, created), (offers) =>
+    chain(processOrderbookSwaps(hub, offers, resumePairIds), (match) =>
+      installMatch(d, hub, offers, match, ext, timestamp),
+    ),
+  );
+};
+/**
+ * og applyPostEntityTxPhases book work, after every Entity tx and before Account proposals: the committed cancels, then
+ * the cancel requests, then the matcher over the frame's committed offers.
  */
 const bookPhase = (d: Draft, timestamp: bigint): Result<Draft, EntityError> => {
   const swaps = d.swaps;
   if (swaps === undefined) return ok(d);
-  const fills = (start: Draft, list: readonly CrossFillInstruction[]): Result<Draft, EntityError> => foldResult<Draft, CrossFillInstruction, EntityError>(list, start, (acc, f) =>
-    map(orderbookFill(bookHostOf(acc.state, acc.accountReplicas, timestamp), f), (r) => hostDraft(acc, hostStep(r.host, { outputs: r.outputs }), timestamp)));
-  // og applyCommittedSwapCancelsToOrderbook
-  const ext0 = d.state.orderbookExt;
-  const removals: Result<{ readonly d: Draft; readonly resumePairIds: readonly string[] }, EntityError> = ext0 === undefined || swaps.cancelled.length === 0 ? ok({ d, resumePairIds: [] })
-    : chain(closeCommittedCrossCancels(bookHostOf(d.state, d.accountReplicas, timestamp), swaps.cancelled), (host) => map(applyCommittedSwapCancels(ext0, swaps.cancelled), ({ ext, resumePairIds }) => ({
-      d: { ...d, state: { ...d.state, orderbookExt: ext, ...opt("crossJurisdictionBookAdmissions", host.admissions) } }, resumePairIds })));
-  return chain(removals, ({ d: d1, resumePairIds }) => {
-    // og applySwapCancelRequests
-    const cancelled: Result<Draft, EntityError> = swaps.cancelRequests.length === 0 ? ok(d1) : chain(routeRemoteCancels(bookHostOf(d1.state, d1.accountReplicas, timestamp), swaps.cancelRequests), (routed) => {
-      const d2 = hostDraft(d1, hostStep(routed.host, { outputs: routed.outputs }), timestamp), ext1 = d2.state.orderbookExt;
-      if (routed.local.length === 0 || ext1 === undefined) return ok(d2);
-      return chain(processOrderbookCancels(hubView(d2.state, d2.accountReplicas, ext1, timestamp), routed.local), (cancels) => {
-        let at: Folded = { state: d2.state, accountReplicas: d2.accountReplicas };
-        for (const { accountId, tx } of cancels.accountTxs) {
-          const child = at.accountReplicas.get(accountId as EntityId), admitted = child === undefined ? undefined : admit(child, [tx], at.state.id);
-          if (admitted !== undefined && admitted.ok) at = putChild(at.state, at.accountReplicas, accountId as EntityId, admitted.value);
-        }
-        return map(fills({ ...d2, state: at.state, accountReplicas: at.accountReplicas }, cancels.crossFills), (d3) => {
-          const ext = d3.state.orderbookExt;
-          return ext === undefined ? d3 : { ...d3, state: { ...d3.state, orderbookExt: withBooks(ext, cancels.books) } };
-        });
-      });
-    });
-    return chain(cancelled, (d3): Result<Draft, EntityError> => {
-      const ext2 = d3.state.orderbookExt;
-      if (ext2 === undefined) return ok(d3);
-      if (swaps.created.length === 0 && resumePairIds.length === 0 && ![...ext2.books.keys()].some((pairId) => pairId.startsWith("cross:"))) return ok(d3);
-      const hub = hubView(d3.state, d3.accountReplicas, ext2, timestamp);
-      return chain(offersForMatching(hub, swaps.created), (offers) => chain(processOrderbookSwaps(hub, offers, resumePairIds), (match): Result<Draft, EntityError> => {
-        let at: Folded = { state: d3.state, accountReplicas: d3.accountReplicas };
-        const verified = new Set(offers.filter((o) => o.crossJurisdiction === undefined).map((o) => `${o.accountId}:${o.offerId}`)), batches = new Map<string, AccountTx[]>();
-        for (const { accountId, tx } of match.accountTxs) {
-          const visible = hub.accounts.get(accountId);
-          if (tx.type === "swap_resolve") {
-            if (visible?.offers.get(tx.offerId)?.crossJurisdiction !== undefined) continue;
-            if (!visible?.offers.has(tx.offerId) && !verified.has(`${accountId}:${tx.offerId}`)) return invariant(`ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.offerId} entity=${at.state.id}`);
-          }
-          if (visible === undefined) return invariant(`ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${at.state.id} tx=${tx.type}`);
-          batches.set(accountId, [...(batches.get(accountId) ?? []), tx]);
-        }
-        for (const [accountId, txs] of batches) {
-          const child = at.accountReplicas.get(accountId as EntityId);
-          if (child === undefined) return invariant(`ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${at.state.id} tx=${txs[0]?.type ?? ""}`);
-          const queued = chain(partyOf(replicaId(child), at.state.id), (p) => enqueue(child, txs, p.left)), admitted = queued.ok ? queued.value.queued.length : 0;
-          if (!queued.ok || admitted !== txs.length) return invariant(`ORDERBOOK_ACCOUNT_TX_ADMISSION_FAILED: account=${child.state.account.id.left}:${child.state.account.id.right} expected=${txs.length} admitted=${admitted}`);
-          at = putChild(at.state, at.accountReplicas, accountId as EntityId, queued.value.replica);
-        }
-        // og commitOrderbookMatchResult: a pair's trade counter never moves backwards; the cross-j fills apply after the books are installed
-        for (const [pairId, book] of match.books) {
-          const previous = ext2.books.get(pairId)?.tradeCount ?? 0;
-          if (book.tradeCount < previous) return invariant(`ORDERBOOK_TRADE_COUNT_REGRESSION:pair=${pairId}:previous=${previous}:next=${book.tradeCount}`);
-        }
-        const installed = at;
-        return chain(tradesMatched(ext2, match.books), (matched) => map(fills({ ...d3, state: { ...installed.state, orderbookExt: { ...withBooks(ext2, match.books), pairDimensions: match.pairDimensions } }, accountReplicas: installed.accountReplicas }, match.crossFills),
-          (d4): Draft => (matched === 0 ? d4 : { ...d4, runtimeEvents: [...(d4.runtimeEvents ?? []), { eventName: "SwapMatched", data: { entityId: installed.state.id, count: matched } }] })));
-      }));
-    });
-  });
+  return chain(applyCommittedCancels(d, swaps.cancelled, timestamp), ({ d: cancelled, resumePairIds }) =>
+    chain(applyCancelRequests(cancelled, swaps.cancelRequests, timestamp), (requested) =>
+      matchCommittedOffers(requested, swaps.created, resumePairIds, timestamp),
+    ),
+  );
 };
-/** `accountFrames`: og accountsToProposeFramesCount (the Account frames this Entity frame proposed; none in a cross-j setup phase). */
-export type FoldedTxs = { readonly draft: Draft; readonly included: readonly EntityTx[]; readonly evicted: readonly EntityTx[]; readonly accountFrames?: number | undefined };
 /**
- * og buildEntityProposalEvictingRejected: a refused tx is evicted and the rest still fold. An openAccount refusal is a plain
- * Error in og (not a reject disposition), so it refuses the whole input, as does an og lending entity-tx refusal; so does a frame whose every tx was refused.
+ * `accountFrames`: og accountsToProposeFramesCount (the Account frames this Entity frame proposed; none in a cross-j
+ * setup phase).
  */
-export const foldTxs = (state: EntityState, replicas: Replicas, txs: readonly EntityTx[], ctx: FoldContext): Result<FoldedTxs, EntityError> => {
-  type Acc = FoldedTxs & { readonly first?: EntityError | undefined };
-  // og proposePendingAccountFrames worklist: Accounts proposable before the frame (sorted), then the Accounts the included txs touched, in order.
-  const primed = [...replicas].filter(([, c]) => proposableChild(c)).map(([peer]) => peer).sort(asc);
-  // og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget, then assertScheduledWakeFrameOrder (prepareEntityFrameWorkingSet): plain Errors for the whole frame
+export type FoldedTxs = {
+  readonly draft: Draft;
+  readonly included: readonly EntityTx[];
+  readonly evicted: readonly EntityTx[];
+  readonly accountFrames?: number | undefined;
+};
+/** The frame's txs folded so far, and the first refusal, which refuses a frame whose every tx was refused. */
+type Folding = FoldedTxs & { readonly first?: EntityError | undefined };
+/**
+ * og buildEntityProposalEvictingRejected: a refused tx is evicted and the rest still fold. An openAccount refusal is a
+ * plain Error in og (not a reject disposition), so it refuses the whole input, as does an og lending entity-tx refusal;
+ * so does a frame whose every tx was refused.
+ */
+const foldEvicting = (
+  state: EntityState,
+  replicas: Replicas,
+  txs: readonly EntityTx[],
+  ctx: FoldContext,
+  self: EntityId,
+): Result<FoldedTxs, EntityError> => {
+  const start: Folding = {
+    draft: { state, accountReplicas: replicas, outputs: [], events: [], touched: [] },
+    included: [],
+    evicted: [],
+  };
+  const step = (acc: Folding, tx: EntityTx): Result<Folding, EntityError> => {
+    const r = foldTx(acc.draft.state, acc.draft.accountReplicas, tx, ctx);
+    if (r.ok) {
+      const draft = appendDraft(acc.draft, r.value, r.value.touched ?? [peerOf(tx, self)]);
+      return ok({ ...acc, included: [...acc.included, tx], draft });
+    }
+    return fatalTx(tx, r.error) ? r : ok({ ...acc, evicted: [...acc.evicted, tx], first: acc.first ?? r.error });
+  };
+  return chain(foldResult(txs, start, step), ({ first, ...folded }) =>
+    folded.included.length === 0 && first !== undefined ? err(first) : ok(folded),
+  );
+};
+/** og proposePendingAccountFrames worklist entries: the Accounts that could propose now, ascending. */
+const proposableAccounts = (replicas: Replicas): readonly EntityId[] =>
+  [...replicas]
+    .filter(([, c]) => proposableChild(c))
+    .map(([peer]) => peer)
+    .toSorted(asc);
+/**
+ * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
+ * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
+ */
+export const foldTxs = (
+  state: EntityState,
+  replicas: Replicas,
+  txs: readonly EntityTx[],
+  ctx: FoldContext,
+): Result<FoldedTxs, EntityError> => {
+  // og proposePendingAccountFrames worklist: Accounts proposable before the frame (sorted), then the Accounts the
+  // included txs touched, in order
+  const primed = proposableAccounts(replicas);
+  // og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget, then assertScheduledWakeFrameOrder
+  // (prepareEntityFrameWorkingSet): plain Errors for the whole frame
   const budgets = frameBudgets(txs);
   if (!budgets.ok) return budgets;
   const misordered = wakeOrderIssue(txs);
   if (misordered !== undefined) return err(misordered);
-  // og prepareEntityFrameWorkingSet: a cross-j setup phase proposes no Account frame and never shares a frame with an Account transition
+  // og prepareEntityFrameWorkingSet: a cross-j setup phase proposes no Account frame and never shares a frame with an
+  // Account transition
   const setupPhase = txs.some(crossSetupTx);
   if (setupPhase && txs.some(accountTransitionTx)) return invariant("CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED");
-  // og getBoardHandoverFrameConfig over the normalized pre-frame state: the authority a [j_event, boardHandover] frame is certified under
-  return chain(normalizeGovernance(state), (normalized) => chain(handoverFrameConfig(normalized, txs), (handover) => chain(selfAuthorityTransitionFrame(normalized, txs), (authorityOnly) => chain(foldResult<Acc, EntityTx, EntityError>(txs, { draft: { state: normalized, accountReplicas: replicas, outputs: [], events: [], touched: [] }, included: [], evicted: [] }, (acc, tx) => {
-    const r = foldTx(acc.draft.state, acc.draft.accountReplicas, tx, handover === null ? ctx : { ...ctx, boardHandover: handover });
-    if (r.ok) return ok({ ...acc, included: [...acc.included, tx], draft: appendDraft(acc.draft, r.value, r.value.touched ?? [peerOf(tx, state.id)]) });
-    return fatalTx(tx, r.error) ? r : ok({ ...acc, evicted: [...acc.evicted, tx], first: acc.first ?? r.error });
-  }), ({ first, ...folded }) => {
-    if (folded.included.length === 0 && first !== undefined) return err(first);
-    // og finishAuthorityTransitionOnly (a handover, or a J range certifying the config board): after the settlement continuation, no Account
-    // work and no post-tx phases; the current profile is re-certified even when its bytes did not change
-    if (authorityOnly) return chain(materializeContinuation(folded.draft, ctx, settleQueue(ctx)), (d) => map(profileHashToSign(state, replicas, d, true), (draft) => ({ ...folded, draft })));
-    // og materializeSettlementContinuation, then drainPostOrderbookAccountWork's settlement approvals, before proposePendingAccountFrames.
-    // og applyPostEntityTxPhases: cancels + orderbook matching, then drainPostOrderbookAccountWork.
-    return chain(chain(chain(materializeContinuation(folded.draft, ctx, settleQueue(ctx)), (d) => bookPhase(d, ctx.timestamp)), (d) => materializeSettlements(d, ctx)), (settled) => {
-      // Accounts that received follow-up work (a gateway's forwarded leg, a matcher resolve) join after the directly touched ones.
-      const followups = [...settled.accountReplicas].filter(([, c]) => proposableChild(c)).map(([peer]) => peer).sort(asc);
-      const order = [...new Set([...primed, ...(settled.touched ?? []), ...followups])];
-      // og refreshChangedAccountCommitments: after the Account proposals, a changed certified frame re-arms its board Hanko refresh
-      return chain(setupPhase ? ok({ draft: settled, frames: 0 }) : proposeAccounts(settled, order, ctx), (proposed) =>
-        chain(rearmBoardRefreshes(replicas, { ...proposed.draft, ...opt("hashes", settled.hashes), ...opt("jOutputs", settled.jOutputs) }, Number(ctx.timestamp)), (draft) => chain(profileHashToSign(state, replicas, draft, false), (withProfile) => ok({ ...folded, draft: withProfile, accountFrames: proposed.frames }))));
+  const queue = settleQueue(ctx);
+  /**
+   * og finishAuthorityTransitionOnly (a handover, or a J range certifying the config board): after the settlement
+   * continuation, no Account work and no post-tx phases; the current profile is re-certified even when its bytes did
+   * not change.
+   */
+  const authorityOnly = (folded: FoldedTxs): Result<FoldedTxs, EntityError> =>
+    chain(materializeContinuation(folded.draft, ctx, queue), (d) =>
+      map(profileHashToSign(state, replicas, d, true), (draft) => ({ ...folded, draft })),
+    );
+  /**
+   * og materializeSettlementContinuation, then applyPostEntityTxPhases (cancels and matching) and
+   * drainPostOrderbookAccountWork's settlement approvals, then proposePendingAccountFrames. Accounts that received
+   * follow-up work (a gateway's forwarded leg, a matcher resolve) join the worklist after the directly touched ones;
+   * og refreshChangedAccountCommitments then re-arms a changed certified frame's board Hanko refresh.
+   */
+  const proposeAfter = (folded: FoldedTxs): Result<FoldedTxs, EntityError> => {
+    const continued = materializeContinuation(folded.draft, ctx, queue);
+    const booked = chain(continued, (d) => bookPhase(d, ctx.timestamp));
+    return chain(
+      chain(booked, (d) => materializeSettlements(d, ctx)),
+      (settled) => {
+        const order = [
+          ...new Set([...primed, ...(settled.touched ?? []), ...proposableAccounts(settled.accountReplicas)]),
+        ];
+        const proposed = setupPhase ? ok({ draft: settled, frames: 0 }) : proposeAccounts(settled, order, ctx);
+        return chain(proposed, (p) => {
+          const signed = { ...p.draft, ...opt("hashes", settled.hashes), ...opt("jOutputs", settled.jOutputs) };
+          return chain(rearmBoardRefreshes(replicas, signed, Number(ctx.timestamp)), (draft) =>
+            map(profileHashToSign(state, replicas, draft, false), (withProfile) => ({
+              ...folded,
+              draft: withProfile,
+              accountFrames: p.frames,
+            })),
+          );
+        });
+      },
+    );
+  };
+  // og getBoardHandoverFrameConfig over the normalized pre-frame state: the authority a [j_event, boardHandover] frame
+  // is certified under
+  return chain(normalizeGovernance(state), (normalized) => {
+    const frame = all({
+      handover: handoverFrameConfig(normalized, txs),
+      authorityOnly: selfAuthorityTransitionFrame(normalized, txs),
     });
-  }))));
+    return chain(frame, ({ handover, authorityOnly: onlyAuthority }) => {
+      const frameCtx = handover === null ? ctx : { ...ctx, boardHandover: handover };
+      const folded = foldEvicting(normalized, replicas, txs, frameCtx, state.id);
+      return chain(folded, onlyAuthority ? authorityOnly : proposeAfter);
+    });
+  });
 };
 // ---- og entity/profile/profile-descriptor.ts: the public profile descriptor; its hash is a 'profile' secondary hash to sign ----
 /** og MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES: LIMITS.MAX_PROFILE_BYTES (1 MiB) minus the fixed route-envelope overhead og measures once. */
