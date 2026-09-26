@@ -30282,483 +30282,1279 @@ const jurisdictionConfigOf = (j: ImportJurisdiction): JurisdictionConfig => ({
 });
 
 // ---- og runtime/j-submit/j-submit-{state,result}.ts, registration/entity-provider-action-submit-{state,result}.ts, governance-submit-state.ts ----
-const ENTITY_J_SUBMIT_RETRY_MS = 60_000, SUBMIT_RESULT_FINGERPRINT_LIMIT = 256, SUBMIT_MAX_UINT256 = (1n << 256n) - 1n;
+const ENTITY_J_SUBMIT_RETRY_MS = 60_000;
+const SUBMIT_RESULT_FINGERPRINT_LIMIT = 256;
+const SUBMIT_MAX_UINT256 = (1n << 256n) - 1n;
 /** og normalizeSubmitId. */
 const submitId = (v: unknown): string => String(v || "").trim().toLowerCase();
-type SubmitAttempt = { readonly attemptId: string; readonly attemptNumber: number; readonly attemptedAt: number; readonly batchGeneration?: number | undefined; readonly generation?: number | undefined; readonly eligibleAt?: number | undefined };
-type JTxRow = { readonly type: string; readonly entityId: string; readonly timestamp: number; readonly data: { readonly [field: string]: unknown; readonly runtimeSubmitAttempt?: SubmitAttempt | undefined } };
+const naturalSafeInt = (v: unknown): boolean => Number.isSafeInteger(v) && (v as number) >= 0;
+/** og runtimeSubmitAttempt: one durable submit attempt stamped on a pending jTx. */
+type SubmitAttempt = {
+  readonly attemptId: string;
+  readonly attemptNumber: number;
+  readonly attemptedAt: number;
+  readonly batchGeneration?: number | undefined;
+  readonly generation?: number | undefined;
+  readonly eligibleAt?: number | undefined;
+};
+type JTxRow = {
+  readonly type: string;
+  readonly entityId: string;
+  readonly timestamp: number;
+  readonly data: { readonly [field: string]: unknown; readonly runtimeSubmitAttempt?: SubmitAttempt | undefined };
+};
 const rowOf = (b: Binary): JTxRow => b as unknown as JTxRow;
 const binOf = (v: unknown): Binary => v as Binary;
 /** keccak256(utf8(safeStringify(v))), lowercase. */
 const stableHash = (v: unknown): string => `0x${keccakUtf8(stableJson(v))}`.toLowerCase();
-const isEpActionJTx = (t: string): boolean => t === "entityProviderTransfer" || t === "entityProviderReleaseControlShares" || t === "entityProviderCancelAction";
+/** og: the EntityProvider action jTx types, each carrying exactly one payload kind. */
+const EP_ACTION_KIND_OF_JTX = {
+  entityProviderTransfer: "entityTransferTokens",
+  entityProviderReleaseControlShares: "releaseControlShares",
+  entityProviderCancelAction: "cancelPendingAction",
+} as const satisfies Record<string, EntityProviderActionPayload["kind"]>;
+type EpActionJTxType = keyof typeof EP_ACTION_KIND_OF_JTX;
+const isEpActionJTx = (t: string): t is EpActionJTxType => Object.hasOwn(EP_ACTION_KIND_OF_JTX, t);
 const isGovernanceJTx = (t: string): boolean => t === "entityProviderProposeControlBoard";
-type JSubmitIdentity = { readonly jurisdictionName: string; readonly entityId: string; readonly signerId: string; readonly entityNonce: number; readonly batchGeneration: number; readonly batchHash: string };
-/** og buildJSubmitAttemptId: signer and jurisdiction scoped, generation separated. */
-export const jSubmitAttemptId = (i: JSubmitIdentity & { readonly attemptNumber: number }): Result<string, RuntimeError> => {
-  const jurisdictionName = submitId(i.jurisdictionName), entityId = submitId(i.entityId), signerId = submitId(i.signerId), batchHash = submitId(i.batchHash);
-  if (!jurisdictionName) return txErr("J_SUBMIT_ATTEMPT_JURISDICTION_MISSING");
-  if (!entityId) return txErr("J_SUBMIT_ATTEMPT_ENTITY_MISSING");
-  if (!signerId) return txErr("J_SUBMIT_ATTEMPT_SIGNER_MISSING");
-  if (!batchHash) return txErr("J_SUBMIT_ATTEMPT_BATCH_HASH_MISSING");
-  if (!Number.isSafeInteger(i.entityNonce) || i.entityNonce < 0) return txErr(`J_SUBMIT_ATTEMPT_ENTITY_NONCE_INVALID:${i.entityNonce}`);
-  if (!Number.isSafeInteger(i.batchGeneration) || i.batchGeneration <= 0) return txErr(`J_SUBMIT_ATTEMPT_BATCH_GENERATION_INVALID:${i.batchGeneration}`);
-  if (!Number.isSafeInteger(i.attemptNumber) || i.attemptNumber <= 0) return txErr(`J_SUBMIT_ATTEMPT_NUMBER_INVALID:${i.attemptNumber}`);
-  return ok(stableHash({ domain: "xln/j-submit-attempt/v1", jurisdictionName, entityId, signerId, entityNonce: i.entityNonce, batchGeneration: i.batchGeneration, batchHash, attemptNumber: i.attemptNumber }));
+/** The attempt a jTx carries, when it is the one expected. */
+const expectedAttempt =
+  (attempt: SubmitAttempt, code: string) =>
+  (expected: string): Result<SubmitAttempt, RuntimeError> =>
+    attempt.attemptId === expected ? ok(attempt) : txErr(`${code}:${attempt.attemptId}:${expected}`);
+type JSubmitIdentity = {
+  readonly jurisdictionName: string;
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly entityNonce: number;
+  readonly batchGeneration: number;
+  readonly batchHash: string;
 };
-type EpIdentity = { readonly jurisdictionName: string; readonly entityId: string; readonly signerId: string; readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number };
+/** og buildJSubmitAttemptId: signer and jurisdiction scoped, generation separated. */
+export const jSubmitAttemptId = (
+  i: JSubmitIdentity & { readonly attemptNumber: number },
+): Result<string, RuntimeError> => {
+  const n = {
+    domain: "xln/j-submit-attempt/v1",
+    jurisdictionName: submitId(i.jurisdictionName),
+    entityId: submitId(i.entityId),
+    signerId: submitId(i.signerId),
+    entityNonce: i.entityNonce,
+    batchGeneration: i.batchGeneration,
+    batchHash: submitId(i.batchHash),
+    attemptNumber: i.attemptNumber,
+  };
+  switch (true) {
+    case !n.jurisdictionName:
+      return txErr("J_SUBMIT_ATTEMPT_JURISDICTION_MISSING");
+    case !n.entityId:
+      return txErr("J_SUBMIT_ATTEMPT_ENTITY_MISSING");
+    case !n.signerId:
+      return txErr("J_SUBMIT_ATTEMPT_SIGNER_MISSING");
+    case !n.batchHash:
+      return txErr("J_SUBMIT_ATTEMPT_BATCH_HASH_MISSING");
+    case !naturalSafeInt(n.entityNonce):
+      return txErr(`J_SUBMIT_ATTEMPT_ENTITY_NONCE_INVALID:${n.entityNonce}`);
+    case !positiveSafeInt(n.batchGeneration):
+      return txErr(`J_SUBMIT_ATTEMPT_BATCH_GENERATION_INVALID:${n.batchGeneration}`);
+    case !positiveSafeInt(n.attemptNumber):
+      return txErr(`J_SUBMIT_ATTEMPT_NUMBER_INVALID:${n.attemptNumber}`);
+    default:
+      return ok(stableHash(n));
+  }
+};
+type EpIdentity = {
+  readonly jurisdictionName: string;
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly actionHash: string;
+  readonly actionNonce: bigint;
+  readonly generation: number;
+};
 /** og buildEntityProviderActionAttemptId. */
 export const epActionAttemptId = (i: EpIdentity & { readonly attemptNumber: number }): Result<string, RuntimeError> => {
-  const jurisdictionName = submitId(i.jurisdictionName), entityId = submitId(i.entityId), signerId = submitId(i.signerId), actionHash = submitId(i.actionHash);
-  if (!jurisdictionName) return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_JURISDICTION_MISSING");
-  if (!entityId) return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_ENTITY_MISSING");
-  if (!signerId) return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_SIGNER_MISSING");
-  if (!/^0x[0-9a-f]{64}$/.test(actionHash)) return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_HASH_INVALID:${actionHash || "missing"}`);
-  if (i.actionNonce <= 0n || i.actionNonce > SUBMIT_MAX_UINT256) return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_NONCE_INVALID");
-  if (!Number.isSafeInteger(i.generation) || i.generation <= 0) return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_GENERATION_INVALID:${i.generation}`);
-  if (!Number.isSafeInteger(i.attemptNumber) || i.attemptNumber <= 0) return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_NUMBER_INVALID:${i.attemptNumber}`);
-  return ok(stableHash({ domain: "xln/entity-provider-action-submit-attempt/v1", jurisdictionName, entityId, signerId, actionHash, actionNonce: i.actionNonce, generation: i.generation, attemptNumber: i.attemptNumber }));
+  const n = {
+    domain: "xln/entity-provider-action-submit-attempt/v1",
+    jurisdictionName: submitId(i.jurisdictionName),
+    entityId: submitId(i.entityId),
+    signerId: submitId(i.signerId),
+    actionHash: submitId(i.actionHash),
+    actionNonce: i.actionNonce,
+    generation: i.generation,
+    attemptNumber: i.attemptNumber,
+  };
+  switch (true) {
+    case !n.jurisdictionName:
+      return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_JURISDICTION_MISSING");
+    case !n.entityId:
+      return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_ENTITY_MISSING");
+    case !n.signerId:
+      return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_SIGNER_MISSING");
+    case !/^0x[0-9a-f]{64}$/.test(n.actionHash):
+      return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_HASH_INVALID:${n.actionHash || "missing"}`);
+    case n.actionNonce <= 0n || n.actionNonce > SUBMIT_MAX_UINT256:
+      return txErr("ENTITY_PROVIDER_ACTION_ATTEMPT_NONCE_INVALID");
+    case !positiveSafeInt(n.generation):
+      return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_GENERATION_INVALID:${n.generation}`);
+    case !positiveSafeInt(n.attemptNumber):
+      return txErr(`ENTITY_PROVIDER_ACTION_ATTEMPT_NUMBER_INVALID:${n.attemptNumber}`);
+    default:
+      return ok(stableHash(n));
+  }
 };
-/** og requireCanonicalEntityProviderActionAttempt. */
+/**
+ * og requireCanonicalEntityProviderActionAttempt: the jTx's type carries its intent's payload kind, the intent is
+ * this Entity's and self-consistent, and the attempt is the expected one for it.
+ */
 const canonicalEpAttempt = (jurisdictionName: string, jTx: JTxRow): Result<SubmitAttempt, RuntimeError> => {
-  const attempt = jTx.data.runtimeSubmitAttempt, intent = jTx.data["intent"] as EntityProviderActionIntent;
+  const attempt = jTx.data.runtimeSubmitAttempt;
+  const intent = jTx.data["intent"] as EntityProviderActionIntent;
   if (!attempt) return txErr("ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_METADATA_MISSING");
-  const expectedKind = jTx.type === "entityProviderTransfer" ? "entityTransferTokens" : jTx.type === "entityProviderReleaseControlShares" ? "releaseControlShares" : "cancelPendingAction";
-  if (intent.payload.kind !== expectedKind) return txErr(`ENTITY_PROVIDER_ACTION_JTX_KIND_MISMATCH:${jTx.type}:${intent.payload.kind}`);
-  if (submitId(jTx.entityId) !== submitId(intent.entityId) || intent.actionHash.toLowerCase() !== entityProviderActionHash(intent) || attempt.generation !== intent.generation || attempt.attemptedAt < 0 || !Number.isSafeInteger(attempt.attemptedAt))
-    return txErr("ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_INVALID");
-  return chain(epActionAttemptId({ jurisdictionName, entityId: jTx.entityId, signerId: String(jTx.data["signerId"] ?? ""), actionHash: intent.actionHash, actionNonce: intent.actionNonce, generation: intent.generation, attemptNumber: attempt.attemptNumber }),
-    (expected) => (attempt.attemptId === expected ? ok(attempt) : txErr(`ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_ID_MISMATCH:${attempt.attemptId}:${expected}`)));
+  if (intent.payload.kind !== EP_ACTION_KIND_OF_JTX[jTx.type as EpActionJTxType])
+    return txErr(`ENTITY_PROVIDER_ACTION_JTX_KIND_MISMATCH:${jTx.type}:${intent.payload.kind}`);
+  const bound =
+    submitId(jTx.entityId) === submitId(intent.entityId) &&
+    intent.actionHash.toLowerCase() === entityProviderActionHash(intent) &&
+    attempt.generation === intent.generation &&
+    naturalSafeInt(attempt.attemptedAt);
+  if (!bound) return txErr("ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_INVALID");
+  const expected = epActionAttemptId({
+    jurisdictionName,
+    entityId: jTx.entityId,
+    signerId: String(jTx.data["signerId"] ?? ""),
+    actionHash: intent.actionHash,
+    actionNonce: intent.actionNonce,
+    generation: intent.generation,
+    attemptNumber: attempt.attemptNumber,
+  });
+  return chain(expected, expectedAttempt(attempt, "ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_ID_MISMATCH"));
 };
 /** og governancePayloadHash: the unsigned control-board proposal as submitted. */
 const governancePayloadHash = (jTx: JTxRow): string => {
   const d = jTx.data;
-  return stableHash({ type: jTx.type, entityId: jTx.entityId, data: { targetEntityId: d["targetEntityId"], newBoardHash: d["newBoardHash"], boardEpoch: d["boardEpoch"], actionNonce: d["actionNonce"], proposalHash: d["proposalHash"], supporterVotes: d["supporterVotes"], signerId: d["signerId"] }, timestamp: jTx.timestamp });
+  return stableHash({
+    type: jTx.type,
+    entityId: jTx.entityId,
+    data: {
+      targetEntityId: d["targetEntityId"],
+      newBoardHash: d["newBoardHash"],
+      boardEpoch: d["boardEpoch"],
+      actionNonce: d["actionNonce"],
+      proposalHash: d["proposalHash"],
+      supporterVotes: d["supporterVotes"],
+      signerId: d["signerId"],
+    },
+    timestamp: jTx.timestamp,
+  });
 };
-type GovernanceIdentity = { readonly jurisdictionName: string; readonly entityId: string; readonly signerId: string; readonly proposalHash: string; readonly payloadHash: string };
-const governanceAttemptId = (i: GovernanceIdentity & { readonly attemptNumber: number }): Result<string, RuntimeError> => {
-  const n = { domain: "xln/governance-j-submit-attempt/v1", jurisdictionName: submitId(i.jurisdictionName), entityId: submitId(i.entityId), signerId: submitId(i.signerId), proposalHash: submitId(i.proposalHash), payloadHash: submitId(i.payloadHash), attemptNumber: i.attemptNumber };
-  if (!n.jurisdictionName) return txErr("GOVERNANCE_SUBMIT_JURISDICTION_MISSING");
-  if (!n.entityId) return txErr("GOVERNANCE_SUBMIT_ENTITY_MISSING");
-  if (!n.signerId) return txErr("GOVERNANCE_SUBMIT_SIGNER_MISSING");
-  if (!/^0x[0-9a-f]{64}$/.test(n.proposalHash)) return txErr("GOVERNANCE_SUBMIT_PROPOSAL_HASH_INVALID");
-  if (!/^0x[0-9a-f]{64}$/.test(n.payloadHash)) return txErr("GOVERNANCE_SUBMIT_PAYLOAD_HASH_INVALID");
-  if (!Number.isSafeInteger(n.attemptNumber) || n.attemptNumber <= 0) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_NUMBER_INVALID");
-  return ok(stableHash(n));
+type GovernanceIdentity = {
+  readonly jurisdictionName: string;
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly proposalHash: string;
+  readonly payloadHash: string;
+};
+const governanceAttemptId = (
+  i: GovernanceIdentity & { readonly attemptNumber: number },
+): Result<string, RuntimeError> => {
+  const n = {
+    domain: "xln/governance-j-submit-attempt/v1",
+    jurisdictionName: submitId(i.jurisdictionName),
+    entityId: submitId(i.entityId),
+    signerId: submitId(i.signerId),
+    proposalHash: submitId(i.proposalHash),
+    payloadHash: submitId(i.payloadHash),
+    attemptNumber: i.attemptNumber,
+  };
+  switch (true) {
+    case !n.jurisdictionName:
+      return txErr("GOVERNANCE_SUBMIT_JURISDICTION_MISSING");
+    case !n.entityId:
+      return txErr("GOVERNANCE_SUBMIT_ENTITY_MISSING");
+    case !n.signerId:
+      return txErr("GOVERNANCE_SUBMIT_SIGNER_MISSING");
+    case !/^0x[0-9a-f]{64}$/.test(n.proposalHash):
+      return txErr("GOVERNANCE_SUBMIT_PROPOSAL_HASH_INVALID");
+    case !/^0x[0-9a-f]{64}$/.test(n.payloadHash):
+      return txErr("GOVERNANCE_SUBMIT_PAYLOAD_HASH_INVALID");
+    case !positiveSafeInt(n.attemptNumber):
+      return txErr("GOVERNANCE_SUBMIT_ATTEMPT_NUMBER_INVALID");
+    default:
+      return ok(stableHash(n));
+  }
 };
 const governanceIdentity = (jurisdictionName: string, jTx: JTxRow): Result<GovernanceIdentity, RuntimeError> => {
   const signerId = submitId(jTx.data["signerId"]);
-  return signerId ? ok({ jurisdictionName, entityId: jTx.entityId, signerId, proposalHash: String(jTx.data["proposalHash"]), payloadHash: governancePayloadHash(jTx) }) : txErr("GOVERNANCE_SUBMIT_SIGNER_MISSING");
+  if (!signerId) return txErr("GOVERNANCE_SUBMIT_SIGNER_MISSING");
+  return ok({
+    jurisdictionName,
+    entityId: jTx.entityId,
+    signerId,
+    proposalHash: String(jTx.data["proposalHash"]),
+    payloadHash: governancePayloadHash(jTx),
+  });
 };
-/** og requireCanonicalGovernanceAttempt. */
+/** og requireCanonicalGovernanceAttempt: a well-timed attempt, the expected one for the proposal. */
 const canonicalGovernanceAttempt = (jurisdictionName: string, jTx: JTxRow): Result<SubmitAttempt, RuntimeError> => {
   const a = jTx.data.runtimeSubmitAttempt;
   if (!a) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_MISSING");
   const eligibleAt = a.eligibleAt ?? Number.NaN;
-  if (!Number.isSafeInteger(a.attemptedAt) || a.attemptedAt < 0 || !Number.isSafeInteger(eligibleAt) || eligibleAt < a.attemptedAt) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_TIME_INVALID");
-  return chain(governanceIdentity(jurisdictionName, jTx), (identity) => chain(governanceAttemptId({ ...identity, attemptNumber: a.attemptNumber }),
-    (expected) => (a.attemptId === expected ? ok(a) : txErr(`GOVERNANCE_SUBMIT_ATTEMPT_ID_MISMATCH:${a.attemptId}:${expected}`))));
+  const timed = naturalSafeInt(a.attemptedAt) && Number.isSafeInteger(eligibleAt) && eligibleAt >= a.attemptedAt;
+  if (!timed) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_TIME_INVALID");
+  return chain(governanceIdentity(jurisdictionName, jTx), (identity) =>
+    chain(
+      governanceAttemptId({ ...identity, attemptNumber: a.attemptNumber }),
+      expectedAttempt(a, "GOVERNANCE_SUBMIT_ATTEMPT_ID_MISMATCH"),
+    ),
+  );
 };
 /** og materializeInitialGovernanceAttempt: attempt one, eligible at the proposal's own timestamp. */
 const initialGovernanceAttempt = (jurisdictionName: string, jTx: JTxRow): Result<Binary, RuntimeError> => {
   if (jTx.data.runtimeSubmitAttempt) return map(canonicalGovernanceAttempt(jurisdictionName, jTx), () => binOf(jTx));
-  return chain(governanceIdentity(jurisdictionName, jTx), (identity) => map(governanceAttemptId({ ...identity, attemptNumber: 1 }), (attemptId) =>
-    binOf({ ...jTx, data: { ...jTx.data, runtimeSubmitAttempt: { attemptId, attemptNumber: 1, attemptedAt: jTx.timestamp, eligibleAt: jTx.timestamp } } })));
+  return chain(governanceIdentity(jurisdictionName, jTx), (identity) =>
+    map(governanceAttemptId({ ...identity, attemptNumber: 1 }), (attemptId) => {
+      const runtimeSubmitAttempt: SubmitAttempt = {
+        attemptId,
+        attemptNumber: 1,
+        attemptedAt: jTx.timestamp,
+        eligibleAt: jTx.timestamp,
+      };
+      return binOf({ ...jTx, data: { ...jTx.data, runtimeSubmitAttempt } });
+    }),
+  );
 };
-/** og requireCanonicalPendingAttempt. */
+/** og requireCanonicalPendingAttempt for a batch: its generation stamped, the attempt the expected one. */
+const canonicalBatchAttempt = (
+  jurisdictionName: string,
+  jTx: JTxRow,
+  attempt: SubmitAttempt,
+): Result<SubmitAttempt, RuntimeError> => {
+  const expected = jSubmitAttemptId({
+    jurisdictionName,
+    entityId: jTx.entityId,
+    signerId: submitId(jTx.data["signerId"]),
+    entityNonce: Number(jTx.data["entityNonce"]),
+    batchGeneration: attempt.batchGeneration ?? Number.NaN,
+    batchHash: String(jTx.data["batchHash"] || ""),
+    attemptNumber: attempt.attemptNumber,
+  });
+  return chain(expected, (id) => {
+    const generation = jTx.data["batchGeneration"];
+    if (generation !== attempt.batchGeneration)
+      return txErr(`J_SUBMIT_PENDING_BATCH_GENERATION_MISMATCH:${String(generation)}:${attempt.batchGeneration}`);
+    return expectedAttempt(attempt, "J_SUBMIT_PENDING_ATTEMPT_ID_MISMATCH")(id);
+  });
+};
+/**
+ * og requireCanonicalPendingAttempt: every durable jTx (batch, EntityProvider action, governance) carries its canonical
+ * attempt.
+ */
 const canonicalPendingAttempt = (jurisdictionName: string, jTx: JTxRow): Result<SubmitAttempt, RuntimeError> => {
-  const attempt = jTx.type === "batch" || isEpActionJTx(jTx.type) || isGovernanceJTx(jTx.type) ? jTx.data?.runtimeSubmitAttempt : undefined;
+  const durable = jTx.type === "batch" || isEpActionJTx(jTx.type) || isGovernanceJTx(jTx.type);
+  const attempt = durable ? jTx.data?.runtimeSubmitAttempt : undefined;
   if (!attempt) return txErr("J_SUBMIT_PENDING_ATTEMPT_METADATA_MISSING");
   if (isEpActionJTx(jTx.type)) return canonicalEpAttempt(jurisdictionName, jTx);
   if (isGovernanceJTx(jTx.type)) return canonicalGovernanceAttempt(jurisdictionName, jTx);
-  return chain(jSubmitAttemptId({ jurisdictionName, entityId: jTx.entityId, signerId: submitId(jTx.data["signerId"]), entityNonce: Number(jTx.data["entityNonce"]), batchGeneration: attempt.batchGeneration ?? Number.NaN, batchHash: String(jTx.data["batchHash"] || ""), attemptNumber: attempt.attemptNumber }), (expected) => {
-    if (jTx.data["batchGeneration"] !== attempt.batchGeneration) return txErr(`J_SUBMIT_PENDING_BATCH_GENERATION_MISMATCH:${String(jTx.data["batchGeneration"])}:${attempt.batchGeneration}`);
-    return attempt.attemptId === expected ? ok(attempt) : txErr(`J_SUBMIT_PENDING_ATTEMPT_ID_MISMATCH:${attempt.attemptId}:${expected}`);
-  });
+  return canonicalBatchAttempt(jurisdictionName, jTx, attempt);
 };
 const attemptFingerprint = (jurisdictionName: string, jTx: Binary): string => stableJson({ jurisdictionName, jTx });
-/** og registerPendingCommittedJOutbox: canonical attempts only, one per attempt id, an exact repeat dropped, a different payload refused. */
-export const registerPendingJOutbox = (pending: readonly JInput[], additions: readonly JInput[]): Result<readonly JInput[], RuntimeError> => {
-  if (additions.length === 0) return ok(pending);
-  const known = new Map<string, string>();
-  for (const input of pending) for (const jTx of input.jTxs) {
-    const attempt = canonicalPendingAttempt(input.jurisdictionName, rowOf(jTx));
-    if (!attempt.ok) return attempt;
-    const fingerprint = attemptFingerprint(input.jurisdictionName, jTx), previous = known.get(attempt.value.attemptId);
-    if (previous !== undefined) return txErr(`${previous !== fingerprint ? "J_SUBMIT_PENDING_ATTEMPT_CONFLICT" : "J_SUBMIT_PENDING_ATTEMPT_DUPLICATED"}:${attempt.value.attemptId}`);
-    known.set(attempt.value.attemptId, fingerprint);
-  }
-  const accepted: JInput[] = [];
-  for (const input of additions) {
-    const jTxs: Binary[] = [];
-    for (const jTx of input.jTxs) {
-      const attempt = canonicalPendingAttempt(input.jurisdictionName, rowOf(jTx));
-      if (!attempt.ok) return attempt;
-      const fingerprint = attemptFingerprint(input.jurisdictionName, jTx), previous = known.get(attempt.value.attemptId);
-      if (previous !== undefined) { if (previous !== fingerprint) return txErr(`J_SUBMIT_PENDING_ATTEMPT_CONFLICT:${attempt.value.attemptId}`); continue; }
-      known.set(attempt.value.attemptId, fingerprint);
-      jTxs.push(jTx);
-    }
-    if (jTxs.length > 0) accepted.push({ jurisdictionName: input.jurisdictionName, jTxs });
-  }
-  return ok([...pending, ...accepted]);
-};
-export type JOutboxSplit = { readonly maintenance: readonly JInput[]; readonly durable: readonly JInput[]; readonly retries: readonly RuntimeTx[] };
+/** Attempt id to payload fingerprint, over the pending outbox. */
+type AttemptLedger = ReadonlyMap<string, string>;
+/** A pending jTx's canonical attempt id and payload fingerprint. */
+const attemptEntry = (jurisdictionName: string, raw: Binary): Result<readonly [string, string], RuntimeError> =>
+  map(
+    canonicalPendingAttempt(jurisdictionName, rowOf(raw)),
+    (a) => [a.attemptId, attemptFingerprint(jurisdictionName, raw)] as const,
+  );
+/** og registerPendingCommittedJOutbox's ledger: the already-pending attempts, each exactly once. */
+const pendingLedger = (pending: readonly JInput[]): Result<AttemptLedger, RuntimeError> =>
+  foldResult(
+    pending.flatMap((input) => input.jTxs.map((raw) => [input.jurisdictionName, raw] as const)),
+    new Map() as AttemptLedger,
+    (known, [jurisdictionName, raw]) =>
+      chain(attemptEntry(jurisdictionName, raw), ([id, fingerprint]) => {
+        const previous = known.get(id);
+        if (previous === undefined) return ok(mapSet(known, id, fingerprint));
+        const code =
+          previous !== fingerprint ? "J_SUBMIT_PENDING_ATTEMPT_CONFLICT" : "J_SUBMIT_PENDING_ATTEMPT_DUPLICATED";
+        return txErr(`${code}:${id}`);
+      }),
+  );
+type Registering = { readonly known: AttemptLedger; readonly accepted: readonly JInput[] };
+type RegisteringInput = { readonly known: AttemptLedger; readonly jTxs: readonly Binary[] };
+/** og: a new attempt joins; an exact repeat is dropped, a different payload refused. */
+const registerJTx =
+  (jurisdictionName: string) =>
+  (s: RegisteringInput, raw: Binary): Result<RegisteringInput, RuntimeError> =>
+    chain(attemptEntry(jurisdictionName, raw), ([id, fingerprint]) => {
+      const previous = s.known.get(id);
+      if (previous === undefined) return ok({ known: mapSet(s.known, id, fingerprint), jTxs: [...s.jTxs, raw] });
+      return previous === fingerprint ? ok(s) : txErr(`J_SUBMIT_PENDING_ATTEMPT_CONFLICT:${id}`);
+    });
+const registerInput = (s: Registering, input: JInput): Result<Registering, RuntimeError> =>
+  map(foldResult(input.jTxs, { known: s.known, jTxs: [] }, registerJTx(input.jurisdictionName)), ({ known, jTxs }) => ({
+    known,
+    accepted: jTxs.length > 0 ? [...s.accepted, { jurisdictionName: input.jurisdictionName, jTxs }] : s.accepted,
+  }));
 /**
- * og splitJOutboxForDurableSubmit: governance proposals become durable attempt one; an EntityProvider action or batch with an attempt is durable,
- * without one it becomes a local retry RuntimeTx for the next frame; mint / debt enforcement / board activation are maintenance.
+ * og registerPendingCommittedJOutbox: canonical attempts only, one per attempt id, an exact repeat dropped, a different
+ * payload refused.
  */
-export const splitJOutbox = (jOutbox: readonly JInput[]): Result<JOutboxSplit, RuntimeError> => {
-  const maintenance: JInput[] = [], durable: JInput[] = [], retries: RuntimeTx[] = [];
-  for (const input of jOutbox) {
-    const keep: Binary[] = [], hold: Binary[] = [];
-    for (const raw of input.jTxs) {
-      const jTx = rowOf(raw);
-      if (isGovernanceJTx(jTx.type)) {
-        const materialized = initialGovernanceAttempt(input.jurisdictionName, jTx);
-        if (!materialized.ok) return materialized;
-        hold.push(materialized.value);
-      } else if (isEpActionJTx(jTx.type)) {
-        if (jTx.data.runtimeSubmitAttempt) {
-          const canonical = canonicalEpAttempt(input.jurisdictionName, jTx);
-          if (!canonical.ok) return canonical;
-          hold.push(raw);
-        } else {
-          const signer = submitId(jTx.data["signerId"]), intent = jTx.data["intent"] as EntityProviderActionIntent;
-          if (!signer) return txErr(`ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING:${jTx.entityId}`);
-          if (!jTx.data["hankoSignature"]) return txErr(`ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${jTx.entityId}`);
-          retries.push({ type: "retryEntityProviderAction", data: { entityId: jTx.entityId, signerId: signer, jurisdictionName: input.jurisdictionName, actionHash: intent.actionHash, actionNonce: intent.actionNonce, generation: intent.generation } });
-        }
-      } else if (jTx.type === "mint" || jTx.type === "debtEnforcement" || jTx.type === "entityProviderActivateBoard") {
-        keep.push(raw);
-      } else if (jTx.data?.runtimeSubmitAttempt) {
-        hold.push(raw);
-      } else {
-        const signer = submitId(jTx.data?.["signerId"]), generation = Number(jTx.data?.["batchGeneration"]), fee = jTx.data?.["feeOverrides"] as { readonly [k: string]: Binary } | undefined;
-        if (!signer) return txErr(`J_SUBMIT_INTENT_SIGNER_MISSING:${jTx.entityId}`);
-        if (!Number.isSafeInteger(generation) || generation <= 0) return txErr(`J_SUBMIT_INTENT_BATCH_GENERATION_INVALID:${String(jTx.data["batchGeneration"])}`);
-        retries.push({ type: "retryJSubmit", data: { entityId: jTx.entityId, signerId: signer, jurisdictionName: input.jurisdictionName, batchHash: String(jTx.data["batchHash"] || ""), entityNonce: Number(jTx.data["entityNonce"]), batchGeneration: generation, ...(fee ? { feeOverrides: { ...fee } } : {}) } });
-      }
-    }
-    if (keep.length > 0) maintenance.push({ jurisdictionName: input.jurisdictionName, jTxs: keep });
-    if (hold.length > 0) durable.push({ jurisdictionName: input.jurisdictionName, jTxs: hold });
-  }
-  return ok({ maintenance, durable, retries });
+export const registerPendingJOutbox = (
+  pending: readonly JInput[],
+  additions: readonly JInput[],
+): Result<readonly JInput[], RuntimeError> => {
+  if (additions.length === 0) return ok(pending);
+  return chain(pendingLedger(pending), (known) =>
+    map(foldResult(additions, { known, accepted: [] }, registerInput), ({ accepted }) => [...pending, ...accepted]),
+  );
 };
+export type JOutboxSplit = {
+  readonly maintenance: readonly JInput[];
+  readonly durable: readonly JInput[];
+  readonly retries: readonly RuntimeTx[];
+};
+/** Where one outbox jTx goes: submitted as maintenance, kept as a durable attempt, or turned into a local retry. */
+type JOutboxRoute =
+  | { readonly lane: "maintenance" | "durable"; readonly jTx: Binary }
+  | { readonly lane: "retry"; readonly tx: RuntimeTx };
+const durableRoute = (jTx: Binary): JOutboxRoute => ({ lane: "durable", jTx });
+const retryRoute = (tx: RuntimeTx): JOutboxRoute => ({ lane: "retry", tx });
+/** og: mint, debt enforcement and board activation are maintenance, submitted as is. */
+const MAINTENANCE_JTX: ReadonlySet<string> = new Set(["mint", "debtEnforcement", "entityProviderActivateBoard"]);
+/** og splitJOutboxForDurableSubmit: a fresh EntityProvider action becomes a local retry, signed by consensus. */
+const epActionRetry = (jurisdictionName: string, jTx: JTxRow): Result<RuntimeTx, RuntimeError> => {
+  const signer = submitId(jTx.data["signerId"]);
+  const intent = jTx.data["intent"] as EntityProviderActionIntent;
+  if (!signer) return txErr(`ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING:${jTx.entityId}`);
+  if (!jTx.data["hankoSignature"]) return txErr(`ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${jTx.entityId}`);
+  return ok({
+    type: "retryEntityProviderAction",
+    data: {
+      entityId: jTx.entityId,
+      signerId: signer,
+      jurisdictionName,
+      actionHash: intent.actionHash,
+      actionNonce: intent.actionNonce,
+      generation: intent.generation,
+    },
+  });
+};
+/** og splitJOutboxForDurableSubmit: a fresh batch becomes a local retry of its sealed generation. */
+const batchRetry = (jurisdictionName: string, jTx: JTxRow): Result<RuntimeTx, RuntimeError> => {
+  const signer = submitId(jTx.data?.["signerId"]);
+  const generation = Number(jTx.data?.["batchGeneration"]);
+  const fee = jTx.data?.["feeOverrides"] as { readonly [k: string]: Binary } | undefined;
+  if (!signer) return txErr(`J_SUBMIT_INTENT_SIGNER_MISSING:${jTx.entityId}`);
+  if (!positiveSafeInt(generation))
+    return txErr(`J_SUBMIT_INTENT_BATCH_GENERATION_INVALID:${String(jTx.data["batchGeneration"])}`);
+  return ok({
+    type: "retryJSubmit",
+    data: {
+      entityId: jTx.entityId,
+      signerId: signer,
+      jurisdictionName,
+      batchHash: String(jTx.data["batchHash"] || ""),
+      entityNonce: Number(jTx.data["entityNonce"]),
+      batchGeneration: generation,
+      ...opt("feeOverrides", fee ? { ...fee } : undefined),
+    },
+  });
+};
+/**
+ * og splitJOutboxForDurableSubmit, one jTx: a governance proposal becomes durable attempt one; an EntityProvider
+ * action or batch with an attempt is durable, without one it becomes a retry; maintenance goes as is.
+ */
+const routeJTx = (jurisdictionName: string, raw: Binary): Result<JOutboxRoute, RuntimeError> => {
+  const jTx = rowOf(raw);
+  switch (true) {
+    case isGovernanceJTx(jTx.type):
+      return map(initialGovernanceAttempt(jurisdictionName, jTx), durableRoute);
+    case isEpActionJTx(jTx.type):
+      return jTx.data.runtimeSubmitAttempt
+        ? map(canonicalEpAttempt(jurisdictionName, jTx), () => durableRoute(raw))
+        : map(epActionRetry(jurisdictionName, jTx), retryRoute);
+    case MAINTENANCE_JTX.has(jTx.type):
+      return ok({ lane: "maintenance", jTx: raw });
+    case Boolean(jTx.data?.runtimeSubmitAttempt):
+      return ok(durableRoute(raw));
+    default:
+      return map(batchRetry(jurisdictionName, jTx), retryRoute);
+  }
+};
+type RoutedJInput = { readonly jurisdictionName: string; readonly routes: readonly JOutboxRoute[] };
+/** The input's jTxs routed to one lane, as a J input (none when empty). */
+const laneJInputs = (
+  { jurisdictionName, routes }: RoutedJInput,
+  lane: "maintenance" | "durable",
+): readonly JInput[] => {
+  const jTxs = routes.flatMap((r) => (r.lane === lane ? [r.jTx] : []));
+  return jTxs.length > 0 ? [{ jurisdictionName, jTxs }] : [];
+};
+/** og splitJOutboxForDurableSubmit: every jTx routed, inputs kept per jurisdiction. */
+export const splitJOutbox = (jOutbox: readonly JInput[]): Result<JOutboxSplit, RuntimeError> =>
+  map(
+    traverse(jOutbox, (input) =>
+      map(traverse(input.jTxs, (raw) => routeJTx(input.jurisdictionName, raw)), (routes): RoutedJInput => ({
+        jurisdictionName: input.jurisdictionName,
+        routes,
+      })),
+    ),
+    (routed) => ({
+      maintenance: routed.flatMap((input) => laneJInputs(input, "maintenance")),
+      durable: routed.flatMap((input) => laneJInputs(input, "durable")),
+      retries: routed.flatMap(({ routes }) => routes.flatMap((r) => (r.lane === "retry" ? [r.tx] : []))),
+    }),
+  );
+/** One Runtime tx's effect: the next Runtime and the J inputs it hands to the J adapter. */
 type TxStep = { readonly runtime: Runtime; readonly jOutputs: readonly JInput[] };
 const noJ = (runtime: Runtime): TxStep => ({ runtime, jOutputs: [] });
 /** og findJSubmitReplica / findEntityProviderActionReplica: the replica of exactly this Entity and signer. */
-const findSubmitReplica = (rt: Runtime, entityId: unknown, signerId: unknown): readonly [string, EntityReplica] | undefined => {
-  const entity = submitId(entityId), signer = submitId(signerId);
+const findSubmitReplica = (
+  rt: Runtime,
+  entityId: unknown,
+  signerId: unknown,
+): readonly [string, EntityReplica] | undefined => {
+  const entity = submitId(entityId);
+  const signer = submitId(signerId);
   return [...rt.entities].find(([, r]) => submitId(r.state.id) === entity && submitId(r.signerId) === signer);
 };
 const localOf = (rt: Runtime, key: string): ReplicaLocal => rt.replicaLocal.get(key) ?? {};
-const withLocal = (rt: Runtime, key: string, patch: ReplicaLocal): Runtime => ({ ...rt, replicaLocal: mapSet(rt.replicaLocal, key, { ...localOf(rt, key), ...patch }) });
-const jBatchOf = (state: EntityState): JBatchState | undefined => state.committed["jBatchState"] as JBatchState | undefined;
-const sentMatches = (sent: SentJBatch | undefined, batchHash: unknown, entityNonce: unknown): sent is SentJBatch =>
-  sent !== undefined && submitId(sent.batchHash) === submitId(batchHash) && Number(sent.entityNonce) === Number(entityNonce);
-/** og getMatchingJSubmitState. */
-const matchingJSubmitState = (state: EntityState, local: JSubmitState | undefined): JSubmitState | undefined => {
-  const jb = jBatchOf(state);
-  return local !== undefined && sentMatches(jb?.sentBatch, local.batchHash, local.entityNonce) && local.batchGeneration === jb?.broadcastCount ? local : undefined;
-};
-const journalOf = (p: SubmitJournal | undefined): Partial<SubmitJournal> => (p === undefined ? {} : {
-  ...opt("txHash", p.txHash || undefined), ...opt("lastFailure", p.lastFailure), ...opt("lastResultAttemptId", p.lastResultAttemptId || undefined), ...opt("lastResultAt", p.lastResultAt),
-  ...opt("lastResultOutcome", p.lastResultOutcome || undefined), ...opt("lastResultFingerprint", p.lastResultFingerprint || undefined),
+const withLocal = (rt: Runtime, key: string, patch: ReplicaLocal): Runtime => ({
+  ...rt,
+  replicaLocal: mapSet(rt.replicaLocal, key, { ...localOf(rt, key), ...patch }),
 });
-/** og applyRetryJSubmitRuntimeTx: the active leader re-attempts its exact sealed batch at most once per retry window; stale hints are no-ops. */
-const retryJSubmit = (rt: Runtime, d: Extract<RuntimeTx, { type: "retryJSubmit" }>["data"]): Result<TxStep, RuntimeError> => {
+const activeLeader = (r: EntityReplica): boolean => leaderStateOf(r.state).activeValidatorId === submitId(r.signerId);
+/** og: the replica's Hanko over a sealed hash, when it witnesses that kind of payload. */
+const quorumWitness = (local: ReplicaLocal, hash: string, type: HankoWitness["type"]): Hanko | undefined => {
+  const witness = local.hankoWitness?.get(hash);
+  return witness?.type === type ? witness.hanko : undefined;
+};
+/** A pending outbox jTx with the jurisdiction it goes to. */
+type PendingJTx = { readonly jurisdictionName: string; readonly jTx: JTxRow };
+const pendingJTxs = (rt: Runtime): readonly PendingJTx[] =>
+  rt.pendingCommittedJOutbox.flatMap((input) =>
+    input.jTxs.map((raw) => ({ jurisdictionName: input.jurisdictionName, jTx: rowOf(raw) })),
+  );
+/** A sealed batch, named by hash, Entity nonce and broadcast generation. */
+type BatchTarget = { readonly batchHash: string; readonly entityNonce: number; readonly batchGeneration: number };
+/** An EntityProvider action, named by hash, action nonce and generation. */
+type ActionTarget = { readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number };
+const jBatchOf = (state: EntityState): JBatchState | undefined =>
+  state.committed["jBatchState"] as JBatchState | undefined;
+const sentMatches = (sent: SentJBatch | undefined, batchHash: unknown, entityNonce: unknown): sent is SentJBatch =>
+  sent !== undefined &&
+  submitId(sent.batchHash) === submitId(batchHash) &&
+  Number(sent.entityNonce) === Number(entityNonce);
+/** og: consensus has sealed exactly this batch, in this broadcast generation. */
+const sealedBatchIs = (state: EntityState, target: BatchTarget): boolean => {
+  const jb = jBatchOf(state);
+  return (
+    sentMatches(jb?.sentBatch, target.batchHash, target.entityNonce) && target.batchGeneration === jb?.broadcastCount
+  );
+};
+/** og: the sealed batch a retry names, while it is still live (not terminally failed). */
+const liveSentBatch = (state: EntityState, target: BatchTarget): SentJBatch | undefined => {
+  const sent = jBatchOf(state)?.sentBatch;
+  return sealedBatchIs(state, target) && sent !== undefined && !sent.terminalFailure ? sent : undefined;
+};
+const sameBatch = (a: BatchTarget, b: BatchTarget): boolean =>
+  submitId(a.batchHash) === submitId(b.batchHash) &&
+  a.entityNonce === b.entityNonce &&
+  a.batchGeneration === b.batchGeneration;
+const sameAction = (a: ActionTarget, b: ActionTarget): boolean =>
+  submitId(a.actionHash) === submitId(b.actionHash) && a.actionNonce === b.actionNonce && a.generation === b.generation;
+/** og getMatchingJSubmitState: the local journal, while it tracks the batch consensus has sealed. */
+const matchingJSubmitState = (state: EntityState, local: JSubmitState | undefined): JSubmitState | undefined =>
+  local !== undefined && sealedBatchIs(state, local) ? local : undefined;
+/** og: this pending jTx is the batch of exactly this identity. */
+const holdsBatch =
+  (i: JSubmitIdentity) =>
+  ({ jurisdictionName, jTx }: PendingJTx): boolean =>
+    jTx.type === "batch" &&
+    submitId(jurisdictionName) === submitId(i.jurisdictionName) &&
+    submitId(jTx.entityId) === submitId(i.entityId) &&
+    submitId(jTx.data["signerId"]) === submitId(i.signerId) &&
+    submitId(jTx.data["batchHash"]) === submitId(i.batchHash) &&
+    Number(jTx.data["entityNonce"]) === Number(i.entityNonce) &&
+    Number(jTx.data["batchGeneration"]) === Number(i.batchGeneration);
+/** og: this pending jTx is the EntityProvider action of exactly this identity. */
+const holdsEpAction =
+  (i: EpIdentity) =>
+  ({ jurisdictionName, jTx }: PendingJTx): boolean => {
+    const intent = jTx.data["intent"] as EntityProviderActionIntent | undefined;
+    return (
+      isEpActionJTx(jTx.type) &&
+      intent !== undefined &&
+      submitId(jurisdictionName) === submitId(i.jurisdictionName) &&
+      submitId(jTx.entityId) === submitId(i.entityId) &&
+      submitId(jTx.data["signerId"]) === submitId(i.signerId) &&
+      sameAction(intent, i)
+    );
+  };
+/** og: an attempt already made waits out its retry window. */
+const insideRetryWindow = (previous: SubmitJournal | undefined, now: number): boolean =>
+  previous !== undefined && previous.submitAttempts > 0 && now < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS;
+/** The last result a re-sent attempt carries over. */
+const journalOf = (p: SubmitJournal | undefined): Partial<SubmitJournal> =>
+  p === undefined
+    ? {}
+    : {
+        ...opt("txHash", p.txHash || undefined),
+        ...opt("lastFailure", p.lastFailure),
+        ...opt("lastResultAttemptId", p.lastResultAttemptId || undefined),
+        ...opt("lastResultAt", p.lastResultAt),
+        ...opt("lastResultOutcome", p.lastResultOutcome || undefined),
+        ...opt("lastResultFingerprint", p.lastResultFingerprint || undefined),
+      };
+const fingerprintsOf = (j: SubmitJournal | undefined): Partial<SubmitJournal> => ({
+  ...opt("resultFingerprints", j?.resultFingerprints),
+  ...opt("resultFingerprintOrder", j?.resultFingerprintOrder),
+});
+type RetryJSubmit = Extract<RuntimeTx, { type: "retryJSubmit" }>["data"];
+/**
+ * og: the batch waits while it is still pending, once it failed terminally or was reconciled, and inside its retry
+ * window (an event barrier waives the window).
+ */
+const batchWaits = (rt: Runtime, identity: JSubmitIdentity, previous: JSubmitState | undefined, now: number): boolean =>
+  pendingJTxs(rt).some(holdsBatch(identity)) ||
+  Boolean(previous?.terminalFailure) ||
+  previous?.lastResultOutcome === "reconciled" ||
+  (previous?.lastResultOutcome !== "eventBarrier" && insideRetryWindow(previous, now));
+/** og: the sealed batch as a batch jTx, stamped with this attempt. */
+const batchAttemptJTx = (
+  sent: SentJBatch,
+  identity: JSubmitIdentity,
+  hanko: Hanko,
+  feeOverrides: Binary | undefined,
+  attempt: SubmitAttempt,
+): Binary =>
+  binOf({
+    type: "batch",
+    entityId: identity.entityId,
+    data: {
+      batch: sent.batch,
+      batchHash: sent.batchHash,
+      encodedBatch: sent.encodedBatch,
+      entityNonce: sent.entityNonce,
+      batchGeneration: identity.batchGeneration,
+      hankoSignature: hanko,
+      batchSize: batchOpCount(sent.batch),
+      signerId: identity.signerId,
+      ...opt("feeOverrides", feeOverrides ? { ...(feeOverrides as object) } : undefined),
+      runtimeSubmitAttempt: attempt,
+    },
+    timestamp: attempt.attemptedAt,
+  });
+/**
+ * og applyRetryJSubmitRuntimeTx: the active leader re-attempts its exact sealed batch at most once per retry window;
+ * stale hints are no-ops.
+ */
+const retryJSubmit = (rt: Runtime, d: RetryJSubmit): Result<TxStep, RuntimeError> => {
   const found = findSubmitReplica(rt, d.entityId, d.signerId);
   if (found === undefined) return txErr(`J_SUBMIT_LOCAL_REPLICA_MISSING:${d.entityId}:${d.signerId}`);
-  const [key, r] = found, jb = jBatchOf(r.state), sent = jb?.sentBatch, local = localOf(rt, key), now = Number(rt.timestamp);
-  if (leaderStateOf(r.state).activeValidatorId !== submitId(r.signerId)) return txErr(`J_SUBMIT_NOT_ACTIVE_LEADER:${d.signerId}`);
-  if (!sentMatches(sent, d.batchHash, d.entityNonce) || d.batchGeneration !== jb?.broadcastCount || sent.terminalFailure) return ok(noJ(rt));
-  const entityId = lower(r.state.id), signer = lower(r.signerId), previous = matchingJSubmitState(r.state, local.jSubmitState);
-  const identity: JSubmitIdentity = { jurisdictionName: d.jurisdictionName, entityId, signerId: signer, batchHash: sent.batchHash, entityNonce: sent.entityNonce, batchGeneration: d.batchGeneration };
-  const pending = rt.pendingCommittedJOutbox.some((input) => input.jTxs.some((raw) => {
-    const t = rowOf(raw);
-    return t.type === "batch" && submitId(input.jurisdictionName) === submitId(identity.jurisdictionName) && submitId(t.entityId) === submitId(identity.entityId) && submitId(t.data["signerId"]) === submitId(identity.signerId)
-      && submitId(t.data["batchHash"]) === submitId(identity.batchHash) && Number(t.data["entityNonce"]) === Number(identity.entityNonce) && Number(t.data["batchGeneration"]) === Number(identity.batchGeneration);
-  }));
-  if (pending || previous?.terminalFailure || previous?.lastResultOutcome === "reconciled") return ok(noJ(rt));
-  if (previous && previous.lastResultOutcome !== "eventBarrier" && previous.submitAttempts > 0 && now < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS) return ok(noJ(rt));
-  const witness = local.hankoWitness?.get(sent.batchHash);
-  if (witness === undefined || witness.type !== "jBatch") return txErr(`J_SUBMIT_HANKO_WITNESS_MISSING:${d.entityId}:${sent.batchHash}`);
+  const [key, r] = found;
+  if (!activeLeader(r)) return txErr(`J_SUBMIT_NOT_ACTIVE_LEADER:${d.signerId}`);
+  const sent = liveSentBatch(r.state, d);
+  if (sent === undefined) return ok(noJ(rt));
+  const local = localOf(rt, key);
+  const now = Number(rt.timestamp);
+  const previous = matchingJSubmitState(r.state, local.jSubmitState);
+  const identity: JSubmitIdentity = {
+    jurisdictionName: d.jurisdictionName,
+    entityId: lower(r.state.id),
+    signerId: lower(r.signerId),
+    batchHash: sent.batchHash,
+    entityNonce: sent.entityNonce,
+    batchGeneration: d.batchGeneration,
+  };
+  if (batchWaits(rt, identity, previous, now)) return ok(noJ(rt));
+  const hanko = quorumWitness(local, sent.batchHash, "jBatch");
+  if (hanko === undefined) return txErr(`J_SUBMIT_HANKO_WITNESS_MISSING:${d.entityId}:${sent.batchHash}`);
   const attemptNumber = (previous?.submitAttempts ?? 0) + 1;
   return map(jSubmitAttemptId({ ...identity, attemptNumber }), (attemptId): TxStep => {
-    const recorded = local.jSubmitState;
-    const next: JSubmitState = {
-      jurisdictionName: d.jurisdictionName, batchHash: sent.batchHash, entityNonce: sent.entityNonce, batchGeneration: d.batchGeneration, submitAttempts: attemptNumber, lastSubmittedAt: now,
-      ...journalOf(previous), ...opt("resultFingerprints", recorded?.resultFingerprints), ...opt("resultFingerprintOrder", recorded?.resultFingerprintOrder),
+    const attempt = { attemptId, attemptNumber, attemptedAt: now, batchGeneration: d.batchGeneration };
+    const jSubmitState: JSubmitState = {
+      jurisdictionName: d.jurisdictionName,
+      batchHash: sent.batchHash,
+      entityNonce: sent.entityNonce,
+      batchGeneration: d.batchGeneration,
+      submitAttempts: attemptNumber,
+      lastSubmittedAt: now,
+      ...journalOf(previous),
+      ...fingerprintsOf(local.jSubmitState),
     };
-    const batchTx = {
-      type: "batch", entityId, data: {
-        batch: sent.batch, batchHash: sent.batchHash, encodedBatch: sent.encodedBatch, entityNonce: sent.entityNonce, batchGeneration: d.batchGeneration, hankoSignature: witness.hanko,
-        batchSize: batchOpCount(sent.batch), signerId: signer, ...(d.feeOverrides ? { feeOverrides: { ...(d.feeOverrides as object) } } : {}),
-        runtimeSubmitAttempt: { attemptId, attemptNumber, attemptedAt: now, batchGeneration: d.batchGeneration },
-      }, timestamp: now,
+    return {
+      runtime: withLocal(rt, key, { jSubmitState }),
+      jOutputs: [
+        {
+          jurisdictionName: d.jurisdictionName,
+          jTxs: [batchAttemptJTx(sent, identity, hanko, d.feeOverrides, attempt)],
+        },
+      ],
     };
-    return { runtime: withLocal(rt, key, { jSubmitState: next }), jOutputs: [{ jurisdictionName: d.jurisdictionName, jTxs: [binOf(batchTx)] }] };
   });
 };
-/** og normalizeRuntimeFailureCode + classifyRuntimeJBatchFailure. */
+/** og classifyRuntimeJBatchFailure; an unknown code is a contradiction. */
 const J_BATCH_FAILURE_CATEGORIES: { readonly [code: string]: RuntimeFailureSignal["category"] } = {
-  J_BATCH_EMPTY: "ExpectedEmpty", J_BATCH_SENT_PENDING: "TransientRace", J_BATCH_JURISDICTION_MISSING: "Contradiction", J_BATCH_JURISDICTION_UNAVAILABLE: "TransientRace",
-  J_BATCH_CHAIN_ID_MISSING: "Contradiction", J_BATCH_SIGNER_MISSING: "Contradiction", J_BATCH_LIMIT_EXCEEDED: "Contradiction", J_BATCH_CONSENSUS_HANKO_MISSING: "Contradiction",
-  J_SUBMIT_MISSING_JREPLICA: "TransientRace", J_SUBMIT_MISSING_JADAPTER: "TransientRace", J_SUBMIT_TRANSIENT: "TransientRace", J_SUBMIT_FATAL: "Contradiction",
+  J_BATCH_EMPTY: "ExpectedEmpty",
+  J_BATCH_SENT_PENDING: "TransientRace",
+  J_BATCH_JURISDICTION_MISSING: "Contradiction",
+  J_BATCH_JURISDICTION_UNAVAILABLE: "TransientRace",
+  J_BATCH_CHAIN_ID_MISSING: "Contradiction",
+  J_BATCH_SIGNER_MISSING: "Contradiction",
+  J_BATCH_LIMIT_EXCEEDED: "Contradiction",
+  J_BATCH_CONSENSUS_HANKO_MISSING: "Contradiction",
+  J_SUBMIT_MISSING_JREPLICA: "TransientRace",
+  J_SUBMIT_MISSING_JADAPTER: "TransientRace",
+  J_SUBMIT_TRANSIENT: "TransientRace",
+  J_SUBMIT_FATAL: "Contradiction",
 };
-const failureCode = (v: unknown): string => (String(v || "").trim().split(/[\s:]/)[0] || "UNKNOWN").replace(/[^A-Z0-9_]/gi, "_").toUpperCase();
+/** og normalizeRuntimeFailureCode: the first word, as an upper-case identifier. */
+const failureCode = (v: unknown): string => {
+  const word = String(v || "").trim().split(/[\s:]/)[0] || "UNKNOWN";
+  return word.replace(/[^A-Z0-9_]/gi, "_").toUpperCase();
+};
 export const classifyJBatchFailure = (code: string, message?: string): RuntimeFailureSignal => {
-  const c = failureCode(code), category = J_BATCH_FAILURE_CATEGORIES[c] ?? "Contradiction";
-  return { category, code: c, message: String((message ?? c) || c).trim() || c, retryable: category === "TransientRace", fatal: category === "Contradiction" };
+  const c = failureCode(code);
+  const category = J_BATCH_FAILURE_CATEGORIES[c] ?? "Contradiction";
+  const text = String((message ?? c) || c).trim();
+  return {
+    category,
+    code: c,
+    message: text || c,
+    retryable: category === "TransientRace",
+    fatal: category === "Contradiction",
+  };
 };
 type ResultShape = SubmitResultTail & { readonly outcome: string };
-/** og assertValidAdapterFailure (both families, by code prefix). */
+/** og assertValidAdapterFailure: a categorised, explained failure that agrees with the reported outcome. */
 const adapterFailureValid = (d: ResultShape, prefix: string): Result<void, RuntimeError> => {
   const f = d.adapterFailure;
   if (!f) return ok(undefined);
-  if (f.category !== "transient" && f.category !== "terminal") return txErr(`${prefix}_ADAPTER_FAILURE_CATEGORY_INVALID:${String(f.category)}`);
-  if (!String(f.code ?? "").trim()) return txErr(`${prefix}_ADAPTER_FAILURE_CODE_MISSING`);
-  if (!String(f.message ?? "").trim()) return txErr(`${prefix}_ADAPTER_FAILURE_MESSAGE_MISSING`);
-  if (f.message !== d.message) return txErr(`${prefix}_ADAPTER_FAILURE_MESSAGE_MISMATCH`);
   const expected = f.category === "transient" ? "transientFailure" : "terminalFailure";
-  return d.outcome === expected ? ok(undefined) : txErr(`${prefix}_ADAPTER_FAILURE_OUTCOME_MISMATCH:${f.category}:${d.outcome}`);
-};
-/** og findRecordedResultFingerprint / findRecordedFingerprint: one fingerprint per attempt id across every replica journal. */
-const recordedFingerprint = (rt: Runtime, attemptId: string, pick: (l: ReplicaLocal) => SubmitJournal | undefined, prefix: string): Result<string | null, RuntimeError> => {
-  let found: string | null = null;
-  for (const key of rt.entities.keys()) {
-    const local = pick(localOf(rt, key));
-    if (local === undefined) continue;
-    const journal = Object.prototype.hasOwnProperty.call(local.resultFingerprints ?? {}, attemptId) ? local.resultFingerprints?.[attemptId] : undefined;
-    const last = local.lastResultAttemptId === attemptId ? local.lastResultFingerprint : undefined;
-    if (local.lastResultAttemptId === attemptId && !last) return txErr(`${prefix}_RESULT_FINGERPRINT_MISSING:${attemptId}`);
-    if (journal !== undefined && last !== undefined && journal !== last) return txErr(`${prefix}_RESULT_RECORDED_CONFLICT:${attemptId}`);
-    const fingerprint = journal ?? last;
-    if (fingerprint === undefined) continue;
-    if (found !== null && found !== fingerprint) return txErr(`${prefix}_RESULT_RECORDED_CONFLICT:${attemptId}`);
-    found = fingerprint;
+  switch (true) {
+    case f.category !== "transient" && f.category !== "terminal":
+      return txErr(`${prefix}_ADAPTER_FAILURE_CATEGORY_INVALID:${String(f.category)}`);
+    case !String(f.code ?? "").trim():
+      return txErr(`${prefix}_ADAPTER_FAILURE_CODE_MISSING`);
+    case !String(f.message ?? "").trim():
+      return txErr(`${prefix}_ADAPTER_FAILURE_MESSAGE_MISSING`);
+    case f.message !== d.message:
+      return txErr(`${prefix}_ADAPTER_FAILURE_MESSAGE_MISMATCH`);
+    case d.outcome !== expected:
+      return txErr(`${prefix}_ADAPTER_FAILURE_OUTCOME_MISMATCH:${f.category}:${d.outcome}`);
+    default:
+      return ok(undefined);
   }
-  return ok(found);
 };
+type Fingerprints = { readonly [attemptId: string]: string };
+/** The fingerprint one journal holds for an attempt; its last result and its journal must agree. */
+const journalFingerprint = (
+  journal: SubmitJournal,
+  attemptId: string,
+  prefix: string,
+): Result<string | undefined, RuntimeError> => {
+  const journaled = Object.hasOwn(journal.resultFingerprints ?? {}, attemptId)
+    ? journal.resultFingerprints?.[attemptId]
+    : undefined;
+  const isLast = journal.lastResultAttemptId === attemptId;
+  const last = isLast ? journal.lastResultFingerprint : undefined;
+  switch (true) {
+    case isLast && !last:
+      return txErr(`${prefix}_RESULT_FINGERPRINT_MISSING:${attemptId}`);
+    case journaled !== undefined && last !== undefined && journaled !== last:
+      return txErr(`${prefix}_RESULT_RECORDED_CONFLICT:${attemptId}`);
+    default:
+      return ok(journaled ?? last);
+  }
+};
+/**
+ * og findRecordedResultFingerprint / findRecordedFingerprint: one fingerprint per attempt id across every replica
+ * journal.
+ */
+const recordedFingerprint = (
+  rt: Runtime,
+  attemptId: string,
+  pick: (l: ReplicaLocal) => SubmitJournal | undefined,
+  prefix: string,
+): Result<string | null, RuntimeError> =>
+  foldResult(rt.entities.keys(), null as string | null, (found, key) => {
+    const journal = pick(localOf(rt, key));
+    if (journal === undefined) return ok(found);
+    return chain(journalFingerprint(journal, attemptId, prefix), (fingerprint) => {
+      if (fingerprint === undefined) return ok(found);
+      return found !== null && found !== fingerprint
+        ? txErr(`${prefix}_RESULT_RECORDED_CONFLICT:${attemptId}`)
+        : ok(fingerprint);
+    });
+  });
 const dropPendingAttempt = (pending: readonly JInput[], match: (t: JTxRow) => boolean): readonly JInput[] =>
-  pending.flatMap((input) => { const jTxs = input.jTxs.filter((raw) => !match(rowOf(raw))); return jTxs.length > 0 ? [{ jurisdictionName: input.jurisdictionName, jTxs }] : []; });
-/** og buildBoundedResultJournal / buildResultJournal: the newest fingerprints plus every still-pending attempt of this replica, at most 256. */
-const boundedJournal = (local: SubmitJournal, attemptId: string, fingerprint: string, active: Set<string>, jSubmit: boolean): Result<Pick<SubmitJournal, "resultFingerprints" | "resultFingerprintOrder">, RuntimeError> => {
-  const existing = local.resultFingerprints ?? {}, order = local.resultFingerprintOrder ?? Object.keys(existing), prefix = jSubmit ? "J_SUBMIT" : "ENTITY_PROVIDER_ACTION";
-  if (jSubmit) {
-    const seen = new Set<string>();
-    for (const id of order) {
-      if (seen.has(id)) return txErr(`J_SUBMIT_RESULT_JOURNAL_ORDER_DUPLICATE:${id}`);
-      if (!Object.prototype.hasOwnProperty.call(existing, id)) return txErr(`J_SUBMIT_RESULT_JOURNAL_ORDER_UNKNOWN:${id}`);
-      seen.add(id);
+  pending.flatMap((input) => {
+    const jTxs = input.jTxs.filter((raw) => !match(rowOf(raw)));
+    return jTxs.length > 0 ? [{ jurisdictionName: input.jurisdictionName, jTxs }] : [];
+  });
+/** og (J submit): the journal order lists every recorded attempt exactly once; the first stray id is named. */
+const jSubmitOrderValid = (order: readonly string[], recorded: Fingerprints): Result<void, RuntimeError> => {
+  const seen = foldResult(order, new Set<string>() as ReadonlySet<string>, (s, id) => {
+    switch (true) {
+      case s.has(id):
+        return txErr(`J_SUBMIT_RESULT_JOURNAL_ORDER_DUPLICATE:${id}`);
+      case !Object.hasOwn(recorded, id):
+        return txErr(`J_SUBMIT_RESULT_JOURNAL_ORDER_UNKNOWN:${id}`);
+      default:
+        return ok(new Set([...s, id]));
     }
-    if (seen.size !== Object.keys(existing).length) return txErr("J_SUBMIT_RESULT_JOURNAL_ORDER_INCOMPLETE");
-  } else {
-    if (new Set(order).size !== order.length) return txErr("ENTITY_PROVIDER_ACTION_RESULT_JOURNAL_ORDER_DUPLICATE");
-    if (order.some((id) => existing[id] === undefined) || order.length !== Object.keys(existing).length) return txErr("ENTITY_PROVIDER_ACTION_RESULT_JOURNAL_ORDER_INVALID");
-  }
-  const nextOrder = [...order.filter((id) => id !== attemptId), attemptId];
-  if (active.size > SUBMIT_RESULT_FINGERPRINT_LIMIT) return txErr(`${prefix}_ACTIVE_ATTEMPT_CAPACITY_EXCEEDED:${active.size}`);
-  const retained = new Set(active);
-  for (let i = nextOrder.length - 1; i >= 0 && retained.size < SUBMIT_RESULT_FINGERPRINT_LIMIT; i -= 1) if (nextOrder[i]) retained.add(nextOrder[i] as string);
-  const resultFingerprintOrder = nextOrder.filter((id) => retained.has(id)), all: { readonly [id: string]: string } = { ...existing, [attemptId]: fingerprint };
-  return ok({ resultFingerprintOrder, resultFingerprints: Object.fromEntries(resultFingerprintOrder.map((id) => [id, all[id] as string])) });
+  });
+  return chain(seen, (s) =>
+    s.size === Object.keys(recorded).length ? ok(undefined) : txErr("J_SUBMIT_RESULT_JOURNAL_ORDER_INCOMPLETE"),
+  );
 };
-const activeAttempts = (rt: Runtime, r: EntityReplica, isFamily: (t: string) => boolean): Set<string> => new Set(rt.pendingCommittedJOutbox.flatMap((input) => input.jTxs.flatMap((raw) => {
-  const t = rowOf(raw);
-  return isFamily(t.type) && submitId(t.entityId) === submitId(r.state.id) && submitId(t.data["signerId"]) === submitId(r.signerId) && t.data.runtimeSubmitAttempt ? [t.data.runtimeSubmitAttempt.attemptId] : [];
-})));
-const withoutKeys = <T extends object>(o: T, keys: readonly string[]): T => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k))) as T;
-/** og applyRecordJSubmitResultRuntimeTx: validate, idempotent by fingerprint, retire a stale attempt, else journal the result for the live attempt. */
-const recordJSubmitResult = (rt: Runtime, d: JSubmitResultData): Result<Runtime, RuntimeError> => {
-  if (!submitId(d.entityId)) return txErr("J_SUBMIT_RESULT_ENTITY_MISSING");
-  if (!submitId(d.signerId)) return txErr("J_SUBMIT_RESULT_SIGNER_MISSING");
-  if (!String(d.jurisdictionName || "").trim()) return txErr("J_SUBMIT_RESULT_JURISDICTION_MISSING");
-  if (!submitId(d.batchHash)) return txErr("J_SUBMIT_RESULT_BATCH_HASH_MISSING");
-  if (!String(d.attemptId || "").trim()) return txErr("J_SUBMIT_RESULT_ATTEMPT_ID_MISSING");
-  if (!Number.isSafeInteger(d.entityNonce) || d.entityNonce < 0) return txErr(`J_SUBMIT_RESULT_ENTITY_NONCE_INVALID:${d.entityNonce}`);
-  if (!Number.isSafeInteger(d.batchGeneration) || d.batchGeneration <= 0) return txErr(`J_SUBMIT_RESULT_BATCH_GENERATION_INVALID:${d.batchGeneration}`);
-  if (!Number.isSafeInteger(d.attemptNumber) || d.attemptNumber <= 0) return txErr(`J_SUBMIT_RESULT_ATTEMPT_NUMBER_INVALID:${d.attemptNumber}`);
-  if (!Number.isSafeInteger(d.attemptedAt) || d.attemptedAt < 0) return txErr(`J_SUBMIT_RESULT_ATTEMPT_TIMESTAMP_INVALID:${d.attemptedAt}`);
-  return chain(jSubmitAttemptId(d), (expected): Result<Runtime, RuntimeError> => {
-    if (d.attemptId !== expected) return txErr(`J_SUBMIT_RESULT_ATTEMPT_ID_MISMATCH:${d.attemptId}:${expected}`);
-    if (!["submitted", "eventBarrier", "transientFailure", "terminalFailure", "reconciled"].includes(d.outcome)) return txErr(`J_SUBMIT_RESULT_OUTCOME_INVALID:${String(d.outcome)}`);
-    return chain(adapterFailureValid(d, "J_SUBMIT"), () => {
-      const fingerprint = stableJson(d), isAttempt = (t: JTxRow): boolean => t.type === "batch" && t.data?.runtimeSubmitAttempt?.attemptId === d.attemptId;
-      const matches = rt.pendingCommittedJOutbox.flatMap((input) => input.jTxs.filter((raw) => isAttempt(rowOf(raw))).map((raw) => ({ jurisdictionName: input.jurisdictionName, jTx: rowOf(raw) })));
-      if (matches.length > 1) return txErr(`J_SUBMIT_PENDING_ATTEMPT_DUPLICATED:${d.attemptId}`);
-      const pending = matches[0], a = pending?.jTx.data.runtimeSubmitAttempt;
-      if (pending !== undefined && !(a && submitId(pending.jTx.entityId) === submitId(d.entityId) && submitId(pending.jTx.data["signerId"]) === submitId(d.signerId) && pending.jurisdictionName === d.jurisdictionName
-        && submitId(pending.jTx.data["batchHash"]) === submitId(d.batchHash) && Number(pending.jTx.data["entityNonce"]) === Number(d.entityNonce) && Number(pending.jTx.data["batchGeneration"]) === d.batchGeneration
-        && a.attemptId === d.attemptId && a.attemptNumber === d.attemptNumber && a.attemptedAt === d.attemptedAt)) return txErr(`J_SUBMIT_RESULT_PENDING_CONFLICT:${d.attemptId}`);
-      return chain(recordedFingerprint(rt, d.attemptId, (l) => l.jSubmitState, "J_SUBMIT"), (recorded): Result<Runtime, RuntimeError> => {
-        if (recorded !== null) return recorded === fingerprint ? ok(rt) : txErr(`J_SUBMIT_RESULT_DUPLICATE_CONFLICT:${d.attemptId}`);
-        const found = findSubmitReplica(rt, d.entityId, d.signerId);
-        if (found === undefined) return txErr(`J_SUBMIT_LOCAL_REPLICA_MISSING:${d.entityId}:${d.signerId}`);
-        const [key, r] = found, local = localOf(rt, key).jSubmitState, jb = jBatchOf(r.state);
-        const matchesSent = sentMatches(jb?.sentBatch, d.batchHash, d.entityNonce) && jb?.broadcastCount === d.batchGeneration;
-        const matchesLocal = local !== undefined && submitId(local.batchHash) === submitId(d.batchHash) && local.entityNonce === d.entityNonce && local.batchGeneration === d.batchGeneration;
-        const retired = (): Runtime => (pending === undefined ? rt : { ...rt, pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt) });
-        if (!matchesSent || (matchesLocal && d.attemptNumber < local.submitAttempts)) return ok(retired());
-        if (local === undefined || !matchesLocal || local.submitAttempts !== d.attemptNumber || local.lastSubmittedAt !== d.attemptedAt) return txErr(`J_SUBMIT_RESULT_ATTEMPT_MISMATCH:${d.attemptId}`);
-        if (pending === undefined) return txErr(`J_SUBMIT_PENDING_ATTEMPT_MISSING:${d.attemptId}`);
-        return map(boundedJournal(local, d.attemptId, fingerprint, activeAttempts(rt, r, (t) => t === "batch"), true), (journal) => {
-          const now = Number(rt.timestamp), base: JSubmitState = { ...local, lastResultAttemptId: d.attemptId, lastResultAt: now, lastResultOutcome: d.outcome, lastResultFingerprint: fingerprint, ...journal };
-          let next: JSubmitState = base;
-          if (d.outcome === "submitted") next = { ...withoutKeys(base, ["lastFailure"]), ...(d.txHash ? { txHash: d.txHash } : {}) };
-          else if (d.outcome === "eventBarrier") next = withoutKeys(base, ["lastFailure"]);
-          else if (d.outcome === "transientFailure" || d.outcome === "terminalFailure") {
-            const message = String(d.message || "unknown"), code = d.outcome === "transientFailure" ? "J_SUBMIT_TRANSIENT" : "J_SUBMIT_FATAL";
-            const failure: SubmitFailure = { message, failedAt: now, failure: classifyJBatchFailure(code, message), ...opt("adapterFailure", d.adapterFailure) };
-            next = { ...base, lastFailure: failure, ...(d.outcome === "terminalFailure" ? { terminalFailure: failure } : {}) };
-          }
-          return withLocal({ ...rt, pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt) }, key, { jSubmitState: next });
-        });
+/** og (EntityProvider action): the journal order lists every recorded attempt exactly once. */
+const epActionOrderValid = (order: readonly string[], recorded: Fingerprints): Result<void, RuntimeError> => {
+  switch (true) {
+    case new Set(order).size !== order.length:
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_JOURNAL_ORDER_DUPLICATE");
+    case order.some((id) => recorded[id] === undefined) || order.length !== Object.keys(recorded).length:
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_JOURNAL_ORDER_INVALID");
+    default:
+      return ok(undefined);
+  }
+};
+/** og: the active attempts, topped up with the newest journaled ones until the journal is full. */
+const newestRetained = (order: readonly string[], active: ReadonlySet<string>): ReadonlySet<string> =>
+  order.reduceRight<ReadonlySet<string>>(
+    (kept, id) => (kept.size < SUBMIT_RESULT_FINGERPRINT_LIMIT && id ? new Set([...kept, id]) : kept),
+    active,
+  );
+/** Removes the last failure, keeping every other field in place. */
+const withoutLastFailure = <T extends SubmitJournal>({ lastFailure: _, ...rest }: T): T => rest as T;
+/** og: a success clears the last failure (and records the tx hash it names). */
+const cleared = <T extends SubmitJournal>(base: T, txHash: string | undefined): T => ({
+  ...withoutLastFailure(base),
+  ...opt("txHash", txHash || undefined),
+});
+/** og: a failure becomes the last failure; a terminal one also sticks. */
+const failed = <T extends SubmitJournal>(base: T, failure: SubmitFailure, terminal: boolean): T => ({
+  ...base,
+  lastFailure: failure,
+  ...opt("terminalFailure", terminal ? failure : undefined),
+});
+/** og: how one submit family's results land in the replica journal. */
+type ResultLedger<J extends SubmitJournal, D extends ResultData> = {
+  readonly prefix: "J_SUBMIT" | "ENTITY_PROVIDER_ACTION";
+  readonly isFamily: (type: string) => boolean;
+  /** The pending jTx carrying the result's attempt is for the result's target. */
+  readonly pendingFor: (d: D) => (p: PendingJTx) => boolean;
+  readonly journal: (local: ReplicaLocal) => J | undefined;
+  readonly withJournal: (journal: J) => ReplicaLocal;
+  /** Consensus still holds the result's target. */
+  readonly current: (state: EntityState, d: D) => boolean;
+  /** The local journal tracks the result's target. */
+  readonly tracks: (journal: J, d: D) => boolean;
+  readonly orderValid: (order: readonly string[], recorded: Fingerprints) => Result<void, RuntimeError>;
+  readonly land: (base: J, d: D, now: number) => J;
+};
+type ResultData = SubmitResultTail & {
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly outcome: SubmitOutcome;
+};
+/**
+ * og buildBoundedResultJournal / buildResultJournal: this result's fingerprint joins the journal, which keeps every
+ * still-pending attempt of this replica plus the newest others, at most 256.
+ */
+const boundedJournal = <J extends SubmitJournal, D extends ResultData>(
+  ledger: ResultLedger<J, D>,
+  journal: SubmitJournal,
+  attemptId: string,
+  fingerprint: string,
+  active: ReadonlySet<string>,
+): Result<Pick<SubmitJournal, "resultFingerprints" | "resultFingerprintOrder">, RuntimeError> => {
+  const recorded = journal.resultFingerprints ?? {};
+  const order = journal.resultFingerprintOrder ?? Object.keys(recorded);
+  return chain(ledger.orderValid(order, recorded), () => {
+    if (active.size > SUBMIT_RESULT_FINGERPRINT_LIMIT)
+      return txErr(`${ledger.prefix}_ACTIVE_ATTEMPT_CAPACITY_EXCEEDED:${active.size}`);
+    const nextOrder = [...order.filter((id) => id !== attemptId), attemptId];
+    const retained = newestRetained(nextOrder, active);
+    const resultFingerprintOrder = nextOrder.filter((id) => retained.has(id));
+    const fingerprints: Fingerprints = { ...recorded, [attemptId]: fingerprint };
+    return ok({
+      resultFingerprintOrder,
+      resultFingerprints: Object.fromEntries(resultFingerprintOrder.map((id) => [id, fingerprints[id] as string])),
+    });
+  });
+};
+const retiredAttempt = (rt: Runtime, isAttempt: (t: JTxRow) => boolean): Runtime => ({
+  ...rt,
+  pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt),
+});
+/** og: a family's jTx carrying exactly this attempt. */
+const carriesAttempt =
+  (isFamily: (type: string) => boolean, attemptId: string) =>
+  (jTx: JTxRow): boolean =>
+    isFamily(jTx.type) && jTx.data?.runtimeSubmitAttempt?.attemptId === attemptId;
+/** og: the one pending jTx carrying an attempt, if any; two of them is a duplicated attempt. */
+const soleAttempt = (
+  rt: Runtime,
+  isAttempt: (t: JTxRow) => boolean,
+  duplicated: string,
+): Result<PendingJTx | undefined, RuntimeError> => {
+  const matches = pendingJTxs(rt).filter(({ jTx }) => isAttempt(jTx));
+  return matches.length > 1 ? txErr(duplicated) : ok(matches[0]);
+};
+/** og: the result reports the very attempt stamped on the pending jTx. */
+const sameAttempt = (a: SubmitAttempt | undefined, d: SubmitResultTail): boolean =>
+  a !== undefined &&
+  a.attemptId === d.attemptId &&
+  a.attemptNumber === d.attemptNumber &&
+  a.attemptedAt === d.attemptedAt;
+/** og: the pending attempts of one family on this replica, which the journal must never forget. */
+const activeAttempts = (rt: Runtime, r: EntityReplica, isFamily: (type: string) => boolean): ReadonlySet<string> =>
+  new Set(
+    pendingJTxs(rt).flatMap(({ jTx }) => {
+      const attempt = jTx.data.runtimeSubmitAttempt;
+      const own =
+        isFamily(jTx.type) &&
+        submitId(jTx.entityId) === submitId(r.state.id) &&
+        submitId(jTx.data["signerId"]) === submitId(r.signerId);
+      return own && attempt ? [attempt.attemptId] : [];
+    }),
+  );
+/**
+ * og: a result for a target consensus has moved past, or for an attempt the journal has already superseded, only
+ * retires its pending jTx; otherwise it must be the journal's latest attempt, and is journaled.
+ */
+const landResult = <J extends SubmitJournal, D extends ResultData>(
+  ledger: ResultLedger<J, D>,
+  rt: Runtime,
+  d: D,
+  pending: PendingJTx | undefined,
+  fingerprint: string,
+): Result<Runtime, RuntimeError> => {
+  const { prefix } = ledger;
+  const found = findSubmitReplica(rt, d.entityId, d.signerId);
+  if (found === undefined) return txErr(`${prefix}_LOCAL_REPLICA_MISSING:${d.entityId}:${d.signerId}`);
+  const [key, r] = found;
+  const journal = ledger.journal(localOf(rt, key));
+  const tracked = journal !== undefined && ledger.tracks(journal, d) ? journal : undefined;
+  const isAttempt = carriesAttempt(ledger.isFamily, d.attemptId);
+  const superseded = tracked !== undefined && d.attemptNumber < tracked.submitAttempts;
+  if (!ledger.current(r.state, d) || superseded) return ok(pending === undefined ? rt : retiredAttempt(rt, isAttempt));
+  if (tracked === undefined || tracked.submitAttempts !== d.attemptNumber || tracked.lastSubmittedAt !== d.attemptedAt)
+    return txErr(`${prefix}_RESULT_ATTEMPT_MISMATCH:${d.attemptId}`);
+  if (pending === undefined) return txErr(`${prefix}_PENDING_ATTEMPT_MISSING:${d.attemptId}`);
+  const active = activeAttempts(rt, r, ledger.isFamily);
+  return map(boundedJournal(ledger, tracked, d.attemptId, fingerprint, active), (bounded) => {
+    const now = Number(rt.timestamp);
+    const base: J = {
+      ...tracked,
+      lastResultAttemptId: d.attemptId,
+      lastResultAt: now,
+      lastResultOutcome: d.outcome,
+      lastResultFingerprint: fingerprint,
+      ...bounded,
+    };
+    return withLocal(retiredAttempt(rt, isAttempt), key, ledger.withJournal(ledger.land(base, d, now)));
+  });
+};
+/**
+ * og: a result is idempotent by fingerprint; its attempt, when still pending, must be the one it reports, and only
+ * once.
+ */
+const recordResult = <J extends SubmitJournal, D extends ResultData>(
+  ledger: ResultLedger<J, D>,
+  rt: Runtime,
+  d: D,
+): Result<Runtime, RuntimeError> => {
+  const { prefix } = ledger;
+  const isAttempt = carriesAttempt(ledger.isFamily, d.attemptId);
+  return chain(soleAttempt(rt, isAttempt, `${prefix}_PENDING_ATTEMPT_DUPLICATED:${d.attemptId}`), (pending) => {
+    const conflicting =
+      pending !== undefined &&
+      !(sameAttempt(pending.jTx.data.runtimeSubmitAttempt, d) && ledger.pendingFor(d)(pending));
+    if (conflicting) return txErr(`${prefix}_RESULT_PENDING_CONFLICT:${d.attemptId}`);
+    const fingerprint = stableJson(d);
+    return chain(recordedFingerprint(rt, d.attemptId, ledger.journal, prefix), (recorded) => {
+      if (recorded === null) return landResult(ledger, rt, d, pending, fingerprint);
+      return recorded === fingerprint ? ok(rt) : txErr(`${prefix}_RESULT_DUPLICATE_CONFLICT:${d.attemptId}`);
+    });
+  });
+};
+/** og: a J submit failure, classified by its outcome. */
+const jSubmitFailure = (d: JSubmitResultData, now: number): SubmitFailure => {
+  const message = String(d.message || "unknown");
+  const code = d.outcome === "transientFailure" ? "J_SUBMIT_TRANSIENT" : "J_SUBMIT_FATAL";
+  return {
+    message,
+    failedAt: now,
+    failure: classifyJBatchFailure(code, message),
+    ...opt("adapterFailure", d.adapterFailure),
+  };
+};
+const J_SUBMIT_LEDGER: ResultLedger<JSubmitState, JSubmitResultData> = {
+  prefix: "J_SUBMIT",
+  isFamily: (type) => type === "batch",
+  pendingFor: (d) => (p) => p.jurisdictionName === d.jurisdictionName && holdsBatch(d)(p),
+  journal: (local) => local.jSubmitState,
+  withJournal: (jSubmitState) => ({ jSubmitState }),
+  current: sealedBatchIs,
+  tracks: sameBatch,
+  orderValid: jSubmitOrderValid,
+  land: (base, d, now) => {
+    switch (d.outcome) {
+      case "submitted":
+        return cleared(base, d.txHash);
+      case "eventBarrier":
+        return cleared(base, undefined);
+      case "transientFailure":
+      case "terminalFailure":
+        return failed(base, jSubmitFailure(d, now), d.outcome === "terminalFailure");
+      case "reconciled":
+        return base;
+    }
+  },
+};
+const ENTITY_PROVIDER_ACTION_LEDGER: ResultLedger<EntityProviderActionSubmitState, EpActionResultData> = {
+  prefix: "ENTITY_PROVIDER_ACTION",
+  isFamily: isEpActionJTx,
+  pendingFor: holdsEpAction,
+  journal: (local) => local.entityProviderActionSubmitState,
+  withJournal: (entityProviderActionSubmitState) => ({ entityProviderActionSubmitState }),
+  current: (state, d) => {
+    const committed = epActionState(state).pending;
+    return committed !== undefined && sameAction(committed, d);
+  },
+  tracks: sameAction,
+  orderValid: epActionOrderValid,
+  land: (base, d, now) => {
+    switch (d.outcome) {
+      case "submitted":
+      case "reconciled":
+        return cleared(base, d.txHash);
+      case "transientFailure":
+      case "terminalFailure": {
+        const failure = {
+          message: String(d.message ?? "unknown"),
+          failedAt: now,
+          ...opt("adapterFailure", d.adapterFailure),
+        };
+        return failed(base, failure, d.outcome === "terminalFailure");
+      }
+    }
+  },
+};
+const J_SUBMIT_OUTCOMES: ReadonlySet<unknown> = new Set([
+  "submitted",
+  "eventBarrier",
+  "transientFailure",
+  "terminalFailure",
+  "reconciled",
+]);
+const EP_ACTION_OUTCOMES: ReadonlySet<unknown> = new Set([
+  "submitted",
+  "transientFailure",
+  "terminalFailure",
+  "reconciled",
+]);
+/** og: a J submit result names its batch, its attempt and a known outcome, and its attempt id is the canonical one. */
+const jSubmitResultValid = (d: JSubmitResultData): Result<void, RuntimeError> => {
+  switch (true) {
+    case !submitId(d.entityId):
+      return txErr("J_SUBMIT_RESULT_ENTITY_MISSING");
+    case !submitId(d.signerId):
+      return txErr("J_SUBMIT_RESULT_SIGNER_MISSING");
+    case !submitId(d.jurisdictionName):
+      return txErr("J_SUBMIT_RESULT_JURISDICTION_MISSING");
+    case !submitId(d.batchHash):
+      return txErr("J_SUBMIT_RESULT_BATCH_HASH_MISSING");
+    case !submitId(d.attemptId):
+      return txErr("J_SUBMIT_RESULT_ATTEMPT_ID_MISSING");
+    case !naturalSafeInt(d.entityNonce):
+      return txErr(`J_SUBMIT_RESULT_ENTITY_NONCE_INVALID:${d.entityNonce}`);
+    case !positiveSafeInt(d.batchGeneration):
+      return txErr(`J_SUBMIT_RESULT_BATCH_GENERATION_INVALID:${d.batchGeneration}`);
+    case !positiveSafeInt(d.attemptNumber):
+      return txErr(`J_SUBMIT_RESULT_ATTEMPT_NUMBER_INVALID:${d.attemptNumber}`);
+    case !naturalSafeInt(d.attemptedAt):
+      return txErr(`J_SUBMIT_RESULT_ATTEMPT_TIMESTAMP_INVALID:${d.attemptedAt}`);
+  }
+  return chain(jSubmitAttemptId(d), (expected) => {
+    switch (true) {
+      case d.attemptId !== expected:
+        return txErr(`J_SUBMIT_RESULT_ATTEMPT_ID_MISMATCH:${d.attemptId}:${expected}`);
+      case !J_SUBMIT_OUTCOMES.has(d.outcome):
+        return txErr(`J_SUBMIT_RESULT_OUTCOME_INVALID:${String(d.outcome)}`);
+      default:
+        return adapterFailureValid(d, "J_SUBMIT");
+    }
+  });
+};
+/**
+ * og: an EntityProvider action result names its action, its attempt and a known outcome, under the canonical attempt
+ * id.
+ */
+const epActionResultValid = (d: EpActionResultData): Result<void, RuntimeError> => {
+  switch (true) {
+    case !submitId(d.entityId):
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_ENTITY_MISSING");
+    case !submitId(d.signerId):
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_SIGNER_MISSING");
+    case !submitId(d.jurisdictionName):
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_JURISDICTION_MISSING");
+    case !HASH_32.test(submitId(d.actionHash)):
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_HASH_INVALID");
+    case d.actionNonce <= 0n || d.actionNonce > SUBMIT_MAX_UINT256:
+      return txErr("ENTITY_PROVIDER_ACTION_RESULT_NONCE_INVALID");
+    case !positiveSafeInt(d.generation):
+      return txErr(`ENTITY_PROVIDER_ACTION_RESULT_GENERATION_INVALID:${d.generation}`);
+    case !positiveSafeInt(d.attemptNumber):
+      return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_NUMBER_INVALID:${d.attemptNumber}`);
+    case !naturalSafeInt(d.attemptedAt):
+      return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_TIMESTAMP_INVALID:${d.attemptedAt}`);
+    case !EP_ACTION_OUTCOMES.has(d.outcome):
+      return txErr(`ENTITY_PROVIDER_ACTION_RESULT_OUTCOME_INVALID:${String(d.outcome)}`);
+  }
+  return chain(epActionAttemptId(d), (expected) =>
+    d.attemptId === expected
+      ? adapterFailureValid(d, "ENTITY_PROVIDER_ACTION")
+      : txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_ID_MISMATCH:${d.attemptId}:${expected}`),
+  );
+};
+/** og applyRecordJSubmitResultRuntimeTx. */
+const recordJSubmitResult = (rt: Runtime, d: JSubmitResultData): Result<Runtime, RuntimeError> =>
+  chain(jSubmitResultValid(d), () => recordResult(J_SUBMIT_LEDGER, rt, d));
+/** og requireRuntimeJurisdictionConfigByName over the Entity's own committed jurisdiction. */
+const entityJurisdiction = (
+  rt: Runtime,
+  state: EntityState,
+  missing: string,
+): Result<ImportJurisdiction, RuntimeError> => {
+  const j = state.jurisdictionConfig;
+  const name = (j?.name ?? "").trim();
+  if (j === undefined || !name) return txErr(missing);
+  return requireJurisdictionByName(rt, name, {
+    name,
+    chainId: state.jurisdiction.chainId,
+    depositoryAddress: state.jurisdiction.depositoryAddress,
+    entityProviderAddress: j.entityProviderAddress,
+    ...opt("registrationBlock", j.registrationBlock),
+    ...opt("entityProviderDeploymentBlock", j.entityProviderDeploymentBlock),
+    ...opt("blockTimeMs", j.blockTimeMs),
+    ...opt("rebalancePolicyUsd", j.rebalancePolicyUsd),
+  });
+};
+/** og requireUsableContractAddress. */
+const usableOrFail = (label: string, v: unknown): Result<string, RuntimeError> =>
+  usableAddress(v) === null ? txErr(`INVALID_${label.toUpperCase()}_ADDRESS`) : ok(String(v));
+/** og: the Entity's certified board, which the pending action must have been signed under. */
+const certifiedBoard = (state: EntityState, entityId: string): Result<CertifiedBoardRecord, RuntimeError> =>
+  chain(observerBoardRecord(state, entityId), (board) =>
+    board === null ? txErr(`ENTITY_PROVIDER_ACTION_CERTIFIED_BOARD_MISSING:${entityId}`) : ok(board),
+  );
+type TrustedEpPending = { readonly pending: EntityProviderActionIntent; readonly jurisdictionName: string };
+/**
+ * og requireTrustedPending: the committed pending intent, re-checked against the J replica's stack and the current
+ * certified board epoch.
+ */
+const trustedEpPending = (rt: Runtime, r: EntityReplica): Result<TrustedEpPending, RuntimeError> => {
+  const pending = epActionState(r.state).pending;
+  const entityId = lower(r.state.id);
+  if (pending === undefined) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_MISSING:${entityId}`);
+  return chain(entityJurisdiction(rt, r.state, "ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING"), (j) => {
+    const chainId = Number(j.chainId);
+    if (!positiveSafeInt(chainId)) return txErr(`ENTITY_PROVIDER_ACTION_CHAIN_ID_INVALID:${String(j.chainId)}`);
+    return chain(certifiedBoard(r.state, entityId), (board) => {
+      const boardEpoch = BigInt(board.boardEpoch);
+      if (pending.boardEpoch !== boardEpoch)
+        return txErr(`ENTITY_PROVIDER_ACTION_PENDING_BOARD_EPOCH_STALE:${pending.boardEpoch}:${board.boardEpoch}`);
+      const addresses = all({
+        provider: usableOrFail("entity_provider", j.entityProviderAddress),
+        depository: usableOrFail("depository", j.depositoryAddress),
+      });
+      return chain(addresses, ({ provider, depository }) => {
+        const domain = {
+          name: j.name ?? "",
+          chainId: BigInt(chainId),
+          entityProviderAddress: lower(provider),
+          depositoryAddress: lower(depository),
+        };
+        return map(epIntentValid(pending, domain, entityId, boardEpoch), () => ({
+          pending,
+          jurisdictionName: j.name ?? "",
+        }));
       });
     });
   });
 };
-/** og requireRuntimeJurisdictionConfigByName over the Entity's own committed jurisdiction. */
-const entityJurisdiction = (rt: Runtime, state: EntityState, missing: string): Result<ImportJurisdiction, RuntimeError> => {
-  const j = state.jurisdictionConfig, name = (j?.name ?? "").trim();
-  if (j === undefined || !name) return txErr(missing);
-  return requireJurisdictionByName(rt, name, {
-    name, chainId: state.jurisdiction.chainId, depositoryAddress: state.jurisdiction.depositoryAddress, entityProviderAddress: j.entityProviderAddress, ...opt("registrationBlock", j.registrationBlock),
-    ...opt("entityProviderDeploymentBlock", j.entityProviderDeploymentBlock), ...opt("blockTimeMs", j.blockTimeMs), ...opt("rebalancePolicyUsd", j.rebalancePolicyUsd),
-  });
-};
-/** og requireUsableContractAddress. */
-const usableOrFail = (label: string, v: unknown): Result<string, RuntimeError> => (usableAddress(v) === null ? txErr(`INVALID_${label.toUpperCase()}_ADDRESS`) : ok(String(v)));
-/** og requireTrustedPending: the committed pending intent, re-checked against the J replica's stack and the current certified board epoch. */
-const trustedEpPending = (rt: Runtime, r: EntityReplica): Result<{ readonly pending: EntityProviderActionIntent; readonly jurisdictionName: string }, RuntimeError> => {
-  const pending = epActionState(r.state).pending, entityId = lower(r.state.id);
-  if (pending === undefined) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_MISSING:${entityId}`);
-  return chain(entityJurisdiction(rt, r.state, "ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING"), (j) => {
-    const chainId = Number(j.chainId);
-    if (!Number.isSafeInteger(chainId) || chainId <= 0) return txErr(`ENTITY_PROVIDER_ACTION_CHAIN_ID_INVALID:${String(j.chainId)}`);
-    return chain(observerBoardRecord(r.state, entityId), (board): Result<{ readonly pending: EntityProviderActionIntent; readonly jurisdictionName: string }, RuntimeError> => {
-      if (board === null) return txErr(`ENTITY_PROVIDER_ACTION_CERTIFIED_BOARD_MISSING:${entityId}`);
-      if (pending.boardEpoch !== BigInt(board.boardEpoch)) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_BOARD_EPOCH_STALE:${pending.boardEpoch.toString()}:${board.boardEpoch}`);
-      return chain(usableOrFail("entity_provider", j.entityProviderAddress), (provider) => chain(usableOrFail("depository", j.depositoryAddress), (depository) =>
-        map(epIntentValid(pending, { name: j.name ?? "", chainId: BigInt(chainId), entityProviderAddress: lower(provider), depositoryAddress: lower(depository) }, entityId, BigInt(board.boardEpoch)), () => ({ pending, jurisdictionName: j.name ?? "" }))));
-    });
-  });
-};
-/** og getMatchingEntityProviderActionSubmitState. */
-const matchingEpSubmitState = (state: EntityState, local: EntityProviderActionSubmitState | undefined): EntityProviderActionSubmitState | undefined => {
+/** og getMatchingEntityProviderActionSubmitState: the local journal, while it tracks the committed pending action. */
+const matchingEpSubmitState = (
+  state: EntityState,
+  local: EntityProviderActionSubmitState | undefined,
+): EntityProviderActionSubmitState | undefined => {
   const pending = epActionState(state).pending;
-  return pending !== undefined && local !== undefined && submitId(local.actionHash) === submitId(pending.actionHash) && local.actionNonce === pending.actionNonce && local.generation === pending.generation ? local : undefined;
+  return pending !== undefined && local !== undefined && sameAction(local, pending) ? local : undefined;
 };
-/** og applyRetryEntityProviderActionRuntimeTx: the active leader submits the committed pending action with its quorum Hanko, once per retry window. */
-const retryEntityProviderAction = (rt: Runtime, d: Extract<RuntimeTx, { type: "retryEntityProviderAction" }>["data"]): Result<TxStep, RuntimeError> => {
+/** og: the jTx type each EntityProvider action payload is submitted as. */
+const EP_JTX_OF_KIND: { readonly [K in EntityProviderActionPayload["kind"]]: EpActionJTxType } = {
+  entityTransferTokens: "entityProviderTransfer",
+  releaseControlShares: "entityProviderReleaseControlShares",
+  cancelPendingAction: "entityProviderCancelAction",
+};
+type RetryEpAction = Extract<RuntimeTx, { type: "retryEntityProviderAction" }>["data"];
+/** og: the action waits while it is still pending, once it failed terminally, and inside its retry window. */
+const actionWaits = (
+  rt: Runtime,
+  identity: EpIdentity,
+  previous: EntityProviderActionSubmitState | undefined,
+  now: number,
+): boolean =>
+  pendingJTxs(rt).some(holdsEpAction(identity)) ||
+  Boolean(previous?.terminalFailure) ||
+  insideRetryWindow(previous, now);
+/** og: the pending action as its EntityProvider jTx, stamped with this attempt. */
+const epActionAttemptJTx = (
+  pending: EntityProviderActionIntent,
+  identity: EpIdentity,
+  hanko: Hanko,
+  attempt: SubmitAttempt,
+): Binary =>
+  binOf({
+    type: EP_JTX_OF_KIND[pending.payload.kind],
+    entityId: identity.entityId,
+    data: { intent: pending, signerId: identity.signerId, hankoSignature: hanko, runtimeSubmitAttempt: attempt },
+    timestamp: attempt.attemptedAt,
+  });
+/**
+ * og applyRetryEntityProviderActionRuntimeTx: the active leader submits the committed pending action with its quorum
+ * Hanko, once per retry window.
+ */
+const retryEntityProviderAction = (rt: Runtime, d: RetryEpAction): Result<TxStep, RuntimeError> => {
   const found = findSubmitReplica(rt, d.entityId, d.signerId);
   if (found === undefined) return txErr(`ENTITY_PROVIDER_ACTION_LOCAL_REPLICA_MISSING:${d.entityId}:${d.signerId}`);
-  const [key, r] = found, local = localOf(rt, key), now = Number(rt.timestamp);
-  if (leaderStateOf(r.state).activeValidatorId !== submitId(r.signerId)) return txErr(`ENTITY_PROVIDER_ACTION_NOT_ACTIVE_LEADER:${d.signerId}`);
+  const [key, r] = found;
+  if (!activeLeader(r)) return txErr(`ENTITY_PROVIDER_ACTION_NOT_ACTIVE_LEADER:${d.signerId}`);
   return chain(trustedEpPending(rt, r), ({ pending, jurisdictionName }): Result<TxStep, RuntimeError> => {
-    if (submitId(jurisdictionName) !== submitId(d.jurisdictionName) || submitId(pending.actionHash) !== submitId(d.actionHash) || pending.actionNonce !== d.actionNonce || pending.generation !== d.generation)
+    if (submitId(jurisdictionName) !== submitId(d.jurisdictionName) || !sameAction(pending, d))
       return txErr(`ENTITY_PROVIDER_ACTION_COMMITTED_INTENT_MISMATCH:${d.entityId}`);
-    const entityId = lower(r.state.id), signer = lower(r.signerId);
-    const identity: EpIdentity = { jurisdictionName, entityId, signerId: signer, actionHash: pending.actionHash, actionNonce: pending.actionNonce, generation: pending.generation };
-    const held = rt.pendingCommittedJOutbox.some((input) => input.jTxs.some((raw) => {
-      const t = rowOf(raw), intent = t.data?.["intent"] as EntityProviderActionIntent | undefined;
-      return isEpActionJTx(t.type) && intent !== undefined && submitId(input.jurisdictionName) === submitId(identity.jurisdictionName) && submitId(t.entityId) === submitId(identity.entityId)
-        && submitId(t.data["signerId"]) === submitId(identity.signerId) && submitId(intent.actionHash) === submitId(identity.actionHash) && intent.actionNonce === identity.actionNonce && intent.generation === identity.generation;
-    }));
-    if (held) return ok(noJ(rt));
+    const local = localOf(rt, key);
+    const now = Number(rt.timestamp);
     const previous = matchingEpSubmitState(r.state, local.entityProviderActionSubmitState);
-    if (previous?.terminalFailure) return ok(noJ(rt));
-    if (previous && previous.submitAttempts > 0 && now < previous.lastSubmittedAt + ENTITY_J_SUBMIT_RETRY_MS) return ok(noJ(rt));
-    const witness = local.hankoWitness?.get(pending.actionHash);
-    if (witness === undefined || witness.type !== "entityProviderAction") return txErr(`ENTITY_PROVIDER_ACTION_HANKO_WITNESS_MISSING:${entityId}:${pending.actionHash}`);
+    const identity: EpIdentity = {
+      jurisdictionName,
+      entityId: lower(r.state.id),
+      signerId: lower(r.signerId),
+      actionHash: pending.actionHash,
+      actionNonce: pending.actionNonce,
+      generation: pending.generation,
+    };
+    if (actionWaits(rt, identity, previous, now)) return ok(noJ(rt));
+    const hanko = quorumWitness(local, pending.actionHash, "entityProviderAction");
+    if (hanko === undefined)
+      return txErr(`ENTITY_PROVIDER_ACTION_HANKO_WITNESS_MISSING:${identity.entityId}:${pending.actionHash}`);
     const attemptNumber = (previous?.submitAttempts ?? 0) + 1;
     return map(epActionAttemptId({ ...identity, attemptNumber }), (attemptId): TxStep => {
-      const next: EntityProviderActionSubmitState = {
-        jurisdictionName, actionHash: pending.actionHash, actionNonce: pending.actionNonce, generation: pending.generation, submitAttempts: attemptNumber, lastSubmittedAt: now,
-        ...journalOf(previous), ...opt("terminalFailure", previous?.terminalFailure), ...opt("resultFingerprints", previous?.resultFingerprints), ...opt("resultFingerprintOrder", previous?.resultFingerprintOrder),
+      const attempt = { attemptId, attemptNumber, attemptedAt: now, generation: pending.generation };
+      const entityProviderActionSubmitState: EntityProviderActionSubmitState = {
+        jurisdictionName,
+        actionHash: pending.actionHash,
+        actionNonce: pending.actionNonce,
+        generation: pending.generation,
+        submitAttempts: attemptNumber,
+        lastSubmittedAt: now,
+        ...journalOf(previous),
+        ...opt("terminalFailure", previous?.terminalFailure),
+        ...fingerprintsOf(previous),
       };
-      const type = pending.payload.kind === "entityTransferTokens" ? "entityProviderTransfer" : pending.payload.kind === "releaseControlShares" ? "entityProviderReleaseControlShares" : "entityProviderCancelAction";
-      const jTx = { type, entityId, data: { intent: pending, signerId: signer, hankoSignature: witness.hanko, runtimeSubmitAttempt: { attemptId, attemptNumber, attemptedAt: now, generation: pending.generation } }, timestamp: now };
-      return { runtime: withLocal(rt, key, { entityProviderActionSubmitState: next }), jOutputs: [{ jurisdictionName, jTxs: [binOf(jTx)] }] };
+      return {
+        runtime: withLocal(rt, key, { entityProviderActionSubmitState }),
+        jOutputs: [{ jurisdictionName, jTxs: [epActionAttemptJTx(pending, identity, hanko, attempt)] }],
+      };
     });
   });
 };
 /** og applyRecordEntityProviderActionResultRuntimeTx. */
-const recordEpActionResult = (rt: Runtime, d: EpActionResultData): Result<Runtime, RuntimeError> => {
-  if (!submitId(d.entityId)) return txErr("ENTITY_PROVIDER_ACTION_RESULT_ENTITY_MISSING");
-  if (!submitId(d.signerId)) return txErr("ENTITY_PROVIDER_ACTION_RESULT_SIGNER_MISSING");
-  if (!submitId(d.jurisdictionName)) return txErr("ENTITY_PROVIDER_ACTION_RESULT_JURISDICTION_MISSING");
-  if (!/^0x[0-9a-f]{64}$/.test(submitId(d.actionHash))) return txErr("ENTITY_PROVIDER_ACTION_RESULT_HASH_INVALID");
-  if (d.actionNonce <= 0n || d.actionNonce > SUBMIT_MAX_UINT256) return txErr("ENTITY_PROVIDER_ACTION_RESULT_NONCE_INVALID");
-  if (!Number.isSafeInteger(d.generation) || d.generation <= 0) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_GENERATION_INVALID:${d.generation}`);
-  if (!Number.isSafeInteger(d.attemptNumber) || d.attemptNumber <= 0) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_NUMBER_INVALID:${d.attemptNumber}`);
-  if (!Number.isSafeInteger(d.attemptedAt) || d.attemptedAt < 0) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_TIMESTAMP_INVALID:${d.attemptedAt}`);
-  if (!["submitted", "transientFailure", "terminalFailure", "reconciled"].includes(d.outcome)) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_OUTCOME_INVALID:${String(d.outcome)}`);
-  return chain(epActionAttemptId(d), (expected): Result<Runtime, RuntimeError> => {
-    if (d.attemptId !== expected) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_ID_MISMATCH:${d.attemptId}:${expected}`);
-    return chain(adapterFailureValid(d, "ENTITY_PROVIDER_ACTION"), () => {
-      const fingerprint = stableJson(d), isAttempt = (t: JTxRow): boolean => isEpActionJTx(t.type) && t.data?.runtimeSubmitAttempt?.attemptId === d.attemptId;
-      const matches = rt.pendingCommittedJOutbox.flatMap((input) => input.jTxs.filter((raw) => isAttempt(rowOf(raw))).map((raw) => ({ jurisdictionName: input.jurisdictionName, jTx: rowOf(raw) })));
-      if (matches.length > 1) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_DUPLICATED:${d.attemptId}`);
-      const pending = matches[0], a = pending?.jTx.data.runtimeSubmitAttempt, intent = pending?.jTx.data["intent"] as EntityProviderActionIntent | undefined;
-      if (pending !== undefined && !(a && intent && submitId(pending.jurisdictionName) === submitId(d.jurisdictionName) && submitId(pending.jTx.entityId) === submitId(d.entityId) && submitId(pending.jTx.data["signerId"]) === submitId(d.signerId)
-        && submitId(intent.actionHash) === submitId(d.actionHash) && intent.actionNonce === d.actionNonce && intent.generation === d.generation && a.attemptId === d.attemptId && a.attemptNumber === d.attemptNumber && a.attemptedAt === d.attemptedAt))
-        return txErr(`ENTITY_PROVIDER_ACTION_RESULT_PENDING_CONFLICT:${d.attemptId}`);
-      return chain(recordedFingerprint(rt, d.attemptId, (l) => l.entityProviderActionSubmitState, "ENTITY_PROVIDER_ACTION"), (recorded): Result<Runtime, RuntimeError> => {
-        if (recorded !== null) return recorded === fingerprint ? ok(rt) : txErr(`ENTITY_PROVIDER_ACTION_RESULT_DUPLICATE_CONFLICT:${d.attemptId}`);
-        const found = findSubmitReplica(rt, d.entityId, d.signerId);
-        if (found === undefined) return txErr(`ENTITY_PROVIDER_ACTION_LOCAL_REPLICA_MISSING:${d.entityId}:${d.signerId}`);
-        const [key, r] = found, local = localOf(rt, key).entityProviderActionSubmitState, consensus = epActionState(r.state).pending;
-        const matchesConsensus = consensus !== undefined && submitId(consensus.actionHash) === submitId(d.actionHash) && consensus.actionNonce === d.actionNonce && consensus.generation === d.generation;
-        const matchesLocal = local !== undefined && submitId(local.actionHash) === submitId(d.actionHash) && local.actionNonce === d.actionNonce && local.generation === d.generation;
-        if (!matchesConsensus || (matchesLocal && d.attemptNumber < local.submitAttempts)) return ok(pending === undefined ? rt : { ...rt, pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt) });
-        if (local === undefined || !matchesLocal || local.submitAttempts !== d.attemptNumber || local.lastSubmittedAt !== d.attemptedAt) return txErr(`ENTITY_PROVIDER_ACTION_RESULT_ATTEMPT_MISMATCH:${d.attemptId}`);
-        if (pending === undefined) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_ATTEMPT_MISSING:${d.attemptId}`);
-        return map(boundedJournal(local, d.attemptId, fingerprint, activeAttempts(rt, r, isEpActionJTx), false), (journal) => {
-          const now = Number(rt.timestamp), base: EntityProviderActionSubmitState = { ...local, lastResultAttemptId: d.attemptId, lastResultAt: now, lastResultOutcome: d.outcome, lastResultFingerprint: fingerprint, ...journal };
-          let next: EntityProviderActionSubmitState;
-          if (d.outcome === "submitted" || d.outcome === "reconciled") next = { ...withoutKeys(base, ["lastFailure"]), ...(d.txHash ? { txHash: d.txHash } : {}) };
-          else {
-            const failure: SubmitFailure = { message: String(d.message ?? "unknown"), failedAt: now, ...opt("adapterFailure", d.adapterFailure) };
-            next = { ...base, lastFailure: failure, ...(d.outcome === "terminalFailure" ? { terminalFailure: failure } : {}) };
-          }
-          return withLocal({ ...rt, pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt) }, key, { entityProviderActionSubmitState: next });
-        });
-      });
+const recordEpActionResult = (rt: Runtime, d: EpActionResultData): Result<Runtime, RuntimeError> =>
+  chain(epActionResultValid(d), () => recordResult(ENTITY_PROVIDER_ACTION_LEDGER, rt, d));
+/** og: a governance result reports on exactly the pending proposal and attempt. */
+const governanceResultMatches = (d: GovernanceResultData, i: GovernanceIdentity, attempt: SubmitAttempt): boolean =>
+  submitId(d.jurisdictionName) === submitId(i.jurisdictionName) &&
+  submitId(d.entityId) === submitId(i.entityId) &&
+  submitId(d.signerId) === submitId(i.signerId) &&
+  submitId(d.proposalHash) === submitId(i.proposalHash) &&
+  submitId(d.payloadHash) === submitId(i.payloadHash) &&
+  d.attemptNumber === attempt.attemptNumber &&
+  d.attemptedAt === attempt.attemptedAt;
+/** og: the pending proposal re-armed as its next attempt, eligible one retry window from now. */
+const rearmedGovernance = (
+  rt: Runtime,
+  identity: GovernanceIdentity,
+  attempt: SubmitAttempt,
+  isAttempt: (t: JTxRow) => boolean,
+): Result<Runtime, RuntimeError> => {
+  const attemptNumber = attempt.attemptNumber + 1;
+  const now = Number(rt.timestamp);
+  if (!Number.isSafeInteger(attemptNumber)) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_EXHAUSTED");
+  return map(governanceAttemptId({ ...identity, attemptNumber }), (attemptId) => {
+    const runtimeSubmitAttempt: SubmitAttempt = {
+      attemptId,
+      attemptNumber,
+      attemptedAt: now,
+      eligibleAt: now + ENTITY_J_SUBMIT_RETRY_MS,
+    };
+    const rearmed = (raw: Binary): Binary => {
+      const jTx = rowOf(raw);
+      return isAttempt(jTx) ? binOf({ ...jTx, data: { ...jTx.data, runtimeSubmitAttempt } }) : raw;
+    };
+    const pendingCommittedJOutbox = rt.pendingCommittedJOutbox.map((input) => ({
+      jurisdictionName: input.jurisdictionName,
+      jTxs: input.jTxs.map(rearmed),
+    }));
+    return { ...rt, pendingCommittedJOutbox };
+  });
+};
+/**
+ * og applyGovernanceSubmitResultRuntimeTx: a transient failure re-arms the attempt one retry window later; any other
+ * outcome retires it.
+ */
+const recordGovernanceResult = (rt: Runtime, d: GovernanceResultData): Result<Runtime, RuntimeError> => {
+  const isAttempt = carriesAttempt(isGovernanceJTx, d.attemptId);
+  return chain(soleAttempt(rt, isAttempt, `GOVERNANCE_SUBMIT_ATTEMPT_DUPLICATED:${d.attemptId}`), (pending) => {
+    if (pending === undefined) return txErr(`GOVERNANCE_SUBMIT_RESULT_ATTEMPT_MISSING:${d.attemptId}`);
+    const reported = all({
+      attempt: canonicalGovernanceAttempt(pending.jurisdictionName, pending.jTx),
+      identity: governanceIdentity(pending.jurisdictionName, pending.jTx),
+    });
+    return chain(reported, ({ attempt, identity }) => {
+      if (!governanceResultMatches(d, identity, attempt))
+        return txErr(`GOVERNANCE_SUBMIT_RESULT_IDENTITY_MISMATCH:${d.attemptId}`);
+      return d.outcome === "transientFailure"
+        ? rearmedGovernance(rt, identity, attempt, isAttempt)
+        : ok(retiredAttempt(rt, isAttempt));
     });
   });
 };
-/** og applyGovernanceSubmitResultRuntimeTx: a transient failure re-arms the attempt one retry window later; any other outcome retires it. */
-const recordGovernanceResult = (rt: Runtime, d: GovernanceResultData): Result<Runtime, RuntimeError> => {
-  const isAttempt = (t: JTxRow): boolean => isGovernanceJTx(t.type) && t.data?.runtimeSubmitAttempt?.attemptId === d.attemptId;
-  const matches = rt.pendingCommittedJOutbox.flatMap((input) => input.jTxs.filter((raw) => isAttempt(rowOf(raw))).map((raw) => ({ jurisdictionName: input.jurisdictionName, jTx: rowOf(raw) })));
-  if (matches.length > 1) return txErr(`GOVERNANCE_SUBMIT_ATTEMPT_DUPLICATED:${d.attemptId}`);
-  const pending = matches[0];
-  if (pending === undefined) return txErr(`GOVERNANCE_SUBMIT_RESULT_ATTEMPT_MISSING:${d.attemptId}`);
-  return chain(canonicalGovernanceAttempt(pending.jurisdictionName, pending.jTx), (attempt) => chain(governanceIdentity(pending.jurisdictionName, pending.jTx), (identity): Result<Runtime, RuntimeError> => {
-    if (submitId(d.jurisdictionName) !== submitId(identity.jurisdictionName) || submitId(d.entityId) !== submitId(identity.entityId) || submitId(d.signerId) !== submitId(identity.signerId)
-      || submitId(d.proposalHash) !== submitId(identity.proposalHash) || submitId(d.payloadHash) !== submitId(identity.payloadHash) || d.attemptNumber !== attempt.attemptNumber || d.attemptedAt !== attempt.attemptedAt)
-      return txErr(`GOVERNANCE_SUBMIT_RESULT_IDENTITY_MISMATCH:${d.attemptId}`);
-    if (d.outcome !== "transientFailure") return ok({ ...rt, pendingCommittedJOutbox: dropPendingAttempt(rt.pendingCommittedJOutbox, isAttempt) });
-    const attemptNumber = attempt.attemptNumber + 1, now = Number(rt.timestamp);
-    if (!Number.isSafeInteger(attemptNumber)) return txErr("GOVERNANCE_SUBMIT_ATTEMPT_EXHAUSTED");
-    return map(governanceAttemptId({ ...identity, attemptNumber }), (attemptId) => ({
-      ...rt, pendingCommittedJOutbox: rt.pendingCommittedJOutbox.map((input) => ({ jurisdictionName: input.jurisdictionName, jTxs: input.jTxs.map((raw) => {
-        const t = rowOf(raw);
-        return isAttempt(t) ? binOf({ ...t, data: { ...t.data, runtimeSubmitAttempt: { attemptId, attemptNumber, attemptedAt: now, eligibleAt: now + ENTITY_J_SUBMIT_RETRY_MS } } }) : raw;
-      }) })),
-    }));
-  }));
-};
-/** og pruneHankoWitnessToReachableState: keep the sealed batch's and the pending EntityProvider action's witnesses and the newest profile one. */
-const pruneWitnesses = (witness: ReadonlyMap<string, HankoWitness>, state: EntityState): ReadonlyMap<string, HankoWitness> => {
-  const reachable = new Set<string>(), sent = jBatchOf(state)?.sentBatch?.batchHash, action = epActionState(state).pending?.actionHash;
-  if (sent) reachable.add(sent);
-  if (action) reachable.add(action);
-  const profile = [...witness].filter(([, w]) => w.type === "profile").sort(([lh, l], [rh, r]) => r.entityHeight - l.entityHeight || r.createdAt - l.createdAt || asc(lh, rh))[0];
-  if (profile !== undefined) reachable.add(profile[0]);
-  return new Map([...witness].filter(([h]) => reachable.has(h)));
+/** og: the newest profile witness, by height, then creation time, then hash. */
+const newestProfileWitness = (witness: ReadonlyMap<string, HankoWitness>): string | undefined =>
+  [...witness]
+    .filter(([, w]) => w.type === "profile")
+    .toSorted(
+      ([lh, l], [rh, r]) => r.entityHeight - l.entityHeight || r.createdAt - l.createdAt || asc(lh, rh),
+    )[0]?.[0];
+/**
+ * og pruneHankoWitnessToReachableState: keep the sealed batch's and the pending EntityProvider action's witnesses and
+ * the newest profile one.
+ */
+const pruneWitnesses = (
+  witness: ReadonlyMap<string, HankoWitness>,
+  state: EntityState,
+): ReadonlyMap<string, HankoWitness> => {
+  const reachable = new Set([
+    jBatchOf(state)?.sentBatch?.batchHash || undefined,
+    epActionState(state).pending?.actionHash || undefined,
+    newestProfileWitness(witness),
+  ]);
+  return new Map([...witness].filter(([hash]) => reachable.has(hash)));
 };
 
 // ---- og jurisdiction/machine/{local-history,event-observation,events/event-normalization,event-normalizers,event-normalizers-wallet,batch-validation}.ts ----
