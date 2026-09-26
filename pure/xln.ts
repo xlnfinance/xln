@@ -29235,162 +29235,476 @@ export const mergeEntityInputs = (
   );
 
 // ---- og runtime/tx/tx-handlers.ts ----
-const HASH_32 = /^0x[0-9a-f]{64}$/, COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/, MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
+const HASH_32 = /^0x[0-9a-f]{64}$/;
+const COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/;
+const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
 const txErr = (code: string): Result<never, RuntimeError> => err({ _tag: "runtime_tx", code });
-/** og applyRuntimeAdapterCommandMarker: validate, prune other expired lanes, require the next contiguous sequence, record the frontier. */
-const adapterCommand = (rt: Runtime, raw: Extract<RuntimeTx, { type: "recordRuntimeAdapterCommand" }>["data"]): Result<Runtime, RuntimeError> => {
-  const laneId = lower(raw.laneId), commandId = String(raw.commandId || "").trim(), inputHash = lower(raw.inputHash), sequence = Number(raw.sequence);
-  const expiresAtMs = raw.expiresAtMs === null ? null : Number(raw.expiresAtMs);
-  if (!Number.isSafeInteger(sequence) || sequence <= 0) return txErr("RADAPTER_COMMAND_SEQUENCE_INVALID");
-  if (!HASH_32.test(laneId)) return txErr("RADAPTER_COMMAND_LANE_INVALID");
-  if (!COMMAND_ID.test(commandId)) return txErr("RADAPTER_COMMAND_ID_INVALID");
-  if (!HASH_32.test(inputHash)) return txErr("RADAPTER_COMMAND_INPUT_HASH_INVALID");
-  if (expiresAtMs !== null && (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= 0)) return txErr("RADAPTER_COMMAND_EXPIRY_INVALID");
-  const nowMs = rt.timestamp < 0n ? 0 : Number(rt.timestamp);
-  const kept = new Map([...rt.adapterFrontiers].filter(([id, f]) => id === laneId || f.expiresAtMs === null || f.expiresAtMs > nowMs));
-  const prior = kept.get(laneId);
-  if (sequence !== (prior?.lastContiguousSequence ?? 0) + 1) return txErr("RADAPTER_COMMAND_FRONTIER_NONCONTIGUOUS");
-  if (prior === undefined && kept.size >= MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES) return txErr("RADAPTER_COMMAND_FRONTIER_CAPACITY_EXCEEDED");
-  kept.set(laneId, { lastContiguousSequence: sequence, lastInputHash: inputHash, lastCommandId: commandId, observedHeight: Number(rt.height) + 1, expiresAtMs });
-  return ok({ ...rt, adapterFrontiers: kept });
+type AdapterCommandData = Extract<RuntimeTx, { type: "recordRuntimeAdapterCommand" }>["data"];
+type AdapterCommand = {
+  readonly laneId: string;
+  readonly commandId: string;
+  readonly inputHash: string;
+  readonly sequence: number;
+  readonly expiresAtMs: number | null;
 };
-/** og registration/entity-creation/crypto.ts + entity/auth/crypto.ts: HKDF-SHA256(seed, salt=entityId, info) then X25519. */
+const adapterCommandOf = (raw: AdapterCommandData): AdapterCommand => ({
+  laneId: lower(raw.laneId),
+  commandId: String(raw.commandId || "").trim(),
+  inputHash: lower(raw.inputHash),
+  sequence: Number(raw.sequence),
+  expiresAtMs: raw.expiresAtMs === null ? null : Number(raw.expiresAtMs),
+});
+/** og applyRuntimeAdapterCommandMarker's shape checks. */
+const adapterCommandIssue = (c: AdapterCommand): string | undefined => {
+  switch (true) {
+    case !Number.isSafeInteger(c.sequence) || c.sequence <= 0:
+      return "RADAPTER_COMMAND_SEQUENCE_INVALID";
+    case !HASH_32.test(c.laneId):
+      return "RADAPTER_COMMAND_LANE_INVALID";
+    case !COMMAND_ID.test(c.commandId):
+      return "RADAPTER_COMMAND_ID_INVALID";
+    case !HASH_32.test(c.inputHash):
+      return "RADAPTER_COMMAND_INPUT_HASH_INVALID";
+    case c.expiresAtMs !== null && (!Number.isSafeInteger(c.expiresAtMs) || c.expiresAtMs <= 0):
+      return "RADAPTER_COMMAND_EXPIRY_INVALID";
+    default:
+      return undefined;
+  }
+};
+/**
+ * og applyRuntimeAdapterCommandMarker: validate, prune other expired lanes, require the next contiguous sequence,
+ * record the frontier.
+ */
+const adapterCommand = (rt: Runtime, raw: AdapterCommandData): Result<Runtime, RuntimeError> => {
+  const c = adapterCommandOf(raw);
+  const issue = adapterCommandIssue(c);
+  if (issue !== undefined) return txErr(issue);
+  const nowMs = rt.timestamp < 0n ? 0 : Number(rt.timestamp);
+  const live = new Map(
+    [...rt.adapterFrontiers].filter(([id, f]) => id === c.laneId || f.expiresAtMs === null || f.expiresAtMs > nowMs),
+  );
+  const prior = live.get(c.laneId);
+  if (c.sequence !== (prior?.lastContiguousSequence ?? 0) + 1) return txErr("RADAPTER_COMMAND_FRONTIER_NONCONTIGUOUS");
+  if (prior === undefined && live.size >= MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES)
+    return txErr("RADAPTER_COMMAND_FRONTIER_CAPACITY_EXCEEDED");
+  const frontier: AdapterFrontier = {
+    lastContiguousSequence: c.sequence,
+    lastInputHash: c.inputHash,
+    lastCommandId: c.commandId,
+    observedHeight: Number(rt.height) + 1,
+    expiresAtMs: c.expiresAtMs,
+  };
+  return ok({ ...rt, adapterFrontiers: mapSet(live, c.laneId, frontier) });
+};
+/**
+ * og registration/entity-creation/crypto.ts + entity/auth/crypto.ts: HKDF-SHA256(seed, salt=entityId, info) then
+ * X25519.
+ */
 export const entityEncryptionPublicKey = (seed: string, entity: string): string => {
   const priv = hkdf(sha256, hexToBytes(seed), utf8(lower(entity)), utf8("xln:entity-encryption:v1"), 32);
   return bytesToHex(x25519.getPublicKey(priv)).toLowerCase();
 };
 const MAX_NUMBERED_ENTITY = 1_000_000n;
 /** Called only on a 0x-prefixed 32-byte hex id (checked first), so the BigInt parse cannot fail. */
-const isNumberedEntity = (id: string): boolean => { const n = BigInt(id); return n > 0n && n < MAX_NUMBERED_ENTITY; };
+const isNumberedEntity = (id: string): boolean => {
+  const n = BigInt(id);
+  return n > 0n && n < MAX_NUMBERED_ENTITY;
+};
 /** og ethers.getAddress: a mixed-case address must carry its EIP-55 checksum. */
-const checksumValid = (a: string): boolean => { const body = a.slice(2); return body === body.toLowerCase() || body === body.toUpperCase() || checksum(a) === a; };
+const checksumValid = (a: string): boolean => {
+  const body = a.slice(2);
+  return body === body.toLowerCase() || body === body.toUpperCase() || checksum(a) === a;
+};
 /** og ethers.computeAddress over a 33/65-byte secp256k1 public key; an off-curve key is refused (og throws). */
 const pubkeyAddress = (key: string): string | null => {
-  try { return bytesToHex(keccak256(secp256k1.ProjectivePoint.fromHex(hexBody(key)).toRawBytes(false).slice(1)).slice(12)); } catch { return null; }
+  try {
+    const point = secp256k1.ProjectivePoint.fromHex(hexBody(key));
+    return bytesToHex(keccak256(point.toRawBytes(false).slice(1)).slice(12));
+  } catch {
+    return null;
+  }
 };
-/** og toBoardEntityId + resolveValidatorAddress: a bytes32 id as is, an EOA (or public key) as its zero-padded address. */
+/** og resolveValidatorAddress over a public key. */
+const publicKeyValidatorId = (key: string): Result<string, RuntimeError> => {
+  const a = pubkeyAddress(key);
+  return a === null ? txErr("BOARD_VALIDATOR_PUBLIC_KEY_INVALID") : ok(addressAsId(a));
+};
+/**
+ * og toBoardEntityId + resolveValidatorAddress: a bytes32 id as is, an EOA (or public key) as its zero-padded address.
+ */
 const boardValidatorId = (v: string): Result<string, RuntimeError> => {
-  if (/^0x[0-9a-f]{64}$/i.test(v)) return ok(v.toLowerCase());
-  if (v.startsWith("0x") && v.length === 42) return /^0x[0-9a-fA-F]{40}$/.test(v) && checksumValid(v) ? ok(addressAsId(v)) : txErr("BOARD_VALIDATOR_ADDRESS_INVALID");
-  if (v.startsWith("0x") && (v.length === 68 || v.length === 132)) { const a = pubkeyAddress(v); return a === null ? txErr("BOARD_VALIDATOR_PUBLIC_KEY_INVALID") : ok(addressAsId(a)); }
-  return txErr("BOARD_VALIDATOR_ADDRESS_REQUIRED");
+  const hex = v.startsWith("0x");
+  switch (true) {
+    case /^0x[0-9a-f]{64}$/i.test(v):
+      return ok(v.toLowerCase());
+    case hex && v.length === 42:
+      return /^0x[0-9a-fA-F]{40}$/.test(v) && checksumValid(v)
+        ? ok(addressAsId(v))
+        : txErr("BOARD_VALIDATOR_ADDRESS_INVALID");
+    case hex && (v.length === 68 || v.length === 132):
+      return publicKeyValidatorId(v);
+    default:
+      return txErr("BOARD_VALIDATOR_ADDRESS_REQUIRED");
+  }
 };
-/** og factory.ts encodeBoard -> hashBoard: the lazy Entity id of a board config (validators positional, shares as uint16 powers, zero delays). */
-export const lazyBoardEntityId = (config: EntityRootConfig): Result<string, RuntimeError> => map(lazyBoardEncoding(config), (encoded) => keccak256Hex(hexToBytes(encoded)));
-/** og factory.ts encodeBoard: abi.encode(Board) of a board config. */
+/**
+ * og factory.ts encodeBoard -> hashBoard: the lazy Entity id of a board config (validators positional, shares as uint16
+ * powers, zero delays).
+ */
+export const lazyBoardEntityId = (config: EntityRootConfig): Result<string, RuntimeError> =>
+  map(lazyBoardEncoding(config), (encoded) => keccak256Hex(hexToBytes(encoded)));
+type BoardShares = ReadonlyMap<string, bigint>;
+/** og encodeBoard's shares: one positive share per validator, keyed by its lowercased id. */
+const validatorShares = (config: EntityRootConfig, validators: ReadonlySet<string>): Result<BoardShares, RuntimeError> =>
+  foldResult(Object.entries(config.shares), new Map() as BoardShares, (shares, [raw, share]) => {
+    const id = lower(raw);
+    if (id === "" || shares.has(id)) return txErr("BOARD_SHARE_DUPLICATE_OR_EMPTY");
+    if (!validators.has(id)) return txErr("BOARD_SHARE_NOT_VALIDATOR");
+    if (typeof share !== "bigint" || share <= 0n) return txErr("BOARD_VOTING_POWER_NOT_POSITIVE");
+    return ok(mapSet(shares, id, share));
+  });
+/** og encodeBoard votingPowers: each validator's share, as a uint16. */
+const votingPower =
+  (shares: BoardShares) =>
+  (v: string): Result<number, RuntimeError> => {
+    const share = shares.get(lower(v));
+    if (share === undefined) return txErr("BOARD_VOTING_POWER_MISSING");
+    return share > 0xffffn ? txErr("BOARD_WEIGHT_OUT_OF_RANGE") : ok(Number(share));
+  };
+/** og encodeBoard votingThreshold: positive, a uint16, and reachable by the board's total power. */
+const boardThresholdIssue = (threshold: bigint, powers: readonly number[]): string | undefined => {
+  switch (true) {
+    case threshold <= 0n:
+      return "BOARD_THRESHOLD_NOT_POSITIVE";
+    case threshold > 0xffffn:
+      return "BOARD_THRESHOLD_OUT_OF_RANGE";
+    case threshold > powers.reduce((total, p) => total + BigInt(p), 0n):
+      return "BOARD_THRESHOLD_EXCEEDS_POWER";
+    default:
+      return undefined;
+  }
+};
+/** og factory.ts encodeBoard: abi.encode(Board) of a board config; the proposer (validators[0]) must be an EOA. */
 export const lazyBoardEncoding = (config: EntityRootConfig): Result<string, RuntimeError> => {
-  if (config.validators.length === 0) return txErr("BOARD_EMPTY");
-  const seen = new Set<string>();
-  for (const v of config.validators) { const id = lower(v); if (id === "" || seen.has(id)) return txErr("BOARD_VALIDATOR_DUPLICATE_OR_EMPTY"); seen.add(id); }
+  const ids = config.validators.map(lower);
+  if (ids.length === 0) return txErr("BOARD_EMPTY");
+  if (ids.includes("") || new Set(ids).size !== ids.length) return txErr("BOARD_VALIDATOR_DUPLICATE_OR_EMPTY");
   const proposer = config.validators[0] ?? "";
   if (!/^0x[0-9a-f]{40}$/i.test(proposer)) return txErr("BOARD_PROPOSER_EOA_REQUIRED");
   if (!checksumValid(proposer)) return txErr("BOARD_VALIDATOR_ADDRESS_INVALID");
-  const shares = new Map<string, bigint>();
-  for (const [raw, share] of Object.entries(config.shares)) {
-    const id = lower(raw);
-    if (id === "" || shares.has(id)) return txErr("BOARD_SHARE_DUPLICATE_OR_EMPTY");
-    if (!seen.has(id)) return txErr("BOARD_SHARE_NOT_VALIDATOR");
-    if (typeof share !== "bigint" || share <= 0n) return txErr("BOARD_VOTING_POWER_NOT_POSITIVE");
-    shares.set(id, share);
+  return chain(validatorShares(config, new Set(ids)), (shares) =>
+    chain(traverse(config.validators, boardValidatorId), (entityIds) =>
+      chain(traverse(config.validators, votingPower(shares)), (votingPowers) => {
+        const issue = boardThresholdIssue(config.threshold, votingPowers);
+        if (issue !== undefined) return txErr(issue);
+        return ok(
+          encodeBoardBytes({
+            votingThreshold: Number(config.threshold),
+            entityIds,
+            votingPowers,
+            boardChangeDelay: 0,
+            controlChangeDelay: 0,
+            dividendChangeDelay: 0,
+          }),
+        );
+      }),
+    ),
+  );
+};
+type TeachingAuthority = Extract<Authority, { _tag: "teaching" }>;
+/** og importReplica's board: every validator an EOA holding a share. */
+const quorumOf = (config: ImportConfig): Result<TeachingAuthority, RuntimeError> =>
+  map(
+    traverse(config.validators, (v) => {
+      const a = address(v);
+      const share = Object.entries(config.shares).find(([k]) => lower(k) === lower(v))?.[1];
+      return a.ok && share !== undefined
+        ? ok([a.value, { shares: share }] as const)
+        : txErr("IMPORT_REPLICA_VALIDATOR_NOT_EOA");
+    }),
+    (members): TeachingAuthority => ({ _tag: "teaching", threshold: config.threshold, members: new Map(members) }),
+  );
+type ImportReplicaTx = Extract<RuntimeTx, { type: "importReplica" }>;
+/**
+ * og importReplicaRuntimeTx: normalize the identity, bind the jurisdiction, prove board authority, check the
+ * seed-derived encryption key against siblings and the retained seed, then reuse / checkpoint-import / create the
+ * genesis replica.
+ */
+const importReplica = (rt: Runtime, tx: ImportReplicaTx): Result<Runtime, RuntimeError> => {
+  const entity = lower(tx.entityId);
+  const signer = lower(tx.signerId);
+  if (entity === "" || signer === "") return txErr("IMPORT_REPLICA_INVALID_ID");
+  const key = `${entity}:${signer}`;
+  const existing = [...rt.entities].find(([k]) => lower(k) === key);
+  return chain(requireBoundJurisdiction(rt, entity, tx.data.config), (j) =>
+    importBoundReplica(rt, tx, entity, signer, key, existing, j),
+  );
+};
+type DefaultSwapPair = { readonly baseTokenId: number; readonly quoteTokenId: number; readonly pairId: string };
+/** og's liquid reference stables: USDC (1) and USDT (3). */
+const LIQUID_QUOTES: ReadonlySet<number> = new Set([1, 3]);
+/** og getSwapPairOrientation: a liquid reference stable quotes; otherwise the lower id is the base. */
+const swapPairOrientation = (a: number, b: number): DefaultSwapPair => {
+  const left = Math.min(a, b);
+  const right = Math.max(a, b);
+  const pairId = `${left}/${right}`;
+  switch (true) {
+    case LIQUID_QUOTES.has(a) && !LIQUID_QUOTES.has(b):
+      return { baseTokenId: b, quoteTokenId: a, pairId };
+    case !LIQUID_QUOTES.has(a) && LIQUID_QUOTES.has(b):
+      return { baseTokenId: a, quoteTokenId: b, pairId };
+    default:
+      return { baseTokenId: left, quoteTokenId: right, pairId };
   }
-  return chain(traverse(config.validators, boardValidatorId), (ids): Result<string, RuntimeError> => {
-    const powers: number[] = [];
-    for (const v of config.validators) { const s = shares.get(lower(v)); if (s === undefined) return txErr("BOARD_VOTING_POWER_MISSING"); if (s > 0xffffn) return txErr("BOARD_WEIGHT_OUT_OF_RANGE"); powers.push(Number(s)); }
-    if (config.threshold <= 0n) return txErr("BOARD_THRESHOLD_NOT_POSITIVE");
-    if (config.threshold > 0xffffn) return txErr("BOARD_THRESHOLD_OUT_OF_RANGE");
-    if (config.threshold > powers.reduce((t, p) => t + BigInt(p), 0n)) return txErr("BOARD_THRESHOLD_EXCEEDS_POWER");
-    return ok(encodeBoardBytes({ votingThreshold: Number(config.threshold), entityIds: ids, votingPowers: powers, boardChangeDelay: 0, controlChangeDelay: 0, dividendChangeDelay: 0 }));
+};
+const orientedKey = (p: DefaultSwapPair): string => `${p.baseTokenId}/${p.quoteTokenId}`;
+const WETH_USDC = "2/1";
+/**
+ * og buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(j)): USDC/WETH/USDT everywhere, plus TRX/SUN on a Tron
+ * stack; WETH/USDC first, then by quote, then base.
+ */
+export const defaultEntitySwapPairs = (
+  name: string | undefined,
+  chainId: number | undefined,
+): readonly DefaultSwapPair[] => {
+  const n = String(name ?? "")
+    .trim()
+    .toLowerCase();
+  const tron = n.includes("tron") || n === "rpc2" || (n.length === 0 && chainId === 31338);
+  const tokens = tron ? [1, 2, 3, 4, 5] : [1, 2, 3];
+  const pairs = tokens.flatMap((a, i) => tokens.slice(i + 1).map((b) => swapPairOrientation(a, b)));
+  return firstBy(pairs, orientedKey).toSorted((a, b) => {
+    if (orientedKey(a) === WETH_USDC) return -1;
+    if (orientedKey(b) === WETH_USDC) return 1;
+    return a.quoteTokenId - b.quoteTokenId || a.baseTokenId - b.baseTokenId;
   });
 };
-const quorumOf = (config: ImportConfig): Result<Authority, RuntimeError> => {
-  const members = new Map<Address, { readonly shares: bigint }>();
-  for (const v of config.validators) {
-    const a = address(v), share = Object.entries(config.shares).find(([k]) => lower(k) === lower(v))?.[1];
-    if (!a.ok || share === undefined) return txErr("IMPORT_REPLICA_VALIDATOR_NOT_EOA");
-    members.set(a.value, { shares: share });
-  }
-  return ok({ _tag: "teaching", threshold: config.threshold, members });
+/**
+ * og buildGenesisReplica `replica.position`: validator-local, its jurisdiction defaulting to the active one or
+ * 'default'.
+ */
+const withPosition = (
+  rt: Runtime,
+  key: string,
+  position: ReplicaPosition | undefined,
+  active: string | undefined,
+): Runtime =>
+  position === undefined
+    ? rt
+    : withLocal(rt, key, { position: { ...position, jurisdiction: position.jurisdiction || active || "default" } });
+/** og assertNumberedReplicaImportAuthority: a numbered id needs receipt-proven registration evidence for this board. */
+const numberedBoardProof = (
+  rt: Runtime,
+  entity: string,
+  config: ImportConfig,
+  j: ImportJurisdiction,
+): Result<void, RuntimeError> => {
+  const stack = {
+    chainId: j.chainId,
+    depositoryAddress: j.depositoryAddress,
+    entityProviderAddress: j.entityProviderAddress,
+  };
+  const stackKey = mapErr(boardStackKey(stack), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code }));
+  return chain(stackKey, (k) =>
+    chain(registrationEvidenceKey(k, entity), (evidenceKey) => {
+      const evidence = rt.registrationEvidence.get(evidenceKey);
+      if (evidence === undefined) return txErr(`NUMBERED_REPLICA_REGISTRATION_EVIDENCE_MISSING:${entity}`);
+      return chain(lazyBoardEntityId(config), (boardHash) =>
+        lower(String(evidence["boardHash"])) === lower(boardHash)
+          ? ok(undefined)
+          : txErr(`NUMBERED_REPLICA_REGISTRATION_BOARD_MISMATCH:${entity}`),
+      );
+    }),
+  );
+};
+/** og: a lazy id is the hash of its board. */
+const lazyBoardProof = (entity: string, config: ImportConfig): Result<void, RuntimeError> =>
+  chain(lazyBoardEntityId(config), (boardId) =>
+    lower(boardId) === entity ? ok(undefined) : txErr("IMPORT_REPLICA_LAZY_BOARD_ID_MISMATCH"),
+  );
+/** og: the seed-derived encryption key must match every sibling's committed key, and the seed any retained one. */
+const importedEntityKey = (
+  rt: Runtime,
+  entity: string,
+  seed: string,
+  siblings: readonly EntityReplica[],
+): Result<string, RuntimeError> => {
+  if (!/^0x[0-9a-f]{128}$/.test(seed)) return txErr("IMPORT_REPLICA_ENTITY_SEED_INVALID");
+  const publicKey = entityEncryptionPublicKey(seed, entity);
+  if (siblings.some((r) => r.state.committed["entityEncryptionPublicKey"] !== publicKey))
+    return txErr("IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH");
+  const retained = rt.encryptionSeeds.get(entity);
+  return retained !== undefined && retained !== seed ? txErr("ENTITY_ENCRYPTION_SEED_CONFLICT") : ok(publicKey);
+};
+/** One replica import, its board and key proven. */
+type Importing = {
+  readonly rt: Runtime;
+  readonly tx: ImportReplicaTx;
+  readonly entity: string;
+  readonly signer: string;
+  readonly key: string;
+  readonly authority: TeachingAuthority;
+  readonly quorum: Quorum;
+  readonly domain: Domain;
+  readonly jurisdictionConfig: JurisdictionConfig;
+  readonly publicKey: string;
+  readonly siblings: readonly EntityReplica[];
+};
+/** The replica installed under its key (a differently-cased old key dropped), its seed retained. */
+const installImported = (im: Importing, r: EntityReplica, drop?: string): Runtime => ({
+  ...im.rt,
+  entities: mapSet(drop === undefined ? im.rt.entities : mapDelete(im.rt.entities, drop), im.key, r),
+  encryptionSeeds: mapSet(im.rt.encryptionSeeds, im.entity, im.tx.data.entitySeed),
+});
+/** og: a checkpoint must carry exactly the supplied config's authority. */
+const sameImportedAuthority = (im: Importing, from: EntityReplica): Result<void, RuntimeError> =>
+  chain(authorityRoot({ ...from.state, quorum: im.quorum }), (supplied) =>
+    chain(authorityRoot(from.state), (held) =>
+      supplied === held ? ok(undefined) : txErr("IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH"),
+    ),
+  );
+/** This validator's open replica over a sibling's head and Accounts. */
+const importedReplica = (
+  im: Importing,
+  from: EntityReplica,
+  state: EntityState,
+  mempool: readonly EntityTx[],
+): OpenEntity =>
+  openEntity(
+    memberId(im.quorum, im.signer as Address) ?? (im.signer as Address),
+    state,
+    from.head,
+    mempool,
+    from.accountReplicas,
+  );
+/**
+ * og reuseExistingReplica: a certified Entity keeps its state (re-import changes validator-local routing only); an
+ * uncertified one takes the supplied board and jurisdiction.
+ */
+const reimport = (
+  im: Importing,
+  [oldKey, replica]: readonly [string, EntityReplica],
+): Result<Runtime, RuntimeError> => {
+  const drop = oldKey === im.key ? undefined : oldKey;
+  const certified = replica.head.height > 0n || im.siblings.some((r) => r.head.height > 0n);
+  if (certified) return map(sameImportedAuthority(im, replica), () => installImported(im, replica, drop));
+  const state = {
+    ...replica.state,
+    quorum: im.quorum,
+    jurisdiction: im.domain,
+    jurisdictionConfig: im.jurisdictionConfig,
+  };
+  return ok(installImported(im, importedReplica(im, replica, state, replica.mempool), drop));
 };
 /**
- * og importReplicaRuntimeTx: normalize the identity, bind the jurisdiction, prove board authority (signer on board, proposer flag = board index 0,
- * lazy id = hashBoard(encodeBoard(config)); a numbered Entity needs certified registration evidence), check the seed-derived encryption key
- * against siblings and the retained seed, then reuse / checkpoint-import / create the genesis replica.
+ * og buildCheckpointReplica: a sibling makes this a checkpoint import; its position defaults to the bound jurisdiction
+ * name.
  */
-const importReplica = (rt: Runtime, tx: Extract<RuntimeTx, { type: "importReplica" }>): Result<Runtime, RuntimeError> => {
-  const entity = lower(tx.entityId), signer = lower(tx.signerId), { config } = tx.data;
-  if (entity === "" || signer === "") return txErr("IMPORT_REPLICA_INVALID_ID");
-  const key = `${entity}:${signer}`, existing = [...rt.entities].find(([k]) => lower(k) === key);
-  return chain(requireBoundJurisdiction(rt, entity, config), (j) => importBoundReplica(rt, tx, entity, signer, key, existing, j));
+const checkpointImport = (im: Importing, certified: EntityReplica): Result<Runtime, RuntimeError> =>
+  map(sameImportedAuthority(im, certified), () => {
+    const imported = installImported(im, importedReplica(im, certified, certified.state, []));
+    const p = im.tx.data.position;
+    if (p === undefined) return imported;
+    const jurisdiction = p.jurisdiction || im.jurisdictionConfig.name;
+    return withLocal(imported, im.key, { position: { ...p, ...opt("jurisdiction", jurisdiction || undefined) } });
+  });
+/**
+ * og buildGenesisReplica's committed root: the default profile, the crontab and the jurisdiction's default swap
+ * pairs; lastFinalizedJHeight starts at the EntityProvider registration base (getJHistoryRegistrationBaseHeight).
+ */
+const genesisCommitted = (im: Importing): EntityCommitted => {
+  const profileName = im.tx.data.profileName;
+  const named = typeof profileName === "string" && profileName.trim().length > 0;
+  return {
+    nonces: new Map(),
+    proposals: new Map(),
+    reserves: new Map(),
+    deferredAccountProposals: new Map(),
+    entityEncryptionPublicKey: im.publicKey,
+    lastFinalizedJHeight: jHistoryRegistrationBase(im.jurisdictionConfig),
+    profile: {
+      name: named ? profileName.trim() : `Entity ${im.entity.slice(-4)}`,
+      isHub: false,
+      avatar: "",
+      bio: "",
+      website: "",
+    },
+    crontabState: DEFAULT_CRONTAB,
+    swapTradingPairs: defaultEntitySwapPairs(im.jurisdictionConfig.name, im.domain.chainId) as unknown as Binary,
+  };
 };
-/** og getSwapPairOrientation: a liquid reference stable (USDC 1, USDT 3) quotes; otherwise the lower id is the base. */
-const swapPairOrientation = (a: number, b: number): { readonly baseTokenId: number; readonly quoteTokenId: number; readonly pairId: string } => {
-  const left = Math.min(a, b), right = Math.max(a, b), pairId = `${left}/${right}`, liquid = (t: number): boolean => t === 1 || t === 3;
-  return liquid(a) && !liquid(b) ? { baseTokenId: b, quoteTokenId: a, pairId } : !liquid(a) && liquid(b) ? { baseTokenId: a, quoteTokenId: b, pairId } : { baseTokenId: left, quoteTokenId: right, pairId };
+/** og importReplica genesis: the Entity's first replica. */
+const genesisImport = (im: Importing): Result<Runtime, RuntimeError> => {
+  const created = createEntity({
+    id: im.entity as EntityId,
+    jurisdiction: im.domain,
+    threshold: im.tx.data.config.threshold,
+    members: im.authority.members,
+    signerId: im.signer as Address,
+    timestamp: im.rt.timestamp,
+    jurisdictionConfig: im.jurisdictionConfig,
+    committed: genesisCommitted(im),
+  });
+  return map(mapErr(created, (e): RuntimeError => e), (r) => {
+    const replica: EntityReplica = { ...r, state: { ...r.state, crossJurisdictionBookAdmissions: new Map() } };
+    return withPosition(installImported(im, replica), im.key, im.tx.data.position, im.rt.activeJurisdiction);
+  });
 };
-/** og buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(j)): USDC/WETH/USDT everywhere, plus TRX/SUN on a Tron stack; WETH/USDC first, then by quote, then base. */
-export const defaultEntitySwapPairs = (name: string | undefined, chainId: number | undefined): readonly { readonly baseTokenId: number; readonly quoteTokenId: number; readonly pairId: string }[] => {
-  const n = String(name ?? "").trim().toLowerCase(), tron = n.includes("tron") || n === "rpc2" || (n.length === 0 && chainId === 31338);
-  const tokens = tron ? [1, 2, 3, 4, 5] : [1, 2, 3], seen = new Set<string>(), pairs: { baseTokenId: number; quoteTokenId: number; pairId: string }[] = [];
-  for (let i = 0; i < tokens.length; i++) for (let j = i + 1; j < tokens.length; j++) {
-    const o = swapPairOrientation(tokens[i] as number, tokens[j] as number), k = `${o.baseTokenId}/${o.quoteTokenId}`;
-    if (!seen.has(k)) { seen.add(k); pairs.push(o); }
-  }
-  const primary = "2/1", key = (p: { readonly baseTokenId: number; readonly quoteTokenId: number }): string => `${p.baseTokenId}/${p.quoteTokenId}`;
-  return pairs.sort((a, b) => (key(a) === primary ? -1 : key(b) === primary ? 1 : a.quoteTokenId - b.quoteTokenId || a.baseTokenId - b.baseTokenId));
-};
-/** og buildGenesisReplica `replica.position`: validator-local, its jurisdiction defaulting to the active one or 'default'. */
-const withPosition = (rt: Runtime, key: string, position: ReplicaPosition | undefined, active: string | undefined): Runtime =>
-  position === undefined ? rt : withLocal(rt, key, { position: { ...position, jurisdiction: position.jurisdiction || active || "default" } });
-const importBoundReplica = (rt: Runtime, tx: Extract<RuntimeTx, { type: "importReplica" }>, entity: string, signer: string, key: string, existing: readonly [string, EntityReplica] | undefined, j: ImportJurisdiction): Result<Runtime, RuntimeError> => {
-  const { config, isProposer, entitySeed } = tx.data;
-  const domain: Domain = { chainId: j.chainId ?? 0, depositoryAddress: j.depositoryAddress ?? "" }, jurisdictionConfig = jurisdictionConfigOf(j);
+/** The most advanced replica among siblings. */
+const highestReplica = (replicas: readonly EntityReplica[]): EntityReplica | undefined =>
+  replicas.reduce<EntityReplica | undefined>(
+    (best, r) => (best === undefined || r.head.height > best.head.height ? r : best),
+    undefined,
+  );
+/**
+ * og importReplicaRuntimeTx under a bound jurisdiction: the signer on the board, the proposer flag at board index 0,
+ * the board authority (a lazy id is its board hash, a numbered one needs registration evidence), the key; then an
+ * existing replica is reused, a sibling checkpoint imported, or the genesis replica created.
+ */
+const importBoundReplica = (
+  rt: Runtime,
+  tx: ImportReplicaTx,
+  entity: string,
+  signer: string,
+  key: string,
+  existing: readonly [string, EntityReplica] | undefined,
+  j: ImportJurisdiction,
+): Result<Runtime, RuntimeError> => {
+  const { config, isProposer } = tx.data;
   const siblings = [...rt.entities.values()].filter((r) => lower(r.state.id) === entity);
   const boardIndex = config.validators.findIndex((v) => lower(v) === signer);
   if (boardIndex < 0) return txErr("IMPORT_REPLICA_SIGNER_NOT_ON_BOARD");
   if (isProposer !== (boardIndex === 0)) return txErr("IMPORT_REPLICA_PROPOSER_FLAG_INVALID");
   if (!/^0x[0-9a-f]{64}$/i.test(entity)) return txErr("FINTECH_SAFETY_INVALID_ENTITY_ID");
-  // og assertNumberedReplicaImportAuthority: a lazy id is its board hash; a numbered id needs receipt-proven registration evidence for this board.
-  const boardAuthority = isNumberedEntity(entity)
-    ? chain(mapErr(boardStackKey({ chainId: j.chainId, depositoryAddress: j.depositoryAddress, entityProviderAddress: j.entityProviderAddress }), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code })),
-      (stackKey) => chain(registrationEvidenceKey(stackKey, entity), (evidenceKey): Result<void, RuntimeError> => {
-        const evidence = rt.registrationEvidence.get(evidenceKey);
-        if (evidence === undefined) return txErr(`NUMBERED_REPLICA_REGISTRATION_EVIDENCE_MISSING:${entity}`);
-        return chain(lazyBoardEntityId(config), (boardHash) => (lower(String(evidence["boardHash"])) === lower(boardHash) ? ok(undefined) : txErr(`NUMBERED_REPLICA_REGISTRATION_BOARD_MISMATCH:${entity}`)));
-      }))
-    : chain(lazyBoardEntityId(config), (boardId): Result<void, RuntimeError> => (lower(boardId) === entity ? ok(undefined) : txErr("IMPORT_REPLICA_LAZY_BOARD_ID_MISMATCH")));
-  return chain(boardAuthority, (): Result<Runtime, RuntimeError> => {
-    if (!/^0x[0-9a-f]{128}$/.test(entitySeed)) return txErr("IMPORT_REPLICA_ENTITY_SEED_INVALID");
-    const publicKey = entityEncryptionPublicKey(entitySeed, entity);
-    if (siblings.some((r) => r.state.committed["entityEncryptionPublicKey"] !== publicKey)) return txErr("IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH");
-    const retained = rt.encryptionSeeds.get(entity);
-    if (retained !== undefined && retained !== entitySeed) return txErr("ENTITY_ENCRYPTION_SEED_CONFLICT");
-    const finish = (r: EntityReplica, drop?: string): Runtime => ({
-      ...rt, entities: mapSet(drop === undefined ? rt.entities : mapDelete(rt.entities, drop), key, r), encryptionSeeds: mapSet(rt.encryptionSeeds, entity, entitySeed),
-    });
-    return chain(quorumOf(config), (authority) => chain(admitQuorum(authority), (quorum): Result<Runtime, RuntimeError> => {
-      const certified = siblings.reduce<EntityReplica | undefined>((best, r) => (best === undefined || r.head.height > best.head.height ? r : best), undefined);
-      const sameAuthority = (from: EntityReplica): Result<void, RuntimeError> => chain(authorityRoot({ ...from.state, quorum }), (supplied) =>
-        chain(authorityRoot(from.state), (held) => (supplied === held ? ok(undefined) : txErr("IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH"))));
-      const at = (from: EntityReplica, state: EntityState, mempool: readonly EntityTx[]): OpenEntity => openEntity(memberId(quorum, signer as Address) ?? (signer as Address), state, from.head, mempool, from.accountReplicas);
-      if (existing !== undefined) {
-        const [oldKey, replica] = existing;
-        // A certified Entity keeps its state: re-import changes validator-local routing only (og reuseExistingReplica).
-        if (replica.head.height > 0n || siblings.some((r) => r.head.height > 0n)) return map(sameAuthority(replica), () => finish(replica, oldKey === key ? undefined : oldKey));
-        return ok(finish(at(replica, { ...replica.state, quorum, jurisdiction: domain, jurisdictionConfig }, replica.mempool), oldKey === key ? undefined : oldKey));
-      }
-      // og buildCheckpointReplica: any sibling makes this a checkpoint import; its position defaults to the bound jurisdiction name.
-      if (certified !== undefined) return map(sameAuthority(certified), () => { const p = tx.data.position; const rt2 = finish(at(certified, certified.state, [])); return p === undefined ? rt2 : withLocal(rt2, key, { position: { ...p, ...(p.jurisdiction || jurisdictionConfig.name ? { jurisdiction: p.jurisdiction || jurisdictionConfig.name } : {}) } }); });
-      // og importReplica genesis: lastFinalizedJHeight starts at the EntityProvider registration base (getJHistoryRegistrationBaseHeight).
-      // og buildGenesisReplica also commits the default profile, the crontab and the jurisdiction's default swap pairs.
-      const name = typeof tx.data.profileName === "string" && tx.data.profileName.trim().length > 0 ? tx.data.profileName.trim() : `Entity ${entity.slice(-4)}`;
-      const committed: EntityCommitted = {
-        nonces: new Map(), proposals: new Map(), reserves: new Map(), deferredAccountProposals: new Map(), entityEncryptionPublicKey: publicKey, lastFinalizedJHeight: jHistoryRegistrationBase(jurisdictionConfig),
-        profile: { name, isHub: false, avatar: "", bio: "", website: "" }, crontabState: DEFAULT_CRONTAB, swapTradingPairs: defaultEntitySwapPairs(jurisdictionConfig.name, domain.chainId) as unknown as Binary,
-      };
-      return map(mapErr(createEntity({ id: entity as EntityId, jurisdiction: domain, threshold: config.threshold, members: (authority as Extract<Authority, { _tag: "teaching" }>).members, signerId: signer as Address, timestamp: rt.timestamp, jurisdictionConfig, committed }), (e): RuntimeError => e),
-        (r) => withPosition(finish({ ...r, state: { ...r.state, crossJurisdictionBookAdmissions: new Map() } }), key, tx.data.position, rt.activeJurisdiction));
-    }));
-  });
+  const boardProof = isNumberedEntity(entity)
+    ? numberedBoardProof(rt, entity, config, j)
+    : lazyBoardProof(entity, config);
+  return chain(boardProof, () =>
+    chain(importedEntityKey(rt, entity, tx.data.entitySeed, siblings), (publicKey) =>
+      chain(quorumOf(config), (authority) =>
+        chain(admitQuorum(authority), (quorum) => {
+          const domain: Domain = { chainId: j.chainId ?? 0, depositoryAddress: j.depositoryAddress ?? "" };
+          const jurisdictionConfig = jurisdictionConfigOf(j);
+          const im: Importing = {
+            rt,
+            tx,
+            entity,
+            signer,
+            key,
+            authority,
+            quorum,
+            domain,
+            jurisdictionConfig,
+            publicKey,
+            siblings,
+          };
+          if (existing !== undefined) return reimport(im, existing);
+          const certified = highestReplica(siblings);
+          return certified !== undefined ? checkpointImport(im, certified) : genesisImport(im);
+        }),
+      ),
+    ),
+  );
 };
 // ---- og runtime/j-submit/jurisdiction-import(-request).ts: the J import registry ----
 const ZERO_ADDRESS = `0x${"00".repeat(20)}`;
@@ -29400,187 +29714,443 @@ const importAddress = (value: unknown, label: string): Result<string, RuntimeErr
   if (a === null) return txErr(`IMPORT_J_${label}_ADDRESS_INVALID:${String(value ?? "")}`);
   return a === ZERO_ADDRESS ? txErr(`IMPORT_J_${label}_ADDRESS_ZERO`) : ok(a);
 };
+const IMPORT_CONTRACT_KEYS = ["depository", "entityProvider", "account", "deltaTransformer"] as const;
 /** og normalizeJurisdictionImportContracts: all four stack contracts, each a checksummed non-zero address. */
-const importContracts = (c: JContracts | undefined, required: boolean): Result<FullJContracts | undefined, RuntimeError> => {
+const importContracts = (
+  c: JContracts | undefined,
+  required: boolean,
+): Result<FullJContracts | undefined, RuntimeError> => {
   if (!c) return required ? txErr("IMPORT_J_RPC_CONTRACTS_REQUIRED") : ok(undefined);
-  const missing = (["depository", "entityProvider", "account", "deltaTransformer"] as const).filter((k) => !c[k]);
+  const missing = IMPORT_CONTRACT_KEYS.filter((k) => !c[k]);
   if (missing.length > 0) return txErr(`IMPORT_J_CONTRACTS_INCOMPLETE:${missing.join(",")}`);
-  return chain(importAddress(c.depository, "DEPOSITORY"), (depository) => chain(importAddress(c.entityProvider, "ENTITY_PROVIDER"), (entityProvider) =>
-    chain(importAddress(c.account, "ACCOUNT"), (account) => map(importAddress(c.deltaTransformer, "DELTA_TRANSFORMER"), (deltaTransformer) => ({ depository, entityProvider, account, deltaTransformer })))));
+  return all({
+    depository: importAddress(c.depository, "DEPOSITORY"),
+    entityProvider: importAddress(c.entityProvider, "ENTITY_PROVIDER"),
+    account: importAddress(c.account, "ACCOUNT"),
+    deltaTransformer: importAddress(c.deltaTransformer, "DELTA_TRANSFORMER"),
+  });
 };
-const requireContracts = (c: JContracts | undefined): Result<FullJContracts, RuntimeError> => map(importContracts(c, true), (x) => x as FullJContracts);
-const parseUrl = (s: string): URL | null => { try { return new URL(s); } catch { return null; } };
-/** og normalizeJurisdictionImportRequest: one http(s) RPC (or none for BrowserVM), full contracts + deployment block for RPC stacks, no custom tokens. */
-export const normalizeJurisdictionImportRequest = (raw: JurisdictionImportRequest): Result<JurisdictionImportRequest, RuntimeError> => {
-  const name = String(raw.name ?? "").trim(), ticker = String(raw.ticker ?? "").trim().toUpperCase(), chainId = Number(raw.chainId);
+const requireContracts = (c: JContracts | undefined): Result<FullJContracts, RuntimeError> =>
+  map(importContracts(c, true), (x) => x as FullJContracts);
+const parseUrl = (s: string): URL | null => {
+  try {
+    return new URL(s);
+  } catch {
+    return null;
+  }
+};
+/** og: one RPC endpoint, an http(s) URL. */
+const importRpc = (value: unknown, index: number): Result<string, RuntimeError> => {
+  const rpc = String(value ?? "").trim();
+  const url = rpc === "" ? null : parseUrl(rpc);
+  if (url === null) return txErr(`IMPORT_J_RPC_INVALID:${index}`);
+  const web = url.protocol === "http:" || url.protocol === "https:";
+  return web ? ok(url.toString()) : txErr(`IMPORT_J_RPC_PROTOCOL_INVALID:${index}:${url.protocol}`);
+};
+/** og: a well-formed quorum policy (recognized, but not supported). */
+const quorumPolicy = (policy: unknown, rpcs: number): boolean => {
+  const q =
+    typeof policy === "object" && policy !== null
+      ? (policy as { readonly mode?: unknown; readonly min?: unknown })
+      : null;
+  const min = q !== null && Number.isSafeInteger(q.min) ? (q.min as number) : 0;
+  return q !== null && q.mode === "quorum" && min > 0 && min <= rpcs;
+};
+/** og: only the `single` policy over exactly one RPC is supported. */
+const rpcPolicyIssue = (policy: unknown, rpcs: number): string | undefined => {
+  switch (true) {
+    case policy === undefined:
+      return undefined;
+    case policy === "failover":
+      return "IMPORT_J_RPC_POLICY_UNSUPPORTED:failover";
+    case quorumPolicy(policy, rpcs):
+      return "IMPORT_J_RPC_POLICY_UNSUPPORTED:quorum";
+    case policy !== "single":
+      return "IMPORT_J_RPC_POLICY_INVALID";
+    case rpcs !== 1:
+      return `IMPORT_J_RPC_POLICY_SINGLE_REQUIRES_ONE_RPC:${rpcs}`;
+    default:
+      return undefined;
+  }
+};
+/**
+ * og normalizeJurisdictionImportRequest's stack checks: a deployment block exactly for RPC stacks, no custom tokens,
+ * a positive block time, a boolean start flag, a supported policy, at most one RPC.
+ */
+const importRequestIssue = (
+  raw: JurisdictionImportRequest,
+  rpcs: readonly string[],
+  browserVM: boolean,
+  deployment: number,
+): string | undefined => {
+  const block = raw.entityProviderDeploymentBlock;
+  switch (true) {
+    case !browserVM && block === undefined:
+      return "IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED";
+    case block !== undefined && (!Number.isSafeInteger(deployment) || deployment < 1):
+      return `IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${String(block)}`;
+    case browserVM && block !== undefined:
+      return "IMPORT_J_BROWSERVM_DEPLOYMENT_BLOCK_UNEXPECTED";
+    case (raw.tokens?.length ?? 0) > 0:
+      return "IMPORT_J_CUSTOM_TOKENS_UNSUPPORTED";
+    case raw.blockTimeMs !== undefined && (!Number.isSafeInteger(raw.blockTimeMs) || raw.blockTimeMs <= 0):
+      return `IMPORT_J_BLOCK_TIME_INVALID:${String(raw.blockTimeMs)}`;
+    case raw.startAtCurrentBlock !== undefined && typeof raw.startAtCurrentBlock !== "boolean":
+      return "IMPORT_J_START_AT_CURRENT_BLOCK_INVALID";
+    default:
+      return (
+        rpcPolicyIssue(raw.rpcPolicy, rpcs.length) ??
+        (rpcs.length > 1 ? `IMPORT_J_MULTIPLE_RPCS_UNSUPPORTED:${rpcs.length}` : undefined)
+      );
+  }
+};
+/**
+ * og normalizeJurisdictionImportRequest: one http(s) RPC (or none for BrowserVM), full contracts + deployment block
+ * for RPC stacks, no custom tokens.
+ */
+export const normalizeJurisdictionImportRequest = (
+  raw: JurisdictionImportRequest,
+): Result<JurisdictionImportRequest, RuntimeError> => {
+  const name = String(raw.name ?? "").trim();
+  const ticker = String(raw.ticker ?? "")
+    .trim()
+    .toUpperCase();
+  const chainId = Number(raw.chainId);
   if (!name || name.length > 128) return txErr("IMPORT_J_NAME_INVALID");
   if (!ticker || ticker.length > 16) return txErr("IMPORT_J_TICKER_INVALID");
   if (!Number.isSafeInteger(chainId) || chainId <= 0) return txErr(`IMPORT_J_CHAIN_ID_INVALID:${String(raw.chainId)}`);
   if (!Array.isArray(raw.rpcs)) return txErr("IMPORT_J_RPCS_INVALID");
-  const rpcs: string[] = [];
-  for (const [index, value] of (raw.rpcs as readonly unknown[]).entries()) {
-    const rpc = String(value ?? "").trim(), url = rpc === "" ? null : parseUrl(rpc);
-    if (url === null) return txErr(`IMPORT_J_RPC_INVALID:${index}`);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return txErr(`IMPORT_J_RPC_PROTOCOL_INVALID:${index}:${url.protocol}`);
-    rpcs.push(url.toString());
-  }
-  if (new Set(rpcs).size !== rpcs.length) return txErr("IMPORT_J_RPC_DUPLICATED");
-  if (rpcs.length > 8) return txErr(`IMPORT_J_RPC_LIMIT_EXCEEDED:${rpcs.length}`);
-  const isBrowserVM = rpcs.length === 0;
-  return chain(importContracts(raw.contracts, !isBrowserVM), (contracts): Result<JurisdictionImportRequest, RuntimeError> => {
-    const deployment = Number(raw.entityProviderDeploymentBlock);
-    if (!isBrowserVM && raw.entityProviderDeploymentBlock === undefined) return txErr("IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED");
-    if (raw.entityProviderDeploymentBlock !== undefined && (!Number.isSafeInteger(deployment) || deployment < 1)) return txErr(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${String(raw.entityProviderDeploymentBlock)}`);
-    if (isBrowserVM && raw.entityProviderDeploymentBlock !== undefined) return txErr("IMPORT_J_BROWSERVM_DEPLOYMENT_BLOCK_UNEXPECTED");
-    if ((raw.tokens?.length ?? 0) > 0) return txErr("IMPORT_J_CUSTOM_TOKENS_UNSUPPORTED");
-    if (raw.blockTimeMs !== undefined && (!Number.isSafeInteger(raw.blockTimeMs) || raw.blockTimeMs <= 0)) return txErr(`IMPORT_J_BLOCK_TIME_INVALID:${String(raw.blockTimeMs)}`);
-    if (raw.startAtCurrentBlock !== undefined && typeof raw.startAtCurrentBlock !== "boolean") return txErr("IMPORT_J_START_AT_CURRENT_BLOCK_INVALID");
-    const policy = raw.rpcPolicy as unknown;
-    if (policy !== undefined) {
-      if (policy === "failover") return txErr("IMPORT_J_RPC_POLICY_UNSUPPORTED:failover");
-      const q = typeof policy === "object" && policy !== null ? (policy as { readonly mode?: unknown; readonly min?: unknown }) : null;
-      if (q !== null && q.mode === "quorum" && Number.isSafeInteger(q.min) && (q.min as number) > 0 && (q.min as number) <= rpcs.length) return txErr("IMPORT_J_RPC_POLICY_UNSUPPORTED:quorum");
-      if (policy !== "single") return txErr("IMPORT_J_RPC_POLICY_INVALID");
-      if (rpcs.length !== 1) return txErr(`IMPORT_J_RPC_POLICY_SINGLE_REQUIRES_ONE_RPC:${rpcs.length}`);
-    }
-    if (rpcs.length > 1) return txErr(`IMPORT_J_MULTIPLE_RPCS_UNSUPPORTED:${rpcs.length}`);
-    return ok({
-      name, chainId, ticker, rpcs, ...(isBrowserVM ? {} : { entityProviderDeploymentBlock: deployment }), ...opt("blockTimeMs", raw.blockTimeMs),
-      ...opt("startAtCurrentBlock", raw.startAtCurrentBlock), ...opt("rpcPolicy", raw.rpcPolicy), ...opt("contracts", contracts),
-    });
+  return chain(traverse(raw.rpcs as readonly unknown[], importRpc), (rpcs) => {
+    if (new Set(rpcs).size !== rpcs.length) return txErr("IMPORT_J_RPC_DUPLICATED");
+    if (rpcs.length > 8) return txErr(`IMPORT_J_RPC_LIMIT_EXCEEDED:${rpcs.length}`);
+    const browserVM = rpcs.length === 0;
+    return chain(
+      importContracts(raw.contracts, !browserVM),
+      (contracts): Result<JurisdictionImportRequest, RuntimeError> => {
+        const deployment = Number(raw.entityProviderDeploymentBlock);
+        const issue = importRequestIssue(raw, rpcs, browserVM, deployment);
+        if (issue !== undefined) return txErr(issue);
+        return ok({
+          name,
+          chainId,
+          ticker,
+          rpcs,
+          ...opt("entityProviderDeploymentBlock", browserVM ? undefined : deployment),
+          ...opt("blockTimeMs", raw.blockTimeMs),
+          ...opt("startAtCurrentBlock", raw.startAtCurrentBlock),
+          ...opt("rpcPolicy", raw.rpcPolicy),
+          ...opt("contracts", contracts),
+        });
+      },
+    );
   });
 };
 /** og buildJurisdictionImportRequestHash: keccak256(safeStringify({domain, request: normalized})). */
 export const jurisdictionImportRequestHash = (request: JurisdictionImportRequest): Result<string, RuntimeError> =>
-  map(normalizeJurisdictionImportRequest(request), (normalized) => `0x${keccakUtf8(stableJson({ domain: "xln/jurisdiction-import/v1", request: normalized }))}`);
+  map(
+    normalizeJurisdictionImportRequest(request),
+    (normalized) => `0x${keccakUtf8(stableJson({ domain: "xln/jurisdiction-import/v1", request: normalized }))}`,
+  );
 const jNameKey = (name: string): string => name.trim().toLowerCase();
-const findJReplica = (rt: Runtime, name: string): readonly [string, JReplica] | undefined => [...rt.jReplicas].find(([k]) => jNameKey(k) === jNameKey(name));
-/** og assertReplicaMatchesRequest: an existing J replica must be the same chain, deployment block and (when given) contract stack. */
-const jReplicaMatchesRequest = (replica: JReplica, request: Pick<JurisdictionImportRequest, "name" | "chainId" | "entityProviderDeploymentBlock" | "contracts">): Result<void, RuntimeError> => {
+const findJReplica = (rt: Runtime, name: string): readonly [string, JReplica] | undefined =>
+  [...rt.jReplicas].find(([k]) => jNameKey(k) === jNameKey(name));
+type ImportIdentity = Pick<
+  JurisdictionImportRequest,
+  "name" | "chainId" | "entityProviderDeploymentBlock" | "contracts"
+>;
+/**
+ * og assertReplicaMatchesRequest: an existing J replica must be the same chain, deployment block and (when given)
+ * contract stack.
+ */
+const jReplicaMatchesRequest = (replica: JReplica, request: ImportIdentity): Result<void, RuntimeError> => {
+  const block = request.entityProviderDeploymentBlock;
   if (Number(replica.chainId) !== request.chainId) return txErr(`IMPORT_J_EXISTING_CHAIN_CONFLICT:${request.name}`);
-  if (request.entityProviderDeploymentBlock !== undefined && Number(replica.entityProviderDeploymentBlock) !== request.entityProviderDeploymentBlock) return txErr(`IMPORT_J_EXISTING_DEPLOYMENT_BLOCK_CONFLICT:${request.name}`);
+  if (block !== undefined && Number(replica.entityProviderDeploymentBlock) !== block)
+    return txErr(`IMPORT_J_EXISTING_DEPLOYMENT_BLOCK_CONFLICT:${request.name}`);
   if (!request.contracts) return ok(undefined);
   const c = replica.contracts;
-  const held = { ...(c?.depository ? { depository: c.depository } : {}), ...(c?.entityProvider ? { entityProvider: c.entityProvider } : {}), ...(c?.account ? { account: c.account } : {}), ...(c?.deltaTransformer ? { deltaTransformer: c.deltaTransformer } : {}) };
-  return chain(requireContracts(held), (existing) => (stableJson(existing) === stableJson(request.contracts) ? ok(undefined) : txErr(`IMPORT_J_EXISTING_CONTRACTS_CONFLICT:${request.name}`)));
+  const held: JContracts = {
+    ...opt("depository", c?.depository || undefined),
+    ...opt("entityProvider", c?.entityProvider || undefined),
+    ...opt("account", c?.account || undefined),
+    ...opt("deltaTransformer", c?.deltaTransformer || undefined),
+  };
+  return chain(requireContracts(held), (existing) =>
+    stableJson(existing) === stableJson(request.contracts)
+      ? ok(undefined)
+      : txErr(`IMPORT_J_EXISTING_CONTRACTS_CONFLICT:${request.name}`),
+  );
 };
-/** og applyImportJurisdictionIntent: at most one BrowserVM stack; an existing replica must match; one pending intent per name, keyed by its request hash. */
-const importJ = (rt: Runtime, raw: JurisdictionImportRequest): Result<Runtime, RuntimeError> => chain(normalizeJurisdictionImportRequest(raw), (request) => {
-  if (request.rpcs.length === 0) {
-    const replica = [...rt.jReplicas].find(([n, r]) => jNameKey(n) !== jNameKey(request.name) && Array.isArray(r.rpcs) && r.rpcs.length === 0);
-    const intent = [...rt.pendingJImports.values()].find((i) => jNameKey(i.request.name) !== jNameKey(request.name) && i.request.rpcs.length === 0);
-    if (replica !== undefined || intent !== undefined) return txErr(`IMPORT_J_MULTIPLE_BROWSERVM_UNSUPPORTED:${request.name}:${replica?.[0] ?? intent?.request.name ?? "unknown"}`);
-  }
-  const existing = findJReplica(rt, request.name);
-  if (existing !== undefined) return map(jReplicaMatchesRequest(existing[1], request), () => rt);
-  return chain(jurisdictionImportRequestHash(request), (requestHash): Result<Runtime, RuntimeError> => {
-    for (const pending of rt.pendingJImports.values()) {
-      if (jNameKey(pending.request.name) !== jNameKey(request.name)) continue;
-      return pending.importId === requestHash && pending.requestHash === requestHash ? ok(rt) : txErr(`IMPORT_J_PENDING_CONFLICT:${request.name}`);
-    }
-    return ok({ ...rt, pendingJImports: mapSet(rt.pendingJImports, requestHash, { importId: requestHash, requestHash, request }) });
+/** og: at most one BrowserVM stack, as a J replica or a pending intent under another name (that name, if any). */
+const otherBrowserVM = (rt: Runtime, name: string): string | undefined => {
+  const replica = [...rt.jReplicas].find(
+    ([n, r]) => jNameKey(n) !== jNameKey(name) && Array.isArray(r.rpcs) && r.rpcs.length === 0,
+  );
+  const intent = [...rt.pendingJImports.values()].find(
+    (i) => jNameKey(i.request.name) !== jNameKey(name) && i.request.rpcs.length === 0,
+  );
+  return replica !== undefined || intent !== undefined
+    ? (replica?.[0] ?? intent?.request.name ?? "unknown")
+    : undefined;
+};
+/**
+ * og applyImportJurisdictionIntent: an existing replica must match; one pending intent per name, keyed by its request
+ * hash.
+ */
+const importJ = (rt: Runtime, raw: JurisdictionImportRequest): Result<Runtime, RuntimeError> =>
+  chain(normalizeJurisdictionImportRequest(raw), (request) => {
+    const browserVM = request.rpcs.length === 0 ? otherBrowserVM(rt, request.name) : undefined;
+    if (browserVM !== undefined) return txErr(`IMPORT_J_MULTIPLE_BROWSERVM_UNSUPPORTED:${request.name}:${browserVM}`);
+    const existing = findJReplica(rt, request.name);
+    if (existing !== undefined) return map(jReplicaMatchesRequest(existing[1], request), () => rt);
+    return chain(jurisdictionImportRequestHash(request), (requestHash): Result<Runtime, RuntimeError> => {
+      const pending = [...rt.pendingJImports.values()].find((p) => jNameKey(p.request.name) === jNameKey(request.name));
+      if (pending !== undefined)
+        return pending.importId === requestHash && pending.requestHash === requestHash
+          ? ok(rt)
+          : txErr(`IMPORT_J_PENDING_CONFLICT:${request.name}`);
+      const intent: PendingJurisdictionImport = { importId: requestHash, requestHash, request };
+      return ok({ ...rt, pendingJImports: mapSet(rt.pendingJImports, requestHash, intent) });
+    });
   });
-});
-/** og validateImportResult: the result answers its pending intent exactly; tokens are unique, well-formed, address-normalized and sorted by id. */
-const validateImportResult = (pending: PendingJurisdictionImport, raw: JurisdictionImportResult): Result<JurisdictionImportResult, RuntimeError> => {
-  const request = pending.request, id = pending.importId;
-  if (raw.importId !== pending.importId || raw.requestHash !== pending.requestHash || raw.name !== request.name || raw.chainId !== request.chainId || raw.ticker !== request.ticker
-    || stableJson(raw.rpcs) !== stableJson(request.rpcs) || raw.blockTimeMs !== request.blockTimeMs) return txErr(`IMPORT_J_RESULT_INTENT_MISMATCH:${id}`);
+/** og validateImportResult: the result answers its pending intent exactly. */
+const answersIntent = (pending: PendingJurisdictionImport, raw: JurisdictionImportResult): boolean => {
+  const request = pending.request;
+  return (
+    raw.importId === pending.importId &&
+    raw.requestHash === pending.requestHash &&
+    raw.name === request.name &&
+    raw.chainId === request.chainId &&
+    raw.ticker === request.ticker &&
+    stableJson(raw.rpcs) === stableJson(request.rpcs) &&
+    raw.blockTimeMs === request.blockTimeMs
+  );
+};
+/**
+ * og validateImportResult's chain facts: a decimal block number, a receipt commitment only on an unconfirmed Tron RPC
+ * stack, a state root and VM state exactly for BrowserVM, sane watcher depth and deployment block.
+ */
+const importResultIssue = (raw: JurisdictionImportResult, browserVM: boolean): string | undefined => {
+  switch (true) {
+    case !/^(0|[1-9][0-9]*)$/.test(String(raw.blockNumber)):
+      return `IMPORT_J_RESULT_BLOCK_NUMBER_INVALID:${raw.blockNumber}`;
+    case raw.watcherReceiptCommitment !== undefined &&
+      (raw.watcherReceiptCommitment !== "tron-rpc-attested" || browserVM || raw.watcherConfirmationDepth !== 0):
+      return "IMPORT_J_RESULT_RECEIPT_COMMITMENT_INVALID";
+    case browserVM && (!raw.stateRoot || !/^0x[0-9a-fA-F]{64}$/.test(raw.stateRoot)):
+      return "IMPORT_J_RESULT_STATE_ROOT_INVALID";
+    case browserVM && !raw.browserVMState:
+      return "IMPORT_J_RESULT_BROWSERVM_STATE_MISSING";
+    case !browserVM && (raw.stateRoot !== null || raw.browserVMState !== undefined):
+      return "IMPORT_J_RESULT_RPC_STATE_INVALID";
+    case !Number.isSafeInteger(raw.watcherConfirmationDepth) || raw.watcherConfirmationDepth < 0:
+      return `IMPORT_J_RESULT_WATCHER_CONFIRMATION_DEPTH_INVALID:${String(raw.watcherConfirmationDepth)}`;
+    case !Number.isSafeInteger(raw.entityProviderDeploymentBlock) || raw.entityProviderDeploymentBlock < 1:
+      return `IMPORT_J_RESULT_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${String(raw.entityProviderDeploymentBlock)}`;
+    default:
+      return undefined;
+  }
+};
+type TokenRegistry = {
+  readonly ids: ReadonlySet<number>;
+  readonly addresses: ReadonlySet<string>;
+  readonly tokens: readonly JTokenInfo[];
+};
+const NO_TOKENS: TokenRegistry = { ids: new Set(), addresses: new Set(), tokens: [] };
+/**
+ * og validateImportResult tokens: unique well-formed ids, types and decimals, unique normalized addresses, string
+ * metadata.
+ */
+const registerToken = (
+  registry: TokenRegistry,
+  token: JTokenInfo,
+  index: number,
+): Result<TokenRegistry, RuntimeError> => {
+  const prefix = `IMPORT_J_RESULT_TOKEN_${index}`;
+  if (!Number.isSafeInteger(token.tokenId) || token.tokenId < 1 || registry.ids.has(token.tokenId))
+    return txErr(`${prefix}_ID_INVALID:${String(token.tokenId)}`);
+  if (![0, 1, 2].includes(token.tokenType)) return txErr(`${prefix}_TYPE_INVALID:${String(token.tokenType)}`);
+  if (!Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 255)
+    return txErr(`${prefix}_DECIMALS_INVALID:${String(token.decimals)}`);
+  return chain(importAddress(token.address, `${prefix}_ADDRESS`), (address) => {
+    if (registry.addresses.has(address)) return txErr(`${prefix}_ADDRESS_DUPLICATE:${address}`);
+    if (typeof token.symbol !== "string" || typeof token.name !== "string" || token.externalTokenId < 0n)
+      return txErr(`${prefix}_METADATA_INVALID`);
+    return ok({
+      ids: new Set([...registry.ids, token.tokenId]),
+      addresses: new Set([...registry.addresses, address]),
+      tokens: [...registry.tokens, { ...token, address }],
+    });
+  });
+};
+/**
+ * og validateImportResult: the result answers its pending intent exactly; tokens are unique, address-normalized and
+ * sorted by id.
+ */
+const validateImportResult = (
+  pending: PendingJurisdictionImport,
+  raw: JurisdictionImportResult,
+): Result<JurisdictionImportResult, RuntimeError> => {
+  const request = pending.request;
+  const id = pending.importId;
+  if (!answersIntent(pending, raw)) return txErr(`IMPORT_J_RESULT_INTENT_MISMATCH:${id}`);
   return chain(requireContracts(raw.contracts), (contracts): Result<JurisdictionImportResult, RuntimeError> => {
-    if (request.contracts && stableJson(contracts) !== stableJson(request.contracts)) return txErr(`IMPORT_J_RESULT_CONTRACTS_MISMATCH:${id}`);
-    if (!/^(0|[1-9][0-9]*)$/.test(String(raw.blockNumber))) return txErr(`IMPORT_J_RESULT_BLOCK_NUMBER_INVALID:${raw.blockNumber}`);
-    const isBrowserVM = request.rpcs.length === 0;
-    if (raw.watcherReceiptCommitment !== undefined && (raw.watcherReceiptCommitment !== "tron-rpc-attested" || isBrowserVM || raw.watcherConfirmationDepth !== 0)) return txErr("IMPORT_J_RESULT_RECEIPT_COMMITMENT_INVALID");
-    if (isBrowserVM) {
-      if (!raw.stateRoot || !/^0x[0-9a-fA-F]{64}$/.test(raw.stateRoot)) return txErr("IMPORT_J_RESULT_STATE_ROOT_INVALID");
-      if (!raw.browserVMState) return txErr("IMPORT_J_RESULT_BROWSERVM_STATE_MISSING");
-    } else if (raw.stateRoot !== null || raw.browserVMState !== undefined) return txErr("IMPORT_J_RESULT_RPC_STATE_INVALID");
-    for (const [label, value, minimum] of [["WATCHER_CONFIRMATION_DEPTH", raw.watcherConfirmationDepth, 0], ["ENTITY_PROVIDER_DEPLOYMENT_BLOCK", raw.entityProviderDeploymentBlock, 1]] as const)
-      if (!Number.isSafeInteger(value) || value < minimum) return txErr(`IMPORT_J_RESULT_${label}_INVALID:${String(value)}`);
-    const ids = new Set<number>(), addresses = new Set<string>(), tokens: JTokenInfo[] = [];
-    for (const [index, token] of raw.tokenRegistry.entries()) {
-      const prefix = `IMPORT_J_RESULT_TOKEN_${index}`;
-      if (!Number.isSafeInteger(token.tokenId) || token.tokenId < 1 || ids.has(token.tokenId)) return txErr(`${prefix}_ID_INVALID:${String(token.tokenId)}`);
-      if (![0, 1, 2].includes(token.tokenType)) return txErr(`${prefix}_TYPE_INVALID:${String(token.tokenType)}`);
-      if (!Number.isSafeInteger(token.decimals) || token.decimals < 0 || token.decimals > 255) return txErr(`${prefix}_DECIMALS_INVALID:${String(token.decimals)}`);
-      const a = importAddress(token.address, `${prefix}_ADDRESS`);
-      if (!a.ok) return a;
-      if (addresses.has(a.value)) return txErr(`${prefix}_ADDRESS_DUPLICATE:${a.value}`);
-      if (typeof token.symbol !== "string" || typeof token.name !== "string" || token.externalTokenId < 0n) return txErr(`${prefix}_METADATA_INVALID`);
-      ids.add(token.tokenId); addresses.add(a.value); tokens.push({ ...token, address: a.value });
-    }
-    return ok({ ...raw, tokenRegistry: tokens.sort((l, r) => l.tokenId - r.tokenId), contracts });
+    if (request.contracts && stableJson(contracts) !== stableJson(request.contracts))
+      return txErr(`IMPORT_J_RESULT_CONTRACTS_MISMATCH:${id}`);
+    const issue = importResultIssue(raw, request.rpcs.length === 0);
+    if (issue !== undefined) return txErr(issue);
+    return map(foldResult(raw.tokenRegistry, NO_TOKENS, registerToken), ({ tokens }) => ({
+      ...raw,
+      tokenRegistry: tokens.toSorted((l, r) => l.tokenId - r.tokenId),
+      contracts,
+    }));
   });
 };
 /** og assertReplicaMatchesResult. */
-const jReplicaMatchesResult = (replica: JReplica, result: JurisdictionImportResult): Result<void, RuntimeError> => chain(jReplicaMatchesRequest(replica, result), () =>
-  replica.blockNumber.toString() !== result.blockNumber || Number(replica.watcherConfirmationDepth) !== result.watcherConfirmationDepth || replica.watcherReceiptCommitment !== result.watcherReceiptCommitment
-    || Number(replica.entityProviderDeploymentBlock) !== result.entityProviderDeploymentBlock || stableJson(replica.tokenRegistry) !== stableJson(result.tokenRegistry)
-    ? txErr(`IMPORT_J_RESULT_EXISTING_REPLICA_CONFLICT:${result.name}`) : ok(undefined));
-/** og applyCompleteImportJurisdiction: install the prepared J replica (unless it exists and matches), drop the intent, default the active jurisdiction. */
+const jReplicaMatchesResult = (replica: JReplica, result: JurisdictionImportResult): Result<void, RuntimeError> =>
+  chain(jReplicaMatchesRequest(replica, result), () => {
+    const same =
+      replica.blockNumber.toString() === result.blockNumber &&
+      Number(replica.watcherConfirmationDepth) === result.watcherConfirmationDepth &&
+      replica.watcherReceiptCommitment === result.watcherReceiptCommitment &&
+      Number(replica.entityProviderDeploymentBlock) === result.entityProviderDeploymentBlock &&
+      stableJson(replica.tokenRegistry) === stableJson(result.tokenRegistry);
+    return same ? ok(undefined) : txErr(`IMPORT_J_RESULT_EXISTING_REPLICA_CONFLICT:${result.name}`);
+  });
+/** og: a new J replica may not share another replica's watcher identity (chain and depository). */
+const watcherIdentityFree = (rt: Runtime, result: JurisdictionImportResult): Result<void, RuntimeError> =>
+  map(
+    traverse(rt.jReplicas, ([name, replica]): Result<void, RuntimeError> => {
+      const depository = replica.contracts?.depository;
+      if (Number(replica.chainId) !== result.chainId || !depository) return ok(undefined);
+      const identity = `${result.name}:${name}:${result.chainId}:${result.contracts.depository}`;
+      return chain(importAddress(depository, "EXISTING_DEPOSITORY"), (held) =>
+        held === result.contracts.depository ? txErr(`IMPORT_J_WATCHER_IDENTITY_CONFLICT:${identity}`) : ok(undefined),
+      );
+    }),
+    () => undefined,
+  );
+/** og prepareJurisdictionReplica: the imported J replica at the result's block. */
+const importedJReplica = (rt: Runtime, result: JurisdictionImportResult): JReplica => ({
+  name: result.name,
+  blockNumber: BigInt(result.blockNumber),
+  stateRoot: result.stateRoot ? result.stateRoot.toLowerCase() : null,
+  mempool: [],
+  blockDelayMs: 300,
+  ...opt("blockTimeMs", result.blockTimeMs || undefined),
+  lastBlockTimestamp: Number(rt.timestamp),
+  position: { x: 0, y: 50, z: 0 },
+  entityProviderDeploymentBlock: result.entityProviderDeploymentBlock,
+  contracts: result.contracts,
+  rpcs: [...result.rpcs],
+  chainId: result.chainId,
+  watcherConfirmationDepth: result.watcherConfirmationDepth,
+  ...opt("watcherReceiptCommitment", result.watcherReceiptCommitment || undefined),
+  tokenRegistry: result.tokenRegistry,
+});
+/**
+ * og applyCompleteImportJurisdiction: install the prepared J replica (unless it exists and matches), drop the intent,
+ * default the active jurisdiction.
+ */
 const completeImportJ = (rt: Runtime, raw: JurisdictionImportResult): Result<Runtime, RuntimeError> => {
-  const existing = findJReplica(rt, String(raw.name ?? "")), pending = rt.pendingJImports.get(raw.importId);
-  if (pending === undefined) return existing !== undefined ? map(jReplicaMatchesResult(existing[1], raw), () => rt) : txErr(`IMPORT_J_RESULT_STALE:${raw.importId}`);
-  return chain(validateImportResult(pending, raw), (result): Result<Runtime, RuntimeError> => {
-    let jReplicas = rt.jReplicas;
-    if (existing !== undefined) {
-      const matched = jReplicaMatchesResult(existing[1], result);
-      if (!matched.ok) return matched;
-    } else {
-      for (const [name, replica] of rt.jReplicas) {
-        if (Number(replica.chainId) !== result.chainId || !replica.contracts?.depository) continue;
-        const depository = importAddress(replica.contracts.depository, "EXISTING_DEPOSITORY");
-        if (!depository.ok) return depository;
-        if (depository.value === result.contracts.depository) return txErr(`IMPORT_J_WATCHER_IDENTITY_CONFLICT:${result.name}:${name}:${result.chainId}:${result.contracts.depository}`);
-      }
-      jReplicas = mapSet(rt.jReplicas, result.name, {
-        name: result.name, blockNumber: BigInt(result.blockNumber), stateRoot: result.stateRoot ? result.stateRoot.toLowerCase() : null, mempool: [], blockDelayMs: 300,
-        ...(result.blockTimeMs ? { blockTimeMs: result.blockTimeMs } : {}), lastBlockTimestamp: Number(rt.timestamp), position: { x: 0, y: 50, z: 0 },
-        entityProviderDeploymentBlock: result.entityProviderDeploymentBlock, contracts: result.contracts, rpcs: [...result.rpcs], chainId: result.chainId,
-        watcherConfirmationDepth: result.watcherConfirmationDepth, ...(result.watcherReceiptCommitment ? { watcherReceiptCommitment: result.watcherReceiptCommitment } : {}), tokenRegistry: result.tokenRegistry,
-      });
-    }
-    return ok({ ...rt, jReplicas, ...(result.browserVMState ? { browserVMState: result.browserVMState } : {}), pendingJImports: mapDelete(rt.pendingJImports, result.importId), activeJurisdiction: rt.activeJurisdiction || result.name });
+  const existing = findJReplica(rt, String(raw.name ?? ""));
+  const pending = rt.pendingJImports.get(raw.importId);
+  if (pending === undefined)
+    return existing !== undefined
+      ? map(jReplicaMatchesResult(existing[1], raw), () => rt)
+      : txErr(`IMPORT_J_RESULT_STALE:${raw.importId}`);
+  return chain(validateImportResult(pending, raw), (result) => {
+    const jReplicas: Result<ReadonlyMap<string, JReplica>, RuntimeError> = existing !== undefined
+      ? map(jReplicaMatchesResult(existing[1], result), () => rt.jReplicas)
+      : map(watcherIdentityFree(rt, result), () => mapSet(rt.jReplicas, result.name, importedJReplica(rt, result)));
+    return map(jReplicas, (installed) => ({
+      ...rt,
+      jReplicas: installed,
+      ...opt("browserVMState", result.browserVMState),
+      pendingJImports: mapDelete(rt.pendingJImports, result.importId),
+      activeJurisdiction: rt.activeJurisdiction || result.name,
+    }));
   });
 };
 
 // ---- og jurisdiction/adapter/watcher/observe/watcher-replica.ts + watcher-cursor.ts ----
-const label = (v: unknown): string => String(v || "").trim().toLowerCase();
-const watcherChainIdOf = (r: JReplica | undefined): number | null => { const c = Number(r?.chainId); return Number.isFinite(c) && c > 0 ? Math.floor(c) : null; };
-/** og findWatcherJurisdictionReplica: by depository and/or chain id (ambiguity refused), else the active replica, else the first. */
-const findWatcherJReplica = (rt: Runtime, depositoryAddress?: string, chainId?: number): Result<readonly [string, JReplica] | null, RuntimeError> => {
+const watcherChainIdOf = (r: JReplica | undefined): number | null => {
+  const c = Number(r?.chainId);
+  return Number.isFinite(c) && c > 0 ? Math.floor(c) : null;
+};
+/**
+ * og findWatcherJurisdictionReplica: by depository and/or chain id (ambiguity refused), else the active replica, else
+ * the first.
+ */
+const findWatcherJReplica = (
+  rt: Runtime,
+  depositoryAddress?: string,
+  chainId?: number,
+): Result<readonly [string, JReplica] | null, RuntimeError> => {
   const entries = [...rt.jReplicas];
   if (entries.length === 0) return ok(null);
-  const depository = label(depositoryAddress), wanted = typeof chainId === "number" && Number.isFinite(chainId) && chainId > 0 ? Math.floor(chainId) : null;
+  const depository = lower(depositoryAddress);
+  const wanted = typeof chainId === "number" && Number.isFinite(chainId) && chainId > 0 ? Math.floor(chainId) : null;
   if (depository || wanted !== null) {
-    const exact = entries.filter(([, r]) => (!depository || label(r.contracts?.depository) === depository) && (wanted === null || watcherChainIdOf(r) === wanted));
+    const exact = entries.filter(
+      ([, r]) =>
+        (!depository || lower(r.contracts?.depository) === depository) &&
+        (wanted === null || watcherChainIdOf(r) === wanted),
+    );
     if (exact.length > 1) return txErr(`J_WATCHER_JURISDICTION_AMBIGUOUS:${wanted ?? "any"}:${depository || "any"}`);
     return ok(exact[0] ?? null);
   }
   const active = rt.activeJurisdiction ? rt.jReplicas.get(rt.activeJurisdiction) : undefined;
-  return ok(active !== undefined && rt.activeJurisdiction !== undefined ? [rt.activeJurisdiction, active] : (entries[0] ?? null));
+  return ok(
+    active !== undefined && rt.activeJurisdiction !== undefined
+      ? [rt.activeJurisdiction, active]
+      : (entries[0] ?? null),
+  );
 };
-const requireWatcherJReplica = (rt: Runtime, depositoryAddress: string | undefined, chainId: number | undefined, context: string): Result<readonly [string, JReplica], RuntimeError> =>
+const requireWatcherJReplica = (
+  rt: Runtime,
+  depositoryAddress: string | undefined,
+  chainId: number | undefined,
+  context: string,
+): Result<readonly [string, JReplica], RuntimeError> =>
   chain(findWatcherJReplica(rt, depositoryAddress, chainId), (found) => {
     if (found !== null) return ok(found);
-    const available = [...rt.jReplicas.values()].map((r) => `${r.name || "unnamed"}/${String(r.chainId ?? "missing")}/${label(r.contracts?.depository) || "missing"}`).join(",");
-    return txErr(`J_WATCHER_JURISDICTION_NOT_FOUND:${context}:chain=${String(chainId ?? "any")}:depository=${label(depositoryAddress) || "any"}:available=${available || "none"}`);
+    const available = [...rt.jReplicas.values()]
+      .map(
+        (r) =>
+          `${r.name || "unnamed"}/${String(r.chainId ?? "missing")}/${lower(r.contracts?.depository) || "missing"}`,
+      )
+      .join(",");
+    const wanted = `chain=${String(chainId ?? "any")}:depository=${lower(depositoryAddress) || "any"}`;
+    return txErr(`J_WATCHER_JURISDICTION_NOT_FOUND:${context}:${wanted}:available=${available || "none"}`);
   });
+type CursorData = Extract<RuntimeTx, { type: "advanceJWatcherCursor" }>["data"];
 /** og applyWatcherJurisdictionCursor: the committed watcher cursor only moves forward. */
-const advanceJWatcherCursor = (rt: Runtime, data: Extract<RuntimeTx, { type: "advanceJWatcherCursor" }>["data"]): Result<Runtime, RuntimeError> => {
-  if (!Number.isSafeInteger(data.blockNumber) || data.blockNumber < 0) return txErr(`J_WATCHER_CURSOR_INVALID:${String(data.blockNumber)}`);
+const advanceJWatcherCursor = (rt: Runtime, data: CursorData): Result<Runtime, RuntimeError> => {
+  if (!Number.isSafeInteger(data.blockNumber) || data.blockNumber < 0)
+    return txErr(`J_WATCHER_CURSOR_INVALID:${String(data.blockNumber)}`);
+  const block = BigInt(data.blockNumber);
   return map(requireWatcherJReplica(rt, data.depositoryAddress, data.chainId, "cursor-apply"), ([key, replica]) =>
-    (replica.blockNumber >= BigInt(data.blockNumber) ? rt : { ...rt, jReplicas: mapSet(rt.jReplicas, key, { ...replica, blockNumber: BigInt(data.blockNumber) }) }));
+    replica.blockNumber >= block
+      ? rt
+      : { ...rt, jReplicas: mapSet(rt.jReplicas, key, { ...replica, blockNumber: block }) },
+  );
 };
 
 // ---- og jurisdiction/machine/jurisdiction-runtime/index.ts: requireBoundEntityConfig ----
-/** og isUsableContractAddress / firstUsableContractAddress: the first value that is a valid non-zero address, as given. */
-const usableAddress = (...values: readonly unknown[]): string | null => {
-  for (const v of values) if (typeof v === "string") { const a = ethAddress(v); if (a !== null && a !== ZERO_ADDRESS) return v; }
-  return null;
+/** og isUsableContractAddress: a valid, non-zero address. */
+const isUsableAddress = (v: unknown): v is string => {
+  if (typeof v !== "string") return false;
+  const a = ethAddress(v);
+  return a !== null && a !== ZERO_ADDRESS;
 };
+/** og firstUsableContractAddress: the first usable value, as given. */
+const usableAddress = (...values: readonly unknown[]): string | null => values.find(isUsableAddress) ?? null;
 const STACK_REF = /^stack:(?:\d+:)?0x[0-9a-fA-F]{40}$/;
-const stackChainId = (v: unknown): number | null => { const n = Number(v); return Number.isSafeInteger(n) && n > 0 ? n : null; };
+const stackChainId = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
 const jNameOf = (v: unknown): string => (typeof v === "string" ? v.trim().toLowerCase() : "");
 /** og getJReplicaByName: the exact key, else the first replica whose name matches case-insensitively. */
 const jReplicaByName = (rt: Runtime, name: unknown): JReplica | undefined => {
@@ -29589,67 +30159,126 @@ const jReplicaByName = (rt: Runtime, name: unknown): JReplica | undefined => {
   return rt.jReplicas.get(name as string) ?? [...rt.jReplicas.values()].find((r) => jNameOf(r.name) === n);
 };
 const jReplicaByRef = (rt: Runtime, ref: string): JReplica | undefined =>
-  [...rt.jReplicas.values()].find((r) => stackIdOf({ depositoryAddress: usableAddress(r.contracts?.depository) ?? "", chainId: r.chainId }) === ref.trim().toLowerCase());
-/** og resolveRuntimeJurisdictionConfig: complete a jurisdiction config from the named (else active, else first) J replica; replica contracts win. */
-const resolveRuntimeJurisdiction = (rt: Runtime, current: ImportJurisdiction | undefined): ImportJurisdiction | undefined => {
+  [...rt.jReplicas.values()].find(
+    (r) =>
+      stackIdOf({ depositoryAddress: usableAddress(r.contracts?.depository) ?? "", chainId: r.chainId }) ===
+      ref.trim().toLowerCase(),
+  );
+/** A finite numeric chain id (a bigint read as a number). */
+const finiteChainId = (raw: unknown): number | undefined => {
+  switch (typeof raw) {
+    case "bigint":
+      return Number(raw);
+    case "number":
+      return Number.isFinite(raw) ? raw : undefined;
+    default:
+      return undefined;
+  }
+};
+/**
+ * og resolveRuntimeJurisdictionConfig: complete a jurisdiction config from the named (else active, else first) J
+ * replica; replica contracts win.
+ */
+const resolveRuntimeJurisdiction = (
+  rt: Runtime,
+  current: ImportJurisdiction | undefined,
+): ImportJurisdiction | undefined => {
   const active = rt.activeJurisdiction ? rt.jReplicas.get(rt.activeJurisdiction) : undefined;
   const replica = jReplicaByName(rt, current?.name) ?? active ?? [...rt.jReplicas.values()][0];
   const depositoryAddress = usableAddress(replica?.contracts?.depository, current?.depositoryAddress);
   const entityProviderAddress = usableAddress(replica?.contracts?.entityProvider, current?.entityProviderAddress);
-  const rawChain = replica?.chainId !== undefined ? replica.chainId : current?.chainId;
-  const chainId = typeof rawChain === "bigint" ? Number(rawChain) : typeof rawChain === "number" && Number.isFinite(rawChain) ? rawChain : undefined;
-  const deployment = replica?.entityProviderDeploymentBlock !== undefined ? replica.entityProviderDeploymentBlock : current?.entityProviderDeploymentBlock;
-  const currentName = current?.name?.trim() || undefined, currentAddress = current?.address?.trim() || undefined, replicaAddress = replica?.rpcs?.[0]?.trim() || undefined;
-  const name = currentName !== undefined ? currentName : replica?.name !== undefined ? replica.name : rt.activeJurisdiction;
-  const address = currentAddress ?? replicaAddress ?? (name ? `jreplica://${name}` : undefined);
+  const chainId = finiteChainId(replica?.chainId ?? current?.chainId);
+  const deployment = replica?.entityProviderDeploymentBlock ?? current?.entityProviderDeploymentBlock;
+  const name = (current?.name?.trim() || undefined) ?? replica?.name ?? rt.activeJurisdiction;
+  const address =
+    (current?.address?.trim() || undefined) ??
+    (replica?.rpcs?.[0]?.trim() || undefined) ??
+    (name ? `jreplica://${name}` : undefined);
   if (!name || !address || !depositoryAddress || !entityProviderAddress) return current;
-  return { ...current, name, address, entityProviderAddress, depositoryAddress, ...opt("chainId", chainId), ...opt("entityProviderDeploymentBlock", deployment) };
+  return {
+    ...current,
+    name,
+    address,
+    entityProviderAddress,
+    depositoryAddress,
+    ...opt("chainId", chainId),
+    ...opt("entityProviderDeploymentBlock", deployment),
+  };
 };
-/** og requireRuntimeJurisdictionConfigByName: the J replica must exist (by name or stack ref) and resolve to a complete stack of the same name. */
-const requireJurisdictionByName = (rt: Runtime, name: string, current: ImportJurisdiction | undefined): Result<ImportJurisdiction, RuntimeError> => {
+/**
+ * og requireRuntimeJurisdictionConfigByName: the J replica must exist (by name or stack ref) and resolve to a complete
+ * stack of the same name.
+ */
+const requireJurisdictionByName = (
+  rt: Runtime,
+  name: string,
+  current: ImportJurisdiction | undefined,
+): Result<ImportJurisdiction, RuntimeError> => {
   const configured = String(name || current?.name || "").trim();
   if (!configured) return txErr("ENTITY_JURISDICTION_MISSING");
-  const isRef = STACK_REF.test(configured), replica = isRef ? jReplicaByRef(rt, configured) : jReplicaByName(rt, configured);
+  const isRef = STACK_REF.test(configured);
+  const replica = isRef ? jReplicaByRef(rt, configured) : jReplicaByName(rt, configured);
   if (replica === undefined) return txErr(`ENTITY_JURISDICTION_UNAVAILABLE: ${configured}`);
   const replicaName = replica.name || configured;
-  const chainId = current?.chainId !== undefined ? current.chainId : replica.chainId;
   const candidate: ImportJurisdiction = {
-    name: replicaName, address: current?.address || replica.rpcs?.[0] || `jreplica://${replicaName}`,
-    entityProviderAddress: current?.entityProviderAddress || replica.contracts?.entityProvider || "", depositoryAddress: current?.depositoryAddress || replica.contracts?.depository || "",
-    ...opt("chainId", chainId), ...opt("blockTimeMs", current?.blockTimeMs), ...opt("registrationBlock", current?.registrationBlock),
-    ...opt("entityProviderDeploymentBlock", current?.entityProviderDeploymentBlock !== undefined ? current.entityProviderDeploymentBlock : replica.entityProviderDeploymentBlock),
-    ...(current?.rebalancePolicyUsd ? { rebalancePolicyUsd: current.rebalancePolicyUsd } : {}),
+    name: replicaName,
+    address: current?.address || replica.rpcs?.[0] || `jreplica://${replicaName}`,
+    entityProviderAddress: current?.entityProviderAddress || replica.contracts?.entityProvider || "",
+    depositoryAddress: current?.depositoryAddress || replica.contracts?.depository || "",
+    ...opt("chainId", current?.chainId ?? replica.chainId),
+    ...opt("blockTimeMs", current?.blockTimeMs),
+    ...opt("registrationBlock", current?.registrationBlock),
+    ...opt(
+      "entityProviderDeploymentBlock",
+      current?.entityProviderDeploymentBlock ?? replica.entityProviderDeploymentBlock,
+    ),
+    ...opt("rebalancePolicyUsd", current?.rebalancePolicyUsd || undefined),
   };
   const resolved = resolveRuntimeJurisdiction(rt, candidate);
-  const same = resolved !== undefined && (isRef ? stackIdOf(resolved) === configured.toLowerCase() : jNameOf(resolved.name) === jNameOf(configured));
+  const same =
+    resolved !== undefined &&
+    (isRef ? stackIdOf(resolved) === configured.toLowerCase() : jNameOf(resolved.name) === jNameOf(configured));
   if (resolved === undefined || !same) return txErr(`ENTITY_JURISDICTION_RESOLVE_FAILED: ${configured}`);
-  if (!resolved.depositoryAddress || !resolved.entityProviderAddress || !resolved.chainId) return txErr(`ENTITY_JURISDICTION_INCOMPLETE: ${configured}`);
+  if (!resolved.depositoryAddress || !resolved.entityProviderAddress || !resolved.chainId)
+    return txErr(`ENTITY_JURISDICTION_INCOMPLETE: ${configured}`);
   return ok(resolved);
 };
 /** og readStrictJurisdictionStackId: chain id and a usable depository, else nothing. */
 const strictStackId = (chainId: unknown, depository: unknown): string => {
-  const c = stackChainId(chainId), d = usableAddress(depository);
+  const c = stackChainId(chainId);
+  const d = usableAddress(depository);
   return c === null || d === null ? "" : stackIdOf({ depositoryAddress: d, chainId: c });
 };
-/** og requireBoundEntityConfig: resolve the config's jurisdiction against the J replicas and refuse a stack other than the one sibling replicas are bound to. */
-const requireBoundJurisdiction = (rt: Runtime, entity: string, config: ImportConfig): Result<ImportJurisdiction, RuntimeError> => {
+/**
+ * og requireBoundEntityConfig: resolve the config's jurisdiction against the J replicas and refuse a stack other than
+ * the one sibling replicas are bound to.
+ */
+const requireBoundJurisdiction = (
+  rt: Runtime,
+  entity: string,
+  config: ImportConfig,
+): Result<ImportJurisdiction, RuntimeError> => {
   const merged = resolveRuntimeJurisdiction(rt, config.jurisdiction) ?? config.jurisdiction;
   const name = typeof merged?.name === "string" ? merged.name.trim() : "";
   if (!name) return txErr(`ENTITY_JURISDICTION_MISSING: entity=${entity}`);
   return chain(requireJurisdictionByName(rt, name, merged), (bound) => {
     const incoming = strictStackId(bound.chainId, bound.depositoryAddress);
-    for (const r of rt.entities.values()) {
-      if (lower(r.state.id) !== entity || !(r.state.jurisdictionConfig?.name ?? "").trim()) continue;
+    const conflicting = [...rt.entities.values()].some((r) => {
+      if (lower(r.state.id) !== entity || !(r.state.jurisdictionConfig?.name ?? "").trim()) return false;
       const held = strictStackId(r.state.jurisdiction.chainId, r.state.jurisdiction.depositoryAddress);
-      if (!held || !incoming || held !== incoming) return txErr(`ENTITY_JURISDICTION_CONFLICT: entity=${entity}`);
-    }
-    return ok(bound);
+      return !held || !incoming || held !== incoming;
+    });
+    return conflicting ? txErr(`ENTITY_JURISDICTION_CONFLICT: entity=${entity}`) : ok(bound);
   });
 };
 /** og ConsensusConfig.jurisdiction beyond the account Domain, as the Entity state carries it. */
 const jurisdictionConfigOf = (j: ImportJurisdiction): JurisdictionConfig => ({
-  ...opt("name", j.name), entityProviderAddress: j.entityProviderAddress ?? "", ...opt("registrationBlock", j.registrationBlock),
-  ...opt("entityProviderDeploymentBlock", j.entityProviderDeploymentBlock), ...opt("blockTimeMs", j.blockTimeMs), ...opt("rebalancePolicyUsd", j.rebalancePolicyUsd),
+  ...opt("name", j.name),
+  entityProviderAddress: j.entityProviderAddress ?? "",
+  ...opt("registrationBlock", j.registrationBlock),
+  ...opt("entityProviderDeploymentBlock", j.entityProviderDeploymentBlock),
+  ...opt("blockTimeMs", j.blockTimeMs),
+  ...opt("rebalancePolicyUsd", j.rebalancePolicyUsd),
 });
 
 // ---- og runtime/j-submit/j-submit-{state,result}.ts, registration/entity-provider-action-submit-{state,result}.ts, governance-submit-state.ts ----
