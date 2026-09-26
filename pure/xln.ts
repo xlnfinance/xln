@@ -26566,155 +26566,531 @@ const appendMempool = (mempool: readonly EntityTx[], admitted: readonly EntityTx
   });
   return [...mempool, ...firstBy(admitted, accountKey, queued)];
 };
-/** og finalizeCommitNotification: install the candidate, emit its Account outputs, optionally broadcast the certified frame to the other validators. */
-const installFrame = (r: EntityEnv & EntityCandidate, frameHash: EntityFrameHash, signatures: Precommits, broadcast: boolean | Quorum): Result<EntityApply<OpenEntity>, EntityError> =>
-  chain(secondaryHankos(r.draft, r.frame, signatures), (byHash) => chain(fillHankos(r.draft, byHash), (draft) => chain(commitEffects(r, frameHash, byHash, draft), (committed) => map(publishFrame(r, frameHash, signatures, broadcast, draft), (a) => ({ ...a, committed })))));
-/** og isWitnessHashType + requireDraftWitness over one frame's fresh witnesses: this height's Hanko for the hash, of the expected type. */
-const draftWitness = (witnesses: ReadonlyMap<string, Omit<HankoWitness, "createdAt">>, hash: unknown, type: HankoWitness["type"], height: number, existing: unknown): Result<Hanko, EntityError> => {
-  const entry = witnesses.get(String(hash));
-  if (typeof existing === "string" && existing !== "") {
-    if (entry === undefined) return ok(existing);
-    if (entry.type !== type || entry.entityHeight > height) return invariant(`HANKO_WITNESS_BINDING_MISMATCH:hash=${String(hash)}`);
-    return entry.hanko === existing ? ok(existing) : invariant(`HANKO_WITNESS_VALUE_MISMATCH:hash=${String(hash)}:type=${type}`);
-  }
-  if (entry === undefined) return invariant(`HANKO_DRAFT_WITNESS_MISSING:hash=${String(hash)}:type=${type}:entityHeight=${height}`);
-  return entry.type !== type || entry.entityHeight !== height ? invariant(`HANKO_WITNESS_BINDING_MISMATCH:hash=${String(hash)}`) : ok(entry.hanko);
+/**
+ * og finalizeCommitNotification: install the candidate, emit its Account outputs, optionally broadcast the certified
+ * frame to the other validators.
+ */
+const installFrame = (
+  r: EntityEnv & EntityCandidate,
+  frameHash: EntityFrameHash,
+  signatures: Precommits,
+  broadcast: boolean | Quorum,
+): Result<EntityApply<OpenEntity>, EntityError> =>
+  chain(secondaryHankos(r.draft, r.frame, signatures), (byHash) =>
+    chain(fillHankos(r.draft, byHash), (draft) =>
+      chain(commitEffects(r, frameHash, byHash, draft), (committed) =>
+        map(publishFrame(r, frameHash, signatures, broadcast, draft), (a) => ({ ...a, committed })),
+      ),
+    ),
+  );
+type Witness = Omit<HankoWitness, "createdAt">;
+type Witnesses = ReadonlyMap<string, Witness>;
+/** og requireDraftWitness over a Hanko the jTx already carries: a witness, when there is one, must agree with it. */
+const keptHanko = (
+  entry: Witness | undefined,
+  key: string,
+  type: Witness["type"],
+  height: number,
+  existing: Hanko,
+): Result<Hanko, EntityError> => {
+  if (entry === undefined) return ok(existing);
+  if (entry.type !== type || entry.entityHeight > height)
+    return invariant(`HANKO_WITNESS_BINDING_MISMATCH:hash=${key}`);
+  return entry.hanko === existing ? ok(existing) : invariant(`HANKO_WITNESS_VALUE_MISMATCH:hash=${key}:type=${type}`);
+};
+/** og requireDraftWitness over an unsigned jTx: this height's fresh Hanko of the expected type. */
+const freshHanko = (
+  entry: Witness | undefined,
+  key: string,
+  type: Witness["type"],
+  height: number,
+): Result<Hanko, EntityError> => {
+  if (entry === undefined)
+    return invariant(`HANKO_DRAFT_WITNESS_MISSING:hash=${key}:type=${type}:entityHeight=${height}`);
+  const bound = entry.type === type && entry.entityHeight === height;
+  return bound ? ok(entry.hanko) : invariant(`HANKO_WITNESS_BINDING_MISMATCH:hash=${key}`);
+};
+/** og isWitnessHashType + requireDraftWitness: the Hanko a jTx carries for one hash. */
+const draftWitness = (
+  witnesses: Witnesses,
+  hash: unknown,
+  type: Witness["type"],
+  height: number,
+  existing: unknown,
+): Result<Hanko, EntityError> => {
+  const key = String(hash);
+  const entry = witnesses.get(key);
+  return typeof existing === "string" && existing !== ""
+    ? keptHanko(entry, key, type, height, existing)
+    : freshHanko(entry, key, type, height);
 };
 type JTxFields = { readonly [field: string]: Binary };
-/** og attachHankoWitnessToOutputs (J half): a batch gets its batch-hash Hanko, an EntityProvider action its action-hash Hanko, a control-board proposal its own supporter vote. */
-const attachJHankos = (jOutputs: readonly JInput[], witnesses: ReadonlyMap<string, Omit<HankoWitness, "createdAt">>, height: number): Result<readonly JInput[], EntityError> =>
-  traverse(jOutputs, (input) => map(traverse(input.jTxs, (raw): Result<Binary, EntityError> => {
-    const jTx = raw as { readonly type?: unknown; readonly entityId?: unknown; readonly data?: JTxFields };
-    const data = jTx.data ?? {};
-    if (jTx.type === "batch" && data["batchHash"]) return map(draftWitness(witnesses, data["batchHash"], "jBatch", height, data["hankoSignature"]), (hankoSignature) => ({ ...(raw as JTxFields), data: { ...data, hankoSignature } }));
-    if (jTx.type === "entityProviderTransfer" || jTx.type === "entityProviderReleaseControlShares" || jTx.type === "entityProviderCancelAction") {
-      const intent = data["intent"] as { readonly actionHash?: unknown } | undefined;
-      return map(draftWitness(witnesses, intent?.actionHash, "entityProviderAction", height, data["hankoSignature"]), (hankoSignature) => ({ ...(raw as JTxFields), data: { ...data, hankoSignature } }));
-    }
-    if (jTx.type === "entityProviderProposeControlBoard") {
-      const votes = (data["supporterVotes"] ?? []) as readonly { readonly entityId?: unknown; readonly hankoSignature?: unknown }[];
-      const own = votes.findIndex((v) => v.entityId === jTx.entityId);
-      if (own < 0 || votes[own]?.hankoSignature) return invariant(`CONTROL_BOARD_PROPOSAL_OWN_VOTE_INVALID:${String(jTx.entityId)}`);
-      return map(draftWitness(witnesses, data["proposalHash"], "entityProviderAction", height, undefined), (hankoSignature) =>
-        ({ ...(raw as JTxFields), data: { ...data, supporterVotes: votes.map((v, i) => (i === own ? { ...v, hankoSignature } : v)) as unknown as Binary } }));
-    }
-    return ok(raw);
-  }), (jTxs) => ({ jurisdictionName: input.jurisdictionName, jTxs })));
-/** og attachCommitProofsAndOutputs: witness every secondary hash of a witness type; the emitter (relay next leader, else proposer) carries the jOutputs. */
-const commitEffects = (r: EntityEnv & EntityCandidate, frameHash: EntityFrameHash, byHash: ReadonlyMap<string, Hanko>, draft: Draft): Result<CommitEffects, EntityError> => {
-  const height = Number(r.frame.height);
-  const witnesses = r.frame.hashesToSign.flatMap((h): (readonly [string, Omit<HankoWitness, "createdAt">])[] => {
-    const hanko = byHash.get(h.hash), type = h.type as string;
-    return hanko === undefined || type === "entityFrame" || type === "entityOutput" ? [] : [[h.hash, { hanko, type: type as HankoWitness["type"], entityHeight: height }]];
-  });
-  const relay = r.frame.leader.relayCertificate, emitter = relay !== undefined && relay.preparedFrameHash === frameHash ? relay.nextLeaderId : r.frame.leader.proposerSignerId;
-  return map(attachJHankos(draft.jOutputs ?? [], new Map(witnesses), height), (jOutputs) => ({ height, witnesses, jOutputs: lower(emitter) === lower(r.signerId) ? jOutputs : [], runtimeEvents: draft.runtimeEvents ?? [] }));
+type JTxShape = { readonly type?: unknown; readonly entityId?: unknown; readonly data?: JTxFields };
+type LooseVote = { readonly entityId?: unknown; readonly hankoSignature?: unknown };
+/** og control-board proposal: the proposer's own supporter vote, still unsigned, takes the proposal-hash Hanko. */
+const ownLooseVote = (
+  jTx: JTxShape,
+  data: JTxFields,
+  witnesses: Witnesses,
+  height: number,
+): Result<JTxFields, EntityError> => {
+  const votes = (data["supporterVotes"] ?? []) as readonly LooseVote[];
+  const own = votes.findIndex((v) => v.entityId === jTx.entityId);
+  if (own < 0 || votes[own]?.hankoSignature)
+    return invariant(`CONTROL_BOARD_PROPOSAL_OWN_VOTE_INVALID:${String(jTx.entityId)}`);
+  return map(
+    draftWitness(witnesses, data["proposalHash"], "entityProviderAction", height, undefined),
+    (hankoSignature) => ({
+      supporterVotes: votes.with(own, { ...votes[own], hankoSignature }) as unknown as Binary,
+    }),
+  );
 };
 /**
- * og buildCertifiedEntityFrameLink + projectCertifiedEntityFrameLinkIdentity: the frame's manifest head, the first signature of each signer,
- * the entity-frame Hanko over the post-frame board (og installCommittedState `hankos[0]`), the leader and the post-frame authority.
+ * og attachHankoWitnessToOutputs for one jTx: a batch gets its batch-hash Hanko, an EntityProvider action its
+ * action-hash Hanko, a control-board proposal its own supporter vote.
  */
-const certifiedLink = (frame: EntityFrame, frameHash: EntityFrameHash, signatures: Precommits, state: EntityState): Result<{ readonly link: Binary; readonly hanko: Hanko }, EntityError> => {
-  const head = frame.hashesToSign[0];
-  if (head === undefined || head.type !== "entityFrame" || head.hash !== frameHash) return invariant(`ENTITY_CERTIFIED_LINK_FRAME_MANIFEST_INVALID:${frame.height}:${frameHash}`);
-  if (signatures.size === 0) return invariant(`ENTITY_CERTIFIED_LINK_SIGNATURES_MISSING:${frame.height}:${frameHash}`);
-  const first = new Map([...signatures].flatMap(([id, bundle]) => { const s = bundle[0]; return s === undefined ? [] : [[id, s] as const]; }));
-  const missing = [...signatures.keys()].find((id) => !first.has(id));
-  if (missing !== undefined) return invariant(`ENTITY_CERTIFIED_LINK_FRAME_SIGNATURE_MISSING:${frame.height}:${missing}`);
-  const config = rootConfig(state), active = signerId(state.leaderState?.activeValidatorId ?? config.validators[0] ?? "");
-  if (active.length === 0) return invariant("ENTITY_FRAME_AUTHORITY_LEADER_MISSING");
-  return chain(quorumHanko(state, frameHash, first), (hanko) => map(leaderBinary(frame.leader, false), (leader) => ({ hanko, link: {
-    frameHash: lower(frameHash), parentFrameHash: frame.prevFrameHash, stateRoot: lower(frame.stateRoot), authorityRoot: lower(frame.authorityRoot), leader,
-    hashesToSign: [{ hash: head.hash, type: head.type, context: head.context }], collectedSigs: precommitsBinary(new Map([...first].map(([id, s]) => [id, [s]]))), hankos: [hanko],
-    postAuthority: { config: binaryOf(config), leaderState: { activeValidatorId: active, view: state.leaderState?.view ?? 0, changedAtHeight: state.leaderState?.changedAtHeight ?? 0 } },
-  } as Binary })));
+const witnessedJTx = (raw: Binary, witnesses: Witnesses, height: number): Result<Binary, EntityError> => {
+  const jTx = raw as JTxShape;
+  const data = jTx.data ?? {};
+  const withData = (fields: JTxFields): Binary => ({ ...(raw as JTxFields), data: { ...data, ...fields } });
+  const signed = (hash: unknown, type: Witness["type"]): Result<Binary, EntityError> =>
+    map(draftWitness(witnesses, hash, type, height, data["hankoSignature"]), (hankoSignature) =>
+      withData({ hankoSignature }),
+    );
+  switch (jTx.type) {
+    case "batch":
+      return data["batchHash"] ? signed(data["batchHash"], "jBatch") : ok(raw);
+    case "entityProviderTransfer":
+    case "entityProviderReleaseControlShares":
+    case "entityProviderCancelAction":
+      return signed(
+        (data["intent"] as { readonly actionHash?: unknown } | undefined)?.actionHash,
+        "entityProviderAction",
+      );
+    case "entityProviderProposeControlBoard":
+      return map(ownLooseVote(jTx, data, witnesses, height), withData);
+    default:
+      return ok(raw);
+  }
 };
-const publishFrame = (r: EntityEnv & EntityCandidate, frameHash: EntityFrameHash, signatures: Precommits, broadcast: boolean | Quorum, draft: Draft): Result<EntityApply<OpenEntity>, EntityError> => chain(certifiedLink(r.frame, frameHash, signatures, draft.state), ({ link, hanko }) => {
-  // og finalizeCommitNotification broadcastValidators: the committed (post-frame) board unless a handover names the retired one
-  const board = broadcast === true ? draft.state.quorum : broadcast === false ? undefined : broadcast;
-  const others = board === undefined ? [] : [...membersOf(board).keys()].filter((v) => signerId(v) !== signerId(r.signerId));
-  // og finalizeCommitNotification: votes reset; a relay certificate for exactly this frame stays pending.
-  const relay = r.frame.leader.relayCertificate, pending = relay !== undefined && relay.preparedFrameHash === frameHash ? relay : undefined;
-  const opened: OpenEntity = { ...openEntity(r.signerId, draft.state, { height: r.frame.height, prevFrameHash: frameHash }, withoutTxs(r.mempool, r.frame.txs), draft.accountReplicas), certifiedFrameHead: link, leaderVotes: new Map(), ...opt("pendingLeaderCertificate", pending),
-    // og clearCommittedJPrefixRound: a round for a height this frame committed is done
-    ...opt("jPrefixRound", r.jPrefixRound !== undefined && r.jPrefixRound.targetEntityHeight > Number(r.frame.height) ? r.jPrefixRound : undefined) };
-  // og finalizeCommitNotification emitter: the relay certificate's next leader for exactly this frame, else the frame's proposer.
-  const emitter = pending !== undefined ? pending.nextLeaderId : r.frame.leader.proposerSignerId;
-  return ok(done(opened, [...publishCommitted(draft.outputs, r.signerId, emitter), ...others.map((v): EntityOutput => ({ to: r.state.id, signerId: v, input: { kind: "proposal", frame: r.frame, signatures, hankos: [hanko] } }))]));
-});
-/** og admitEntityTransactions + startEntityProposalIfReady: queue, forward a non-leader mempool to the leader, or propose from the mempool. */
-const admitTxs = <R extends EntityReplica>(r: R, input: Extract<EntityInput, { kind: "txs" }>, ctx: EntityContext): Result<R, EntityError> => {
-  if (input.timestamp < 0n || input.timestamp > BigInt(Number.MAX_SAFE_INTEGER)) return err({ _tag: "frame_timestamp_invalid", timestamp: input.timestamp });
-  const from = ctx.from;
-  // og external ingress: Account inputs from their sender, or exactly one certified runtimeOutput naming the sending Entity as its source
-  const certified = input.txs.length === 1 && input.txs[0]?.type === "runtimeOutput" && from !== undefined && namesEntity(input.txs[0].data.sourceEntityId, from);
-  if (from !== undefined && !certified && (from === ctx.self || !input.txs.every((tx) => tx.type === "accountInput" && namesEntity(tx.data.fromEntityId, from) && namesEntity(tx.data.toEntityId, ctx.self)))) return err({ _tag: "from_not_converted" });
+/** og attachHankoWitnessToOutputs (J half): every jTx of every J input with its Hanko. */
+const attachJHankos = (
+  jOutputs: readonly JInput[],
+  witnesses: Witnesses,
+  height: number,
+): Result<readonly JInput[], EntityError> =>
+  traverse(jOutputs, (input) =>
+    map(traverse(input.jTxs, (raw) => witnessedJTx(raw, witnesses, height)), (jTxs) => ({
+      jurisdictionName: input.jurisdictionName,
+      jTxs,
+    })),
+  );
+/** og installCommittedState: a relay certificate stays pending only when it relays exactly this frame. */
+const relayOf = (frame: EntityFrame, frameHash: EntityFrameHash): LeaderCertificate | undefined => {
+  const relay = frame.leader.relayCertificate;
+  return relay?.preparedFrameHash === frameHash ? relay : undefined;
+};
+/**
+ * og finalizeCommitNotification emitter: the relay certificate's next leader for exactly this frame, else the proposer.
+ */
+const frameEmitter = (frame: EntityFrame, frameHash: EntityFrameHash): string =>
+  relayOf(frame, frameHash)?.nextLeaderId ?? frame.leader.proposerSignerId;
+const MANIFEST_HASH_TYPES: ReadonlySet<string> = new Set(["entityFrame", "entityOutput"]);
+/** og attachCommitProofsAndOutputs: every secondary hash of a witness type (the frame and output manifests are not). */
+const frameWitnesses = (
+  frame: EntityFrame,
+  byHash: ReadonlyMap<string, Hanko>,
+  height: number,
+): readonly (readonly [string, Witness])[] =>
+  frame.hashesToSign.flatMap(({ hash, type }): (readonly [string, Witness])[] => {
+    const hanko = byHash.get(hash);
+    const witnessed = hanko !== undefined && !MANIFEST_HASH_TYPES.has(type);
+    return witnessed ? [[hash, { hanko, type: type as Witness["type"], entityHeight: height }]] : [];
+  });
+/** og attachCommitProofsAndOutputs: the frame's witnesses; only the emitter carries the jOutputs. */
+const commitEffects = (
+  r: EntityEnv & EntityCandidate,
+  frameHash: EntityFrameHash,
+  byHash: ReadonlyMap<string, Hanko>,
+  draft: Draft,
+): Result<CommitEffects, EntityError> => {
+  const height = Number(r.frame.height);
+  const witnesses = frameWitnesses(r.frame, byHash, height);
+  const emits = lower(frameEmitter(r.frame, frameHash)) === lower(r.signerId);
+  return map(attachJHankos(draft.jOutputs ?? [], new Map(witnesses), height), (jOutputs) => ({
+    height,
+    witnesses,
+    jOutputs: emits ? jOutputs : [],
+    runtimeEvents: draft.runtimeEvents ?? [],
+  }));
+};
+/** og buildCertifiedEntityFrameLink: each signer's first signature. */
+const firstSignatures = (signatures: Precommits): ReadonlyMap<string, Signature> =>
+  new Map([...signatures].flatMap(([id, [first]]) => (first === undefined ? [] : [[id, first] as const])));
+/**
+ * og buildCertifiedEntityFrameLink + projectCertifiedEntityFrameLinkIdentity: the frame's manifest head, the first
+ * signature of each signer, the entity-frame Hanko over the post-frame board (og installCommittedState `hankos[0]`),
+ * the leader and the post-frame authority.
+ */
+const certifiedLink = (
+  frame: EntityFrame,
+  frameHash: EntityFrameHash,
+  signatures: Precommits,
+  state: EntityState,
+): Result<{ readonly link: Binary; readonly hanko: Hanko }, EntityError> => {
+  const head = frame.hashesToSign[0];
+  const first = firstSignatures(signatures);
+  const unsigned = [...signatures.keys()].find((id) => !first.has(id));
+  const config = rootConfig(state);
+  const leaderState = authorityLeader(state, config);
+  if (head === undefined || head.type !== "entityFrame" || head.hash !== frameHash)
+    return invariant(`ENTITY_CERTIFIED_LINK_FRAME_MANIFEST_INVALID:${frame.height}:${frameHash}`);
+  if (signatures.size === 0) return invariant(`ENTITY_CERTIFIED_LINK_SIGNATURES_MISSING:${frame.height}:${frameHash}`);
+  if (unsigned !== undefined)
+    return invariant(`ENTITY_CERTIFIED_LINK_FRAME_SIGNATURE_MISSING:${frame.height}:${unsigned}`);
+  if (leaderState.activeValidatorId.length === 0) return invariant("ENTITY_FRAME_AUTHORITY_LEADER_MISSING");
+  return chain(quorumHanko(state, frameHash, first), (hanko) =>
+    map(leaderBinary(frame.leader, false), (leader) => ({
+      hanko,
+      link: {
+        frameHash: lower(frameHash),
+        parentFrameHash: frame.prevFrameHash,
+        stateRoot: lower(frame.stateRoot),
+        authorityRoot: lower(frame.authorityRoot),
+        leader,
+        hashesToSign: [{ hash: head.hash, type: head.type, context: head.context }],
+        collectedSigs: precommitsBinary(new Map([...first].map(([id, s]) => [id, [s]]))),
+        hankos: [hanko],
+        postAuthority: { config: binaryOf(config), leaderState },
+      } as Binary,
+    })),
+  );
+};
+/** og finalizeCommitNotification broadcastValidators: the committed board, unless a handover names the retired one. */
+const broadcastBoard = (broadcast: boolean | Quorum, committed: Quorum): Quorum | undefined => {
+  switch (broadcast) {
+    case true:
+      return committed;
+    case false:
+      return undefined;
+    default:
+      return broadcast;
+  }
+};
+/** One copy of a proposal per other validator of the board. */
+const toOtherValidators = (
+  entityId: EntityId,
+  board: Quorum | undefined,
+  self: string,
+  input: EntityInput,
+): readonly EntityOutput[] =>
+  board === undefined
+    ? []
+    : [...membersOf(board).keys()]
+        .filter((v) => signerId(v) !== signerId(self))
+        .map((v): EntityOutput => ({ to: entityId, signerId: v, input }));
+/** og clearCommittedJPrefixRound: a round for a height this frame committed is done. */
+const openJPrefixRound = <T extends { readonly targetEntityHeight: number }>(
+  round: T | undefined,
+  height: bigint,
+): T | undefined => (round !== undefined && round.targetEntityHeight > Number(height) ? round : undefined);
+/** og finalizeCommitNotification: open the next height, publish the committed outputs, tell the board. */
+const publishFrame = (
+  r: EntityEnv & EntityCandidate,
+  frameHash: EntityFrameHash,
+  signatures: Precommits,
+  broadcast: boolean | Quorum,
+  draft: Draft,
+): Result<EntityApply<OpenEntity>, EntityError> =>
+  map(certifiedLink(r.frame, frameHash, signatures, draft.state), ({ link, hanko }) => {
+    const head = { height: r.frame.height, prevFrameHash: frameHash };
+    const mempool = withoutTxs(r.mempool, r.frame.txs);
+    const opened: OpenEntity = {
+      ...openEntity(r.signerId, draft.state, head, mempool, draft.accountReplicas),
+      certifiedFrameHead: link,
+      // og finalizeCommitNotification: votes reset; a relay certificate for exactly this frame stays pending
+      leaderVotes: new Map(),
+      ...opt("pendingLeaderCertificate", relayOf(r.frame, frameHash)),
+      ...opt("jPrefixRound", openJPrefixRound(r.jPrefixRound, r.frame.height)),
+    };
+    const certified: EntityInput = { kind: "proposal", frame: r.frame, signatures, hankos: [hanko] };
+    return done(opened, [
+      ...publishCommitted(draft.outputs, r.signerId, frameEmitter(r.frame, frameHash)),
+      ...toOtherValidators(r.state.id, broadcastBoard(broadcast, draft.state.quorum), r.signerId, certified),
+    ]);
+  });
+/**
+ * og external ingress: Account inputs from their sender to this Entity, or exactly one certified runtimeOutput naming
+ * the sender as its source. Local input (no sender) is always admitted.
+ */
+const ingressAdmitted = (txs: readonly EntityTx[], from: EntityId | undefined, self: EntityId): boolean => {
+  if (from === undefined) return true;
+  const [only] = txs;
+  const certified = txs.length === 1 && only?.type === "runtimeOutput" && namesEntity(only.data.sourceEntityId, from);
+  const accountInputs = txs.every(
+    (tx) =>
+      tx.type === "accountInput" && namesEntity(tx.data.fromEntityId, from) && namesEntity(tx.data.toEntityId, self),
+  );
+  return certified || (from !== self && accountInputs);
+};
+/** og admitEntityTransactions: queue the admitted txs, within the mempool bound. */
+const admitTxs = <R extends EntityReplica>(
+  r: R,
+  input: Extract<EntityInput, { kind: "txs" }>,
+  ctx: EntityContext,
+): Result<R, EntityError> => {
+  if (input.timestamp < 0n || input.timestamp > BigInt(Number.MAX_SAFE_INTEGER))
+    return err({ _tag: "frame_timestamp_invalid", timestamp: input.timestamp });
+  if (!ingressAdmitted(input.txs, ctx.from, ctx.self)) return err({ _tag: "from_not_converted" });
   return chain(crossMaterializations(r, input.txs, ctx, input.timestamp), (txs): Result<R, EntityError> => {
-    if (txs.length > ENTITY_MEMPOOL_SIZE || r.mempool.length + txs.length > ENTITY_MEMPOOL_SIZE) return err({ _tag: "mempool_full" });
-    // og admitEntityTransactions: a pure Account-input delta is appended; any other admission re-orders the mempool wake-first
+    if (r.mempool.length + txs.length > ENTITY_MEMPOOL_SIZE) return err({ _tag: "mempool_full" });
     const appended = appendMempool(r.mempool, txs);
-    return txs.every((tx) => tx.type === "accountInput") ? ok({ ...r, mempool: appended }) : map(prioritizeWake(appended), (mempool) => ({ ...r, mempool }));
+    // og admitEntityTransactions: a pure Account-input delta is appended; any other admission re-orders wake-first
+    const ordered: Result<readonly EntityTx[], EntityError> = txs.every((tx) => tx.type === "accountInput")
+      ? ok(appended)
+      : prioritizeWake(appended);
+    return map(ordered, (mempool) => ({ ...r, mempool }));
   });
 };
-/** og admission (forwardValidatorMempool over the authority replica): a replica that is not the proposal leader forwards its mempool to that leader. */
-const forwarded = (r: EntityEnv, timestamp: bigint): Result<readonly EntityOutput[], EntityError> => map(authorityReplica(r, r.mempool), (a) => {
-  const leader = proposalLeader(a).activeValidatorId, to = memberId(a.state.quorum, leader);
-  return isProposalLeader(a) || r.mempool.length === 0 || to === undefined ? [] : [{ to: r.state.id, signerId: to, input: { kind: "txs", timestamp, txs: r.mempool } }];
-});
+/**
+ * og forwardValidatorMempool over the authority replica: a replica that is not the proposal leader forwards its mempool
+ * to it.
+ */
+const forwarded = (r: EntityEnv, timestamp: bigint): Result<readonly EntityOutput[], EntityError> =>
+  map(authorityReplica(r, r.mempool), (a): readonly EntityOutput[] => {
+    const to = memberId(a.state.quorum, proposalLeader(a).activeValidatorId);
+    const forwards = !isProposalLeader(a) && r.mempool.length > 0 && to !== undefined;
+    return forwards ? [{ to: r.state.id, signerId: to, input: { kind: "txs", timestamp, txs: r.mempool } }] : [];
+  });
 /** og shouldStartProposal: a certified view change (without a prepared frame to relay) proposes even an empty frame. */
-const certifiedTransition = (r: EntityEnv): boolean => { const c = r.pendingLeaderCertificate; return c !== undefined && c.targetHeight === Number(r.head.height) + 1 && c.preparedFrameHash === undefined; };
-/** og startEntityProposalIfReady + certifyEntityProposal: fold the mempool, commit the proposal leader's view, self-sign, commit alone or broadcast. */
-/** og: after admission (with its mempool forward), a J-prefix input or local consensus work first signs this validator's head (ensureLocalJPrefixAttestation). */
-const startProposal = (admitted: OpenEntity, runtimeTimestamp: bigint, ctx: EntityContext, force = false): Result<EntityApply<OpenEntity | ProposedEntity>, EntityError> =>
-  chain(force || admitted.mempool.length > 0 || hasProposableAccount(admitted) ? ensureLocalJPrefix(admitted, ctx, force) : ok({ replica: admitted, outputs: [], signed: false }), ({ replica: queued, outputs: votes }) =>
-  chain(authorityReplica(queued, queued.mempool), (authority) => {
-    if (!isProposalLeader(authority)) return map(forwarded(queued, runtimeTimestamp), (out) => done<OpenEntity | ProposedEntity, EntityOutput>(queued, [...out, ...votes]));
-    // og selectEntityProposal: the J-prefix certificate and certified range first, no selection while a required certificate is missing
-    return chain(jPrefixSelection(queued, authority, ctx), ({ replica: selecting, certificate, blocked, frozen }) => chain(blocked ? ok<ProposableSelection>({ txs: [], currentAuthorityReady: false }) : selectProposable(selecting.state, selecting.mempool), (selection) => {
+const certifiedTransition = (r: EntityEnv): boolean => {
+  const c = r.pendingLeaderCertificate;
+  return c !== undefined && c.targetHeight === Number(r.head.height) + 1 && c.preparedFrameHash === undefined;
+};
+type Proposal = EntityApply<OpenEntity | ProposedEntity>;
+const noProposal = (replica: OpenEntity, outputs: readonly EntityOutput[] = []): Proposal =>
+  done<OpenEntity | ProposedEntity, EntityOutput>(replica, outputs);
+/** og ensureLocalJPrefixAttestation: a validator with consensus work first signs its own J-prefix head. */
+const locallyAttested = (
+  admitted: OpenEntity,
+  ctx: EntityContext,
+  force: boolean,
+): Result<Attested<OpenEntity>, EntityError> =>
+  force || admitted.mempool.length > 0 || hasProposableAccount(admitted)
+    ? ensureLocalJPrefix(admitted, ctx, force)
+    : ok({ replica: admitted, outputs: [], signed: false });
+/** og selectEntityProposal: an atomic cross-j leg's accountInput must be in the proposal. */
+const requiredLegMissing = (ctx: EntityContext, txs: readonly EntityTx[]): boolean => {
+  if (ctx.required === undefined) return false;
+  const required = encodeEntityTx(ctx.required);
+  return !txs.some((tx) => encodeEntityTx(tx) === required);
+};
+/**
+ * og shouldStartProposal: selected txs, a frozen-base roll, or a certified board with queued Account work or a
+ * certified leader transition.
+ */
+const worthProposing = (
+  r: OpenEntity,
+  txs: readonly EntityTx[],
+  frozen: boolean,
+  selection: ProposableSelection,
+): boolean =>
+  txs.length > 0 || frozen || (selection.currentAuthorityReady && (hasProposableAccount(r) || certifiedTransition(r)));
+const NOTHING_SELECTED: ProposableSelection = { txs: [], currentAuthorityReady: false };
+/**
+ * og selectEntityProposal: the J-prefix certificate and certified range first (no selection while a required
+ * certificate is missing), then the proposable mempool; the J-prefix votes lead the proposal's outputs.
+ */
+const leaderProposal = (
+  queued: OpenEntity,
+  authority: OpenEntity,
+  runtimeTimestamp: bigint,
+  ctx: EntityContext,
+  votes: readonly EntityOutput[],
+): Result<Proposal, EntityError> =>
+  chain(jPrefixSelection(queued, authority, ctx), ({ replica, certificate, blocked, frozen }) =>
+    chain(blocked ? ok(NOTHING_SELECTED) : selectProposable(replica.state, replica.mempool), (selection) => {
       // og: a frozen-base roll proposes exactly an empty frame
       const txs = frozen ? [] : selection.txs;
-      // og selectEntityProposal: an atomic cross-j leg's accountInput must be in the proposal
-      const required = ctx.required === undefined ? undefined : encodeEntityTx(ctx.required);
-      if (required !== undefined && !txs.some((tx) => encodeEntityTx(tx) === required))
-        return invariant(`RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_NOT_SELECTED:${selecting.state.id}:mempool=${selecting.mempool.length}:selected=${txs.length}:reason=${blocked ? "J_PREFIX_QUORUM_REQUIRED" : "none"}`);
-      // og shouldStartProposal: selected txs, a frozen-base roll, or a certified board with queued Account work or a certified leader transition
-      if (txs.length === 0 && !frozen && !(selection.currentAuthorityReady && (hasProposableAccount(selecting) || certifiedTransition(selecting)))) return ok(done<OpenEntity | ProposedEntity, EntityOutput>(selecting, votes));
-      return chain(assertProposalPrefix(selecting, txs, certificate, ctx), () =>
-        map(proposeSelected(selecting, authority, txs, runtimeTimestamp, ctx, certificate ?? undefined), (a) => ({ ...a, outputs: [...votes, ...a.outputs] })));
-    }));
-  }));
-/** `keep`: og shouldKeepPreparedEntityFrame -- an account-work preview that proposes no Account frame is discarded (no Entity frame). */
-const proposeSelected = (queued: OpenEntity, authority: OpenEntity, selected: readonly EntityTx[], runtimeTimestamp: bigint, ctx: EntityContext, jPrefixCertificate?: JPrefixCertificate, keep?: (accountFrames: number) => boolean): Result<EntityApply<OpenEntity | ProposedEntity>, EntityError> => {
-  /** og resolveEntityProposalTimestamp: never behind the committed clock. */
-  const timestamp = runtimeTimestamp > queued.state.timestamp ? runtimeTimestamp : queued.state.timestamp;
-  // og getReplicaProposalLeader(authorityReplica): the view the proposer claims; buildProposalState: a handover frame installs its own leader
-  const view = proposalLeader(authority).view, self = signerId(queued.signerId), pending = queued.pendingLeaderCertificate;
-  const leader: FrameLeader = { proposerSignerId: self, view, ...opt("certificate", pending) };
-  const ordinary: LeaderState = { activeValidatorId: self, view, changedAtHeight: pending !== undefined ? Number(queued.head.height) + 1 : queued.state.leaderState?.changedAtHeight ?? 0 };
+      if (requiredLegMissing(ctx, txs)) {
+        const reason = blocked ? "J_PREFIX_QUORUM_REQUIRED" : "none";
+        const where = `${replica.state.id}:mempool=${replica.mempool.length}:selected=${txs.length}`;
+        return invariant(`RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_NOT_SELECTED:${where}:reason=${reason}`);
+      }
+      if (!worthProposing(replica, txs, frozen, selection)) return ok(noProposal(replica, votes));
+      return chain(assertProposalPrefix(replica, txs, certificate, ctx), () =>
+        map(proposeSelected(replica, authority, txs, runtimeTimestamp, ctx, certificate ?? undefined), (a) => ({
+          ...a,
+          outputs: [...votes, ...a.outputs],
+        })),
+      );
+    }),
+  );
+/**
+ * og startEntityProposalIfReady + certifyEntityProposal: after admission, sign the local J-prefix head when there is
+ * work, then propose as the leader or forward the mempool to it.
+ */
+const startProposal = (
+  admitted: OpenEntity,
+  runtimeTimestamp: bigint,
+  ctx: EntityContext,
+  force = false,
+): Result<Proposal, EntityError> =>
+  chain(locallyAttested(admitted, ctx, force), ({ replica: queued, outputs: votes }) =>
+    chain(authorityReplica(queued, queued.mempool), (authority) =>
+      isProposalLeader(authority)
+        ? leaderProposal(queued, authority, runtimeTimestamp, ctx, votes)
+        : map(forwarded(queued, runtimeTimestamp), (out) => noProposal(queued, [...out, ...votes])),
+    ),
+  );
+/** og resolveEntityProposalTimestamp: never behind the committed clock. */
+const proposalTimestamp = (runtime: bigint, state: EntityState): bigint =>
+  runtime > state.timestamp ? runtime : state.timestamp;
+/**
+ * og getReplicaProposalLeader(authorityReplica) + buildProposalState: the proposer claims the authority's view; a
+ * pending certificate makes this height the leader change. A handover frame installs its own leader instead.
+ */
+const proposalLeaders = (
+  queued: OpenEntity,
+  authority: OpenEntity,
+): { readonly leader: FrameLeader; readonly ordinary: LeaderState } => {
+  const view = proposalLeader(authority).view;
+  const self = signerId(queued.signerId);
+  const pending = queued.pendingLeaderCertificate;
+  const changedAtHeight =
+    pending !== undefined ? Number(queued.head.height) + 1 : (queued.state.leaderState?.changedAtHeight ?? 0);
+  return {
+    leader: { proposerSignerId: self, view, ...opt("certificate", pending) },
+    ordinary: { activeValidatorId: self, view, changedAtHeight },
+  };
+};
+const NO_PAYMENTS: Originating = { originated: [], refused: new Map() };
+/**
+ * og materializeEntityInfraContext: the proposer prepares every htlcPayment before the fold; a payment it cannot
+ * prepare is evicted like any refused tx.
+ */
+const preparedPayments = (
+  queued: OpenEntity,
+  selected: readonly EntityTx[],
+  timestamp: bigint,
+  ctx: EntityContext,
+): Originating => {
+  if (!selected.some((tx) => tx.type === "htlcPayment")) return NO_PAYMENTS;
+  const view = originView(queued.state, queued.accountReplicas, timestamp);
+  return materializeOriginated(view, ctx.htlc?.profiles ?? [], selected, ctx.htlc ?? { profiles: [] });
+};
+/** og materializeHtlcPreparedInfraContext: the pre-frame view every inbound onion layer decrypts against. */
+const inboundView = (queued: OpenEntity, timestamp: bigint, ctx: EntityContext): Omit<HtlcInboundView, "online"> => ({
+  state: queued.state,
+  replicas: queued.accountReplicas,
+  timestamp: Number(timestamp),
+  publicKey: String(queued.state.committed["entityEncryptionPublicKey"] ?? ""),
+  privateKey: ctx.htlc?.encryptionPrivateKey,
+});
+/** The proposal's fold context: the runtime's context, the proposal clock and the prepared HTLC infra. */
+const proposalFoldContext = (
+  ctx: EntityContext,
+  timestamp: bigint,
+  originated: readonly PreparedOriginated[],
+  entries: readonly PreparedHtlcEntry[],
+) => ({
+  verify: ctx.verify,
+  timestamp,
+  htlc: { ...EMPTY_HTLC_INFRA, originated, entries },
+  ...opt("activeJurisdiction", ctx.activeJurisdiction),
+  ...opt("siblings", ctx.siblings),
+  ...opt("boardAuthority", ctx.boardAuthority),
+  ...opt("jReplicas", ctx.jReplicas),
+  ...opt("runtimeSeed", ctx.runtimeSeed),
+});
+/**
+ * og certifyEntityProposal: a single-signer board commits alone (a handover also delivers the certified transition to
+ * the retired board); any other proposal goes to the new board on a handover, else to the committed one.
+ */
+const certifyProposal = (
+  queued: OpenEntity,
+  authority: OpenEntity,
+  proposed: ProposedEntity,
+  frameHash: EntityFrameHash,
+  leaderHandedOver: boolean,
+  included: readonly EntityTx[],
+): Result<Proposal, EntityError> => {
+  if (isSingleSigner(authority.state.quorum))
+    return installFrame(proposed, frameHash, proposed.signatures, leaderHandedOver ? queued.state.quorum : false);
+  const handover = included.some((tx) => tx.type === "boardHandover");
+  const board = handover ? proposed.draft.state.quorum : queued.state.quorum;
+  const input: EntityInput = { kind: "proposal", frame: proposed.frame, signatures: proposed.signatures };
+  return ok(
+    done<OpenEntity | ProposedEntity, EntityOutput>(
+      proposed,
+      toOtherValidators(queued.state.id, board, queued.signerId, input),
+    ),
+  );
+};
+/**
+ * og startEntityProposalIfReady: prepare the HTLC infra, fold the selected txs, build and self-sign the frame, then
+ * certify it. `keep`: og shouldKeepPreparedEntityFrame, an account-work preview that proposes no Account frame is
+ * discarded (no Entity frame).
+ */
+const proposeSelected = (
+  queued: OpenEntity,
+  authority: OpenEntity,
+  selected: readonly EntityTx[],
+  runtimeTimestamp: bigint,
+  ctx: EntityContext,
+  jPrefixCertificate?: JPrefixCertificate,
+  keep?: (accountFrames: number) => boolean,
+): Result<Proposal, EntityError> => {
+  const timestamp = proposalTimestamp(runtimeTimestamp, queued.state);
+  const { leader, ordinary } = proposalLeaders(queued, authority);
   // og startInboundLayerPriming reads requireEntityEncryptionPrivateKey for every proposal, before any materialization
   const keypair = entityKeypair(queued.state, ctx);
   if (!keypair.ok) return keypair;
-  // og materializeEntityInfraContext: the proposer prepares every htlcPayment before the fold; a payment it cannot prepare is evicted like any refused tx.
-  const phase = selected;
-  const prepared = phase.some((tx) => tx.type === "htlcPayment") ? materializeOriginated(originView(queued.state, queued.accountReplicas, timestamp), ctx.htlc?.profiles ?? [], phase, ctx.htlc ?? { profiles: [] }) : { originated: [], refused: new Map<EntityTx, EntityError>() };
-  const txs = phase.filter((tx) => !prepared.refused.has(tx)), [firstRefusal] = prepared.refused.values();
+  const prepared = preparedPayments(queued, selected, timestamp, ctx);
+  const txs = selected.filter((tx) => !prepared.refused.has(tx));
+  const [firstRefusal] = prepared.refused.values();
   if (txs.length === 0 && firstRefusal !== undefined) return err(firstRefusal);
-  // og materializeHtlcPreparedInfraContext: the proposer decrypts every inbound onion layer against the pre-frame state; validators replay the same bytes.
-  const inbound = { state: queued.state, replicas: queued.accountReplicas, timestamp: Number(timestamp), publicKey: String(queued.state.committed["entityEncryptionPublicKey"] ?? ""), privateKey: ctx.htlc?.encryptionPrivateKey };
-  return chain(htlcFrameTxs(txs) ? inboundHtlcEntries({ ...inbound, online: onlineOf(ctx.htlc) }, txs) : ok([]), (entries) =>
-  chain(foldTxs(queued.state, queued.accountReplicas, txs, { verify: ctx.verify, timestamp, htlc: { ...EMPTY_HTLC_INFRA, originated: prepared.originated, entries }, ...opt("activeJurisdiction", ctx.activeJurisdiction), ...opt("siblings", ctx.siblings), ...opt("boardAuthority", ctx.boardAuthority), ...opt("jReplicas", ctx.jReplicas), ...opt("runtimeSeed", ctx.runtimeSeed) }), ({ draft, included, evicted, accountFrames }) => chain(frameHtlcInfra(ctx.htlc, inbound, prepared.originated, included), (infra) => {
-    if (keep !== undefined && !keep(accountFrames ?? 0)) return ok(done<OpenEntity | ProposedEntity, EntityOutput>(queued));
-    const pool = withoutTxs(queued.mempool, [...prepared.refused.keys(), ...evicted]);
-    return chain(handoverLeaderState(queued.state, included), (handoverLeader) => chain(buildFrame(queued, leader, handoverLeader ?? ordinary, timestamp, included, draft, infra, jPrefixCertificate), (candidate) => chain(signManifest(candidate.frame.hashesToSign, queued.signerId, ctx, candidate.draft.state), (own) => chain(hashEntityFrame(candidate.frame), (frameHash): Result<EntityApply<OpenEntity | ProposedEntity>, EntityError> => {
-      const proposed: ProposedEntity = { ...queued, _tag: "proposed", mempool: pool, ...candidate, signatures: new Map([[self, own]]) };
-      // og: a single-signer (authority) board commits alone; a handover also delivers the certified transition to the retired board
-      if (isSingleSigner(authority.state.quorum)) return installFrame(proposed, frameHash, proposed.signatures, handoverLeader !== null ? queued.state.quorum : false);
-      // og: a handover proposal goes to the new board, any other proposal to the committed one
-      const board = included.some((tx) => tx.type === "boardHandover") ? candidate.draft.state.quorum : queued.state.quorum;
-      const others = [...membersOf(board).keys()].filter((v) => signerId(v) !== self);
-      return ok(done<OpenEntity | ProposedEntity, EntityOutput>(proposed, others.map((v): EntityOutput => ({ to: queued.state.id, signerId: v, input: { kind: "proposal", frame: candidate.frame, signatures: proposed.signatures } }))));
-    }))));
-  })));
+  // og materializeHtlcPreparedInfraContext: the proposer decrypts every inbound onion layer; validators replay the
+  // bytes
+  const inbound = inboundView(queued, timestamp, ctx);
+  const entries = htlcFrameTxs(txs) ? inboundHtlcEntries({ ...inbound, online: onlineOf(ctx.htlc) }, txs) : ok([]);
+  return chain(entries, (entries) =>
+    chain(
+      foldTxs(
+        queued.state,
+        queued.accountReplicas,
+        txs,
+        proposalFoldContext(ctx, timestamp, prepared.originated, entries),
+      ),
+      ({ draft, included, evicted, accountFrames }) =>
+        chain(frameHtlcInfra(ctx.htlc, inbound, prepared.originated, included), (infra) => {
+          if (keep !== undefined && !keep(accountFrames ?? 0)) return ok(noProposal(queued));
+          const mempool = withoutTxs(queued.mempool, [...prepared.refused.keys(), ...evicted]);
+          return chain(handoverLeaderState(queued.state, included), (handoverLeader) =>
+            chain(
+              buildFrame(
+                queued,
+                leader,
+                handoverLeader ?? ordinary,
+                timestamp,
+                included,
+                draft,
+                infra,
+                jPrefixCertificate,
+              ),
+              (candidate) =>
+                chain(signManifest(candidate.frame.hashesToSign, queued.signerId, ctx, candidate.draft.state), (own) =>
+                  chain(hashEntityFrame(candidate.frame), (frameHash) => {
+                    const signatures: Precommits = new Map([[signerId(queued.signerId), own]]);
+                    const proposed: ProposedEntity = { ...queued, _tag: "proposed", mempool, ...candidate, signatures };
+                    return certifyProposal(queued, authority, proposed, frameHash, handoverLeader !== null, included);
+                  }),
+                ),
+            ),
+          );
+        }),
+    ),
+  );
 };
 // ---- og entity/consensus/j-prefix/{prefix-round, prefix-input, prefix-validation}.ts + proposal/selection.ts: the J prefix inside Entity consensus ----
 const jpView = (r: EntityEnv): JPrefixView => ({ state: r.state, head: r.head });
