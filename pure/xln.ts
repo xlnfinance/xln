@@ -22777,420 +22777,1211 @@ const queueReturned = (d: Draft, target: AccountTxTarget): Draft => {
   return admitted.ok ? { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value) } : d;
 };
 // ---- og entity/tx/handlers/payments/settle.ts: settle_propose / update / approve / execute / reject, deferred approvals, committed auto-approval, continuations ----
+const isSettleTransition = (tx: { readonly type: string }): boolean => tx.type === "settle_transition";
 /** og hasPendingSettlementTransition: a settle_transition queued in the mempool or inside our pending frame. */
-const settlePending = (c: AccountReplica): boolean => c.mempool.some((tx) => tx.type === "settle_transition") || (c._tag === "proposed" && c.candidate.frame.txs.some((tx) => tx.type === "settle_transition"));
+const settlePending = (c: AccountReplica): boolean =>
+  c.mempool.some(isSettleTransition) || (c._tag === "proposed" && c.candidate.frame.txs.some(isSettleTransition));
+const SETTLE_PENDING = "SETTLEMENT_TRANSITION_ALREADY_PENDING";
+/** Any signature, or a pinned N+1 proof: the workspace can no longer be edited or silently dropped. */
+const workspaceSigned = (w: SettlementWorkspace): boolean =>
+  Boolean(w.settlementHash || w.leftHanko || w.rightHanko || w.postSettlementDisputeProof);
 const bodyReason = (e: BodyError): string => (e._tag === "settlement" ? e.reason : e._tag);
-const bodyInvariant = <X,>(r: Result<X, BodyError>): Result<X, EntityError> => mapErr(r, (e): EntityError => ({ _tag: "entity_invariant", reason: bodyReason(e) }));
+const bodyInvariant = <X,>(r: Result<X, BodyError>): Result<X, EntityError> =>
+  mapErr(r, (e): EntityError => ({ _tag: "entity_invariant", reason: bodyReason(e) }));
 const settleSay = (d: Draft, message: string): Draft => ({ ...d, events: [...(d.events ?? []), status(message)] });
-/** og EntityState.deferredAccountProposals / settlementContinuations: live maps in `committed`; the root commits them as entity collections (entityRootOf). */
-const liveMap = <V,>(v: Binary | undefined): ReadonlyMap<string, V> => (v instanceof Map ? (v as ReadonlyMap<string, V>) : new Map());
-const deferredOf = (state: EntityState): ReadonlyMap<string, string> => liveMap(state.committed["deferredAccountProposals"]);
-const withDeferred = (state: EntityState, m: ReadonlyMap<string, string>): EntityState => ({ ...state, committed: { ...state.committed, deferredAccountProposals: m as unknown as Binary } });
+const noAccount = (peer: EntityId): Result<never, EntityError> => invariant(`No account with ${peer.slice(-4)}`);
+/**
+ * og EntityState.deferredAccountProposals / settlementContinuations: live maps in `committed`; the root commits them as
+ * entity collections (entityRootOf).
+ */
+const liveMap = <V,>(v: Binary | undefined): ReadonlyMap<string, V> =>
+  v instanceof Map ? (v as ReadonlyMap<string, V>) : new Map();
+const deferredOf = (state: EntityState): ReadonlyMap<string, string> =>
+  liveMap(state.committed["deferredAccountProposals"]);
+const withDeferred = (state: EntityState, m: ReadonlyMap<string, string>): EntityState => ({
+  ...state,
+  committed: { ...state.committed, deferredAccountProposals: m as unknown as Binary },
+});
+const forgetDeferred = (state: EntityState, peer: string): EntityState =>
+  withDeferred(state, mapDelete(deferredOf(state), peer));
 /** og deferredAccountProposals.set with the conflicting-hash guard. */
-const deferApproval = (state: EntityState, peer: string, hash: string, code: string): Result<EntityState, EntityError> => {
-  const existing = deferredOf(state).get(peer);
-  return existing !== undefined && existing !== hash ? invariant(`${code}:${existing}:${hash}`) : ok(withDeferred(state, mapSet(deferredOf(state), peer, hash)));
+const deferApproval = (
+  state: EntityState,
+  peer: string,
+  hash: string,
+  code: string,
+): Result<EntityState, EntityError> => {
+  const deferred = deferredOf(state);
+  const existing = deferred.get(peer);
+  return existing !== undefined && existing !== hash
+    ? invariant(`${code}:${existing}:${hash}`)
+    : ok(withDeferred(state, mapSet(deferred, peer, hash)));
 };
 export type SettlementContinuationAction =
   | { readonly type: "r2r"; readonly toEntityId: string; readonly tokenId: number; readonly amount: bigint }
   | { readonly type: "r2e"; readonly receivingEntity: string; readonly tokenId: number; readonly amount: bigint }
-  | { readonly type: "r2c"; readonly counterpartyId: string; readonly receivingEntityId?: string | undefined; readonly tokenId: number; readonly amount: bigint };
-export type SettlementContinuationPlan = { readonly actions: readonly SettlementContinuationAction[]; readonly broadcast: boolean };
-type PendingContinuation = SettlementContinuationPlan & { readonly workspaceHash: string };
-const continuationsOf = (state: EntityState): ReadonlyMap<string, PendingContinuation> => liveMap(state.committed["settlementContinuations"]);
-const withContinuations = (state: EntityState, m: ReadonlyMap<string, PendingContinuation>): EntityState => ({ ...state, committed: { ...state.committed, settlementContinuations: m as unknown as Binary } });
-/** og assertSettlementContinuation: at most one action, a boolean broadcast, a safe token id, a positive amount, lowercase bytes32 entities. */
-const continuationIssue = (c: SettlementContinuationPlan): string | undefined => {
-  if (!Array.isArray(c.actions)) return "SETTLEMENT_CONTINUATION_ACTIONS_INVALID";
-  if (c.actions.length > 1) return `SETTLEMENT_CONTINUATION_ACTION_LIMIT_EXCEEDED:${c.actions.length}`;
-  if (typeof c.broadcast !== "boolean") return "SETTLEMENT_CONTINUATION_BROADCAST_INVALID";
-  for (const [i, a] of c.actions.entries()) {
-    if (!Number.isSafeInteger(a.tokenId) || a.tokenId < 0) return `SETTLEMENT_CONTINUATION_TOKEN_INVALID:${i}`;
-    if (typeof a.amount !== "bigint" || a.amount <= 0n) return `SETTLEMENT_CONTINUATION_AMOUNT_INVALID:${i}`;
-    const ids = a.type === "r2r" ? [a.toEntityId] : a.type === "r2e" ? [a.receivingEntity] : [a.counterpartyId, ...(a.receivingEntityId ? [a.receivingEntityId] : [])];
-    if (ids.some((id) => !ENTITY_WORD.test(id))) return `SETTLEMENT_CONTINUATION_ENTITY_INVALID:${i}`;
-  }
-  return undefined;
+  | {
+      readonly type: "r2c";
+      readonly counterpartyId: string;
+      readonly receivingEntityId?: string | undefined;
+      readonly tokenId: number;
+      readonly amount: bigint;
+    };
+export type SettlementContinuationPlan = {
+  readonly actions: readonly SettlementContinuationAction[];
+  readonly broadcast: boolean;
 };
+type PendingContinuation = SettlementContinuationPlan & { readonly workspaceHash: string };
+const continuationsOf = (state: EntityState): ReadonlyMap<string, PendingContinuation> =>
+  liveMap(state.committed["settlementContinuations"]);
+const withContinuations = (state: EntityState, m: ReadonlyMap<string, PendingContinuation>): EntityState => ({
+  ...state,
+  committed: { ...state.committed, settlementContinuations: m as unknown as Binary },
+});
+const forgetContinuation = (d: Draft, peer: string): Draft => ({
+  ...d,
+  state: withContinuations(d.state, mapDelete(continuationsOf(d.state), peer)),
+});
+/** The entities one continuation action pays; an unknown action type reads as r2c, as in og. */
+const continuationEntities = (a: SettlementContinuationAction): readonly string[] => {
+  switch (a.type) {
+    case "r2r":
+      return [a.toEntityId];
+    case "r2e":
+      return [a.receivingEntity];
+    default:
+      return [a.counterpartyId, ...(a.receivingEntityId ? [a.receivingEntityId] : [])];
+  }
+};
+const continuationActionIssue = (a: SettlementContinuationAction, i: number): string | undefined => {
+  switch (true) {
+    case !Number.isSafeInteger(a.tokenId) || a.tokenId < 0:
+      return `SETTLEMENT_CONTINUATION_TOKEN_INVALID:${i}`;
+    case typeof a.amount !== "bigint" || a.amount <= 0n:
+      return `SETTLEMENT_CONTINUATION_AMOUNT_INVALID:${i}`;
+    case continuationEntities(a).some((id) => !ENTITY_WORD.test(id)):
+      return `SETTLEMENT_CONTINUATION_ENTITY_INVALID:${i}`;
+    default:
+      return undefined;
+  }
+};
+/**
+ * og assertSettlementContinuation: at most one action, a boolean broadcast, a safe token id, a positive amount,
+ * lowercase bytes32 entities.
+ */
+const continuationIssue = (c: SettlementContinuationPlan): string | undefined => {
+  switch (true) {
+    case !Array.isArray(c.actions):
+      return "SETTLEMENT_CONTINUATION_ACTIONS_INVALID";
+    case c.actions.length > 1:
+      return `SETTLEMENT_CONTINUATION_ACTION_LIMIT_EXCEEDED:${c.actions.length}`;
+    case typeof c.broadcast !== "boolean":
+      return "SETTLEMENT_CONTINUATION_BROADCAST_INVALID";
+    default:
+      return firstDefined(...c.actions.map((a, i) => () => continuationActionIssue(a, i)));
+  }
+};
+/** The Account a settle_* command acts on, and our side of it. */
 type SettleTarget = { readonly child: AccountReplica; readonly iAmLeft: boolean };
-const settleChild = (d: Draft, peer: EntityId): SettleTarget | undefined => { const child = d.accountReplicas.get(peer); return child === undefined ? undefined : { child, iAmLeft: isLeft(d.state.id, replicaId(child)) }; };
+const settleChild = (d: Draft, peer: EntityId): SettleTarget | undefined => {
+  const child = d.accountReplicas.get(peer);
+  return child === undefined ? undefined : { child, iAmLeft: isLeft(d.state.id, replicaId(child)) };
+};
 /** og compileOps on the proposer path: a refusal is a plain Error (the whole input). */
-const opsCheck = (ops: readonly SettlementOp[], isLeftSide: boolean): Result<void, EntityError> => bodyInvariant(map(compileOps(ops, isLeftSide), () => undefined));
+const opsCheck = (ops: readonly SettlementOp[], isLeftSide: boolean): Result<void, EntityError> =>
+  bodyInvariant(map(compileOps(ops, isLeftSide), () => undefined));
 type SettleEnqueue = (d: Draft, peer: EntityId, tx: AccountTx) => Result<Draft, EntityError>;
-/** og handleSettlePropose: skip an existing workspace; otherwise queue a revision-1 upsert (the proposer executes by default) and pin an optional continuation. */
-const settlePropose = (d: Draft, x: Extract<EntityTx, { type: "settle_propose" }>["data"], queue: SettleEnqueue): Result<Draft, EntityError> => {
-  const peer = x.counterpartyEntityId, t = settleChild(d, peer);
-  if (t === undefined) return invariant(`No account with ${peer.slice(-4)}`);
-  if (t.child.state.settlement !== undefined) return ok(settleSay(d, `⏭️ Settlement propose skipped: workspace already exists (v${t.child.state.settlement.revision})`));
-  if (settlePending(t.child)) return invariant("SETTLEMENT_TRANSITION_ALREADY_PENDING");
-  return chain(opsCheck(x.ops, t.iAmLeft), () => {
-    const executorIsLeft = x.executorIsLeft ?? t.iAmLeft, c = x.continuation;
-    const pinned: Result<Draft, EntityError> = c === undefined ? ok(d) : (() => {
-      const issue = continuationIssue(c);
-      if (issue !== undefined) return invariant(issue);
-      if (executorIsLeft !== t.iAmLeft) return invariant("SETTLEMENT_CONTINUATION_REQUIRES_LOCAL_EXECUTOR");
-      if (continuationsOf(d.state).has(peer)) return invariant(`SETTLEMENT_CONTINUATION_ALREADY_PENDING:${peer}`);
-      return map(bodyInvariant(workspaceHashOf(t.child.state.account.id, { revision: 1, ops: x.ops, lastModifiedByLeft: t.iAmLeft, executorIsLeft, memo: x.memo })), (workspaceHash): Draft =>
-        ({ ...d, state: withContinuations(d.state, mapSet(continuationsOf(d.state), peer, { workspaceHash, actions: c.actions.map((a) => ({ ...a })), broadcast: c.broadcast })) }));
-    })();
-    return chain(pinned, (p) => map(queue(p, peer, { type: "settle_transition", kind: "upsert", revision: 1, ops: x.ops, executorIsLeft, ...opt("memo", x.memo) }), (q) => settleSay(q, "⚖️ Settlement proposal queued for bilateral Account consensus")));
-  });
+type SettleData<K extends EntityTx["type"]> = Extract<EntityTx, { type: K }>["data"];
+/**
+ * og's continuation pin: a sound plan that we execute, the only one pending for this peer, bound to the revision-1
+ * workspace hash.
+ */
+const pinContinuation = (
+  d: Draft,
+  x: SettleData<"settle_propose">,
+  t: SettleTarget,
+  executorIsLeft: boolean,
+): Result<Draft, EntityError> => {
+  const c = x.continuation;
+  const peer = x.counterpartyEntityId;
+  if (c === undefined) return ok(d);
+  const issue = continuationIssue(c);
+  if (issue !== undefined) return invariant(issue);
+  if (executorIsLeft !== t.iAmLeft) return invariant("SETTLEMENT_CONTINUATION_REQUIRES_LOCAL_EXECUTOR");
+  if (continuationsOf(d.state).has(peer)) return invariant(`SETTLEMENT_CONTINUATION_ALREADY_PENDING:${peer}`);
+  const workspace = { revision: 1, ops: x.ops, lastModifiedByLeft: t.iAmLeft, executorIsLeft, memo: x.memo };
+  const pin = (workspaceHash: string): Draft => {
+    const pending: PendingContinuation = {
+      workspaceHash,
+      actions: c.actions.map((a) => ({ ...a })),
+      broadcast: c.broadcast,
+    };
+    return { ...d, state: withContinuations(d.state, mapSet(continuationsOf(d.state), peer, pending)) };
+  };
+  return map(bodyInvariant(workspaceHashOf(t.child.state.account.id, workspace)), pin);
+};
+/**
+ * og handleSettlePropose: skip an existing workspace; otherwise queue a revision-1 upsert (the proposer executes by
+ * default) and pin an optional continuation.
+ */
+const settlePropose = (d: Draft, x: SettleData<"settle_propose">, queue: SettleEnqueue): Result<Draft, EntityError> => {
+  const peer = x.counterpartyEntityId;
+  const t = settleChild(d, peer);
+  if (t === undefined) return noAccount(peer);
+  const existing = t.child.state.settlement;
+  if (existing !== undefined) {
+    return ok(settleSay(d, `⏭️ Settlement propose skipped: workspace already exists (v${existing.revision})`));
+  }
+  if (settlePending(t.child)) return invariant(SETTLE_PENDING);
+  const executorIsLeft = x.executorIsLeft ?? t.iAmLeft;
+  const upsert: AccountTx = {
+    type: "settle_transition",
+    kind: "upsert",
+    revision: 1,
+    ops: x.ops,
+    executorIsLeft,
+    ...opt("memo", x.memo),
+  };
+  const queued = (p: Draft): Result<Draft, EntityError> =>
+    map(queue(p, peer, upsert), (q) => settleSay(q, "⚖️ Settlement proposal queued for bilateral Account consensus"));
+  return chain(opsCheck(x.ops, t.iAmLeft), () => chain(pinContinuation(d, x, t, executorIsLeft), queued));
 };
 /** og handleSettleUpdate: an unsigned workspace is replaced by an exact previous-hash revision+1 upsert. */
-const settleUpdate = (d: Draft, x: Extract<EntityTx, { type: "settle_update" }>["data"], queue: SettleEnqueue): Result<Draft, EntityError> => {
-  const peer = x.counterpartyEntityId, t = settleChild(d, peer), w = t?.child.state.settlement;
-  if (t === undefined) return invariant(`No account with ${peer.slice(-4)}`);
+const settleUpdate = (d: Draft, x: SettleData<"settle_update">, queue: SettleEnqueue): Result<Draft, EntityError> => {
+  const peer = x.counterpartyEntityId;
+  const t = settleChild(d, peer);
+  const w = t?.child.state.settlement;
+  if (t === undefined) return noAccount(peer);
   if (w === undefined) return invariant("No settlement workspace to update. Use settle_propose first.");
-  if (settlePending(t.child)) return invariant("SETTLEMENT_TRANSITION_ALREADY_PENDING");
-  if (w.leftHanko !== undefined || w.rightHanko !== undefined) return invariant("Cannot update after signing. Use settle_reject to start over.");
-  return chain(opsCheck(x.ops, t.iAmLeft), () => chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), (previousWorkspaceHash) => {
-    const revision = w.revision + 1, memo = x.memo !== undefined ? x.memo : w.memo;
-    return map(queue(d, peer, { type: "settle_transition", kind: "upsert", revision, previousWorkspaceHash, ops: x.ops, executorIsLeft: x.executorIsLeft ?? w.executorIsLeft, ...opt("memo", memo) }), (q) => settleSay(q, `⚖️ Settlement update v${revision} queued for bilateral Account consensus`));
-  }));
+  if (settlePending(t.child)) return invariant(SETTLE_PENDING);
+  if (w.leftHanko !== undefined || w.rightHanko !== undefined) {
+    return invariant("Cannot update after signing. Use settle_reject to start over.");
+  }
+  const revision = w.revision + 1;
+  const upsert = (previousWorkspaceHash: string): AccountTx => ({
+    type: "settle_transition",
+    kind: "upsert",
+    revision,
+    previousWorkspaceHash,
+    ops: x.ops,
+    executorIsLeft: x.executorIsLeft ?? w.executorIsLeft,
+    ...opt("memo", x.memo !== undefined ? x.memo : w.memo),
+  });
+  const queued = (previous: string): Result<Draft, EntityError> =>
+    map(queue(d, peer, upsert(previous)), (q) =>
+      settleSay(q, `⚖️ Settlement update v${revision} queued for bilateral Account consensus`),
+    );
+  return chain(opsCheck(x.ops, t.iAmLeft), () =>
+    chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), queued),
+  );
 };
-/** og handleSettleReject: an unsigned workspace is cleared by an exact Account-frame clear; no workspace is a silent no-op. */
-const settleReject = (d: Draft, x: Extract<EntityTx, { type: "settle_reject" }>["data"], queue: SettleEnqueue): Result<Draft, EntityError> => {
-  const peer = x.counterpartyEntityId, t = settleChild(d, peer), w = t?.child.state.settlement;
-  if (t === undefined) return invariant(`No account with ${peer.slice(-4)}`);
+/**
+ * og handleSettleReject: an unsigned workspace is cleared by an exact Account-frame clear; no workspace is a silent
+ * no-op.
+ */
+const settleReject = (d: Draft, x: SettleData<"settle_reject">, queue: SettleEnqueue): Result<Draft, EntityError> => {
+  const peer = x.counterpartyEntityId;
+  const t = settleChild(d, peer);
+  const w = t?.child.state.settlement;
+  if (t === undefined) return noAccount(peer);
   if (w === undefined) return ok(d);
-  if (settlePending(t.child)) return invariant("SETTLEMENT_TRANSITION_ALREADY_PENDING");
-  if (w.settlementHash || w.leftHanko || w.rightHanko || w.postSettlementDisputeProof) return invariant("SETTLEMENT_REJECT_SIGNED_FORBIDDEN");
-  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), (workspaceHash) =>
-    map(queue(d, peer, { type: "settle_transition", kind: "clear", revision: w.revision, workspaceHash }), (q) => settleSay(q, `❌ Settlement clear queued${x.reason ? `: ${x.reason}` : ""}`)));
+  if (settlePending(t.child)) return invariant(SETTLE_PENDING);
+  if (workspaceSigned(w)) return invariant("SETTLEMENT_REJECT_SIGNED_FORBIDDEN");
+  const clear = (workspaceHash: string): AccountTx => ({
+    type: "settle_transition",
+    kind: "clear",
+    revision: w.revision,
+    workspaceHash,
+  });
+  const queued = (workspaceHash: string): Result<Draft, EntityError> =>
+    map(queue(d, peer, clear(workspaceHash)), (q) =>
+      settleSay(q, `❌ Settlement clear queued${x.reason ? `: ${x.reason}` : ""}`),
+    );
+  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), queued);
 };
-/** og handleSettleApprove: the approval is deferred until the Account is idle (materializeDeferredSettlementApprovals signs it). */
-const settleApprove = (d: Draft, x: Extract<EntityTx, { type: "settle_approve" }>["data"]): Result<Draft, EntityError> => {
-  const peer = x.counterpartyEntityId, t = settleChild(d, peer), w = t?.child.state.settlement;
-  if (t === undefined) return invariant(`No account with ${peer.slice(-4)}`);
+/**
+ * og handleSettleApprove: the approval is deferred until the Account is idle (materializeDeferredSettlementApprovals
+ * signs it).
+ */
+const settleApprove = (d: Draft, x: SettleData<"settle_approve">): Result<Draft, EntityError> => {
+  const peer = x.counterpartyEntityId;
+  const t = settleChild(d, peer);
+  const w = t?.child.state.settlement;
+  if (t === undefined) return noAccount(peer);
   if (w === undefined) return invariant("No settlement workspace to approve.");
-  if (settlePending(t.child)) return invariant("SETTLEMENT_TRANSITION_ALREADY_PENDING");
+  if (settlePending(t.child)) return invariant(SETTLE_PENDING);
   if (w.status === "submitted") return ok(settleSay(d, "⏭️ settle_execute skipped: workspace already submitted"));
-  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), (hash) => x.workspaceHash !== hash ? invariant(`SETTLEMENT_APPROVAL_WORKSPACE_HASH_MISMATCH:${x.workspaceHash}:${hash}`)
-    : map(deferApproval(d.state, peer, hash, "SETTLEMENT_APPROVAL_ALREADY_DEFERRED"), (state) => settleSay({ ...d, state }, "⚖️ Settlement approval accepted; waiting for prior Account work")));
+  const defer = (hash: string): Result<Draft, EntityError> =>
+    x.workspaceHash !== hash
+      ? invariant(`SETTLEMENT_APPROVAL_WORKSPACE_HASH_MISMATCH:${x.workspaceHash}:${hash}`)
+      : map(deferApproval(d.state, peer, hash, "SETTLEMENT_APPROVAL_ALREADY_DEFERRED"), (state) =>
+          settleSay({ ...d, state }, "⚖️ Settlement approval accepted; waiting for prior Account work"),
+        );
+  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), defer);
 };
-type OgSettlementDiff = { readonly tokenId: number; readonly leftDiff: bigint; readonly rightDiff: bigint; readonly collateralDiff: bigint; readonly ondeltaDiff: bigint };
-type OgSettlementRow = { readonly leftEntity: string; readonly rightEntity: string; readonly diffs: readonly OgSettlementDiff[]; readonly forgiveDebtsInTokenIds: readonly number[]; readonly sig: string; readonly nonce: number };
-type OgC2RRow = { readonly counterparty: string; readonly tokenId: number; readonly amount: bigint; readonly nonce: number; readonly sig: string };
+type OgSettlementDiff = {
+  readonly tokenId: number;
+  readonly leftDiff: bigint;
+  readonly rightDiff: bigint;
+  readonly collateralDiff: bigint;
+  readonly ondeltaDiff: bigint;
+};
+type OgSettlementRow = {
+  readonly leftEntity: string;
+  readonly rightEntity: string;
+  readonly diffs: readonly OgSettlementDiff[];
+  readonly forgiveDebtsInTokenIds: readonly number[];
+  readonly sig: string;
+  readonly nonce: number;
+};
+type OgC2RRow = {
+  readonly counterparty: string;
+  readonly tokenId: number;
+  readonly amount: bigint;
+  readonly nonce: number;
+  readonly sig: string;
+};
 const ogBatchOps = (b: CommittedJBatch["batch"]): number => BATCH_FIELDS.reduce((n, f) => n + (b[f] ?? []).length, 0);
 /** og detectPureC2R: one negative-collateral diff that only pays the withdrawer's reserve. */
-const pureC2R = (diffs: readonly OgSettlementDiff[], forgive: readonly number[]): { readonly withdrawer: "left" | "right"; readonly tokenId: number; readonly amount: bigint } | undefined => {
+const pureC2R = (
+  diffs: readonly OgSettlementDiff[],
+  forgive: readonly number[],
+): { readonly withdrawer: "left" | "right"; readonly tokenId: number; readonly amount: bigint } | undefined => {
   const d = diffs[0];
   if (diffs.length !== 1 || forgive.length > 0 || d === undefined || d.collateralDiff >= 0n) return undefined;
   const amount = -d.collateralDiff;
-  if (d.leftDiff === amount && d.rightDiff === 0n && d.ondeltaDiff === -amount) return { withdrawer: "left", tokenId: d.tokenId, amount };
-  return d.leftDiff === 0n && d.rightDiff === amount && d.ondeltaDiff === 0n ? { withdrawer: "right", tokenId: d.tokenId, amount } : undefined;
-};
-/** og batchAddSettlement on the committed (og-shaped) jBatchState: exact retries are ignored, a conflict throws, a pure C2R the initiator withdraws is compressed into collateralToReserve. */
-export const addSettlementRow = (jb: CommittedJBatch & { readonly status?: string }, row: OgSettlementRow, initiator: string, disableShortcut: boolean): Result<CommittedJBatch, EntityError> => {
-  const L = J_BATCH_LIMITS, n = (s: string): string => s.trim().toLowerCase(), tag = `${row.leftEntity.slice(-4)}:${row.rightEntity.slice(-4)}`, b = jb.batch;
-  if (row.diffs.length > L.maxSettlementDiffs) return invariant(`J_BATCH_LIMIT_EXCEEDED: settlement.diffs ${row.diffs.length}/${L.maxSettlementDiffs}`);
-  if (row.forgiveDebtsInTokenIds.length > L.maxSettlementForgivenessIds) return invariant(`J_BATCH_LIMIT_EXCEEDED: settlement.forgiveDebtsInTokenIds ${row.forgiveDebtsInTokenIds.length}/${L.maxSettlementForgivenessIds}`);
-  if (row.leftEntity >= row.rightEntity) return invariant(`Settlement entities must be ordered: ${row.leftEntity} >= ${row.rightEntity}`);
-  if ((row.diffs.length > 0 || row.forgiveDebtsInTokenIds.length > 0) && (!row.sig || row.sig === "0x")) return invariant(`Settlement ${row.leftEntity.slice(-4)}↔${row.rightEntity.slice(-4)} missing hanko signature`);
-  const settlements = (b["settlements"] ?? []) as readonly OgSettlementRow[], c2rs = (b["collateralToReserve"] ?? []) as readonly OgC2RRow[];
-  const existing = settlements.find((s) => n(s.leftEntity) === n(row.leftEntity) && n(s.rightEntity) === n(row.rightEntity));
-  if (existing !== undefined) {
-    const same = existing.diffs.length === row.diffs.length && existing.diffs.every((x, i) => { const y = row.diffs[i]; return y !== undefined && BigInt(x.tokenId) === BigInt(y.tokenId) && x.leftDiff === y.leftDiff && x.rightDiff === y.rightDiff && x.collateralDiff === y.collateralDiff && x.ondeltaDiff === y.ondeltaDiff; })
-      && existing.forgiveDebtsInTokenIds.length === row.forgiveDebtsInTokenIds.length && existing.forgiveDebtsInTokenIds.every((x, i) => row.forgiveDebtsInTokenIds[i] !== undefined && BigInt(x) === BigInt(row.forgiveDebtsInTokenIds[i]!))
-      && existing.sig.toLowerCase() === row.sig.toLowerCase() && BigInt(existing.nonce) === BigInt(row.nonce);
-    return same ? ok(jb) : invariant(`J_BATCH_SETTLEMENT_CONFLICT:${tag}`);
+  switch (true) {
+    case d.leftDiff === amount && d.rightDiff === 0n && d.ondeltaDiff === -amount:
+      return { withdrawer: "left", tokenId: d.tokenId, amount };
+    case d.leftDiff === 0n && d.rightDiff === amount && d.ondeltaDiff === 0n:
+      return { withdrawer: "right", tokenId: d.tokenId, amount };
+    default:
+      return undefined;
   }
-  const c2r = pureC2R(row.diffs, row.forgiveDebtsInTokenIds), withdrawer = c2r === undefined ? undefined : c2r.withdrawer === "left" ? row.leftEntity : row.rightEntity;
-  const shortcutCounterparty = c2r === undefined ? undefined : c2r.withdrawer === "left" ? row.rightEntity : row.leftEntity;
-  const shortcut = c2r !== undefined && !!row.sig && !disableShortcut && (!initiator || n(initiator) === n(withdrawer!));
-  const owner = n(initiator || row.leftEntity), pairCounterparty = shortcut ? shortcutCounterparty : owner === n(row.leftEntity) ? row.rightEntity : owner === n(row.rightEntity) ? row.leftEntity : undefined;
-  const prior = pairCounterparty === undefined ? undefined : c2rs.find((op) => n(op.counterparty) === n(pairCounterparty));
-  if (prior !== undefined) return shortcut && BigInt(prior.tokenId) === BigInt(c2r!.tokenId) && prior.amount === c2r!.amount && BigInt(prior.nonce) === BigInt(row.nonce) && prior.sig.toLowerCase() === row.sig.toLowerCase() ? ok(jb) : invariant(`J_BATCH_SETTLEMENT_CONFLICT:${tag}`);
-  const accumulating = jb.status === "empty" ? { status: "accumulating" } : {};
-  if (shortcut) {
-    if (ogBatchOps(b) + 1 > L.maxTotalOps) return invariant(`J_BATCH_LIMIT_EXCEEDED: collateralToReserve would exceed total ops ${ogBatchOps(b) + 1}/${L.maxTotalOps}`);
-    const op: OgC2RRow = { counterparty: shortcutCounterparty!, tokenId: c2r!.tokenId, amount: c2r!.amount, nonce: row.nonce, sig: row.sig };
-    return ok({ ...jb, ...accumulating, batch: { ...b, collateralToReserve: [...c2rs, op] as unknown as readonly Binary[] } });
-  }
-  if (settlements.length + 1 > L.maxSettlements) return invariant(`J_BATCH_LIMIT_EXCEEDED: settlements ${settlements.length + 1}/${L.maxSettlements}`);
-  if (ogBatchOps(b) + 1 > L.maxTotalOps) return invariant(`J_BATCH_LIMIT_EXCEEDED: settlement would exceed total ops ${ogBatchOps(b) + 1}/${L.maxTotalOps}`);
-  return ok({ ...jb, ...accumulating, batch: { ...b, settlements: [...settlements, row] as unknown as readonly Binary[] } });
 };
-const sameDiff = (a: WorkspaceDiff, b: WorkspaceDiff): boolean => a.tokenId === b.tokenId && a.leftDiff === b.leftDiff && a.rightDiff === b.rightDiff && a.collateralDiff === b.collateralDiff && a.ondeltaDiff === b.ondeltaDiff;
-/** og prepareSettlementExecution: recompiled diffs equal the cached ones, the signed nonce and hash reproduce, both Hankos and the exact N+1 proof are present. */
-const prepareExecution = (state: EntityState, a: AccountBody, w: SettlementWorkspace, dt?: DeltaTransformerRef): Result<SettlementTargets & { readonly nonce: number }, EntityError> => chain(bodyInvariant(compileOps(w.ops, w.lastModifiedByLeft)), ({ diffs }) => {
-  const cached = w.compiledDiffs;
-  if (cached !== undefined && diffs.length !== cached.length) return invariant(`Recompiled diffs length mismatch: ${diffs.length} vs ${cached.length}`);
-  const bad = cached === undefined ? -1 : diffs.findIndex((x, i) => !sameDiff(x, cached[i]!));
-  if (bad >= 0) return invariant(`Recompiled diff mismatch at index ${bad}`);
-  const nonce = w.nonceAtSign;
-  if (typeof nonce !== "number" || !Number.isSafeInteger(nonce) || nonce < 1) return invariant(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(nonce)}`);
-  if (!w.settlementHash) return invariant("SETTLEMENT_SIGNED_HASH_MISSING");
-  if (state.jurisdiction.depositoryAddress === "" || !state.jurisdictionConfig?.entityProviderAddress) return invariant("SETTLEMENT_JURISDICTION_MISSING");
-  const p = w.postSettlementDisputeProof;
-  return chain(bodyInvariant(settlementTargets(a, w, nonce, p?.proposerIsLeft ?? w.lastModifiedByLeft, dt)), (t) => {
-    if (t.settlementHash.toLowerCase() !== w.settlementHash!.toLowerCase()) return invariant(`SETTLEMENT_SIGNED_HASH_MISMATCH:${w.settlementHash}:${t.settlementHash}`);
-    if (w.status !== "ready_to_submit") return invariant(`SETTLEMENT_HANKOS_INCOMPLETE:${w.status}`);
-    if (p === undefined || p.nonce !== nonce + 1) return invariant(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${String(p?.nonce)}:${nonce + 1}`);
-    if (p.proofBodyHash.toLowerCase() !== t.postProof.proofBodyHash.toLowerCase() || p.disputeHash.toLowerCase() !== t.postProof.disputeHash.toLowerCase()) return invariant("POST_SETTLEMENT_PROOF_HASH_MISMATCH");
-    if (!p.leftHanko || !p.rightHanko) return invariant("POST_SETTLEMENT_PROOF_HANKO_MISSING");
-    return ok({ ...t, nonce });
+/**
+ * og's row-level batch guards: the diff and forgiveness limits, ordered entities, and a signature when anything moves.
+ */
+const settlementRowIssue = (row: OgSettlementRow): string | undefined => {
+  const L = J_BATCH_LIMITS;
+  const diffs = row.diffs.length;
+  const forgiven = row.forgiveDebtsInTokenIds.length;
+  const pair = `${row.leftEntity.slice(-4)}↔${row.rightEntity.slice(-4)}`;
+  switch (true) {
+    case diffs > L.maxSettlementDiffs:
+      return `J_BATCH_LIMIT_EXCEEDED: settlement.diffs ${diffs}/${L.maxSettlementDiffs}`;
+    case forgiven > L.maxSettlementForgivenessIds:
+      return `J_BATCH_LIMIT_EXCEEDED: settlement.forgiveDebtsInTokenIds ${forgiven}/${L.maxSettlementForgivenessIds}`;
+    case row.leftEntity >= row.rightEntity:
+      return `Settlement entities must be ordered: ${row.leftEntity} >= ${row.rightEntity}`;
+    case (diffs > 0 || forgiven > 0) && (!row.sig || row.sig === "0x"):
+      return `Settlement ${pair} missing hanko signature`;
+    default:
+      return undefined;
+  }
+};
+const sameOgDiff = (x: OgSettlementDiff, y: OgSettlementDiff | undefined): boolean =>
+  y !== undefined &&
+  BigInt(x.tokenId) === BigInt(y.tokenId) &&
+  x.leftDiff === y.leftDiff &&
+  x.rightDiff === y.rightDiff &&
+  x.collateralDiff === y.collateralDiff &&
+  x.ondeltaDiff === y.ondeltaDiff;
+const sameTokenIds = (xs: readonly number[], ys: readonly number[]): boolean =>
+  xs.length === ys.length &&
+  xs.every((x, i) => {
+    const y = ys[i];
+    return y !== undefined && BigInt(x) === BigInt(y);
   });
+/** og's exact-retry test for a settlement row: the same diffs, forgiveness, signature and nonce. */
+const sameSettlementRow = (a: OgSettlementRow, b: OgSettlementRow): boolean =>
+  a.diffs.length === b.diffs.length &&
+  a.diffs.every((x, i) => sameOgDiff(x, b.diffs[i])) &&
+  sameTokenIds(a.forgiveDebtsInTokenIds, b.forgiveDebtsInTokenIds) &&
+  a.sig.toLowerCase() === b.sig.toLowerCase() &&
+  BigInt(a.nonce) === BigInt(b.nonce);
+/** og's exact-retry test for a collateralToReserve row. */
+const sameC2RRow = (a: OgC2RRow, b: OgC2RRow): boolean =>
+  BigInt(a.tokenId) === BigInt(b.tokenId) &&
+  a.amount === b.amount &&
+  BigInt(a.nonce) === BigInt(b.nonce) &&
+  a.sig.toLowerCase() === b.sig.toLowerCase();
+/**
+ * og's C2R shortcut: a signed pure C2R, submitted by its withdrawer (or by nobody in particular), becomes one
+ * collateralToReserve row against the other side.
+ */
+const c2rShortcut = (row: OgSettlementRow, initiator: string, disabled: boolean): OgC2RRow | undefined => {
+  const c2r = pureC2R(row.diffs, row.forgiveDebtsInTokenIds);
+  if (c2r === undefined || !row.sig || disabled) return undefined;
+  const [withdrawer, counterparty] =
+    c2r.withdrawer === "left" ? [row.leftEntity, row.rightEntity] : [row.rightEntity, row.leftEntity];
+  const byWithdrawer = !initiator || lower(initiator) === lower(withdrawer);
+  return byWithdrawer
+    ? { counterparty, tokenId: c2r.tokenId, amount: c2r.amount, nonce: row.nonce, sig: row.sig }
+    : undefined;
+};
+/**
+ * The counterparty whose collateralToReserve row this settlement would collide with: the shortcut's, else the owner's.
+ */
+const c2rCounterparty = (
+  row: OgSettlementRow,
+  initiator: string,
+  shortcut: OgC2RRow | undefined,
+): string | undefined => {
+  if (shortcut !== undefined) return shortcut.counterparty;
+  switch (lower(initiator || row.leftEntity)) {
+    case lower(row.leftEntity):
+      return row.rightEntity;
+    case lower(row.rightEntity):
+      return row.leftEntity;
+    default:
+      return undefined;
+  }
+};
+type OgJBatch = CommittedJBatch & { readonly status?: string };
+/** The batch with one more row in `field`; the first row moves an empty batch to accumulating. */
+const appendBatchRows = (
+  jb: OgJBatch,
+  field: "settlements" | "collateralToReserve",
+  rows: readonly object[],
+): OgJBatch => ({
+  ...jb,
+  ...(jb.status === "empty" ? { status: "accumulating" } : {}),
+  batch: { ...jb.batch, [field]: rows as unknown as readonly Binary[] },
 });
-/** og handleSettleExecute: the executor verifies the counterparty's settlement Hanko and both N+1 Hankos, appends the settlement to the draft jBatch, and queues the Account submit. */
-const settleExecute = (d: Draft, x: Extract<EntityTx, { type: "settle_execute" }>["data"], verify: Verify, queue: SettleEnqueue, jReplicas?: ReadonlyMap<string, JReplica>): Result<Draft, EntityError> => {
-  const peer = x.counterpartyEntityId, t = settleChild(d, peer), w = t?.child.state.settlement, tag = peer.slice(-4);
-  if (t === undefined) return ok(settleSay(d, `⏭️ settle_execute skipped: no account with ${tag}`));
-  if (w === undefined) return ok(settleSay(d, `⏭️ settle_execute skipped: no workspace with ${tag}`));
-  // og rejectFailure: a reject disposition evicts only this tx
-  if (settlePending(t.child)) return err({ _tag: "entity_command", reason: "SETTLEMENT_TRANSITION_ALREADY_PENDING" });
-  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), (workspaceHash): Result<Draft, EntityError> => {
-    if (w.status === "submitted") return ok(settleSay(d, "⏭️ settle_execute skipped: settlement already submitted"));
-    if (w.executorIsLeft !== t.iAmLeft) return invariant(`SETTLEMENT_EXECUTOR_MISMATCH:expected=${w.executorIsLeft ? "left" : "right"}`);
-    const counterpartyHanko = t.iAmLeft ? w.rightHanko : w.leftHanko, { left, right } = t.child.state.account.id;
-    if (!counterpartyHanko) return ok(settleSay(d, "⏭️ settle_execute skipped: missing counterparty signature"));
-    return chain(prepareExecution(d.state, t.child.state, w, accountDt({ jReplicas }, t.child)), (p) => {
-      if (!verify(p.settlementHash, counterpartyHanko, peer)) return invariant("SETTLEMENT_NONEXECUTOR_HANKO_INVALID");
-      if (!verify(p.postProof.disputeHash, w.postSettlementDisputeProof!.leftHanko!, left as EntityId)) return invariant("POST_SETTLEMENT_LEFT_HANKO_INVALID");
-      if (!verify(p.postProof.disputeHash, w.postSettlementDisputeProof!.rightHanko!, right as EntityId)) return invariant("POST_SETTLEMENT_RIGHT_HANKO_INVALID");
-      const jb = (committedJBatch(d.state) ?? (initJBatch() as unknown as CommittedJBatch)) as CommittedJBatch & { readonly status?: string };
-      const seeded: Draft = { ...d, state: { ...d.state, committed: { ...d.state.committed, jBatchState: jb as unknown as Binary } } };
-      // og: a nonce-bound settlement never waits behind another on-chain batch
-      if (jb.sentBatch !== undefined) return ok(settleSay(seeded, "⏭️ settle_execute skipped: jBatch sentBatch pending"));
-      const row: OgSettlementRow = { leftEntity: t.iAmLeft ? d.state.id : peer, rightEntity: t.iAmLeft ? peer : d.state.id, diffs: p.diffs, forgiveDebtsInTokenIds: p.forgive, sig: counterpartyHanko, nonce: p.nonce };
-      return chain(addSettlementRow(jb, row, d.state.id, x.disableC2RShortcut ?? false), (next) => {
-        const batched: Draft = { ...seeded, state: { ...seeded.state, committed: { ...seeded.state.committed, jBatchState: next as unknown as Binary } } };
-        return map(queue(batched, peer, { type: "settle_transition", kind: "submit", revision: w.revision, workspaceHash }), (q) => settleSay(q, `✅ Settlement submission queued (${p.diffs.length} diffs) - use j_broadcast to commit`));
-      });
+/**
+ * og batchAddSettlement on the committed (og-shaped) jBatchState: exact retries are ignored, a conflict throws, a pure
+ * C2R the initiator withdraws is compressed into collateralToReserve.
+ */
+export const addSettlementRow = (
+  jb: OgJBatch,
+  row: OgSettlementRow,
+  initiator: string,
+  disableShortcut: boolean,
+): Result<CommittedJBatch, EntityError> => {
+  const L = J_BATCH_LIMITS;
+  const issue = settlementRowIssue(row);
+  if (issue !== undefined) return invariant(issue);
+  const conflict = invariant(`J_BATCH_SETTLEMENT_CONFLICT:${row.leftEntity.slice(-4)}:${row.rightEntity.slice(-4)}`);
+  const settlements = (jb.batch["settlements"] ?? []) as readonly OgSettlementRow[];
+  const c2rs = (jb.batch["collateralToReserve"] ?? []) as readonly OgC2RRow[];
+  const samePair = (s: OgSettlementRow): boolean =>
+    lower(s.leftEntity) === lower(row.leftEntity) && lower(s.rightEntity) === lower(row.rightEntity);
+  const existing = settlements.find(samePair);
+  if (existing !== undefined) return sameSettlementRow(existing, row) ? ok(jb) : conflict;
+  const shortcut = c2rShortcut(row, initiator, disableShortcut);
+  const counterparty = c2rCounterparty(row, initiator, shortcut);
+  const prior =
+    counterparty === undefined ? undefined : c2rs.find((op) => lower(op.counterparty) === lower(counterparty));
+  if (prior !== undefined) return shortcut !== undefined && sameC2RRow(prior, shortcut) ? ok(jb) : conflict;
+  const ops = ogBatchOps(jb.batch) + 1;
+  if (shortcut !== undefined) {
+    return ops > L.maxTotalOps
+      ? invariant(`J_BATCH_LIMIT_EXCEEDED: collateralToReserve would exceed total ops ${ops}/${L.maxTotalOps}`)
+      : ok(appendBatchRows(jb, "collateralToReserve", [...c2rs, shortcut]));
+  }
+  if (settlements.length + 1 > L.maxSettlements) {
+    return invariant(`J_BATCH_LIMIT_EXCEEDED: settlements ${settlements.length + 1}/${L.maxSettlements}`);
+  }
+  if (ops > L.maxTotalOps) {
+    return invariant(`J_BATCH_LIMIT_EXCEEDED: settlement would exceed total ops ${ops}/${L.maxTotalOps}`);
+  }
+  return ok(appendBatchRows(jb, "settlements", [...settlements, row]));
+};
+const sameDiff = (a: WorkspaceDiff, b: WorkspaceDiff | undefined): boolean =>
+  b !== undefined &&
+  a.tokenId === b.tokenId &&
+  a.leftDiff === b.leftDiff &&
+  a.rightDiff === b.rightDiff &&
+  a.collateralDiff === b.collateralDiff &&
+  a.ondeltaDiff === b.ondeltaDiff;
+/** og's recompile check: the cached diffs, when present, are exactly the recompiled ones. */
+const recompileIssue = (
+  diffs: readonly WorkspaceDiff[],
+  cached: readonly WorkspaceDiff[] | undefined,
+): string | undefined => {
+  if (cached === undefined) return undefined;
+  if (diffs.length !== cached.length) return `Recompiled diffs length mismatch: ${diffs.length} vs ${cached.length}`;
+  const bad = diffs.findIndex((x, i) => !sameDiff(x, cached[i]));
+  return bad >= 0 ? `Recompiled diff mismatch at index ${bad}` : undefined;
+};
+const sameProofHashes = (pin: PostSettlementProof, target: PostProofTarget): boolean =>
+  sameHex(pin.proofBodyHash, target.proofBodyHash) && sameHex(pin.disputeHash, target.disputeHash);
+/** A settlement ready to execute: its targets at the signed nonce, and both N+1 Hankos. */
+type ExecutionPlan = SettlementTargets & {
+  readonly nonce: number;
+  readonly leftHanko: string;
+  readonly rightHanko: string;
+};
+/**
+ * og prepareSettlementExecution: recompiled diffs equal the cached ones, the signed nonce and hash reproduce, both
+ * Hankos and the exact N+1 proof are present.
+ */
+const prepareExecution = (
+  state: EntityState,
+  a: AccountBody,
+  w: SettlementWorkspace,
+  dt?: DeltaTransformerRef,
+): Result<ExecutionPlan, EntityError> =>
+  chain(bodyInvariant(compileOps(w.ops, w.lastModifiedByLeft)), ({ diffs }) => {
+    const recompiled = recompileIssue(diffs, w.compiledDiffs);
+    const nonce = w.nonceAtSign;
+    const signedHash = w.settlementHash;
+    const proof = w.postSettlementDisputeProof;
+    if (recompiled !== undefined) return invariant(recompiled);
+    if (typeof nonce !== "number" || !Number.isSafeInteger(nonce) || nonce < 1) {
+      return invariant(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(nonce)}`);
+    }
+    if (!signedHash) return invariant("SETTLEMENT_SIGNED_HASH_MISSING");
+    if (state.jurisdiction.depositoryAddress === "" || !state.jurisdictionConfig?.entityProviderAddress) {
+      return invariant("SETTLEMENT_JURISDICTION_MISSING");
+    }
+    const targets = settlementTargets(a, w, nonce, proof?.proposerIsLeft ?? w.lastModifiedByLeft, dt);
+    return chain(bodyInvariant(targets), (t): Result<ExecutionPlan, EntityError> => {
+      if (!sameHex(t.settlementHash, signedHash)) {
+        return invariant(`SETTLEMENT_SIGNED_HASH_MISMATCH:${signedHash}:${t.settlementHash}`);
+      }
+      if (w.status !== "ready_to_submit") return invariant(`SETTLEMENT_HANKOS_INCOMPLETE:${w.status}`);
+      if (proof === undefined || proof.nonce !== nonce + 1) {
+        return invariant(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${String(proof?.nonce)}:${nonce + 1}`);
+      }
+      if (!sameProofHashes(proof, t.postProof)) return invariant("POST_SETTLEMENT_PROOF_HASH_MISMATCH");
+      const { leftHanko, rightHanko } = proof;
+      if (!leftHanko || !rightHanko) return invariant("POST_SETTLEMENT_PROOF_HANKO_MISSING");
+      return ok({ ...t, nonce, leftHanko, rightHanko });
     });
   });
+/** The executor's view of one settlement it is about to batch: the Account, the counterparty's Hanko and the plan. */
+type SettleExecution = {
+  readonly peer: EntityId;
+  readonly t: SettleTarget;
+  readonly revision: number;
+  readonly workspaceHash: string;
+  readonly counterpartyHanko: string;
+  readonly plan: ExecutionPlan;
 };
-/** og canAutoApproveWorkspace: never for forgiveness or raw diffs; otherwise every compiled diff passes userAutoApprove. */
-export const canAutoApproveWorkspace = (w: Pick<SettlementWorkspace, "ops" | "lastModifiedByLeft">, iAmLeft: boolean): boolean => {
+/** The first Hanko that does not verify: the counterparty's settlement Hanko, then the left and right N+1 Hankos. */
+const executionHankoIssue = (e: SettleExecution, verify: Verify): string | undefined => {
+  const { left, right } = e.t.child.state.account.id;
+  const { settlementHash, postProof, leftHanko, rightHanko } = e.plan;
+  switch (true) {
+    case !verify(settlementHash, e.counterpartyHanko, e.peer):
+      return "SETTLEMENT_NONEXECUTOR_HANKO_INVALID";
+    case !verify(postProof.disputeHash, leftHanko, left as EntityId):
+      return "POST_SETTLEMENT_LEFT_HANKO_INVALID";
+    case !verify(postProof.disputeHash, rightHanko, right as EntityId):
+      return "POST_SETTLEMENT_RIGHT_HANKO_INVALID";
+    default:
+      return undefined;
+  }
+};
+/**
+ * og's execute tail: the settlement joins the draft jBatch (never behind a sent one) and the Account queues its submit.
+ */
+const batchExecution = (
+  d: Draft,
+  e: SettleExecution,
+  disableShortcut: boolean,
+  queue: SettleEnqueue,
+): Result<Draft, EntityError> => {
+  const self = d.state.id;
+  const jb: OgJBatch = committedJBatch(d.state) ?? (initJBatch() as unknown as CommittedJBatch);
+  const seeded: Draft = { ...d, state: withCommittedJBatch(d.state, jb) };
+  // og: a nonce-bound settlement never waits behind another on-chain batch
+  if (jb.sentBatch !== undefined) return ok(settleSay(seeded, "⏭️ settle_execute skipped: jBatch sentBatch pending"));
+  const row: OgSettlementRow = {
+    leftEntity: e.t.iAmLeft ? self : e.peer,
+    rightEntity: e.t.iAmLeft ? e.peer : self,
+    diffs: e.plan.diffs,
+    forgiveDebtsInTokenIds: e.plan.forgive,
+    sig: e.counterpartyHanko,
+    nonce: e.plan.nonce,
+  };
+  const submit: AccountTx = {
+    type: "settle_transition",
+    kind: "submit",
+    revision: e.revision,
+    workspaceHash: e.workspaceHash,
+  };
+  const submitted = `✅ Settlement submission queued (${e.plan.diffs.length} diffs) - use j_broadcast to commit`;
+  return chain(addSettlementRow(jb, row, self, disableShortcut), (next) =>
+    map(queue({ ...seeded, state: withCommittedJBatch(seeded.state, next) }, e.peer, submit), (q) =>
+      settleSay(q, submitted),
+    ),
+  );
+};
+/**
+ * og handleSettleExecute: the executor verifies the counterparty's settlement Hanko and both N+1 Hankos, appends the
+ * settlement to the draft jBatch, and queues the Account submit.
+ */
+const settleExecute = (
+  d: Draft,
+  x: SettleData<"settle_execute">,
+  verify: Verify,
+  queue: SettleEnqueue,
+  jReplicas?: ReadonlyMap<string, JReplica>,
+): Result<Draft, EntityError> => {
+  const peer = x.counterpartyEntityId;
+  const t = settleChild(d, peer);
+  const w = t?.child.state.settlement;
+  const skip = (why: string): Result<Draft, EntityError> => ok(settleSay(d, `⏭️ settle_execute skipped: ${why}`));
+  if (t === undefined) return skip(`no account with ${peer.slice(-4)}`);
+  if (w === undefined) return skip(`no workspace with ${peer.slice(-4)}`);
+  // og rejectFailure: a reject disposition evicts only this tx
+  if (settlePending(t.child)) return err({ _tag: "entity_command", reason: SETTLE_PENDING });
+  const execute = (workspaceHash: string): Result<Draft, EntityError> => {
+    const counterpartyHanko = t.iAmLeft ? w.rightHanko : w.leftHanko;
+    if (w.status === "submitted") return skip("settlement already submitted");
+    if (w.executorIsLeft !== t.iAmLeft) {
+      return invariant(`SETTLEMENT_EXECUTOR_MISMATCH:expected=${w.executorIsLeft ? "left" : "right"}`);
+    }
+    if (!counterpartyHanko) return skip("missing counterparty signature");
+    const plan = prepareExecution(d.state, t.child.state, w, accountDt({ jReplicas }, t.child));
+    return chain(plan, (p) => {
+      const e: SettleExecution = { peer, t, revision: w.revision, workspaceHash, counterpartyHanko, plan: p };
+      const issue = executionHankoIssue(e, verify);
+      return issue !== undefined ? invariant(issue) : batchExecution(d, e, x.disableC2RShortcut ?? false, queue);
+    });
+  };
+  return chain(bodyInvariant(canonicalWorkspaceHash(t.child.state, w)), execute);
+};
+/** Our reserve and our collateral share never shrink. */
+const ownShareGrows = (diff: WorkspaceDiff, iAmLeft: boolean): boolean => {
+  const reserve = iAmLeft ? diff.leftDiff : diff.rightDiff;
+  const collateralShare = iAmLeft ? diff.ondeltaDiff : diff.collateralDiff - diff.ondeltaDiff;
+  return reserve >= 0n && collateralShare >= 0n;
+};
+/**
+ * og canAutoApproveWorkspace: never for forgiveness or raw diffs; otherwise every compiled diff passes userAutoApprove.
+ */
+export const canAutoApproveWorkspace = (
+  w: Pick<SettlementWorkspace, "ops" | "lastModifiedByLeft">,
+  iAmLeft: boolean,
+): boolean => {
   if (w.ops.some((op) => op.type === "forgive" || op.type === "rawDiff")) return false;
   const compiled = compileOps(w.ops, w.lastModifiedByLeft);
-  if (!compiled.ok) return false;
-  return compiled.value.diffs.every((diff) => (iAmLeft ? diff.leftDiff : diff.rightDiff) >= 0n && (iAmLeft ? diff.ondeltaDiff : diff.collateralDiff - diff.ondeltaDiff) >= 0n);
+  return compiled.ok && compiled.value.diffs.every((diff) => ownShareGrows(diff, iAmLeft));
 };
-/** og processCommittedSettlementTransitionFollowup: after a committed frame whose last transition is the peer's upsert / hanko, defer our own signature when the ops are safe (or ours). */
-const settleFollowups = (d: Draft, peer: EntityId, frames: readonly { readonly frame: AccountFrame; readonly proposerIsLeft: boolean }[]): Result<Draft, EntityError> =>
-  foldResult(frames, d, (acc, { frame, proposerIsLeft }) => foldResult(frame.txs.map((tx, i) => [tx, i] as const), acc, (cur, [tx, i]): Result<Draft, EntityError> => {
-    if (tx.type !== "settle_transition" || (tx.kind !== "upsert" && tx.kind !== "hanko")) return ok(cur);
-    if (frame.txs.slice(i + 1).some((later) => later.type === "settle_transition")) return ok(cur);
-    const child = cur.accountReplicas.get(peer), w = child?.state.settlement;
-    if (child === undefined || w === undefined) return invariant("SETTLEMENT_COMMITTED_WORKSPACE_MISSING");
-    return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), (hash) => {
-      if (w.revision !== tx.revision) return invariant(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${w.revision}:${tx.revision}`);
-      const iAmLeft = isLeft(cur.state.id, replicaId(child));
-      if (proposerIsLeft === iAmLeft || (iAmLeft ? w.postSettlementDisputeProof?.leftHanko : w.postSettlementDisputeProof?.rightHanko) || settlePending(child)) return ok(cur);
-      if (w.lastModifiedByLeft !== iAmLeft && !canAutoApproveWorkspace(w, iAmLeft)) return ok(cur);
-      return map(deferApproval(cur.state, peer, hash, "SETTLEMENT_APPROVAL_ALREADY_DEFERRED"), (state) => ({ ...cur, state }));
-    });
-  }));
-/** og buildSettlementHankoDraft: our side's hanko transition at the pinned (or next safe) nonce; own Hankos are the manifest placeholders `installFrame` replaces. */
-const settlementHankoDraft = (child: AccountReplica, iAmLeft: boolean, peer: EntityId, dt?: DeltaTransformerRef): Result<{ readonly tx: AccountTx; readonly hashes: readonly HashToSign[] }, EntityError> => {
+/**
+ * og processCommittedSettlementTransitionFollowup: when a committed frame's last settle transition is the peer's upsert
+ * or hanko, defer our own signature if the ops are safe (or ours).
+ */
+const settleFollowups = (
+  d: Draft,
+  peer: EntityId,
+  frame: AccountFrame,
+  proposerIsLeft: boolean,
+): Result<Draft, EntityError> => {
+  const last = frame.txs.findLast(isSettleTransition);
+  if (last?.type !== "settle_transition" || (last.kind !== "upsert" && last.kind !== "hanko")) return ok(d);
+  const child = d.accountReplicas.get(peer);
+  const w = child?.state.settlement;
+  if (child === undefined || w === undefined) return invariant("SETTLEMENT_COMMITTED_WORKSPACE_MISSING");
+  const defer = (hash: string): Result<Draft, EntityError> => {
+    const iAmLeft = isLeft(d.state.id, replicaId(child));
+    const proof = w.postSettlementDisputeProof;
+    const ownHanko = Boolean(iAmLeft ? proof?.leftHanko : proof?.rightHanko);
+    switch (true) {
+      case w.revision !== last.revision:
+        return invariant(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${w.revision}:${last.revision}`);
+      case proposerIsLeft === iAmLeft || ownHanko || settlePending(child):
+        return ok(d);
+      case w.lastModifiedByLeft !== iAmLeft && !canAutoApproveWorkspace(w, iAmLeft):
+        return ok(d);
+      default:
+        return map(deferApproval(d.state, peer, hash, "SETTLEMENT_APPROVAL_ALREADY_DEFERRED"), (state) => ({
+          ...d,
+          state,
+        }));
+    }
+  };
+  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), defer);
+};
+/** Our side's hanko transition and the hashes it leaves to sign. */
+type HankoDraft = { readonly tx: AccountTx; readonly hashes: readonly HashToSign[] };
+/**
+ * og buildSettlementHankoDraft: our side's hanko transition at the pinned (or next safe) nonce; own Hankos are the
+ * manifest placeholders `installFrame` replaces. The executor signs only the N+1 proof.
+ */
+const settlementHankoDraft = (
+  child: AccountReplica,
+  iAmLeft: boolean,
+  peer: EntityId,
+  dt?: DeltaTransformerRef,
+): Result<HankoDraft, EntityError> => {
   const w = child.state.settlement;
   if (w === undefined) return invariant("SETTLEMENT_WORKSPACE_MISSING");
+  const pin = w.postSettlementDisputeProof;
+  const draft = (workspaceHash: string, nonce: number, t: SettlementTargets): HankoDraft => {
+    const executor = w.executorIsLeft === iAmLeft;
+    const tail = peer.slice(-8);
+    const settlement: HashToSign = {
+      hash: t.settlementHash,
+      type: "settlement",
+      context: `settlement:${tail}:nonce:${nonce}`,
+    };
+    const dispute: HashToSign = {
+      hash: t.postProof.disputeHash,
+      type: "dispute",
+      context: `settlement:${tail}:post-dispute:nonce:${t.postProof.nonce}`,
+    };
+    const tx: AccountTx = {
+      type: "settle_transition",
+      kind: "hanko",
+      revision: w.revision,
+      workspaceHash,
+      settlementNonce: nonce,
+      settlementHash: t.settlementHash,
+      ...(executor ? {} : { settlementHanko: pendingHanko(t.settlementHash) }),
+      postProof: { ...t.postProof, hanko: pendingHanko(t.postProof.disputeHash) },
+    };
+    return { tx, hashes: executor ? [dispute] : [settlement, dispute] };
+  };
   return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), (workspaceHash) => {
     if (w.status === "submitted") return invariant("SETTLEMENT_HANKO_SUBMITTED_FORBIDDEN");
-    if (iAmLeft ? w.postSettlementDisputeProof?.leftHanko : w.postSettlementDisputeProof?.rightHanko) return invariant("SETTLEMENT_SIDE_HANKO_ALREADY_ATTACHED");
+    if (iAmLeft ? pin?.leftHanko : pin?.rightHanko) return invariant("SETTLEMENT_SIDE_HANKO_ALREADY_ATTACHED");
     const nonce = w.nonceAtSign ?? nextSettlementNonce(child);
     if (!Number.isSafeInteger(nonce) || nonce < 1) return invariant(`SETTLEMENT_SIGNED_NONCE_INVALID:${String(nonce)}`);
-    return chain(bodyInvariant(settlementTargets(child.state, w, nonce, w.lastModifiedByLeft, dt)), (t) => {
-      if (w.settlementHash && w.settlementHash.toLowerCase() !== t.settlementHash.toLowerCase()) return invariant(`SETTLEMENT_SIGNED_HASH_MISMATCH:${w.settlementHash}:${t.settlementHash}`);
-      const pin = w.postSettlementDisputeProof;
-      if (pin !== undefined && (pin.nonce !== t.postProof.nonce || pin.proofBodyHash.toLowerCase() !== t.postProof.proofBodyHash.toLowerCase() || pin.disputeHash.toLowerCase() !== t.postProof.disputeHash.toLowerCase())) return invariant("POST_SETTLEMENT_PROOF_PIN_MISMATCH");
-      const executor = w.executorIsLeft === iAmLeft, tail = peer.slice(-8);
-      const tx: AccountTx = { type: "settle_transition", kind: "hanko", revision: w.revision, workspaceHash, settlementNonce: nonce, settlementHash: t.settlementHash, ...(executor ? {} : { settlementHanko: pendingHanko(t.settlementHash) }), postProof: { ...t.postProof, hanko: pendingHanko(t.postProof.disputeHash) } };
-      return ok({ tx, hashes: [...(executor ? [] : [{ hash: t.settlementHash, type: "settlement" as const, context: `settlement:${tail}:nonce:${nonce}` }]), { hash: t.postProof.disputeHash, type: "dispute", context: `settlement:${tail}:post-dispute:nonce:${t.postProof.nonce}` }] });
+    const targets = settlementTargets(child.state, w, nonce, w.lastModifiedByLeft, dt);
+    return chain(bodyInvariant(targets), (t): Result<HankoDraft, EntityError> => {
+      if (w.settlementHash && !sameHex(w.settlementHash, t.settlementHash)) {
+        return invariant(`SETTLEMENT_SIGNED_HASH_MISMATCH:${w.settlementHash}:${t.settlementHash}`);
+      }
+      if (pin !== undefined && (pin.nonce !== t.postProof.nonce || !sameProofHashes(pin, t.postProof))) {
+        return invariant("POST_SETTLEMENT_PROOF_PIN_MISMATCH");
+      }
+      return ok(draft(workspaceHash, nonce, t));
     });
   });
 };
 /**
- * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refreshStaleUncommittedSettlementHankos (a stale-nonce hanko intent is
- * dropped and re-deferred), then materializeDeferredSettlementApprovals (each idle Account's deferred approval becomes its hanko transition).
+ * og refreshStaleUncommittedSettlementHankos for one idle, unsigned Account: a queued hanko intent signed at a stale
+ * nonce is dropped and its approval deferred again.
+ */
+const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
+  const child = d.accountReplicas.get(peer);
+  const w = child?.state.settlement;
+  if (child === undefined || child.mempool.length === 0 || w === undefined) return ok(d);
+  if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(d);
+  const refresh = (hash: string): Result<Draft, EntityError> => {
+    const expected = nextSettlementNonce(child);
+    const stale = (tx: WireAccountTx): boolean =>
+      tx.type === "settle_transition" &&
+      tx.kind === "hanko" &&
+      tx.revision === w.revision &&
+      tx.workspaceHash.toLowerCase() === hash &&
+      tx.settlementNonce !== expected;
+    if (!child.mempool.some(stale)) return ok(d);
+    const fresh = { ...child, mempool: child.mempool.filter((tx) => !stale(tx)) } as AccountReplica;
+    const deferred = deferApproval(d.state, peer, hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
+    return map(deferred, (state) => ({ ...d, ...putChild(state, d.accountReplicas, peer, fresh) }));
+  };
+  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), refresh);
+};
+/**
+ * og materializeDeferredSettlementApprovals for one Account: an idle Account's still-current approval becomes its hanko
+ * transition; a changed or missing workspace expires it.
+ */
+const materializeDeferred =
+  (ctx: FoldContext) =>
+  (d: Draft, [peer, approved]: readonly [string, string]): Result<Draft, EntityError> => {
+    const self = d.state.id;
+    const id = peer as EntityId;
+    const child = d.accountReplicas.get(id);
+    if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
+    if (child._tag === "proposed" || settlePending(child)) return ok(d);
+    const w = child.state.settlement;
+    const expired = settleSay(
+      { ...d, state: forgetDeferred(d.state, peer) },
+      "⚠️ Settlement approval expired because the workspace changed",
+    );
+    const admit = (built: HankoDraft): Result<Draft, EntityError> => {
+      const clock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
+      const admitted = admitAt(child, [built.tx], self, clock, pendingVerify(ctx.verify, self));
+      if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) {
+        return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
+      }
+      return ok({
+        ...d,
+        ...putChild(forgetDeferred(d.state, peer), d.accountReplicas, id, admitted.value),
+        hashes: [...(d.hashes ?? []), ...built.hashes],
+        touched: [...(d.touched ?? []), id],
+      });
+    };
+    const current = whenDefined(w, (ws) => bodyInvariant(canonicalWorkspaceHash(child.state, ws)));
+    return chain(current, (hash) => {
+      if (w === undefined || hash !== approved) return ok(expired);
+      // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
+      // them
+      if (child.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+      const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
+      return chain(built, admit);
+    });
+  };
+/**
+ * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refresh every stale uncommitted hanko intent,
+ * then materialize each deferred approval, both in ascending counterparty order.
  */
 const materializeSettlements = (d: Draft, ctx: FoldContext): Result<Draft, EntityError> => {
-  const self = d.state.id;
-  let draft = d;
-  for (const peer of [...draft.accountReplicas.keys()].sort(asc)) {
-    const child = draft.accountReplicas.get(peer)!, w = child.state.settlement;
-    if (child.mempool.length === 0 || w === undefined || w.nonceAtSign !== undefined || child._tag === "proposed") continue;
-    const hash = canonicalWorkspaceHash(child.state, w);
-    if (!hash.ok) return invariant(bodyReason(hash.error));
-    const expected = nextSettlementNonce(child), stale = (tx: WireAccountTx): boolean => tx.type === "settle_transition" && tx.kind === "hanko" && tx.revision === w.revision && tx.workspaceHash.toLowerCase() === hash.value && tx.settlementNonce !== expected;
-    if (!child.mempool.some(stale)) continue;
-    const refreshed = deferApproval(draft.state, peer, hash.value, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
-    if (!refreshed.ok) return refreshed;
-    draft = { ...draft, ...putChild(refreshed.value, draft.accountReplicas, peer, { ...child, mempool: child.mempool.filter((tx) => !stale(tx)) } as AccountReplica) };
+  const peers = [...d.accountReplicas.keys()].toSorted(asc);
+  return chain(foldResult(peers, d, refreshStaleHanko), (refreshed) => {
+    const deferred = [...deferredOf(refreshed.state)].toSorted(([a], [b]) => asc(a, b));
+    return foldResult(deferred, refreshed, materializeDeferred(ctx));
+  });
+};
+/** og continuationActionToTx: the r2r / r2e / r2c follow-up of an executed settlement. */
+const continuationTx = (a: SettlementContinuationAction): EntityTx => {
+  switch (a.type) {
+    case "r2r":
+      return { type: "r2r", data: { toEntityId: a.toEntityId, tokenId: a.tokenId, amount: a.amount } };
+    case "r2e":
+      return { type: "r2e", data: { receivingEntity: a.receivingEntity, tokenId: a.tokenId, amount: a.amount } };
+    default:
+      return {
+        type: "r2c",
+        data: {
+          counterpartyId: a.counterpartyId,
+          ...(a.receivingEntityId ? { receivingEntityId: a.receivingEntityId } : {}),
+          tokenId: a.tokenId,
+          amount: a.amount,
+        },
+      };
   }
-  const deferred = deferredOf(draft.state);
-  for (const [peer, approved] of [...deferred].sort(([a], [b]) => asc(a, b))) {
-    const child = draft.accountReplicas.get(peer as EntityId);
-    if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    if (child._tag === "proposed" || settlePending(child)) continue;
-    const w = child.state.settlement, current = w === undefined ? undefined : canonicalWorkspaceHash(child.state, w);
-    if (current !== undefined && !current.ok) return invariant(bodyReason(current.error));
-    if (w === undefined || current?.value !== approved) {
-      draft = settleSay({ ...draft, state: withDeferred(draft.state, mapDelete(deferredOf(draft.state), peer)) }, "⚠️ Settlement approval expired because the workspace changed");
-      continue;
-    }
-    // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of them
-    if (child.mempool.length > 0 && !(w.settlementHash || w.leftHanko || w.rightHanko || w.postSettlementDisputeProof)) continue;
-    const iAmLeft = isLeft(self, replicaId(child)), built = settlementHankoDraft(child, iAmLeft, peer as EntityId, accountDt(ctx, child));
-    if (!built.ok) return built;
-    const admitted = admitAt(child, [built.value.tx], self, { timestamp: ctx.timestamp, jHeight: entityJHeight(draft.state) }, pendingVerify(ctx.verify, self));
-    if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
-    draft = { ...draft, ...putChild({ ...draft.state, ...withDeferred(draft.state, mapDelete(deferredOf(draft.state), peer)) }, draft.accountReplicas, peer as EntityId, admitted.value), hashes: [...(draft.hashes ?? []), ...built.value.hashes], touched: [...(draft.touched ?? []), peer as EntityId] };
-  }
-  return ok(draft);
 };
 /**
- * og selectSettlementContinuation + materializeSettlementContinuation: at most one continuation per frame (lowest counterparty), waiting passively
- * until its workspace is ready and the jBatch is idle; a missing / changed / submitted workspace discards it. The execute path runs settle_execute,
- * then og's follow-up r2r / r2e / r2c and j_broadcast Entity txs, and drops the continuation only when all of them succeeded.
+ * og's execute path of a continuation, as one collective run: settle_execute (no C2R shortcut when actions follow),
+ * the follow-up actions, then j_broadcast; the continuation is dropped only when all of them succeeded.
+ */
+const runContinuation = (
+  d: Draft,
+  peer: string,
+  c: PendingContinuation,
+  ctx: FoldContext,
+  queue: SettleEnqueue,
+): Result<Draft, EntityError> => {
+  const broadcast: readonly EntityTx[] = c.broadcast ? [{ type: "j_broadcast", data: {} }] : [];
+  const follow = [...c.actions.map(continuationTx), ...broadcast];
+  const execute: SettleData<"settle_execute"> = {
+    counterpartyEntityId: peer as EntityId,
+    ...(c.actions.length > 0 ? { disableC2RShortcut: true } : {}),
+  };
+  const followUp = (x: Draft): Result<Draft, EntityError> =>
+    follow.length === 0
+      ? ok(forgetContinuation(x, peer))
+      : map(foldNested(x.state, x.accountReplicas, follow, ctx, "collective"), (y) =>
+          forgetContinuation(appendDraft(x, y, y.touched ?? []), peer),
+        );
+  return chain(settleExecute(d, execute, ctx.verify, queue, ctx.jReplicas), followUp);
+};
+/**
+ * og selectSettlementContinuation + materializeSettlementContinuation: at most one continuation per frame (lowest
+ * counterparty), waiting passively until its workspace is ready and the jBatch is idle; a missing, changed or
+ * submitted workspace discards it.
  */
 const materializeContinuation = (d: Draft, ctx: FoldContext, queue: SettleEnqueue): Result<Draft, EntityError> => {
-  const entry = [...continuationsOf(d.state)].sort(([a], [b]) => asc(a, b))[0];
+  const entry = [...continuationsOf(d.state)].toSorted(([a], [b]) => asc(a, b))[0];
   if (entry === undefined) return ok(d);
-  const [peer, c] = entry, child = d.accountReplicas.get(peer as EntityId);
+  const [peer, c] = entry;
+  const child = d.accountReplicas.get(peer as EntityId);
+  const discard = (reason: string): Result<Draft, EntityError> =>
+    ok(settleSay(forgetContinuation(d, peer), `Settlement continuation cleared: ${reason}`));
   if (child === undefined) return invariant(`SETTLEMENT_CONTINUATION_ACCOUNT_MISSING:${peer}`);
   if (settlePending(child)) return ok(d);
-  const discard = (reason: string): Result<Draft, EntityError> => ok(settleSay({ ...d, state: withContinuations(d.state, mapDelete(continuationsOf(d.state), peer)) }, `Settlement continuation cleared: ${reason.replaceAll("_", " ")}`));
   const w = child.state.settlement;
-  if (w === undefined) return discard("workspace_missing");
-  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), (hash) => {
-    if (hash !== c.workspaceHash) return discard("workspace_changed");
-    if (w.status === "submitted") return discard("already_submitted");
-    if (w.status !== "ready_to_submit") return ok(d);
-    if (w.executorIsLeft !== isLeft(d.state.id, replicaId(child))) return invariant(`SETTLEMENT_CONTINUATION_EXECUTOR_MISMATCH:${peer}`);
-    const jb = committedJBatch(d.state);
-    if (jb?.sentBatch !== undefined || (jb !== undefined && ogBatchOps(jb.batch) > 0)) return ok(d);
-    // og continuationActionToTx: settle_execute (no C2R shortcut when actions follow), the r2r / r2e / r2c follow-ups, then j_broadcast, all as one collective run
-    const follow: readonly EntityTx[] = [...c.actions.map((a): EntityTx => a.type === "r2r" ? { type: "r2r", data: { toEntityId: a.toEntityId, tokenId: a.tokenId, amount: a.amount } }
-      : a.type === "r2e" ? { type: "r2e", data: { receivingEntity: a.receivingEntity, tokenId: a.tokenId, amount: a.amount } }
-      : { type: "r2c", data: { counterpartyId: a.counterpartyId, ...(a.receivingEntityId ? { receivingEntityId: a.receivingEntityId } : {}), tokenId: a.tokenId, amount: a.amount } }), ...(c.broadcast ? [{ type: "j_broadcast", data: {} } satisfies EntityTx] : [])];
-    return chain(settleExecute(d, { counterpartyEntityId: peer as EntityId, ...(c.actions.length > 0 ? { disableC2RShortcut: true } : {}) }, ctx.verify, queue, ctx.jReplicas), (x) => {
-      const done = (y: Draft): Draft => ({ ...y, state: withContinuations(y.state, mapDelete(continuationsOf(y.state), peer)) });
-      if (follow.length === 0) return ok(done(x));
-      return map(foldNested(x.state, x.accountReplicas, follow, ctx, "collective"), (y) => done(appendDraft(x, y, y.touched ?? [])));
+  if (w === undefined) return discard("workspace missing");
+  const jb = committedJBatch(d.state);
+  const jBatchBusy = jb !== undefined && (jb.sentBatch !== undefined || ogBatchOps(jb.batch) > 0);
+  const decide = (hash: string): Result<Draft, EntityError> => {
+    switch (true) {
+      case hash !== c.workspaceHash:
+        return discard("workspace changed");
+      case w.status === "submitted":
+        return discard("already submitted");
+      case w.status !== "ready_to_submit":
+        return ok(d);
+      case w.executorIsLeft !== isLeft(d.state.id, replicaId(child)):
+        return invariant(`SETTLEMENT_CONTINUATION_EXECUTOR_MISMATCH:${peer}`);
+      case jBatchBusy:
+        return ok(d);
+      default:
+        return runContinuation(d, peer, c, ctx, queue);
+    }
+  };
+  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), decide);
+};
+const settleQueue =
+  (ctx: FoldContext): SettleEnqueue =>
+  (d, peer, tx) =>
+    withChild(d.accountReplicas, peer, (child) =>
+      map(admitAt(child, [tx], d.state.id, L0_CLOCK, ctx.verify), (admitted) => ({
+        ...d,
+        ...putChild(d.state, d.accountReplicas, peer, admitted),
+      })),
+    );
+/**
+ * A peer frame this Entity just signed, with the Account envelope its receiver HTLC lock followups check the prepared
+ * entries against.
+ */
+export type ReceivedCommit = {
+  readonly frame: AccountFrame;
+  readonly from: EntityId;
+  readonly to: EntityId;
+  readonly domain: Domain;
+};
+type SwapOutputEffect = Of<Effect, "swap_offer_upsert" | "swap_cancelled" | "swap_cancel_requested">;
+const isSwapOutput = (e: Effect): e is SwapOutputEffect =>
+  e._tag === "swap_offer_upsert" || e._tag === "swap_cancelled" || e._tag === "swap_cancel_requested";
+const swapOutputId = (e: SwapOutputEffect): string => (e._tag === "swap_offer_upsert" ? e.offer.offerId : e.offerId);
+/** og consumeSameJurisdictionSwapOutput: the swap outputs each same-j swap tx may own. */
+const SWAP_OUTPUT_KINDS: { readonly [T in SwapTxType]: readonly SwapOutputEffect["_tag"][] } = {
+  swap_offer: ["swap_offer_upsert"],
+  swap_resolve: ["swap_offer_upsert", "swap_cancelled"],
+  swap_cancel_request: ["swap_cancel_requested"],
+};
+type SwapTxType = "swap_offer" | "swap_resolve" | "swap_cancel_request";
+type FrameTx = AccountFrame["txs"][number];
+/** One committed frame of an Account input, and whether it is the peer's frame we just signed. */
+type FollowedFrame = { readonly frame: AccountFrame; readonly viaNewFrame: boolean };
+/** What every committed followup of one Account input reads. */
+type CommittedAt = {
+  readonly peer: EntityId;
+  readonly self: EntityId;
+  readonly ctx: FoldContext;
+  /** Whether the Account existed before this input, and our side of it. */
+  readonly hadAccount: boolean;
+  readonly selfIsLeft: boolean;
+  readonly received: ReceivedCommit | undefined;
+  readonly htlc: FollowupAt;
+  readonly paybookBefore: Paybook;
+  readonly swapOutputs: readonly SwapOutputEffect[];
+};
+/** The cross-j book host opened by the input's first cross-j pull, and the crontab it started from. */
+type CrossFollowing = { readonly step: CommittedCrossStep; readonly crontab0: Crontab };
+/** The swap events so far, and how many of the Account's swap outputs the same-j swap txs consumed. */
+type SwapFollowing = {
+  readonly cursor: number;
+  readonly created: readonly SwapOfferEvent[];
+  readonly cancelled: readonly SwapRef[];
+  readonly cancelRequests: readonly SwapRef[];
+};
+/** What the committed frames of one Account input produced so far (og applyCommittedFrameTransactions). */
+type Following = {
+  readonly d: Draft;
+  readonly targets: readonly AccountTxTarget[];
+  readonly run: PaybookRun;
+  readonly cross: CrossFollowing | undefined;
+  readonly swaps: SwapFollowing;
+};
+/** og applyCommittedAccountFrameFollowups: each tx's lending followup. */
+const lendingFollowStep = (f: Following, c: FollowedFrame, at: CommittedAt): Result<Following, EntityError> => {
+  const proposer = c.viaNewFrame ? at.peer : at.self;
+  const { state } = f.d;
+  const lent = lendingFollowups(
+    state,
+    f.d.accountReplicas,
+    at.peer,
+    [{ frame: c.frame, proposer }],
+    at.ctx.timestamp,
+    f.targets,
+  );
+  return map(lent, (l) => ({ ...f, d: l.state === state ? f.d : { ...f.d, state: l.state }, targets: l.accountTxs }));
+};
+/** A frame with HTLC locks or resolves runs its paybook followups; their Account txs join the targets. */
+const paybookStep = (f: Following, c: FollowedFrame, at: CommittedAt): Result<Following, EntityError> => {
+  if (!c.frame.txs.some((tx) => tx.type === "htlc_lock" || tx.type === "htlc_resolve")) return ok(f);
+  const start: PaybookRun = { ...f.run, flow: { ...f.run.flow, queue: [] } };
+  return map(paybookFrameFollowups(start, c, at.htlc), (run) => ({
+    ...f,
+    run,
+    targets: [...f.targets, ...run.flow.queue],
+  }));
+};
+const openCross = (f: Following, at: CommittedAt): Result<CrossFollowing, EntityError> => {
+  if (f.cross !== undefined) return ok(f.cross);
+  const { state, accountReplicas } = f.d;
+  return map(crontabOf(state), (crontab) => {
+    const book = bookHostOf(state, accountReplicas, at.ctx.timestamp);
+    const host = { ...book, auths: state.crossJurisdictionAuthorizations, crontab };
+    return { crontab0: crontab, step: { host, outputs: [], messages: [], created: [], handled: false } };
+  });
+};
+/**
+ * og applyCommittedCrossJurisdictionFollowup: the input's first cross-j pull opens the book host; each pull steps it.
+ */
+const crossPullFollowup = (
+  f: Following,
+  tx: FrameTx,
+  committedAt: number,
+  at: CommittedAt,
+): Result<Following, EntityError> =>
+  chain(openCross(f, at), (cross) =>
+    map(committedCrossFollowup(cross.step.host, at.peer, tx, committedAt), (n) => {
+      const outputs = [...cross.step.outputs, ...n.outputs];
+      const messages = [...cross.step.messages, ...n.messages];
+      return {
+        ...f,
+        cross: { ...cross, step: { ...n, outputs, messages, created: [] } },
+        swaps: { ...f.swaps, created: [...f.swaps.created, ...n.created] },
+      };
+    }),
+  );
+/** og buildCommittedSwapOfferEvent from a committed cross-j offer. */
+const committedOfferEvent = (
+  peer: EntityId,
+  account: AccountState,
+  offerId: string,
+  offer: SwapOffer,
+): SwapOfferEvent => ({
+  offerId,
+  accountId: peer,
+  makerIsLeft: offer.makerIsLeft,
+  fromEntity: account.id.left,
+  toEntity: account.id.right,
+  createdHeight: offer.createdHeight,
+  giveTokenId: Number(offer.giveTokenId),
+  giveTokenDecimals: offer.giveTokenDecimals,
+  giveAmount: offer.giveAmount,
+  wantTokenId: Number(offer.wantTokenId),
+  wantTokenDecimals: offer.wantTokenDecimals,
+  wantAmount: offer.wantAmount,
+  maxFee: offer.maxFee,
+  minNetReceive: offer.minNetReceive,
+  priceTicks: offer.priceTicks,
+  ...opt("timeInForce", tif(offer.timeInForce)),
+  ...opt("crossJurisdiction", offer.crossJurisdiction),
+});
+/** og applyCommittedCrossJurisdictionSwapFollowup: a committed cross-j offer becomes a created swap event. */
+const crossOfferFollowup = (f: Following, offerId: string, peer: EntityId): Following => {
+  const child = f.d.accountReplicas.get(peer);
+  const offer = child?.state.offers.get(offerId);
+  if (child === undefined || offer === undefined) return f;
+  const created = committedOfferEvent(peer, child.state.account, offerId, offer);
+  return { ...f, swaps: { ...f.swaps, created: [...f.swaps.created, created] } };
+};
+const recordSwapOutput = (s: SwapFollowing, e: SwapOutputEffect, peer: EntityId): SwapFollowing => {
+  const ref: SwapRef = { offerId: swapOutputId(e), accountId: peer };
+  switch (e._tag) {
+    case "swap_offer_upsert":
+      return { ...s, created: [...s.created, swapOfferEvent(peer, e)] };
+    case "swap_cancelled":
+      return { ...s, cancelled: [...s.cancelled, ref] };
+    case "swap_cancel_requested":
+      return { ...s, cancelRequests: [...s.cancelRequests, ref] };
+  }
+};
+/** og consumeSameJurisdictionSwapOutput: the Account's next swap output belongs to this tx, by kind and offer id. */
+const swapOutputFollowup = (
+  f: Following,
+  tx: { readonly type: SwapTxType; readonly offerId: string },
+  at: CommittedAt,
+): Result<Following, EntityError> => {
+  const e = at.swapOutputs[f.swaps.cursor];
+  if (e === undefined) return invariant(`ACCOUNT_SWAP_OUTPUT_MISSING:${tx.offerId}`);
+  if (!SWAP_OUTPUT_KINDS[tx.type].includes(e._tag)) {
+    return invariant(`ACCOUNT_SWAP_OUTPUT_KIND_MISMATCH:${tx.offerId}:${e._tag}`);
+  }
+  if (swapOutputId(e) !== tx.offerId)
+    return invariant(`ACCOUNT_SWAP_OUTPUT_ID_MISMATCH:${tx.offerId}:${swapOutputId(e)}`);
+  return ok({ ...f, swaps: recordSwapOutput({ ...f.swaps, cursor: f.swaps.cursor + 1 }, e, at.peer) });
+};
+/** One committed tx's cross-j or swap followup, in signed tx order. */
+const txFollowup =
+  (at: CommittedAt, c: FollowedFrame) =>
+  (f: Following, tx: FrameTx): Result<Following, EntityError> => {
+    switch (tx.type) {
+      case "cross_pull_lock":
+      case "cross_pull_close":
+        return crossPullFollowup(f, tx, Number(c.frame.timestamp), at);
+      case "swap_offer":
+        return tx.crossJurisdiction !== undefined
+          ? ok(crossOfferFollowup(f, tx.offerId, at.peer))
+          : swapOutputFollowup(f, tx, at);
+      case "swap_resolve":
+      case "swap_cancel_request":
+        return swapOutputFollowup(f, tx, at);
+      default:
+        return ok(f);
+    }
+  };
+/** The settlement auto-approval, on an Account that existed before this input. */
+const settleStep = (f: Following, c: FollowedFrame, at: CommittedAt): Result<Following, EntityError> => {
+  if (!at.hadAccount) return ok(f);
+  const proposerIsLeft = c.viaNewFrame ? !at.selfIsLeft : at.selfIsLeft;
+  return map(settleFollowups(f.d, at.peer, c.frame, proposerIsLeft), (d) => ({ ...f, d }));
+};
+/** One committed frame: lending, then paybook, then each tx's cross-j or swap followup, then settlement. */
+const frameFollowups =
+  (at: CommittedAt) =>
+  (f: Following, c: FollowedFrame): Result<Following, EntityError> =>
+    chain(lendingFollowStep(f, c, at), (lent) =>
+      chain(paybookStep(lent, c, at), (paid) =>
+        chain(foldResult(c.frame.txs, paid, txFollowup(at, c)), (swept) => settleStep(swept, c, at)),
+      ),
+    );
+/**
+ * og queueInitialHubPolicies: a hub's new inbound Account gets its fee terms for each token its genesis frame adds,
+ * ascending.
+ */
+const hubPolicyTargets = (
+  state: EntityState,
+  createdAccount: boolean,
+  at: CommittedAt,
+): Result<readonly AccountTxTarget[], EntityError> => {
+  if (!createdAccount) return ok([]);
+  const genesis = at.received?.frame.height === 1n ? at.received.frame : undefined;
+  const hub = hubConfigOf(state);
+  if (genesis === undefined) return invariant(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${at.peer}`);
+  if (hub === undefined) return ok([]);
+  const added = genesis.txs.flatMap((tx) => (tx.type === "add_delta" ? [Number(tx.tokenId)] : []));
+  const tokens = [...new Set(added)].toSorted((a, b) => a - b);
+  const policies = traverse(tokens, (t) => hubPolicyTx(hub, String(t) as TokenId));
+  return map(policies, (txs) => txs.map((tx) => ({ accountId: at.peer, tx })));
+};
+/** The cross-j book host's changes, once after every frame: its crontab, authorizations, outputs and messages. */
+const withCrossHost = (d: Draft, cross: CrossFollowing | undefined, timestamp: bigint): Draft => {
+  if (cross === undefined) return d;
+  const { host, outputs, messages } = cross.step;
+  const crontab = host.crontab;
+  const scheduled = crontab === undefined || crontab === cross.crontab0 ? d.state : withCrontab(d.state, crontab);
+  const state: EntityState = { ...scheduled, ...opt("crossJurisdictionAuthorizations", host.auths) };
+  return hostDraft({ ...d, state }, { host, outputs, messages, created: [] }, timestamp);
+};
+/** The paybook the followups wrote, and the Htlc* runtime events they emitted. */
+const withPaybookFlow = (d: Draft, flow: PaybookFlow, before: Paybook): Draft => {
+  const paid = flow.paybook === before ? d : { ...d, state: { ...d.state, paybook: flow.paybook } };
+  const events = flow.runtimeEvents ?? [];
+  return events.length === 0 ? paid : { ...paid, runtimeEvents: [...(paid.runtimeEvents ?? []), ...events] };
+};
+/**
+ * og scheduleCommittedAccountWork: on a hub, an Account with rebalance work kicks the hubRebalance task, unless it
+ * already ran this tick.
+ */
+const rebalanceKick = (d: Draft, at: CommittedAt): Result<Draft, EntityError> => {
+  const child = d.accountReplicas.get(at.peer);
+  if (hubConfigOf(d.state) === undefined || child === undefined) return ok(d);
+  const now = at.htlc.timestamp;
+  const kick = (crontab: Crontab): Draft => {
+    const task = crontab.tasks.get("hubRebalance");
+    const due = task === undefined || task.lastRun < now;
+    const data = { reason: "account_frame_committed", counterpartyId: at.peer };
+    const hook: ScheduledHook = { id: "hub-rebalance-kick", triggerAt: now, type: "hub_rebalance_kick", data };
+    return due ? { ...d, state: withCrontab(d.state, scheduleHook(crontab, hook)) } : d;
+  };
+  return chain(hasRebalanceWork(at.self, child), (work) => (work ? map(crontabOf(d.state), kick) : ok(d)));
+};
+/**
+ * og applyLocalAccountEffects: each returned Account tx is admitted alone and in order; an Account that admits one
+ * joins the frame's worklist after the peer.
+ */
+const admitTargets = (d: Draft, targets: readonly AccountTxTarget[], peer: EntityId): Draft =>
+  targets.reduce<Draft>(
+    (acc, t) => {
+      const id = t.accountId.toLowerCase() as EntityId;
+      const before = acc.accountReplicas.get(id)?.mempool.length;
+      const next = queueReturned(acc, t);
+      const admitted = before !== undefined && next.accountReplicas.get(id)?.mempool.length !== before;
+      return admitted ? { ...next, touched: [...(next.touched ?? []), id] } : next;
+    },
+    { ...d, touched: [peer] },
+  );
+const followedSwapEvents = ({ created, cancelled, cancelRequests }: SwapFollowing): SwapEvents | undefined =>
+  created.length + cancelled.length + cancelRequests.length === 0 ? undefined : { created, cancelled, cancelRequests };
+/**
+ * After every frame: every swap output consumed, the hub's initial policies, the direct-payment forwards, the timed-out
+ * locks and preimages (og applyCommittedHtlcFollowups), the cross-j host, the paybook, the rebalance kick; then the
+ * returned Account txs are admitted.
+ */
+const finishFollowups = (
+  f: Following,
+  frames: readonly FollowedFrame[],
+  effects: readonly Effect[],
+  createdAccount: boolean,
+  at: CommittedAt,
+): Result<Draft, EntityError> => {
+  const consumed = f.swaps.cursor;
+  const produced = at.swapOutputs.length;
+  if (consumed !== produced) return invariant(`ACCOUNT_SWAP_OUTPUT_UNCONSUMED:${produced - consumed}`);
+  const forwards = effects.flatMap((e) =>
+    e._tag === "direct_payment_forward" && sameHex(e.route[0], at.self) ? [e] : [],
+  );
+  const returned = all({
+    policies: hubPolicyTargets(f.d.state, createdAccount, at),
+    legs: traverse(forwards, (forward) => forwardLeg(f.d, forward)),
+  });
+  return chain(returned, ({ policies, legs }) => {
+    const flow = paybookTailFollowups({ ...f.run.flow, queue: [] }, frames, at.htlc);
+    const targets = [...f.targets, ...policies, ...legs, ...flow.queue];
+    const settled = withPaybookFlow(withCrossHost(f.d, f.cross, at.ctx.timestamp), flow, at.paybookBefore);
+    return map(rebalanceKick(settled, at), (kicked) => {
+      const admitted = admitTargets(kicked, targets, at.peer);
+      return { ...admitted, ...opt("swaps", joinSwapEvents(admitted.swaps, followedSwapEvents(f.swaps))) };
     });
   });
 };
-const settleQueue = (ctx: FoldContext): SettleEnqueue => (d, peer, tx) => withChild(d.accountReplicas, peer, (child) => map(admitAt(child, [tx], d.state.id, L0_CLOCK, ctx.verify), (admitted) => ({ ...d, ...putChild(d.state, d.accountReplicas, peer, admitted) })));
-/** A peer frame this Entity just signed, with the Account envelope its receiver HTLC lock followups check the prepared entries against. */
-export type ReceivedCommit = { readonly frame: AccountFrame; readonly from: EntityId; readonly to: EntityId; readonly domain: Domain };
-type SwapOutputEffect = Of<Effect, "swap_offer_upsert" | "swap_cancelled" | "swap_cancel_requested">;
-const swapOutputId = (e: SwapOutputEffect): string => (e._tag === "swap_offer_upsert" ? e.offer.offerId : e.offerId);
 /**
- * og applySuccessfulAccountInput after the Account machine, for the committed frames of one accountInput (our frame the peer ACKed, then the peer's
- * frame we signed). applyCommittedFrameTransactions goes frame by frame: applyCommittedAccountFrameFollowups (each tx's lending followup and HTLC
- * resolve), then per tx the settlement auto-approval, the cross-j followup, the receiver's HTLC lock followup and the swap output (the next same-j
- * output in signed tx order, or the committed cross-j offer). Then queueInitialHubPolicies (a hub's new inbound Account), applyCommittedHtlcFollowups
- * (direct-payment forwards, timeouts, preimages) and scheduleCommittedAccountWork (the hub-rebalance-kick hook).
- * The returned Account txs are admitted after all of them, one at a time and in that order (og applyLocalAccountEffects), and each Account that
- * admits one joins the frame's worklist in that order.
+ * og applySuccessfulAccountInput after the Account machine, for the committed frames of one accountInput (our frame
+ * the peer ACKed, then the peer's frame we signed). applyCommittedFrameTransactions goes frame by frame:
+ * applyCommittedAccountFrameFollowups (each tx's lending followup and HTLC resolve), then per tx the settlement
+ * auto-approval, the cross-j followup, the receiver's HTLC lock followup and the swap output (the next same-j output in
+ * signed tx order, or the committed cross-j offer). Then queueInitialHubPolicies (a hub's new inbound Account),
+ * applyCommittedHtlcFollowups (direct-payment forwards, timeouts, preimages) and scheduleCommittedAccountWork (the
+ * hub-rebalance-kick hook). The returned Account txs are admitted after all of them, one at a time and in that order
+ * (og applyLocalAccountEffects), and each Account that admits one joins the frame's worklist in that order.
  */
-export const committedFollowups = (d0: Draft, peer: EntityId, own: AccountFrame | undefined, received: ReceivedCommit | undefined, effects: readonly Effect[], ctx: FoldContext, createdAccount = false): Result<Draft, EntityError> => {
-  const self = d0.state.id, child0 = d0.accountReplicas.get(peer), mine = child0 !== undefined && isLeft(self, replicaId(child0)), now = Number(ctx.timestamp);
-  const frames: readonly { readonly frame: AccountFrame; readonly viaNewFrame: boolean }[] = [...(own === undefined ? [] : [{ frame: own, viaNewFrame: false }]), ...(received === undefined ? [] : [{ frame: received.frame, viaNewFrame: true }])];
-  const forwards = effects.flatMap((e) => (e._tag === "direct_payment_forward" && sameHex(e.route[0], self) ? [e] : []));
-  const swapOutputs = effects.flatMap((e): SwapOutputEffect[] => (e._tag === "swap_offer_upsert" || e._tag === "swap_cancelled" || e._tag === "swap_cancel_requested" ? [e] : []));
-  const byKey = new Map((ctx.htlc?.entries ?? []).map((e) => [preparedHtlcKey(e.binding), e])), jid = htlcJurisdictionId(d0.state, ctx.activeJurisdiction), paybook0 = d0.state.paybook ?? EMPTY_PAYBOOK;
-  const at: FollowupAt = { peer, received, byKey, timestamp: now, self, jurisdictionId: jid };
-  let d = d0, targets: readonly AccountTxTarget[] = [], flow: PaybookFlow = { paybook: paybook0, queue: [] }, cross: CommittedCrossStep | undefined, crontab0: Crontab | undefined, cursor = 0, consumed: ReadonlySet<string> = new Set<string>();
-  let created: readonly SwapOfferEvent[] = [], cancelled: readonly SwapRef[] = [], cancelRequests: readonly SwapRef[] = [];
-  for (const c of frames) {
-    const lent = lendingFollowups(d.state, d.accountReplicas, peer, [{ frame: c.frame, proposer: c.viaNewFrame ? peer : self }], ctx.timestamp, targets);
-    if (!lent.ok) return lent;
-    if (lent.value.state !== d.state) d = { ...d, state: lent.value.state };
-    targets = lent.value.accountTxs;
-    if (c.frame.txs.some((tx) => tx.type === "htlc_lock" || tx.type === "htlc_resolve")) {
-      const paid = paybookFrameFollowups({ flow: { ...flow, queue: [] }, consumed }, c, at);
-      if (!paid.ok) return paid;
-      flow = paid.value.flow;
-      consumed = paid.value.consumed;
-      targets = [...targets, ...flow.queue];
-    }
-    for (const tx of c.frame.txs) {
-      if (tx.type === "cross_pull_lock" || tx.type === "cross_pull_close") {
-        if (cross === undefined) {
-          const crontab = crontabOf(d.state);
-          if (!crontab.ok) return crontab;
-          crontab0 = crontab.value;
-          cross = { host: { ...bookHostOf(d.state, d.accountReplicas, ctx.timestamp), auths: d.state.crossJurisdictionAuthorizations, crontab: crontab.value }, outputs: [], messages: [], created: [], handled: false };
-        }
-        const n = committedCrossFollowup(cross.host, peer, tx, Number(c.frame.timestamp));
-        if (!n.ok) return n;
-        cross = { ...n.value, outputs: [...cross.outputs, ...n.value.outputs], messages: [...cross.messages, ...n.value.messages], created: [] };
-        created = [...created, ...n.value.created];
-      } else if (tx.type === "swap_offer" && tx.crossJurisdiction !== undefined) {
-        // og applyCommittedCrossJurisdictionSwapFollowup: buildCommittedSwapOfferEvent from the committed offer
-        const child = d.accountReplicas.get(peer), offer = child?.state.offers.get(tx.offerId);
-        if (child !== undefined && offer !== undefined) created = [...created, { offerId: tx.offerId, accountId: peer, makerIsLeft: offer.makerIsLeft, fromEntity: child.state.account.id.left, toEntity: child.state.account.id.right,
-          createdHeight: offer.createdHeight, giveTokenId: Number(offer.giveTokenId), giveTokenDecimals: offer.giveTokenDecimals, giveAmount: offer.giveAmount, wantTokenId: Number(offer.wantTokenId), wantTokenDecimals: offer.wantTokenDecimals,
-          wantAmount: offer.wantAmount, maxFee: offer.maxFee, minNetReceive: offer.minNetReceive, priceTicks: offer.priceTicks, ...opt("timeInForce", tif(offer.timeInForce)), ...opt("crossJurisdiction", offer.crossJurisdiction) }];
-      } else if (tx.type === "swap_offer" || tx.type === "swap_resolve" || tx.type === "swap_cancel_request") {
-        // og consumeSameJurisdictionSwapOutput: the Account's next swap output belongs to this tx
-        const e = swapOutputs[cursor], kinds: readonly SwapOutputEffect["_tag"][] = tx.type === "swap_offer" ? ["swap_offer_upsert"] : tx.type === "swap_resolve" ? ["swap_offer_upsert", "swap_cancelled"] : ["swap_cancel_requested"];
-        if (e === undefined) return invariant(`ACCOUNT_SWAP_OUTPUT_MISSING:${tx.offerId}`);
-        if (!kinds.includes(e._tag)) return invariant(`ACCOUNT_SWAP_OUTPUT_KIND_MISMATCH:${tx.offerId}:${e._tag}`);
-        if (swapOutputId(e) !== tx.offerId) return invariant(`ACCOUNT_SWAP_OUTPUT_ID_MISMATCH:${tx.offerId}:${swapOutputId(e)}`);
-        cursor += 1;
-        const ref: SwapRef = { offerId: tx.offerId, accountId: peer };
-        if (e._tag === "swap_offer_upsert") created = [...created, swapOfferEvent(peer, e)];
-        else if (e._tag === "swap_cancelled") cancelled = [...cancelled, ref];
-        else cancelRequests = [...cancelRequests, ref];
-      }
-    }
-    if (child0 !== undefined) {
-      const settled = settleFollowups(d, peer, [{ frame: c.frame, proposerIsLeft: c.viaNewFrame ? !mine : mine }]);
-      if (!settled.ok) return settled;
-      d = settled.value;
-    }
-  }
-  if (cursor !== swapOutputs.length) return invariant(`ACCOUNT_SWAP_OUTPUT_UNCONSUMED:${swapOutputs.length - cursor}`);
-  // og queueInitialHubPolicies: a hub's new inbound Account gets its fee terms for each token its genesis frame adds, ascending
-  if (createdAccount) {
-    const genesis = received !== undefined && received.frame.height === 1n ? received.frame : undefined, hub = hubConfigOf(d.state);
-    if (genesis === undefined) return invariant(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${peer}`);
-    const tokens = hub === undefined ? [] : [...new Set(genesis.txs.flatMap((tx) => (tx.type === "add_delta" ? [Number(tx.tokenId)] : [])))].sort((a, b) => a - b);
-    const policies = traverse(tokens, (t) => hubPolicyTx(hub as HubConfig, String(t) as TokenId));
-    if (!policies.ok) return policies;
-    targets = [...targets, ...policies.value.map((tx) => ({ accountId: peer, tx }))];
-  }
-  // og applyCommittedHtlcFollowups: the direct-payment forwards, then the timed-out locks, then the peer frame's preimages
-  for (const f of forwards) {
-    const leg = forwardLeg(d, f);
-    if (!leg.ok) return leg;
-    targets = [...targets, leg.value];
-  }
-  flow = paybookTailFollowups({ ...flow, queue: [] }, frames, at);
-  targets = [...targets, ...flow.queue];
-  if (cross !== undefined) {
-    const s = cross, state: EntityState = { ...(s.host.crontab === undefined || s.host.crontab === crontab0 ? d.state : withCrontab(d.state, s.host.crontab)), ...opt("crossJurisdictionAuthorizations", s.host.auths) };
-    d = hostDraft({ ...d, state }, { host: s.host, outputs: s.outputs, messages: s.messages, created: [] }, ctx.timestamp);
-  }
-  if (flow.paybook !== paybook0) d = { ...d, state: { ...d.state, paybook: flow.paybook } };
-  if ((flow.runtimeEvents ?? []).length > 0) d = { ...d, runtimeEvents: [...(d.runtimeEvents ?? []), ...(flow.runtimeEvents ?? [])] };
-  // og scheduleCommittedAccountWork: on a hub, an Account with rebalance work kicks the hubRebalance task, unless it already ran this tick
-  const child = d.accountReplicas.get(peer);
-  if (hubConfigOf(d.state) !== undefined && child !== undefined) {
-    const work = hasRebalanceWork(self, child);
-    if (!work.ok) return work;
-    if (work.value) {
-      const crontab = crontabOf(d.state);
-      if (!crontab.ok) return crontab;
-      const task = crontab.value.tasks.get("hubRebalance");
-      if (task === undefined || task.lastRun < now) d = { ...d, state: withCrontab(d.state, scheduleHook(crontab.value, { id: "hub-rebalance-kick", triggerAt: now, type: "hub_rebalance_kick", data: { reason: "account_frame_committed", counterpartyId: peer } })) };
-    }
-  }
-  const touched: EntityId[] = [peer];
-  for (const t of targets) {
-    const id = t.accountId.toLowerCase() as EntityId, before = d.accountReplicas.get(id)?.mempool.length;
-    d = queueReturned(d, t);
-    if (before !== undefined && d.accountReplicas.get(id)?.mempool.length !== before) touched.push(id);
-  }
-  const swaps: SwapEvents | undefined = created.length + cancelled.length + cancelRequests.length === 0 ? undefined : { created, cancelled, cancelRequests };
-  return ok({ ...d, touched, ...opt("swaps", joinSwapEvents(d.swaps, swaps)) });
+export const committedFollowups = (
+  d0: Draft,
+  peer: EntityId,
+  own: AccountFrame | undefined,
+  received: ReceivedCommit | undefined,
+  effects: readonly Effect[],
+  ctx: FoldContext,
+  createdAccount = false,
+): Result<Draft, EntityError> => {
+  const self = d0.state.id;
+  const child0 = d0.accountReplicas.get(peer);
+  const paybookBefore = d0.state.paybook ?? EMPTY_PAYBOOK;
+  const frames: readonly FollowedFrame[] = [
+    ...(own === undefined ? [] : [{ frame: own, viaNewFrame: false }]),
+    ...(received === undefined ? [] : [{ frame: received.frame, viaNewFrame: true }]),
+  ];
+  const htlc: FollowupAt = {
+    peer,
+    received,
+    byKey: entriesByKey(ctx.htlc?.entries ?? []),
+    timestamp: Number(ctx.timestamp),
+    self,
+    jurisdictionId: htlcJurisdictionId(d0.state, ctx.activeJurisdiction),
+  };
+  const at: CommittedAt = {
+    peer,
+    self,
+    ctx,
+    hadAccount: child0 !== undefined,
+    selfIsLeft: child0 !== undefined && isLeft(self, replicaId(child0)),
+    received,
+    htlc,
+    paybookBefore,
+    swapOutputs: effects.filter(isSwapOutput),
+  };
+  const start: Following = {
+    d: d0,
+    targets: [],
+    run: { flow: { paybook: paybookBefore, queue: [] }, consumed: new Set() },
+    cross: undefined,
+    swaps: { cursor: 0, created: [], cancelled: [], cancelRequests: [] },
+  };
+  return chain(foldResult(frames, start, frameFollowups(at)), (f) =>
+    finishFollowups(f, frames, effects, createdAccount, at),
+  );
 };
+/** The HTLC originator's view of this Entity: its clock, J height, encryption key, paybook and Accounts. */
 const originView = (state: EntityState, replicas: Replicas, timestamp: bigint): HtlcOriginView => ({
-  id: state.id, timestamp: Number(timestamp), jHeight: Number(entityJHeight(state)), encryptionKey: String(state.committed["entityEncryptionPublicKey"] ?? ""), paybook: state.paybook ?? EMPTY_PAYBOOK, replicas,
+  id: state.id,
+  timestamp: Number(timestamp),
+  jHeight: Number(entityJHeight(state)),
+  encryptionKey: String(state.committed["entityEncryptionPublicKey"] ?? ""),
+  paybook: state.paybook ?? EMPTY_PAYBOOK,
+  replicas,
 });
 // ---- og entity/tx/handlers/cross-j/setup.ts + extensions/cross-j/prepared-route.ts + j-events-htlc/cross-jurisdiction-helpers.ts ----
 /** The Entity state a cross-j setup handler reads (og EntityState fields: entityId, timestamp, config.validators/jurisdiction, accounts, both collections). */
@@ -23215,7 +24006,7 @@ const crossView = (state: EntityState, replicas: Replicas, timestamp: bigint): C
 const crossSetup = (v: CrossEntityView, o: Partial<CrossSetup> = {}): CrossSetup => ({ swaps: v.swaps, auths: v.auths, messages: [], outputs: [], accountTxs: [], ...o });
 const crossNote = (v: CrossEntityView, message: string, o: Partial<CrossSetup> = {}): CrossStep => ok(crossSetup(v, { ...o, messages: [message] }));
 /** og MalformedEntityFrameInputError (reject: the outer tx is evicted). og haltRuntimeFailure / plain Error map to `invariant` (the input is refused). */
-const crossReject2 = (reason: string): Result<never, EntityError> => err({ _tag: "cross_j_entity", reason });
+const crossEvict = (reason: string): Result<never, EntityError> => err({ _tag: "cross_j_entity", reason });
 /** og normalizeEntityRef (entity/tx/account-key.ts): lowercase, not trimmed. */
 const entityRef = (v: unknown): string => String(v || "").toLowerCase();
 const fatalCross = <T,>(r: Result<T, CrossError>): Result<T, EntityError> => (r.ok ? r : invariant(r.error.reason));
@@ -23335,7 +24126,7 @@ const crossAuthorize = (v: CrossEntityView, route: CrossRoute, role: "source" | 
   for (const [code, s] of signers) if (!entityRef(s)) return invariant(`${code}:${id}`);
   const auths = v.auths ?? new Map<string, CrossRoute>(), existing = auths.get(id);
   return chain(fatalCross(cloneCrossRoute(route)), (cloned) => chain(exactRouteBytes(route), (bytes) => chain(existing === undefined ? ok("") : exactRouteBytes(existing), (held): CrossStep => {
-    if (existing !== undefined && held !== bytes) return crossReject2(`CROSS_J_USER_AUTH_CONFLICT:${id}`);
+    if (existing !== undefined && held !== bytes) return crossEvict(`CROSS_J_USER_AUTH_CONFLICT:${id}`);
     const next = existing === undefined ? mapSet(auths, id, cloned) : auths;
     const message = existing !== undefined ? `🌉 Cross-j swap ${id} auth retry re-emitted by ${role} user` : `🌉 Cross-j swap ${id} authorized by ${role} user`;
     if (role !== "source") return ok(crossSetup(v, { auths: next, messages: [message] }));
@@ -23352,12 +24143,12 @@ const crossPrepareRaw = (v: CrossEntityView, route: CrossRoute): CrossStep => {
   if (clock) return crossNote(v, `❌ Cross-j prepare ${id} blocked: ${clock}`);
   const swaps = v.swaps ?? new Map<string, CrossRoute>(), existing = swaps.get(id);
   if (existing !== undefined && isCrossTerminal(existing.status) && !existing.sourcePull && !existing.targetPull)
-    return chain(materializedIntentBytes(route, existing), (a) => chain(exactRouteBytes(existing), (b) => (a !== b ? crossReject2(`CROSS_J_RAW_PREPARE_CONFLICT:${id}`) : ok(crossSetup(v, { swaps })))));
+    return chain(materializedIntentBytes(route, existing), (a) => chain(exactRouteBytes(existing), (b) => (a !== b ? crossEvict(`CROSS_J_RAW_PREPARE_CONFLICT:${id}`) : ok(crossSetup(v, { swaps })))));
   if (existing?.sourcePull || existing?.targetPull) {
     const stored = entityRef(existing.routeHash || ""), replay = entityRef(route.routeHash || "");
-    return stored && replay && stored === replay ? crossNote(v, `🌉 Cross-j prepare ${id} already materialized; replay ignored`, { swaps }) : crossReject2(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${id}`);
+    return stored && replay && stored === replay ? crossNote(v, `🌉 Cross-j prepare ${id} already materialized; replay ignored`, { swaps }) : crossEvict(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${id}`);
   }
-  if (existing !== undefined) return chain(exactRouteBytes(existing), (a) => chain(exactRouteBytes(route), (b) => (a !== b ? crossReject2(`CROSS_J_RAW_PREPARE_CONFLICT:${id}`) : ok(crossSetup(v, { swaps })))));
+  if (existing !== undefined) return chain(exactRouteBytes(existing), (a) => chain(exactRouteBytes(route), (b) => (a !== b ? crossEvict(`CROSS_J_RAW_PREPARE_CONFLICT:${id}`) : ok(crossSetup(v, { swaps })))));
   return chain(fatalCross(cloneCrossRoute(route)), (cloned): CrossStep => {
     const first = v.validators[0];
     if (!first) return invariant(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${id}`);
@@ -32242,7 +33033,7 @@ export type CrossClearReveal = { readonly proposerSignerId: string; readonly ord
  */
 export const materializeCrossClear = (h: BookHost, data: CrossClearReveal): Result<CrossHostStep, EntityError> => {
   const { orderId, binary } = data, expected = entityRef(h.validators[0] || ""), claimed = entityRef(data.proposerSignerId);
-  if (!expected || claimed !== expected) return crossReject2(`CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimed || "missing"}:${expected || "missing"}`);
+  if (!expected || claimed !== expected) return crossEvict(`CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimed || "missing"}:${expected || "missing"}`);
   const stored = h.swaps?.get(orderId);
   if (stored === undefined || stored.status !== "clear_requested") return halt(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
   return chain(canonRoute(stored), (route) => {
