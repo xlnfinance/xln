@@ -19875,8 +19875,7 @@ type EpSigning = { readonly entityNumber: bigint; readonly boardEpoch: bigint };
 /** A new intent takes the next generation, and the leader to submit it. */
 const epNextSigner = (state: EntityState, current: EntityProviderActionState): Result<string, EntityError> => {
   if (current.generation >= Number.MAX_SAFE_INTEGER) return epFail("ENTITY_PROVIDER_ACTION_GENERATION_EXHAUSTED");
-  const signer = leaderStateOf(state).activeValidatorId;
-  return signer === "" ? epFail("ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING") : ok(signer);
+  return activeSigner(state, "ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING");
 };
 /** The intent at the lane's next nonce, hashed for the board to sign. */
 const epIntent = (
@@ -20173,644 +20172,1759 @@ export const applyEntityProviderActionJEvent = (
 };
 // ---- og entity/tx/handlers/control-board-proposal.ts + hanko/onchain-domain.ts encodeBoardProposalHankoPayload
 const BOARD_PROPOSAL_DOMAIN = keccak256Hex(utf8("XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V1"));
-/** og hashBoardProposalHankoPayload: keccak(abi.encode(domain, chainId, entityProvider, entityId, boardEpoch, newBoardHash, authority, actionNonce)). */
-export const boardProposalHash = (i: { readonly chainId: bigint; readonly entityProviderAddress: string; readonly boardEpoch: bigint; readonly entityId: string; readonly newBoardHash: string; readonly authority: number; readonly actionNonce: bigint }): string =>
-  keccak256Hex(abiEncode([A.b32(BOARD_PROPOSAL_DOMAIN), A.uint(i.chainId), A.address(i.entityProviderAddress), A.b32(i.entityId), A.uint(i.boardEpoch), A.b32(i.newBoardHash), A.uint(BigInt(i.authority)), A.uint(i.actionNonce)])).toLowerCase();
+type BoardProposal = {
+  readonly chainId: bigint;
+  readonly entityProviderAddress: string;
+  readonly boardEpoch: bigint;
+  readonly entityId: string;
+  readonly newBoardHash: string;
+  readonly authority: number;
+  readonly actionNonce: bigint;
+};
+/**
+ * og hashBoardProposalHankoPayload: keccak(abi.encode(domain, chainId, entityProvider, entityId, boardEpoch,
+ * newBoardHash, authority, actionNonce)).
+ */
+export const boardProposalHash = (i: BoardProposal): string => {
+  const encoded = abiEncode([
+    A.b32(BOARD_PROPOSAL_DOMAIN),
+    A.uint(i.chainId),
+    A.address(i.entityProviderAddress),
+    A.b32(i.entityId),
+    A.uint(i.boardEpoch),
+    A.b32(i.newBoardHash),
+    A.uint(BigInt(i.authority)),
+    A.uint(i.actionNonce),
+  ]);
+  return keccak256Hex(encoded).toLowerCase();
+};
 /** og toEntityId (protocol/identity): a 32-byte hex id, lowercased by the caller. */
 const cbEntityId = (value: unknown): Result<string, EntityError> =>
-  typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value) ? ok(value.toLowerCase()) : epFail(`FINTECH-SAFETY: Invalid EntityId format: ${String(value)}`);
+  typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value)
+    ? ok(value.toLowerCase())
+    : epFail(`FINTECH-SAFETY: Invalid EntityId format: ${String(value)}`);
 const cbRecord = (state: EntityState, entityId: string, missing: string): Result<CertifiedBoardRecord, EntityError> =>
-  chain(observerBoardRecord(state, entityId), (record) => (record === null ? epFail(`${missing}:${entityId}`) : ok(record)));
+  chain(observerBoardRecord(state, entityId), (record) =>
+    record === null ? epFail(`${missing}:${entityId}`) : ok(record),
+  );
+/** The leader who submits the Entity's J txs; an Entity without one cannot submit. */
+const activeSigner = (state: EntityState, missing: string): Result<string, EntityError> => {
+  const signer = leaderStateOf(state).activeValidatorId;
+  return signer === "" ? epFail(missing) : ok(signer);
+};
+/** A draft whose only effect is one J tx for the Entity's jurisdiction. */
+const jTxDraft = (
+  state: EntityState,
+  replicas: Replicas,
+  jurisdictionName: string,
+  jTx: Binary,
+  message: string,
+): Draft => ({
+  state,
+  accountReplicas: replicas,
+  outputs: [],
+  events: [status(message)],
+  jOutputs: [{ jurisdictionName, jTxs: [jTx] }],
+});
 type ControlProposalTx = Extract<EntityTx, { readonly type: "entityProviderProposeControlBoard" }>;
-/**
- * og handleEntityProviderProposeControlBoard: this Entity, a CONTROL shareholder of `targetEntityId`, signs a board proposal (with the verified
- * written consents of other shareholders) for EntityProvider; the proposal hash is a frame-signed hash and the proposal a J output.
- */
-const proposeControlBoard = (state: EntityState, replicas: Replicas, tx: ControlProposalTx, ctx: FoldContext): Result<Draft, EntityError> => {
-  const j = state.jurisdictionConfig, name = (j?.name ?? "").trim();
+type ControlProposalData = ControlProposalTx["data"];
+type SupporterVote = { readonly entityId: string; readonly hankoSignature: string };
+/** Where a CONTROL proposal is submitted: the jurisdiction's name, chain and EntityProvider. */
+type ControlDomain = { readonly name: string; readonly chainId: bigint; readonly entityProviderAddress: string };
+const controlDomain = (state: EntityState): Result<ControlDomain, EntityError> => {
+  const j = state.jurisdictionConfig;
+  const name = (j?.name ?? "").trim();
   if (j === undefined || name === "") return epFail("CONTROL_BOARD_PROPOSAL_JURISDICTION_MISSING");
   const chainId = BigInt(state.jurisdiction.chainId);
   if (chainId <= 0n) return epFail(`CONTROL_BOARD_PROPOSAL_CHAIN_ID_INVALID:${chainId}`);
   const provider = ethAddress(j.entityProviderAddress);
   if (provider === null || provider === EP_ZERO_ADDRESS) return epFail("INVALID_ENTITY_PROVIDER_ADDRESS");
-  const d = tx.data;
-  return chain(cbEntityId(d.targetEntityId), (target) => chain(cbEntityId(state.id), (shareholder): Result<Draft, EntityError> => {
-    if (typeof d.newBoardHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(d.newBoardHash)) return epFail(`PROTOCOL_BOARD_HASH_INVALID:${String(d.newBoardHash)}`);
-    const newBoardHash = d.newBoardHash.toLowerCase(), nonce = d.actionNonce;
-    if (typeof nonce !== "bigint" || nonce <= 0n || nonce > EP_MAX_UINT) return epFail(`CONTROL_BOARD_PROPOSAL_NONCE_INVALID:${String(nonce)}`);
-    return chain(cbRecord(state, target, "CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING"), (targetBoard) => chain(cbRecord(state, shareholder, "CONTROL_BOARD_PROPOSAL_SHAREHOLDER_AUTHORITY_MISSING"), (): Result<Draft, EntityError> => {
-      const proposalHash = boardProposalHash({ chainId, entityProviderAddress: provider, boardEpoch: BigInt(targetBoard.boardEpoch), entityId: target, newBoardHash, authority: 1, actionNonce: nonce });
-      const supplied = d.supporterVotes ?? [];
-      if (supplied.length >= 256) return epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTERS_OVERSIZED:${supplied.length}`);
-      // og verifyControlSupporterVotes (8 Del. C. § 228 written consent): each supporter Hanko is checked against its certified current board
-      const votes = foldResult<readonly { readonly entityId: string; readonly hankoSignature?: string }[], { readonly entityId: string; readonly hankoSignature: string }, EntityError>(supplied, [], (acc, vote) =>
-        chain(cbEntityId(vote.entityId), (supporter) => {
-          if (supporter === shareholder || acc.some((v) => v.entityId === supporter)) return epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTER_DUPLICATE:${supporter}`);
-          return chain(cbRecord(state, supporter, "CONTROL_BOARD_PROPOSAL_SUPPORTER_AUTHORITY_MISSING"), (record) =>
-            ctx.verify(proposalHash, vote.hankoSignature, supporter as EntityId, { allowPreviousBoard: false, registeredBoardHash: record.boardHash })
-              ? ok([...acc, { entityId: supporter, hankoSignature: vote.hankoSignature }]) : epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID:${supporter}`));
-        }));
-      return chain(votes, (verified): Result<Draft, EntityError> => {
-        const signer = leaderStateOf(state).activeValidatorId;
-        if (signer === "") return epFail("CONTROL_BOARD_PROPOSAL_SUBMITTER_MISSING");
-        const supporterVotes = [...verified, { entityId: shareholder }].sort((a, b) => asc(a.entityId, b.entityId));
-        const jTx = { type: "entityProviderProposeControlBoard", entityId: shareholder, data: { targetEntityId: target, newBoardHash, boardEpoch: BigInt(targetBoard.boardEpoch), actionNonce: nonce, proposalHash, supporterVotes, signerId: signer }, timestamp: Number(ctx.timestamp) } as unknown as Binary;
-        return ok({
-          state, accountReplicas: replicas, outputs: [], events: [status(`🗳️ CONTROL vote ${shareholder.slice(-4)} → ${target.slice(-4)}`)],
-          jOutputs: [{ jurisdictionName: name, jTxs: [jTx] }], hashes: [{ hash: proposalHash, type: "entityProviderAction", context: `controlBoard:${target.slice(-4)}:nonce:${nonce}` }],
-        });
-      });
-    }));
-  }));
+  return ok({ name, chainId, entityProviderAddress: provider });
 };
-/** og handleEntityProviderActivateBoard: the permissionless activation call for a certified target once its proposal delay has passed. */
-const activateBoard = (state: EntityState, replicas: Replicas, tx: Extract<EntityTx, { readonly type: "entityProviderActivateBoard" }>, timestamp: bigint): Result<Draft, EntityError> => {
+/** The proposal's own terms: the board it installs and the target's action nonce it spends. */
+const controlTerms = (
+  d: ControlProposalData,
+): Result<{ readonly newBoardHash: string; readonly nonce: bigint }, EntityError> => {
+  const nonce = d.actionNonce;
+  if (typeof d.newBoardHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(d.newBoardHash)) {
+    return epFail(`PROTOCOL_BOARD_HASH_INVALID:${String(d.newBoardHash)}`);
+  }
+  if (typeof nonce !== "bigint" || nonce <= 0n || nonce > EP_MAX_UINT) {
+    return epFail(`CONTROL_BOARD_PROPOSAL_NONCE_INVALID:${String(nonce)}`);
+  }
+  return ok({ newBoardHash: d.newBoardHash.toLowerCase(), nonce });
+};
+/**
+ * og verifyControlSupporterVotes (8 Del. C. § 228 written consent): each supporter is a distinct Entity other than the
+ * proposer, and its Hanko is checked against its certified current board.
+ */
+const verifiedSupporters = (
+  state: EntityState,
+  ctx: FoldContext,
+  shareholder: string,
+  proposalHash: string,
+  supplied: readonly SupporterVote[],
+): Result<readonly SupporterVote[], EntityError> =>
+  foldResult(supplied, [] as readonly SupporterVote[], (verified, vote) =>
+    chain(cbEntityId(vote.entityId), (supporter) => {
+      if (supporter === shareholder || verified.some((v) => v.entityId === supporter)) {
+        return epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTER_DUPLICATE:${supporter}`);
+      }
+      return chain(cbRecord(state, supporter, "CONTROL_BOARD_PROPOSAL_SUPPORTER_AUTHORITY_MISSING"), (record) => {
+        const board = { allowPreviousBoard: false, registeredBoardHash: record.boardHash };
+        return ctx.verify(proposalHash, vote.hankoSignature, supporter as EntityId, board)
+          ? ok([...verified, { entityId: supporter, hankoSignature: vote.hankoSignature }])
+          : epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID:${supporter}`);
+      });
+    }),
+  );
+/** A CONTROL proposal ready to submit: whose board it replaces, who proposes it, and under which hash. */
+type ControlProposal = {
+  readonly domain: ControlDomain;
+  readonly target: string;
+  readonly shareholder: string;
+  readonly newBoardHash: string;
+  readonly nonce: bigint;
+  readonly boardEpoch: bigint;
+  readonly proposalHash: string;
+};
+const controlProposalDraft = (
+  state: EntityState,
+  replicas: Replicas,
+  ctx: FoldContext,
+  p: ControlProposal,
+  verified: readonly SupporterVote[],
+  signer: string,
+): Draft => {
+  const supporterVotes = [...verified, { entityId: p.shareholder }].toSorted((a, b) => asc(a.entityId, b.entityId));
+  const data = {
+    targetEntityId: p.target,
+    newBoardHash: p.newBoardHash,
+    boardEpoch: p.boardEpoch,
+    actionNonce: p.nonce,
+    proposalHash: p.proposalHash,
+    supporterVotes,
+    signerId: signer,
+  };
+  const jTx = {
+    type: "entityProviderProposeControlBoard",
+    entityId: p.shareholder,
+    data,
+    timestamp: Number(ctx.timestamp),
+  };
+  const message = `🗳️ CONTROL vote ${p.shareholder.slice(-4)} → ${p.target.slice(-4)}`;
+  const context = `controlBoard:${p.target.slice(-4)}:nonce:${p.nonce}`;
+  return {
+    ...jTxDraft(state, replicas, p.domain.name, jTx as unknown as Binary, message),
+    hashes: [{ hash: p.proposalHash, type: "entityProviderAction", context }],
+  };
+};
+/**
+ * og handleEntityProviderProposeControlBoard: this Entity, a CONTROL shareholder of `targetEntityId`, signs a board
+ * proposal (with the verified written consents of other shareholders) for EntityProvider; the proposal hash is a
+ * frame-signed hash and the proposal a J output.
+ */
+const proposeControlBoard = (
+  state: EntityState,
+  replicas: Replicas,
+  tx: ControlProposalTx,
+  ctx: FoldContext,
+): Result<Draft, EntityError> => {
+  const d = tx.data;
+  const parties = all({ target: cbEntityId(d.targetEntityId), shareholder: cbEntityId(state.id) });
+  return chain(controlDomain(state), (domain) =>
+    chain(parties, ({ target, shareholder }) =>
+      chain(controlTerms(d), ({ newBoardHash, nonce }) =>
+        chain(cbRecord(state, target, "CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING"), (targetBoard) =>
+          chain(cbRecord(state, shareholder, "CONTROL_BOARD_PROPOSAL_SHAREHOLDER_AUTHORITY_MISSING"), () => {
+            const boardEpoch = BigInt(targetBoard.boardEpoch);
+            const proposalHash = boardProposalHash({
+              chainId: domain.chainId,
+              entityProviderAddress: domain.entityProviderAddress,
+              boardEpoch,
+              entityId: target,
+              newBoardHash,
+              authority: 1,
+              actionNonce: nonce,
+            });
+            const proposal: ControlProposal = {
+              domain,
+              target,
+              shareholder,
+              newBoardHash,
+              nonce,
+              boardEpoch,
+              proposalHash,
+            };
+            const supplied = d.supporterVotes ?? [];
+            if (supplied.length >= 256) return epFail(`CONTROL_BOARD_PROPOSAL_SUPPORTERS_OVERSIZED:${supplied.length}`);
+            return chain(verifiedSupporters(state, ctx, shareholder, proposalHash, supplied), (verified) =>
+              map(activeSigner(state, "CONTROL_BOARD_PROPOSAL_SUBMITTER_MISSING"), (signer) =>
+                controlProposalDraft(state, replicas, ctx, proposal, verified, signer),
+              ),
+            );
+          }),
+        ),
+      ),
+    ),
+  );
+};
+/**
+ * og handleEntityProviderActivateBoard: the permissionless activation call for a certified target once its proposal
+ * delay has passed.
+ */
+const activateBoard = (
+  state: EntityState,
+  replicas: Replicas,
+  tx: Extract<EntityTx, { readonly type: "entityProviderActivateBoard" }>,
+  timestamp: bigint,
+): Result<Draft, EntityError> => {
   const name = (state.jurisdictionConfig?.name ?? "").trim();
   if (name === "") return epFail("CONTROL_BOARD_ACTIVATION_JURISDICTION_MISSING");
-  return chain(cbEntityId(tx.data.targetEntityId), (target) => chain(cbRecord(state, target, "CONTROL_BOARD_ACTIVATION_TARGET_MISSING"), (): Result<Draft, EntityError> => {
-    const signer = leaderStateOf(state).activeValidatorId;
-    if (signer === "") return epFail("CONTROL_BOARD_ACTIVATION_SUBMITTER_MISSING");
-    const jTx = { type: "entityProviderActivateBoard", entityId: state.id, data: { targetEntityId: target, signerId: signer }, timestamp: Number(timestamp) } as unknown as Binary;
-    return ok({ state, accountReplicas: replicas, outputs: [], events: [status(`🔐 Activate board ${target.slice(-4)}`)], jOutputs: [{ jurisdictionName: name, jTxs: [jTx] }] });
-  }));
+  return chain(cbEntityId(tx.data.targetEntityId), (target) =>
+    chain(cbRecord(state, target, "CONTROL_BOARD_ACTIVATION_TARGET_MISSING"), () =>
+      map(activeSigner(state, "CONTROL_BOARD_ACTIVATION_SUBMITTER_MISSING"), (signer) => {
+        const data = { targetEntityId: target, signerId: signer };
+        const jTx = { type: "entityProviderActivateBoard", entityId: state.id, data, timestamp: Number(timestamp) };
+        return jTxDraft(state, replicas, name, jTx as unknown as Binary, `🔐 Activate board ${target.slice(-4)}`);
+      }),
+    ),
+  );
 };
 /** og canonicalBoardHash: the quorum's board (validator addresses, shares, the board's delays). */
-export const quorumBoardHash = (q: Authority): string => match(q, { teaching: () => configBoardHash(q), board: ({ board }) => boardHashOf(board).toLowerCase() });
+export const quorumBoardHash = (q: Authority): string =>
+  match(q, { teaching: () => configBoardHash(q), board: ({ board }) => boardHashOf(board).toLowerCase() });
 /** og encodeQuorumEntityId: the Entity id as a 32-byte word. */
 const quorumEntityWord = (entityId: string): Result<string, EntityError> => {
   const s = entityId.trim();
-  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(s) || BigInt(s) >= 1n << 256n) return invariant(`BUILD_QUORUM_HANKO_INVALID_ENTITY_ID: entityId=${entityId}`);
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(s) || BigInt(s) >= 1n << 256n) {
+    return invariant(`BUILD_QUORUM_HANKO_INVALID_ENTITY_ID: entityId=${entityId}`);
+  }
   return ok(`0x${BigInt(s).toString(16).padStart(64, "0")}`);
 };
 /**
- * og assertQuorumBoardBinding / assertEntityConfigBoardAuthority: the committed board must be the Entity's lazy id (id == board hash) or,
- * for any other Entity, the board its own certified registry holds. Proposers and validators run it before signing any manifest.
+ * og assertQuorumBoardBinding / assertEntityConfigBoardAuthority: the committed board must be the Entity's lazy id (id
+ * == board hash) or, for any other Entity, the board its own certified registry holds. Proposers and validators run it
+ * before signing any manifest.
  */
-export const assertBoardAuthority = (state: EntityState): Result<void, EntityError> => chain(quorumEntityWord(state.id), (word): Result<void, EntityError> => {
-  const supplied = quorumBoardHash(state.quorum);
-  if (supplied === word) return ok(undefined);
-  if (state.jurisdictionConfig === undefined) return invariant(`BUILD_QUORUM_HANKO_BOARD_UNAVAILABLE: entityId=${state.id}`);
-  return chain(signingBoardHash(state, state.id), (authoritative) => supplied === authoritative ? ok(undefined)
-    : invariant(`BUILD_QUORUM_HANKO_BOARD_MISMATCH: entityId=${state.id} authoritative=${authoritative} supplied=${supplied}`));
-});
+export const assertBoardAuthority = (state: EntityState): Result<void, EntityError> =>
+  chain(quorumEntityWord(state.id), (word): Result<void, EntityError> => {
+    const supplied = quorumBoardHash(state.quorum);
+    if (supplied === word) return ok(undefined);
+    if (state.jurisdictionConfig === undefined)
+      return invariant(`BUILD_QUORUM_HANKO_BOARD_UNAVAILABLE: entityId=${state.id}`);
+    return chain(signingBoardHash(state, state.id), (authoritative) => {
+      const mismatch = `entityId=${state.id} authoritative=${authoritative} supplied=${supplied}`;
+      return supplied === authoritative ? ok(undefined) : invariant(`BUILD_QUORUM_HANKO_BOARD_MISMATCH: ${mismatch}`);
+    });
+  });
 // ---- og entity/command (command-codec.ts, index.ts), auth/authorization.ts, tx/processing/proposals.ts, system/basic.ts propose/vote ----
-/** og applyEntityTxsInOrder authorization lanes: top-level frame txs, a signed command's individual txs, an approved proposal's collective txs. */
+/**
+ * og applyEntityTxsInOrder authorization lanes: top-level frame txs, a signed command's individual txs, an approved
+ * proposal's collective txs.
+ */
 type TxLane = "top" | "command" | "collective" | "runtime";
 /** A tx that changes nothing but the Entity state: no outputs, no events, no Account touched. */
-const idle = (state: EntityState, replicas: Replicas): Draft => ({ state, accountReplicas: replicas, outputs: [], touched: [] });
+const idle = (state: EntityState, replicas: Replicas): Draft => ({
+  state,
+  accountReplicas: replicas,
+  outputs: [],
+  touched: [],
+});
 const status = (message: string): FrameEvent => ({ type: "status", message });
 const lendingMessage = (tx: LendingEntityTx): string => {
   switch (tx.type) {
-    case "lendingOffer": return `Lending pool funding requested: ${tx.data.amount} token=${Number(tx.data.tokenId)}`;
-    case "lendingBorrow": return `Loan requested: ${tx.data.amount} token=${Number(tx.data.tokenId)}`;
-    case "lendingRepay": return `Loan repayment requested: ${tx.data.loanId}`;
-    case "lendingClosePosition": return `Lending position close requested: ${tx.data.positionId}`;
+    case "lendingOffer":
+      return `Lending pool funding requested: ${tx.data.amount} token=${Number(tx.data.tokenId)}`;
+    case "lendingBorrow":
+      return `Loan requested: ${tx.data.amount} token=${Number(tx.data.tokenId)}`;
+    case "lendingRepay":
+      return `Loan repayment requested: ${tx.data.loanId}`;
+    case "lendingClosePosition":
+      return `Lending position close requested: ${tx.data.positionId}`;
   }
 };
 const invariant = (reason: string): Result<never, EntityError> => err({ _tag: "entity_invariant", reason });
 const rejectCommand = (reason: string): Result<never, EntityError> => err({ _tag: "entity_command", reason });
 /** og isEntityProtocolTx / isIndividualEntityCommandTx / isCollectiveEntityActionTx over the rewrite's tx types. */
-const PROTOCOL_TXS: ReadonlySet<string> = new Set(["boardHandover", "entityCommand", "runtimeOutput", "scheduledWake", "proposeAccountsNow", "j_event", "accountInput"]);
-const INDIVIDUAL_TXS: ReadonlySet<string> = new Set(["chat", "materializeCrossJurisdictionClear", "materializeCrossJurisdictionSwap", "propose", "vote"]);
+const PROTOCOL_TXS: ReadonlySet<string> = new Set([
+  "boardHandover",
+  "entityCommand",
+  "runtimeOutput",
+  "scheduledWake",
+  "proposeAccountsNow",
+  "j_event",
+  "accountInput",
+]);
+const INDIVIDUAL_TXS: ReadonlySet<string> = new Set([
+  "chat",
+  "materializeCrossJurisdictionClear",
+  "materializeCrossJurisdictionSwap",
+  "propose",
+  "vote",
+]);
 const isProtocolTx = (tx: EntityTx): boolean => PROTOCOL_TXS.has(tx.type);
 const isIndividualTx = (tx: EntityTx): boolean => INDIVIDUAL_TXS.has(tx.type);
 const isCollectiveTx = (tx: EntityTx): boolean => !isProtocolTx(tx) && !isIndividualTx(tx);
 /**
- * og assertEntityTxAuthorization. A signed command applies only individual txs and an approved proposal only collective ones. og refuses every
- * other top-level tx with ENTITY_COMMAND_REQUIRED; the rewrite's top-level `txs` lane stays the trusted local lane for the txs it already carried,
- * and refuses the governance txs og only accepts inside a command.
+ * og assertEntityTxAuthorization. A signed command applies only individual txs and an approved proposal only collective
+ * ones. og refuses every other top-level tx with ENTITY_COMMAND_REQUIRED; the rewrite's top-level `txs` lane stays the
+ * trusted local lane for the txs it already carried, and refuses the governance txs og only accepts inside a command.
  */
 const laneRefusal = (tx: EntityTx, lane: TxLane): EntityError | undefined => {
-  if (isProtocolTx(tx)) return undefined;
-  if (tx.type === "crossJurisdictionSalvage" && lane !== "runtime") return { _tag: "entity_invariant", reason: "CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED" };
-  if (lane === "command" && !isIndividualTx(tx)) return { _tag: "entity_invariant", reason: `ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}` };
-  if (lane === "collective" && !isCollectiveTx(tx)) return { _tag: "entity_invariant", reason: `ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}` };
-  if (lane === "top" && (tx.type === "propose" || tx.type === "vote")) return { _tag: "entity_invariant", reason: `ENTITY_COMMAND_REQUIRED:${tx.type}` };
-  return undefined;
+  const refuse = (reason: string): EntityError => ({ _tag: "entity_invariant", reason });
+  switch (true) {
+    case isProtocolTx(tx):
+      return undefined;
+    case tx.type === "crossJurisdictionSalvage" && lane !== "runtime":
+      return refuse("CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED");
+    case lane === "command" && !isIndividualTx(tx):
+      return refuse(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
+    case lane === "collective" && !isCollectiveTx(tx):
+      return refuse(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
+    case lane === "top" && (tx.type === "propose" || tx.type === "vote"):
+      return refuse(`ENTITY_COMMAND_REQUIRED:${tx.type}`);
+    default:
+      return undefined;
+  }
 };
-/** og plain Errors (openAccount, lending, governance invariants) refuse the whole input; a reject disposition evicts only the outermost tx. */
-const fatalTx = (tx: EntityTx, e: EntityError): boolean => tx.type === "openAccount" || e._tag === "lending_entity" || e._tag === "swap_request_account_missing" || e._tag === "entity_invariant" || accountThrew(e);
-/** og's thrown Account handler Error or critical proposal failure (proposal/transactions.ts throwCriticalProposalFailure): it aborts the whole Entity input. */
-const accountThrew = (e: EntityError): boolean => e._tag === "account_tx_thrown" || e._tag === "proposal_halt" || (e._tag === "rejected_after_ack" && accountThrew(e.cause));
+/**
+ * og plain Errors (openAccount, lending, governance invariants) refuse the whole input; a reject disposition evicts
+ * only the outermost tx.
+ */
+const fatalTx = (tx: EntityTx, e: EntityError): boolean =>
+  tx.type === "openAccount" ||
+  e._tag === "lending_entity" ||
+  e._tag === "swap_request_account_missing" ||
+  e._tag === "entity_invariant" ||
+  accountThrew(e);
+/**
+ * og's thrown Account handler Error or critical proposal failure (proposal/transactions.ts
+ * throwCriticalProposalFailure): it aborts the whole Entity input.
+ */
+const accountThrew = (e: EntityError): boolean =>
+  e._tag === "account_tx_thrown" ||
+  e._tag === "proposal_halt" ||
+  (e._tag === "rejected_after_ack" && accountThrew(e.cause));
 /** The accumulated tx hashesToSign and jOutputs of two drafts (absent while empty). */
 const frameEffects = (a: Draft, b: Draft): Pick<Draft, "hashes" | "jOutputs"> => {
-  const hashes = [...(a.hashes ?? []), ...(b.hashes ?? [])], jOutputs = [...(a.jOutputs ?? []), ...(b.jOutputs ?? [])];
+  const hashes = [...(a.hashes ?? []), ...(b.hashes ?? [])];
+  const jOutputs = [...(a.jOutputs ?? []), ...(b.jOutputs ?? [])];
   return { ...(hashes.length === 0 ? {} : { hashes }), ...(jOutputs.length === 0 ? {} : { jOutputs }) };
 };
-/** og applyEntityTxsInOrder for a nested lane: every tx in order, atomically; a fatal child makes the whole outer tx fatal. */
-const foldNested = (state: EntityState, replicas: Replicas, txs: readonly EntityTx[], ctx: FoldContext, lane: TxLane): Result<Draft, EntityError> =>
-  foldResult<Draft, EntityTx, EntityError>(txs, { state, accountReplicas: replicas, outputs: [], events: [] }, (acc, tx) => {
+/**
+ * `next` applied after `acc`: its state, with every output, event, touched Account, hash, J output and swap accumulated
+ * in order.
+ */
+const appendDraft = (acc: Draft, next: Draft, touched: readonly EntityId[]): Draft => ({
+  ...next,
+  outputs: [...acc.outputs, ...next.outputs],
+  events: [...(acc.events ?? []), ...(next.events ?? [])],
+  runtimeEvents: [...(acc.runtimeEvents ?? []), ...(next.runtimeEvents ?? [])],
+  touched: [...(acc.touched ?? []), ...touched],
+  ...frameEffects(acc, next),
+  swaps: joinSwapEvents(acc.swaps, next.swaps),
+});
+/**
+ * og applyEntityTxsInOrder for a nested lane: every tx in order, atomically; a fatal child makes the whole outer tx
+ * fatal.
+ */
+const foldNested = (
+  state: EntityState,
+  replicas: Replicas,
+  txs: readonly EntityTx[],
+  ctx: FoldContext,
+  lane: TxLane,
+): Result<Draft, EntityError> => {
+  const start: Draft = { state, accountReplicas: replicas, outputs: [], events: [] };
+  return foldResult(txs, start, (acc, tx) => {
     const r = foldTx(acc.state, acc.accountReplicas, tx, ctx, lane);
-    if (!r.ok) return fatalTx(tx, r.error) && r.error._tag !== "entity_invariant" ? invariant(`${tx.type}:${r.error._tag}`) : r;
-    return ok({ ...r.value, outputs: [...acc.outputs, ...r.value.outputs], events: [...(acc.events ?? []), ...(r.value.events ?? [])], runtimeEvents: [...(acc.runtimeEvents ?? []), ...(r.value.runtimeEvents ?? [])], touched: [...(acc.touched ?? []), ...(r.value.touched ?? [peerOf(tx, state.id)])], ...frameEffects(acc, r.value), swaps: joinSwapEvents(acc.swaps, r.value.swaps) });
+    if (r.ok) return ok(appendDraft(acc, r.value, r.value.touched ?? [peerOf(tx, state.id)]));
+    return fatalTx(tx, r.error) && r.error._tag !== "entity_invariant" ? invariant(`${tx.type}:${r.error._tag}`) : r;
   });
-const WORD32 = /^0x[0-9a-f]{64}$/, EOA = /^0x[0-9a-f]{40}$/;
-const COMMAND_DOMAIN = "xln:entity-command:binary", PROPOSAL_ACTION_DOMAIN = "xln:entity-proposal-action:v1";
+};
+const WORD32 = /^0x[0-9a-f]{64}$/;
+const EOA = /^0x[0-9a-f]{40}$/;
+const COMMAND_DOMAIN = "xln:entity-command:binary";
+const PROPOSAL_ACTION_DOMAIN = "xln:entity-proposal-action:v1";
 const MAX_PENDING_PROPOSALS = 100;
 /** og UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers.id('xln:entity-command:unregistered-stack:v1'). */
 const UNREGISTERED_STACK_KEY = keccak256Hex(utf8("xln:entity-command:unregistered-stack:v1"));
+const BOARD_STACK_DOMAIN = keccak256Hex(utf8("xln.certified-board.stack.v1"));
 /** og getCertifiedBoardStackKey: keccak(abi.encode(STACK_DOMAIN, chainId, depository, entityProvider)). */
-export const certifiedBoardStackKey = (j: { readonly chainId: number; readonly depositoryAddress: string; readonly entityProviderAddress: string }): string =>
-  keccak256Hex(abiEncode([A.b32(keccak256Hex(utf8("xln.certified-board.stack.v1"))), A.uint(BigInt(j.chainId)), A.address(j.depositoryAddress.toLowerCase()), A.address(j.entityProviderAddress.toLowerCase())]));
-const commandStackKey = (state: EntityState): string => (state.jurisdictionConfig === undefined ? UNREGISTERED_STACK_KEY
-  : certifiedBoardStackKey({ chainId: state.jurisdiction.chainId, depositoryAddress: state.jurisdiction.depositoryAddress, entityProviderAddress: state.jurisdictionConfig.entityProviderAddress }));
+export const certifiedBoardStackKey = (j: {
+  readonly chainId: number;
+  readonly depositoryAddress: string;
+  readonly entityProviderAddress: string;
+}): string =>
+  keccak256Hex(
+    abiEncode([
+      A.b32(BOARD_STACK_DOMAIN),
+      A.uint(BigInt(j.chainId)),
+      A.address(j.depositoryAddress.toLowerCase()),
+      A.address(j.entityProviderAddress.toLowerCase()),
+    ]),
+  );
+const commandStackKey = (state: EntityState): string => {
+  const config = state.jurisdictionConfig;
+  if (config === undefined) return UNREGISTERED_STACK_KEY;
+  return certifiedBoardStackKey({
+    chainId: state.jurisdiction.chainId,
+    depositoryAddress: state.jurisdiction.depositoryAddress,
+    entityProviderAddress: config.entityProviderAddress,
+  });
+};
 type BoardMember = { readonly signerId: string; readonly signer: string; readonly share: bigint };
-type CommandBoard = { readonly boardHash: string; readonly boardEpoch: number; readonly members: readonly BoardMember[] };
-/** og hashBoard(encodeBoard(config)): the config's positional validators as zero-padded EOAs, uint16 powers, no delays. */
+type CommandBoard = {
+  readonly boardHash: string;
+  readonly boardEpoch: number;
+  readonly members: readonly BoardMember[];
+};
+/**
+ * og hashBoard(encodeBoard(config)): the config's positional validators as zero-padded EOAs, uint16 powers, no delays.
+ */
 export const configBoardHash = (q: Authority): string => {
   const members = [...membersOf(q)];
-  return boardHashOf({ votingThreshold: Number(thresholdOf(q)), entityIds: members.map(([a]) => (/^0x[0-9a-f]{64}$/i.test(a) ? lower(a) : addressAsId(a))), votingPowers: members.map(([, m]) => Number(m.shares)), boardChangeDelay: 0, controlChangeDelay: 0, dividendChangeDelay: 0 }).toLowerCase();
+  const board = {
+    votingThreshold: Number(thresholdOf(q)),
+    entityIds: members.map(([a]) => (/^0x[0-9a-f]{64}$/i.test(a) ? lower(a) : addressAsId(a))),
+    votingPowers: members.map(([, m]) => Number(m.shares)),
+    boardChangeDelay: 0,
+    controlChangeDelay: 0,
+    dividendChangeDelay: 0,
+  };
+  return boardHashOf(board).toLowerCase();
 };
-/** og resolveEntityCommandBoard: a lazy Entity (id == its config board hash) is at epoch 0; any other Entity takes the epoch of its certified board record, which must be its config board. */
+/**
+ * og resolveEntityCommandBoard: a lazy Entity (id == its config board hash) is at epoch 0; any other Entity takes the
+ * epoch of its certified board record, which must be its config board.
+ */
 const commandBoard = (state: EntityState): Result<CommandBoard, EntityError> => {
-  const members = [...membersOf(state.quorum)].map(([a, m]): BoardMember => ({ signerId: signerId(a), signer: signerId(a), share: m.shares }));
-  const boardHash = configBoardHash(state.quorum), entity = signerId(state.id);
+  const members = [...membersOf(state.quorum)].map(([a, m]): BoardMember => ({
+    signerId: signerId(a),
+    signer: signerId(a),
+    share: m.shares,
+  }));
+  const boardHash = configBoardHash(state.quorum);
+  const entity = signerId(state.id);
   if (entity === boardHash) return ok({ boardHash, boardEpoch: 0, members });
-  return chain(observerBoardRecord(state, entity), (record): Result<CommandBoard, EntityError> => record === null ? invariant(`ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:${entity}`)
-    : record.boardHash !== boardHash ? invariant(`ENTITY_COMMAND_CERTIFIED_BOARD_CONFIG_MISMATCH:${record.boardHash}:${boardHash}`) : ok({ boardHash, boardEpoch: record.boardEpoch, members }));
+  return chain(observerBoardRecord(state, entity), (record): Result<CommandBoard, EntityError> => {
+    if (record === null) return invariant(`ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:${entity}`);
+    return record.boardHash !== boardHash
+      ? invariant(`ENTITY_COMMAND_CERTIFIED_BOARD_CONFIG_MISMATCH:${record.boardHash}:${boardHash}`)
+      : ok({ boardHash, boardEpoch: record.boardEpoch, members });
+  });
 };
-const consensusHash = (value: unknown): Result<string, EntityError> => chain(binaryBody(value), (b) => map(encodeConsensus(b), (bytes) => bytesToHex(keccak_256(bytes))));
+const consensusHash = (value: unknown): Result<string, EntityError> =>
+  chain(binaryBody(value), (b) => map(encodeConsensus(b), (bytes) => bytesToHex(keccak_256(bytes))));
 /** og hashEntityCommandTxs. */
-export const hashCommandTxs = (txs: readonly EntityTx[]): Result<string, EntityError> => consensusHash({ version: COMMAND_DOMAIN, txs: txs.map(wireEntityTx) });
+export const hashCommandTxs = (txs: readonly EntityTx[]): Result<string, EntityError> =>
+  consensusHash({ version: COMMAND_DOMAIN, txs: txs.map(wireEntityTx) });
 type CommandBody = Omit<EntityCommand, "signature">;
 /** og hashEntityCommand over the normalized body (txs enter through txsHash only). */
-export const hashCommand = (c: CommandBody): Result<string, EntityError> => consensusHash({
-  domain: COMMAND_DOMAIN, version: c.version, entityId: c.entityId, stackKey: c.stackKey, boardHash: c.boardHash, boardEpoch: c.boardEpoch,
-  authorSignerId: c.authorSignerId, authorSigner: c.authorSigner, nonce: c.nonce, txsHash: c.txsHash,
-});
+export const hashCommand = (c: CommandBody): Result<string, EntityError> =>
+  consensusHash({
+    domain: COMMAND_DOMAIN,
+    version: c.version,
+    entityId: c.entityId,
+    stackKey: c.stackKey,
+    boardHash: c.boardHash,
+    boardEpoch: c.boardEpoch,
+    authorSignerId: c.authorSignerId,
+    authorSigner: c.authorSigner,
+    nonce: c.nonce,
+    txsHash: c.txsHash,
+  });
 /** og hashCollectiveEntityActionTxs. */
 const hashCollectiveTxs = (txs: readonly EntityTx[]): Result<string, EntityError> => {
-  if (txs.length === 0 || txs.length > ENTITY_MEMPOOL_SIZE) return invariant(`ENTITY_COLLECTIVE_ACTION_TX_COUNT_INVALID:${txs.length}`);
+  if (txs.length === 0 || txs.length > ENTITY_MEMPOOL_SIZE)
+    return invariant(`ENTITY_COLLECTIVE_ACTION_TX_COUNT_INVALID:${txs.length}`);
   const forbidden = txs.find((tx) => !isCollectiveTx(tx));
-  return forbidden !== undefined ? invariant(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${forbidden.type}`) : consensusHash({ domain: PROPOSAL_ACTION_DOMAIN, version: 1, txs: txs.map(wireEntityTx) });
+  if (forbidden !== undefined) return invariant(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${forbidden.type}`);
+  return consensusHash({ domain: PROPOSAL_ACTION_DOMAIN, version: 1, txs: txs.map(wireEntityTx) });
 };
 /** og buildEntityTransactionProposalAction. */
-export const entityTransactionAction = (txs: readonly EntityTx[]): Result<ProposalAction, EntityError> => map(hashCollectiveTxs(txs), (actionHash) => ({ type: "entity_transaction", data: { version: 1, actionHash, txs } }));
+export const entityTransactionAction = (txs: readonly EntityTx[]): Result<ProposalAction, EntityError> =>
+  map(hashCollectiveTxs(txs), (actionHash) => ({ type: "entity_transaction", data: { version: 1, actionHash, txs } }));
 /** og assertEntityProposalAction: the recomputed collective action hash must equal the carried one. */
 const checkAction = (a: ProposalAction): Result<ProposalAction, EntityError> => {
-  if (a.type === "collective_message") return typeof a.data.message === "string" ? ok({ type: a.type, data: { message: a.data.message } }) : invariant("ENTITY_PROPOSAL_MESSAGE_DATA_INVALID");
-  if (a.type !== "entity_transaction") return invariant(`ENTITY_PROPOSAL_ACTION_TYPE_INVALID:${String((a as { type?: unknown }).type)}`);
-  if (a.data.version !== 1) return invariant("ENTITY_PROPOSAL_TRANSACTION_DATA_INVALID");
-  const carried = lower(a.data.actionHash);
-  return chain(hashCollectiveTxs(a.data.txs), (computed) => (carried !== computed ? invariant(`ENTITY_PROPOSAL_ACTION_HASH_MISMATCH:${carried || "missing"}:${computed}`) : ok({ type: a.type, data: { version: 1, actionHash: carried, txs: a.data.txs } })));
+  switch (a.type) {
+    case "collective_message":
+      return typeof a.data.message === "string"
+        ? ok({ type: a.type, data: { message: a.data.message } })
+        : invariant("ENTITY_PROPOSAL_MESSAGE_DATA_INVALID");
+    case "entity_transaction": {
+      if (a.data.version !== 1) return invariant("ENTITY_PROPOSAL_TRANSACTION_DATA_INVALID");
+      const carried = lower(a.data.actionHash);
+      return chain(hashCollectiveTxs(a.data.txs), (computed) =>
+        carried !== computed
+          ? invariant(`ENTITY_PROPOSAL_ACTION_HASH_MISMATCH:${carried || "missing"}:${computed}`)
+          : ok({ type: a.type, data: { version: 1, actionHash: carried, txs: a.data.txs } }),
+      );
+    }
+    default:
+      return invariant(`ENTITY_PROPOSAL_ACTION_TYPE_INVALID:${String((a as { type?: unknown }).type)}`);
+  }
 };
 /** og hashEntityProposalAction. */
-export const hashProposalAction = (a: ProposalAction): Result<string, EntityError> => chain(checkAction(a), (checked) => consensusHash({ domain: PROPOSAL_ACTION_DOMAIN, action: wireAction(checked) }));
+export const hashProposalAction = (a: ProposalAction): Result<string, EntityError> =>
+  chain(checkAction(a), (checked) => consensusHash({ domain: PROPOSAL_ACTION_DOMAIN, action: wireAction(checked) }));
 type NonceSlot = { readonly nonce: bigint; readonly commandHash: string };
+type StoredNonces = {
+  readonly boardHash?: string;
+  readonly boardEpoch?: number;
+  readonly bySigner?: ReadonlyMap<string, NonceSlot>;
+};
+const storedNonces = (state: EntityState): StoredNonces | undefined =>
+  state.committed["entityCommandNonces"] as StoredNonces | undefined;
+const onBoard = (stored: { readonly boardHash?: string; readonly boardEpoch?: number }, board: CommandBoard): boolean =>
+  stored.boardHash === board.boardHash && stored.boardEpoch === board.boardEpoch;
 /** og canonicalCommandNonceState: the committed fence for the current board, empty after a board rotation. */
 const nonceSlots = (state: EntityState, board: CommandBoard): ReadonlyMap<string, NonceSlot> => {
-  const stored = state.committed["entityCommandNonces"] as { readonly boardHash?: string; readonly boardEpoch?: number; readonly bySigner?: ReadonlyMap<string, NonceSlot> } | undefined;
-  return stored?.bySigner !== undefined && stored.boardHash === board.boardHash && stored.boardEpoch === board.boardEpoch ? stored.bySigner : new Map();
+  const stored = storedNonces(state);
+  return stored?.bySigner !== undefined && onBoard(stored, board) ? stored.bySigner : new Map();
 };
-const nonceBinary = (board: CommandBoard, slots: ReadonlyMap<string, NonceSlot>): Binary =>
-  ({ version: 1, boardHash: board.boardHash, boardEpoch: board.boardEpoch, bySigner: new Map([...slots].map(([k, v]) => [k, { nonce: v.nonce, commandHash: v.commandHash }])) });
+const nonceBinary = (board: CommandBoard, slots: ReadonlyMap<string, NonceSlot>): Binary => ({
+  version: 1,
+  boardHash: board.boardHash,
+  boardEpoch: board.boardEpoch,
+  bySigner: new Map([...slots].map(([k, v]) => [k, { nonce: v.nonce, commandHash: v.commandHash }])),
+});
+const withNonceFence = (
+  state: EntityState,
+  board: CommandBoard,
+  slots: ReadonlyMap<string, NonceSlot>,
+): EntityState => ({
+  ...state,
+  committed: { ...state.committed, entityCommandNonces: nonceBinary(board, slots) },
+});
+/** The fence after `signer` spends `slot`. */
+const withNonceSlot = (state: EntityState, board: CommandBoard, signer: string, slot: NonceSlot): EntityState =>
+  withNonceFence(state, board, new Map([...nonceSlots(state, board), [signer, slot]]));
+const nextNonce = (state: EntityState, board: CommandBoard, signer: string): bigint =>
+  (nonceSlots(state, board).get(signer)?.nonce ?? 0n) + 1n;
 type Disposition = "next" | "retry" | "cancel";
-/** og getEntityCommandDisposition: nonces only grow; an exact byte retry is idempotent, an older or rewritten slot is cancelled, a gap is refused. */
-const disposition = (slots: ReadonlyMap<string, NonceSlot>, c: EntityCommand, commandHash: string): Result<Disposition, EntityError> => {
+/**
+ * og getEntityCommandDisposition: nonces only grow; an exact byte retry is idempotent, an older or rewritten slot is
+ * cancelled, a gap is refused.
+ */
+const disposition = (
+  slots: ReadonlyMap<string, NonceSlot>,
+  c: EntityCommand,
+  commandHash: string,
+): Result<Disposition, EntityError> => {
   const latest = slots.get(c.authorSignerId);
-  if (latest === undefined) return c.nonce !== 1n ? rejectCommand(`ENTITY_COMMAND_NONCE_MISMATCH:${c.nonce}:1`) : ok("next");
-  if (c.nonce === latest.nonce) return ok(commandHash === latest.commandHash ? "retry" : "cancel");
-  if (c.nonce < latest.nonce) return ok("cancel");
-  return c.nonce !== latest.nonce + 1n ? rejectCommand(`ENTITY_COMMAND_NONCE_MISMATCH:${c.nonce}:${latest.nonce + 1n}`) : ok("next");
+  const expected = (latest?.nonce ?? 0n) + 1n;
+  switch (true) {
+    case latest !== undefined && c.nonce === latest.nonce:
+      return ok(commandHash === latest.commandHash ? "retry" : "cancel");
+    case latest !== undefined && c.nonce < latest.nonce:
+      return ok("cancel");
+    case c.nonce !== expected:
+      return rejectCommand(`ENTITY_COMMAND_NONCE_MISMATCH:${c.nonce}:${expected}`);
+    default:
+      return ok("next");
+  }
 };
 /** og isCanonicalCompactSignatureHex: 0x + r,s + recovery 0/1, low-s, nonzero. */
 const canonicalCompactSig = (sig: string): boolean => {
   if (!/^0x[0-9a-f]{130}$/.test(sig)) return false;
-  const bytes = hexToBytes(sig), r = wordAt(bytes, 0), sv = wordAt(bytes, 32), rec = bytes[64];
-  return (rec === 0 || rec === 1) && r !== 0n && sv !== 0n && r < secp256k1.CURVE.n && sv <= HALF_ORDER;
+  const bytes = hexToBytes(sig);
+  const r = wordAt(bytes, 0);
+  const s = wordAt(bytes, 32);
+  const recovery = bytes[64];
+  return (recovery === 0 || recovery === 1) && r !== 0n && s !== 0n && r < secp256k1.CURVE.n && s <= HALF_ORDER;
 };
-/** og assertEntityCommandTxs + normalizeEntityCommandBody + normalizeSignedEntityCommand. */
-const normalizeCommand = (c: EntityCommand): Result<EntityCommand, EntityError> => {
-  const bad = (code: string, v: unknown): Result<never, EntityError> => invariant(`${code}:${lower(v) || "missing"}`);
-  const commandTxs = (): Result<void, EntityError> => {
-    if (!Array.isArray(c.txs) || c.txs.length === 0 || c.txs.length > ENTITY_MEMPOOL_SIZE) return invariant(`ENTITY_COMMAND_TX_COUNT_INVALID:${Array.isArray(c.txs) ? c.txs.length : "not-array"}`);
-    const protocol = c.txs.find(isProtocolTx);
-    return protocol !== undefined ? invariant(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${protocol.type}`) : ok(undefined);
-  };
-  return chain(commandTxs(), () => {
+/** og assertEntityCommandTxs: a command carries 1..mempool-size txs and never a protocol tx. */
+const commandTxsAllowed = (txs: readonly EntityTx[]): Result<void, EntityError> => {
+  if (!Array.isArray(txs) || txs.length === 0 || txs.length > ENTITY_MEMPOOL_SIZE) {
+    return invariant(`ENTITY_COMMAND_TX_COUNT_INVALID:${Array.isArray(txs) ? txs.length : "not-array"}`);
+  }
+  const protocol = txs.find(isProtocolTx);
+  return protocol !== undefined ? invariant(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${protocol.type}`) : ok(undefined);
+};
+const commandHex = (v: unknown, code: string, shape: RegExp): Result<string, EntityError> => {
+  const s = lower(v);
+  return shape.test(s) ? ok(s) : invariant(`${code}:${s || "missing"}`);
+};
+const commandEpoch = (v: unknown): Result<number, EntityError> =>
+  typeof v === "number" && Number.isSafeInteger(v) && v >= 0
+    ? ok(v)
+    : invariant(`ENTITY_COMMAND_BOARD_EPOCH_INVALID:${String(v)}`);
+const commandAuthorId = (v: unknown): Result<string, EntityError> => {
+  const s = lower(v);
+  return s === "" ? invariant("ENTITY_COMMAND_AUTHOR_SIGNER_ID_REQUIRED") : ok(s);
+};
+/**
+ * og normalizeEntityCommandBody + normalizeSignedEntityCommand: every field canonical, the txs hashing to `txsHash`, a
+ * canonical signature.
+ */
+const normalizeCommand = (c: EntityCommand): Result<EntityCommand, EntityError> =>
+  chain(commandTxsAllowed(c.txs), () => {
     if (c.version !== 1) return invariant(`ENTITY_COMMAND_VERSION_INVALID:${String(c.version)}`);
-    if (typeof c.nonce !== "bigint" || c.nonce < 1n) return invariant(`ENTITY_COMMAND_NONCE_INVALID:${String(c.nonce)}`);
-    const entityId = lower(c.entityId), stackKey = lower(c.stackKey), boardHash = lower(c.boardHash), authorSignerId = lower(c.authorSignerId), authorSigner = lower(c.authorSigner), txsHash = lower(c.txsHash);
-    if (!WORD32.test(entityId)) return bad("ENTITY_COMMAND_ENTITY_ID_INVALID", c.entityId);
-    if (!WORD32.test(stackKey)) return bad("ENTITY_COMMAND_STACK_KEY_INVALID", c.stackKey);
-    if (!WORD32.test(boardHash)) return bad("ENTITY_COMMAND_BOARD_HASH_INVALID", c.boardHash);
-    if (typeof c.boardEpoch !== "number" || !Number.isSafeInteger(c.boardEpoch) || c.boardEpoch < 0) return invariant(`ENTITY_COMMAND_BOARD_EPOCH_INVALID:${String(c.boardEpoch)}`);
-    if (authorSignerId === "") return invariant("ENTITY_COMMAND_AUTHOR_SIGNER_ID_REQUIRED");
-    if (!EOA.test(authorSigner)) return bad("ENTITY_COMMAND_AUTHOR_SIGNER_INVALID", c.authorSigner);
-    if (!WORD32.test(txsHash)) return bad("ENTITY_COMMAND_TXS_HASH_INVALID", c.txsHash);
-    return chain(hashCommandTxs(c.txs), (computed): Result<EntityCommand, EntityError> => {
-      if (txsHash !== computed) return invariant(`ENTITY_COMMAND_TXS_HASH_MISMATCH:${txsHash}:${computed}`);
-      const signature = lower(c.signature);
-      return canonicalCompactSig(signature) ? ok({ version: 1, entityId, stackKey, boardHash, boardEpoch: c.boardEpoch, authorSignerId, authorSigner, nonce: c.nonce, txsHash, txs: c.txs, signature }) : rejectCommand("ENTITY_COMMAND_SIGNATURE_INVALID");
+    if (typeof c.nonce !== "bigint" || c.nonce < 1n)
+      return invariant(`ENTITY_COMMAND_NONCE_INVALID:${String(c.nonce)}`);
+    const fields = all({
+      entityId: commandHex(c.entityId, "ENTITY_COMMAND_ENTITY_ID_INVALID", WORD32),
+      stackKey: commandHex(c.stackKey, "ENTITY_COMMAND_STACK_KEY_INVALID", WORD32),
+      boardHash: commandHex(c.boardHash, "ENTITY_COMMAND_BOARD_HASH_INVALID", WORD32),
+      boardEpoch: commandEpoch(c.boardEpoch),
+      authorSignerId: commandAuthorId(c.authorSignerId),
+      authorSigner: commandHex(c.authorSigner, "ENTITY_COMMAND_AUTHOR_SIGNER_INVALID", EOA),
+      txsHash: commandHex(c.txsHash, "ENTITY_COMMAND_TXS_HASH_INVALID", WORD32),
     });
+    return chain(fields, (f) =>
+      chain(hashCommandTxs(c.txs), (computed): Result<EntityCommand, EntityError> => {
+        if (f.txsHash !== computed) return invariant(`ENTITY_COMMAND_TXS_HASH_MISMATCH:${f.txsHash}:${computed}`);
+        const signature = lower(c.signature);
+        if (!canonicalCompactSig(signature)) return rejectCommand("ENTITY_COMMAND_SIGNATURE_INVALID");
+        return ok({
+          version: 1,
+          entityId: f.entityId,
+          stackKey: f.stackKey,
+          boardHash: f.boardHash,
+          boardEpoch: f.boardEpoch,
+          authorSignerId: f.authorSignerId,
+          authorSigner: f.authorSigner,
+          nonce: c.nonce,
+          txsHash: f.txsHash,
+          txs: c.txs,
+          signature,
+        });
+      }),
+    );
   });
+/** The field of a tx that names an individual board member, if it has one. */
+const authorClaim = (tx: EntityTx): { readonly field: string; readonly claimed: unknown } | undefined => {
+  switch (tx.type) {
+    case "chat":
+      return { field: "chat.from", claimed: tx.data.from };
+    case "propose":
+      return { field: "propose.proposer", claimed: tx.data.proposer };
+    case "vote":
+      return { field: "vote.voter", claimed: tx.data.voter };
+    default:
+      return undefined;
+  }
 };
 /** og assertEntityCommandAuthorBindings: fields that claim an individual board identity must equal the author. */
-const authorBindings = (author: string, txs: readonly EntityTx[]): Result<void, EntityError> => {
-  for (const tx of txs) {
-    const [field, claimed] = tx.type === "chat" ? ["chat.from", tx.data.from] : tx.type === "propose" ? ["propose.proposer", tx.data.proposer] : tx.type === "vote" ? ["vote.voter", tx.data.voter] : [undefined, undefined];
-    if (field !== undefined && lower(claimed) !== author) return rejectCommand(`ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:${field}:${lower(claimed) || "missing"}:${author}`);
-  }
-  return ok(undefined);
-};
+const authorBindings = (author: string, txs: readonly EntityTx[]): Result<void, EntityError> =>
+  foldResult(txs, undefined as void, (_, tx): Result<void, EntityError> => {
+    const claim = authorClaim(tx);
+    const claimed = lower(claim?.claimed);
+    return claim === undefined || claimed === author
+      ? ok(undefined)
+      : rejectCommand(`ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:${claim.field}:${claimed || "missing"}:${author}`);
+  });
 /** og assertIndividualEntityCommandTxs. */
-const individualOnly = (txs: readonly EntityTx[]): Result<void, EntityError> => foldResult(txs, undefined as void, (_, tx): Result<void, EntityError> =>
-  !isIndividualTx(tx) ? rejectCommand(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`) : tx.type === "propose" ? map(checkAction(tx.data.action), () => undefined) : ok(undefined));
-type CheckedCommand = { readonly command: EntityCommand; readonly board: CommandBoard; readonly commandHash: string; readonly disposition: Disposition };
-/** og assertSignedEntityCommand: entity, stack, board and epoch, author and its EOA, author bindings, individual txs, signature, nonce disposition. */
-export const checkCommand = (state: EntityState, raw: EntityCommand): Result<CheckedCommand, EntityError> => chain(normalizeCommand(raw), (c) => {
-  const entityId = lower(state.id), stackKey = commandStackKey(state);
-  if (c.entityId !== entityId) return rejectCommand(`ENTITY_COMMAND_ENTITY_MISMATCH:${c.entityId}:${entityId}`);
-  if (c.stackKey !== stackKey) return rejectCommand(`ENTITY_COMMAND_STACK_MISMATCH:${c.stackKey}:${stackKey}`);
-  return chain(commandBoard(state), (board) => {
-    if (c.boardHash !== board.boardHash) return rejectCommand(`ENTITY_COMMAND_BOARD_MISMATCH:${c.boardHash}:${board.boardHash}`);
-    if (c.boardEpoch !== board.boardEpoch) return rejectCommand(`ENTITY_COMMAND_EPOCH_MISMATCH:${c.boardEpoch}:${board.boardEpoch}`);
-    const author = board.members.find((m) => m.signerId === c.authorSignerId);
-    if (author === undefined) return rejectCommand(`ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${c.authorSignerId}`);
-    if (c.authorSigner !== author.signer) return rejectCommand(`ENTITY_COMMAND_AUTHOR_EOA_MISMATCH:${c.authorSigner}:${author.signer}`);
-    return chain(authorBindings(c.authorSignerId, c.txs), () => chain(individualOnly(c.txs), () => chain(hashCommand(c), (commandHash) => {
-      if (!sameHex(recoverRawSigner(commandHash, c.signature) ?? undefined, author.signer)) return rejectCommand(`ENTITY_COMMAND_SIGNATURE_MISMATCH:${author.signerId}:${author.signer}`);
-      return map(disposition(nonceSlots(state, board), c, commandHash), (d): CheckedCommand => ({ command: c, board, commandHash, disposition: d }));
-    })));
+const individualOnly = (txs: readonly EntityTx[]): Result<void, EntityError> =>
+  foldResult(txs, undefined as void, (_, tx): Result<void, EntityError> => {
+    if (!isIndividualTx(tx)) return rejectCommand(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
+    return tx.type === "propose" ? map(checkAction(tx.data.action), () => undefined) : ok(undefined);
   });
-});
-/** og applyNestedEntityTx: a non-next command (exact retry or cancelled slot) is a no-op; otherwise its txs apply in order, then the nonce advances. */
-const foldCommand = (state: EntityState, replicas: Replicas, raw: EntityCommand, ctx: FoldContext): Result<Draft, EntityError> => chain(checkCommand(state, raw), ({ command, board, commandHash, disposition: d }) => {
-  if (d !== "next") return ok(idle(state, replicas));
-  return map(foldNested(state, replicas, command.txs, ctx, "command"), (applied) => {
-    const slots = new Map(nonceSlots(applied.state, board)).set(command.authorSignerId, { nonce: command.nonce, commandHash });
-    return { ...applied, state: { ...applied.state, committed: { ...applied.state.committed, entityCommandNonces: nonceBinary(board, slots) } } };
+/** og's author rules shared by checking and building a command: the txs bind to the author and are all individual. */
+const authoredBy = (author: string, txs: readonly EntityTx[]): Result<void, EntityError> =>
+  chain(authorBindings(author, txs), () => individualOnly(txs));
+type CheckedCommand = {
+  readonly command: EntityCommand;
+  readonly board: CommandBoard;
+  readonly commandHash: string;
+  readonly disposition: Disposition;
+};
+/** The author must sit on the current board under the EOA the command claims. */
+const commandAuthor = (board: CommandBoard, c: EntityCommand): Result<BoardMember, EntityError> => {
+  if (c.boardHash !== board.boardHash)
+    return rejectCommand(`ENTITY_COMMAND_BOARD_MISMATCH:${c.boardHash}:${board.boardHash}`);
+  if (c.boardEpoch !== board.boardEpoch)
+    return rejectCommand(`ENTITY_COMMAND_EPOCH_MISMATCH:${c.boardEpoch}:${board.boardEpoch}`);
+  const author = board.members.find((m) => m.signerId === c.authorSignerId);
+  if (author === undefined) return rejectCommand(`ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${c.authorSignerId}`);
+  return c.authorSigner !== author.signer
+    ? rejectCommand(`ENTITY_COMMAND_AUTHOR_EOA_MISMATCH:${c.authorSigner}:${author.signer}`)
+    : ok(author);
+};
+/**
+ * og assertSignedEntityCommand: entity, stack, board and epoch, author and its EOA, author bindings, individual txs,
+ * signature, nonce disposition.
+ */
+export const checkCommand = (state: EntityState, raw: EntityCommand): Result<CheckedCommand, EntityError> =>
+  chain(normalizeCommand(raw), (c) => {
+    const entityId = lower(state.id);
+    const stackKey = commandStackKey(state);
+    if (c.entityId !== entityId) return rejectCommand(`ENTITY_COMMAND_ENTITY_MISMATCH:${c.entityId}:${entityId}`);
+    if (c.stackKey !== stackKey) return rejectCommand(`ENTITY_COMMAND_STACK_MISMATCH:${c.stackKey}:${stackKey}`);
+    return chain(commandBoard(state), (board) =>
+      chain(commandAuthor(board, c), (author) =>
+        chain(authoredBy(c.authorSignerId, c.txs), () =>
+          chain(hashCommand(c), (commandHash) => {
+            if (!sameHex(recoverRawSigner(commandHash, c.signature) ?? undefined, author.signer)) {
+              return rejectCommand(`ENTITY_COMMAND_SIGNATURE_MISMATCH:${author.signerId}:${author.signer}`);
+            }
+            return map(disposition(nonceSlots(state, board), c, commandHash), (d): CheckedCommand => ({
+              command: c,
+              board,
+              commandHash,
+              disposition: d,
+            }));
+          }),
+        ),
+      ),
+    );
   });
-});
+/**
+ * og applyNestedEntityTx: a non-next command (exact retry or cancelled slot) is a no-op; otherwise its txs apply in
+ * order, then the nonce advances.
+ */
+const foldCommand = (
+  state: EntityState,
+  replicas: Replicas,
+  raw: EntityCommand,
+  ctx: FoldContext,
+): Result<Draft, EntityError> =>
+  chain(checkCommand(state, raw), ({ command, board, commandHash, disposition: d }) => {
+    if (d !== "next") return ok(idle(state, replicas));
+    return map(foldNested(state, replicas, command.txs, ctx, "command"), (applied) => ({
+      ...applied,
+      state: withNonceSlot(applied.state, board, command.authorSignerId, { nonce: command.nonce, commandHash }),
+    }));
+  });
 /** og nextEntityCommandNonce. */
-export const nextCommandNonce = (state: EntityState, author: string): Result<bigint, EntityError> => map(commandBoard(state), (board) => (nonceSlots(state, board).get(lower(author))?.nonce ?? 0n) + 1n);
+export const nextCommandNonce = (state: EntityState, author: string): Result<bigint, EntityError> =>
+  map(commandBoard(state), (board) => nextNonce(state, board, lower(author)));
 /** og board shares keyed by canonical signer id. */
-const boardShares = (state: EntityState): { readonly bySigner: ReadonlyMap<string, bigint>; readonly total: bigint } => {
+const boardShares = (
+  state: EntityState,
+): { readonly bySigner: ReadonlyMap<string, bigint>; readonly total: bigint } => {
   const bySigner = new Map([...membersOf(state.quorum)].map(([a, m]) => [signerId(a), m.shares] as const));
   return { bySigner, total: [...bySigner.values()].reduce((a, b) => a + b, 0n) };
 };
-type StoredVote = "yes" | "no" | { readonly choice: "yes" | "no"; readonly comment: string };
-type StoredProposal = { readonly id: string; readonly proposer: string; readonly boardHash: string; readonly boardEpoch: number; readonly action: Binary; readonly actionHash: string; readonly votes: ReadonlyMap<string, StoredVote>; readonly created: number };
-const proposalsOf = (state: EntityState): ReadonlyMap<string, StoredProposal> => (state.committed["proposals"] as ReadonlyMap<string, StoredProposal> | undefined) ?? new Map();
-const withProposals = (state: EntityState, proposals: ReadonlyMap<string, StoredProposal>): EntityState =>
-  ({ ...state, committed: { ...state.committed, proposals: proposals as unknown as Binary } });
-/** og generateProposalId: sha256 of safeStringify({actionHash, proposer, boardHash, boardEpoch, commandNonce}) with og's sorted keys and tagged bigint. */
-export const proposalId = (actionHash: string, proposer: string, board: { readonly boardHash: string; readonly boardEpoch: number }, commandNonce: bigint): string =>
-  `prop_${nobleHex(sha256(utf8(JSON.stringify({ actionHash, boardEpoch: board.boardEpoch, boardHash: board.boardHash, commandNonce: { __xlnType: "BigInt", value: commandNonce.toString() }, proposer }))))}`;
-/** og executeProposal (+ approvedEntityTxs): a collective message is a status event; an entity transaction applies its txs on the collective lane. */
-const executeProposal = (state: EntityState, replicas: Replicas, action: ProposalAction, ctx: FoldContext, prior: readonly FrameEvent[]): Result<Draft, EntityError> =>
-  action.type === "collective_message"
-    ? ok({ state, accountReplicas: replicas, outputs: [], events: [...prior, status(`[COLLECTIVE] ${action.data.message}`)], touched: [] })
-    : map(foldNested(state, replicas, action.data.txs, ctx, "collective"), (d) => ({ ...d, events: [...prior, ...(d.events ?? [])] }));
-/** og handleProposeEntityTx: board member, action, capacity, id; a proposer holding the threshold executes at once, otherwise the proposal waits for votes. */
-const foldPropose = (state: EntityState, replicas: Replicas, x: Extract<EntityTx, { type: "propose" }>["data"], ctx: FoldContext): Result<Draft, EntityError> => {
-  const proposer = lower(x.proposer), power = boardShares(state).bySigner.get(proposer);
-  if (power === undefined) return invariant(`ENTITY_PROPOSAL_PROPOSER_UNKNOWN:${proposer}`);
-  return chain(commandBoard(state), (board) => chain(checkAction(x.action), (action) => {
-    const proposals = proposalsOf(state);
-    if (proposals.size >= MAX_PENDING_PROPOSALS) return invariant(`ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED:${proposals.size}:${MAX_PENDING_PROPOSALS}`);
-    const pending = [...proposals.values()].find((p) => lower(p.proposer) === proposer);
-    if (pending !== undefined) return invariant(`ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT:${proposer}:${pending.id}`);
-    return chain(hashProposalAction(action), (actionHash) => chain(binaryBody(wireAction(action)), (wired) => {
-      const id = proposalId(actionHash, proposer, board, (nonceSlots(state, board).get(proposer)?.nonce ?? 0n) + 1n);
-      if (proposals.has(id)) return invariant(`ENTITY_PROPOSAL_DUPLICATE:${id}`);
-      if (power >= thresholdOf(state.quorum)) return executeProposal(state, replicas, action, ctx, []);
-      const proposal: StoredProposal = { id, proposer, boardHash: board.boardHash, boardEpoch: board.boardEpoch, action: wired, actionHash, votes: new Map([[proposer, "yes"]]), created: Number(ctx.timestamp) };
-      return ok(idle(withProposals(state, new Map(proposals).set(id, proposal)), replicas));
-    }));
-  }));
+type VoteChoice = "yes" | "no";
+type StoredVote = VoteChoice | { readonly choice: VoteChoice; readonly comment: string };
+type StoredProposal = {
+  readonly id: string;
+  readonly proposer: string;
+  readonly boardHash: string;
+  readonly boardEpoch: number;
+  readonly action: Binary;
+  readonly actionHash: string;
+  readonly votes: ReadonlyMap<string, StoredVote>;
+  readonly created: number;
 };
-/** og handleVoteEntityTx: same board and epoch, one vote per member; yes power reaching the threshold executes, no power that makes it unreachable drops it. */
-const foldVote = (state: EntityState, replicas: Replicas, x: Extract<EntityTx, { type: "vote" }>["data"], ctx: FoldContext): Result<Draft, EntityError> => {
-  const voter = lower(x.voter), proposals = proposalsOf(state), proposal = proposals.get(x.proposalId), shares = boardShares(state);
+const proposalsOf = (state: EntityState): ReadonlyMap<string, StoredProposal> =>
+  (state.committed["proposals"] as ReadonlyMap<string, StoredProposal> | undefined) ?? new Map();
+const withProposals = (state: EntityState, proposals: ReadonlyMap<string, StoredProposal>): EntityState => ({
+  ...state,
+  committed: { ...state.committed, proposals: proposals as unknown as Binary },
+});
+/**
+ * og generateProposalId: sha256 of safeStringify({actionHash, proposer, boardHash, boardEpoch, commandNonce}) with og's
+ * sorted keys and tagged bigint.
+ */
+export const proposalId = (
+  actionHash: string,
+  proposer: string,
+  board: { readonly boardHash: string; readonly boardEpoch: number },
+  commandNonce: bigint,
+): string => {
+  const sortedKeys = {
+    actionHash,
+    boardEpoch: board.boardEpoch,
+    boardHash: board.boardHash,
+    commandNonce: { __xlnType: "BigInt", value: commandNonce.toString() },
+    proposer,
+  };
+  return `prop_${nobleHex(sha256(utf8(JSON.stringify(sortedKeys))))}`;
+};
+/**
+ * og executeProposal (+ approvedEntityTxs): a collective message is a status event; an entity transaction applies its
+ * txs on the collective lane.
+ */
+const executeProposal = (
+  state: EntityState,
+  replicas: Replicas,
+  action: ProposalAction,
+  ctx: FoldContext,
+): Result<Draft, EntityError> =>
+  action.type === "collective_message"
+    ? ok({
+        state,
+        accountReplicas: replicas,
+        outputs: [],
+        events: [status(`[COLLECTIVE] ${action.data.message}`)],
+        touched: [],
+      })
+    : map(foldNested(state, replicas, action.data.txs, ctx, "collective"), (d) => ({ ...d, events: d.events ?? [] }));
+/**
+ * og handleProposeEntityTx: board member, action, capacity, id; a proposer holding the threshold executes at once,
+ * otherwise the proposal waits for votes.
+ */
+const foldPropose = (
+  state: EntityState,
+  replicas: Replicas,
+  x: Extract<EntityTx, { type: "propose" }>["data"],
+  ctx: FoldContext,
+): Result<Draft, EntityError> => {
+  const proposer = lower(x.proposer);
+  const power = boardShares(state).bySigner.get(proposer);
+  if (power === undefined) return invariant(`ENTITY_PROPOSAL_PROPOSER_UNKNOWN:${proposer}`);
+  return chain(commandBoard(state), (board) =>
+    chain(checkAction(x.action), (action) => {
+      const proposals = proposalsOf(state);
+      if (proposals.size >= MAX_PENDING_PROPOSALS) {
+        return invariant(`ENTITY_PROPOSAL_PENDING_LIMIT_EXCEEDED:${proposals.size}:${MAX_PENDING_PROPOSALS}`);
+      }
+      const pending = [...proposals.values()].find((p) => lower(p.proposer) === proposer);
+      if (pending !== undefined) return invariant(`ENTITY_PROPOSAL_PROPOSER_PENDING_LIMIT:${proposer}:${pending.id}`);
+      return chain(hashProposalAction(action), (actionHash) =>
+        chain(binaryBody(wireAction(action)), (wired) => {
+          const id = proposalId(actionHash, proposer, board, nextNonce(state, board, proposer));
+          if (proposals.has(id)) return invariant(`ENTITY_PROPOSAL_DUPLICATE:${id}`);
+          if (power >= thresholdOf(state.quorum)) return executeProposal(state, replicas, action, ctx);
+          const proposal: StoredProposal = {
+            id,
+            proposer,
+            boardHash: board.boardHash,
+            boardEpoch: board.boardEpoch,
+            action: wired,
+            actionHash,
+            votes: new Map([[proposer, "yes"]]),
+            created: Number(ctx.timestamp),
+          };
+          return ok(idle(withProposals(state, new Map([...proposals, [id, proposal]])), replicas));
+        }),
+      );
+    }),
+  );
+};
+const choiceOf = (v: StoredVote): VoteChoice => (typeof v === "object" ? v.choice : v);
+/**
+ * og handleVoteEntityTx: same board and epoch, one vote per member; yes power reaching the threshold executes, no power
+ * that makes it unreachable drops it.
+ */
+const foldVote = (
+  state: EntityState,
+  replicas: Replicas,
+  x: Extract<EntityTx, { type: "vote" }>["data"],
+  ctx: FoldContext,
+): Result<Draft, EntityError> => {
+  const voter = lower(x.voter);
+  const proposals = proposalsOf(state);
+  const proposal = proposals.get(x.proposalId);
+  const shares = boardShares(state);
   if (proposal === undefined) return invariant(`ENTITY_PROPOSAL_VOTE_TARGET_MISSING:${x.proposalId}`);
   if (!shares.bySigner.has(voter)) return invariant(`ENTITY_PROPOSAL_VOTER_UNKNOWN:${voter}`);
   return chain(commandBoard(state), (board) => {
-    if (proposal.boardHash.toLowerCase() !== board.boardHash) return invariant(`ENTITY_PROPOSAL_BOARD_MISMATCH:${x.proposalId}:${proposal.boardHash}:${board.boardHash}`);
-    if (proposal.boardEpoch !== board.boardEpoch) return invariant(`ENTITY_PROPOSAL_EPOCH_MISMATCH:${x.proposalId}:${proposal.boardEpoch}:${board.boardEpoch}`);
-    if (proposal.votes.has(voter)) return invariant(`ENTITY_PROPOSAL_DUPLICATE_VOTE:${x.proposalId}:${voter}`);
-    const votes = new Map(proposal.votes).set(voter, x.comment !== undefined ? { choice: x.choice, comment: x.comment } : x.choice);
-    const power = (choice: "yes" | "no"): bigint => [...votes].reduce((n, [id, v]) => ((typeof v === "object" ? v.choice : v) === choice ? n + (shares.bySigner.get(id) ?? 0n) : n), 0n);
-    const threshold = thresholdOf(state.quorum), rest = new Map(proposals);
-    rest.delete(x.proposalId);
-    if (power("yes") >= threshold) return executeProposal(withProposals(state, rest), replicas, actionOf(proposal.action), ctx, []);
-    if (power("no") >= shares.total - threshold + 1n) return ok(idle(withProposals(state, rest), replicas));
-    return ok(idle(withProposals(state, new Map(proposals).set(x.proposalId, { ...proposal, votes })), replicas));
+    const id = x.proposalId;
+    if (proposal.boardHash.toLowerCase() !== board.boardHash) {
+      return invariant(`ENTITY_PROPOSAL_BOARD_MISMATCH:${id}:${proposal.boardHash}:${board.boardHash}`);
+    }
+    if (proposal.boardEpoch !== board.boardEpoch) {
+      return invariant(`ENTITY_PROPOSAL_EPOCH_MISMATCH:${id}:${proposal.boardEpoch}:${board.boardEpoch}`);
+    }
+    if (proposal.votes.has(voter)) return invariant(`ENTITY_PROPOSAL_DUPLICATE_VOTE:${id}:${voter}`);
+    const vote: StoredVote = x.comment !== undefined ? { choice: x.choice, comment: x.comment } : x.choice;
+    const votes = new Map([...proposal.votes, [voter, vote]]);
+    const power = (choice: VoteChoice): bigint =>
+      [...votes].reduce((n, [signer, v]) => (choiceOf(v) === choice ? n + (shares.bySigner.get(signer) ?? 0n) : n), 0n);
+    const threshold = thresholdOf(state.quorum);
+    const settled = withProposals(state, mapDelete(proposals, id));
+    switch (true) {
+      case power("yes") >= threshold:
+        return executeProposal(settled, replicas, actionOf(proposal.action), ctx);
+      case power("no") >= shares.total - threshold + 1n:
+        return ok(idle(settled, replicas));
+      default:
+        return ok(idle(withProposals(state, new Map([...proposals, [id, { ...proposal, votes }]])), replicas));
+    }
   });
+};
+type WiredAction = {
+  readonly type: string;
+  readonly data: {
+    readonly message?: string;
+    readonly version?: 1;
+    readonly actionHash?: string;
+    readonly txs?: readonly { readonly type: string; readonly data: unknown }[];
+  };
 };
 const actionOf = (wired: Binary): ProposalAction => {
-  const a = wired as { readonly type: string; readonly data: { readonly message?: string; readonly version?: 1; readonly actionHash?: string; readonly txs?: readonly { readonly type: string; readonly data: unknown }[] } };
-  return a.type === "collective_message" ? { type: "collective_message", data: { message: a.data.message ?? "" } }
-    : { type: "entity_transaction", data: { version: 1, actionHash: a.data.actionHash ?? "", txs: (a.data.txs ?? []).map(unwireEntityTx) } };
-};
-/** og normalizeEntityProposalBoard + normalizeEntityCommandNonceBoard at frame start: work from another board or epoch is dropped. */
-const normalizeGovernance = (state: EntityState): Result<EntityState, EntityError> => {
-  const proposals = proposalsOf(state), nonces = state.committed["entityCommandNonces"] as { readonly boardHash?: string; readonly boardEpoch?: number } | undefined;
-  if (proposals.size === 0 && nonces === undefined) return ok(state);
-  return map(commandBoard(state), (board) => {
-    const kept = new Map([...proposals].filter(([, p]) => p.boardHash.toLowerCase() === board.boardHash && p.boardEpoch === board.boardEpoch));
-    const next = kept.size === proposals.size ? state : withProposals(state, kept);
-    return nonces === undefined || (nonces.boardHash === board.boardHash && nonces.boardEpoch === board.boardEpoch) ? next
-      : { ...next, committed: { ...next.committed, entityCommandNonces: nonceBinary(board, new Map()) } };
-  });
+  const a = wired as WiredAction;
+  if (a.type === "collective_message") return { type: "collective_message", data: { message: a.data.message ?? "" } };
+  const txs = (a.data.txs ?? []).map(unwireEntityTx);
+  return { type: "entity_transaction", data: { version: 1, actionHash: a.data.actionHash ?? "", txs } };
 };
 /**
- * og prepareLocallyAuthoredEntityTxs (without its openAccount/directPayment materialization): protocol txs pass through, a signed command is
- * re-checked against the running cursor (a stale one is dropped), runs of individual txs become one command and runs of collective txs one
- * command carrying a `propose` of them. `sign` is the author's key on a 32-byte digest.
+ * og normalizeEntityProposalBoard + normalizeEntityCommandNonceBoard at frame start: work from another board or epoch
+ * is dropped.
  */
-export const authorEntityTxs = (state: EntityState, author: string, txs: readonly EntityTx[], sign: (digest: Hash) => Result<Signature, unknown>): Result<readonly EntityTx[], EntityError> => {
-  let cursor = state, run: EntityTx[] = [], kind: "individual" | "collective" | undefined;
-  const out: EntityTx[] = [], seen = new Map<string, string>();
-  const advance = (c: CheckedCommand): void => {
-    const slots = new Map(nonceSlots(cursor, c.board)).set(c.command.authorSignerId, { nonce: c.command.nonce, commandHash: c.commandHash });
-    cursor = { ...cursor, committed: { ...cursor.committed, entityCommandNonces: nonceBinary(c.board, slots) } };
-  };
-  const flush = (): Result<void, EntityError> => {
-    if (run.length === 0) return ok(undefined);
-    const batch = run, collective = kind === "collective";
-    run = []; kind = undefined;
-    const commandTxs = collective ? map(entityTransactionAction(batch), (action): readonly EntityTx[] => [{ type: "propose", data: { proposer: lower(author), action } }]) : ok(batch);
-    return chain(commandTxs, (ctxs) => chain(buildCommand(cursor, author, ctxs, sign), (command) => map(checkCommand(cursor, command), (checked) => { out.push({ type: "entityCommand", data: checked.command }); advance(checked); })));
-  };
-  for (const tx of txs) {
-    if (tx.type === "entityCommand") {
-      const slot = [tx.data.entityId, tx.data.stackKey, tx.data.boardHash, tx.data.boardEpoch, lower(tx.data.authorSignerId), tx.data.nonce].map(String).join("|"), identity = canon(wireEntityTx(tx));
-      if (seen.has(slot)) continue;
-      seen.set(slot, identity);
-      const flushed = flush();
-      if (!flushed.ok) return flushed;
-      const checked = checkCommand(cursor, tx.data);
-      if (!checked.ok) { if (checked.error._tag === "entity_command") continue; return checked; }
-      if (checked.value.disposition !== "next") continue;
-      out.push({ type: "entityCommand", data: checked.value.command });
-      advance(checked.value);
-      continue;
-    }
-    if (isProtocolTx(tx)) { const flushed = flush(); if (!flushed.ok) return flushed; out.push(tx); continue; }
-    const k = isIndividualTx(tx) ? "individual" : "collective";
-    if (kind !== undefined && kind !== k) { const flushed = flush(); if (!flushed.ok) return flushed; }
-    kind = k;
-    run.push(tx);
-  }
-  return map(flush(), () => out);
+const normalizeGovernance = (state: EntityState): Result<EntityState, EntityError> => {
+  const proposals = proposalsOf(state);
+  const nonces = storedNonces(state);
+  if (proposals.size === 0 && nonces === undefined) return ok(state);
+  return map(commandBoard(state), (board) => {
+    const current = ([, p]: readonly [string, StoredProposal]): boolean =>
+      p.boardHash.toLowerCase() === board.boardHash && p.boardEpoch === board.boardEpoch;
+    const kept = new Map([...proposals].filter(current));
+    const next = kept.size === proposals.size ? state : withProposals(state, kept);
+    return nonces === undefined || onBoard(nonces, board) ? next : withNonceFence(next, board, new Map());
+  });
+};
+type CommandSigner = (digest: Hash) => Result<Signature, unknown>;
+/** Who authors commands locally, and the key they sign with. */
+type CommandAuthor = { readonly author: string; readonly sign: CommandSigner };
+type RunKind = "individual" | "collective";
+/**
+ * Authoring so far: the state commands advance, the txs out, the open run of like txs not yet wrapped in a command, and
+ * the signed command slots already carried.
+ */
+type Authoring = {
+  readonly cursor: EntityState;
+  readonly out: readonly EntityTx[];
+  readonly run: readonly EntityTx[];
+  readonly kind: RunKind | undefined;
+  readonly seen: ReadonlySet<string>;
+};
+const emitCommand = (a: Authoring, c: CheckedCommand): Authoring => ({
+  ...a,
+  cursor: withNonceSlot(a.cursor, c.board, c.command.authorSignerId, {
+    nonce: c.command.nonce,
+    commandHash: c.commandHash,
+  }),
+  out: [...a.out, { type: "entityCommand", data: c.command }],
+});
+/** The open run becomes one command: individual txs as they are, collective txs as one `propose` of them. */
+const flushRun = (a: Authoring, by: CommandAuthor): Result<Authoring, EntityError> => {
+  if (a.run.length === 0) return ok(a);
+  const closed: Authoring = { ...a, run: [], kind: undefined };
+  const commandTxs: Result<readonly EntityTx[], EntityError> =
+    a.kind === "collective"
+      ? map(entityTransactionAction(a.run), (action): readonly EntityTx[] => [
+          { type: "propose", data: { proposer: lower(by.author), action } },
+        ])
+      : ok(a.run);
+  return chain(commandTxs, (txs) =>
+    chain(buildCommand(a.cursor, by.author, txs, by.sign), (command) =>
+      map(checkCommand(a.cursor, command), (checked) => emitCommand(closed, checked)),
+    ),
+  );
+};
+const commandSlot = (c: EntityCommand): string =>
+  [c.entityId, c.stackKey, c.boardHash, c.boardEpoch, lower(c.authorSignerId), c.nonce].map(String).join("|");
+/** A signed command is carried once, re-checked against the cursor; a stale or rejected one is dropped. */
+const carrySignedCommand = (a: Authoring, c: EntityCommand, by: CommandAuthor): Result<Authoring, EntityError> => {
+  const slot = commandSlot(c);
+  if (a.seen.has(slot)) return ok(a);
+  return chain(flushRun({ ...a, seen: new Set([...a.seen, slot]) }, by), (flushed) => {
+    const checked = checkCommand(flushed.cursor, c);
+    if (!checked.ok) return checked.error._tag === "entity_command" ? ok(flushed) : checked;
+    return ok(checked.value.disposition === "next" ? emitCommand(flushed, checked.value) : flushed);
+  });
+};
+const authorTx = (a: Authoring, tx: EntityTx, by: CommandAuthor): Result<Authoring, EntityError> => {
+  if (tx.type === "entityCommand") return carrySignedCommand(a, tx.data, by);
+  if (isProtocolTx(tx)) return map(flushRun(a, by), (flushed) => ({ ...flushed, out: [...flushed.out, tx] }));
+  const kind: RunKind = isIndividualTx(tx) ? "individual" : "collective";
+  const joinable = a.kind === undefined || a.kind === kind ? ok(a) : flushRun(a, by);
+  return map(joinable, (open) => ({ ...open, kind, run: [...open.run, tx] }));
+};
+/**
+ * og prepareLocallyAuthoredEntityTxs (without its openAccount/directPayment materialization): protocol txs pass
+ * through, a signed command is re-checked against the running cursor (a stale one is dropped), runs of individual txs
+ * become one command and runs of collective txs one command carrying a `propose` of them. `sign` is the author's key on
+ * a 32-byte digest.
+ */
+export const authorEntityTxs = (
+  state: EntityState,
+  author: string,
+  txs: readonly EntityTx[],
+  sign: CommandSigner,
+): Result<readonly EntityTx[], EntityError> => {
+  const by: CommandAuthor = { author, sign };
+  const start: Authoring = { cursor: state, out: [], run: [], kind: undefined, seen: new Set() };
+  return chain(foldResult(txs, start, (a, tx) => authorTx(a, tx, by)), (a) => map(flushRun(a, by), (done) => done.out));
 };
 /** og buildSignedEntityCommand. */
-export const buildCommand = (state: EntityState, author: string, txs: readonly EntityTx[], sign: (digest: Hash) => Result<Signature, unknown>): Result<EntityCommand, EntityError> => {
+export const buildCommand = (
+  state: EntityState,
+  author: string,
+  txs: readonly EntityTx[],
+  sign: CommandSigner,
+): Result<EntityCommand, EntityError> => {
   const signer = lower(author);
-  if (txs.length === 0 || txs.length > ENTITY_MEMPOOL_SIZE) return invariant(`ENTITY_COMMAND_TX_COUNT_INVALID:${txs.length}`);
-  const protocol = txs.find(isProtocolTx);
-  if (protocol !== undefined) return invariant(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${protocol.type}`);
-  return chain(commandBoard(state), (board) => {
-    const member = board.members.find((m) => m.signerId === signer);
-    if (member === undefined) return rejectCommand(`ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${signer}`);
-    return chain(authorBindings(signer, txs), () => chain(individualOnly(txs), () => chain(hashCommandTxs(txs), (txsHash) => {
-      const body: CommandBody = { version: 1, entityId: lower(state.id), stackKey: commandStackKey(state), boardHash: board.boardHash, boardEpoch: board.boardEpoch, authorSignerId: signer, authorSigner: member.signer, nonce: (nonceSlots(state, board).get(signer)?.nonce ?? 0n) + 1n, txsHash, txs };
-      return chain(hashCommand(body), (h) => map(mapErr(sign(h as Hash), (): EntityError => ({ _tag: "sign_failed" })), (sig): EntityCommand => ({ ...body, signature: `0x${hexBody(sig).toLowerCase()}` })));
-    })));
-  });
+  return chain(commandTxsAllowed(txs), () =>
+    chain(commandBoard(state), (board) => {
+      const member = board.members.find((m) => m.signerId === signer);
+      if (member === undefined) return rejectCommand(`ENTITY_COMMAND_AUTHOR_NOT_ON_BOARD:${signer}`);
+      return chain(authoredBy(signer, txs), () =>
+        chain(hashCommandTxs(txs), (txsHash) => {
+          const body: CommandBody = {
+            version: 1,
+            entityId: lower(state.id),
+            stackKey: commandStackKey(state),
+            boardHash: board.boardHash,
+            boardEpoch: board.boardEpoch,
+            authorSignerId: signer,
+            authorSigner: member.signer,
+            nonce: nextNonce(state, board, signer),
+            txsHash,
+            txs,
+          };
+          const signed = (h: string) => mapErr(sign(h as Hash), (): EntityError => ({ _tag: "sign_failed" }));
+          return chain(hashCommand(body), (h) =>
+            map(signed(h), (sig): EntityCommand => ({ ...body, signature: `0x${hexBody(sig).toLowerCase()}` })),
+          );
+        }),
+      );
+    }),
+  );
 };
 // ---- og Entity htlcPayment: entity/paybook/payment-admission.ts, tx/handlers/htlc/payment.ts, types/entity/htlc-infra-context.ts ----
 /** og EntityTx htlcPayment data: the route is the full path source..target; the preimage never enters consensus. */
 export type HtlcPaymentData = {
-  readonly targetEntityId: string; readonly tokenId: number; readonly amount: bigint; readonly maxSenderDebit: bigint; readonly route: readonly string[];
-  readonly description?: string | undefined; readonly deliveryMode: ConditionalMode; readonly startedAtMs?: number | undefined; readonly hashlock?: string | undefined;
+  readonly targetEntityId: string;
+  readonly tokenId: number;
+  readonly amount: bigint;
+  readonly maxSenderDebit: bigint;
+  readonly route: readonly string[];
+  readonly description?: string | undefined;
+  readonly deliveryMode: ConditionalMode;
+  readonly startedAtMs?: number | undefined;
+  readonly hashlock?: string | undefined;
 };
-/** og PreparedOriginatedHtlcPayment: the proposer's public facts for one raw htlcPayment tx, committed in the frame's entityContext.htlc.originated. */
+/**
+ * og PreparedOriginatedHtlcPayment: the proposer's public facts for one raw htlcPayment tx, committed in the frame's
+ * entityContext.htlc.originated.
+ */
 export type PreparedOriginated = {
-  readonly txHash: string; readonly targetEntityId: string; readonly tokenId: number; readonly recipientAmount: bigint; readonly route: readonly string[]; readonly description: string;
-  readonly deliveryMode: ConditionalMode; readonly startedAtMs: number; readonly hashlock: string; readonly senderLockAmount: bigint; readonly maxSenderDebit: bigint; readonly totalFee: bigint;
-  readonly timelock: bigint; readonly revealBeforeHeight: number; readonly nextHopEntityId: string; readonly envelope: HtlcEnvelope;
+  readonly txHash: string;
+  readonly targetEntityId: string;
+  readonly tokenId: number;
+  readonly recipientAmount: bigint;
+  readonly route: readonly string[];
+  readonly description: string;
+  readonly deliveryMode: ConditionalMode;
+  readonly startedAtMs: number;
+  readonly hashlock: string;
+  readonly senderLockAmount: bigint;
+  readonly maxSenderDebit: bigint;
+  readonly totalFee: bigint;
+  readonly timelock: bigint;
+  readonly revealBeforeHeight: number;
+  readonly nextHopEntityId: string;
+  readonly envelope: HtlcEnvelope;
 };
 /** og PaybookEntry (entity/types.ts): one hashlock-keyed payment machine entry. */
 export type PaybookEntry = {
-  readonly hashlock: string; readonly description?: string | undefined; readonly tokenId?: number | undefined; readonly amount?: bigint | undefined; readonly startedAtMs?: number | undefined;
-  readonly originated?: true | undefined; readonly inboundEntity?: string | undefined; readonly outboundEntity?: string | undefined; readonly inboundSettled?: true | undefined; readonly outboundSettled?: true | undefined;
-  readonly secret?: string | undefined; readonly secretAckPending?: boolean | undefined; readonly secretAckStartedAt?: number | undefined; readonly secretAckDeadlineAt?: number | undefined; readonly secretAckedAt?: number | undefined;
-  readonly pendingFee?: bigint | undefined; readonly crossJurisdictionRelay?: Binary | undefined; readonly createdTimestamp: number;
+  readonly hashlock: string;
+  readonly description?: string | undefined;
+  readonly tokenId?: number | undefined;
+  readonly amount?: bigint | undefined;
+  readonly startedAtMs?: number | undefined;
+  readonly originated?: true | undefined;
+  readonly inboundEntity?: string | undefined;
+  readonly outboundEntity?: string | undefined;
+  readonly inboundSettled?: true | undefined;
+  readonly outboundSettled?: true | undefined;
+  readonly secret?: string | undefined;
+  readonly secretAckPending?: boolean | undefined;
+  readonly secretAckStartedAt?: number | undefined;
+  readonly secretAckDeadlineAt?: number | undefined;
+  readonly secretAckedAt?: number | undefined;
+  readonly pendingFee?: bigint | undefined;
+  readonly crossJurisdictionRelay?: Binary | undefined;
+  readonly createdTimestamp: number;
 };
 export type Paybook = { readonly entries: ReadonlyMap<string, PaybookEntry>; readonly feesEarned: bigint };
 export const EMPTY_PAYBOOK: Paybook = { entries: new Map(), feesEarned: 0n };
-/** og state-root.ts projectEntityConsensusState paybook section: the hashlock-keyed collection commitment and the fee total. */
-export const paybookSection = (p: Paybook): Result<Binary, EntityRootError> =>
-  map(entityCollectionCommitment(new Map([...p.entries].map(([k, v]) => [k, v as unknown as Binary])), "paybookHashlock"), (entries) => ({ entries, feesEarned: p.feesEarned }));
-/** The proposer's HTLC infrastructure (og proposal/infra-context.ts): gossip profiles as og Profile values, plus proposer-only entropy. */
+/**
+ * og state-root.ts projectEntityConsensusState paybook section: the hashlock-keyed collection commitment and the fee
+ * total.
+ */
+export const paybookSection = (p: Paybook): Result<Binary, EntityRootError> => {
+  const entries = new Map([...p.entries].map(([k, v]) => [k, v as unknown as Binary]));
+  return map(entityCollectionCommitment(entries, "paybookHashlock"), (committed) => ({
+    entries: committed,
+    feesEarned: p.feesEarned,
+  }));
+};
+/**
+ * The proposer's HTLC infrastructure (og proposal/infra-context.ts): gossip profiles as og Profile values, plus
+ * proposer-only entropy.
+ */
 export type HtlcProposerInfra = {
   readonly profiles: readonly Binary[];
-  /** og getDeterministicHtlcTestSecret: a secret registered for this exact canonical payment; its ephemeral keys then derive from the tx hash. */
+  /**
+   * og getDeterministicHtlcTestSecret: a secret registered for this exact canonical payment; its ephemeral keys then
+   * derive from the tx hash.
+   */
   readonly secretFor?: ((txHash: string) => string | undefined) | undefined;
   /** og secureRandomBytes32Hex: fresh proposer entropy (32-byte hex) for a label; the rewrite takes it as input. */
   readonly entropy?: ((label: string) => string | undefined) | undefined;
   /** og observeOnlineEntityIds: the proposer's liveness view of a peer, committed as a peer assertion. */
   readonly online?: ((entityId: string) => boolean) | undefined;
-  /** og requireEntityEncryptionPrivateKey: the Entity's X25519 key every validator holds (the Runtime derives it from its encryption seed when not given). */
+  /**
+   * og requireEntityEncryptionPrivateKey: the Entity's X25519 key every validator holds (the Runtime derives it from
+   * its encryption seed when not given).
+   */
   readonly encryptionPrivateKey?: string | undefined;
 };
 /** The frame's committed HTLC context as the fold consumes it. */
-export type HtlcFrameInfra = { readonly gossipProfiles: readonly Binary[]; readonly peerAssertions: readonly Binary[]; readonly originated: readonly PreparedOriginated[]; readonly entries: readonly PreparedHtlcEntry[] };
+export type HtlcFrameInfra = {
+  readonly gossipProfiles: readonly Binary[];
+  readonly peerAssertions: readonly Binary[];
+  readonly originated: readonly PreparedOriginated[];
+  readonly entries: readonly PreparedHtlcEntry[];
+};
 export const EMPTY_HTLC_INFRA: HtlcFrameInfra = { gossipProfiles: [], peerAssertions: [], originated: [], entries: [] };
-const HTLC_NOTE_MAX_BYTES = 256, MAX_TOKEN_ID = 65535;
+const HTLC_NOTE_MAX_BYTES = 256;
+const MAX_TOKEN_ID = 65535;
 const htlcReject = (code: string): Result<never, EntityError> => err({ _tag: "htlc_payment", code });
-const fromOnion = <T>(r: Result<T, OnionError>): Result<T, EntityError> => mapErr(r, (e): EntityError => ({ _tag: "htlc_payment", code: e.code }));
-const bytes32Id = (value: unknown, code: string): Result<string, EntityError> => { const n = lower(value); return /^0x[0-9a-f]{64}$/.test(n) ? ok(n) : htlcReject(code); };
+const fromOnion = <T>(r: Result<T, OnionError>): Result<T, EntityError> =>
+  mapErr(r, (e): EntityError => ({ _tag: "htlc_payment", code: e.code }));
+const bytes32Id = (value: unknown, code: string): Result<string, EntityError> => {
+  const n = lower(value);
+  return WORD32.test(n) ? ok(n) : htlcReject(code);
+};
 type HtlcPaymentTx = Extract<EntityTx, { type: "htlcPayment" }>;
 /** og hashRawHtlcPaymentTx: keccak of the canonical consensus bytes of the exact raw tx. */
 export const htlcPaymentTxHash = (tx: HtlcPaymentTx): Result<string, EntityError> =>
   chain(binaryBody(tx), (b) => map(encodeConsensus(b), keccak256Hex));
+const HTLC_PAYMENT_FIELDS: ReadonlySet<string> = new Set([
+  "amount",
+  "deliveryMode",
+  "maxSenderDebit",
+  "route",
+  "targetEntityId",
+  "tokenId",
+  "description",
+  "hashlock",
+  "startedAtMs",
+]);
+const htlcNoteValid = (v: unknown): boolean =>
+  typeof v === "string" && v === v.trim() && utf8(v).byteLength <= HTLC_NOTE_MAX_BYTES;
 /** og assertRawHtlcPayment. */
 const rawHtlcPayment = (tx: HtlcPaymentTx): Result<HtlcPaymentData, EntityError> => {
-  const d = tx.data, allowed = new Set(["amount", "deliveryMode", "maxSenderDebit", "route", "targetEntityId", "tokenId", "description", "hashlock", "startedAtMs"]);
-  if (Object.keys(d).some((k) => !allowed.has(k))) return htlcReject("HTLC_PAYMENT_FIELDS_INVALID");
-  if (!Number.isSafeInteger(d.tokenId) || d.tokenId < 0 || d.tokenId > MAX_TOKEN_ID) return htlcReject("HTLC_PAYMENT_TOKEN_INVALID");
-  if (typeof d.amount !== "bigint" || d.amount <= 0n) return htlcReject("HTLC_PAYMENT_AMOUNT_INVALID");
-  if (typeof d.maxSenderDebit !== "bigint" || d.maxSenderDebit <= 0n) return htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_INVALID");
-  if (d.maxSenderDebit < d.amount) return htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT");
-  if (d.deliveryMode !== "instant" && d.deliveryMode !== "async") return htlcReject("HTLC_PAYMENT_DELIVERY_MODE_INVALID");
-  if (d.description !== undefined && (typeof d.description !== "string" || d.description !== d.description.trim() || utf8(d.description).byteLength > HTLC_NOTE_MAX_BYTES)) return htlcReject("HTLC_PAYMENT_DESCRIPTION_INVALID");
-  if (d.hashlock !== undefined && !/^0x[0-9a-f]{64}$/.test(d.hashlock)) return htlcReject("HTLC_PAYMENT_HASHLOCK_INVALID");
-  return ok(d);
+  const d = tx.data;
+  switch (true) {
+    case Object.keys(d).some((k) => !HTLC_PAYMENT_FIELDS.has(k)):
+      return htlcReject("HTLC_PAYMENT_FIELDS_INVALID");
+    case !Number.isSafeInteger(d.tokenId) || d.tokenId < 0 || d.tokenId > MAX_TOKEN_ID:
+      return htlcReject("HTLC_PAYMENT_TOKEN_INVALID");
+    case typeof d.amount !== "bigint" || d.amount <= 0n:
+      return htlcReject("HTLC_PAYMENT_AMOUNT_INVALID");
+    case typeof d.maxSenderDebit !== "bigint" || d.maxSenderDebit <= 0n:
+      return htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_INVALID");
+    case d.maxSenderDebit < d.amount:
+      return htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_BELOW_AMOUNT");
+    case d.deliveryMode !== "instant" && d.deliveryMode !== "async":
+      return htlcReject("HTLC_PAYMENT_DELIVERY_MODE_INVALID");
+    case d.description !== undefined && !htlcNoteValid(d.description):
+      return htlcReject("HTLC_PAYMENT_DESCRIPTION_INVALID");
+    case d.hashlock !== undefined && !WORD32.test(d.hashlock):
+      return htlcReject("HTLC_PAYMENT_HASHLOCK_INVALID");
+    default:
+      return ok(d);
+  }
 };
-/** og normalizeRoute: lowercase ids, source first, target last, at most 100 hops, loop-free (a self route needs two unique intermediates). */
-const htlcRoute = (raw: readonly string[], source: string, target: string): Result<readonly string[], EntityError> => chain(traverse(raw, (v) => bytes32Id(v, "HTLC_PAYMENT_ROUTE_ENTITY_INVALID")), (route) => {
-  if (route.length < 2 || route[0] !== source || route[route.length - 1] !== target) return htlcReject("HTLC_PAYMENT_ROUTE_INVALID");
-  if (route.length - 1 > HTLC_MAX_HOPS) return htlcReject("HTLC_PAYMENT_ROUTE_TOO_LONG");
-  const inner = route.slice(1, -1), selfRoute = source === target;
-  const validSelf = selfRoute && inner.length >= 2 && new Set(inner).size === inner.length && !inner.includes(source);
-  return (!selfRoute && new Set(route).size !== route.length) || (selfRoute && !validSelf) ? htlcReject("HTLC_PAYMENT_ROUTE_LOOP") : ok(route);
-});
+/** The payment's two ends as canonical ids: this Entity and the target. */
+type PaymentEnds = { readonly source: string; readonly target: string };
+const paymentEnds = (id: EntityId, d: HtlcPaymentData): Result<PaymentEnds, EntityError> =>
+  all({
+    source: bytes32Id(id, "HTLC_PAYMENT_SOURCE_INVALID"),
+    target: bytes32Id(d.targetEntityId, "HTLC_PAYMENT_TARGET_INVALID"),
+  });
+/**
+ * og normalizeRoute: lowercase ids, source first, target last, at most 100 hops, loop-free (a self route needs two
+ * unique intermediates).
+ */
+const htlcRoute = (raw: readonly string[], ends: PaymentEnds): Result<readonly string[], EntityError> =>
+  chain(traverse(raw, (v) => bytes32Id(v, "HTLC_PAYMENT_ROUTE_ENTITY_INVALID")), (route) => {
+    switch (true) {
+      case route.length < 2 || route[0] !== ends.source || route[route.length - 1] !== ends.target:
+        return htlcReject("HTLC_PAYMENT_ROUTE_INVALID");
+      case route.length - 1 > HTLC_MAX_HOPS:
+        return htlcReject("HTLC_PAYMENT_ROUTE_TOO_LONG");
+      case !routeLoopFree(route):
+        return htlcReject("HTLC_PAYMENT_ROUTE_LOOP");
+      default:
+        return ok(route);
+    }
+  });
+const canonicalDomain = (d: Domain): Result<Domain, EntityError> =>
+  mapErr(domainOf(d), (): EntityError => ({ _tag: "htlc_payment", code: "ACCOUNT_STATE_DOMAIN_INVALID" }));
 const sameDomainCanonical = (a: Domain, b: Domain): Result<boolean, EntityError> =>
-  chain(mapErr(domainOf(a), (): EntityError => ({ _tag: "htlc_payment", code: "ACCOUNT_STATE_DOMAIN_INVALID" })), (x) => map(mapErr(domainOf(b), (): EntityError => ({ _tag: "htlc_payment", code: "ACCOUNT_STATE_DOMAIN_INVALID" })), (y) => x.chainId === y.chainId && x.depositoryAddress === y.depositoryAddress));
-/** og Profile -> RoutingProfile: the fields pathfinding/htlc-quote.ts reads (routingFeePPM ?? 1, baseFee ?? 0n, tokenCapacities as a Map or a Record). */
+  chain(canonicalDomain(a), (x) =>
+    map(canonicalDomain(b), (y) => x.chainId === y.chainId && x.depositoryAddress === y.depositoryAddress),
+  );
+type ProfileRecord = { readonly [k: string]: unknown };
+/** A profile's tokenCapacities as rows, from a Map or a plain Record. */
+const capacityRows = (caps: unknown): readonly (readonly [unknown, unknown])[] => {
+  if (caps instanceof Map) return [...caps];
+  return caps !== null && typeof caps === "object" ? Object.entries(caps) : [];
+};
+const routingAccountOf = (a: ProfileRecord): RoutingAccount => ({
+  counterpartyId: String(a["counterpartyId"] ?? ""),
+  domain: a["domain"] as Domain,
+  tokenCapacities: new Map(capacityRows(a["tokenCapacities"]).map(([k, v]) => [Number(k), v as TokenCapacity])),
+});
+/**
+ * og Profile -> RoutingProfile: the fields pathfinding/htlc-quote.ts reads (routingFeePPM ?? 1, baseFee ?? 0n,
+ * tokenCapacities as a Map or a Record).
+ */
 export const routingProfileOf = (b: Binary): RoutingProfile | null => {
   if (b === null || typeof b !== "object" || Array.isArray(b) || b instanceof Map) return null;
-  const p = b as { readonly [k: string]: unknown }, meta = (p["metadata"] ?? {}) as { readonly [k: string]: unknown };
-  const accounts = Array.isArray(p["accounts"]) ? (p["accounts"] as readonly { readonly [k: string]: unknown }[]) : [];
+  const p = b as ProfileRecord;
+  const meta = (p["metadata"] ?? {}) as ProfileRecord;
+  const accounts = Array.isArray(p["accounts"]) ? (p["accounts"] as readonly ProfileRecord[]) : [];
+  const baseFee = meta["baseFee"];
   return {
-    entityId: String(p["entityId"] ?? ""), entityEncryptionPublicKey: String(p["entityEncryptionPublicKey"] ?? ""),
-    metadata: { ...opt("routingFeePPM", meta["routingFeePPM"] as number | undefined), ...opt("baseFee", typeof meta["baseFee"] === "bigint" ? meta["baseFee"] : undefined) },
-    accounts: accounts.map((a): RoutingAccount => {
-      const caps = a["tokenCapacities"], rows: [unknown, unknown][] = caps instanceof Map ? [...caps] : caps !== null && typeof caps === "object" ? Object.entries(caps) : [];
-      return { counterpartyId: String(a["counterpartyId"] ?? ""), domain: a["domain"] as Domain, tokenCapacities: new Map(rows.map(([k, v]) => [Number(k), v as { readonly inCapacity: bigint; readonly outCapacity: bigint }])) };
-    }),
+    entityId: String(p["entityId"] ?? ""),
+    entityEncryptionPublicKey: String(p["entityEncryptionPublicKey"] ?? ""),
+    metadata: {
+      ...opt("routingFeePPM", meta["routingFeePPM"] as number | undefined),
+      ...opt("baseFee", typeof baseFee === "bigint" ? baseFee : undefined),
+    },
+    accounts: accounts.map(routingAccountOf),
   };
 };
+/** The routing index over every gossip Profile that reads as one. */
+const gossipRoutingIndex = (profiles: readonly Binary[]): RoutingIndex =>
+  routingIndex(profiles.flatMap((b) => routingProfileOf(b) ?? []));
 /** og hopAccountDomain: the lane's domain as whichever Profile advertises it; two advertisements must agree. */
-const hopDomain = (index: RoutingIndex, from: string, to: string): Result<Domain, EntityError> => chain(fromOnion(uniqueProfile(index, from)), (fp) => chain(fromOnion(uniqueProfile(index, to)), (tp) => {
-  const own = fp.accounts.find((a) => a.counterpartyId.toLowerCase() === to), mirror = tp.accounts.find((a) => a.counterpartyId.toLowerCase() === from);
-  if (own === undefined && mirror === undefined) return htlcReject(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`);
-  if (own !== undefined && mirror !== undefined) return chain(sameDomainCanonical(own.domain, mirror.domain), (same) => (same ? ok(own.domain) : htlcReject(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`)));
-  return ok((own ?? mirror)?.domain as Domain);
-}));
-type HtlcOriginView = { readonly id: EntityId; readonly timestamp: number; readonly jHeight: number; readonly encryptionKey: string; readonly paybook: Paybook; readonly replicas: Replicas };
-/** og assertOriginRouteEvidence (shared with materialization): source profile key, every hop's domain, the first hop against the local Account. */
-const originRouteEvidence = (v: HtlcOriginView, index: RoutingIndex, route: readonly string[]): Result<readonly Domain[], EntityError> =>
-  chain(fromOnion(uniqueProfile(index, route[0] ?? "")), (source) => source.entityEncryptionPublicKey !== v.encryptionKey ? htlcReject("HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH")
-    : traverse(route.slice(0, -1), (from, i) => chain(hopDomain(index, from, route[i + 1] ?? ""), (domain): Result<Domain, EntityError> => {
-      if (i !== 0) return ok(domain);
-      const local = v.replicas.get((route[1] ?? "") as EntityId);
-      return local === undefined ? htlcReject(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${route[0]}:${route[1]}`)
-        : chain(sameDomainCanonical(local.state.terms.domain, domain), (same) => (same ? ok(domain) : htlcReject(`HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${route[0]}:${route[1]}`)));
-    })));
-type OriginEconomics = { readonly startedAtMs: number; readonly senderLockAmount: bigint; readonly hopForwardAmounts: ReadonlyMap<string, bigint>; readonly timelock: bigint; readonly revealBeforeHeight: number };
-/** og quote + deadline window for one payment at the frame clock. */
-const originEconomics = (v: HtlcOriginView, index: RoutingIndex, d: HtlcPaymentData, route: readonly string[]): Result<OriginEconomics, EntityError> => {
-  const startedAtMs = d.startedAtMs ?? v.timestamp;
-  if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== v.timestamp) return htlcReject("HTLC_PAYMENT_STARTED_AT_INVALID");
-  return chain(fromOnion(quoteHtlcRoute(index, route, d.tokenId, d.amount)), (quote) => quote.senderLockAmount > d.maxSenderDebit ? htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED")
-    : map(fromOnion(paymentDeadlineWindow(d.deliveryMode, v.jHeight, startedAtMs, route.length - 1)), (w) => ({
-      startedAtMs, senderLockAmount: quote.senderLockAmount, hopForwardAmounts: quote.hopForwardAmounts, timelock: hopTimelock(w.baseTimelock, 0), revealBeforeHeight: hopRevealHeight(w.baseHeight, 0, route.length - 1),
-    })));
+const hopDomain = (index: RoutingIndex, from: string, to: string): Result<Domain, EntityError> =>
+  chain(fromOnion(uniqueProfile(index, from)), (fp) =>
+    chain(fromOnion(uniqueProfile(index, to)), (tp) => {
+      const own = fp.accounts.find((a) => a.counterpartyId.toLowerCase() === to);
+      const mirror = tp.accounts.find((a) => a.counterpartyId.toLowerCase() === from);
+      if (own !== undefined && mirror !== undefined) {
+        return chain(sameDomainCanonical(own.domain, mirror.domain), (same) =>
+          same ? ok(own.domain) : htlcReject(`HTLC_PAYMENT_PROFILE_ACCOUNT_DOMAIN_MISMATCH:${from}:${to}`),
+        );
+      }
+      const advertised = own ?? mirror;
+      return advertised === undefined
+        ? htlcReject(`HTLC_PAYMENT_PROFILE_ACCOUNT_MISSING:${from}:${to}`)
+        : ok(advertised.domain);
+    }),
+  );
+type HtlcOriginView = {
+  readonly id: EntityId;
+  readonly timestamp: number;
+  readonly jHeight: number;
+  readonly encryptionKey: string;
+  readonly paybook: Paybook;
+  readonly replicas: Replicas;
 };
-/** og infra-context.ts resolveRoute: `findPaths(entityId, tx.data.targetEntityId, amount, tokenId)[0].path` (the raw target id, as og passes it). */
-const resolveHtlcRoute = (profiles: readonly Binary[], source: string, d: HtlcPaymentData): Result<readonly string[], EntityError> =>
+/** The first hop's advertised domain must be the local Account's own. */
+const firstHopDomain = (v: HtlcOriginView, route: readonly string[], domain: Domain): Result<Domain, EntityError> => {
+  const mismatch = `HTLC_PAYMENT_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${route[0]}:${route[1]}`;
+  const local = v.replicas.get((route[1] ?? "") as EntityId);
+  if (local === undefined) return htlcReject(mismatch);
+  return chain(sameDomainCanonical(local.state.terms.domain, domain), (same) =>
+    same ? ok(domain) : htlcReject(mismatch),
+  );
+};
+/**
+ * og assertOriginRouteEvidence (shared with materialization): source profile key, every hop's domain, the first hop
+ * against the local Account.
+ */
+const originRouteEvidence = (
+  v: HtlcOriginView,
+  index: RoutingIndex,
+  route: readonly string[],
+): Result<readonly Domain[], EntityError> =>
+  chain(fromOnion(uniqueProfile(index, route[0] ?? "")), (source) => {
+    if (source.entityEncryptionPublicKey !== v.encryptionKey)
+      return htlcReject("HTLC_PAYMENT_SOURCE_PROFILE_KEY_MISMATCH");
+    return traverse(route.slice(0, -1), (from, i) =>
+      chain(hopDomain(index, from, route[i + 1] ?? ""), (domain) =>
+        i === 0 ? firstHopDomain(v, route, domain) : ok(domain),
+      ),
+    );
+  });
+type OriginEconomics = {
+  readonly startedAtMs: number;
+  readonly senderLockAmount: bigint;
+  readonly hopForwardAmounts: ReadonlyMap<string, bigint>;
+  readonly timelock: bigint;
+  readonly revealBeforeHeight: number;
+};
+/** og quote + deadline window for one payment at the frame clock. */
+const originEconomics = (
+  v: HtlcOriginView,
+  index: RoutingIndex,
+  d: HtlcPaymentData,
+  route: readonly string[],
+): Result<OriginEconomics, EntityError> => {
+  const startedAtMs = d.startedAtMs ?? v.timestamp;
+  const hops = route.length - 1;
+  if (!Number.isSafeInteger(startedAtMs) || startedAtMs !== v.timestamp)
+    return htlcReject("HTLC_PAYMENT_STARTED_AT_INVALID");
+  return chain(fromOnion(quoteHtlcRoute(index, route, d.tokenId, d.amount)), (quote) => {
+    if (quote.senderLockAmount > d.maxSenderDebit) return htlcReject("HTLC_PAYMENT_MAX_SENDER_DEBIT_EXCEEDED");
+    return map(fromOnion(paymentDeadlineWindow(d.deliveryMode, v.jHeight, startedAtMs, hops)), (w) => ({
+      startedAtMs,
+      senderLockAmount: quote.senderLockAmount,
+      hopForwardAmounts: quote.hopForwardAmounts,
+      timelock: hopTimelock(w.baseTimelock, 0),
+      revealBeforeHeight: hopRevealHeight(w.baseHeight, 0, hops),
+    }));
+  });
+};
+/**
+ * og infra-context.ts resolveRoute: `findPaths(entityId, tx.data.targetEntityId, amount, tokenId)[0].path` (the raw
+ * target id, as og passes it).
+ */
+const resolveHtlcRoute = (
+  profiles: readonly Binary[],
+  source: string,
+  d: HtlcPaymentData,
+): Result<readonly string[], EntityError> =>
   chain(fromOnion(findPaths(profiles, source, d.targetEntityId, d.amount, d.tokenId)), (routes) => {
     const path = routes[0]?.path;
     return path === undefined ? htlcReject(`HTLC_PAYMENT_ROUTE_NOT_FOUND:${source}:${d.targetEntityId}`) : ok(path);
   });
-/** og generateHtlcEphemeralPrivateKey: 32 bytes (keccak of the deterministic seed, or entropy), clamped per RFC 7748. */
-const clampedX25519 = (hex32: string): string => { const b = hexToBytes(hex32); b[0] = (b[0] ?? 0) & 248; b[31] = ((b[31] ?? 0) & 127) | 64; return bytesToHex(b); };
+/** An explicit route as given, an empty one resolved over every gossip Profile; either way normalized. */
+const originRoute = (
+  infra: HtlcProposerInfra,
+  d: HtlcPaymentData,
+  ends: PaymentEnds,
+): Result<readonly string[], EntityError> =>
+  chain(d.route.length > 0 ? ok(d.route) : resolveHtlcRoute(infra.profiles, ends.source, d), (raw) =>
+    htlcRoute(raw, ends),
+  );
 /**
- * og materializeOriginatedHtlcPayments (proposer only): per htlcPayment in order, the raw checks, route, secret -> hashlock, quote, deadline window,
- * profile/domain evidence and the onion; sorted by tx hash. An empty route is resolved like og resolveRoute: the cheapest findPaths route over every gossip Profile.
+ * og generateHtlcEphemeralPrivateKey: 32 bytes (keccak of the deterministic seed, or entropy), clamped per RFC 7748.
  */
-export const materializeOriginated = (v: HtlcOriginView, profiles: readonly Binary[], txs: readonly EntityTx[], infra: HtlcProposerInfra): { readonly originated: readonly PreparedOriginated[]; readonly refused: ReadonlyMap<EntityTx, EntityError> } => {
-  const index = routingIndex(profiles.flatMap((b) => { const p = routingProfileOf(b); return p === null ? [] : [p]; }));
-  const taken = new Set<string>(), hashes = new Set<string>(), refused = new Map<EntityTx, EntityError>(), originated: PreparedOriginated[] = [];
-  for (const tx of txs) {
-    if (tx.type !== "htlcPayment") continue;
-    const one = chain(rawHtlcPayment(tx), (d) => chain(bytes32Id(v.id, "HTLC_PAYMENT_SOURCE_INVALID"), (source) => chain(bytes32Id(d.targetEntityId, "HTLC_PAYMENT_TARGET_INVALID"), (target) =>
-      chain(d.route.length > 0 ? htlcRoute(d.route, source, target) : chain(resolveHtlcRoute(infra.profiles, source, d), (found) => htlcRoute(found, source, target)), (route) => chain(htlcPaymentTxHash(tx), (txHash): Result<PreparedOriginated, EntityError> => {
-        const local = infra.secretFor?.(txHash), secret = local ?? infra.entropy?.(`htlc-secret:${txHash}`) ?? "";
-        if (!/^0x[0-9a-f]{64}$/.test(secret)) return htlcReject("HTLC_PAYMENT_PREIMAGE_INVALID");
-        const hashlock = (hashHtlcSecret(secret) ?? "").toLowerCase();
-        if (d.hashlock !== undefined && d.hashlock !== hashlock) return htlcReject("HTLC_PAYMENT_HASHLOCK_MISMATCH");
-        if (v.paybook.entries.has(hashlock) || taken.has(hashlock)) return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${hashlock}`);
-        return chain(originEconomics(v, index, d, route), (e) => chain(originRouteEvidence(v, index, route), (domains) => {
-          const keys = new Map(route.map((id) => [id, unwrapOr(map(uniqueProfile(index, id), (p) => p.entityEncryptionPublicKey), () => "")]));
-          let keyIndex = 0;
-          const ephemeral = (): string => clampedX25519(local !== undefined ? keccak256Hex(utf8(`${txHash}:${keyIndex++}`)) : infra.entropy?.(`htlc-ephemeral:${txHash}:${keyIndex++}`) ?? ZERO_WORD);
-          return map(fromOnion(createOnionEnvelopes(route, secret, keys, domains, e.hopForwardAmounts, d.description, e.startedAtMs,
-            { hashlock, tokenId: d.tokenId, senderLockAmount: e.senderLockAmount, timelock: e.timelock, revealBeforeHeight: e.revealBeforeHeight }, ephemeral)), (envelope): PreparedOriginated => ({
-            txHash, targetEntityId: target, tokenId: d.tokenId, recipientAmount: d.amount, route, description: d.description ?? "", deliveryMode: d.deliveryMode, startedAtMs: e.startedAtMs,
-            hashlock, senderLockAmount: e.senderLockAmount, maxSenderDebit: d.maxSenderDebit, totalFee: e.senderLockAmount - d.amount, timelock: e.timelock, revealBeforeHeight: e.revealBeforeHeight,
-            nextHopEntityId: route[1] ?? "", envelope,
-          }));
-        }));
-      })))));
-    if (!one.ok) { refused.set(tx, one.error); continue; }
-    if (hashes.has(one.value.txHash)) { refused.set(tx, { _tag: "htlc_payment", code: `HTLC_PAYMENT_TX_DUPLICATE:${one.value.txHash}` }); continue; }
-    hashes.add(one.value.txHash); taken.add(one.value.hashlock); originated.push(one.value);
-  }
-  return { originated: [...originated].sort((a, b) => asc(a.txHash, b.txHash)), refused };
+const clampedX25519 = (hex32: string): string => {
+  const clamp = (byte: number, i: number): number => {
+    switch (i) {
+      case 0:
+        return byte & 248;
+      case 31:
+        return (byte & 127) | 64;
+      default:
+        return byte;
+    }
+  };
+  return bytesToHex(hexToBytes(hex32).map(clamp));
 };
-/** og assertOriginatedHtlcPayments (validators): one prepared origin per htlcPayment, unique hashlocks, route evidence and economics recomputed from public facts. */
-export const assertOriginated = (v: HtlcOriginView, infra: HtlcFrameInfra, txs: readonly EntityTx[]): Result<void, EntityError> => {
+/**
+ * og draws one ephemeral key per onion layer, sealing from the recipient inward, so layer i takes draw number
+ * `last - i`: from the tx hash for a registered test secret, from proposer entropy otherwise.
+ */
+const originEphemeral =
+  (infra: HtlcProposerInfra, txHash: string, registered: boolean, last: number) =>
+  (i: number): string => {
+    const draw = last - i;
+    const seed = registered
+      ? keccak256Hex(utf8(`${txHash}:${draw}`))
+      : (infra.entropy?.(`htlc-ephemeral:${txHash}:${draw}`) ?? ZERO_WORD);
+    return clampedX25519(seed);
+  };
+/** One payment, routed and hashed, before its secret is drawn. */
+type OriginPlan = {
+  readonly d: HtlcPaymentData;
+  readonly target: string;
+  readonly route: readonly string[];
+  readonly txHash: string;
+};
+/** The secret's hashlock must match any the tx names, and be neither in the paybook nor taken earlier in the frame. */
+const freshHashlock = (
+  v: HtlcOriginView,
+  p: OriginPlan,
+  secret: string,
+  earlier: readonly PreparedOriginated[],
+): Result<string, EntityError> => {
+  if (!WORD32.test(secret)) return htlcReject("HTLC_PAYMENT_PREIMAGE_INVALID");
+  const hashlock = (hashHtlcSecret(secret) ?? "").toLowerCase();
+  switch (true) {
+    case p.d.hashlock !== undefined && p.d.hashlock !== hashlock:
+      return htlcReject("HTLC_PAYMENT_HASHLOCK_MISMATCH");
+    case v.paybook.entries.has(hashlock) || earlier.some((o) => o.hashlock === hashlock):
+      return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${hashlock}`);
+    default:
+      return ok(hashlock);
+  }
+};
+const profileKey = (index: RoutingIndex, id: string): string =>
+  unwrapOr(
+    map(uniqueProfile(index, id), (p) => p.entityEncryptionPublicKey),
+    () => "",
+  );
+/** The secret, its hashlock, the quote and route evidence, then the onion sealed to every hop. */
+const sealOrigin = (
+  v: HtlcOriginView,
+  index: RoutingIndex,
+  infra: HtlcProposerInfra,
+  earlier: readonly PreparedOriginated[],
+  p: OriginPlan,
+): Result<PreparedOriginated, EntityError> => {
+  const registered = infra.secretFor?.(p.txHash);
+  const secret = registered ?? infra.entropy?.(`htlc-secret:${p.txHash}`) ?? "";
+  const { d, route } = p;
+  return chain(freshHashlock(v, p, secret, earlier), (hashlock) =>
+    chain(originEconomics(v, index, d, route), (e) =>
+      chain(originRouteEvidence(v, index, route), (domains) => {
+        const keys = new Map(route.map((id) => [id, profileKey(index, id)]));
+        const binding = {
+          hashlock,
+          tokenId: d.tokenId,
+          senderLockAmount: e.senderLockAmount,
+          timelock: e.timelock,
+          revealBeforeHeight: e.revealBeforeHeight,
+        };
+        const ephemeralAt = originEphemeral(infra, p.txHash, registered !== undefined, route.length - 1);
+        const onion = createOnionEnvelopes(
+          route,
+          secret,
+          keys,
+          domains,
+          e.hopForwardAmounts,
+          d.description,
+          e.startedAtMs,
+          binding,
+          ephemeralAt,
+        );
+        return map(fromOnion(onion), (envelope): PreparedOriginated => ({
+          txHash: p.txHash,
+          targetEntityId: p.target,
+          tokenId: d.tokenId,
+          recipientAmount: d.amount,
+          route,
+          description: d.description ?? "",
+          deliveryMode: d.deliveryMode,
+          startedAtMs: e.startedAtMs,
+          hashlock,
+          senderLockAmount: e.senderLockAmount,
+          maxSenderDebit: d.maxSenderDebit,
+          totalFee: e.senderLockAmount - d.amount,
+          timelock: e.timelock,
+          revealBeforeHeight: e.revealBeforeHeight,
+          nextHopEntityId: route[1] ?? "",
+          envelope,
+        }));
+      }),
+    ),
+  );
+};
+/** og's per-payment materialization: the raw checks, both ends, the route and the tx hash, then the sealed origin. */
+const originate = (
+  v: HtlcOriginView,
+  index: RoutingIndex,
+  infra: HtlcProposerInfra,
+  earlier: readonly PreparedOriginated[],
+  tx: HtlcPaymentTx,
+): Result<PreparedOriginated, EntityError> =>
+  chain(rawHtlcPayment(tx), (d) =>
+    chain(paymentEnds(v.id, d), (ends) =>
+      chain(originRoute(infra, d, ends), (route) =>
+        chain(htlcPaymentTxHash(tx), (txHash) =>
+          sealOrigin(v, index, infra, earlier, { d, target: ends.target, route, txHash }),
+        ),
+      ),
+    ),
+  );
+type Originating = {
+  readonly originated: readonly PreparedOriginated[];
+  readonly refused: ReadonlyMap<EntityTx, EntityError>;
+};
+/**
+ * og materializeOriginatedHtlcPayments (proposer only): per htlcPayment in order, the raw checks, route, secret ->
+ * hashlock, quote, deadline window, profile/domain evidence and the onion; sorted by tx hash. An empty route is
+ * resolved like og resolveRoute: the cheapest findPaths route over every gossip Profile.
+ */
+export const materializeOriginated = (
+  v: HtlcOriginView,
+  profiles: readonly Binary[],
+  txs: readonly EntityTx[],
+  infra: HtlcProposerInfra,
+): Originating => {
+  const index = gossipRoutingIndex(profiles);
+  const step = (acc: Originating, tx: EntityTx): Originating => {
+    if (tx.type !== "htlcPayment") return acc;
+    const refuse = (e: EntityError): Originating => ({ ...acc, refused: new Map([...acc.refused, [tx, e]]) });
+    const one = originate(v, index, infra, acc.originated, tx);
+    if (!one.ok) return refuse(one.error);
+    const { txHash } = one.value;
+    return acc.originated.some((o) => o.txHash === txHash)
+      ? refuse({ _tag: "htlc_payment", code: `HTLC_PAYMENT_TX_DUPLICATE:${txHash}` })
+      : { ...acc, originated: [...acc.originated, one.value] };
+  };
+  const done = txs.reduce<Originating>(step, { originated: [], refused: new Map() });
+  return { originated: done.originated.toSorted((a, b) => asc(a.txHash, b.txHash)), refused: done.refused };
+};
+/** Every public fact of a prepared origin, beside the value the validator recomputes for it. */
+const originFacts = (
+  o: PreparedOriginated,
+  d: HtlcPaymentData,
+  e: OriginEconomics,
+): readonly (readonly [string, unknown, unknown])[] => [
+  ["targetEntityId", o.targetEntityId, d.targetEntityId.toLowerCase()],
+  ["tokenId", o.tokenId, d.tokenId],
+  ["recipientAmount", o.recipientAmount, d.amount],
+  ["description", o.description, d.description ?? ""],
+  ["deliveryMode", o.deliveryMode, d.deliveryMode],
+  ["startedAtMs", o.startedAtMs, e.startedAtMs],
+  ["senderLockAmount", o.senderLockAmount, e.senderLockAmount],
+  ["maxSenderDebit", o.maxSenderDebit, d.maxSenderDebit],
+  ["totalFee", o.totalFee, e.senderLockAmount - d.amount],
+  ["timelock", o.timelock, e.timelock],
+  ["revealBeforeHeight", o.revealBeforeHeight, e.revealBeforeHeight],
+  ["nextHopEntityId", o.nextHopEntityId, o.route[1]],
+];
+/** A validator's check of one payment's prepared origin; its hashlock is then taken for the rest of the frame. */
+const checkOrigin = (
+  v: HtlcOriginView,
+  index: RoutingIndex,
+  origins: ReadonlyMap<string, PreparedOriginated>,
+  taken: ReadonlySet<string>,
+  tx: HtlcPaymentTx,
+): Result<string, EntityError> =>
+  chain(rawHtlcPayment(tx), (d) =>
+    chain(htlcPaymentTxHash(tx), (txHash) => {
+      const o = origins.get(txHash);
+      if (o === undefined) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
+      if (v.paybook.entries.has(o.hashlock) || taken.has(o.hashlock)) {
+        return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${o.hashlock}`);
+      }
+      return chain(paymentEnds(v.id, d), (ends) =>
+        chain(htlcRoute(o.route, ends), (route) => {
+          if (d.route.length > 0 && canon(route) !== canon(d.route)) {
+            return htlcReject(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${txHash}`);
+          }
+          return chain(originRouteEvidence(v, index, route), () =>
+            chain(originEconomics(v, index, d, o.route), (e) => {
+              if (d.hashlock !== undefined && d.hashlock !== o.hashlock) {
+                return htlcReject(`HTLC_PAYMENT_PREPARED_HASHLOCK_MISMATCH:${txHash}`);
+              }
+              const differing = originFacts(o, d, e).find(([, prepared, recomputed]) => prepared !== recomputed);
+              return differing === undefined
+                ? ok(o.hashlock)
+                : htlcReject(`HTLC_PAYMENT_PREPARED_${differing[0].toUpperCase()}_MISMATCH:${txHash}`);
+            }),
+          );
+        }),
+      );
+    }),
+  );
+/**
+ * og assertOriginatedHtlcPayments (validators): one prepared origin per htlcPayment, unique hashlocks, route evidence
+ * and economics recomputed from public facts.
+ */
+export const assertOriginated = (
+  v: HtlcOriginView,
+  infra: HtlcFrameInfra,
+  txs: readonly EntityTx[],
+): Result<void, EntityError> => {
   const payments = txs.filter((tx): tx is HtlcPaymentTx => tx.type === "htlcPayment");
   if (payments.length !== infra.originated.length) return htlcReject("HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH");
-  const index = routingIndex(infra.gossipProfiles.flatMap((b) => { const p = routingProfileOf(b); return p === null ? [] : [p]; }));
-  const origins = new Map(infra.originated.map((o) => [o.txHash, o])), taken = new Set<string>();
-  return map(traverse(payments, (tx) => chain(rawHtlcPayment(tx), (d) => chain(htlcPaymentTxHash(tx), (txHash): Result<void, EntityError> => {
-    const o = origins.get(txHash);
-    if (o === undefined) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
-    if (v.paybook.entries.has(o.hashlock) || taken.has(o.hashlock)) return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${o.hashlock}`);
-    taken.add(o.hashlock);
-    return chain(bytes32Id(v.id, "HTLC_PAYMENT_SOURCE_INVALID"), (source) => chain(bytes32Id(d.targetEntityId, "HTLC_PAYMENT_TARGET_INVALID"), (target) => chain(htlcRoute(o.route, source, target), (route) => {
-      if (d.route.length > 0 && canon(route) !== canon(d.route)) return htlcReject(`HTLC_PAYMENT_PREPARED_ROUTE_MISMATCH:${txHash}`);
-      return chain(originRouteEvidence(v, index, route), () => chain(originEconomics(v, index, d, o.route), (e): Result<void, EntityError> => {
-        if (d.hashlock !== undefined && d.hashlock !== o.hashlock) return htlcReject(`HTLC_PAYMENT_PREPARED_HASHLOCK_MISMATCH:${txHash}`);
-        const expected: readonly (readonly [string, unknown, unknown])[] = [
-          ["targetEntityId", o.targetEntityId, d.targetEntityId.toLowerCase()], ["tokenId", o.tokenId, d.tokenId], ["recipientAmount", o.recipientAmount, d.amount], ["description", o.description, d.description ?? ""],
-          ["deliveryMode", o.deliveryMode, d.deliveryMode], ["startedAtMs", o.startedAtMs, e.startedAtMs], ["senderLockAmount", o.senderLockAmount, e.senderLockAmount], ["maxSenderDebit", o.maxSenderDebit, d.maxSenderDebit],
-          ["totalFee", o.totalFee, e.senderLockAmount - d.amount], ["timelock", o.timelock, e.timelock], ["revealBeforeHeight", o.revealBeforeHeight, e.revealBeforeHeight], ["nextHopEntityId", o.nextHopEntityId, o.route[1]],
-        ];
-        const bad = expected.find(([, a, b]) => a !== b);
-        return bad === undefined ? ok(undefined) : htlcReject(`HTLC_PAYMENT_PREPARED_${bad[0].toUpperCase()}_MISMATCH:${txHash}`);
-      }));
-    })));
-  }))), () => undefined);
+  const index = gossipRoutingIndex(infra.gossipProfiles);
+  const origins = new Map(infra.originated.map((o) => [o.txHash, o]));
+  const checked = foldResult(payments, new Set<string>() as ReadonlySet<string>, (taken, tx) =>
+    map(checkOrigin(v, index, origins, taken, tx), (hashlock) => new Set([...taken, hashlock])),
+  );
+  return map(checked, () => undefined);
 };
-/** og validatePreparedHtlcPayment: the tx's prepared origin, a fresh hashlock, an active next-hop Account with committed out-capacity for the sender lock. */
-export const validatePreparedHtlcPayment = (v: HtlcOriginView, tx: HtlcPaymentTx, infra: HtlcFrameInfra): Result<PreparedOriginated, EntityError> =>
-  chain(rawHtlcPayment(tx), (d) => chain(htlcPaymentTxHash(tx), (txHash): Result<PreparedOriginated, EntityError> => {
-    const p = infra.originated.find((o) => o.txHash === txHash);
-    if (p === undefined) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
-    if (p.targetEntityId !== d.targetEntityId.toLowerCase() || p.tokenId !== d.tokenId || p.recipientAmount !== d.amount || p.maxSenderDebit !== d.maxSenderDebit || p.deliveryMode !== d.deliveryMode
-      || (d.startedAtMs !== undefined && p.startedAtMs !== d.startedAtMs)) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
-    if (v.paybook.entries.has(p.hashlock)) return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${p.hashlock}`);
-    const child = v.replicas.get(p.nextHopEntityId as EntityId);
-    if (child === undefined || child._tag === "preparing" || child._tag === "disputed") return htlcReject(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
-    const tk = String(p.tokenId) as TokenId, body = child.state, byLeft = isLeft(v.id, replicaId(child));
-    return !body.account.deltas.has(tk) || outCapacity(getDelta(body.account, tk), byLeft, holds(body, tk, byLeft)) < p.senderLockAmount ? htlcReject(`HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT:${txHash}`) : ok(p);
-  }));
-/** og handleHtlcPayment: record the originated paybook entry and queue the first-hop htlc_lock carrying the onion (no output; the Account frame proposes in this Entity frame). */
-export const htlcPaymentStep = (p: PreparedOriginated, paybook: Paybook, timestamp: number): { readonly paybook: Paybook; readonly lock: AccountTx } => ({
-  paybook: { ...paybook, entries: mapSet(paybook.entries, p.hashlock, {
-    hashlock: p.hashlock, ...(p.description ? { description: p.description } : {}), tokenId: p.tokenId, amount: p.recipientAmount, startedAtMs: p.startedAtMs, originated: true, outboundEntity: p.nextHopEntityId, createdTimestamp: timestamp,
-  }) },
-  lock: { type: "htlc_lock", lockId: p.hashlock, hashlock: p.hashlock, timelock: p.timelock, revealBeforeHeight: BigInt(p.revealBeforeHeight), amount: p.senderLockAmount, tokenId: String(p.tokenId) as TokenId, deliveryMode: p.deliveryMode, envelope: p.envelope },
-});
-/** og selectInfraProfiles + the committed gossipProfiles: exactly the Profiles of every entity on an originated route, sorted by entity id. */
+/** The prepared origin still describes the raw tx it was prepared for. */
+const originMatchesTx = (p: PreparedOriginated, d: HtlcPaymentData): boolean =>
+  p.targetEntityId === d.targetEntityId.toLowerCase() &&
+  p.tokenId === d.tokenId &&
+  p.recipientAmount === d.amount &&
+  p.maxSenderDebit === d.maxSenderDebit &&
+  p.deliveryMode === d.deliveryMode &&
+  (d.startedAtMs === undefined || p.startedAtMs === d.startedAtMs);
+/**
+ * og validatePreparedHtlcPayment: the tx's prepared origin, a fresh hashlock, an active next-hop Account with committed
+ * out-capacity for the sender lock.
+ */
+export const validatePreparedHtlcPayment = (
+  v: HtlcOriginView,
+  tx: HtlcPaymentTx,
+  infra: HtlcFrameInfra,
+): Result<PreparedOriginated, EntityError> =>
+  chain(rawHtlcPayment(tx), (d) =>
+    chain(htlcPaymentTxHash(tx), (txHash): Result<PreparedOriginated, EntityError> => {
+      const p = infra.originated.find((o) => o.txHash === txHash);
+      if (p === undefined) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_REQUIRED:${txHash}`);
+      if (!originMatchesTx(p, d)) return htlcReject(`HTLC_PAYMENT_PREPARED_CONTEXT_MISMATCH:${txHash}`);
+      if (v.paybook.entries.has(p.hashlock)) return htlcReject(`HTLC_PAYMENT_HASHLOCK_ALREADY_ACTIVE:${p.hashlock}`);
+      const child = v.replicas.get(p.nextHopEntityId as EntityId);
+      if (child === undefined || child._tag === "preparing" || child._tag === "disputed") {
+        return htlcReject(`HTLC_PAYMENT_OUTBOUND_ACCOUNT_UNAVAILABLE:${txHash}`);
+      }
+      const tk = String(p.tokenId) as TokenId;
+      const body = child.state;
+      const byLeft = isLeft(v.id, replicaId(child));
+      const enough =
+        body.account.deltas.has(tk) &&
+        outCapacity(getDelta(body.account, tk), byLeft, holds(body, tk, byLeft)) >= p.senderLockAmount;
+      return enough ? ok(p) : htlcReject(`HTLC_PAYMENT_OUTBOUND_CAPACITY_INSUFFICIENT:${txHash}`);
+    }),
+  );
+/**
+ * og handleHtlcPayment: record the originated paybook entry and queue the first-hop htlc_lock carrying the onion (no
+ * output; the Account frame proposes in this Entity frame).
+ */
+export const htlcPaymentStep = (
+  p: PreparedOriginated,
+  paybook: Paybook,
+  timestamp: number,
+): { readonly paybook: Paybook; readonly lock: AccountTx } => {
+  const entry: PaybookEntry = {
+    hashlock: p.hashlock,
+    ...opt("description", p.description || undefined),
+    tokenId: p.tokenId,
+    amount: p.recipientAmount,
+    startedAtMs: p.startedAtMs,
+    originated: true,
+    outboundEntity: p.nextHopEntityId,
+    createdTimestamp: timestamp,
+  };
+  const lock: AccountTx = {
+    type: "htlc_lock",
+    lockId: p.hashlock,
+    hashlock: p.hashlock,
+    timelock: p.timelock,
+    revealBeforeHeight: BigInt(p.revealBeforeHeight),
+    amount: p.senderLockAmount,
+    tokenId: String(p.tokenId) as TokenId,
+    deliveryMode: p.deliveryMode,
+    envelope: p.envelope,
+  };
+  return { paybook: { ...paybook, entries: mapSet(paybook.entries, p.hashlock, entry) }, lock };
+};
+const profileEntityId = (b: Binary): string => lower((b as { readonly entityId?: unknown } | null)?.entityId);
+/**
+ * og selectInfraProfiles + the committed gossipProfiles: exactly the Profiles of every entity on an originated route,
+ * sorted by entity id.
+ */
 const frameProfiles = (profiles: readonly Binary[], originated: readonly PreparedOriginated[]): readonly Binary[] => {
   const ids = new Set(originated.flatMap((o) => o.route));
-  return profiles.filter((b) => ids.has(lower((b as { readonly entityId?: unknown } | null)?.entityId))).sort((a, b) => asc(String((a as { entityId: string }).entityId), String((b as { entityId: string }).entityId)));
+  const rawId = (b: Binary): string => String((b as { entityId: string }).entityId);
+  return profiles.filter((b) => ids.has(profileEntityId(b))).toSorted((a, b) => asc(rawId(a), rawId(b)));
 };
-/** og materializeFreshEntityInfraContext: the committed context for the payments this frame actually includes (profiles of every route entity, liveness of every next hop). */
-const frameHtlcInfra = (infra: HtlcProposerInfra | undefined, v: Omit<HtlcInboundView, "online">, originated: readonly PreparedOriginated[], included: readonly EntityTx[]): Result<HtlcFrameInfra, EntityError> => {
+/**
+ * og materializeFreshEntityInfraContext: the committed context for the payments this frame actually includes (profiles
+ * of every route entity, liveness of every next hop).
+ */
+const frameHtlcInfra = (
+  infra: HtlcProposerInfra | undefined,
+  v: Omit<HtlcInboundView, "online">,
+  originated: readonly PreparedOriginated[],
+  included: readonly EntityTx[],
+): Result<HtlcFrameInfra, EntityError> => {
   const observer = onlineObserver(infra);
-  return chain(htlcFrameTxs(included) ? inboundHtlcEntries({ ...v, online: observer.online }, included) : ok([]), (entries) => {
-    const kept = new Set<string>();
-    for (const tx of included) if (tx.type === "htlcPayment") { const h = htlcPaymentTxHash(tx); if (!h.ok) return h; kept.add(h.value); }
-    const final = originated.filter((o) => kept.has(o.txHash));
-    for (const o of final) observer.online(o.nextHopEntityId);
-    const peerAssertions = [...observer.observed.keys()].sort(asc).map((entityId) => ({ entityId, online: observer.observed.get(entityId) === true }));
-    return ok({ gossipProfiles: frameProfiles(infra?.profiles ?? [], final), peerAssertions, originated: final, entries });
-  });
+  const payments = included.filter((tx): tx is HtlcPaymentTx => tx.type === "htlcPayment");
+  const entries = htlcFrameTxs(included) ? inboundHtlcEntries({ ...v, online: observer.online }, included) : ok([]);
+  return chain(entries, (prepared) =>
+    map(traverse(payments, htlcPaymentTxHash), (hashes) => {
+      const kept = new Set(hashes);
+      const final = originated.filter((o) => kept.has(o.txHash));
+      final.forEach((o) => observer.online(o.nextHopEntityId));
+      const peerAssertions = [...observer.observed.keys()]
+        .toSorted(asc)
+        .map((entityId) => ({ entityId, online: observer.observed.get(entityId) === true }));
+      return {
+        gossipProfiles: frameProfiles(infra?.profiles ?? [], final),
+        peerAssertions,
+        originated: final,
+        entries: prepared,
+      };
+    }),
+  );
 };
-/** og validateHtlcPreparedInfraContext (originated half): exact field set, canonical ids, strictly sorted tx hashes, route and economics shape, opaque envelope. */
+const PREPARED_ORIGIN_KEYS = [
+  "deliveryMode",
+  "description",
+  "envelope",
+  "hashlock",
+  "maxSenderDebit",
+  "nextHopEntityId",
+  "recipientAmount",
+  "revealBeforeHeight",
+  "route",
+  "senderLockAmount",
+  "startedAtMs",
+  "targetEntityId",
+  "timelock",
+  "tokenId",
+  "totalFee",
+  "txHash",
+].join(",");
+const isWordId = (v: unknown): boolean => typeof v === "string" && WORD32.test(v);
+/** A committed route: canonical ids, 1..100 hops, loop-free, ending at the target through the named next hop. */
+const preparedRouteSound = (o: PreparedOriginated): boolean => {
+  const route: unknown = o.route;
+  return (
+    Array.isArray(route) &&
+    route.length >= 2 &&
+    route.length <= 101 &&
+    route.every(isWordId) &&
+    routeLoopFree(route) &&
+    o.targetEntityId === route[route.length - 1] &&
+    o.nextHopEntityId === route[1]
+  );
+};
+/**
+ * Amounts in their order: the recipient's, the sender's lock covering it, the debit cap covering that, the fee between
+ * them.
+ */
+const preparedAmountsSound = (o: PreparedOriginated): boolean =>
+  typeof o.recipientAmount === "bigint" &&
+  o.recipientAmount > 0n &&
+  typeof o.senderLockAmount === "bigint" &&
+  o.senderLockAmount >= o.recipientAmount &&
+  typeof o.maxSenderDebit === "bigint" &&
+  o.maxSenderDebit >= o.senderLockAmount &&
+  typeof o.totalFee === "bigint" &&
+  o.totalFee === o.senderLockAmount - o.recipientAmount &&
+  typeof o.timelock === "bigint" &&
+  o.timelock > 0n;
+/**
+ * og validateHtlcPreparedInfraContext (originated half): exact field set, canonical ids, strictly sorted tx hashes,
+ * route and economics shape, opaque envelope.
+ */
 export const preparedOriginOf = (b: Binary): PreparedOriginated | null => {
-  const KEYS = "deliveryMode,description,envelope,hashlock,maxSenderDebit,nextHopEntityId,recipientAmount,revealBeforeHeight,route,senderLockAmount,startedAtMs,targetEntityId,timelock,tokenId,totalFee,txHash";
-  if (b === null || typeof b !== "object" || Array.isArray(b) || b instanceof Map || Object.keys(b).sort().join(",") !== KEYS) return null;
-  const o = b as unknown as PreparedOriginated, id = (v: unknown): boolean => typeof v === "string" && /^0x[0-9a-f]{64}$/.test(v);
-  const route = o.route, inner = Array.isArray(route) ? route.slice(1, -1) : [];
-  if (![o.txHash, o.targetEntityId, o.hashlock, o.nextHopEntityId].every(id) || !Array.isArray(route) || route.length < 2 || route.length > 101 || !route.every(id)) return null;
-  if (route[0] === route[route.length - 1] ? inner.length < 2 || new Set(inner).size !== inner.length || inner.includes(route[0] as string) : new Set(route).size !== route.length) return null;
-  if (o.targetEntityId !== route[route.length - 1] || o.nextHopEntityId !== route[1]) return null;
-  if (!Number.isSafeInteger(o.tokenId) || o.tokenId < 0 || o.tokenId > MAX_TOKEN_ID) return null;
-  if (typeof o.recipientAmount !== "bigint" || o.recipientAmount <= 0n || typeof o.senderLockAmount !== "bigint" || o.senderLockAmount < o.recipientAmount || typeof o.maxSenderDebit !== "bigint" || o.maxSenderDebit < o.senderLockAmount
-    || typeof o.totalFee !== "bigint" || o.totalFee !== o.senderLockAmount - o.recipientAmount || typeof o.timelock !== "bigint" || o.timelock <= 0n) return null;
-  if ((o.deliveryMode !== "instant" && o.deliveryMode !== "async") || !Number.isSafeInteger(o.startedAtMs) || o.startedAtMs <= 0 || !Number.isSafeInteger(o.revealBeforeHeight) || o.revealBeforeHeight <= 0) return null;
-  return typeof o.description !== "string" || utf8(o.description).byteLength > HTLC_NOTE_MAX_BYTES || htlcEnvelopeHash(o.envelope) === null ? null : o;
+  if (b === null || typeof b !== "object" || Array.isArray(b) || b instanceof Map) return null;
+  if (Object.keys(b).toSorted().join(",") !== PREPARED_ORIGIN_KEYS) return null;
+  const o = b as unknown as PreparedOriginated;
+  const sound =
+    [o.txHash, o.targetEntityId, o.hashlock, o.nextHopEntityId].every(isWordId) &&
+    preparedRouteSound(o) &&
+    Number.isSafeInteger(o.tokenId) &&
+    o.tokenId >= 0 &&
+    o.tokenId <= MAX_TOKEN_ID &&
+    preparedAmountsSound(o) &&
+    (o.deliveryMode === "instant" || o.deliveryMode === "async") &&
+    Number.isSafeInteger(o.startedAtMs) &&
+    o.startedAtMs > 0 &&
+    Number.isSafeInteger(o.revealBeforeHeight) &&
+    o.revealBeforeHeight > 0 &&
+    typeof o.description === "string" &&
+    utf8(o.description).byteLength <= HTLC_NOTE_MAX_BYTES &&
+    htlcEnvelopeHash(o.envelope) !== null;
+  return sound ? o : null;
 };
+/** Each committed entry must be sound and strictly after the one before it. */
+const preparedEntriesOf = (bs: readonly Binary[]): Result<readonly PreparedHtlcEntry[], EntityError> =>
+  foldResult(bs, [] as readonly PreparedHtlcEntry[], (entries, b) => {
+    const previous = entries[entries.length - 1];
+    const e = preparedEntryOf(b, previous === undefined ? "" : preparedHtlcKey(previous.binding));
+    return e === null ? htlcReject("HTLC_PREPARED_CONTEXT_INVALID") : ok([...entries, e]);
+  });
 const frameInfraOf = (frame: EntityFrame): Result<HtlcFrameInfra, EntityError> => {
-  const origins = frame.entityContext.htlc.originated.map(preparedOriginOf);
-  if (origins.some((o, i) => o === null || (i > 0 && (origins[i - 1]?.txHash ?? "") >= o.txHash))) return htlcReject("HTLC_PREPARED_CONTEXT_INVALID");
-  const entries: PreparedHtlcEntry[] = [];
-  for (const b of frame.entityContext.htlc.entries) {
-    const e = preparedEntryOf(b, entries.length === 0 ? "" : preparedHtlcKey((entries[entries.length - 1] as PreparedHtlcEntry).binding));
-    if (e === null) return htlcReject("HTLC_PREPARED_CONTEXT_INVALID");
-    entries.push(e);
-  }
-  return ok({ gossipProfiles: frame.entityContext.gossipProfiles, peerAssertions: frame.entityContext.peerAssertions, originated: origins as readonly PreparedOriginated[], entries });
+  const context = frame.entityContext;
+  const origins = context.htlc.originated.map(preparedOriginOf);
+  const sound = origins.filter((o): o is PreparedOriginated => o !== null);
+  const ascending = sound.every((o, i) => i === 0 || (sound[i - 1]?.txHash ?? "") < o.txHash);
+  if (sound.length !== origins.length || !ascending) return htlcReject("HTLC_PREPARED_CONTEXT_INVALID");
+  return map(preparedEntriesOf(context.htlc.entries), (entries) => ({
+    gossipProfiles: context.gossipProfiles,
+    peerAssertions: context.peerAssertions,
+    originated: sound,
+    entries,
+  }));
 };
 // ---- og inbound HTLC: entity/paybook/{materialize-context,prepared-context-validation,lifecycle}.ts, tx/handlers/account/committed-{htlc,frame}-followups.ts ----
 /** og PreparedHtlcInboundBinding: the committed Account facts of one inbound lock. */
@@ -21377,8 +22491,7 @@ const materializeContinuation = (d: Draft, ctx: FoldContext, queue: SettleEnqueu
     return chain(settleExecute(d, { counterpartyEntityId: peer as EntityId, ...(c.actions.length > 0 ? { disableC2RShortcut: true } : {}) }, ctx.verify, queue, ctx.jReplicas), (x) => {
       const done = (y: Draft): Draft => ({ ...y, state: withContinuations(y.state, mapDelete(continuationsOf(y.state), peer)) });
       if (follow.length === 0) return ok(done(x));
-      return map(foldNested(x.state, x.accountReplicas, follow, ctx, "collective"), (y) => done({ ...y, outputs: [...x.outputs, ...y.outputs], events: [...(x.events ?? []), ...(y.events ?? [])], runtimeEvents: [...(x.runtimeEvents ?? []), ...(y.runtimeEvents ?? [])],
-        touched: [...(x.touched ?? []), ...(y.touched ?? [])], ...frameEffects(x, y), swaps: joinSwapEvents(x.swaps, y.swaps) }));
+      return map(foldNested(x.state, x.accountReplicas, follow, ctx, "collective"), (y) => done(appendDraft(x, y, y.touched ?? [])));
     });
   });
 };
@@ -22251,7 +23364,7 @@ export const foldTxs = (state: EntityState, replicas: Replicas, txs: readonly En
   // og getBoardHandoverFrameConfig over the normalized pre-frame state: the authority a [j_event, boardHandover] frame is certified under
   return chain(normalizeGovernance(state), (normalized) => chain(handoverFrameConfig(normalized, txs), (handover) => chain(selfAuthorityTransitionFrame(normalized, txs), (authorityOnly) => chain(foldResult<Acc, EntityTx, EntityError>(txs, { draft: { state: normalized, accountReplicas: replicas, outputs: [], events: [], touched: [] }, included: [], evicted: [] }, (acc, tx) => {
     const r = foldTx(acc.draft.state, acc.draft.accountReplicas, tx, handover === null ? ctx : { ...ctx, boardHandover: handover });
-    if (r.ok) return ok({ ...acc, included: [...acc.included, tx], draft: { ...r.value, outputs: [...acc.draft.outputs, ...r.value.outputs], events: [...(acc.draft.events ?? []), ...(r.value.events ?? [])], runtimeEvents: [...(acc.draft.runtimeEvents ?? []), ...(r.value.runtimeEvents ?? [])], touched: [...(acc.draft.touched ?? []), ...(r.value.touched ?? [peerOf(tx, state.id)])], ...frameEffects(acc.draft, r.value), swaps: joinSwapEvents(acc.draft.swaps, r.value.swaps) } });
+    if (r.ok) return ok({ ...acc, included: [...acc.included, tx], draft: appendDraft(acc.draft, r.value, r.value.touched ?? [peerOf(tx, state.id)]) });
     return fatalTx(tx, r.error) ? r : ok({ ...acc, evicted: [...acc.evicted, tx], first: acc.first ?? r.error });
   }), ({ first, ...folded }) => {
     if (folded.included.length === 0 && first !== undefined) return err(first);
