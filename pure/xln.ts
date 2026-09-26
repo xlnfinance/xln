@@ -39989,485 +39989,1400 @@ export const runtimeOutputRows = (
 export type NetworkOutput = { readonly [k: string]: Binary };
 /** og LIMITS.MAX_PENDING_NETWORK_OUTPUTS. */
 export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
-type NetworkTx = { readonly type: string; readonly data: { readonly [k: string]: Binary } };
-const netText = (v: Binary | undefined): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
-const netTxs = (o: NetworkOutput): readonly NetworkTx[] => (Array.isArray(o["entityTxs"]) ? (o["entityTxs"] as unknown as readonly NetworkTx[]) : []);
-const netMap = (v: Binary | undefined): ReadonlyMap<Binary, Binary> | undefined => (v instanceof Map ? (v as ReadonlyMap<Binary, Binary>) : undefined);
+type WireRecord = { readonly [k: string]: Binary };
+type NetworkTx = { readonly type: string; readonly data: WireRecord };
+/** A wire value as og's String(...) spells it; absence is the empty string. */
+const netText = (v: Binary | undefined): string => {
+  switch (true) {
+    case typeof v === "string":
+      return v;
+    case v === undefined || v === null:
+      return "";
+    default:
+      return String(v);
+  }
+};
+const txList = (v: Binary | undefined): readonly NetworkTx[] =>
+  Array.isArray(v) ? (v as unknown as readonly NetworkTx[]) : [];
+const netTxs = (o: NetworkOutput): readonly NetworkTx[] => txList(o["entityTxs"]);
+const netMap = (v: Binary | undefined): ReadonlyMap<Binary, Binary> | undefined =>
+  v instanceof Map ? (v as ReadonlyMap<Binary, Binary>) : undefined;
+const RUNTIME_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 /** og netRuntimeId: a runtime id is a lowercased address; anything else is no id. */
-const netRuntimeId = (v: Binary | undefined): string => { const s = netText(v).trim(); return /^0x[0-9a-fA-F]{40}$/.test(s) ? s.toLowerCase() : ""; };
+const netRuntimeId = (v: Binary | undefined): string => {
+  const s = netText(v).trim();
+  return RUNTIME_ADDRESS.test(s) ? s.toLowerCase() : "";
+};
 const routeText = (v: Binary | undefined): string => netText(v).trim().toLowerCase();
 /** og getEffectiveEntityInputTxs: a runtimeOutput's nested txs stand in for it. */
-const netEffective = (o: NetworkOutput): readonly NetworkTx[] => netTxs(o).flatMap((tx) => (tx.type === "runtimeOutput" && Array.isArray(tx.data["entityTxs"]) ? (tx.data["entityTxs"] as unknown as readonly NetworkTx[]) : [tx]));
-type NetProposal = { readonly from: string; readonly to: string; readonly height: Binary; readonly stateHash: string; readonly frameHanko: boolean; readonly disputeHanko: boolean; readonly ack: boolean };
+const standInTxs = (tx: NetworkTx): readonly NetworkTx[] =>
+  tx.type === "runtimeOutput" && Array.isArray(tx.data["entityTxs"]) ? txList(tx.data["entityTxs"]) : [tx];
+const netEffective = (o: NetworkOutput): readonly NetworkTx[] => netTxs(o).flatMap(standInTxs);
+
+
+// Account proposals: the one kind of output identified by what it proposes rather than by its bytes.
+
+type NetProposal = {
+  readonly from: string;
+  readonly to: string;
+  readonly height: Binary;
+  readonly stateHash: string;
+  readonly frameHanko: boolean;
+  readonly disputeHanko: boolean;
+  readonly ack: boolean;
+};
 /** og accountInputProposal / accountInputAck over an `accountInput` wire tx. */
 const netProposal = (tx: NetworkTx): NetProposal | undefined => {
-  const d = tx.data, proposal = d["proposal"] as { readonly [k: string]: Binary } | undefined;
-  if (tx.type !== "accountInput" || d["kind"] !== "ack_frame" || proposal === undefined || proposal === null) return undefined;
-  const frame = proposal["frame"] as { readonly [k: string]: Binary };
-  return { from: netText(d["fromEntityId"]), to: netText(d["toEntityId"]), height: frame["height"] ?? null, stateHash: netText(frame["stateHash"]), frameHanko: Boolean(proposal["frameHanko"]), disputeHanko: Boolean(proposal["disputeHanko"]), ack: Boolean(d["ack"]) };
+  const d = tx.data;
+  const proposal = d["proposal"] as WireRecord | undefined;
+  if (tx.type !== "accountInput" || d["kind"] !== "ack_frame" || proposal === undefined || proposal === null) {
+    return undefined;
+  }
+  const frame = proposal["frame"] as WireRecord;
+  return {
+    from: netText(d["fromEntityId"]),
+    to: netText(d["toEntityId"]),
+    height: frame["height"] ?? null,
+    stateHash: netText(frame["stateHash"]),
+    frameHanko: Boolean(proposal["frameHanko"]),
+    disputeHanko: Boolean(proposal["disputeHanko"]),
+    ack: Boolean(d["ack"]),
+  };
 };
+const carriedProposals = (o: NetworkOutput): readonly NetProposal[] =>
+  netEffective(o).flatMap((tx) => {
+    const p = netProposal(tx);
+    return p === undefined ? [] : [p];
+  });
+/** An output whose every effective tx is an Account proposal; anything else is no proposal output. */
 const netProposals = (o: NetworkOutput): readonly NetProposal[] | null => {
-  const txs = netEffective(o);
-  if (txs.length === 0) return null;
-  const proposals = txs.flatMap((tx) => { const p = netProposal(tx); return p === undefined ? [] : [p]; });
-  return proposals.length === txs.length ? proposals : null;
+  const proposals = carriedProposals(o);
+  return proposals.length > 0 && proposals.length === netEffective(o).length ? proposals : null;
 };
+const proposalLegKey = (p: NetProposal): string =>
+  `${p.from.toLowerCase()}:${p.to.toLowerCase()}:${netText(p.height)}:${p.stateHash.toLowerCase()}`;
 /** og accountProposalOutputIdentity. */
 const proposalIdentity = (o: NetworkOutput): string | null => {
   const proposals = netProposals(o);
   if (proposals === null) return null;
-  return `ap|${netRuntimeId(o["runtimeId"])}|${routeText(o["entityId"])}|${routeText(o["signerId"])}|${netRuntimeId(o["from"])}|`
-    + proposals.map((p) => `${p.from.toLowerCase()}:${p.to.toLowerCase()}:${netText(p.height)}:${p.stateHash.toLowerCase()}`).join(",");
+  const route = [
+    netRuntimeId(o["runtimeId"]),
+    routeText(o["entityId"]),
+    routeText(o["signerId"]),
+    netRuntimeId(o["from"]),
+  ];
+  return `ap|${route.join("|")}|${proposals.map(proposalLegKey).join(",")}`;
 };
-const netDigest = (v: Binary | undefined): Result<string, RuntimeError> => v === undefined ? ok("") : mapErr(map(encodeBinary(v), integrity), (): RuntimeError => ({ _tag: "runtime_frame", code: "ROUTE_OUTPUT_ENCODING_INVALID" }));
+/** The Hanko evidence an output's proposals carry. */
+const proposalRank = (o: NetworkOutput): number =>
+  carriedProposals(o).reduce((rank, p) => rank + Number(p.frameHanko) + Number(p.disputeHanko), 0);
+
+
+// Route keys and lanes: two outputs on one key merge into one delivery.
+
+const ROUTE_ENCODING_INVALID: RuntimeError = { _tag: "runtime_frame", code: "ROUTE_OUTPUT_ENCODING_INVALID" };
+const netDigest = (v: Binary | undefined): Result<string, RuntimeError> =>
+  v === undefined ? ok("") : mapErr(map(encodeBinary(v), integrity), () => ROUTE_ENCODING_INVALID);
+const compareConsensus = (a: Binary, b: Binary): Result<number, RuntimeError> => {
+  const x = encodeConsensus(a);
+  const y = encodeConsensus(b);
+  return x.ok && y.ok ? ok(compareBytes(x.value, y.value)) : frameErr("ROUTE_OUTPUT_ENCODING_INVALID");
+};
+/** A present part spelled by `spell`; an absent one is the empty field. */
+const spelledIf = <T>(part: T | undefined, spell: (t: T) => string): string => (part ? spell(part) : "");
+const sortedKeys = (v: Binary | undefined): string =>
+  [...(netMap(v)?.keys() ?? [])].map(netText).toSorted().join(",");
+/** A vote without its signature and voter: what two votes of one voter must agree on. */
+const voteBodyOf = (vote: WireRecord | undefined): Binary | undefined =>
+  vote === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(vote).filter(([k]) => k !== "signature" && k !== "voterId"));
 /**
- * og buildRouteOutputKey: an Account proposal by its identity, anything else by route, source frame and exact payload. og's tx fingerprints and
- * leader-vote body hash are replaced by equality-equivalent content digests (the key is compared, never stored).
+ * og buildRouteOutputKey: an Account proposal by its identity, anything else by route, source frame and exact payload.
+ * og's tx fingerprints and leader-vote body hash are replaced by equality-equivalent content digests (the key is
+ * compared, never stored).
  */
 const routeKeyOf = (o: NetworkOutput): Result<string, RuntimeError> => {
   const identity = proposalIdentity(o);
   if (identity !== null) return ok(identity);
-  const frame = o["sourceRuntimeFrame"] as { readonly height: Binary; readonly timestamp: Binary } | undefined, pf = o["proposedFrame"] as { readonly [k: string]: Binary } | undefined;
-  const pc = o["hashPrecommitFrame"] as { readonly [k: string]: Binary } | undefined, vote = o["leaderTimeoutVote"] as { readonly [k: string]: Binary } | undefined;
-  const voteBody = vote === undefined ? undefined : Object.fromEntries(Object.entries(vote).filter(([k]) => k !== "signature" && k !== "voterId")) as Binary;
-  return chain(netDigest(voteBody), (voteHash) => chain(traverse(netTxs(o), (tx) => netDigest(tx as unknown as Binary)), (fingerprints) => ok(
-    `ro|${netText(o["runtimeId"])}|${frame ? `${netText(frame.height)}:${netText(frame.timestamp)}` : ""}|${routeText(o["entityId"])}|${routeText(o["signerId"])}|${netText(o["from"])}`
-    + `|${pf ? `${netText(pf["height"])}:${netText(pf["hash"])}` : ""}`
-    + `|${pc ? `${netText(pc["height"])}:${netText(pc["frameHash"])}:${[...(netMap(o["hashPrecommits"])?.keys() ?? [])].map(netText).sort().join(",")}` : ""}`
-    + `|${vote ? `${routeText(vote["voterId"])}:${voteHash}` : ""}`
-    + `|${[...(netMap(o["jPrefixAttestations"])?.keys() ?? [])].map(netText).sort().join(",")}`
-    + `|${fingerprints.join("\u0001")}`)));
+  const source = o["sourceRuntimeFrame"] as { readonly height: Binary; readonly timestamp: Binary } | undefined;
+  const proposed = o["proposedFrame"] as WireRecord | undefined;
+  const precommit = o["hashPrecommitFrame"] as WireRecord | undefined;
+  const vote = o["leaderTimeoutVote"] as WireRecord | undefined;
+  const digests = all({
+    voteHash: netDigest(voteBodyOf(vote)),
+    fingerprints: traverse(netTxs(o), (tx) => netDigest(tx as unknown as Binary)),
+  });
+  return map(digests, ({ voteHash, fingerprints }) =>
+    [
+      "ro",
+      netText(o["runtimeId"]),
+      spelledIf(source, (f) => `${netText(f.height)}:${netText(f.timestamp)}`),
+      routeText(o["entityId"]),
+      routeText(o["signerId"]),
+      netText(o["from"]),
+      spelledIf(proposed, (f) => `${netText(f["height"])}:${netText(f["hash"])}`),
+      spelledIf(
+        precommit,
+        (f) => `${netText(f["height"])}:${netText(f["frameHash"])}:${sortedKeys(o["hashPrecommits"])}`,
+      ),
+      spelledIf(vote, (v) => `${routeText(v["voterId"])}:${voteHash}`),
+      sortedKeys(o["jPrefixAttestations"]),
+      fingerprints.join("\u0001"),
+    ].join("|"),
+  );
 };
-/** og splitRoutedOutputByDeliveryLane: one output per payload kind (frame, precommit bundle, vote, each J-prefix attestation, the txs together). */
+/**
+ * og splitRoutedOutputByDeliveryLane: one output per payload kind (frame, precommit bundle, vote, each J-prefix
+ * attestation, the txs together).
+ */
 const splitLanes = (o: NetworkOutput): Result<readonly NetworkOutput[], RuntimeError> => {
-  const { entityTxs, proposedFrame, hashPrecommits, hashPrecommitFrame, jPrefixAttestations, leaderTimeoutVote, ...route } = o;
-  const split: NetworkOutput[] = [], precommits = netMap(hashPrecommits), jp = netMap(jPrefixAttestations), txs = Array.isArray(entityTxs) ? entityTxs : [];
-  if (proposedFrame !== undefined) split.push({ ...route, proposedFrame });
-  if (precommits !== undefined && precommits.size > 0) {
-    if (hashPrecommitFrame === undefined) return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING");
-    split.push({ ...route, hashPrecommitFrame, hashPrecommits: precommits });
-  } else if (hashPrecommitFrame !== undefined) return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_WITHOUT_SIGNATURES");
-  if (leaderTimeoutVote !== undefined) split.push({ ...route, leaderTimeoutVote });
-  for (const [signer, attestation] of jp ?? new Map()) split.push({ ...route, jPrefixAttestations: new Map([[signer, attestation]]) });
-  if (txs.length > 0 || split.length === 0) split.push({ ...route, entityTxs: txs });
-  return ok(split);
+  const {
+    entityTxs,
+    proposedFrame,
+    hashPrecommits,
+    hashPrecommitFrame,
+    jPrefixAttestations,
+    leaderTimeoutVote,
+    ...route
+  } = o;
+  const precommits = netMap(hashPrecommits);
+  const bundled = precommits !== undefined && precommits.size > 0;
+  if (bundled && hashPrecommitFrame === undefined) return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING");
+  if (!bundled && hashPrecommitFrame !== undefined)
+    return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_WITHOUT_SIGNATURES");
+  const attestations = [...(netMap(jPrefixAttestations) ?? [])];
+  const lanes: readonly NetworkOutput[] = [
+    ...(proposedFrame === undefined ? [] : [{ ...route, proposedFrame }]),
+    ...(bundled && hashPrecommitFrame !== undefined
+      ? [{ ...route, hashPrecommitFrame, hashPrecommits: precommits }]
+      : []),
+    ...(leaderTimeoutVote === undefined ? [] : [{ ...route, leaderTimeoutVote }]),
+    ...attestations.map((signed) => ({ ...route, jPrefixAttestations: new Map([signed]) })),
+  ];
+  const txs = Array.isArray(entityTxs) ? entityTxs : [];
+  return ok(txs.length > 0 || lanes.length === 0 ? [...lanes, { ...route, entityTxs: txs }] : lanes);
 };
-const compareConsensus = (a: Binary, b: Binary): Result<number, RuntimeError> => {
-  const x = encodeConsensus(a), y = encodeConsensus(b);
-  return x.ok && y.ok ? ok(compareBytes(x.value, y.value)) : frameErr("ROUTE_OUTPUT_ENCODING_INVALID");
+
+
+// Merging: one slot per route key, the first output's.
+
+type SourceStamp = SourceRuntimeFrame | undefined;
+const sourceFrameOf = (o: NetworkOutput): SourceStamp => o["sourceRuntimeFrame"] as SourceStamp;
+/** Whether `incoming` was stamped by a later source frame than `existing`; an unstamped incoming never is. */
+const isNewerSource = (incoming: SourceStamp, existing: SourceStamp): boolean => {
+  if (incoming === undefined) return false;
+  if (existing === undefined) return true;
+  return (
+    incoming.height > existing.height ||
+    (incoming.height === existing.height && incoming.timestamp > existing.timestamp)
+  );
 };
-const proposalRank = (o: NetworkOutput): number => netEffective(o).reduce((rank, tx) => { const p = netProposal(tx); return p === undefined ? rank : rank + Number(p.frameHanko) + Number(p.disputeHanko); }, 0);
-const isCommitNotice = (o: NetworkOutput): boolean => { const f = o["proposedFrame"] as { readonly [k: string]: Binary } | undefined; return Array.isArray(f?.["hankos"]) && (f["hankos"] as readonly Binary[]).length === 1; };
-/** og mergeAccountProposalOutput: more Hanko evidence, else the newer source frame, else the canonically smaller envelope. */
+/**
+ * og mergeAccountProposalOutput: more Hanko evidence, else the newer source frame, else the canonically smaller
+ * envelope.
+ */
 const mergeProposal = (existing: NetworkOutput, incoming: NetworkOutput): Result<NetworkOutput, RuntimeError> => {
   const delta = proposalRank(incoming) - proposalRank(existing);
   if (delta !== 0) return ok(delta > 0 ? incoming : existing);
-  const ef = existing["sourceRuntimeFrame"] as SourceRuntimeFrame | undefined, inf = incoming["sourceRuntimeFrame"] as SourceRuntimeFrame | undefined;
-  if (inf !== undefined && (ef === undefined || inf.height > ef.height || (inf.height === ef.height && inf.timestamp > ef.timestamp))) return ok(incoming);
+  if (isNewerSource(sourceFrameOf(incoming), sourceFrameOf(existing))) return ok(incoming);
   return map(compareConsensus(existing, incoming), (c) => (c <= 0 ? existing : incoming));
 };
+type PrecommitBundles = ReadonlyMap<string, readonly Binary[]>;
+const NO_BUNDLES: PrecommitBundles = new Map();
 /** og normalizePrecommitBundles. */
-const precommitBundles = (m: ReadonlyMap<Binary, Binary>): Result<Map<string, readonly Binary[]>, RuntimeError> => {
-  const out = new Map<string, readonly Binary[]>();
-  for (const [raw, sigs] of m) {
+const precommitBundles = (m: ReadonlyMap<Binary, Binary>): Result<PrecommitBundles, RuntimeError> =>
+  foldResult(m, NO_BUNDLES, (bundles, [raw, sigs]) => {
     const signer = routeText(raw);
-    if (out.has(signer)) return frameErr(`ROUTE_PRECOMMIT_DUPLICATE_SIGNER:${netText(raw)}`);
-    out.set(signer, Array.isArray(sigs) ? sigs : []);
-  }
-  return ok(out);
-};
-/** og mergeOrdinaryOutput: vote equivocation refuses; txs append; precommit bundles union (equivocation refuses); a commit notice replaces a bare frame. */
-const mergeOrdinary = (existing: NetworkOutput, incoming: NetworkOutput): Result<NetworkOutput, RuntimeError> => {
-  const ev = existing["leaderTimeoutVote"], iv = incoming["leaderTimeoutVote"];
-  const voteConflict: Result<boolean, RuntimeError> = ev === undefined && iv === undefined ? ok(false) : ev === undefined || iv === undefined ? ok(true) : map(compareConsensus(iv, ev), (c) => c !== 0);
-  return chain(voteConflict, (conflict) => {
-    if (conflict) return frameErr(`ROUTE_LEADER_VOTE_EQUIVOCATION:${netText((iv as { readonly [k: string]: Binary } | undefined)?.["voterId"]) || "missing"}`);
-    let next: { [k: string]: Binary } = { ...existing };
-    const itxs = netTxs(incoming);
-    if (itxs.length > 0) next = { ...next, entityTxs: [...netTxs(existing), ...itxs] as unknown as Binary };
-    const ipc = netMap(incoming["hashPrecommits"]);
-    const precommitStep: Result<{ [k: string]: Binary }, RuntimeError> = ipc === undefined || ipc.size === 0 ? ok(next) : chain(
-      existing["hashPrecommitFrame"] !== undefined ? map(compareConsensus(existing["hashPrecommitFrame"], incoming["hashPrecommitFrame"] ?? null), (c) => c !== 0) : ok(false), (clash) => {
-        if (clash) return frameErr("ROUTE_PRECOMMIT_FRAME_CONFLICT");
-        if (incoming["hashPrecommitFrame"] === undefined) return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING");
-        return chain(precommitBundles(netMap(existing["hashPrecommits"]) ?? new Map()), (merged) => chain(precommitBundles(ipc), (adds) => {
-          for (const [signer, sigs] of adds) {
-            const prev = merged.get(signer);
-            if (prev === undefined) merged.set(signer, [...sigs]);
-            else if (prev.length !== sigs.length || prev.some((s, i) => s !== sigs[i])) return frameErr(`ROUTE_PRECOMMIT_EQUIVOCATION:${signer}`);
-          }
-          return ok({ ...next, hashPrecommitFrame: incoming["hashPrecommitFrame"] as Binary, hashPrecommits: new Map([...merged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) as unknown as Binary });
-        }));
-      });
-    return map(precommitStep, (n) => (incoming["proposedFrame"] !== undefined && (n["proposedFrame"] === undefined || (isCommitNotice(incoming) && !isCommitNotice(n))) ? { ...n, proposedFrame: incoming["proposedFrame"] } : n));
+    return bundles.has(signer)
+      ? frameErr(`ROUTE_PRECOMMIT_DUPLICATE_SIGNER:${netText(raw)}`)
+      : ok(mapSet(bundles, signer, Array.isArray(sigs) ? sigs : []));
+  });
+const sameSignatures = (a: readonly Binary[], b: readonly Binary[]): boolean =>
+  a.length === b.length && a.every((s, i) => s === b[i]);
+/** A signer new to the bundles joins them; a signer already there must repeat its signatures exactly. */
+const unionBundles = (held: PrecommitBundles, added: PrecommitBundles): Result<PrecommitBundles, RuntimeError> =>
+  foldResult(added, held, (merged, [signer, sigs]) => {
+    const prev = merged.get(signer);
+    if (prev === undefined) return ok(mapSet(merged, signer, [...sigs]));
+    return sameSignatures(prev, sigs) ? ok(merged) : frameErr(`ROUTE_PRECOMMIT_EQUIVOCATION:${signer}`);
+  });
+/** Two outputs' precommit bundles merge only over one frame reference. */
+const mergePrecommits = (
+  next: NetworkOutput,
+  existing: NetworkOutput,
+  incoming: NetworkOutput,
+): Result<NetworkOutput, RuntimeError> => {
+  const adds = netMap(incoming["hashPrecommits"]);
+  if (adds === undefined || adds.size === 0) return ok(next);
+  const heldFrame = existing["hashPrecommitFrame"];
+  const clash = heldFrame === undefined
+    ? ok(false)
+    : map(compareConsensus(heldFrame, incoming["hashPrecommitFrame"] ?? null), (c) => c !== 0);
+  return chain(clash, (clashes) => {
+    const frame = incoming["hashPrecommitFrame"];
+    if (clashes) return frameErr("ROUTE_PRECOMMIT_FRAME_CONFLICT");
+    if (frame === undefined) return frameErr("ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING");
+    const bundles = all({
+      held: precommitBundles(netMap(existing["hashPrecommits"]) ?? new Map()),
+      added: precommitBundles(adds),
+    });
+    return map(chain(bundles, ({ held, added }) => unionBundles(held, added)), (merged) => ({
+      ...next,
+      hashPrecommitFrame: frame,
+      hashPrecommits: new Map(sortWith(merged, ([a], [b]) => asc(a, b))),
+    }));
   });
 };
+/** A proposed frame carrying exactly one Hanko is a commit notice. */
+const isCommitNotice = (o: NetworkOutput): boolean => {
+  const hankos = (o["proposedFrame"] as WireRecord | undefined)?.["hankos"];
+  return Array.isArray(hankos) && hankos.length === 1;
+};
+/** A proposed frame fills an empty slot, and a commit notice replaces a bare frame. */
+const withProposedFrame = (merged: NetworkOutput, incoming: NetworkOutput): NetworkOutput => {
+  const frame = incoming["proposedFrame"];
+  if (frame === undefined) return merged;
+  const replaces = merged["proposedFrame"] === undefined || (isCommitNotice(incoming) && !isCommitNotice(merged));
+  return replaces ? { ...merged, proposedFrame: frame } : merged;
+};
+/** Two leader votes on one route conflict unless both are absent or canonically equal. */
+const votesConflict = (held: Binary | undefined, incoming: Binary | undefined): Result<boolean, RuntimeError> => {
+  if (held === undefined && incoming === undefined) return ok(false);
+  if (held === undefined || incoming === undefined) return ok(true);
+  return map(compareConsensus(incoming, held), (c) => c !== 0);
+};
+const voterOf = (vote: Binary | undefined): string =>
+  netText((vote as WireRecord | undefined)?.["voterId"]) || "missing";
+/**
+ * og mergeOrdinaryOutput: vote equivocation refuses; txs append; precommit bundles union (equivocation refuses); a
+ * commit notice replaces a bare frame.
+ */
+const mergeOrdinary = (existing: NetworkOutput, incoming: NetworkOutput): Result<NetworkOutput, RuntimeError> => {
+  const vote = incoming["leaderTimeoutVote"];
+  return chain(votesConflict(existing["leaderTimeoutVote"], vote), (conflict) => {
+    if (conflict) return frameErr(`ROUTE_LEADER_VOTE_EQUIVOCATION:${voterOf(vote)}`);
+    const added = netTxs(incoming);
+    const next = added.length > 0
+      ? { ...existing, entityTxs: [...netTxs(existing), ...added] as unknown as Binary }
+      : existing;
+    return map(mergePrecommits(next, existing, incoming), (merged) => withProposedFrame(merged, incoming));
+  });
+};
+/** Same-identity Account proposals merge by evidence; anything else by lane union. */
+const mergeSlot = (existing: NetworkOutput, incoming: NetworkOutput): Result<NetworkOutput, RuntimeError> => {
+  const identity = proposalIdentity(existing);
+  return identity !== null && identity === proposalIdentity(incoming)
+    ? mergeProposal(existing, incoming)
+    : mergeOrdinary(existing, incoming);
+};
+type Slots = ReadonlyMap<string, NetworkOutput>;
+const NO_SLOTS: Slots = new Map();
+const intoSlot = (slots: Slots, o: NetworkOutput): Result<Slots, RuntimeError> =>
+  chain(routeKeyOf(o), (key) => {
+    const existing = slots.get(key);
+    return existing === undefined
+      ? ok(mapSet(slots, key, o))
+      : map(mergeSlot(existing, o), (merged) => mapSet(slots, key, merged));
+  });
 /** og buildPendingNetworkOutputs / dedupeEntityOutputs: split lanes, merge by route key into the first slot. */
 const dedupeNetwork = (outputs: readonly NetworkOutput[]): Result<readonly NetworkOutput[], RuntimeError> =>
-  chain(traverse(outputs, splitLanes), (lanes) => {
-    const slots = new Map<string, NetworkOutput>();
-    for (const o of lanes.flat()) {
-      const key = routeKeyOf(o);
-      if (!key.ok) return key;
-      const existing = slots.get(key.value);
-      if (existing === undefined) { slots.set(key.value, o); continue; }
-      const merged = proposalIdentity(existing) !== null && proposalIdentity(existing) === proposalIdentity(o) ? mergeProposal(existing, o) : mergeOrdinary(existing, o);
-      if (!merged.ok) return merged;
-      slots.set(key.value, merged.value);
-    }
-    return ok([...slots.values()]);
-  });
-const pendingNetwork = (outputs: readonly NetworkOutput[]): Result<readonly NetworkOutput[], RuntimeError> => chain(dedupeNetwork(outputs), (pending) =>
-  pending.length > MAX_PENDING_NETWORK_OUTPUTS ? frameErr(`NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`) : ok(pending));
+  chain(traverse(outputs, splitLanes), (lanes) =>
+    map(foldResult(lanes.flat(), NO_SLOTS, intoSlot), (slots) => [...slots.values()]),
+  );
+const pendingNetwork = (outputs: readonly NetworkOutput[]): Result<readonly NetworkOutput[], RuntimeError> =>
+  chain(dedupeNetwork(outputs), (pending) =>
+    pending.length > MAX_PENDING_NETWORK_OUTPUTS
+      ? frameErr(`NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`)
+      : ok(pending));
+
+
+// Settlement: a proposal is owed until its sender's Account stops holding it pending.
+
+const senderAccount = (rt: Runtime, p: NetProposal) =>
+  [...rt.entities.values()]
+    .filter((r) => lower(r.state.id) === lower(p.from))
+    .map((r) => [...r.accountReplicas].find(([id]) => lower(id) === lower(p.to))?.[1])
+    .find((a) => a !== undefined);
 /**
- * og accountProposalSettledBySender / pruneSettledOutputs: a proposal-only output is settled once the sender's Account no longer holds that frame
- * pending (committed or rolled back); an output that also carries an ACK is still owed.
+ * Whether the sender's Account still holds this proposal's frame pending; a sender Account this Runtime lacks refuses.
  */
-const pruneSettled = (rt: Runtime, outputs: readonly NetworkOutput[]): Result<readonly NetworkOutput[], RuntimeError> => {
-  const kept: NetworkOutput[] = [];
-  for (const o of outputs) {
-    const proposals = netEffective(o).flatMap((tx) => { const p = netProposal(tx); return p === undefined ? [] : [p]; });
-    if (proposals.length === 0 || proposals.some((p) => p.ack)) { kept.push(o); continue; }
-    let settled = true;
-    for (const p of proposals) {
-      const account = [...rt.entities.values()].filter((r) => lower(r.state.id) === lower(p.from)).map((r) => [...r.accountReplicas].find(([id]) => lower(id) === lower(p.to))?.[1]).find((a) => a !== undefined);
-      if (account === undefined) return frameErr(`ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING:${stableJson({ runtimeId: rt.runtimeId ?? null, fromEntityId: p.from, toEntityId: p.to, proposalHeight: p.height, proposalStateHash: p.stateHash })}`);
-      const pending = account._tag === "proposed" ? account.candidate.frame : undefined;
-      // og `every`: the first proposal still pending keeps the output, and later legs are not inspected
-      if (pending !== undefined && netText(p.height) === String(pending.height) && pending.stateHash.toLowerCase() === p.stateHash.toLowerCase()) { settled = false; break; }
-    }
-    if (!settled) kept.push(o);
+const stillPending = (rt: Runtime, p: NetProposal): Result<boolean, RuntimeError> => {
+  const account = senderAccount(rt, p);
+  if (account === undefined) {
+    const proposal = {
+      runtimeId: rt.runtimeId ?? null,
+      fromEntityId: p.from,
+      toEntityId: p.to,
+      proposalHeight: p.height,
+      proposalStateHash: p.stateHash,
+    };
+    return frameErr(`ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING:${stableJson(proposal)}`);
   }
-  return ok(kept);
+  const pending = account._tag === "proposed" ? account.candidate.frame : undefined;
+  return ok(
+    pending !== undefined &&
+    netText(p.height) === String(pending.height) &&
+    pending.stateHash.toLowerCase() === p.stateHash.toLowerCase(),
+  );
 };
-const isTriggerOnly = (o: NetworkOutput): boolean => netTxs(o).length === 0 && o["proposedFrame"] === undefined && o["leaderTimeoutVote"] === undefined && (netMap(o["jPrefixAttestations"])?.size ?? 0) === 0 && (netMap(o["hashPrecommits"])?.size ?? 0) === 0;
+/** An output is owed while it carries no proposal, carries an ACK, or holds a proposal still pending. */
+const stillOwed = (rt: Runtime, o: NetworkOutput): Result<boolean, RuntimeError> => {
+  const proposals = carriedProposals(o);
+  if (proposals.length === 0 || proposals.some((p) => p.ack)) return ok(true);
+  // og `every` settled: the first proposal still pending keeps the output, and later legs are not inspected
+  return someResult(proposals, (p) => stillPending(rt, p));
+};
+/**
+ * og accountProposalSettledBySender / pruneSettledOutputs: a proposal-only output is settled once the sender's Account
+ * no longer holds that frame pending (committed or rolled back); an output that also carries an ACK is still owed.
+ */
+const pruneSettled = (rt: Runtime, outputs: readonly NetworkOutput[]): Result<readonly NetworkOutput[], RuntimeError> =>
+  map(
+    traverse(outputs, (o) => map(stillOwed(rt, o), (owed) => [o, owed] as const)),
+    (judged) => judged.filter(([, owed]) => owed).map(([o]) => o),
+  );
+
+
+// Planning: each output is this Runtime's own continuation or a delivery to a bound remote Runtime.
+
+/** An output with nothing to deliver but its route. */
+const isTriggerOnly = (o: NetworkOutput): boolean =>
+  netTxs(o).length === 0 &&
+  o["proposedFrame"] === undefined &&
+  o["leaderTimeoutVote"] === undefined &&
+  (netMap(o["jPrefixAttestations"])?.size ?? 0) === 0 &&
+  (netMap(o["hashPrecommits"])?.size ?? 0) === 0;
 const txTypesOf = (o: NetworkOutput): string => netTxs(o).map((tx) => tx.type).join(",");
-/** og extensions/cross-j/boundary.ts CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES: raw cross-j Entity effects never leave their Runtime. */
-const CROSS_J_INTRA_RUNTIME_TXS = new Set(["prepareCrossJurisdictionSwap", "materializeCrossJurisdictionSwap", "registerCrossJurisdictionSwap", "crossJurisdictionFillNotice", "requestCrossJurisdictionClear", "materializeCrossJurisdictionClear",
-  "crossPullClose", "crossJurisdictionSalvage", "crossJurisdictionForceSiblingDispute", "orderbookSweepCrossJurisdiction", "admitCrossJurisdictionBookOrder", "removeCrossJurisdictionBookOrder", "crossJurisdictionBookOrderRemoved"]);
+/**
+ * og extensions/cross-j/boundary.ts CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES: raw cross-j Entity effects never leave their
+ * Runtime.
+ */
+const CROSS_J_INTRA_RUNTIME_TXS = new Set([
+  "prepareCrossJurisdictionSwap",
+  "materializeCrossJurisdictionSwap",
+  "registerCrossJurisdictionSwap",
+  "crossJurisdictionFillNotice",
+  "requestCrossJurisdictionClear",
+  "materializeCrossJurisdictionClear",
+  "crossPullClose",
+  "crossJurisdictionSalvage",
+  "crossJurisdictionForceSiblingDispute",
+  "orderbookSweepCrossJurisdiction",
+  "admitCrossJurisdictionBookOrder",
+  "removeCrossJurisdictionBookOrder",
+  "crossJurisdictionBookOrderRemoved",
+]);
 type NetworkPlan = { readonly local: readonly NetworkOutput[]; readonly remote: readonly NetworkOutput[] };
+type PlannedOutput = { readonly lane: keyof NetworkPlan; readonly output: NetworkOutput };
+const planned = (lane: keyof NetworkPlan) => (output: NetworkOutput): PlannedOutput => ({ lane, output });
+const entityOf = (o: NetworkOutput): string => netText(o["entityId"]);
+const resolvedAs = (signer: string, o: NetworkOutput): string => `resolved=${signer} txTypes=${txTypesOf(o)}`;
+/** A trigger for a local Entity retargets to its sole local signer; anything else names the wrong signer. */
+const retargetLocal = (o: NetworkOutput, sole: string): Result<PlannedOutput, RuntimeError> => {
+  if (isTriggerOnly(o)) return ok(planned("local")({ ...o, signerId: sole }));
+  const named = `entity=${entityOf(o)} signer=${netText(o["signerId"])}`;
+  const payload = netTxs(o).length > 0 ? `txTypes=${txTypesOf(o)}` : `resolved=${sole} consensusOnly=true`;
+  return frameErr(`ROUTE_LOCAL_SIGNER_MISMATCH: ${named} ${payload}`);
+};
 /**
- * og planEntityOutputs: a target with a local replica of the named signer is local (a trigger retargets to the sole local signer; anything else
- * refuses ROUTE_LOCAL_SIGNER_MISMATCH); every other output is remote: its signer aligned with the verified profile, its Runtime bound (replay
- * route, else the verified route, else the persisted or resolved one), with og's unknown-route, self-hint and cross-j refusals.
+ * og alignRemoteOutputSigner: the verified profile's signer wins; a trigger takes it, txs for another signer refuse.
  */
-const planNetwork = (rt: Runtime, outputs: readonly NetworkOutput[], routes: RuntimeRoutes | undefined): Result<NetworkPlan, RuntimeError> => chain(dedupeNetwork(outputs), (deduped) => {
-  const local: NetworkOutput[] = [], remote: NetworkOutput[] = [];
-  for (const initial of deduped) {
-    const entity = routeText(initial["entityId"]), signer = routeText(initial["signerId"]);
-    const signers = [...rt.entities.values()].filter((r) => lower(r.state.id) === entity).map((r) => lower(r.signerId));
-    if (signer !== "" && signers.includes(signer)) { local.push(initial); continue; }
-    if (signers.length === 1) {
-      if (isTriggerOnly(initial)) { local.push({ ...initial, signerId: signers[0]! }); continue; }
-      return frameErr(netTxs(initial).length > 0 ? `ROUTE_LOCAL_SIGNER_MISMATCH: entity=${netText(initial["entityId"])} signer=${netText(initial["signerId"])} txTypes=${txTypesOf(initial)}`
-        : `ROUTE_LOCAL_SIGNER_MISMATCH: entity=${netText(initial["entityId"])} signer=${netText(initial["signerId"])} resolved=${signers[0]} consensusOnly=true`);
-    }
-    // og alignRemoteOutputSigner
-    const preferred = routes?.verifiedProfileSigner(entity) ?? "", outSigner = netText(initial["signerId"]).trim();
-    let output = initial;
-    if (preferred !== "" && preferred.toLowerCase() !== outSigner.toLowerCase()) {
-      if (isTriggerOnly(initial)) output = { ...initial, signerId: preferred };
-      else if (netTxs(initial).length > 0) return frameErr(`ROUTE_REMOTE_SIGNER_MISMATCH: entity=${netText(initial["entityId"])} signer=${netText(initial["signerId"])} resolved=${preferred} txTypes=${txTypesOf(initial)}`);
-    }
-    // og bindVerifiedTargetRuntime
-    const outSignerId = netText(output["signerId"]), persisted = netRuntimeId(output["runtimeId"]), replay = netRuntimeId(routes?.replayRuntime?.(entity, routeText(outSignerId)));
-    let target: string;
-    if (replay !== "") {
-      if (persisted !== "" && persisted !== replay) return frameErr(`REPLAY_OUTPUT_RUNTIME_ROUTE_MISMATCH:${netText(output["entityId"])}:${outSignerId}`);
-      target = replay;
-    } else {
-      const resolved = routes?.resolvedRuntime?.(entity) ?? "", verified = netRuntimeId(routes?.verifiedRuntime?.(entity));
-      if (verified !== "" && persisted !== verified) output = { ...output, runtimeId: verified };
-      target = netRuntimeId(output["runtimeId"]) || verified || resolved;
-    }
-    if (target === "") return frameErr(`ROUTE_TARGET_RUNTIME_UNKNOWN: entity=${netText(output["entityId"])} txTypes=${txTypesOf(output)}`);
-    if (netRuntimeId(rt.runtimeId) !== "" && target === netRuntimeId(rt.runtimeId)) return frameErr(`ROUTE_STALE_SELF_HINT: entity=${netText(output["entityId"])} runtime=${target} txTypes=${txTypesOf(output)}`);
-    const txs = netTxs(output);
-    if (txs.length === 1 && txs[0]!.type === "runtimeOutput") {
-      const bound = netRuntimeId(replay !== "" ? replay : routes?.crossJRuntime?.(entity, routeText(outSignerId)));
-      if (bound === "" || bound !== target) return frameErr(`CROSS_J_RUNTIME_OUTPUT_TARGET_UNVERIFIED:${netText(output["entityId"])}:${outSignerId}:${target || "missing"}`);
-    } else if (txs.some((tx) => tx.type === "runtimeOutput" && tx.data["protocol"] === "cross-j") || netEffective(output).some((tx) => CROSS_J_INTRA_RUNTIME_TXS.has(tx.type))) {
-      return frameErr(`CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=${routeText(output["entityId"])} targetRuntime=${target} txTypes=${txTypesOf(output)}`);
-    }
-    remote.push({ ...output, runtimeId: target });
+const alignRemoteSigner = (
+  o: NetworkOutput,
+  entity: string,
+  routes: RuntimeRoutes | undefined,
+): Result<NetworkOutput, RuntimeError> => {
+  const preferred = routes?.verifiedProfileSigner(entity) ?? "";
+  const signer = netText(o["signerId"]);
+  const aligned = preferred === "" || preferred.toLowerCase() === signer.trim().toLowerCase();
+  switch (true) {
+    case aligned:
+      return ok(o);
+    case isTriggerOnly(o):
+      return ok({ ...o, signerId: preferred });
+    case netTxs(o).length > 0:
+      return frameErr(
+        `ROUTE_REMOTE_SIGNER_MISMATCH: entity=${entityOf(o)} signer=${signer} ${resolvedAs(preferred, o)}`,
+      );
+    default:
+      return ok(o);
   }
-  return ok({ local, remote });
+};
+/** An output bound to its target Runtime, and the replay route that bound it (empty outside replay). */
+type BoundOutput = { readonly output: NetworkOutput; readonly target: string; readonly replay: string };
+/**
+ * og bindVerifiedTargetRuntime: a replay route binds outright; else a verified route overrides the persisted hint,
+ * which the resolved one backs.
+ */
+const bindTargetRuntime = (
+  o: NetworkOutput,
+  entity: string,
+  routes: RuntimeRoutes | undefined,
+): Result<BoundOutput, RuntimeError> => {
+  const signer = netText(o["signerId"]);
+  const persisted = netRuntimeId(o["runtimeId"]);
+  const replay = netRuntimeId(routes?.replayRuntime?.(entity, routeText(signer)));
+  if (replay !== "") {
+    return persisted !== "" && persisted !== replay
+      ? frameErr(`REPLAY_OUTPUT_RUNTIME_ROUTE_MISMATCH:${entityOf(o)}:${signer}`)
+      : ok({ output: o, target: replay, replay });
+  }
+  const resolved = routes?.resolvedRuntime?.(entity) ?? "";
+  const verified = netRuntimeId(routes?.verifiedRuntime?.(entity));
+  const output = verified !== "" && persisted !== verified ? { ...o, runtimeId: verified } : o;
+  return ok({ output, target: netRuntimeId(output["runtimeId"]) || verified || resolved, replay });
+};
+/** A lone cross-j runtimeOutput goes only to the Runtime its (Entity, signer) is bound to. */
+const crossJTargetVerified = (
+  { output, target, replay }: BoundOutput,
+  entity: string,
+  routes: RuntimeRoutes | undefined,
+) => {
+  const bound = netRuntimeId(replay !== "" ? replay : routes?.crossJRuntime?.(entity, routeText(output["signerId"])));
+  return bound !== "" && bound === target;
+};
+/** og boundary: a cross-j runtimeOutput or a raw cross-j Entity effect never goes remote. */
+const leaksCrossJ = (o: NetworkOutput): boolean =>
+  netTxs(o).some((tx) => tx.type === "runtimeOutput" && tx.data["protocol"] === "cross-j") ||
+  netEffective(o).some((tx) => CROSS_J_INTRA_RUNTIME_TXS.has(tx.type));
+/**
+ * og's remote refusals: an unknown or stale self target, a lone cross-j output to an unbound Runtime, and cross-j
+ * traffic that must stay home.
+ */
+const remoteRefusal = (
+  rt: Runtime,
+  bound: BoundOutput,
+  entity: string,
+  routes: RuntimeRoutes | undefined,
+): Result<void, RuntimeError> => {
+  const { output, target } = bound;
+  const self = netRuntimeId(rt.runtimeId);
+  const txs = netTxs(output);
+  const kinds = `txTypes=${txTypesOf(output)}`;
+  switch (true) {
+    case target === "":
+      return frameErr(`ROUTE_TARGET_RUNTIME_UNKNOWN: entity=${entityOf(output)} ${kinds}`);
+    case self !== "" && target === self:
+      return frameErr(`ROUTE_STALE_SELF_HINT: entity=${entityOf(output)} runtime=${target} ${kinds}`);
+    case txs.length === 1 && txs[0]?.type === "runtimeOutput":
+      return crossJTargetVerified(bound, entity, routes)
+        ? ok(undefined)
+        : frameErr(
+            `CROSS_J_RUNTIME_OUTPUT_TARGET_UNVERIFIED:${entityOf(output)}:${netText(output["signerId"])}:${target}`,
+          );
+    case leaksCrossJ(output):
+      return frameErr(
+        `CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=${routeText(output["entityId"])} targetRuntime=${target} ${kinds}`,
+      );
+    default:
+      return ok(undefined);
+  }
+};
+/** A remote output: signer aligned, Runtime bound, og's refusals passed. */
+const bindRemote = (
+  rt: Runtime,
+  o: NetworkOutput,
+  entity: string,
+  routes: RuntimeRoutes | undefined,
+): Result<NetworkOutput, RuntimeError> =>
+  chain(alignRemoteSigner(o, entity, routes), (aligned) =>
+    chain(bindTargetRuntime(aligned, entity, routes), (bound) =>
+      map(remoteRefusal(rt, bound, entity, routes), () => ({ ...bound.output, runtimeId: bound.target }))));
+const planOutput = (
+  rt: Runtime,
+  o: NetworkOutput,
+  routes: RuntimeRoutes | undefined,
+): Result<PlannedOutput, RuntimeError> => {
+  const entity = routeText(o["entityId"]);
+  const signer = routeText(o["signerId"]);
+  const signers = [...rt.entities.values()].filter((r) => lower(r.state.id) === entity).map((r) => lower(r.signerId));
+  const sole = signers.length === 1 ? signers[0] : undefined;
+  switch (true) {
+    case signer !== "" && signers.includes(signer):
+      return ok(planned("local")(o));
+    case sole !== undefined:
+      return retargetLocal(o, sole);
+    default:
+      return map(bindRemote(rt, o, entity, routes), planned("remote"));
+  }
+};
+const outputsIn = (plan: readonly PlannedOutput[], lane: keyof NetworkPlan): readonly NetworkOutput[] =>
+  plan.filter((p) => p.lane === lane).map((p) => p.output);
+/**
+ * og planEntityOutputs: a target with a local replica of the named signer is local (a trigger retargets to the sole
+ * local signer; anything else refuses ROUTE_LOCAL_SIGNER_MISMATCH); every other output is remote: its signer aligned
+ * with the verified profile, its Runtime bound (replay route, else the verified route, else the persisted or resolved
+ * one), with og's unknown-route, self-hint and cross-j refusals.
+ */
+const planNetwork = (
+  rt: Runtime,
+  outputs: readonly NetworkOutput[],
+  routes: RuntimeRoutes | undefined,
+): Result<NetworkPlan, RuntimeError> =>
+  chain(dedupeNetwork(outputs), (deduped) =>
+    map(traverse(deduped, (o) => planOutput(rt, o, routes)), (plan) => ({
+      local: outputsIn(plan, "local"),
+      remote: outputsIn(plan, "remote"),
+    })));
+/**
+ * og applyRecoveryRuntimeOutputPlan after a frame: this frame's outputs are stamped with their source frame, joined to
+ * the retained outbox, pruned of settled proposals, deduplicated and planned; the local outputs are this Runtime's own
+ * continuations and the remote ones become the new retained outbox, which is exactly what og commits as the frame's
+ * runtime outputs.
+ */
+export const retainedNetworkOutbox = (
+  rt: Runtime,
+  outbox: readonly EntityOutput[],
+  routes?: RuntimeRoutes,
+): Result<readonly NetworkOutput[], RuntimeError> =>
+  chain(traverse(outbox, (o) => outputBinary(rt, o, routes)), (rows) =>
+    networkOutboxStep(rt, rows as readonly NetworkOutput[], routes));
+/**
+ * og applyRecoveryRuntimeOutputPlan over og-wire outputs: stamp, join the retained outbox, prune, dedupe, plan; the
+ * result is the new retained outbox.
+ */
+export const networkOutboxStep = (
+  rt: Runtime,
+  outputs: readonly NetworkOutput[],
+  routes?: RuntimeRoutes,
+): Result<readonly NetworkOutput[], RuntimeError> =>
+  chain(all({ height: frameNumber(rt.height), timestamp: frameNumber(rt.timestamp) }), (source) => {
+    const originated = outputs.map((o) => (o["sourceRuntimeFrame"] ? o : { ...o, sourceRuntimeFrame: source }));
+    const owed = chain(pruneSettled(rt, [...(rt.pendingNetworkOutputs ?? []), ...originated]), pendingNetwork);
+    return chain(owed, (pending) => chain(planNetwork(rt, pending, routes), (plan) => pendingNetwork(plan.remote)));
+  });
+/**
+ * og dispatchEntityOutputs retirement: outputs a transport accepted leave the retained outbox (by route key); the rest
+ * stay owed.
+ */
+export const retireNetworkOutputs = (rt: Runtime, accepted: (output: NetworkOutput) => boolean): Runtime => ({
+  ...rt,
+  pendingNetworkOutputs: (rt.pendingNetworkOutputs ?? []).filter((o) => !accepted(o)),
 });
+
+
+// Recovery: a persisted frame's outputs are proven against the outbox the frames before it retained.
+
+/** An output as retained evidence: its Runtime binding aside. */
+const asEvidence = (o: NetworkOutput): NetworkOutput => ({ ...o, runtimeId: "" });
+type PriorEvidence = { readonly output: NetworkOutput; readonly index: number };
+/** The previous retained outbox by evidence key; a repeated key keeps its last output. */
+const priorEvidence = (previous: readonly NetworkOutput[]): Result<ReadonlyMap<string, PriorEvidence>, RuntimeError> =>
+  map(
+    traverse(previous, (output, index) =>
+      map(routeKeyOf(asEvidence(output)), (key) => [key, { output, index }] as const),
+    ),
+    (rows) => new Map(rows),
+  );
+/** The prior retained output a recorded row repeats exactly, its Runtime binding aside. */
+const provenPrior = (
+  prior: ReadonlyMap<string, PriorEvidence>,
+  output: NetworkOutput,
+  height: number,
+): Result<PriorEvidence, RuntimeError> =>
+  chain(routeKeyOf(asEvidence(output)), (key) => {
+    const verified = prior.get(key);
+    const unproven = frameErr(`RECOVERY_OUTBOX_RETAINED_OUTPUT_UNPROVEN:height=${height}`);
+    if (verified === undefined) return unproven;
+    return chain(compareConsensus(asEvidence(verified.output), asEvidence(output)), (c) =>
+      c === 0 ? ok(verified) : unproven,
+    );
+  });
+/** The retained outputs selected so far, and the prior index the last of them came from. */
+type RetainedWalk = { readonly retained: readonly NetworkOutput[]; readonly lastIndex: number };
 /**
- * og applyRecoveryRuntimeOutputPlan after a frame: this frame's outputs are stamped with their source frame, joined to the retained outbox, pruned
- * of settled proposals, deduplicated and planned; the local outputs are this Runtime's own continuations and the remote ones become the new
- * retained outbox, which is exactly what og commits as the frame's runtime outputs.
+ * A recorded row from an earlier frame is prior evidence, in prior order; this frame's own rows are regenerated by
+ * replay.
  */
-export const retainedNetworkOutbox = (rt: Runtime, outbox: readonly EntityOutput[], routes?: RuntimeRoutes): Result<readonly NetworkOutput[], RuntimeError> =>
-  chain(traverse(outbox, (o) => outputBinary(rt, o, routes)), (rows) => networkOutboxStep(rt, rows as readonly NetworkOutput[], routes));
-/** og applyRecoveryRuntimeOutputPlan over og-wire outputs: stamp, join the retained outbox, prune, dedupe, plan; the result is the new retained outbox. */
-export const networkOutboxStep = (rt: Runtime, outputs: readonly NetworkOutput[], routes?: RuntimeRoutes): Result<readonly NetworkOutput[], RuntimeError> =>
-  chain(frameNumber(rt.height), (height) => chain(frameNumber(rt.timestamp), (timestamp) => {
-    const originated = outputs.map((o) => (o["sourceRuntimeFrame"] ? o : { ...o, sourceRuntimeFrame: { height, timestamp } }));
-    return chain(chain(pruneSettled(rt, [...(rt.pendingNetworkOutputs ?? []), ...originated]), pendingNetwork), (pending) => chain(planNetwork(rt, pending, routes), (plan) => pendingNetwork(plan.remote)));
-  }));
-/** og dispatchEntityOutputs retirement: outputs a transport accepted leave the retained outbox (by route key); the rest stay owed. */
-export const retireNetworkOutputs = (rt: Runtime, accepted: (output: NetworkOutput) => boolean): Runtime => ({ ...rt, pendingNetworkOutputs: (rt.pendingNetworkOutputs ?? []).filter((o) => !accepted(o)) });
+const retainRecorded = (
+  prior: ReadonlyMap<string, PriorEvidence>,
+  walk: RetainedWalk,
+  output: NetworkOutput,
+  height: number,
+): Result<RetainedWalk, RuntimeError> => {
+  const source = sourceFrameOf(output);
+  if (source === undefined || source.height > height || !output["runtimeId"]) {
+    return frameErr(`RECOVERY_OUTBOX_SOURCE_FRAME_INVALID:height=${height}`);
+  }
+  if (source.height === height) return ok(walk);
+  return chain(provenPrior(prior, output, height), (verified) => {
+    if (verified.index <= walk.lastIndex) return frameErr(`RECOVERY_OUTBOX_RETAINED_ORDER_INVALID:height=${height}`);
+    const runtimeId = output["runtimeId"] as Binary;
+    const rebound = verified.output["runtimeId"] === runtimeId ? verified.output : { ...verified.output, runtimeId };
+    return ok({ retained: [...walk.retained, rebound], lastIndex: verified.index });
+  });
+};
 /**
- * og selectRetainedRecoveryOutbox: a frame's recorded rows from earlier frames must each be exact prior retained evidence (runtimeId aside), in
- * prior order; this frame's own rows are regenerated by replay.
+ * og selectRetainedRecoveryOutbox: a frame's recorded rows from earlier frames must each be exact prior retained
+ * evidence (runtimeId aside), in prior order; this frame's own rows are regenerated by replay.
  */
-export const selectRetainedRecovery = (previous: readonly NetworkOutput[], recorded: readonly NetworkOutput[], height: number): Result<readonly NetworkOutput[], RuntimeError> => {
-  const evidence = (o: NetworkOutput): NetworkOutput => ({ ...o, runtimeId: "" });
-  const prior = new Map<string, { readonly output: NetworkOutput; readonly index: number }>();
-  for (const [index, output] of previous.entries()) { const key = routeKeyOf(evidence(output)); if (!key.ok) return key; prior.set(key.value, { output, index }); }
-  const retained: NetworkOutput[] = [];
-  let priorIndex = -1;
-  for (const output of recorded) {
-    const source = output["sourceRuntimeFrame"] as SourceRuntimeFrame | undefined;
-    if (source === undefined || source.height > height || !output["runtimeId"]) return frameErr(`RECOVERY_OUTBOX_SOURCE_FRAME_INVALID:height=${height}`);
-    if (source.height === height) continue;
-    const key = routeKeyOf(evidence(output));
-    if (!key.ok) return key;
-    const verified = prior.get(key.value), same = verified === undefined ? ok(1) : compareConsensus(evidence(verified.output), evidence(output));
-    if (!same.ok) return same;
-    if (verified === undefined || same.value !== 0) return frameErr(`RECOVERY_OUTBOX_RETAINED_OUTPUT_UNPROVEN:height=${height}`);
-    if (verified.index <= priorIndex) return frameErr(`RECOVERY_OUTBOX_RETAINED_ORDER_INVALID:height=${height}`);
-    priorIndex = verified.index;
-    retained.push(verified.output["runtimeId"] === output["runtimeId"] ? verified.output : { ...verified.output, runtimeId: output["runtimeId"] as Binary });
-  }
-  return ok(retained);
+export const selectRetainedRecovery = (
+  previous: readonly NetworkOutput[],
+  recorded: readonly NetworkOutput[],
+  height: number,
+): Result<readonly NetworkOutput[], RuntimeError> =>
+  chain(priorEvidence(previous), (prior) => {
+    const start: RetainedWalk = { retained: [], lastIndex: -1 };
+    const walked = foldResult(recorded, start, (walk, output) => retainRecorded(prior, walk, output, height));
+    return map(walked, (walk) => walk.retained);
+  });
+const NO_BINDINGS: ReadonlyMap<string, string> = new Map();
+/**
+ * og collectOutputSignerHints: each Account-bearing row of a replayed frame names its Entity's signer; two signers for
+ * one Entity conflict.
+ */
+export const replaySignerHints = (
+  rows: readonly NetworkOutput[],
+  height: number,
+): Result<ReadonlyMap<string, string>, RuntimeError> =>
+  foldResult(rows, NO_BINDINGS, (hints, o) => {
+    if (!netTxs(o).some((tx) => tx.type === "accountInput")) return ok(hints);
+    const entity = routeText(o["entityId"]);
+    const signer = routeText(o["signerId"]);
+    const held = hints.get(entity);
+    switch (true) {
+      case entity === "" || signer === "":
+        return frameErr(`RECOVERY_OUTPUT_SIGNER_HINT_INVALID:height=${height}`);
+      case held !== undefined && held !== signer:
+        return frameErr(
+          `RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT:height=${height}:entity=${entity}:left=${held}:right=${signer}`,
+        );
+      default:
+        return ok(mapSet(hints, entity, signer));
+    }
+  });
+/**
+ * og installReplayOutputRuntimeRoutes: a replayed frame's own rows bind each (Entity, signer) to its committed Runtime.
+ */
+export const replayOutputRoutes = (rows: readonly NetworkOutput[]): Result<ReadonlyMap<string, string>, RuntimeError> =>
+  foldResult(rows, NO_BINDINGS, (routes, o) => {
+    const key = `${routeText(o["entityId"])}:${routeText(o["signerId"])}`;
+    const runtimeId = netRuntimeId(o["runtimeId"]);
+    const held = routes.get(key);
+    switch (true) {
+      case key === ":" || runtimeId === "":
+        return frameErr("REPLAY_OUTPUT_RUNTIME_ROUTE_INVALID");
+      case held !== undefined && held !== runtimeId:
+        return frameErr(`REPLAY_OUTPUT_RUNTIME_ROUTE_CONFLICT:${key}`);
+      default:
+        return ok(mapSet(routes, key, runtimeId));
+    }
+  });
+
+
+// Sealing: a frame that did work becomes one WAL row over its state and its retained outbox.
+
+/** A sealed frame's outbox as its WAL row counts and digests it. */
+type OutboxSeal = { readonly count: number; readonly digest: string };
+const outboxSeal = (retained: readonly NetworkOutput[]): Result<OutboxSeal, RuntimeError> =>
+  chain(traverse(retained, (o) => mapErr(encodeBinary(o), () => ROUTE_ENCODING_INVALID)), (rows) =>
+    map(runtimeOutputsDigest(rows), (digest) => ({ count: rows.length, digest })));
+type PostState = { readonly metaDigest: string; readonly postStateHash: string };
+/** og storage post-state: replica metas, component digests and the outbox digest under one hash. */
+const postStateOf = (
+  after: Runtime,
+  height: number,
+  timestamp: number,
+  outbox: OutboxSeal,
+): Result<PostState, RuntimeError> =>
+  chain(replicaMetaRows(after), (metaRows) => {
+    const digests = all({
+      metaDigest: replicaMetaDigest(metaRows),
+      components: runtimeComponentDigests(runtimeView(after)),
+    });
+    return chain(digests, ({ metaDigest, components }) => {
+      const hashed = storagePostStateHash({
+        height,
+        timestamp,
+        replicaMetaDigest: metaDigest,
+        runtimeComponentDigests: components,
+        runtimeOutputCount: outbox.count,
+        runtimeOutputsDigest: outbox.digest,
+      });
+      return map(hashed, (postStateHash) => ({ metaDigest, postStateHash }));
+    });
+  });
+/** The Entities a frame's applied input touched, lowercased and sorted. */
+const touchedEntities = (applied: RuntimeStep["applied"]): readonly string[] => {
+  const inputs = applied.entityInputs.map((i) => lower(i.entityId));
+  const imports = applied.runtimeTxs.flatMap((tx) => (tx.type === "importReplica" ? [lower(tx.entityId)] : []));
+  return [...new Set([...inputs, ...imports])].toSorted(asc);
 };
-/** og collectOutputSignerHints: each Account-bearing row of a replayed frame names its Entity's signer; two signers for one Entity conflict. */
-export const replaySignerHints = (rows: readonly NetworkOutput[], height: number): Result<ReadonlyMap<string, string>, RuntimeError> => {
-  const hints = new Map<string, string>();
-  for (const o of rows) {
-    if (!netTxs(o).some((tx) => tx.type === "accountInput")) continue;
-    const entity = routeText(o["entityId"]), signer = routeText(o["signerId"]);
-    if (entity === "" || signer === "") return frameErr(`RECOVERY_OUTPUT_SIGNER_HINT_INVALID:height=${height}`);
-    const existing = hints.get(entity);
-    if (existing !== undefined && existing !== signer) return frameErr(`RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT:height=${height}:entity=${entity}:left=${existing}:right=${signer}`);
-    hints.set(entity, signer);
-  }
-  return ok(hints);
-};
-/** og installReplayOutputRuntimeRoutes: a replayed frame's own rows bind each (Entity, signer) to its committed Runtime. */
-export const replayOutputRoutes = (rows: readonly NetworkOutput[]): Result<ReadonlyMap<string, string>, RuntimeError> => {
-  const routes = new Map<string, string>();
-  for (const o of rows) {
-    const key = `${routeText(o["entityId"])}:${routeText(o["signerId"])}`, runtimeId = netRuntimeId(o["runtimeId"]);
-    if (key === ":" || runtimeId === "") return frameErr("REPLAY_OUTPUT_RUNTIME_ROUTE_INVALID");
-    const existing = routes.get(key);
-    if (existing !== undefined && existing !== runtimeId) return frameErr(`REPLAY_OUTPUT_RUNTIME_ROUTE_CONFLICT:${key}`);
-    routes.set(key, runtimeId);
-  }
-  return ok(routes);
-};
-const sealFrame = (rt: Runtime, step: RuntimeStep, routes?: RuntimeRoutes): Result<RuntimeFrameCommit, RuntimeError> => {
+const sealFrame = (
+  rt: Runtime,
+  step: RuntimeStep,
+  routes?: RuntimeRoutes,
+): Result<RuntimeFrameCommit, RuntimeError> => {
   const after = step.runtime;
-  return chain(frameNumber(after.height), (height) => chain(frameNumber(after.timestamp), (timestamp) => chain(retainedNetworkOutbox(after, step.outbox, routes), (retained) => chain(traverse(retained, (o) => mapErr(encodeBinary(o), (): RuntimeError => ({ _tag: "runtime_frame", code: "ROUTE_OUTPUT_ENCODING_INVALID" }))), (rows) => chain(runtimeOutputsDigest(rows), (outputsDigest) =>
-    chain(replicaMetaRows(after), (metaRows) => chain(replicaMetaDigest(metaRows), (metaDigest) => chain(runtimeComponentDigests(runtimeView(after)), (components) =>
-      chain(storagePostStateHash({ height, timestamp, replicaMetaDigest: metaDigest, runtimeComponentDigests: components, runtimeOutputCount: rows.length, runtimeOutputsDigest: outputsDigest }), (postStateHash) =>
-        chain(canonicalEntityHashes(after), (entityHashes) => {
-          const touched = [...new Set([...step.applied.entityInputs.map((i) => lower(i.entityId)), ...step.applied.runtimeTxs.flatMap((tx) => (tx.type === "importReplica" ? [lower(tx.entityId)] : []))])].sort(asc);
-          const body: StorageFrame = {
-            height, timestamp, prevFrameHash: rt.frameHash, replicaMetaDigest: metaDigest, postStateHash, materializedState: false,
-            canonicalStateHash: canonicalRuntimeStateHash(height, timestamp, entityHashes), canonicalEntityHashes: entityHashes,
-            runtimeInput: binaryOf(step.applied), runtimeOutputCount: rows.length, runtimeOutputsDigest: outputsDigest, touchedEntities: touched, touchedAccounts: [], touchedBookEntities: [],
-          };
-          return map(storageFrameHash(body), (frameHash) => ({ runtime: { ...after, frameHash, pendingNetworkOutputs: retained }, frame: { ...body, frameHash }, applied: step.applied, outbox: step.outbox, runtimeOutputs: retained, jOutbox: step.jOutbox, queuedRetries: step.queuedRetries, rejected: step.rejected }));
-        }))))))))));
+  const coordinates = all({ height: frameNumber(after.height), timestamp: frameNumber(after.timestamp) });
+  return chain(coordinates, ({ height, timestamp }) =>
+    chain(retainedNetworkOutbox(after, step.outbox, routes), (retained) =>
+      chain(outboxSeal(retained), (outbox) =>
+        chain(postStateOf(after, height, timestamp, outbox), ({ metaDigest, postStateHash }) =>
+          chain(canonicalEntityHashes(after), (entityHashes) => {
+            const body: StorageFrame = {
+              height,
+              timestamp,
+              prevFrameHash: rt.frameHash,
+              replicaMetaDigest: metaDigest,
+              postStateHash,
+              materializedState: false,
+              canonicalStateHash: canonicalRuntimeStateHash(height, timestamp, entityHashes),
+              canonicalEntityHashes: entityHashes,
+              runtimeInput: binaryOf(step.applied),
+              runtimeOutputCount: outbox.count,
+              runtimeOutputsDigest: outbox.digest,
+              touchedEntities: touchedEntities(step.applied),
+              touchedAccounts: [],
+              touchedBookEntities: [],
+            };
+            return map(storageFrameHash(body), (frameHash) => ({
+              runtime: { ...after, frameHash, pendingNetworkOutputs: retained },
+              frame: { ...body, frameHash },
+              applied: step.applied,
+              outbox: step.outbox,
+              runtimeOutputs: retained,
+              jOutbox: step.jOutbox,
+              queuedRetries: step.queuedRetries,
+              rejected: step.rejected,
+            }));
+          }),
+        ),
+      ),
+    ),
+  );
 };
 /**
- * og process + saveRuntimeFrame: apply one Runtime input and, when the frame advanced, seal its WAL row (prev hash chain from ZERO_FRAME_HASH,
- * canonical state hash, post-state oracle, ordered outbox digest). A frame that did no work writes no row.
+ * og process + saveRuntimeFrame: apply one Runtime input and, when the frame advanced, seal its WAL row (prev hash
+ * chain from ZERO_FRAME_HASH, canonical state hash, post-state oracle, ordered outbox digest). A frame that did no work
+ * writes no row.
  */
-export const commitRuntimeFrame = (rt: Runtime, input: RuntimeInput, ctx: RuntimeCtx): Result<RuntimeFrameCommit | null, RuntimeError> =>
+export const commitRuntimeFrame = (
+  rt: Runtime,
+  input: RuntimeInput,
+  ctx: RuntimeCtx,
+): Result<RuntimeFrameCommit | null, RuntimeError> =>
   chain(applyRuntime(rt, input, ctx), (step) => (step.advanced ? sealFrame(rt, step, ctx.routes) : ok(null)));
+
+
+// Replay: the WAL tail verified row by row and replayed to the same bytes.
+
 export type RuntimeRecovery = { readonly runtime: Runtime; readonly outbox: readonly EntityOutput[] };
+type RecoveryCtx = Verifiers & Pick<RuntimeCtx, "routes">;
 /**
- * og verifyStorageTailIntegrity + replay: every row continues the chain (height+1, prevFrameHash), its canonical state hash recomputes from its own
- * coordinates, and its frame hash recomputes; replaying its applied input (with replay capabilities) must reproduce the row byte-for-byte.
- * The recovered outbox is every replayed frame's ordered outputs (nothing is terminal without a receipt) and must equal the persisted rows positionally.
- * `rows`, when given, are each frame's persisted runtime outputs (og frame.runtimeOutputs): og replayOneFrame seeds the retained outbox from
- * the prior evidence they select (og selectRetainedRecoveryOutbox, so transport retirements between frames replay) and binds their Runtime routes.
+ * og verifyStorageTailIntegrity for one row: it continues the chain, and its canonical state and frame hashes
+ * recompute.
  */
-export const recoverRuntime = (checkpoint: Runtime, frames: readonly StorageFrame[], inputs: readonly RuntimeInput[], outbox: readonly EntityOutput[], ctx: Verifiers & Pick<RuntimeCtx, "routes">, rows?: readonly (readonly NetworkOutput[])[]): Result<RuntimeRecovery, RuntimeError> => {
+const rowIntegrity = (runtime: Runtime, frame: StorageFrame): Result<void, RuntimeError> => {
+  if (BigInt(frame.height) !== runtime.height + 1n) return frameErr("STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH");
+  if (frame.prevFrameHash !== runtime.frameHash) return frameErr("STORAGE_VERIFY_FRAME_CHAIN_BROKEN");
+  const canonical = () => canonicalRuntimeStateHash(frame.height, frame.timestamp, frame.canonicalEntityHashes ?? []);
+  if (frame.canonicalStateHash !== undefined && frame.canonicalStateHash !== canonical()) {
+    return frameErr("STORAGE_VERIFY_CANONICAL_HASH_MISMATCH");
+  }
+  const own = storageFrameHash(frame);
+  return own.ok && own.value === frame.frameHash ? ok(undefined) : frameErr("STORAGE_VERIFY_FRAME_HASH_MISMATCH");
+};
+type ReplaySeed = { readonly runtime: Runtime; readonly routes: RuntimeRoutes | undefined };
+/**
+ * og replayOneFrame seeding: the retained outbox a row's recorded outputs select, and the signers and Runtimes they
+ * bind.
+ */
+const replaySeed = (
+  runtime: Runtime,
+  recorded: readonly NetworkOutput[] | undefined,
+  height: number,
+  routes: RuntimeRoutes | undefined,
+): Result<ReplaySeed, RuntimeError> => {
+  if (recorded === undefined) return ok({ runtime, routes });
+  const evidence = all({
+    retained: selectRetainedRecovery(runtime.pendingNetworkOutputs ?? [], recorded, height),
+    hints: replaySignerHints(recorded, height),
+    bound: replayOutputRoutes(recorded),
+  });
+  return map(evidence, ({ retained, hints, bound }): ReplaySeed => ({
+    runtime: { ...runtime, pendingNetworkOutputs: retained },
+    routes: {
+      verifiedProfileSigner: (e) => routes?.verifiedProfileSigner(e),
+      ...routes,
+      replayRuntime: (e, signer) => bound.get(`${lower(e)}:${lower(signer)}`),
+      replaySigner: (e) => hints.get(lower(e)),
+    },
+  }));
+};
+/**
+ * One WAL row: verified, then replayed from its seed to the same frame hash; its recorded outputs become the retained
+ * outbox.
+ */
+const replayRow = (
+  ctx: RecoveryCtx,
+  done: RuntimeRecovery,
+  frame: StorageFrame,
+  input: RuntimeInput,
+  recorded: readonly NetworkOutput[] | undefined,
+): Result<RuntimeRecovery, RuntimeError> =>
+  chain(rowIntegrity(done.runtime, frame), () =>
+    chain(replaySeed(done.runtime, recorded, frame.height, ctx.routes), (seed) => {
+      const stamped = { ...input, timestamp: BigInt(frame.timestamp) };
+      const replayed = commitRuntimeFrame(seed.runtime, stamped, { ...ctx, routes: seed.routes, replay: true });
+      return chain(replayed, (commit) => {
+        if (commit === null || commit.frame.frameHash !== frame.frameHash)
+          return frameErr("STORAGE_REPLAY_POST_STATE_MISMATCH");
+        const runtime =
+          recorded === undefined ? commit.runtime : { ...commit.runtime, pendingNetworkOutputs: recorded };
+        return ok({ runtime, outbox: [...done.outbox, ...commit.outbox] });
+      });
+    }),
+  );
+/**
+ * og verifyStorageTailIntegrity + replay: every row continues the chain (height+1, prevFrameHash), its canonical state
+ * hash recomputes from its own coordinates, and its frame hash recomputes; replaying its applied input (with replay
+ * capabilities) must reproduce the row byte-for-byte. The recovered outbox is every replayed frame's ordered outputs
+ * (nothing is terminal without a receipt) and must equal the persisted rows positionally. `rows`, when given, are each
+ * frame's persisted runtime outputs (og frame.runtimeOutputs): og replayOneFrame seeds the retained outbox from the
+ * prior evidence they select (og selectRetainedRecoveryOutbox, so transport retirements between frames replay) and
+ * binds their Runtime routes.
+ */
+export const recoverRuntime = (
+  checkpoint: Runtime,
+  frames: readonly StorageFrame[],
+  inputs: readonly RuntimeInput[],
+  outbox: readonly EntityOutput[],
+  ctx: RecoveryCtx,
+  rows?: readonly (readonly NetworkOutput[])[],
+): Result<RuntimeRecovery, RuntimeError> => {
   if (frames.length !== inputs.length) return frameErr("STORAGE_VERIFY_FRAME_INPUT_MISSING");
   if (rows !== undefined && rows.length !== frames.length) return frameErr("STORAGE_VERIFY_FRAME_OUTPUTS_MISSING");
-  type Replayed = { readonly runtime: Runtime; readonly outbox: readonly EntityOutput[] };
-  return chain(foldResult(frames.map((f, i) => [f, inputs[i] as RuntimeInput, i] as const), { runtime: checkpoint, outbox: [] } as Replayed, ({ runtime, outbox: pending }, [frame, input, index]): Result<Replayed, RuntimeError> => {
-    if (BigInt(frame.height) !== runtime.height + 1n) return frameErr("STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH");
-    if (frame.prevFrameHash !== runtime.frameHash) return frameErr("STORAGE_VERIFY_FRAME_CHAIN_BROKEN");
-    if (frame.canonicalStateHash !== undefined && frame.canonicalStateHash !== canonicalRuntimeStateHash(frame.height, frame.timestamp, frame.canonicalEntityHashes ?? [])) return frameErr("STORAGE_VERIFY_CANONICAL_HASH_MISMATCH");
-    const own = storageFrameHash(frame);
-    if (!own.ok || own.value !== frame.frameHash) return frameErr("STORAGE_VERIFY_FRAME_HASH_MISMATCH");
-    const recorded = rows?.[index];
-    const seeded: Result<{ readonly runtime: Runtime; readonly routes: RuntimeRoutes | undefined }, RuntimeError> = recorded === undefined ? ok({ runtime, routes: ctx.routes })
-      : chain(selectRetainedRecovery(runtime.pendingNetworkOutputs ?? [], recorded, frame.height), (retained) => chain(replaySignerHints(recorded, frame.height), (hints) => map(replayOutputRoutes(recorded), (bound): { readonly runtime: Runtime; readonly routes: RuntimeRoutes } => ({
-        runtime: { ...runtime, pendingNetworkOutputs: retained },
-        routes: { verifiedProfileSigner: (e) => ctx.routes?.verifiedProfileSigner(e), ...ctx.routes, replayRuntime: (e, sgn) => bound.get(`${lower(e)}:${lower(sgn)}`), replaySigner: (e) => hints.get(lower(e)) },
-      }))));
-    return chain(seeded, (seed) => chain(commitRuntimeFrame(seed.runtime, { ...input, timestamp: BigInt(frame.timestamp) }, { ...ctx, routes: seed.routes, replay: true }), (replayed): Result<Replayed, RuntimeError> =>
-      replayed === null || replayed.frame.frameHash !== frame.frameHash ? frameErr("STORAGE_REPLAY_POST_STATE_MISMATCH")
-        : ok({ runtime: recorded === undefined ? replayed.runtime : { ...replayed.runtime, pendingNetworkOutputs: recorded }, outbox: [...pending, ...replayed.outbox] })));
-  }), (done) => (canon(done.outbox) !== canon(outbox) ? frameErr("STORAGE_RECOVERY_OUTBOX_MISMATCH") : ok(done)));
+  const start: RuntimeRecovery = { runtime: checkpoint, outbox: [] };
+  const replayed = foldResult(frames, start, (done, frame, i) =>
+    replayRow(ctx, done, frame, inputs[i] as RuntimeInput, rows?.[i]),
+  );
+  return chain(replayed, (done) =>
+    canon(done.outbox) !== canon(outbox) ? frameErr("STORAGE_RECOVERY_OUTBOX_MISMATCH") : ok(done),
+  );
 };
 
 
-/** og entity j-batch txs (r2r / r2c / r2e / e2r queue into jBatchState; j_broadcast seals it) and the finalized J events that move reserves (entity-runtime ER-16). */
+// ---- the one-Account Host: an Account, its J state and its ladder, driven tx by tx ----
+
+/**
+ * og entity j-batch txs (r2r / r2c / r2e / e2r queue into jBatchState; j_broadcast seals it) and the finalized J events
+ * that move reserves (entity-runtime ER-16).
+ */
 export type JOp =
   | { readonly type: "r2r"; readonly toEntity: EntityId; readonly tokenId: TokenId; readonly amount: bigint }
-  | { readonly type: "r2c"; readonly counterparty: EntityId; readonly tokenId: TokenId; readonly amount: bigint; readonly receivingEntity?: EntityId | undefined; readonly rebalanceFee?: RebalanceFee | undefined }
+  | {
+      readonly type: "r2c";
+      readonly counterparty: EntityId;
+      readonly tokenId: TokenId;
+      readonly amount: bigint;
+      readonly receivingEntity?: EntityId | undefined;
+      readonly rebalanceFee?: RebalanceFee | undefined;
+    }
   | { readonly type: "et2r"; readonly tokenAddress: string; readonly amount: bigint; readonly internalTokenId: TokenId }
   | { readonly type: "r2et"; readonly recipient: EntityId; readonly tokenId: TokenId; readonly amount: bigint }
   | { readonly type: "j_broadcast"; readonly chainId: number; readonly depository: string; readonly signerId: string }
-  /** og j_rebroadcast / j_abort_sent_batch / j_clear_batch / mintReserves (entity/tx/handlers/j-batch): the J submit lifecycle. */
-  | { readonly type: "j_rebroadcast"; readonly chainId: number; readonly depository: string; readonly signerId: string; readonly gasBumpBps?: number | undefined }
-  | { readonly type: "j_abort_sent_batch"; readonly reason?: string | undefined; readonly requeueToCurrent?: boolean | undefined }
+  /**
+   * og j_rebroadcast / j_abort_sent_batch / j_clear_batch / mintReserves (entity/tx/handlers/j-batch): the J submit
+   * lifecycle.
+   */
+  | {
+      readonly type: "j_rebroadcast";
+      readonly chainId: number;
+      readonly depository: string;
+      readonly signerId: string;
+      readonly gasBumpBps?: number | undefined;
+    }
+  | {
+      readonly type: "j_abort_sent_batch";
+      readonly reason?: string | undefined;
+      readonly requeueToCurrent?: boolean | undefined;
+    }
   | { readonly type: "j_clear_batch"; readonly reason?: string | undefined }
   | { readonly type: "mintReserves"; readonly tokenId: number; readonly amount: bigint }
   | { readonly type: "j_event"; readonly blockNumber: number; readonly event: JEvent };
-/** og EntityState reserves / outDebtsByToken / inDebtsByToken / jBatchState: reserves change only through finalized J events. */
-export type JState = { readonly reserves: ReadonlyMap<number, bigint>; readonly debts: DebtLedger; readonly jBatch?: JBatchState | undefined };
-export type LadderTx = { readonly type: "ladder_reveal"; readonly revealer: EntityId; readonly counter: EntityId; readonly ladderHash: Hash; readonly targetRole: boolean; readonly fillRatio: number; readonly revealedAt: bigint };
+/**
+ * og EntityState reserves / outDebtsByToken / inDebtsByToken / jBatchState: reserves change only through finalized J
+ * events.
+ */
+export type JState = {
+  readonly reserves: ReadonlyMap<number, bigint>;
+  readonly debts: DebtLedger;
+  readonly jBatch?: JBatchState | undefined;
+};
+export type LadderTx = {
+  readonly type: "ladder_reveal";
+  readonly revealer: EntityId;
+  readonly counter: EntityId;
+  readonly ladderHash: Hash;
+  readonly targetRole: boolean;
+  readonly fillRatio: number;
+  readonly revealedAt: bigint;
+};
 export type EntityRouteTx =
-  | { readonly type: "directPayment"; readonly recipient: EntityId; readonly tokenId: TokenId; readonly amount: bigint; readonly description?: string | undefined; readonly invoiceId?: string | undefined }
+  | {
+      readonly type: "directPayment";
+      readonly recipient: EntityId;
+      readonly tokenId: TokenId;
+      readonly amount: bigint;
+      readonly description?: string | undefined;
+      readonly invoiceId?: string | undefined;
+    }
   | ({ readonly type: "placeSwapOffer" } & SwapOfferTerms);
 export type HostInput = { readonly kind: "dispute" };
 export type HostCtx = { readonly timestamp: bigint; readonly jHeight: bigint; readonly from?: EntityId | undefined };
-/** `j_submit`: og jOutputs `{jurisdictionName, jTxs:[jTx]}` plus the jBatch hash the Entity quorum signs; `j_broadcast_request`: og finalizePendingBatch's self input `{entityTxs:[{type:"j_broadcast"}]}`. */
-export type HostEffect = Effect | Tagged<"start_dispute", { start: DisputeStart }> | Tagged<"send", { message: AccountPeerInput }>
-  | Tagged<"j_submit", { jTx: JBatchTx | JMintTx; hashToSign?: JBatchHashToSign | undefined }> | Tagged<"j_broadcast_request", { entityId: string }>;
+/**
+ * `j_submit`: og jOutputs `{jurisdictionName, jTxs:[jTx]}` plus the jBatch hash the Entity quorum signs;
+ * `j_broadcast_request`: og finalizePendingBatch's self input `{entityTxs:[{type:"j_broadcast"}]}`.
+ */
+export type HostEffect =
+  | Effect
+  | Tagged<"start_dispute", { start: DisputeStart }>
+  | Tagged<"send", { message: AccountPeerInput }>
+  | Tagged<"j_submit", { jTx: JBatchTx | JMintTx; hashToSign?: JBatchHashToSign | undefined }>
+  | Tagged<"j_broadcast_request", { entityId: string }>;
 export type OutboxEntry = { readonly id: Hash; readonly effect: HostEffect };
 export type HostTx =
-  | { readonly layer: "account"; readonly tx: WireAccountTx } | { readonly layer: "frame"; readonly input: AccountInput } | { readonly layer: "j"; readonly tx: JOp }
-  | { readonly layer: "ladder"; readonly tx: LadderTx } | { readonly layer: "entity"; readonly tx: EntityRouteTx } | { readonly layer: "input"; readonly input: HostInput } | { readonly layer: "receipt"; readonly id: Hash };
-/** `deltaTransformer`: og requireAccountDeltaTransformerAddress for the Host's Account (its Runtime's durable jurisdiction stack; never committed). */
-export type Host = { readonly self: EntityId; readonly account: AccountReplica; readonly j: JState; readonly ladder: ReadonlyMap<string, RatioRecord>; readonly height: bigint; readonly frameHash: RuntimeFrameHash; readonly outbox: readonly OutboxEntry[]; readonly deltaTransformer?: DeltaTransformerRef | undefined };
+  | { readonly layer: "account"; readonly tx: WireAccountTx }
+  | { readonly layer: "frame"; readonly input: AccountInput }
+  | { readonly layer: "j"; readonly tx: JOp }
+  | { readonly layer: "ladder"; readonly tx: LadderTx }
+  | { readonly layer: "entity"; readonly tx: EntityRouteTx }
+  | { readonly layer: "input"; readonly input: HostInput }
+  | { readonly layer: "receipt"; readonly id: Hash };
+/**
+ * `deltaTransformer`: og requireAccountDeltaTransformerAddress for the Host's Account (its Runtime's durable
+ * jurisdiction stack; never committed).
+ */
+export type Host = {
+  readonly self: EntityId;
+  readonly account: AccountReplica;
+  readonly j: JState;
+  readonly ladder: ReadonlyMap<string, RatioRecord>;
+  readonly height: bigint;
+  readonly frameHash: RuntimeFrameHash;
+  readonly outbox: readonly OutboxEntry[];
+  readonly deltaTransformer?: DeltaTransformerRef | undefined;
+};
 export type Stamped = { readonly tx: HostTx; readonly ctx: HostCtx };
-export type HostError = BodyError | Tagged<"unsigned" | "chain" | "root" | "version" | "reserve" | "status" | "recipient"> | Tagged<"candidate", { cause: AccountReplicaError }> | JBatchError | JObserveError;
+export type HostError =
+  | BodyError
+  | Tagged<"unsigned" | "chain" | "root" | "version" | "reserve" | "status" | "recipient">
+  | Tagged<"candidate", { cause: AccountReplicaError }>
+  | JBatchError
+  | JObserveError;
 export type HostStep = Step<Host, HostEffect>;
 export const genesisHost = (self: EntityId, account: AccountReplica): Result<Host, AccountReplicaError> =>
-  map(partyOf(replicaId(account), self), () => ({ self, account, j: { reserves: new Map(), debts: EMPTY_DEBTS }, ladder: new Map(), height: 0n, frameHash: ZERO_HASH as RuntimeFrameHash, outbox: [] }));
-const jEntityOf = (j: JState, self: EntityId, peer: string): JEntity => ({ entityId: self, reserves: j.reserves, debts: j.debts, jBatch: j.jBatch, accounts: new Set([peer]) });
-/** `release`: the Account latches a J recovery tx frees (og applyEntityAccountEnvelopeUpdate setRebalanceSubmittedAt / replaceDisputeLifecycle). */
-export type JApplied = { readonly j: JState; readonly effects: readonly HostEffect[]; readonly release?: JLatchRelease | undefined };
-/** og handleR2R / handleR2C / handleR2E / handleE2R / handleJBroadcast / handleJRebroadcast / handleJAbortSentBatch / handleJClearBatch / handleMintReserves and the Entity's reserve, debt and HankoBatchProcessed J-event handlers, for the Host's one Account. */
-export const applyJ = (j: JState, op: JOp, self: EntityId, peer: string, ctx: HostCtx, account?: AccountBody): Result<JApplied, HostError> => {
-  const e = jEntityOf(j, self, peer), just = (next: JState): JApplied => ({ j: next, effects: [] }), queued = (r: Result<JBatchState, JBatchError>): Result<JApplied, HostError> => map(r, (jBatch) => just({ ...j, jBatch }));
-  const submit = (b: Broadcast): JApplied => ({ j: { ...j, jBatch: b.jBatch }, effects: b.jTx === undefined ? [] : [{ _tag: "j_submit", jTx: b.jTx, ...opt("hashToSign", b.hashToSign) }] });
-  const recovered = (r: JRecovered): JApplied => ({ j: { ...j, jBatch: r.jBatch }, effects: [], release: r.release });
-  const jNonceOf = (counterparty: string): number => (account !== undefined && counterparty === peer.toLowerCase() ? account.jNonce : 0);
-  return matchBy("type", op, {
-    r2r: (x) => queued(queueR2R(e, x.toEntity, Number(x.tokenId), x.amount)),
-    r2c: (x) => map(queueR2C(e, x.counterparty, Number(x.tokenId), x.amount, x.receivingEntity, x.rebalanceFee), (q) => just(q.note === undefined ? { ...j, jBatch: q.jBatch } : j)),
-    r2et: (x) => queued(queueR2E(e, x.recipient, Number(x.tokenId), x.amount)),
-    et2r: (x) => queued(queueE2R(e, { contractAddress: x.tokenAddress, amount: x.amount, internalTokenId: Number(x.internalTokenId) })),
-    j_broadcast: (x) => map(jBroadcast(j.jBatch, { entityId: self, chainId: x.chainId, depository: x.depository, signerId: x.signerId, timestamp: Number(ctx.timestamp) }), submit),
-    j_rebroadcast: (x) => map(jRebroadcast(j.jBatch, { entityId: self, chainId: x.chainId, depository: x.depository, signerId: x.signerId, timestamp: Number(ctx.timestamp), gasBumpBps: x.gasBumpBps }), submit),
-    j_abort_sent_batch: (x) => ok(recovered(jAbortSentBatch(j.jBatch, x, jNonceOf))),
-    j_clear_batch: (x) => ok(recovered(jClearBatch(j.jBatch, x, account === undefined ? new Map() : new Map([[peer.toLowerCase(), [...(account.submittedAt ?? new Map<number, number>()).keys()]]])))),
-    mintReserves: (x) => ok({ j, effects: [{ _tag: "j_submit", jTx: mintReservesTx(self, x.tokenId, x.amount, Number(ctx.timestamp)).jTx }] }),
-    j_event: (x) => x.event.type === "HankoBatchProcessed"
-      ? map(applyHankoBatchProcessed(j.jBatch, self, x.event, Number(ctx.timestamp)), (b): JApplied => ({ j: { ...j, jBatch: b.jBatch }, effects: b.autoBroadcast ? [{ _tag: "j_broadcast_request", entityId: self }] : [] }))
-      : map(observeJBlocks({ entityId: self, reserves: j.reserves, debts: j.debts, accounts: new Map() }, [{ blockNumber: x.blockNumber, events: [x.event] }]), (o) => just({ ...j, reserves: o.observer.reserves, debts: o.observer.debts })),
-  });
-};
-/** og releaseR2CSubmittedLatches / clear's submitted-marker reset on the Host's one Account (finalize latches: the rewrite never sets finalizeQueued). */
-const releaseLatches = (account: AccountReplica, peer: string, release: JLatchRelease | undefined): AccountReplica => {
-  const mine = (release?.submitted ?? []).filter((r) => r.accountId === peer.toLowerCase());
-  return mine.length === 0 ? account : ({ ...account, state: mine.reduce((b, r) => setRebalanceSubmittedAt(b, r.tokenId, undefined), account.state) } as AccountReplica);
-};
-const ladderKey = (tx: LadderTx): string => `${tx.revealer}|${tx.counter}|${tx.ladderHash}|${tx.targetRole ? "t" : "s"}`;
-const admitTx = (host: Host, tx: WireAccountTx, ctx: HostCtx, verify: Verify): Result<HostStep, AccountReplicaError> => map(admitAt(host.account, [tx], host.self, { timestamp: ctx.timestamp, jHeight: ctx.jHeight }, verify), (account) => step({ ...host, account }));
-const accountStep = (host: Host, applied: Result<AccountApply, AccountReplicaError>): Result<HostStep, AccountReplicaError> => map(applied, (a) => {
-  const send = (message: AccountMessage): HostEffect => ({ _tag: "send", message });
-  return step({ ...host, account: a.replica }, a.outputs.flatMap((o): HostEffect[] => (o.kind === "message" ? [] : [matchBy("kind", o, { effect: (e) => e.effect, ack: send, ack_frame: send, start_dispute: ({ start }) => ({ _tag: "start_dispute", start }) })])));
+  map(partyOf(replicaId(account), self), () => ({
+    self,
+    account,
+    j: { reserves: new Map(), debts: EMPTY_DEBTS },
+    ladder: new Map(),
+    height: 0n,
+    frameHash: ZERO_HASH as RuntimeFrameHash,
+    outbox: [],
+  }));
+/** The Host's one Account seen through the door every Account input enters by. */
+const hostDoor = (host: Host, ctx: HostCtx, verify: Verify): DoorContext => ({
+  verify,
+  self: host.self,
+  now: ctx.timestamp,
+  ...opt("deltaTransformer", host.deltaTransformer),
 });
-const routeEntity = (tx: EntityRouteTx, self: EntityId, id: AccountId): Result<AccountTx, HostError> => matchBy("type", tx, {
-  directPayment: (x) => {
-    const party = partyOf(id, self);
-    return !party.ok || x.recipient !== party.value.peer ? err({ _tag: "recipient" }) : ok({ type: "payment", tokenId: x.tokenId, amount: x.amount });
-  },
-  placeSwapOffer: ({ type: _, ...offer }) => ok({ type: "swap_offer", ...offer }),
-  // og htlcPayment and the cross-j setup (prepare / materialize / register, foldTx) are Entity txs, never a one-Account Host route.
+
+
+// The Host's J state: batch lifecycle and finalized J events.
+
+const jEntityOf = (j: JState, self: EntityId, peer: string): JEntity => ({
+  entityId: self,
+  reserves: j.reserves,
+  debts: j.debts,
+  jBatch: j.jBatch,
+  accounts: new Set([peer]),
 });
 /**
- * og j-events.ts applyDisputeStartedJEvent / applyDisputeFinalizedJEvent (J7 dispatch): a DisputeStarted / DisputeFinalized event whose account
- * (og resolveDisputeAccountContext: the counterentity when we sent it, else the sender) is the Host's one Account becomes that Account's
- * external_finality, built by disputeStartedInput / disputeFinalizedInput against the frozen Account's current proof body. Other Accounts' events are
- * og's `account_missing` no-op. The Host's jBatchState then takes og's J-batch retirement (hostDisputeJBatch). Counter-proof selection and HTLC / cross-j follow-ups run on the
- * Entity path (disputeStartedJEvent); the one-Account Host holds no HTLC route or cross-j book to follow up on.
+ * `release`: the Account latches a J recovery tx frees (og applyEntityAccountEnvelopeUpdate setRebalanceSubmittedAt /
+ * replaceDisputeLifecycle).
  */
-const disputeFinalityOf = (host: Host, op: JOp, peer: EntityId): Result<AccountFinality | undefined, HostError> => {
-  if (op.type !== "j_event" || (op.event.type !== "DisputeStarted" && op.event.type !== "DisputeFinalized")) return ok(undefined);
-  const e = op.event, self = host.self.toLowerCase(), counterparty = e.sender.toLowerCase() === self ? e.counterentity.toLowerCase() : e.sender.toLowerCase();
-  if (counterparty !== peer.toLowerCase()) return ok(undefined);
-  const body = host.account.state, frozen = chain(mapErr(committedView(body), (): JObserveError => ({ _tag: "j_observe", reason: "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH" })), (view) =>
-    map(mapErr(localProof(view, host.deltaTransformer), (): JObserveError => ({ _tag: "j_observe", reason: "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH" })), (p) => p.bodyHash));
-  return chain(frozen, (frozenHash): Result<AccountFinality, HostError> => {
-    if (e.type === "DisputeStarted") return disputeStartedInput(e, op.blockNumber, frozenHash);
-    const active = host.account._tag === "disputed" ? host.account.active : undefined;
-    return disputeFinalizedInput(e, { jNonce: body.jNonce, ...opt("initialProposerIsLeft", active?.initialProposerIsLeft) }, frozenHash);
+export type JApplied = {
+  readonly j: JState;
+  readonly effects: readonly HostEffect[];
+  readonly release?: JLatchRelease | undefined;
+};
+const quietly = (j: JState): JApplied => ({ j, effects: [] });
+const withBatch = (j: JState, jBatch: JBatchState | undefined): JState => ({ ...j, jBatch });
+const queuedInto = (j: JState, queued: Result<JBatchState, JBatchError>): Result<JApplied, HostError> =>
+  map(queued, (jBatch) => quietly(withBatch(j, jBatch)));
+/** A broadcast seals the batch and, when it produced a J tx, submits it for the quorum to sign. */
+const submitted = (j: JState, b: Broadcast): JApplied => ({
+  j: withBatch(j, b.jBatch),
+  effects: b.jTx === undefined ? [] : [{ _tag: "j_submit", jTx: b.jTx, ...opt("hashToSign", b.hashToSign) }],
+});
+const recoveredBatch = (j: JState, r: JRecovered): JApplied => ({
+  j: withBatch(j, r.jBatch),
+  effects: [],
+  release: r.release,
+});
+/** og's jNonce lookup for a sent batch's counterparty: only the Host's one Account has one. */
+const hostJNonce = (account: AccountBody | undefined, peer: string) => (counterparty: string): number =>
+  account !== undefined && counterparty === peer.toLowerCase() ? account.jNonce : 0;
+/** The token ids the Host's one Account holds rebalance submissions for, by peer, as og clear reads them. */
+const submittedTokens = (account: AccountBody | undefined, peer: string) =>
+  account === undefined
+    ? new Map()
+    : new Map([[peer.toLowerCase(), [...(account.submittedAt ?? new Map<number, number>()).keys()]]]);
+/**
+ * HankoBatchProcessed retires the sent batch (and may ask for the next broadcast); any other J event moves reserves and
+ * debts.
+ */
+const applyJEvent = (
+  j: JState,
+  self: EntityId,
+  x: Extract<JOp, { readonly type: "j_event" }>,
+  timestamp: number,
+): Result<JApplied, HostError> => {
+  if (x.event.type === "HankoBatchProcessed") {
+    return map(applyHankoBatchProcessed(j.jBatch, self, x.event, timestamp), (b): JApplied => ({
+      j: withBatch(j, b.jBatch),
+      effects: b.autoBroadcast ? [{ _tag: "j_broadcast_request", entityId: self }] : [],
+    }));
+  }
+  const observed = observeJBlocks(
+    { entityId: self, reserves: j.reserves, debts: j.debts, accounts: new Map() },
+    [{ blockNumber: x.blockNumber, events: [x.event] }],
+  );
+  return map(observed, (o) => quietly({ ...j, reserves: o.observer.reserves, debts: o.observer.debts }));
+};
+/**
+ * og handleR2R / handleR2C / handleR2E / handleE2R / handleJBroadcast / handleJRebroadcast / handleJAbortSentBatch /
+ * handleJClearBatch / handleMintReserves and the Entity's reserve, debt and HankoBatchProcessed J-event handlers, for
+ * the Host's one Account.
+ */
+export const applyJ = (
+  j: JState,
+  op: JOp,
+  self: EntityId,
+  peer: string,
+  ctx: HostCtx,
+  account?: AccountBody,
+): Result<JApplied, HostError> => {
+  const e = jEntityOf(j, self, peer);
+  const timestamp = Number(ctx.timestamp);
+  return matchBy("type", op, {
+    r2r: (x) => queuedInto(j, queueR2R(e, x.toEntity, Number(x.tokenId), x.amount)),
+    r2c: (x) =>
+      map(queueR2C(e, x.counterparty, Number(x.tokenId), x.amount, x.receivingEntity, x.rebalanceFee), (q) =>
+        quietly(q.note === undefined ? withBatch(j, q.jBatch) : j),
+      ),
+    r2et: (x) => queuedInto(j, queueR2E(e, x.recipient, Number(x.tokenId), x.amount)),
+    et2r: (x) =>
+      queuedInto(
+        j,
+        queueE2R(e, { contractAddress: x.tokenAddress, amount: x.amount, internalTokenId: Number(x.internalTokenId) }),
+      ),
+    j_broadcast: (x) => {
+      const target = { entityId: self, chainId: x.chainId, depository: x.depository, signerId: x.signerId, timestamp };
+      return map(jBroadcast(j.jBatch, target), (b) => submitted(j, b));
+    },
+    j_rebroadcast: (x) => {
+      const target = {
+        entityId: self,
+        chainId: x.chainId,
+        depository: x.depository,
+        signerId: x.signerId,
+        timestamp,
+        gasBumpBps: x.gasBumpBps,
+      };
+      return map(jRebroadcast(j.jBatch, target), (b) => submitted(j, b));
+    },
+    j_abort_sent_batch: (x) => ok(recoveredBatch(j, jAbortSentBatch(j.jBatch, x, hostJNonce(account, peer)))),
+    j_clear_batch: (x) => ok(recoveredBatch(j, jClearBatch(j.jBatch, x, submittedTokens(account, peer)))),
+    mintReserves: (x) =>
+      ok({ j, effects: [{ _tag: "j_submit", jTx: mintReservesTx(self, x.tokenId, x.amount, timestamp).jTx }] }),
+    j_event: (x) => applyJEvent(j, self, x, timestamp),
   });
 };
-export const applyHost = (host: Host, tx: HostTx, ctx: HostCtx, verify: Verify): Result<HostStep, AccountReplicaError | HostError> => matchBy("layer", tx, {
-  account: (i) => admitTx(host, i.tx, ctx, verify),
-  frame: (i) => {
-    const delivery: Delivery = ctx.from === undefined ? { _tag: "local" } : { _tag: "received", from: ctx.from }, door: DoorContext = { verify, self: host.self, now: ctx.timestamp, ...opt("deltaTransformer", host.deltaTransformer) };
-    return accountStep(host, disputeUnsafe(host.account, applyDelivered(host.account, i.input, delivery, door), door));
-  },
-  j: (i) => chain(partyOf(replicaId(host.account), host.self), (party) => chain(applyJ(host.j, i.tx, host.self, party.peer, ctx, host.account.state), ({ j, effects, release }) => {
-    const moved: Host = { ...host, j, account: releaseLatches(host.account, party.peer, release) };
-    return chain(disputeFinalityOf(host, i.tx, party.peer), (finality): Result<HostStep, AccountReplicaError | HostError> => (finality === undefined || i.tx.type !== "j_event" || (i.tx.event.type !== "DisputeStarted" && i.tx.event.type !== "DisputeFinalized") ? ok(step(moved, effects))
-      : chain(map(accountStep(moved, applyAccountInput(host.account, { kind: "external_finality", ...envelopeOf(host.account.state.terms, party), finality }, { verify, self: host.self, now: ctx.timestamp, ...opt("deltaTransformer", host.deltaTransformer) })), (s) => step(s.state, [...effects, ...s.effects])),
-        (s) => map(hostDisputeJBatch(s.state.j, host.self, (i.tx as Extract<JOp, { readonly type: "j_event" }>).event as Extract<JEvent, { readonly type: "DisputeStarted" | "DisputeFinalized" }>), (b) => step({ ...s.state, j: b.j }, [...s.effects, ...b.effects])))));
-  })),
-  ladder: (i) => { const key = ladderKey(i.tx); return map(revealSlot(host.ladder.get(key), i.tx), (slot) => step({ ...host, ladder: mapSet(host.ladder, key, slot) })); },
-  entity: (i) => chain(routeEntity(i.tx, host.self, replicaId(host.account)), (routed) => admitTx(host, routed, ctx, verify)),
-  input: (i) => matchBy("kind", i.input, {
-    dispute: () => accountStep(host, applyAccountInput(host.account, { kind: "freeze" }, { verify, self: host.self, now: ctx.timestamp, ...opt("deltaTransformer", host.deltaTransformer) })),
-  }),
+/**
+ * og releaseR2CSubmittedLatches / clear's submitted-marker reset on the Host's one Account (finalize latches: the
+ * rewrite never sets finalizeQueued).
+ */
+const releaseLatches = (account: AccountReplica, peer: string, release: JLatchRelease | undefined): AccountReplica => {
+  const mine = (release?.submitted ?? []).filter((r) => r.accountId === peer.toLowerCase());
+  if (mine.length === 0) return account;
+  return {
+    ...account,
+    state: mine.reduce((b, r) => setRebalanceSubmittedAt(b, r.tokenId, undefined), account.state),
+  } as AccountReplica;
+};
 
-  receipt: (i) => ok(step({ ...host, outbox: host.outbox.filter((e) => e.id !== i.id) })),
-});
+
+// Disputes: a dispute J event on the Host's Account lands on it as external finality.
+
+type DisputeJEvent = Extract<JEvent, { readonly type: "DisputeStarted" | "DisputeFinalized" }>;
+type DisputeJOp = { readonly blockNumber: number; readonly event: DisputeJEvent };
+const disputeOpOf = (op: JOp): DisputeJOp | undefined =>
+  op.type === "j_event" && (op.event.type === "DisputeStarted" || op.event.type === "DisputeFinalized")
+    ? { blockNumber: op.blockNumber, event: op.event }
+    : undefined;
+/** og resolveDisputeAccountContext: the counterentity when we sent it, else the sender. */
+const disputedPeer = (self: EntityId, e: DisputeJEvent): string =>
+  e.sender.toLowerCase() === self.toLowerCase() ? e.counterentity.toLowerCase() : e.sender.toLowerCase();
+const FROZEN_STATE_MISMATCH: JObserveError = { _tag: "j_observe", reason: "DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH" };
+/** The frozen Account's current proof body hash, which the dispute's finality is built against. */
+const frozenBodyHash = (host: Host) =>
+  chain(mapErr(committedView(host.account.state), () => FROZEN_STATE_MISMATCH), (view) =>
+    map(mapErr(localProof(view, host.deltaTransformer), () => FROZEN_STATE_MISMATCH), (p) => p.bodyHash));
+/**
+ * og j-events.ts applyDisputeStartedJEvent / applyDisputeFinalizedJEvent (J7 dispatch): a DisputeStarted /
+ * DisputeFinalized event whose account (og resolveDisputeAccountContext: the counterentity when we sent it, else the
+ * sender) is the Host's one Account becomes that Account's external_finality, built by disputeStartedInput /
+ * disputeFinalizedInput against the frozen Account's current proof body. Other Accounts' events are og's
+ * `account_missing` no-op. The Host's jBatchState then takes og's J-batch retirement (hostDisputeJBatch). Counter-proof
+ * selection and HTLC / cross-j follow-ups run on the Entity path (disputeStartedJEvent); the one-Account Host holds no
+ * HTLC route or cross-j book to follow up on.
+ */
+const disputeFinalityOf = (
+  host: Host,
+  d: DisputeJOp,
+  peer: EntityId,
+): Result<AccountFinality | undefined, HostError> => {
+  if (disputedPeer(host.self, d.event) !== peer.toLowerCase()) return ok(undefined);
+  return chain(frozenBodyHash(host), (frozenHash): Result<AccountFinality, HostError> => {
+    const e = d.event;
+    if (e.type === "DisputeStarted") return disputeStartedInput(e, d.blockNumber, frozenHash);
+    const active = host.account._tag === "disputed" ? host.account.active : undefined;
+    return disputeFinalizedInput(
+      e,
+      { jNonce: host.account.state.jNonce, ...opt("initialProposerIsLeft", active?.initialProposerIsLeft) },
+      frozenHash,
+    );
+  });
+};
+
+
+// The Host's steps.
+
+const ladderKey = (tx: LadderTx): string =>
+  `${tx.revealer}|${tx.counter}|${tx.ladderHash}|${tx.targetRole ? "t" : "s"}`;
+const admitTx = (host: Host, tx: WireAccountTx, ctx: HostCtx, verify: Verify): Result<HostStep, AccountReplicaError> =>
+  map(admitAt(host.account, [tx], host.self, { timestamp: ctx.timestamp, jHeight: ctx.jHeight }, verify), (account) =>
+    step({ ...host, account }));
+const sendEffect = (message: AccountMessage): HostEffect => ({ _tag: "send", message });
+/** An Account output as the Host's effect; the Account's plain messages stay with it. */
+const hostEffectsOf = (o: AccountOutput): readonly HostEffect[] =>
+  o.kind === "message"
+    ? []
+    : [matchBy("kind", o, {
+        effect: (e) => e.effect,
+        ack: sendEffect,
+        ack_frame: sendEffect,
+        start_dispute: ({ start }) => ({ _tag: "start_dispute", start }),
+      })];
+const accountStep = (
+  host: Host,
+  applied: Result<AccountApply, AccountReplicaError>,
+): Result<HostStep, AccountReplicaError> =>
+  map(applied, (a) => step({ ...host, account: a.replica }, a.outputs.flatMap(hostEffectsOf)));
+const routeEntity = (tx: EntityRouteTx, self: EntityId, id: AccountId): Result<AccountTx, HostError> =>
+  matchBy("type", tx, {
+    directPayment: (x) => {
+      const party = partyOf(id, self);
+      return !party.ok || x.recipient !== party.value.peer
+        ? err({ _tag: "recipient" })
+        : ok({ type: "payment", tokenId: x.tokenId, amount: x.amount });
+    },
+    placeSwapOffer: ({ type: _, ...offer }) => ok({ type: "swap_offer", ...offer }),
+    // og htlcPayment and the cross-j setup (prepare / materialize / register, foldTx) are Entity txs,
+    // never a one-Account Host route.
+  });
+/**
+ * A J op moves the Host's J state and frees its latches; a dispute event on its Account also lands there, then retires
+ * the J batch.
+ */
+const applyHostJ = (
+  host: Host,
+  op: JOp,
+  ctx: HostCtx,
+  verify: Verify,
+): Result<HostStep, AccountReplicaError | HostError> =>
+  chain(partyOf(replicaId(host.account), host.self), (party) =>
+    chain(applyJ(host.j, op, host.self, party.peer, ctx, host.account.state), ({ j, effects, release }) => {
+      const moved: Host = { ...host, j, account: releaseLatches(host.account, party.peer, release) };
+      const dispute = disputeOpOf(op);
+      const finality = dispute === undefined ? ok(undefined) : disputeFinalityOf(host, dispute, party.peer);
+      return chain(finality, (f): Result<HostStep, AccountReplicaError | HostError> => {
+        if (dispute === undefined || f === undefined) return ok(step(moved, effects));
+        const envelope = envelopeOf(host.account.state.terms, party);
+        const landed = accountStep(
+          moved,
+          applyAccountInput(
+            host.account,
+            { kind: "external_finality", ...envelope, finality: f },
+            hostDoor(host, ctx, verify),
+          ),
+        );
+        const withFinality = map(landed, (s) => step(s.state, [...effects, ...s.effects]));
+        return chain(withFinality, (s) =>
+          map(hostDisputeJBatch(s.state.j, host.self, dispute.event), (b) =>
+            step({ ...s.state, j: b.j }, [...s.effects, ...b.effects]),
+          ),
+        );
+      });
+    }),
+  );
+export const applyHost = (
+  host: Host,
+  tx: HostTx,
+  ctx: HostCtx,
+  verify: Verify,
+): Result<HostStep, AccountReplicaError | HostError> =>
+  matchBy("layer", tx, {
+    account: (i) => admitTx(host, i.tx, ctx, verify),
+    frame: (i) => {
+      const delivery: Delivery = ctx.from === undefined ? { _tag: "local" } : { _tag: "received", from: ctx.from };
+      const door = hostDoor(host, ctx, verify);
+      return accountStep(
+        host,
+        disputeUnsafe(host.account, applyDelivered(host.account, i.input, delivery, door), door),
+      );
+    },
+    j: (i) => applyHostJ(host, i.tx, ctx, verify),
+    ladder: (i) => {
+      const key = ladderKey(i.tx);
+      return map(revealSlot(host.ladder.get(key), i.tx), (slot) =>
+        step({ ...host, ladder: mapSet(host.ladder, key, slot) }),
+      );
+    },
+    entity: (i) =>
+      chain(routeEntity(i.tx, host.self, replicaId(host.account)), (routed) => admitTx(host, routed, ctx, verify)),
+    input: (i) =>
+      matchBy("kind", i.input, {
+        dispute: () =>
+          accountStep(host, applyAccountInput(host.account, { kind: "freeze" }, hostDoor(host, ctx, verify))),
+      }),
+    receipt: (i) => ok(step({ ...host, outbox: host.outbox.filter((e) => e.id !== i.id) })),
+  });
 
 // ---- watchtower: og storage/recovery/bundle/{types,crypto}.ts, watchtower/http.ts verifyTowerAppointment, watchtower/store/{appointments,decode,db}.ts ----
-// The HTTP body reader, LevelDB, the store-wide quotas (maxLookupKeys, maxTotalStoredBytes), push, sweep and the on-chain action are I/O:
-// the stored lookup document is threaded as a value, and the tower's clock and key are inputs.
+// The HTTP body reader, LevelDB, the store-wide quotas (maxLookupKeys, maxTotalStoredBytes), push, sweep and the
+// on-chain action are I/O: the stored lookup document is threaded as a value, and the tower's clock and key are inputs.
 export type TowerModeV1 = "blind_backup" | "delayed_last_resort";
 export type EncryptedRuntimeRecoveryBundleV1 = {
-  readonly version: 1; readonly kind?: "snapshot" | "journal_tail" | undefined; readonly runtimeId: string; readonly lookupKey: string; readonly height: number; readonly createdAt: number;
-  readonly bundleHash: string; readonly baseRuntimeHeight?: number | undefined; readonly baseCheckpointHash?: string | undefined; readonly iv: string; readonly ciphertext: string; readonly compression?: "gzip" | undefined;
+  readonly version: 1;
+  readonly kind?: "snapshot" | "journal_tail" | undefined;
+  readonly runtimeId: string;
+  readonly lookupKey: string;
+  readonly height: number;
+  readonly createdAt: number;
+  readonly bundleHash: string;
+  readonly baseRuntimeHeight?: number | undefined;
+  readonly baseCheckpointHash?: string | undefined;
+  readonly iv: string;
+  readonly ciphertext: string;
+  readonly compression?: "gzip" | undefined;
 };
-export type TowerLastResortWatchV1 = { readonly rpcUrl: string; readonly chainId: number; readonly depositoryAddress: string; readonly watchedEntityId: string; readonly counterentity: string };
+export type TowerLastResortWatchV1 = {
+  readonly rpcUrl: string;
+  readonly chainId: number;
+  readonly depositoryAddress: string;
+  readonly watchedEntityId: string;
+  readonly counterentity: string;
+};
 export type TowerLastResortPayloadV1 = {
-  readonly triggerHint: string; readonly watch: TowerLastResortWatchV1; readonly encryptedRemedy: string; readonly actionKind: "counter_dispute_only"; readonly appointmentSequence: number; readonly proofNonce: number;
-  readonly proofBodyHash: string; readonly responseMode: "last_resort"; readonly lastResortWindowSeconds: number; readonly maxFeeToken?: string | undefined; readonly feeBudget?: string | undefined;
+  readonly triggerHint: string;
+  readonly watch: TowerLastResortWatchV1;
+  readonly encryptedRemedy: string;
+  readonly actionKind: "counter_dispute_only";
+  readonly appointmentSequence: number;
+  readonly proofNonce: number;
+  readonly proofBodyHash: string;
+  readonly responseMode: "last_resort";
+  readonly lastResortWindowSeconds: number;
+  readonly maxFeeToken?: string | undefined;
+  readonly feeBudget?: string | undefined;
 };
-export type TowerAppointmentOwnerProofV1 = { readonly runtimeId: string; readonly signedAt: number; readonly signature: string };
+export type TowerAppointmentOwnerProofV1 = {
+  readonly runtimeId: string;
+  readonly signedAt: number;
+  readonly signature: string;
+};
 export type TowerAppointmentV1 = {
-  readonly type: "tower_appointment"; readonly version: 1; readonly towerMode?: TowerModeV1 | undefined; readonly lookupKey: string; readonly slot?: number | undefined;
-  readonly bundle: EncryptedRuntimeRecoveryBundleV1; readonly lastResortPayload?: TowerLastResortPayloadV1 | undefined; readonly ownerProof: TowerAppointmentOwnerProofV1;
+  readonly type: "tower_appointment";
+  readonly version: 1;
+  readonly towerMode?: TowerModeV1 | undefined;
+  readonly lookupKey: string;
+  readonly slot?: number | undefined;
+  readonly bundle: EncryptedRuntimeRecoveryBundleV1;
+  readonly lastResortPayload?: TowerLastResortPayloadV1 | undefined;
+  readonly ownerProof: TowerAppointmentOwnerProofV1;
 };
 export type TowerReceiptV1 = {
-  readonly type: "tower_receipt"; readonly version: 1; readonly towerId: string; readonly lookupKey: string; readonly runtimeId: string; readonly height: number; readonly bundleHash: string;
-  readonly towerMode?: TowerModeV1 | undefined; readonly slot?: number | undefined; readonly storedAt?: number | undefined; readonly receivedAt: number; readonly expiresAt?: number | undefined;
-  readonly sequence: number; readonly retainedSlots: number; readonly storedBytes?: number | undefined; readonly maxStoredBytes?: number | undefined; readonly quotaOk?: boolean | undefined;
-  readonly appointmentSequence?: number | null | undefined; readonly towerSignature?: string | undefined;
+  readonly type: "tower_receipt";
+  readonly version: 1;
+  readonly towerId: string;
+  readonly lookupKey: string;
+  readonly runtimeId: string;
+  readonly height: number;
+  readonly bundleHash: string;
+  readonly towerMode?: TowerModeV1 | undefined;
+  readonly slot?: number | undefined;
+  readonly storedAt?: number | undefined;
+  readonly receivedAt: number;
+  readonly expiresAt?: number | undefined;
+  readonly sequence: number;
+  readonly retainedSlots: number;
+  readonly storedBytes?: number | undefined;
+  readonly maxStoredBytes?: number | undefined;
+  readonly quotaOk?: boolean | undefined;
+  readonly appointmentSequence?: number | null | undefined;
+  readonly towerSignature?: string | undefined;
 };
 export type TowerStoredBundle = {
-  readonly slot: number; readonly towerMode: TowerModeV1; readonly bundle: EncryptedRuntimeRecoveryBundleV1; readonly ownerSignedAt: number; readonly encryptedEnvelopeHash: string;
-  readonly lastResortPayloadDigest: string; readonly lastResortPayload?: TowerLastResortPayloadV1 | undefined;
+  readonly slot: number;
+  readonly towerMode: TowerModeV1;
+  readonly bundle: EncryptedRuntimeRecoveryBundleV1;
+  readonly ownerSignedAt: number;
+  readonly encryptedEnvelopeHash: string;
+  readonly lastResortPayloadDigest: string;
+  readonly lastResortPayload?: TowerLastResortPayloadV1 | undefined;
 };
 /** og StoredLookupDoc: one lookup key's receipts (newest first) and retained bundles. */
-export type TowerLookupDoc = { readonly lookupKey: string; readonly runtimeId: string; readonly updatedAt: number; readonly receipts: readonly TowerReceiptV1[]; readonly bundles: readonly TowerStoredBundle[] };
-/** og WatchtowerStoreContext minus I/O: `now` is the one `context.now()` reading for this write, `towerPrivateKey` og's `signer`. */
-export type TowerStoreConfig = { readonly towerId: string; readonly towerPrivateKey: Uint8Array; readonly maxBundlesPerLookupKey: number; readonly maxStoredBytesPerLookupKey: number; readonly receiptTtlMs: number; readonly now: number };
+export type TowerLookupDoc = {
+  readonly lookupKey: string;
+  readonly runtimeId: string;
+  readonly updatedAt: number;
+  readonly receipts: readonly TowerReceiptV1[];
+  readonly bundles: readonly TowerStoredBundle[];
+};
+/**
+ * og WatchtowerStoreContext minus I/O: `now` is the one `context.now()` reading for this write, `towerPrivateKey` og's
+ * `signer`.
+ */
+export type TowerStoreConfig = {
+  readonly towerId: string;
+  readonly towerPrivateKey: Uint8Array;
+  readonly maxBundlesPerLookupKey: number;
+  readonly maxStoredBytesPerLookupKey: number;
+  readonly receiptTtlMs: number;
+  readonly now: number;
+};
 /** `code` is og's thrown message. */
 export type TowerError = Tagged<"tower", { code: string }>;
 type Rec = { readonly [k: string]: unknown };
 const towerErr = (code: string): Result<never, TowerError> => err({ _tag: "tower", code });
-/** Sequential guards: the first failing code, as og's first throw. */
-const towerChecks = (...checks: readonly (() => string | undefined)[]): Result<void, TowerError> => {
-  for (const check of checks) { const code = check(); if (code !== undefined) return towerErr(code); }
-  return ok(undefined);
+const errorCode = (r: Result<unknown, TowerError>): string | undefined => (r.ok ? undefined : r.error.code);
+
+
+// Boundary checks: og throws the first failure, so each check is lazy and names its failure or nothing.
+
+type BoundaryCheck = () => string | undefined;
+const codeIf = (failed: boolean, code: string): string | undefined => (failed ? code : undefined);
+/** The first failing check, as og's first throw; later checks are not run. */
+const firstThrown = (...checks: readonly BoundaryCheck[]): string | undefined => firstDefined(...checks);
+const towerChecks = (...checks: readonly BoundaryCheck[]): Result<void, TowerError> => {
+  const code = firstThrown(...checks);
+  return code === undefined ? ok(undefined) : towerErr(code);
 };
 /** og requireBoundaryRecord. */
 const plainRecord = (v: unknown): v is Rec => {
@@ -40476,342 +41391,865 @@ const plainRecord = (v: unknown): v is Rec => {
   return proto === Object.prototype || proto === null;
 };
 /** og requireExactBoundaryKeys. */
-const exactKeys = (r: Rec, required: readonly string[], optional: readonly string[], code: string): string | undefined => {
-  const allowed = new Set([...required, ...optional]), missing = required.filter((k) => !Object.hasOwn(r, k)), extra = Object.keys(r).filter((k) => !allowed.has(k));
-  return missing.length > 0 || extra.length > 0 ? `${code}:missing=${missing.join(",") || "none"}:extra=${extra.join(",") || "none"}` : undefined;
+const exactKeys = (
+  r: Rec,
+  required: readonly string[],
+  optional: readonly string[],
+  code: string,
+): string | undefined => {
+  const allowed = new Set([...required, ...optional]);
+  const missing = required.filter((k) => !Object.hasOwn(r, k));
+  const extra = Object.keys(r).filter((k) => !allowed.has(k));
+  const listed = (keys: readonly string[]): string => keys.join(",") || "none";
+  return codeIf(missing.length > 0 || extra.length > 0, `${code}:missing=${listed(missing)}:extra=${listed(extra)}`);
 };
-const recordShape = (v: unknown, code: string, required: readonly string[], optional: readonly string[], fieldsCode: string): string | undefined =>
-  !plainRecord(v) ? code : exactKeys(v, required, optional, fieldsCode);
+/** A boundary record: exactly its fields, with og's codes for a non-record and for wrong fields. */
+type RecordShape = {
+  readonly required: readonly string[];
+  readonly optional: readonly string[];
+  readonly invalid: string;
+  readonly fieldsInvalid: string;
+};
+const fieldsCode = (r: Rec, shape: RecordShape): string | undefined =>
+  exactKeys(r, shape.required, shape.optional, shape.fieldsInvalid);
+const shapeCode = (v: unknown, shape: RecordShape): string | undefined =>
+  plainRecord(v) ? fieldsCode(v, shape) : shape.invalid;
+const BUNDLE_FIELDS = ["version", "runtimeId", "lookupKey", "height", "createdAt", "bundleHash", "iv", "ciphertext"];
+const BUNDLE_OPTIONAL = ["kind", "baseRuntimeHeight", "baseCheckpointHash", "compression"];
+const APPOINTMENT_SHAPE: RecordShape = {
+  required: ["type", "version", "lookupKey", "bundle", "ownerProof"],
+  optional: ["towerMode", "slot", "lastResortPayload"],
+  invalid: "TOWER_APPOINTMENT_INVALID",
+  fieldsInvalid: "TOWER_APPOINTMENT_FIELDS_INVALID",
+};
+const BUNDLE_SHAPE: RecordShape = {
+  required: BUNDLE_FIELDS,
+  optional: BUNDLE_OPTIONAL,
+  invalid: "TOWER_BUNDLE_INVALID",
+  fieldsInvalid: "TOWER_BUNDLE_FIELDS_INVALID",
+};
+const OWNER_PROOF_SHAPE: RecordShape = {
+  required: ["runtimeId", "signedAt", "signature"],
+  optional: [],
+  invalid: "TOWER_APPOINTMENT_OWNER_PROOF_INVALID",
+  fieldsInvalid: "TOWER_APPOINTMENT_OWNER_PROOF_FIELDS_INVALID",
+};
+const LAST_RESORT_PAYLOAD_SHAPE: RecordShape = {
+  required: [
+    "triggerHint",
+    "watch",
+    "encryptedRemedy",
+    "actionKind",
+    "appointmentSequence",
+    "proofNonce",
+    "proofBodyHash",
+    "responseMode",
+    "lastResortWindowSeconds",
+  ],
+  optional: ["maxFeeToken", "feeBudget"],
+  invalid: "TOWER_LAST_RESORT_PAYLOAD_INVALID",
+  fieldsInvalid: "TOWER_LAST_RESORT_PAYLOAD_FIELDS_INVALID",
+};
+const WATCH_SHAPE: RecordShape = {
+  required: ["rpcUrl", "chainId", "depositoryAddress", "watchedEntityId", "counterentity"],
+  optional: [],
+  invalid: "TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING",
+  fieldsInvalid: "TOWER_LAST_RESORT_PAYLOAD_WATCH_FIELDS_INVALID",
+};
+const STORED_LOOKUP_SHAPE: RecordShape = {
+  required: ["lookupKey", "runtimeId", "updatedAt", "receipts", "bundles"],
+  optional: [],
+  invalid: "TOWER_STORED_LOOKUP_INVALID",
+  fieldsInvalid: "TOWER_STORED_LOOKUP_FIELDS_INVALID",
+};
+const STORED_RECEIPT_SHAPE: RecordShape = {
+  required: [
+    "type",
+    "version",
+    "towerId",
+    "lookupKey",
+    "runtimeId",
+    "height",
+    "bundleHash",
+    "receivedAt",
+    "sequence",
+    "retainedSlots",
+  ],
+  optional: [
+    "towerMode",
+    "slot",
+    "storedAt",
+    "expiresAt",
+    "storedBytes",
+    "maxStoredBytes",
+    "quotaOk",
+    "appointmentSequence",
+    "towerSignature",
+  ],
+  invalid: "TOWER_STORED_RECEIPT_INVALID",
+  fieldsInvalid: "TOWER_STORED_RECEIPT_FIELDS_INVALID",
+};
+const STORED_ENTRY_SHAPE: RecordShape = {
+  required: ["slot", "towerMode", "bundle", "ownerSignedAt", "encryptedEnvelopeHash", "lastResortPayloadDigest"],
+  optional: ["lastResortPayload"],
+  invalid: "TOWER_STORED_BUNDLE_ENTRY_INVALID",
+  fieldsInvalid: "TOWER_STORED_BUNDLE_ENTRY_FIELDS_INVALID",
+};
+const STORED_BUNDLE_SHAPE: RecordShape = {
+  required: BUNDLE_FIELDS,
+  optional: BUNDLE_OPTIONAL,
+  invalid: "TOWER_STORED_BUNDLE_INVALID",
+  fieldsInvalid: "TOWER_STORED_BUNDLE_FIELDS_INVALID",
+};
+
+
+// Values as og coerces them at the boundary.
+
 const jsText = (v: unknown): string => String(v || "");
 const jsInt = (v: unknown): number => Math.max(0, Math.floor(Number(v || 0)));
+/** og's slot: `?? 0`, so only a missing slot is zero before the floor. */
+const slotOf = (v: unknown): number => Math.max(0, Math.floor(Number(v ?? 0)));
 /** og normalizeTowerModeV1. */
 export const normalizeTowerMode = (mode: unknown): Result<TowerModeV1, TowerError> => {
   const raw = jsText(mode).trim();
-  return !raw || raw === "blind_backup" ? ok("blind_backup") : raw === "delayed_last_resort" ? ok("delayed_last_resort") : towerErr(`TOWER_MODE_INVALID:${raw}`);
+  switch (raw) {
+    case "":
+    case "blind_backup":
+      return ok("blind_backup");
+    case "delayed_last_resort":
+      return ok("delayed_last_resort");
+    default:
+      return towerErr(`TOWER_MODE_INVALID:${raw}`);
+  }
 };
+const TOWER_BYTES32 = /^0x[0-9a-f]{64}$/;
+const LOWER_HEX_BYTES = /^0x([0-9a-f]{2})*$/;
+const towerLookupKey = (v: unknown): Result<string, TowerError> => {
+  const k = jsText(v).trim().toLowerCase();
+  return TOWER_BYTES32.test(k) ? ok(k) : towerErr(`TOWER_LOOKUP_KEY_INVALID: ${String(v)}`);
+};
+const bytes32Code = (v: unknown, label: string): string | undefined =>
+  codeIf(!TOWER_BYTES32.test(jsText(v).trim().toLowerCase()), `TOWER_${label}_INVALID: ${String(v)}`);
+const hexBytesCode = (v: unknown, label: string): string | undefined =>
+  codeIf(!LOWER_HEX_BYTES.test(jsText(v).trim().toLowerCase()), `TOWER_${label}_INVALID`);
+const nonNegative = (v: unknown): number | undefined => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+};
+const nonNegativeCode = (v: unknown, label: string): string | undefined =>
+  codeIf(nonNegative(v) === undefined, `TOWER_${label}_INVALID`);
+const positiveCode = (v: unknown, label: string): string | undefined => {
+  const n = nonNegative(v);
+  return codeIf(n === undefined || n <= 0, `TOWER_${label}_INVALID`);
+};
+const safeIntCode = (v: unknown, code: string): string | undefined =>
+  codeIf(typeof v !== "number" || !Number.isSafeInteger(v) || v < 0, code);
+const optionalSafeIntCode = (v: unknown, code: string): string | undefined =>
+  v === undefined || v === null ? undefined : safeIntCode(v, code);
+const textCode = (v: unknown, code: string): string | undefined =>
+  codeIf(typeof v !== "string" || v.trim().length === 0, code);
+
+
+// Hashes and signed messages.
+
 const towerHashText = (text: string): string => keccak256Hex(utf8(text));
 /** og computeEncryptedRuntimeRecoveryEnvelopeHash: keccak of the tagged-JSON envelope. */
-export const towerEnvelopeHash = (bundle: EncryptedRuntimeRecoveryBundleV1): string => towerHashText(stableJson(bundle));
+export const towerEnvelopeHash = (bundle: EncryptedRuntimeRecoveryBundleV1): string =>
+  towerHashText(stableJson(bundle));
 /** og computeTowerLastResortPayloadDigest: ZeroHash when absent. */
-export const towerPayloadDigest = (payload: TowerLastResortPayloadV1 | null | undefined): string => (payload ? towerHashText(stableJson(payload)) : ZERO_WORD);
+export const towerPayloadDigest = (payload: TowerLastResortPayloadV1 | null | undefined): string =>
+  payload ? towerHashText(stableJson(payload)) : ZERO_WORD;
 /** og buildTowerAppointmentOwnerMessage. */
-export const towerAppointmentOwnerMessage = (runtimeId: string, towerMode: TowerModeV1, lookupKey: string, slot: number, bundle: EncryptedRuntimeRecoveryBundleV1, signedAt: number, payload?: TowerLastResortPayloadV1 | null): string =>
-  `xln:tower:appointment:v1|${runtimeId.toLowerCase()}|${towerMode}|${lookupKey}|${jsInt(slot)}|${towerEnvelopeHash(bundle)}|${jsInt(signedAt)}|${towerPayloadDigest(payload)}`;
+export const towerAppointmentOwnerMessage = (
+  runtimeId: string,
+  towerMode: TowerModeV1,
+  lookupKey: string,
+  slot: number,
+  bundle: EncryptedRuntimeRecoveryBundleV1,
+  signedAt: number,
+  payload?: TowerLastResortPayloadV1 | null,
+): string =>
+  [
+    "xln:tower:appointment:v1",
+    runtimeId.toLowerCase(),
+    towerMode,
+    lookupKey,
+    jsInt(slot),
+    towerEnvelopeHash(bundle),
+    jsInt(signedAt),
+    towerPayloadDigest(payload),
+  ].join("|");
 /** og appointments.ts buildReceiptMessage. */
 export const towerReceiptMessage = (r: TowerReceiptV1): string =>
-  `xln:watchtower:receipt:v1|${r.towerId}|${r.lookupKey}|${r.runtimeId}|${r.height}|${r.bundleHash}|${jsInt(r.sequence)}|${jsInt(r.slot)}|${String(r.towerMode || "blind_backup")}|${jsInt(r.storedBytes)}|${jsInt(r.maxStoredBytes)}|${jsInt(r.expiresAt)}`;
-const eip191Digest = (message: string): Uint8Array => { const body = utf8(message); return keccak256(concat([utf8(`\x19Ethereum Signed Message:\n${body.length}`), body])); };
+  [
+    "xln:watchtower:receipt:v1",
+    r.towerId,
+    r.lookupKey,
+    r.runtimeId,
+    r.height,
+    r.bundleHash,
+    jsInt(r.sequence),
+    jsInt(r.slot),
+    String(r.towerMode || "blind_backup"),
+    jsInt(r.storedBytes),
+    jsInt(r.maxStoredBytes),
+    jsInt(r.expiresAt),
+  ].join("|");
+const eip191Digest = (message: string): Uint8Array => {
+  const body = utf8(message);
+  return keccak256(concat([utf8(`\x19Ethereum Signed Message:\n${body.length}`), body]));
+};
+const hexWord = (n: bigint): string => n.toString(16).padStart(64, "0");
 /** ethers Wallet.signMessage: EIP-191, RFC 6979 low-s, v = 27 + parity. */
 export const signPersonalMessage = (message: string, privateKey: Uint8Array): string => {
   const s = signRaw(eip191Digest(message), privateKey);
-  return joinHex([s.r.toString(16).padStart(64, "0"), s.s.toString(16).padStart(64, "0"), (27 + s.recovery).toString(16)]);
+  return joinHex([hexWord(s.r), hexWord(s.s), (27 + s.recovery).toString(16)]);
 };
-/** ethers verifyMessage (Signature.from: 64-byte EIP-2098 or 65-byte with v 0/1/27/28/EIP-155): the lowercase signer, or undefined where ethers throws. */
+/** A signature's r, s and v: 65 bytes as they are, 64 bytes (EIP-2098) with v folded into the top bit of s. */
+type SplitSignature = { readonly r: Uint8Array; readonly s: Uint8Array; readonly v: number };
+const splitSignature = (bytes: Uint8Array): SplitSignature | undefined => {
+  const r = bytes.slice(0, 32);
+  const s = bytes.slice(32, 64);
+  const top = s[0] ?? 0;
+  switch (bytes.length) {
+    case 65:
+      return { r, s, v: bytes[64] ?? 0 };
+    case 64:
+      return { r, s: Uint8Array.of(top & 0x7f, ...s.subarray(1)), v: top & 0x80 ? 28 : 27 };
+    default:
+      return undefined;
+  }
+};
+/** The recovery parity a v byte names (0/1, 27/28 or EIP-155), or undefined where ethers throws. */
+const parityOfV = (v: number): 0 | 1 | undefined => {
+  switch (true) {
+    case v === 0 || v === 27:
+      return 0;
+    case v === 1 || v === 28:
+      return 1;
+    case v >= 35:
+      return v & 1 ? 0 : 1;
+    default:
+      return undefined;
+  }
+};
+/**
+ * ethers verifyMessage (Signature.from: 64-byte EIP-2098 or 65-byte with v 0/1/27/28/EIP-155): the lowercase signer, or
+ * undefined where ethers throws.
+ */
 export const recoverPersonalMessage = (message: string, signature: string): string | undefined => {
-  const bytes = /^0x([0-9a-fA-F]{2})*$/.test(signature) ? hexToBytes(signature) : undefined;
-  if (bytes === undefined || (bytes.length !== 64 && bytes.length !== 65)) return undefined;
-  const s = bytes.slice(32, 64), v = bytes.length === 64 ? ((s[0] ?? 0) & 0x80 ? 28 : 27) : bytes[64] ?? 0;
-  if (bytes.length === 64) s[0] = (s[0] ?? 0) & 0x7f;
-  const parity = v === 0 || v === 27 ? 0 : v === 1 || v === 28 ? 1 : v >= 35 ? (v & 1 ? 0 : 1) : undefined;
-  if (parity === undefined) return undefined;
-  const pub = recoverPublicKey(eip191Digest(message), bytes.slice(0, 32), s, parity);
+  const sig = EVEN_HEX.test(signature) ? splitSignature(hexToBytes(signature)) : undefined;
+  const parity = sig === undefined ? undefined : parityOfV(sig.v);
+  if (sig === undefined || parity === undefined) return undefined;
+  const pub = recoverPublicKey(eip191Digest(message), sig.r, sig.s, parity);
   return pub === null ? undefined : addressOf(pub).toLowerCase();
 };
+const ibanDigits = (c: string): string => (/[0-9]/.test(c) ? c : String(c.charCodeAt(0) - 55));
+/** A long decimal string mod 97, folded 15 digits at a time as ethers does. */
+const mod97 = (digits: string): number =>
+  digits.length >= 15
+    ? mod97(String(parseInt(digits.substring(0, 15), 10) % 97) + digits.substring(15))
+    : parseInt(digits, 10) % 97;
 const ibanChecksum = (address: string): string => {
-  const letters = (c: string): string => (/[0-9]/.test(c) ? c : String(c.charCodeAt(0) - 55));
-  let expanded = [...`${address.toUpperCase().substring(4)}${address.toUpperCase().substring(0, 2)}00`].map(letters).join("");
-  while (expanded.length >= 15) { const block = expanded.substring(0, 15); expanded = String(parseInt(block, 10) % 97) + expanded.substring(block.length); }
-  return String(98 - (parseInt(expanded, 10) % 97)).padStart(2, "0");
+  const upper = address.toUpperCase();
+  const expanded = [...`${upper.substring(4)}${upper.substring(0, 2)}00`].map(ibanDigits).join("");
+  return String(98 - mod97(expanded)).padStart(2, "0");
 };
+const ETHERS_HEX_ADDRESS = /^(0x)?[0-9a-fA-F]{40}$/;
+const MIXED_CASE = /([A-F].*[a-f])|([a-f].*[A-F])/;
+const DIRECT_ICAP = /^XE[0-9]{2}[0-9A-Za-z]{30,31}$/;
 /** ethers isAddress: hex with optional 0x (mixed case must checksum), or a direct-mode ICAP. */
 export const isEthersAddress = (value: string): boolean => {
-  if (/^(0x)?[0-9a-fA-F]{40}$/.test(value)) { const a = value.startsWith("0x") ? value : `0x${value}`; return !/([A-F].*[a-f])|([a-f].*[A-F])/.test(a) || checksum(a) === a; }
-  return /^XE[0-9]{2}[0-9A-Za-z]{30,31}$/.test(value) && value.substring(2, 4) === ibanChecksum(value);
+  if (ETHERS_HEX_ADDRESS.test(value)) {
+    const a = value.startsWith("0x") ? value : `0x${value}`;
+    return !MIXED_CASE.test(a) || checksum(a) === a;
+  }
+  return DIRECT_ICAP.test(value) && value.substring(2, 4) === ibanChecksum(value);
 };
-const TOWER_BYTES32 = /^0x[0-9a-f]{64}$/;
-const towerLookupKey = (v: unknown): Result<string, TowerError> => { const k = jsText(v).trim().toLowerCase(); return TOWER_BYTES32.test(k) ? ok(k) : towerErr(`TOWER_LOOKUP_KEY_INVALID: ${String(v)}`); };
-const bytes32Code = (v: unknown, label: string): string | undefined => (TOWER_BYTES32.test(jsText(v).trim().toLowerCase()) ? undefined : `TOWER_${label}_INVALID: ${String(v)}`);
-const hexBytesCode = (v: unknown, label: string): string | undefined => (/^0x([0-9a-f]{2})*$/.test(jsText(v).trim().toLowerCase()) ? undefined : `TOWER_${label}_INVALID`);
-const nonNegative = (v: unknown): number | undefined => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined; };
-const nonNegativeCode = (v: unknown, label: string): string | undefined => (nonNegative(v) === undefined ? `TOWER_${label}_INVALID` : undefined);
-const positiveCode = (v: unknown, label: string): string | undefined => { const n = nonNegative(v); return n === undefined ? `TOWER_${label}_INVALID` : n <= 0 ? `TOWER_${label}_INVALID` : undefined; };
-const BUNDLE_FIELDS = ["version", "runtimeId", "lookupKey", "height", "createdAt", "bundleHash", "iv", "ciphertext"] as const, BUNDLE_OPTIONAL = ["kind", "baseRuntimeHeight", "baseCheckpointHash", "compression"] as const;
+
+
+// The HTTP appointment: exact envelope, sound bundle, bound owner, mode rules, owner signature.
+
 /** og http.ts decodeTowerAppointmentEnvelope: exact fields before any signed value is read. */
 const towerEnvelopeCode = (a: Rec): string | undefined => {
   const payload = a["lastResortPayload"];
-  const found = [
-    () => exactKeys(a, ["type", "version", "lookupKey", "bundle", "ownerProof"], ["towerMode", "slot", "lastResortPayload"], "TOWER_APPOINTMENT_FIELDS_INVALID"),
-    () => (a["type"] !== "tower_appointment" || a["version"] !== 1 ? "TOWER_APPOINTMENT_INVALID" : undefined),
-    () => recordShape(a["bundle"], "TOWER_BUNDLE_INVALID", BUNDLE_FIELDS, BUNDLE_OPTIONAL, "TOWER_BUNDLE_FIELDS_INVALID"),
-    () => recordShape(a["ownerProof"], "TOWER_APPOINTMENT_OWNER_PROOF_INVALID", ["runtimeId", "signedAt", "signature"], [], "TOWER_APPOINTMENT_OWNER_PROOF_FIELDS_INVALID"),
-    () => payload === undefined ? undefined : recordShape(payload, "TOWER_LAST_RESORT_PAYLOAD_INVALID",
-      ["triggerHint", "watch", "encryptedRemedy", "actionKind", "appointmentSequence", "proofNonce", "proofBodyHash", "responseMode", "lastResortWindowSeconds"], ["maxFeeToken", "feeBudget"], "TOWER_LAST_RESORT_PAYLOAD_FIELDS_INVALID"),
-    () => payload === undefined ? undefined : recordShape((payload as Rec)["watch"], "TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING", ["rpcUrl", "chainId", "depositoryAddress", "watchedEntityId", "counterentity"], [], "TOWER_LAST_RESORT_PAYLOAD_WATCH_FIELDS_INVALID"),
-  ].map((f) => f()).find((c) => c !== undefined);
-  return found;
+  return firstThrown(
+    () => fieldsCode(a, APPOINTMENT_SHAPE),
+    () => codeIf(a["type"] !== "tower_appointment" || a["version"] !== 1, "TOWER_APPOINTMENT_INVALID"),
+    () => shapeCode(a["bundle"], BUNDLE_SHAPE),
+    () => shapeCode(a["ownerProof"], OWNER_PROOF_SHAPE),
+    () => (payload === undefined ? undefined : shapeCode(payload, LAST_RESORT_PAYLOAD_SHAPE)),
+    () => (payload === undefined ? undefined : shapeCode((payload as Rec)["watch"], WATCH_SHAPE)),
+  );
 };
 /** og http.ts verifyEncryptedBundleShape. */
-const towerBundleShapeCode = (b: Rec): string | undefined => {
-  if (b["version"] !== 1) return "TOWER_BUNDLE_VERSION_UNSUPPORTED";
-  if (!jsText(b["runtimeId"]).trim()) return "TOWER_BUNDLE_RUNTIME_ID_REQUIRED";
-  const key = towerLookupKey(b["lookupKey"]);
-  if (!key.ok) return key.error.code;
-  const first = [nonNegativeCode(b["height"], "BUNDLE_HEIGHT"), nonNegativeCode(b["createdAt"], "BUNDLE_CREATED_AT"), bytes32Code(b["bundleHash"], "BUNDLE_HASH"), hexBytesCode(b["iv"], "BUNDLE_IV"), hexBytesCode(b["ciphertext"], "BUNDLE_CIPHERTEXT")].find((c) => c !== undefined);
-  if (first !== undefined) return first;
-  if (jsText(b["ciphertext"]).trim().length <= 2) return "TOWER_BUNDLE_CIPHERTEXT_EMPTY";
-  return b["compression"] !== undefined && b["compression"] !== "gzip" ? `TOWER_BUNDLE_COMPRESSION_UNSUPPORTED: ${String(b["compression"])}` : undefined;
-};
-/** og assertEncryptedLastResortPayload: `encryptedRemedy` is a tagged-JSON `tower_encrypted_payload` v1 record. */
+const towerBundleShapeCode = (b: Rec): string | undefined =>
+  firstThrown(
+    () => codeIf(b["version"] !== 1, "TOWER_BUNDLE_VERSION_UNSUPPORTED"),
+    () => codeIf(!jsText(b["runtimeId"]).trim(), "TOWER_BUNDLE_RUNTIME_ID_REQUIRED"),
+    () => errorCode(towerLookupKey(b["lookupKey"])),
+    () => nonNegativeCode(b["height"], "BUNDLE_HEIGHT"),
+    () => nonNegativeCode(b["createdAt"], "BUNDLE_CREATED_AT"),
+    () => bytes32Code(b["bundleHash"], "BUNDLE_HASH"),
+    () => hexBytesCode(b["iv"], "BUNDLE_IV"),
+    () => hexBytesCode(b["ciphertext"], "BUNDLE_CIPHERTEXT"),
+    () => codeIf(jsText(b["ciphertext"]).trim().length <= 2, "TOWER_BUNDLE_CIPHERTEXT_EMPTY"),
+    () => codeIf(
+      b["compression"] !== undefined && b["compression"] !== "gzip",
+      `TOWER_BUNDLE_COMPRESSION_UNSUPPORTED: ${String(b["compression"])}`,
+    ),
+  );
+/** og's sealed remedy: a `tower_encrypted_payload` v1 record under watch-seed AES-256-GCM. */
+const isSealedRemedy = (v: unknown): boolean =>
+  plainRecord(v) &&
+  v["type"] === "tower_encrypted_payload" &&
+  v["version"] === 1 &&
+  v["alg"] === "watch-seed-aes-256-gcm" &&
+  typeof v["iv"] === "string" &&
+  typeof v["ciphertext"] === "string";
+/** og assertEncryptedLastResortPayload: `encryptedRemedy` is a tagged-JSON sealed remedy. */
 const encryptedRemedyCode = (payload: Rec | undefined): string | undefined => {
   const raw = jsText(payload?.["encryptedRemedy"]).trim();
   if (!raw) return "TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING";
   const parsed = parseTaggedJson(raw);
-  return parsed.ok && plainRecord(parsed.value) && parsed.value["type"] === "tower_encrypted_payload" && parsed.value["version"] === 1 && parsed.value["alg"] === "watch-seed-aes-256-gcm"
-    && typeof parsed.value["iv"] === "string" && typeof parsed.value["ciphertext"] === "string" ? undefined : "TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED";
+  return codeIf(!(parsed.ok && isSealedRemedy(parsed.value)), "TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED");
+};
+const HTTP_URL = /^https?:\/\//i;
+/**
+ * og http.ts verifyLastResortWatch: an http(s) RPC, a positive chain, an ethers address depository and two bytes32
+ * Entities.
+ */
+const lastResortWatchCode = (watch: Rec): string | undefined => {
+  const rpcUrl = jsText(watch["rpcUrl"]).trim();
+  return firstThrown(
+    () =>
+      codeIf(!rpcUrl || rpcUrl.length > 512 || !HTTP_URL.test(rpcUrl), "TOWER_LAST_RESORT_PAYLOAD_WATCH_RPC_INVALID"),
+    () => positiveCode(watch["chainId"], "LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID"),
+    () =>
+      codeIf(
+        !isEthersAddress(jsText(watch["depositoryAddress"])),
+        "TOWER_LAST_RESORT_PAYLOAD_WATCH_DEPOSITORY_INVALID",
+      ),
+    () => bytes32Code(watch["watchedEntityId"], "LAST_RESORT_PAYLOAD_WATCH_ENTITY"),
+    () => bytes32Code(watch["counterentity"], "LAST_RESORT_PAYLOAD_WATCH_COUNTERENTITY"),
+  );
 };
 /** og http.ts verifyLastResortPayload + verifyLastResortWatch. */
 const lastResortPayloadCode = (p: Rec | undefined): string | undefined => {
   if (!p) return "TOWER_LAST_RESORT_PAYLOAD_MISSING";
   if (p["actionKind"] !== "counter_dispute_only") return "TOWER_LAST_RESORT_PAYLOAD_ACTION_KIND_UNSUPPORTED";
   if (p["responseMode"] !== "last_resort") return "TOWER_LAST_RESORT_PAYLOAD_RESPONSE_MODE_UNSUPPORTED";
-  const w = p["watch"];
-  if (!w || typeof w !== "object") return "TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING";
-  const watch = w as Rec, rpcUrl = jsText(watch["rpcUrl"]).trim(), hint = jsText(p["triggerHint"]).trim();
-  const found = [
-    () => (!rpcUrl || rpcUrl.length > 512 || !/^https?:\/\//i.test(rpcUrl) ? "TOWER_LAST_RESORT_PAYLOAD_WATCH_RPC_INVALID" : undefined),
-    () => positiveCode(watch["chainId"], "LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID"),
-    () => (isEthersAddress(jsText(watch["depositoryAddress"])) ? undefined : "TOWER_LAST_RESORT_PAYLOAD_WATCH_DEPOSITORY_INVALID"),
-    () => bytes32Code(watch["watchedEntityId"], "LAST_RESORT_PAYLOAD_WATCH_ENTITY"),
-    () => bytes32Code(watch["counterentity"], "LAST_RESORT_PAYLOAD_WATCH_COUNTERENTITY"),
-    () => (!hint || hint.length > 256 ? "TOWER_LAST_RESORT_PAYLOAD_TRIGGER_HINT_INVALID" : undefined),
+  const watch = p["watch"];
+  if (!watch || typeof watch !== "object") return "TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING";
+  const hint = jsText(p["triggerHint"]).trim();
+  return firstThrown(
+    () => lastResortWatchCode(watch as Rec),
+    () => codeIf(!hint || hint.length > 256, "TOWER_LAST_RESORT_PAYLOAD_TRIGGER_HINT_INVALID"),
     () => positiveCode(p["appointmentSequence"], "LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE"),
     () => positiveCode(p["proofNonce"], "LAST_RESORT_PAYLOAD_PROOF_NONCE"),
     () => bytes32Code(p["proofBodyHash"], "LAST_RESORT_PAYLOAD_PROOF_BODY_HASH"),
     () => positiveCode(p["lastResortWindowSeconds"], "LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW"),
     () => encryptedRemedyCode(p),
-  ];
-  for (const f of found) { const c = f(); if (c !== undefined) return c; }
-  return undefined;
+  );
+};
+/** og http.ts mode rules: a blind backup carries no payload; a delayed last resort carries a sound one. */
+const appointmentModeCode = (towerMode: TowerModeV1, payload: Rec | undefined): string | undefined => {
+  switch (towerMode) {
+    case "blind_backup":
+      return codeIf(Boolean(payload), "TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN");
+    case "delayed_last_resort":
+      return lastResortPayloadCode(payload);
+  }
 };
 export const TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+/** The owner an appointment's proof names, and when the owner signed. */
+type OwnerClaim = { readonly runtimeId: string; readonly signedAt: number };
+/** og: the proof names the bundle's runtime under the requested key, signed within a day of the tower's clock. */
+const ownerClaimOf = (bundle: Rec, proof: Rec, lookupKey: string, nowMs: number): Result<OwnerClaim, TowerError> => {
+  const runtimeId = jsText(proof["runtimeId"]).trim().toLowerCase();
+  const signedAt = jsInt(proof["signedAt"]);
+  const bound = towerChecks(
+    () => codeIf(bundle["lookupKey"] !== lookupKey, "TOWER_APPOINTMENT_LOOKUP_MISMATCH"),
+    () => codeIf(
+      !runtimeId || runtimeId !== jsText(bundle["runtimeId"]).trim().toLowerCase(),
+      "TOWER_APPOINTMENT_RUNTIME_ID_MISMATCH",
+    ),
+    () => codeIf(!Number.isSafeInteger(signedAt) || signedAt <= 0, "TOWER_APPOINTMENT_SIGNED_AT_INVALID"),
+    () => codeIf(Math.abs(nowMs - signedAt) > TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS, "TOWER_APPOINTMENT_STALE"),
+  );
+  return map(bound, () => ({ runtimeId, signedAt }));
+};
+const ownerSignatureCode = (message: string, signature: string, runtimeId: string): string | undefined => {
+  const recovered = recoverPersonalMessage(message, signature);
+  if (recovered === undefined) return "TOWER_APPOINTMENT_SIGNATURE_UNREADABLE";
+  return codeIf(
+    recovered !== runtimeId,
+    `TOWER_APPOINTMENT_SIGNATURE_INVALID: recovered=${recovered} expected=${runtimeId}`,
+  );
+};
 /**
- * og http.ts verifyTowerAppointment: exact envelope, bundle shape, lookup/runtime binding, owner clock within 24h of the tower clock `nowMs`,
- * mode/payload rules, and the owner's EIP-191 signature recovering `ownerProof.runtimeId`. Returns og's normalized appointment.
+ * og http.ts verifyTowerAppointment: exact envelope, bundle shape, lookup/runtime binding, owner clock within 24h of
+ * the tower clock `nowMs`, mode/payload rules, and the owner's EIP-191 signature recovering `ownerProof.runtimeId`.
+ * Returns og's normalized appointment.
  */
 export const verifyTowerAppointment = (input: unknown, nowMs: number): Result<TowerAppointmentV1, TowerError> => {
-  if (!plainRecord(input)) return towerErr("TOWER_APPOINTMENT_INVALID");
-  const envelope = towerEnvelopeCode(input);
-  if (envelope !== undefined) return towerErr(envelope);
-  const a = input as unknown as TowerAppointmentV1, bundle = input["bundle"] as Rec, proof = input["ownerProof"] as Rec, payload = input["lastResortPayload"] as Rec | undefined;
-  const shape = towerBundleShapeCode(bundle);
-  if (shape !== undefined) return towerErr(shape);
-  return chain(towerLookupKey(a.lookupKey), (lookupKey) => {
-    if (bundle["lookupKey"] !== lookupKey) return towerErr("TOWER_APPOINTMENT_LOOKUP_MISMATCH");
-    const runtimeId = jsText(proof["runtimeId"]).trim().toLowerCase();
-    if (!runtimeId || runtimeId !== jsText(bundle["runtimeId"]).trim().toLowerCase()) return towerErr("TOWER_APPOINTMENT_RUNTIME_ID_MISMATCH");
-    const signedAt = Math.max(0, Math.floor(Number(proof["signedAt"] || 0)));
-    if (!Number.isSafeInteger(signedAt) || signedAt <= 0) return towerErr("TOWER_APPOINTMENT_SIGNED_AT_INVALID");
-    if (Math.abs(nowMs - signedAt) > TOWER_APPOINTMENT_MAX_CLOCK_SKEW_MS) return towerErr("TOWER_APPOINTMENT_STALE");
-    const slot = Math.max(0, Math.floor(Number(input["slot"] ?? 0)));
-    return chain(normalizeTowerMode(input["towerMode"]), (towerMode) => {
-      if (towerMode === "blind_backup" && payload) return towerErr("TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN");
-      const payloadCode = towerMode === "delayed_last_resort" ? lastResortPayloadCode(payload) : undefined;
-      if (payloadCode !== undefined) return towerErr(payloadCode);
-      const message = towerAppointmentOwnerMessage(runtimeId, towerMode, lookupKey, slot, a.bundle, signedAt, a.lastResortPayload);
-      const recovered = recoverPersonalMessage(message, jsText(proof["signature"]));
-      if (recovered === undefined) return towerErr("TOWER_APPOINTMENT_SIGNATURE_UNREADABLE");
-      if (recovered !== runtimeId) return towerErr(`TOWER_APPOINTMENT_SIGNATURE_INVALID: recovered=${recovered} expected=${runtimeId}`);
-      return ok({
-        ...a, towerMode, lookupKey, slot, ownerProof: { ...a.ownerProof, runtimeId, signedAt, signature: jsText(proof["signature"]) },
-        bundle: { ...a.bundle, runtimeId, lookupKey, height: jsInt(bundle["height"]), createdAt: jsInt(bundle["createdAt"]) },
-      });
-    });
-  });
+  if (!plainRecord(input)) return towerErr(APPOINTMENT_SHAPE.invalid);
+  const a = input as unknown as TowerAppointmentV1;
+  const bundle = input["bundle"] as Rec;
+  const proof = input["ownerProof"] as Rec;
+  const shaped = towerChecks(
+    () => towerEnvelopeCode(input),
+    () => towerBundleShapeCode(bundle),
+  );
+  const owned = chain(shaped, () =>
+    chain(towerLookupKey(a.lookupKey), (lookupKey) =>
+      map(ownerClaimOf(bundle, proof, lookupKey, nowMs), (owner) => ({ lookupKey, ...owner })),
+    ),
+  );
+  return chain(owned, ({ lookupKey, runtimeId, signedAt }) =>
+    chain(normalizeTowerMode(input["towerMode"]), (towerMode) => {
+      const slot = slotOf(input["slot"]);
+      const signature = jsText(proof["signature"]);
+      const message = (): string =>
+        towerAppointmentOwnerMessage(runtimeId, towerMode, lookupKey, slot, a.bundle, signedAt, a.lastResortPayload);
+      const signed = towerChecks(
+        () => appointmentModeCode(towerMode, input["lastResortPayload"] as Rec | undefined),
+        () => ownerSignatureCode(message(), signature, runtimeId),
+      );
+      return map(signed, () => ({
+        ...a,
+        towerMode,
+        lookupKey,
+        slot,
+        ownerProof: { ...a.ownerProof, runtimeId, signedAt, signature },
+        bundle: {
+          ...a.bundle,
+          runtimeId,
+          lookupKey,
+          height: jsInt(bundle["height"]),
+          createdAt: jsInt(bundle["createdAt"]),
+        },
+      }));
+    }),
+  );
 };
-export const emptyTowerLookupDoc = (lookupKey: string): TowerLookupDoc => ({ lookupKey, runtimeId: "", updatedAt: 0, receipts: [], bundles: [] });
+
+
+// The store: one lookup document per key, its bundles retained per (slot, mode, kind) and every write receipted.
+
+export const emptyTowerLookupDoc = (lookupKey: string): TowerLookupDoc => ({
+  lookupKey,
+  runtimeId: "",
+  updatedAt: 0,
+  receipts: [],
+  bundles: [],
+});
 /** og computeStoredLookupBytes: UTF-8 bytes of the tagged-JSON document. */
 export const towerLookupBytes = (doc: TowerLookupDoc): number => utf8(stableJson(doc)).length;
+const quotaExceeded = (bytes: number, cfg: TowerStoreConfig): Result<never, TowerError> =>
+  towerErr(`TOWER_QUOTA_EXCEEDED: bytes=${bytes} max=${cfg.maxStoredBytesPerLookupKey}`);
 const bundleKind = (b: EncryptedRuntimeRecoveryBundleV1): string => b.kind ?? "snapshot";
 /** og sortStoredBundles: height, then createdAt, then slot, all descending (stable). */
 const sortTowerBundles = (bundles: readonly TowerStoredBundle[]): readonly TowerStoredBundle[] =>
-  [...bundles].sort((l, r) => (r.bundle.height !== l.bundle.height ? r.bundle.height - l.bundle.height : r.bundle.createdAt !== l.bundle.createdAt ? r.bundle.createdAt - l.bundle.createdAt : r.slot - l.slot));
+  bundles.toSorted(
+    (l, r) => r.bundle.height - l.bundle.height || r.bundle.createdAt - l.bundle.createdAt || r.slot - l.slot,
+  );
+const newestBlind = (bundles: readonly TowerStoredBundle[], tail: boolean): TowerStoredBundle | undefined =>
+  bundles.find((e) => e.towerMode === "blind_backup" && (e.bundle.kind === "journal_tail") === tail);
 /** og retainAppointmentBundles: a blind backup pins the newest snapshot and the newest tail before the cut. */
-const retainTowerBundles = (bundles: readonly TowerStoredBundle[], towerMode: TowerModeV1, limit: number): readonly TowerStoredBundle[] => {
-  const pins = towerMode !== "blind_backup" ? [] : [bundles.find((e) => e.towerMode === "blind_backup" && e.bundle.kind !== "journal_tail"), bundles.find((e) => e.towerMode === "blind_backup" && e.bundle.kind === "journal_tail")];
-  const pinned = pins.filter((e, i): e is TowerStoredBundle => e !== undefined && pins.indexOf(e) === i);
+const retainTowerBundles = (
+  bundles: readonly TowerStoredBundle[],
+  towerMode: TowerModeV1,
+  limit: number,
+): readonly TowerStoredBundle[] => {
+  const pins = towerMode === "blind_backup" ? [newestBlind(bundles, false), newestBlind(bundles, true)] : [];
+  const pinned = pins.filter((e): e is TowerStoredBundle => e !== undefined);
   return [...pinned, ...bundles.filter((e) => !pinned.includes(e))].slice(0, limit);
 };
 /** og store validateAppointmentMode. */
 const towerStoreModeCode = (a: TowerAppointmentV1, towerMode: TowerModeV1): string | undefined => {
-  if (towerMode === "blind_backup" && a.lastResortPayload) return "TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN";
-  if (towerMode === "delayed_last_resort" && !a.lastResortPayload) return "TOWER_LAST_RESORT_PAYLOAD_MISSING";
-  return towerMode === "delayed_last_resort" ? encryptedRemedyCode(a.lastResortPayload as Rec | undefined) : undefined;
+  switch (towerMode) {
+    case "blind_backup":
+      return codeIf(Boolean(a.lastResortPayload), "TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN");
+    case "delayed_last_resort":
+      return a.lastResortPayload
+        ? encryptedRemedyCode(a.lastResortPayload as Rec)
+        : "TOWER_LAST_RESORT_PAYLOAD_MISSING";
+  }
 };
+/** A retention slot: one bundle per (slot, mode, kind) survives. */
+type SlotId = { readonly slot: number; readonly towerMode: TowerModeV1; readonly kind: string };
+const inSlot = (e: TowerStoredBundle, id: SlotId): boolean =>
+  e.slot === id.slot && e.towerMode === id.towerMode && bundleKind(e.bundle) === id.kind;
+const latestSigned = (bundles: readonly TowerStoredBundle[]): TowerStoredBundle | undefined =>
+  bundles.reduce<TowerStoredBundle | undefined>((l, e) => (!l || e.ownerSignedAt > l.ownerSignedAt ? e : l), undefined);
+/** og: an older owner signature than the slot's newest is stale; the same one over different bytes is a replay. */
+const slotConflictCode = (latest: TowerStoredBundle | undefined, candidate: TowerStoredBundle): string | undefined => {
+  if (latest === undefined) return undefined;
+  const differs =
+    latest.encryptedEnvelopeHash !== candidate.encryptedEnvelopeHash ||
+    latest.lastResortPayloadDigest !== candidate.lastResortPayloadDigest;
+  switch (true) {
+    case latest.ownerSignedAt > candidate.ownerSignedAt:
+      return "TOWER_APPOINTMENT_STALE";
+    case latest.ownerSignedAt === candidate.ownerSignedAt && differs:
+      return "TOWER_APPOINTMENT_REPLAY_MISMATCH";
+    default:
+      return undefined;
+  }
+};
+/** What a receipt attests about the write it answers. */
+type StoredFacts = {
+  readonly lookupKey: string;
+  readonly runtimeId: string;
+  readonly towerMode: TowerModeV1;
+  readonly slot: number;
+  readonly sequence: number;
+  readonly retainedSlots: number;
+  readonly storedBytes: number;
+};
+/** og prepareAppointment's receipt, signed by the tower (EIP-191). */
+const towerReceipt = (cfg: TowerStoreConfig, a: TowerAppointmentV1, facts: StoredFacts): TowerReceiptV1 => {
+  const appointmentSequence = Number(a.lastResortPayload?.appointmentSequence);
+  const unsigned: TowerReceiptV1 = {
+    type: "tower_receipt",
+    version: 1,
+    towerId: cfg.towerId,
+    lookupKey: facts.lookupKey,
+    runtimeId: facts.runtimeId,
+    height: jsInt(a.bundle.height),
+    bundleHash: a.bundle.bundleHash,
+    towerMode: facts.towerMode,
+    slot: facts.slot,
+    storedAt: cfg.now,
+    receivedAt: cfg.now,
+    expiresAt: cfg.now + cfg.receiptTtlMs,
+    sequence: facts.sequence,
+    retainedSlots: facts.retainedSlots,
+    storedBytes: facts.storedBytes,
+    maxStoredBytes: cfg.maxStoredBytesPerLookupKey,
+    quotaOk: true,
+    appointmentSequence: Number.isFinite(appointmentSequence) ? jsInt(a.lastResortPayload?.appointmentSequence) : null,
+  };
+  return { ...unsigned, towerSignature: signPersonalMessage(towerReceiptMessage(unsigned), cfg.towerPrivateKey) };
+};
+const nextSequence = (doc: TowerLookupDoc): number => Math.max(0, ...doc.receipts.map((r) => r.sequence || 0)) + 1;
 /**
- * og appointments.ts prepareAppointment: per (slot, mode, kind) the newest owner signature wins; an older `signedAt` is TOWER_APPOINTMENT_STALE,
- * the same `signedAt` over different envelope or payload bytes is TOWER_APPOINTMENT_REPLAY_MISMATCH. The tower signs the receipt (EIP-191).
+ * og appointments.ts prepareAppointment: per (slot, mode, kind) the newest owner signature wins; an older `signedAt` is
+ * TOWER_APPOINTMENT_STALE, the same `signedAt` over different envelope or payload bytes is
+ * TOWER_APPOINTMENT_REPLAY_MISMATCH. The tower signs the receipt (EIP-191).
  */
-const prepareTowerAppointment = (cfg: TowerStoreConfig, a: TowerAppointmentV1, existing: TowerLookupDoc): Result<TowerLookupDoc, TowerError> =>
-  chain(towerLookupKey(a.lookupKey), (lookupKey) => chain(normalizeTowerMode(a.towerMode), (towerMode) => {
-    const slot = Math.max(0, Math.floor(Number(a.slot ?? 0)));
-    const runtimeId = jsText(a.bundle.runtimeId).trim().toLowerCase();
-    const sequence = Math.max(0, ...existing.receipts.map((r) => r.sequence || 0)) + 1, ownerSignedAt = jsInt(a.ownerProof.signedAt);
-    const lastResortPayloadDigest = towerPayloadDigest(a.lastResortPayload), encryptedEnvelopeHash = towerEnvelopeHash(a.bundle);
-    const sameSlot = (e: TowerStoredBundle): boolean => e.slot === slot && e.towerMode === towerMode && bundleKind(e.bundle) === bundleKind(a.bundle);
-    const latest = existing.bundles.filter(sameSlot).reduce<TowerStoredBundle | undefined>((l, e) => (!l || e.ownerSignedAt > l.ownerSignedAt ? e : l), undefined);
-    return chain(towerChecks(
-      () => towerStoreModeCode(a, towerMode),
-      () => (existing.runtimeId && existing.runtimeId !== runtimeId ? `TOWER_LOOKUP_RUNTIME_ID_MISMATCH:${existing.runtimeId}:${runtimeId}` : undefined),
-      () => (latest && latest.ownerSignedAt > ownerSignedAt ? "TOWER_APPOINTMENT_STALE" : undefined),
-      () => (latest && latest.ownerSignedAt === ownerSignedAt && (latest.encryptedEnvelopeHash !== encryptedEnvelopeHash || latest.lastResortPayloadDigest !== lastResortPayloadDigest) ? "TOWER_APPOINTMENT_REPLAY_MISMATCH" : undefined),
-    ), () => {
-      const candidate: TowerStoredBundle = { slot, towerMode, bundle: a.bundle, ownerSignedAt, encryptedEnvelopeHash, lastResortPayloadDigest, ...opt("lastResortPayload", a.lastResortPayload || undefined) };
-      const bundles = retainTowerBundles(sortTowerBundles([candidate, ...existing.bundles.filter((e) => !sameSlot(e))]), towerMode, cfg.maxBundlesPerLookupKey);
-      const draft: TowerLookupDoc = { lookupKey, runtimeId, updatedAt: cfg.now, receipts: existing.receipts, bundles };
-      const storedBytes = towerLookupBytes(draft);
-      if (storedBytes > cfg.maxStoredBytesPerLookupKey) return towerErr(`TOWER_QUOTA_EXCEEDED: bytes=${storedBytes} max=${cfg.maxStoredBytesPerLookupKey}`);
-      const seq = Number(a.lastResortPayload?.appointmentSequence);
-      const unsigned: TowerReceiptV1 = {
-        type: "tower_receipt", version: 1, towerId: cfg.towerId, lookupKey, runtimeId, height: jsInt(a.bundle.height), bundleHash: a.bundle.bundleHash, towerMode, slot,
-        storedAt: cfg.now, receivedAt: cfg.now, expiresAt: cfg.now + cfg.receiptTtlMs, sequence, retainedSlots: bundles.length, storedBytes, maxStoredBytes: cfg.maxStoredBytesPerLookupKey, quotaOk: true,
-        appointmentSequence: Number.isFinite(seq) ? jsInt(a.lastResortPayload?.appointmentSequence) : null,
+const prepareTowerAppointment = (
+  cfg: TowerStoreConfig,
+  a: TowerAppointmentV1,
+  existing: TowerLookupDoc,
+): Result<TowerLookupDoc, TowerError> =>
+  chain(
+    all({ lookupKey: towerLookupKey(a.lookupKey), towerMode: normalizeTowerMode(a.towerMode) }),
+    ({ lookupKey, towerMode }) => {
+      const slot = slotOf(a.slot);
+      const runtimeId = jsText(a.bundle.runtimeId).trim().toLowerCase();
+      const id: SlotId = { slot, towerMode, kind: bundleKind(a.bundle) };
+      const candidate: TowerStoredBundle = {
+        slot,
+        towerMode,
+        bundle: a.bundle,
+        ownerSignedAt: jsInt(a.ownerProof.signedAt),
+        encryptedEnvelopeHash: towerEnvelopeHash(a.bundle),
+        lastResortPayloadDigest: towerPayloadDigest(a.lastResortPayload),
+        ...opt("lastResortPayload", a.lastResortPayload || undefined),
       };
-      const receipt: TowerReceiptV1 = { ...unsigned, towerSignature: signPersonalMessage(towerReceiptMessage(unsigned), cfg.towerPrivateKey) };
-      return ok({ ...draft, receipts: [receipt, ...existing.receipts].slice(0, cfg.maxBundlesPerLookupKey) });
-    });
-  }));
+      const admitted = towerChecks(
+        () => towerStoreModeCode(a, towerMode),
+        () =>
+          codeIf(
+            Boolean(existing.runtimeId) && existing.runtimeId !== runtimeId,
+            `TOWER_LOOKUP_RUNTIME_ID_MISMATCH:${existing.runtimeId}:${runtimeId}`,
+          ),
+        () => slotConflictCode(latestSigned(existing.bundles.filter((e) => inSlot(e, id))), candidate),
+      );
+      return chain(admitted, () => {
+        const others = existing.bundles.filter((e) => !inSlot(e, id));
+        const bundles = retainTowerBundles(
+          sortTowerBundles([candidate, ...others]),
+          towerMode,
+          cfg.maxBundlesPerLookupKey,
+        );
+        const draft: TowerLookupDoc = {
+          lookupKey,
+          runtimeId,
+          updatedAt: cfg.now,
+          receipts: existing.receipts,
+          bundles,
+        };
+        const storedBytes = towerLookupBytes(draft);
+        if (storedBytes > cfg.maxStoredBytesPerLookupKey) return quotaExceeded(storedBytes, cfg);
+        const facts = {
+          lookupKey,
+          runtimeId,
+          towerMode,
+          slot,
+          sequence: nextSequence(existing),
+          retainedSlots: bundles.length,
+          storedBytes,
+        };
+        const receipts = [towerReceipt(cfg, a, facts), ...existing.receipts].slice(0, cfg.maxBundlesPerLookupKey);
+        return ok({ ...draft, receipts });
+      });
+    },
+  );
 export type TowerWrite = { readonly doc: TowerLookupDoc; readonly receipt: TowerReceiptV1 };
 /** og writeLookup's per-lookup quota on the final signed document (the store-wide quotas are the host's). */
 const sealTowerWrite = (cfg: TowerStoreConfig, doc: TowerLookupDoc): Result<TowerWrite, TowerError> => {
-  const bytes = towerLookupBytes(doc), receipt = doc.receipts[0];
-  if (bytes > cfg.maxStoredBytesPerLookupKey) return towerErr(`TOWER_QUOTA_EXCEEDED: bytes=${bytes} max=${cfg.maxStoredBytesPerLookupKey}`);
+  const bytes = towerLookupBytes(doc);
+  const receipt = doc.receipts[0];
+  if (bytes > cfg.maxStoredBytesPerLookupKey) return quotaExceeded(bytes, cfg);
   return receipt === undefined ? towerErr("TOWER_RECEIPT_MISSING") : ok({ doc, receipt });
 };
 /** og store upsertAppointment over the stored lookup document (`existing` undefined when the key is new). */
-export const upsertTowerAppointment = (cfg: TowerStoreConfig, a: TowerAppointmentV1, existing?: TowerLookupDoc): Result<TowerWrite, TowerError> =>
-  chain(towerLookupKey(a.lookupKey), (key) => chain(prepareTowerAppointment(cfg, a, existing ?? emptyTowerLookupDoc(key)), (doc) => sealTowerWrite(cfg, doc)));
+export const upsertTowerAppointment = (
+  cfg: TowerStoreConfig,
+  a: TowerAppointmentV1,
+  existing?: TowerLookupDoc,
+): Result<TowerWrite, TowerError> =>
+  chain(towerLookupKey(a.lookupKey), (key) =>
+    chain(prepareTowerAppointment(cfg, a, existing ?? emptyTowerLookupDoc(key)), (doc) => sealTowerWrite(cfg, doc)));
+type ArchivePair = readonly [TowerAppointmentV1, TowerAppointmentV1];
+/** og: one blind-backup snapshot and the tail that continues it, under one key, runtime, slot and owner signature. */
+const isArchivePair = ([snapshot, tail]: ArchivePair, modes: readonly TowerModeV1[]): boolean =>
+  modes.every((m) => m === "blind_backup") &&
+  snapshot.bundle.kind === "snapshot" &&
+  tail.bundle.kind === "journal_tail" &&
+  snapshot.lookupKey === tail.lookupKey &&
+  snapshot.bundle.runtimeId === tail.bundle.runtimeId &&
+  slotOf(snapshot.slot) === slotOf(tail.slot) &&
+  snapshot.ownerProof.signedAt === tail.ownerProof.signedAt &&
+  tail.bundle.baseRuntimeHeight === snapshot.bundle.height &&
+  tail.bundle.height > snapshot.bundle.height;
+const retainsBoth = (doc: TowerLookupDoc, pair: ArchivePair): boolean =>
+  pair.every((a) => doc.bundles.some((e) => e.encryptedEnvelopeHash === towerEnvelopeHash(a.bundle)));
 /** og upsertRecoveryArchive: one owner-signed snapshot and its tail, written as one document or not at all. */
-export const upsertTowerRecoveryArchive = (cfg: TowerStoreConfig, pair: readonly [TowerAppointmentV1, TowerAppointmentV1], existing?: TowerLookupDoc): Result<TowerWrite, TowerError> => {
-  const [snapshot, tail] = pair;
-  const modes = pair.map((x) => normalizeTowerMode(x.towerMode));
-  const bad = modes.find((m) => !m.ok);
-  if (bad !== undefined && !bad.ok) return bad;
-  if (modes.some((m) => m.ok && m.value !== "blind_backup") || snapshot.bundle.kind !== "snapshot" || tail.bundle.kind !== "journal_tail" || snapshot.lookupKey !== tail.lookupKey || snapshot.bundle.runtimeId !== tail.bundle.runtimeId
-    || Math.max(0, Math.floor(Number(snapshot.slot ?? 0))) !== Math.max(0, Math.floor(Number(tail.slot ?? 0))) || snapshot.ownerProof.signedAt !== tail.ownerProof.signedAt
-    || tail.bundle.baseRuntimeHeight !== snapshot.bundle.height || tail.bundle.height <= snapshot.bundle.height) return towerErr("TOWER_ARCHIVE_PAIR_INVALID");
-  return chain(towerLookupKey(snapshot.lookupKey), (key) => chain(foldResult(pair, existing ?? emptyTowerLookupDoc(key), (doc, a) => prepareTowerAppointment(cfg, a, doc)), (doc) =>
-    pair.every((a) => doc.bundles.some((e) => e.encryptedEnvelopeHash === towerEnvelopeHash(a.bundle))) ? sealTowerWrite(cfg, doc) : towerErr("TOWER_ARCHIVE_PAIR_NOT_RETAINED")));
-};
-/** Client check of og's receipt signature (og signs in prepareAppointment and ships no verifier): the tower address the receipt message recovers to. */
-export const verifyTowerReceiptSignature = (receipt: TowerReceiptV1, towerAddress: string): Result<TowerReceiptV1, TowerError> => {
+export const upsertTowerRecoveryArchive = (
+  cfg: TowerStoreConfig,
+  pair: ArchivePair,
+  existing?: TowerLookupDoc,
+): Result<TowerWrite, TowerError> =>
+  chain(
+    traverse(pair, (a) => normalizeTowerMode(a.towerMode)),
+    (modes) => {
+      if (!isArchivePair(pair, modes)) return towerErr("TOWER_ARCHIVE_PAIR_INVALID");
+      return chain(towerLookupKey(pair[0].lookupKey), (key) => {
+        const written = foldResult(pair, existing ?? emptyTowerLookupDoc(key), (doc, a) =>
+          prepareTowerAppointment(cfg, a, doc),
+        );
+        return chain(written, (doc) =>
+          retainsBoth(doc, pair) ? sealTowerWrite(cfg, doc) : towerErr("TOWER_ARCHIVE_PAIR_NOT_RETAINED"),
+        );
+      });
+    },
+  );
+/**
+ * Client check of og's receipt signature (og signs in prepareAppointment and ships no verifier): the tower address the
+ * receipt message recovers to.
+ */
+export const verifyTowerReceiptSignature = (
+  receipt: TowerReceiptV1,
+  towerAddress: string,
+): Result<TowerReceiptV1, TowerError> => {
   if (receipt.towerSignature === undefined) return towerErr("TOWER_RECEIPT_SIGNATURE_MISSING");
   const { towerSignature, ...unsigned } = receipt;
-  return recoverPersonalMessage(towerReceiptMessage(unsigned as TowerReceiptV1), towerSignature) === towerAddress.toLowerCase() ? ok(receipt) : towerErr("TOWER_RECEIPT_SIGNATURE_INVALID");
+  const signer = recoverPersonalMessage(towerReceiptMessage(unsigned as TowerReceiptV1), towerSignature);
+  return signer === towerAddress.toLowerCase() ? ok(receipt) : towerErr("TOWER_RECEIPT_SIGNATURE_INVALID");
 };
-/** og deserializeTaggedJson: JSON with BigInt/Map/Set/Buffer/Date/TypedArray envelopes revived. */
+
+
+// Decoding a stored lookup document: every record exact and bound to its key and runtime.
+
+/** og's tagged-JSON reviver: BigInt/Map/Set/Buffer/Date/TypedArray envelopes back to values. */
+const reviveTagged = (_k: string, v: unknown): unknown => {
+  if (!plainRecord(v) || typeof v["__xlnType"] !== "string") return v;
+  const x = v["value"];
+  switch (v["__xlnType"]) {
+    case "BigInt":
+      return typeof x === "string" ? BigInt(x) : v;
+    case "Map":
+      return Array.isArray(x) ? new Map(x as [unknown, unknown][]) : v;
+    case "Set":
+      return Array.isArray(x) ? new Set(x) : v;
+    case "Buffer":
+      return Array.isArray(x) ? Uint8Array.from(x as number[]) : v;
+    case "Date":
+      return typeof x === "string" ? new Date(x) : v;
+    case "TypedArray":
+      return typeof v["kind"] === "string" && typeof x === "string" ? new Uint8Array(0) : v;
+    default:
+      return v;
+  }
+};
+/** og deserializeTaggedJson; JSON.parse throws on bad input, so this is the one place a throw becomes a value. */
 const parseTaggedJson = (raw: string): Result<unknown, TowerError> => {
   try {
-    return ok(JSON.parse(raw, (_k, v: unknown) => {
-      if (!plainRecord(v) || typeof v["__xlnType"] !== "string") return v;
-      const x = v["value"];
-      switch (v["__xlnType"]) {
-        case "BigInt": return typeof x === "string" ? BigInt(x) : v;
-        case "Map": return Array.isArray(x) ? new Map(x as [unknown, unknown][]) : v;
-        case "Set": return Array.isArray(x) ? new Set(x) : v;
-        case "Buffer": return Array.isArray(x) ? Uint8Array.from(x as number[]) : v;
-        case "Date": return typeof x === "string" ? new Date(x) : v;
-        case "TypedArray": return typeof v["kind"] === "string" && typeof x === "string" ? new Uint8Array(0) : v;
-        default: return v;
-      }
-    }));
-  } catch { return towerErr("TOWER_JSON_INVALID"); }
+    return ok(JSON.parse(raw, reviveTagged));
+  } catch {
+    return towerErr("TOWER_JSON_INVALID");
+  }
 };
-const safeIntCode = (v: unknown, code: string): string | undefined => (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0 ? code : undefined);
-const optionalSafeIntCode = (v: unknown, code: string): string | undefined => (v === undefined || v === null ? undefined : safeIntCode(v, code));
-const textCode = (v: unknown, code: string): string | undefined => (typeof v !== "string" || v.trim().length === 0 ? code : undefined);
-const firstCode = (checks: readonly (() => string | undefined)[]): string | undefined => { for (const c of checks) { const code = c(); if (code !== undefined) return code; } return undefined; };
-/** og decode.ts decodeReceipt: a stored receipt bound to its lookup key and runtime; `towerSignature` is optional but non-empty when present. */
-export const decodeTowerReceipt = (value: unknown, lookupKey: string, runtimeId: string): Result<TowerReceiptV1, TowerError> => {
-  if (!plainRecord(value)) return towerErr("TOWER_STORED_RECEIPT_INVALID");
+/** A stored record's own lookup key must be its document's. */
+const boundLookupCode = (v: unknown, lookupKey: string, record: string): string | undefined =>
+  textCode(v, `TOWER_STORED_${record}_LOOKUP_INVALID`) ??
+  codeIf(v !== lookupKey, `TOWER_STORED_${record}_LOOKUP_MISMATCH`);
+/** A stored record's own runtime must be its document's, case aside. */
+const boundRuntimeCode = (v: unknown, runtimeId: string, record: string): string | undefined =>
+  textCode(v, `TOWER_STORED_${record}_RUNTIME_INVALID`) ??
+  codeIf(String(v).toLowerCase() !== runtimeId, `TOWER_STORED_${record}_RUNTIME_MISMATCH`);
+const RECEIPT_COUNTS = ["height", "receivedAt", "sequence", "retainedSlots"];
+const RECEIPT_OPTIONAL_COUNTS = [
+  "slot",
+  "storedAt",
+  "expiresAt",
+  "storedBytes",
+  "maxStoredBytes",
+  "appointmentSequence",
+];
+const receiptCountCode = (field: string): string => `TOWER_STORED_RECEIPT_${field.toUpperCase()}_INVALID`;
+/**
+ * og decode.ts decodeReceipt: a stored receipt bound to its lookup key and runtime; `towerSignature` is optional but
+ * non-empty when present.
+ */
+export const decodeTowerReceipt = (
+  value: unknown,
+  lookupKey: string,
+  runtimeId: string,
+): Result<TowerReceiptV1, TowerError> => {
+  if (!plainRecord(value)) return towerErr(STORED_RECEIPT_SHAPE.invalid);
   const r = value;
-  const code = firstCode([
-    () => exactKeys(r, ["type", "version", "towerId", "lookupKey", "runtimeId", "height", "bundleHash", "receivedAt", "sequence", "retainedSlots"],
-      ["towerMode", "slot", "storedAt", "expiresAt", "storedBytes", "maxStoredBytes", "quotaOk", "appointmentSequence", "towerSignature"], "TOWER_STORED_RECEIPT_FIELDS_INVALID"),
-    () => (r["type"] !== "tower_receipt" || r["version"] !== 1 ? "TOWER_STORED_RECEIPT_VERSION_INVALID" : undefined),
-    () => textCode(r["lookupKey"], "TOWER_STORED_RECEIPT_LOOKUP_INVALID") ?? (r["lookupKey"] !== lookupKey ? "TOWER_STORED_RECEIPT_LOOKUP_MISMATCH" : undefined),
-    () => textCode(r["runtimeId"], "TOWER_STORED_RECEIPT_RUNTIME_INVALID") ?? ((r["runtimeId"] as string).toLowerCase() !== runtimeId ? "TOWER_STORED_RECEIPT_RUNTIME_MISMATCH" : undefined),
+  const checked = towerChecks(
+    () => fieldsCode(r, STORED_RECEIPT_SHAPE),
+    () => codeIf(r["type"] !== "tower_receipt" || r["version"] !== 1, "TOWER_STORED_RECEIPT_VERSION_INVALID"),
+    () => boundLookupCode(r["lookupKey"], lookupKey, "RECEIPT"),
+    () => boundRuntimeCode(r["runtimeId"], runtimeId, "RECEIPT"),
     () => textCode(r["towerId"], "TOWER_STORED_RECEIPT_TOWER_INVALID"),
     () => textCode(r["bundleHash"], "TOWER_STORED_RECEIPT_HASH_INVALID"),
-    ...(["height", "receivedAt", "sequence", "retainedSlots"] as const).map((f) => () => safeIntCode(r[f], `TOWER_STORED_RECEIPT_${f.toUpperCase()}_INVALID`)),
-    ...(["slot", "storedAt", "expiresAt", "storedBytes", "maxStoredBytes", "appointmentSequence"] as const).map((f) => () => optionalSafeIntCode(r[f], `TOWER_STORED_RECEIPT_${f.toUpperCase()}_INVALID`)),
-    () => { if (r["towerMode"] === undefined) return undefined; const m = normalizeTowerMode(r["towerMode"]); return m.ok ? undefined : m.error.code; },
-    () => (r["quotaOk"] !== undefined && typeof r["quotaOk"] !== "boolean" ? "TOWER_STORED_RECEIPT_QUOTA_INVALID" : undefined),
-    () => (r["towerSignature"] !== undefined ? textCode(r["towerSignature"], "TOWER_STORED_RECEIPT_SIGNATURE_INVALID") : undefined),
-  ]);
-  return code === undefined ? ok(value as unknown as TowerReceiptV1) : towerErr(code);
+    ...RECEIPT_COUNTS.map((f) => () => safeIntCode(r[f], receiptCountCode(f))),
+    ...RECEIPT_OPTIONAL_COUNTS.map((f) => () => optionalSafeIntCode(r[f], receiptCountCode(f))),
+    () => (r["towerMode"] === undefined ? undefined : errorCode(normalizeTowerMode(r["towerMode"]))),
+    () => codeIf(r["quotaOk"] !== undefined && typeof r["quotaOk"] !== "boolean", "TOWER_STORED_RECEIPT_QUOTA_INVALID"),
+    () =>
+      r["towerSignature"] === undefined
+        ? undefined
+        : textCode(r["towerSignature"], "TOWER_STORED_RECEIPT_SIGNATURE_INVALID"),
+  );
+  return map(checked, () => value as unknown as TowerReceiptV1);
 };
 /** og decode.ts decodeBundle. */
-export const decodeTowerBundle = (value: unknown, lookupKey: string, runtimeId: string): Result<EncryptedRuntimeRecoveryBundleV1, TowerError> => {
-  if (!plainRecord(value)) return towerErr("TOWER_STORED_BUNDLE_INVALID");
+export const decodeTowerBundle = (
+  value: unknown,
+  lookupKey: string,
+  runtimeId: string,
+): Result<EncryptedRuntimeRecoveryBundleV1, TowerError> => {
+  if (!plainRecord(value)) return towerErr(STORED_BUNDLE_SHAPE.invalid);
   const b = value;
-  const code = firstCode([
-    () => exactKeys(b, BUNDLE_FIELDS, BUNDLE_OPTIONAL, "TOWER_STORED_BUNDLE_FIELDS_INVALID"),
-    () => (b["version"] !== 1 ? "TOWER_STORED_BUNDLE_VERSION_INVALID" : undefined),
-    () => (b["kind"] !== undefined && b["kind"] !== "snapshot" && b["kind"] !== "journal_tail" ? "TOWER_STORED_BUNDLE_KIND_INVALID" : undefined),
-    () => textCode(b["lookupKey"], "TOWER_STORED_BUNDLE_LOOKUP_INVALID") ?? (b["lookupKey"] !== lookupKey ? "TOWER_STORED_BUNDLE_LOOKUP_MISMATCH" : undefined),
-    () => textCode(b["runtimeId"], "TOWER_STORED_BUNDLE_RUNTIME_INVALID") ?? ((b["runtimeId"] as string).toLowerCase() !== runtimeId ? "TOWER_STORED_BUNDLE_RUNTIME_MISMATCH" : undefined),
+  const checked = towerChecks(
+    () => fieldsCode(b, STORED_BUNDLE_SHAPE),
+    () => codeIf(b["version"] !== 1, "TOWER_STORED_BUNDLE_VERSION_INVALID"),
+    () =>
+      codeIf(
+        b["kind"] !== undefined && b["kind"] !== "snapshot" && b["kind"] !== "journal_tail",
+        "TOWER_STORED_BUNDLE_KIND_INVALID",
+      ),
+    () => boundLookupCode(b["lookupKey"], lookupKey, "BUNDLE"),
+    () => boundRuntimeCode(b["runtimeId"], runtimeId, "BUNDLE"),
     () => safeIntCode(b["height"], "TOWER_STORED_BUNDLE_HEIGHT_INVALID"),
     () => safeIntCode(b["createdAt"], "TOWER_STORED_BUNDLE_CREATED_AT_INVALID"),
     () => optionalSafeIntCode(b["baseRuntimeHeight"], "TOWER_STORED_BUNDLE_BASE_HEIGHT_INVALID"),
     () => textCode(b["bundleHash"], "TOWER_STORED_BUNDLE_HASH_INVALID"),
     () => textCode(b["iv"], "TOWER_STORED_BUNDLE_IV_INVALID"),
     () => textCode(b["ciphertext"], "TOWER_STORED_BUNDLE_CIPHERTEXT_INVALID"),
-    () => (b["compression"] !== undefined && b["compression"] !== "gzip" ? "TOWER_STORED_BUNDLE_COMPRESSION_INVALID" : undefined),
-  ]);
-  return code === undefined ? ok(value as unknown as EncryptedRuntimeRecoveryBundleV1) : towerErr(code);
+    () =>
+      codeIf(b["compression"] !== undefined && b["compression"] !== "gzip", "TOWER_STORED_BUNDLE_COMPRESSION_INVALID"),
+  );
+  return map(checked, () => value as unknown as EncryptedRuntimeRecoveryBundleV1);
 };
-/** og decode.ts decodeStoredLookupDoc: a persisted lookup document, every receipt and bundle bound to its key and runtime. */
-export const decodeTowerLookupDoc = (raw: string, expectedLookupKey?: string): Result<TowerLookupDoc, TowerError> => chain(parseTaggedJson(raw), (value) => {
-  if (!plainRecord(value)) return towerErr("TOWER_STORED_LOOKUP_INVALID");
-  const d = value;
-  const fields = exactKeys(d, ["lookupKey", "runtimeId", "updatedAt", "receipts", "bundles"], [], "TOWER_STORED_LOOKUP_FIELDS_INVALID");
-  if (fields !== undefined) return towerErr(fields);
-  const keyCode = textCode(d["lookupKey"], "TOWER_STORED_LOOKUP_KEY_INVALID");
-  if (keyCode !== undefined) return towerErr(keyCode);
-  const lookupKey = (d["lookupKey"] as string).toLowerCase();
-  if (!TOWER_BYTES32.test(lookupKey)) return towerErr("TOWER_STORED_LOOKUP_KEY_INVALID");
-  if (expectedLookupKey && lookupKey !== expectedLookupKey) return towerErr("TOWER_STORED_LOOKUP_KEY_MISMATCH");
-  const runtimeCode = textCode(d["runtimeId"], "TOWER_STORED_RUNTIME_INVALID");
-  if (runtimeCode !== undefined) return towerErr(runtimeCode);
-  const runtimeId = (d["runtimeId"] as string).toLowerCase();
-  const code = firstCode([
-    () => (/^0x[0-9a-f]{40}$/.test(runtimeId) ? undefined : "TOWER_STORED_RUNTIME_INVALID"),
-    () => safeIntCode(d["updatedAt"], "TOWER_STORED_UPDATED_AT_INVALID"),
-    () => (Array.isArray(d["receipts"]) ? undefined : "TOWER_STORED_RECEIPTS_INVALID"),
-    () => (Array.isArray(d["bundles"]) ? undefined : "TOWER_STORED_BUNDLES_INVALID"),
-  ]);
-  if (code !== undefined) return towerErr(code);
-  return chain(traverse(d["receipts"] as readonly unknown[], (r) => decodeTowerReceipt(r, lookupKey, runtimeId)), (receipts) =>
-    map(traverse(d["bundles"] as readonly unknown[], (v): Result<TowerStoredBundle, TowerError> => {
-      if (!plainRecord(v)) return towerErr("TOWER_STORED_BUNDLE_ENTRY_INVALID");
-      const e = v, entryFields = exactKeys(e, ["slot", "towerMode", "bundle", "ownerSignedAt", "encryptedEnvelopeHash", "lastResortPayloadDigest"], ["lastResortPayload"], "TOWER_STORED_BUNDLE_ENTRY_FIELDS_INVALID");
-      if (entryFields !== undefined) return towerErr(entryFields);
-      const slotCode = safeIntCode(e["slot"], "TOWER_STORED_BUNDLE_SLOT_INVALID");
-      if (slotCode !== undefined) return towerErr(slotCode);
-      return chain(normalizeTowerMode(e["towerMode"]), (towerMode) => chain(decodeTowerBundle(e["bundle"], lookupKey, runtimeId), (bundle) => {
-        const c = firstCode([
-          () => safeIntCode(e["ownerSignedAt"], "TOWER_STORED_OWNER_SIGNED_AT_INVALID"),
-          () => textCode(e["encryptedEnvelopeHash"], "TOWER_STORED_ENCRYPTED_ENVELOPE_HASH_INVALID") ?? (TOWER_BYTES32.test((e["encryptedEnvelopeHash"] as string).toLowerCase()) ? undefined : "TOWER_STORED_ENCRYPTED_ENVELOPE_HASH_INVALID"),
-          () => textCode(e["lastResortPayloadDigest"], "TOWER_STORED_LAST_RESORT_DIGEST_INVALID"),
-          () => (e["lastResortPayload"] !== undefined && !plainRecord(e["lastResortPayload"]) ? "TOWER_STORED_LAST_RESORT_PAYLOAD_INVALID" : undefined),
-        ]);
-        return c !== undefined ? towerErr(c) : ok({
-          slot: e["slot"] as number, towerMode, bundle, ownerSignedAt: e["ownerSignedAt"] as number, encryptedEnvelopeHash: (e["encryptedEnvelopeHash"] as string).toLowerCase(),
-          lastResortPayloadDigest: e["lastResortPayloadDigest"] as string, ...opt("lastResortPayload", e["lastResortPayload"] as TowerLastResortPayloadV1 | undefined),
-        });
-      }));
-    }), (bundles) => ({ lookupKey, runtimeId, updatedAt: d["updatedAt"] as number, receipts, bundles })));
-});
+const STORED_ENVELOPE_HASH_INVALID = "TOWER_STORED_ENCRYPTED_ENVELOPE_HASH_INVALID";
+/**
+ * og decode.ts's bundle entry: its retention slot and mode, its bundle, its owner signature time and its two hashes.
+ */
+const decodeStoredBundle = (
+  v: unknown,
+  lookupKey: string,
+  runtimeId: string,
+): Result<TowerStoredBundle, TowerError> => {
+  if (!plainRecord(v)) return towerErr(STORED_ENTRY_SHAPE.invalid);
+  const e = v;
+  const head = towerChecks(
+    () => fieldsCode(e, STORED_ENTRY_SHAPE),
+    () => safeIntCode(e["slot"], "TOWER_STORED_BUNDLE_SLOT_INVALID"),
+  );
+  const decoded = chain(head, () =>
+    all({
+      towerMode: normalizeTowerMode(e["towerMode"]),
+      bundle: decodeTowerBundle(e["bundle"], lookupKey, runtimeId),
+    }),
+  );
+  return chain(decoded, ({ towerMode, bundle }) => {
+    const checked = towerChecks(
+      () => safeIntCode(e["ownerSignedAt"], "TOWER_STORED_OWNER_SIGNED_AT_INVALID"),
+      () =>
+        textCode(e["encryptedEnvelopeHash"], STORED_ENVELOPE_HASH_INVALID) ??
+        codeIf(!TOWER_BYTES32.test(String(e["encryptedEnvelopeHash"]).toLowerCase()), STORED_ENVELOPE_HASH_INVALID),
+      () => textCode(e["lastResortPayloadDigest"], "TOWER_STORED_LAST_RESORT_DIGEST_INVALID"),
+      () =>
+        codeIf(
+          e["lastResortPayload"] !== undefined && !plainRecord(e["lastResortPayload"]),
+          "TOWER_STORED_LAST_RESORT_PAYLOAD_INVALID",
+        ),
+    );
+    return map(checked, () => ({
+      slot: e["slot"] as number,
+      towerMode,
+      bundle,
+      ownerSignedAt: e["ownerSignedAt"] as number,
+      encryptedEnvelopeHash: String(e["encryptedEnvelopeHash"]).toLowerCase(),
+      lastResortPayloadDigest: e["lastResortPayloadDigest"] as string,
+      ...opt("lastResortPayload", e["lastResortPayload"] as TowerLastResortPayloadV1 | undefined),
+    }));
+  });
+};
+/**
+ * og decode.ts decodeStoredLookupDoc: a persisted lookup document, every receipt and bundle bound to its key and
+ * runtime.
+ */
+export const decodeTowerLookupDoc = (raw: string, expectedLookupKey?: string): Result<TowerLookupDoc, TowerError> =>
+  chain(parseTaggedJson(raw), (value) => {
+    if (!plainRecord(value)) return towerErr(STORED_LOOKUP_SHAPE.invalid);
+    const d = value;
+    const lookupKey = lowerText(d["lookupKey"]);
+    const runtimeId = lowerText(d["runtimeId"]);
+    const checked = towerChecks(
+      () => fieldsCode(d, STORED_LOOKUP_SHAPE),
+      () => textCode(d["lookupKey"], "TOWER_STORED_LOOKUP_KEY_INVALID"),
+      () => codeIf(!TOWER_BYTES32.test(lookupKey), "TOWER_STORED_LOOKUP_KEY_INVALID"),
+      () => codeIf(Boolean(expectedLookupKey) && lookupKey !== expectedLookupKey, "TOWER_STORED_LOOKUP_KEY_MISMATCH"),
+      () => textCode(d["runtimeId"], "TOWER_STORED_RUNTIME_INVALID"),
+      () => codeIf(!EOA.test(runtimeId), "TOWER_STORED_RUNTIME_INVALID"),
+      () => safeIntCode(d["updatedAt"], "TOWER_STORED_UPDATED_AT_INVALID"),
+      () => codeIf(!Array.isArray(d["receipts"]), "TOWER_STORED_RECEIPTS_INVALID"),
+      () => codeIf(!Array.isArray(d["bundles"]), "TOWER_STORED_BUNDLES_INVALID"),
+    );
+    const decoded = chain(checked, () =>
+      all({
+        receipts: traverse(d["receipts"] as readonly unknown[], (r) => decodeTowerReceipt(r, lookupKey, runtimeId)),
+        bundles: traverse(d["bundles"] as readonly unknown[], (b) => decodeStoredBundle(b, lookupKey, runtimeId)),
+      }),
+    );
+    return map(decoded, ({ receipts, bundles }) => ({
+      lookupKey,
+      runtimeId,
+      updatedAt: d["updatedAt"] as number,
+      receipts,
+      bundles,
+    }));
+  });
 
 // ---- orderbook: og orderbook/core.ts (price-page limit order book), orderbook/pages/{page,key}.ts, orderbook/commitment.ts ----
 // og keeps liquidity in two Patricia trees of 16-slot FIFO price pages; the rewrite keeps each side as its pages in key-byte order
