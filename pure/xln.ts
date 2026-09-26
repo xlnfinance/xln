@@ -35875,585 +35875,1273 @@ export const pruneFinalizedJHistory = (
 };
 // ---- og entity/consensus/authority/board-handover.ts + entity/tx/handlers/board-handover.ts: the on-chain BoardActivated handover ----
 /** og ConsensusConfig as boardHandover carries it (mode, threshold, validators, shares). */
-export type HandoverConfig = { readonly mode: string; readonly threshold: bigint; readonly validators: readonly string[]; readonly shares: { readonly [signer: string]: bigint } };
+export type HandoverConfig = {
+  readonly mode: string;
+  readonly threshold: bigint;
+  readonly validators: readonly string[];
+  readonly shares: { readonly [signer: string]: bigint };
+};
+/** og: board thresholds and shares encode as uint16. */
+const BOARD_WEIGHT_MAX = 0xffffn;
 /** og FinancialDataCorruptionError / TypeSafetyViolationError messages. */
-const safetyText = (message: string, context?: Record<string, unknown>): string => `🚨 FINANCIAL-SAFETY VIOLATION: ${message}${context === undefined ? "" : `\nContext: ${stableJson(context)}`}`;
-const typeSafetyText = (message: string, value: unknown): string => `🛡️ TYPE-SAFETY VIOLATION: ${message}${value === undefined ? "" : `\nReceived: ${typeof value} = ${String(value)}`}`;
-/** og validateConsensusConfig: mode, threshold, validators, shares, then voting power (a refusal is og's Error message). */
+const safetyText = (message: string, context?: Record<string, unknown>): string =>
+  `🚨 FINANCIAL-SAFETY VIOLATION: ${message}${context === undefined ? "" : `\nContext: ${stableJson(context)}`}`;
+const typeSafetyText = (message: string, value: unknown): string =>
+  `🛡️ TYPE-SAFETY VIOLATION: ${message}${value === undefined ? "" : `\nReceived: ${typeof value} = ${String(value)}`}`;
+/** og: a validator list of distinct (case-blind) non-empty strings. */
+const configValidators = (raw: readonly unknown[], context: string): Result<readonly string[], string> => {
+  const admit = (seen: ReadonlySet<string>, validator: unknown, index: number): Result<ReadonlySet<string>, string> => {
+    if (typeof validator !== "string" || validator.trim().length === 0) {
+      return err(safetyText(`${context}.validators[${index}] must be a non-empty string`));
+    }
+    const id = lower(validator);
+    return seen.has(id)
+      ? err(safetyText(`${context}.validators has duplicate signer`, { validator }))
+      : ok(new Set([...seen, id]));
+  };
+  return map(foldResult(raw, new Set<string>() as ReadonlySet<string>, admit), () => raw as readonly string[]);
+};
+/** og: every share a bigint, one per (case-blind) signer. */
+const configShares = (
+  shares: Readonly<Record<string, unknown>>,
+  context: string,
+): Result<ReadonlyMap<string, bigint>, string> => {
+  const entries = Object.entries(shares);
+  const notBigint = entries.find(([, power]) => typeof power !== "bigint");
+  if (notBigint !== undefined) return err(safetyText(`${context}.shares.${notBigint[0]} must be bigint`));
+  const admit = (byId: ReadonlyMap<string, bigint>, [raw, power]: readonly [string, unknown]) => {
+    const id = lower(raw);
+    return byId.has(id)
+      ? err(safetyText(`${context}.shares has case-duplicate signer`, { rawSigner: raw }))
+      : ok(mapSet(byId, id, power as bigint));
+  };
+  return foldResult(entries, new Map() as ReadonlyMap<string, bigint>, admit);
+};
+/** og: each validator's positive uint16 power, summed. */
+const validatorPower = (
+  validators: readonly string[],
+  byId: ReadonlyMap<string, bigint>,
+  context: string,
+): Result<bigint, string> =>
+  foldResult(validators, 0n, (total, validator) => {
+    const power = byId.get(lower(validator));
+    if (power === undefined || power <= 0n) {
+      return err(safetyText(`${context}.shares missing positive power for validator`, { validator }));
+    }
+    return power > BOARD_WEIGHT_MAX
+      ? err(safetyText(`${context}.shares exceeds uint16 board encoding`, { validator, power }))
+      : ok(total + power);
+  });
+/**
+ * og validateConsensusConfig: mode, threshold, validators, shares, then voting power (a refusal is og's Error message).
+ */
 export const consensusConfigIssue = (value: unknown, context: string): Result<HandoverConfig, string> => {
-  const c = recOf(value) ?? {}, mode = c["mode"], threshold = c["threshold"];
-  if (mode !== "proposer-based" && mode !== "gossip-based") return err(safetyText(`${context}.mode must be proposer-based or gossip-based`));
-  if (typeof threshold !== "bigint" || threshold <= 0n) return err(safetyText(`${context}.threshold must be positive bigint`));
-  if (threshold > 0xffffn) return err(safetyText(`${context}.threshold exceeds uint16 board encoding`, { threshold }));
+  const c = recOf(value) ?? {};
+  const mode = c["mode"];
+  const threshold = c["threshold"];
   const rawValidators = c["validators"];
-  if (!Array.isArray(rawValidators)) return err(typeSafetyText(`${context}.validators must be an array`, rawValidators));
-  if (rawValidators.length === 0) return err(safetyText(`${context}.validators cannot be empty`));
-  const normalized = new Set<string>(), validators: string[] = [];
-  for (const [index, validator] of (rawValidators as readonly unknown[]).entries()) {
-    if (typeof validator !== "string" || validator.trim().length === 0) return err(safetyText(`${context}.validators[${index}] must be a non-empty string`));
-    const id = validator.trim().toLowerCase();
-    if (normalized.has(id)) return err(safetyText(`${context}.validators has duplicate signer`, { validator }));
-    normalized.add(id);
-    validators.push(validator);
-  }
   const rawShares = c["shares"];
-  if (!rawShares || typeof rawShares !== "object" || Array.isArray(rawShares)) return err(typeSafetyText(`${context}.shares must be a non-null object`, rawShares));
-  const shares = rawShares as Readonly<Record<string, unknown>>;
-  for (const [id, power] of Object.entries(shares)) if (typeof power !== "bigint") return err(safetyText(`${context}.shares.${id} must be bigint`));
-  const byId = new Map<string, bigint>();
-  for (const [raw, power] of Object.entries(shares)) {
-    const id = raw.trim().toLowerCase();
-    if (byId.has(id)) return err(safetyText(`${context}.shares has case-duplicate signer`, { rawSigner: raw }));
-    byId.set(id, power as bigint);
+  if (mode !== "proposer-based" && mode !== "gossip-based") {
+    return err(safetyText(`${context}.mode must be proposer-based or gossip-based`));
   }
-  let total = 0n;
-  for (const validator of validators) {
-    const power = byId.get(validator.trim().toLowerCase());
-    if (power === undefined || power <= 0n) return err(safetyText(`${context}.shares missing positive power for validator`, { validator }));
-    if (power > 0xffffn) return err(safetyText(`${context}.shares exceeds uint16 board encoding`, { validator, power }));
-    total += power;
-  }
-  for (const id of Object.keys(shares)) if (!normalized.has(id.trim().toLowerCase())) return err(safetyText(`${context}.shares contains signer outside validators`, { shareSigner: id }));
-  if (total < threshold) return err(safetyText(`${context}.threshold exceeds total validator power`, { threshold, totalPower: total }));
-  return ok({ mode, threshold, validators, shares: shares as Readonly<Record<string, bigint>> });
+  if (typeof threshold !== "bigint" || threshold <= 0n)
+    return err(safetyText(`${context}.threshold must be positive bigint`));
+  if (threshold > BOARD_WEIGHT_MAX)
+    return err(safetyText(`${context}.threshold exceeds uint16 board encoding`, { threshold }));
+  if (!Array.isArray(rawValidators))
+    return err(typeSafetyText(`${context}.validators must be an array`, rawValidators));
+  if (rawValidators.length === 0) return err(safetyText(`${context}.validators cannot be empty`));
+  return chain(configValidators(rawValidators, context), (validators) => {
+    if (!rawShares || typeof rawShares !== "object" || Array.isArray(rawShares)) {
+      return err(typeSafetyText(`${context}.shares must be a non-null object`, rawShares));
+    }
+    const shares = rawShares as Readonly<Record<string, unknown>>;
+    const members = new Set(validators.map((v) => lower(v)));
+    return chain(configShares(shares, context), (byId) =>
+      chain(validatorPower(validators, byId, context), (total) => {
+        const outsider = Object.keys(shares).find((id) => !members.has(lower(id)));
+        if (outsider !== undefined) {
+          return err(safetyText(`${context}.shares contains signer outside validators`, { shareSigner: outsider }));
+        }
+        if (total < threshold) {
+          return err(
+            safetyText(`${context}.threshold exceeds total validator power`, { threshold, totalPower: total }),
+          );
+        }
+        return ok({ mode, threshold, validators, shares: shares as Readonly<Record<string, bigint>> });
+      }),
+    );
+  });
 };
-/** og hashBoard(encodeBoard(config)); og's encodeBoard refusals keep the rewrite's lazyBoardEncoding codes except the proposer's (og `BOARD_PROPOSER_EOA_REQUIRED:<proposer>`). */
+/**
+ * og hashBoard(encodeBoard(config)); og's encodeBoard refusals keep the rewrite's lazyBoardEncoding codes except the
+ * proposer's (og `BOARD_PROPOSER_EOA_REQUIRED:<proposer>`).
+ */
 const handoverBoardHash = (config: HandoverConfig): Result<string, EntityError> => {
-  const encoded = lazyBoardEncoding({ mode: "proposer-based", threshold: config.threshold, validators: config.validators, shares: config.shares });
+  const encoded = lazyBoardEncoding({
+    mode: "proposer-based",
+    threshold: config.threshold,
+    validators: config.validators,
+    shares: config.shares,
+  });
   if (encoded.ok) return ok(keccak256Hex(hexToBytes(encoded.value)).toLowerCase());
-  return invariant(jCode(encoded.error) === "BOARD_PROPOSER_EOA_REQUIRED" ? `BOARD_PROPOSER_EOA_REQUIRED:${config.validators[0] ?? ""}` : jCode(encoded.error));
+  const code = jCode(encoded.error);
+  return invariant(code === "BOARD_PROPOSER_EOA_REQUIRED" ? `${code}:${config.validators[0] ?? ""}` : code);
 };
+const isCanonicalId = (id: string): boolean => id === lower(id);
 /** og assertCanonicalConfig: a valid config in the Entity's own mode with lowercase validators and share signers. */
 const canonicalHandoverConfig = (board: unknown): Result<HandoverConfig, EntityError> => {
   const config = consensusConfigIssue(board, "BOARD_HANDOVER_CONFIG");
   if (!config.ok) return invariant(`BOARD_HANDOVER_CONFIG_INVALID:${config.error}`);
   const c = config.value;
-  if (c.mode !== "proposer-based") return invariant(`BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN:proposer-based:${c.mode}`);
-  for (const v of c.validators) if (v !== v.trim().toLowerCase()) return invariant(`BOARD_HANDOVER_VALIDATOR_NON_CANONICAL:${v}`);
-  for (const s of Object.keys(c.shares)) if (s !== s.trim().toLowerCase()) return invariant(`BOARD_HANDOVER_SHARE_SIGNER_NON_CANONICAL:${s}`);
-  return ok(c);
+  const validator = c.validators.find((v) => !isCanonicalId(v));
+  const signer = Object.keys(c.shares).find((s) => !isCanonicalId(s));
+  switch (true) {
+    case c.mode !== "proposer-based":
+      return invariant(`BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN:proposer-based:${c.mode}`);
+    case validator !== undefined:
+      return invariant(`BOARD_HANDOVER_VALIDATOR_NON_CANONICAL:${validator}`);
+    case signer !== undefined:
+      return invariant(`BOARD_HANDOVER_SHARE_SIGNER_NON_CANONICAL:${signer}`);
+    default:
+      return ok(c);
+  }
 };
+const eventData = (e: JRec): JRec => recOf(e["data"]) ?? {};
+/** The BoardActivated records a range carries for this Entity, in order. */
+const selfActivations = (range: JEventTx, me: string): readonly JRec[] =>
+  jRangeEvents(range)
+    .filter((e) => e["type"] === "BoardActivated" && lower(eventData(e)["entityId"]) === me)
+    .map(eventData);
+/** og: the activations chain from the committed board, each naming the board before it; the chain's end. */
+const activatedBoard = (state: EntityState, activations: readonly JRec[]): Result<string, EntityError> =>
+  foldResult(activations, configBoardHash(state.quorum).toLowerCase(), (expected, a) => {
+    const received = lower(a["previousBoardHash"]);
+    return received !== expected
+      ? invariant(`BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID:${received}:${expected}`)
+      : ok(lower(a["newBoardHash"]));
+  });
 /**
- * og getBoardHandoverFrameConfig: a frame carrying boardHandover must be exactly [j_event, boardHandover], and the j_event's own
- * BoardActivated chain must run from the committed board to the new config's board. The authority the frame is certified under.
+ * og getBoardHandoverFrameConfig: a frame carrying boardHandover must be exactly [j_event, boardHandover], and the
+ * j_event's own BoardActivated chain must run from the committed board to the new config's board. The authority the
+ * frame is certified under.
  */
-export const handoverFrameConfig = (state: EntityState, txs: readonly EntityTx[]): Result<HandoverConfig | null, EntityError> => {
+export const handoverFrameConfig = (
+  state: EntityState,
+  txs: readonly EntityTx[],
+): Result<HandoverConfig | null, EntityError> => {
   const handovers = txs.filter((tx) => tx.type === "boardHandover");
+  const [range, handover] = txs;
   if (handovers.length === 0) return ok(null);
   if (handovers.length !== 1) return invariant(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
-  const [range, handover] = txs;
-  if (txs.length !== 2 || range?.type !== "j_event" || handover?.type !== "boardHandover") return invariant(`BOARD_HANDOVER_FRAME_SHAPE_INVALID:${txs.map((tx) => tx.type).join(",")}`);
+  if (txs.length !== 2 || range?.type !== "j_event" || handover?.type !== "boardHandover") {
+    return invariant(`BOARD_HANDOVER_FRAME_SHAPE_INVALID:${txs.map((tx) => tx.type).join(",")}`);
+  }
   return chain(canonicalHandoverConfig(handover.data.board), (config) => {
-    const me = lower(state.id), blocks = Array.isArray(range.data["blocks"]) ? (range.data["blocks"] as readonly unknown[]) : [];
-    const activations = blocks.flatMap((b) => { const events = recOf(b)?.["events"]; return Array.isArray(events) ? (events as readonly unknown[]) : []; })
-      .map((e) => recOf(e) ?? {}).filter((e) => e["type"] === "BoardActivated" && lower((recOf(e["data"]) ?? {})["entityId"]) === me).map((e) => recOf(e["data"]) ?? {});
+    const activations = selfActivations(range, lower(state.id));
     if (activations.length === 0) return invariant("BOARD_HANDOVER_ACTIVATION_MISSING");
-    let expected = configBoardHash(state.quorum).toLowerCase();
-    for (const a of activations) {
-      const received = lower(a["previousBoardHash"]);
-      if (received !== expected) return invariant(`BOARD_HANDOVER_ACTIVATION_CHAIN_INVALID:${received}:${expected}`);
-      expected = lower(a["newBoardHash"]);
-    }
-    return chain(handoverBoardHash(config), (hash) => (hash !== expected ? invariant(`BOARD_HANDOVER_CONFIG_HASH_MISMATCH:${hash}:${expected}`) : ok(config)));
+    return chain(activatedBoard(state, activations), (expected) =>
+      chain(handoverBoardHash(config), (hash) =>
+        hash !== expected ? invariant(`BOARD_HANDOVER_CONFIG_HASH_MISMATCH:${hash}:${expected}`) : ok(config),
+      ),
+    );
   });
 };
 /**
- * og handleBoardHandoverEntityTx: the frame-authorized config replaces the board once the Entity's certified registry holds its own
- * BoardActivated record for exactly that board; the new CEO leads from view 0. A validator is an EOA or a nested Entity id (og toBoardEntityId).
+ * og handleBoardHandoverEntityTx: the frame-authorized config replaces the board once the Entity's certified registry
+ * holds its own BoardActivated record for exactly that board; the new CEO leads from view 0. A validator is an EOA or
+ * a nested Entity id (og toBoardEntityId).
  */
-const entityBoardHandover = (d: Draft, board: unknown, authorized: HandoverConfig | undefined): Result<Draft, EntityError> => {
-  const state = d.state, config = consensusConfigIssue(board, "BOARD_HANDOVER_CONFIG");
+const entityBoardHandover = (
+  d: Draft,
+  board: unknown,
+  authorized: HandoverConfig | undefined,
+): Result<Draft, EntityError> => {
+  const state = d.state;
+  const config = consensusConfigIssue(board, "BOARD_HANDOVER_CONFIG");
   if (!config.ok) return invariant(config.error);
   const c = config.value;
   if (c.mode !== "proposer-based") return invariant("BOARD_HANDOVER_MODE_CHANGE_FORBIDDEN");
   if (authorized === undefined) return invariant("BOARD_HANDOVER_TRANSITION_PROOF_REQUIRED");
   return chain(observerBoardRecord(state, state.id), (record) => {
-    if (record === null || record.source !== "BoardActivated") return invariant("BOARD_HANDOVER_CERTIFIED_ACTIVATION_REQUIRED");
+    if (record === null || record.source !== "BoardActivated") {
+      return invariant("BOARD_HANDOVER_CERTIFIED_ACTIVATION_REQUIRED");
+    }
     const previous = configBoardHash(state.quorum).toLowerCase();
-    return chain(handoverBoardHash(c), (next) => chain(handoverBoardHash(authorized), (auth) => {
-      if (auth !== next || record.boardHash !== next) return invariant(`BOARD_HANDOVER_CERTIFIED_AUTHORITY_MISMATCH:previous=${record.previousBoardHash}:${previous}:certified=${record.boardHash}:authorized=${auth}:next=${next}`);
-      return map(withBoardAuthority(state, c, Number(state.height) + 1), (next) => ({ ...d, state: next, touched: [] }));
-    }));
+    return chain(handoverBoardHash(c), (next) =>
+      chain(handoverBoardHash(authorized), (auth) => {
+        if (auth === next && record.boardHash === next) {
+          return map(withBoardAuthority(state, c, Number(state.height) + 1), (s) => ({ ...d, state: s, touched: [] }));
+        }
+        const boards = `previous=${record.previousBoardHash}:${previous}:certified=${record.boardHash}`;
+        return invariant(`BOARD_HANDOVER_CERTIFIED_AUTHORITY_MISMATCH:${boards}:authorized=${auth}:next=${next}`);
+      }),
+    );
   });
 };
 // ---- og entity/consensus/authority/board-handover.ts + proposal/policy.ts: the consensus side of a board handover ----
-/** og withBoardAuthority's board: the config's validators (an EOA, or a nested Entity id as og toBoardEntityId keeps it) with their shares. */
-const quorumOfConfig = (c: HandoverConfig): Result<Quorum, EntityError> => {
-  const members = new Map<Address, { readonly shares: bigint }>();
-  for (const v of c.validators) {
-    const share = Object.entries(c.shares).find(([k]) => lower(k) === lower(v))?.[1], nested = /^0x[0-9a-f]{64}$/i.test(v), a = nested ? ok(lower(v) as Address) : address(v);
-    if (!a.ok || share === undefined) return invariant(`BOARD_HANDOVER_VALIDATOR_INVALID:${v}`);
-    members.set(a.value, { shares: share });
-  }
-  return admitQuorum({ _tag: "teaching", threshold: c.threshold, members });
+const NESTED_ENTITY_ID = /^0x[0-9a-f]{64}$/i;
+/** og toBoardEntityId: an EOA, or a nested Entity id kept as it is, with its share. */
+const handoverMember = (
+  c: HandoverConfig,
+  v: string,
+): Result<readonly [Address, { readonly shares: bigint }], EntityError> => {
+  const share = Object.entries(c.shares).find(([k]) => lower(k) === lower(v))?.[1];
+  const id: Result<Address, unknown> = NESTED_ENTITY_ID.test(v) ? ok(lower(v) as Address) : address(v);
+  return !id.ok || share === undefined
+    ? invariant(`BOARD_HANDOVER_VALIDATOR_INVALID:${v}`)
+    : ok([id.value, { shares: share }] as const);
+};
+/** og withBoardAuthority's board: the config's validators with their shares. */
+const quorumOfConfig = (c: HandoverConfig): Result<Quorum, EntityError> =>
+  chain(traverse(c.validators, (v) => handoverMember(c, v)), (members) =>
+    admitQuorum({ _tag: "teaching", threshold: c.threshold, members: new Map(members) }),
+  );
+/** og: the handed-over board's first validator leads from view 0. */
+const handoverLeader = (c: HandoverConfig, changedAtHeight: number): Result<LeaderState, EntityError> => {
+  const active = c.validators[0];
+  return active === undefined
+    ? invariant("BOARD_HANDOVER_VALIDATOR_MISSING")
+    : ok({ activeValidatorId: active, view: 0, changedAtHeight });
 };
 /** og withBoardAuthority: the state under the handed-over board, its first validator leading from view 0. */
-const withBoardAuthority = (state: EntityState, c: HandoverConfig, changedAtHeight: number): Result<EntityState, EntityError> => {
-  const active = c.validators[0];
-  if (active === undefined) return invariant("BOARD_HANDOVER_VALIDATOR_MISSING");
-  return map(quorumOfConfig(c), (quorum) => ({ ...state, quorum, leaderState: { activeValidatorId: active, view: 0, changedAtHeight } }));
-};
-/** og getPendingBoardHandoverConfig: uncommitted local coordination; one queued handover names the board that assembles the transition. */
-const pendingHandoverConfig = (state: EntityState, txs: readonly EntityTx[]): Result<HandoverConfig | null, EntityError> => {
+const withBoardAuthority = (
+  state: EntityState,
+  c: HandoverConfig,
+  changedAtHeight: number,
+): Result<EntityState, EntityError> =>
+  chain(handoverLeader(c, changedAtHeight), (leaderState) =>
+    map(quorumOfConfig(c), (quorum) => ({ ...state, quorum, leaderState })),
+  );
+/**
+ * og getPendingBoardHandoverConfig: uncommitted local coordination; one queued handover names the board that assembles
+ * the transition.
+ */
+const pendingHandoverConfig = (
+  state: EntityState,
+  txs: readonly EntityTx[],
+): Result<HandoverConfig | null, EntityError> => {
   const handovers = txs.filter((tx): tx is Extract<EntityTx, { type: "boardHandover" }> => tx.type === "boardHandover");
   const [only] = handovers;
   if (only === undefined) return ok(null);
-  return handovers.length !== 1 ? invariant(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`) : canonicalHandoverConfig(only.data.board);
+  return handovers.length !== 1
+    ? invariant(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`)
+    : canonicalHandoverConfig(only.data.board);
 };
-/** og `pendingConfig ? { ...replica, state: withBoardAuthority(replica.state, pendingConfig) } : replica` (admission and proposal selection). */
+/**
+ * og `pendingConfig ? { ...replica, state: withBoardAuthority(replica.state, pendingConfig) } : replica` (admission and
+ * proposal selection).
+ */
 const authorityReplica = <R extends EntityEnv>(r: R, txs: readonly EntityTx[]): Result<R, EntityError> =>
-  chain(pendingHandoverConfig(r.state, txs), (c) => (c === null ? ok(r) : map(withBoardAuthority(r.state, c, Number(r.state.height) + 1), (state) => ({ ...r, state }))));
+  chain(pendingHandoverConfig(r.state, txs), (c) =>
+    c === null ? ok(r) : map(withBoardAuthority(r.state, c, Number(r.state.height) + 1), (state) => ({ ...r, state })),
+  );
 /** og getEntityFrameConsensusConfig: the board a frame's signatures are counted under. */
 const frameQuorum = (state: EntityState, txs: readonly EntityTx[]): Result<Quorum, EntityError> =>
   chain(handoverFrameConfig(state, txs), (c) => (c === null ? ok(state.quorum) : quorumOfConfig(c)));
 /** og getBoardHandoverLeaderState. */
 const handoverLeaderState = (state: EntityState, txs: readonly EntityTx[]): Result<LeaderState | null, EntityError> =>
-  chain(handoverFrameConfig(state, txs), (c) => {
-    if (c === null) return ok(null);
-    const active = c.validators[0];
-    return active === undefined ? invariant("BOARD_HANDOVER_VALIDATOR_MISSING") : ok({ activeValidatorId: active, view: 0, changedAtHeight: Number(state.height) + 1 });
-  });
+  chain(handoverFrameConfig(state, txs), (c) => (c === null ? ok(null) : handoverLeader(c, Number(state.height) + 1)));
+/** Every event a j_event range carries, block by block. */
 const jRangeEvents = (tx: JEventTx): readonly JRec[] => {
   const blocks = Array.isArray(tx.data["blocks"]) ? (tx.data["blocks"] as readonly unknown[]) : [];
-  return blocks.flatMap((b) => { const events = recOf(b)?.["events"]; return Array.isArray(events) ? (events as readonly unknown[]) : []; }).map((e) => recOf(e) ?? {});
+  const eventsOf = (b: unknown): readonly unknown[] => {
+    const events = recOf(b)?.["events"];
+    return Array.isArray(events) ? (events as readonly unknown[]) : [];
+  };
+  return blocks.flatMap(eventsOf).map((e) => recOf(e) ?? {});
 };
-/** og getSelfAuthorityTargetFromJRange: the last board this range registers, activates or (for the Foundation) bootstraps for the Entity. */
+/** The board one event registers, activates or (for the Foundation) bootstraps for this Entity. */
+const selfBoardOf = (e: JRec, me: string): string | undefined => {
+  const d = eventData(e);
+  switch (true) {
+    case e["type"] === "FoundationBootstrapped" && me === FOUNDATION_ENTITY_ID:
+      return lower(d["boardHash"]);
+    case e["type"] === "EntityRegistered" && lower(d["entityId"]) === me:
+      return lower(d["boardHash"]);
+    case e["type"] === "BoardActivated" && lower(d["entityId"]) === me:
+      return lower(d["newBoardHash"]);
+    default:
+      return undefined;
+  }
+};
+/** og getSelfAuthorityTargetFromJRange: the last board this range registers, activates or bootstraps for the Entity. */
 const selfAuthorityTarget = (tx: JEventTx, entityId: string): string | null => {
   const me = lower(entityId);
-  let target: string | null = null;
-  for (const e of jRangeEvents(tx)) {
-    const d = recOf(e["data"]) ?? {};
-    if (e["type"] === "FoundationBootstrapped" && me === FOUNDATION_ENTITY_ID) target = lower(d["boardHash"]);
-    else if ((e["type"] === "EntityRegistered" || e["type"] === "BoardActivated") && lower(d["entityId"]) === me) target = lower(e["type"] === "EntityRegistered" ? d["boardHash"] : d["newBoardHash"]);
-  }
-  return target;
+  return jRangeEvents(tx).reduce<string | null>((target, e) => selfBoardOf(e, me) ?? target, null);
 };
 /** og nestedEntityTxs. */
-const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => (tx.type === "runtimeOutput" ? tx.data.entityTxs : tx.type === "entityCommand" ? tx.data.txs : []);
-/** og collectCounterpartyBoardActivations. */
-const counterpartyActivations = (txs: readonly EntityTx[], me: string, into: Set<string>): Set<string> => {
-  for (const tx of txs) {
-    if (tx.type !== "j_event") { counterpartyActivations(nestedEntityTxs(tx), me, into); continue; }
-    for (const e of jRangeEvents(tx)) { if (e["type"] !== "BoardActivated") continue; const target = lower((recOf(e["data"]) ?? {})["entityId"]); if (target !== me) into.add(target); }
+const nestedEntityTxs = (tx: EntityTx): readonly EntityTx[] => {
+  switch (tx.type) {
+    case "runtimeOutput":
+      return tx.data.entityTxs;
+    case "entityCommand":
+      return tx.data.txs;
+    default:
+      return [];
   }
-  return into;
 };
-/** og findConflictingAccountInput. */
+/** og collectCounterpartyBoardActivations: every other Entity whose board a (nested) range activates. */
+const activatedCounterparties = (txs: readonly EntityTx[], me: string): readonly string[] =>
+  txs.flatMap((tx) =>
+    tx.type !== "j_event"
+      ? activatedCounterparties(nestedEntityTxs(tx), me)
+      : jRangeEvents(tx)
+          .filter((e) => e["type"] === "BoardActivated")
+          .map((e) => lower(eventData(e)["entityId"]))
+          .filter((target) => target !== me),
+  );
+/** og findConflictingAccountInput: the first (nested) Account row from an Entity whose board this frame activates. */
 const conflictingAccountInput = (tx: EntityTx, activated: ReadonlySet<string>): string | null => {
-  if (tx.type === "accountInput") { const from = lower(tx.data.fromEntityId); return activated.has(from) ? from : null; }
-  for (const nested of nestedEntityTxs(tx)) { const c = conflictingAccountInput(nested, activated); if (c !== null) return c; }
-  return null;
+  if (tx.type !== "accountInput") return firstConflict(nestedEntityTxs(tx), activated);
+  const from = lower(tx.data.fromEntityId);
+  return activated.has(from) ? from : null;
 };
-/** og findCounterpartyBoardActivationConflict: one frame may not both activate a counterparty's board and carry that counterparty's Account row. */
+const firstConflict = (txs: readonly EntityTx[], activated: ReadonlySet<string>): string | null =>
+  txs.reduce<string | null>((found, tx) => found ?? conflictingAccountInput(tx, activated), null);
+/**
+ * og findCounterpartyBoardActivationConflict: one frame may not both activate a counterparty's board and carry that
+ * counterparty's Account row.
+ */
 export const counterpartyBoardActivationConflict = (entityId: string, txs: readonly EntityTx[]): string | null => {
-  const activated = counterpartyActivations(txs, lower(entityId), new Set());
-  if (activated.size === 0) return null;
-  for (const tx of txs) { const c = conflictingAccountInput(tx, activated); if (c !== null) return c; }
-  return null;
+  const activated = new Set(activatedCounterparties(txs, lower(entityId)));
+  return activated.size === 0 ? null : firstConflict(txs, activated);
 };
-/** og withoutCounterpartyBoardActivationConflicts: the certified range keeps priority, the counterparty's rows wait for the next frame. */
-export const withoutCounterpartyBoardActivationConflicts = (entityId: string, txs: readonly EntityTx[]): readonly EntityTx[] => {
-  const activated = counterpartyActivations(txs, lower(entityId), new Set());
+/**
+ * og withoutCounterpartyBoardActivationConflicts: the certified range keeps priority, the counterparty's rows wait for
+ * the next frame.
+ */
+export const withoutCounterpartyBoardActivationConflicts = (
+  entityId: string,
+  txs: readonly EntityTx[],
+): readonly EntityTx[] => {
+  const activated = new Set(activatedCounterparties(txs, lower(entityId)));
   return activated.size === 0 ? txs : txs.filter((tx) => conflictingAccountInput(tx, activated) === null);
 };
-/** og getEntityFrameJRangeBudgetError over several ranges: valid spans, then their canonical frame payload within 10 MiB. */
-const jRangePayloadBytes = (ranges: readonly JEventTx[]): Result<number, EntityError> => {
-  for (const r of ranges) {
-    const base = Number(r.data["baseHeight"]), scanned = Number(r.data["scannedThroughHeight"]);
-    if (!Number.isSafeInteger(base) || base < 0) return invariant(`J_RANGE_FRAME_BASE_HEIGHT_INVALID:${String(r.data["baseHeight"])}`);
-    if (!Number.isSafeInteger(scanned) || scanned <= base) return invariant(`J_RANGE_FRAME_SCANNED_HEIGHT_INVALID:${String(r.data["scannedThroughHeight"])}`);
+/** og: a frame range spans at least one height above a valid base. */
+const frameRangeSpanValid = (r: JEventTx): Result<void, EntityError> => {
+  const base = Number(r.data["baseHeight"]);
+  const scanned = Number(r.data["scannedThroughHeight"]);
+  if (!Number.isSafeInteger(base) || base < 0) {
+    return invariant(`J_RANGE_FRAME_BASE_HEIGHT_INVALID:${String(r.data["baseHeight"])}`);
   }
-  const bytes = authConsensusBytes({ domain: J_RANGE_FRAME_PAYLOAD_DOMAIN, version: 1, ranges: ranges.map((r) => r.data) });
-  return bytes.ok ? ok(bytes.value.length) : invariant("CANONICAL_ENCODING_INVALID");
+  if (!Number.isSafeInteger(scanned) || scanned <= base) {
+    return invariant(`J_RANGE_FRAME_SCANNED_HEIGHT_INVALID:${String(r.data["scannedThroughHeight"])}`);
+  }
+  return ok(undefined);
 };
+/**
+ * og getEntityFrameJRangeBudgetError over several ranges: valid spans, then their canonical frame payload within 10
+ * MiB.
+ */
+const jRangePayloadBytes = (ranges: readonly JEventTx[]): Result<number, EntityError> =>
+  chain(
+    foldResult(ranges, undefined as void, (_, r) => frameRangeSpanValid(r)),
+    () => {
+      const bytes = authConsensusBytes({
+        domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
+        version: 1,
+        ranges: ranges.map((r) => r.data),
+      });
+      return bytes.ok ? ok(bytes.value.length) : invariant("CANONICAL_ENCODING_INVALID");
+    },
+  );
 const frameJRangeIssue = (ranges: readonly JEventTx[]): Result<string | null, EntityError> =>
-  map(jRangePayloadBytes(ranges), (n) => (n > MAX_ENTITY_FRAME_J_RANGE_BYTES ? `J_RANGE_FRAME_BYTE_LIMIT_EXCEEDED:${n}:${MAX_ENTITY_FRAME_J_RANGE_BYTES}` : null));
-/** og selectEntityTxsWithinJRangeBudget: an ordered prefix; once a range overflows the budget the whole suffix waits, a range that can never fit halts. */
-export const jRangeBudgetPrefix = (txs: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> => {
-  const selected: EntityTx[] = [], ranges: JEventTx[] = [];
-  for (const tx of txs) {
-    if (tx.type !== "j_event") { selected.push(tx); continue; }
-    const alone = frameJRangeIssue([tx]);
-    if (!alone.ok) return alone;
-    if (alone.value !== null) return invariant(`J_RANGE_SINGLE_RANGE_UNPROPOSABLE:${alone.value}`);
-    const all = frameJRangeIssue([...ranges, tx]);
-    if (!all.ok) return all;
-    if (all.value !== null) break;
-    selected.push(tx); ranges.push(tx);
-  }
-  return ok(selected);
+  map(jRangePayloadBytes(ranges), (n) =>
+    n > MAX_ENTITY_FRAME_J_RANGE_BYTES
+      ? `J_RANGE_FRAME_BYTE_LIMIT_EXCEEDED:${n}:${MAX_ENTITY_FRAME_J_RANGE_BYTES}`
+      : null,
+  );
+/** The prefix taken so far, the ranges in it, and whether a range has already overflowed. */
+type RangeBudget = {
+  readonly selected: readonly EntityTx[];
+  readonly ranges: readonly JEventTx[];
+  readonly full: boolean;
 };
-/** og MAX_ENTITY_FRAME_TXS and MAX_ENTITY_FRAME_TX_BYTES (half of LIMITS.MAX_FRAME_SIZE_BYTES): each tx costs a 4-byte length prefix plus its canonical frame-hash bytes. */
-export const MAX_ENTITY_FRAME_TXS = 10_000, MAX_ENTITY_FRAME_TX_BYTES = Math.floor(100_000_000 / 2);
+const takeWithinRangeBudget = (b: RangeBudget, tx: EntityTx): Result<RangeBudget, EntityError> => {
+  if (b.full) return ok(b);
+  if (tx.type !== "j_event") return ok({ ...b, selected: [...b.selected, tx] });
+  return chain(frameJRangeIssue([tx]), (alone) =>
+    alone !== null
+      ? invariant(`J_RANGE_SINGLE_RANGE_UNPROPOSABLE:${alone}`)
+      : map(frameJRangeIssue([...b.ranges, tx]), (together) =>
+          together !== null
+            ? { ...b, full: true }
+            : { selected: [...b.selected, tx], ranges: [...b.ranges, tx], full: false },
+        ),
+  );
+};
+/**
+ * og selectEntityTxsWithinJRangeBudget: an ordered prefix; once a range overflows the budget the whole suffix waits, a
+ * range that can never fit halts.
+ */
+export const jRangeBudgetPrefix = (txs: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> =>
+  map(foldResult(txs, { selected: [], ranges: [], full: false }, takeWithinRangeBudget), (b) => b.selected);
+/**
+ * og MAX_ENTITY_FRAME_TXS and MAX_ENTITY_FRAME_TX_BYTES (half of LIMITS.MAX_FRAME_SIZE_BYTES): each tx costs a 4-byte
+ * length prefix plus its canonical frame-hash bytes.
+ */
+export const MAX_ENTITY_FRAME_TXS = 10_000;
+export const MAX_ENTITY_FRAME_TX_BYTES = Math.floor(100_000_000 / 2);
 const frameTxBytes = (txs: readonly EntityTx[]): Result<readonly number[], EntityError> =>
-  traverse(txs, (tx) => chain(entityFrameTx(tx), (ftx) => chain(entityTxForHash(ftx), (hashed) => map(encodeBinary(hashed as Binary), (b) => 4 + b.byteLength))));
-/** og selectEntityFrameTxByteBudgetWithMeter: at most MAX_ENTITY_FRAME_TXS, then the longest prefix within the byte budget; a head tx over it halts. */
+  traverse(txs, (tx) =>
+    chain(entityFrameTx(tx), (ftx) =>
+      chain(entityTxForHash(ftx), (hashed) => map(encodeBinary(hashed as Binary), (b) => 4 + b.byteLength)),
+    ),
+  );
+/**
+ * og selectEntityFrameTxByteBudgetWithMeter: at most MAX_ENTITY_FRAME_TXS, then the longest prefix within the byte
+ * budget; a head tx over it halts.
+ */
 export const frameTxBudgetPrefix = (all: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> => {
   const txs = all.length > MAX_ENTITY_FRAME_TXS ? all.slice(0, MAX_ENTITY_FRAME_TXS) : all;
   return chain(frameTxBytes(txs), (sizes) => {
-    let total = 0, count = 0;
-    for (const n of sizes) { if (total + n > MAX_ENTITY_FRAME_TX_BYTES) break; total += n; count += 1; }
-    if (count === txs.length) return ok(txs);
-    return count === 0 ? invariant(`ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${sizes[0] ?? 0}:${MAX_ENTITY_FRAME_TX_BYTES}`) : ok(txs.slice(0, count));
+    const [, running] = mapAccum(sizes, 0, (total, n) => [total + n, total + n] as const);
+    const over = running.findIndex((total) => total > MAX_ENTITY_FRAME_TX_BYTES);
+    switch (over) {
+      case -1:
+        return ok(txs);
+      case 0:
+        return invariant(`ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${sizes[0] ?? 0}:${MAX_ENTITY_FRAME_TX_BYTES}`);
+      default:
+        return ok(txs.slice(0, over));
+    }
   });
 };
 /** og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget at the head of applyEntityFrame. */
 const frameBudgets = (txs: readonly EntityTx[]): Result<void, EntityError> =>
   chain(frameTxBytes(txs), (sizes) => {
     const n = sizes.reduce((t, s) => t + s, 0);
-    if (n > MAX_ENTITY_FRAME_TX_BYTES) return invariant(`ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:${n}:${MAX_ENTITY_FRAME_TX_BYTES}`);
-    return chain(frameJRangeIssue(txs.filter((tx): tx is JEventTx => tx.type === "j_event")), (issue) => (issue === null ? ok(undefined) : invariant(issue)));
+    if (n > MAX_ENTITY_FRAME_TX_BYTES)
+      return invariant(`ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:${n}:${MAX_ENTITY_FRAME_TX_BYTES}`);
+    const ranges = txs.filter((tx): tx is JEventTx => tx.type === "j_event");
+    return chain(frameJRangeIssue(ranges), (issue) => (issue === null ? ok(undefined) : invariant(issue)));
   });
-const budgeted = (txs: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> => chain(jRangeBudgetPrefix(txs), frameTxBudgetPrefix);
+const budgeted = (txs: readonly EntityTx[]): Result<readonly EntityTx[], EntityError> =>
+  chain(jRangeBudgetPrefix(txs), frameTxBudgetPrefix);
 export type ProposableSelection = { readonly txs: readonly EntityTx[]; readonly currentAuthorityReady: boolean };
-/** og currentAuthorityReady: a lazy Entity (id = its config board), or a certified self record for exactly the config board. */
+/**
+ * og currentAuthorityReady: a lazy Entity (id = its config board), or a certified self record for exactly the config
+ * board.
+ */
 const currentAuthorityReady = (state: EntityState): Result<boolean, EntityError> => {
   const configHash = quorumBoardHash(state.quorum);
-  return configHash === lower(state.id) ? ok(true) : map(observerBoardRecord(state, lower(state.id)), (record) => record?.boardHash === configHash);
+  return configHash === lower(state.id)
+    ? ok(true)
+    : map(observerBoardRecord(state, lower(state.id)), (record) => record?.boardHash === configHash);
+};
+/** A mempool range that moves this Entity's own board, and the board it moves to. */
+type SelfRange = { readonly tx: JEventTx; readonly target: string };
+const selfRangesOf = (mempool: readonly EntityTx[], me: string): readonly SelfRange[] =>
+  mempool
+    .filter((tx): tx is JEventTx => tx.type === "j_event")
+    .flatMap((tx) => {
+      const target = selfAuthorityTarget(tx, me);
+      return target === null ? [] : [{ tx, target }];
+    });
+/** og: self board ranges go alone; one moving off the config board goes with its one handover, or waits for it. */
+const selfRangeProposal = (
+  state: EntityState,
+  selfRanges: readonly SelfRange[],
+  handovers: readonly EntityTx[],
+  ready: boolean,
+): Result<ProposableSelection, EntityError> => {
+  const latest = selfRanges.at(-1);
+  const [handover] = handovers;
+  if (latest === undefined || latest.target === quorumBoardHash(state.quorum)) {
+    return map(budgeted(selfRanges.map((e) => e.tx)), (txs) => ({ txs, currentAuthorityReady: ready }));
+  }
+  if (handovers.length !== 1 || handover === undefined) return ok({ txs: [], currentAuthorityReady: ready });
+  const transition = [latest.tx, handover];
+  return map(handoverFrameConfig(state, transition), () => ({ txs: transition, currentAuthorityReady: true }));
 };
 /**
- * og selectProposableEntityTxs: only txs whose authority prerequisites are committed. A self board range isolates itself (with its one
- * handover when it moves off the config board); a handover waits for its activation; an uncertified board proposes nothing; otherwise
- * counterparty board activations and cross-j setup keep priority, then the J-range and frame byte budgets cut the prefix.
+ * og selectProposableEntityTxs: only txs whose authority prerequisites are committed. A self board range isolates
+ * itself (with its one handover when it moves off the config board); a handover waits for its activation; an
+ * uncertified board proposes nothing; otherwise counterparty board activations and cross-j setup keep priority, then
+ * the J-range and frame byte budgets cut the prefix.
  */
-export const selectProposable = (state: EntityState, mempool: readonly EntityTx[]): Result<ProposableSelection, EntityError> =>
+export const selectProposable = (
+  state: EntityState,
+  mempool: readonly EntityTx[],
+): Result<ProposableSelection, EntityError> =>
   chain(currentAuthorityReady(state), (ready): Result<ProposableSelection, EntityError> => {
-    const configHash = quorumBoardHash(state.quorum), me = lower(state.id);
-    const selfRanges = mempool.filter((tx): tx is JEventTx => tx.type === "j_event").map((tx) => ({ tx, target: selfAuthorityTarget(tx, me) })).filter((e) => e.target !== null);
+    const me = lower(state.id);
+    const selfRanges = selfRangesOf(mempool, me);
     const handovers = mempool.filter((tx) => tx.type === "boardHandover");
-    const latest = selfRanges[selfRanges.length - 1];
-    if (latest !== undefined) {
-      if (latest.target !== configHash) {
-        const [handover] = handovers;
-        if (handovers.length !== 1 || handover === undefined) return ok({ txs: [], currentAuthorityReady: ready });
-        const transition = [latest.tx, handover];
-        return map(handoverFrameConfig(state, transition), () => ({ txs: transition, currentAuthorityReady: true }));
+    switch (true) {
+      case selfRanges.length > 0:
+        return selfRangeProposal(state, selfRanges, handovers, ready);
+      case handovers.length > 1:
+        return invariant(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
+      case handovers.length === 1 || !ready:
+        return ok({ txs: [], currentAuthorityReady: ready });
+      default: {
+        const proposable = selectCommitPhaseTxs(withoutCounterpartyBoardActivationConflicts(me, mempool));
+        return map(budgeted(proposable), (txs) => ({ txs, currentAuthorityReady: true }));
       }
-      return map(budgeted(selfRanges.map((e) => e.tx)), (txs) => ({ txs, currentAuthorityReady: ready }));
     }
-    if (handovers.length > 1) return invariant(`BOARD_HANDOVER_COUNT_INVALID:${handovers.length}`);
-    if (handovers.length === 1 || !ready) return ok({ txs: [], currentAuthorityReady: ready });
-    return map(budgeted(selectCommitPhaseTxs(withoutCounterpartyBoardActivationConflicts(me, mempool))), (txs) => ({ txs, currentAuthorityReady: true }));
   });
-/** og isSelfBoardAuthorityTransitionFrame: a handover frame, or a pure J-range frame that certifies the (not yet certified) config board. */
-export const selfAuthorityTransitionFrame = (state: EntityState, txs: readonly EntityTx[]): Result<boolean, EntityError> =>
+/**
+ * og isSelfBoardAuthorityTransitionFrame: a handover frame, or a pure J-range frame that certifies the (not yet
+ * certified) config board.
+ */
+export const selfAuthorityTransitionFrame = (
+  state: EntityState,
+  txs: readonly EntityTx[],
+): Result<boolean, EntityError> =>
   chain(handoverFrameConfig(state, txs), (c): Result<boolean, EntityError> => {
-    if (c !== null) return ok(true);
-    if (txs.length === 0 || txs.some((tx) => tx.type !== "j_event")) return ok(false);
     const configHash = quorumBoardHash(state.quorum);
-    if (configHash === lower(state.id)) return ok(false);
-    return chain(observerBoardRecord(state, state.id), (record) => {
-      if (record?.boardHash === configHash) return ok(false);
-      const targets = (txs as readonly JEventTx[]).map((tx) => selfAuthorityTarget(tx, state.id)).filter((t): t is string => t !== null);
-      return ok(targets[targets.length - 1] === configHash);
-    });
+    switch (true) {
+      case c !== null:
+        return ok(true);
+      case txs.length === 0 || txs.some((tx) => tx.type !== "j_event"):
+      case configHash === lower(state.id):
+        return ok(false);
+      default:
+        return map(observerBoardRecord(state, state.id), (record) => {
+          const targets = (txs as readonly JEventTx[]).flatMap((tx) => selfAuthorityTarget(tx, state.id) ?? []);
+          return record?.boardHash !== configHash && targets.at(-1) === configHash;
+        });
+    }
   });
-/** og entity/auth/signer-wallet.ts on the committed externalWallet {balances, allowances}: owner -> token (or token:spender) -> row. */
+/**
+ * og entity/auth/signer-wallet.ts on the committed externalWallet {balances, allowances}: owner -> token (or
+ * token:spender) -> row.
+ */
 type WalletBook = ReadonlyMap<string, ReadonlyMap<string, Binary>>;
+type WalletRows = ReadonlyMap<string, Binary>;
+/** Where a wallet row was observed. */
+type WalletStamp = { readonly jHeight: number; readonly transactionHash: string };
 const NATIVE_EXTERNAL_TOKEN = `0x${"00".repeat(20)}`;
-const walletAddress = (v: unknown, label: string): Result<string, EntityError> => { const s = String(v || "").trim().toLowerCase(); return /^0x[0-9a-f]{40}$/.test(s) ? ok(s) : invariant(`j_event rejected: invalid external wallet ${label}`); };
-const walletTokenId = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined);
-/** og applyExternalWalletJEvent: a signer-Entity validator's on-chain wallet snapshot (baseline) or delta (on an existing baseline row). */
-const externalWalletJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number, txHash: string): Result<JEventStep, EntityError> => {
-  const state = step.draft.state, d = e.data;
+const walletAddress = (v: unknown, label: string): Result<string, EntityError> => {
+  const s = lower(v);
+  return /^0x[0-9a-f]{40}$/.test(s) ? ok(s) : invariant(`j_event rejected: invalid external wallet ${label}`);
+};
+const walletTokenId = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined;
+const listField = (v: unknown): readonly unknown[] => (Array.isArray(v) ? v : []);
+const balanceRow = (tokenAddress: string, tokenId: number | undefined, balance: bigint, at: WalletStamp): Binary =>
+  ({ tokenAddress, ...opt("tokenId", tokenId), balance, ...at }) as unknown as Binary;
+const allowanceRow = (tokenAddress: string, spender: string, allowance: bigint, at: WalletStamp): Binary =>
+  ({ tokenAddress, spender, allowance, ...at }) as unknown as Binary;
+/** og: a snapshot's native balance and token balances over the owner's rows. */
+const snapshotBalances = (own: WalletRows, d: JRec, at: WalletStamp): Result<WalletRows, EntityError> => {
+  const native =
+    d["nativeBalance"] === undefined
+      ? own
+      : mapSet(
+          own,
+          NATIVE_EXTERNAL_TOKEN,
+          balanceRow(NATIVE_EXTERNAL_TOKEN, 0, BigInt(String(d["nativeBalance"])), at),
+        );
+  return foldResult(listField(d["tokenBalances"]), native, (rows, raw) => {
+    const entry = recOf(raw) ?? {};
+    return map(walletAddress(entry["tokenAddress"], "tokenAddress"), (token) =>
+      mapSet(rows, token, balanceRow(token, walletTokenId(entry["tokenId"]), BigInt(String(entry["balance"])), at)),
+    );
+  });
+};
+/** og: a snapshot's allowances over the owner's rows. */
+const snapshotAllowances = (own: WalletRows, d: JRec, at: WalletStamp): Result<WalletRows, EntityError> =>
+  foldResult(listField(d["allowances"]), own, (rows, raw) => {
+    const entry = recOf(raw) ?? {};
+    const pair = all({
+      token: walletAddress(entry["tokenAddress"], "tokenAddress"),
+      spender: walletAddress(entry["spender"], "spender"),
+    });
+    return map(pair, ({ token, spender }) =>
+      mapSet(rows, `${token}:${spender}`, allowanceRow(token, spender, BigInt(String(entry["allowance"])), at)),
+    );
+  });
+/** The owner's two books after an event, and what the event was. */
+type WalletMove = {
+  readonly balances: WalletBook;
+  readonly allowances: WalletBook;
+  readonly kind: "snapshot" | "delta";
+};
+/** The wallet event as it touches one owner. */
+type WalletEvent = {
+  readonly d: JRec;
+  readonly owner: string;
+  readonly balances: WalletBook;
+  readonly allowances: WalletBook;
+  readonly at: WalletStamp;
+};
+/** og: a snapshot is the owner's new baseline. */
+const walletSnapshotMove = (w: WalletEvent): Result<WalletMove, EntityError> =>
+  chain(snapshotBalances(w.balances.get(w.owner) ?? new Map(), w.d, w.at), (own) =>
+    map(snapshotAllowances(w.allowances.get(w.owner) ?? new Map(), w.d, w.at), (ownAllowed) => ({
+      balances: mapSet(w.balances, w.owner, own),
+      allowances: mapSet(w.allowances, w.owner, ownAllowed),
+      kind: "snapshot" as const,
+    })),
+  );
+/** og: a balance delta lands on an existing baseline row and never below zero. */
+const balanceDelta = (w: WalletEvent, token: string, who: string): Result<WalletBook, EntityError> => {
+  if (w.d["balanceDelta"] === undefined) return ok(w.balances);
+  const own = w.balances.get(w.owner);
+  const current = own?.get(token) as { readonly tokenId?: number; readonly balance: bigint } | undefined;
+  if (current === undefined) return invariant(`EXTERNAL_WALLET_BASELINE_MISSING:balance ${who} token=${token}`);
+  const balance = current.balance + BigInt(String(w.d["balanceDelta"]));
+  if (balance < 0n) return invariant(`EXTERNAL_WALLET_BALANCE_UNDERFLOW ${who} token=${token}`);
+  const tokenId = walletTokenId(w.d["tokenId"]) ?? current.tokenId;
+  return ok(mapSet(w.balances, w.owner, mapSet(own ?? new Map(), token, balanceRow(token, tokenId, balance, w.at))));
+};
+/** og: an allowance delta lands on an existing baseline row (a bare spender re-stamps it). */
+const allowanceDelta = (w: WalletEvent, token: string, who: string): Result<WalletBook, EntityError> => {
+  if (w.d["allowance"] === undefined && w.d["spender"] === undefined) return ok(w.allowances);
+  return chain(walletAddress(w.d["spender"], "spender"), (spender) => {
+    const key = `${token}:${spender}`;
+    const own = w.allowances.get(w.owner);
+    const current = own?.get(key) as { readonly allowance: bigint } | undefined;
+    if (current === undefined) {
+      return invariant(`EXTERNAL_WALLET_BASELINE_MISSING:allowance ${who} token=${token} spender=${spender}`);
+    }
+    const allowance = w.d["allowance"] !== undefined ? BigInt(String(w.d["allowance"])) : current.allowance;
+    return ok(
+      mapSet(w.allowances, w.owner, mapSet(own ?? new Map(), key, allowanceRow(token, spender, allowance, w.at))),
+    );
+  });
+};
+/** og: a delta moves one token's balance and/or one spender's allowance. */
+const walletDeltaMove = (w: WalletEvent): Result<WalletMove, EntityError> =>
+  chain(walletAddress(w.d["tokenAddress"], "tokenAddress"), (token) => {
+    const who = `entity=${String(w.d["entityId"]).slice(0, 12)} owner=${w.owner}`;
+    return chain(balanceDelta(w, token, who), (balances) =>
+      map(allowanceDelta(w, token, who), (allowances) => ({ balances, allowances, kind: "delta" as const })),
+    );
+  });
+/** The committed external wallet's two books. */
+const walletBooks = (state: EntityState): { readonly balances: WalletBook; readonly allowances: WalletBook } => {
+  const held = recOf(state.committed["externalWallet"]);
+  const book = (k: string): WalletBook => {
+    const v = held?.[k];
+    return v instanceof Map ? (v as WalletBook) : new Map();
+  };
+  return { balances: book("balances"), allowances: book("allowances") };
+};
+/**
+ * og applyExternalWalletJEvent: a signer-Entity validator's on-chain wallet snapshot (baseline) or delta (on an
+ * existing baseline row).
+ */
+const externalWalletJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  blockNumber: number,
+  txHash: string,
+): Result<JEventStep, EntityError> => {
+  const state = step.draft.state;
+  const d = e.data;
   if (lower(d["entityId"]) !== lower(state.id)) return ok(step);
   return chain(walletAddress(d["owner"], "owner"), (owner): Result<JEventStep, EntityError> => {
-    if (![...membersOf(state.quorum).keys()].some((v) => lower(v) === owner)) return invariant(`EXTERNAL_WALLET_OWNER_NOT_SIGNER entity=${String(state.id).slice(0, 12)} owner=${owner}`);
-    const held = recOf(state.committed["externalWallet"]), book = (k: string): WalletBook => { const v = held?.[k]; return v instanceof Map ? (v as WalletBook) : new Map(); };
-    const balances = book("balances"), allowances = book("allowances"), jHeight = Number(e.blockNumber ?? blockNumber);
-    if (!Number.isSafeInteger(jHeight) || jHeight < 0) return invariant("PROTOCOL_J_HEIGHT_INVALID");
-    const own = new Map(balances.get(owner) ?? []), ownAllowed = new Map(allowances.get(owner) ?? []);
-    const done = (nextBalances: WalletBook, nextAllowances: WalletBook, kind: string): JEventStep => {
-      const changed = nextBalances !== balances || nextAllowances !== allowances, wallet: Binary = { balances: nextBalances, allowances: nextAllowances } as unknown as Binary;
-      const next = changed ? { ...state, committed: { ...state.committed, externalWallet: wallet } } : state;
-      return { ...step, draft: jSay({ ...step.draft, state: next }, `💼 EXTERNAL: ${owner.slice(0, 10)} ${kind} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`) };
-    };
-    if (e.type === "ExternalWalletSnapshot") {
-      if (d["nativeBalance"] !== undefined) own.set(NATIVE_EXTERNAL_TOKEN, { tokenAddress: NATIVE_EXTERNAL_TOKEN, tokenId: 0, balance: BigInt(String(d["nativeBalance"])), jHeight, transactionHash: txHash } as unknown as Binary);
-      for (const raw of (Array.isArray(d["tokenBalances"]) ? d["tokenBalances"] : []) as readonly unknown[]) {
-        const entry = recOf(raw) ?? {}, token = walletAddress(entry["tokenAddress"], "tokenAddress");
-        if (!token.ok) return token;
-        const tokenId = walletTokenId(entry["tokenId"]);
-        own.set(token.value, { tokenAddress: token.value, ...(tokenId !== undefined ? { tokenId } : {}), balance: BigInt(String(entry["balance"])), jHeight, transactionHash: txHash } as unknown as Binary);
-      }
-      for (const raw of (Array.isArray(d["allowances"]) ? d["allowances"] : []) as readonly unknown[]) {
-        const entry = recOf(raw) ?? {}, token = walletAddress(entry["tokenAddress"], "tokenAddress");
-        if (!token.ok) return token;
-        const spender = walletAddress(entry["spender"], "spender");
-        if (!spender.ok) return spender;
-        ownAllowed.set(`${token.value}:${spender.value}`, { tokenAddress: token.value, spender: spender.value, allowance: BigInt(String(entry["allowance"])), jHeight, transactionHash: txHash } as unknown as Binary);
-      }
-      return ok(done(mapSet(balances, owner, own), mapSet(allowances, owner, ownAllowed), "snapshot"));
+    const signers = [...membersOf(state.quorum).keys()];
+    const jHeight = Number(e.blockNumber ?? blockNumber);
+    if (!signers.some((v) => lower(v) === owner)) {
+      return invariant(`EXTERNAL_WALLET_OWNER_NOT_SIGNER entity=${String(state.id).slice(0, 12)} owner=${owner}`);
     }
-    return chain(walletAddress(d["tokenAddress"], "tokenAddress"), (token): Result<JEventStep, EntityError> => {
-      const entity = String(d["entityId"]).slice(0, 12);
-      let nextBalances = balances, nextAllowances = allowances;
-      if (d["balanceDelta"] !== undefined) {
-        const current = balances.get(owner)?.get(token) as { readonly tokenId?: number; readonly balance: bigint } | undefined;
-        if (current === undefined) return invariant(`EXTERNAL_WALLET_BASELINE_MISSING:balance entity=${entity} owner=${owner} token=${token}`);
-        const balance = current.balance + BigInt(String(d["balanceDelta"]));
-        if (balance < 0n) return invariant(`EXTERNAL_WALLET_BALANCE_UNDERFLOW entity=${entity} owner=${owner} token=${token}`);
-        const tokenId = walletTokenId(d["tokenId"]) ?? current.tokenId;
-        own.set(token, { tokenAddress: token, ...(tokenId !== undefined ? { tokenId } : {}), balance, jHeight, transactionHash: txHash } as unknown as Binary);
-        nextBalances = mapSet(balances, owner, own);
-      }
-      if (d["allowance"] !== undefined || d["spender"] !== undefined) {
-        const spender = walletAddress(d["spender"], "spender");
-        if (!spender.ok) return spender;
-        const current = allowances.get(owner)?.get(`${token}:${spender.value}`) as { readonly allowance: bigint } | undefined;
-        if (current === undefined) return invariant(`EXTERNAL_WALLET_BASELINE_MISSING:allowance entity=${entity} owner=${owner} token=${token} spender=${spender.value}`);
-        ownAllowed.set(`${token}:${spender.value}`, { tokenAddress: token, spender: spender.value, allowance: d["allowance"] !== undefined ? BigInt(String(d["allowance"])) : current.allowance, jHeight, transactionHash: txHash } as unknown as Binary);
-        nextAllowances = mapSet(allowances, owner, ownAllowed);
-      }
-      return ok(done(nextBalances, nextAllowances, "delta"));
+    if (!Number.isSafeInteger(jHeight) || jHeight < 0) return invariant("PROTOCOL_J_HEIGHT_INVALID");
+    const books = walletBooks(state);
+    const w: WalletEvent = { d, owner, ...books, at: { jHeight, transactionHash: txHash } };
+    const move = e.type === "ExternalWalletSnapshot" ? walletSnapshotMove(w) : walletDeltaMove(w);
+    return map(move, (m) => {
+      const changed = m.balances !== books.balances || m.allowances !== books.allowances;
+      const wallet = { balances: m.balances, allowances: m.allowances } as unknown as Binary;
+      const next = changed ? { ...state, committed: { ...state.committed, externalWallet: wallet } } : state;
+      const said = `💼 EXTERNAL: ${owner.slice(0, 10)} ${m.kind} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`;
+      return { ...step, draft: jSay({ ...step.draft, state: next }, said) };
     });
   });
 };
 // ---- og jurisdiction/machine/registration-evidence, receipt-codec verifyCanonicalReceiptProof (@ethereumjs/mpt 10 + @ethereumjs/rlp 10) ----
 type RlpItem = Uint8Array | readonly RlpItem[];
-/** @ethereumjs/rlp _decode: canonical prefixes only; a failure is null. */
-const rlpDecodeAt = (input: Uint8Array): { readonly data: RlpItem; readonly rest: Uint8Array } | null => {
-  const first = input[0] ?? 0, slice = (s: number, e: number): Uint8Array | null => (e > input.length ? null : input.slice(s, e));
-  const lengthOf = (v: Uint8Array | null): number | null => { if (v === null || v.length === 0 || v[0] === 0) return null; const n = Number.parseInt(nobleHex(v), 16); return Number.isNaN(n) ? null : n; };
-  const list = (body: Uint8Array | null, end: number): { readonly data: RlpItem; readonly rest: Uint8Array } | null => {
-    if (body === null) return null;
-    const items: RlpItem[] = [];
-    for (let rest = body; rest.length > 0;) { const d = rlpDecodeAt(rest); if (d === null) return null; items.push(d.data); rest = d.rest; }
-    return { data: items, rest: input.subarray(end) };
-  };
-  if (first <= 0x7f) return { data: input.slice(0, 1), rest: input.subarray(1) };
-  if (first <= 0xb7) {
-    const length = first - 0x7f, data = first === 0x80 ? new Uint8Array(0) : slice(1, length);
-    return data === null || (length === 2 && (data[0] ?? 0) < 0x80) ? null : { data, rest: input.subarray(length) };
-  }
-  if (first <= 0xbf) {
-    const lLength = first - 0xb6;
-    if (input.length - 1 < lLength) return null;
-    const length = lengthOf(slice(1, lLength));
-    if (length === null || length <= 55) return null;
-    const data = slice(lLength, length + lLength);
-    return data === null ? null : { data, rest: input.subarray(length + lLength) };
-  }
-  if (first <= 0xf7) { const length = first - 0xbf; return list(slice(1, length), length); }
-  const lLength = first - 0xf6, length = lengthOf(slice(1, lLength));
+/** One decoded item and the input after it. */
+type RlpDecoded = { readonly data: RlpItem; readonly rest: Uint8Array };
+/** The bytes [start, end) of `input`, or null past its end. */
+const rlpSlice = (input: Uint8Array, start: number, end: number): Uint8Array | null =>
+  end > input.length ? null : input.slice(start, end);
+/** A big-endian length with no leading zero byte. */
+const rlpLength = (v: Uint8Array | null): number | null => {
+  if (v === null || v.length === 0 || v[0] === 0) return null;
+  const n = Number.parseInt(nobleHex(v), 16);
+  return Number.isNaN(n) ? null : n;
+};
+/** Every item of a list body, in order; null when one fails. */
+const rlpItems = (body: Uint8Array): readonly RlpItem[] | null => {
+  if (body.length === 0) return [];
+  const head = rlpDecodeAt(body);
+  const tail = head === null ? null : rlpItems(head.rest);
+  return head === null || tail === null ? null : [head.data, ...tail];
+};
+const rlpList = (input: Uint8Array, body: Uint8Array | null, end: number): RlpDecoded | null => {
+  const items = body === null ? null : rlpItems(body);
+  return items === null ? null : { data: items, rest: input.subarray(end) };
+};
+/** A string of at most 55 bytes; a single byte below 0x80 must have been encoded as itself. */
+const rlpShortString = (input: Uint8Array, first: number): RlpDecoded | null => {
+  const length = first - 0x7f;
+  const data = first === 0x80 ? new Uint8Array(0) : rlpSlice(input, 1, length);
+  return data === null || (length === 2 && (data[0] ?? 0) < 0x80) ? null : { data, rest: input.subarray(length) };
+};
+/** A string whose length needs its own length prefix, so it must be longer than 55 bytes. */
+const rlpLongString = (input: Uint8Array, first: number): RlpDecoded | null => {
+  const lLength = first - 0xb6;
+  if (input.length - 1 < lLength) return null;
+  const length = rlpLength(rlpSlice(input, 1, lLength));
+  if (length === null || length <= 55) return null;
+  const data = rlpSlice(input, lLength, length + lLength);
+  return data === null ? null : { data, rest: input.subarray(length + lLength) };
+};
+/** A list whose length needs its own length prefix, so it must be at least 56 bytes. */
+const rlpLongList = (input: Uint8Array, first: number): RlpDecoded | null => {
+  const lLength = first - 0xf6;
+  const length = rlpLength(rlpSlice(input, 1, lLength));
   if (length === null || length < 56 || lLength + length > input.length) return null;
-  return list(slice(lLength, lLength + length), lLength + length);
+  return rlpList(input, rlpSlice(input, lLength, lLength + length), lLength + length);
+};
+/** @ethereumjs/rlp _decode: canonical prefixes only; a failure is null. */
+const rlpDecodeAt = (input: Uint8Array): RlpDecoded | null => {
+  const first = input[0] ?? 0;
+  switch (true) {
+    case first <= 0x7f:
+      return { data: input.slice(0, 1), rest: input.subarray(1) };
+    case first <= 0xb7:
+      return rlpShortString(input, first);
+    case first <= 0xbf:
+      return rlpLongString(input, first);
+    case first <= 0xf7:
+      return rlpList(input, rlpSlice(input, 1, first - 0xbf), first - 0xbf);
+    default:
+      return rlpLongList(input, first);
+  }
 };
 /** @ethereumjs/rlp decode: empty input is the empty string; anything left over is an error. */
-const rlpDecode = (input: Uint8Array): RlpItem | null => { if (input.length === 0) return new Uint8Array(0); const d = rlpDecodeAt(input); return d === null || d.rest.length !== 0 ? null : d.data; };
-/**
- * @ethereumjs/mpt verifyMPTWithMerkleProof: the first node must hash to the root; the key is walked through hashed or embedded nodes.
- * The value, or null for a proven absence; og throws on a missing node ("Invalid proof provided") or a malformed one.
- */
-const mptProofGet = (root: Uint8Array, key: Uint8Array, proof: readonly Uint8Array[]): Result<Uint8Array | null, RuntimeError> => {
-  const db = new Map(proof.map((node) => [nobleHex(keccak_256(node)), node] as const));
-  if (proof[0] !== undefined && nobleHex(keccak_256(proof[0])) !== nobleHex(root)) return txErr("Invalid proof nodes given");
-  const target = nibblesOf(key);
-  let ref: RlpItem = root, progress = 0;
-  for (;;) {
-    let raw: RlpItem;
-    if (Array.isArray(ref)) raw = ref;
-    else {
-      const bytes = db.get(nobleHex(ref as Uint8Array));
-      if (bytes === undefined) return txErr("Invalid proof provided");
-      const decoded = rlpDecode(bytes);
-      if (decoded === null) return txErr("invalid RLP");
-      if (!Array.isArray(decoded)) return txErr("Invalid node");
-      raw = decoded;
-    }
-    const node = raw as readonly RlpItem[];
-    if (node.length === 17) {
-      if (progress === target.length) { const v = node[16]; return ok(v instanceof Uint8Array && v.length > 0 ? v : null); }
-      const child = node[target[progress] ?? 0];
-      if (child === undefined || child.length === 0) return ok(null);
-      progress += 1;
-      ref = child;
-      continue;
-    }
-    if (node.length !== 2 || !(node[0] instanceof Uint8Array)) return txErr("Invalid node");
-    const encoded = nibblesOf(node[0]), leaf = (encoded[0] ?? 0) > 1, path = (encoded[0] ?? 0) % 2 ? encoded.slice(1) : encoded.slice(2);
-    if (leaf && target.length - progress > path.length) return ok(null);
-    for (const nibble of path) { if (nibble !== target[progress]) return ok(null); progress += 1; }
-    const next = node[1];
-    if (leaf) return next instanceof Uint8Array ? ok(next) : txErr("Invalid node");
-    if (next === undefined) return txErr("Invalid node");
-    ref = next;
+const rlpDecode = (input: Uint8Array): RlpItem | null => {
+  if (input.length === 0) return new Uint8Array(0);
+  const d = rlpDecodeAt(input);
+  return d === null || d.rest.length !== 0 ? null : d.data;
+};
+/** A Merkle-Patricia proof walk: the proof's nodes by hash, and the key's nibbles. */
+type TrieWalk = { readonly db: ReadonlyMap<string, Uint8Array>; readonly target: readonly number[] };
+type TrieAnswer = Result<Uint8Array | null, RuntimeError>;
+/** The node a reference names: embedded in its parent, or a proof node by hash. */
+const trieNode = (w: TrieWalk, ref: RlpItem): Result<readonly RlpItem[], RuntimeError> => {
+  if (Array.isArray(ref)) return ok(ref);
+  const bytes = w.db.get(nobleHex(ref as Uint8Array));
+  if (bytes === undefined) return txErr("Invalid proof provided");
+  const decoded = rlpDecode(bytes);
+  if (decoded === null) return txErr("invalid RLP");
+  return Array.isArray(decoded) ? ok(decoded) : txErr("Invalid node");
+};
+/** A branch: its value once the key is spent, else the child under the next nibble (absent: a proven absence). */
+const branchStep = (w: TrieWalk, node: readonly RlpItem[], progress: number): TrieAnswer => {
+  if (progress === w.target.length) {
+    const v = node[16];
+    return ok(v instanceof Uint8Array && v.length > 0 ? v : null);
   }
+  const child = node[w.target[progress] ?? 0];
+  return child === undefined || child.length === 0 ? ok(null) : walkTrie(w, child, progress + 1);
+};
+/** A leaf or extension: its compact path must match the key from here on. */
+const pathStep = (w: TrieWalk, node: readonly RlpItem[], progress: number): TrieAnswer => {
+  const [compact, next] = node;
+  if (node.length !== 2 || !(compact instanceof Uint8Array)) return txErr("Invalid node");
+  const encoded = nibblesOf(compact);
+  const flag = encoded[0] ?? 0;
+  const leaf = flag > 1;
+  const path = flag % 2 ? encoded.slice(1) : encoded.slice(2);
+  if (leaf && w.target.length - progress > path.length) return ok(null);
+  if (!path.every((nibble, i) => nibble === w.target[progress + i])) return ok(null);
+  if (leaf) return next instanceof Uint8Array ? ok(next) : txErr("Invalid node");
+  return next === undefined ? txErr("Invalid node") : walkTrie(w, next, progress + path.length);
+};
+const walkTrie = (w: TrieWalk, ref: RlpItem, progress: number): TrieAnswer =>
+  chain(trieNode(w, ref), (node) => (node.length === 17 ? branchStep(w, node, progress) : pathStep(w, node, progress)));
+/**
+ * @ethereumjs/mpt verifyMPTWithMerkleProof: the first node must hash to the root; the key is walked through hashed or
+ * embedded nodes. The value, or null for a proven absence; og throws on a missing node ("Invalid proof provided") or
+ * a malformed one.
+ */
+const mptProofGet = (root: Uint8Array, key: Uint8Array, proof: readonly Uint8Array[]): TrieAnswer => {
+  const db = new Map(proof.map((node) => [nobleHex(keccak_256(node)), node] as const));
+  if (proof[0] !== undefined && nobleHex(keccak_256(proof[0])) !== nobleHex(root)) {
+    return txErr("Invalid proof nodes given");
+  }
+  return walkTrie({ db, target: nibblesOf(key) }, root, 0);
 };
 /** og RLP.encode(BigInt(index)): 0 is the empty string. */
-const receiptTrieKey = (index: number): Uint8Array => (index === 0 ? Uint8Array.of(0x80) : rlp(magnitude(BigInt(index))));
-/** og CertifiedRegistrationEvidence (types/jurisdiction-runtime.ts): an MPT receipt proof or a Tron RPC attestation, witness-signed. */
+const receiptTrieKey = (index: number): Uint8Array =>
+  index === 0 ? Uint8Array.of(0x80) : rlp(magnitude(BigInt(index)));
+/**
+ * og CertifiedRegistrationEvidence (types/jurisdiction-runtime.ts): an MPT receipt proof or a Tron RPC attestation,
+ * witness-signed.
+ */
 export type RegistrationEvidence = { readonly [field: string]: Binary };
-const J_AUTH_ZERO = `0x${"00".repeat(32)}`, FOUNDATION_ENTITY = `0x${"00".repeat(31)}01`;
-const authBytes32 = (v: unknown, label: string): Result<string, RuntimeError> => { const s = String(v ?? "").trim().toLowerCase(); return /^0x[0-9a-f]{64}$/.test(s) ? ok(s) : txErr(`J_AUTHORITY_${label}_INVALID:${s || "missing"}`); };
-const authAddress = (v: unknown, label: string): Result<string, RuntimeError> => { const a = ethAddress(String(v ?? "")); return a === null ? txErr(`J_AUTHORITY_${label}_INVALID:${String(v ?? "")}`) : ok(a); };
-const authInt = (v: unknown, label: string): Result<number, RuntimeError> => { const n = Number(v); return Number.isSafeInteger(n) && n >= 0 ? ok(n) : txErr(`J_AUTHORITY_${label}_INVALID:${String(v)}`); };
+const J_AUTH_ZERO = `0x${"00".repeat(32)}`;
+const FOUNDATION_ENTITY = `0x${"00".repeat(31)}01`;
+const MIB = 1_048_576;
+const MAX_PROOF_NODES = 128;
+const MAX_PROOF_BYTES = 2 * MIB;
+const authBytes32 = (v: unknown, label: string): Result<string, RuntimeError> => {
+  const s = String(v ?? "").trim().toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(s) ? ok(s) : txErr(`J_AUTHORITY_${label}_INVALID:${s || "missing"}`);
+};
+const authAddress = (v: unknown, label: string): Result<string, RuntimeError> => {
+  const a = ethAddress(String(v ?? ""));
+  return a === null ? txErr(`J_AUTHORITY_${label}_INVALID:${String(v ?? "")}`) : ok(a);
+};
+const authInt = (v: unknown, label: string): Result<number, RuntimeError> => {
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= 0 ? ok(n) : txErr(`J_AUTHORITY_${label}_INVALID:${String(v)}`);
+};
 const authHex = (v: unknown, label: string, maxBytes: number): Result<string, RuntimeError> => {
   const s = String(v ?? "");
-  if (!/^0x(?:[0-9a-f]{2})*$/.test(s)) return txErr(`J_AUTHORITY_${label}_INVALID`);
   const n = (s.length - 2) / 2;
-  return n > maxBytes ? txErr(`J_AUTHORITY_${label}_OVERSIZED:${n}:${maxBytes}`) : ok(s);
+  switch (true) {
+    case !/^0x(?:[0-9a-f]{2})*$/.test(s):
+      return txErr(`J_AUTHORITY_${label}_INVALID`);
+    case n > maxBytes:
+      return txErr(`J_AUTHORITY_${label}_OVERSIZED:${n}:${maxBytes}`);
+    default:
+      return ok(s);
+  }
 };
 const authConsensusBytes = (v: unknown): Result<Uint8Array, BinaryError> => chain(binaryBody(v), encodeConsensus);
 /** og keccakBytesHash(encodeCanonicalConsensusBytes(v)): undefined fields dropped. */
-const authHash = (v: unknown): Result<string, RuntimeError> => mapErr(map(authConsensusBytes(v), (b) => bytesToHex(keccak_256(b))), (): RuntimeError => ({ _tag: "runtime_tx", code: "CANONICAL_ENCODING_INVALID" }));
+const authHash = (v: unknown): Result<string, RuntimeError> =>
+  mapErr(
+    map(authConsensusBytes(v), (b) => bytesToHex(keccak_256(b))),
+    (): RuntimeError => ({ _tag: "runtime_tx", code: "CANONICAL_ENCODING_INVALID" }),
+  );
 /** og canonicalConsensusValuesEqual. */
-const consensusEqual = (a: unknown, b: unknown): boolean => { const x = authConsensusBytes(a), y = authConsensusBytes(b); return x.ok && y.ok && compareBytes(x.value, y.value) === 0; };
+const consensusEqual = (a: unknown, b: unknown): boolean => {
+  const x = authConsensusBytes(a);
+  const y = authConsensusBytes(b);
+  return x.ok && y.ok && compareBytes(x.value, y.value) === 0;
+};
 const isTron = (e: RegistrationEvidence): boolean => e["receiptKind"] === "tron-rpc-attested";
-const topicsOfEvidence = (e: RegistrationEvidence): readonly unknown[] => (Array.isArray(e["topics"]) ? e["topics"] : []);
+const topicsOfEvidence = (e: RegistrationEvidence): readonly unknown[] =>
+  Array.isArray(e["topics"]) ? e["topics"] : [];
+const topicWords = (topics: readonly unknown[], label: string): Result<readonly string[], RuntimeError> =>
+  traverse(topics, (t, i) => authBytes32(t, `${label}_${i}`));
 export const registrationEvidenceKey = (stackKey: unknown, entityId: unknown): Result<string, RuntimeError> =>
   chain(authBytes32(stackKey, "STACK_KEY"), (s) => map(authBytes32(entityId, "ENTITY_ID"), (e) => `${s}:${e}`));
 /** og buildRegistrationEvidenceRawLogDigest. */
-const rawLogDigest = (e: RegistrationEvidence): Result<string, RuntimeError> =>
-  chain(authAddress(e["emitter"], "EMITTER"), (emitter) => chain(traverse(topicsOfEvidence(e).map((t, i) => [t, i] as const), ([t, i]) => authBytes32(t, `TOPIC_${i}`)), (topics) =>
-    chain(authInt(e["activationHeight"], "ACTIVATION_HEIGHT"), (activationHeight) => chain(authBytes32(e["blockHash"], "BLOCK_HASH"), (blockHash) =>
-      chain(authBytes32(e["transactionHash"], "TRANSACTION_HASH"), (transactionHash) => chain(authInt(e["transactionIndex"], "TRANSACTION_INDEX"), (transactionIndex) =>
-        chain(authInt(e["logIndex"], "LOG_INDEX"), (logIndex) => authHash({ domain: "xln.j-authority.raw-log.v1", emitter, topics, data: String(e["data"]).toLowerCase(), activationHeight, blockHash, transactionHash, transactionIndex, logIndex }))))))));
+const rawLogDigest = (e: RegistrationEvidence): Result<string, RuntimeError> => {
+  const fields = all({
+    emitter: authAddress(e["emitter"], "EMITTER"),
+    topics: topicWords(topicsOfEvidence(e), "TOPIC"),
+    activationHeight: authInt(e["activationHeight"], "ACTIVATION_HEIGHT"),
+    blockHash: authBytes32(e["blockHash"], "BLOCK_HASH"),
+    transactionHash: authBytes32(e["transactionHash"], "TRANSACTION_HASH"),
+    transactionIndex: authInt(e["transactionIndex"], "TRANSACTION_INDEX"),
+    logIndex: authInt(e["logIndex"], "LOG_INDEX"),
+  });
+  return chain(fields, (f) =>
+    authHash({
+      domain: "xln.j-authority.raw-log.v1",
+      emitter: f.emitter,
+      topics: f.topics,
+      data: String(e["data"]).toLowerCase(),
+      activationHeight: f.activationHeight,
+      blockHash: f.blockHash,
+      transactionHash: f.transactionHash,
+      transactionIndex: f.transactionIndex,
+      logIndex: f.logIndex,
+    }),
+  );
+};
 /** og buildRegistrationEvidenceDigest: what the witness Runtime signs (everything but its signature). */
 const registrationEvidenceDigest = (e: RegistrationEvidence): Result<string, RuntimeError> => {
   const { witnessSignature: _signature, ...body } = e;
   return authHash({ domain: "xln.j-authority.witness.v1", evidence: body });
 };
+/** How the receipt was committed: a Tron RPC attestation, or an MPT proof against the block's receipts root. */
+const receiptCommitment = (e: RegistrationEvidence) =>
+  isTron(e)
+    ? { receiptKind: e["receiptKind"], chainId: e["chainId"], finality: e["finality"] }
+    : {
+        receiptsRoot: e["receiptsRoot"],
+        encodedReceipt: e["encodedReceipt"],
+        receiptProofNodes: e["receiptProofNodes"],
+      };
 /** og computeRegistrationEvidenceClaimHash: the receipt claim, independent of which witness saw it when. */
-export const registrationClaimHash = (e: RegistrationEvidence): Result<string, RuntimeError> => authHash({
-  domain: "xln.j-authority.receipt-claim.v1", version: e["version"], source: e["source"], stackKey: e["stackKey"], entityId: e["entityId"], boardHash: e["boardHash"], activationHeight: e["activationHeight"],
-  blockHash: e["blockHash"], transactionHash: e["transactionHash"], transactionIndex: e["transactionIndex"], logIndex: e["logIndex"], emitter: e["emitter"], topics: e["topics"], data: e["data"], rawLogDigest: e["rawLogDigest"],
-  ...(isTron(e) ? { receiptKind: e["receiptKind"], chainId: e["chainId"], finality: e["finality"] } : { receiptsRoot: e["receiptsRoot"], encodedReceipt: e["encodedReceipt"], receiptProofNodes: e["receiptProofNodes"] }),
-  receiptLogIndex: e["receiptLogIndex"],
-});
+export const registrationClaimHash = (e: RegistrationEvidence): Result<string, RuntimeError> =>
+  authHash({
+    domain: "xln.j-authority.receipt-claim.v1",
+    version: e["version"],
+    source: e["source"],
+    stackKey: e["stackKey"],
+    entityId: e["entityId"],
+    boardHash: e["boardHash"],
+    activationHeight: e["activationHeight"],
+    blockHash: e["blockHash"],
+    transactionHash: e["transactionHash"],
+    transactionIndex: e["transactionIndex"],
+    logIndex: e["logIndex"],
+    emitter: e["emitter"],
+    topics: e["topics"],
+    data: e["data"],
+    rawLogDigest: e["rawLogDigest"],
+    ...receiptCommitment(e),
+    receiptLogIndex: e["receiptLogIndex"],
+  });
 /** og computeRegistrationEvidenceHash. */
-export const registrationEvidenceHash = (e: RegistrationEvidence): Result<string, RuntimeError> => authHash({ domain: "xln.j-authority.evidence.v1", evidence: e });
-/** og canonicalRegistrationReceipt: the Tron attestation fields, or a bounded MPT proof. */
-const canonicalRegistrationReceipt = (e: RegistrationEvidence): Result<Readonly<Record<string, unknown>>, RuntimeError> => {
-  if (isTron(e)) {
-    if (e["finality"] !== "tron-solidified") return txErr("J_AUTHORITY_NATIVE_FINALITY_INVALID");
-    if (["receiptsRoot", "encodedReceipt", "receiptProofNodes"].some((f) => Object.hasOwn(e, f))) return txErr("J_AUTHORITY_NATIVE_MPT_FIELDS_FORBIDDEN");
-    return chain(authInt(e["chainId"], "CHAIN_ID"), (chainId) => map(authBytes32(e["rpcEndpointHash"], "RPC_ENDPOINT_HASH"), (rpcEndpointHash) => ({ receiptKind: e["receiptKind"], finality: e["finality"], chainId, rpcEndpointHash })));
+export const registrationEvidenceHash = (e: RegistrationEvidence): Result<string, RuntimeError> =>
+  authHash({ domain: "xln.j-authority.evidence.v1", evidence: e });
+type CanonicalReceipt = Readonly<Record<string, unknown>>;
+/** og: a Tron attestation is solidified, carries no MPT fields, and names its chain and RPC endpoint. */
+const tronReceipt = (e: RegistrationEvidence): Result<CanonicalReceipt, RuntimeError> => {
+  if (e["finality"] !== "tron-solidified") return txErr("J_AUTHORITY_NATIVE_FINALITY_INVALID");
+  if (["receiptsRoot", "encodedReceipt", "receiptProofNodes"].some((f) => Object.hasOwn(e, f))) {
+    return txErr("J_AUTHORITY_NATIVE_MPT_FIELDS_FORBIDDEN");
   }
+  const fields = all({
+    chainId: authInt(e["chainId"], "CHAIN_ID"),
+    rpcEndpointHash: authBytes32(e["rpcEndpointHash"], "RPC_ENDPOINT_HASH"),
+  });
+  return map(fields, ({ chainId, rpcEndpointHash }) => ({
+    receiptKind: e["receiptKind"],
+    finality: e["finality"],
+    chainId,
+    rpcEndpointHash,
+  }));
+};
+/** og: an MPT proof of 1 to 128 nodes, each at most 1 MiB and 2 MiB in all, with its root and encoded receipt. */
+const mptReceipt = (e: RegistrationEvidence): Result<CanonicalReceipt, RuntimeError> => {
   const nodes = e["receiptProofNodes"];
   if (e["receiptKind"] !== undefined || !Array.isArray(nodes)) return txErr("J_AUTHORITY_RECEIPT_PROOF_SHAPE_INVALID");
-  if (nodes.length === 0 || nodes.length > 128) return txErr(`J_AUTHORITY_PROOF_NODE_COUNT_INVALID:${nodes.length}`);
-  return chain(traverse(nodes.map((n, i) => [n, i] as const), ([n, i]) => authHex(n, `PROOF_NODE_${i}`, 1_048_576)), (receiptProofNodes) => {
+  if (nodes.length === 0 || nodes.length > MAX_PROOF_NODES) {
+    return txErr(`J_AUTHORITY_PROOF_NODE_COUNT_INVALID:${nodes.length}`);
+  }
+  return chain(traverse(nodes, (n, i) => authHex(n, `PROOF_NODE_${i}`, MIB)), (receiptProofNodes) => {
     const total = receiptProofNodes.reduce((sum, n) => sum + (n.length - 2) / 2, 0);
-    if (total > 2_097_152) return txErr(`J_AUTHORITY_PROOF_OVERSIZED:${total}:2097152`);
-    return chain(authBytes32(e["receiptsRoot"], "RECEIPTS_ROOT"), (receiptsRoot) => map(authHex(e["encodedReceipt"], "ENCODED_RECEIPT", 1_048_576), (encodedReceipt) => ({ receiptsRoot, encodedReceipt, receiptProofNodes })));
+    if (total > MAX_PROOF_BYTES) return txErr(`J_AUTHORITY_PROOF_OVERSIZED:${total}:${MAX_PROOF_BYTES}`);
+    const fields = all({
+      receiptsRoot: authBytes32(e["receiptsRoot"], "RECEIPTS_ROOT"),
+      encodedReceipt: authHex(e["encodedReceipt"], "ENCODED_RECEIPT", MIB),
+    });
+    return map(fields, ({ receiptsRoot, encodedReceipt }) => ({ receiptsRoot, encodedReceipt, receiptProofNodes }));
   });
 };
+/** og canonicalRegistrationReceipt: the Tron attestation fields, or a bounded MPT proof. */
+const canonicalRegistrationReceipt = (e: RegistrationEvidence): Result<CanonicalReceipt, RuntimeError> =>
+  isTron(e) ? tronReceipt(e) : mptReceipt(e);
 /** og jReplicaStackKey: the certified board stack of a J replica with a chain id and both contracts, else null. */
 const jReplicaStackKey = (r: JReplica): Result<string | null, RuntimeError> => {
-  const depository = r.contracts?.depository, entityProvider = r.contracts?.entityProvider;
+  const depository = r.contracts?.depository;
+  const entityProvider = r.contracts?.entityProvider;
   if (!r.chainId || !depository || !entityProvider) return ok(null);
-  return mapErr(boardStackKey({ chainId: r.chainId, depositoryAddress: depository, entityProviderAddress: entityProvider }), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code }));
+  const stack = { chainId: r.chainId, depositoryAddress: depository, entityProviderAddress: entityProvider };
+  return mapErr(boardStackKey(stack), (e): RuntimeError => ({ _tag: "runtime_tx", code: e.code }));
 };
 const HALF_ORDER_J = secp256k1.CURVE.n >> 1n;
 /** og verifyAccountSignature over a canonical compact signature: it must recover to the witness Runtime address. */
 const witnessSigned = (digest: string, signature: string, witness: string): boolean => {
   if (!/^0x[0-9a-f]{64}$/i.test(digest) || !/^0x[0-9a-f]{130}$/i.test(signature)) return false;
-  const bytes = hexToBytes(signature.toLowerCase()), r = bytes.subarray(0, 32), s = bytes.subarray(32, 64), rec = bytes[64];
-  const rn = BigInt(bytesToHex(r)), sn = BigInt(bytesToHex(s));
+  const bytes = hexToBytes(signature.toLowerCase());
+  const r = bytes.subarray(0, 32);
+  const s = bytes.subarray(32, 64);
+  const rec = bytes[64];
+  const rn = BigInt(bytesToHex(r));
+  const sn = BigInt(bytesToHex(s));
+  // Low-s and a 0/1 recovery id only: any other encoding of the same signature is refused.
   if ((rec !== 0 && rec !== 1) || rn === 0n || sn === 0n || rn >= secp256k1.CURVE.n || sn > HALF_ORDER_J) return false;
   const key = recoverPublicKey(hexToBytes(digest.toLowerCase()), r, s, rec);
   return key !== null && addressOf(key).toLowerCase() === witness;
 };
-/** og assertDecodedRegistrationLog via the EntityProvider ABI: EntityRegistered(bytes32 indexed, uint256 indexed, bytes32) / FoundationBootstrapped(address indexed, bytes32 indexed, uint256, uint256). */
-const decodedRegistrationLog = (e: RegistrationEvidence): Result<{ readonly entityId: string; readonly boardHash: string; readonly entityNumber?: bigint }, RuntimeError> => {
-  const topics = topicsOfEvidence(e).map((t) => String(t).toLowerCase()), data = hexToBytes(String(e["data"])), topic0 = topics[0];
-  const name = topic0 === jEventTopic("EntityRegistered").toLowerCase() ? "EntityRegistered" : topic0 === jEventTopic("FoundationBootstrapped").toLowerCase() ? "FoundationBootstrapped" : "unknown";
-  if (name !== e["source"]) return txErr(`J_AUTHORITY_EVENT_TYPE_MISMATCH:${String(e["source"])}:${name}`);
-  if (topics.length < 3) return txErr("J_AUTHORITY_EVENT_DECODE_FAILED");
-  if (name === "EntityRegistered") return data.length < 32 ? txErr("J_AUTHORITY_EVENT_DECODE_FAILED") : ok({ entityId: topics[1] ?? "", entityNumber: BigInt(topics[2] ?? "0x0"), boardHash: bytesToHex(data.subarray(0, 32)) });
-  if (data.length < 64 || BigInt(topics[1] ?? "0x0") >> 160n !== 0n) return txErr("J_AUTHORITY_EVENT_DECODE_FAILED");
-  return ok({ entityId: FOUNDATION_ENTITY, boardHash: topics[2] ?? "" });
+type RegistrationLog = { readonly entityId: string; readonly boardHash: string; readonly entityNumber?: bigint };
+const registrationEventName = (topic0: string | undefined): string => {
+  switch (topic0) {
+    case jEventTopic("EntityRegistered").toLowerCase():
+      return "EntityRegistered";
+    case jEventTopic("FoundationBootstrapped").toLowerCase():
+      return "FoundationBootstrapped";
+    default:
+      return "unknown";
+  }
 };
-/** og assertRegistrationEvidenceEnvelope: canonical fields, finality under the local J replica's policy, the decoded log, the witness signature. */
-const registrationEnvelope = (rt: Runtime, e: RegistrationEvidence): Result<void, RuntimeError> => {
-  if (e["version"] !== 1) return txErr(`J_AUTHORITY_VERSION_INVALID:${String(e["version"])}`);
-  if (e["source"] !== "EntityRegistered" && e["source"] !== "FoundationBootstrapped") return txErr(`J_AUTHORITY_SOURCE_INVALID:${String(e["source"])}`);
-  const rawTopics = e["topics"];
-  if (!Array.isArray(rawTopics)) return txErr("J_AUTHORITY_RECEIPT_PROOF_SHAPE_INVALID");
-  if (rawTopics.length === 0 || rawTopics.length > 4) return txErr(`J_AUTHORITY_TOPIC_COUNT_INVALID:${rawTopics.length}`);
-  type Row = readonly [string, Result<unknown, RuntimeError>];
-  return chain(authHex(e["data"], "EVENT_DATA", 65_536), (data) => chain(canonicalRegistrationReceipt(e), (receipt) => chain(authHex(e["witnessSignature"], "WITNESS_SIGNATURE", 65), (witnessSignature) => {
-    const rows: readonly (() => Row)[] = [
-      () => ["stackKey", authBytes32(e["stackKey"], "STACK_KEY")], () => ["entityId", authBytes32(e["entityId"], "ENTITY_ID")], () => ["boardHash", authBytes32(e["boardHash"], "BOARD_HASH")],
-      () => ["blockHash", authBytes32(e["blockHash"], "BLOCK_HASH")], () => ["transactionHash", authBytes32(e["transactionHash"], "TRANSACTION_HASH")], () => ["observedTipBlockHash", authBytes32(e["observedTipBlockHash"], "OBSERVED_TIP_HASH")],
-      () => ["rawLogDigest", authBytes32(e["rawLogDigest"], "RAW_LOG_DIGEST")], () => ["emitter", authAddress(e["emitter"], "EMITTER")], () => ["witnessRuntimeId", authAddress(e["witnessRuntimeId"], "WITNESS")],
-      () => ["activationHeight", authInt(e["activationHeight"], "ACTIVATION_HEIGHT")], () => ["transactionIndex", authInt(e["transactionIndex"], "TRANSACTION_INDEX")], () => ["logIndex", authInt(e["logIndex"], "LOG_INDEX")],
-      () => ["receiptLogIndex", authInt(e["receiptLogIndex"], "RECEIPT_LOG_INDEX")], () => ["observedThroughHeight", authInt(e["observedThroughHeight"], "OBSERVED_THROUGH_HEIGHT")],
-      () => ["observedHeadHeight", authInt(e["observedHeadHeight"], "OBSERVED_HEAD_HEIGHT")], () => ["confirmationDepth", authInt(e["confirmationDepth"], "CONFIRMATION_DEPTH")],
-      () => ["topics", traverse(rawTopics.map((t, i) => [t, i] as const), ([t, i]) => authBytes32(t, `TOPIC_${i}`))],
-    ];
-    const canonical: Record<string, unknown> = {};
-    for (const row of rows) { const [field, r] = row(); if (!r.ok) return r; canonical[field] = r.value; }
-    Object.assign(canonical, { data }, receipt, { witnessSignature });
-    for (const [field, value] of Object.entries(canonical)) if (!consensusEqual(e[field], value)) return txErr(`J_AUTHORITY_NON_CANONICAL_FIELD:${field}`);
-    const n = (f: string): number => canonical[f] as number;
-    if (witnessSignature.length !== 132) return txErr(`J_AUTHORITY_WITNESS_SIGNATURE_LENGTH_INVALID:${witnessSignature.length}`);
-    if (n("activationHeight") < 1 || e["receiptsRoot"] === J_AUTH_ZERO) return txErr(`J_AUTHORITY_UNCOMMITTED_RECEIPT:${n("activationHeight")}:${String(e["receiptsRoot"])}`);
-    if (n("observedThroughHeight") < n("activationHeight") || n("observedHeadHeight") - n("activationHeight") < n("confirmationDepth") || n("observedThroughHeight") > n("observedHeadHeight") - n("confirmationDepth"))
-      return txErr(`J_AUTHORITY_FINALITY_INSUFFICIENT:${n("activationHeight")}:${n("observedThroughHeight")}:${n("observedHeadHeight")}:${n("confirmationDepth")}`);
-    const witness = canonical["witnessRuntimeId"] as string;
-    return chain(rt.runtimeId ? authAddress(rt.runtimeId, "RUNTIME_ID") : txErr(`J_AUTHORITY_WITNESS_RUNTIME_MISMATCH:${witness}:missing`), (runtimeId) => {
-      if (witness !== runtimeId) return txErr(`J_AUTHORITY_WITNESS_RUNTIME_MISMATCH:${witness}:${rt.runtimeId ?? "missing"}`);
-      const matches: JReplica[] = [];
-      for (const r of rt.jReplicas.values()) { const k = jReplicaStackKey(r); if (!k.ok) return k; if (k.value === e["stackKey"]) matches.push(r); }
-      const local = matches[0];
-      if (matches.length !== 1 || local === undefined) return txErr(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${String(e["stackKey"])}:${matches.length}`);
-      return chain(authAddress(local.contracts?.entityProvider, "LOCAL_ENTITY_PROVIDER"), (provider): Result<void, RuntimeError> => {
-        if (provider !== e["emitter"]) return txErr(`J_AUTHORITY_EMITTER_STACK_MISMATCH:${String(e["emitter"])}:${String(local.contracts?.entityProvider)}`);
-        // og assertReceiptPolicy: the committed J replica's receipt policy; a witness cannot downgrade an EVM stack to RPC trust.
-        if ((local.watcherReceiptCommitment === "tron-rpc-attested") !== isTron(e)) return txErr("J_AUTHORITY_RECEIPT_COMMITMENT_MISMATCH");
-        if (isTron(e)) {
-          if (e["chainId"] !== local.chainId) return txErr("J_AUTHORITY_NATIVE_CHAIN_MISMATCH");
-          if (e["confirmationDepth"] !== 0) return txErr("J_AUTHORITY_NATIVE_FINALITY_DEPTH_INVALID");
-          const configured = (local.rpcs ?? []).map((rpc) => { try { return `0x${keccakUtf8(new URL(rpc).toString())}`; } catch { return null; } });
-          if (configured.some((h) => h === null)) return txErr("J_AUTHORITY_NATIVE_RPC_URL_INVALID");
-          if (!configured.includes(String(e["rpcEndpointHash"]))) return txErr("J_AUTHORITY_NATIVE_RPC_NOT_CONFIGURED");
-        }
-        return chain(authInt(local.watcherConfirmationDepth, "LOCAL_CONFIRMATION_DEPTH"), (trusted) => {
-          if (n("confirmationDepth") !== trusted) return txErr(`J_AUTHORITY_FINALITY_POLICY_MISMATCH:${n("confirmationDepth")}:${trusted}`);
-          return chain(rawLogDigest(e), (digest) => {
-            if (digest !== e["rawLogDigest"]) return txErr(`J_AUTHORITY_RAW_LOG_DIGEST_MISMATCH:${String(e["entityId"])}`);
-            return chain(decodedRegistrationLog(e), (log) => {
-              if (log.entityNumber !== undefined && (log.entityNumber <= 0n || log.entityNumber !== BigInt(log.entityId))) return txErr(`J_AUTHORITY_ENTITY_NUMBER_MISMATCH:${log.entityId}:${log.entityNumber}`);
-              if (log.entityId !== e["entityId"] || log.boardHash !== e["boardHash"]) return txErr(`J_AUTHORITY_EVENT_BODY_MISMATCH:entity=${log.entityId}:${String(e["entityId"])}:board=${log.boardHash}:${String(e["boardHash"])}`);
-              return chain(registrationEvidenceDigest(e), (signed) => (witnessSigned(signed, witnessSignature, witness) ? ok(undefined) : txErr(`J_AUTHORITY_WITNESS_SIGNATURE_INVALID:${witness}`)));
-            });
+/**
+ * og assertDecodedRegistrationLog via the EntityProvider ABI: EntityRegistered(bytes32 indexed, uint256 indexed,
+ * bytes32) / FoundationBootstrapped(address indexed, bytes32 indexed, uint256, uint256).
+ */
+const decodedRegistrationLog = (e: RegistrationEvidence): Result<RegistrationLog, RuntimeError> => {
+  const topics = topicsOfEvidence(e).map((t) => String(t).toLowerCase());
+  const data = hexToBytes(String(e["data"]));
+  const name = registrationEventName(topics[0]);
+  switch (true) {
+    case name !== e["source"]:
+      return txErr(`J_AUTHORITY_EVENT_TYPE_MISMATCH:${String(e["source"])}:${name}`);
+    case topics.length < 3:
+      return txErr("J_AUTHORITY_EVENT_DECODE_FAILED");
+    case name === "EntityRegistered":
+      return data.length < 32
+        ? txErr("J_AUTHORITY_EVENT_DECODE_FAILED")
+        : ok({
+            entityId: topics[1] ?? "",
+            entityNumber: BigInt(topics[2] ?? "0x0"),
+            boardHash: bytesToHex(data.subarray(0, 32)),
           });
-        });
-      });
-    });
-  })));
+    case data.length < 64 || BigInt(topics[1] ?? "0x0") >> 160n !== 0n:
+      return txErr("J_AUTHORITY_EVENT_DECODE_FAILED");
+    default:
+      return ok({ entityId: FOUNDATION_ENTITY, boardHash: topics[2] ?? "" });
+  }
 };
-/** og verifyCanonicalReceiptProof + assertReceiptContainsRawLog: the receipt is in the block's receipts trie and carries this exact log. */
+/** og: every envelope field in canonical form, in og's field order. */
+const canonicalEnvelope = (e: RegistrationEvidence, rawTopics: readonly unknown[]) =>
+  all({
+    stackKey: authBytes32(e["stackKey"], "STACK_KEY"),
+    entityId: authBytes32(e["entityId"], "ENTITY_ID"),
+    boardHash: authBytes32(e["boardHash"], "BOARD_HASH"),
+    blockHash: authBytes32(e["blockHash"], "BLOCK_HASH"),
+    transactionHash: authBytes32(e["transactionHash"], "TRANSACTION_HASH"),
+    observedTipBlockHash: authBytes32(e["observedTipBlockHash"], "OBSERVED_TIP_HASH"),
+    rawLogDigest: authBytes32(e["rawLogDigest"], "RAW_LOG_DIGEST"),
+    emitter: authAddress(e["emitter"], "EMITTER"),
+    witnessRuntimeId: authAddress(e["witnessRuntimeId"], "WITNESS"),
+    activationHeight: authInt(e["activationHeight"], "ACTIVATION_HEIGHT"),
+    transactionIndex: authInt(e["transactionIndex"], "TRANSACTION_INDEX"),
+    logIndex: authInt(e["logIndex"], "LOG_INDEX"),
+    receiptLogIndex: authInt(e["receiptLogIndex"], "RECEIPT_LOG_INDEX"),
+    observedThroughHeight: authInt(e["observedThroughHeight"], "OBSERVED_THROUGH_HEIGHT"),
+    observedHeadHeight: authInt(e["observedHeadHeight"], "OBSERVED_HEAD_HEIGHT"),
+    confirmationDepth: authInt(e["confirmationDepth"], "CONFIRMATION_DEPTH"),
+    topics: topicWords(rawTopics, "TOPIC"),
+  });
+/** The heights a witness claims finality from. */
+type EnvelopeHeights = {
+  readonly activationHeight: number;
+  readonly observedThroughHeight: number;
+  readonly observedHeadHeight: number;
+  readonly confirmationDepth: number;
+};
+/** og: the log is committed, and observed at least `confirmationDepth` below the witness's head. */
+const finalityIssue = (e: RegistrationEvidence, h: EnvelopeHeights): Result<void, RuntimeError> => {
+  const {
+    activationHeight: at,
+    observedThroughHeight: through,
+    observedHeadHeight: head,
+    confirmationDepth: depth,
+  } = h;
+  switch (true) {
+    case at < 1 || e["receiptsRoot"] === J_AUTH_ZERO:
+      return txErr(`J_AUTHORITY_UNCOMMITTED_RECEIPT:${at}:${String(e["receiptsRoot"])}`);
+    case through < at || head - at < depth || through > head - depth:
+      return txErr(`J_AUTHORITY_FINALITY_INSUFFICIENT:${at}:${through}:${head}:${depth}`);
+    default:
+      return ok(undefined);
+  }
+};
+/** og: the one local J replica serving the evidence's board stack. */
+const localStackReplica = (rt: Runtime, stackKey: unknown): Result<JReplica, RuntimeError> =>
+  chain(traverse(rt.jReplicas.values(), (r) => map(jReplicaStackKey(r), (key) => ({ r, key }))), (keyed) => {
+    const matches = keyed.filter((k) => k.key === stackKey).map((k) => k.r);
+    const [local] = matches;
+    return matches.length !== 1 || local === undefined
+      ? txErr(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${String(stackKey)}:${matches.length}`)
+      : ok(local);
+  });
+/** og: the hash a configured RPC endpoint is named by (null for an unparsable URL). */
+const rpcEndpointHash = (rpc: string): string | null =>
+  URL.canParse(rpc) ? `0x${keccakUtf8(new URL(rpc).toString())}` : null;
+/**
+ * og assertReceiptPolicy: the committed J replica's receipt policy; a witness cannot downgrade an EVM stack to RPC
+ * trust, and a Tron attestation names this chain and a configured endpoint.
+ */
+const receiptPolicyIssue = (local: JReplica, e: RegistrationEvidence): Result<void, RuntimeError> => {
+  const configured = (local.rpcs ?? []).map(rpcEndpointHash);
+  switch (true) {
+    case (local.watcherReceiptCommitment === "tron-rpc-attested") !== isTron(e):
+      return txErr("J_AUTHORITY_RECEIPT_COMMITMENT_MISMATCH");
+    case !isTron(e):
+      return ok(undefined);
+    case e["chainId"] !== local.chainId:
+      return txErr("J_AUTHORITY_NATIVE_CHAIN_MISMATCH");
+    case e["confirmationDepth"] !== 0:
+      return txErr("J_AUTHORITY_NATIVE_FINALITY_DEPTH_INVALID");
+    case configured.some((h) => h === null):
+      return txErr("J_AUTHORITY_NATIVE_RPC_URL_INVALID");
+    case !configured.includes(String(e["rpcEndpointHash"])):
+      return txErr("J_AUTHORITY_NATIVE_RPC_NOT_CONFIGURED");
+    default:
+      return ok(undefined);
+  }
+};
+/** og: the decoded log names exactly the evidence's Entity (and its number) and board. */
+const logBodyIssue = (e: RegistrationEvidence, log: RegistrationLog): Result<void, RuntimeError> => {
+  switch (true) {
+    case log.entityNumber !== undefined && (log.entityNumber <= 0n || log.entityNumber !== BigInt(log.entityId)):
+      return txErr(`J_AUTHORITY_ENTITY_NUMBER_MISMATCH:${log.entityId}:${log.entityNumber}`);
+    case log.entityId !== e["entityId"] || log.boardHash !== e["boardHash"]: {
+      const entity = `entity=${log.entityId}:${String(e["entityId"])}`;
+      return txErr(`J_AUTHORITY_EVENT_BODY_MISMATCH:${entity}:board=${log.boardHash}:${String(e["boardHash"])}`);
+    }
+    default:
+      return ok(undefined);
+  }
+};
+/** og: the witness is this Runtime. */
+const witnessIsRuntime = (rt: Runtime, witness: string): Result<void, RuntimeError> => {
+  const runtimeId = rt.runtimeId
+    ? authAddress(rt.runtimeId, "RUNTIME_ID")
+    : txErr(`J_AUTHORITY_WITNESS_RUNTIME_MISMATCH:${witness}:missing`);
+  return chain(runtimeId, (id) =>
+    witness !== id
+      ? txErr(`J_AUTHORITY_WITNESS_RUNTIME_MISMATCH:${witness}:${rt.runtimeId ?? "missing"}`)
+      : ok(undefined),
+  );
+};
+/**
+ * og: the local stack's provider emitted it, under its receipt and finality policy, as the raw log and body it claims,
+ * signed by the witness.
+ */
+const locallyAuthorized = (
+  rt: Runtime,
+  e: RegistrationEvidence,
+  confirmationDepth: number,
+  witness: string,
+  witnessSignature: string,
+): Result<void, RuntimeError> =>
+  chain(localStackReplica(rt, e["stackKey"]), (local) =>
+    chain(authAddress(local.contracts?.entityProvider, "LOCAL_ENTITY_PROVIDER"), (provider) => {
+      if (provider !== e["emitter"]) {
+        const emitters = `${String(e["emitter"])}:${String(local.contracts?.entityProvider)}`;
+        return txErr(`J_AUTHORITY_EMITTER_STACK_MISMATCH:${emitters}`);
+      }
+      return chain(receiptPolicyIssue(local, e), () =>
+        chain(authInt(local.watcherConfirmationDepth, "LOCAL_CONFIRMATION_DEPTH"), (trusted) => {
+          if (confirmationDepth !== trusted) {
+            return txErr(`J_AUTHORITY_FINALITY_POLICY_MISMATCH:${confirmationDepth}:${trusted}`);
+          }
+          return chain(rawLogDigest(e), (digest) => {
+            if (digest !== e["rawLogDigest"])
+              return txErr(`J_AUTHORITY_RAW_LOG_DIGEST_MISMATCH:${String(e["entityId"])}`);
+            return chain(decodedRegistrationLog(e), (log) =>
+              chain(logBodyIssue(e, log), () =>
+                chain(registrationEvidenceDigest(e), (signed) =>
+                  witnessSigned(signed, witnessSignature, witness)
+                    ? ok(undefined)
+                    : txErr(`J_AUTHORITY_WITNESS_SIGNATURE_INVALID:${witness}`),
+                ),
+              ),
+            );
+          });
+        }),
+      );
+    }),
+  );
+/**
+ * og assertRegistrationEvidenceEnvelope: canonical fields, finality under the local J replica's policy, the decoded
+ * log, the witness signature.
+ */
+const registrationEnvelope = (rt: Runtime, e: RegistrationEvidence): Result<void, RuntimeError> => {
+  const rawTopics = e["topics"];
+  switch (true) {
+    case e["version"] !== 1:
+      return txErr(`J_AUTHORITY_VERSION_INVALID:${String(e["version"])}`);
+    case e["source"] !== "EntityRegistered" && e["source"] !== "FoundationBootstrapped":
+      return txErr(`J_AUTHORITY_SOURCE_INVALID:${String(e["source"])}`);
+    case !Array.isArray(rawTopics):
+      return txErr("J_AUTHORITY_RECEIPT_PROOF_SHAPE_INVALID");
+  }
+  const topics = rawTopics as readonly unknown[];
+  if (topics.length === 0 || topics.length > 4) return txErr(`J_AUTHORITY_TOPIC_COUNT_INVALID:${topics.length}`);
+  const signed = all({
+    data: authHex(e["data"], "EVENT_DATA", 65_536),
+    receipt: canonicalRegistrationReceipt(e),
+    witnessSignature: authHex(e["witnessSignature"], "WITNESS_SIGNATURE", 65),
+  });
+  return chain(signed, ({ data, receipt, witnessSignature }) =>
+    chain(canonicalEnvelope(e, topics), (fields) => {
+      const canonical = { ...fields, data, ...receipt, witnessSignature };
+      const nonCanonical = Object.entries(canonical).find(([field, value]) => !consensusEqual(e[field], value));
+      if (nonCanonical !== undefined) return txErr(`J_AUTHORITY_NON_CANONICAL_FIELD:${nonCanonical[0]}`);
+      if (witnessSignature.length !== 132) {
+        return txErr(`J_AUTHORITY_WITNESS_SIGNATURE_LENGTH_INVALID:${witnessSignature.length}`);
+      }
+      const witness = fields.witnessRuntimeId;
+      return chain(finalityIssue(e, fields), () =>
+        chain(witnessIsRuntime(rt, witness), () =>
+          locallyAuthorized(rt, e, fields.confirmationDepth, witness, witnessSignature),
+        ),
+      );
+    }),
+  );
+};
+/** One receipt log as og's receipt codec reads it. */
+type ReceiptLog = { readonly emitter: Uint8Array; readonly topics: readonly RlpItem[]; readonly data: Uint8Array };
+/** og: the log at `index` in a (possibly typed) encoded receipt. */
+const receiptLogAt = (encoded: Uint8Array, index: number): Result<ReceiptLog, RuntimeError> => {
+  const decoded = rlpDecode(encoded[0] !== undefined && encoded[0] <= 0x7f ? encoded.slice(1) : encoded);
+  if (decoded === null) return txErr("invalid RLP");
+  const logs = Array.isArray(decoded) ? (decoded as readonly RlpItem[])[3] : undefined;
+  if (!Array.isArray(logs)) return txErr("J_AUTHORITY_RECEIPT_LOGS_INVALID");
+  const rawLog = (logs as readonly RlpItem[])[index];
+  if (!Array.isArray(rawLog) || rawLog.length !== 3 || !Array.isArray(rawLog[1])) {
+    return txErr(`J_AUTHORITY_RECEIPT_LOG_MISSING:${index}`);
+  }
+  const [emitter, topics, data] = rawLog as unknown as readonly [RlpItem, readonly RlpItem[], RlpItem];
+  return emitter instanceof Uint8Array && data instanceof Uint8Array
+    ? ok({ emitter, topics, data })
+    : txErr("J_AUTHORITY_RECEIPT_LOG_INVALID");
+};
+/** og assertReceiptContainsRawLog: the receipt's log is exactly the evidence's emitter, topics and data. */
+const receiptLogMatches = (e: RegistrationEvidence, log: ReceiptLog): Result<void, RuntimeError> => {
+  const topicWord = (t: RlpItem, i: number): Result<string, RuntimeError> =>
+    t instanceof Uint8Array
+      ? authBytes32(bytesToHex(t), `RECEIPT_TOPIC_${i}`)
+      : txErr(`J_AUTHORITY_RECEIPT_TOPIC_${i}_INVALID`);
+  const fields = all({
+    emitter: authAddress(bytesToHex(log.emitter), "RECEIPT_LOG_EMITTER"),
+    topics: traverse(log.topics, topicWord),
+  });
+  return chain(fields, ({ emitter, topics }) => {
+    const same =
+      emitter === e["emitter"] &&
+      consensusEqual(topics, e["topics"]) &&
+      bytesToHex(log.data) === String(e["data"]).toLowerCase();
+    return same
+      ? ok(undefined)
+      : txErr(`J_AUTHORITY_RECEIPT_LOG_MISMATCH:${String(e["transactionHash"])}:${String(e["logIndex"])}`);
+  });
+};
+/**
+ * og verifyCanonicalReceiptProof + assertReceiptContainsRawLog: the receipt is in the block's receipts trie and carries
+ * this exact log.
+ */
 const receiptProven = (e: RegistrationEvidence): Result<void, RuntimeError> => {
-  const nodes = (e["receiptProofNodes"] as readonly string[]).map(hexToBytes), encoded = hexToBytes(String(e["encodedReceipt"]));
+  const nodes = (e["receiptProofNodes"] as readonly string[]).map(hexToBytes);
+  const encoded = hexToBytes(String(e["encodedReceipt"]));
   if (nodes.length === 0) return txErr("J_RECEIPT_PROOF_NODES_MISSING");
-  return chain(mptProofGet(hexToBytes(String(e["receiptsRoot"])), receiptTrieKey(Number(e["transactionIndex"])), nodes), (value) => {
-    const actual = value === null ? "" : bytesToHex(value), expected = bytesToHex(encoded);
-    if (actual !== expected) return txErr(`J_RECEIPT_PROOF_VALUE_MISMATCH:expected=${expected}:actual=${actual || "missing"}`);
-    const decoded = rlpDecode(encoded[0] !== undefined && encoded[0] <= 0x7f ? encoded.slice(1) : encoded);
-    if (decoded === null) return txErr("invalid RLP");
-    const logs = Array.isArray(decoded) ? (decoded as readonly RlpItem[])[3] : undefined;
-    if (!Array.isArray(logs)) return txErr("J_AUTHORITY_RECEIPT_LOGS_INVALID");
-    const index = Number(e["receiptLogIndex"]), rawLog = (logs as readonly RlpItem[])[index];
-    if (!Array.isArray(rawLog) || rawLog.length !== 3 || !Array.isArray(rawLog[1])) return txErr(`J_AUTHORITY_RECEIPT_LOG_MISSING:${index}`);
-    const [emitterBytes, topicItems, dataBytes] = rawLog as unknown as readonly [RlpItem, readonly RlpItem[], RlpItem];
-    if (!(emitterBytes instanceof Uint8Array) || !(dataBytes instanceof Uint8Array)) return txErr("J_AUTHORITY_RECEIPT_LOG_INVALID");
-    return chain(authAddress(bytesToHex(emitterBytes), "RECEIPT_LOG_EMITTER"), (emitter) => chain(traverse(topicItems.map((t, i) => [t, i] as const), ([t, i]) => (t instanceof Uint8Array ? authBytes32(bytesToHex(t), `RECEIPT_TOPIC_${i}`) : txErr(`J_AUTHORITY_RECEIPT_TOPIC_${i}_INVALID`))), (topics) =>
-      emitter !== e["emitter"] || !consensusEqual(topics, e["topics"]) || bytesToHex(dataBytes) !== String(e["data"]).toLowerCase() ? txErr(`J_AUTHORITY_RECEIPT_LOG_MISMATCH:${String(e["transactionHash"])}:${String(e["logIndex"])}`) : ok(undefined)));
+  const key = receiptTrieKey(Number(e["transactionIndex"]));
+  return chain(mptProofGet(hexToBytes(String(e["receiptsRoot"])), key, nodes), (value) => {
+    const actual = value === null ? "" : bytesToHex(value);
+    const expected = bytesToHex(encoded);
+    if (actual !== expected)
+      return txErr(`J_RECEIPT_PROOF_VALUE_MISMATCH:expected=${expected}:actual=${actual || "missing"}`);
+    return chain(receiptLogAt(encoded, Number(e["receiptLogIndex"])), (log) => receiptLogMatches(e, log));
   });
 };
 /** og assertCertifiedRegistrationEvidence. */
 const certifiedRegistrationEvidence = (rt: Runtime, e: RegistrationEvidence): Result<void, RuntimeError> =>
   chain(registrationEnvelope(rt, e), () => (isTron(e) ? ok(undefined) : receiptProven(e)));
-/** og recordAuthenticatedJAuthority: store verified evidence once per (stack, entity); the same claim again is a no-op, a different claim is refused. */
+/**
+ * og recordAuthenticatedJAuthority: store verified evidence once per (stack, entity); the same claim again is a no-op,
+ * a different claim is refused.
+ */
 const recordAuthenticatedJAuthority = (rt: Runtime, e: RegistrationEvidence): Result<Runtime, RuntimeError> =>
-  chain(certifiedRegistrationEvidence(rt, e), () => chain(registrationEvidenceKey(e["stackKey"], e["entityId"]), (key) => {
-    const existing = rt.registrationEvidence.get(key);
-    if (existing === undefined) return ok({ ...rt, registrationEvidence: mapSet(rt.registrationEvidence, key, e) });
-    return chain(registrationClaimHash(existing), (held) => chain(registrationClaimHash(e), (incoming) => (held !== incoming ? txErr(`J_AUTHORITY_EVIDENCE_CONFLICT:${key}:${held}:${incoming}`) : ok(rt))));
-  }));
+  chain(certifiedRegistrationEvidence(rt, e), () =>
+    chain(registrationEvidenceKey(e["stackKey"], e["entityId"]), (key) => {
+      const existing = rt.registrationEvidence.get(key);
+      if (existing === undefined) return ok({ ...rt, registrationEvidence: mapSet(rt.registrationEvidence, key, e) });
+      return chain(registrationClaimHash(existing), (held) =>
+        chain(registrationClaimHash(e), (incoming) =>
+          held !== incoming ? txErr(`J_AUTHORITY_EVIDENCE_CONFLICT:${key}:${held}:${incoming}`) : ok(rt),
+        ),
+      );
+    }),
+  );
 
 // ---- og runtime/registration/numbered-registration-{codec,intent}.ts + ethers v6 Transaction.from: durable numbered-registration intents ----
 /**
