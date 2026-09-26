@@ -28356,141 +28356,403 @@ export const applyEntityInput = (
   return chain(applied, (a) => (a.replica.head.height > r.head.height ? afterCommit(a, ctx) : ok(a)));
 };
 
-/** og runtime/types.ts JInput: one deterministic child-machine input for a J replica; the rewrite carries the J txs uninterpreted (J area). */
+/**
+ * og runtime/types.ts JInput: one deterministic child-machine input for a J replica; the rewrite carries the J txs
+ * uninterpreted (J area).
+ */
 export type JInput = { readonly jurisdictionName: string; readonly jTxs: readonly Binary[] };
-/** og RoutedEntityInput.sourceRuntimeFrame: the sender Runtime frame whose outbox carried the input (set by transport; absent for local loopback). */
+/**
+ * og RoutedEntityInput.sourceRuntimeFrame: the sender Runtime frame whose outbox carried the input (set by transport;
+ * absent for local loopback).
+ */
 export type SourceRuntimeFrame = { readonly height: number; readonly timestamp: number };
 /** og atomicCrossJurisdictionPair: the cohort marker of one leg of an atomic cross-j Account pair. */
 export type AtomicCrossPair = { readonly phase: "proposal" | "ack"; readonly pairKey: string };
 /**
- * og RoutedEntityInput: an EntityInput addressed to one validator replica; `from` is the source Runtime (absent for local work), `runtimeId` the
- * addressed Runtime, `sourceRuntimeFrame` the sender frame, `atomicCrossJurisdictionPair` the atomic cross-j cohort marker.
+ * og RoutedEntityInput: an EntityInput addressed to one validator replica; `from` is the source Runtime (absent for
+ * local work), `runtimeId` the addressed Runtime, `sourceRuntimeFrame` the sender frame, `atomicCrossJurisdictionPair`
+ * the atomic cross-j cohort marker.
  */
 export type RoutedEntityInput = {
-  readonly entityId: EntityId; readonly signerId: string; readonly input: EntityInput; readonly from?: string | undefined;
-  readonly runtimeId?: string | undefined; readonly sourceRuntimeFrame?: SourceRuntimeFrame | undefined; readonly atomicCrossJurisdictionPair?: AtomicCrossPair | undefined;
+  readonly entityId: EntityId;
+  readonly signerId: string;
+  readonly input: EntityInput;
+  readonly from?: string | undefined;
+  readonly runtimeId?: string | undefined;
+  readonly sourceRuntimeFrame?: SourceRuntimeFrame | undefined;
+  readonly atomicCrossJurisdictionPair?: AtomicCrossPair | undefined;
 };
 /** og ConsensusConfig as carried by importReplica. */
 export type ImportConfig = EntityRootConfig & { readonly jurisdiction?: ImportJurisdiction | undefined };
-/** og JurisdictionConfig as supplied to importReplica: `address` is og's J endpoint label (an RPC URL or `jreplica://name`). */
-export type ImportJurisdiction = Partial<EntityRootJurisdiction> & { readonly name?: string | undefined; readonly address?: string | undefined };
-/** og jurisdiction-runtime.ts JTokenInfo: one JReplica.tokenRegistry row. */
-export type JTokenInfo = { readonly symbol: string; readonly name: string; readonly address: string; readonly decimals: number; readonly tokenId: number; readonly tokenType: number; readonly externalTokenId: bigint };
-export type JContracts = { readonly depository?: string | undefined; readonly entityProvider?: string | undefined; readonly account?: string | undefined; readonly deltaTransformer?: string | undefined };
-export type FullJContracts = { readonly depository: string; readonly entityProvider: string; readonly account: string; readonly deltaTransformer: string };
 /**
- * og JReplica (types/jurisdiction-runtime.ts). `stateRoot` is the 32-byte BrowserVM root as 0x hex (og holds the bytes; the post-state view
- * packs them as bytes), null for RPC stacks. `mempool` carries og JTx values uninterpreted.
+ * og JurisdictionConfig as supplied to importReplica: `address` is og's J endpoint label (an RPC URL or
+ * `jreplica://name`).
+ */
+export type ImportJurisdiction = Partial<EntityRootJurisdiction> & {
+  readonly name?: string | undefined;
+  readonly address?: string | undefined;
+};
+/** og jurisdiction-runtime.ts JTokenInfo: one JReplica.tokenRegistry row. */
+export type JTokenInfo = {
+  readonly symbol: string;
+  readonly name: string;
+  readonly address: string;
+  readonly decimals: number;
+  readonly tokenId: number;
+  readonly tokenType: number;
+  readonly externalTokenId: bigint;
+};
+export type JContracts = {
+  readonly depository?: string | undefined;
+  readonly entityProvider?: string | undefined;
+  readonly account?: string | undefined;
+  readonly deltaTransformer?: string | undefined;
+};
+export type FullJContracts = {
+  readonly depository: string;
+  readonly entityProvider: string;
+  readonly account: string;
+  readonly deltaTransformer: string;
+};
+/**
+ * og JReplica (types/jurisdiction-runtime.ts). `stateRoot` is the 32-byte BrowserVM root as 0x hex (og holds the bytes;
+ * the post-state view packs them as bytes), null for RPC stacks. `mempool` carries og JTx values uninterpreted.
  */
 export type JReplica = {
-  readonly name: string; readonly blockNumber: bigint; readonly stateRoot: string | null; readonly mempool: readonly Binary[]; readonly blockDelayMs: number;
-  readonly blockTimeMs?: number | undefined; readonly lastBlockTimestamp: number; readonly blockReady?: boolean | undefined;
-  readonly rpcs?: readonly string[] | undefined; readonly chainId?: number | undefined; readonly watcherConfirmationDepth?: number | undefined;
-  readonly watcherReceiptCommitment?: "tron-rpc-attested" | undefined; readonly tokenRegistry?: readonly JTokenInfo[] | undefined;
-  readonly position: { readonly x: number; readonly y: number; readonly z: number }; readonly entityProviderDeploymentBlock?: number | undefined; readonly contracts?: JContracts | undefined;
+  readonly name: string;
+  readonly blockNumber: bigint;
+  readonly stateRoot: string | null;
+  readonly mempool: readonly Binary[];
+  readonly blockDelayMs: number;
+  readonly blockTimeMs?: number | undefined;
+  readonly lastBlockTimestamp: number;
+  readonly blockReady?: boolean | undefined;
+  readonly rpcs?: readonly string[] | undefined;
+  readonly chainId?: number | undefined;
+  readonly watcherConfirmationDepth?: number | undefined;
+  readonly watcherReceiptCommitment?: "tron-rpc-attested" | undefined;
+  readonly tokenRegistry?: readonly JTokenInfo[] | undefined;
+  readonly position: { readonly x: number; readonly y: number; readonly z: number };
+  readonly entityProviderDeploymentBlock?: number | undefined;
+  readonly contracts?: JContracts | undefined;
 };
 export type RpcPolicy = "single" | "failover" | { readonly mode: "quorum"; readonly min: number };
 /** og runtime/types.ts JurisdictionImportRequest (the importJ payload). */
 export type JurisdictionImportRequest = {
-  readonly name: string; readonly chainId: number; readonly ticker: string; readonly rpcs: readonly string[]; readonly entityProviderDeploymentBlock?: number | undefined;
-  readonly blockTimeMs?: number | undefined; readonly startAtCurrentBlock?: boolean | undefined; readonly rpcPolicy?: RpcPolicy | undefined; readonly contracts?: JContracts | undefined;
-  readonly tokens?: readonly { readonly symbol: string; readonly decimals: number; readonly initialSupply?: bigint | undefined }[] | undefined;
+  readonly name: string;
+  readonly chainId: number;
+  readonly ticker: string;
+  readonly rpcs: readonly string[];
+  readonly entityProviderDeploymentBlock?: number | undefined;
+  readonly blockTimeMs?: number | undefined;
+  readonly startAtCurrentBlock?: boolean | undefined;
+  readonly rpcPolicy?: RpcPolicy | undefined;
+  readonly contracts?: JContracts | undefined;
+  readonly tokens?:
+    | readonly { readonly symbol: string; readonly decimals: number; readonly initialSupply?: bigint | undefined }[]
+    | undefined;
 };
 /** og runtime/types.ts JurisdictionImportResult (the completeImportJ payload). */
 export type JurisdictionImportResult = {
-  readonly importId: string; readonly requestHash: string; readonly name: string; readonly chainId: number; readonly ticker: string; readonly rpcs: readonly string[];
-  readonly blockTimeMs?: number | undefined; readonly blockNumber: string; readonly stateRoot: string | null; readonly watcherConfirmationDepth: number;
-  readonly watcherReceiptCommitment?: "tron-rpc-attested" | undefined; readonly tokenRegistry: readonly JTokenInfo[]; readonly entityProviderDeploymentBlock: number;
-  readonly contracts: FullJContracts; readonly browserVMState?: { readonly [field: string]: Binary } | undefined;
+  readonly importId: string;
+  readonly requestHash: string;
+  readonly name: string;
+  readonly chainId: number;
+  readonly ticker: string;
+  readonly rpcs: readonly string[];
+  readonly blockTimeMs?: number | undefined;
+  readonly blockNumber: string;
+  readonly stateRoot: string | null;
+  readonly watcherConfirmationDepth: number;
+  readonly watcherReceiptCommitment?: "tron-rpc-attested" | undefined;
+  readonly tokenRegistry: readonly JTokenInfo[];
+  readonly entityProviderDeploymentBlock: number;
+  readonly contracts: FullJContracts;
+  readonly browserVMState?: { readonly [field: string]: Binary } | undefined;
 };
-export type PendingJurisdictionImport = { readonly importId: string; readonly requestHash: string; readonly request: JurisdictionImportRequest };
-type SubmitResultTail = { readonly attemptId: string; readonly attemptNumber: number; readonly attemptedAt: number; readonly message?: string | undefined; readonly adapterFailure?: JAdapterFailure | undefined; readonly txHash?: string | undefined };
+export type PendingJurisdictionImport = {
+  readonly importId: string;
+  readonly requestHash: string;
+  readonly request: JurisdictionImportRequest;
+};
+type SubmitResultTail = {
+  readonly attemptId: string;
+  readonly attemptNumber: number;
+  readonly attemptedAt: number;
+  readonly message?: string | undefined;
+  readonly adapterFailure?: JAdapterFailure | undefined;
+  readonly txHash?: string | undefined;
+};
 /** og recordJSubmitResult / recordEntityProviderActionSubmitResult / recordGovernanceJSubmitResult payloads. */
-export type JSubmitResultData = SubmitResultTail & { readonly entityId: string; readonly signerId: string; readonly jurisdictionName: string; readonly batchHash: string; readonly entityNonce: number; readonly batchGeneration: number; readonly outcome: SubmitOutcome };
-export type EpActionResultData = SubmitResultTail & { readonly entityId: string; readonly signerId: string; readonly jurisdictionName: string; readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number; readonly outcome: Exclude<SubmitOutcome, "eventBarrier"> };
-export type GovernanceResultData = SubmitResultTail & { readonly jurisdictionName: string; readonly entityId: string; readonly signerId: string; readonly proposalHash: string; readonly payloadHash: string; readonly outcome: SubmitOutcome };
+export type JSubmitResultData = SubmitResultTail & {
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly jurisdictionName: string;
+  readonly batchHash: string;
+  readonly entityNonce: number;
+  readonly batchGeneration: number;
+  readonly outcome: SubmitOutcome;
+};
+export type EpActionResultData = SubmitResultTail & {
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly jurisdictionName: string;
+  readonly actionHash: string;
+  readonly actionNonce: bigint;
+  readonly generation: number;
+  readonly outcome: Exclude<SubmitOutcome, "eventBarrier">;
+};
+export type GovernanceResultData = SubmitResultTail & {
+  readonly jurisdictionName: string;
+  readonly entityId: string;
+  readonly signerId: string;
+  readonly proposalHash: string;
+  readonly payloadHash: string;
+  readonly outcome: SubmitOutcome;
+};
 /** og JAdapterFailure / RuntimeFailureSignal. */
-export type JAdapterFailure = { readonly category: "transient" | "terminal"; readonly code: string; readonly message: string };
-export type RuntimeFailureSignal = { readonly category: "ExpectedEmpty" | "TransientRace" | "Contradiction"; readonly code: string; readonly message: string; readonly retryable: boolean; readonly fatal: boolean };
-export type SubmitFailure = { readonly message: string; readonly failedAt: number; readonly failure?: RuntimeFailureSignal | undefined; readonly adapterFailure?: JAdapterFailure | undefined };
+export type JAdapterFailure = {
+  readonly category: "transient" | "terminal";
+  readonly code: string;
+  readonly message: string;
+};
+export type RuntimeFailureSignal = {
+  readonly category: "ExpectedEmpty" | "TransientRace" | "Contradiction";
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly fatal: boolean;
+};
+export type SubmitFailure = {
+  readonly message: string;
+  readonly failedAt: number;
+  readonly failure?: RuntimeFailureSignal | undefined;
+  readonly adapterFailure?: JAdapterFailure | undefined;
+};
 export type SubmitOutcome = "submitted" | "eventBarrier" | "transientFailure" | "terminalFailure" | "reconciled";
 type SubmitJournal = {
-  readonly submitAttempts: number; readonly lastSubmittedAt: number; readonly txHash?: string | undefined; readonly lastFailure?: SubmitFailure | undefined; readonly terminalFailure?: SubmitFailure | undefined;
-  readonly lastResultAttemptId?: string | undefined; readonly lastResultAt?: number | undefined; readonly lastResultOutcome?: SubmitOutcome | undefined; readonly lastResultFingerprint?: string | undefined;
-  readonly resultFingerprints?: { readonly [attemptId: string]: string } | undefined; readonly resultFingerprintOrder?: readonly string[] | undefined;
+  readonly submitAttempts: number;
+  readonly lastSubmittedAt: number;
+  readonly txHash?: string | undefined;
+  readonly lastFailure?: SubmitFailure | undefined;
+  readonly terminalFailure?: SubmitFailure | undefined;
+  readonly lastResultAttemptId?: string | undefined;
+  readonly lastResultAt?: number | undefined;
+  readonly lastResultOutcome?: SubmitOutcome | undefined;
+  readonly lastResultFingerprint?: string | undefined;
+  readonly resultFingerprints?: { readonly [attemptId: string]: string } | undefined;
+  readonly resultFingerprintOrder?: readonly string[] | undefined;
 };
 /** og EntityReplica.jSubmitState: this validator's attempts at submitting the sealed batch. */
-export type JSubmitState = SubmitJournal & { readonly jurisdictionName: string; readonly batchHash: string; readonly entityNonce: number; readonly batchGeneration: number };
+export type JSubmitState = SubmitJournal & {
+  readonly jurisdictionName: string;
+  readonly batchHash: string;
+  readonly entityNonce: number;
+  readonly batchGeneration: number;
+};
 /** og EntityProviderActionSubmitState. */
-export type EntityProviderActionSubmitState = SubmitJournal & { readonly jurisdictionName: string; readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number };
-/** og EntityReplica validator-local fields the Runtime owns (never in the Entity root): J submit ledgers, quorum Hanko witnesses, J history. */
-export type ReplicaPosition = { readonly x: number; readonly y: number; readonly z: number; readonly jurisdiction?: string | undefined };
-/** `lastConsensusProgressAt`: og EntityReplica.lastConsensusProgressAt (Runtime clock of this validator's last consensus progress; RAM and snapshot only, never in the replica-meta commitment). */
+export type EntityProviderActionSubmitState = SubmitJournal & {
+  readonly jurisdictionName: string;
+  readonly actionHash: string;
+  readonly actionNonce: bigint;
+  readonly generation: number;
+};
+/**
+ * og EntityReplica validator-local fields the Runtime owns (never in the Entity root): J submit ledgers, quorum Hanko
+ * witnesses, J history.
+ */
+export type ReplicaPosition = {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly jurisdiction?: string | undefined;
+};
+/**
+ * `lastConsensusProgressAt`: og EntityReplica.lastConsensusProgressAt (Runtime clock of this validator's last consensus
+ * progress; RAM and snapshot only, never in the replica-meta commitment).
+ */
 export type ReplicaLocal = {
-  readonly position?: ReplicaPosition | undefined; readonly lastConsensusProgressAt?: number | undefined;
-  readonly jSubmitState?: JSubmitState | undefined; readonly entityProviderActionSubmitState?: EntityProviderActionSubmitState | undefined;
-  readonly hankoWitness?: ReadonlyMap<string, HankoWitness> | undefined; readonly jHistory?: ValidatorJHistory | undefined;
+  readonly position?: ReplicaPosition | undefined;
+  readonly lastConsensusProgressAt?: number | undefined;
+  readonly jSubmitState?: JSubmitState | undefined;
+  readonly entityProviderActionSubmitState?: EntityProviderActionSubmitState | undefined;
+  readonly hankoWitness?: ReadonlyMap<string, HankoWitness> | undefined;
+  readonly jHistory?: ValidatorJHistory | undefined;
 };
 type RuntimeData = { readonly [field: string]: Binary };
 /** og runtime/types.ts RuntimeTx: every kind with og's field names. */
 export type RuntimeTx =
   | { readonly type: "checkpointBarrier"; readonly data: Record<string, never> }
-  | { readonly type: "recordRuntimeAdapterCommand"; readonly data: { readonly laneId: string; readonly sequence: number; readonly commandId: string; readonly inputHash: string; readonly expiresAtMs: number | null } }
+  | {
+      readonly type: "recordRuntimeAdapterCommand";
+      readonly data: {
+        readonly laneId: string;
+        readonly sequence: number;
+        readonly commandId: string;
+        readonly inputHash: string;
+        readonly expiresAtMs: number | null;
+      };
+    }
   | { readonly type: "recordNumberedRegistrationIntent"; readonly data: RuntimeData }
   | { readonly type: "resolveNumberedRegistrationIntent"; readonly data: RuntimeData }
   | { readonly type: "recordAuthenticatedJAuthority"; readonly data: RuntimeData }
-  | { readonly type: "importReplica"; readonly entityId: string; readonly signerId: string; readonly data: { readonly config: ImportConfig; readonly isProposer: boolean; readonly entitySeed: string; readonly profileName?: string | undefined; readonly position?: { readonly x: number; readonly y: number; readonly z: number; readonly jurisdiction?: string | undefined } | undefined } }
-  | { readonly type: "observeJRange"; readonly data: { readonly entityId: string; readonly signerId: string; readonly jurisdictionRef: string; readonly scannedThroughHeight: number; readonly tipBlockHash: string; readonly headers?: readonly Binary[] | undefined; readonly blocks: readonly Binary[] } }
-  | { readonly type: "advanceJWatcherCursor"; readonly data: { readonly depositoryAddress: string; readonly chainId: number; readonly blockNumber: number } }
-  | { readonly type: "rewindJHistory"; readonly data: { readonly entityId: string; readonly signerId: string; readonly jurisdictionRef: string; readonly conflictingHeight: number; readonly conflictingBlockHash: string } }
-  | { readonly type: "retryJSubmit"; readonly data: { readonly entityId: string; readonly signerId: string; readonly jurisdictionName: string; readonly batchHash: string; readonly entityNonce: number; readonly batchGeneration: number; readonly feeOverrides?: Binary | undefined } }
+  | {
+      readonly type: "importReplica";
+      readonly entityId: string;
+      readonly signerId: string;
+      readonly data: {
+        readonly config: ImportConfig;
+        readonly isProposer: boolean;
+        readonly entitySeed: string;
+        readonly profileName?: string | undefined;
+        readonly position?:
+          | { readonly x: number; readonly y: number; readonly z: number; readonly jurisdiction?: string | undefined }
+          | undefined;
+      };
+    }
+  | {
+      readonly type: "observeJRange";
+      readonly data: {
+        readonly entityId: string;
+        readonly signerId: string;
+        readonly jurisdictionRef: string;
+        readonly scannedThroughHeight: number;
+        readonly tipBlockHash: string;
+        readonly headers?: readonly Binary[] | undefined;
+        readonly blocks: readonly Binary[];
+      };
+    }
+  | {
+      readonly type: "advanceJWatcherCursor";
+      readonly data: { readonly depositoryAddress: string; readonly chainId: number; readonly blockNumber: number };
+    }
+  | {
+      readonly type: "rewindJHistory";
+      readonly data: {
+        readonly entityId: string;
+        readonly signerId: string;
+        readonly jurisdictionRef: string;
+        readonly conflictingHeight: number;
+        readonly conflictingBlockHash: string;
+      };
+    }
+  | {
+      readonly type: "retryJSubmit";
+      readonly data: {
+        readonly entityId: string;
+        readonly signerId: string;
+        readonly jurisdictionName: string;
+        readonly batchHash: string;
+        readonly entityNonce: number;
+        readonly batchGeneration: number;
+        readonly feeOverrides?: Binary | undefined;
+      };
+    }
   | { readonly type: "recordJSubmitResult"; readonly data: JSubmitResultData }
-  | { readonly type: "retryEntityProviderAction"; readonly data: { readonly entityId: string; readonly signerId: string; readonly jurisdictionName: string; readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number } }
+  | {
+      readonly type: "retryEntityProviderAction";
+      readonly data: {
+        readonly entityId: string;
+        readonly signerId: string;
+        readonly jurisdictionName: string;
+        readonly actionHash: string;
+        readonly actionNonce: bigint;
+        readonly generation: number;
+      };
+    }
   | { readonly type: "recordEntityProviderActionSubmitResult"; readonly data: EpActionResultData }
   | { readonly type: "recordGovernanceJSubmitResult"; readonly data: GovernanceResultData }
   | { readonly type: "importJ"; readonly data: JurisdictionImportRequest }
   | { readonly type: "completeImportJ"; readonly data: JurisdictionImportResult };
 export type RuntimeTxType = RuntimeTx["type"];
-/** og RuntimeInput: runtime txs first, then entity inputs, then J inputs (queued to the J mempool). `timestamp` is the ingress seed. */
-export type RuntimeInput = { readonly runtimeTxs: readonly RuntimeTx[]; readonly entityInputs: readonly RoutedEntityInput[]; readonly jInputs?: readonly JInput[] | undefined; readonly timestamp?: bigint | undefined };
-/** og infrastructure.runtimeAdapterCommandFrontiers row. */
-export type AdapterFrontier = { readonly lastContiguousSequence: number; readonly lastInputHash: string; readonly lastCommandId: string; readonly observedHeight: number; readonly expiresAtMs: number | null };
 /**
- * og RuntimeReplica: `entities` is `eReplicas` (one replica per `entityId:signerId`, signer lowercased); `height`/`timestamp` are RuntimeState;
- * `jReplicas` is og state.jReplicas (insertion-ordered); `activeJurisdiction` / `runtimeId` / `browserVMState` are og RuntimeReplica fields;
- * `adapterFrontiers`, `encryptionSeeds` and `pendingJImports` are og infrastructure maps; `frameHash` is the WAL head.
+ * og RuntimeInput: runtime txs first, then entity inputs, then J inputs (queued to the J mempool). `timestamp` is the
+ * ingress seed.
+ */
+export type RuntimeInput = {
+  readonly runtimeTxs: readonly RuntimeTx[];
+  readonly entityInputs: readonly RoutedEntityInput[];
+  readonly jInputs?: readonly JInput[] | undefined;
+  readonly timestamp?: bigint | undefined;
+};
+/** og infrastructure.runtimeAdapterCommandFrontiers row. */
+export type AdapterFrontier = {
+  readonly lastContiguousSequence: number;
+  readonly lastInputHash: string;
+  readonly lastCommandId: string;
+  readonly observedHeight: number;
+  readonly expiresAtMs: number | null;
+};
+/**
+ * og RuntimeReplica: `entities` is `eReplicas` (one replica per `entityId:signerId`, signer lowercased);
+ * `height`/`timestamp` are RuntimeState; `jReplicas` is og state.jReplicas (insertion-ordered); `activeJurisdiction` /
+ * `runtimeId` / `browserVMState` are og RuntimeReplica fields; `adapterFrontiers`, `encryptionSeeds` and
+ * `pendingJImports` are og infrastructure maps; `frameHash` is the WAL head.
  */
 export type Runtime = {
-  readonly entities: ReadonlyMap<string, EntityReplica>; readonly height: bigint; readonly timestamp: bigint; readonly jReplicas: ReadonlyMap<string, JReplica>;
-  readonly activeJurisdiction?: string | undefined; readonly runtimeId?: string | undefined; readonly browserVMState?: { readonly [field: string]: Binary } | undefined;
+  readonly entities: ReadonlyMap<string, EntityReplica>;
+  readonly height: bigint;
+  readonly timestamp: bigint;
+  readonly jReplicas: ReadonlyMap<string, JReplica>;
+  readonly activeJurisdiction?: string | undefined;
+  readonly runtimeId?: string | undefined;
+  readonly browserVMState?: { readonly [field: string]: Binary } | undefined;
   readonly pendingJImports: ReadonlyMap<string, PendingJurisdictionImport>;
   /** og infrastructure.pendingCommittedJOutbox: durable J submit attempts awaiting their recorded result. */
   readonly pendingCommittedJOutbox: readonly JInput[];
   /** og per-EntityReplica local fields, keyed like `entities`. */
   readonly replicaLocal: ReadonlyMap<string, ReplicaLocal>;
-  readonly adapterFrontiers: ReadonlyMap<string, AdapterFrontier>; readonly encryptionSeeds: ReadonlyMap<string, string>; readonly frameHash: string;
-  /** og infrastructure.certifiedRegistrationEvidence: receipt-proven EntityProvider registrations, keyed `stackKey:entityId`. */
+  readonly adapterFrontiers: ReadonlyMap<string, AdapterFrontier>;
+  readonly encryptionSeeds: ReadonlyMap<string, string>;
+  readonly frameHash: string;
+  /**
+   * og infrastructure.certifiedRegistrationEvidence: receipt-proven EntityProvider registrations, keyed
+   * `stackKey:entityId`.
+   */
   readonly registrationEvidence: ReadonlyMap<string, RegistrationEvidence>;
-  /** og infrastructure.numberedRegistrationIntents: durable numbered-registration intents (pending / completed / quarantined), keyed by intentId. */
+  /**
+   * og infrastructure.numberedRegistrationIntents: durable numbered-registration intents (pending / completed /
+   * quarantined), keyed by intentId.
+   */
   readonly numberedRegistrationIntents: ReadonlyMap<string, RuntimeData>;
-  /** og env.pendingNetworkOutputs: the retained network outbox (remote outputs still owed), committed as each frame's runtime outputs. */
+  /**
+   * og env.pendingNetworkOutputs: the retained network outbox (remote outputs still owed), committed as each frame's
+   * runtime outputs.
+   */
   readonly pendingNetworkOutputs?: readonly NetworkOutput[] | undefined;
 };
-/** A whole-frame refusal carries og's error code (og throws out of the Runtime reducer, so nothing of the frame applies). */
-export type RuntimeError = EntityError | Tagged<"no_such_entity", { id: EntityId }> | Tagged<"runtime_frame" | "runtime_tx", { code: string }>;
+/**
+ * A whole-frame refusal carries og's error code (og throws out of the Runtime reducer, so nothing of the frame
+ * applies).
+ */
+export type RuntimeError =
+  EntityError | Tagged<"no_such_entity", { id: EntityId }> | Tagged<"runtime_frame" | "runtime_tx", { code: string }>;
 export type Verifiers = { readonly verify: Verify; readonly verifyMember: MemberVerify; readonly sign: MemberSign };
-/** og capability markers: `local` holds the exact RuntimeTx (and proposeAccountsNow EntityTx) objects this process authorized (og's Symbol tags); replay trusts the WAL. */
-export type RuntimeCtx = Verifiers & { readonly replay?: boolean | undefined; readonly local?: ReadonlySet<RuntimeTx | EntityTx> | undefined;
+/**
+ * og capability markers: `local` holds the exact RuntimeTx (and proposeAccountsNow EntityTx) objects this process
+ * authorized (og's Symbol tags); replay trusts the WAL.
+ */
+export type RuntimeCtx = Verifiers & {
+  readonly replay?: boolean | undefined;
+  readonly local?: ReadonlySet<RuntimeTx | EntityTx> | undefined;
   /** og EntityRuntimeContext gossip + liveness + proposer entropy, per Entity (the HTLC proposer infrastructure). */
   readonly htlcInfra?: ((entityId: EntityId) => HtlcProposerInfra | undefined) | undefined;
-  /** og env.runtimeSeed: the process's private seed; a source hub's default proposer derives cross-j hash-ladder seeds from it. */
+  /**
+   * og env.runtimeSeed: the process's private seed; a source hub's default proposer derives cross-j hash-ladder seeds
+   * from it.
+   */
   readonly runtimeSeed?: string | undefined;
-  /** og env.infrastructure transport view (verified gossip profile routes), read when binding an outbox row's signer; never committed. */
-  readonly routes?: RuntimeRoutes | undefined };
+  /**
+   * og env.infrastructure transport view (verified gossip profile routes), read when binding an outbox row's signer;
+   * never committed.
+   */
+  readonly routes?: RuntimeRoutes | undefined;
+};
 /**
- * og transport view (never committed): `verifiedProfileSigner` is an Entity's verified gossip profile runtime signer (og verifiedProfileRoutes /
- * resolveGossipBoardSignerIds); `verifiedRuntime` og p2p getVerifiedRuntimeRoute; `resolvedRuntime` og resolveRuntimeIdForEntity; `crossJRuntime`
- * og resolveRuntimeIdForCrossJurisdictionEntity; `replayRuntime` og resolveReplayOutputRuntimeRoute (a replayed frame's committed rows).
+ * og transport view (never committed): `verifiedProfileSigner` is an Entity's verified gossip profile runtime signer
+ * (og verifiedProfileRoutes / resolveGossipBoardSignerIds); `verifiedRuntime` og p2p getVerifiedRuntimeRoute;
+ * `resolvedRuntime` og resolveRuntimeIdForEntity; `crossJRuntime` og resolveRuntimeIdForCrossJurisdictionEntity;
+ * `replayRuntime` og resolveReplayOutputRuntimeRoute (a replayed frame's committed rows).
  */
 export type RuntimeRoutes = {
   readonly verifiedProfileSigner: (entityId: string) => string | undefined;
@@ -28504,66 +28766,156 @@ export type RuntimeRoutes = {
 export const ZERO_FRAME_HASH = `0x${"00".repeat(32)}`;
 export const replicaKey = (entity: EntityId, signer: string): string => `${entity}:${signerId(signer)}`;
 /** og buildJurisdictionImportAdapterConfig's bare replica: a name alone is an unconfigured J replica at block 0. */
-export const bareJReplica = (name: string): JReplica => ({ name, blockNumber: 0n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 } });
-export const createRuntime = (jurisdictions: Iterable<string | JReplica> = [], runtimeId?: string): Runtime => ({
-  entities: new Map(), height: 0n, timestamp: 0n, jReplicas: new Map([...jurisdictions].map((j): [string, JReplica] => (typeof j === "string" ? [j, bareJReplica(j)] : [j.name, j]))),
-  ...opt("runtimeId", runtimeId), pendingJImports: new Map(), pendingCommittedJOutbox: [], replicaLocal: new Map(), adapterFrontiers: new Map(), encryptionSeeds: new Map(), frameHash: ZERO_FRAME_HASH,
-  registrationEvidence: new Map(), numberedRegistrationIntents: new Map(),
+export const bareJReplica = (name: string): JReplica => ({
+  name,
+  blockNumber: 0n,
+  stateRoot: null,
+  mempool: [],
+  blockDelayMs: 300,
+  lastBlockTimestamp: 0,
+  position: { x: 0, y: 50, z: 0 },
 });
-export const spawn = (rt: Runtime, r: EntityReplica): Runtime => ({ ...rt, entities: mapSet(rt.entities, replicaKey(r.state.id, r.signerId), r) });
-/** og resolveEntityProposerId: an Account message goes to the receiver's active leader (the CEO `validators[0]` until a view change); a consensus input to the named validator. */
-export const convertOutput = (rt: Runtime, item: EntityOutput, from: EntityId, timestamp: bigint): Result<RoutedEntityInput, RuntimeError> => {
+export const createRuntime = (jurisdictions: Iterable<string | JReplica> = [], runtimeId?: string): Runtime => ({
+  entities: new Map(),
+  height: 0n,
+  timestamp: 0n,
+  jReplicas: new Map(
+    [...jurisdictions].map((j): [string, JReplica] => (typeof j === "string" ? [j, bareJReplica(j)] : [j.name, j])),
+  ),
+  ...opt("runtimeId", runtimeId),
+  pendingJImports: new Map(),
+  pendingCommittedJOutbox: [],
+  replicaLocal: new Map(),
+  adapterFrontiers: new Map(),
+  encryptionSeeds: new Map(),
+  frameHash: ZERO_FRAME_HASH,
+  registrationEvidence: new Map(),
+  numberedRegistrationIntents: new Map(),
+});
+export const spawn = (rt: Runtime, r: EntityReplica): Runtime => ({
+  ...rt,
+  entities: mapSet(rt.entities, replicaKey(r.state.id, r.signerId), r),
+});
+/**
+ * og resolveEntityProposerId: an Account message goes to the receiver's active leader (the CEO `validators[0]` until a
+ * view change); a consensus input to the named validator.
+ */
+export const convertOutput = (
+  rt: Runtime,
+  item: EntityOutput,
+  from: EntityId,
+  timestamp: bigint,
+): Result<RoutedEntityInput, RuntimeError> => {
   const marker = opt("atomicCrossJurisdictionPair", item.atomicCrossJurisdictionPair);
   if ("input" in item) return ok({ entityId: item.to, signerId: item.signerId, input: item.input, ...marker });
   const receiver = [...rt.entities.values()].find((r) => r.state.id === item.to);
   if (receiver === undefined) return err({ _tag: "no_such_entity", id: item.to });
-  const leader = memberId(receiver.state.quorum, leaderStateOf(receiver.state).activeValidatorId) ?? allowedProposer(receiver.state.quorum);
-  return ok({ entityId: item.to, from, signerId: leader, input: { kind: "txs", timestamp, txs: [item.tx] }, ...marker });
+  const leader =
+    memberId(receiver.state.quorum, leaderStateOf(receiver.state).activeValidatorId) ??
+    allowedProposer(receiver.state.quorum);
+  return ok({
+    entityId: item.to,
+    from,
+    signerId: leader,
+    input: { kind: "txs", timestamp, txs: [item.tx] },
+    ...marker,
+  });
 };
 
 // ---- og runtime/frame/intake: shape limits, capabilities, merge ----
-const MAX_RUNTIME_INPUT_RUNTIME_TXS = 10_000, MAX_RUNTIME_INPUT_ENTITY_INPUTS = 10_000, MAX_RUNTIME_J_INPUTS = 256, MAX_RUNTIME_J_TXS = 1_024, MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
+const MAX_RUNTIME_INPUT_RUNTIME_TXS = 10_000;
+const MAX_RUNTIME_INPUT_ENTITY_INPUTS = 10_000;
+const MAX_RUNTIME_J_INPUTS = 256;
+const MAX_RUNTIME_J_TXS = 1_024;
+const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
 const frameErr = (code: string): Result<never, RuntimeError> => err({ _tag: "runtime_frame", code });
-/** og validateRuntimeInputShapeAndLimits + collectJOutbox: a checkpoint barrier stands alone; bounded counts; every J input names a known J replica. */
+type JTally = { readonly total: number; readonly perJurisdiction: ReadonlyMap<string, number> };
+const EMPTY_J_TALLY: JTally = { total: 0, perJurisdiction: new Map() };
+/**
+ * og collectJOutbox: every J input names a known J replica; its J txs count against the frame's and the jurisdiction's
+ * bound.
+ */
+const tallyJInput =
+  (rt: Runtime) =>
+  (tally: JTally, j: JInput): Result<JTally, RuntimeError> => {
+    if (!rt.jReplicas.has(j.jurisdictionName)) return frameErr("RUNTIME_J_UNKNOWN_JURISDICTION");
+    const total = tally.total + j.jTxs.length;
+    if (total > MAX_RUNTIME_J_TXS) return frameErr("RUNTIME_J_TXS_MAX");
+    const here = (tally.perJurisdiction.get(j.jurisdictionName) ?? 0) + j.jTxs.length;
+    if (here > MAX_RUNTIME_J_TXS_PER_JURISDICTION) return frameErr("RUNTIME_J_TXS_PER_JURISDICTION_MAX");
+    return ok({ total, perJurisdiction: mapSet(tally.perJurisdiction, j.jurisdictionName, here) });
+  };
+/**
+ * og validateRuntimeInputShapeAndLimits + collectJOutbox: a checkpoint barrier stands alone; bounded counts; every J
+ * input names a known J replica.
+ */
 export const validateRuntimeInput = (rt: Runtime, input: RuntimeInput): Result<readonly JInput[], RuntimeError> => {
-  const barriers = input.runtimeTxs.filter((tx) => tx.type === "checkpointBarrier").length, jInputs = input.jInputs ?? [];
-  if (barriers > 0 && (barriers !== 1 || input.runtimeTxs.length !== 1 || input.entityInputs.length !== 0 || jInputs.length !== 0)) return frameErr("CHECKPOINT_BARRIER_NOT_ALONE");
-  if (input.jInputs !== undefined) {
-    if (jInputs.length > MAX_RUNTIME_J_INPUTS) return frameErr("RUNTIME_J_INPUTS_MAX");
-    let total = 0;
-    const perJ = new Map<string, number>();
-    for (const j of jInputs) {
-      if (!rt.jReplicas.has(j.jurisdictionName)) return frameErr("RUNTIME_J_UNKNOWN_JURISDICTION");
-      total += j.jTxs.length;
-      if (total > MAX_RUNTIME_J_TXS) return frameErr("RUNTIME_J_TXS_MAX");
-      const n = (perJ.get(j.jurisdictionName) ?? 0) + j.jTxs.length;
-      if (n > MAX_RUNTIME_J_TXS_PER_JURISDICTION) return frameErr("RUNTIME_J_TXS_PER_JURISDICTION_MAX");
-      perJ.set(j.jurisdictionName, n);
-    }
-  }
+  const jInputs = input.jInputs ?? [];
+  const barriers = input.runtimeTxs.filter((tx) => tx.type === "checkpointBarrier").length;
+  const barrierAlone =
+    barriers === 1 && input.runtimeTxs.length === 1 && input.entityInputs.length === 0 && jInputs.length === 0;
+  if (barriers > 0 && !barrierAlone) return frameErr("CHECKPOINT_BARRIER_NOT_ALONE");
+  if (jInputs.length > MAX_RUNTIME_J_INPUTS) return frameErr("RUNTIME_J_INPUTS_MAX");
+  const tallied = foldResult(jInputs, EMPTY_J_TALLY, tallyJInput(rt));
+  if (!tallied.ok) return tallied;
   if (input.runtimeTxs.length > MAX_RUNTIME_INPUT_RUNTIME_TXS) return frameErr("RUNTIME_TXS_MAX");
-  return input.entityInputs.length > MAX_RUNTIME_INPUT_ENTITY_INPUTS ? frameErr("RUNTIME_ENTITY_INPUTS_MAX") : ok(jInputs);
+  return input.entityInputs.length > MAX_RUNTIME_INPUT_ENTITY_INPUTS
+    ? frameErr("RUNTIME_ENTITY_INPUTS_MAX")
+    : ok(jInputs);
 };
 /** og internal-tx-auth.ts: every RuntimeTx except importReplica/importJ needs a local capability, or replay. */
 const CAPABILITY_CODES: { readonly [T in RuntimeTxType]: string | null } = {
-  checkpointBarrier: "CHECKPOINT_BARRIER_EXTERNAL_RUNTIME_TX_REJECTED", recordRuntimeAdapterCommand: "RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED",
-  recordNumberedRegistrationIntent: "NUMBERED_REGISTRATION_EXTERNAL_RUNTIME_TX_REJECTED", resolveNumberedRegistrationIntent: "NUMBERED_REGISTRATION_EXTERNAL_RUNTIME_TX_REJECTED",
-  recordAuthenticatedJAuthority: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED", observeJRange: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
-  advanceJWatcherCursor: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED", rewindJHistory: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
-  retryJSubmit: "J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED", recordJSubmitResult: "J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
-  retryEntityProviderAction: "ENTITY_PROVIDER_ACTION_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED", recordEntityProviderActionSubmitResult: "ENTITY_PROVIDER_ACTION_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
-  recordGovernanceJSubmitResult: "GOVERNANCE_SUBMIT_RESULT_EXTERNAL_INGRESS_REJECTED", completeImportJ: "J_IMPORT_RESULT_EXTERNAL_INGRESS_REJECTED",
-  importReplica: null, importJ: null,
+  checkpointBarrier: "CHECKPOINT_BARRIER_EXTERNAL_RUNTIME_TX_REJECTED",
+  recordRuntimeAdapterCommand: "RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED",
+  recordNumberedRegistrationIntent: "NUMBERED_REGISTRATION_EXTERNAL_RUNTIME_TX_REJECTED",
+  resolveNumberedRegistrationIntent: "NUMBERED_REGISTRATION_EXTERNAL_RUNTIME_TX_REJECTED",
+  recordAuthenticatedJAuthority: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  observeJRange: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  advanceJWatcherCursor: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  rewindJHistory: "J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  retryJSubmit: "J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  recordJSubmitResult: "J_SUBMIT_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  retryEntityProviderAction: "ENTITY_PROVIDER_ACTION_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  recordEntityProviderActionSubmitResult: "ENTITY_PROVIDER_ACTION_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED",
+  recordGovernanceJSubmitResult: "GOVERNANCE_SUBMIT_RESULT_EXTERNAL_INGRESS_REJECTED",
+  completeImportJ: "J_IMPORT_RESULT_EXTERNAL_INGRESS_REJECTED",
+  importReplica: null,
+  importJ: null,
 };
-export const runtimeTxAuthorized = (tx: RuntimeTx, ctx: Pick<RuntimeCtx, "replay" | "local">): Result<void, RuntimeError> => {
+export const runtimeTxAuthorized = (
+  tx: RuntimeTx,
+  ctx: Pick<RuntimeCtx, "replay" | "local">,
+): Result<void, RuntimeError> => {
   const code = CAPABILITY_CODES[tx.type];
-  return code === null || ctx.replay === true || ctx.local?.has(tx) === true ? ok(undefined) : err({ _tag: "runtime_tx", code });
+  const allowed = code === null || ctx.replay === true || ctx.local?.has(tx) === true;
+  return allowed ? ok(undefined) : err({ _tag: "runtime_tx", code });
 };
 const inputFingerprint = (tx: EntityTx): string => encodeEntityTx(tx);
-const frameIdOf = (frame: EntityFrame): string => { const h = hashEntityFrame(frame); return h.ok ? h.value : canon(frame); };
-type Lane = { readonly entityId: EntityId; readonly signerId: string; readonly from?: string | undefined; readonly runtimeId?: string | undefined; readonly sourceRuntimeFrame?: SourceRuntimeFrame | undefined; readonly atomic?: AtomicCrossPair | undefined; readonly timestamp: bigint; readonly txs?: readonly EntityTx[] | undefined; readonly proposal?: Extract<EntityInput, { kind: "proposal" }> | undefined; readonly precommit?: Extract<EntityInput, { kind: "precommit" }> | undefined; readonly vote?: VoteInput | undefined; readonly jPrefix?: JPrefixInput | undefined };
+const frameIdOf = (frame: EntityFrame): string => unwrapOr(hashEntityFrame(frame), () => canon(frame));
+/** One routed input as a merge lane: its envelope, and whichever consensus payload it carries. */
+type Lane = {
+  readonly entityId: EntityId;
+  readonly signerId: string;
+  readonly from?: string | undefined;
+  readonly runtimeId?: string | undefined;
+  readonly sourceRuntimeFrame?: SourceRuntimeFrame | undefined;
+  readonly atomic?: AtomicCrossPair | undefined;
+  readonly timestamp: bigint;
+  readonly txs?: readonly EntityTx[] | undefined;
+  readonly proposal?: ProposalInput | undefined;
+  readonly precommit?: PrecommitInput | undefined;
+  readonly vote?: VoteInput | undefined;
+  readonly jPrefix?: JPrefixInput | undefined;
+};
 const laneOf = (i: RoutedEntityInput): Lane => {
-  const at = { entityId: i.entityId, signerId: i.signerId, from: i.from, runtimeId: i.runtimeId, sourceRuntimeFrame: i.sourceRuntimeFrame, atomic: i.atomicCrossJurisdictionPair };
+  const at = {
+    entityId: i.entityId,
+    signerId: i.signerId,
+    from: i.from,
+    runtimeId: i.runtimeId,
+    sourceRuntimeFrame: i.sourceRuntimeFrame,
+    atomic: i.atomicCrossJurisdictionPair,
+  };
   return matchBy("kind", i.input, {
     txs: (x): Lane => ({ ...at, timestamp: x.timestamp, txs: x.txs }),
     proposal: (x): Lane => ({ ...at, timestamp: x.frame.timestamp, proposal: x }),
@@ -28573,150 +28925,314 @@ const laneOf = (i: RoutedEntityInput): Lane => {
   });
 };
 /** The routed input a lane stands for, provenance included (og keeps the first input's envelope fields). */
-const laneProvenance = (l: Lane): Partial<RoutedEntityInput> => ({ ...opt("from", l.from), ...opt("runtimeId", l.runtimeId), ...opt("sourceRuntimeFrame", l.sourceRuntimeFrame), ...opt("atomicCrossJurisdictionPair", l.atomic) });
+const laneProvenance = (l: Lane): Partial<RoutedEntityInput> => ({
+  ...opt("from", l.from),
+  ...opt("runtimeId", l.runtimeId),
+  ...opt("sourceRuntimeFrame", l.sourceRuntimeFrame),
+  ...opt("atomicCrossJurisdictionPair", l.atomic),
+});
 /** og getEffectiveEntityInputTxs: a runtimeOutput counts as its nested Entity txs. */
-const effectiveTxs = (txs: readonly EntityTx[]): readonly EntityTx[] => txs.flatMap((tx) => (tx.type === "runtimeOutput" ? tx.data.entityTxs : [tx]));
-/** og hasCrossJurisdictionSourcePullProposal: an Account proposal whose frame locks a source-leg cross pull (it consumes a target ACK of the same Runtime frame). */
-const sourcePullConsumer = (l: Lane): boolean => effectiveTxs(l.txs ?? []).some((tx) => tx.type === "accountInput" && tx.data.kind === "ack_frame"
-  && tx.data.frame.txs.some((a) => a.type === "cross_pull_lock" && a.crossJurisdiction.leg === "source"));
-const runtimeOutputOf = (l: Lane): EntityTx | undefined => l.txs?.find((tx) => tx.type === "runtimeOutput");
+const effectiveTxs = (txs: readonly EntityTx[]): readonly EntityTx[] =>
+  txs.flatMap((tx) => (tx.type === "runtimeOutput" ? tx.data.entityTxs : [tx]));
 /**
- * og entityInputMergeKey: one authenticated runtimeOutput is its own envelope (keyed by its sender, Runtime, source frame and exact tx); an atomic
- * cross-j leg is keyed by its cohort and source frame; one J-prefix head per input; each timeout vote is its own lane; precommits by frame; tx
- * envelopes by origin, a source-pull consumer apart.
+ * og hasCrossJurisdictionSourcePullProposal: an Account proposal whose frame locks a source-leg cross pull (it
+ * consumes a target ACK of the same Runtime frame).
  */
+const sourcePullConsumer = (l: Lane): boolean =>
+  effectiveTxs(l.txs ?? []).some(
+    (tx) =>
+      tx.type === "accountInput" &&
+      tx.data.kind === "ack_frame" &&
+      tx.data.frame.txs.some((a) => a.type === "cross_pull_lock" && a.crossJurisdiction.leg === "source"),
+  );
+const runtimeOutputOf = (l: Lane): EntityTx | undefined => l.txs?.find((tx) => tx.type === "runtimeOutput");
+/** og entityInputMergeKey: the lane key of one input. */
 const mergeKey = (l: Lane): Result<string, RuntimeError> => {
   const base = `${lower(l.entityId)}:${lower(l.signerId)}`;
   const output = runtimeOutputOf(l);
-  if (output !== undefined) return ok(`${base}:runtime-output:${String(l.from || "").toLowerCase()}:${String(l.runtimeId || "").toLowerCase()}:${stableJson(l.sourceRuntimeFrame)}:${inputFingerprint(output)}`);
-  if (l.atomic !== undefined) {
-    const frame = l.sourceRuntimeFrame;
-    if (frame === undefined) return frameErr("ENTITY_INPUT_ATOMIC_CROSS_J_SOURCE_FRAME_MISSING");
-    return ok(`${base}:cross-j-atomic:${l.atomic.phase}:${l.atomic.pairKey}:${frame.height}:${frame.timestamp}`);
-  }
-  if (l.jPrefix !== undefined) {
-    // og: one signed head per J-prefix input, keyed by its signer, target height and unsigned body hash
-    const [entry, ...rest] = l.jPrefix.attestations;
-    if (entry === undefined) return frameErr("ENTITY_INPUT_J_PREFIX_MISSING");
-    if (rest.length > 0) return frameErr("ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT");
-    const [raw, a] = entry, { signature: _signature, ...unsigned } = a;
-    return ok(`${base}:j-prefix:${raw.toLowerCase()}:${a.targetEntityHeight}:${unwrapOr(jPrefixAttestationHash(unsigned), () => canon(unsigned))}`);
-  }
+  if (output !== undefined) return ok(runtimeOutputKey(base, l, output));
+  if (l.atomic !== undefined) return atomicKey(base, l.atomic, l.sourceRuntimeFrame);
+  if (l.jPrefix !== undefined) return jPrefixKey(base, l.jPrefix);
   return ok(laneKey(l, base));
 };
+/** og: one authenticated runtimeOutput is its own envelope, keyed by its sender, Runtime, source frame and exact tx. */
+const runtimeOutputKey = (base: string, l: Lane, output: EntityTx): string =>
+  [
+    base,
+    "runtime-output",
+    lowerText(l.from),
+    lowerText(l.runtimeId),
+    stableJson(l.sourceRuntimeFrame),
+    inputFingerprint(output),
+  ].join(":");
+/** og: an atomic cross-j leg is keyed by its cohort and source frame. */
+const atomicKey = (
+  base: string,
+  atomic: AtomicCrossPair,
+  frame: SourceRuntimeFrame | undefined,
+): Result<string, RuntimeError> =>
+  frame === undefined
+    ? frameErr("ENTITY_INPUT_ATOMIC_CROSS_J_SOURCE_FRAME_MISSING")
+    : ok(`${base}:cross-j-atomic:${atomic.phase}:${atomic.pairKey}:${frame.height}:${frame.timestamp}`);
+/** og: one signed head per J-prefix input, keyed by its signer, target height and unsigned body hash. */
+const jPrefixKey = (base: string, input: JPrefixInput): Result<string, RuntimeError> => {
+  const [entry, ...rest] = input.attestations;
+  if (entry === undefined) return frameErr("ENTITY_INPUT_J_PREFIX_MISSING");
+  if (rest.length > 0) return frameErr("ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT");
+  const [raw, { signature: _signature, ...unsigned }] = entry;
+  const bodyHash = unwrapOr(jPrefixAttestationHash(unsigned), () => canon(unsigned));
+  return ok(`${base}:j-prefix:${raw.toLowerCase()}:${unsigned.targetEntityHeight}:${bodyHash}`);
+};
+/** og: each timeout vote is its own lane; precommits by frame; tx envelopes by origin, a source-pull consumer apart. */
 const laneKey = (l: Lane, base: string): string => {
-  if (l.vote !== undefined) return `${base}:leader:${l.vote.vote.targetHeight}:${lower(l.vote.vote.voterId)}:${unwrapOr(hashLeaderVote(l.vote.vote), () => canon(l.vote?.vote))}`;
+  if (l.vote !== undefined) {
+    const { vote } = l.vote;
+    const voteHash = unwrapOr(hashLeaderVote(vote), () => canon(vote));
+    return `${base}:leader:${vote.targetHeight}:${lower(vote.voterId)}:${voteHash}`;
+  }
   if (l.precommit !== undefined) return `${base}:precommit:${l.precommit.height}:${lower(l.precommit.frameHash)}`;
-  return l.txs !== undefined && l.txs.length > 0 ? `${base}:tx-origin:${lower(l.from)}${sourcePullConsumer(l) ? ":cross-j-source-consumer" : ""}` : base;
+  if (l.txs === undefined || l.txs.length === 0) return base;
+  return `${base}:tx-origin:${lower(l.from)}${sourcePullConsumer(l) ? ":cross-j-source-consumer" : ""}`;
 };
 /** og mergeJEventTxs: one signed J observation (proposer, range, roots and signature) once per lane, first kept. */
-const mergeJEvents = (txs: readonly EntityTx[]): readonly EntityTx[] => firstBy(txs, (tx) => {
-  if (tx.type !== "j_event") return undefined;
-  const d = tx.data, t = (v: unknown): string => String(v || "").toLowerCase();
-  return canon({ from: t(d["from"]), jurisdictionRef: t(d["jurisdictionRef"]), baseHeight: d["baseHeight"] ?? null, scannedThroughHeight: d["scannedThroughHeight"] ?? null, tipBlockHash: t(d["tipBlockHash"]), eventHistoryRoot: t(d["eventHistoryRoot"]), rangeHash: t(d["rangeHash"]), signature: t(d["signature"]) });
-});
-/** og consensusInputOrder: a verified commit (0), then a timeout vote (1), then an unverified proposal (2), per Entity, signer and target height. */
-const consensusOrder = (i: RoutedEntityInput, verified: (i: RoutedEntityInput) => boolean): { readonly height: bigint; readonly priority: number } | null =>
-  i.input.kind === "proposal" ? { height: i.input.frame.height, priority: verified(i) ? 0 : 2 } : i.input.kind === "leaderTimeoutVote" ? { height: BigInt(i.input.vote.targetHeight), priority: 1 } : null;
-/** og prioritizeEntityConsensusInputs: reorder only the slots of one consensus race; unrelated inputs keep their exact positions. */
-export const prioritizeConsensusInputs = (inputs: readonly RoutedEntityInput[], verified: (i: RoutedEntityInput) => boolean = () => false): readonly RoutedEntityInput[] => {
-  const result = [...inputs], races = new Map<string, number[]>();
-  result.forEach((i, index) => { const o = consensusOrder(i, verified); if (o === null) return; const key = `${lower(i.entityId.trim())}:${lower(i.signerId.trim())}:${o.height}`; races.set(key, [...(races.get(key) ?? []), index]); });
-  for (const positions of races.values()) {
-    if (positions.length < 2) continue;
-    const ordered = positions.map((position, stable) => ({ input: result[position] as RoutedEntityInput, stable, priority: consensusOrder(result[position] as RoutedEntityInput, verified)?.priority ?? 3 }))
-      .sort((a, b) => a.priority - b.priority || a.stable - b.stable).map((e) => e.input);
-    positions.forEach((position, k) => { result[position] = ordered[k] as RoutedEntityInput; });
+const mergeJEvents = (txs: readonly EntityTx[]): readonly EntityTx[] =>
+  firstBy(txs, (tx) => {
+    if (tx.type !== "j_event") return undefined;
+    const d = tx.data;
+    return canon({
+      from: lowerText(d["from"]),
+      jurisdictionRef: lowerText(d["jurisdictionRef"]),
+      baseHeight: d["baseHeight"] ?? null,
+      scannedThroughHeight: d["scannedThroughHeight"] ?? null,
+      tipBlockHash: lowerText(d["tipBlockHash"]),
+      eventHistoryRoot: lowerText(d["eventHistoryRoot"]),
+      rangeHash: lowerText(d["rangeHash"]),
+      signature: lowerText(d["signature"]),
+    });
+  });
+type Verified = (i: RoutedEntityInput) => boolean;
+type ConsensusSlot = { readonly height: bigint; readonly priority: number };
+/** og consensusInputOrder: a verified commit (0), then a timeout vote (1), then an unverified proposal (2). */
+const consensusOrder = (i: RoutedEntityInput, verified: Verified): ConsensusSlot | null => {
+  switch (i.input.kind) {
+    case "proposal":
+      return { height: i.input.frame.height, priority: verified(i) ? 0 : 2 };
+    case "leaderTimeoutVote":
+      return { height: BigInt(i.input.vote.targetHeight), priority: 1 };
+    default:
+      return null;
   }
-  return result;
+};
+type RaceSlot = { readonly input: RoutedEntityInput; readonly position: number; readonly priority: number };
+/**
+ * og prioritizeEntityConsensusInputs: the inputs of one consensus race (Entity, signer and target height) trade their
+ * slots by priority; unrelated inputs keep their exact positions.
+ */
+export const prioritizeConsensusInputs = (
+  inputs: readonly RoutedEntityInput[],
+  verified: Verified = () => false,
+): readonly RoutedEntityInput[] => {
+  const slots = inputs.flatMap((input, position) => {
+    const order = consensusOrder(input, verified);
+    if (order === null) return [];
+    const race = `${lower(input.entityId.trim())}:${lower(input.signerId.trim())}:${order.height}`;
+    return [{ race, slot: { input, position, priority: order.priority } }];
+  });
+  const races = Map.groupBy(slots, ({ race }) => race);
+  const reseated = new Map(
+    [...races.values()].flatMap((race) => {
+      const positions = race.map(({ slot }) => slot.position);
+      const winners = race
+        .map(({ slot }) => slot)
+        .toSorted((a, b) => a.priority - b.priority || a.position - b.position);
+      return winners.map((winner: RaceSlot, k) => [positions[k] ?? winner.position, winner.input] as const);
+    }),
+  );
+  return inputs.map((input, position) => reseated.get(position) ?? input);
+};
+/** og: the same frame (body and leader) and manifest this replica already holds by replay. */
+const sameHeldFrame = (held: EntityFrame, frame: EntityFrame): boolean => {
+  const local = hashEntityFrame(held);
+  const incoming = hashEntityFrame(frame);
+  const hashes = held.hashesToSign;
+  return (
+    local.ok &&
+    incoming.ok &&
+    local.value === incoming.value &&
+    canon(held.leader) === canon(frame.leader) &&
+    hashes.length > 0 &&
+    canon(hashes) === canon(frame.hashesToSign)
+  );
+};
+/** og: one full bundle per distinct validator, every one verifying over the manifest, together holding the quorum. */
+const commitSigned = (
+  q: Quorum,
+  hashes: readonly HashToSign[],
+  signatures: Precommits,
+  ctx: EntityContext,
+): boolean => {
+  const ids = [...signatures.keys()].map(signerId);
+  const distinct = new Set(ids).size === ids.length;
+  const bundlesSign = [...signatures].every(([raw, sigs]) => {
+    const id = signerId(raw);
+    return sharesOf(q, id) > 0n && sigs.length === hashes.length && bundleValid(q, hashes, id, sigs, ctx);
+  });
+  return distinct && bundlesSign && ids.reduce((power, id) => power + sharesOf(q, id), 0n) >= thresholdOf(q);
 };
 /**
- * og hasVerifiedEntityCommitPrecertificate: a proposal input is a verified commit only when this replica already holds the same frame (body and
- * leader) and manifest by replay, and the carried signatures verify over every hash with the committed board's quorum.
+ * og hasVerifiedEntityCommitPrecertificate: a proposal input is a verified commit only when this replica already
+ * holds the same frame by replay, and the carried signatures verify with the committed board's quorum.
  */
-export const verifiedCommit = (entities: ReadonlyMap<string, EntityReplica>, ctx: Pick<EntityContext, "verify" | "verifyMember">) => (i: RoutedEntityInput): boolean => {
-  if (i.input.kind !== "proposal") return false;
-  const r = entities.get(replicaKey(i.entityId, i.signerId)), held = r === undefined ? undefined : heldFrame(r), frame = i.input.frame;
-  if (r === undefined || held === undefined) return false;
-  const local = hashEntityFrame(held.frame), incoming = hashEntityFrame(frame), hashes = held.frame.hashesToSign;
-  if (!local.ok || !incoming.ok || local.value !== incoming.value || canon(held.frame.leader) !== canon(frame.leader) || hashes.length === 0 || canon(hashes) !== canon(frame.hashesToSign)) return false;
-  const q = r.state.quorum, seen = new Set<string>();
-  let power = 0n;
-  for (const [raw, sigs] of i.input.signatures) {
-    const id = signerId(raw), shares = sharesOf(q, id);
-    if (shares === 0n || seen.has(id) || sigs.length !== hashes.length || !bundleValid(q, hashes, id, sigs, ctx as EntityContext)) return false;
-    seen.add(id);
-    power += shares;
-  }
-  return power >= thresholdOf(q);
-};
-/** og mergePrecommitBundles: signer ids trimmed/lowercased; a second different bundle from one signer is equivocation. */
-const mergeBundles = (existing: Precommits, incoming: Precommits): Result<Precommits, RuntimeError> => {
-  const normalize = (m: Precommits, source: string): Result<Map<string, readonly Signature[]>, RuntimeError> => {
-    const out = new Map<string, readonly Signature[]>();
-    for (const [raw, sigs] of m) { const id = signerId(raw); if (out.has(id)) return frameErr(`ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER:${source}`); out.set(id, sigs); }
-    return ok(out);
+export const verifiedCommit =
+  (entities: ReadonlyMap<string, EntityReplica>, ctx: Pick<EntityContext, "verify" | "verifyMember">) =>
+  (i: RoutedEntityInput): boolean => {
+    if (i.input.kind !== "proposal") return false;
+    const r = entities.get(replicaKey(i.entityId, i.signerId));
+    const held = r === undefined ? undefined : heldFrame(r);
+    if (r === undefined || held === undefined) return false;
+    return (
+      sameHeldFrame(held.frame, i.input.frame) &&
+      commitSigned(r.state.quorum, held.frame.hashesToSign, i.input.signatures, ctx as EntityContext)
+    );
   };
-  return chain(normalize(existing, "existing"), (merged) => chain(normalize(incoming, "incoming"), (next) => {
-    for (const [id, sigs] of next) {
-      const previous = merged.get(id);
-      if (previous === undefined) merged.set(id, sigs);
-      else if (!sameSigs(previous, sigs)) return frameErr("ENTITY_INPUT_PRECOMMIT_EQUIVOCATION");
-    }
-    return ok(merged);
+/** og mergePrecommitBundles' normalization: signer ids trimmed/lowercased, one bundle each. */
+const bundlesBySigner = (m: Precommits, source: string): Result<Precommits, RuntimeError> =>
+  foldResult(m, new Map() as Precommits, (out, [raw, sigs]) => {
+    const id = signerId(raw);
+    return out.has(id) ? frameErr(`ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER:${source}`) : ok(mapSet(out, id, sigs));
+  });
+/** og mergePrecommitBundles: a second different bundle from one signer is equivocation; an identical one is a no-op. */
+const mergeBundles = (existing: Precommits, incoming: Precommits): Result<Precommits, RuntimeError> =>
+  chain(bundlesBySigner(existing, "existing"), (merged) =>
+    chain(bundlesBySigner(incoming, "incoming"), (next) =>
+      foldResult(next, merged, (acc, [id, sigs]) => {
+        const previous = acc.get(id);
+        if (previous === undefined) return ok(mapSet(acc, id, sigs));
+        return sameSigs(previous, sigs) ? ok(acc) : frameErr("ENTITY_INPUT_PRECOMMIT_EQUIVOCATION");
+      }),
+    ),
+  );
+/** og: the same cohort marker on both, or none on either. */
+const sameAtomic = (a: AtomicCrossPair | undefined, b: AtomicCrossPair | undefined): boolean =>
+  a === undefined || b === undefined ? a === b : a.phase === b.phase && a.pairKey === b.pairKey;
+/**
+ * og isExactTransactionReplay: the same cohort marker, origin, Runtime and source frame re-delivering the exact same tx
+ * list is one input.
+ */
+const exactReplay = (a: Lane, b: Lane): boolean =>
+  sameAtomic(a.atomic, b.atomic) &&
+  lower(a.from) === lower(b.from) &&
+  lower(a.runtimeId) === lower(b.runtimeId) &&
+  stableJson(a.sourceRuntimeFrame) === stableJson(b.sourceRuntimeFrame) &&
+  canon((a.txs ?? []).map(inputFingerprint)) === canon((b.txs ?? []).map(inputFingerprint));
+/** og mergeExactAccountInputReplays: an exact duplicate accountInput inside one lane is dropped. */
+const dedupAccountInputs = (txs: readonly EntityTx[]): readonly EntityTx[] =>
+  firstBy(txs, (tx) => (tx.type === "accountInput" ? inputFingerprint(tx) : undefined));
+/** A lane as the proposal input `verified` judges. */
+const routedProposal = (l: Lane): RoutedEntityInput => ({
+  entityId: l.entityId,
+  signerId: l.signerId,
+  input: l.proposal ?? { kind: "txs", timestamp: l.timestamp, txs: [] },
+  ...laneProvenance(l),
+});
+/** og: a second, different proposal for a lane is a conflict, kept apart. */
+const conflictingProposal = (a: Lane, b: Lane): boolean =>
+  a.proposal !== undefined &&
+  b.proposal !== undefined &&
+  (frameIdOf(a.proposal.frame) !== frameIdOf(b.proposal.frame) || a.proposal.frame.height !== b.proposal.frame.height);
+/**
+ * og mergeEntityInputs for a lane meeting its key's existing lane: votes and J-prefix heads must agree, txs append
+ * (an exact replay once), precommit bundles merge, and a verified commit replaces an unverified copy of the frame.
+ */
+const mergedLane = (existing: Lane, lane: Lane, verified: Verified): Result<Lane, RuntimeError> => {
+  if ((lane.vote !== undefined || existing.vote !== undefined) && canon(lane.vote?.vote) !== canon(existing.vote?.vote))
+    return frameErr(`ENTITY_LEADER_VOTE_EQUIVOCATION:${lane.vote?.vote.voterId ?? "missing"}`);
+  if (
+    (lane.jPrefix !== undefined || existing.jPrefix !== undefined) &&
+    canon(lane.jPrefix?.attestations) !== canon(existing.jPrefix?.attestations)
+  )
+    return frameErr("ENTITY_INPUT_J_PREFIX_EQUIVOCATION");
+  const txs =
+    lane.txs !== undefined && !exactReplay(existing, lane)
+      ? { txs: mergeJEvents([...(existing.txs ?? []), ...lane.txs]) }
+      : {};
+  const held = existing.precommit;
+  const precommit =
+    lane.precommit !== undefined && held !== undefined
+      ? map(mergeBundles(held.signatures, lane.precommit.signatures), (signatures) => ({
+          precommit: { ...held, signatures },
+        }))
+      : ok({});
+  const replaces =
+    lane.proposal !== undefined &&
+    (existing.proposal === undefined || (verified(routedProposal(lane)) && !verified(routedProposal(existing))));
+  return map(precommit, (bundles) => ({
+    ...existing,
+    ...txs,
+    ...bundles,
+    ...opt("proposal", replaces ? lane.proposal : undefined),
   }));
 };
-/** og isExactTransactionReplay: the same cohort marker, origin, Runtime and source frame re-delivering the exact same tx list is one input. */
-const exactReplay = (a: Lane, b: Lane): boolean => {
-  if ((a.atomic === undefined) !== (b.atomic === undefined)) return false;
-  if (a.atomic !== undefined && b.atomic !== undefined && (a.atomic.phase !== b.atomic.phase || a.atomic.pairKey !== b.atomic.pairKey)) return false;
-  return lower(a.from) === lower(b.from) && lower(a.runtimeId) === lower(b.runtimeId) && stableJson(a.sourceRuntimeFrame) === stableJson(b.sourceRuntimeFrame)
-    && canon((a.txs ?? []).map(inputFingerprint)) === canon((b.txs ?? []).map(inputFingerprint));
+/** `boundary` counts runtimeOutput envelopes: og never merges ordinary lanes across that effect boundary. */
+type Merging = {
+  readonly lanes: ReadonlyMap<string, Lane>;
+  readonly conflicts: readonly Lane[];
+  readonly boundary: number;
 };
-/** og mergeExactAccountInputReplays: an exact duplicate accountInput inside one lane is dropped. */
-const dedupAccountInputs = (txs: readonly EntityTx[]): readonly EntityTx[] => firstBy(txs, (tx) => (tx.type === "accountInput" ? inputFingerprint(tx) : undefined));
+const NOTHING_MERGED: Merging = { lanes: new Map(), conflicts: [], boundary: 0 };
+const admitLane =
+  (verified: Verified) =>
+  (m: Merging, input: RoutedEntityInput): Result<Merging, RuntimeError> => {
+    const lane = laneOf(input);
+    return chain(mergeKey(lane), (laneMergeKey) => {
+      const isOutput = runtimeOutputOf(lane) !== undefined;
+      const key = isOutput ? laneMergeKey : `${m.boundary}:${laneMergeKey}`;
+      const existing = m.lanes.get(key);
+      const boundary = isOutput && existing === undefined ? m.boundary + 1 : m.boundary;
+      if (existing === undefined) return ok({ ...m, lanes: mapSet(m.lanes, key, lane), boundary });
+      if (conflictingProposal(existing, lane)) return ok({ ...m, conflicts: [...m.conflicts, lane] });
+      return map(mergedLane(existing, lane, verified), (next) => ({ ...m, lanes: mapSet(m.lanes, key, next) }));
+    });
+  };
+const SCHEDULED_WAKE_CONFLICT: RuntimeError = { _tag: "runtime_frame", code: "SCHEDULED_WAKE_CONFLICTING_INPUTS" };
 /**
- * og mergeEntityInputs: inputs for one replica lane collapse into one, in first-arrival order; a second different proposal for the lane
- * is kept as a conflict after every merged input; a precommit equivocation refuses the whole Runtime frame.
+ * og: exact Account replays and repeated J observations collapse, then the scheduled wake runs first (conflicting wakes
+ * refuse the frame).
  */
-export const mergeEntityInputs = (inputs: readonly RoutedEntityInput[], verified: (i: RoutedEntityInput) => boolean = () => false): Result<readonly RoutedEntityInput[], RuntimeError> => {
-  const merged = new Map<string, Lane>(), conflicts: Lane[] = [];
-  const routed = (l: Lane): RoutedEntityInput => ({ entityId: l.entityId, signerId: l.signerId, input: l.proposal ?? { kind: "txs", timestamp: l.timestamp, txs: [] }, ...laneProvenance(l) });
-  // og: a runtimeOutput envelope is an effect boundary; ordinary lanes never merge across it
-  let boundary = 0;
-  for (const input of inputs) {
-    const lane = laneOf(input), laneMergeKey = mergeKey(lane);
-    if (!laneMergeKey.ok) return laneMergeKey;
-    const isOutput = runtimeOutputOf(lane) !== undefined, key = isOutput ? laneMergeKey.value : `${boundary}:${laneMergeKey.value}`;
-    if (isOutput && !merged.has(key)) boundary += 1;
-    const existing = merged.get(key);
-    if (existing === undefined) { merged.set(key, lane); continue; }
-    if (existing.proposal !== undefined && lane.proposal !== undefined && (frameIdOf(existing.proposal.frame) !== frameIdOf(lane.proposal.frame) || existing.proposal.frame.height !== lane.proposal.frame.height)) { conflicts.push(lane); continue; }
-    if ((lane.vote !== undefined || existing.vote !== undefined) && canon(lane.vote?.vote) !== canon(existing.vote?.vote)) return frameErr(`ENTITY_LEADER_VOTE_EQUIVOCATION:${lane.vote?.vote.voterId ?? "missing"}`);
-    if ((lane.jPrefix !== undefined || existing.jPrefix !== undefined) && canon(lane.jPrefix?.attestations) !== canon(existing.jPrefix?.attestations)) return frameErr("ENTITY_INPUT_J_PREFIX_EQUIVOCATION");
-    let next: Lane = existing;
-    if (lane.txs !== undefined && !exactReplay(existing, lane)) next = { ...next, txs: mergeJEvents([...(existing.txs ?? []), ...lane.txs]) };
-    if (lane.precommit !== undefined && existing.precommit !== undefined) {
-      const bundles = mergeBundles(existing.precommit.signatures, lane.precommit.signatures);
-      if (!bundles.ok) return bundles;
-      next = { ...next, precommit: { ...existing.precommit, signatures: bundles.value } };
-    }
-    // og: a verified commit replaces an unverified copy of the same frame
-    if (lane.proposal !== undefined && (existing.proposal === undefined || (verified(routed(lane)) && !verified(routed(existing))))) next = { ...next, proposal: lane.proposal };
-    merged.set(key, next);
-  }
-  const out: RoutedEntityInput[] = [];
-  for (const l of [...merged.values(), ...conflicts]) {
-    // og: exact Account replays and repeated J observations collapse, then the scheduled wake runs first (conflicting wakes refuse the frame)
-    const txs = l.txs === undefined || l.txs.length === 0 ? ok(l.txs ?? []) : mapErr(prioritizeWake(dedupAccountInputs(mergeJEvents(l.txs))), (): RuntimeError => ({ _tag: "runtime_frame", code: "SCHEDULED_WAKE_CONFLICTING_INPUTS" }) as RuntimeError);
-    if (!txs.ok) return txs;
-    const input: EntityInput = l.vote ?? l.jPrefix ?? l.proposal ?? l.precommit ?? { kind: "txs", timestamp: l.timestamp, txs: txs.value };
-    out.push({ entityId: l.entityId, signerId: l.signerId, input, ...laneProvenance(l) });
-  }
-  // og applyCausalEntityInputOrder: a source-pull consumer runs after the target ACK it consumes; then the consensus-race priority
-  const consumers = new Set(out.filter((i) => i.input.kind === "txs" && sourcePullConsumer({ entityId: i.entityId, signerId: i.signerId, timestamp: 0n, txs: i.input.txs })));
-  return ok(prioritizeConsensusInputs([...out.filter((i) => !consumers.has(i)), ...out.filter((i) => consumers.has(i))], verified));
-};
+const laneTxs = (l: Lane): Result<readonly EntityTx[], RuntimeError> =>
+  l.txs === undefined || l.txs.length === 0
+    ? ok(l.txs ?? [])
+    : mapErr(prioritizeWake(dedupAccountInputs(mergeJEvents(l.txs))), () => SCHEDULED_WAKE_CONFLICT);
+/** A merged lane as one routed input. */
+const laneInput = (l: Lane): Result<RoutedEntityInput, RuntimeError> =>
+  map(laneTxs(l), (txs) => {
+    const input: EntityInput = l.vote ??
+      l.jPrefix ??
+      l.proposal ??
+      l.precommit ?? { kind: "txs", timestamp: l.timestamp, txs };
+    return { entityId: l.entityId, signerId: l.signerId, input, ...laneProvenance(l) };
+  });
+/** og applyCausalEntityInputOrder: a source-pull consumer runs after the target ACK it consumes. */
+const consumesSourcePull = (i: RoutedEntityInput): boolean =>
+  i.input.kind === "txs" &&
+  sourcePullConsumer({ entityId: i.entityId, signerId: i.signerId, timestamp: 0n, txs: i.input.txs });
+/**
+ * og mergeEntityInputs: inputs for one replica lane collapse into one, in first-arrival order; a second different
+ * proposal for the lane is kept as a conflict after every merged input; a precommit equivocation refuses the whole
+ * Runtime frame. Source-pull consumers go last, then consensus races are prioritized.
+ */
+export const mergeEntityInputs = (
+  inputs: readonly RoutedEntityInput[],
+  verified: Verified = () => false,
+): Result<readonly RoutedEntityInput[], RuntimeError> =>
+  chain(foldResult(inputs, NOTHING_MERGED, admitLane(verified)), ({ lanes, conflicts }) =>
+    map(traverse([...lanes.values(), ...conflicts], laneInput), (out) =>
+      prioritizeConsensusInputs(
+        [...out.filter((i) => !consumesSourcePull(i)), ...out.filter(consumesSourcePull)],
+        verified,
+      ),
+    ),
+  );
 
 // ---- og runtime/tx/tx-handlers.ts ----
 const HASH_32 = /^0x[0-9a-f]{64}$/, COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/, MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
