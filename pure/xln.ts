@@ -265,6 +265,10 @@ const sortedBy = <X>(xs: readonly X[], key: (x: X) => string): readonly X[] =>
   xs.map((x) => [key(x), x] as const).toSorted(([a], [b]) => asc(a, b)).map(([, x]) => x);
 const sortWith = <X>(xs: Iterable<X>, cmp: (a: X, b: X) => number): readonly X[] =>
   [...xs].toSorted(cmp);
+/** A lowercase 0x-prefixed 32-byte word: og's canonical spelling of a hash or an Entity id. */
+const WORD32 = /^0x[0-9a-f]{64}$/;
+/** A lowercase 0x-prefixed 20-byte address. */
+const EOA = /^0x[0-9a-f]{40}$/;
 const lengthPrefixed = (kind: string, body: string): string => `${kind}${body.length}:${body}`;
 const countOf = (n: number): string => lengthPrefixed("d", String(n));
 const canonMap = (m: ReadonlyMap<unknown, unknown>): string => {
@@ -6772,7 +6776,7 @@ const rebalancePolicy = (a: AccountBody, x: TxOf<"rebalance_policy">, ctx: FoldC
 // Lending lives in the entities' books; the Account only moves the money and remembers each intent id once, so a
 // replayed intent can never pay twice. Every tx is proposed by the party its role names, against the other one.
 const lendingErr = (reason: string): Result<never, BodyError> => err({ _tag: "lending", reason });
-const LENDING_ENTITY = /^0x[0-9a-f]{64}$/, LENDING_INTENT = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
+const LENDING_INTENT = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
 const lower = (v: unknown): string => String(v || "").trim().toLowerCase();
 type AccountLendingTx = TxOf<
   | "lending_fund" | "lending_borrow_request" | "lending_repay"
@@ -6829,7 +6833,7 @@ const lendingParties = (a: AccountBody, byLeft: boolean, role: LendingRole): Res
   switch (true) {
     case !LENDING_INTENT.test(intent) || !intent.startsWith(`${role.prefix}-`):
       return lendingErr("LENDING_INTENT_ID_INVALID");
-    case !LENDING_ENTITY.test(claimed): return lendingErr("LENDING_ROLE_INVALID");
+    case !WORD32.test(claimed): return lendingErr("LENDING_ROLE_INVALID");
     case claimed !== proposer: return lendingErr("LENDING_ROLE_NOT_PROPOSER");
     case lower(role.counterparty) !== peer: return lendingErr("LENDING_COUNTERPARTY_INVALID");
     default: return ok(undefined);
@@ -7777,7 +7781,7 @@ const lendingPartiesFailure = (a: AccountBody, byLeft: boolean, role: LendingRol
   return firstFailure(
     () => raise(!LENDING_INTENT.test(intent) || !intent.startsWith(`${role.prefix}-`),
       `LENDING_INTENT_ID_INVALID:${role.id}`),
-    () => raise(!LENDING_ENTITY.test(claimed), `LENDING_${title}_INVALID:${role.actor}`),
+    () => raise(!WORD32.test(claimed), `LENDING_${title}_INVALID:${role.actor}`),
     () => raise(claimed !== proposer, `LENDING_${title}_NOT_PROPOSER: claimed=${claimed} proposer=${proposer}`),
     () => raise(lower(role.counterparty) !== expected,
       `LENDING_COUNTERPARTY_INVALID: expected=${expected} got=${lower(role.counterparty)}`),
@@ -10783,9 +10787,8 @@ export const resume = accountVerb("resume", {
 });
 
 
-const ENTITY_WORD = /^0x[0-9a-f]{64}$/;
 export const genesisReplica = (id: AccountId, terms: AccountTerms): Result<OpenAccount, AccountReplicaError> => {
-  if (!ENTITY_WORD.test(id.left) || !ENTITY_WORD.test(id.right)) {
+  if (!WORD32.test(id.left) || !WORD32.test(id.right)) {
     return err({ _tag: "bad_account", reason: "entity_id" });
   }
   if (id.left === id.right) return err({ _tag: "bad_account", reason: "same_entity" });
@@ -13038,7 +13041,6 @@ const forwardPayment = (d: Draft, f: DirectForward): Result<Draft, EntityError> 
       ({ ...putChild(d.state, d.accountReplicas, accountId as EntityId, admitted), outputs: d.outputs }))));
 const L0_CLOCK = { timestamp: 0n, jHeight: 0n } as const;
 type InitOrderbook = Extract<EntityTx, { readonly type: "initOrderbookExt" }>["data"];
-const LOWER_WORD = /^0x[0-9a-f]{64}$/;
 /**
  * og handleInitOrderbookExtEntityTx: an existing extension and a spread that does not sum to 10000 bps are silent
  * no-ops; a USD quote authority that is not a lowercase 32-byte id halts (ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID).
@@ -13050,7 +13052,7 @@ const initOrderbookExt = (state: EntityState, d: InitOrderbook): Result<Orderboo
   switch (true) {
     case state.orderbookExt !== undefined: return ok(state.orderbookExt);
     case spreadBps !== 10_000: return ok(undefined);
-    case !LOWER_WORD.test(usdQuoteAuthorityEntityId):
+    case !WORD32.test(usdQuoteAuthorityEntityId):
       return invariant(`ORDERBOOK_USD_QUOTE_AUTHORITY_INVALID:${usdQuoteAuthorityEntityId}`);
     default: return ok({
       books: new Map(),
@@ -13755,9 +13757,9 @@ const routeCarriesPull = (
   routeId: string | undefined, body: Pick<ProofBody, "transformers">, dt: DeltaTransformerRef,
 ): Result<void, EntityError> => {
   if (!routeId) return ok(undefined);
-  if (!dt.ok) return halt(dt.error);
+  if (!dt.ok) return invariant(dt.error);
   return chain(proofBodyHasPulls(body, dt.value), (has) =>
-    (has ? ok(undefined) : halt(`DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`)));
+    (has ? ok(undefined) : invariant(`DISPUTE_START_CROSS_J_PROOF_PULLS_MISSING:${routeId}`)));
 };
 /** A start that passed og's admission: the seeded draft, its batch, the preparing Account and how it is judged. */
 type StartCase = {
@@ -13791,7 +13793,7 @@ const startRefusal = (c: StartCase, refusal: StartRefusal): Result<Draft, Entity
   switch (refusal._tag) {
     case "no_witness": return ok(withStatus(c.admitted, "❌ Missing counterparty dispute hanko - cannot start dispute"));
     case "body_mismatch": return afterReveal((p) =>
-      halt(`DISPUTE_START_PROOFBODY_HASH_MISMATCH:${c.peer}:${w?.proofBodyHash ?? ""}:${p.bodyHash}`));
+      invariant(`DISPUTE_START_PROOFBODY_HASH_MISMATCH:${c.peer}:${w?.proofBodyHash ?? ""}:${p.bodyHash}`));
     case "nonce_stale": return afterReveal((p) => withPulls(p, () =>
       ok(withStatus(c.admitted, `❌ Stale dispute proof nonce ${signed} (on-chain=${jNonce}) - reopen required`))));
     case "hanko_invalid": return afterReveal((p) => withPulls(p, () => ok(withStatus(c.admitted,
@@ -13800,7 +13802,7 @@ const startRefusal = (c: StartCase, refusal: StartRefusal): Result<Draft, Entity
     case "hash_mismatch":
       return afterReveal((p) => withPulls(p, () => invariant(`DISPUTE_STORED_HASH_MISMATCH:${c.peer}`)));
     case "proof":
-      return refusal.error._tag === "transformer" ? halt(refusal.error.code) : err(START_EVIDENCE_INVALID);
+      return refusal.error._tag === "transformer" ? invariant(refusal.error.code) : err(START_EVIDENCE_INVALID);
     default: return err(START_EVIDENCE_INVALID);
   }
 };
@@ -13810,7 +13812,7 @@ const startBatchFits = (jb: CommittedJBatch, hasPulls: boolean): Result<void, En
   const total = BATCH_FIELDS.reduce((n, f) => n + (jb.batch[f] ?? []).length, 0);
   const { maxDisputeStarts, maxTotalOps } = J_BATCH_LIMITS;
   switch (true) {
-    case hasPulls && total !== 0: return halt(`DISPUTE_START_PULL_BATCH_NOT_EMPTY:${total}`);
+    case hasPulls && total !== 0: return invariant(`DISPUTE_START_PULL_BATCH_NOT_EMPTY:${total}`);
     case starts >= maxDisputeStarts:
       return invariant(`J_BATCH_LIMIT_EXCEEDED: disputeStarts ${starts + 1}/${maxDisputeStarts}`);
     case total + 1 > maxTotalOps:
@@ -13858,7 +13860,7 @@ const startQueued = (c: StartCase, s: DisputeStart, starterInitialArguments: str
 const queueStart = (c: StartCase, s: DisputeStart, ctx: FoldContext): Result<Draft, EntityError> => {
   const { admitted, child, peer, intent, dt } = c;
   const transformer = chain(routeCarriesPull(intent.crossJurisdictionRouteId, s.initialProofbody, dt), () =>
-    (dt.ok ? ok(dt.value) : halt(dt.error)));
+    (dt.ok ? ok(dt.value) : invariant(dt.error)));
   return chain(transformer, (address) => chain(proofBodyHasPulls(s.initialProofbody, address), (hasPulls) => {
     const starterIsLeft = sameHex(child.state.account.id.left, admitted.state.id);
     const checked = all({
@@ -13890,7 +13892,7 @@ const startDispute = (d: Draft, peer: EntityId, intent: StartRequest, ctx: FoldC
     return invariant("DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED");
   }
   const routeIssue = crossDisputeRouteIssue(d.state, peer, intent.crossJurisdictionRouteId);
-  if (routeIssue !== undefined) return halt(routeIssue);
+  if (routeIssue !== undefined) return invariant(routeIssue);
   const { jb, admitted } = seededBatch(d, "disputeStart");
   const gate = startGate(admitted, jb, peer, Number(ctx.timestamp));
   if (typeof gate === "string") return ok(withStatus(admitted, gate));
@@ -14000,13 +14002,13 @@ export const ethersBatchPulls = (encoded: unknown): Result<number, string> => {
 export const proofBodyHasPulls = (
   body: Pick<ProofBody, "transformers">, transformer: string,
 ): Result<boolean, EntityError> => {
-  if (!isAddressText(transformer)) return halt(`DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${transformer}`);
+  if (!isAddressText(transformer)) return invariant(`DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${transformer}`);
   const canonical = transformer.toLowerCase();
   const clauses = body.transformers.flatMap((t, i) =>
     (String(t.transformerAddress).toLowerCase() === canonical ? [[i, t.encodedBatch] as const] : []));
   const pullsIn = (i: number, batch: unknown): Result<boolean, EntityError> => {
     const pulls = ethersBatchPulls(batch);
-    return pulls.ok ? ok(pulls.value > 0) : halt(`DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${i}:${pulls.error}`);
+    return pulls.ok ? ok(pulls.value > 0) : invariant(`DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${i}:${pulls.error}`);
   };
   // the first Pull-bearing clause answers; clauses after it are never decoded
   return foldResult(clauses, false, (found, [i, batch]) => (found ? ok(true) : pullsIn(i, batch)));
@@ -14017,11 +14019,11 @@ export const proofBodyHasPulls = (
  */
 const bundleSourceClaim = (claimed: CjHost) => (next: Cj, c: SourceClaim): Result<Cj, EntityError> => {
   switch (c.result) {
-    case "source-window-expired": return halt(`DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${c.routeId}`);
+    case "source-window-expired": return invariant(`DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${c.routeId}`);
     case "already-queued": return ok(next);
     case "queued": return ok(cjSay(next, `🌉 Cross-j claim ${c.routeId}: source reveal bundled with dispute start`));
     case "deferred-batch-pending": return claimed.jb?.sentBatch === undefined
-      ? halt(`DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${c.routeId}`)
+      ? invariant(`DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${c.routeId}`)
       : ok(cjSay(next, `⏳ Cross-j claim ${c.routeId}: start/reveal held behind immutable jBatch`));
   }
 };
@@ -14032,7 +14034,7 @@ const latchBroadcast = (signerId: string | undefined) => (next: Cj): Result<Cj, 
   if (jb.sentBatch !== undefined) return ok(latched);
   return signerId
     ? ok(cjBroadcast(latched, signerId))
-    : halt("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING");
+    : invariant("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING");
 };
 /**
  * og queuePullDisputeRegistrations: flush this Account's stashed reveals, bundle every Source hub claim the signed
@@ -14070,12 +14072,12 @@ const removeLocalOrder = (acc: BookRemoval, orderId: string): Result<BookRemoval
   const books = acc.books;
   if (books === undefined) return ok(acc);
   const pairs = pairsHolding(books, orderId);
-  if (pairs.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
+  if (pairs.length > 1) return invariant(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
   const [pairId] = pairs, book = pairId === undefined ? undefined : books.get(pairId);
   const order = book?.orders.get(orderId);
   if (pairId === undefined || book === undefined || order === undefined) return ok(acc);
   const r = applyBookCommand(book, { kind: 1, ownerId: order.ownerId, orderId });
-  if (!r.ok) return halt(r.error.code);
+  if (!r.ok) return invariant(r.error.code);
   return ok({ ...acc, books: mapSet(books, pairId, r.value.state), removed: acc.removed + 1 });
 };
 /** og removeCrossJurisdictionBookOrder to the Entity that owns the cross-j order's book. */
@@ -14085,7 +14087,7 @@ const remoteRemoval = (
   const signerId = crossRouteSigner(route, owner);
   if (!signerId) {
     const at = `order=${offerId} owner=${owner} source=${route.source.entityId}`;
-    return halt(`DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING: ${at}`);
+    return invariant(`DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING: ${at}`);
   }
   const data = {
     orderId: offerId,
@@ -14525,10 +14527,10 @@ const registrySecrets = (
 ): Result<Registry, EntityError> => {
   const secrets = useRegistry ? knownDisputeSecrets(view, paybook, peer) : [];
   if (secrets.length === 0) return ok({ secrets, transformer: "" });
-  if (!dt.ok) return halt(dt.error);
+  if (!dt.ok) return invariant(dt.error);
   return usableContract(dt.value)
     ? ok({ secrets, transformer: dt.value })
-    : halt("DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS");
+    : invariant("DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS");
 };
 /** When finalize may submit: `notBefore` T (Account.sol waits), null for at once; otherwise og's status line. */
 type SubmitTiming = Tagged<"submit", { notBefore: number | null }> | Tagged<"wait", { message: string }>;
@@ -14683,7 +14685,7 @@ const finalizeReady = (
     identity: counterIdentity(d.state, child.dispute.counterparty, sel, peer),
     args: finalArguments(d, child, active, sel, peer),
     registry: registrySecrets(x.useOnchainRegistry, sel.view, d.state.paybook, peer, dt),
-    transformer: dt.ok ? ok(dt.value) : halt(dt.error),
+    transformer: dt.ok ? ok(dt.value) : invariant(dt.error),
   });
   return chain(prepared, ({ args, registry, transformer }) =>
     chain(proofBodyHasPulls(sel.proof.body, transformer), (hasPulls) => {
@@ -15015,7 +15017,7 @@ export const queueLadderReveal = (
   const ladder = pullLadderHash(pull);
   const cp = String(counterparty).toLowerCase();
   if (!fillRatioOk(ratio)) return invariant(`J_HASH_LADDER_FILL_RATIO_INVALID:${String(ratio)}`);
-  if (!LOWER_WORD.test(cp)) return invariant(`J_HASH_LADDER_COUNTERPARTY_INVALID:${counterparty}`);
+  if (!WORD32.test(cp)) return invariant(`J_HASH_LADDER_COUNTERPARTY_INVALID:${counterparty}`);
   return chain(existingRegistryRatios(h, cp, ladder, targetRole), ({ jb, confirmed, queued }) => {
     const seeded: CjHost = { ...h, jb };
     const existing = [...confirmed, ...queued];
@@ -15519,7 +15521,7 @@ const checkPort = (state: EntityState, x: SalvageData): Result<PortCheck, Entity
   if (route === undefined || lc(route.target?.counterpartyEntityId) !== lc(state.id))
     return note(`🌉 Cross-j reveal port ${routeId} skipped: route not owned here`);
   const pull = route.targetPull;
-  if (pull === undefined) return halt(`CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING:${routeId}:${state.id}`);
+  if (pull === undefined) return invariant(`CROSS_J_REVEAL_PORT_TARGET_PULL_MISSING:${routeId}:${state.id}`);
   if (isCrossTerminal(route.status)) return ok({ kind: "settled" });
   if (binary === "0x") return note(`🌉 Cross-j reveal port ignored for ${routeId}: empty result`);
   const verified = verifyHashLadderBinary({ fullHash: pull.fullHash, partialRoot: pull.partialRoot }, binary);
@@ -15547,7 +15549,7 @@ const portReveal = (cj: Cj, routeId: string, port: VerifiedPort): Result<Cj, Ent
     const jb = host.jb;
     const sent = jb?.sentBatch !== undefined;
     const broadcast = (): Result<Cj, EntityError> =>
-      signerId ? ok(cjBroadcast(queued, signerId)) : halt(`CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
+      signerId ? ok(cjBroadcast(queued, signerId)) : invariant(`CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
     switch (result) {
       case "queued":
         return sent
@@ -15609,12 +15611,12 @@ const forceSiblingDispute = (d: Draft, x: ForceSiblingData, ctx: FoldContext): R
   const self = lc(d.state.id);
   const observed = lc(x.observedCounterpartyEntityId);
   const route = d.state.crossJurisdictionSwaps?.get(routeId);
-  if (route === undefined) return halt(`CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING:${routeId}`);
-  if (!route.sourcePull || !route.targetPull) return halt(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${routeId}`);
+  if (route === undefined) return invariant(`CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING:${routeId}`);
+  if (!route.sourcePull || !route.targetPull) return invariant(`CROSS_J_SIBLING_DISPUTE_PULLS_MISSING:${routeId}`);
   const local = legPeerOf(route, self);
-  if (!local) return halt(`CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT:${routeId}:self=${self}`);
+  if (!local) return invariant(`CROSS_J_SIBLING_DISPUTE_NOT_PARTICIPANT:${routeId}:self=${self}`);
   if (!observedOtherLeg(route, self, observed))
-    return halt(
+    return invariant(
       `CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID:${routeId}:observed=${observed}:self=${self}:local=${local}`,
     );
   const dispute = {
@@ -20543,8 +20545,6 @@ const foldNested = (
     return fatalTx(tx, r.error) && r.error._tag !== "entity_invariant" ? invariant(`${tx.type}:${r.error._tag}`) : r;
   });
 };
-const WORD32 = /^0x[0-9a-f]{64}$/;
-const EOA = /^0x[0-9a-f]{40}$/;
 const COMMAND_DOMAIN = "xln:entity-command:binary";
 const PROPOSAL_ACTION_DOMAIN = "xln:entity-proposal-action:v1";
 const MAX_PENDING_PROPOSALS = 100;
@@ -22859,7 +22859,7 @@ const continuationActionIssue = (a: SettlementContinuationAction, i: number): st
       return `SETTLEMENT_CONTINUATION_TOKEN_INVALID:${i}`;
     case typeof a.amount !== "bigint" || a.amount <= 0n:
       return `SETTLEMENT_CONTINUATION_AMOUNT_INVALID:${i}`;
-    case continuationEntities(a).some((id) => !ENTITY_WORD.test(id)):
+    case continuationEntities(a).some((id) => !WORD32.test(id)):
       return `SETTLEMENT_CONTINUATION_ENTITY_INVALID:${i}`;
     default:
       return undefined;
@@ -24045,7 +24045,7 @@ const crossNote = (v: CrossEntityView, message: string, o: Partial<CrossSetup> =
  */
 const crossEvict = (reason: string): Result<never, EntityError> => err({ _tag: "cross_j_entity", reason });
 /** og normalizeEntityRef (entity/tx/account-key.ts): lowercase, not trimmed. */
-const entityRef = (v: unknown): string => String(v || "").toLowerCase();
+const entityRef = lowerText;
 const fatalCross = <T,>(r: Result<T, CrossError>): Result<T, EntityError> => (r.ok ? r : invariant(r.error.reason));
 /** og exactRouteBytes: safeStringify(cloneCrossJurisdictionRoute(route)). */
 const exactRouteBytes = (r: CrossRoute): Result<string, EntityError> => map(fatalCross(cloneCrossRoute(r)), stableJson);
@@ -27720,9 +27720,8 @@ const queueOnly = <R extends ProposedEntity | LockedEntity>(
  * og preauthenticateEntityProposal: canonical digests, parent, leader, recomputed hash, manifest head, the proposer's
  * frame signature.
  */
-const DIGEST = /^0x[0-9a-f]{64}$/;
 const canonicalRoots = (frame: EntityFrame): boolean =>
-  DIGEST.test(frame.stateRoot) && DIGEST.test(frame.authorityRoot);
+  WORD32.test(frame.stateRoot) && WORD32.test(frame.authorityRoot);
 /**
  * og validateProposedFrameLeader: a handover frame is proposed by the new board's first validator at view 0, with no
  * certificate.
@@ -29235,7 +29234,6 @@ export const mergeEntityInputs = (
   );
 
 // ---- og runtime/tx/tx-handlers.ts ----
-const HASH_32 = /^0x[0-9a-f]{64}$/;
 const COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/;
 const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
 const txErr = (code: string): Result<never, RuntimeError> => err({ _tag: "runtime_tx", code });
@@ -29259,11 +29257,11 @@ const adapterCommandIssue = (c: AdapterCommand): string | undefined => {
   switch (true) {
     case !Number.isSafeInteger(c.sequence) || c.sequence <= 0:
       return "RADAPTER_COMMAND_SEQUENCE_INVALID";
-    case !HASH_32.test(c.laneId):
+    case !WORD32.test(c.laneId):
       return "RADAPTER_COMMAND_LANE_INVALID";
     case !COMMAND_ID.test(c.commandId):
       return "RADAPTER_COMMAND_ID_INVALID";
-    case !HASH_32.test(c.inputHash):
+    case !WORD32.test(c.inputHash):
       return "RADAPTER_COMMAND_INPUT_HASH_INVALID";
     case c.expiresAtMs !== null && (!Number.isSafeInteger(c.expiresAtMs) || c.expiresAtMs <= 0):
       return "RADAPTER_COMMAND_EXPIRY_INVALID";
@@ -31302,7 +31300,7 @@ const epActionResultValid = (d: EpActionResultData): Result<void, RuntimeError> 
       return txErr("ENTITY_PROVIDER_ACTION_RESULT_SIGNER_MISSING");
     case !submitId(d.jurisdictionName):
       return txErr("ENTITY_PROVIDER_ACTION_RESULT_JURISDICTION_MISSING");
-    case !HASH_32.test(submitId(d.actionHash)):
+    case !WORD32.test(submitId(d.actionHash)):
       return txErr("ENTITY_PROVIDER_ACTION_RESULT_HASH_INVALID");
     case d.actionNonce <= 0n || d.actionNonce > SUBMIT_MAX_UINT256:
       return txErr("ENTITY_PROVIDER_ACTION_RESULT_NONCE_INVALID");
@@ -32239,11 +32237,11 @@ const finalityAnchor = (finality: JRec, stateHeight: number): Result<JAnchor, Ru
   switch (true) {
     case !positiveSafeInt(height) || height !== stateHeight:
       return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(claimed)}`);
-    case !HASH_32.test(hash):
+    case !WORD32.test(hash):
       return txErr("J_HISTORY_FINALITY_HASH_CORRUPTION");
     case !jurisdictionRef:
       return txErr("J_HISTORY_FINALITY_JURISDICTION_CORRUPTION");
-    case !HASH_32.test(eventHistoryRoot):
+    case !WORD32.test(eventHistoryRoot):
       return txErr("J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid");
     default:
       return ok({ height, hash, jurisdictionRef, eventHistoryRoot });
@@ -33263,18 +33261,18 @@ const frozenJBody = (
 ): Result<ProofBody, EntityError> => {
   const hash = lower(logged);
   switch (true) {
-    case !HASH_32.test(hash):
-      return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${peer}:${hash || "missing"}`);
+    case !WORD32.test(hash):
+      return invariant(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${peer}:${hash || "missing"}`);
     case raw === null || typeof raw !== "object":
-      return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${peer}:${hash}`);
+      return invariant(`J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${peer}:${hash}`);
   }
   const body = proofBodyOfOg(raw as OgRow);
   const computed = proofBodyHash(body).toLowerCase();
-  if (computed !== hash) return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${peer}:${hash}:${computed}`);
+  if (computed !== hash) return invariant(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${peer}:${hash}:${computed}`);
   return chain(currentProofOf(child, ctx), (current) =>
     current.bodyHash.toLowerCase() === hash
       ? ok(body)
-      : halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${peer}:${hash}:${current.bodyHash}`),
+      : invariant(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${peer}:${hash}:${current.bodyHash}`),
   );
 };
 type FinalityRefusal = Extract<AccountReplicaError, { readonly _tag: "finality" }>["reason"];
@@ -33351,7 +33349,7 @@ const childFinality = (
 };
 const requireDt = (ctx: FoldContext, child: AccountReplica): Result<string, EntityError> => {
   const dt = accountDt(ctx, child);
-  return dt.ok ? ok(dt.value) : halt(dt.error);
+  return dt.ok ? ok(dt.value) : invariant(dt.error);
 };
 /** og: a queued or deferred Source hub claim wakes the local jBatch and says so; any other result says nothing. */
 const announceSourceClaim = (x: JEv, c: SourceClaim): Result<JEv, EntityError> => {
@@ -33417,7 +33415,7 @@ const crossRelayOutput = (relay: CrossRelay, secret: string): Result<CjOut, Enti
   const targetSigner = lower(relay.targetSignerId);
   // og: both route ends are committed before the relay can exist
   if (!entityId || !targetSigner)
-    return halt(`CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING:${entityId || "entity"}:${targetSigner || "signer"}`);
+    return invariant(`CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING:${entityId || "entity"}:${targetSigner || "signer"}`);
   const tx = {
     type: "resolveHtlcLock",
     data: {
@@ -33552,7 +33550,7 @@ const counterProofIdentity = (
   peer: string,
 ): Result<void, EntityError> => {
   if (!named) return ok(undefined);
-  if (state.jurisdictionConfig === undefined) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
+  if (state.jurisdictionConfig === undefined) return invariant("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
   const view = committedView(child.state);
   const expected = view.ok
     ? accountDisputeHash(
@@ -33562,10 +33560,10 @@ const counterProofIdentity = (
         choice.proposerIsLeft,
       )
     : undefined;
-  if (expected === undefined || !expected.ok) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
+  if (expected === undefined || !expected.ok) return invariant("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
   return lc(named) === lc(expected.value)
     ? ok(undefined)
-    : halt(`DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${peer}:${named}:${expected.value}`);
+    : invariant(`DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${peer}:${named}:${expected.value}`);
 };
 type PullLock = { readonly x: JEv; readonly queued: boolean };
 const notQueued = (x: JEv): PullLock => ({ x, queued: false });
@@ -33622,7 +33620,7 @@ const lockPullCounter = (x: JEv, peer: string, ctx: FoldContext): Result<PullLoc
     if (choice.finalNonce <= 0)
       return ok(notQueued(jevSay(x, `❌ Invalid dispute finalNonce=${choice.finalNonce} — must be > 0`)));
     if (current.bodyHash.toLowerCase() !== choice.finalHash.toLowerCase())
-      return halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${peer}:${choice.finalHash}:${current.bodyHash}`);
+      return invariant(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${peer}:${choice.finalHash}:${current.bodyHash}`);
     if (!choice.usable) return ok(notQueued(x));
     return chain(requireDt(ctx, child), (dt) =>
       chain(proofBodyHasPulls(current.body, dt), (hasPulls) => {
@@ -33706,7 +33704,7 @@ const planStartedRecovery =
     const visibleActive = visible === undefined ? undefined : (activeOf(visible) as ActiveDispute | undefined);
     const account = x.cj.host.accounts.get(peer);
     if (visible === undefined || visibleActive === undefined || account === undefined)
-      return halt(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${peer}`);
+      return invariant(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${peer}`);
     const known = visibleActive.crossJurisdictionRecovery?.resultsByPullId ?? {};
     return map(planTargetRecovery(x.cj.host, account, peer, known), (plan) =>
       plan === null
@@ -33942,7 +33940,7 @@ const routeSettlement = (
     const unsettled = { orderId: route.orderId, settledRatio: 0 };
     const expected = role === "source" ? route.sourcePull : route.targetPull;
     if (expected === undefined)
-      return unlockedIntent(route) ? ok(unsettled) : halt(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
+      return unlockedIntent(route) ? ok(unsettled) : invariant(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
     const record = role === "source" ? route.sourceRegistryRecord : route.targetRegistryRecord;
     const signedPull = fatalCross(findSignedProofBodyPull(s.body, expected, role === "target", s.dt));
     return chain(signedPull, (signed) => {
@@ -33971,9 +33969,9 @@ const finalitySettlements = (s: SettlementScope): Result<readonly FinalitySettle
 const terminalRoute = (x: JEv, { orderId, settledRatio }: FinalitySettlement): Result<JEv, EntityError> => {
   const routes = x.cj.host.swaps;
   const at = x.cj.host.timestamp;
-  if (routes === undefined) return halt(`CROSS_J_FINALITY_COLLECTION_MISSING:${orderId}`);
+  if (routes === undefined) return invariant(`CROSS_J_FINALITY_COLLECTION_MISSING:${orderId}`);
   const stored = routes.get(orderId);
-  if (stored === undefined) return halt(`CROSS_J_FINALITY_ROUTE_FORK_MISSING:${orderId}`);
+  if (stored === undefined) return invariant(`CROSS_J_FINALITY_ROUTE_FORK_MISSING:${orderId}`);
   const { pendingSourceRegistryReveal: _s, pendingTargetRegistryReveal: _t, ...route } = stored;
   const put = (r: CrossRoute, message: string): JEv =>
     jevSay({ ...x, cj: cjHost(x.cj, cjPutRoute(x.cj.host, orderId, r)) }, message);
@@ -34062,7 +34060,7 @@ const finalizedNonceOf = (
   const records = finalizationRecords(data, evidence, finalHash);
   if (records.length > 1) {
     const which = `${lc(data["sender"])}:${lc(data["counterentity"])}:${String(data["initialNonce"])}`;
-    return halt(`J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${which}`);
+    return invariant(`J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${which}`);
   }
   return chain(evidenceUint(data["initialNonce"], "J_EVENT_DISPUTE_INITIAL_NONCE_INVALID"), (initialNonce) => {
     const onInitial = finalHash === lc(data["initialProofbodyHash"]);
@@ -34075,7 +34073,7 @@ const finalizedNonceOf = (
 };
 const finalizedTokenId = (v: unknown, i: number, peer: string): Result<number, EntityError> => {
   const n = Number(v);
-  return naturalSafeInt(n) ? ok(n) : halt(`J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${i}:${String(v)}`);
+  return naturalSafeInt(n) ? ok(n) : invariant(`J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${i}:${String(v)}`);
 };
 const pendingSettleTransitions = (child: AccountReplica): number =>
   ("mempool" in child ? (child.mempool as readonly WireAccountTx[]) : []).filter((t) => t.type === "settle_transition")
@@ -34188,9 +34186,9 @@ const sameRatioRecord = (
 ): Result<HashLadderRegistryRecord, EntityError> => {
   switch (true) {
     case !targetRole && existing.revealedAt !== next.revealedAt:
-      return halt(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
+      return invariant(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
     case next.revealedAt < existing.revealedAt:
-      return halt(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
+      return invariant(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
     case next.revealedAt === existing.revealedAt:
       return ok(existing);
     default:
@@ -34208,13 +34206,13 @@ export const updateRegistryRecord = (
 ): Result<HashLadderRegistryRecord, EntityError> => {
   const next = { fillRatio: Math.floor(Number(data.fillRatio)), revealedAt: Number(data.revealedAt) };
   if (!positiveSafeInt(next.revealedAt))
-    return halt(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
+    return invariant(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
   if (existing === undefined) return ok(next);
   if (existing.fillRatio === next.fillRatio) return sameRatioRecord(existing, next, data.targetRole, orderId);
   const conflict =
     !data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt;
   return conflict
-    ? halt(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`)
+    ? invariant(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`)
     : ok(next);
 };
 /** og: this route's leg in the event's role registered exactly this ladder, between these two Entities. */
@@ -34240,7 +34238,7 @@ const selfWrittenRatio = (
     case route.sourceRegistryFillRatio === undefined:
       return ok({ ...route, sourceRegistryFillRatio: observed });
     case route.sourceRegistryFillRatio !== observed:
-      return halt(`CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:${route.sourceRegistryFillRatio}:${observed}`);
+      return invariant(`CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:${route.sourceRegistryFillRatio}:${observed}`);
     default:
       return ok(route);
   }
@@ -34259,7 +34257,7 @@ export const ladderRegisteredOnRoutes = (
   return foldResult(routesOf(h), h, (host, found): Result<CjHost, EntityError> => {
     if (isCrossTerminal(found.status) || !ladderOnRoute(found, data, ladder)) return ok(host);
     const current = host.swaps?.get(found.orderId);
-    if (current === undefined) return halt(`CROSS_J_REGISTRY_ROUTE_FORK_MISSING:${found.orderId}`);
+    if (current === undefined) return invariant(`CROSS_J_REGISTRY_ROUTE_FORK_MISSING:${found.orderId}`);
     const observed = Math.floor(Number(data.fillRatio));
     const latched = writerIsSelf ? selfWrittenRatio(current, data.targetRole, observed) : ok(current);
     return chain(latched, (route) => {
@@ -41522,14 +41520,13 @@ export const normalizeTowerMode = (mode: unknown): Result<TowerModeV1, TowerErro
       return towerErr(`TOWER_MODE_INVALID:${raw}`);
   }
 };
-const TOWER_BYTES32 = /^0x[0-9a-f]{64}$/;
 const LOWER_HEX_BYTES = /^0x([0-9a-f]{2})*$/;
 const towerLookupKey = (v: unknown): Result<string, TowerError> => {
   const k = jsText(v).trim().toLowerCase();
-  return TOWER_BYTES32.test(k) ? ok(k) : towerErr(`TOWER_LOOKUP_KEY_INVALID: ${String(v)}`);
+  return WORD32.test(k) ? ok(k) : towerErr(`TOWER_LOOKUP_KEY_INVALID: ${String(v)}`);
 };
 const bytes32Code = (v: unknown, label: string): string | undefined =>
-  codeIf(!TOWER_BYTES32.test(jsText(v).trim().toLowerCase()), `TOWER_${label}_INVALID: ${String(v)}`);
+  codeIf(!WORD32.test(jsText(v).trim().toLowerCase()), `TOWER_${label}_INVALID: ${String(v)}`);
 const hexBytesCode = (v: unknown, label: string): string | undefined =>
   codeIf(!LOWER_HEX_BYTES.test(jsText(v).trim().toLowerCase()), `TOWER_${label}_INVALID`);
 const nonNegative = (v: unknown): number | undefined => {
@@ -42196,7 +42193,7 @@ const decodeStoredBundle = (
       () => safeIntCode(e["ownerSignedAt"], "TOWER_STORED_OWNER_SIGNED_AT_INVALID"),
       () =>
         textCode(e["encryptedEnvelopeHash"], STORED_ENVELOPE_HASH_INVALID) ??
-        codeIf(!TOWER_BYTES32.test(String(e["encryptedEnvelopeHash"]).toLowerCase()), STORED_ENVELOPE_HASH_INVALID),
+        codeIf(!WORD32.test(String(e["encryptedEnvelopeHash"]).toLowerCase()), STORED_ENVELOPE_HASH_INVALID),
       () => textCode(e["lastResortPayloadDigest"], "TOWER_STORED_LAST_RESORT_DIGEST_INVALID"),
       () =>
         codeIf(
@@ -42228,7 +42225,7 @@ export const decodeTowerLookupDoc = (raw: string, expectedLookupKey?: string): R
     const checked = towerChecks(
       () => fieldsCode(d, STORED_LOOKUP_SHAPE),
       () => textCode(d["lookupKey"], "TOWER_STORED_LOOKUP_KEY_INVALID"),
-      () => codeIf(!TOWER_BYTES32.test(lookupKey), "TOWER_STORED_LOOKUP_KEY_INVALID"),
+      () => codeIf(!WORD32.test(lookupKey), "TOWER_STORED_LOOKUP_KEY_INVALID"),
       () => codeIf(Boolean(expectedLookupKey) && lookupKey !== expectedLookupKey, "TOWER_STORED_LOOKUP_KEY_MISMATCH"),
       () => textCode(d["runtimeId"], "TOWER_STORED_RUNTIME_INVALID"),
       () => codeIf(!EOA.test(runtimeId), "TOWER_STORED_RUNTIME_INVALID"),
@@ -43192,7 +43189,6 @@ type RawOffer = { readonly offerId: string } & OfferTerms & {
   readonly priceTicks?: bigint | undefined;
   readonly timeInForce?: number | undefined;
 };
-const halt = (message: string): Result<never, EntityError> => err({ _tag: "entity_invariant", reason: message });
 const haltMessage = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
 /** A book refusal where the hub cannot refuse: og throws it, so it halts the frame. */
 const bookFault = (e: BookError): EntityError => ({ _tag: "entity_invariant", reason: e.code });
@@ -43204,7 +43200,7 @@ const swapKeyOf = (accountId: string, offerId: string): string => `${accountId}:
 /** og parseNamespacedOrderId: the account id is everything before the last colon. */
 const parseOrderId = (orderId: string, code: string): Result<SwapRef, EntityError> => {
   const i = orderId.lastIndexOf(":");
-  if (i <= 0 || i === orderId.length - 1) return halt(`${code}: order=${orderId}`);
+  if (i <= 0 || i === orderId.length - 1) return invariant(`${code}: order=${orderId}`);
   return ok({ accountId: orderId.slice(0, i), offerId: orderId.slice(i + 1) });
 };
 const dimsOf = (give: number, want: number, giveDecimals: number, wantDecimals: number): SwapDims => {
@@ -43255,7 +43251,7 @@ const normalizeOffer = (o: RawOffer, accountId: string): Result<BookOffer, Entit
   const d = offerDims(o);
   const signed = o.priceTicks !== undefined && o.priceTicks > 0n ? o.priceTicks : undefined;
   const priceTicks = signed ?? priceTicksOf(d, baseAmountOf(o, d), quoteAmountOf(o, d));
-  if (priceTicks <= 0n) return halt(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${o.offerId}`);
+  if (priceTicks <= 0n) return invariant(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${o.offerId}`);
   return ok({ offerId: o.offerId, accountId, ...termsOf(o), priceTicks, timeInForce: tif(o.timeInForce) ?? 0 });
 };
 
@@ -43331,7 +43327,7 @@ const bandAnchor = (rule: PairRule, bid: bigint | null, ask: bigint | null): big
 type Band = { readonly min: bigint; readonly max: bigint };
 /** og deriveSameOrderbookPriceBandBounds: +/-30% around the anchor. */
 const bandBounds = (anchor: bigint): Result<Band, EntityError> => {
-  if (anchor <= 0n) return halt("ORDERBOOK_PRICE_BAND_ANCHOR_INVALID");
+  if (anchor <= 0n) return invariant("ORDERBOOK_PRICE_BAND_ANCHOR_INVALID");
   const offset = (anchor * PRICE_REJECT_BPS) / 10_000n;
   return ok({ min: anchor - offset, max: anchor + offset });
 };
@@ -43391,7 +43387,7 @@ const materialization = (o: BookOffer, minTradeSize: bigint): Result<Materializa
   if (amounts.b <= 0n || amounts.q <= 0n) return refuseOffer("zero-amount");
   if (minTradeSize > 0n && amounts.q < minTradeSize) return refuseOffer(`below-minTradeSize:${amounts.q}`);
   if (amounts.b % lot !== 0n) return refuseOffer(`lot-misaligned:${amounts.b}`);
-  if (o.priceTicks <= 0n) return halt("SWAP_EXACT_QUOTE_PRICE_INVALID");
+  if (o.priceTicks <= 0n) return invariant("SWAP_EXACT_QUOTE_PRICE_INVALID");
   const qtyLots = amounts.b / lot;
   const multiple = exactQuoteLots(d.bd, d.qd, o.priceTicks);
   if (qtyLots % multiple !== 0n) return refuseOffer(`quote-lot-misaligned:${qtyLots}:${multiple}`);
@@ -43513,7 +43509,7 @@ const sameRowMatches = (pairId: string, order: BookOrder, meta: BookOffer): Resu
     ["Price", order.priceTicks, meta.priceTicks],
     ["QtyLots", order.qtyLots, qtyLots],
   ]);
-  return same ? ok(undefined) : halt(`ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ${fields}`);
+  return same ? ok(undefined) : invariant(`ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ${fields}`);
 };
 /**
  * og classifySameBookMaker: an inactive Account cancels, a resolving row is suspended, and the row must equal its
@@ -43524,12 +43520,12 @@ const classifyMaker = (pass: Pass, pairId: string, order: BookOrder): Result<Mak
   chain(parseOrderId(order.orderId, "ORDERBOOK_MALFORMED_BOOK_ORDER"), ({ accountId }) => {
     const account = pass.hub.accounts.get(accountId);
     const missing = `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`;
-    if (account === undefined) return halt(missing);
+    if (account === undefined) return invariant(missing);
     if (!account.active) return ok("cancel");
     const cached = pass.meta.get(order.orderId);
     const meta = cached === undefined ? liveMeta(pass.hub, order.orderId) : ok(cached);
     return chain(meta, (m): Result<MakerDisposition, EntityError> => {
-      if (m === null) return halt(missing);
+      if (m === null) return invariant(missing);
       if (hasQueuedResolve(pass, m.accountId, m.offerId)) return ok("suspended");
       return map(sameRowMatches(pairId, order, m), () => "eligible");
     });
@@ -43545,7 +43541,7 @@ const bookFailureText = (e: BookError | EntityError): string => (e._tag === "boo
 /** og containSamePairFailure (live mode): a failed pair command halts the frame. */
 const pairFailure = (p: Prepared, message: string): Result<never, EntityError> => {
   const at = `pair=${p.bookKey} account=${p.offer.accountId} offer=${p.offer.offerId}`;
-  return halt(`ORDERBOOK_PAIR_COMMAND_FAILED: ${at} error=${message}`);
+  return invariant(`ORDERBOOK_PAIR_COMMAND_FAILED: ${at} error=${message}`);
 };
 
 
@@ -43628,7 +43624,7 @@ const keepResting = (pass: Pass, p: Prepared): Result<Passed<boolean>, EntityErr
   if (existing === undefined) return ok({ pass, value: false });
   const same = existing.ownerId === p.makerId && existing.side === p.side && existing.qtyLots === p.qtyLots
     && existing.priceTicks === p.priceTicks;
-  if (!same) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${p.bookKey} order=${p.orderId}`);
+  if (!same) return invariant(`ORDERBOOK_CACHE_MISMATCH: pair=${p.bookKey} order=${p.orderId}`);
   return ok({ pass: { ...pass, cache: mapSet(pass.cache, p.bookKey, p.book) }, value: true });
 };
 
@@ -43913,11 +43909,11 @@ const crossedTaker = (
 ): Result<Passed<Prepared>, EntityError> => {
   const mismatch = `ORDERBOOK_CACHE_MISMATCH: pair=${trigger.bookKey} order=${takerOrderId}`;
   return chain(liveMeta(pass.hub, takerOrderId), (live) => {
-    if (live === null) return halt(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${trigger.bookKey} order=${takerOrderId}`);
+    if (live === null) return invariant(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${trigger.bookKey} order=${takerOrderId}`);
     return chain(readySame(pass, live, minTradeSize), ({ pass: ready, value: p }) =>
       p === null
-        ? halt(mismatch)
-        : chain(keepResting(ready, p), (kept) => (kept.value ? ok({ pass: kept.pass, value: p }) : halt(mismatch))));
+        ? invariant(mismatch)
+        : chain(keepResting(ready, p), (kept) => (kept.value ? ok({ pass: kept.pass, value: p }) : invariant(mismatch))));
   });
 };
 type Drain = { readonly pass: Pass; readonly current: Prepared; readonly done: boolean };
@@ -43929,11 +43925,11 @@ const drainStep =
     return chain(resumeSame(d.pass, d.current), (resumed): Result<Drain, EntityError> => {
       if (resumed === null) return ok({ ...d, done: true });
       if (resumedCount >= limit)
-        return halt(`ORDERBOOK_SAME_DRAIN_NON_TERMINATING: pair=${seed.bookKey} limit=${limit}`);
+        return invariant(`ORDERBOOK_SAME_DRAIN_NON_TERMINATING: pair=${seed.bookKey} limit=${limit}`);
       return chain(crossedTaker(d.pass, d.current, resumed.takerOrderId, minTradeSize), (taker) =>
         chain(commitSame(taker.pass, taker.value, resumed), (committed) => {
           const next = committed.cache.get(seed.bookKey);
-          if (next === undefined) return halt(`ORDERBOOK_CACHE_MISMATCH: pair=${seed.bookKey} missing-after-resume`);
+          if (next === undefined) return invariant(`ORDERBOOK_CACHE_MISMATCH: pair=${seed.bookKey} missing-after-resume`);
           return ok({ pass: committed, current: { ...d.current, book: next }, done: false });
         }),
       );
@@ -44041,7 +44037,7 @@ const isAdmitted = (hub: Hub, self: string, o: BookOfferInput): Result<boolean, 
   if (makerOf(o) === self) return ok(false);
   const account = hub.accounts.get(o.accountId.toLowerCase());
   if (account === undefined)
-    return halt(`ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING: account=${o.accountId} offer=${o.offerId}`);
+    return invariant(`ORDERBOOK_ACCOUNT_OUTPUT_ACCOUNT_MISSING: account=${o.accountId} offer=${o.offerId}`);
   return ok(account.active);
 };
 /**
@@ -44078,7 +44074,7 @@ type CancelSweep = { readonly books: ReadonlyMap<string, Book>; readonly touched
 const takeOffBook = (s: CancelSweep, { accountId, offerId }: SwapRef): Result<CancelSweep, EntityError> => {
   const orderId = swapKeyOf(accountId, offerId);
   const pairs = pairsHolding(s.books, orderId);
-  if (pairs.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
+  if (pairs.length > 1) return invariant(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${pairs.length}`);
   const pairId = pairs[0];
   const book = pairId === undefined ? undefined : s.books.get(pairId);
   const order = book?.orders.get(orderId);
@@ -44122,7 +44118,7 @@ const cancelRequested =
       const order = book?.orders.get(orderId);
       return book === undefined || order === undefined ? [] : [{ pairId, book, order }];
     });
-    if (matching.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${matching.length}`);
+    if (matching.length > 1) return invariant(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${orderId} matches=${matching.length}`);
     const removed = foldResult(matching, run.working, (working, { pairId, book, order }) =>
       map(cancelRow(book, order), (next) => mapSet(working, pairId, next)),
     );
@@ -44694,7 +44690,7 @@ const learnMeta = (cp: CrossPass, learned: readonly LearnedMeta[]): CrossPass =>
 });
 /** og rejectInvalidCrossOffer in live mode: every invalid cross-j offer halts the frame. */
 const liveReject = (accountId: string, offerId: string, reason: string): Result<never, EntityError> =>
-  halt(`ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
+  invariant(`ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
 /** og getCrossMarketOffer: the admitted route (or the hub's route mirror) carries the progressed remainder. */
 const crossMetaOf = (cp: CrossPass, o: CrossBookOffer): Result<CrossPassed<CrossMarketOffer | null>, EntityError> => {
   const key = swapKeyOf(o.accountId, o.offerId);
@@ -44726,9 +44722,9 @@ const crossRowMatches = (pairId: string, order: BookOrder, meta: CrossMarketOffe
     const sized: readonly Mismatch[] = [["Qty", order.qtyLots, qty], ["Price", order.priceTicks, meta.priceTicks]];
     const placed: readonly Mismatch[] = [["Pair", pairId, meta.pairId], ["Owner", order.ownerId, meta.makerId]];
     if (meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId) {
-      return halt(`${at} ${mismatchText([...placed, ...sized])}`);
+      return invariant(`${at} ${mismatchText([...placed, ...sized])}`);
     }
-    return order.qtyLots === qty ? ok(undefined) : halt(`${at} ${mismatchText(sized)}`);
+    return order.qtyLots === qty ? ok(undefined) : invariant(`${at} ${mismatchText(sized)}`);
   });
 /**
  * og classifyCrossBookMaker: a disputed local Account, a non-working or expired route cancels the row; a matched row is
@@ -44748,7 +44744,7 @@ const classifyCrossMaker = (
     if (status && status !== "resting" && status !== "partially_filled") return ok({ disposition: "cancel" });
     return chain(crossMeta(cp, order.orderId), (meta): Result<MakerVerdict<LearnedMeta>, EntityError> => {
       const at = `pair=${pairId} order=${order.orderId} account=${accountId} offer=${offerId}`;
-      if (meta === null) return halt(`ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: ${at}`);
+      if (meta === null) return invariant(`ORDERBOOK_CROSS_J_SNAPSHOT_MISSING: ${at}`);
       const learned: LearnedMeta = [order.orderId, meta];
       if (isCrossExpired(meta.route, Number(hub.timestamp ?? 0))) return ok({ disposition: "cancel", learned });
       if (cp.suspended.has(order.orderId)) return ok({ disposition: "suspended", learned });
@@ -44822,7 +44818,7 @@ const prepareCross = (cp: CrossPass, raw: CrossBookOffer): Result<CrossPassed<Pr
             ["Qty", existing.qtyLots, lots.qtyLots],
             ["Price", existing.priceTicks, meta.priceTicks],
           ]);
-          return halt(`ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: pair=${meta.pairId} order=${orderId} ${fields}`);
+          return invariant(`ORDERBOOK_CROSS_J_DUPLICATE_SNAPSHOT_MISMATCH: pair=${meta.pairId} order=${orderId} ${fields}`);
         },
       );
     });
@@ -44847,7 +44843,7 @@ const crossTrade = (cp: CrossPass, t: Trade): Result<CrossTrade, EntityError> =>
   chain(crossMeta(cp, t.makerOrderId), (maker) =>
     chain(crossMeta(cp, t.takerOrderId), (taker) => {
       if (maker === null || taker === null)
-        return halt(`ORDERBOOK_CROSS_J_TRADE_META_MISSING:maker=${t.makerOrderId}:taker=${t.takerOrderId}`);
+        return invariant(`ORDERBOOK_CROSS_J_TRADE_META_MISSING:maker=${t.makerOrderId}:taker=${t.takerOrderId}`);
       return map(crossExecutionPrice(maker, taker), (price) => ({ trade: { ...t, price }, maker, taker }));
     }),
   );
@@ -44980,7 +44976,7 @@ const planCrossFill =
   (cp: CrossPass) =>
   (plan: CrossPlan, [orderId, fill]: readonly [string, CrossFillAgg]): Result<CrossPlan, EntityError> =>
     chain(crossMeta(cp, orderId), (meta) => {
-      if (meta === null) return halt(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
+      if (meta === null) return invariant(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${orderId}`);
       return chain(crossExecutionAmounts(meta, fill), (execution) => {
         const ref = parseOrderId(orderId, "ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER");
         return chain(netted(plan.net, meta.route, execution), (net) =>
@@ -45013,7 +45009,7 @@ const finalizeCrossFills = (cp: CrossPass): Result<CrossPass, EntityError> => {
   return chain(foldResult(fills, start, planCrossFill(cp)), ({ net, planned }) => {
     const bad = [...net].toSorted(([a], [b]) => asc(a, b));
     if (bad.length > 0)
-      return halt(`CROSS_J_TRADE_CONSERVATION_FAILED:${bad.map(([asset, v]) => `${asset}=${v}`).join(",")}`);
+      return invariant(`CROSS_J_TRADE_CONSERVATION_FAILED:${bad.map(([asset, v]) => `${asset}=${v}`).join(",")}`);
     return foldResult(planned, cp, commitCrossFill);
   });
 };
@@ -45097,7 +45093,7 @@ const rowHolder = (h: BookHost, id: string): Result<HeldRow | undefined, EntityE
   const ext = h.ext;
   if (ext === undefined) return ok(undefined);
   const pairs = pairsHolding(ext.books, id);
-  if (pairs.length > 1) return halt(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${id} matches=${pairs.length}`);
+  if (pairs.length > 1) return invariant(`ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${id} matches=${pairs.length}`);
   const pairId = pairs[0];
   const book = pairId === undefined ? undefined : ext.books.get(pairId);
   return ok(pairId === undefined || book === undefined ? undefined : { ext, pairId, book });
@@ -45114,7 +45110,7 @@ const removeRowById = (h: BookHost, id: string): Result<HostChange, EntityError>
   });
 /** og resizeBookOrderById: a committed cross-j progress shrinks the row; never matcher repair. */
 const resizeRowById = (h: BookHost, id: string, qty: bigint): Result<HostChange, EntityError> => {
-  if (qty <= 0n || qty > MAX_ORDERBOOK_QTY_LOTS) return halt(`ORDERBOOK_RESIZE_INVALID: order=${id} qty=${qty}`);
+  if (qty <= 0n || qty > MAX_ORDERBOOK_QTY_LOTS) return invariant(`ORDERBOOK_RESIZE_INVALID: order=${id} qty=${qty}`);
   return chain(rowHolder(h, id), (held) => {
     if (held === undefined) return ok(unchanged(h));
     return map(bookHalt(reduceBookOrderQuantity(held.book, id, qty)), (book) => ({
@@ -45137,7 +45133,7 @@ const materializeRow = (h: BookHost, x: RowPlacement): Result<HostChange, Entity
   const ext = h.ext;
   if (ext === undefined) return ok(unchanged(h));
   const id = bookRowId(x.sourceEntityId, x.orderId);
-  if (pairsHolding(ext.books, id).length > 0) return halt(`ORDERBOOK_REMAINDER_ALREADY_PRESENT: order=${id}`);
+  if (pairsHolding(ext.books, id).length > 0) return invariant(`ORDERBOOK_REMAINDER_ALREADY_PRESENT: order=${id}`);
   const book = ext.books.get(x.pairId);
   if (book === undefined) return ok(unchanged(h));
   const row = { orderId: id, ownerId: x.ownerId, side: x.side, priceTicks: x.priceTicks, qtyLots: x.qtyLots };
@@ -45154,7 +45150,7 @@ const proofRatioE = (r: ProofRatioInput): Result<number, EntityError> => fatalCr
 const transitionE = (r: CrossRoute, next: CrossStatus, at: number): Result<CrossRoute, EntityError> =>
   crossTransitionAllowed(r.status, next)
     ? ok({ ...r, status: next, updatedAt: at })
-    : halt(`CROSS_J_ROUTE_TRANSITION_INVALID: route=${r.orderId} ${r.status || "intent"}->${next}`);
+    : invariant(`CROSS_J_ROUTE_TRANSITION_INVALID: route=${r.orderId} ${r.status || "intent"}->${next}`);
 /** The route moves to `clear_requested` under the given clearing policy. */
 const requestClear = (
   r: CrossRoute,
@@ -45174,10 +45170,10 @@ const applyRatioProgress = (
   prefix: string,
 ): Result<CrossRoute, EntityError> => {
   if (!Number.isFinite(ratio))
-    return halt(`RangeError: The number ${ratio} cannot be converted to a BigInt because it is not an integer`);
+    return invariant(`RangeError: The number ${ratio} cannot be converted to a BigInt because it is not an integer`);
   const fill = { fillSeq, cumulativeFillRatio: ratio, fillNumerator: BigInt(ratio), fillDenominator: BigInt(MAX_FILL) };
   const next = applyCrossFill(r, fill, at);
-  return next.ok ? ok(next.value) : halt(`${prefix}: route=${r.orderId} ${next.error.reason}`);
+  return next.ok ? ok(next.value) : invariant(`${prefix}: route=${r.orderId} ${next.error.reason}`);
 };
 const seqOf = (r: { readonly fillSeq?: number | undefined }): number => Math.floor(Number(r.fillSeq ?? 0));
 
@@ -45270,7 +45266,7 @@ const recordAdmittedRoute = (
   const rh = route.routeHash?.toLowerCase();
   const staleSameRoute = Boolean(eh && rh) && eh === rh && compareCrossStatus(existing?.status, route.status) < 0;
   if (transitionError && !staleSameRoute)
-    return halt(`CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} ${transitionError}`);
+    return invariant(`CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} ${transitionError}`);
   const merged =
     staleSameRoute && existing !== undefined ? mergeCrossRoute(route, existing) : mergeCrossRoute(existing, route);
   return map(merged, (m) => mapSet(swaps, route.orderId, m));
@@ -45290,11 +45286,11 @@ export const admitBookOrder = (
     const prior = h.admissions?.get(key);
     const say = (what: string): readonly string[] => [`🌉 Cross-j book ${what}`];
     if (owner !== entityRef(h.id))
-      return halt(`CROSS_J_BOOK_ADMIT_WRONG_OWNER: order=${route.orderId} owner=${owner} current=${h.id}`);
+      return invariant(`CROSS_J_BOOK_ADMIT_WRONG_OWNER: order=${route.orderId} owner=${owner} current=${h.id}`);
     if (prior?.status === "closed" || prior?.status === "resolving") {
       const sameRoute = (prior.routeHash || "").toLowerCase() === (route.routeHash || "").toLowerCase();
       if (!sameRoute)
-        return halt(`CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} existing admission route hash mismatch`);
+        return invariant(`CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} existing admission route hash mismatch`);
       return ok(hostStep(h, { messages: say(`admit ${route.orderId}: duplicate ${prior.status}`) }));
     }
     return chain(recordAdmittedRoute(h.swaps ?? new Map<string, CrossRoute>(), route), (swaps) =>
@@ -45333,7 +45329,7 @@ export const admitBookOrder = (
               );
             }
             case "invalid":
-              return halt(failure.message);
+              return invariant(failure.message);
           }
         });
       }),
@@ -45344,7 +45340,7 @@ const progressMarket = (h: BookHost, route: CrossRoute): Result<CrossMarketOffer
   chain(committedCrossOfferEvent(h, route), (event) =>
     chain(normalizeCross(event, event.accountId || route.source.entityId, route), (n) =>
       chain(crossMarketOffer(n, h.id), (market) =>
-        market === null ? halt(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`) : ok(market))));
+        market === null ? invariant(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`) : ok(market))));
 /**
  * og updateBookOrderForProgress: a partial fill resizes (or re-materializes) the row at the committed remainder; a
  * terminal one removes what still rests.
@@ -45366,7 +45362,7 @@ const updateRowForProgress = (h: BookHost, route: CrossRoute): Result<BookHost, 
           qtyLots,
         };
         return chain(materializeRow(h, placement), (m) =>
-          m.changed ? ok(m.host) : halt(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`),
+          m.changed ? ok(m.host) : invariant(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`),
         );
       }),
     ),
@@ -45429,7 +45425,7 @@ const advanceBookFill = ({
   const now = h.timestamp;
   const currentSeq = seqOf(route);
   if (Math.floor(Number(data.fillSeq)) <= currentSeq) {
-    return halt(`CROSS_J_BOOK_PROGRESS_STALE: order=${route.orderId} seq=${data.fillSeq} current=${currentSeq}`);
+    return invariant(`CROSS_J_BOOK_PROGRESS_STALE: order=${route.orderId} seq=${data.fillSeq} current=${currentSeq}`);
   }
   const ratio = Math.floor(Number(data.cumulativeFillRatio));
   const progressed = chain(
@@ -45478,17 +45474,17 @@ export const bookFillToState = (
   const admission = h.admissions?.get(key);
   const admissions = h.admissions;
   if (admission === undefined || admissions === undefined) {
-    return halt(`CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING: order=${data.orderId} source=${sourceEntityId}`);
+    return invariant(`CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING: order=${data.orderId} source=${sourceEntityId}`);
   }
   if (admission.status === "closed" && data.cancelRemainder) return ok(unchanged(h));
   if (admission.status !== "admitted" && admission.status !== "resolving") {
-    return halt(`CROSS_J_BOOK_PROGRESS_ADMISSION_NOT_ADMITTED: order=${data.orderId} status=${admission.status}`);
+    return invariant(`CROSS_J_BOOK_PROGRESS_ADMISSION_NOT_ADMITTED: order=${data.orderId} status=${admission.status}`);
   }
   return chain(canonRoute(admission.route), (route) => {
     const owner = crossBookOwnerRef(route);
     const self = entityRef(h.id);
     if (owner !== self)
-      return halt(`CROSS_J_BOOK_PROGRESS_WRONG_OWNER: order=${route.orderId} owner=${owner} current=${h.id}`);
+      return invariant(`CROSS_J_BOOK_PROGRESS_WRONG_OWNER: order=${route.orderId} owner=${owner} current=${h.id}`);
     const fill: BookFill = {
       h,
       key,
@@ -45562,7 +45558,7 @@ const requestClearAtSource = (
   });
   return chain(removed, (after) => {
     const signer = trimLower(h.validators[0] || "");
-    if (!signer) return halt(`CROSS_J_SELF_SIGNER_MISSING:${next.orderId}:${h.id}`);
+    if (!signer) return invariant(`CROSS_J_SELF_SIGNER_MISSING:${next.orderId}:${h.id}`);
     const request = { orderId: next.orderId, cancelRemainder: Boolean(fill.cancelRemainder) };
     const clear: CrossEntityOutput = {
       entityId: h.id,
@@ -45583,22 +45579,22 @@ export const sourceHubFillProgress = (h: BookHost, fill: CrossProgress): Result<
   const ignored: HubProgress = { host: h, applied: false, outputs: [] };
   if (route === undefined || swaps === undefined) {
     const tag = `entity=${shortTail(h.id, 4)} offer=${shortTail(fill.orderId, 12)}`;
-    return halt(
+    return invariant(
       `CROSS_J_FILL_ROUTE_MISSING: ${tag} ratio=${fill.cumulativeFillRatio} cancel=${Boolean(fill.cancelRemainder)}`,
     );
   }
   if (entityRef(h.id) !== entityRef(route.source.counterpartyEntityId)) {
-    return halt(`CROSS_J_FILL_SOURCE_HUB_REQUIRED: order=${fill.orderId} entity=${h.id}`);
+    return invariant(`CROSS_J_FILL_SOURCE_HUB_REQUIRED: order=${fill.orderId} entity=${h.id}`);
   }
   if (fill.routeHash && route.routeHash && fill.routeHash.toLowerCase() !== route.routeHash.toLowerCase()) {
-    return halt(
+    return invariant(
       `CROSS_J_FILL_ROUTE_HASH_MISMATCH: order=${fill.orderId} got=${fill.routeHash} expected=${route.routeHash}`,
     );
   }
   if (isCrossTerminal(route.status) || route.status === "clear_requested" || route.status === "clearing")
     return ok(ignored);
   if (!Number.isSafeInteger(fill.fillSeq) || !Number.isSafeInteger(fill.cumulativeFillRatio)) {
-    return halt(
+    return invariant(
       `CROSS_J_FILL_NOTICE_INVALID: order=${fill.orderId} seq=${fill.fillSeq} ratio=${fill.cumulativeFillRatio}`,
     );
   }
@@ -45608,7 +45604,7 @@ export const sourceHubFillProgress = (h: BookHost, fill: CrossProgress): Result<
   const isCancel = Boolean(fill.cancelRemainder) && incoming === currentSeq;
   const conflict = incoming === currentSeq ? map(proofRatioE(route), (committed) => ratio !== committed) : ok(false);
   return chain(conflict, (stale): Result<HubProgress, EntityError> => {
-    if (stale) return halt(`CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${fill.orderId} seq=${incoming} ratio=${ratio}`);
+    if (stale) return invariant(`CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${fill.orderId} seq=${incoming} ratio=${ratio}`);
     if (!isCancel && incoming <= currentSeq) return ok(ignored);
     return chain(committedFillProgress(route, fill, ratio, at), (progressed) => {
       const next: CrossRoute = { ...progressed, updatedAt: at };
@@ -45645,7 +45641,7 @@ export const orderbookFill = (
     }
     const sourceHub = trimLower(i.route.source.counterpartyEntityId);
     const signer = trimLower(i.route.sourceHubSignerId || "");
-    if (!sourceHub || !signer) return halt(`CROSS_J_FILL_NOTICE_SOURCE_HUB_MISSING:${i.offerId}`);
+    if (!sourceHub || !signer) return invariant(`CROSS_J_FILL_NOTICE_SOURCE_HUB_MISSING:${i.offerId}`);
     return map(crossOutput(sourceHub, signer, [{ type: "crossJurisdictionFillNotice", data }]), (out) => ({
       host,
       outputs: [out],
@@ -45672,9 +45668,9 @@ const removalAck = (
   if (!data.sourceAccountId) return ok([]);
   const sourceHub = entityRef(ackRoute.source.counterpartyEntityId);
   const at = `order=${ackRoute.orderId}:target=${sourceHub}`;
-  if (!sourceHub || sourceHub === entityRef(host.id)) return halt(`CROSS_J_BOOK_REMOVAL_ACK_TARGET_INVALID:${at}`);
+  if (!sourceHub || sourceHub === entityRef(host.id)) return invariant(`CROSS_J_BOOK_REMOVAL_ACK_TARGET_INVALID:${at}`);
   const signer = crossRouteSigner(ackRoute, sourceHub);
-  if (!signer) return halt(`CROSS_J_BOOK_REMOVAL_ACK_SIGNER_MISSING:${at}`);
+  if (!signer) return invariant(`CROSS_J_BOOK_REMOVAL_ACK_SIGNER_MISSING:${at}`);
   const removed = {
     orderId: ackRoute.orderId,
     sourceEntityId: ackRoute.source.entityId,
@@ -45692,16 +45688,16 @@ const removalAck = (
  * ACK carrying this book's progress.
  */
 export const removeCrossBookOrder = (h: BookHost, data: RemovalRequest): Result<BookHostStep, EntityError> => {
-  if (data.route === undefined) return halt(`CROSS_J_BOOK_REMOVAL_ROUTE_MISSING:${data.orderId}`);
+  if (data.route === undefined) return invariant(`CROSS_J_BOOK_REMOVAL_ROUTE_MISSING:${data.orderId}`);
   return chain(canonRoute(data.route), (route) => {
     const named =
       route.orderId === data.orderId &&
       entityRef(route.source.entityId) === entityRef(data.sourceEntityId) &&
       crossBookOwnerRef(route) === entityRef(h.id);
-    if (!named) return halt(`CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH:${data.orderId}`);
+    if (!named) return invariant(`CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH:${data.orderId}`);
     const admission = h.admissions?.get(bookAdmissionKey(data.sourceEntityId, data.orderId));
     if (admission !== undefined && entityRef(admission.routeHash || "") !== entityRef(route.routeHash || "")) {
-      return halt(`CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:${data.orderId}`);
+      return invariant(`CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:${data.orderId}`);
     }
     return chain(removeRowById(h, bookRowId(data.sourceEntityId, data.orderId)), ({ host, changed }) => {
       const reason = data.reason || "removeCrossJurisdictionBookOrder";
@@ -45732,19 +45728,19 @@ type RemovalAck = {
 export const bookOrderRemoved = (h: BookHost, data: RemovalAck): Result<BookHostStep, EntityError> =>
   chain(canonRoute(data.route), (route) => {
     if (entityRef(h.id) !== entityRef(route.source.counterpartyEntityId)) {
-      return halt(`CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED:order=${route.orderId}:entity=${h.id}`);
+      return invariant(`CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED:order=${route.orderId}:entity=${h.id}`);
     }
     const visible = h.accounts.get(data.sourceAccountId);
     const offer = visible?.offers.get(route.orderId);
     const current = h.swaps?.get(route.orderId);
     const at = `order=${route.orderId}:account=${data.sourceAccountId}`;
     const missing = `CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING:${at}`;
-    if (current === undefined) return halt(missing);
+    if (current === undefined) return invariant(missing);
     if (entityRef(current.routeHash || "") !== entityRef(route.routeHash || "")) {
-      return halt(`CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH:order=${route.orderId}`);
+      return invariant(`CROSS_J_BOOK_REMOVAL_ACK_ROUTE_HASH_MISMATCH:order=${route.orderId}`);
     }
     if (isCrossTerminal(current.status)) return ok(hostStep(h));
-    if (visible === undefined || offer?.crossJurisdiction === undefined) return halt(missing);
+    if (visible === undefined || offer?.crossJurisdiction === undefined) return invariant(missing);
     const closing = markAdmissionClosed(
       h.admissions,
       route.source.entityId,
@@ -45797,12 +45793,12 @@ const routeRemoteCancel = (acc: RemoteCancels, cancel: SwapRef): Result<RemoteCa
   const current = trimLower(acc.host.id);
   const sourceHub = trimLower(route.source.counterpartyEntityId);
   if (current !== sourceHub)
-    return halt(`CROSS_J_CANCEL_SOURCE_HUB_REQUIRED:offer=${cancel.offerId}:entity=${current}:sourceHub=${sourceHub}`);
+    return invariant(`CROSS_J_CANCEL_SOURCE_HUB_REQUIRED:offer=${cancel.offerId}:entity=${current}:sourceHub=${sourceHub}`);
   const owner = crossBookOwnerRef(route);
-  if (!owner) return halt(`CROSS_J_CANCEL_BOOK_OWNER_MISSING:offer=${cancel.offerId}`);
+  if (!owner) return invariant(`CROSS_J_CANCEL_BOOK_OWNER_MISSING:offer=${cancel.offerId}`);
   if (owner === current) return ok(kept);
   const signer = crossRouteSigner(route, owner);
-  if (!signer) return halt(`CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:offer=${cancel.offerId}:owner=${owner}`);
+  if (!signer) return invariant(`CROSS_J_CANCEL_BOOK_OWNER_SIGNER_MISSING:offer=${cancel.offerId}:owner=${owner}`);
   const removal = {
     orderId: cancel.offerId,
     sourceEntityId: route.source.entityId,
@@ -45892,356 +45888,939 @@ const committedCrossOfferError = (account: HubAccount, o: BookOfferInput): strin
 const admitCrossForMatching = (hub: Hub, o: CrossBookOffer): Result<boolean, EntityError> => {
   const status = o.crossJurisdiction.status;
   if (status !== "resting" && status !== "partially_filled") {
-    return halt(`CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${o.offerId} status=${status}`);
+    return invariant(`CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${o.offerId} status=${status}`);
   }
   const account = hub.accounts.get(entityRef(o.accountId));
   if (account !== undefined && !account.active) return ok(false);
   const bad = account?.offers.has(o.offerId) ? committedCrossOfferError(account, o) : null;
-  if (bad !== null) return halt(bad);
+  if (bad !== null) return invariant(bad);
   const failure = bookAdmissionFailure(hub.id, hub.crossAdmissions, o.crossJurisdiction, Number(hub.timestamp ?? 0));
-  return chain(failure, (f) => (f?.kind === "invalid" ? halt(f.message) : ok(f === null)));
+  return chain(failure, (f) => (f?.kind === "invalid" ? invariant(f.message) : ok(f === null)));
 };
 
-// ---- og entity/tx/handlers/cross-j/clear.ts (requestCrossJurisdictionClear, materializeCrossJurisdictionClear), payments/pull.ts (crossPullClose) and
-// cross-j/sweep.ts (orderbookSweepCrossJurisdiction). og mutates the Entity candidate in place; each step here returns the next host and the Account work. ----
+// ---- og entity/tx/handlers/cross-j/clear.ts (requestCrossJurisdictionClear, materializeCrossJurisdictionClear),
+// payments/pull.ts (crossPullClose) and cross-j/sweep.ts (orderbookSweepCrossJurisdiction). og mutates the Entity
+// candidate in place; each step here returns the next host and the Account work. ----
 /** A cross-j step that also returns Account work (og AccountTxTarget[]). */
 export type CrossHostStep = BookHostStep & { readonly accountTxs: readonly AccountTxTarget[] };
-type CrossAcc = { readonly host: BookHost; readonly messages: readonly string[]; readonly outputs: readonly CrossEntityOutput[]; readonly accountTxs: readonly AccountTxTarget[] };
+type CrossAcc = {
+  readonly host: BookHost;
+  readonly messages: readonly string[];
+  readonly outputs: readonly CrossEntityOutput[];
+  readonly accountTxs: readonly AccountTxTarget[];
+};
 const crossAcc = (host: BookHost): CrossAcc => ({ host, messages: [], outputs: [], accountTxs: [] });
 const accNote = (a: CrossAcc, message: string): CrossAcc => ({ ...a, messages: [...a.messages, message] });
-const accStep = (a: CrossAcc): CrossHostStep => ({ ...hostStep(a.host, { outputs: a.outputs, messages: a.messages }), accountTxs: a.accountTxs });
-const putRoute = <H extends BookHost>(h: H, route: CrossRoute): H => ({ ...h, swaps: mapSet(h.swaps ?? new Map<string, CrossRoute>(), route.orderId, route) });
+const accStep = (a: CrossAcc): CrossHostStep => ({
+  ...hostStep(a.host, { outputs: a.outputs, messages: a.messages }),
+  accountTxs: a.accountTxs,
+});
+/** A step that only notes why nothing happened. */
+const crossNoted = (h: BookHost, message: string): Result<CrossHostStep, never> =>
+  ok(accStep(accNote(crossAcc(h), message)));
+const putRoute = <H extends BookHost>(h: H, route: CrossRoute): H =>
+  ({ ...h, swaps: mapSet(h.swaps ?? new Map<string, CrossRoute>(), route.orderId, route) });
 /** og accountHasCrossPullCloseQueued: a cross_pull_close for this pull in the mempool or our pending frame. */
-const pullCloseQueued = (a: HubAccount, pullId: string): boolean => a.queued.some((tx) => tx.type === "cross_pull_close" && tx.pullId === pullId);
+const pullCloseQueued = (a: HubAccount, pullId: string): boolean =>
+  a.queued.some((tx) => tx.type === "cross_pull_close" && tx.pullId === pullId);
 /** og's proposer wake: an empty input to this Entity's validators[0], as stored. */
-const selfWake = (h: BookHost): readonly CrossEntityOutput[] => { const v = h.validators[0]; return v ? [{ entityId: h.id, signerId: v, txs: [] }] : []; };
-const fillRatioE = (r: CrossRoute): Result<number, EntityError> => map(fatalCross(crossFillAmounts(r)), (f) => f.fillRatio);
-const closeProofE = (r: CrossRoute, binary: string): Result<CrossCloseProof, EntityError> => fatalCross(buildCrossCloseProof(r, binary));
+const selfWake = (h: BookHost): readonly CrossEntityOutput[] => {
+  const v = h.validators[0];
+  return v ? [{ entityId: h.id, signerId: v, txs: [] }] : [];
+};
+const fillRatioE = (r: CrossRoute): Result<number, EntityError> =>
+  map(fatalCross(crossFillAmounts(r)), (f) => f.fillRatio);
+const closeProofE = (r: CrossRoute, binary: string): Result<CrossCloseProof, EntityError> =>
+  fatalCross(buildCrossCloseProof(r, binary));
+const EXACT_PROOF_FIELDS = [
+  "orderId",
+  "sourcePullId",
+  "targetPullId",
+  "fillRatio",
+  "cumulativeSourceAmount",
+  "cumulativeTargetAmount",
+  "closeMode",
+] as const;
 /** og closeProofMatches / closeProofsMatch: route and binary hashes compare lowercased, the rest exactly. */
-const closeProofSame = (a: CrossCloseProof, b: CrossCloseProof): boolean => a.orderId === b.orderId && lowerText(a.routeHash) === lowerText(b.routeHash) && a.sourcePullId === b.sourcePullId && a.targetPullId === b.targetPullId
-  && a.fillRatio === b.fillRatio && a.cumulativeSourceAmount === b.cumulativeSourceAmount && a.cumulativeTargetAmount === b.cumulativeTargetAmount && lowerText(a.binaryHash) === lowerText(b.binaryHash) && a.closeMode === b.closeMode;
-/** og requestPureCancel: nothing filled, so both pulls close at ratio 0 in one Hub cohort (the source here, the target through the sibling hub). */
-const pureCancelClear = (a: CrossAcc, route: CrossRoute, accountId: string | null, orderId: string, cancel: boolean): Result<CrossHostStep, EntityError> => {
+const closeProofSame = (a: CrossCloseProof, b: CrossCloseProof): boolean =>
+  lowerText(a.routeHash) === lowerText(b.routeHash)
+  && lowerText(a.binaryHash) === lowerText(b.binaryHash)
+  && EXACT_PROOF_FIELDS.every((field) => a[field] === b[field]);
+/** The local route enters `clearing` carrying the source close proof. */
+const enterClearing = (route: CrossRoute, proof: CrossCloseProof, at: number): Result<CrossRoute, EntityError> =>
+  transitionE({ ...route, sourceCloseProof: proof }, "clearing", at);
+/**
+ * og's atomic Hub close: the sibling hub receives the paired target close, carrying the route as it enters `clearing`.
+ */
+const pairedTargetClose = (
+  route: CrossRoute,
+  targetPullId: string,
+  binary: string,
+  proof: CrossCloseProof,
+  at: number,
+  description: string,
+): Result<CrossEntityOutput, EntityError> =>
+  chain(cloneRouteE(route), (clone) => chain(enterClearing(clone, proof, at), (command) => {
+    const close = {
+      counterpartyEntityId: route.target.counterpartyEntityId,
+      pullId: targetPullId,
+      binary,
+      proof,
+      route: command,
+      description,
+    };
+    return crossOutput(route.target.entityId, route.targetHubSignerId, [{ type: "crossPullClose", data: close }]);
+  }));
+
+
+// -- asking for the clear
+
+/**
+ * og requestPureCancel: nothing filled, so both pulls close at ratio 0 in one Hub cohort (the source here, the target
+ * through the sibling hub).
+ */
+const pureCancelClear = (
+  a: CrossAcc,
+  route: CrossRoute,
+  accountId: string | null,
+  orderId: string,
+  cancel: boolean,
+): Result<CrossHostStep, EntityError> => {
   if (!cancel) return ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} ignored: no pending fill`)));
-  const at = a.host.timestamp, sourcePull = route.sourcePull, targetPull = route.targetPull;
+  const at = a.host.timestamp;
+  const { sourcePull, targetPull } = route;
   return chain(closeProofE(route, "0x"), (proof) => {
     const account = accountId === null ? undefined : a.host.accounts.get(accountId);
-    if (accountId === null || sourcePull === undefined || targetPull === undefined || !(account?.pulls?.has(sourcePull.pullId) ?? false)) return ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} waiting for source close proof`)));
-    return chain(cloneRouteE(route), (clone) => chain(transitionE({ ...clone, sourceCloseProof: proof }, "clearing", at), (command) => chain(crossOutput(route.target.entityId, route.targetHubSignerId, [{ type: "crossPullClose",
-      data: { counterpartyEntityId: route.target.counterpartyEntityId, pullId: targetPull.pullId, binary: "0x", proof, route: command, description: `Cross-j ${orderId} paired pure-cancel target close` } }]), (out) =>
-      map(transitionE({ ...route, sourceCloseProof: proof }, "clearing", at), (r): CrossHostStep => accStep({
-        host: putRoute(a.host, { ...r, pendingClearRequestedAt: at, clearingPolicy: "cancel_and_clear" }), messages: [...a.messages, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`],
-        outputs: [...a.outputs, out, ...selfWake(a.host)], accountTxs: [...a.accountTxs, { accountId, tx: { type: "cross_pull_close", pullId: sourcePull.pullId, binary: "0x", proof } }],
-      })))));
+    const holdsPull = account?.pulls?.has(sourcePull?.pullId ?? "") ?? false;
+    if (accountId === null || sourcePull === undefined || targetPull === undefined || !holdsPull) {
+      return ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} waiting for source close proof`)));
+    }
+    const description = `Cross-j ${orderId} paired pure-cancel target close`;
+    return chain(pairedTargetClose(route, targetPull.pullId, "0x", proof, at, description), (out) =>
+      map(enterClearing(route, proof, at), (r): CrossHostStep =>
+        accStep({
+          host: putRoute(a.host, { ...r, pendingClearRequestedAt: at, clearingPolicy: "cancel_and_clear" }),
+          messages: [...a.messages, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`],
+          outputs: [...a.outputs, out, ...selfWake(a.host)],
+          accountTxs: [
+            ...a.accountTxs,
+            { accountId, tx: { type: "cross_pull_close", pullId: sourcePull.pullId, binary: "0x", proof } },
+          ],
+        }),
+      ),
+    );
   });
 };
-/** og requestFilledRouteReveal: a committed fill waits for the default proposer's ladder reveal (materializeCrossJurisdictionClear). */
-const filledRevealClear = (a: CrossAcc, route: CrossRoute, accountId: string | null, orderId: string, cancel: boolean, ratio: number): Result<CrossHostStep, EntityError> => {
-  const account = accountId === null ? undefined : a.host.accounts.get(accountId), pullId = route.sourcePull?.pullId ?? "";
-  if (account === undefined) return ok(accStep(accNote(a, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`)));
-  if (!(account.pulls?.has(pullId) ?? false)) return ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`)));
-  if (pullCloseQueued(account, pullId)) return ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} ignored: source pull close already queued`)));
+/**
+ * og requestFilledRouteReveal: a committed fill waits for the default proposer's ladder reveal
+ * (materializeCrossJurisdictionClear).
+ */
+const filledRevealClear = (
+  a: CrossAcc,
+  route: CrossRoute,
+  accountId: string | null,
+  orderId: string,
+  cancel: boolean,
+  ratio: number,
+): Result<CrossHostStep, EntityError> => {
+  const account = accountId === null ? undefined : a.host.accounts.get(accountId);
+  const pullId = route.sourcePull?.pullId ?? "";
+  const ignored = (why: string): Result<CrossHostStep, never> =>
+    ok(accStep(accNote(a, `🌉 Cross-j clear ${orderId} ignored: ${why}`)));
+  if (account === undefined)
+    return ok(
+      accStep(accNote(a, `❌ Cross-j clear ${orderId} blocked: no source account with ${route.source.entityId}`)),
+    );
+  if (!(account.pulls?.has(pullId) ?? false)) return ignored("source pull already closed");
+  if (pullCloseQueued(account, pullId)) return ignored("source pull close already queued");
   const at = a.host.timestamp;
-  return map(transitionE(route, "clear_requested", at), (r) => accStep({
-    ...a, host: putRoute(a.host, { ...r, pendingClearRequestedAt: at, clearingPolicy: cancel || ratio < MAX_FILL ? "cancel_and_clear" : "full_fill" }),
-    messages: [...a.messages, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${MAX_FILL}`], outputs: [...a.outputs, ...selfWake(a.host)],
-  }));
+  const clearingPolicy = cancel || ratio < MAX_FILL ? "cancel_and_clear" : "full_fill";
+  return map(transitionE(route, "clear_requested", at), (r) =>
+    accStep({
+      ...a,
+      host: putRoute(a.host, { ...r, pendingClearRequestedAt: at, clearingPolicy }),
+      messages: [...a.messages, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${MAX_FILL}`],
+      outputs: [...a.outputs, ...selfWake(a.host)],
+    }),
+  );
 };
 /**
- * og handleRequestCrossJurisdictionClearEntityTx: a source user asks through its Account (swap_cancel_request); the source hub removes a still-resting
- * local row, then closes an unfilled route at once (pure cancel) or asks its proposer for the ladder reveal of the committed fill.
+ * og findCrossJurisdictionOfferRoute: the Account offer's opening snapshot, when there is one, must name the same
+ * route.
  */
-export const requestCrossClear = (h: BookHost, data: { readonly orderId: string; readonly cancelRemainder?: boolean | undefined }): Result<CrossHostStep, EntityError> => {
-  const orderId = data.orderId, cancel = data.cancelRemainder ?? false, stored = h.swaps?.get(orderId);
-  if (stored === undefined) return halt(`CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
-  if (isCrossTerminal(stored.status)) return ok(accStep(accNote(crossAcc(h), `🌉 Cross-j clear ${orderId} ignored: route ${stored.status}`)));
-  const self = entityRef(h.id), src = entityRef(stored.source.entityId), srcHub = entityRef(stored.source.counterpartyEntityId);
-  // og findCrossJurisdictionOfferRoute: the Account offer's opening snapshot must name the same route
-  const peer = self === src ? srcHub : self === srcHub ? src : "", offerRoute = peer ? h.accounts.get(peer)?.offers.get(orderId)?.crossJurisdiction : undefined;
-  const snapshot: Result<void, EntityError> = offerRoute === undefined ? ok(undefined)
-    : chain(canonRoute(offerRoute), (c) => (lowerText(c.routeHash) !== lowerText(stored.routeHash) ? halt(`CROSS_J_CLEAR_ROUTE_HASH_MISMATCH:${orderId}`) : ok(undefined)));
-  return chain(snapshot, () => chain(cloneRouteE(stored), (route): Result<CrossHostStep, EntityError> => {
-    if (self !== srcHub) {
-      // og requestClearThroughSourceAccount: the user cannot address the remote hub; its Account carries the cancel to the source hub
-      if (self !== src) return halt(`CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${h.id}:${src}`);
-      if (h.accounts.get(srcHub)?.offers.get(orderId)?.crossJurisdiction === undefined) return halt(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${h.id}:${srcHub}`);
-      return chain(cancel ? ok(1) : fillRatioE(route), (ratio) => ratio <= 0 ? ok(accStep(accNote(crossAcc(h), `🌉 Cross-j clear ${orderId} ignored: no pending fill`)))
-        : map(transitionE(route, "clear_requested", h.timestamp), (r) => accStep({
-          host: putRoute(h, { ...r, pendingClearRequestedAt: h.timestamp, clearingPolicy: cancel ? "cancel_and_clear" : "manual" }), messages: [`🌉 Cross-j clear ${orderId} queued through source Account`], outputs: [],
-          accountTxs: [{ accountId: srcHub, tx: { type: "swap_cancel_request", offerId: orderId } }],
-        })));
-    }
-    return chain(canonRoute(route), (canonical) => {
-      if (!canonical.sourcePull || !canonical.targetPull) return halt(`CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
-      if (canonical.status === "clearing") return ok(accStep(accNote(crossAcc(h), `🌉 Cross-j clear ${orderId} ignored: close already queued`)));
-      return chain(fillRatioE(canonical), (ratio) => {
-        const accountId = h.accounts.has(src) ? src : null;
-        // og: the user's Account offer stays open until the pull close deletes it; only a still-resting local book row leaves before the reveal
-        const removed = accountId === null ? ok(unchanged(h)) : removeRowById(h, `${accountId}:${orderId}`);
-        return chain(removed, ({ host, changed: gone }) => {
-          const a = gone ? accNote(crossAcc(host), `🌉 Cross-j clear ${orderId} removed live book order`) : crossAcc(host);
-          return ratio <= 0 ? pureCancelClear(a, canonical, accountId, orderId, cancel) : filledRevealClear(a, canonical, accountId, orderId, cancel, ratio);
-        });
+const offerSnapshotMatches = (h: BookHost, stored: CrossRoute, peer: string): Result<void, EntityError> => {
+  const offerRoute = peer ? h.accounts.get(peer)?.offers.get(stored.orderId)?.crossJurisdiction : undefined;
+  if (offerRoute === undefined) return ok(undefined);
+  return chain(canonRoute(offerRoute), (c) =>
+    lowerText(c.routeHash) === lowerText(stored.routeHash)
+      ? ok(undefined)
+      : invariant(`CROSS_J_CLEAR_ROUTE_HASH_MISMATCH:${stored.orderId}`),
+  );
+};
+/**
+ * og requestClearThroughSourceAccount: the user cannot address the remote hub; its Account carries the cancel to the
+ * source hub.
+ */
+const clearThroughSourceAccount = (
+  h: BookHost,
+  route: CrossRoute,
+  srcHub: string,
+  cancel: boolean,
+): Result<CrossHostStep, EntityError> => {
+  const orderId = route.orderId;
+  if (h.accounts.get(srcHub)?.offers.get(orderId)?.crossJurisdiction === undefined) {
+    return invariant(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${h.id}:${srcHub}`);
+  }
+  return chain(cancel ? ok(1) : fillRatioE(route), (ratio) => {
+    if (ratio <= 0) return crossNoted(h, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
+    const clearingPolicy = cancel ? "cancel_and_clear" : "manual";
+    return map(transitionE(route, "clear_requested", h.timestamp), (r) =>
+      accStep({
+        host: putRoute(h, { ...r, pendingClearRequestedAt: h.timestamp, clearingPolicy }),
+        messages: [`🌉 Cross-j clear ${orderId} queued through source Account`],
+        outputs: [],
+        accountTxs: [{ accountId: srcHub, tx: { type: "swap_cancel_request", offerId: orderId } }],
+      }),
+    );
+  });
+};
+/**
+ * The source hub's own clear: a still-resting local row leaves, then an unfilled route closes at once and a filled one
+ * waits for the reveal.
+ */
+const clearAtSourceHub = (
+  h: BookHost,
+  route: CrossRoute,
+  src: string,
+  cancel: boolean,
+): Result<CrossHostStep, EntityError> =>
+  chain(canonRoute(route), (canonical) => {
+    const orderId = route.orderId;
+    if (!canonical.sourcePull || !canonical.targetPull)
+      return invariant(`CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
+    if (canonical.status === "clearing") return crossNoted(h, `🌉 Cross-j clear ${orderId} ignored: close already queued`);
+    return chain(fillRatioE(canonical), (ratio) => {
+      const accountId = h.accounts.has(src) ? src : null;
+      // og: the user's Account offer stays open until the pull close deletes it; only a still-resting local book row
+      // leaves before the reveal
+      const removed = accountId === null ? ok(unchanged(h)) : removeRowById(h, `${accountId}:${orderId}`);
+      return chain(removed, ({ host, changed }) => {
+        const a = changed
+          ? accNote(crossAcc(host), `🌉 Cross-j clear ${orderId} removed live book order`)
+          : crossAcc(host);
+        return ratio <= 0
+          ? pureCancelClear(a, canonical, accountId, orderId, cancel)
+          : filledRevealClear(a, canonical, accountId, orderId, cancel, ratio);
       });
     });
+  });
+/**
+ * og handleRequestCrossJurisdictionClearEntityTx: a source user asks through its Account (swap_cancel_request); the
+ * source hub removes a still-resting local row, then closes an unfilled route at once (pure cancel) or asks its
+ * proposer for the ladder reveal of the committed fill.
+ */
+export const requestCrossClear = (
+  h: BookHost,
+  data: { readonly orderId: string; readonly cancelRemainder?: boolean | undefined },
+): Result<CrossHostStep, EntityError> => {
+  const orderId = data.orderId;
+  const cancel = data.cancelRemainder ?? false;
+  const stored = h.swaps?.get(orderId);
+  if (stored === undefined) return invariant(`CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
+  if (isCrossTerminal(stored.status)) return crossNoted(h, `🌉 Cross-j clear ${orderId} ignored: route ${stored.status}`);
+  const self = entityRef(h.id);
+  const src = entityRef(stored.source.entityId);
+  const srcHub = entityRef(stored.source.counterpartyEntityId);
+  const peer = self === src ? srcHub : self === srcHub ? src : "";
+  return chain(offerSnapshotMatches(h, stored, peer), () => chain(cloneRouteE(stored), (route) => {
+    if (self === srcHub) return clearAtSourceHub(h, route, src, cancel);
+    if (self !== src) return invariant(`CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${h.id}:${src}`);
+    return clearThroughSourceAccount(h, route, srcHub, cancel);
   }));
 };
+
+
+// -- the proposer's reveal, and the pull closes it drives
+
 /** og materializeCrossJurisdictionClear data: the default proposer's public reveal of the committed fill. */
-export type CrossClearReveal = { readonly proposerSignerId: string; readonly orderId: string; readonly binary: string; readonly proof: CrossCloseProof };
+export type CrossClearReveal = {
+  readonly proposerSignerId: string;
+  readonly orderId: string;
+  readonly binary: string;
+  readonly proof: CrossCloseProof;
+};
+type VerifiedReveal = { readonly fillRatio: number; readonly proof: CrossCloseProof; readonly accountId: string };
 /**
- * og handleMaterializeCrossJurisdictionClearEntityTx: every validator verifies the proposer's reveal against the committed source pull (the private
- * seed never enters replay), then the hub closes its source pull and sends the paired target close to the sibling hub.
+ * Every validator checks the reveal against the committed source pull: the ladder opens at the committed ratio and
+ * yields the same proof.
+ */
+const verifyReveal = (h: BookHost, route: CrossRoute, data: CrossClearReveal): Result<VerifiedReveal, EntityError> => {
+  const { orderId, binary } = data;
+  const sp = route.sourcePull;
+  if (sp === undefined || route.targetPull === undefined)
+    return invariant(`CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
+  if (entityRef(route.source.counterpartyEntityId) !== entityRef(h.id))
+    return invariant(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
+  return chain(fillRatioE(route), (fillRatio) => {
+    if (fillRatio <= 0) return invariant(`CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING:${orderId}`);
+    const decoded = verifyHashLadderBinary({ fullHash: sp.fullHash, partialRoot: sp.partialRoot }, binary);
+    if (!decoded.ok) return invariant(`CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID:${orderId}:${decoded.error.reason}`);
+    if (decoded.value.fillRatio !== fillRatio) {
+      return invariant(`CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH:${orderId}:${decoded.value.fillRatio}:${fillRatio}`);
+    }
+    return chain(closeProofE(route, binary), (proof) => {
+      if (!closeProofSame(data.proof, proof)) return invariant(`CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
+      const accountId = entityRef(route.source.entityId);
+      const account = h.accounts.get(accountId);
+      if (account === undefined || !(account.pulls?.has(sp.pullId) ?? false))
+        return invariant(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
+      if (pullCloseQueued(account, sp.pullId)) return invariant(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
+      return ok({ fillRatio, proof, accountId });
+    });
+  });
+};
+/**
+ * og handleMaterializeCrossJurisdictionClearEntityTx: every validator verifies the proposer's reveal against the
+ * committed source pull (the private seed never enters replay), then the hub closes its source pull and sends the
+ * paired target close to the sibling hub.
  */
 export const materializeCrossClear = (h: BookHost, data: CrossClearReveal): Result<CrossHostStep, EntityError> => {
-  const { orderId, binary } = data, expected = entityRef(h.validators[0] || ""), claimed = entityRef(data.proposerSignerId);
-  if (!expected || claimed !== expected) return crossEvict(`CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimed || "missing"}:${expected || "missing"}`);
+  const { orderId, binary } = data;
+  const expected = entityRef(h.validators[0] || "");
+  const claimed = entityRef(data.proposerSignerId);
+  if (!expected || claimed !== expected) {
+    return crossEvict(`CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimed || "missing"}:${expected || "missing"}`);
+  }
   const stored = h.swaps?.get(orderId);
-  if (stored === undefined || stored.status !== "clear_requested") return halt(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
-  return chain(canonRoute(stored), (route) => {
-    const sp = route.sourcePull;
-    if (sp === undefined || route.targetPull === undefined) return halt(`CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
-    if (entityRef(route.source.counterpartyEntityId) !== entityRef(h.id)) return halt(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
-    return chain(fillRatioE(route), (fillRatio) => {
-      if (fillRatio <= 0) return halt(`CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING:${orderId}`);
-      const decoded = verifyHashLadderBinary({ fullHash: sp.fullHash, partialRoot: sp.partialRoot }, binary);
-      if (!decoded.ok) return halt(`CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID:${orderId}:${decoded.error.reason}`);
-      if (decoded.value.fillRatio !== fillRatio) return halt(`CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH:${orderId}:${decoded.value.fillRatio}:${fillRatio}`);
-      return chain(closeProofE(route, binary), (proof) => {
-        if (!closeProofSame(data.proof, proof)) return halt(`CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
-        const accountId = entityRef(route.source.entityId), account = h.accounts.get(accountId);
-        if (account === undefined || !(account.pulls?.has(sp.pullId) ?? false)) return halt(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
-        if (pullCloseQueued(account, sp.pullId)) return halt(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
-        // og writes the stored route (its fork), which must carry the canonical hash exactly
-        return chain(cloneRouteE(stored), (fork) => {
-          if (route.routeHash && fork.routeHash !== route.routeHash) return halt(`CROSS_J_CLEAR_MATERIALIZE_ROUTE_FORK_MISMATCH:${orderId}`);
-          const source = fork.sourcePull, target = fork.targetPull, at = h.timestamp;
-          if (source === undefined) return halt(`CROSS_J_CLEAR_SOURCE_PULL_MISSING:${fork.orderId}`);
-          if (target === undefined) return halt(`CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
-          return chain(cloneRouteE(fork), (clone) => chain(transitionE({ ...clone, sourceCloseProof: proof }, "clearing", at), (command) => chain(crossOutput(fork.target.entityId, fork.targetHubSignerId, [{ type: "crossPullClose",
-            data: { counterpartyEntityId: fork.target.counterpartyEntityId, pullId: target.pullId, binary, proof, route: command, description: `Cross-j ${fork.orderId} paired target close ${fillRatio}/${MAX_FILL}` } }]), (out) =>
-            map(transitionE({ ...fork, sourceCloseProof: proof }, "clearing", at), (next) => accStep({
-              host: putRoute(h, next), messages: [`🌉 Cross-j clear ${orderId} queued atomic Hub source+target close ratio=${fillRatio}/${MAX_FILL}`], outputs: [out, ...selfWake(h)],
-              accountTxs: [{ accountId, tx: { type: "cross_pull_close", pullId: source.pullId, binary, proof } }],
-            })))));
-        });
-      });
-    });
-  });
+  if (stored === undefined || stored.status !== "clear_requested")
+    return invariant(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
+  return chain(canonRoute(stored), (route) =>
+    chain(verifyReveal(h, route, data), ({ fillRatio, proof, accountId }) =>
+      // og writes the stored route (its fork), which must carry the canonical hash exactly
+      chain(cloneRouteE(stored), (fork) => {
+        const at = h.timestamp;
+        const { sourcePull, targetPull } = fork;
+        const ratio = `${fillRatio}/${MAX_FILL}`;
+        if (route.routeHash && fork.routeHash !== route.routeHash)
+          return invariant(`CROSS_J_CLEAR_MATERIALIZE_ROUTE_FORK_MISMATCH:${orderId}`);
+        if (sourcePull === undefined) return invariant(`CROSS_J_CLEAR_SOURCE_PULL_MISSING:${fork.orderId}`);
+        if (targetPull === undefined) return invariant(`CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
+        const description = `Cross-j ${fork.orderId} paired target close ${ratio}`;
+        return chain(pairedTargetClose(fork, targetPull.pullId, binary, proof, at, description), (out) =>
+          map(enterClearing(fork, proof, at), (next) =>
+            accStep({
+              host: putRoute(h, next),
+              messages: [`🌉 Cross-j clear ${orderId} queued atomic Hub source+target close ratio=${ratio}`],
+              outputs: [out, ...selfWake(h)],
+              accountTxs: [{ accountId, tx: { type: "cross_pull_close", pullId: sourcePull.pullId, binary, proof } }],
+            }),
+          ),
+        );
+      }),
+    ),
+  );
 };
 /** og crossPullClose Entity tx data. */
-export type CrossPullCloseData = { readonly counterpartyEntityId: string; readonly pullId: string; readonly binary: string; readonly proof: CrossCloseProof; readonly route?: CrossRoute | undefined; readonly description?: string | undefined };
-/** og proofRouteError (payments/pull.ts): the close must name this route and pull, open its ladder at the proof ratio, and never roll the informed ratio back. */
-const pullCloseProofError = (route: CrossRoute, proof: CrossCloseProof, binary: string, leg: "source" | "target", command: CrossRoute | undefined): Result<string | null, EntityError> => {
+export type CrossPullCloseData = {
+  readonly counterpartyEntityId: string;
+  readonly pullId: string;
+  readonly binary: string;
+  readonly proof: CrossCloseProof;
+  readonly route?: CrossRoute | undefined;
+  readonly description?: string | undefined;
+};
+type PullLeg = "source" | "target";
+/** The route a close command carries must name the proof's order, route and both pulls. */
+const commandRouteError = (command: CrossRoute | undefined, proof: CrossCloseProof): string | null => {
+  if (command === undefined) return null;
+  switch (true) {
+    case command.orderId !== proof.orderId:
+      return `command route order ${command.orderId} != ${proof.orderId}`;
+    case lowerText(command.routeHash) !== lowerText(proof.routeHash):
+      return `command route hash ${command.routeHash} != ${proof.routeHash}`;
+    case command.sourcePull?.pullId !== proof.sourcePullId:
+      return `command source pull ${command.sourcePull?.pullId} != ${proof.sourcePullId}`;
+    case command.targetPull?.pullId !== proof.targetPullId:
+      return `command target pull ${command.targetPull?.pullId} != ${proof.targetPullId}`;
+    default:
+      return null;
+  }
+};
+/** The proof against the one og builds at the proof's own ratio: amounts and mode must agree. */
+const expectedProofError = (proof: CrossCloseProof, e: CrossCloseProof): string | null => {
+  switch (true) {
+    case proof.fillRatio !== e.fillRatio:
+      return `ratio ${proof.fillRatio} != ${e.fillRatio}`;
+    case proof.cumulativeSourceAmount !== e.cumulativeSourceAmount:
+      return `source amount ${proof.cumulativeSourceAmount} != ${e.cumulativeSourceAmount}`;
+    case proof.cumulativeTargetAmount !== e.cumulativeTargetAmount:
+      return `target amount ${proof.cumulativeTargetAmount} != ${e.cumulativeTargetAmount}`;
+    case proof.closeMode !== e.closeMode:
+      return `mode ${proof.closeMode} != ${e.closeMode}`;
+    default:
+      return null;
+  }
+};
+/** A target close must carry the source close proof it pairs with. */
+const pairedProofError = (
+  route: CrossRoute,
+  proof: CrossCloseProof,
+  leg: PullLeg,
+  command: CrossRoute | undefined,
+): string | null => {
+  if (leg !== "target") return null;
+  const sourceProof = route.sourceCloseProof ?? command?.sourceCloseProof;
+  if (!sourceProof) return "source close proof missing";
+  return closeProofSame(sourceProof, proof) ? null : "source close proof mismatch";
+};
+/**
+ * og proofRouteError (payments/pull.ts): the close must name this route and pull, open its ladder at the proof ratio,
+ * and never roll the informed ratio back.
+ */
+const pullCloseProofError = (
+  route: CrossRoute,
+  proof: CrossCloseProof,
+  binary: string,
+  leg: PullLeg,
+  command: CrossRoute | undefined,
+): Result<string | null, EntityError> => {
   const routeHash = lowerText(route.routeHash);
+  const { sourcePull, targetPull } = route;
   if (!routeHash) return ok("route hash missing");
   if (lowerText(proof.routeHash) !== routeHash) return ok(`route hash ${proof.routeHash} != ${routeHash}`);
-  if (command !== undefined) {
-    if (command.orderId !== proof.orderId) return ok(`command route order ${command.orderId} != ${proof.orderId}`);
-    if (lowerText(command.routeHash) !== lowerText(proof.routeHash)) return ok(`command route hash ${command.routeHash} != ${proof.routeHash}`);
-    if (command.sourcePull?.pullId !== proof.sourcePullId) return ok(`command source pull ${command.sourcePull?.pullId} != ${proof.sourcePullId}`);
-    if (command.targetPull?.pullId !== proof.targetPullId) return ok(`command target pull ${command.targetPull?.pullId} != ${proof.targetPullId}`);
-  }
+  const commandError = commandRouteError(command, proof);
+  if (commandError !== null) return ok(commandError);
   if (proof.orderId !== route.orderId) return ok(`order ${proof.orderId} != ${route.orderId}`);
-  const { sourcePull, targetPull } = route;
   if (!sourcePull || !targetPull) return ok("pull commitments missing");
   if (proof.sourcePullId !== sourcePull.pullId) return ok(`source pull ${proof.sourcePullId} != ${sourcePull.pullId}`);
   if (proof.targetPullId !== targetPull.pullId) return ok(`target pull ${proof.targetPullId} != ${targetPull.pullId}`);
+  const commitment = leg === "source" ? sourcePull : targetPull;
+  const ladder = { fullHash: commitment.fullHash, partialRoot: commitment.partialRoot };
   return chain(fatalCross(crossCloseBinaryHash(binary)), (binaryHash) => {
     if (lowerText(proof.binaryHash) !== binaryHash.toLowerCase()) return ok("binary hash mismatch");
-    const commitment = leg === "source" ? sourcePull : targetPull;
-    return chain(fatalCross(verifyHashLadderBinary({ fullHash: commitment.fullHash, partialRoot: commitment.partialRoot }, binary)), (decoded) => {
-      if (decoded.fillRatio !== proof.fillRatio) return ok(`binary ratio ${decoded.fillRatio} != proof ${proof.fillRatio}`);
-      if (leg === "target") {
-        const sourceProof = route.sourceCloseProof ?? command?.sourceCloseProof;
-        if (!sourceProof) return ok("source close proof missing");
-        if (!closeProofSame(sourceProof, proof)) return ok("source close proof mismatch");
-      }
+    return chain(fatalCross(verifyHashLadderBinary(ladder, binary)), (decoded) => {
+      if (decoded.fillRatio !== proof.fillRatio)
+        return ok(`binary ratio ${decoded.fillRatio} != proof ${proof.fillRatio}`);
+      const pairing = pairedProofError(route, proof, leg, command);
+      if (pairing !== null) return ok(pairing);
       return chain(proofRatioE(route), (routeRatio) => {
         if (proof.fillRatio < routeRatio) return ok(`ratio ${proof.fillRatio} < informed ${routeRatio}`);
         if (leg !== "source" && routeRatio <= 0) return ok(null);
         // og: off-chain progress never gates the close; the expectation is built at the proof's ratio
-        return map(closeProofE(withCloseProofProgress(route, proof, route.updatedAt), binary), (e) => proof.fillRatio !== e.fillRatio ? `ratio ${proof.fillRatio} != ${e.fillRatio}`
-          : proof.cumulativeSourceAmount !== e.cumulativeSourceAmount ? `source amount ${proof.cumulativeSourceAmount} != ${e.cumulativeSourceAmount}`
-          : proof.cumulativeTargetAmount !== e.cumulativeTargetAmount ? `target amount ${proof.cumulativeTargetAmount} != ${e.cumulativeTargetAmount}`
-          : proof.closeMode !== e.closeMode ? `mode ${proof.closeMode} != ${e.closeMode}` : null);
+        return map(closeProofE(withCloseProofProgress(route, proof, route.updatedAt), binary), (e) =>
+          expectedProofError(proof, e),
+        );
       });
     });
   });
 };
+/** The route a pull close finds: this hub's source leg with the user, else its target leg with the sibling hub. */
+const closedLeg = (
+  h: BookHost,
+  pullId: string,
+  cp: string,
+): { readonly route: CrossRoute; readonly leg: PullLeg } | undefined => {
+  const self = entityRef(h.id);
+  const routes = [...(h.swaps?.values() ?? [])];
+  const source = routes.find(
+    (r) =>
+      r.sourcePull?.pullId === pullId &&
+      entityRef(r.source.counterpartyEntityId) === self &&
+      entityRef(r.source.entityId) === cp,
+  );
+  const target = routes.find(
+    (r) =>
+      r.targetPull?.pullId === pullId &&
+      entityRef(r.target.entityId) === self &&
+      entityRef(r.target.counterpartyEntityId) === cp,
+  );
+  if (source !== undefined) return { route: source, leg: "source" };
+  return target === undefined ? undefined : { route: target, leg: "target" };
+};
+/** The target hub's route after its close: the proof's progress, then `clearing` under a cancel-and-clear policy. */
+const targetClearing = (withProof: CrossRoute, proof: CrossCloseProof, at: number): Result<CrossRoute, EntityError> => {
+  const progressed = withCloseProofProgress(withProof, proof, withProof.updatedAt);
+  const pendingClearRequestedAt = progressed.pendingClearRequestedAt || at;
+  return transitionE({ ...progressed, clearingPolicy: "cancel_and_clear", pendingClearRequestedAt }, "clearing", at);
+};
 /**
- * og handleCrossPullCloseEntityTx: the source hub closes its user's source pull, or the target hub closes the paired target pull the source hub sent;
- * terminal or not-yet-clearing routes only note it, invalid close data halts, and every gate runs before the mirror moves.
+ * og handleCrossPullCloseEntityTx: the source hub closes its user's source pull, or the target hub closes the paired
+ * target pull the source hub sent; terminal or not-yet-clearing routes only note it, invalid close data halts, and
+ * every gate runs before the mirror moves.
  */
 export const crossPullCloseTx = (h: BookHost, data: CrossPullCloseData): Result<CrossHostStep, EntityError> => {
-  const { pullId, binary, proof } = data, cp = entityRef(data.counterpartyEntityId), self = entityRef(h.id);
-  if (!h.accounts.has(cp)) return halt(`CROSS_J_PULL_CLOSE_ACCOUNT_MISSING:${data.counterpartyEntityId}`);
-  const routes = [...(h.swaps?.values() ?? [])];
-  const source = routes.find((r) => r.sourcePull?.pullId === pullId && entityRef(r.source.counterpartyEntityId) === self && entityRef(r.source.entityId) === cp);
-  const found = source ?? routes.find((r) => r.targetPull?.pullId === pullId && entityRef(r.target.entityId) === self && entityRef(r.target.counterpartyEntityId) === cp);
-  if (found === undefined) return halt(`CROSS_J_PULL_CLOSE_ROUTE_MISSING:${pullId}`);
-  const leg = source !== undefined ? "source" : "target", short = pullId.slice(0, 8);
-  if (isCrossTerminal(found.status)) return ok(accStep(accNote(crossAcc(h), `❌ Cross-j ${leg} pull close ${short} blocked: route ${found.status}`)));
-  if (leg === "source" && found.status !== "clearing" && found.status !== "clear_requested") return ok(accStep(accNote(crossAcc(h), `❌ Cross-j source pull close ${short} blocked: route ${found.status}`)));
-  return chain(pullCloseProofError(found, proof, binary, leg, data.route), (bad) => bad !== null ? halt(`CROSS_J_PULL_CLOSE_PROOF_INVALID:${pullId}:${bad}`)
-    : chain(fatalCross(cloneCloseProof(proof)), (closeProof) => chain(cloneRouteE(found), (fork) => {
-      const withProof: CrossRoute = { ...fork, sourceCloseProof: closeProof }, at = h.timestamp;
-      const next: Result<CrossRoute, EntityError> = leg === "source" ? ok(withProof) : (() => {
-        const progressed = withCloseProofProgress(withProof, proof, withProof.updatedAt);
-        return transitionE({ ...progressed, clearingPolicy: "cancel_and_clear", pendingClearRequestedAt: progressed.pendingClearRequestedAt || at }, "clearing", at);
-      })();
-      return map(next, (route) => accStep({ host: putRoute(h, route), messages: [], outputs: selfWake(h), accountTxs: [{ accountId: cp, tx: { type: "cross_pull_close", pullId, binary, proof } }] }));
-    })));
+  const { pullId, binary, proof } = data;
+  const cp = entityRef(data.counterpartyEntityId);
+  if (!h.accounts.has(cp)) return invariant(`CROSS_J_PULL_CLOSE_ACCOUNT_MISSING:${data.counterpartyEntityId}`);
+  const found = closedLeg(h, pullId, cp);
+  if (found === undefined) return invariant(`CROSS_J_PULL_CLOSE_ROUTE_MISSING:${pullId}`);
+  const { route, leg } = found;
+  const short = pullId.slice(0, 8);
+  if (isCrossTerminal(route.status))
+    return crossNoted(h, `❌ Cross-j ${leg} pull close ${short} blocked: route ${route.status}`);
+  if (leg === "source" && route.status !== "clearing" && route.status !== "clear_requested") {
+    return crossNoted(h, `❌ Cross-j source pull close ${short} blocked: route ${route.status}`);
+  }
+  return chain(pullCloseProofError(route, proof, binary, leg, data.route), (bad) => {
+    if (bad !== null) return invariant(`CROSS_J_PULL_CLOSE_PROOF_INVALID:${pullId}:${bad}`);
+    return chain(fatalCross(cloneCloseProof(proof)), (closeProof) =>
+      chain(cloneRouteE(route), (fork) => {
+        const withProof: CrossRoute = { ...fork, sourceCloseProof: closeProof };
+        const next = leg === "source" ? ok(withProof) : targetClearing(withProof, proof, h.timestamp);
+        return map(next, (r) =>
+          accStep({
+            host: putRoute(h, r),
+            messages: [],
+            outputs: selfWake(h),
+            accountTxs: [{ accountId: cp, tx: { type: "cross_pull_close", pullId, binary, proof } }],
+          }),
+        );
+      }),
+    );
+  });
 };
-/** og handleOrderbookSweepCrossJurisdictionEntityTx: the book-TTL sweep; the source hub clears each expired route it owns (cancelling the remainder). */
-export const crossSweep = (h: BookHost, reason?: string | undefined): Result<CrossHostStep, EntityError> => {
-  type Sweep = CrossAcc & { readonly expired: number; readonly closed: number; readonly waiting: number };
-  const start: Sweep = { ...crossAcc(h), expired: 0, closed: 0, waiting: 0 };
-  return map(foldResult<Sweep, readonly [string, CrossRoute], EntityError>([...(h.swaps?.entries() ?? [])], start, (s, [orderId, route]) => {
+
+
+// -- the book-TTL sweep
+
+type SweepTally = CrossAcc & { readonly expired: number; readonly closed: number; readonly waiting: number };
+/**
+ * One route under the sweep: a live one waits, an expired one this hub sources is cleared, anyone else's is counted.
+ */
+const sweepRoute =
+  (at: number) =>
+  (s: SweepTally, [orderId, route]: readonly [string, CrossRoute]): Result<SweepTally, EntityError> => {
     if (isCrossTerminal(route.status)) return ok(s);
-    if (!isCrossExpired(route, h.timestamp)) return ok({ ...s, waiting: s.waiting + 1 });
+    if (!isCrossExpired(route, at)) return ok({ ...s, waiting: s.waiting + 1 });
     const sourceHub = lowerText(route.source.counterpartyEntityId);
-    if (!sourceHub) return halt(`CROSS_J_SWEEP_SOURCE_HUB_MISSING:${orderId}`);
+    if (!sourceHub) return invariant(`CROSS_J_SWEEP_SOURCE_HUB_MISSING:${orderId}`);
     if (lowerText(s.host.id) !== sourceHub) return ok({ ...s, expired: s.expired + 1, waiting: s.waiting + 1 });
-    return map(requestCrossClear(s.host, { orderId, cancelRemainder: true }), (c): Sweep => ({
-      host: c.host, messages: [...s.messages, ...c.messages], outputs: [...s.outputs, ...c.outputs], accountTxs: [...s.accountTxs, ...c.accountTxs],
-      expired: s.expired + 1, closed: s.closed + (c.accountTxs.some((t) => t.tx.type === "cross_pull_close") ? 1 : 0), waiting: s.waiting,
+    return map(requestCrossClear(s.host, { orderId, cancelRemainder: true }), (c): SweepTally => ({
+      host: c.host,
+      messages: [...s.messages, ...c.messages],
+      outputs: [...s.outputs, ...c.outputs],
+      accountTxs: [...s.accountTxs, ...c.accountTxs],
+      expired: s.expired + 1,
+      closed: s.closed + (c.accountTxs.some((t) => t.tx.type === "cross_pull_close") ? 1 : 0),
+      waiting: s.waiting,
     }));
-  }), (s) => accStep(accNote(s, `🌉 Cross-j orderbook sweep${reason ? `: ${reason}` : ""} expired=${s.expired} closedOffers=${s.closed} waiting=${s.waiting}`)));
+  };
+/**
+ * og handleOrderbookSweepCrossJurisdictionEntityTx: the book-TTL sweep; the source hub clears each expired route it
+ * owns (cancelling the remainder).
+ */
+export const crossSweep = (h: BookHost, reason?: string | undefined): Result<CrossHostStep, EntityError> => {
+  const start: SweepTally = { ...crossAcc(h), expired: 0, closed: 0, waiting: 0 };
+  const because = reason ? `: ${reason}` : "";
+  return map(foldResult([...(h.swaps?.entries() ?? [])], start, sweepRoute(h.timestamp)), (s) =>
+    accStep(
+      accNote(
+        s,
+        `🌉 Cross-j orderbook sweep${because} expired=${s.expired} closedOffers=${s.closed} waiting=${s.waiting}`,
+      ),
+    ),
+  );
 };
-// ---- og entity/tx/handlers/account-cross-j-followups.ts applyCommittedCrossJurisdictionAccountTxFollowup: what a committed cross_pull_lock /
-// cross_pull_close does to the Entity (route mirror, one-shot user authorization, expiry hook, book admission or removal). ----
-/** The Entity fields a committed cross-j Account tx rewrites: the book host plus the user authorizations and the crontab. */
-export type CommittedCrossHost = BookHost & { readonly auths?: ReadonlyMap<string, CrossRoute> | undefined; readonly crontab?: Crontab | undefined };
-export type CommittedCrossStep = { readonly host: CommittedCrossHost; readonly outputs: readonly CrossEntityOutput[]; readonly messages: readonly string[]; readonly created: readonly SwapOfferEvent[]; readonly handled: boolean };
+
+// ---- og entity/tx/handlers/account-cross-j-followups.ts applyCommittedCrossJurisdictionAccountTxFollowup: what a
+// committed cross_pull_lock / cross_pull_close does to the Entity (route mirror, one-shot user authorization, expiry
+// hook, book admission or removal). ----
+/**
+ * The Entity fields a committed cross-j Account tx rewrites: the book host plus the user authorizations and the
+ * crontab.
+ */
+export type CommittedCrossHost = BookHost & {
+  readonly auths?: ReadonlyMap<string, CrossRoute> | undefined;
+  readonly crontab?: Crontab | undefined;
+};
+export type CommittedCrossStep = {
+  readonly host: CommittedCrossHost;
+  readonly outputs: readonly CrossEntityOutput[];
+  readonly messages: readonly string[];
+  readonly created: readonly SwapOfferEvent[];
+  readonly handled: boolean;
+};
 /** og routeBookOwnerEntityId: the stored owner, else the canonical market's. */
-const bookOwnerIdE = (route: CrossRoute): Result<string, EntityError> => map(route.bookOwnerEntityId ? ok(route.bookOwnerEntityId) : fatalCross(crossBookOwner(route)), entityRef);
-/** og removeOrRouteCrossJurisdictionBookOrder: a local book drops the row and closes the admission; a sibling book owner gets a removal request. */
-const removeOrRouteBookOrder = (s: CommittedCrossStep, route: CrossRoute, reason: string): Result<CommittedCrossStep, EntityError> => chain(bookOwnerIdE(route), (owner): Result<CommittedCrossStep, EntityError> => {
-  const h = s.host;
-  if (!owner || owner === entityRef(h.id))
-    return chain(removeRowById(h, bookRowId(route.source.entityId, route.orderId)), (r) => map(markAdmissionClosed(r.host.admissions, route.source.entityId, route.orderId, h.timestamp, reason), (admissions) => ({ ...s, host: { ...h, ext: r.host.ext, admissions } })));
-  const signer = crossRouteSigner(route, owner);
-  if (!signer) return halt(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${owner}`);
-  return map(crossOutput(owner, signer, [{ type: "removeCrossJurisdictionBookOrder", data: { orderId: route.orderId, sourceEntityId: route.source.entityId, route, reason } }]), (out) => ({ ...s, outputs: [...s.outputs, out] }));
+const bookOwnerIdE = (route: CrossRoute): Result<string, EntityError> =>
+  map(route.bookOwnerEntityId ? ok(route.bookOwnerEntityId) : fatalCross(crossBookOwner(route)), entityRef);
+/** The four parties of a route: the source user and its hub, the target hub and its user. */
+type RouteParties = {
+  readonly sourceUser: string;
+  readonly sourceHub: string;
+  readonly targetHub: string;
+  readonly targetUser: string;
+};
+const partiesOf = (route: CrossRoute): RouteParties => ({
+  sourceUser: entityRef(route.source.entityId),
+  sourceHub: entityRef(route.source.counterpartyEntityId),
+  targetHub: entityRef(route.target.entityId),
+  targetUser: entityRef(route.target.counterpartyEntityId),
 });
+/**
+ * og removeOrRouteCrossJurisdictionBookOrder: a local book drops the row and closes the admission; a sibling book owner
+ * gets a removal request.
+ */
+const removeOrRouteBookOrder = (
+  s: CommittedCrossStep,
+  route: CrossRoute,
+  reason: string,
+): Result<CommittedCrossStep, EntityError> =>
+  chain(bookOwnerIdE(route), (owner): Result<CommittedCrossStep, EntityError> => {
+    const h = s.host;
+    if (!owner || owner === entityRef(h.id)) {
+      return chain(removeRowById(h, bookRowId(route.source.entityId, route.orderId)), (r) =>
+        map(
+          markAdmissionClosed(r.host.admissions, route.source.entityId, route.orderId, h.timestamp, reason),
+          (admissions) => ({ ...s, host: { ...h, ext: r.host.ext, admissions } }),
+        ),
+      );
+    }
+    const signer = crossRouteSigner(route, owner);
+    if (!signer) return invariant(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${owner}`);
+    const removal = { orderId: route.orderId, sourceEntityId: route.source.entityId, route, reason };
+    return map(crossOutput(owner, signer, [{ type: "removeCrossJurisdictionBookOrder", data: removal }]), (out) => ({
+      ...s,
+      outputs: [...s.outputs, out],
+    }));
+  });
+
+
+// -- a committed pull lock: the route goes resting, and the source hub admits it to the book
+
 /** og committedPullMatchesRoute: the committed lock is exactly the route's pull on this leg. */
-const committedPullMatches = (tx: TxOf<"cross_pull_lock">, route: CrossRoute, leg: "source" | "target"): boolean => {
-  const pull = leg === "source" ? route.sourcePull : route.targetPull, b = tx.crossJurisdiction;
-  if (pull === undefined || b.leg !== leg || b.orderId !== route.orderId || lowerText(b.routeHash) !== lowerText(route.routeHash)) return false;
-  return tx.pullId === pull.pullId && Number(tx.tokenId) === pull.tokenId && tx.amount === pull.signedAmount && lowerText(tx.fullHash) === pull.fullHash.toLowerCase() && lowerText(tx.partialRoot) === pull.partialRoot.toLowerCase();
+const committedPullMatches = (tx: TxOf<"cross_pull_lock">, route: CrossRoute, leg: PullLeg): boolean => {
+  const pull = leg === "source" ? route.sourcePull : route.targetPull;
+  const b = tx.crossJurisdiction;
+  if (pull === undefined || b.leg !== leg || b.orderId !== route.orderId) return false;
+  return lowerText(b.routeHash) === lowerText(route.routeHash)
+    && tx.pullId === pull.pullId
+    && Number(tx.tokenId) === pull.tokenId
+    && tx.amount === pull.signedAmount
+    && lowerText(tx.fullHash) === pull.fullHash.toLowerCase()
+    && lowerText(tx.partialRoot) === pull.partialRoot.toLowerCase();
 };
-/** og getCommittedPullRole: which leg this pull is, and whether this Entity is the source hub committing it with the source user. */
-const committedPullRole = (route: CrossRoute, self: string, cp: string, pullId: string): { readonly leg: "source" | "target"; readonly sourceHub: boolean } | null => {
-  const su = entityRef(route.source.entityId), sh = entityRef(route.source.counterpartyEntityId), th = entityRef(route.target.entityId), tu = entityRef(route.target.counterpartyEntityId);
-  const sp = route.sourcePull?.pullId === pullId, tp = route.targetPull?.pullId === pullId;
-  if (sp && self === sh && cp === su) return { leg: "source", sourceHub: true };
-  if (sp && self === su && cp === sh) return { leg: "source", sourceHub: false };
-  if (tp && ((self === th && cp === tu) || (self === tu && cp === th))) return { leg: "target", sourceHub: false };
-  return null;
+type PullRole = { readonly leg: PullLeg; readonly sourceHub: boolean };
+/**
+ * og getCommittedPullRole: which leg this pull is, and whether this Entity is the source hub committing it with the
+ * source user.
+ */
+const committedPullRole = (route: CrossRoute, self: string, cp: string, pullId: string): PullRole | null => {
+  const p = partiesOf(route);
+  const sourcePull = route.sourcePull?.pullId === pullId;
+  const targetPull = route.targetPull?.pullId === pullId;
+  const between = (a: string, b: string): boolean => (self === a && cp === b) || (self === b && cp === a);
+  switch (true) {
+    case sourcePull && self === p.sourceHub && cp === p.sourceUser:
+      return { leg: "source", sourceHub: true };
+    case sourcePull && self === p.sourceUser && cp === p.sourceHub:
+      return { leg: "source", sourceHub: false };
+    case targetPull && between(p.targetHub, p.targetUser):
+      return { leg: "target", sourceHub: false };
+    default:
+      return null;
+  }
 };
-/** og admitCommittedSourcePullToBook: the expiry sweep hook, then the book admission (here, or at the sibling book owner). */
+/**
+ * og admitCommittedSourcePullToBook: the expiry sweep hook, then the book admission (here, or at the sibling book
+ * owner).
+ */
 const admitCommittedPull = (s: CommittedCrossStep, route: CrossRoute): Result<CommittedCrossStep, EntityError> => {
-  const noted: CommittedCrossStep = { ...s, messages: [...s.messages, `🌉 Cross-j swap ${route.orderId} committed by both Account legs`] }, crontab = s.host.crontab;
-  if (crontab === undefined) return halt(`CROSS_J_EXPIRY_CRONTAB_MISSING:${route.orderId}`);
+  const crontab = s.host.crontab;
+  if (crontab === undefined) return invariant(`CROSS_J_EXPIRY_CRONTAB_MISSING:${route.orderId}`);
   const expiresAt = Math.floor(Number(route.expiresAt || 0));
-  if (!Number.isSafeInteger(expiresAt) || expiresAt <= s.host.timestamp) return halt(`CROSS_J_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
-  const hooked: CommittedCrossStep = { ...noted, host: { ...noted.host, crontab: scheduleHook(crontab, { id: `cross-j-expiry:${route.orderId}`, type: "cross_j_orderbook_sweep", triggerAt: expiresAt, data: { reason: `cross-j-expiry:${route.orderId}` } }) } };
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= s.host.timestamp) {
+    return invariant(`CROSS_J_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
+  }
+  const hook = {
+    id: `cross-j-expiry:${route.orderId}`,
+    type: "cross_j_orderbook_sweep",
+    triggerAt: expiresAt,
+    data: { reason: `cross-j-expiry:${route.orderId}` },
+  } as const;
+  const hooked: CommittedCrossStep = {
+    ...s,
+    messages: [...s.messages, `🌉 Cross-j swap ${route.orderId} committed by both Account legs`],
+    host: { ...s.host, crontab: scheduleHook(crontab, hook) },
+  };
   return chain(bookOwnerIdE(route), (owner) => chain(cloneRouteE(route), (clone) => {
     const data = { route: clone, reason: "atomic_account_pair_committed" };
     // og drops a local admission's outputs; only its created offers reach this frame's matcher
-    if (owner === entityRef(s.host.id)) return map(admitBookOrder(hooked.host, data), (a): CommittedCrossStep => ({ ...hooked, host: { ...hooked.host, ...a.host }, messages: [...hooked.messages, ...a.messages], created: [...hooked.created, ...a.created] }));
+    if (owner === entityRef(s.host.id)) {
+      return map(admitBookOrder(hooked.host, data), (a): CommittedCrossStep => ({
+        ...hooked,
+        host: { ...hooked.host, ...a.host },
+        messages: [...hooked.messages, ...a.messages],
+        created: [...hooked.created, ...a.created],
+      }));
+    }
     const signer = crossRouteSigner(route, owner);
-    if (!signer) return halt(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${owner}`);
-    return map(crossOutput(owner, signer, [{ type: "admitCrossJurisdictionBookOrder", data }]), (out) => ({ ...hooked, outputs: [...hooked.outputs, out] }));
+    if (!signer) return invariant(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${owner}`);
+    return map(crossOutput(owner, signer, [{ type: "admitCrossJurisdictionBookOrder", data }]), (out) =>
+      ({ ...hooked, outputs: [...hooked.outputs, out] }));
   }));
 };
-/** og queueBookAdmissionOnCommittedPull: the carried route joins the mirror; each route naming this pull goes resting, a user's one-shot authorization is consumed, the source hub admits the order. */
-const committedPullLock = (s0: CommittedCrossStep, cp: string, tx: TxOf<"cross_pull_lock">, committedAt: number): Result<CommittedCrossStep, EntityError> => chain(cloneRouteE(tx.crossJurisdictionRoute), (carried) => {
-  const existing = s0.host.swaps?.get(carried.orderId);
-  if (existing?.routeHash && carried.routeHash && existing.routeHash.toLowerCase() !== carried.routeHash.toLowerCase()) return halt(`CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT:${carried.orderId}`);
-  const s: CommittedCrossStep = { ...s0, host: putRoute(s0.host, { ...existing, ...carried }) }, self = entityRef(s.host.id);
-  return foldResult<CommittedCrossStep, string, EntityError>([...(s.host.swaps?.keys() ?? [])], s, (acc, orderId) => {
-    const route = acc.host.swaps?.get(orderId), role = route === undefined ? null : committedPullRole(route, self, entityRef(cp), tx.pullId);
+/**
+ * One mirrored route naming the committed pull: its user leg spends the one-shot authorization, and it goes resting.
+ */
+const lockRoute = (tx: TxOf<"cross_pull_lock">, self: string, cp: string, committedAt: number) =>
+  (acc: CommittedCrossStep, orderId: string): Result<CommittedCrossStep, EntityError> => {
+    const route = acc.host.swaps?.get(orderId);
+    const role = route === undefined ? null : committedPullRole(route, self, cp, tx.pullId);
     if (route === undefined || role === null) return ok(acc);
-    if (!committedPullMatches(tx, route, role.leg)) return halt(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${role.leg} pull=${tx.pullId}`);
-    const userLeg = self === entityRef(route.source.entityId) || self === entityRef(route.target.counterpartyEntityId), auth = acc.host.auths?.get(route.orderId);
-    if (userLeg && (auth === undefined || entityRef(auth.routeHash || "") !== entityRef(route.routeHash || ""))) return halt(`CROSS_J_COMMITTED_PULL_AUTH_MISSING:${route.orderId}:${self}`);
-    const host: CommittedCrossHost = userLeg && acc.host.auths !== undefined ? { ...acc.host, auths: mapDelete(acc.host.auths, route.orderId) } : acc.host;
+    if (!committedPullMatches(tx, route, role.leg)) {
+      return invariant(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${role.leg} pull=${tx.pullId}`);
+    }
+    const userLeg = self === entityRef(route.source.entityId) || self === entityRef(route.target.counterpartyEntityId);
+    const auth = acc.host.auths?.get(route.orderId);
+    if (userLeg && (auth === undefined || entityRef(auth.routeHash || "") !== entityRef(route.routeHash || ""))) {
+      return invariant(`CROSS_J_COMMITTED_PULL_AUTH_MISSING:${route.orderId}:${self}`);
+    }
+    const host: CommittedCrossHost = userLeg && acc.host.auths !== undefined
+      ? { ...acc.host, auths: mapDelete(acc.host.auths, route.orderId) }
+      : acc.host;
     return chain(cloneRouteE(route), (clone) => chain(transitionE(clone, "resting", committedAt), (resting) => {
       const next: CommittedCrossStep = { ...acc, host: putRoute(host, { ...route, ...resting }), handled: true };
       return role.sourceHub ? admitCommittedPull(next, resting) : ok(next);
     }));
+  };
+/**
+ * og queueBookAdmissionOnCommittedPull: the carried route joins the mirror; each route naming this pull goes resting, a
+ * user's one-shot authorization is consumed, the source hub admits the order.
+ */
+const committedPullLock = (
+  start: CommittedCrossStep,
+  cp: string,
+  tx: TxOf<"cross_pull_lock">,
+  committedAt: number,
+): Result<CommittedCrossStep, EntityError> =>
+  chain(cloneRouteE(tx.crossJurisdictionRoute), (carried) => {
+    const existing = start.host.swaps?.get(carried.orderId);
+    if (
+      existing?.routeHash &&
+      carried.routeHash &&
+      existing.routeHash.toLowerCase() !== carried.routeHash.toLowerCase()
+    ) {
+      return invariant(`CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT:${carried.orderId}`);
+    }
+    const s: CommittedCrossStep = { ...start, host: putRoute(start.host, { ...existing, ...carried }) };
+    const orderIds = [...(s.host.swaps?.keys() ?? [])];
+    return foldResult(orderIds, s, lockRoute(tx, entityRef(s.host.id), entityRef(cp), committedAt));
   });
-});
+
+
+// -- a committed pull close: every route naming the pull projects the close and ends
+
 /** og assertTerminalPullReplay: a close replayed against a terminal mirror must be the recorded close exactly. */
-const terminalPullReplay = (route: CrossRoute, fillRatio: number, binary: string, supplied: CrossCloseProof): Result<boolean, EntityError> => {
+const terminalPullReplay = (
+  route: CrossRoute,
+  fillRatio: number,
+  binary: string,
+  supplied: CrossCloseProof,
+): Result<boolean, EntityError> => {
   if (!isCrossTerminal(route.status)) return ok(false);
   const proof = route.sourceCloseProof;
-  return chain(fatalCross(crossFillAmounts(route)), (c) => chain(fatalCross(crossCloseBinaryHash(binary)), (binaryHash) => {
-    if (!proof || fillRatio !== c.fillRatio || proof.fillRatio !== c.fillRatio || entityRef(proof.binaryHash) !== entityRef(binaryHash) || proof.cumulativeSourceAmount !== c.filledSourceAmount || proof.cumulativeTargetAmount !== c.filledTargetAmount)
-      return halt(`CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
-    const same = supplied.orderId === proof.orderId && entityRef(supplied.routeHash) === entityRef(proof.routeHash) && supplied.sourcePullId === proof.sourcePullId && supplied.targetPullId === proof.targetPullId
-      && supplied.closeMode === proof.closeMode && supplied.fillRatio === proof.fillRatio && supplied.cumulativeSourceAmount === proof.cumulativeSourceAmount && supplied.cumulativeTargetAmount === proof.cumulativeTargetAmount && entityRef(supplied.binaryHash) === entityRef(proof.binaryHash);
-    return same ? ok(true) : halt(`CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
-  }));
+  return chain(fatalCross(crossFillAmounts(route)), (c) =>
+    chain(fatalCross(crossCloseBinaryHash(binary)), (binaryHash) => {
+      const recorded =
+        proof !== undefined &&
+        fillRatio === c.fillRatio &&
+        proof.fillRatio === c.fillRatio &&
+        entityRef(proof.binaryHash) === entityRef(binaryHash) &&
+        proof.cumulativeSourceAmount === c.filledSourceAmount &&
+        proof.cumulativeTargetAmount === c.filledTargetAmount;
+      if (!recorded) return invariant(`CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
+      const same =
+        entityRef(supplied.routeHash) === entityRef(proof.routeHash) &&
+        entityRef(supplied.binaryHash) === entityRef(proof.binaryHash) &&
+        EXACT_PROOF_FIELDS.every((field) => supplied[field] === proof[field]);
+      return same ? ok(true) : invariant(`CROSS_J_TERMINAL_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
+    }),
+  );
 };
-/** og assertCrossPullCloseAllowed: the proof names this route, its amounts are the ratio's projection, it never rolls back, and a hub mirror is already clearing. */
-const pullCloseAllowed = (route: CrossRoute, fillRatio: number, leg: "source" | "target", hubCommitted: boolean, proof: CrossCloseProof): Result<void, EntityError> => {
-  if (proof.orderId !== route.orderId || entityRef(proof.routeHash) !== entityRef(route.routeHash || "") || proof.sourcePullId !== route.sourcePull?.pullId || proof.targetPullId !== route.targetPull?.pullId)
-    return halt(`CROSS_J_PULL_CLOSE_PROOF_MISMATCH: route=${route.orderId}`);
-  const ratio = BigInt(fillRatio), max = BigInt(MAX_FILL), project = (total: bigint): bigint => (ratio >= max ? total : (total * ratio) / max);
-  if (proof.cumulativeSourceAmount !== project(BigInt(route.source.amount)) || proof.cumulativeTargetAmount !== project(BigInt(route.target.amount))) return halt(`CROSS_J_PULL_CLOSE_ECONOMICS_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
+/** The mirror states a hub may close each leg from. */
+const CLOSABLE_FROM: Readonly<Record<PullLeg, ReadonlySet<CrossStatus | undefined>>> = {
+  source: new Set(["clearing", "clear_requested"]),
+  target: new Set(["resting", "partially_filled", "clear_requested", "clearing"]),
+};
+/**
+ * og assertCrossPullCloseAllowed: the proof names this route, its amounts are the ratio's projection, it never rolls
+ * back, and a hub mirror is already clearing.
+ */
+const pullCloseAllowed = (
+  route: CrossRoute,
+  fillRatio: number,
+  leg: PullLeg,
+  hubCommitted: boolean,
+  proof: CrossCloseProof,
+): Result<void, EntityError> => {
+  const names =
+    proof.orderId === route.orderId &&
+    entityRef(proof.routeHash) === entityRef(route.routeHash || "") &&
+    proof.sourcePullId === route.sourcePull?.pullId &&
+    proof.targetPullId === route.targetPull?.pullId;
+  if (!names) return invariant(`CROSS_J_PULL_CLOSE_PROOF_MISMATCH: route=${route.orderId}`);
+  const ratio = BigInt(fillRatio);
+  const max = BigInt(MAX_FILL);
+  const project = (total: bigint): bigint => (ratio >= max ? total : (total * ratio) / max);
+  const projected =
+    proof.cumulativeSourceAmount === project(BigInt(route.source.amount)) &&
+    proof.cumulativeTargetAmount === project(BigInt(route.target.amount));
+  if (!projected) return invariant(`CROSS_J_PULL_CLOSE_ECONOMICS_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
   return chain(proofRatioE(route), (committed): Result<void, EntityError> => {
-    if (fillRatio < committed) return halt(`CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ratio=${fillRatio} informed=${committed}`);
-    if (fillRatio <= 0 || !hubCommitted) return ok(undefined);
-    const allowed = leg === "source" ? route.status === "clearing" || route.status === "clear_requested"
-      : route.status === "resting" || route.status === "partially_filled" || route.status === "clear_requested" || route.status === "clearing";
-    return allowed ? ok(undefined) : halt(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=${leg} status=${route.status}`);
+    if (fillRatio < committed)
+      return invariant(`CROSS_J_PULL_CLOSE_ROLLBACK: route=${route.orderId} ratio=${fillRatio} informed=${committed}`);
+    if (fillRatio <= 0 || !hubCommitted || CLOSABLE_FROM[leg].has(route.status)) return ok(undefined);
+    return invariant(`CROSS_J_PULL_CLOSE_STATE_INVALID: route=${route.orderId} leg=${leg} status=${route.status}`);
   });
 };
-/** og applyCrossPullCloseProgress + transitionTargetLegTerminal: the mirror takes the close at its ratio and ends settled, expired or cancelled; the expiry hook goes. */
-const closeProgress = (s: CommittedCrossStep, orderId: string, proof: CrossCloseProof, fillRatio: number): Result<{ readonly step: CommittedCrossStep; readonly route: CrossRoute; readonly terminal: CrossStatus }, EntityError> => {
-  const stored = s.host.swaps?.get(orderId), at = s.host.timestamp;
-  if (stored === undefined) return halt(`CROSS_J_PULL_CLOSE_ROUTE_FORK_MISSING:${orderId}`);
+/** og transitionTargetLegTerminal: a filled close settles; an unfilled one expired or was cancelled. */
+const closedAs = (fillRatio: number, route: CrossRoute, at: number): CrossStatus => {
+  switch (true) {
+    case fillRatio > 0:
+      return "settled";
+    case isCrossExpired(route, at):
+      return "expired";
+    default:
+      return "cancelled";
+  }
+};
+type ClosedRoute = { readonly step: CommittedCrossStep; readonly route: CrossRoute; readonly terminal: CrossStatus };
+/**
+ * og applyCrossPullCloseProgress + transitionTargetLegTerminal: the mirror takes the close at its ratio and ends
+ * settled, expired or cancelled; the expiry hook goes.
+ */
+const closeProgress = (
+  s: CommittedCrossStep,
+  orderId: string,
+  proof: CrossCloseProof,
+  fillRatio: number,
+): Result<ClosedRoute, EntityError> => {
+  const stored = s.host.swaps?.get(orderId);
+  const at = s.host.timestamp;
+  if (stored === undefined) return invariant(`CROSS_J_PULL_CLOSE_ROUTE_FORK_MISSING:${orderId}`);
   return chain(fatalCross(cloneCloseProof(proof)), (closeProof) => {
-    const progressed: CrossRoute = { ...withCloseProofProgress(stored, proof, at), sourceCloseProof: closeProof, targetCloseProof: closeProof };
-    return chain(progressed.status !== "clearing" ? transitionE(progressed, "clearing", at) : ok(progressed), (clearing) => {
-      const terminal: CrossStatus = fillRatio > 0 ? "settled" : isCrossExpired(clearing, at) ? "expired" : "cancelled";
-      return map(transitionE(clearing, terminal, at), (ended) => {
-        const route: CrossRoute = terminal === "settled" ? { ...ended, settledAt: at } : ended, crontab = s.host.crontab;
-        return { step: { ...s, host: { ...putRoute(s.host, route), ...opt("crontab", crontab === undefined ? undefined : cancelHook(crontab, `cross-j-expiry:${orderId}`)) } }, route, terminal };
+    const progressed: CrossRoute = {
+      ...withCloseProofProgress(stored, proof, at),
+      sourceCloseProof: closeProof,
+      targetCloseProof: closeProof,
+    };
+    const clearing = progressed.status !== "clearing" ? transitionE(progressed, "clearing", at) : ok(progressed);
+    return chain(clearing, (c) => {
+      const terminal = closedAs(fillRatio, c, at);
+      return map(transitionE(c, terminal, at), (ended) => {
+        const route: CrossRoute = terminal === "settled" ? { ...ended, settledAt: at } : ended;
+        const crontab = s.host.crontab;
+        const unhooked = opt(
+          "crontab",
+          crontab === undefined ? undefined : cancelHook(crontab, `cross-j-expiry:${orderId}`),
+        );
+        return { step: { ...s, host: { ...putRoute(s.host, route), ...unhooked } }, route, terminal };
       });
     });
   });
 };
-/** og applyCrossPullCloseFollowup: every mirrored route naming this pull on this Account projects the committed close; the source hub then drops or routes the book order. */
-const committedPullClose = (s0: CommittedCrossStep, cp: string, tx: TxOf<"cross_pull_close">): Result<CommittedCrossStep, EntityError> => {
+type CloseWalk = { readonly step: CommittedCrossStep; readonly matched: boolean };
+/**
+ * The source leg closes: a replay is only checked, a new close projects; the source hub then drops or routes the book
+ * order.
+ */
+const closeSourceLeg = (
+  w: CloseWalk,
+  route: CrossRoute,
+  tx: TxOf<"cross_pull_close">,
+  sourceHub: boolean,
+): Result<CloseWalk, EntityError> => {
   const fillRatio = tx.proof.fillRatio;
-  if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > MAX_FILL) return halt(`CROSS_J_CLOSE_PROOF_RATIO_INVALID:${fillRatio}`);
-  return chain(fatalCross(decodeHashLadderBinary(tx.binary)), (decoded) => {
-    if (decoded.fillRatio !== fillRatio) return halt(`CROSS_J_CLOSE_BINARY_RATIO_MISMATCH: pull=${tx.pullId} binary=${decoded.fillRatio} proof=${fillRatio}`);
-    const self = entityRef(s0.host.id), peer = entityRef(cp);
-    type Walk = { readonly step: CommittedCrossStep; readonly matched: boolean };
-    return chain(foldResult<Walk, string, EntityError>([...(s0.host.swaps?.keys() ?? [])], { step: s0, matched: false }, (w, orderId) => {
-      const route = w.step.host.swaps?.get(orderId);
-      if (route === undefined) return ok(w);
-      const su = entityRef(route.source.entityId), sh = entityRef(route.source.counterpartyEntityId), th = entityRef(route.target.entityId), tu = entityRef(route.target.counterpartyEntityId);
-      const sourceHub = route.sourcePull?.pullId === tx.pullId && route.targetPull?.pullId !== undefined && self === sh && peer === su;
-      const sourceUser = route.sourcePull?.pullId === tx.pullId && self === su && peer === sh;
-      if (sourceHub || sourceUser) return chain(terminalPullReplay(route, fillRatio, tx.binary, tx.proof), (replay): Result<Walk, EntityError> => {
-        if (replay) return map(sourceHub ? removeOrRouteBookOrder(w.step, route, "settled") : ok(w.step), (step) => ({ step, matched: true }));
-        return chain(pullCloseAllowed(route, fillRatio, "source", sourceHub, tx.proof), () => chain(closeProgress(w.step, route.orderId, tx.proof, fillRatio), (p) =>
-          map(sourceHub ? removeOrRouteBookOrder(p.step, p.route, p.terminal) : ok(p.step), (step) => ({ step, matched: true }))));
-      });
-      const targetUser = route.targetPull?.pullId === tx.pullId && self === tu && peer === th, targetHub = route.targetPull?.pullId === tx.pullId && self === th && peer === tu;
-      if (!targetUser && !targetHub) return ok(w);
-      return chain(terminalPullReplay(route, fillRatio, tx.binary, tx.proof), (replay) => replay ? ok({ step: w.step, matched: true })
-        : chain(pullCloseAllowed(route, fillRatio, "target", targetHub, tx.proof), () => map(closeProgress(w.step, route.orderId, tx.proof, fillRatio), (p) => ({ step: p.step, matched: true }))));
-    }), (w) => (w.matched ? ok({ ...w.step, handled: true }) : halt(`CROSS_J_PULL_CLOSE_ROUTE_MISSING: pull=${tx.pullId} order=${tx.proof.orderId}`)));
+  const matched = (step: CommittedCrossStep): CloseWalk => ({ step, matched: true });
+  return chain(terminalPullReplay(route, fillRatio, tx.binary, tx.proof), (replay) => {
+    if (replay) return map(sourceHub ? removeOrRouteBookOrder(w.step, route, "settled") : ok(w.step), matched);
+    return chain(pullCloseAllowed(route, fillRatio, "source", sourceHub, tx.proof), () =>
+      chain(closeProgress(w.step, route.orderId, tx.proof, fillRatio), (p) =>
+        map(sourceHub ? removeOrRouteBookOrder(p.step, p.route, p.terminal) : ok(p.step), matched),
+      ),
+    );
   });
 };
-/** og applyCommittedCrossJurisdictionAccountTxFollowup: `handled` is og's return (a cross-j tx that the HTLC followup must skip). */
-export const committedCrossFollowup = (h: CommittedCrossHost, counterpartyId: string, tx: WireAccountTx, committedAt: number): Result<CommittedCrossStep, EntityError> => {
+/** The target leg closes: a replay is only checked, a new close projects. */
+const closeTargetLeg = (
+  w: CloseWalk,
+  route: CrossRoute,
+  tx: TxOf<"cross_pull_close">,
+  targetHub: boolean,
+): Result<CloseWalk, EntityError> => {
+  const fillRatio = tx.proof.fillRatio;
+  return chain(terminalPullReplay(route, fillRatio, tx.binary, tx.proof), (replay) => {
+    if (replay) return ok({ step: w.step, matched: true });
+    return chain(pullCloseAllowed(route, fillRatio, "target", targetHub, tx.proof), () =>
+      map(closeProgress(w.step, route.orderId, tx.proof, fillRatio), (p) => ({ step: p.step, matched: true })),
+    );
+  });
+};
+/** One mirrored route: which side of the closed pull this Entity is on decides the leg it closes. */
+const closeRoute =
+  (tx: TxOf<"cross_pull_close">, self: string, peer: string) =>
+  (w: CloseWalk, orderId: string): Result<CloseWalk, EntityError> => {
+    const route = w.step.host.swaps?.get(orderId);
+    if (route === undefined) return ok(w);
+    const p = partiesOf(route);
+    const sourcePull = route.sourcePull?.pullId === tx.pullId;
+    const targetPull = route.targetPull?.pullId === tx.pullId;
+    const sourceHub =
+      sourcePull && route.targetPull?.pullId !== undefined && self === p.sourceHub && peer === p.sourceUser;
+    const sourceUser = sourcePull && self === p.sourceUser && peer === p.sourceHub;
+    const targetUser = targetPull && self === p.targetUser && peer === p.targetHub;
+    const targetHub = targetPull && self === p.targetHub && peer === p.targetUser;
+    if (sourceHub || sourceUser) return closeSourceLeg(w, route, tx, sourceHub);
+    return targetUser || targetHub ? closeTargetLeg(w, route, tx, targetHub) : ok(w);
+  };
+/**
+ * og applyCrossPullCloseFollowup: every mirrored route naming this pull on this Account projects the committed close;
+ * the source hub then drops or routes the book order.
+ */
+const committedPullClose = (
+  start: CommittedCrossStep,
+  cp: string,
+  tx: TxOf<"cross_pull_close">,
+): Result<CommittedCrossStep, EntityError> => {
+  const fillRatio = tx.proof.fillRatio;
+  if (!Number.isSafeInteger(fillRatio) || fillRatio < 0 || fillRatio > MAX_FILL)
+    return invariant(`CROSS_J_CLOSE_PROOF_RATIO_INVALID:${fillRatio}`);
+  return chain(fatalCross(decodeHashLadderBinary(tx.binary)), (decoded) => {
+    if (decoded.fillRatio !== fillRatio) {
+      return invariant(
+        `CROSS_J_CLOSE_BINARY_RATIO_MISMATCH: pull=${tx.pullId} binary=${decoded.fillRatio} proof=${fillRatio}`,
+      );
+    }
+    const orderIds = [...(start.host.swaps?.keys() ?? [])];
+    const walked = foldResult(
+      orderIds,
+      { step: start, matched: false },
+      closeRoute(tx, entityRef(start.host.id), entityRef(cp)),
+    );
+    return chain(walked, (w) =>
+      w.matched
+        ? ok({ ...w.step, handled: true })
+        : invariant(`CROSS_J_PULL_CLOSE_ROUTE_MISSING: pull=${tx.pullId} order=${tx.proof.orderId}`),
+    );
+  });
+};
+/**
+ * og applyCommittedCrossJurisdictionAccountTxFollowup: `handled` is og's return (a cross-j tx that the HTLC followup
+ * must skip).
+ */
+export const committedCrossFollowup = (
+  h: CommittedCrossHost,
+  counterpartyId: string,
+  tx: WireAccountTx,
+  committedAt: number,
+): Result<CommittedCrossStep, EntityError> => {
   const start: CommittedCrossStep = { host: h, outputs: [], messages: [], created: [], handled: false };
-  return tx.type === "cross_pull_lock" ? committedPullLock(start, counterpartyId, tx, committedAt) : tx.type === "cross_pull_close" ? committedPullClose(start, counterpartyId, tx) : ok(start);
+  switch (tx.type) {
+    case "cross_pull_lock":
+      return committedPullLock(start, counterpartyId, tx, committedAt);
+    case "cross_pull_close":
+      return committedPullClose(start, counterpartyId, tx);
+    default:
+      return ok(start);
+  }
 };
