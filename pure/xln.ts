@@ -25995,200 +25995,576 @@ export const foldTxs = (
   });
 };
 // ---- og entity/profile/profile-descriptor.ts: the public profile descriptor; its hash is a 'profile' secondary hash to sign ----
-/** og MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES: LIMITS.MAX_PROFILE_BYTES (1 MiB) minus the fixed route-envelope overhead og measures once. */
+/**
+ * og MAX_ENTITY_PROFILE_DESCRIPTOR_BYTES: LIMITS.MAX_PROFILE_BYTES (1 MiB) minus the fixed route-envelope overhead og
+ * measures once.
+ */
 const MAX_PROFILE_DESCRIPTOR_BYTES = 960_602;
 type ProfileCap = { readonly inCapacity: bigint; readonly outCapacity: bigint };
 type RankedCap = { readonly tokenId: string; readonly capacity: ProfileCap; readonly liquidity: bigint };
-type ProfileRow = { readonly counterpartyId: string; readonly domain: Domain; readonly tokenCapacities: Readonly<Record<string, ProfileCap>> };
+type ExtraCap = RankedCap & { readonly counterpartyId: string };
+type ProfileRow = {
+  readonly counterpartyId: string;
+  readonly domain: Domain;
+  readonly tokenCapacities: Readonly<Record<string, ProfileCap>>;
+};
+/**
+ * One pinned Account: its advertised row (its most liquid token), its other liquid tokens, and whether it takes
+ * inbound.
+ */
+type PinnedAccount = { readonly row: ProfileRow; readonly extras: readonly ExtraCap[]; readonly isPublic: boolean };
 /** og floorProfileCapacity: advertised capacities are floored to 1000 (no per-payment leak). */
 const floorProfileCap = (v: bigint): bigint => (v <= 0n ? 0n : v - (v % 1000n));
-const compareTokenText = (l: string, r: string): number => { const a = Number(l), b = Number(r); return Number.isSafeInteger(a) && Number.isSafeInteger(b) && a !== b ? a - b : asc(l, r); };
-/** og rankedLiquidProfileCapacities: deriveDelta from our side, floored, liquid tokens by liquidity desc, at most 16. */
-const rankedCaps = (self: EntityId, child: AccountReplica): readonly RankedCap[] => {
-  const body = child.state, me = isLeft(self, replicaId(child));
-  return [...body.account.deltas].map(([tk, d]): RankedCap => {
-    const out = outCapacity(d, me, holds(body, tk, me)), inn = outCapacity(d, !me, holds(body, tk, !me));
-    return { tokenId: String(tk), capacity: { inCapacity: floorProfileCap(inn), outCapacity: floorProfileCap(out) }, liquidity: inn + out };
-  }).filter((c) => c.liquidity > 0n).sort((l, r) => (l.liquidity === r.liquidity ? compareTokenText(l.tokenId, r.tokenId) : l.liquidity > r.liquidity ? -1 : 1)).slice(0, 16);
+const compareTokenText = (l: string, r: string): number => {
+  const a = Number(l);
+  const b = Number(r);
+  return Number.isSafeInteger(a) && Number.isSafeInteger(b) && a !== b ? a - b : asc(l, r);
 };
-/** og buildEntityProfileDescriptor then computeEntityProfileDescriptorHash. Only pinned Accounts are advertised, at most 100, then extra capacities up to the byte budget. */
-export const entityProfileHash = (state: EntityState, replicas: Replicas): Result<string, EntityError> => {
-  let rows: ProfileRow[] = [], pub: string[] = [], extras: (RankedCap & { readonly counterpartyId: string })[] = [];
-  for (const [peer, child] of replicas) {
-    if (child.publicPinned !== true) continue;
-    const ranked = rankedCaps(state.id, child), [first] = ranked;
-    if (first === undefined) continue;
-    extras.push(...ranked.slice(1).map((c) => ({ counterpartyId: peer, ...c })));
-    rows.push({ counterpartyId: peer, domain: child.state.terms.domain, tokenCapacities: { [first.tokenId]: first.capacity } });
-    if (first.capacity.inCapacity > 0n) pub.push(peer);
-  }
-  if (rows.length > 100) {
-    const liquidity = (r: ProfileRow): bigint => Object.values(r.tokenCapacities).reduce((n, c) => n + c.inCapacity + c.outCapacity, 0n);
-    rows = [...rows].sort((l, r) => { const a = liquidity(l), b = liquidity(r); return a !== b ? (a > b ? -1 : 1) : asc(l.counterpartyId, r.counterpartyId); }).slice(0, 100);
-    const advertised = new Set(rows.map((r) => r.counterpartyId));
-    pub = pub.filter((id) => advertised.has(id)); extras = extras.filter((e) => advertised.has(e.counterpartyId));
-  }
-  rows.sort((l, r) => asc(l.counterpartyId, r.counterpartyId)); pub.sort(asc);
-  extras.sort((l, r) => (l.liquidity === r.liquidity ? asc(l.counterpartyId, r.counterpartyId) || compareTokenText(l.tokenId, r.tokenId) : l.liquidity > r.liquidity ? -1 : 1));
-  const profile = (state.committed["profile"] ?? {}) as { readonly [k: string]: unknown }, hub = state.committed["hubRebalanceConfig"] as { readonly [k: string]: unknown } | undefined;
-  const isHub = profile["isHub"] === true, j = rootConfig(state).jurisdiction, jName = String(j?.name || "").trim(), sectors = profile["sectors"] as readonly unknown[] | undefined;
-  const text = (v: unknown): string => (v === undefined ? "" : String(v));
-  const base = {
-    entityId: lower(state.id), entityEncryptionPublicKey: text(state.committed["entityEncryptionPublicKey"]), name: String(profile["name"] || "").trim(),
-    avatar: text(profile["avatar"]), bio: text(profile["bio"]), website: text(profile["website"]), publicAccounts: pub, accounts: rows,
-    metadata: {
-      isHub, ...(profile["entityKind"] ? { entityKind: profile["entityKind"] } : {}), ...(sectors?.length ? { sectors: [...sectors] } : {}),
-      routingFeePPM: hub?.["routingFeePPM"] ?? 1, baseFee: hub?.["baseFee"] ?? 0n, ...(hub?.["swapTakerFeeBps"] !== undefined ? { swapTakerFeeBps: hub["swapTakerFeeBps"] } : {}),
-      ...(j === undefined || jName === "" ? {} : { jurisdiction: { name: jName, ...(j.chainId !== undefined ? { chainId: j.chainId } : {}), ...(j.entityProviderAddress ? { entityProviderAddress: lower(j.entityProviderAddress) } : {}), ...(j.depositoryAddress ? { depositoryAddress: lower(j.depositoryAddress) } : {}) } }),
-      ...(isHub && hub !== undefined ? {
-        ...(hub["hubName"] ? { hubName: hub["hubName"] } : {}), policyVersion: hub["policyVersion"], ...(hub["rebalanceBaseFee"] !== undefined ? { rebalanceBaseFee: String(hub["rebalanceBaseFee"]) } : {}),
-        rebalanceLiquidityFeeBps: String(hub["rebalanceLiquidityFeeBps"]), rebalanceGasFee: String(hub["rebalanceGasFee"] ?? 0n), rebalanceTimeoutMs: hub["rebalanceTimeoutMs"] ?? 10 * 60 * 1000,
-      } : {}),
+const byLiquidityDesc = (a: bigint, b: bigint): number => (a === b ? 0 : a > b ? -1 : 1);
+/**
+ * og rankedLiquidProfileCapacities: deriveDelta from our side, floored, liquid tokens by liquidity desc, at most 16.
+ */
+const rankedCaps = (self: EntityId, child: AccountReplica): readonly RankedCap[] => {
+  const body = child.state;
+  const me = isLeft(self, replicaId(child));
+  const capOf = ([tk, d]: readonly [TokenId, Delta]): RankedCap => {
+    const out = outCapacity(d, me, holds(body, tk, me));
+    const inn = outCapacity(d, !me, holds(body, tk, !me));
+    const capacity = { inCapacity: floorProfileCap(inn), outCapacity: floorProfileCap(out) };
+    return { tokenId: String(tk), capacity, liquidity: inn + out };
+  };
+  return [...body.account.deltas]
+    .map(capOf)
+    .filter((c) => c.liquidity > 0n)
+    .toSorted((l, r) => byLiquidityDesc(l.liquidity, r.liquidity) || compareTokenText(l.tokenId, r.tokenId))
+    .slice(0, 16);
+};
+const pinnedAccountOf = (self: EntityId, peer: EntityId, child: AccountReplica): PinnedAccount | undefined => {
+  if (child.publicPinned !== true) return undefined;
+  const [first, ...rest] = rankedCaps(self, child);
+  if (first === undefined) return undefined;
+  return {
+    row: {
+      counterpartyId: peer,
+      domain: child.state.terms.domain,
+      tokenCapacities: { [first.tokenId]: first.capacity },
+    },
+    extras: rest.map((c) => ({ counterpartyId: peer, ...c })),
+    isPublic: first.capacity.inCapacity > 0n,
+  };
+};
+const rowLiquidity = (r: ProfileRow): bigint =>
+  Object.values(r.tokenCapacities).reduce((n, c) => n + c.inCapacity + c.outCapacity, 0n);
+/** og's advertised cut: of more than 100 pinned Accounts, the 100 most liquid (ties by id) are advertised. */
+const advertisedAccounts = (pinned: readonly PinnedAccount[]): readonly PinnedAccount[] =>
+  pinned.length <= 100
+    ? pinned
+    : pinned
+        .toSorted(
+          (l, r) =>
+            byLiquidityDesc(rowLiquidity(l.row), rowLiquidity(r.row)) ||
+            asc(l.row.counterpartyId, r.row.counterpartyId),
+        )
+        .slice(0, 100);
+const profileJurisdiction = (j: EntityRootJurisdiction | undefined): Loose => {
+  const name = String(j?.name || "").trim();
+  if (j === undefined || name === "") return {};
+  return {
+    jurisdiction: {
+      name,
+      ...(j.chainId !== undefined ? { chainId: j.chainId } : {}),
+      ...(j.entityProviderAddress ? { entityProviderAddress: lower(j.entityProviderAddress) } : {}),
+      ...(j.depositoryAddress ? { depositoryAddress: lower(j.depositoryAddress) } : {}),
     },
   };
-  const withExtras = (count: number): Binary => {
-    const byPeer = new Map(base.accounts.map((a) => [a.counterpartyId, { ...a, tokenCapacities: { ...a.tokenCapacities } as Record<string, ProfileCap> }]));
-    for (const e of extras.slice(0, count)) { const row = byPeer.get(e.counterpartyId); if (row !== undefined) row.tokenCapacities[e.tokenId] = e.capacity; }
-    return { ...base, accounts: [...byPeer.values()].map((a) => ({ ...a, tokenCapacities: Object.fromEntries(Object.entries(a.tokenCapacities).sort(([l], [r]) => compareTokenText(l, r))) })) } as unknown as Binary;
-  };
-  const size = (d: Binary): Result<number, EntityError> => map(encodeConsensus(d), (b) => b.byteLength);
-  const full = withExtras(extras.length);
-  return chain(size(full), (fullBytes) => fullBytes <= MAX_PROFILE_DESCRIPTOR_BYTES ? bytesKeccak(full) : chain(size(base as unknown as Binary), (baseBytes) => {
-    if (baseBytes > MAX_PROFILE_DESCRIPTOR_BYTES) return invariant(`ENTITY_PROFILE_REQUIRED_CAPACITY_BUDGET_EXCEEDED:${baseBytes}:${MAX_PROFILE_DESCRIPTOR_BYTES}`);
-    let low = 0, high = extras.length;
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2), bytes = size(withExtras(mid));
-      if (!bytes.ok) return bytes;
-      if (bytes.value <= MAX_PROFILE_DESCRIPTOR_BYTES) low = mid; else high = mid - 1;
-    }
-    return bytesKeccak(withExtras(low));
-  }));
 };
-/** og appendFinalProfileHash / finishAuthorityTransitionOnly: a changed descriptor (always at genesis, always on an authority transition) is re-certified. */
-const profileHashToSign = (before: EntityState, beforeReplicas: Replicas, after: Draft, always: boolean): Result<Draft, EntityError> =>
-  chain(entityProfileHash(after.state, after.accountReplicas), (hash) => chain(always || before.height === 0n ? ok(null) : map(entityProfileHash(before, beforeReplicas), (h): string | null => h), (previous) =>
-    ok(previous === hash ? after : { ...after, hashes: [...(after.hashes ?? []), { hash, type: "profile" as const, context: `profile:${hash}` }] })));
+const hubRebalanceTerms = (hub: Loose): Loose => ({
+  ...(hub["hubName"] ? { hubName: hub["hubName"] } : {}),
+  policyVersion: hub["policyVersion"],
+  ...(hub["rebalanceBaseFee"] !== undefined ? { rebalanceBaseFee: String(hub["rebalanceBaseFee"]) } : {}),
+  rebalanceLiquidityFeeBps: String(hub["rebalanceLiquidityFeeBps"]),
+  rebalanceGasFee: String(hub["rebalanceGasFee"] ?? 0n),
+  rebalanceTimeoutMs: hub["rebalanceTimeoutMs"] ?? 10 * 60 * 1000,
+});
+/** og's descriptor metadata: the hub flag and kind, sectors, fees, the jurisdiction, and a hub's rebalance terms. */
+const profileMetadata = (state: EntityState, profile: Loose, hub: Loose | undefined): Loose => {
+  const isHub = profile["isHub"] === true;
+  const sectors = profile["sectors"] as readonly unknown[] | undefined;
+  return {
+    isHub,
+    ...(profile["entityKind"] ? { entityKind: profile["entityKind"] } : {}),
+    ...(sectors?.length ? { sectors: [...sectors] } : {}),
+    routingFeePPM: hub?.["routingFeePPM"] ?? 1,
+    baseFee: hub?.["baseFee"] ?? 0n,
+    ...(hub?.["swapTakerFeeBps"] !== undefined ? { swapTakerFeeBps: hub["swapTakerFeeBps"] } : {}),
+    ...profileJurisdiction(rootConfig(state).jurisdiction),
+    ...(isHub && hub !== undefined ? hubRebalanceTerms(hub) : {}),
+  };
+};
+type ProfileDescriptor = Loose & { readonly accounts: readonly ProfileRow[] };
+/** og buildEntityProfileDescriptor without extra capacities. */
+const profileDescriptor = (
+  state: EntityState,
+  publicAccounts: readonly string[],
+  accounts: readonly ProfileRow[],
+): ProfileDescriptor => {
+  const profile = (state.committed["profile"] ?? {}) as Loose;
+  const hub = state.committed["hubRebalanceConfig"] as Loose | undefined;
+  const text = (v: unknown): string => (v === undefined ? "" : String(v));
+  return {
+    entityId: lower(state.id),
+    entityEncryptionPublicKey: text(state.committed["entityEncryptionPublicKey"]),
+    name: String(profile["name"] || "").trim(),
+    avatar: text(profile["avatar"]),
+    bio: text(profile["bio"]),
+    website: text(profile["website"]),
+    publicAccounts,
+    accounts,
+    metadata: profileMetadata(state, profile, hub),
+  };
+};
+/** The descriptor with the first `count` extra capacities merged into their rows, each row's tokens in token order. */
+const withExtraCaps = (base: ProfileDescriptor, extras: readonly ExtraCap[], count: number): Binary => {
+  const added = extras.slice(0, count);
+  const accounts = base.accounts.map((a) => {
+    const more = added
+      .filter((e) => e.counterpartyId === a.counterpartyId)
+      .map((e) => [e.tokenId, e.capacity] as const);
+    const caps = Object.entries({ ...a.tokenCapacities, ...Object.fromEntries(more) });
+    return { ...a, tokenCapacities: Object.fromEntries(caps.toSorted(([l], [r]) => compareTokenText(l, r))) };
+  });
+  return { ...base, accounts } as unknown as Binary;
+};
+/** The most extras, in rank order, whose descriptor still fits: a binary search over `low..high`. */
+const fittingCount = (
+  fits: (count: number) => Result<boolean, EntityError>,
+  low: number,
+  high: number,
+): Result<number, EntityError> => {
+  if (low >= high) return ok(low);
+  const mid = Math.ceil((low + high) / 2);
+  return chain(fits(mid), (fit) => (fit ? fittingCount(fits, mid, high) : fittingCount(fits, low, mid - 1)));
+};
+/**
+ * og buildEntityProfileDescriptor then computeEntityProfileDescriptorHash. Only pinned Accounts are advertised, at most
+ * 100, then extra capacities up to the byte budget.
+ */
+export const entityProfileHash = (state: EntityState, replicas: Replicas): Result<string, EntityError> => {
+  const pinned = [...replicas].flatMap(([peer, child]) => {
+    const p = pinnedAccountOf(state.id, peer, child);
+    return p === undefined ? [] : [p];
+  });
+  const advertised = advertisedAccounts(pinned);
+  const rows = advertised.map((p) => p.row).toSorted((l, r) => asc(l.counterpartyId, r.counterpartyId));
+  const publicAccounts = advertised
+    .filter((p) => p.isPublic)
+    .map((p) => p.row.counterpartyId)
+    .toSorted(asc);
+  const extras = advertised
+    .flatMap((p) => p.extras)
+    .toSorted(
+      (l, r) =>
+        byLiquidityDesc(l.liquidity, r.liquidity) ||
+        asc(l.counterpartyId, r.counterpartyId) ||
+        compareTokenText(l.tokenId, r.tokenId),
+    );
+  const base = profileDescriptor(state, publicAccounts, rows);
+  const size = (d: Binary): Result<number, EntityError> => map(encodeConsensus(d), (b) => b.byteLength);
+  const fits = (count: number): Result<boolean, EntityError> =>
+    map(size(withExtraCaps(base, extras, count)), (bytes) => bytes <= MAX_PROFILE_DESCRIPTOR_BYTES);
+  const full = withExtraCaps(base, extras, extras.length);
+  const trimmed = (): Result<string, EntityError> =>
+    chain(size(base as unknown as Binary), (baseBytes) =>
+      baseBytes > MAX_PROFILE_DESCRIPTOR_BYTES
+        ? invariant(`ENTITY_PROFILE_REQUIRED_CAPACITY_BUDGET_EXCEEDED:${baseBytes}:${MAX_PROFILE_DESCRIPTOR_BYTES}`)
+        : chain(fittingCount(fits, 0, extras.length), (count) => bytesKeccak(withExtraCaps(base, extras, count))),
+    );
+  return chain(size(full), (fullBytes) => (fullBytes <= MAX_PROFILE_DESCRIPTOR_BYTES ? bytesKeccak(full) : trimmed()));
+};
+/**
+ * og appendFinalProfileHash / finishAuthorityTransitionOnly: a changed descriptor (always at genesis, always on an
+ * authority transition) is re-certified.
+ */
+const profileHashToSign = (
+  before: EntityState,
+  beforeReplicas: Replicas,
+  after: Draft,
+  always: boolean,
+): Result<Draft, EntityError> =>
+  chain(entityProfileHash(after.state, after.accountReplicas), (hash) => {
+    const previous: Result<string | null, EntityError> =
+      always || before.height === 0n ? ok(null) : entityProfileHash(before, beforeReplicas);
+    const signed: HashToSign = { hash, type: "profile", context: `profile:${hash}` };
+    return map(previous, (p) => (p === hash ? after : { ...after, hashes: [...(after.hashes ?? []), signed] }));
+  });
 const EMPTY_COLLECTION = { radix: 16, leafCount: 0, root: ZERO_WORD } as const;
 /** og applyEntityFrame `state.crontabState ??= initCrontab()`: the hubRebalance task at the 1s cadence, no hooks. */
-const DEFAULT_CRONTAB: Binary = { tasks: new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun: 0, enabled: true, params: {} }]]), hooks: EMPTY_COLLECTION };
+const DEFAULT_CRONTAB: Binary = {
+  tasks: new Map([
+    ["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun: 0, enabled: true, params: {} }],
+  ]),
+  hooks: EMPTY_COLLECTION,
+};
 const rootConfig = (state: EntityState): EntityRootConfig => {
-  const members = [...membersOf(state.quorum)].map(([id, member]) => [signerId(id), member.shares] as const), j = state.jurisdictionConfig;
+  const members = [...membersOf(state.quorum)].map(([id, member]) => [signerId(id), member.shares] as const);
+  const j = state.jurisdictionConfig;
   return {
-    mode: "proposer-based", threshold: thresholdOf(state.quorum), validators: members.map(([id]) => id), shares: Object.fromEntries(members),
-    ...(j === undefined ? {} : { jurisdiction: { chainId: state.jurisdiction.chainId, depositoryAddress: state.jurisdiction.depositoryAddress, ...j } }),
+    mode: "proposer-based",
+    threshold: thresholdOf(state.quorum),
+    validators: members.map(([id]) => id),
+    shares: Object.fromEntries(members),
+    ...(j === undefined
+      ? {}
+      : {
+          jurisdiction: {
+            chainId: state.jurisdiction.chainId,
+            depositoryAddress: state.jurisdiction.depositoryAddress,
+            ...j,
+          },
+        }),
   };
 };
-/** og AccountReplica dispute fields (dispute/hanko.ts replaceLocalDisputeDraft, storeCounterpartyDisputeHanko): our unsigned draft tuple, the peer's full witness. */
-const disputeLeafFields = (w: DisputeWitnesses): Partial<Record<EntityLeafOptional, unknown>> => ({
-  ...(w.current === undefined ? {} : { currentDisputeHash: w.current.hash, currentDisputeProofBodyHash: w.current.proofBodyHash, currentDisputeProofNonce: w.current.proofNonce, currentDisputeProofProposerIsLeft: w.current.proposerIsLeft }),
-  ...(w.counterparty === undefined ? {} : { counterpartyDisputeProofHanko: w.counterparty.hanko, counterpartyDisputeHash: w.counterparty.hash, counterpartyDisputeProofBodyHash: w.counterparty.proofBodyHash, counterpartyDisputeProofNonce: w.counterparty.proofNonce, counterpartyDisputeProofProposerIsLeft: w.counterparty.proposerIsLeft }),
-});
+/**
+ * og AccountReplica dispute fields (dispute/hanko.ts replaceLocalDisputeDraft, storeCounterpartyDisputeHanko): our
+ * unsigned draft tuple, the peer's full witness.
+ */
+const disputeLeafFields = (w: DisputeWitnesses): Partial<Record<EntityLeafOptional, unknown>> => {
+  const { current, counterparty } = w;
+  return {
+    ...(current === undefined
+      ? {}
+      : {
+          currentDisputeHash: current.hash,
+          currentDisputeProofBodyHash: current.proofBodyHash,
+          currentDisputeProofNonce: current.proofNonce,
+          currentDisputeProofProposerIsLeft: current.proposerIsLeft,
+        }),
+    ...(counterparty === undefined
+      ? {}
+      : {
+          counterpartyDisputeProofHanko: counterparty.hanko,
+          counterpartyDisputeHash: counterparty.hash,
+          counterpartyDisputeProofBodyHash: counterparty.proofBodyHash,
+          counterpartyDisputeProofNonce: counterparty.proofNonce,
+          counterpartyDisputeProofProposerIsLeft: counterparty.proposerIsLeft,
+        }),
+  };
+};
 /** og witness-projection.ts counterpartySettlementHankos: the peer's settlement and post-proof Hankos, when any. */
 const peerSettlementHankos = (w: SettlementWorkspace | undefined, localIsLeft: boolean): unknown => {
   if (w === undefined) return undefined;
-  const settlementHanko = localIsLeft ? w.rightHanko : w.leftHanko, postProofHanko = localIsLeft ? w.postSettlementDisputeProof?.rightHanko : w.postSettlementDisputeProof?.leftHanko;
-  return settlementHanko === undefined && postProofHanko === undefined ? undefined : { ...opt("settlementHanko", settlementHanko), ...opt("postProofHanko", postProofHanko) };
+  const proof = w.postSettlementDisputeProof;
+  const settlementHanko = localIsLeft ? w.rightHanko : w.leftHanko;
+  const postProofHanko = localIsLeft ? proof?.rightHanko : proof?.leftHanko;
+  return settlementHanko === undefined && postProofHanko === undefined
+    ? undefined
+    : { ...opt("settlementHanko", settlementHanko), ...opt("postProofHanko", postProofHanko) };
+};
+/** The committed head as the Account leaf links it: its height, its frame hash, and the peer's Hanko on it. */
+type HeadLink = { readonly height: number; readonly frame: string; readonly peerHanko?: string | undefined };
+/**
+ * og's genesis replica carries `currentFrame.stateHash = ""` (open-account.ts, inbound-account.ts), so H=0 commits the
+ * empty frame hash; `counterpartyFrameHanko` is the peer's Hanko on the committed head (ack-commit.ts, index.ts).
+ */
+const headLink = (child: AccountReplica, localIsLeft: boolean): Result<HeadLink, EntityFrameHashError> =>
+  match(child.head, {
+    genesis: () => ok({ height: 0, frame: "" }),
+    installed: (head) =>
+      map(frameNumber(head.height), (height) => ({
+        height,
+        frame: head.prevFrameHash,
+        peerHanko: at(head.certificate.right, head.certificate.left, localIsLeft),
+      })),
+  });
+const ACCOUNT_LEAF_STATUS = {
+  open: "active",
+  proposed: "active",
+  received: "active",
+  preparing: "dispute_preparing",
+  disputed: "disputed",
+} as const satisfies Record<AccountReplica["_tag"], EntityRootAccount["status"]>;
+/**
+ * The replica's committed side fields: its pin, board refresh state, the peer's head Hanko, dispute witnesses and any
+ * active dispute.
+ */
+const accountLeafCommitted = (child: AccountReplica, link: HeadLink): EntityRootAccount["committed"] => ({
+  ...opt("publicPinned", child.publicPinned),
+  ...opt("boardHankoRefreshMigration", child.refreshMigration),
+  ...opt("counterpartyBoardHankoRefresh", child.boardRefresh),
+  ...opt("counterpartyFrameHanko", link.peerHanko),
+  ...disputeLeafFields(child.dispute),
+  ...(child._tag === "disputed" ? opt("activeDispute", child.active ?? child.queued) : {}),
+  ...(child._tag === "preparing" ? opt("disputePrepare", child.prepare) : {}),
+});
+/**
+ * og projectAccountConsensusState for one Account replica. Rebalance requests, fee state and fee policies are committed
+ * Account state; the local shadow is not part of the body.
+ */
+export const installedAccount = (
+  self: EntityId,
+  peer: EntityId,
+  child: AccountReplica,
+): Result<EntityRootAccount, EntityError> => {
+  const body = child.state;
+  const localIsLeft = isLeft(self, replicaId(child));
+  const view = mapErr(committedView(body), (): EntityError => ({ _tag: "account_envelope", target: peer }));
+  return chain(headLink(child, localIsLeft), (link) =>
+    map(view, (state): EntityRootAccount => ({
+      fromEntity: self,
+      toEntity: peer,
+      status: ACCOUNT_LEAF_STATUS[child._tag],
+      currentHeight: link.height,
+      nextProofNonce: child.dispute.nextProofNonce,
+      currentFrameHash: link.frame,
+      pendingWithdrawals: ZERO_WORD,
+      policyRoot: unwrapOr(mapRoot(child.rebalancePolicy ?? new Map<number, RebalancePolicy>()), () => ZERO_WORD),
+      submittedAtByTokenRoot: unwrapOr(submittedAtRoot(body), () => ZERO_WORD),
+      state,
+      committed: accountLeafCommitted(child, link),
+      ...opt("counterpartySettlementHankos", peerSettlementHankos(body.settlement, localIsLeft)),
+      ...opt("rejectedFrameEvidence", child.rejectedFrame),
+    })),
+  );
 };
 /**
- * og projectAccountConsensusState for one Account replica. og's genesis replica carries `currentFrame.stateHash = ""` (open-account.ts, inbound-account.ts), so H=0 commits the empty frame hash.
- * `counterpartyFrameHanko` is the peer's Hanko on the committed head (ack-commit.ts, index.ts). Rebalance requests, fee state and fee policies are committed Account state; the local shadow is not part of the body.
+ * og projectEntityConsensusState: deferredAccountProposals / settlementContinuations are committed as entity
+ * collections when present.
  */
-export const installedAccount = (self: EntityId, peer: EntityId, child: AccountReplica): Result<EntityRootAccount, EntityError> => {
-  const body = child.state;
-  const status: EntityRootAccount["status"] = match(child, { open: () => "active", proposed: () => "active", received: () => "active", preparing: () => "dispute_preparing", disputed: () => "disputed" });
-  const localIsLeft = isLeft(self, replicaId(child));
-  const linked: Result<{ readonly height: number; readonly frame: string; readonly peerHanko?: string | undefined }, EntityFrameHashError> = match(child.head, {
-    genesis: () => ok({ height: 0, frame: "" }),
-    installed: (head) => map(frameNumber(head.height), (height) => ({ height, frame: head.prevFrameHash, peerHanko: at(head.certificate.right, head.certificate.left, localIsLeft) })),
+const settleCollections = (committed: EntityCommitted): Result<EntityCommitted, EntityError> =>
+  foldResult(["deferredAccountProposals", "settlementContinuations"] as const, committed, (c, field) => {
+    const live = c[field];
+    return live instanceof Map
+      ? map(entityCollectionCommitment(live as ReadonlyMap<string, Binary>), (commitment): EntityCommitted => ({
+          ...c,
+          [field]: commitment as unknown as Binary,
+        }))
+      : ok(c);
   });
-  return chain(linked, (link): Result<EntityRootAccount, EntityError> => chain(mapErr(committedView(body), (): EntityError => ({ _tag: "account_envelope", target: peer })), (state): Result<EntityRootAccount, EntityError> => ok({
-    fromEntity: self, toEntity: peer, status, currentHeight: link.height, nextProofNonce: child.dispute.nextProofNonce, currentFrameHash: link.frame,
-    pendingWithdrawals: ZERO_WORD, policyRoot: unwrapOr(mapRoot(child.rebalancePolicy ?? new Map<number, RebalancePolicy>()), () => ZERO_WORD), submittedAtByTokenRoot: unwrapOr(submittedAtRoot(body), () => ZERO_WORD), state,
-    committed: { ...opt("publicPinned", child.publicPinned), ...opt("boardHankoRefreshMigration", child.refreshMigration), ...opt("counterpartyBoardHankoRefresh", child.boardRefresh), ...opt("counterpartyFrameHanko", link.peerHanko), ...disputeLeafFields(child.dispute), ...(child._tag === "disputed" ? opt("activeDispute", child.active ?? child.queued) : {}), ...(child._tag === "preparing" ? opt("disputePrepare", child.prepare) : {}) },
-    ...opt("counterpartySettlementHankos", peerSettlementHankos(body.settlement, localIsLeft)), ...opt("rejectedFrameEvidence", child.rejectedFrame),
-  })));
+/**
+ * og projectEntityConsensusState's committed sections: the settlement collections, the paybook, the cross-j
+ * collections, the order book, the crontab.
+ */
+const committedSections = (state: EntityState): Result<EntityCommitted, EntityError> => {
+  const withPaybook = (c: EntityCommitted): Result<EntityCommitted, EntityError> =>
+    state.paybook === undefined
+      ? ok(c)
+      : map(paybookSection(state.paybook), (paybook): EntityCommitted => ({ ...c, paybook }));
+  const withBook = (c: EntityCommitted): EntityCommitted =>
+    state.orderbookExt === undefined ? c : { ...c, orderbookExt: orderbookSection(state.orderbookExt) };
+  const paid = chain(settleCollections(state.committed), withPaybook);
+  return chain(
+    chain(paid, (c) => map(crossSections(c, state), withBook)),
+    crontabSection,
+  );
 };
-/** og projectEntityConsensusState: deferredAccountProposals / settlementContinuations are committed as entity collections when present. */
-const settleCollections = (committed: EntityCommitted): Result<EntityCommitted, EntityError> => foldResult(["deferredAccountProposals", "settlementContinuations"] as const, committed, (c, field): Result<EntityCommitted, EntityError> => {
-  const live = c[field];
-  return live instanceof Map ? map(entityCollectionCommitment(live as ReadonlyMap<string, Binary>), (commitment): EntityCommitted => ({ ...c, [field]: commitment as unknown as Binary })) : ok(c);
-});
-/** og computeCanonicalEntityConsensusStateHash over the draft: entityId, height, timestamp, config, accounts and every committed section. */
-export const entityRootOf = (state: EntityState, replicas: Replicas): Result<string, EntityError> =>
-  chain(frameNumber(state.height), (height) => chain(frameNumber(state.timestamp), (timestamp) => chain(traverse([...replicas], ([peer, child]) => installedAccount(state.id, peer, child)),
-    (accounts) => chain(chain(chain(chain(settleCollections(state.committed), (base) => state.paybook === undefined ? ok(base) : map(paybookSection(state.paybook), (paybook): EntityCommitted => ({ ...base, paybook }))), (withPaybook) => map(crossSections(withPaybook, state), (c): EntityCommitted => (state.orderbookExt === undefined ? c : { ...c, orderbookExt: orderbookSection(state.orderbookExt) }))), crontabSection),
-      (committed) => entityStateRoot({ config: rootConfig(state), accounts, entityId: state.id, height, timestamp, committed, leaderState: state.leaderState })))));
-/** og state-root.ts: crossJurisdictionSwaps / crossJurisdictionAuthorizations commit as text-keyed collections once they exist. */
+/**
+ * og computeCanonicalEntityConsensusStateHash over the draft: entityId, height, timestamp, config, accounts and every
+ * committed section.
+ */
+export const entityRootOf = (state: EntityState, replicas: Replicas): Result<string, EntityError> => {
+  const parts = all({
+    height: frameNumber(state.height),
+    timestamp: frameNumber(state.timestamp),
+    accounts: traverse([...replicas], ([peer, child]) => installedAccount(state.id, peer, child)),
+    committed: committedSections(state),
+  });
+  return chain(parts, ({ height, timestamp, accounts, committed }) =>
+    entityStateRoot({
+      config: rootConfig(state),
+      accounts,
+      entityId: state.id,
+      height,
+      timestamp,
+      committed,
+      leaderState: state.leaderState,
+    }),
+  );
+};
+/** A text-keyed collection's commitment, once the collection exists. */
+const textCollection = (m: ReadonlyMap<string, unknown> | undefined): Result<Binary | undefined, EntityError> =>
+  m === undefined
+    ? ok(undefined)
+    : map(entityCollectionCommitment(new Map([...m].map(([k, v]) => [k, v as Binary]))), (c) => c as unknown as Binary);
+/**
+ * og state-root.ts: crossJurisdictionSwaps / crossJurisdictionAuthorizations commit as text-keyed collections once they
+ * exist.
+ */
 const crossSections = (committed: EntityCommitted, state: EntityState): Result<EntityCommitted, EntityError> => {
-  const section = (m: ReadonlyMap<string, CrossRoute> | undefined): Result<Binary | undefined, EntityError> =>
-    m === undefined ? ok(undefined) : map(entityCollectionCommitment(new Map([...m].map(([k, v]) => [k, v as unknown as Binary]))), (c) => c as unknown as Binary);
-  const admissionsSection = (m: BookAdmissions | undefined): Result<Binary | undefined, EntityError> =>
-    m === undefined ? ok(undefined) : map(entityCollectionCommitment(new Map([...m].map(([k, v]) => [k, v as unknown as Binary]))), (c) => c as unknown as Binary);
-  return chain(section(state.crossJurisdictionSwaps), (swaps) => chain(section(state.crossJurisdictionAuthorizations), (auths) => map(admissionsSection(state.crossJurisdictionBookAdmissions), (admissions): EntityCommitted => ({
-    ...committed, ...(swaps === undefined ? {} : { crossJurisdictionSwaps: swaps }), ...(auths === undefined ? {} : { crossJurisdictionAuthorizations: auths }),
-    ...(admissions === undefined ? {} : { crossJurisdictionBookAdmissions: admissions }),
-  }))));
+  const sections = all({
+    swaps: textCollection(state.crossJurisdictionSwaps),
+    auths: textCollection(state.crossJurisdictionAuthorizations),
+    admissions: textCollection(state.crossJurisdictionBookAdmissions),
+  });
+  return map(sections, ({ swaps, auths, admissions }): EntityCommitted => ({
+    ...committed,
+    ...opt("crossJurisdictionSwaps", swaps),
+    ...opt("crossJurisdictionAuthorizations", auths),
+    ...opt("crossJurisdictionBookAdmissions", admissions),
+  }));
 };
-/** og computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(state)): config + normalizeAuthorityLeader(leaderState). */
+/** og normalizeAuthorityLeader: the active validator (by default the first) at its view and change height. */
+const authorityLeader = (
+  state: EntityState,
+  config: EntityRootConfig,
+): { readonly activeValidatorId: string; readonly view: number; readonly changedAtHeight: number } => ({
+  activeValidatorId: signerId(state.leaderState?.activeValidatorId ?? config.validators[0] ?? ""),
+  view: state.leaderState?.view ?? 0,
+  changedAtHeight: state.leaderState?.changedAtHeight ?? 0,
+});
+/**
+ * og computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(state)): config + normalizeAuthorityLeader(leaderState).
+ */
 const authorityRoot = (state: EntityState): Result<string, EntityRootError> => {
-  const config = rootConfig(state), leader = signerId(state.leaderState?.activeValidatorId ?? config.validators[0] ?? "");
-  if (leader.length === 0) return err({ _tag: "bad_config" });
-  return chain(consensusConfig(config), (normalized) => map(encodeConsensus({
-    domain: "xln.entity.frame-authority:binary",
-    authority: { config: normalized, leaderState: { activeValidatorId: leader, view: state.leaderState?.view ?? 0, changedAtHeight: state.leaderState?.changedAtHeight ?? 0 } },
-  }), (bytes) => bytesToHex(keccak_256(bytes))));
+  const config = rootConfig(state);
+  const leaderState = authorityLeader(state, config);
+  if (leaderState.activeValidatorId.length === 0) return err({ _tag: "bad_config" });
+  return chain(consensusConfig(config), (normalized) =>
+    map(
+      encodeConsensus({ domain: "xln.entity.frame-authority:binary", authority: { config: normalized, leaderState } }),
+      (bytes) => bytesToHex(keccak_256(bytes)),
+    ),
+  );
 };
-/** og account/consensus hashesToSign: the Account frames and dispute proofs this frame signs for, as secondary manifest entries. */
+/**
+ * og account/consensus hashesToSign: the Account frames and dispute proofs this frame signs for, as secondary manifest
+ * entries.
+ */
 const messageHashes = (peer: EntityId, m: AccountPeerInput): readonly HashToSign[] => {
   const tail = peer.slice(-8);
+  const disputed = (h: DisputeHanko | undefined, context: string): readonly HashToSign[] =>
+    h === undefined ? [] : [{ hash: h.hash, type: "dispute", context }];
   const acked = (a: AccountAck): readonly HashToSign[] => [
     { hash: a.frameHash, type: "accountFrame", context: `account:${tail}:ack:${a.height}` },
-    ...(a.disputeHanko === undefined ? [] : [{ hash: a.disputeHanko.hash, type: "dispute", context: `account:${tail}:ack-dispute` } as const]),
+    ...disputed(a.disputeHanko, `account:${tail}:ack-dispute`),
   ];
   return matchBy("kind", m, {
     ack: (a) => acked(a),
-    ack_frame: (f) => [...(f.ack === null ? [] : acked(f.ack)), { hash: f.frame.stateHash, type: "accountFrame", context: `account:${tail}:frame:${f.frame.height}` },
-      ...(f.disputeHanko === undefined ? [] : [{ hash: f.disputeHanko.hash, type: "dispute", context: `account:${tail}:dispute` } as const])],
-    dispute: (d) => [{ hash: d.disputeHanko.hash, type: "dispute", context: `account:${tail}:dispute` }],
-    // og: a refresh re-Hankos an already committed frame; its hashes are signed where the board-rotation hook drafts it (boardRefreshHook), not per message
+    ack_frame: (f) => [
+      ...(f.ack === null ? [] : acked(f.ack)),
+      { hash: f.frame.stateHash, type: "accountFrame", context: `account:${tail}:frame:${f.frame.height}` },
+      ...disputed(f.disputeHanko, `account:${tail}:dispute`),
+    ],
+    dispute: (d) => disputed(d.disputeHanko, `account:${tail}:dispute`),
+    // og: a refresh re-Hankos an already committed frame; its hashes are signed where the board-rotation hook drafts it
+    // (boardRefreshHook), not per message
     board_hanko_refresh: () => [],
   });
 };
 /** og buildEntityHashesToSign: the frame hash first, then the secondary hashes sorted, a duplicate is fatal. */
-const hashesToSignOf = (entityId: EntityId, height: bigint, frameHash: string, outputs: readonly EntityOutput[], txHashes: readonly HashToSign[] = []): Result<readonly HashToSign[], EntityError> => {
+const hashesToSignOf = (
+  entityId: EntityId,
+  height: bigint,
+  frameHash: string,
+  outputs: readonly EntityOutput[],
+  txHashes: readonly HashToSign[] = [],
+): Result<readonly HashToSign[], EntityError> => {
   const secondary = [...txHashes, ...outputs.flatMap((o) => ("tx" in o ? messageHashes(o.to, o.tx.data) : []))];
   const hashes = [frameHash, ...secondary.map((h) => h.hash)];
   if (new Set(hashes).size !== hashes.length) return err({ _tag: "secondary_hash_duplicate" });
-  return ok([{ hash: frameHash, type: "entityFrame", context: `entity:${entityId.slice(-4)}:frame:${height}` }, ...[...secondary].sort((a, b) => asc(a.hash, b.hash))]);
+  const head: HashToSign = {
+    hash: frameHash,
+    type: "entityFrame",
+    context: `entity:${entityId.slice(-4)}:frame:${height}`,
+  };
+  return ok([head, ...secondary.toSorted((a, b) => asc(a.hash, b.hash))]);
 };
 const GENESIS_PARENT = "genesis";
-/** og certifyEntityProposal: the proposal state takes height+1 and the frame timestamp, then state root, authority root, frame hash, manifest. */
-const buildFrame = (r: EntityEnv, leader: FrameLeader, leaderState: LeaderState, timestamp: bigint, txs: readonly EntityTx[], folded: Draft, infra: HtlcFrameInfra = EMPTY_HTLC_INFRA, jPrefixCertificate?: JPrefixCertificate): Result<EntityCandidate, EntityError> => {
-  const height = r.head.height + 1n, parent = parentOf(r.head), signer = signerId(leader.proposerSignerId);
-  const committed: EntityCommitted = "crontabState" in folded.state.committed ? folded.state.committed : { ...folded.state.committed, crontabState: DEFAULT_CRONTAB };
+/**
+ * og certifyEntityProposal's entityContext: the proposer replica, the parent link and the HTLC infra the frame commits.
+ */
+const frameEntityContext = (
+  entityId: EntityId,
+  signer: string,
+  parent: string,
+  height: number,
+  infra: HtlcFrameInfra,
+): EntityInfraContext => ({
+  version: 1,
+  proposerReplicaId: `${entityId}:${signer}`,
+  entityId,
+  proposerSignerId: signer,
+  parentFrameHash: parent,
+  height,
+  gossipProfiles: infra.gossipProfiles,
+  peerAssertions: infra.peerAssertions,
+  htlc: {
+    version: 1,
+    entries: infra.entries as unknown as readonly Binary[],
+    originated: infra.originated as unknown as readonly Binary[],
+  },
+});
+/**
+ * og certifyEntityProposal: the proposal state takes height+1, the frame timestamp and the leader (an uninitialized
+ * crontab gets og's default), then state root, authority root, frame hash, manifest.
+ */
+const buildFrame = (
+  r: EntityEnv,
+  leader: FrameLeader,
+  leaderState: LeaderState,
+  timestamp: bigint,
+  txs: readonly EntityTx[],
+  folded: Draft,
+  infra: HtlcFrameInfra = EMPTY_HTLC_INFRA,
+  jPrefixCertificate?: JPrefixCertificate,
+): Result<EntityCandidate, EntityError> => {
+  const height = r.head.height + 1n;
+  const parent = parentOf(r.head);
+  const signer = signerId(leader.proposerSignerId);
+  const committed: EntityCommitted =
+    "crontabState" in folded.state.committed
+      ? folded.state.committed
+      : { ...folded.state.committed, crontabState: DEFAULT_CRONTAB };
   const draft: Draft = { ...folded, state: { ...folded.state, height, timestamp, committed, leaderState } };
-  return chain(frameNumber(height), (heightNo) => chain(entityRootOf(draft.state, draft.accountReplicas), (stateRoot) => chain(authorityRoot(draft.state), (root) => {
+  const roots = all({
+    heightNo: frameNumber(height),
+    stateRoot: entityRootOf(draft.state, draft.accountReplicas),
+    authority: authorityRoot(draft.state),
+  });
+  return chain(roots, ({ heightNo, stateRoot, authority }) => {
     const body = {
-      height, prevFrameHash: parent as EntityFrameHash, timestamp, txs, events: (folded.events ?? []).map((e): Binary => ({ ...e })), stateRoot, authorityRoot: root, leader,
-      entityContext: { version: 1, proposerReplicaId: `${draft.state.id}:${signer}`, entityId: draft.state.id, proposerSignerId: signer, parentFrameHash: parent, height: heightNo, gossipProfiles: infra.gossipProfiles, peerAssertions: infra.peerAssertions, htlc: { version: 1, entries: infra.entries as unknown as readonly Binary[], originated: infra.originated as unknown as readonly Binary[] } },
+      height,
+      prevFrameHash: parent as EntityFrameHash,
+      timestamp,
+      txs,
+      events: (folded.events ?? []).map((e): Binary => ({ ...e })),
+      stateRoot,
+      authorityRoot: authority,
+      leader,
+      entityContext: frameEntityContext(draft.state.id, signer, parent, heightNo, infra),
       ...opt("jPrefixCertificate", jPrefixCertificate),
     };
     return chain(hashEntityFrame({ ...body, hashesToSign: [] }), (frameHash) =>
-      map(hashesToSignOf(draft.state.id, height, frameHash, draft.outputs, draft.hashes), (hashesToSign): EntityCandidate => ({ frame: { ...body, hashesToSign }, signatures: new Map(), draft })));
-  })));
+      map(
+        hashesToSignOf(draft.state.id, height, frameHash, draft.outputs, draft.hashes),
+        (hashesToSign): EntityCandidate => ({
+          frame: { ...body, hashesToSign },
+          signatures: new Map(),
+          draft,
+        }),
+      ),
+    );
+  });
 };
 const frameKey = (tx: EntityTx): string => encodeEntityTx(tx);
-/** og removeCommittedTxsFromMempool: drop one mempool entry per committed (or evicted) tx. */
+/** og removeCommittedTxsFromMempool: drop one mempool entry per committed (or evicted) tx, the earliest first. */
 const withoutTxs = (mempool: readonly EntityTx[], gone: readonly EntityTx[]): readonly EntityTx[] => {
-  const left = new Map<string, number>();
-  for (const tx of gone) left.set(frameKey(tx), (left.get(frameKey(tx)) ?? 0) + 1);
-  return mempool.filter((tx) => { const k = frameKey(tx), n = left.get(k) ?? 0; if (n === 0) return true; left.set(k, n - 1); return false; });
+  const owed = Map.groupBy(gone, frameKey);
+  const positions = Map.groupBy(mempool.keys(), (i) => frameKey(mempool[i] as EntityTx));
+  const dropped = new Set([...owed].flatMap(([k, txs]) => (positions.get(k) ?? []).slice(0, txs.length)));
+  return mempool.filter((_, i) => !dropped.has(i));
 };
 const ENTITY_MEMPOOL_SIZE = 10_000;
-/** og appendEntityMempoolTransactions: exact Account-input retries collapse, every other tx keeps order and multiplicity. */
+/**
+ * og appendEntityMempoolTransactions: exact Account-input retries collapse, every other tx keeps order and
+ * multiplicity.
+ */
 const appendMempool = (mempool: readonly EntityTx[], admitted: readonly EntityTx[]): readonly EntityTx[] => {
   const accountKey = (tx: EntityTx): string | undefined => (tx.type === "accountInput" ? frameKey(tx) : undefined);
-  return [...mempool, ...firstBy(admitted, accountKey, mempool.flatMap((tx) => { const k = accountKey(tx); return k === undefined ? [] : [k]; }))];
+  const queued = mempool.flatMap((tx) => {
+    const k = accountKey(tx);
+    return k === undefined ? [] : [k];
+  });
+  return [...mempool, ...firstBy(admitted, accountKey, queued)];
 };
 /** og finalizeCommitNotification: install the candidate, emit its Account outputs, optionally broadcast the certified frame to the other validators. */
 const installFrame = (r: EntityEnv & EntityCandidate, frameHash: EntityFrameHash, signatures: Precommits, broadcast: boolean | Quorum): Result<EntityApply<OpenEntity>, EntityError> =>
