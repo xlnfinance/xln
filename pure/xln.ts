@@ -38961,34 +38961,84 @@ export const markCommittedAckOutputs = (
     }));
 };
 // ---- og runtime/mempool/entity-inputs.ts applyMergedEntityInputs + admit/entity-input-output.ts: the R -> E -> A cascade of one Runtime frame ----
-type BatchOut = { readonly key?: string | undefined; readonly rejected: readonly RuntimeError[]; readonly applied: readonly RoutedEntityInput[]; readonly committed: boolean; readonly progressed?: string | undefined; readonly effects?: readonly [string, CommitEffects] | undefined };
+/**
+ * What one applied Entity input did: its refusals, the input as applied, whether it committed, and the commit's
+ * effects.
+ */
+type BatchOut = {
+  readonly key?: string | undefined;
+  readonly rejected: readonly RuntimeError[];
+  readonly applied: readonly RoutedEntityInput[];
+  readonly committed: boolean;
+  /** The replica whose consensus progressed. */
+  readonly progressed?: string | undefined;
+  readonly effects?: readonly [string, CommitEffects] | undefined;
+};
 /** A local cross-j command (a certified runtimeOutput to a replica of this Runtime) or a local Account-work poke. */
 type CrossCommand =
-  | { readonly kind: "entity-txs"; readonly sourceEntityId: string; readonly sourceSignerId: string; readonly targetEntityId: string; readonly targetSignerId: string; readonly entityTxs: readonly EntityTx[] }
-  | { readonly kind: "account-work"; readonly sourceEntityId: string; readonly targetEntityId: string; readonly targetSignerId: string };
+  | {
+      readonly kind: "entity-txs";
+      readonly sourceEntityId: string;
+      readonly sourceSignerId: string;
+      readonly targetEntityId: string;
+      readonly targetSignerId: string;
+      readonly entityTxs: readonly EntityTx[];
+    }
+  | {
+      readonly kind: "account-work";
+      readonly sourceEntityId: string;
+      readonly targetEntityId: string;
+      readonly targetSignerId: string;
+    };
 type EntityTxsCommand = Extract<CrossCommand, { readonly kind: "entity-txs" }>;
-const commandKey = (c: EntityTxsCommand): string => `${c.kind}\0${c.sourceEntityId}\0${c.sourceSignerId}\0${c.targetEntityId}\0${c.targetSignerId}`;
-const workKey = (t: { readonly entityId: string; readonly signerId: string }): string => `${t.entityId}\0${t.signerId}`;
+type WorkTarget = { readonly entityId: string; readonly signerId: string };
+const commandKey = (c: EntityTxsCommand): string =>
+  `${c.kind}\0${c.sourceEntityId}\0${c.sourceSignerId}\0${c.targetEntityId}\0${c.targetSignerId}`;
+const workKey = (t: WorkTarget): string => `${t.entityId}\0${t.signerId}`;
+/** An active validator with ready Account work and no frame in flight. */
+const readyWorkTarget = (r: EntityReplica): WorkTarget[] => {
+  const entityId = lower(r.state.id);
+  const signerId = lower(r.signerId);
+  const active = signerId === lower(leaderStateOf(r.state).activeValidatorId);
+  return active && r._tag === "open" && hasProposableAccount(r) ? [{ entityId, signerId }] : [];
+};
 /** Each active validator with ready Account work and no frame in flight, once, sorted by (Entity, signer). */
-export const readyAccountWorkTargets = (replicas: Iterable<EntityReplica>): readonly { readonly entityId: string; readonly signerId: string }[] => sortWith(firstBy([...replicas].flatMap((r) => {
-  const entityId = lower(r.state.id), signerId = lower(r.signerId);
-  return signerId === lower(leaderStateOf(r.state).activeValidatorId) && r._tag === "open" && hasProposableAccount(r) ? [{ entityId, signerId }] : [];
-}), workKey), (a, b) => workKey(a).localeCompare(workKey(b)));
+export const readyAccountWorkTargets = (replicas: Iterable<EntityReplica>): readonly WorkTarget[] =>
+  sortWith(firstBy([...replicas].flatMap(readyWorkTarget), workKey), (a, b) => workKey(a).localeCompare(workKey(b)));
+type InputOutput = Extract<EntityOutput, { readonly input: EntityInput }>;
+type CrossJOutput = Extract<EntityTx, { readonly type: "runtimeOutput" }>["data"];
 /** Exactly one cross-j runtimeOutput, no consensus lane. */
-const crossCommandOf = (o: EntityOutput): readonly [Extract<EntityOutput, { readonly input: EntityInput }>, Extract<EntityTx, { readonly type: "runtimeOutput" }>["data"]] | undefined => {
+const crossCommandOf = (o: EntityOutput): readonly [InputOutput, CrossJOutput] | undefined => {
   const tx = "input" in o && o.input.kind === "txs" && o.input.txs.length === 1 ? o.input.txs[0] : undefined;
   return "input" in o && tx?.type === "runtimeOutput" && tx.data.protocol === "cross-j" ? [o, tx.data] : undefined;
 };
-const localReplica = (store: ReadonlyMap<string, EntityReplica>, entity: string, signer: string): EntityReplica | undefined =>
+const localReplica = (
+  store: ReadonlyMap<string, EntityReplica>,
+  entity: string,
+  signer: string,
+): EntityReplica | undefined =>
   [...store.values()].find((r) => lower(r.state.id) === lower(entity) && lower(r.signerId) === lower(signer));
-/** The state one Runtime frame threads through its Entity inputs; `deferred` holds the replicas a `txs` input left to propose. */
+/**
+ * The state one Runtime frame threads through its Entity inputs; `deferred` holds the replicas a `txs` input left to
+ * propose.
+ */
 type InputBatch = {
-  readonly store: ReadonlyMap<string, EntityReplica>; readonly outs: readonly BatchOut[]; readonly outbox: readonly EntityOutput[]; readonly queue: readonly CrossCommand[];
-  readonly deferred: ReadonlyMap<string, { readonly entityId: EntityId; readonly signerId: string }>; readonly localEvents: number;
-  readonly rejectedPairs: ReadonlySet<number>; readonly committedPairs: ReadonlySet<number>;
+  readonly store: ReadonlyMap<string, EntityReplica>;
+  readonly outs: readonly BatchOut[];
+  readonly outbox: readonly EntityOutput[];
+  readonly queue: readonly CrossCommand[];
+  readonly deferred: ReadonlyMap<string, { readonly entityId: EntityId; readonly signerId: string }>;
+  readonly localEvents: number;
+  readonly rejectedPairs: ReadonlySet<number>;
+  readonly committedPairs: ReadonlySet<number>;
 };
+/** One input applied to its replica, before its outputs are routed. */
 type Staged = { readonly key: string; readonly outputs: readonly EntityOutput[]; readonly committed: boolean };
-const rejectOut = (b: InputBatch, e: RuntimeError): InputBatch => ({ ...b, outs: [...b.outs, { rejected: [e], applied: [], committed: false }] });
+type StagedIn = Result<readonly [InputBatch, Staged], RuntimeError>;
+const rejectOut = (b: InputBatch, e: RuntimeError): InputBatch => ({
+  ...b,
+  outs: [...b.outs, { rejected: [e], applied: [], committed: false }],
+});
 type StageOptions = {
   readonly lane?: EntityContext["lane"] | undefined;
   readonly recordApplied: boolean;
@@ -39022,191 +39072,509 @@ const pairLegRefusal = (
   if (broken || !transported || replay) return frameErr(runtimeErrorText(error));
   return ok("CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED");
 };
-/**
- * Each merged input applies in order; a plain `txs` input only fills its mempool (touched replicas propose once, in first-touch order, before a pair
- * and at the end). After each input, cross-j commands to local replicas and local Account work drain in this frame; other outputs leave in the outbox.
- */
-const entityInputBatch = (rt: Runtime, merged: readonly RoutedEntityInput[], timestamp: bigint, ctx: RuntimeCtx): Result<InputBatch, RuntimeError> => {
-  const stage = (b: InputBatch, routed: RoutedEntityInput, { lane, recordApplied, requiredTx }: StageOptions): Result<readonly [InputBatch, Staged], RuntimeError> => {
-    const key = replicaKey(routed.entityId, routed.signerId), r = b.store.get(key);
-    if (r === undefined) return err({ _tag: "no_such_entity", id: routed.entityId });
-    const stamped: RoutedEntityInput = routed.input.kind === "txs" || routed.input.kind === "jPrefixAttestations" ? { ...routed, input: { ...routed.input, timestamp } } : routed;
-    const siblings: SiblingReplicas = (entity, signer) => localReplica(b.store, entity, signer);
-    const boardAuthority: BoardAuthority = (source) => settlementBoardAuthority([...b.store.values()].filter((x) => lower(x.state.id) === lower(source)).map((x) => x.state), source);
-    return map(applyEntityInput(r, stamped.input, {
-      self: routed.entityId, signerId: routed.signerId as Address, ...ctx, htlc: runtimeHtlcInfra(ctx, rt, routed.entityId), ...opt("activeJurisdiction", rt.activeJurisdiction),
-      ...opt("jHistory", replicaJHistory({ ...rt, entities: b.store }, key, r)), siblings, boardAuthority, ...opt("lane", lane), ...opt("required", requiredTx), jReplicas: rt.jReplicas,
-    }), ({ replica, outputs, committed: effects }) => {
-      const committed = replica.head.height > r.head.height, progressed = consensusProgressed(r, replica, stamped.input, rt.replicaLocal.get(key));
-      const out: BatchOut = { key, rejected: [], applied: recordApplied ? [stamped] : [], committed, progressed: progressed ? key : undefined, ...(effects === undefined ? {} : { effects: [key, effects] as const }) };
-      return [{ ...b, store: mapSet(b.store, key, replica), outs: [...b.outs, out] }, { key, outputs, committed }] as const;
-    });
+/** The Runtime frame every Entity input applies under: the Runtime after its txs, the frame clock, the host context. */
+type FrameScope = { readonly rt: Runtime; readonly timestamp: bigint; readonly ctx: RuntimeCtx };
+/** og: a `txs` or J-prefix input takes the frame's timestamp. */
+const stampedInput = (routed: RoutedEntityInput, timestamp: bigint): RoutedEntityInput =>
+  routed.input.kind === "txs" || routed.input.kind === "jPrefixAttestations"
+    ? { ...routed, input: { ...routed.input, timestamp } }
+    : routed;
+/** What an Entity input sees of its Runtime: its siblings, their boards, its J history and the host's seams. */
+const entityContextFor = (
+  f: FrameScope,
+  b: InputBatch,
+  routed: RoutedEntityInput,
+  r: EntityReplica,
+  { lane, requiredTx }: StageOptions,
+): EntityContext => {
+  const siblings: SiblingReplicas = (entity, signer) => localReplica(b.store, entity, signer);
+  const boardAuthority: BoardAuthority = (source) =>
+    settlementBoardAuthority(
+      [...b.store.values()].filter((x) => lower(x.state.id) === lower(source)).map((x) => x.state),
+      source,
+    );
+  return {
+    self: routed.entityId,
+    signerId: routed.signerId as Address,
+    ...f.ctx,
+    htlc: runtimeHtlcInfra(f.ctx, f.rt, routed.entityId),
+    ...opt("activeJurisdiction", f.rt.activeJurisdiction),
+    ...opt(
+      "jHistory",
+      replicaJHistory({ ...f.rt, entities: b.store }, replicaKey(routed.entityId, routed.signerId), r),
+    ),
+    siblings,
+    boardAuthority,
+    ...opt("lane", lane),
+    ...opt("required", requiredTx),
+    jReplicas: f.rt.jReplicas,
   };
-  // a cross-j command to a local replica becomes a local command (coalesced inside this one Entity frame only)
-  const route = (b: InputBatch, outputs: readonly EntityOutput[]): Result<InputBatch, RuntimeError> =>
-    map(foldResult(outputs, { outbox: b.outbox, commands: [] as readonly EntityTxsCommand[] }, (s, o) => {
-      const envelope = crossCommandOf(o);
-      if (envelope === undefined || localReplica(b.store, o.to, envelope[0].signerId) === undefined) return ok({ ...s, outbox: [...s.outbox, o] });
-      const [{ signerId }, d] = envelope;
-      const command: EntityTxsCommand = { kind: "entity-txs", sourceEntityId: lower(d.sourceEntityId), sourceSignerId: lower(d.sourceSignerId), targetEntityId: lower(d.targetEntityId), targetSignerId: lower(signerId), entityTxs: d.entityTxs };
-      const { sourceEntityId: source, targetEntityId: target } = command, key = commandKey(command);
-      return !source || !command.sourceSignerId || !target || !command.targetSignerId || target !== lower(o.to)
-        ? frameErr(`RUNTIME_CROSS_J_COMMAND_ROUTE_INVALID:source=${source || "missing"}:target=${target || "missing"}:envelope=${o.to}`)
-        : d.entityTxs.length === 0 ? frameErr(`RUNTIME_CROSS_J_COMMAND_TXS_MISSING:${target}`)
-        : ok({ ...s, commands: s.commands.some((c) => commandKey(c) === key) ? s.commands.map((c) => (commandKey(c) === key ? { ...c, entityTxs: [...c.entityTxs, ...d.entityTxs] } : c)) : [...s.commands, command] });
-    }), ({ outbox, commands }) => ({ ...b, outbox, queue: [...b.queue, ...commands] }));
-  // a commit not itself caused by Account work pokes every local active validator with ready Account work, once
-  const collect = (b: InputBatch, staged: Staged, cause: CommitCause): Result<InputBatch, RuntimeError> => map(route(b, staged.outputs), (routed) => !staged.committed || cause === "account-work" ? routed : {
-    ...routed, queue: [...routed.queue, ...readyAccountWorkTargets(routed.store.values())
-      .filter((t) => !routed.queue.some((c) => c.kind === "account-work" && c.targetEntityId === t.entityId && c.targetSignerId === t.signerId))
-      .map((t): CrossCommand => ({ kind: "account-work", sourceEntityId: t.entityId, targetEntityId: t.entityId, targetSignerId: t.signerId }))],
+};
+/** One input applied to its replica: the replica replaced, the outcome recorded, its outputs held for routing. */
+const stageInput = (f: FrameScope, b: InputBatch, routed: RoutedEntityInput, options: StageOptions): StagedIn => {
+  const key = replicaKey(routed.entityId, routed.signerId);
+  const r = b.store.get(key);
+  if (r === undefined) return err({ _tag: "no_such_entity", id: routed.entityId });
+  const stamped = stampedInput(routed, f.timestamp);
+  return map(
+    applyEntityInput(r, stamped.input, entityContextFor(f, b, routed, r, options)),
+    ({ replica, outputs, committed: effects }) => {
+      const committed = replica.head.height > r.head.height;
+      const progressed = consensusProgressed(r, replica, stamped.input, f.rt.replicaLocal.get(key));
+      const out: BatchOut = {
+        key,
+        rejected: [],
+        applied: options.recordApplied ? [stamped] : [],
+        committed,
+        progressed: progressed ? key : undefined,
+        ...opt("effects", effects === undefined ? undefined : ([key, effects] as const)),
+      };
+      return [
+        { ...b, store: mapSet(b.store, key, replica), outs: [...b.outs, out] },
+        { key, outputs, committed },
+      ] as const;
+    },
+  );
+};
+/** The outbox so far and the local commands drawn out of it. */
+type Routing = { readonly outbox: readonly EntityOutput[]; readonly commands: readonly EntityTxsCommand[] };
+/** A command joins an earlier one for the same (source, target) pair, coalesced inside one Entity frame. */
+const coalesced = (commands: readonly EntityTxsCommand[], command: EntityTxsCommand): readonly EntityTxsCommand[] => {
+  const key = commandKey(command);
+  return commands.some((c) => commandKey(c) === key)
+    ? commands.map((c) => (commandKey(c) === key ? { ...c, entityTxs: [...c.entityTxs, ...command.entityTxs] } : c))
+    : [...commands, command];
+};
+/** A cross-j command to a local replica becomes a local command; any other output leaves in the outbox. */
+const routeOutput =
+  (b: InputBatch) =>
+  (s: Routing, o: EntityOutput): Result<Routing, RuntimeError> => {
+    const envelope = crossCommandOf(o);
+    if (envelope === undefined || localReplica(b.store, o.to, envelope[0].signerId) === undefined) {
+      return ok({ ...s, outbox: [...s.outbox, o] });
+    }
+    const [{ signerId }, d] = envelope;
+    const command: EntityTxsCommand = {
+      kind: "entity-txs",
+      sourceEntityId: lower(d.sourceEntityId),
+      sourceSignerId: lower(d.sourceSignerId),
+      targetEntityId: lower(d.targetEntityId),
+      targetSignerId: lower(signerId),
+      entityTxs: d.entityTxs,
+    };
+    const source = command.sourceEntityId;
+    const target = command.targetEntityId;
+    switch (true) {
+      case !source || !command.sourceSignerId || !target || !command.targetSignerId || target !== lower(o.to): {
+        const route = `source=${source || "missing"}:target=${target || "missing"}:envelope=${o.to}`;
+        return frameErr(`RUNTIME_CROSS_J_COMMAND_ROUTE_INVALID:${route}`);
+      }
+      case d.entityTxs.length === 0:
+        return frameErr(`RUNTIME_CROSS_J_COMMAND_TXS_MISSING:${target}`);
+      default:
+        return ok({ ...s, commands: coalesced(s.commands, command) });
+    }
+  };
+const routeOutputs = (b: InputBatch, outputs: readonly EntityOutput[]): Result<InputBatch, RuntimeError> =>
+  map(foldResult(outputs, { outbox: b.outbox, commands: [] } as Routing, routeOutput(b)), ({ outbox, commands }) => ({
+    ...b,
+    outbox,
+    queue: [...b.queue, ...commands],
+  }));
+/** Every local active validator with ready Account work, not already poked, is poked once. */
+const pokeAccountWork = (b: InputBatch): InputBatch => {
+  const poked = (t: WorkTarget): boolean =>
+    b.queue.some(
+      (c) => c.kind === "account-work" && c.targetEntityId === t.entityId && c.targetSignerId === t.signerId,
+    );
+  const pokes = readyAccountWorkTargets(b.store.values())
+    .filter((t) => !poked(t))
+    .map((t): CrossCommand => ({
+      kind: "account-work",
+      sourceEntityId: t.entityId,
+      targetEntityId: t.entityId,
+      targetSignerId: t.signerId,
+    }));
+  return { ...b, queue: [...b.queue, ...pokes] };
+};
+/** A staged input's outputs routed; a commit not itself caused by Account work pokes Account work. */
+const collectCommit = (b: InputBatch, staged: Staged, cause: CommitCause): Result<InputBatch, RuntimeError> =>
+  map(routeOutputs(b, staged.outputs), (routed) =>
+    !staged.committed || cause === "account-work" ? routed : pokeAccountWork(routed),
+  );
+/** A refused input is recorded as rejected; an applied one has its outputs collected. */
+const settleStaged = (b: InputBatch, staged: StagedIn): Result<InputBatch, RuntimeError> =>
+  staged.ok ? collectCommit(staged.value[0], staged.value[1], "input") : ok(rejectOut(b, staged.error));
+/** The txs a local command delivers: the cross-j runtimeOutput itself, or nothing (an Account-work poke proposes). */
+const commandTxs = (command: CrossCommand): readonly EntityTx[] =>
+  command.kind === "account-work"
+    ? []
+    : [
+        {
+          type: "runtimeOutput",
+          data: {
+            protocol: "cross-j",
+            sourceEntityId: command.sourceEntityId,
+            sourceSignerId: command.sourceSignerId,
+            targetEntityId: command.targetEntityId,
+            entityTxs: command.entityTxs,
+          },
+        },
+      ];
+/** og's cascade bound: rounds and local events grow with the number of replicas. */
+const cascadeExceeded = (round: number, localEvents: number, replicas: number): boolean =>
+  round > 64 + replicas || localEvents > 1_000 + 64 * replicas;
+/** Each local command must commit, in queue order; cycles and runaway cascades refuse the frame. */
+const drainCommands = (
+  f: FrameScope,
+  b: InputBatch,
+  round = 1,
+  seen: ReadonlySet<string> = new Set(),
+): Result<InputBatch, RuntimeError> => {
+  const [command, ...queue] = b.queue;
+  const localEvents = b.localEvents + 1;
+  if (command === undefined) return ok(b);
+  const fingerprint = command.kind === "entity-txs" ? canon(command) : undefined;
+  const r = localReplica(b.store, command.targetEntityId, command.targetSignerId);
+  if (cascadeExceeded(round, localEvents, b.store.size)) {
+    return frameErr(`RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${localEvents}`);
+  }
+  if (fingerprint !== undefined && seen.has(fingerprint)) {
+    return frameErr(`RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${command.targetEntityId}`);
+  }
+  if (r === undefined) {
+    return frameErr(`RUNTIME_CROSS_J_LOCAL_REPLICA_NOT_FOUND:${command.targetEntityId}:${command.targetSignerId}`);
+  }
+  const input: RoutedEntityInput = {
+    entityId: r.state.id,
+    signerId: r.signerId,
+    input: { kind: "txs", timestamp: f.timestamp, txs: commandTxs(command) },
+  };
+  const lane = command.kind === "entity-txs" ? "cross-j" : "account-work";
+  const staged = stageInput(f, { ...b, queue, localEvents }, input, { lane, recordApplied: false });
+  if (!staged.ok) {
+    const outcome = `round=${round}:outcome=rejected:detail=${runtimeErrorText(staged.error)}`;
+    return frameErr(`RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${command.targetEntityId}:${outcome}`);
+  }
+  const cause: CommitCause = command.kind === "account-work" ? "account-work" : "input";
+  const nextSeen = fingerprint === undefined ? seen : new Set([...seen, fingerprint]);
+  return chain(collectCommit(staged.value[0], staged.value[1], cause), (next) =>
+    drainCommands(f, next, round + 1, nextSeen),
+  );
+};
+/** Each touched replica proposes once from its mempool, in first-touch order. */
+const flushDeferred = (f: FrameScope, b: InputBatch): Result<InputBatch, RuntimeError> =>
+  foldResult(b.deferred.values(), { ...b, deferred: new Map() } as InputBatch, (s, { entityId, signerId }) => {
+    const propose: RoutedEntityInput = { entityId, signerId, input: { kind: "txs", timestamp: f.timestamp, txs: [] } };
+    return chain(settleStaged(s, stageInput(f, s, propose, { recordApplied: false })), (next) =>
+      drainCommands(f, next),
+    );
   });
-  const settle = (b: InputBatch, staged: Result<readonly [InputBatch, Staged], RuntimeError>): Result<InputBatch, RuntimeError> =>
-    staged.ok ? collect(staged.value[0], staged.value[1], "input") : ok(rejectOut(b, staged.error));
-  // each local command must commit; cycles and runaway cascades refuse the frame
-  const drain = (b: InputBatch, round = 1, seen: ReadonlySet<string> = new Set()): Result<InputBatch, RuntimeError> => {
-    const [command, ...queue] = b.queue, localEvents = b.localEvents + 1, replicas = b.store.size;
-    if (command === undefined) return ok(b);
-    const fingerprint = command.kind === "entity-txs" ? canon(command) : undefined, r = localReplica(b.store, command.targetEntityId, command.targetSignerId);
-    if (round > 64 + replicas || localEvents > 1_000 + 64 * replicas) return frameErr(`RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${round}:events=${localEvents}`);
-    if (fingerprint !== undefined && seen.has(fingerprint)) return frameErr(`RUNTIME_CROSS_J_EVENT_CYCLE:round=${round}:entity=${command.targetEntityId}`);
-    if (r === undefined) return frameErr(`RUNTIME_CROSS_J_LOCAL_REPLICA_NOT_FOUND:${command.targetEntityId}:${command.targetSignerId}`);
-    const txs: readonly EntityTx[] = command.kind === "account-work" ? []
-      : [{ type: "runtimeOutput", data: { protocol: "cross-j", sourceEntityId: command.sourceEntityId, sourceSignerId: command.sourceSignerId, targetEntityId: command.targetEntityId, entityTxs: command.entityTxs } }];
-    const staged = stage({ ...b, queue, localEvents }, { entityId: r.state.id, signerId: r.signerId, input: { kind: "txs", timestamp, txs } }, { lane: command.kind === "entity-txs" ? "cross-j" : "account-work", recordApplied: false });
-    return !staged.ok ? frameErr(`RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${command.targetEntityId}:round=${round}:outcome=rejected:detail=${runtimeErrorText(staged.error)}`)
-      : chain(collect(staged.value[0], staged.value[1], command.kind === "account-work" ? "account-work" : "input"), (next) => drain(next, round + 1, fingerprint === undefined ? seen : new Set([...seen, fingerprint])));
-  };
-  // each touched replica proposes once from its mempool
-  const flush = (b: InputBatch): Result<InputBatch, RuntimeError> => foldResult<InputBatch, { readonly entityId: EntityId; readonly signerId: string }, RuntimeError>(b.deferred.values(), { ...b, deferred: new Map() }, (s, { entityId, signerId }) =>
-    chain(settle(s, stage(s, { entityId, signerId, input: { kind: "txs", timestamp, txs: [] } }, { recordApplied: false })), (next) => drain(next)));
-  // a `txs` input carries no consensus evidence
-  const single = (b: InputBatch, routed: RoutedEntityInput): Result<InputBatch, RuntimeError> => {
-    const deferrable = routed.input.kind === "txs", staged = stage(b, routed, { lane: deferrable ? "defer" : undefined, recordApplied: true });
-    if (!staged.ok) return ok(rejectOut(b, staged.error));
-    const [next, { key, committed }] = staged.value;
-    const deferred = committed ? mapDelete(next.deferred, key) : deferrable ? mapSet(next.deferred, key, { entityId: routed.entityId, signerId: routed.signerId }) : next.deferred;
-    return collect({ ...next, deferred }, staged.value[1], "input");
-  };
-  // A pair commits both expected Account frames or neither: on any failure both staged legs are discarded,
-  // the pair is rejected at its first leg's position and each leg re-applies without its Account legs.
-  const applyPair = (
-    before: InputBatch,
-    pair: readonly [RoutedEntityInput, RoutedEntityInput],
-    pairIndex: number,
-  ): Result<InputBatch, RuntimeError> => {
-    const accountInputs = pair.map(topLevelAccountInputs);
-    const miscounted = accountInputs.findIndex((txs) => txs.length !== 1);
-    if (miscounted >= 0) {
-      const entityId = pair[miscounted]?.entityId;
-      const count = accountInputs[miscounted]?.length;
-      return frameErr(`RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_COUNT_INVALID:${entityId}:${count}`);
-    }
-    const start: PairRun = { _tag: "framed", batch: before, staged: [] };
-    const run = foldResult<PairRun, RoutedEntityInput, RuntimeError>(
-      pair,
-      start,
-      (current, leg, legIndex) => stagePairLeg(current, leg, accountInputs[legIndex]?.[0]),
-    );
-    return chain(run, (finished) => finishPair(before, pair, pairIndex, finished));
-  };
-  const stagePairLeg = (
-    run: PairRun,
-    leg: RoutedEntityInput,
-    requiredTx: EntityTx | undefined,
-  ): Result<PairRun, RuntimeError> => {
-    if (run._tag === "refused") return ok(run);
-    const staged = stage(run.batch, leg, { recordApplied: true, requiredTx });
-    if (!staged.ok) {
-      const refusal = pairLegRefusal(staged.error, { leg, replay: ctx.replay === true });
-      return map(refusal, (code): PairRun => ({ _tag: "refused", code }));
-    }
-    const [batch, stagedLeg] = staged.value;
-    const replica = batch.store.get(stagedLeg.key);
-    const legFramed =
-      stagedLeg.committed && replica !== undefined && committedExpectedAccountFrame(leg, replica);
-    const allFramed = run._tag === "framed" && legFramed;
-    return ok({
-      _tag: allFramed ? "framed" : "unframed",
-      batch,
-      staged: [...run.staged, stagedLeg],
-    });
-  };
-  const finishPair = (
-    before: InputBatch,
-    pair: readonly RoutedEntityInput[],
-    pairIndex: number,
-    run: PairRun,
-  ): Result<InputBatch, RuntimeError> => {
-    if (run._tag === "framed") return commitPair(run.batch, run.staged, pairIndex);
-    if (ctx.replay === true) return frameErr("RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED");
-    const code = run._tag === "refused" ? run.code : "CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED";
-    return rollBackPair(before, pair, pairIndex, code);
-  };
-  const commitPair = (
-    batch: InputBatch,
-    stagedLegs: readonly Staged[],
-    pairIndex: number,
-  ): Result<InputBatch, RuntimeError> => {
-    const collected = foldResult(stagedLegs, batch, (current, stagedLeg) =>
-      collect(current, stagedLeg, "input"),
-    );
-    return map(collected, (after) => ({
+/** A single input; a `txs` input carries no consensus evidence and only fills its mempool until the next flush. */
+const singleInput = (f: FrameScope, b: InputBatch, routed: RoutedEntityInput): Result<InputBatch, RuntimeError> => {
+  const deferrable = routed.input.kind === "txs";
+  const staged = stageInput(f, b, routed, { lane: deferrable ? "defer" : undefined, recordApplied: true });
+  if (!staged.ok) return ok(rejectOut(b, staged.error));
+  const [next, stagedInput] = staged.value;
+  const { key, committed } = stagedInput;
+  const deferred = committed
+    ? mapDelete(next.deferred, key)
+    : deferrable
+      ? mapSet(next.deferred, key, { entityId: routed.entityId, signerId: routed.signerId })
+      : next.deferred;
+  return collectCommit({ ...next, deferred }, stagedInput, "input");
+};
+/**
+ * One leg staged: a refusal ends the pair, and the pair stays framed only while every leg committed its expected frame.
+ */
+const stagePairLeg = (
+  f: FrameScope,
+  run: PairRun,
+  leg: RoutedEntityInput,
+  requiredTx: EntityTx | undefined,
+): Result<PairRun, RuntimeError> => {
+  if (run._tag === "refused") return ok(run);
+  const staged = stageInput(f, run.batch, leg, { recordApplied: true, requiredTx });
+  if (!staged.ok) {
+    const refusal = pairLegRefusal(staged.error, { leg, replay: f.ctx.replay === true });
+    return map(refusal, (code): PairRun => ({ _tag: "refused", code }));
+  }
+  const [batch, stagedLeg] = staged.value;
+  const replica = batch.store.get(stagedLeg.key);
+  const legFramed = stagedLeg.committed && replica !== undefined && committedExpectedAccountFrame(leg, replica);
+  return ok({
+    _tag: run._tag === "framed" && legFramed ? "framed" : "unframed",
+    batch,
+    staged: [...run.staged, stagedLeg],
+  });
+};
+const commitPair = (
+  batch: InputBatch,
+  stagedLegs: readonly Staged[],
+  pairIndex: number,
+): Result<InputBatch, RuntimeError> =>
+  map(
+    foldResult(stagedLegs, batch, (current, stagedLeg) => collectCommit(current, stagedLeg, "input")),
+    (after) => ({
       ...after,
       committedPairs: new Set([...after.committedPairs, pairIndex]),
-    }));
-  };
-  const rollBackPair = (
-    before: InputBatch,
-    pair: readonly RoutedEntityInput[],
-    pairIndex: number,
-    code: PairRefusal,
-  ): Result<InputBatch, RuntimeError> => {
-    const pairRejected: InputBatch = {
-      ...before,
-      rejectedPairs: new Set([...before.rejectedPairs, pairIndex]),
-    };
-    return foldResult(pair, pairRejected, (batch, leg) =>
-      reapplyWithoutCrossLegs(batch, leg, code),
-    );
-  };
-  const reapplyWithoutCrossLegs = (
-    batch: InputBatch,
-    leg: RoutedEntityInput,
-    code: PairRefusal,
-  ): Result<InputBatch, RuntimeError> => {
-    const rejected = rejectOut(batch, { _tag: "runtime_frame", code });
-    const remainder = withoutCrossLegs({ entities: rejected.store, timestamp: rt.timestamp }, leg);
-    if (remainder === undefined) return ok(rejected);
-    const staged = stage(rejected, remainder, { recordApplied: true });
-    return settle(rejected, staged);
-  };
-  // a marked pair is two adjacent inputs; it sees every earlier admission already framed
-  type Unit = { readonly index: number; readonly legs: readonly [RoutedEntityInput] | readonly [RoutedEntityInput, RoutedEntityInput] };
-  const units = merged.reduce<readonly Unit[]>((us, routed, index) => {
-    const last = us.at(-1), next = merged[index + 1];
-    return last?.legs.length === 2 && last.index === index - 1 ? us : [...us, { index, legs: atomicPairInputsMatch(routed, next) ? [routed, next] : [routed] }];
+    }),
+  );
+/** A rejected pair's leg is rejected at its position, then re-applied without its Account legs. */
+const reapplyWithoutCrossLegs = (
+  f: FrameScope,
+  batch: InputBatch,
+  leg: RoutedEntityInput,
+  code: PairRefusal,
+): Result<InputBatch, RuntimeError> => {
+  const rejected = rejectOut(batch, { _tag: "runtime_frame", code });
+  const remainder = withoutCrossLegs({ entities: rejected.store, timestamp: f.rt.timestamp }, leg);
+  return remainder === undefined
+    ? ok(rejected)
+    : settleStaged(rejected, stageInput(f, rejected, remainder, { recordApplied: true }));
+};
+const rollBackPair = (
+  f: FrameScope,
+  before: InputBatch,
+  pair: readonly RoutedEntityInput[],
+  pairIndex: number,
+  code: PairRefusal,
+): Result<InputBatch, RuntimeError> => {
+  const pairRejected: InputBatch = { ...before, rejectedPairs: new Set([...before.rejectedPairs, pairIndex]) };
+  return foldResult(pair, pairRejected, (batch, leg) => reapplyWithoutCrossLegs(f, batch, leg, code));
+};
+const finishPair = (
+  f: FrameScope,
+  before: InputBatch,
+  pair: readonly RoutedEntityInput[],
+  pairIndex: number,
+  run: PairRun,
+): Result<InputBatch, RuntimeError> => {
+  switch (run._tag) {
+    case "framed":
+      return commitPair(run.batch, run.staged, pairIndex);
+    default:
+      return f.ctx.replay === true
+        ? frameErr("RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED")
+        : rollBackPair(
+            f,
+            before,
+            pair,
+            pairIndex,
+            run._tag === "refused" ? run.code : "CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED",
+          );
+  }
+};
+/**
+ * A pair commits both expected Account frames or neither: on any failure both staged legs are discarded, the pair is
+ * rejected at its first leg's position and each leg re-applies without its Account legs.
+ */
+const applyPair = (
+  f: FrameScope,
+  before: InputBatch,
+  pair: readonly [RoutedEntityInput, RoutedEntityInput],
+  pairIndex: number,
+): Result<InputBatch, RuntimeError> => {
+  const accountInputs = pair.map(topLevelAccountInputs);
+  const miscounted = accountInputs.findIndex((txs) => txs.length !== 1);
+  if (miscounted >= 0) {
+    const entityId = pair[miscounted]?.entityId;
+    const count = accountInputs[miscounted]?.length;
+    return frameErr(`RUNTIME_CROSS_J_ATOMIC_ACCOUNT_INPUT_COUNT_INVALID:${entityId}:${count}`);
+  }
+  const start: PairRun = { _tag: "framed", batch: before, staged: [] };
+  const run = foldResult<PairRun, RoutedEntityInput, RuntimeError>(pair, start, (current, leg, legIndex) =>
+    stagePairLeg(f, current, leg, accountInputs[legIndex]?.[0]),
+  );
+  return chain(run, (finished) => finishPair(f, before, pair, pairIndex, finished));
+};
+/** One input, or a marked pair of two adjacent inputs, at the merged position of its first leg. */
+type InputUnit = {
+  readonly index: number;
+  readonly legs: readonly [RoutedEntityInput] | readonly [RoutedEntityInput, RoutedEntityInput];
+};
+const inputUnits = (merged: readonly RoutedEntityInput[]): readonly InputUnit[] =>
+  merged.reduce<readonly InputUnit[]>((units, routed, index) => {
+    const last = units.at(-1);
+    const next = merged[index + 1];
+    if (last?.legs.length === 2 && last.index === index - 1) return units;
+    return [...units, { index, legs: atomicPairInputsMatch(routed, next) ? [routed, next] : [routed] }];
   }, []);
-  const init: InputBatch = { store: rt.entities, outs: [], outbox: [], queue: [], deferred: new Map(), localEvents: 0, rejectedPairs: new Set(), committedPairs: new Set() };
-  return chain(foldResult(units, init, (b, { index, legs }) => chain(legs.length === 2 ? chain(flush(b), (f) => applyPair(f, legs, index)) : single(b, legs[0]), (next) => drain(next))), flush);
+/** A pair sees every earlier admission already framed; after each unit its local commands drain. */
+const applyUnit =
+  (f: FrameScope) =>
+  (b: InputBatch, { index, legs }: InputUnit): Result<InputBatch, RuntimeError> => {
+    const applied =
+      legs.length === 2
+        ? chain(flushDeferred(f, b), (flushed) => applyPair(f, flushed, legs, index))
+        : singleInput(f, b, legs[0]);
+    return chain(applied, (next) => drainCommands(f, next));
+  };
+/**
+ * Each merged input applies in order; a plain `txs` input only fills its mempool (touched replicas propose once, in
+ * first-touch order, before a pair and at the end). After each input, cross-j commands to local replicas and local
+ * Account work drain in this frame; other outputs leave in the outbox.
+ */
+const entityInputBatch = (
+  rt: Runtime,
+  merged: readonly RoutedEntityInput[],
+  timestamp: bigint,
+  ctx: RuntimeCtx,
+): Result<InputBatch, RuntimeError> => {
+  const f: FrameScope = { rt, timestamp, ctx };
+  const init: InputBatch = {
+    store: rt.entities,
+    outs: [],
+    outbox: [],
+    queue: [],
+    deferred: new Map(),
+    localEvents: 0,
+    rejectedPairs: new Set(),
+    committedPairs: new Set(),
+  };
+  return chain(foldResult(inputUnits(merged), init, applyUnit(f)), (b) => flushDeferred(f, b));
 };
 /** `txs` admission refusals that reject an input rather than fail its ingress. */
-const INGRESS_REJECTIONS: ReadonlySet<string> = new Set(["mempool_full", "frame_timestamp_invalid", "from_not_converted"]);
-const runtimeErrorText = (e: RuntimeError | EntityError): string => ("code" in e && typeof e.code === "string" ? e.code : "reason" in e && typeof e.reason === "string" ? e.reason : e._tag);
-/** Consensus progress, the J history each commit certified, and each committed frame's witnesses (stamped with the Runtime clock) pruned to what stays reachable. */
-const commitLocal = (afterTxs: Runtime, store: ReadonlyMap<string, EntityReplica>, outs: readonly BatchOut[], timestamp: bigint): Runtime["replicaLocal"] => {
+const INGRESS_REJECTIONS: ReadonlySet<string> = new Set([
+  "mempool_full",
+  "frame_timestamp_invalid",
+  "from_not_converted",
+]);
+const runtimeErrorText = (e: RuntimeError | EntityError): string => {
+  switch (true) {
+    case "code" in e && typeof e.code === "string":
+      return e.code;
+    case "reason" in e && typeof e.reason === "string":
+      return e.reason;
+    default:
+      return e._tag;
+  }
+};
+type ReplicaLocals = Runtime["replicaLocal"];
+/** og lastConsensusProgressAt: every replica whose consensus progressed, at the frame's clock. */
+const withProgress = (local: ReplicaLocals, outs: readonly BatchOut[], at: number): ReplicaLocals =>
+  outs
+    .flatMap((o) => (o.progressed === undefined ? [] : [o.progressed]))
+    .reduce((acc, key) => mapSet(acc, key, { ...(acc.get(key) ?? {}), lastConsensusProgressAt: at }), local);
+/** og: a commit prunes its replica's J history to what the Entity certified. */
+const withPrunedHistory = (
+  afterTxs: Runtime,
+  store: ReadonlyMap<string, EntityReplica>,
+  local: ReplicaLocals,
+  outs: readonly BatchOut[],
+): ReplicaLocals =>
+  [...new Set(outs.flatMap((o) => (o.committed && o.key !== undefined ? [o.key] : [])))].reduce((acc, key) => {
+    const current = acc.get(key);
+    const replica = store.get(key);
+    if (current?.jHistory === undefined || replica === undefined) return acc;
+    return mapSet(acc, key, {
+      ...current,
+      jHistory: replicaJHistory({ ...afterTxs, replicaLocal: acc }, key, replica),
+    });
+  }, local);
+/** Each committed frame's witnesses, stamped with the Runtime clock and pruned to what stays reachable. */
+const withWitnesses = (
+  store: ReadonlyMap<string, EntityReplica>,
+  local: ReplicaLocals,
+  outs: readonly BatchOut[],
+  at: number,
+): ReplicaLocals =>
+  outs
+    .flatMap((o) => (o.effects === undefined ? [] : [o.effects]))
+    .reduce((acc, [key, effects]) => {
+      const current = acc.get(key) ?? {};
+      const state = store.get(key)?.state;
+      const stamped = [...effects.witnesses].map(([hash, w]) => [hash, { ...w, createdAt: at }] as const);
+      const witness = new Map([...(current.hankoWitness ?? []), ...stamped]);
+      return mapSet(acc, key, {
+        ...current,
+        hankoWitness: state === undefined ? witness : pruneWitnesses(witness, state),
+      });
+    }, local);
+/** Consensus progress, the J history each commit certified, and each committed frame's witnesses. */
+const commitLocal = (
+  afterTxs: Runtime,
+  store: ReadonlyMap<string, EntityReplica>,
+  outs: readonly BatchOut[],
+  timestamp: bigint,
+): ReplicaLocals => {
   const at = Number(timestamp);
-  const progressed = outs.flatMap((o) => (o.progressed === undefined ? [] : [o.progressed]))
-    .reduce((local, key) => mapSet(local, key, { ...(local.get(key) ?? {}), lastConsensusProgressAt: at }), afterTxs.replicaLocal);
-  const pruned = [...new Set(outs.flatMap((o) => (o.committed && o.key !== undefined ? [o.key] : [])))].reduce((local, key) => {
-    const current = local.get(key), replica = store.get(key);
-    return current?.jHistory !== undefined && replica !== undefined ? mapSet(local, key, { ...current, jHistory: replicaJHistory({ ...afterTxs, replicaLocal: local }, key, replica) }) : local;
-  }, progressed);
-  return outs.flatMap((o) => (o.effects === undefined ? [] : [o.effects])).reduce((local, [key, effects]) => {
-    const current = local.get(key) ?? {}, state = store.get(key)?.state;
-    const witness = new Map([...(current.hankoWitness ?? []), ...[...effects.witnesses].map(([hash, w]) => [hash, { ...w, createdAt: at }] as const)]);
-    return mapSet(local, key, { ...current, hankoWitness: state === undefined ? witness : pruneWitnesses(witness, state) });
-  }, pruned);
+  const progressed = withProgress(afterTxs.replicaLocal, outs, at);
+  return withWitnesses(store, withPrunedHistory(afterTxs, store, progressed, outs), outs, at);
+};
+/** og: max(previous, ingress seed) — the input's own timestamp, else the latest `txs` seed. */
+const frameTimestamp = (rt: Runtime, input: RuntimeInput): bigint => {
+  const seeds = input.entityInputs.flatMap((i) => (i.input.kind === "txs" ? [i.input.timestamp] : []));
+  const candidates = [input.timestamp ?? rt.timestamp, ...(input.timestamp === undefined ? seeds : [])];
+  return candidates.reduce((a, b) => (b > a ? b : a), rt.timestamp);
+};
+type TxFold = { readonly runtime: Runtime; readonly jOutputs: readonly JInput[] };
+/** Every RuntimeTx in order at the frame's clock; any failure refuses the whole frame. */
+const applyRuntimeTxs = (
+  rt: Runtime,
+  input: RuntimeInput,
+  timestamp: bigint,
+  ctx: RuntimeCtx,
+): Result<TxFold, RuntimeError> =>
+  foldResult(input.runtimeTxs, { runtime: { ...rt, timestamp }, jOutputs: [] } as TxFold, (at, tx) =>
+    map(applyRuntimeTxStep(at.runtime, tx, ctx), (s): TxFold => ({
+      runtime: s.runtime,
+      jOutputs: [...at.jOutputs, ...s.jOutputs],
+    })),
+  );
+/** og advanceAppliedRuntimeFrame: a frame advances the height only when it did work. */
+const frameAdvanced = (
+  input: RuntimeInput,
+  applied: readonly RoutedEntityInput[],
+  outs: readonly BatchOut[],
+  outbox: readonly EntityOutput[],
+  frameJ: readonly JInput[],
+): boolean => {
+  const meaningful = applied.filter((i) => i.input.kind !== "txs" || i.input.txs.length > 0).length;
+  const entityInputCount = outs.some((o) => o.committed) ? Math.max(meaningful, applied.length) : meaningful;
+  return input.runtimeTxs.length > 0 || entityInputCount > 0 || outbox.length > 0 || frameJ.length > 0;
+};
+/** The Entity half of a frame, once applied. */
+type EntityHalf = { readonly afterTxs: Runtime; readonly txJOutputs: readonly JInput[]; readonly batch: InputBatch };
+/** The frame's committed Runtime and everything it hands to the host. */
+const runtimeStepOf = (
+  input: RuntimeInput,
+  jOutbox: readonly JInput[],
+  timestamp: bigint,
+  { afterTxs, txJOutputs, batch }: EntityHalf,
+  outbox: readonly EntityOutput[],
+): Result<RuntimeStep, RuntimeError> => {
+  const { store, outs } = batch;
+  const applied = outs.flatMap((o) => o.applied);
+  const replicaLocal = commitLocal(afterTxs, store, outs, timestamp);
+  // Ingress J inputs, RuntimeTx J outputs, then each emitter's committed Entity J outputs; split for durable submit.
+  const frameJ = [...jOutbox, ...txJOutputs, ...outs.flatMap((o) => o.effects?.[1].jOutputs ?? [])];
+  const advanced = frameAdvanced(input, applied, outs, outbox, frameJ);
+  return chain(splitJOutbox(frameJ), (split) =>
+    map(
+      registerPendingJOutbox(afterTxs.pendingCommittedJOutbox, split.durable),
+      (pendingCommittedJOutbox): RuntimeStep => ({
+        runtime: {
+          ...afterTxs,
+          entities: store,
+          replicaLocal,
+          pendingCommittedJOutbox,
+          height: advanced ? afterTxs.height + 1n : afterTxs.height,
+        },
+        applied: {
+          runtimeTxs: input.runtimeTxs,
+          entityInputs: applied,
+          ...opt("jInputs", jOutbox.length > 0 ? jOutbox : undefined),
+        },
+        outbox,
+        jOutbox: [...pendingCommittedJOutbox, ...split.maintenance],
+        queuedRetries: split.retries,
+        rejected: outs.flatMap((o) => o.rejected),
+        advanced,
+        events: outs.flatMap((o) => o.effects?.[1].runtimeEvents ?? []),
+      }),
+    ),
+  );
 };
 /**
  * og createRuntimeInputReducer: validate shape/limits, apply every RuntimeTx in order (any failure refuses the whole
@@ -39214,186 +39582,408 @@ const commitLocal = (afterTxs: Runtime, store: ReadonlyMap<string, EntityReplica
  * apply the rest, and advance the Runtime height only when the frame did work (og advanceAppliedRuntimeFrame). The
  * frame timestamp is max(previous, ingress seed) and stamps every txs input (og env.state.timestamp).
  */
-export const applyRuntime = (rt: Runtime, input: RuntimeInput, ctx: RuntimeCtx): Result<RuntimeStep, RuntimeError> => chain(validateRuntimeInput(rt, input), (jOutbox) => {
-  const forged = forgedIngress(input, ctx);
-  if (forged !== undefined) return frameErr(forged);
-  const seeds = input.entityInputs.flatMap((i) => (i.input.kind === "txs" ? [i.input.timestamp] : []));
-  const timestamp = [input.timestamp ?? rt.timestamp, ...(input.timestamp === undefined ? seeds : [])].reduce((a, b) => (b > a ? b : a), rt.timestamp);
-  type TxFold = { readonly runtime: Runtime; readonly jOutputs: readonly JInput[] };
-  const txFold = foldResult(input.runtimeTxs, { runtime: { ...rt, timestamp }, jOutputs: [] } as TxFold, (at, tx) => map(applyRuntimeTxStep(at.runtime, tx, ctx), (s): TxFold => ({ runtime: s.runtime, jOutputs: [...at.jOutputs, ...s.jOutputs] })));
-  // transported cross-j cohorts are isolated before the merge, then admitted as exact pairs before any Entity input applies
-  return chain(txFold, ({ runtime: afterTxs, jOutputs: txJOutputs }) => chain(mergeEntityInputs(markPotentialCrossPairs(input.entityInputs), verifiedCommit(afterTxs.entities, ctx)), (mergedInputs) =>
-    chain(admitAtomicCrossPairs(afterTxs, mergedInputs, ctx.replay === true), ({ inputs: merged, pairs }) => chain(entityInputBatch(afterTxs, merged, timestamp, ctx), ({ store, outs, outbox: batchOutbox, rejectedPairs, committedPairs }) => {
-      // every admitted pair that was not rejected committed both expected Account frames; its two ACKs carry the pair marker
-      const accepted = pairs.filter((p) => !rejectedPairs.has(pairStart(p)));
-      if (accepted.some((p) => !committedPairs.has(pairStart(p)))) return frameErr("RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_ADMISSION");
-      return chain(markCommittedAckOutputs(batchOutbox, accepted), (outbox) => {
-        const applied = outs.flatMap((o) => o.applied), replicaLocal = commitLocal(afterTxs, store, outs, timestamp);
-        // ingress J inputs, RuntimeTx J outputs, then each emitter's committed Entity J outputs; split for durable submit.
-        const frameJ = [...jOutbox, ...txJOutputs, ...outs.flatMap((o) => o.effects?.[1].jOutputs ?? [])];
-        const meaningful = applied.filter((i) => i.input.kind !== "txs" || i.input.txs.length > 0).length;
-        const entityInputCount = outs.some((o) => o.committed) ? Math.max(meaningful, applied.length) : meaningful;
-        const advanced = input.runtimeTxs.length > 0 || entityInputCount > 0 || outbox.length > 0 || frameJ.length > 0;
-        return chain(splitJOutbox(frameJ), (split) => map(registerPendingJOutbox(afterTxs.pendingCommittedJOutbox, split.durable), (pendingCommittedJOutbox): RuntimeStep => {
-          const runtime: Runtime = { ...afterTxs, entities: store, replicaLocal, pendingCommittedJOutbox, height: advanced ? afterTxs.height + 1n : afterTxs.height };
-          const appliedInput: RuntimeInput = { runtimeTxs: input.runtimeTxs, entityInputs: applied, ...(jOutbox.length > 0 ? { jInputs: jOutbox } : {}) };
-          return { runtime, applied: appliedInput, outbox, jOutbox: [...pendingCommittedJOutbox, ...split.maintenance], queuedRetries: split.retries, rejected: outs.flatMap((o) => o.rejected), advanced, events: outs.flatMap((o) => o.effects?.[1].runtimeEvents ?? []) };
-        }));
-      });
-    }))));
-});
+export const applyRuntime = (rt: Runtime, input: RuntimeInput, ctx: RuntimeCtx): Result<RuntimeStep, RuntimeError> =>
+  chain(validateRuntimeInput(rt, input), (jOutbox) => {
+    const forged = forgedIngress(input, ctx);
+    if (forged !== undefined) return frameErr(forged);
+    const timestamp = frameTimestamp(rt, input);
+    return chain(applyRuntimeTxs(rt, input, timestamp, ctx), ({ runtime: afterTxs, jOutputs: txJOutputs }) => {
+      // Transported cross-j cohorts are isolated before the merge, then admitted as exact pairs before any Entity input
+      // applies.
+      const merging = mergeEntityInputs(
+        markPotentialCrossPairs(input.entityInputs),
+        verifiedCommit(afterTxs.entities, ctx),
+      );
+      return chain(merging, (mergedInputs) =>
+        chain(admitAtomicCrossPairs(afterTxs, mergedInputs, ctx.replay === true), ({ inputs: merged, pairs }) =>
+          chain(entityInputBatch(afterTxs, merged, timestamp, ctx), (batch) => {
+            // Every admitted pair that was not rejected committed both expected Account frames; its two ACKs carry the
+            // pair marker.
+            const accepted = pairs.filter((p) => !batch.rejectedPairs.has(pairStart(p)));
+            if (accepted.some((p) => !batch.committedPairs.has(pairStart(p)))) {
+              return frameErr("RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_ADMISSION");
+            }
+            return chain(markCommittedAckOutputs(batch.outbox, accepted), (outbox) =>
+              runtimeStepOf(input, jOutbox, timestamp, { afterTxs, txJOutputs, batch }, outbox),
+            );
+          }),
+        ),
+      );
+    });
+  });
 
 // ---- og storage/hashes.ts, canonical-hash.ts, replica-meta-digest.ts, wal/outbox-payload.ts: Runtime WAL commitments ----
 /** og computeIntegrityDigest(encodeBinaryPayload(value)): 0x-sha256 over the 0x03-framed canonical msgpack. */
 const hashStable = (value: Binary): Result<string, BinaryError> => map(encodeBinary(value), integrity);
 export type StorageFrameEntityHash = { readonly entityId: string; readonly hash: string; readonly cellCount: number };
 const sortedEntityHashes = (rows: readonly StorageFrameEntityHash[]): readonly StorageFrameEntityHash[] =>
-  rows.map((r) => ({ entityId: r.entityId.toLowerCase(), hash: r.hash, cellCount: r.cellCount })).sort((a, b) => asc(a.entityId, b.entityId));
-/** og RuntimeFrame (storage/types.ts): the WAL row. `runtimeInput` is the applied input; optional og fields are absent when empty. */
+  rows
+    .map((r) => ({ entityId: r.entityId.toLowerCase(), hash: r.hash, cellCount: r.cellCount }))
+    .toSorted((a, b) => asc(a.entityId, b.entityId));
+type TouchedAccount = { readonly entityId: string; readonly counterpartyId: string };
+/**
+ * og RuntimeFrame (storage/types.ts): the WAL row. `runtimeInput` is the applied input; optional og fields are absent
+ * when empty.
+ */
 export type StorageFrame = {
-  readonly height: number; readonly timestamp: number; readonly prevFrameHash?: string | undefined; readonly frameHash?: string | undefined;
-  readonly replicaMetaDigest: string; readonly postStateHash: string; readonly materializedState: boolean;
-  readonly canonicalStateHash?: string | undefined; readonly canonicalEntityHashes?: readonly StorageFrameEntityHash[] | undefined;
-  readonly runtimeInput: Binary; readonly runtimeOutputCount: number; readonly runtimeOutputsDigest: string;
-  readonly touchedEntities: readonly string[]; readonly touchedAccounts: readonly { readonly entityId: string; readonly counterpartyId: string }[]; readonly touchedBookEntities: readonly string[];
+  readonly height: number;
+  readonly timestamp: number;
+  readonly prevFrameHash?: string | undefined;
+  readonly frameHash?: string | undefined;
+  readonly replicaMetaDigest: string;
+  readonly postStateHash: string;
+  readonly materializedState: boolean;
+  readonly canonicalStateHash?: string | undefined;
+  readonly canonicalEntityHashes?: readonly StorageFrameEntityHash[] | undefined;
+  readonly runtimeInput: Binary;
+  readonly runtimeOutputCount: number;
+  readonly runtimeOutputsDigest: string;
+  readonly touchedEntities: readonly string[];
+  readonly touchedAccounts: readonly TouchedAccount[];
+  readonly touchedBookEntities: readonly string[];
   readonly [extra: string]: Binary | undefined;
 };
-const definedFields = (record: { readonly [field: string]: Binary | undefined }): { readonly [field: string]: Binary } =>
+type BinaryRecord = { readonly [field: string]: Binary };
+const definedFields = (record: { readonly [field: string]: Binary | undefined }): BinaryRecord =>
   Object.fromEntries(Object.entries(record).filter((e): e is [string, Binary] => e[1] !== undefined));
-/** og computeStorageFrameHash: the frame without `frameHash`, under domain `xln.storage.frame`, canonical Entity hashes normalized and sorted. */
+/**
+ * og computeStorageFrameHash: the frame without `frameHash`, under domain `xln.storage.frame`, canonical Entity hashes
+ * normalized and sorted.
+ */
 export const storageFrameHash = (record: StorageFrame): Result<string, BinaryError> => {
   const { frameHash: _, ...rest } = record;
-  return hashStable({ kind: "xln.storage.frame", ...definedFields(rest), canonicalEntityHashes: sortedEntityHashes(record.canonicalEntityHashes ?? []) });
+  return hashStable({
+    kind: "xln.storage.frame",
+    ...definedFields(rest),
+    canonicalEntityHashes: sortedEntityHashes(record.canonicalEntityHashes ?? []),
+  });
 };
 /** og computeCanonicalRuntimeStateHash: keccak of the JSON text {kind, height, timestamp, entities}. */
-export const canonicalRuntimeStateHash = (height: number, timestamp: number, entities: readonly StorageFrameEntityHash[]): string =>
-  `0x${keccakUtf8(JSON.stringify({ kind: "xln.storage.canonicalRuntimeHash.v2", height, timestamp, entities: sortedEntityHashes(entities) }))}`;
+export const canonicalRuntimeStateHash = (
+  height: number,
+  timestamp: number,
+  entities: readonly StorageFrameEntityHash[],
+): string => {
+  const body = {
+    kind: "xln.storage.canonicalRuntimeHash.v2",
+    height,
+    timestamp,
+    entities: sortedEntityHashes(entities),
+  };
+  return `0x${keccakUtf8(JSON.stringify(body))}`;
+};
 export type ComponentDigest = { readonly key: string; readonly valueHash: string };
 /** og computeRuntimePostStateComponentDigests: one integrity hash per Runtime component, keys sorted. */
-export const runtimeComponentDigests = (view: { readonly [key: string]: Binary }): Result<readonly ComponentDigest[], BinaryError> =>
-  traverse(Object.keys(view).sort(asc), (key) => map(hashStable(view[key] as Binary), (valueHash) => ({ key, valueHash })));
-/** og computeStoragePostStateHash: the per-frame replay oracle. */
-export const storagePostStateHash = (i: { readonly height: number; readonly timestamp: number; readonly replicaMetaDigest: string; readonly runtimeComponentDigests: readonly ComponentDigest[]; readonly runtimeOutputCount: number; readonly runtimeOutputsDigest: string }): Result<string, BinaryError> =>
-  hashStable({ kind: "xln.storage.postState", height: i.height, timestamp: i.timestamp, replicaMetaDigest: i.replicaMetaDigest, runtimeComponentDigests: i.runtimeComponentDigests, runtimeOutputCount: i.runtimeOutputCount, runtimeOutputsDigest: i.runtimeOutputsDigest });
-/** og computeStorageReplicaMetaDigest: rows sorted by hex key then value hash; values hashed independently. */
-export const replicaMetaDigest = (rows: readonly { readonly key: Uint8Array; readonly value: Uint8Array }[]): Result<string, BinaryError> =>
-  hashStable({ kind: "xln.storage.replicaMeta.v1", entries: rows.map((r) => ({ key: bytesToHex(r.key).toLowerCase(), valueHash: integrity(r.value) })).sort((a, b) => asc(a.key, b.key) || asc(a.valueHash, b.valueHash)) });
-const MAX_RUNTIME_OUTPUT_ROWS = 10_000;
-/** og computeRuntimeOutputsDigest: sha256("xln.runtime.outbox.v1" | u32 count | (u32 len | row)*), rows in `(height, index)` order. */
-export const runtimeOutputsDigest = (rows: readonly Uint8Array[]): Result<string, RuntimeError> =>
-  rows.length > MAX_RUNTIME_OUTPUT_ROWS ? frameErr("STORAGE_RUNTIME_OUTPUT_COUNT_MAX") : ok(bytesToHex(sha256(concat([utf8("xln.runtime.outbox.v1"), u32(rows.length), ...rows.flatMap((r) => [u32(r.byteLength), r])]))));
-
-/** Rewrite values as og binary payload: optional fields the rewrite leaves `undefined` are absent (og builders spread them in only when set). */
-const binaryOf = (v: unknown): Binary => {
-  if (v === null || typeof v !== "object" || v instanceof Uint8Array) return v as Binary;
-  if (Array.isArray(v)) return v.map(binaryOf);
-  if (v instanceof Map) return new Map([...v].map(([k, x]) => [binaryOf(k), binaryOf(x)]));
-  return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => [k, binaryOf(x)]));
+export const runtimeComponentDigests = (view: BinaryRecord): Result<readonly ComponentDigest[], BinaryError> =>
+  traverse(Object.keys(view).toSorted(asc), (key) =>
+    map(hashStable(view[key] as Binary), (valueHash) => ({ key, valueHash })),
+  );
+/** What one frame's replay oracle commits to. */
+export type PostStateInputs = {
+  readonly height: number;
+  readonly timestamp: number;
+  readonly replicaMetaDigest: string;
+  readonly runtimeComponentDigests: readonly ComponentDigest[];
+  readonly runtimeOutputCount: number;
+  readonly runtimeOutputsDigest: string;
 };
-/** og buildCertifiedEntityHeadPlan: one replica per Entity, the one with the highest certified height (first on a tie). */
+/** og computeStoragePostStateHash: the per-frame replay oracle. */
+export const storagePostStateHash = (i: PostStateInputs): Result<string, BinaryError> =>
+  hashStable({
+    kind: "xln.storage.postState",
+    height: i.height,
+    timestamp: i.timestamp,
+    replicaMetaDigest: i.replicaMetaDigest,
+    runtimeComponentDigests: i.runtimeComponentDigests,
+    runtimeOutputCount: i.runtimeOutputCount,
+    runtimeOutputsDigest: i.runtimeOutputsDigest,
+  });
+type MetaRow = { readonly key: Uint8Array; readonly value: Uint8Array };
+/** og computeStorageReplicaMetaDigest: rows sorted by hex key then value hash; values hashed independently. */
+export const replicaMetaDigest = (rows: readonly MetaRow[]): Result<string, BinaryError> => {
+  const entries = rows
+    .map((r) => ({ key: bytesToHex(r.key).toLowerCase(), valueHash: integrity(r.value) }))
+    .toSorted((a, b) => asc(a.key, b.key) || asc(a.valueHash, b.valueHash));
+  return hashStable({ kind: "xln.storage.replicaMeta.v1", entries });
+};
+const MAX_RUNTIME_OUTPUT_ROWS = 10_000;
+/**
+ * og computeRuntimeOutputsDigest: sha256("xln.runtime.outbox.v1" | u32 count | (u32 len | row)*), rows in `(height,
+ * index)` order.
+ */
+export const runtimeOutputsDigest = (rows: readonly Uint8Array[]): Result<string, RuntimeError> => {
+  if (rows.length > MAX_RUNTIME_OUTPUT_ROWS) return frameErr("STORAGE_RUNTIME_OUTPUT_COUNT_MAX");
+  const framed = rows.flatMap((r) => [u32(r.byteLength), r]);
+  return ok(bytesToHex(sha256(concat([utf8("xln.runtime.outbox.v1"), u32(rows.length), ...framed]))));
+};
+
+/**
+ * Rewrite values as og binary payload: optional fields the rewrite leaves `undefined` are absent (og builders spread
+ * them in only when set).
+ */
+const binaryOf = (v: unknown): Binary => {
+  switch (true) {
+    case v === null || typeof v !== "object" || v instanceof Uint8Array:
+      return v as Binary;
+    case Array.isArray(v):
+      return v.map(binaryOf);
+    case v instanceof Map:
+      return new Map([...v].map(([k, x]) => [binaryOf(k), binaryOf(x)]));
+    default:
+      return Object.fromEntries(
+        Object.entries(v as object)
+          .filter(([, x]) => x !== undefined)
+          .map(([k, x]) => [k, binaryOf(x)]),
+      );
+  }
+};
+/**
+ * og buildCertifiedEntityHeadPlan: one replica per Entity, the one with the highest certified height (first on a tie).
+ */
 const certifiedHeads = (rt: Runtime): readonly EntityReplica[] => {
-  const heads = new Map<string, EntityReplica>();
-  for (const r of rt.entities.values()) { const id = lower(r.state.id), held = heads.get(id); if (held === undefined || r.head.height > held.head.height) heads.set(id, r); }
+  const heads = [...rt.entities.values()].reduce((acc, r) => {
+    const id = lower(r.state.id);
+    const held = acc.get(id);
+    return held === undefined || r.head.height > held.head.height ? mapSet(acc, id, r) : acc;
+  }, new Map() as ReadonlyMap<string, EntityReplica>);
   return [...heads.values()];
 };
 /** og computeCanonicalEntityHash: the Entity consensus state root of the certified head, one cell. */
-export const canonicalEntityHashes = (rt: Runtime): Result<readonly StorageFrameEntityHash[], RuntimeError> =>
-  map(traverse(certifiedHeads(rt), (r) => map(entityRootOf(r.state, r.accountReplicas), (hash) => ({ entityId: lower(r.state.id), hash, cellCount: 1 }))), sortedEntityHashes);
-const KEY_LIVE_REPLICA_META = 0x26;
-/**
- * og buildStorageLiveReplicaMetaCommitment rows: the replica's identity, Entity head, certified-link digest, leader votes (prepared frames on og's
- * EntityFrame wire), pending leader certificate, J-prefix round and J submit states.
- */
-export const replicaMetaRows = (rt: Runtime): Result<readonly { readonly key: Uint8Array; readonly value: Uint8Array }[], RuntimeError> =>
-  traverse([...rt.entities], ([key, r]) => {
-    const entity = lower(r.state.id), signer = signerId(r.signerId);
-    const rowKey = concat([Uint8Array.of(KEY_LIVE_REPLICA_META), hexToBytes(entity), new Uint8Array(12), hexToBytes(signer)]);
-    const votes = r.leaderVotes === undefined ? ok(undefined) : map(traverse([...r.leaderVotes], ([k, v]) => map(voteBinary(v), (b) => [k, b] as const)), (rows): Binary => new Map(rows));
-    const cert = r.pendingLeaderCertificate === undefined ? ok(undefined) : certificateBinary(r.pendingLeaderCertificate);
-    const headDigest = r.certifiedFrameHead === undefined ? ok(undefined) : map(encodeBinary(r.certifiedFrameHead), integrity);
-    return chain(frameNumber(r.state.height), (height) => chain(frameNumber(r.state.timestamp), (timestamp) => chain(votes, (leaderVotes) => chain(cert, (pendingLeaderCertificate) => chain(headDigest, (certifiedFrameHeadDigest) => map(encodeBinary({
-      replicaKey: key.toLowerCase(), entityId: entity, signerId: signer, isProposer: signerId(r.state.quorum.proposer) === signer,
-      entityHead: { entityId: entity, height, timestamp, frameHash: r.head.height === 0n ? "" : frameWord(r.head.prevFrameHash) },
-      ...opt("certifiedFrameHeadDigest", certifiedFrameHeadDigest), ...opt("leaderVotes", leaderVotes), ...opt("pendingLeaderCertificate", pendingLeaderCertificate),
-      ...opt("jPrefixRound", r.jPrefixRound === undefined ? undefined : binaryOf(r.jPrefixRound)),
-      ...opt("jSubmitState", binaryOf(rt.replicaLocal.get(key)?.jSubmitState)), ...opt("entityProviderActionSubmitState", binaryOf(rt.replicaLocal.get(key)?.entityProviderActionSubmitState)),
-    }), (value) => ({ key: rowKey, value })))))));
-  });
-/** og buildCanonicalJReplicaSnapshot + buildDurableJReplicaSnapshot: fixed field set (no token registry), wall-clock marker zeroed, state root as bytes. */
-const jReplicaSnapshot = (r: JReplica): Binary => binaryOf({
-  name: r.name, blockNumber: r.blockNumber, stateRoot: r.stateRoot === null ? null : (hexToBytes(r.stateRoot) as unknown as Binary), mempool: r.mempool, blockDelayMs: r.blockDelayMs,
-  blockTimeMs: r.blockTimeMs, lastBlockTimestamp: 0, blockReady: r.blockReady, watcherConfirmationDepth: r.watcherConfirmationDepth, watcherReceiptCommitment: r.watcherReceiptCommitment,
-  rpcs: r.rpcs, chainId: r.chainId, position: r.position, entityProviderDeploymentBlock: r.entityProviderDeploymentBlock,
-  contracts: r.contracts === undefined ? undefined : Object.fromEntries(Object.entries(r.contracts).filter(([, v]) => Boolean(v))),
-});
-/** og buildDurableRuntimeStateSnapshot: only non-empty durable maps; absent when none. */
-const durableInfrastructure = (rt: Runtime): { readonly [key: string]: Binary } | undefined => {
-  const rows: [string, unknown, number][] = [
-    ["runtimeAdapterCommandFrontiers", rt.adapterFrontiers, rt.adapterFrontiers.size], ["pendingCommittedJOutbox", rt.pendingCommittedJOutbox, rt.pendingCommittedJOutbox.length],
-    ["pendingJurisdictionImports", rt.pendingJImports, rt.pendingJImports.size], ["numberedRegistrationIntents", rt.numberedRegistrationIntents, rt.numberedRegistrationIntents.size], ["certifiedRegistrationEvidence", rt.registrationEvidence, rt.registrationEvidence.size],
-    ["entityEncryptionSeeds", rt.encryptionSeeds, rt.encryptionSeeds.size],
-  ];
-  const kept = rows.filter(([, , size]) => size > 0);
-  return kept.length === 0 ? undefined : Object.fromEntries(kept.map(([k, m]) => [k, binaryOf(m)]));
+export const canonicalEntityHashes = (rt: Runtime): Result<readonly StorageFrameEntityHash[], RuntimeError> => {
+  const hashOf = (r: EntityReplica) =>
+    map(entityRootOf(r.state, r.accountReplicas), (hash) => ({ entityId: lower(r.state.id), hash, cellCount: 1 }));
+  return map(traverse(certifiedHeads(rt), hashOf), sortedEntityHashes);
 };
-/** og buildReplayVerifiableRuntimePostStateView: runtimeId, BrowserVM header (no trie), durable infrastructure, J replicas in insertion order. */
-export const runtimeView = (rt: Runtime): { readonly [key: string]: Binary } => {
-  const infrastructure = durableInfrastructure(rt);
-  const vm = rt.browserVMState === undefined ? undefined : Object.fromEntries(Object.entries(rt.browserVMState).filter(([k]) => k !== "trieData"));
+const KEY_LIVE_REPLICA_META = 0x26;
+/** A value that may be absent, encoded when present. */
+const whenBinary = <T, E>(v: T | undefined, f: (t: T) => Result<Binary, E>): Result<Binary | undefined, E> =>
+  v === undefined ? ok(undefined) : f(v);
+/** og: a replica's leader votes on og's EntityFrame wire. */
+const leaderVotesBinary = (votes: NonNullable<EntityReplica["leaderVotes"]>): Result<Binary, RuntimeError> =>
+  map(traverse([...votes], ([k, v]) => map(voteBinary(v), (b) => [k, b] as const)), (rows): Binary => new Map(rows));
+/**
+ * og buildStorageLiveReplicaMetaCommitment rows: the replica's identity, Entity head, certified-link digest, leader
+ * votes (prepared frames on og's EntityFrame wire), pending leader certificate, J-prefix round and J submit states.
+ */
+const replicaMetaRow =
+  (rt: Runtime) =>
+  ([key, r]: readonly [string, EntityReplica]): Result<MetaRow, RuntimeError> => {
+    const entity = lower(r.state.id);
+    const signer = signerId(r.signerId);
+    const local = rt.replicaLocal.get(key);
+    const rowKey = concat([
+      Uint8Array.of(KEY_LIVE_REPLICA_META),
+      hexToBytes(entity),
+      new Uint8Array(12),
+      hexToBytes(signer),
+    ]);
+    const parts = all({
+      height: frameNumber(r.state.height),
+      timestamp: frameNumber(r.state.timestamp),
+      leaderVotes: whenBinary(r.leaderVotes, leaderVotesBinary),
+      pendingLeaderCertificate: whenBinary(r.pendingLeaderCertificate, certificateBinary),
+      certifiedFrameHeadDigest: whenBinary(r.certifiedFrameHead, (h) => map(encodeBinary(h), integrity)),
+    });
+    return chain(parts, (p) =>
+      map(
+        encodeBinary({
+          replicaKey: key.toLowerCase(),
+          entityId: entity,
+          signerId: signer,
+          isProposer: signerId(r.state.quorum.proposer) === signer,
+          entityHead: {
+            entityId: entity,
+            height: p.height,
+            timestamp: p.timestamp,
+            frameHash: r.head.height === 0n ? "" : frameWord(r.head.prevFrameHash),
+          },
+          ...opt("certifiedFrameHeadDigest", p.certifiedFrameHeadDigest),
+          ...opt("leaderVotes", p.leaderVotes),
+          ...opt("pendingLeaderCertificate", p.pendingLeaderCertificate),
+          ...opt("jPrefixRound", r.jPrefixRound === undefined ? undefined : binaryOf(r.jPrefixRound)),
+          ...opt("jSubmitState", binaryOf(local?.jSubmitState)),
+          ...opt("entityProviderActionSubmitState", binaryOf(local?.entityProviderActionSubmitState)),
+        }),
+        (value) => ({ key: rowKey, value }),
+      ),
+    );
+  };
+export const replicaMetaRows = (rt: Runtime): Result<readonly MetaRow[], RuntimeError> =>
+  traverse([...rt.entities], replicaMetaRow(rt));
+/**
+ * og buildCanonicalJReplicaSnapshot + buildDurableJReplicaSnapshot: fixed field set (no token registry), wall-clock
+ * marker zeroed, state root as bytes.
+ */
+const jReplicaSnapshot = (r: JReplica): Binary =>
+  binaryOf({
+    name: r.name,
+    blockNumber: r.blockNumber,
+    stateRoot: r.stateRoot === null ? null : (hexToBytes(r.stateRoot) as unknown as Binary),
+    mempool: r.mempool,
+    blockDelayMs: r.blockDelayMs,
+    blockTimeMs: r.blockTimeMs,
+    lastBlockTimestamp: 0,
+    blockReady: r.blockReady,
+    watcherConfirmationDepth: r.watcherConfirmationDepth,
+    watcherReceiptCommitment: r.watcherReceiptCommitment,
+    rpcs: r.rpcs,
+    chainId: r.chainId,
+    position: r.position,
+    entityProviderDeploymentBlock: r.entityProviderDeploymentBlock,
+    contracts:
+      r.contracts === undefined
+        ? undefined
+        : Object.fromEntries(Object.entries(r.contracts).filter(([, v]) => Boolean(v))),
+  });
+/** One durable Runtime map under its og snapshot name. */
+type DurableMap = { readonly name: string; readonly value: unknown; readonly size: number };
+/** og buildDurableRuntimeStateSnapshot: only non-empty durable maps; absent when none. */
+const durableInfrastructure = (rt: Runtime): BinaryRecord | undefined => {
+  const maps: readonly DurableMap[] = [
+    { name: "runtimeAdapterCommandFrontiers", value: rt.adapterFrontiers, size: rt.adapterFrontiers.size },
+    { name: "pendingCommittedJOutbox", value: rt.pendingCommittedJOutbox, size: rt.pendingCommittedJOutbox.length },
+    { name: "pendingJurisdictionImports", value: rt.pendingJImports, size: rt.pendingJImports.size },
+    {
+      name: "numberedRegistrationIntents",
+      value: rt.numberedRegistrationIntents,
+      size: rt.numberedRegistrationIntents.size,
+    },
+    { name: "certifiedRegistrationEvidence", value: rt.registrationEvidence, size: rt.registrationEvidence.size },
+    { name: "entityEncryptionSeeds", value: rt.encryptionSeeds, size: rt.encryptionSeeds.size },
+  ];
+  const kept = maps.filter((m) => m.size > 0);
+  return kept.length === 0 ? undefined : Object.fromEntries(kept.map((m) => [m.name, binaryOf(m.value)]));
+};
+/**
+ * og buildReplayVerifiableRuntimePostStateView: runtimeId, BrowserVM header (no trie), durable infrastructure, J
+ * replicas in insertion order.
+ */
+export const runtimeView = (rt: Runtime): BinaryRecord => {
+  const vm =
+    rt.browserVMState === undefined
+      ? undefined
+      : Object.fromEntries(Object.entries(rt.browserVMState).filter(([k]) => k !== "trieData"));
   return {
-    ...(rt.runtimeId ? { runtimeId: rt.runtimeId } : {}), ...(vm !== undefined ? { browserVMState: binaryOf(vm) } : {}), ...opt("infrastructure", infrastructure),
+    ...opt("runtimeId", rt.runtimeId || undefined),
+    ...opt("browserVMState", vm === undefined ? undefined : binaryOf(vm)),
+    ...opt("infrastructure", durableInfrastructure(rt)),
     jReplicas: [...rt.jReplicas].map(([k, r]) => [k, jReplicaSnapshot(r)]),
   };
 };
-export type RuntimeFrameCommit = { readonly runtime: Runtime; readonly frame: StorageFrame; readonly applied: RuntimeInput; readonly outbox: readonly EntityOutput[];
+export type RuntimeFrameCommit = {
+  readonly runtime: Runtime;
+  readonly frame: StorageFrame;
+  readonly applied: RuntimeInput;
+  readonly outbox: readonly EntityOutput[];
   /** og frame.runtimeOutputs: the retained network outbox this frame committed (its rows, in order). */
-  readonly runtimeOutputs: readonly NetworkOutput[]; readonly jOutbox: readonly JInput[]; readonly queuedRetries: readonly RuntimeTx[]; readonly rejected: readonly RuntimeError[] };
-/** og EntityInput wire lanes (entity/types.ts): `entityTxs`, `proposedFrame` (with a commit notice's `hankos`), `hashPrecommitFrame` + `hashPrecommits`, `leaderTimeoutVote`, `jPrefixAttestations`. The rewrite's Runtime-clock stamps are not wire fields. */
-const inputBinary = (input: EntityInput): Result<{ readonly [k: string]: Binary }, RuntimeError> => matchBy("kind", input, {
-  txs: (i): Result<{ readonly [k: string]: Binary }, RuntimeError> => map(traverse(i.txs, entityFrameTx), (entityTxs) => ({ entityTxs: entityTxs as unknown as Binary })),
-  proposal: (i): Result<{ readonly [k: string]: Binary }, RuntimeError> => map(frameBinary(i.frame, i.signatures, false), (f) => ({ proposedFrame: i.hankos === undefined ? f : { ...(f as { readonly [k: string]: Binary }), hankos: [...i.hankos] } })),
-  precommit: (i): Result<{ readonly [k: string]: Binary }, RuntimeError> => map(frameNumber(i.height), (height) => ({ hashPrecommitFrame: { height, frameHash: i.frameHash }, hashPrecommits: precommitsBinary(i.signatures) })),
-  leaderTimeoutVote: (i): Result<{ readonly [k: string]: Binary }, RuntimeError> => map(voteBinary(i.vote), (leaderTimeoutVote) => ({ leaderTimeoutVote })),
-  jPrefixAttestations: (i): Result<{ readonly [k: string]: Binary }, RuntimeError> => ok({ jPrefixAttestations: jpBinary(i.attestations) }),
-});
+  readonly runtimeOutputs: readonly NetworkOutput[];
+  readonly jOutbox: readonly JInput[];
+  readonly queuedRetries: readonly RuntimeTx[];
+  readonly rejected: readonly RuntimeError[];
+};
+type WireLane = Result<BinaryRecord, RuntimeError>;
 /**
- * og resolveObserverCertifiedAccountCounterpartyProposer: the counterparty's frame Hanko on the source Account's committed frame, verified with
- * the observer's certified board registry as board authority, names its proposer as the target claim's first member. Any Hanko refusal (og
- * HankoValidationError, e.g. after a board rotation) yields no route.
+ * og EntityInput wire lanes (entity/types.ts): `entityTxs`, `proposedFrame` (with a commit notice's `hankos`),
+ * `hashPrecommitFrame` + `hashPrecommits`, `leaderTimeoutVote`, `jPrefixAttestations`. The rewrite's Runtime-clock
+ * stamps are not wire fields.
+ */
+const inputBinary = (input: EntityInput): WireLane =>
+  matchBy("kind", input, {
+    txs: (i): WireLane =>
+      map(traverse(i.txs, entityFrameTx), (entityTxs) => ({ entityTxs: entityTxs as unknown as Binary })),
+    proposal: (i): WireLane =>
+      map(frameBinary(i.frame, i.signatures, false), (f) => ({
+        proposedFrame: i.hankos === undefined ? f : { ...(f as BinaryRecord), hankos: [...i.hankos] },
+      })),
+    precommit: (i): WireLane =>
+      map(frameNumber(i.height), (height) => ({
+        hashPrecommitFrame: { height, frameHash: i.frameHash },
+        hashPrecommits: precommitsBinary(i.signatures),
+      })),
+    leaderTimeoutVote: (i): WireLane => map(voteBinary(i.vote), (leaderTimeoutVote) => ({ leaderTimeoutVote })),
+    jPrefixAttestations: (i): WireLane => ok({ jPrefixAttestations: jpBinary(i.attestations) }),
+  });
+/** Whether an observer's certified registry holds exactly this board for an Entity. */
+const observedBoard =
+  (observer: EntityState) =>
+  (entityId: string, boardHash: string): Result<boolean, never> => {
+    const rec = observerBoardRecord(observer, entityId);
+    return ok(rec.ok && rec.value !== null && rec.value.boardHash === boardHash);
+  };
+const EOA_MEMBER = /^0x0{24}[0-9a-f]{40}$/;
+/**
+ * og resolveObserverCertifiedAccountCounterpartyProposer: the counterparty's frame Hanko on the source Account's
+ * committed frame, verified with the observer's certified board registry as board authority, names its proposer as
+ * the target claim's first member. Any Hanko refusal (og HankoValidationError, e.g. after a board rotation) yields no
+ * route.
  */
 const certifiedCounterpartySigner = (rt: Runtime, from: string, to: EntityId): string | undefined => {
   const source = [...rt.entities.values()].find((r) => lower(r.state.id) === lower(from));
-  const account = source === undefined ? undefined : [...source.accountReplicas].find(([id]) => lower(id) === lower(to))?.[1];
+  const account =
+    source === undefined ? undefined : [...source.accountReplicas].find(([id]) => lower(id) === lower(to))?.[1];
   if (source === undefined || account === undefined || account.head._tag !== "installed") return undefined;
-  const head = account.head, hanko = at(head.certificate.right, head.certificate.left, isLeft(source.state.id, replicaId(account)));
+  const head = account.head;
+  const hanko = at(head.certificate.right, head.certificate.left, isLeft(source.state.id, replicaId(account)));
   if (!hanko) return undefined;
-  const checked = checkAccountHanko(hanko, head.prevFrameHash, to, (entityId, boardHash) => { const rec = observerBoardRecord(source.state, entityId); return ok(rec.ok && rec.value !== null && rec.value.boardHash === boardHash); });
+  const checked = checkAccountHanko(hanko, head.prevFrameHash, to, observedBoard(source.state));
   const first = checked.ok ? checked.value.firstMember.toLowerCase() : "";
-  return /^0x0{24}[0-9a-f]{40}$/.test(first) ? `0x${first.slice(-40)}` : undefined;
+  return EOA_MEMBER.test(first) ? `0x${first.slice(-40)}` : undefined;
 };
 /**
- * og resolveEntityOutputSignerId for an Account message: the certified Account counterparty route first, then og resolveEntityProposerId: the
- * receiver's local active leader, else its first local replica, else a replayed frame's signer hint, else the verified gossip profile's runtime
- * signer (`routes`). None resolves:
- * og SIGNER_RESOLUTION_FAILED.
+ * og resolveEntityOutputSignerId for an Account message: the certified Account counterparty route first, then og
+ * resolveEntityProposerId: the receiver's local active leader, else its first local replica, else a replayed frame's
+ * signer hint, else the verified gossip profile's runtime signer (`routes`). None resolves: og
+ * SIGNER_RESOLUTION_FAILED.
  */
-const outputSigner = (rt: Runtime, o: Extract<EntityOutput, { readonly tx: EntityTx }>, routes?: RuntimeRoutes): Result<string, RuntimeError> => {
-  const to = o.to, from = o.tx.type === "accountInput" ? o.tx.data.fromEntityId : undefined;
+const outputSigner = (
+  rt: Runtime,
+  o: Extract<EntityOutput, { readonly tx: EntityTx }>,
+  routes?: RuntimeRoutes,
+): Result<string, RuntimeError> => {
+  const to = o.to;
+  const from = o.tx.type === "accountInput" ? o.tx.data.fromEntityId : undefined;
   const certified = from === undefined ? undefined : certifiedCounterpartySigner(rt, from, to);
   if (certified !== undefined) return ok(certified);
   const local = [...rt.entities.values()].filter((r) => lower(r.state.id) === lower(to));
-  const chosen = local.find(isActiveLeader) ?? local[0], hinted = routes?.replaySigner?.(lower(to)) ?? routes?.verifiedProfileSigner(lower(to));
-  const signer = chosen !== undefined ? lower(chosen.signerId) : hinted === undefined ? undefined : lower(hinted);
-  return signer === undefined ? frameErr(`SIGNER_RESOLUTION_FAILED: Entity output ${from ?? "unknown"}->${to} entityId=${to}`) : ok(signer);
+  const chosen = local.find(isActiveLeader) ?? local[0];
+  const hinted = routes?.replaySigner?.(lower(to)) ?? routes?.verifiedProfileSigner(lower(to));
+  const fromLocal = chosen === undefined ? undefined : lower(chosen.signerId);
+  const signer = fromLocal ?? (hinted === undefined ? undefined : lower(hinted));
+  return signer === undefined
+    ? frameErr(`SIGNER_RESOLUTION_FAILED: Entity output ${from ?? "unknown"}->${to} entityId=${to}`)
+    : ok(signer);
 };
-/** og RoutedEntityInput as prepareRuntimeOutputRows encodes it: destination, bound signer, the input's wire lane, the cohort marker. */
+/**
+ * og RoutedEntityInput as prepareRuntimeOutputRows encodes it: destination, bound signer, the input's wire lane, the
+ * cohort marker.
+ */
 const outputBinary = (rt: Runtime, o: EntityOutput, routes?: RuntimeRoutes): Result<Binary, RuntimeError> => {
-  const marker = o.atomicCrossJurisdictionPair === undefined ? {} : { atomicCrossJurisdictionPair: binaryOf(o.atomicCrossJurisdictionPair) };
-  if ("input" in o) return map(inputBinary(o.input), (lane): Binary => ({ entityId: o.to, signerId: lower(o.signerId), ...lane, ...marker }));
-  return chain(outputSigner(rt, o, routes), (signer) => map(entityFrameTx(o.tx), (tx): Binary => ({ entityId: o.to, signerId: signer, entityTxs: [tx as unknown as Binary], ...marker })));
+  const pair = o.atomicCrossJurisdictionPair;
+  const marker = opt("atomicCrossJurisdictionPair", pair === undefined ? undefined : binaryOf(pair));
+  if ("input" in o) {
+    return map(inputBinary(o.input), (lane): Binary => ({
+      entityId: o.to,
+      signerId: lower(o.signerId),
+      ...lane,
+      ...marker,
+    }));
+  }
+  return chain(outputSigner(rt, o, routes), (signer) =>
+    map(entityFrameTx(o.tx), (tx): Binary => ({
+      entityId: o.to,
+      signerId: signer,
+      entityTxs: [tx as unknown as Binary],
+      ...marker,
+    })),
+  );
 };
 /** og prepareRuntimeOutputRows: one encodeBuffer row per outbox output, in order. */
-export const runtimeOutputRows = (rt: Runtime, outbox: readonly EntityOutput[], routes?: RuntimeRoutes): Result<readonly Uint8Array[], RuntimeError> => traverse(outbox, (o) => chain(outputBinary(rt, o, routes), encodeBinary));
+export const runtimeOutputRows = (
+  rt: Runtime,
+  outbox: readonly EntityOutput[],
+  routes?: RuntimeRoutes,
+): Result<readonly Uint8Array[], RuntimeError> =>
+  traverse(outbox, (o) => chain(outputBinary(rt, o, routes), encodeBinary));
 // ---- og runtime/delivery (identity.ts, pending.ts, plan.ts, recovery-output.ts): the retained network outbox a Runtime frame commits ----
 /** og RoutedEntityInput wire object as og keeps it in env.pendingNetworkOutputs and encodes it as one outbox row. */
 export type NetworkOutput = { readonly [k: string]: Binary };
