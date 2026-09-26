@@ -32147,6 +32147,14 @@ const normalizeEvidence = (evidence: unknown): Result<readonly KeyedEvidence[], 
   const duplicated = ordered.some((x, i) => i > 0 && ordered[i - 1]?.key === x.key);
   return duplicated ? txErr("J_DISPUTE_FINALIZATION_EVIDENCE_DUPLICATE") : ok(ordered);
 };
+/** og: the evidence hash a block claims: keccak over the sorted keys, or empty when there is no evidence. */
+const evidenceHashOf = (evidence: readonly KeyedEvidence[]): string =>
+  evidence.length > 0 ? `0x${keccakUtf8(JSON.stringify(evidence.map((x) => x.key)))}` : "";
+/** A block's dispute evidence and its hash, both left out when there is none. */
+const evidenceFields = (evidence: readonly KeyedEvidence[]) => ({
+  ...opt("disputeFinalizationEvidence", evidence.length > 0 ? evidence.map((x) => x.entry) : undefined),
+  ...opt("disputeFinalizationEvidenceHash", evidenceHashOf(evidence) || undefined),
+});
 export type ValidatorJBlock = {
   readonly jurisdictionRef: string;
   readonly jHeight: number;
@@ -32183,18 +32191,9 @@ const normalizeEventBlock = (jurisdictionRef: string, raw: unknown): Result<Vali
     chain(jEventsHash(events), (eventsHash) => {
       if (nText(block["eventsHash"]) !== eventsHash) return txErr("J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH");
       return chain(normalizeEvidence(block["disputeFinalizationEvidence"] ?? []), (evidence) => {
-        const evidenceHash = evidence.length > 0 ? `0x${keccakUtf8(JSON.stringify(evidence.map((x) => x.key)))}` : "";
-        if (nText(block["disputeFinalizationEvidenceHash"]) !== evidenceHash)
+        if (nText(block["disputeFinalizationEvidenceHash"]) !== evidenceHashOf(evidence))
           return txErr("J_HISTORY_LOCAL_EVIDENCE_HASH_MISMATCH");
-        return ok({
-          jurisdictionRef,
-          jHeight,
-          jBlockHash,
-          eventsHash,
-          events,
-          ...opt("disputeFinalizationEvidence", evidence.length > 0 ? evidence.map((x) => x.entry) : undefined),
-          ...opt("disputeFinalizationEvidenceHash", evidenceHash || undefined),
-        });
+        return ok({ jurisdictionRef, jHeight, jBlockHash, eventsHash, events, ...evidenceFields(evidence) });
       });
     }),
   );
@@ -32528,704 +32527,2054 @@ const rewindJHistory = (rt: Runtime, d: RewindJHistory): Result<Runtime, Runtime
 
 // ---- og entity/tx/j-events.ts applyJEvent over jurisdiction/machine/{range-budget, j-event-range-validation, history-consensus, local-history}: the Entity-certified J range ----
 const jCode = (e: RuntimeError): string => ("code" in e ? e.code : e._tag);
+/** og: keccak over trimmed, lower-case text, the J history hashes' domain and identity words. */
 const jHistoryText = (v: unknown): string => keccak256Hex(utf8(String(v ?? "").trim().toLowerCase()));
 /** og EMPTY_J_HISTORY_ROOT. */
 export const EMPTY_J_HISTORY_ROOT = keccak256Hex(utf8("xln:j-history-empty:v1"));
-const jRoot = (v: unknown, label: string): Result<string, string> => { const s = String(v ?? "").trim().toLowerCase(); return WORD32.test(s) ? ok(s) : err(`J_HISTORY_INVALID_${label}`); };
-const jHeight = (v: unknown, label: string): Result<number, string> => { const n = Number(v); return Number.isSafeInteger(n) && n >= 0 ? ok(n) : err(`J_HISTORY_INVALID_${label}`); };
-type JHistoryIdentity = { readonly jurisdictionRef: string; readonly jHeight: unknown; readonly jBlockHash: string; readonly eventsHash: string; readonly disputeFinalizationEvidenceHash?: string | undefined };
-/** og canonicalJHistoryObservationLeaf. */
-const jHistoryLeaf = (o: JHistoryIdentity): Result<string, string> => chain(jHeight(o.jHeight, "OBSERVATION_HEIGHT"), (h) => chain(jRoot(o.eventsHash, "EVENTS_ROOT"), (events) =>
-  map(o.disputeFinalizationEvidenceHash ? jRoot(o.disputeFinalizationEvidenceHash, "EVIDENCE_ROOT") : ok(ZERO_WORD), (evidence) =>
-    keccak256Hex(abiEncode([A.b32(jHistoryText("xln:j-history-event-block:v1")), A.b32(jHistoryText(o.jurisdictionRef)), A.uint(BigInt(h)), A.b32(jHistoryText(o.jBlockHash)), A.b32(events), A.b32(evidence)])))));
-/** og foldJHistoryRoot: observations by height; the same leaf twice is one leaf, two leaves at one height are an equivocation. */
-export const foldJHistoryRoot = (base: string, observations: readonly JHistoryIdentity[]): Result<string, string> => chain(jRoot(base, "BASE_ROOT"), (start) => {
-  for (const o of observations) { const h = jHeight(o.jHeight, "OBSERVATION_HEIGHT"); if (!h.ok) return h; }
-  const ordered = [...observations].sort((l, r) => Number(l.jHeight) - Number(r.jHeight)), byHeight = new Map<number, string>();
-  let root = start;
-  for (const o of ordered) {
-    const leaf = jHistoryLeaf(o);
-    if (!leaf.ok) return leaf;
-    const h = Number(o.jHeight), existing = byHeight.get(h);
-    if (existing !== undefined && existing !== leaf.value) return err(`J_HISTORY_EQUIVOCATION_AT_HEIGHT:${h}`);
-    if (existing !== undefined) continue;
-    byHeight.set(h, leaf.value);
-    root = keccak256Hex(abiEncode([A.b32(jHistoryText("xln:j-history-fold:v1")), A.b32(root), A.b32(leaf.value)]));
-  }
-  return ok(root);
-});
-/** og JurisdictionEventBlock after normalizeStrictJEventBlock: canonical events in canonical order, dispute evidence with its hash. */
-type JRangeBlock = { readonly blockNumber: number; readonly blockHash: string; readonly eventsHash: string; readonly events: readonly WireJEvent[]; readonly disputeFinalizationEvidence?: readonly unknown[] | undefined; readonly disputeFinalizationEvidenceHash?: string | undefined };
-const jBlockIdentity = (jurisdictionRef: string) => (b: JRangeBlock): JHistoryIdentity => ({ jurisdictionRef, jHeight: b.blockNumber, jBlockHash: nText(b.blockHash), eventsHash: nText(b.eventsHash), ...opt("disputeFinalizationEvidenceHash", b.disputeFinalizationEvidenceHash ? nText(b.disputeFinalizationEvidenceHash) : undefined) });
-/** og canonicalJEventRangeHash: keccak(abi.encode(domain, heights[], blockHashes[], eventsHashes[], evidenceHashes[])). */
-const jRangeHash = (jurisdictionRef: string, blocks: readonly JRangeBlock[]): Result<string, string> => {
-  const heights: bigint[] = [], hashes: string[] = [], events: string[] = [], evidence: string[] = [];
-  let previous = -1;
-  for (const b of blocks) {
-    const h = jHeight(b.blockNumber, "RANGE_BLOCK_HEIGHT");
-    if (!h.ok) return h;
-    if (h.value <= previous) return err("J_HISTORY_RANGE_BLOCK_ORDER_INVALID");
-    previous = h.value;
-    const e = jRoot(b.eventsHash, "RANGE_EVENTS_ROOT");
-    if (!e.ok) return e;
-    const x = nText(b.disputeFinalizationEvidenceHash), ev = x ? jRoot(x, "RANGE_EVIDENCE_ROOT") : ok(ZERO_WORD);
-    if (!ev.ok) return ev;
-    heights.push(BigInt(h.value)); hashes.push(jHistoryText(b.blockHash)); events.push(e.value); evidence.push(ev.value);
-  }
-  return ok(keccak256Hex(abiEncode([A.b32(jHistoryText("xln:j-history-range-body:v1")), A.array(heights.map(A.uint)), A.array(hashes.map(A.b32)), A.array(events.map(A.b32)), A.array(evidence.map(A.b32))])));
+const rangeWord = (v: unknown, code: string): Result<string, string> => {
+  const s = nText(v);
+  return WORD32.test(s) ? ok(s) : err(code);
 };
-type JRangeSigned = { readonly entityId: string; readonly jurisdictionRef: string; readonly signerId: string; readonly baseHeight: number; readonly scannedThroughHeight: number; readonly tipBlockHash: string; readonly eventHistoryRoot: string; readonly rangeHash: string };
+const rangeHeight = (v: unknown, code: string): Result<number, string> => {
+  const n = Number(v);
+  return naturalSafeInt(n) ? ok(n) : err(code);
+};
+const jRoot = (v: unknown, label: string): Result<string, string> => rangeWord(v, `J_HISTORY_INVALID_${label}`);
+const jHistoryHeight = (v: unknown, label: string): Result<number, string> => rangeHeight(v, `J_HISTORY_INVALID_${label}`);
+/** One observed J block as the history root commits to it. */
+type JHistoryIdentity = {
+  readonly jurisdictionRef: string;
+  readonly jHeight: unknown;
+  readonly jBlockHash: string;
+  readonly eventsHash: string;
+  readonly disputeFinalizationEvidenceHash?: string | undefined;
+};
+/** og canonicalJHistoryObservationLeaf. */
+const jHistoryLeaf = (o: JHistoryIdentity): Result<string, string> => {
+  const parts = all({
+    height: jHistoryHeight(o.jHeight, "OBSERVATION_HEIGHT"),
+    events: jRoot(o.eventsHash, "EVENTS_ROOT"),
+    evidence: o.disputeFinalizationEvidenceHash
+      ? jRoot(o.disputeFinalizationEvidenceHash, "EVIDENCE_ROOT")
+      : ok(ZERO_WORD),
+  });
+  return map(parts, ({ height, events, evidence }) =>
+    keccak256Hex(
+      abiEncode([
+        A.b32(jHistoryText("xln:j-history-event-block:v1")),
+        A.b32(jHistoryText(o.jurisdictionRef)),
+        A.uint(BigInt(height)),
+        A.b32(jHistoryText(o.jBlockHash)),
+        A.b32(events),
+        A.b32(evidence),
+      ]),
+    ),
+  );
+};
+/** The history root so far, and the last height folded with its leaf. */
+type HistoryFold = { readonly root: string; readonly last?: { readonly height: number; readonly leaf: string } };
+/**
+ * og: a new height's leaf folds into the root; observations come in height order, so a repeated height is the last
+ * one, where the same leaf is one leaf and another leaf is an equivocation.
+ */
+const foldObservation = (s: HistoryFold, o: JHistoryIdentity): Result<HistoryFold, string> =>
+  chain(jHistoryLeaf(o), (leaf) => {
+    const height = Number(o.jHeight);
+    if (s.last?.height !== height) {
+      const root = keccak256Hex(abiEncode([A.b32(jHistoryText("xln:j-history-fold:v1")), A.b32(s.root), A.b32(leaf)]));
+      return ok({ root, last: { height, leaf } });
+    }
+    return s.last.leaf === leaf ? ok(s) : err(`J_HISTORY_EQUIVOCATION_AT_HEIGHT:${height}`);
+  });
+/**
+ * og foldJHistoryRoot: observations by height; the same leaf twice is one leaf, two leaves at one height are an
+ * equivocation.
+ */
+export const foldJHistoryRoot = (base: string, observations: readonly JHistoryIdentity[]): Result<string, string> =>
+  chain(jRoot(base, "BASE_ROOT"), (start) => {
+    const heights = traverse(observations, (o) => jHistoryHeight(o.jHeight, "OBSERVATION_HEIGHT"));
+    const ordered = observations.toSorted((l, r) => Number(l.jHeight) - Number(r.jHeight));
+    return chain(heights, () =>
+      map(foldResult(ordered, { root: start } as HistoryFold, foldObservation), (s) => s.root),
+    );
+  });
+/**
+ * og JurisdictionEventBlock after normalizeStrictJEventBlock: canonical events in canonical order, dispute evidence
+ * with its hash.
+ */
+type JRangeBlock = {
+  readonly blockNumber: number;
+  readonly blockHash: string;
+  readonly eventsHash: string;
+  readonly events: readonly WireJEvent[];
+  readonly disputeFinalizationEvidence?: readonly unknown[] | undefined;
+  readonly disputeFinalizationEvidenceHash?: string | undefined;
+};
+const jBlockIdentity =
+  (jurisdictionRef: string) =>
+  (b: JRangeBlock): JHistoryIdentity => ({
+    jurisdictionRef,
+    jHeight: b.blockNumber,
+    jBlockHash: nText(b.blockHash),
+    eventsHash: nText(b.eventsHash),
+    ...opt(
+      "disputeFinalizationEvidenceHash",
+      b.disputeFinalizationEvidenceHash ? nText(b.disputeFinalizationEvidenceHash) : undefined,
+    ),
+  });
+/** One block's column entries in the range hash. */
+type RangeRow = { readonly height: number; readonly hash: string; readonly events: string; readonly evidence: string };
+/** og: a range block's row, its height strictly above the previous block's. */
+const rangeRow = (b: JRangeBlock, previous: number): Result<RangeRow, string> =>
+  chain(jHistoryHeight(b.blockNumber, "RANGE_BLOCK_HEIGHT"), (height) => {
+    if (height <= previous) return err("J_HISTORY_RANGE_BLOCK_ORDER_INVALID");
+    const evidence = nText(b.disputeFinalizationEvidenceHash);
+    const roots = all({
+      events: jRoot(b.eventsHash, "RANGE_EVENTS_ROOT"),
+      evidence: evidence ? jRoot(evidence, "RANGE_EVIDENCE_ROOT") : ok(ZERO_WORD),
+    });
+    return map(roots, ({ events, evidence }) => ({ height, hash: jHistoryText(b.blockHash), events, evidence }));
+  });
+/**
+ * og canonicalJEventRangeHash: keccak(abi.encode(domain, heights[], blockHashes[], eventsHashes[], evidenceHashes[])).
+ */
+const jRangeHash = (jurisdictionRef: string, blocks: readonly JRangeBlock[]): Result<string, string> => {
+  const previousHeight = (i: number): number => (i === 0 ? -1 : Number(blocks[i - 1]?.blockNumber));
+  return map(traverse(blocks, (b, i) => rangeRow(b, previousHeight(i))), (rows) =>
+    keccak256Hex(
+      abiEncode([
+        A.b32(jHistoryText("xln:j-history-range-body:v1")),
+        A.array(rows.map((r) => A.uint(BigInt(r.height)))),
+        A.array(rows.map((r) => A.b32(r.hash))),
+        A.array(rows.map((r) => A.b32(r.events))),
+        A.array(rows.map((r) => A.b32(r.evidence))),
+      ]),
+    ),
+  );
+};
+/** What the Entity's active proposer signs over one J range. */
+type JRangeSigned = {
+  readonly entityId: string;
+  readonly jurisdictionRef: string;
+  readonly signerId: string;
+  readonly baseHeight: number;
+  readonly scannedThroughHeight: number;
+  readonly tipBlockHash: string;
+  readonly eventHistoryRoot: string;
+  readonly rangeHash: string;
+};
 /** og buildJEventRangeDigest: what the Entity's active proposer signs over one J range. */
-export const jRangeDigest = (d: JRangeSigned): Result<string, string> => chain(jHeight(d.baseHeight, "BASE_HEIGHT"), (base) => chain(jHeight(d.scannedThroughHeight, "SCANNED_HEIGHT"), (scanned) => {
-  if (scanned <= base) return err("J_HISTORY_RANGE_EMPTY");
-  if (!String(d.tipBlockHash || "").trim()) return err("J_HISTORY_RANGE_TIP_HASH_MISSING");
-  return chain(jRoot(d.eventHistoryRoot, "EVENT_HISTORY_ROOT"), (root) => map(jRoot(d.rangeHash, "RANGE_ROOT"), (range) => keccak256Hex(abiEncode([
-    A.b32(jHistoryText("xln:j-history-range:v1")), A.b32(jHistoryText(d.entityId)), A.b32(jHistoryText(d.jurisdictionRef)), A.b32(jHistoryText(d.signerId)), A.uint(BigInt(base)), A.uint(BigInt(scanned)), A.b32(jHistoryText(d.tipBlockHash)), A.b32(root), A.b32(range),
-  ]))));
-}));
-/** og normalizeStrictJEventBlock: exact fields, a height above the previous block and within the scan, canonical events already in canonical order, both hashes as claimed (codes under `prefix`, J_RANGE or J_PREFIX). */
-const strictJBlock = (value: unknown, previous: number, scanned: number, prefix = "J_RANGE"): Result<JRangeBlock, string> =>
-  mapErr(strictJRangeBlock(value, previous, scanned), (code) => (prefix !== "J_RANGE" && /^J_RANGE_(?:BLOCK_|EVENT_|EVENTS_HASH_|EVIDENCE_)/.test(code) ? `${prefix}${code.slice("J_RANGE".length)}` : code));
+export const jRangeDigest = (d: JRangeSigned): Result<string, string> => {
+  const heights = all({
+    base: jHistoryHeight(d.baseHeight, "BASE_HEIGHT"),
+    scanned: jHistoryHeight(d.scannedThroughHeight, "SCANNED_HEIGHT"),
+  });
+  return chain(heights, ({ base, scanned }) => {
+    if (scanned <= base) return err("J_HISTORY_RANGE_EMPTY");
+    if (!String(d.tipBlockHash || "").trim()) return err("J_HISTORY_RANGE_TIP_HASH_MISSING");
+    const roots = all({
+      root: jRoot(d.eventHistoryRoot, "EVENT_HISTORY_ROOT"),
+      range: jRoot(d.rangeHash, "RANGE_ROOT"),
+    });
+    return map(roots, ({ root, range }) =>
+      keccak256Hex(
+        abiEncode([
+          A.b32(jHistoryText("xln:j-history-range:v1")),
+          A.b32(jHistoryText(d.entityId)),
+          A.b32(jHistoryText(d.jurisdictionRef)),
+          A.b32(jHistoryText(d.signerId)),
+          A.uint(BigInt(base)),
+          A.uint(BigInt(scanned)),
+          A.b32(jHistoryText(d.tipBlockHash)),
+          A.b32(root),
+          A.b32(range),
+        ]),
+      ),
+    );
+  });
+};
+/**
+ * og normalizeStrictJEventBlock: exact fields, a height above the previous block and within the scan, canonical events
+ * already in canonical order, both hashes as claimed (codes under `prefix`, J_RANGE or J_PREFIX).
+ */
+const strictJBlock = (
+  value: unknown,
+  previous: number,
+  scanned: number,
+  prefix = "J_RANGE",
+): Result<JRangeBlock, string> =>
+  mapErr(strictJRangeBlock(value, previous, scanned), (code) =>
+    prefix !== "J_RANGE" && /^J_RANGE_(?:BLOCK_|EVENT_|EVENTS_HASH_|EVIDENCE_)/.test(code)
+      ? `${prefix}${code.slice("J_RANGE".length)}`
+      : code,
+  );
+/** og: canonical events, already in canonical order, all from this block. */
+const blockEvents = (
+  rawEvents: unknown,
+  blockNumber: number,
+  blockHash: string,
+): Result<readonly WireJEvent[], string> =>
+  chain(mapErr(canonicalJEvents(rawEvents), jCode), (events) => {
+    const ordered = events.toSorted(compareJEvents);
+    const inOrder = events.every((e, i) => jEventKey(e) === jEventKey(ordered[i] as WireJEvent));
+    const fromBlock = events.every((e) => Number(e.blockNumber) === blockNumber && nText(e.blockHash) === blockHash);
+    switch (true) {
+      case !inOrder:
+        return err("J_RANGE_EVENT_ORDER_INVALID");
+      case !fromBlock:
+        return err("J_RANGE_EVENT_BLOCK_MISMATCH");
+      default:
+        return ok(events);
+    }
+  });
+/** og: the block's claimed events hash is a word and the hash of its events. */
+const claimedEventsHash = (raw: JRec, events: readonly WireJEvent[]): Result<string, string> =>
+  chain(mapErr(jEventsHash(events), jCode), (eventsHash) => {
+    const claimed = nText(raw["eventsHash"]);
+    switch (true) {
+      case !WORD32.test(claimed):
+        return err("J_RANGE_EVENTS_HASH_INVALID");
+      case claimed !== eventsHash:
+        return err("J_RANGE_EVENTS_HASH_MISMATCH");
+      default:
+        return ok(eventsHash);
+    }
+  });
+/** og: the block's dispute evidence, canonical and hashing to what the block claims. */
+const blockEvidence = (raw: JRec): Result<readonly KeyedEvidence[], string> => {
+  const rawEvidence = raw["disputeFinalizationEvidence"];
+  if (rawEvidence !== undefined && !Array.isArray(rawEvidence)) return err("J_RANGE_EVIDENCE_INVALID");
+  return chain(mapErr(normalizeEvidence(rawEvidence ?? []), jCode), (evidence) =>
+    nText(raw["disputeFinalizationEvidenceHash"]) === evidenceHashOf(evidence)
+      ? ok(evidence)
+      : err("J_RANGE_EVIDENCE_HASH_MISMATCH"),
+  );
+};
+const RANGE_BLOCK_KEYS = ["blockNumber", "blockHash", "eventsHash", "events"];
+const RANGE_BLOCK_OPTIONAL_KEYS = ["disputeFinalizationEvidence", "disputeFinalizationEvidenceHash"];
 const strictJRangeBlock = (value: unknown, previous: number, scanned: number): Result<JRangeBlock, string> => {
   const raw = boundaryRec(value);
   if (raw === null) return err("J_RANGE_BLOCK_INVALID");
-  const fields = jExactKeys(raw, ["blockNumber", "blockHash", "eventsHash", "events"], ["disputeFinalizationEvidence", "disputeFinalizationEvidenceHash"], "J_RANGE_BLOCK_FIELDS_INVALID");
-  if (!fields.ok) return err(jCode(fields.error));
+  const keys = jExactKeys(raw, RANGE_BLOCK_KEYS, RANGE_BLOCK_OPTIONAL_KEYS, "J_RANGE_BLOCK_FIELDS_INVALID");
+  if (!keys.ok) return err(jCode(keys.error));
   const blockNumber = Number(raw["blockNumber"]);
-  if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) return err("J_RANGE_BLOCK_HEIGHT_INVALID");
-  if (blockNumber <= previous || blockNumber > scanned) return err("J_RANGE_BLOCK_ORDER_INVALID");
-  const blockHash = nText(raw["blockHash"]), rawEvents = raw["events"];
-  if (!WORD32.test(blockHash)) return err("J_RANGE_BLOCK_HASH_INVALID");
-  if (!Array.isArray(rawEvents) || rawEvents.length === 0) return err("J_RANGE_EVENT_BLOCK_EMPTY");
-  const canonical = canonicalJEvents(rawEvents);
-  if (!canonical.ok) return err(jCode(canonical.error));
-  const events = canonical.value, ordered = [...events].sort(compareJEvents);
-  if (events.length !== rawEvents.length) return err("J_RANGE_EVENT_INVALID");
-  if (!events.every((e, i) => jEventKey(e) === jEventKey(ordered[i] as WireJEvent))) return err("J_RANGE_EVENT_ORDER_INVALID");
-  if (events.some((e) => Number(e.blockNumber) !== blockNumber || nText(e.blockHash) !== blockHash)) return err("J_RANGE_EVENT_BLOCK_MISMATCH");
-  const eventsHash = jEventsHash(events);
-  if (!eventsHash.ok) return err(jCode(eventsHash.error));
-  const claimed = nText(raw["eventsHash"]);
-  if (!WORD32.test(claimed)) return err("J_RANGE_EVENTS_HASH_INVALID");
-  if (claimed !== eventsHash.value) return err("J_RANGE_EVENTS_HASH_MISMATCH");
-  const rawEvidence = raw["disputeFinalizationEvidence"];
-  if (rawEvidence !== undefined && !Array.isArray(rawEvidence)) return err("J_RANGE_EVIDENCE_INVALID");
-  const evidence = normalizeEvidence(rawEvidence ?? []);
-  if (!evidence.ok) return err(jCode(evidence.error));
-  const evidenceHash = evidence.value.length > 0 ? `0x${keccakUtf8(JSON.stringify(evidence.value.map((x) => x.key)))}` : "";
-  if (nText(raw["disputeFinalizationEvidenceHash"]) !== evidenceHash) return err("J_RANGE_EVIDENCE_HASH_MISMATCH");
-  return ok({ blockNumber, blockHash, eventsHash: eventsHash.value, events, ...(evidence.value.length > 0 ? { disputeFinalizationEvidence: evidence.value.map((x) => x.entry) } : {}), ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}) });
+  const blockHash = nText(raw["blockHash"]);
+  const rawEvents = raw["events"];
+  switch (true) {
+    case !naturalSafeInt(blockNumber):
+      return err("J_RANGE_BLOCK_HEIGHT_INVALID");
+    case blockNumber <= previous || blockNumber > scanned:
+      return err("J_RANGE_BLOCK_ORDER_INVALID");
+    case !WORD32.test(blockHash):
+      return err("J_RANGE_BLOCK_HASH_INVALID");
+    case !Array.isArray(rawEvents) || rawEvents.length === 0:
+      return err("J_RANGE_EVENT_BLOCK_EMPTY");
+  }
+  return chain(blockEvents(rawEvents, blockNumber, blockHash), (events) =>
+    chain(claimedEventsHash(raw, events), (eventsHash) =>
+      map(blockEvidence(raw), (evidence) => ({
+        blockNumber,
+        blockHash,
+        eventsHash,
+        events,
+        ...evidenceFields(evidence),
+      })),
+    ),
+  );
 };
 /** og JurisdictionEventData after validateJEventRangeEnvelope. */
-type JRange = JRangeSigned & { readonly observedAt: number; readonly blocks: readonly JRangeBlock[]; readonly signature: string };
-/** og validateJEventRangeEnvelope: the active proposer's signed, strictly canonical range for this Entity's jurisdiction (a refusal is og's code). */
-const jRangeEnvelope = (state: EntityState, data: JRec): Result<JRange, string> => {
-  const signerId = nText(data["from"]), jurisdictionRef = nText(data["jurisdictionRef"]);
-  if (!signerId || signerId !== nText(leaderStateOf(state).activeValidatorId)) return err("J_RANGE_NOT_ACTIVE_PROPOSER");
-  if (jurisdictionRef !== nText(jEventJurisdictionRef(state))) return err("J_RANGE_JURISDICTION_MISMATCH");
-  const height = (v: unknown, code: string): Result<number, string> => { const n = Number(v); return Number.isSafeInteger(n) && n >= 0 ? ok(n) : err(code); };
-  const word = (v: unknown, code: string): Result<string, string> => { const s = nText(v); return WORD32.test(s) ? ok(s) : err(code); };
-  return chain(height(data["baseHeight"], "J_RANGE_BASE_HEIGHT_INVALID"), (baseHeight) => chain(height(data["scannedThroughHeight"], "J_RANGE_SCANNED_HEIGHT_INVALID"), (scannedThroughHeight) => {
-    if (scannedThroughHeight <= baseHeight) return err("J_RANGE_HEIGHT_INVALID");
-    return chain(height(data["observedAt"], "J_RANGE_OBSERVED_AT_INVALID"), (observedAt) => {
-      if (observedAt !== scannedThroughHeight) return err("J_RANGE_OBSERVED_AT_MISMATCH");
-      return chain(word(data["tipBlockHash"], "J_RANGE_TIP_HASH_INVALID"), (tipBlockHash) => {
-        const rawBlocks = data["blocks"];
-        if (!Array.isArray(rawBlocks)) return err("J_RANGE_BLOCKS_INVALID");
-        const blocks: JRangeBlock[] = [];
-        let previous = baseHeight;
-        for (const raw of rawBlocks as readonly unknown[]) { const b = strictJBlock(raw, previous, scannedThroughHeight); if (!b.ok) return b; blocks.push(b.value); previous = b.value.blockNumber; }
-        return chain(jRangeHash(jurisdictionRef, blocks), (rangeHash) => chain(word(data["rangeHash"], "J_RANGE_BODY_HASH_INVALID"), (claimed) => {
-          if (claimed !== rangeHash) return err("J_RANGE_BODY_HASH_MISMATCH");
-          return chain(word(data["eventHistoryRoot"], "J_RANGE_HISTORY_ROOT_INVALID"), (eventHistoryRoot) => {
-            const signature = nText(data["signature"]);
-            if (!signature) return err("J_RANGE_PROPOSER_SIGNATURE_INVALID");
-            const signed: JRangeSigned = { entityId: state.id, jurisdictionRef, signerId, baseHeight, scannedThroughHeight, tipBlockHash, eventHistoryRoot, rangeHash };
-            // og verifyAccountSignature for an EOA signer: a canonical compact signature recovering to the signer id
-            return chain(jRangeDigest(signed), (digest) => (witnessSigned(digest, signature, signerId) ? ok({ ...signed, observedAt, blocks, signature }) : err("J_RANGE_PROPOSER_SIGNATURE_INVALID")));
-          });
-        }));
-      });
-    });
-  }));
+type JRange = JRangeSigned & {
+  readonly observedAt: number;
+  readonly blocks: readonly JRangeBlock[];
+  readonly signature: string;
 };
-const J_RANGE_FRAME_PAYLOAD_DOMAIN = "xln.entity-frame.j-range-payload.v1", MAX_ENTITY_FRAME_J_RANGE_BYTES = 10 * 1024 * 1024;
+/** The heights and tip a range claims to cover. */
+type RangeSpan = Pick<JRange, "baseHeight" | "scannedThroughHeight" | "observedAt" | "tipBlockHash">;
+/** og: a non-empty span, observed at its scan tip, ending at a well-formed tip hash. */
+const rangeSpan = (data: JRec): Result<RangeSpan, string> => {
+  const heights = all({
+    baseHeight: rangeHeight(data["baseHeight"], "J_RANGE_BASE_HEIGHT_INVALID"),
+    scannedThroughHeight: rangeHeight(data["scannedThroughHeight"], "J_RANGE_SCANNED_HEIGHT_INVALID"),
+  });
+  return chain(heights, ({ baseHeight, scannedThroughHeight }) => {
+    if (scannedThroughHeight <= baseHeight) return err("J_RANGE_HEIGHT_INVALID");
+    return chain(rangeHeight(data["observedAt"], "J_RANGE_OBSERVED_AT_INVALID"), (observedAt) =>
+      observedAt !== scannedThroughHeight
+        ? err("J_RANGE_OBSERVED_AT_MISMATCH")
+        : map(rangeWord(data["tipBlockHash"], "J_RANGE_TIP_HASH_INVALID"), (tipBlockHash) => ({
+            baseHeight,
+            scannedThroughHeight,
+            observedAt,
+            tipBlockHash,
+          })),
+    );
+  });
+};
+type RangeBlocks = { readonly previous: number; readonly blocks: readonly JRangeBlock[] };
+/** og: every block strict, each above the one before it, within the span. */
+const rangeBlocks = (rawBlocks: unknown, span: RangeSpan): Result<readonly JRangeBlock[], string> => {
+  if (!Array.isArray(rawBlocks)) return err("J_RANGE_BLOCKS_INVALID");
+  const strict = (s: RangeBlocks, raw: unknown): Result<RangeBlocks, string> =>
+    map(strictJBlock(raw, s.previous, span.scannedThroughHeight), (b) => ({
+      previous: b.blockNumber,
+      blocks: [...s.blocks, b],
+    }));
+  return map(foldResult(rawBlocks, { previous: span.baseHeight, blocks: [] }, strict), (s) => s.blocks);
+};
+/** og: the claimed body hash is a word and the hash of the range's blocks. */
+const claimedRangeHash = (
+  jurisdictionRef: string,
+  blocks: readonly JRangeBlock[],
+  raw: unknown,
+): Result<string, string> =>
+  chain(jRangeHash(jurisdictionRef, blocks), (rangeHash) =>
+    chain(rangeWord(raw, "J_RANGE_BODY_HASH_INVALID"), (claimed) =>
+      claimed === rangeHash ? ok(rangeHash) : err("J_RANGE_BODY_HASH_MISMATCH"),
+    ),
+  );
+/** og verifyAccountSignature for an EOA signer: a canonical compact signature over the range digest, by the signer. */
+const signedRange = (
+  signed: JRangeSigned,
+  rest: Pick<JRange, "observedAt" | "blocks">,
+  rawSignature: unknown,
+): Result<JRange, string> => {
+  const signature = nText(rawSignature);
+  if (!signature) return err("J_RANGE_PROPOSER_SIGNATURE_INVALID");
+  return chain(jRangeDigest(signed), (digest) =>
+    witnessSigned(digest, signature, signed.signerId)
+      ? ok({ ...signed, observedAt: rest.observedAt, blocks: rest.blocks, signature })
+      : err("J_RANGE_PROPOSER_SIGNATURE_INVALID"),
+  );
+};
+/**
+ * og validateJEventRangeEnvelope: the active proposer's signed, strictly canonical range for this Entity's jurisdiction
+ * (a refusal is og's code).
+ */
+const jRangeEnvelope = (state: EntityState, data: JRec): Result<JRange, string> => {
+  const signerId = nText(data["from"]);
+  const jurisdictionRef = nText(data["jurisdictionRef"]);
+  switch (true) {
+    case !signerId || signerId !== nText(leaderStateOf(state).activeValidatorId):
+      return err("J_RANGE_NOT_ACTIVE_PROPOSER");
+    case jurisdictionRef !== nText(jEventJurisdictionRef(state)):
+      return err("J_RANGE_JURISDICTION_MISMATCH");
+  }
+  return chain(rangeSpan(data), (span) =>
+    chain(rangeBlocks(data["blocks"], span), (blocks) =>
+      chain(claimedRangeHash(jurisdictionRef, blocks, data["rangeHash"]), (rangeHash) =>
+        chain(rangeWord(data["eventHistoryRoot"], "J_RANGE_HISTORY_ROOT_INVALID"), (eventHistoryRoot) => {
+          const signed: JRangeSigned = {
+            entityId: state.id,
+            jurisdictionRef,
+            signerId,
+            baseHeight: span.baseHeight,
+            scannedThroughHeight: span.scannedThroughHeight,
+            tipBlockHash: span.tipBlockHash,
+            eventHistoryRoot,
+            rangeHash,
+          };
+          return signedRange(signed, { observedAt: span.observedAt, blocks }, data["signature"]);
+        }),
+      ),
+    ),
+  );
+};
+const J_RANGE_FRAME_PAYLOAD_DOMAIN = "xln.entity-frame.j-range-payload.v1";
+const MAX_ENTITY_FRAME_J_RANGE_BYTES = 10 * 1024 * 1024;
 /** og assertEntityFrameJRangeBudget for one range: a valid span, and its canonical frame payload within 10 MiB. */
 const jRangeBudgetIssue = (data: JRec): string | undefined => {
-  const base = Number(data["baseHeight"]), scanned = Number(data["scannedThroughHeight"]);
-  if (!Number.isSafeInteger(base) || base < 0) return `J_RANGE_FRAME_BASE_HEIGHT_INVALID:${String(data["baseHeight"])}`;
-  if (!Number.isSafeInteger(scanned) || scanned <= base) return `J_RANGE_FRAME_SCANNED_HEIGHT_INVALID:${String(data["scannedThroughHeight"])}`;
+  const base = Number(data["baseHeight"]);
+  const scanned = Number(data["scannedThroughHeight"]);
+  switch (true) {
+    case !naturalSafeInt(base):
+      return `J_RANGE_FRAME_BASE_HEIGHT_INVALID:${String(data["baseHeight"])}`;
+    case !Number.isSafeInteger(scanned) || scanned <= base:
+      return `J_RANGE_FRAME_SCANNED_HEIGHT_INVALID:${String(data["scannedThroughHeight"])}`;
+  }
   const bytes = authConsensusBytes({ domain: J_RANGE_FRAME_PAYLOAD_DOMAIN, version: 1, ranges: [data] });
   if (!bytes.ok) return "CANONICAL_ENCODING_INVALID";
-  return bytes.value.length > MAX_ENTITY_FRAME_J_RANGE_BYTES ? `J_RANGE_FRAME_BYTE_LIMIT_EXCEEDED:${bytes.value.length}:${MAX_ENTITY_FRAME_J_RANGE_BYTES}` : undefined;
+  const size = bytes.value.length;
+  return size > MAX_ENTITY_FRAME_J_RANGE_BYTES
+    ? `J_RANGE_FRAME_BYTE_LIMIT_EXCEEDED:${size}:${MAX_ENTITY_FRAME_J_RANGE_BYTES}`
+    : undefined;
 };
-type JSuffix = { readonly baseHeight: number; readonly scannedThroughHeight: number; readonly tipBlockHash: string; readonly eventHistoryRoot: string; readonly blocks: readonly JRangeBlock[] };
-/** og reconcileJEventRangeWithFinalizedState: a fully applied range is a no-op; a crossing one is rebased onto the certified head and must still fold to its signed root. */
+/** The part of a range above the certified head, rebased onto it. */
+type JSuffix = {
+  readonly baseHeight: number;
+  readonly scannedThroughHeight: number;
+  readonly tipBlockHash: string;
+  readonly eventHistoryRoot: string;
+  readonly blocks: readonly JRangeBlock[];
+};
+/**
+ * og reconcileJEventRangeWithFinalizedState: a fully applied range is a no-op; a crossing one is rebased onto the
+ * certified head and must still fold to its signed root.
+ */
 const reconcileJRange = (state: EntityState, d: JRange): Result<JSuffix | null, string> => {
   const finalized = Number(state.committed["lastFinalizedJHeight"] || 0);
   if (d.scannedThroughHeight <= finalized) return ok(null);
   if (d.baseHeight > finalized) return err(`J_RANGE_BASE_HEIGHT_AHEAD:${d.baseHeight}:${finalized}`);
   return chain(mapErr(certifiedJAnchor(state), jCode), (anchor) => {
-    if (anchor !== null && d.jurisdictionRef !== anchor.jurisdictionRef) return err("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
+    if (anchor !== null && d.jurisdictionRef !== anchor.jurisdictionRef)
+      return err("J_HISTORY_FINALITY_JURISDICTION_CONFLICT");
     const blocks = d.blocks.filter((b) => b.blockNumber > finalized);
-    return chain(foldJHistoryRoot(anchor?.eventHistoryRoot ?? EMPTY_J_HISTORY_ROOT, blocks.map(jBlockIdentity(d.jurisdictionRef))), (root) =>
-      root !== d.eventHistoryRoot ? err("J_RANGE_HISTORY_ROOT_MISMATCH") : ok({ baseHeight: finalized, scannedThroughHeight: d.scannedThroughHeight, tipBlockHash: d.tipBlockHash, eventHistoryRoot: root, blocks }));
+    const folded = foldJHistoryRoot(
+      anchor?.eventHistoryRoot ?? EMPTY_J_HISTORY_ROOT,
+      blocks.map(jBlockIdentity(d.jurisdictionRef)),
+    );
+    return chain(folded, (root) =>
+      root !== d.eventHistoryRoot
+        ? err("J_RANGE_HISTORY_ROOT_MISMATCH")
+        : ok({
+            baseHeight: finalized,
+            scannedThroughHeight: d.scannedThroughHeight,
+            tipBlockHash: d.tipBlockHash,
+            eventHistoryRoot: root,
+            blocks,
+          }),
+    );
   });
 };
-/** A canonical (og-shaped) J event as the rewrite's typed JEvent; null for a type the Entity handlers below do not read typed. */
+/** The EVM coordinates a typed J event carries. */
+const jEventMeta = (e: WireJEvent): JEventMeta => ({
+  ...opt("blockNumber", e.blockNumber),
+  ...opt("blockHash", e.blockHash),
+  ...opt("transactionHash", e.transactionHash),
+  ...opt("logIndex", e.logIndex),
+});
+/**
+ * A canonical (og-shaped) J event as the rewrite's typed JEvent; null for a type the Entity handlers below do not read
+ * typed.
+ */
 const typedJEvent = (e: WireJEvent): JEvent | null => {
-  const d = e.data, s = (k: string): string => String(d[k] ?? ""), b = (k: string): bigint => BigInt(String(d[k] ?? "0"));
-  const meta: JEventMeta = { ...opt("blockNumber", e.blockNumber), ...opt("blockHash", e.blockHash), ...opt("transactionHash", e.transactionHash), ...opt("logIndex", e.logIndex) };
+  const d = e.data;
+  const s = (k: string): string => String(d[k] ?? "");
+  const b = (k: string): bigint => BigInt(String(d[k] ?? "0"));
+  const meta = jEventMeta(e);
   switch (e.type) {
-    case "FoundationBootstrapped": return { type: e.type, recipient: s("recipient"), boardHash: s("boardHash"), controlTokenId: b("controlTokenId"), dividendTokenId: b("dividendTokenId"), meta };
-    case "EntityRegistered": return { type: e.type, entityId: s("entityId"), entityNumber: b("entityNumber"), boardHash: s("boardHash"), meta };
-    case "BoardActivated": return { type: e.type, entityId: s("entityId"), previousBoardHash: s("previousBoardHash"), newBoardHash: s("newBoardHash"), previousBoardValidUntil: b("previousBoardValidUntil"), meta };
-    case "DebtCreated": return { type: e.type, debtor: s("debtor"), creditor: s("creditor"), tokenId: b("tokenId"), amount: b("amount"), debtIndex: b("debtIndex"), meta };
-    case "DebtEnforced": return { type: e.type, debtor: s("debtor"), creditor: s("creditor"), tokenId: b("tokenId"), amountPaid: b("amountPaid"), remainingAmount: b("remainingAmount"), newDebtIndex: b("newDebtIndex"), meta };
-    case "DebtForgiven": return { type: e.type, debtor: s("debtor"), creditor: s("creditor"), tokenId: b("tokenId"), amountForgiven: b("amountForgiven"), debtIndex: b("debtIndex"), meta };
-    case "HankoBatchProcessed": return { type: e.type, entityId: s("entityId"), batchHash: s("batchHash"), nonce: b("nonce"), meta };
-    case "EntityProviderActionExecuted": return { type: e.type, entityId: s("entityId"), actionNonce: b("actionNonce"), actionHash: s("actionHash"), actionKind: Number(d["actionKind"]) as 0 | 1, meta };
-    case "EntityProviderActionCancelled": return { type: e.type, entityId: s("entityId"), actionNonce: b("actionNonce"), cancelledActionHash: s("cancelledActionHash"), cancelledActionKind: Number(d["cancelledActionKind"]) as 0 | 1, cancelHash: s("cancelHash"), meta };
-    default: return null;
+    case "FoundationBootstrapped":
+      return {
+        type: e.type,
+        recipient: s("recipient"),
+        boardHash: s("boardHash"),
+        controlTokenId: b("controlTokenId"),
+        dividendTokenId: b("dividendTokenId"),
+        meta,
+      };
+    case "EntityRegistered":
+      return {
+        type: e.type,
+        entityId: s("entityId"),
+        entityNumber: b("entityNumber"),
+        boardHash: s("boardHash"),
+        meta,
+      };
+    case "BoardActivated":
+      return {
+        type: e.type,
+        entityId: s("entityId"),
+        previousBoardHash: s("previousBoardHash"),
+        newBoardHash: s("newBoardHash"),
+        previousBoardValidUntil: b("previousBoardValidUntil"),
+        meta,
+      };
+    case "DebtCreated":
+      return {
+        type: e.type,
+        debtor: s("debtor"),
+        creditor: s("creditor"),
+        tokenId: b("tokenId"),
+        amount: b("amount"),
+        debtIndex: b("debtIndex"),
+        meta,
+      };
+    case "DebtEnforced":
+      return {
+        type: e.type,
+        debtor: s("debtor"),
+        creditor: s("creditor"),
+        tokenId: b("tokenId"),
+        amountPaid: b("amountPaid"),
+        remainingAmount: b("remainingAmount"),
+        newDebtIndex: b("newDebtIndex"),
+        meta,
+      };
+    case "DebtForgiven":
+      return {
+        type: e.type,
+        debtor: s("debtor"),
+        creditor: s("creditor"),
+        tokenId: b("tokenId"),
+        amountForgiven: b("amountForgiven"),
+        debtIndex: b("debtIndex"),
+        meta,
+      };
+    case "HankoBatchProcessed":
+      return { type: e.type, entityId: s("entityId"), batchHash: s("batchHash"), nonce: b("nonce"), meta };
+    case "EntityProviderActionExecuted":
+      return {
+        type: e.type,
+        entityId: s("entityId"),
+        actionNonce: b("actionNonce"),
+        actionHash: s("actionHash"),
+        actionKind: Number(d["actionKind"]) as 0 | 1,
+        meta,
+      };
+    case "EntityProviderActionCancelled":
+      return {
+        type: e.type,
+        entityId: s("entityId"),
+        actionNonce: b("actionNonce"),
+        cancelledActionHash: s("cancelledActionHash"),
+        cancelledActionKind: Number(d["cancelledActionKind"]) as 0 | 1,
+        cancelHash: s("cancelHash"),
+        meta,
+      };
+    default:
+      return null;
   }
 };
-const TOKEN_SYMBOLS: ReadonlyMap<number, string> = new Map([[1, "USDC"], [2, "WETH"], [3, "USDT"], [4, "TRX"], [5, "SUN"]]);
-/** og formatTokenAmount: ethers formatUnits over the token's decimals, then its symbol (an unknown token is a plain Error). */
-const tokenAmountText = (tokenId: number, amount: bigint): Result<string, EntityError> => chain(tokenDecimals(tokenId), (decimals) => {
-  const d = Number(decimals), digits = (amount < 0n ? -amount : amount).toString().padStart(d + 1, "0");
-  const whole = d === 0 ? digits : digits.slice(0, -d), frac = d === 0 ? "0" : digits.slice(-d).replace(/0+$/, "") || "0";
-  return ok(`${amount < 0n ? "-" : ""}${whole}.${frac} ${TOKEN_SYMBOLS.get(tokenId) ?? ""}`);
-});
-const rawUnits = (tokenId: number, amount: unknown): string => `${BigInt(String(amount ?? "0")).toString()} raw units of token #${tokenId}`;
+const TOKEN_SYMBOLS: ReadonlyMap<number, string> = new Map([
+  [1, "USDC"],
+  [2, "WETH"],
+  [3, "USDT"],
+  [4, "TRX"],
+  [5, "SUN"],
+]);
+/**
+ * og formatTokenAmount: ethers formatUnits over the token's decimals, then its symbol (an unknown token is a plain
+ * Error).
+ */
+const tokenAmountText = (tokenId: number, amount: bigint): Result<string, EntityError> =>
+  map(tokenDecimals(tokenId), (decimals) => {
+    const d = Number(decimals);
+    const digits = (amount < 0n ? -amount : amount).toString().padStart(d + 1, "0");
+    const whole = d === 0 ? digits : digits.slice(0, -d);
+    const frac = d === 0 ? "0" : digits.slice(-d).replace(/0+$/, "") || "0";
+    return `${amount < 0n ? "-" : ""}${whole}.${frac} ${TOKEN_SYMBOLS.get(tokenId) ?? ""}`;
+  });
+const rawUnits = (tokenId: number, amount: unknown): string =>
+  `${BigInt(String(amount ?? "0")).toString()} raw units of token #${tokenId}`;
 /** One finalized event's Entity effects: the Draft so far, the Account claims it queued, the Accounts it touched. */
-type JEventStep = { readonly draft: Draft; readonly claims: readonly AccountTxTarget[]; readonly dirty: readonly string[] };
-/** og applyAccountSettledJEvent: own reserve from the row, then a j_event_claim for an active Account (a non-active one only notes the suppression). */
-const settledJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number): Result<JEventStep, EntityError> => {
-  const d = e.data, state = step.draft.state, me = lower(state.id), left = lower(d["leftEntity"]), right = lower(d["rightEntity"]);
-  if (me !== left && me !== right) return ok(step);
-  const tokenId = Number(d["tokenId"]), counterparty = me === left ? right : left, own = me === left ? d["leftReserve"] : d["rightReserve"];
-  const reserved = own === undefined || own === null ? state : { ...state, committed: { ...state.committed, reserves: mapSet(committedReserves(state), tokenId, BigInt(String(own))) as unknown as Binary } };
-  const draft: Draft = { ...step.draft, state: reserved }, child = draft.accountReplicas.get(counterparty as EntityId);
-  if (child === undefined) return ok({ ...step, draft });
-  if (!liveAccount(child)) return ok({ ...step, draft: jSay(draft, `⚖️ OBSERVED: non-active Account ${counterparty.slice(-4)} reserve updated; bilateral claim suppressed (${child._tag === "preparing" ? "dispute_preparing" : "disputed"})`) });
-  const token: TokenSettlement = { tokenId: BigInt(tokenId), leftReserve: BigInt(String(d["leftReserve"])), rightReserve: BigInt(String(d["rightReserve"])), collateral: BigInt(String(d["collateral"])), ondelta: BigInt(String(d["ondelta"])), ...opt("eventIndex", e.eventIndex) };
-  const meta: JEventMeta = { ...opt("blockNumber", e.blockNumber), ...opt("blockHash", e.blockHash), ...opt("transactionHash", e.transactionHash), ...opt("logIndex", e.logIndex) };
+type JEventStep = {
+  readonly draft: Draft;
+  readonly claims: readonly AccountTxTarget[];
+  readonly dirty: readonly string[];
+};
+/** og: the settled row's reserve for this Entity, when the row carries one. */
+const withOwnReserve = (state: EntityState, tokenId: number, own: unknown): EntityState => {
+  if (own === undefined || own === null) return state;
+  const reserves = mapSet(committedReserves(state), tokenId, BigInt(String(own)));
+  return { ...state, committed: { ...state.committed, reserves: reserves as unknown as Binary } };
+};
+/** og: the j_event_claim an AccountSettled row becomes for the bilateral Account. */
+const settlementClaim = (
+  e: WireJEvent,
+  left: string,
+  right: string,
+  token: TokenSettlement,
+  blockNumber: number,
+): TxOf<"j_event_claim"> => {
   const jHeight = BigInt(e.blockNumber ?? blockNumber);
-  const claim: TxOf<"j_event_claim"> = { type: "j_event_claim", jHeight, jBlockHash: (e.blockHash || "") as Hash, events: [{ left, right, tokens: [token], nonce: BigInt(String(d["nonce"])), meta }], observedAt: jHeight };
+  const event = { left, right, tokens: [token], nonce: BigInt(String(e.data["nonce"])), meta: jEventMeta(e) };
+  return {
+    type: "j_event_claim",
+    jHeight,
+    jBlockHash: (e.blockHash || "") as Hash,
+    events: [event],
+    observedAt: jHeight,
+  };
+};
+/**
+ * og applyAccountSettledJEvent: own reserve from the row, then a j_event_claim for an active Account (a non-active one
+ * only notes the suppression).
+ */
+const settledJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number): Result<JEventStep, EntityError> => {
+  const d = e.data;
+  const state = step.draft.state;
+  const me = lower(state.id);
+  const left = lower(d["leftEntity"]);
+  const right = lower(d["rightEntity"]);
+  if (me !== left && me !== right) return ok(step);
+  const tokenId = Number(d["tokenId"]);
+  const counterparty = me === left ? right : left;
+  const draft: Draft = {
+    ...step.draft,
+    state: withOwnReserve(state, tokenId, me === left ? d["leftReserve"] : d["rightReserve"]),
+  };
+  const child = draft.accountReplicas.get(counterparty as EntityId);
+  if (child === undefined) return ok({ ...step, draft });
+  const who = counterparty.slice(-4);
+  if (!liveAccount(child)) {
+    const why = child._tag === "preparing" ? "dispute_preparing" : "disputed";
+    const note = `⚖️ OBSERVED: non-active Account ${who} reserve updated; bilateral claim suppressed (${why})`;
+    return ok({ ...step, draft: jSay(draft, note) });
+  }
+  const token: TokenSettlement = {
+    tokenId: BigInt(tokenId),
+    leftReserve: BigInt(String(d["leftReserve"])),
+    rightReserve: BigInt(String(d["rightReserve"])),
+    collateral: BigInt(String(d["collateral"])),
+    ondelta: BigInt(String(d["ondelta"])),
+    ...opt("eventIndex", e.eventIndex),
+  };
   return map(tokenAmountText(tokenId, token.collateral), (coll) => ({
-    draft: jSay(draft, `⚖️ OBSERVED: ${counterparty.slice(-4)} | coll=${coll} | j-block ${blockNumber} (awaiting 2-of-2)`), claims: [...step.claims, { accountId: counterparty, tx: claim }], dirty: [...step.dirty, counterparty],
+    draft: jSay(draft, `⚖️ OBSERVED: ${who} | coll=${coll} | j-block ${blockNumber} (awaiting 2-of-2)`),
+    claims: [...step.claims, { accountId: counterparty, tx: settlementClaim(e, left, right, token, blockNumber) }],
+    dirty: [...step.dirty, counterparty],
   }));
 };
-/** og applyHankoBatchProcessedEvent on the committed jBatchState: finalize the exact pending batch (and queue its follow-up j_broadcast), or quarantine it. */
-const batchProcessedJEvent = (step: JEventStep, e: Extract<JEvent, { readonly type: "HankoBatchProcessed" }>, blockNumber: number, timestamp: bigint, runtimeSeed?: string): Result<JEventStep, EntityError> => {
+/**
+ * og finalizePendingBatch: once sentBatch leaves, the stashed reveals flush into the draft and latch
+ * autoBroadcastDraft; a j_broadcast follows when the batch still has work.
+ */
+const finalizedBatch = (
+  draft: Draft,
+  state: EntityState,
+  timestamp: bigint,
+  autoBroadcast: boolean,
+  runtimeSeed: string | undefined,
+): Result<Draft, EntityError> =>
+  map(flushDeferredReveals(cjOf(draft, timestamp, runtimeSeed).host), ({ host, flushed }) => {
+    const latched =
+      flushed > 0 && host.jb !== undefined ? { ...host.jb, status: "accumulating", autoBroadcastDraft: true } : host.jb;
+    const drafted =
+      flushed > 0
+        ? cjInto(draft, { host: { ...host, ...opt("jb", latched) }, messages: [], outputs: [] }, timestamp)
+        : draft;
+    const after = entityJBatch(drafted.state);
+    const auto =
+      flushed > 0 ? after !== undefined && after.autoBroadcastDraft === true && hasJBatchWork(after) : autoBroadcast;
+    const leader = [...membersOf(state.quorum).keys()][0] ?? "";
+    const broadcast: EntityOutput = {
+      to: state.id,
+      signerId: signerId(leader) as Address,
+      input: { kind: "txs", timestamp, txs: [{ type: "j_broadcast", data: {} }] },
+    };
+    return { ...drafted, outputs: [...drafted.outputs, ...(auto ? [broadcast] : [])] };
+  });
+/**
+ * og applyHankoBatchProcessedEvent on the committed jBatchState: finalize the exact pending batch (and queue its
+ * follow-up j_broadcast), or quarantine it.
+ */
+const batchProcessedJEvent = (
+  step: JEventStep,
+  e: Extract<JEvent, { readonly type: "HankoBatchProcessed" }>,
+  blockNumber: number,
+  timestamp: bigint,
+  runtimeSeed?: string,
+): Result<JEventStep, EntityError> => {
   const state = step.draft.state;
   if (lower(e.entityId) !== lower(state.id)) return ok(step);
-  const before = entityJBatch(state), sent = before?.sentBatch, nonce = Number(e.nonce), hash = lower(e.batchHash);
-  return chain(mapErr(applyHankoBatchProcessed(before, state.id, e, Number(timestamp)), (x): EntityError => ({ _tag: "entity_invariant", reason: x.reason })), (r) => {
+  const before = entityJBatch(state);
+  const sent = before?.sentBatch;
+  const nonce = Number(e.nonce);
+  const hash = lower(e.batchHash);
+  const processed = mapErr(applyHankoBatchProcessed(before, state.id, e, Number(timestamp)), (x): EntityError => ({
+    _tag: "entity_invariant",
+    reason: x.reason,
+  }));
+  return chain(processed, (r) => {
     const draft: Draft = { ...step.draft, state: withEntityJBatch(state, r.jBatch) };
     if (sent === undefined || nonce < sent.entityNonce) return ok({ ...step, draft });
-    if (sent.entityNonce !== nonce || lower(sent.batchHash) !== hash) return ok({ ...step, draft: jSay(draft, `❌ Pending jBatch nonce ${sent.entityNonce} quarantined: chain finalized different batch ${hash} at nonce ${nonce}`) });
-    // og finalizePendingBatch: once sentBatch leaves, the stashed reveals flush into the draft and latch autoBroadcastDraft
-    return chain(flushDeferredReveals(cjOf(draft, timestamp, runtimeSeed).host), ({ host, flushed }) => {
-      const flushedJb = flushed > 0 && host.jb !== undefined ? { ...host.jb, status: "accumulating", autoBroadcastDraft: true } : host.jb;
-      const drafted = flushed > 0 ? cjInto(draft, { host: { ...host, ...opt("jb", flushedJb) }, messages: [], outputs: [] }, timestamp) : draft;
-      const after = entityJBatch(drafted.state), auto = flushed > 0 ? after !== undefined && after.autoBroadcastDraft === true && hasJBatchWork(after) : r.autoBroadcast;
-      const leader = [...membersOf(state.quorum).keys()][0] ?? "";
-      const outputs: readonly EntityOutput[] = auto ? [{ to: state.id, signerId: signerId(leader) as Address, input: { kind: "txs", timestamp, txs: [{ type: "j_broadcast", data: {} }] } }] : [];
-      return ok({ ...step, draft: jSay({ ...drafted, outputs: [...drafted.outputs, ...outputs] }, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`) });
-    });
+    if (sent.entityNonce !== nonce || lower(sent.batchHash) !== hash) {
+      const pending = `Pending jBatch nonce ${sent.entityNonce}`;
+      const note = `❌ ${pending} quarantined: chain finalized different batch ${hash} at nonce ${nonce}`;
+      return ok({ ...step, draft: jSay(draft, note) });
+    }
+    return map(finalizedBatch(draft, state, timestamp, r.autoBroadcast, runtimeSeed), (finalized) => ({
+      ...step,
+      draft: jSay(finalized, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`),
+    }));
   });
 };
 // ---- og entity/tx/j-events.ts DisputeStarted / CounterDisputeRegistered / DisputeFinalized / HashLadderRevealRegistered and j-events-htlc applyKnownHtlcSecret ----
-/** One finalized event's working set: the Draft (Accounts, paybook, crontab), the og helper view (routes, jBatchState, messages, this event's outputs), queued Account txs, dirty Accounts. */
-type JEv = { readonly draft: Draft; readonly cj: Cj; readonly ops: readonly AccountTxTarget[]; readonly dirty: readonly string[] };
-const jevOf = (step: JEventStep, ctx: FoldContext): JEv => ({ draft: step.draft, cj: cjOf(step.draft, ctx.timestamp, ctx.runtimeSeed), ops: step.claims, dirty: step.dirty });
-const jevDone = (x: JEv, ctx: FoldContext): JEventStep => ({ draft: cjInto(x.draft, x.cj, ctx.timestamp), claims: x.ops, dirty: x.dirty });
+/**
+ * One finalized event's working set: the Draft (Accounts, paybook, crontab), the og helper view (routes, jBatchState,
+ * messages, this event's outputs), queued Account txs, dirty Accounts.
+ */
+type JEv = {
+  readonly draft: Draft;
+  readonly cj: Cj;
+  readonly ops: readonly AccountTxTarget[];
+  readonly dirty: readonly string[];
+};
+const jevOf = (step: JEventStep, ctx: FoldContext): JEv => ({
+  draft: step.draft,
+  cj: cjOf(step.draft, ctx.timestamp, ctx.runtimeSeed),
+  ops: step.claims,
+  dirty: step.dirty,
+});
+const jevDone = (x: JEv, ctx: FoldContext): JEventStep => ({
+  draft: cjInto(x.draft, x.cj, ctx.timestamp),
+  claims: x.ops,
+  dirty: x.dirty,
+});
 const jevSay = (x: JEv, ...messages: readonly string[]): JEv => ({ ...x, cj: cjSay(x.cj, ...messages) });
 const jevBroadcast = (x: JEv): Result<JEv, EntityError> => map(localJBroadcast(x.cj), (b) => ({ ...x, cj: b.cj }));
+/** One refusable move on an event's working set. */
+type JEvMove = (x: JEv) => Result<JEv, EntityError>;
+const stay: JEvMove = (x) => ok(x);
+/** The moves in order; the first refusal ends the event. */
+const jevPipe = (x: JEv, ...moves: readonly JEvMove[]): Result<JEv, EntityError> =>
+  foldResult(moves, x, (acc, move) => move(acc));
+const sayWhen =
+  (said: boolean, message: string): JEvMove =>
+  (x) =>
+    ok(said ? jevSay(x, message) : x);
+const sayMaybe =
+  (message: string | undefined): JEvMove =>
+  (x) =>
+    ok(message === undefined ? x : jevSay(x, message));
+const broadcastWhen =
+  (wake: boolean): JEvMove =>
+  (x) =>
+    wake ? jevBroadcast(x) : ok(x);
+const asInvariant = (x: { readonly reason: string }): EntityError => ({ _tag: "entity_invariant", reason: x.reason });
 /** og resolveDisputeAccountContext: the counterentity when we sent the event, else the sender. */
-const disputePeer = (state: EntityState, data: JRec): string => { const self = lc(state.id), sender = lc(data["sender"]); return sender === self ? lc(data["counterentity"]) : sender; };
+const disputePeer = (state: EntityState, data: JRec): string => {
+  const self = lc(state.id);
+  const sender = lc(data["sender"]);
+  return sender === self ? lc(data["counterentity"]) : sender;
+};
+const PROOF_STATE_INVALID: EntityError = { _tag: "entity_invariant", reason: "ACCOUNT_PROOF_STATE_INVALID" };
 /** og buildAccountProofBodyFromJurisdictions on the Account's current state. */
 const currentProofOf = (child: AccountReplica, ctx: FoldContext): Result<LocalProof, EntityError> =>
-  chain(mapErr(committedView(child.state), (): EntityError => ({ _tag: "entity_invariant", reason: "ACCOUNT_PROOF_STATE_INVALID" })),
-    (view) => mapErr(localProof(view, accountDt(ctx, child)), (e): EntityError => ({ _tag: "entity_invariant", reason: e._tag === "dispute_proof" && e.error._tag === "transformer" ? e.error.code : "ACCOUNT_PROOF_STATE_INVALID" })));
-/** og requireFrozenAccountProofBody: the logged body hashes to the logged hash, which is the Account's current (frozen) proof body hash. */
-const frozenJBody = (child: AccountReplica, raw: unknown, logged: unknown, peer: string, context: string, ctx: FoldContext): Result<ProofBody, EntityError> => {
-  const hash = String(logged || "").trim().toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(hash)) return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${peer}:${hash || "missing"}`);
-  if (raw === null || typeof raw !== "object") return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${peer}:${hash}`);
-  const body = proofBodyOfOg(raw as OgRow), computed = proofBodyHash(body).toLowerCase();
-  if (computed !== hash) return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${peer}:${hash}:${computed}`);
-  return chain(currentProofOf(child, ctx), (current) => (current.bodyHash.toLowerCase() !== hash ? halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${peer}:${hash}:${current.bodyHash}`) : ok(body)));
-};
+  chain(
+    mapErr(committedView(child.state), () => PROOF_STATE_INVALID),
+    (view) =>
+      mapErr(localProof(view, accountDt(ctx, child)), (e): EntityError =>
+        e._tag === "dispute_proof" && e.error._tag === "transformer"
+          ? { _tag: "entity_invariant", reason: e.error.code }
+          : PROOF_STATE_INVALID,
+      ),
+  );
 /**
- * og applyEntityAccountEnvelopeUpdate(applyDisputeStarted | applyDisputeFinality): the Account's unilateral external finality (og's plain Error
- * texts). og's applyAccountDisputeFinality refuses nothing: an unsafe finalized nonce or token id halts upstream in applyDisputeFinalizedJEvent
- * (J_EVENT_DISPUTE_FINAL_NONCE_* / J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID), which disputeFinalizedJEvent checks first, so those Account refusals
- * carry og's upstream text for the same fault. Any other refusal is unreachable here: the envelope is the Account's own terms (og
- * createAccountDisputeFinalityInput) and every replica tag takes external_finality.
+ * og requireFrozenAccountProofBody: the logged body hashes to the logged hash, which is the Account's current (frozen)
+ * proof body hash.
  */
-const childFinality = (d: Draft, peer: string, child: AccountReplica, finality: AccountFinality, ctx: FoldContext): Result<Draft, EntityError> => {
-  const fail = (e: AccountReplicaError): EntityError => {
-    if (e._tag === "finality" && finality.kind === "dispute_finalized") {
-      const bad = finality.finalizedTokenIds.findIndex((t) => !Number.isSafeInteger(t) || t < 0);
-      return { _tag: "entity_invariant", reason: e.reason === "token_id" && bad >= 0 ? `J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${bad}:${String(finality.finalizedTokenIds[bad])}` : `J_EVENT_DISPUTE_FINAL_NONCE_INVALID:${String(finality.finalizedJNonce)}` };
-    }
-    if (e._tag !== "finality" || finality.kind !== "dispute_started") return { _tag: "entity_invariant", reason: `ACCOUNT_EXTERNAL_FINALITY_REFUSED:${e._tag}${"reason" in e ? `:${String(e.reason)}` : ""}` };
-    const f = finality, c = child.state.terms.disputeConfig;
-    const reason = e.reason === "initial_nonce" ? `ACCOUNT_DISPUTE_INITIAL_NONCE_INVALID:${f.initialNonce}` : e.reason === "j_nonce" ? `ACCOUNT_DISPUTE_J_NONCE_INVALID:${f.jNonce}` : e.reason === "observed_block" ? `ACCOUNT_DISPUTE_OBSERVED_BLOCK_INVALID:${f.observedBlockNumber}`
-      : e.reason === "timeout" ? `ACCOUNT_DISPUTE_TIMEOUT_INVALID:${f.disputeStartTimestamp}:${f.disputeTimeout}`
-        : `ACCOUNT_DISPUTE_CLOCK_MISMATCH:${f.disputeStartTimestamp}:${f.disputeTimeout}:${f.leftResponseSeconds}:${f.rightResponseSeconds}:${c.leftResponseSeconds}:${c.rightResponseSeconds}`;
-    return { _tag: "entity_invariant", reason };
-  };
-  return chain(mapErr(partyOf(replicaId(child), d.state.id), (): EntityError => ({ _tag: "entity_invariant", reason: `ACCOUNT_DISPUTE_PARTY_INVALID:${peer}` })), (party) =>
-    map(mapErr(applyAccountInput(child, { kind: "external_finality", ...envelopeOf(child.state.terms, party), finality }, { verify: ctx.verify, self: d.state.id, now: ctx.timestamp, deltaTransformer: accountDt(ctx, child) }), fail),
-      (a) => ({ ...d, ...putChild(d.state, d.accountReplicas, peer as EntityId, a.replica) })));
+const frozenJBody = (
+  child: AccountReplica,
+  raw: unknown,
+  logged: unknown,
+  peer: string,
+  context: string,
+  ctx: FoldContext,
+): Result<ProofBody, EntityError> => {
+  const hash = lower(logged);
+  switch (true) {
+    case !HASH_32.test(hash):
+      return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_INVALID:${peer}:${hash || "missing"}`);
+    case raw === null || typeof raw !== "object":
+      return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_INVALID:${peer}:${hash}`);
+  }
+  const body = proofBodyOfOg(raw as OgRow);
+  const computed = proofBodyHash(body).toLowerCase();
+  if (computed !== hash) return halt(`J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH:${peer}:${hash}:${computed}`);
+  return chain(currentProofOf(child, ctx), (current) =>
+    current.bodyHash.toLowerCase() === hash
+      ? ok(body)
+      : halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:${context}:${peer}:${hash}:${current.bodyHash}`),
+  );
 };
-const requireDt = (ctx: FoldContext, child: AccountReplica): Result<string, EntityError> => { const dt = accountDt(ctx, child); return dt.ok ? ok(dt.value) : halt(dt.error); };
-/** og queueSourceHubClaimRegistration (j-events.ts): every queued or deferred Source hub claim wakes the local jBatch and says so. */
-const eventSourceClaims = (x: JEv, peer: string, body: Pick<ProofBody, "transformers">, transformer: string): Result<JEv, EntityError> =>
-  chain(sourceHubClaims(x.cj.host, peer, body, transformer), ({ host, claims }) => foldResult(claims, { ...x, cj: cjHost(x.cj, host) }, (acc, c): Result<JEv, EntityError> => {
-    if (c.result !== "queued" && c.result !== "deferred-batch-pending") return ok(acc);
-    return map(jevBroadcast(acc), (b) => jevSay(b, c.result === "queued" ? `🌉 Cross-j claim ${c.routeId}: registering source reveal ratio ${c.fillRatio}` : `⏳ Cross-j claim ${c.routeId}: reveal deferred until disputeFinalizations leave the jBatch`));
-  }));
+type FinalityRefusal = Extract<AccountReplicaError, { readonly _tag: "finality" }>["reason"];
+type FinalizedFinality = Extract<AccountFinality, { readonly kind: "dispute_finalized" }>;
+/** og's upstream text for a refused dispute_finalized: the first unsafe token id, else the finalized nonce. */
+const finalizedRefusal = (reason: FinalityRefusal, f: FinalizedFinality, peer: string): string => {
+  const bad = f.finalizedTokenIds.findIndex((t) => !naturalSafeInt(t));
+  return reason === "token_id" && bad >= 0
+    ? `J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${bad}:${String(f.finalizedTokenIds[bad])}`
+    : `J_EVENT_DISPUTE_FINAL_NONCE_INVALID:${String(f.finalizedJNonce)}`;
+};
+/** og's plain Error text for a refused dispute_started, by the field it names. */
+const startedRefusalText = (reason: FinalityRefusal, f: DisputeStartedFinality, c: DisputeConfig): string => {
+  switch (reason) {
+    case "initial_nonce":
+      return `ACCOUNT_DISPUTE_INITIAL_NONCE_INVALID:${f.initialNonce}`;
+    case "j_nonce":
+      return `ACCOUNT_DISPUTE_J_NONCE_INVALID:${f.jNonce}`;
+    case "observed_block":
+      return `ACCOUNT_DISPUTE_OBSERVED_BLOCK_INVALID:${f.observedBlockNumber}`;
+    case "timeout":
+      return `ACCOUNT_DISPUTE_TIMEOUT_INVALID:${f.disputeStartTimestamp}:${f.disputeTimeout}`;
+    default: {
+      const window = `${f.disputeStartTimestamp}:${f.disputeTimeout}`;
+      const claimed = `${f.leftResponseSeconds}:${f.rightResponseSeconds}`;
+      return `ACCOUNT_DISPUTE_CLOCK_MISMATCH:${window}:${claimed}:${c.leftResponseSeconds}:${c.rightResponseSeconds}`;
+    }
+  }
+};
+const finalityRefusal = (
+  e: AccountReplicaError,
+  finality: AccountFinality,
+  child: AccountReplica,
+  peer: string,
+): EntityError => {
+  const refused = (): string =>
+    `ACCOUNT_EXTERNAL_FINALITY_REFUSED:${e._tag}${"reason" in e ? `:${String(e.reason)}` : ""}`;
+  switch (true) {
+    case e._tag === "finality" && finality.kind === "dispute_finalized":
+      return { _tag: "entity_invariant", reason: finalizedRefusal(e.reason, finality, peer) };
+    case e._tag === "finality" && finality.kind === "dispute_started": {
+      const reason = startedRefusalText(e.reason, finality, child.state.terms.disputeConfig);
+      return { _tag: "entity_invariant", reason };
+    }
+    default:
+      return { _tag: "entity_invariant", reason: refused() };
+  }
+};
 /**
- * og applyKnownHtlcSecret: an unknown hashlock resolves every inbound lock carrying it; a known route learns the secret once (earning its
- * pending fee), then resolves its inbound lock or relays a cross-j target claim (resolveHtlcLock).
+ * og applyEntityAccountEnvelopeUpdate(applyDisputeStarted | applyDisputeFinality): the Account's unilateral external
+ * finality (og's plain Error texts). og's applyAccountDisputeFinality refuses nothing: an unsafe finalized nonce or
+ * token id halts upstream in applyDisputeFinalizedJEvent (J_EVENT_DISPUTE_FINAL_NONCE_* /
+ * J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID), which disputeFinalizedJEvent checks first, so those Account refusals carry
+ * og's upstream text for the same fault. Any other refusal is unreachable here: the envelope is the Account's own terms
+ * (og createAccountDisputeFinalityInput) and every replica tag takes external_finality.
+ */
+const childFinality = (
+  d: Draft,
+  peer: string,
+  child: AccountReplica,
+  finality: AccountFinality,
+  ctx: FoldContext,
+): Result<Draft, EntityError> => {
+  const party = mapErr(
+    partyOf(replicaId(child), d.state.id),
+    (): EntityError => ({ _tag: "entity_invariant", reason: `ACCOUNT_DISPUTE_PARTY_INVALID:${peer}` }),
+  );
+  return chain(party, (p) => {
+    const input: AccountInput = { kind: "external_finality", ...envelopeOf(child.state.terms, p), finality };
+    const door = { verify: ctx.verify, self: d.state.id, now: ctx.timestamp, deltaTransformer: accountDt(ctx, child) };
+    const applied = mapErr(applyAccountInput(child, input, door), (e) => finalityRefusal(e, finality, child, peer));
+    return map(applied, (a) => ({ ...d, ...putChild(d.state, d.accountReplicas, peer as EntityId, a.replica) }));
+  });
+};
+const requireDt = (ctx: FoldContext, child: AccountReplica): Result<string, EntityError> => {
+  const dt = accountDt(ctx, child);
+  return dt.ok ? ok(dt.value) : halt(dt.error);
+};
+/** og: a queued or deferred Source hub claim wakes the local jBatch and says so; any other result says nothing. */
+const announceSourceClaim = (x: JEv, c: SourceClaim): Result<JEv, EntityError> => {
+  switch (c.result) {
+    case "queued":
+      return map(jevBroadcast(x), (b) =>
+        jevSay(b, `🌉 Cross-j claim ${c.routeId}: registering source reveal ratio ${c.fillRatio}`),
+      );
+    case "deferred-batch-pending":
+      return map(jevBroadcast(x), (b) =>
+        jevSay(b, `⏳ Cross-j claim ${c.routeId}: reveal deferred until disputeFinalizations leave the jBatch`),
+      );
+    default:
+      return ok(x);
+  }
+};
+/**
+ * og queueSourceHubClaimRegistration (j-events.ts): every queued or deferred Source hub claim wakes the local jBatch
+ * and says so.
+ */
+const eventSourceClaims = (
+  x: JEv,
+  peer: string,
+  body: Pick<ProofBody, "transformers">,
+  transformer: string,
+): Result<JEv, EntityError> =>
+  chain(sourceHubClaims(x.cj.host, peer, body, transformer), ({ host, claims }) =>
+    foldResult(claims, { ...x, cj: cjHost(x.cj, host) }, announceSourceClaim),
+  );
+/** og: every inbound lock (the peer sends) carrying the hashlock, resolved with the secret. */
+const inboundLockResolves = (draft: Draft, hashlock: string, secret: string): readonly AccountTxTarget[] =>
+  [...draft.accountReplicas].flatMap(([peer, child]) => {
+    const weAreLeft = child.state.account.id.left === draft.state.id;
+    return [...child.state.locks.values()]
+      .filter((lock) => lc(lock.hashlock) === hashlock && lock.senderIsLeft !== weAreLeft)
+      .map((lock) => ({
+        accountId: peer,
+        tx: { type: "htlc_resolve", lockId: lock.lockId, outcome: "secret", secret } as AccountTx,
+      }));
+  });
+/** og: a route learns its secret once, earning its pending fee then. */
+const learnSecret = (paybook: Paybook, hashlock: string, route: PaybookEntry, secret: string): Paybook => {
+  const { pendingFee, ...rest } = route;
+  const earns = Boolean(pendingFee);
+  const learned: PaybookEntry = earns ? { ...rest, secret } : { ...route, secret };
+  return {
+    entries: mapSet(paybook.entries, hashlock, learned),
+    feesEarned: earns ? paybook.feesEarned + (pendingFee as bigint) : paybook.feesEarned,
+  };
+};
+/** A cross-j route's committed relay to its target leg. */
+type CrossRelay = {
+  readonly routeId: string;
+  readonly targetEntityId: string;
+  readonly targetCounterpartyEntityId: string;
+  readonly targetLockId: string;
+  readonly targetSignerId?: string;
+  readonly fillRatio: number;
+};
+/** og buildCrossJurisdictionEntityOutput: the target claim, to the target Entity's signer. */
+const crossRelayOutput = (relay: CrossRelay, secret: string): Result<CjOut, EntityError> => {
+  const entityId = lower(relay.targetEntityId);
+  const targetSigner = lower(relay.targetSignerId);
+  // og: both route ends are committed before the relay can exist
+  if (!entityId || !targetSigner)
+    return halt(`CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING:${entityId || "entity"}:${targetSigner || "signer"}`);
+  const tx = {
+    type: "resolveHtlcLock",
+    data: {
+      counterpartyEntityId: relay.targetCounterpartyEntityId,
+      lockId: relay.targetLockId,
+      secret,
+      crossJurisdictionRouteId: relay.routeId,
+      description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/${MAX_FILL}`,
+    },
+  } as EntityTx;
+  return ok({ kind: "cross", entityId, signerId: targetSigner, txs: [tx] });
+};
+/**
+ * og resolveHtlcLock: an inbound leg's lock resolves, a cross-j route relays its target claim, any other route only
+ * learns.
+ */
+const secretFollowUp = (x: JEv, route: PaybookEntry, hashlock: string, secret: string): Result<JEv, EntityError> => {
+  if (hasInbound(route)) {
+    const tx = { type: "htlc_resolve", lockId: hashlock, outcome: "secret", secret } as AccountTx;
+    return ok({ ...x, ops: [...x.ops, { accountId: route.inboundEntity as string, tx }] });
+  }
+  const relay = route.crossJurisdictionRelay as CrossRelay | undefined;
+  if (relay === undefined) return ok(x);
+  return map(crossRelayOutput(relay, secret), (out) => ({ ...x, cj: { ...x.cj, outputs: [...x.cj.outputs, out] } }));
+};
+/**
+ * og applyKnownHtlcSecret: an unknown hashlock resolves every inbound lock carrying it; a known route learns the
+ * secret once (earning its pending fee), then resolves its inbound lock or relays a cross-j target claim.
  */
 const knownSecret = (x: JEv, hashlockRaw: string, secretRaw: string, blockNumber: number): Result<JEv, EntityError> => {
-  const hashlock = lc(hashlockRaw), secret = lc(secretRaw), said = `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`;
-  const state = x.draft.state, paybook = state.paybook ?? EMPTY_PAYBOOK, route = paybook.entries.get(hashlock);
+  const hashlock = lc(hashlockRaw);
+  const secret = lc(secretRaw);
+  const said = `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`;
+  const paybook = x.draft.state.paybook ?? EMPTY_PAYBOOK;
+  const route = paybook.entries.get(hashlock);
   if (route === undefined) {
-    const found: AccountTxTarget[] = [];
-    for (const [peer, child] of x.draft.accountReplicas) {
-      const weAreLeft = child.state.account.id.left === state.id;
-      for (const lock of child.state.locks.values()) {
-        if (lc(lock.hashlock) !== hashlock || lock.senderIsLeft === weAreLeft) continue;
-        found.push({ accountId: peer, tx: { type: "htlc_resolve", lockId: lock.lockId, outcome: "secret", secret } as AccountTx });
-      }
-    }
+    const found = inboundLockResolves(x.draft, hashlock, secret);
     return ok(found.length > 0 ? jevSay({ ...x, ops: [...x.ops, ...found] }, said) : x);
   }
   if (route.secret) return ok(jevSay(x, said));
-  const earns = Boolean(route.pendingFee), { pendingFee: _fee, ...rest } = route, learned: PaybookEntry = earns ? { ...rest, secret } : { ...route, secret };
-  const nextBook: Paybook = { entries: mapSet(paybook.entries, hashlock, learned), feesEarned: earns ? paybook.feesEarned + (route.pendingFee as bigint) : paybook.feesEarned };
-  const learnedX: JEv = { ...x, draft: { ...x.draft, state: { ...state, paybook: nextBook } } };
-  if (hasInbound(route)) return ok(jevSay({ ...learnedX, ops: [...learnedX.ops, { accountId: route.inboundEntity as string, tx: { type: "htlc_resolve", lockId: hashlock, outcome: "secret", secret } as AccountTx }] }, said));
-  const relay = route.crossJurisdictionRelay as { readonly routeId: string; readonly targetEntityId: string; readonly targetCounterpartyEntityId: string; readonly targetLockId: string; readonly targetSignerId?: string; readonly fillRatio: number } | undefined;
-  if (relay === undefined) return ok(jevSay(learnedX, said));
-  const tx = { type: "resolveHtlcLock", data: { counterpartyEntityId: relay.targetCounterpartyEntityId, lockId: relay.targetLockId, secret, crossJurisdictionRouteId: relay.routeId, description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/${MAX_FILL}` } } as EntityTx;
-  const out: CjOut = { kind: "cross", entityId: String(relay.targetEntityId ?? "").trim().toLowerCase(), signerId: String(relay.targetSignerId || "").trim().toLowerCase(), txs: [tx] };
-  // og buildCrossJurisdictionEntityOutput: both route ends are committed before the relay can exist
-  if (!out.entityId || !out.signerId) return halt(`CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING:${out.entityId || "entity"}:${out.signerId || "signer"}`);
-  return ok(jevSay({ ...learnedX, cj: { ...learnedX.cj, outputs: [...learnedX.cj.outputs, out] } }, said));
+  const state = { ...x.draft.state, paybook: learnSecret(paybook, hashlock, route, secret) };
+  return map(secretFollowUp({ ...x, draft: { ...x.draft, state } }, route, hashlock, secret), (y) => jevSay(y, said));
 };
-/** og batchAddCounterDispute on the draft: one row per counterparty, only ever raised (a LEFT role may replace RIGHT at equal nonce); limits as og. */
-const addCounterRow = (jb: CjJBatch, row: { readonly counterentity: string; readonly initialNonce: number; readonly initialProofbodyHash: string; readonly counterNonce: number; readonly proposerIsLeft: boolean; readonly counterProofbody: Binary; readonly sig: string }): Result<CjJBatch, EntityError> => {
-  const cp = lc(row.counterentity), rows = (jb.batch["counterDisputes"] ?? []) as readonly (typeof row)[], at = rows.findIndex((r) => lc(r.counterentity) === cp);
-  const bodyHash = (b: Binary): string => proofBodyHash(proofBodyOfOg(b as OgRow)).toLowerCase();
-  const put = (next: readonly (typeof row)[]): CjJBatch => ({ ...jb, batch: { ...jb.batch, counterDisputes: next as unknown as readonly Binary[] }, ...(jb.status === "empty" ? { status: "accumulating" } : {}) });
-  if (at >= 0) {
-    const existing = rows[at] as typeof row;
-    if (existing.initialNonce !== row.initialNonce || lc(existing.initialProofbodyHash) !== lc(row.initialProofbodyHash)) return invariant(`J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT:${cp}`);
-    if (row.counterNonce < existing.counterNonce) return invariant(`J_COUNTER_DISPUTE_NONCE_REGRESSION:${cp}`);
-    if (row.counterNonce === existing.counterNonce) {
-      if (row.proposerIsLeft !== existing.proposerIsLeft) { if (!row.proposerIsLeft) return invariant(`J_COUNTER_DISPUTE_ROLE_REGRESSION:${cp}`); }
-      else if (bodyHash(row.counterProofbody) !== bodyHash(existing.counterProofbody)) return invariant(`J_COUNTER_DISPUTE_HASH_CONFLICT:${cp}:${row.counterNonce}`);
-      else return ok(jb);
-    }
-    return ok(put(rows.map((r, i) => (i === at ? row : r))));
+/** og batchAddCounterDispute's row. */
+type CounterRow = {
+  readonly counterentity: string;
+  readonly initialNonce: number;
+  readonly initialProofbodyHash: string;
+  readonly counterNonce: number;
+  readonly proposerIsLeft: boolean;
+  readonly counterProofbody: Binary;
+  readonly sig: string;
+};
+const counterBodyHash = (b: Binary): string => proofBodyHash(proofBodyOfOg(b as OgRow)).toLowerCase();
+/**
+ * og: a counterparty's row only rises: the same initial binding, never a lower nonce, at an equal one only LEFT over
+ * RIGHT.
+ */
+const raisedCounterRow = (
+  existing: CounterRow,
+  row: CounterRow,
+  cp: string,
+): Result<"keep" | "replace", EntityError> => {
+  const binding =
+    existing.initialNonce === row.initialNonce && lc(existing.initialProofbodyHash) === lc(row.initialProofbodyHash);
+  switch (true) {
+    case !binding:
+      return invariant(`J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT:${cp}`);
+    case row.counterNonce < existing.counterNonce:
+      return invariant(`J_COUNTER_DISPUTE_NONCE_REGRESSION:${cp}`);
+    case row.counterNonce !== existing.counterNonce:
+      return ok("replace");
+    case row.proposerIsLeft !== existing.proposerIsLeft:
+      return row.proposerIsLeft ? ok("replace") : invariant(`J_COUNTER_DISPUTE_ROLE_REGRESSION:${cp}`);
+    case counterBodyHash(row.counterProofbody) !== counterBodyHash(existing.counterProofbody):
+      return invariant(`J_COUNTER_DISPUTE_HASH_CONFLICT:${cp}:${row.counterNonce}`);
+    default:
+      return ok("keep");
   }
+};
+/** og batchAddCounterDispute on the draft: one row per counterparty, only ever raised; limits as og. */
+const addCounterRow = (jb: CjJBatch, row: CounterRow): Result<CjJBatch, EntityError> => {
+  const cp = lc(row.counterentity);
+  const rows = (jb.batch["counterDisputes"] ?? []) as readonly CounterRow[];
+  const at = rows.findIndex((r) => lc(r.counterentity) === cp);
+  const put = (next: readonly CounterRow[]): CjJBatch => ({
+    ...jb,
+    batch: { ...jb.batch, counterDisputes: next as unknown as readonly Binary[] },
+    ...opt("status", jb.status === "empty" ? ("accumulating" as const) : undefined),
+  });
+  const existing = rows[at];
+  if (existing !== undefined)
+    return map(raisedCounterRow(existing, row, cp), (verdict) => (verdict === "keep" ? jb : put(rows.with(at, row))));
   const total = BATCH_FIELDS.reduce((n, f) => n + (jb.batch[f] ?? []).length, 0) + 1;
-  if (total > J_BATCH_LIMITS.maxTotalOps) return invariant(`J_BATCH_LIMIT_EXCEEDED: counterDispute would exceed total ops ${total}/${J_BATCH_LIMITS.maxTotalOps}`);
-  if (rows.length + 1 > J_BATCH_LIMITS.maxCounterDisputes) return invariant(`J_BATCH_LIMIT_EXCEEDED: counterDisputes ${rows.length + 1}/${J_BATCH_LIMITS.maxCounterDisputes}`);
-  return ok(put([...rows, row]));
+  const { maxTotalOps, maxCounterDisputes } = J_BATCH_LIMITS;
+  switch (true) {
+    case total > maxTotalOps:
+      return invariant(`J_BATCH_LIMIT_EXCEEDED: counterDispute would exceed total ops ${total}/${maxTotalOps}`);
+    case rows.length + 1 > maxCounterDisputes:
+      return invariant(`J_BATCH_LIMIT_EXCEEDED: counterDisputes ${rows.length + 1}/${maxCounterDisputes}`);
+    default:
+      return ok(put([...rows, row]));
+  }
+};
+/** The counter-proof a non-starter would lock: the counterparty's newer proof when usable, else the initial one. */
+type CounterChoice = {
+  readonly usable: boolean;
+  readonly finalNonce: number;
+  readonly proposerIsLeft: boolean;
+  readonly finalHash: string;
+};
+/** og selectFinalProof: the counterparty's proof is usable when newer (or LEFT over a RIGHT initial at equal nonce). */
+const counterChoice = (w: DisputeHanko, active: ActiveDispute): CounterChoice => {
+  const newer =
+    w.proofNonce > active.initialNonce ||
+    (w.proofNonce === active.initialNonce && w.proposerIsLeft && !active.initialProposerIsLeft);
+  return typeof w.proposerIsLeft === "boolean" && newer
+    ? { usable: true, finalNonce: w.proofNonce, proposerIsLeft: w.proposerIsLeft, finalHash: w.proofBodyHash }
+    : {
+        usable: false,
+        finalNonce: active.initialNonce,
+        proposerIsLeft: active.initialProposerIsLeft,
+        finalHash: active.initialProofbodyHash,
+      };
+};
+/** og verifyCounterProofIdentity: a counterparty proof that names its dispute hash must name this Account's. */
+const counterProofIdentity = (
+  state: EntityState,
+  child: AccountReplica,
+  named: string,
+  choice: CounterChoice,
+  peer: string,
+): Result<void, EntityError> => {
+  if (!named) return ok(undefined);
+  if (state.jurisdictionConfig === undefined) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
+  const view = committedView(child.state);
+  const expected = view.ok
+    ? accountDisputeHash(
+        { ...view.value, domain: state.jurisdiction },
+        choice.finalHash,
+        choice.finalNonce,
+        choice.proposerIsLeft,
+      )
+    : undefined;
+  if (expected === undefined || !expected.ok) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
+  return lc(named) === lc(expected.value)
+    ? ok(undefined)
+    : halt(`DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${peer}:${named}:${expected.value}`);
+};
+type PullLock = { readonly x: JEv; readonly queued: boolean };
+const notQueued = (x: JEv): PullLock => ({ x, queued: false });
+/** What queuing a Pull counter-proof needs: the dispute, the counterparty's Hanko and the choice it signs. */
+type PullCounter = {
+  readonly peer: string;
+  readonly active: ActiveDispute;
+  readonly hanko: string;
+  readonly choice: CounterChoice;
+  readonly body: ProofBody;
+  readonly dt: string;
 };
 /**
- * og queueSelectedPullCounterProof: the non-starter holding a newer counterparty proof (og selectFinalProof) that carries a Pull queues its
- * counterDispute before T, bundles the Source hub claims of that body and latches autoBroadcastDraft behind a sent batch.
+ * og: before T the counter row joins the draft batch (latching autoBroadcastDraft behind a sent one) with its Source
+ * hub claims.
  */
-const lockPullCounter = (x: JEv, peer: string, ctx: FoldContext): Result<{ readonly x: JEv; readonly queued: boolean }, EntityError> => {
-  const child = x.draft.accountReplicas.get(peer as EntityId) as DisputedAccount, active = child.active as ActiveDispute, w = child.dispute.counterparty, self = x.draft.state.id;
-  const callerIsStarter = (child.state.account.id.left === self) === active.startedByLeft;
-  if (callerIsStarter || w === undefined || !w.hanko || w.hanko === "0x" || !w.proofBodyHash) return ok({ x, queued: false });
-  const usable = typeof w.proposerIsLeft === "boolean" && (w.proofNonce > active.initialNonce || (w.proofNonce === active.initialNonce && w.proposerIsLeft && !active.initialProposerIsLeft));
-  const finalNonce = usable ? w.proofNonce : active.initialNonce, proposerIsLeft = usable ? w.proposerIsLeft : active.initialProposerIsLeft;
-  return chain(currentProofOf(child, ctx), (current) => {
-    if (finalNonce <= 0) return ok({ x: jevSay(x, `❌ Invalid dispute finalNonce=${finalNonce} — must be > 0`), queued: false });
-    const finalHash = usable ? w.proofBodyHash : active.initialProofbodyHash;
-    if (current.bodyHash.toLowerCase() !== finalHash.toLowerCase()) return halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${peer}:${finalHash}:${current.bodyHash}`);
-    if (!usable) return ok({ x, queued: false });
-    return chain(requireDt(ctx, child), (dt) => chain(proofBodyHasPulls(current.body, dt), (hasPulls): Result<{ readonly x: JEv; readonly queued: boolean }, EntityError> => {
-      if (!hasPulls) return ok({ x, queued: false });
-      // og verifyCounterProofIdentity
-      if (w.hash) {
-        if (x.draft.state.jurisdictionConfig === undefined) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
-        const view = committedView(child.state), expected = view.ok ? accountDisputeHash({ ...view.value, domain: x.draft.state.jurisdiction }, finalHash, finalNonce, proposerIsLeft) : undefined;
-        if (expected === undefined || !expected.ok) return halt("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
-        if (lc(w.hash) !== lc(expected.value)) return halt(`DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${peer}:${w.hash}:${expected.value}`);
-      }
-      const nowSec = Math.floor(Number(ctx.timestamp) / 1000);
-      if (nowSec >= active.disputeTimeout) return ok({ x: jevSay(x, `❌ Pull counter-proof ${finalNonce} missed T=${active.disputeTimeout}`), queued: false });
-      const jb = x.cj.host.jb ?? (initJBatch() as unknown as CjJBatch);
-      return chain(addCounterRow(jb, { counterentity: peer, initialNonce: active.initialNonce, initialProofbodyHash: active.initialProofbodyHash, counterNonce: finalNonce, proposerIsLeft, counterProofbody: ogProofBody(current.body), sig: w.hanko }), (added) => {
-        const latched = added.sentBatch !== undefined ? { ...added, autoBroadcastDraft: true } : added;
-        return map(eventSourceClaims({ ...x, cj: cjHost(x.cj, { ...x.cj.host, jb: latched }) }, peer, current.body, dt), (claimed) => ({ x: jevSay(claimed, `🛡️ Locked newer Pull state N${finalNonce} before dispute T`), queued: true }));
-      });
+const queuePullCounter = (x: JEv, p: PullCounter, ctx: FoldContext): Result<PullLock, EntityError> => {
+  const { finalNonce, proposerIsLeft } = p.choice;
+  const nowSec = Math.floor(Number(ctx.timestamp) / 1000);
+  if (nowSec >= p.active.disputeTimeout)
+    return ok(notQueued(jevSay(x, `❌ Pull counter-proof ${finalNonce} missed T=${p.active.disputeTimeout}`)));
+  const jb = x.cj.host.jb ?? (initJBatch() as unknown as CjJBatch);
+  const row: CounterRow = {
+    counterentity: p.peer,
+    initialNonce: p.active.initialNonce,
+    initialProofbodyHash: p.active.initialProofbodyHash,
+    counterNonce: finalNonce,
+    proposerIsLeft,
+    counterProofbody: ogProofBody(p.body),
+    sig: p.hanko,
+  };
+  return chain(addCounterRow(jb, row), (added) => {
+    const latched = added.sentBatch !== undefined ? { ...added, autoBroadcastDraft: true } : added;
+    const withRow = { ...x, cj: cjHost(x.cj, { ...x.cj.host, jb: latched }) };
+    return map(eventSourceClaims(withRow, p.peer, p.body, p.dt), (claimed) => ({
+      x: jevSay(claimed, `🛡️ Locked newer Pull state N${finalNonce} before dispute T`),
+      queued: true,
     }));
+  });
+};
+/**
+ * og queueSelectedPullCounterProof: the non-starter holding a newer counterparty proof (og selectFinalProof) that
+ * carries a Pull queues its counterDispute before T, bundles the Source hub claims of that body and latches
+ * autoBroadcastDraft behind a sent batch.
+ */
+const lockPullCounter = (x: JEv, peer: string, ctx: FoldContext): Result<PullLock, EntityError> => {
+  const child = x.draft.accountReplicas.get(peer as EntityId) as DisputedAccount;
+  const active = child.active as ActiveDispute;
+  const w = child.dispute.counterparty;
+  const callerIsStarter = (child.state.account.id.left === x.draft.state.id) === active.startedByLeft;
+  if (callerIsStarter || w === undefined || !w.hanko || w.hanko === "0x" || !w.proofBodyHash) return ok(notQueued(x));
+  const choice = counterChoice(w, active);
+  return chain(currentProofOf(child, ctx), (current) => {
+    if (choice.finalNonce <= 0)
+      return ok(notQueued(jevSay(x, `❌ Invalid dispute finalNonce=${choice.finalNonce} — must be > 0`)));
+    if (current.bodyHash.toLowerCase() !== choice.finalHash.toLowerCase())
+      return halt(`DISPUTE_FROZEN_ACCOUNT_STATE_MISMATCH:finalize:${peer}:${choice.finalHash}:${current.bodyHash}`);
+    if (!choice.usable) return ok(notQueued(x));
+    return chain(requireDt(ctx, child), (dt) =>
+      chain(proofBodyHasPulls(current.body, dt), (hasPulls) => {
+        if (!hasPulls) return ok(notQueued(x));
+        const counter: PullCounter = { peer, active, hanko: w.hanko, choice, body: current.body, dt };
+        return chain(counterProofIdentity(x.draft.state, child, w.hash, choice, peer), () =>
+          queuePullCounter(x, counter, ctx),
+        );
+      }),
+    );
   });
 };
 /** The wire DisputeStarted as the Account finality builder reads it. */
-const startedEventOf = (e: WireJEvent, body: ProofBody): Extract<JEvent, { readonly type: "DisputeStarted" }> & { readonly batchNonce?: number | undefined } => {
-  const d = e.data, s = (k: string): string => String(d[k] ?? ""), b = (k: string): bigint => BigInt(String(d[k] ?? "0"));
-  return { type: "DisputeStarted", sender: s("sender"), counterentity: s("counterentity"), nonce: b("nonce"), proposerIsLeft: d["proposerIsLeft"] === true, proofbodyHash: s("proofbodyHash"), watchSeed: s("watchSeed"),
-    starterInitialArguments: s("starterInitialArguments"), starterCounterArguments: s("starterCounterArguments"), starterCounterProofCommitment: s("starterCounterProofCommitment"), disputeTimeout: b("disputeTimeout"),
-    disputeStartTimestamp: b("disputeStartTimestamp"), leftResponseSeconds: b("leftResponseSeconds"), rightResponseSeconds: b("rightResponseSeconds"), initialProofbody: body, ...opt("batchNonce", typeof d["batchNonce"] === "number" ? d["batchNonce"] : undefined) };
+const startedEventOf = (
+  e: WireJEvent,
+  body: ProofBody,
+): Extract<JEvent, { readonly type: "DisputeStarted" }> & { readonly batchNonce?: number | undefined } => {
+  const d = e.data;
+  const s = (k: string): string => String(d[k] ?? "");
+  const b = (k: string): bigint => BigInt(String(d[k] ?? "0"));
+  return {
+    type: "DisputeStarted",
+    sender: s("sender"),
+    counterentity: s("counterentity"),
+    nonce: b("nonce"),
+    proposerIsLeft: d["proposerIsLeft"] === true,
+    proofbodyHash: s("proofbodyHash"),
+    watchSeed: s("watchSeed"),
+    starterInitialArguments: s("starterInitialArguments"),
+    starterCounterArguments: s("starterCounterArguments"),
+    starterCounterProofCommitment: s("starterCounterProofCommitment"),
+    disputeTimeout: b("disputeTimeout"),
+    disputeStartTimestamp: b("disputeStartTimestamp"),
+    leftResponseSeconds: b("leftResponseSeconds"),
+    rightResponseSeconds: b("rightResponseSeconds"),
+    initialProofbody: body,
+    ...opt("batchNonce", typeof d["batchNonce"] === "number" ? d["batchNonce"] : undefined),
+  };
 };
-/**
- * og applyDisputeStartedJEvent: the frozen body check, the Account's dispute_started finality, the nonce sync and stale start retirement, the
- * Pull counter-proof lock, the reveal flush (one continuation), then the follow-ups: the starter's secrets (applyKnownHtlcSecret), the Target
- * recovery plan, the Source hub claims, the sibling fanout, the `⚔️ DISPUTE` message and the dispute-deadline hook (1 ms / 5 s).
- */
-const disputeStartedJEvent = (step: JEventStep, e: WireJEvent, ctx: FoldContext, blockNumber: number): Result<JEventStep, EntityError> => {
-  const data = e.data, state = step.draft.state, self = lc(state.id), sender = lc(data["sender"]), peer = disputePeer(state, data), child = step.draft.accountReplicas.get(peer as EntityId);
-  if (child === undefined) return ok(step);
-  return chain(frozenJBody(child, data["initialProofbody"], data["proofbodyHash"], peer, "jEvent.disputeStarted", ctx), (initialBody) =>
-    chain(mapErr(disputeStartedInput(startedEventOf(e, initialBody), blockNumber, String(data["proofbodyHash"]).toLowerCase()), (x): EntityError => ({ _tag: "entity_invariant", reason: x.reason })), (finality) =>
-      chain(childFinality(step.draft, peer, child, finality, ctx), (frozen): Result<JEventStep, EntityError> => {
-        const weAreStarter = sender === self, disputeTimeout = Number(data["disputeTimeout"]);
-        let x = jevOf({ ...step, draft: frozen }, ctx);
-        const retired = startedRetirement(x.cj.host.jb as RetiringJBatch | undefined, self, { sender, counterentity: String(data["counterentity"]), proofbodyHash: String(data["proofbodyHash"]), ...opt("batchNonce", typeof data["batchNonce"] === "number" ? data["batchNonce"] : undefined) });
-        x = { ...x, cj: cjHost(x.cj, { ...x.cj.host, ...opt("jb", retired.jb as unknown as CjJBatch | undefined) }) };
-        if (retired.synced !== undefined) x = jevSay(x, retired.synced);
-        if (retired.broadcast) { const b = jevBroadcast(x); if (!b.ok) return b; x = b.value; }
-        if (retired.removed > 0) x = jevSay(x, `🧹 Removed ${retired.removed} stale dispute-start op(s) for ${peer.slice(-4)}`);
-        return chain(lockPullCounter(x, peer, ctx), ({ x: locked, queued }) => chain(flushDeferredReveals(locked.cj.host), ({ host, flushed }) => {
-          const flushedX: JEv = { ...locked, cj: cjHost(locked.cj, host), dirty: [...locked.dirty, peer] };
-          return chain((flushed > 0 || queued) && retired.removed === 0 ? jevBroadcast(flushedX) : ok(flushedX), (woke) => chain(requireDt(ctx, child), (dt) => {
-            const secrets = starterSecrets(String(data["starterInitialArguments"] || "0x"));
-            const learned = foldResult(secrets, woke, (acc, secret) => knownSecret(acc, hashHtlcSecret(secret) ?? "", secret, blockNumber));
-            if (!learned.ok) return learned;
-            let y = learned.value;
-            if (!weAreStarter && !queued) {
-              const visible = y.draft.accountReplicas.get(peer as EntityId), visibleActive = visible === undefined ? undefined : activeOf(visible);
-              if (visible === undefined || visibleActive === undefined) return halt(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${peer}`);
-              const account = y.cj.host.accounts.get(peer);
-              if (account === undefined) return halt(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${peer}`);
-              const plan = planTargetRecovery(y.cj.host, account, peer, (visibleActive as ActiveDispute).crossJurisdictionRecovery?.resultsByPullId ?? {});
-              if (!plan.ok) return plan;
-              if (plan.value !== null) y = { ...y, draft: { ...y.draft, ...putChild(y.draft.state, y.draft.accountReplicas, peer as EntityId, { ...(visible as DisputedAccount), active: { ...(visibleActive as ActiveDispute), crossJurisdictionRecovery: plan.value.recovery } }) } };
-            }
-            return chain(queued ? ok(y) : eventSourceClaims(y, peer, initialBody, dt), (claimed) => chain(siblingFanout(claimed.cj, peer, blockNumber), ({ cj }) => {
-              const said = jevSay({ ...claimed, cj }, `⚔️ DISPUTE ${weAreStarter ? "STARTED" : "vs us"} with ${peer.slice(-4)}, timeout: unix ${disputeTimeout}`);
-              const t = Number(ctx.timestamp), logical = Number.isFinite(t) && t >= 0 ? t : 0;
-              return map(scheduleDisputeDeadline(said.draft.state, peer, logical + (weAreStarter ? 1 : 5000)), (hooked) => jevDone({ ...said, draft: { ...said.draft, state: hooked } }, ctx));
-            }));
-          }));
-        }));
-      })));
-};
-/** og scrubCounterDisputesSupersededByObserved: a strictly better queued branch survives (higher nonce, or LEFT over RIGHT at equal nonce); an exact retry only where `preserveExact`. */
-const scrubSuperseded = (peer: string, nonce: number, left: boolean, hash: string, preserveExact: boolean): Scrub => scrubRows("counterDisputes", (r) => {
-  const row = r as { readonly counterentity?: unknown; readonly counterNonce?: unknown; readonly proposerIsLeft?: unknown; readonly counterProofbody?: unknown };
-  if (rowId(row.counterentity) !== peer) return true;
-  const n = Number(row.counterNonce);
-  if (n > nonce) return true;
-  if (n < nonce) return false;
-  if (row.proposerIsLeft !== left) return row.proposerIsLeft === true && !left;
-  return preserveExact && proofBodyHash(proofBodyOfOg(row.counterProofbody as OgRow)).toLowerCase() === hash;
+const batchNonceOf = (data: JRec): number | undefined =>
+  typeof data["batchNonce"] === "number" ? data["batchNonce"] : undefined;
+const withRetiredJb = (x: JEv, jb: RetiringJBatch | undefined): JEv => ({
+  ...x,
+  cj: cjHost(x.cj, { ...x.cj.host, ...opt("jb", jb as unknown as CjJBatch | undefined) }),
 });
+/** og: the retired jBatch installed, its nonce sync and removals said, and a broadcast queued when it asks for one. */
+const retiredOps = (x: JEv, retired: RetiredJBatch, ops: string, peer: string): Result<JEv, EntityError> =>
+  jevPipe(
+    withRetiredJb(x, retired.jb),
+    sayMaybe(retired.synced),
+    broadcastWhen(retired.broadcast),
+    sayWhen(retired.removed > 0, `🧹 Removed ${retired.removed} stale ${ops} op(s) for ${peer.slice(-4)}`),
+  );
 /**
- * og applyCounterDisputeRegisteredJEvent: the Account's active dispute takes the selected counter-proof (never regressing), the Target recovery
- * refreshes or re-plans, the selected body's Source hub claims queue, superseded counter-proof operations retire (a sent batch keeps its exact retry).
+ * og: stashed reveals flush into the host (the Account is dirty now), and the jBatch wakes when `wake` says so for
+ * the flushed count.
  */
-const counterRegisteredJEvent = (step: JEventStep, e: WireJEvent, ctx: FoldContext): Result<JEventStep, EntityError> => {
-  const data = e.data, state = step.draft.state, peer = disputePeer(state, data), nonce = Number(data["nonce"]), hash = lc(data["proofbodyHash"]), left = data["proposerIsLeft"] === true;
-  const child = step.draft.accountReplicas.get(peer as EntityId), active = child === undefined ? undefined : activeOf(child);
-  if (child === undefined || active === undefined) return invariant(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${peer}`);
-  return chain(frozenJBody(child, data["counterProofbody"], data["proofbodyHash"], peer, "jEvent.counterDisputeRegistered", ctx), (body): Result<JEventStep, EntityError> => {
-    if (nonce < active.initialNonce || (nonce === active.initialNonce && (!left || active.initialProposerIsLeft))) return invariant(`COUNTER_DISPUTE_NONCE_STALE:${nonce}:${active.initialNonce}`);
-    const a = active as ActiveDispute;
-    if (a.selectedCounterNonce !== undefined) {
-      if (nonce < a.selectedCounterNonce) return invariant(`COUNTER_DISPUTE_NONCE_REGRESSION:${nonce}:${a.selectedCounterNonce}`);
-      if (nonce === a.selectedCounterNonce && left === a.selectedCounterProposerIsLeft && hash !== lc(a.selectedCounterProofbodyHash)) return invariant(`COUNTER_DISPUTE_HASH_CONFLICT:${nonce}`);
-      if (nonce === a.selectedCounterNonce && left !== a.selectedCounterProposerIsLeft && !left) return invariant(`COUNTER_DISPUTE_ROLE_REGRESSION:${nonce}`);
-    }
-    const x0 = jevOf(step, ctx), account = x0.cj.host.accounts.get(peer);
-    if (account === undefined) return invariant(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${peer}`);
-    const planned = a.crossJurisdictionRecovery !== undefined ? refreshTargetRecovery(x0.cj.host, account, peer, a.crossJurisdictionRecovery) : planTargetRecovery(x0.cj.host, account, peer, {});
-    if (!planned.ok) return planned;
-    const { crossJurisdictionRecovery: _r, ...base } = a;
-    const selected: ActiveDispute = { ...base, selectedCounterNonce: nonce, selectedCounterProofbodyHash: hash, selectedCounterProposerIsLeft: left, ...(planned.value === null ? {} : { crossJurisdictionRecovery: planned.value.recovery }) };
-    const x1: JEv = { ...x0, draft: { ...x0.draft, ...putChild(x0.draft.state, x0.draft.accountReplicas, peer as EntityId, { ...(child as DisputedAccount), active: selected }) } };
-    return chain(requireDt(ctx, child), (dt) => chain(eventSourceClaims(x1, peer, body, dt), (claimed) => {
-      const jb = claimed.cj.host.jb as RetiringJBatch | undefined;
-      let x = claimed, removed = 0;
-      if (jb !== undefined) {
-        const drafted = retireJBatch(jb, [scrubSuperseded(peer, nonce, left, hash, false)], true);
-        let next = drafted.jb, removedSent = 0;
-        const sent = next.sentBatch;
-        if (sent !== undefined) {
-          const s2 = scrubSuperseded(peer, nonce, left, hash, true)(sent.batch);
-          if (s2.removed > 0) {
-            removedSent = s2.removed;
-            const { sentBatch: _s, ...unsent } = next, queue = rowsEmpty(s2.batch) ? unsent.recoveryBatches : [s2.batch, ...(unsent.recoveryBatches ?? [])];
-            const work = (queue ?? []).some((b) => !rowsEmpty(b)) || !rowsEmpty(unsent.batch);
-            next = { ...unsent, ...(queue === undefined ? {} : { recoveryBatches: queue }), status: work ? "accumulating" : "empty" };
-          }
-        }
-        removed = drafted.removed + removedSent;
-        x = { ...x, cj: cjHost(x.cj, { ...x.cj.host, jb: next as unknown as CjJBatch }) };
-        if (removedSent > 0) { const b = jevBroadcast(x); if (!b.ok) return b; x = b.value; }
-      }
-      if (removed > 0) x = jevSay(x, `🧹 Retired ${removed} superseded counter-proof operation(s)`);
-      return ok(jevDone(jevSay({ ...x, dirty: [...x.dirty, peer] }, `🛡️ Counter-proof N${nonce} locked for ${peer.slice(-4)}`), ctx));
+const flushedReveals = (x: JEv, peer: string, wake: (flushed: number) => boolean): Result<JEv, EntityError> =>
+  chain(flushDeferredReveals(x.cj.host), ({ host, flushed }) =>
+    broadcastWhen(wake(flushed))({ ...x, cj: cjHost(x.cj, host), dirty: [...x.dirty, peer] }),
+  );
+const withActiveDispute = (x: JEv, peer: string, child: AccountReplica, active: ActiveDispute): JEv => ({
+  ...x,
+  draft: {
+    ...x.draft,
+    ...putChild(x.draft.state, x.draft.accountReplicas, peer as EntityId, { ...(child as DisputedAccount), active }),
+  },
+});
+/** og: the starter's revealed secrets, each applied as a known HTLC secret. */
+const learnStarterSecrets =
+  (starterArguments: string, blockNumber: number): JEvMove =>
+  (x) =>
+    foldResult(starterSecrets(starterArguments), x, (acc, secret) =>
+      knownSecret(acc, hashHtlcSecret(secret) ?? "", secret, blockNumber),
+    );
+/** og: the non-starter plans its Target recovery for the dispute just started against it. */
+const planStartedRecovery =
+  (peer: string): JEvMove =>
+  (x) => {
+    const visible = x.draft.accountReplicas.get(peer as EntityId);
+    const visibleActive = visible === undefined ? undefined : (activeOf(visible) as ActiveDispute | undefined);
+    const account = x.cj.host.accounts.get(peer);
+    if (visible === undefined || visibleActive === undefined || account === undefined)
+      return halt(`CROSS_J_TARGET_ACTIVE_DISPUTE_MISSING:${peer}`);
+    const known = visibleActive.crossJurisdictionRecovery?.resultsByPullId ?? {};
+    return map(planTargetRecovery(x.cj.host, account, peer, known), (plan) =>
+      plan === null
+        ? x
+        : withActiveDispute(x, peer, visible, { ...visibleActive, crossJurisdictionRecovery: plan.recovery }),
+    );
+  };
+const siblingsWarned =
+  (peer: string, blockNumber: number): JEvMove =>
+  (x) =>
+    map(siblingFanout(x.cj, peer, blockNumber), ({ cj }) => ({ ...x, cj }));
+/** og: the dispute-deadline hook, 1 ms after the logical clock for the starter and 5 s for the other side. */
+const deadlineHooked =
+  (peer: string, delay: number, ctx: FoldContext): JEvMove =>
+  (x) => {
+    const t = Number(ctx.timestamp);
+    const logical = Number.isFinite(t) && t >= 0 ? t : 0;
+    return map(scheduleDisputeDeadline(x.draft.state, peer, logical + delay), (hooked) => ({
+      ...x,
+      draft: { ...x.draft, state: hooked },
     }));
+  };
+/**
+ * og applyDisputeStartedJEvent: the frozen body check, the Account's dispute_started finality, the nonce sync and
+ * stale start retirement, the Pull counter-proof lock, the reveal flush (one continuation), then the follow-ups: the
+ * starter's secrets (applyKnownHtlcSecret), the Target recovery plan, the Source hub claims, the sibling fanout, the
+ * `⚔️ DISPUTE` message and the dispute-deadline hook (1 ms / 5 s).
+ */
+const disputeStartedJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  ctx: FoldContext,
+  blockNumber: number,
+): Result<JEventStep, EntityError> => {
+  const data = e.data;
+  const state = step.draft.state;
+  const self = lc(state.id);
+  const sender = lc(data["sender"]);
+  const peer = disputePeer(state, data);
+  const child = step.draft.accountReplicas.get(peer as EntityId);
+  if (child === undefined) return ok(step);
+  const weAreStarter = sender === self;
+  const timeout = Number(data["disputeTimeout"]);
+  const side = weAreStarter ? "STARTED" : "vs us";
+  const started = `⚔️ DISPUTE ${side} with ${peer.slice(-4)}, timeout: unix ${timeout}`;
+  const initialHash = String(data["proofbodyHash"]).toLowerCase();
+  return chain(
+    frozenJBody(child, data["initialProofbody"], data["proofbodyHash"], peer, "jEvent.disputeStarted", ctx),
+    (body) => {
+      const finality = mapErr(disputeStartedInput(startedEventOf(e, body), blockNumber, initialHash), asInvariant);
+      return chain(finality, (f) =>
+        chain(childFinality(step.draft, peer, child, f, ctx), (frozen) => {
+          const x = jevOf({ ...step, draft: frozen }, ctx);
+          const retired = startedRetirement(x.cj.host.jb as RetiringJBatch | undefined, self, {
+            sender,
+            counterentity: String(data["counterentity"]),
+            proofbodyHash: String(data["proofbodyHash"]),
+            ...opt("batchNonce", batchNonceOf(data)),
+          });
+          return chain(retiredOps(x, retired, "dispute-start", peer), (retiredX) =>
+            chain(lockPullCounter(retiredX, peer, ctx), ({ x: locked, queued }) => {
+              const wake = (flushed: number): boolean => (flushed > 0 || queued) && retired.removed === 0;
+              return chain(flushedReveals(locked, peer, wake), (woke) =>
+                chain(requireDt(ctx, child), (dt) => {
+                  const followed = jevPipe(
+                    woke,
+                    learnStarterSecrets(String(data["starterInitialArguments"] || "0x"), blockNumber),
+                    !weAreStarter && !queued ? planStartedRecovery(peer) : stay,
+                    queued ? stay : (y) => eventSourceClaims(y, peer, body, dt),
+                    siblingsWarned(peer, blockNumber),
+                    sayWhen(true, started),
+                    deadlineHooked(peer, weAreStarter ? 1 : 5000, ctx),
+                  );
+                  return map(followed, (y) => jevDone(y, ctx));
+                }),
+              );
+            }),
+          );
+        }),
+      );
+    },
+  );
+};
+/**
+ * og scrubCounterDisputesSupersededByObserved: a strictly better queued branch survives (higher nonce, or LEFT over
+ * RIGHT at equal nonce); an exact retry only where `preserveExact`.
+ */
+const scrubSuperseded = (peer: string, nonce: number, left: boolean, hash: string, preserveExact: boolean): Scrub =>
+  scrubRows("counterDisputes", (r) => {
+    const row = r as {
+      readonly counterentity?: unknown;
+      readonly counterNonce?: unknown;
+      readonly proposerIsLeft?: unknown;
+      readonly counterProofbody?: unknown;
+    };
+    const n = Number(row.counterNonce);
+    switch (true) {
+      case rowId(row.counterentity) !== peer:
+      case n > nonce:
+        return true;
+      case n < nonce:
+        return false;
+      case row.proposerIsLeft !== left:
+        return row.proposerIsLeft === true && !left;
+      default:
+        return preserveExact && proofBodyHash(proofBodyOfOg(row.counterProofbody as OgRow)).toLowerCase() === hash;
+    }
+  });
+/** The counter-proof a CounterDisputeRegistered event selects. */
+type SelectedCounter = { readonly peer: string; readonly nonce: number; readonly left: boolean; readonly hash: string };
+/** og: a counter-proof must beat the initial proof, and never regress from the one already selected. */
+const counterIssue = (active: ActiveDispute, c: SelectedCounter): string | undefined => {
+  const { nonce, left, hash } = c;
+  const stale =
+    nonce < active.initialNonce || (nonce === active.initialNonce && (!left || active.initialProposerIsLeft));
+  if (stale) return `COUNTER_DISPUTE_NONCE_STALE:${nonce}:${active.initialNonce}`;
+  const selected = active.selectedCounterNonce;
+  if (selected === undefined) return undefined;
+  const sameRole = left === active.selectedCounterProposerIsLeft;
+  switch (true) {
+    case nonce < selected:
+      return `COUNTER_DISPUTE_NONCE_REGRESSION:${nonce}:${selected}`;
+    case nonce === selected && sameRole && hash !== lc(active.selectedCounterProofbodyHash):
+      return `COUNTER_DISPUTE_HASH_CONFLICT:${nonce}`;
+    case nonce === selected && !sameRole && !left:
+      return `COUNTER_DISPUTE_ROLE_REGRESSION:${nonce}`;
+    default:
+      return undefined;
+  }
+};
+/**
+ * og: superseded counter-proof rows leave the draft and recovery batches, and the sent batch too (keeping an exact
+ * retry); a sent batch that lost rows re-queues and wakes the jBatch.
+ */
+const retiredCounters = (x: JEv, c: SelectedCounter): Result<JEv, EntityError> => {
+  const jb = x.cj.host.jb as RetiringJBatch | undefined;
+  if (jb === undefined) return ok(x);
+  const drafted = retireJBatch(jb, [scrubSuperseded(c.peer, c.nonce, c.left, c.hash, false)], true);
+  const sent = drafted.jb.sentBatch;
+  const scrubbedSent =
+    sent === undefined ? undefined : scrubSuperseded(c.peer, c.nonce, c.left, c.hash, true)(sent.batch);
+  const removedSent = scrubbedSent?.removed ?? 0;
+  const next = scrubbedSent !== undefined && removedSent > 0 ? requeueSent(drafted.jb, scrubbedSent.batch) : drafted.jb;
+  const removed = drafted.removed + removedSent;
+  return jevPipe(
+    { ...x, cj: cjHost(x.cj, { ...x.cj.host, jb: next as unknown as CjJBatch }) },
+    broadcastWhen(removedSent > 0),
+    sayWhen(removed > 0, `🧹 Retired ${removed} superseded counter-proof operation(s)`),
+  );
+};
+/**
+ * og applyCounterDisputeRegisteredJEvent: the Account's active dispute takes the selected counter-proof (never
+ * regressing), the Target recovery refreshes or re-plans, the selected body's Source hub claims queue, superseded
+ * counter-proof operations retire (a sent batch keeps its exact retry).
+ */
+const counterRegisteredJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  ctx: FoldContext,
+): Result<JEventStep, EntityError> => {
+  const data = e.data;
+  const peer = disputePeer(step.draft.state, data);
+  const c: SelectedCounter = {
+    peer,
+    nonce: Number(data["nonce"]),
+    left: data["proposerIsLeft"] === true,
+    hash: lc(data["proofbodyHash"]),
+  };
+  const child = step.draft.accountReplicas.get(peer as EntityId);
+  const active = child === undefined ? undefined : (activeOf(child) as ActiveDispute | undefined);
+  if (child === undefined || active === undefined) return invariant(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${peer}`);
+  const frozen = frozenJBody(
+    child,
+    data["counterProofbody"],
+    data["proofbodyHash"],
+    peer,
+    "jEvent.counterDisputeRegistered",
+    ctx,
+  );
+  return chain(frozen, (body) => {
+    const issue = counterIssue(active, c);
+    if (issue !== undefined) return invariant(issue);
+    const x0 = jevOf(step, ctx);
+    const account = x0.cj.host.accounts.get(peer);
+    if (account === undefined) return invariant(`COUNTER_DISPUTE_ACTIVE_ACCOUNT_MISSING:${peer}`);
+    const planned =
+      active.crossJurisdictionRecovery !== undefined
+        ? refreshTargetRecovery(x0.cj.host, account, peer, active.crossJurisdictionRecovery)
+        : planTargetRecovery(x0.cj.host, account, peer, {});
+    return chain(planned, (plan) => {
+      const { crossJurisdictionRecovery: _r, ...base } = active;
+      const selected: ActiveDispute = {
+        ...base,
+        selectedCounterNonce: c.nonce,
+        selectedCounterProofbodyHash: c.hash,
+        selectedCounterProposerIsLeft: c.left,
+        ...opt("crossJurisdictionRecovery", plan?.recovery),
+      };
+      const x1 = withActiveDispute(x0, peer, child, selected);
+      const locked = `🛡️ Counter-proof N${c.nonce} locked for ${peer.slice(-4)}`;
+      return chain(requireDt(ctx, child), (dt) =>
+        chain(eventSourceClaims(x1, peer, body, dt), (claimed) =>
+          map(retiredCounters(claimed, c), (x) => jevDone(jevSay({ ...x, dirty: [...x.dirty, peer] }, locked), ctx)),
+        ),
+      );
+    });
   });
 };
 type FinalitySettlement = { readonly orderId: string; readonly settledRatio: number };
-/** og resolveCrossJurisdictionFinalitySettlements: per live route with a leg on this Account, the exact signed Pull's settled ratio (0 when the proof predates it). */
-const finalitySettlements = (h: CjHost, localStack: string | undefined, peer: string, active: ActiveDispute | QueuedDispute | undefined, body: ProofBody, dt: string): Result<readonly FinalitySettlement[], EntityError> =>
-  foldResult<readonly FinalitySettlement[], CrossRoute, EntityError>(routesOf(h), [], (acc, route) => {
-    if (isCrossTerminal(route.status)) return ok(acc);
-    return chain(fatalCross(finalizedRouteLeg({ route, self: h.id, counterparty: peer, ...opt("localStack", localStack) })), (role) => {
-      if (role === undefined) return ok(acc);
-      const expected = role === "source" ? route.sourcePull : route.targetPull;
-      if (expected === undefined) return route.status === "intent" && !route.sourcePull && !route.targetPull ? ok([...acc, { orderId: route.orderId, settledRatio: 0 }]) : halt(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
-      const record = role === "source" ? route.sourceRegistryRecord : route.targetRegistryRecord;
-      return chain(fatalCross(findSignedProofBodyPull(body, expected, role === "target", dt)), (signed) => signed === undefined ? ok([...acc, { orderId: route.orderId, settledRatio: 0 }])
-        : map(fatalCross(finalizedPullFillRatio({ active: active as { readonly disputeStartTimestamp?: unknown; readonly disputeTimeout?: unknown } | undefined, proofbody: body, transformerAddress: dt, expectedPull: expected, targetRole: role === "target", ...opt("record", record) })),
-          (settledRatio) => [...acc, { orderId: route.orderId, settledRatio }]));
+/** What settling routes on dispute finality looks at: this Account's frozen body and dispute. */
+type SettlementScope = {
+  readonly host: CjHost;
+  readonly localStack: string | undefined;
+  readonly peer: string;
+  readonly active: ActiveDispute | QueuedDispute | undefined;
+  readonly body: ProofBody;
+  readonly dt: string;
+};
+/** og: an intent route that never locked a Pull on either side. */
+const unlockedIntent = (route: CrossRoute): boolean =>
+  route.status === "intent" && !route.sourcePull && !route.targetPull;
+/** og: one live route's settlement on this Account: the signed Pull's settled ratio, 0 when the proof predates it. */
+const routeSettlement = (
+  s: SettlementScope,
+  route: CrossRoute,
+): Result<FinalitySettlement | undefined, EntityError> => {
+  if (isCrossTerminal(route.status)) return ok(undefined);
+  const leg = fatalCross(
+    finalizedRouteLeg({ route, self: s.host.id, counterparty: s.peer, ...opt("localStack", s.localStack) }),
+  );
+  return chain(leg, (role) => {
+    if (role === undefined) return ok(undefined);
+    const unsettled = { orderId: route.orderId, settledRatio: 0 };
+    const expected = role === "source" ? route.sourcePull : route.targetPull;
+    if (expected === undefined)
+      return unlockedIntent(route) ? ok(unsettled) : halt(`CROSS_J_FINALITY_PULL_MISSING:${route.orderId}:${role}`);
+    const record = role === "source" ? route.sourceRegistryRecord : route.targetRegistryRecord;
+    const signedPull = fatalCross(findSignedProofBodyPull(s.body, expected, role === "target", s.dt));
+    return chain(signedPull, (signed) => {
+      if (signed === undefined) return ok(unsettled);
+      const ratio = finalizedPullFillRatio({
+        active: s.active as { readonly disputeStartTimestamp?: unknown; readonly disputeTimeout?: unknown } | undefined,
+        proofbody: s.body,
+        transformerAddress: s.dt,
+        expectedPull: expected,
+        targetRole: role === "target",
+        ...opt("record", record),
+      });
+      return map(fatalCross(ratio), (settledRatio) => ({ orderId: route.orderId, settledRatio }));
     });
   });
-/** og terminalizeCrossJurisdictionRoutesOnFinality: parked reveals go; an unlocked intent cancels; every other route clears and ends at its settled ratio. */
-const terminalizeOnFinality = (x: JEv, settlements: readonly FinalitySettlement[]): Result<JEv, EntityError> => foldResult(settlements, x, (acc, { orderId, settledRatio }): Result<JEv, EntityError> => {
-  const routes = acc.cj.host.swaps, at = acc.cj.host.timestamp;
+};
+/**
+ * og resolveCrossJurisdictionFinalitySettlements: per live route with a leg on this Account, the exact signed Pull's
+ * settled ratio (0 when the proof predates it).
+ */
+const finalitySettlements = (s: SettlementScope): Result<readonly FinalitySettlement[], EntityError> =>
+  map(traverse(routesOf(s.host), (route) => routeSettlement(s, route)), (all) =>
+    all.filter((x): x is FinalitySettlement => x !== undefined),
+  );
+/** og: one settled route ends: an unlocked intent cancels; any other clears, then settles, expires or cancels. */
+const terminalRoute = (x: JEv, { orderId, settledRatio }: FinalitySettlement): Result<JEv, EntityError> => {
+  const routes = x.cj.host.swaps;
+  const at = x.cj.host.timestamp;
   if (routes === undefined) return halt(`CROSS_J_FINALITY_COLLECTION_MISSING:${orderId}`);
   const stored = routes.get(orderId);
   if (stored === undefined) return halt(`CROSS_J_FINALITY_ROUTE_FORK_MISSING:${orderId}`);
   const { pendingSourceRegistryReveal: _s, pendingTargetRegistryReveal: _t, ...route } = stored;
-  const put = (r: CrossRoute, message: string): JEv => jevSay({ ...acc, cj: cjHost(acc.cj, cjPutRoute(acc.cj.host, orderId, r)) }, message);
-  if (route.status === "intent" && !route.sourcePull && !route.targetPull) return map(transitionE(route, "cancelled", at), (r) => put(r, `🌉 Cross-j route ${orderId} cancelled before Pull lock on Account finality`));
-  return chain(route.status !== "clearing" ? transitionE(route, "clearing", at) : ok(route as CrossRoute), (clearing) => {
-    const terminal: CrossStatus = settledRatio > 0 ? "settled" : isCrossExpired(clearing, at) ? "expired" : "cancelled";
-    return map(transitionE(clearing, terminal, at), (ended) => put(terminal === "settled" ? { ...ended, settledAt: at } : ended, `🌉 Cross-j route ${orderId} terminal after dispute finality: ${terminal}`));
-  });
-});
-/** og resolveFinalizationEvidence: the block's one reducer record for this finalization sets the finalized nonce (an exact unsigned initial unilateral, or none on the initial body, spends one more). */
-const finalizedNonceOf = (child: AccountReplica, data: JRec, evidence: readonly unknown[], finalHash: string): Result<{ readonly finalizedJNonce: number; readonly initialNonce: number }, EntityError> => {
-  const sender = lc(data["sender"]), counter = lc(data["counterentity"]), initialHash = lc(data["initialProofbodyHash"]);
-  const hits = evidence.map((v) => recOf(v) ?? {}).filter((v) => lc(v["sender"]) === sender && lc(v["counterentity"]) === counter && String(v["initialNonce"]) === String(data["initialNonce"])
-    && lc(v["initialProofbodyHash"]) === initialHash && lc(v["finalProofbodyHash"]) === finalHash);
-  if (hits.length > 1) return halt(`J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${sender}:${counter}:${String(data["initialNonce"])}`);
-  const uint = (v: unknown, code: string): Result<number, EntityError> => { const n = Number(v); return Number.isSafeInteger(n) && n >= 0 && String(v).trim() !== "" ? ok(n) : invariant(`${code}:${String(v)}`); };
-  const bump = (n: number): Result<number, EntityError> => (n >= Number.MAX_SAFE_INTEGER ? invariant(`J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW:${n}`) : ok(n + 1));
-  return chain(uint(data["initialNonce"], "J_EVENT_DISPUTE_INITIAL_NONCE_INVALID"), (initialNonce) => {
-    const primary = hits[0], onInitial = finalHash === initialHash, active = activeOf(child) as ActiveDispute | undefined;
-    const eventNonce: Result<number, EntityError> = primary === undefined ? (onInitial ? bump(initialNonce) : ok(initialNonce)) : chain(uint(primary["finalNonce"], "J_EVENT_DISPUTE_FINAL_NONCE_INVALID"), (finalNonce) => {
-      const sig = lc(primary["sig"] ?? ""), unsigned = sig === "" || sig === "0x";
-      const selected = active?.selectedCounterNonce === finalNonce && active.selectedCounterProposerIsLeft === primary["proposerIsLeft"] && lc(active.selectedCounterProofbodyHash) === finalHash;
-      return unsigned && !selected && finalNonce === initialNonce && primary["proposerIsLeft"] === active?.initialProposerIsLeft && onInitial ? bump(initialNonce) : ok(finalNonce);
-    });
-    return map(eventNonce, (n) => ({ finalizedJNonce: Math.max(Number(child.state.jNonce ?? 0), n), initialNonce }));
+  const put = (r: CrossRoute, message: string): JEv =>
+    jevSay({ ...x, cj: cjHost(x.cj, cjPutRoute(x.cj.host, orderId, r)) }, message);
+  if (unlockedIntent(route))
+    return map(transitionE(route, "cancelled", at), (r) =>
+      put(r, `🌉 Cross-j route ${orderId} cancelled before Pull lock on Account finality`),
+    );
+  const clearing = route.status !== "clearing" ? transitionE(route, "clearing", at) : ok(route as CrossRoute);
+  return chain(clearing, (r) => {
+    const terminal: CrossStatus = settledRatio > 0 ? "settled" : isCrossExpired(r, at) ? "expired" : "cancelled";
+    return map(transitionE(r, terminal, at), (ended) =>
+      put(
+        terminal === "settled" ? { ...ended, settledAt: at } : ended,
+        `🌉 Cross-j route ${orderId} terminal after dispute finality: ${terminal}`,
+      ),
+    );
   });
 };
 /**
- * og applyDisputeFinalizedJEvent: the frozen final body, the reducer evidence, then og applyResolvedDisputeFinality (nonce sync, the cross-j
- * settlements captured before the Account's finality, stale settlement intent, `✅ DISPUTE FINALIZED` and the hook's cancellation, route
- * terminalization) and og retireFinalizedDisputeState.
+ * og terminalizeCrossJurisdictionRoutesOnFinality: parked reveals go; an unlocked intent cancels; every other route
+ * clears and ends at its settled ratio.
  */
-const disputeFinalizedJEvent = (step: JEventStep, e: WireJEvent, ctx: FoldContext, evidence: readonly unknown[]): Result<JEventStep, EntityError> => {
-  const data = e.data, state = step.draft.state, self = lc(state.id), sender = lc(data["sender"]), peer = disputePeer(state, data), child = step.draft.accountReplicas.get(peer as EntityId);
+const terminalizeOnFinality = (x: JEv, settlements: readonly FinalitySettlement[]): Result<JEv, EntityError> =>
+  foldResult(settlements, x, terminalRoute);
+const evidenceUint = (v: unknown, code: string): Result<number, EntityError> => {
+  const n = Number(v);
+  return naturalSafeInt(n) && String(v).trim() !== "" ? ok(n) : invariant(`${code}:${String(v)}`);
+};
+const bumpedNonce = (n: number): Result<number, EntityError> =>
+  n >= Number.MAX_SAFE_INTEGER ? invariant(`J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW:${n}`) : ok(n + 1);
+/** og: the block's reducer records for exactly this finalization. */
+const finalizationRecords = (data: JRec, evidence: readonly unknown[], finalHash: string): readonly JRec[] => {
+  const sender = lc(data["sender"]);
+  const counter = lc(data["counterentity"]);
+  const initialHash = lc(data["initialProofbodyHash"]);
+  return evidence
+    .map((v) => recOf(v) ?? {})
+    .filter(
+      (v) =>
+        lc(v["sender"]) === sender &&
+        lc(v["counterentity"]) === counter &&
+        String(v["initialNonce"]) === String(data["initialNonce"]) &&
+        lc(v["initialProofbodyHash"]) === initialHash &&
+        lc(v["finalProofbodyHash"]) === finalHash,
+    );
+};
+/**
+ * og: the nonce the reducer record names; an exact unsigned initial unilateral on the initial body, or no record on
+ * it, spends one more.
+ */
+const evidencedNonce = (
+  record: JRec | undefined,
+  initialNonce: number,
+  onInitial: boolean,
+  active: ActiveDispute | undefined,
+  finalHash: string,
+): Result<number, EntityError> => {
+  if (record === undefined) return onInitial ? bumpedNonce(initialNonce) : ok(initialNonce);
+  return chain(evidenceUint(record["finalNonce"], "J_EVENT_DISPUTE_FINAL_NONCE_INVALID"), (finalNonce) => {
+    const sig = lc(record["sig"] ?? "");
+    const unsigned = sig === "" || sig === "0x";
+    const selected =
+      active?.selectedCounterNonce === finalNonce &&
+      active.selectedCounterProposerIsLeft === record["proposerIsLeft"] &&
+      lc(active.selectedCounterProofbodyHash) === finalHash;
+    const initialUnilateral =
+      unsigned &&
+      !selected &&
+      finalNonce === initialNonce &&
+      record["proposerIsLeft"] === active?.initialProposerIsLeft &&
+      onInitial;
+    return initialUnilateral ? bumpedNonce(initialNonce) : ok(finalNonce);
+  });
+};
+type FinalizedNonce = { readonly finalizedJNonce: number; readonly initialNonce: number };
+/**
+ * og resolveFinalizationEvidence: the block's one reducer record for this finalization sets the finalized nonce (an
+ * exact unsigned initial unilateral, or none on the initial body, spends one more).
+ */
+const finalizedNonceOf = (
+  child: AccountReplica,
+  data: JRec,
+  evidence: readonly unknown[],
+  finalHash: string,
+): Result<FinalizedNonce, EntityError> => {
+  const records = finalizationRecords(data, evidence, finalHash);
+  if (records.length > 1) {
+    const which = `${lc(data["sender"])}:${lc(data["counterentity"])}:${String(data["initialNonce"])}`;
+    return halt(`J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${which}`);
+  }
+  return chain(evidenceUint(data["initialNonce"], "J_EVENT_DISPUTE_INITIAL_NONCE_INVALID"), (initialNonce) => {
+    const onInitial = finalHash === lc(data["initialProofbodyHash"]);
+    const active = activeOf(child) as ActiveDispute | undefined;
+    return map(evidencedNonce(records[0], initialNonce, onInitial, active, finalHash), (n) => ({
+      finalizedJNonce: Math.max(Number(child.state.jNonce ?? 0), n),
+      initialNonce,
+    }));
+  });
+};
+const finalizedTokenId = (v: unknown, i: number, peer: string): Result<number, EntityError> => {
+  const n = Number(v);
+  return naturalSafeInt(n) ? ok(n) : halt(`J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${i}:${String(v)}`);
+};
+const pendingSettleTransitions = (child: AccountReplica): number =>
+  ("mempool" in child ? (child.mempool as readonly WireAccountTx[]) : []).filter((t) => t.type === "settle_transition")
+    .length;
+/** og: finality cancels the dispute-deadline hook and says the dispute is finalized. */
+const disputeClosed =
+  (peer: string, initialNonce: number): JEvMove =>
+  (x) => {
+    const state = x.draft.state;
+    const unhooked =
+      state.committed["crontabState"] !== undefined
+        ? map(crontabOf(state), (c) => withCrontab(state, cancelHook(c, `dispute-deadline:${peer}`)))
+        : ok(state);
+    return map(unhooked, (s) =>
+      jevSay(
+        { ...x, draft: { ...x.draft, state: s } },
+        `✅ DISPUTE FINALIZED with ${peer.slice(-4)} (nonce ${initialNonce})`,
+      ),
+    );
+  };
+/**
+ * og applyDisputeFinalizedJEvent: the frozen final body, the reducer evidence, then og applyResolvedDisputeFinality
+ * (nonce sync, the cross-j settlements captured before the Account's finality, stale settlement intent, `✅ DISPUTE
+ * FINALIZED` and the hook's cancellation, route terminalization) and og retireFinalizedDisputeState.
+ */
+const disputeFinalizedJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  ctx: FoldContext,
+  evidence: readonly unknown[],
+): Result<JEventStep, EntityError> => {
+  const data = e.data;
+  const state = step.draft.state;
+  const self = lc(state.id);
+  const sender = lc(data["sender"]);
+  const peer = disputePeer(state, data);
+  const child = step.draft.accountReplicas.get(peer as EntityId);
   if (child === undefined) return ok(step);
-  return chain(frozenJBody(child, data["finalProofbody"], data["finalProofbodyHash"], peer, "jEvent.disputeFinalized", ctx), (body) => {
-    const finalHash = lc(data["finalProofbodyHash"]).trim(), tokenIds: number[] = [];
-    for (const [i, v] of body.tokenIds.entries()) { const n = Number(v); if (!Number.isSafeInteger(n) || n < 0) return halt(`J_EVENT_DISPUTE_FINAL_TOKEN_ID_INVALID:${peer}:${i}:${String(v)}`); tokenIds.push(n); }
-    return chain(finalizedNonceOf(child, data, evidence, finalHash), ({ finalizedJNonce, initialNonce }) => {
-      const batchNonce = typeof data["batchNonce"] === "number" ? data["batchNonce"] : undefined;
-      let x = jevOf(step, ctx);
-      const synced = syncBatchNonce(x.cj.host.jb as RetiringJBatch | undefined, sender, self, batchNonce);
-      x = { ...x, cj: cjHost(x.cj, { ...x.cj.host, ...opt("jb", synced.jb as unknown as CjJBatch | undefined) }), dirty: [...x.dirty, peer] };
-      if (synced.message !== undefined) x = jevSay(x, synced.message);
-      return chain(requireDt(ctx, child), (dt) => chain(finalitySettlements(x.cj.host, stackIdOf(state.jurisdiction) || undefined, peer, activeOf(child), body, dt), (settlements) => {
-        const hadActive = activeOf(child) !== undefined, hadWorkspace = child.state.settlement !== undefined, removedTxs = ("mempool" in child ? (child.mempool as readonly WireAccountTx[]) : []).filter((t) => t.type === "settle_transition").length;
-        return chain(childFinality(x.draft, peer, child, { kind: "dispute_finalized", finalizedJNonce, finalizedTokenIds: tokenIds }, ctx), (finalized) => {
-          const deferred = deferredOf(finalized.state), removedDeferred = deferred.has(peer);
-          const cleared: Draft = removedDeferred ? { ...finalized, state: withDeferred(finalized.state, new Map([...deferred].filter(([k]) => k !== peer))) } : finalized;
-          let y: JEv = { ...x, draft: cleared };
-          if (hadWorkspace || removedDeferred || removedTxs > 0) y = jevSay(y, `🧹 Invalidated stale settlement intent after dispute finality with ${peer.slice(-4)}`);
-          const unhooked = hadActive && y.draft.state.committed["crontabState"] !== undefined ? map(crontabOf(y.draft.state), (c) => withCrontab(y.draft.state, cancelHook(c, `dispute-deadline:${peer}`))) : ok(y.draft.state);
-          if (!unhooked.ok) return unhooked;
-          if (hadActive) y = jevSay({ ...y, draft: { ...y.draft, state: unhooked.value } }, `✅ DISPUTE FINALIZED with ${peer.slice(-4)} (nonce ${initialNonce})`);
-          return chain(terminalizeOnFinality(y, settlements), (z) => {
-            const retired = finalizedRetirement(z.cj.host.jb as RetiringJBatch | undefined, self, { sender, counterentity: String(data["counterentity"]), initialProofbodyHash: String(data["initialProofbodyHash"] ?? ""), ...opt("batchNonce", batchNonce) });
-            let w: JEv = { ...z, cj: cjHost(z.cj, { ...z.cj.host, ...opt("jb", retired.jb as unknown as CjJBatch | undefined) }) };
-            if (retired.broadcast) { const b = jevBroadcast(w); if (!b.ok) return b; w = b.value; }
-            if (retired.removed > 0) w = jevSay(w, `🧹 Removed ${retired.removed} stale dispute-finalize op(s) for ${peer.slice(-4)}`);
-            return ok(jevDone(w, ctx));
+  const batchNonce = batchNonceOf(data);
+  const frozen = frozenJBody(
+    child,
+    data["finalProofbody"],
+    data["finalProofbodyHash"],
+    peer,
+    "jEvent.disputeFinalized",
+    ctx,
+  );
+  return chain(frozen, (body) => {
+    const finalHash = lc(data["finalProofbodyHash"]).trim();
+    const tokenIds = traverse(body.tokenIds, (v, i) => finalizedTokenId(v, i, peer));
+    return chain(tokenIds, (finalizedTokenIds) =>
+      chain(finalizedNonceOf(child, data, evidence, finalHash), ({ finalizedJNonce, initialNonce }) => {
+        const x0 = jevOf(step, ctx);
+        const synced = syncBatchNonce(x0.cj.host.jb as RetiringJBatch | undefined, sender, self, batchNonce);
+        const base: JEv = { ...withRetiredJb(x0, synced.jb as RetiringJBatch | undefined), dirty: [...x0.dirty, peer] };
+        const x = synced.message === undefined ? base : jevSay(base, synced.message);
+        return chain(requireDt(ctx, child), (dt) => {
+          const scope: SettlementScope = {
+            host: x.cj.host,
+            localStack: stackIdOf(state.jurisdiction) || undefined,
+            peer,
+            active: activeOf(child),
+            body,
+            dt,
+          };
+          return chain(finalitySettlements(scope), (settlements) => {
+            const hadActive = activeOf(child) !== undefined;
+            const staleIntent = child.state.settlement !== undefined || pendingSettleTransitions(child) > 0;
+            const finality: AccountFinality = { kind: "dispute_finalized", finalizedJNonce, finalizedTokenIds };
+            return chain(childFinality(x.draft, peer, child, finality, ctx), (finalized) => {
+              const deferred = deferredOf(finalized.state);
+              const removedDeferred = deferred.has(peer);
+              const cleared: Draft = removedDeferred
+                ? { ...finalized, state: withDeferred(finalized.state, mapDelete(deferred, peer)) }
+                : finalized;
+              const retire: JEvMove = (z) => {
+                const retired = finalizedRetirement(z.cj.host.jb as RetiringJBatch | undefined, self, {
+                  sender,
+                  counterentity: String(data["counterentity"]),
+                  initialProofbodyHash: String(data["initialProofbodyHash"] ?? ""),
+                  ...opt("batchNonce", batchNonce),
+                });
+                return retiredOps(z, retired, "dispute-finalize", peer);
+              };
+              const closed = jevPipe(
+                { ...x, draft: cleared },
+                sayWhen(
+                  staleIntent || removedDeferred,
+                  `🧹 Invalidated stale settlement intent after dispute finality with ${peer.slice(-4)}`,
+                ),
+                hadActive ? disputeClosed(peer, initialNonce) : stay,
+                (y) => terminalizeOnFinality(y, settlements),
+                retire,
+              );
+              return map(closed, (w) => jevDone(w, ctx));
+            });
           });
         });
-      }));
+      }),
+    );
+  });
+};
+type RegistryRecordData = { readonly fillRatio: unknown; readonly revealedAt: unknown; readonly targetRole: boolean };
+/** og: at an unchanged ratio a Source record keeps its time; a Target one may refresh it forward. */
+const sameRatioRecord = (
+  existing: HashLadderRegistryRecord,
+  next: HashLadderRegistryRecord,
+  targetRole: boolean,
+  orderId: string,
+): Result<HashLadderRegistryRecord, EntityError> => {
+  switch (true) {
+    case !targetRole && existing.revealedAt !== next.revealedAt:
+      return halt(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
+    case next.revealedAt < existing.revealedAt:
+      return halt(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
+    case next.revealedAt === existing.revealedAt:
+      return ok(existing);
+    default:
+      return ok(next);
+  }
+};
+/**
+ * og updateRegistryRecord: a Source record is written once (a retry keeps its time); a Target record may only rise,
+ * and an exact-ratio Target republish refreshes its time.
+ */
+export const updateRegistryRecord = (
+  existing: HashLadderRegistryRecord | undefined,
+  data: RegistryRecordData,
+  orderId: string,
+): Result<HashLadderRegistryRecord, EntityError> => {
+  const next = { fillRatio: Math.floor(Number(data.fillRatio)), revealedAt: Number(data.revealedAt) };
+  if (!positiveSafeInt(next.revealedAt))
+    return halt(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
+  if (existing === undefined) return ok(next);
+  if (existing.fillRatio === next.fillRatio) return sameRatioRecord(existing, next, data.targetRole, orderId);
+  const conflict =
+    !data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt;
+  return conflict
+    ? halt(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`)
+    : ok(next);
+};
+/** og: this route's leg in the event's role registered exactly this ladder, between these two Entities. */
+const ladderOnRoute = (route: CrossRoute, data: LadderRevealEvent, ladder: string): boolean => {
+  const rolePull = data.targetRole ? route.targetPull : route.sourcePull;
+  const roleLeg = data.targetRole ? route.target : route.source;
+  return (
+    rolePull !== undefined &&
+    pullLadderHash(rolePull) === ladder &&
+    lc(roleLeg.counterpartyEntityId) === lc(data.entity) &&
+    lc(roleLeg.entityId) === lc(data.counterpartyEntity)
+  );
+};
+/** og: this Entity latches the fill ratio it wrote itself; a Source ratio is written once. */
+const selfWrittenRatio = (
+  route: CrossRoute,
+  targetRole: boolean,
+  observed: number,
+): Result<CrossRoute, EntityError> => {
+  switch (true) {
+    case targetRole:
+      return ok({ ...route, targetRegistryFillRatio: observed });
+    case route.sourceRegistryFillRatio === undefined:
+      return ok({ ...route, sourceRegistryFillRatio: observed });
+    case route.sourceRegistryFillRatio !== observed:
+      return halt(`CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:${route.sourceRegistryFillRatio}:${observed}`);
+    default:
+      return ok(route);
+  }
+};
+/**
+ * og applyHashLadderRevealRegisteredJEvent: the Source user's reveal ports, the registering Entity's recovery results,
+ * and every matching live route's registry record (the own-slot fill-ratio latch only when this Entity wrote it).
+ */
+export const ladderRegisteredOnRoutes = (
+  h: CjHost,
+  data: LadderRevealEvent & { readonly revealedAt?: unknown },
+): Result<CjHost, EntityError> => {
+  const ladder = lc(data.ladderHash);
+  const writerIsSelf = lc(data.entity) === lc(h.id);
+  const record = { fillRatio: data.fillRatio, revealedAt: data.revealedAt, targetRole: data.targetRole };
+  return foldResult(routesOf(h), h, (host, found): Result<CjHost, EntityError> => {
+    if (isCrossTerminal(found.status) || !ladderOnRoute(found, data, ladder)) return ok(host);
+    const current = host.swaps?.get(found.orderId);
+    if (current === undefined) return halt(`CROSS_J_REGISTRY_ROUTE_FORK_MISSING:${found.orderId}`);
+    const observed = Math.floor(Number(data.fillRatio));
+    const latched = writerIsSelf ? selfWrittenRatio(current, data.targetRole, observed) : ok(current);
+    return chain(latched, (route) => {
+      const existing = data.targetRole ? route.targetRegistryRecord : route.sourceRegistryRecord;
+      return map(updateRegistryRecord(existing, record, route.orderId), (r) =>
+        cjPutRoute(
+          host,
+          found.orderId,
+          data.targetRole ? { ...route, targetRegistryRecord: r } : { ...route, sourceRegistryRecord: r },
+        ),
+      );
     });
   });
 };
-/** og updateRegistryRecord: a Source record is written once (a retry keeps its time); a Target record may only rise, and an exact-ratio Target republish refreshes its time. */
-export const updateRegistryRecord = (existing: HashLadderRegistryRecord | undefined, data: { readonly fillRatio: unknown; readonly revealedAt: unknown; readonly targetRole: boolean }, orderId: string): Result<HashLadderRegistryRecord, EntityError> => {
-  const next = { fillRatio: Math.floor(Number(data.fillRatio)), revealedAt: Number(data.revealedAt) };
-  if (!Number.isSafeInteger(next.revealedAt) || next.revealedAt <= 0) return halt(`CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
-  if (existing === undefined) return ok(next);
-  if (existing.fillRatio === next.fillRatio) {
-    if (!data.targetRole && existing.revealedAt !== next.revealedAt) return halt(`CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
-    if (next.revealedAt < existing.revealedAt) return halt(`CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
-    return ok(next.revealedAt === existing.revealedAt ? existing : next);
-  }
-  if (!data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt) return halt(`CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`);
-  return ok(next);
+/** og: a live route's Pull with this id reveals under this ladder, in the event's role. */
+const ladderRevealsPull = (host: CjHost, pullId: string, data: LadderRevealEvent): boolean => {
+  const route = routesOf(host).find((c) => c.targetPull?.pullId === pullId || c.sourcePull?.pullId === pullId);
+  if (route === undefined) return false;
+  const isTarget = route.targetPull?.pullId === pullId;
+  const pull = isTarget ? route.targetPull : route.sourcePull;
+  return pull !== undefined && pullLadderHash(pull) === data.ladderHash && data.targetRole === isTarget;
 };
-/**
- * og applyHashLadderRevealRegisteredJEvent: the Source user's reveal ports, the registering Entity's recovery results, and every matching live
- * route's registry record (the own-slot fill-ratio latch only when this Entity wrote it).
- */
-export const ladderRegisteredOnRoutes = (h: CjHost, data: LadderRevealEvent & { readonly revealedAt?: unknown }): Result<CjHost, EntityError> => {
-  const self = lc(h.id), ladder = lc(data.ladderHash), writerIsSelf = lc(data.entity) === self;
-  return foldResult(routesOf(h), h, (host, found): Result<CjHost, EntityError> => {
-    if (isCrossTerminal(found.status)) return ok(host);
-    const rolePull = data.targetRole ? found.targetPull : found.sourcePull, roleLeg = data.targetRole ? found.target : found.source;
-    if (!(rolePull && pullLadderHash(rolePull) === ladder && lc(roleLeg.counterpartyEntityId) === lc(data.entity) && lc(roleLeg.entityId) === lc(data.counterpartyEntity))) return ok(host);
-    const observed = Math.floor(Number(data.fillRatio)), current = host.swaps?.get(found.orderId);
-    if (current === undefined) return halt(`CROSS_J_REGISTRY_ROUTE_FORK_MISSING:${found.orderId}`);
-    let route: CrossRoute = current;
-    if (writerIsSelf) {
-      if (data.targetRole) route = { ...route, targetRegistryFillRatio: observed };
-      else if (route.sourceRegistryFillRatio === undefined) route = { ...route, sourceRegistryFillRatio: observed };
-      else if (route.sourceRegistryFillRatio !== observed) return halt(`CROSS_J_SOURCE_REGISTRY_CONFLICT:${route.orderId}:${route.sourceRegistryFillRatio}:${observed}`);
-    }
-    const r0 = route;
-    return map(updateRegistryRecord(data.targetRole ? r0.targetRegistryRecord : r0.sourceRegistryRecord, { fillRatio: data.fillRatio, revealedAt: data.revealedAt, targetRole: data.targetRole }, r0.orderId), (record) =>
-      cjPutRoute(host, found.orderId, data.targetRole ? { ...r0, targetRegistryRecord: record } : { ...r0, sourceRegistryRecord: record }));
+/** og: the registering Entity's recovery learns the fill ratio of each required Pull this ladder reveals. */
+const recoveryLearned = (x: JEv, data: LadderRevealEvent, fillRatio: string): JEv => {
+  if (data.entity !== lc(x.draft.state.id)) return x;
+  const accountId = data.counterpartyEntity;
+  const visible = x.draft.accountReplicas.get(accountId as EntityId);
+  const active = visible === undefined ? undefined : (activeOf(visible) as ActiveDispute | undefined);
+  const recovery = active?.crossJurisdictionRecovery;
+  if (visible === undefined || active === undefined || recovery === undefined) return x;
+  const learned = recovery.requiredPullIds.filter(
+    (id) => !Object.hasOwn(recovery.resultsByPullId, id) && ladderRevealsPull(x.cj.host, id, data),
+  );
+  if (learned.length === 0) return x;
+  const resultsByPullId = { ...recovery.resultsByPullId, ...Object.fromEntries(learned.map((id) => [id, fillRatio])) };
+  const withRecovery = withActiveDispute(x, accountId, visible, {
+    ...active,
+    crossJurisdictionRecovery: { ...recovery, resultsByPullId },
   });
+  return { ...withRecovery, dirty: [...x.dirty, accountId] };
 };
-const ladderRegisteredJEvent = (step: JEventStep, e: WireJEvent, ctx: FoldContext, blockNumber: number): Result<JEventStep, EntityError> => {
-  const d = e.data, data: LadderRevealEvent = { entity: lc(d["entity"]), counterpartyEntity: lc(d["counterpartyEntity"]), ladderHash: lc(d["ladderHash"]), fillRatio: Number(d["fillRatio"]), fullSecret: String(d["fullSecret"] ?? ""),
-    reveals: (Array.isArray(d["reveals"]) ? d["reveals"] : []).map(String), targetRole: d["targetRole"] === true, revealedAt: Number(d["revealedAt"]) };
+const ladderRegisteredJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  ctx: FoldContext,
+  blockNumber: number,
+): Result<JEventStep, EntityError> => {
+  const d = e.data;
+  const data: LadderRevealEvent = {
+    entity: lc(d["entity"]),
+    counterpartyEntity: lc(d["counterpartyEntity"]),
+    ladderHash: lc(d["ladderHash"]),
+    fillRatio: Number(d["fillRatio"]),
+    fullSecret: String(d["fullSecret"] ?? ""),
+    reveals: (Array.isArray(d["reveals"]) ? d["reveals"] : []).map(String),
+    targetRole: d["targetRole"] === true,
+    revealedAt: Number(d["revealedAt"]),
+  };
   const x0 = jevOf(step, ctx);
   return chain(revealPorts(x0.cj, data, blockNumber), ({ cj }) => {
-    let x: JEv = { ...x0, cj };
-    if (data.entity === lc(x.draft.state.id)) {
-      const accountId = data.counterpartyEntity, visible = x.draft.accountReplicas.get(accountId as EntityId), active = visible === undefined ? undefined : activeOf(visible) as ActiveDispute | undefined, recovery = active?.crossJurisdictionRecovery;
-      if (visible !== undefined && active !== undefined && recovery !== undefined) {
-        let results = recovery.resultsByPullId, touched = false;
-        for (const pullId of recovery.requiredPullIds) {
-          if (Object.hasOwn(results, pullId)) continue;
-          const route = routesOf(x.cj.host).find((c) => c.targetPull?.pullId === pullId || c.sourcePull?.pullId === pullId);
-          if (route === undefined) continue;
-          const pull = route.targetPull?.pullId === pullId ? route.targetPull : route.sourcePull;
-          if (pull === undefined || pullLadderHash(pull) !== data.ladderHash || data.targetRole !== (route.targetPull?.pullId === pullId)) continue;
-          results = { ...results, [pullId]: String(d["fillRatio"]) };
-          touched = true;
-        }
-        if (touched) x = { ...x, dirty: [...x.dirty, accountId], draft: { ...x.draft, ...putChild(x.draft.state, x.draft.accountReplicas, accountId as EntityId, { ...(visible as DisputedAccount), active: { ...active, crossJurisdictionRecovery: { ...recovery, resultsByPullId: results } } }) } };
-      }
-    }
+    const x = recoveryLearned({ ...x0, cj }, data, String(d["fillRatio"]));
     return map(ladderRegisteredOnRoutes(x.cj.host, data), (host) => jevDone({ ...x, cj: cjHost(x.cj, host) }, ctx));
   });
 };
-/** og applyFinalizedJEvent: one canonical event's Entity handler (`evidence`: the block's dispute finalization evidence). */
-const finalizedJEvent = (step: JEventStep, e: WireJEvent, ctx: FoldContext, evidence: readonly unknown[] = []): Result<JEventStep, EntityError> => {
-  const blockNumber = e.blockNumber ?? 0, txHash = e.transactionHash || "unknown", d = e.data, state = step.draft.state, typed = typedJEvent(e);
-  const said = (s: EntityState, ...messages: readonly string[]): JEventStep => ({ ...step, draft: jSay({ ...step.draft, state: s }, ...messages) });
+/** og: a ReserveUpdated for this Entity sets its reserve; every one is said. */
+const reserveUpdatedJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number, txHash: string): JEventStep => {
+  const d = e.data;
+  const state = step.draft.state;
+  const tokenId = Number(d["tokenId"]);
+  const mine = lower(d["entity"]) === lower(state.id);
+  const reserves = mapSet(committedReserves(state), tokenId, BigInt(String(d["newBalance"])));
+  const next = mine ? { ...state, committed: { ...state.committed, reserves: reserves as unknown as Binary } } : state;
+  const balance = rawUnits(tokenId, d["newBalance"]);
+  const said = `📊 RESERVE: ${balance} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`;
+  return { ...step, draft: jSay({ ...step.draft, state: next }, said) };
+};
+type DebtJEvent = Extract<JEvent, { readonly type: "DebtCreated" | "DebtEnforced" | "DebtForgiven" }>;
+/** og's line for one debt event. */
+const debtMessage = (e: WireJEvent, blockNumber: number): string => {
+  const d = e.data;
+  const tokenId = Number(d["tokenId"]);
+  const debtor = String(d["debtor"]).slice(-8);
+  const creditor = String(d["creditor"]).slice(-8);
+  const units = (field: string): string => rawUnits(tokenId, d[field]);
+  const block = `Block ${blockNumber}`;
+  const index = String(d["debtIndex"]);
   switch (e.type) {
-    case "FoundationBootstrapped": case "EntityRegistered": case "BoardActivated":
-      return map(applyBoardJEvent(state, typed as JEvent, blockNumber, step.draft.accountReplicas, ctx.timestamp), (b) => ({ ...step, draft: { ...step.draft, state: b.state, accountReplicas: b.accountReplicas, events: [...(step.draft.events ?? []), ...b.events] } }));
-    case "ReserveUpdated": {
-      const tokenId = Number(d["tokenId"]), mine = lower(d["entity"]) === lower(state.id);
-      const next = mine ? { ...state, committed: { ...state.committed, reserves: mapSet(committedReserves(state), tokenId, BigInt(String(d["newBalance"]))) as unknown as Binary } } : state;
-      return ok(said(next, `📊 RESERVE: ${rawUnits(tokenId, d["newBalance"])} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`));
-    }
-    case "DebtCreated": case "DebtEnforced": case "DebtForgiven": {
-      const held = committedDebts(state);
-      return chain(mapErr(applyDebtEvent(held, state.id, typed as Extract<JEvent, { readonly type: "DebtCreated" | "DebtEnforced" | "DebtForgiven" }>), (x): EntityError => ({ _tag: "entity_invariant", reason: x.reason })), (debts) => {
-        const next = debts === held ? state : { ...state, committed: { ...state.committed, outDebtsByToken: debts.out as unknown as Binary, inDebtsByToken: debts.in as unknown as Binary } };
-        const tokenId = Number(d["tokenId"]), tail = (v: unknown): string => String(v).slice(-8);
-        return ok(said(next, e.type === "DebtCreated" ? `🔴 DEBT: ${tail(d["debtor"])} owes ${rawUnits(tokenId, d["amount"])} to ${tail(d["creditor"])} | Block ${blockNumber}`
-          : e.type === "DebtEnforced" ? `✅ DEBT PAID: ${rawUnits(tokenId, d["amountPaid"])} to ${tail(d["creditor"])} | Block ${blockNumber}`
-            : `🩶 DEBT FORGIVEN: ${rawUnits(tokenId, d["amountForgiven"])} between ${tail(d["debtor"])} and ${tail(d["creditor"])} | Block ${blockNumber} · debt #${String(d["debtIndex"])}`));
-      });
-    }
-    case "ExternalWalletSnapshot": case "ExternalWalletDelta": return externalWalletJEvent(step, e, blockNumber, txHash);
-    case "AccountSettled": return settledJEvent(step, e, blockNumber);
-    case "HankoBatchProcessed": return batchProcessedJEvent(step, typed as Extract<JEvent, { readonly type: "HankoBatchProcessed" }>, blockNumber, ctx.timestamp, ctx.runtimeSeed);
-    case "EntityProviderActionExecuted": case "EntityProviderActionCancelled":
-      return map(applyEntityProviderActionJEvent(state, typed as JEvent, blockNumber), (b) => said(b.state, ...b.events.map((x) => x.message)));
-    case "SecretRevealed": return map(knownSecret(jevOf(step, ctx), String(d["hashlock"]), String(d["secret"]), blockNumber), (x) => jevDone(x, ctx));
-    case "DisputeStarted": return disputeStartedJEvent(step, e, ctx, blockNumber);
-    case "CounterDisputeRegistered": return counterRegisteredJEvent(step, e, ctx);
-    case "DisputeFinalized": return disputeFinalizedJEvent(step, e, ctx, evidence);
-    case "HashLadderRevealRegistered": return ladderRegisteredJEvent(step, e, ctx, blockNumber);
-    default: return invariant(`FINALIZED_J_EVENT_HANDLER_MISSING:${e.type}`);
+    case "DebtCreated":
+      return `🔴 DEBT: ${debtor} owes ${units("amount")} to ${creditor} | ${block}`;
+    case "DebtEnforced":
+      return `✅ DEBT PAID: ${units("amountPaid")} to ${creditor} | ${block}`;
+    default:
+      return `🩶 DEBT FORGIVEN: ${units("amountForgiven")} between ${debtor} and ${creditor} | ${block} · debt #${index}`;
   }
 };
+/** og: a debt event updates this Entity's debt ledgers when it is a party; every one is said. */
+const debtJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  typed: DebtJEvent,
+  blockNumber: number,
+): Result<JEventStep, EntityError> => {
+  const state = step.draft.state;
+  const held = committedDebts(state);
+  return map(mapErr(applyDebtEvent(held, state.id, typed), asInvariant), (debts) => {
+    const committed = {
+      ...state.committed,
+      outDebtsByToken: debts.out as unknown as Binary,
+      inDebtsByToken: debts.in as unknown as Binary,
+    };
+    const next = debts === held ? state : { ...state, committed };
+    return { ...step, draft: jSay({ ...step.draft, state: next }, debtMessage(e, blockNumber)) };
+  });
+};
+/** og applyFinalizedJEvent: one canonical event's Entity handler, given the block's dispute finalization evidence. */
+const finalizedJEvent = (
+  step: JEventStep,
+  e: WireJEvent,
+  ctx: FoldContext,
+  evidence: readonly unknown[] = [],
+): Result<JEventStep, EntityError> => {
+  const blockNumber = e.blockNumber ?? 0;
+  const txHash = e.transactionHash || "unknown";
+  const d = e.data;
+  const state = step.draft.state;
+  const typed = typedJEvent(e);
+  switch (e.type) {
+    case "FoundationBootstrapped":
+    case "EntityRegistered":
+    case "BoardActivated":
+      return map(
+        applyBoardJEvent(state, typed as JEvent, blockNumber, step.draft.accountReplicas, ctx.timestamp),
+        (b) => ({
+          ...step,
+          draft: {
+            ...step.draft,
+            state: b.state,
+            accountReplicas: b.accountReplicas,
+            events: [...(step.draft.events ?? []), ...b.events],
+          },
+        }),
+      );
+    case "ReserveUpdated":
+      return ok(reserveUpdatedJEvent(step, e, blockNumber, txHash));
+    case "DebtCreated":
+    case "DebtEnforced":
+    case "DebtForgiven":
+      return debtJEvent(step, e, typed as DebtJEvent, blockNumber);
+    case "ExternalWalletSnapshot":
+    case "ExternalWalletDelta":
+      return externalWalletJEvent(step, e, blockNumber, txHash);
+    case "AccountSettled":
+      return settledJEvent(step, e, blockNumber);
+    case "HankoBatchProcessed":
+      return batchProcessedJEvent(
+        step,
+        typed as Extract<JEvent, { readonly type: "HankoBatchProcessed" }>,
+        blockNumber,
+        ctx.timestamp,
+        ctx.runtimeSeed,
+      );
+    case "EntityProviderActionExecuted":
+    case "EntityProviderActionCancelled":
+      return map(applyEntityProviderActionJEvent(state, typed as JEvent, blockNumber), (b) => ({
+        ...step,
+        draft: jSay({ ...step.draft, state: b.state }, ...b.events.map((x) => x.message)),
+      }));
+    case "SecretRevealed":
+      return map(knownSecret(jevOf(step, ctx), String(d["hashlock"]), String(d["secret"]), blockNumber), (x) =>
+        jevDone(x, ctx),
+      );
+    case "DisputeStarted":
+      return disputeStartedJEvent(step, e, ctx, blockNumber);
+    case "CounterDisputeRegistered":
+      return counterRegisteredJEvent(step, e, ctx);
+    case "DisputeFinalized":
+      return disputeFinalizedJEvent(step, e, ctx, evidence);
+    case "HashLadderRevealRegistered":
+      return ladderRegisteredJEvent(step, e, ctx, blockNumber);
+    default:
+      return invariant(`FINALIZED_J_EVENT_HANDLER_MISSING:${e.type}`);
+  }
+};
+/** og: every received event as a JEventReceived runtime event, or one liveness event for an empty range. */
+const receivedJEvents = (state: EntityState, data: JRec): readonly EntityRuntimeEvent[] => {
+  const rawBlocks = Array.isArray(data["blocks"]) ? (data["blocks"] as readonly unknown[]) : [];
+  const received = rawBlocks.flatMap((b) => {
+    const block = recOf(b) ?? {};
+    const events = Array.isArray(block["events"]) ? (block["events"] as readonly unknown[]) : [];
+    return events.map((raw): EntityRuntimeEvent => {
+      const ev = recOf(raw) ?? {};
+      const eventData = {
+        ...(recOf(ev["data"]) ?? {}),
+        entityId: state.id,
+        eventType: ev["type"] ?? "unknown",
+        blockNumber: block["blockNumber"],
+        txHash: ev["transactionHash"],
+      };
+      return { eventName: "JEventReceived", data: eventData };
+    });
+  });
+  return received.length > 0
+    ? received
+    : [{ eventName: "JEventReceived", data: { entityId: state.id, eventType: "liveness" } }];
+};
+/** The range applied so far: the event effects and the history root folded through the last block. */
+type AppliedJBlock = { readonly step: JEventStep; readonly root: string };
+/** og: one block folds into the history root, advances lastFinalizedJHeight, then applies its events in order. */
+const appliedJBlock =
+  (jurisdictionRef: string, ctx: FoldContext) =>
+  (s: AppliedJBlock, block: JRangeBlock): Result<AppliedJBlock, EntityError> => {
+    const folded = foldJHistoryRoot(s.root, [jBlockIdentity(jurisdictionRef)(block)]);
+    if (!folded.ok) return invariant(folded.error);
+    const st = s.step.draft.state;
+    const committed = { ...st.committed, lastFinalizedJHeight: block.blockNumber };
+    const atBlock: JEventStep = { ...s.step, draft: { ...s.step.draft, state: { ...st, committed } } };
+    const evidence = block.disputeFinalizationEvidence ?? [];
+    const applied = foldResult(block.events, atBlock, (step, e) => finalizedJEvent(step, e, ctx, evidence));
+    return map(applied, (step) => ({ step, root: folded.value }));
+  };
+/** og applyLocalAccountEffects: a claim for a missing or non-active Account, or one the Account refuses, is skipped. */
+const admitClaims = (draft: Draft, claims: readonly AccountTxTarget[], self: EntityId, ctx: FoldContext): Draft =>
+  claims.reduce((d, op) => {
+    const child = d.accountReplicas.get(op.accountId as EntityId);
+    if (child === undefined || !liveAccount(child)) return d;
+    const admitted = admitAt(child, [op.tx], self, L0_CLOCK, ctx.verify);
+    return admitted.ok
+      ? { ...d, ...putChild(d.state, d.accountReplicas, op.accountId as EntityId, admitted.value) }
+      : d;
+  }, draft);
 /**
- * og handleJEventEntityTx + applyJEvent: the active proposer's signed range is validated before anything else, a fully applied range is a no-op,
- * the suffix's events apply block by block (each block advancing lastFinalizedJHeight), and the certified J head, history root and board-registry
- * finality then commit. Queued Account claims merge (og mergeJEventClaimOps) and enter their Accounts' mempools like og's returned accountTxs.
+ * og handleJEventEntityTx + applyJEvent: the active proposer's signed range is validated before anything else, a
+ * fully applied range is a no-op, the suffix's events apply block by block (each block advancing
+ * lastFinalizedJHeight), and the certified J head, history root and board-registry finality then commit. Queued
+ * Account claims merge (og mergeJEventClaimOps) and enter their Accounts' mempools like og's returned accountTxs.
  */
 const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, EntityError> => {
-  const state = d.state, rawBlocks = Array.isArray(data["blocks"]) ? (data["blocks"] as readonly unknown[]) : [];
-  const received = rawBlocks.flatMap((b) => { const block = recOf(b) ?? {}; return (Array.isArray(block["events"]) ? (block["events"] as readonly unknown[]) : []).map((raw): EntityRuntimeEvent => {
-    const ev = recOf(raw) ?? {};
-    return { eventName: "JEventReceived", data: { ...(recOf(ev["data"]) ?? {}), entityId: state.id, eventType: ev["type"] ?? "unknown", blockNumber: block["blockNumber"], txHash: ev["transactionHash"] } };
-  }); });
-  const runtimeEvents = [...(d.runtimeEvents ?? []), ...(received.length > 0 ? received : [{ eventName: "JEventReceived", data: { entityId: state.id, eventType: "liveness" } }])];
+  const state = d.state;
+  const runtimeEvents = [...(d.runtimeEvents ?? []), ...receivedJEvents(state, data)];
   const budget = jRangeBudgetIssue(data);
   if (budget !== undefined) return invariant(budget);
   const range = jRangeEnvelope(state, data);
-  if (!range.ok) return invariant(range.error === "J_RANGE_PROPOSER_SIGNATURE_INVALID" ? `j_event rejected: invalid proposer signature for ${nText(data["from"])}` : `j_event rejected: ${range.error}`);
+  if (!range.ok) {
+    const signer = `invalid proposer signature for ${nText(data["from"])}`;
+    return invariant(
+      `j_event rejected: ${range.error === "J_RANGE_PROPOSER_SIGNATURE_INVALID" ? signer : range.error}`,
+    );
+  }
   const r = range.value;
-  return chain(mapErr(reconcileJRange(state, r), (reason): EntityError => ({ _tag: "entity_invariant", reason })), (suffix): Result<Draft, EntityError> => {
+  const reconciled = mapErr(reconcileJRange(state, r), (reason): EntityError => ({ _tag: "entity_invariant", reason }));
+  return chain(reconciled, (suffix): Result<Draft, EntityError> => {
     if (suffix === null) return ok({ ...d, runtimeEvents, touched: [] });
-    let step: JEventStep = { draft: { ...d, runtimeEvents }, claims: [], dirty: [] }, root = anchorRoot(state);
-    for (const block of suffix.blocks) {
-      const folded = foldJHistoryRoot(root, [jBlockIdentity(r.jurisdictionRef)(block)]);
-      if (!folded.ok) return invariant(folded.error);
-      root = folded.value;
-      const s = step.draft.state;
-      step = { ...step, draft: { ...step.draft, state: { ...s, committed: { ...s.committed, lastFinalizedJHeight: block.blockNumber } } } };
-      for (const e of block.events) { const next = finalizedJEvent(step, e, ctx, block.disputeFinalizationEvidence ?? []); if (!next.ok) return next; step = next.value; }
-    }
-    if (root !== suffix.eventHistoryRoot) return invariant(`J_HISTORY_FINALITY_ROOT_CORRUPTION:expected=${root}:certified=${suffix.eventHistoryRoot}`);
-    const applied = step.draft.state, stack = entityBoardStack(applied);
-    const finality: Binary = { jurisdictionRef: r.jurisdictionRef, baseHeight: suffix.baseHeight, finalizedThroughHeight: suffix.scannedThroughHeight, tipBlockHash: suffix.tipBlockHash, eventHistoryRoot: suffix.eventHistoryRoot,
-      proposerSignerId: r.signerId, proposerSignature: r.signature, entityHeight: Number(state.height) + 1 };
-    if (stack === undefined) return invariant("CERTIFIED_BOARD_ENTITY_JURISDICTION_MISSING");
-    return chain(fromRegistry(advanceBoardFinality(entityBoardRegistry(applied), stack, suffix.scannedThroughHeight, suffix.tipBlockHash, suffix.eventHistoryRoot)), (board) =>
-      chain(mapErr(mergeJOps(step.claims), (x): EntityError => ({ _tag: "entity_invariant", reason: x.reason })), (claims) => {
-        let draft: Draft = { ...step.draft, state: { ...applied, committed: { ...applied.committed, lastFinalizedJHeight: suffix.scannedThroughHeight, jHistoryFinality: finality, certifiedBoardState: { ...board } } } };
-        // og applyLocalAccountEffects: a claim for a missing or non-active Account, or one the Account refuses, is skipped
-        for (const op of claims) {
-          const child = draft.accountReplicas.get(op.accountId as EntityId);
-          if (child === undefined || !liveAccount(child)) continue;
-          const admitted = admitAt(child, [op.tx], state.id, L0_CLOCK, ctx.verify);
-          if (admitted.ok) draft = { ...draft, ...putChild(draft.state, draft.accountReplicas, op.accountId as EntityId, admitted.value) };
-        }
-        return ok({ ...draft, touched: [...new Set(step.dirty)] as EntityId[] });
-      }));
+    const start: AppliedJBlock = {
+      step: { draft: { ...d, runtimeEvents }, claims: [], dirty: [] },
+      root: anchorRoot(state),
+    };
+    return chain(foldResult(suffix.blocks, start, appliedJBlock(r.jurisdictionRef, ctx)), ({ step, root }) => {
+      if (root !== suffix.eventHistoryRoot)
+        return invariant(`J_HISTORY_FINALITY_ROOT_CORRUPTION:expected=${root}:certified=${suffix.eventHistoryRoot}`);
+      const applied = step.draft.state;
+      const stack = entityBoardStack(applied);
+      const finality: Binary = {
+        jurisdictionRef: r.jurisdictionRef,
+        baseHeight: suffix.baseHeight,
+        finalizedThroughHeight: suffix.scannedThroughHeight,
+        tipBlockHash: suffix.tipBlockHash,
+        eventHistoryRoot: suffix.eventHistoryRoot,
+        proposerSignerId: r.signerId,
+        proposerSignature: r.signature,
+        entityHeight: Number(state.height) + 1,
+      };
+      if (stack === undefined) return invariant("CERTIFIED_BOARD_ENTITY_JURISDICTION_MISSING");
+      const registry = advanceBoardFinality(
+        entityBoardRegistry(applied),
+        stack,
+        suffix.scannedThroughHeight,
+        suffix.tipBlockHash,
+        suffix.eventHistoryRoot,
+      );
+      return chain(fromRegistry(registry), (board) =>
+        map(mapErr(mergeJOps(step.claims), asInvariant), (claims) => {
+          const committed = {
+            ...applied.committed,
+            lastFinalizedJHeight: suffix.scannedThroughHeight,
+            jHistoryFinality: finality,
+            certifiedBoardState: { ...board },
+          };
+          const draft = admitClaims({ ...step.draft, state: { ...applied, committed } }, claims, state.id, ctx);
+          return { ...draft, touched: [...new Set(step.dirty)] as EntityId[] };
+        }),
+      );
+    });
   });
 };
-/** og mergeJEventClaimOps over every returned Account tx: j_event_claims merge at their first position (merged claims in og's order); htlc_resolves keep theirs. */
+/**
+ * og mergeJEventClaimOps over every returned Account tx: j_event_claims merge at their first position (merged claims
+ * in og's order); htlc_resolves keep theirs.
+ */
 const mergeJOps = (ops: readonly AccountTxTarget[]): Result<readonly AccountTxTarget[], JObserveError> => {
-  const isClaim = (o: AccountTxTarget): o is JClaimOp => o.tx.type === "j_event_claim", seen = new Set<string>(), slots: (AccountTxTarget | null)[] = [];
-  for (const o of ops) {
-    if (!isClaim(o)) { slots.push(o); continue; }
-    const key = `${o.accountId.toLowerCase()}:${o.tx.jHeight}:${o.tx.jBlockHash.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    slots.push(null);
-  }
-  return map(mergeClaimOps(ops.filter(isClaim)), (merged) => { let i = 0; return slots.map((s) => s ?? (merged[i++] as JClaimOp)); });
+  const isClaim = (o: AccountTxTarget): o is JClaimOp => o.tx.type === "j_event_claim";
+  const claimKey = (o: JClaimOp): string =>
+    `${o.accountId.toLowerCase()}:${o.tx.jHeight}:${o.tx.jBlockHash.toLowerCase()}`;
+  const slots = firstBy(ops, (o) => (isClaim(o) ? claimKey(o) : undefined));
+  return map(mergeClaimOps(ops.filter(isClaim)), (merged) => {
+    const [, filled] = mapAccum(slots, 0, (i, o): readonly [number, AccountTxTarget] =>
+      isClaim(o) ? [i + 1, merged[i] as JClaimOp] : [i, o],
+    );
+    return filled;
+  });
 };
 /** og finalizedJHistoryRoot: the certified head's root, or the empty root before the first certified range. */
-const anchorRoot = (state: EntityState): string => { const a = certifiedJAnchor(state); return a.ok && a.value !== null ? a.value.eventHistoryRoot : EMPTY_J_HISTORY_ROOT; };
+const anchorRoot = (state: EntityState): string => {
+  const a = certifiedJAnchor(state);
+  return a.ok && a.value !== null ? a.value.eventHistoryRoot : EMPTY_J_HISTORY_ROOT;
+};
 const liveAccount = (c: AccountReplica): boolean => c._tag !== "preparing" && c._tag !== "disputed";
 // ---- og jurisdiction/machine/history/j-prefix-consensus.ts over local-history (claim builders) and range-budget.ts (proposable budget): the per-frame J prefix ----
 /** og JPrefixClaim: one exact validator-local J prefix body above the certified anchor. */
