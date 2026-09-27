@@ -4,6 +4,6 @@
   "no-class": 1,
   "no-let": 0,
   "no-loop": 0,
-  "no-mutating-call": 4,
+  "no-mutating-call": 5,
   "no-throw": 30
 }

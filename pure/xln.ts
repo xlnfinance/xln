@@ -44,13 +44,25 @@ export const foldResult = <S, X, E>(
   xs: Iterable<X>, init: S, f: (s: S, x: X, i: number) => Result<S, E>,
 ): Result<S, E> =>
   [...xs].reduce<Result<S, E>>((acc, x, i) => (acc.ok ? f(acc.value, x, i) : acc), ok(init));
+/**
+ * Folds left to right and collects one output per item; the first refusal is the answer.
+ *
+ * The one transient accumulator in the vocabulary (listed in style/README.md). Appending with
+ * `[...ys, y]` copied every earlier output on every step, so each fold over n items cost n²
+ * (review B1: 2.7 s at n = 40k). `collected` is created by this call, only this call pushes to it,
+ * and it is handed out once, after the last push, as a readonly array no caller shares.
+ * mapAccum, traverse, strictFold and lenientFold all fold through here.
+ */
 export const mapAccumResult = <S, X, Y, E>(
   xs: Iterable<X>, init: S, f: (s: S, x: X, i: number) => Result<readonly [S, Y], E>,
 ): Result<readonly [S, readonly Y[]], E> => {
-  type Acc = readonly [S, readonly Y[]];
-  const stepOnce = ([s, ys]: Acc, x: X, i: number): Result<Acc, E> =>
-    map(f(s, x, i), ([next, y]) => [next, [...ys, y]] as const);
-  return foldResult<Acc, X, E>(xs, [init, []], stepOnce);
+  const collected: Y[] = [];
+  const keep = ([next, y]: readonly [S, Y]): S => {
+    collected.push(y);
+    return next;
+  };
+  const stepOnce = (s: S, x: X, i: number): Result<S, E> => map(f(s, x, i), keep);
+  return map(foldResult(xs, init, stepOnce), (last) => [last, collected] as const);
 };
 export const mapAccum = <S, X, Y>(
   xs: Iterable<X>, init: S, f: (s: S, x: X, i: number) => readonly [S, Y],
@@ -70,9 +82,10 @@ type Errors<R> = R[keyof R] extends Result<unknown, infer E> ? E : never;
 export const all = <R extends Record<string, Result<unknown, unknown>>>(
   cs: R,
 ): Result<Values<R>, Errors<R>> => {
-  const collect = (acc: Record<string, unknown>, [k, r]: readonly [string, unknown]) =>
-    map(r as Result<unknown, Errors<R>>, (v) => ({ ...acc, [k]: v }));
-  return foldResult(Object.entries(cs), {}, collect) as Result<Values<R>, Errors<R>>;
+  // Collects [key, value] pairs and builds the record once; spreading the record per key was n².
+  const collect = ([k, r]: readonly [string, unknown]) =>
+    map(r as Result<unknown, Errors<R>>, (v) => [k, v] as const);
+  return map(traverse(Object.entries(cs), collect), Object.fromEntries) as Result<Values<R>, Errors<R>>;
 };
 /** The first answer among lazily asked questions; later questions are never asked once one answers. */
 export const firstDefined = <T>(...asks: readonly (() => T | undefined)[]): T | undefined =>
@@ -233,8 +246,15 @@ export const lenientFold = <S, X, C, Eff, E>(apply: Layer<S, X, C, Eff, E>) =>
 
 // ---- immutable collections ----
 
+/** A new map with k set to v; the old map is unchanged. Copies m, so a fold that inserts wants mapSetAll. */
 export const mapSet = <K, V>(m: ReadonlyMap<K, V>, k: K, v: V): ReadonlyMap<K, V> =>
   new Map([...m, [k, v]]);
+/**
+ * Every entry set in order, exactly as repeated mapSet would (a later entry wins, an existing key
+ * keeps its place), but m is copied once: n inserts cost n, not n² as a fold over mapSet does.
+ */
+export const mapSetAll = <K, V>(m: ReadonlyMap<K, V>, entries: Iterable<readonly [K, V]>): ReadonlyMap<K, V> =>
+  new Map([...m, ...entries]);
 export const mapDelete = <K, V>(m: ReadonlyMap<K, V>, k: K): ReadonlyMap<K, V> =>
   new Map([...m].filter(([key]) => key !== k));
 /** Adds d to the count at k; a count that reaches zero leaves the map. */
@@ -36616,12 +36636,13 @@ const snapshotBalances = (own: WalletRows, d: JRec, at: WalletStamp): Result<Wal
           NATIVE_EXTERNAL_TOKEN,
           balanceRow(NATIVE_EXTERNAL_TOKEN, 0, BigInt(String(d["nativeBalance"])), at),
         );
-  return foldResult(listField(d["tokenBalances"]), native, (rows, raw) => {
+  const tokenRow = (raw: unknown) => {
     const entry = recOf(raw) ?? {};
     return map(walletAddress(entry["tokenAddress"], "tokenAddress"), (token) =>
-      mapSet(rows, token, balanceRow(token, walletTokenId(entry["tokenId"]), BigInt(String(entry["balance"])), at)),
+      [token, balanceRow(token, walletTokenId(entry["tokenId"]), BigInt(String(entry["balance"])), at)] as const,
     );
-  });
+  };
+  return map(traverse(listField(d["tokenBalances"]), tokenRow), (rows) => mapSetAll(native, rows));
 };
 /** og: a snapshot's allowances over the owner's rows. */
 const snapshotAllowances = (own: WalletRows, d: JRec, at: WalletStamp): Result<WalletRows, EntityError> =>
@@ -38404,11 +38425,11 @@ type FrameTxs = FrameRef & { readonly txs: readonly AccountTx[] };
 const idOf = (value: unknown): string => String(value || "").toLowerCase();
 const sole = <X>(xs: readonly X[]): X | undefined => (xs.length === 1 ? xs[0] : undefined);
 const ascending = (a: number, b: number): number => a - b;
-const groupedBy = <K, V>(entries: readonly (readonly [K, V])[]): ReadonlyMap<K, readonly V[]> =>
-  entries.reduce<ReadonlyMap<K, readonly V[]>>(
-    (groups, [key, value]) => mapSet(groups, key, [...(groups.get(key) ?? []), value]),
-    new Map(),
-  );
+/** Values grouped under their key, keys in first-seen order; one pass, not a map copy per entry. */
+const groupedBy = <K, V>(entries: readonly (readonly [K, V])[]): ReadonlyMap<K, readonly V[]> => {
+  const groups = Map.groupBy(entries, ([key]) => key);
+  return new Map([...groups].map(([key, group]) => [key, group.map(([, value]) => value)] as const));
+};
 
 // ---- reading an input ----
 
@@ -45019,7 +45040,7 @@ type CrossPassed<T> = { readonly cp: CrossPass; readonly value: T };
 type LearnedMeta = readonly [orderId: string, meta: CrossMarketOffer];
 const learnMeta = (cp: CrossPass, learned: readonly LearnedMeta[]): CrossPass => ({
   ...cp,
-  meta: learned.reduce((meta, [orderId, m]) => mapSet(meta, orderId, m), cp.meta),
+  meta: mapSetAll(cp.meta, learned),
 });
 /** og rejectInvalidCrossOffer in live mode: every invalid cross-j offer halts the frame. */
 const liveReject = (accountId: string, offerId: string, reason: string): Result<never, EntityError> =>
