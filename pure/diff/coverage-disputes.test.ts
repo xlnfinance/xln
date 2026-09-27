@@ -16,7 +16,7 @@ import { EMPTY_J_HISTORY_ROOT, buildJEventRangeDigest, canonicalJEventRangeHash,
 import {
   accountDisputeHash, applyCrossFill, committedView, createEntity, foldTx, localProof, ogProofBody, prepareCrossRoute,
   tokenId, zeroDelta,
-  type AccountReplica, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
+  type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
 import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, unwrap, verifiers } from "../xln_run.ts";
 
@@ -82,16 +82,20 @@ const aliceRange = (og: OgState, events: readonly RawEvent[]): Record<string, un
 
 // ---- a route whose Source hub is ALICE and Source user BOB, filled so a Source claim is due ----
 const T1 = unwrap(tokenId("1"));
-const sourceRoute = (n: number): CrossRoute => {
+/** A route intent: BOB swaps into a foreign stack through ALICE, nothing locked yet. */
+const intentRoute = (n: number): CrossRoute => {
   const stack = `stack:${TERMS.domain.chainId}:${TERMS.domain.depositoryAddress}`;
   const clock = { leftResponseSeconds: 60, rightResponseSeconds: 60 };
-  const base: CrossRoute = {
+  return {
     orderId: `C${n}`, makerEntityId: BOB, hubEntityId: ALICE,
     source: { jurisdiction: stack, entityId: BOB, counterpartyEntityId: ALICE, tokenId: 1, amount: BigInt(1 + ri(1e9)) },
     target: { jurisdiction: `stack:1:0x${"ab".repeat(20)}`, entityId: W("03"), counterpartyEntityId: W("04"), tokenId: 2, amount: BigInt(1 + ri(1e12)) },
     sourceDisputeConfig: clock, targetDisputeConfig: clock, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: T0 + 60_000,
     sourceSignerId: `0x${"a1".repeat(20)}`, sourceHubSignerId: ALICE_SIGNER, targetHubSignerId: `0x${"a3".repeat(20)}`, targetSignerId: `0x${"a4".repeat(20)}`,
   };
+};
+const sourceRoute = (n: number): CrossRoute => {
+  const base = intentRoute(n);
   const prepared = unwrap(prepareCrossRoute(base, { runtimeSeed: RUNTIME_SEED, now: T0 - 500 }));
   const numerator = BigInt(pick([0, 1 + ri(999), 1000]));
   // the uint16 projection is the exact fraction rounded up (og exactFillRatioToUint16)
@@ -101,11 +105,11 @@ const sourceRoute = (n: number): CrossRoute => {
   return { ...filled, status: pick(["resting", "partially_filled", "partially_filled", "cancelled"] as const) };
 };
 /** The Account row of a route's Source pull. */
-const pullRowOf = (route: CrossRoute): PullRow => {
+const pullRowOf = (route: CrossRoute, claimed = false): PullRow => {
   const pull = route.sourcePull;
   if (pull === undefined) throw new Error("prepared route without a Source pull");
   return {
-    pullId: pull.pullId, tokenId: pull.tokenId, amount: pull.signedAmount, claimedRatio: 0, claimedAmount: 0n,
+    pullId: pull.pullId, tokenId: pull.tokenId, amount: pull.signedAmount, claimedRatio: claimed ? (route.cumulativeFillRatio ?? 0) : 0, claimedAmount: 0n,
     fullHash: pull.fullHash, partialRoot: pull.partialRoot,
     crossJurisdiction: { orderId: route.orderId, routeHash: route.routeHash ?? "", leg: "source" },
     createdHeight: 1, createdTimestamp: 1,
@@ -116,7 +120,7 @@ const pullRowOf = (route: CrossRoute): PullRow => {
 const PA = (name: string, entries: ReadonlyMap<unknown, unknown> = new Map()): unknown =>
   PersistentAccountStateMap.fromEntries(asOg(name), asOg<Parameters<typeof PersistentAccountStateMap.fromEntries>[1]>(entries));
 type OgEntity = Parameters<typeof ogApplyJEvent>[0];
-const ogBobAccount = (child: AccountReplica): unknown => {
+const ogBobAccount = (child: AccountReplica, active?: ActiveDispute): unknown => {
   const view = unwrap(committedView(child.state));
   const w = child.dispute.counterparty;
   return {
@@ -125,12 +129,13 @@ const ogBobAccount = (child: AccountReplica): unknown => {
       deltas: PA("deltas", view.deltas), locks: PA("locks"), swapOffers: PA("swapOffers"), pulls: PA("pulls", view.pulls),
       requestedRebalance: PA("requestedRebalance"), requestedRebalanceFeeState: PA("requestedRebalanceFeeState"), rebalanceFeePolicies: PA("rebalanceFeePolicies"),
     },
-    status: "active", mempool: [], currentHeight: 0, proofHeader: { fromEntity: ALICE.toLowerCase(), toEntity: BOB, nextProofNonce: 1 },
+    status: active === undefined ? "active" : "disputed", mempool: [], currentHeight: 0, proofHeader: { fromEntity: ALICE.toLowerCase(), toEntity: BOB, nextProofNonce: 1 },
     pendingWithdrawals: PA("pendingWithdrawals"), shadow: { rebalance: { policy: PA("rebalanceShadowPolicy"), submittedAtByToken: PA("rebalanceShadowSubmitted") } },
     ...(w === undefined ? {} : {
       counterpartyDisputeProofHanko: w.hanko, counterpartyDisputeProofNonce: w.proofNonce, counterpartyDisputeProofBodyHash: w.proofBodyHash,
       counterpartyDisputeProofProposerIsLeft: w.proposerIsLeft, counterpartyDisputeHash: w.hash,
     }),
+    ...(active === undefined ? {} : { activeDispute: structuredClone(active) }),
   };
 };
 const ogRoutes = (routes: readonly CrossRoute[]): unknown => {
@@ -138,11 +143,11 @@ const ogRoutes = (routes: readonly CrossRoute[]): unknown => {
   for (const c of routes) swaps.set(c.orderId, cloneCrossJurisdictionRoute(asOg(structuredClone(c))));
   return swaps;
 };
-const ogEntity = (child: AccountReplica, routes: readonly CrossRoute[], jBatch: unknown): OgEntity => asOg<OgEntity>({
+const ogEntity = (child: AccountReplica, routes: readonly CrossRoute[], jBatch: unknown, active?: ActiveDispute): OgEntity => asOg<OgEntity>({
   entityId: ALICE, timestamp: T0, height: 0, lastFinalizedJHeight: 0,
   config: { mode: "proposer-based", threshold: 1n, validators: [ALICE_SIGNER], shares: { [ALICE_SIGNER]: 1n }, jurisdiction: OG_J },
   reserves: new Map(), outDebtsByToken: new Map(), inDebtsByToken: new Map(),
-  accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(asOg([[BOB, ogBobAccount(child)]]), ALICE, () => asOg(Z32))),
+  accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(asOg([[BOB, ogBobAccount(child, active)]]), ALICE, () => asOg(Z32))),
   crossJurisdictionSwaps: ogRoutes(routes), paybook: { entries: new Map(), feesEarned: 0n },
   ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }),
 });
@@ -162,12 +167,12 @@ type Case = {
   readonly body: Binary;
   readonly witness: DisputeHanko | undefined;
 };
-const frozenCase = (n: number): Case => {
+const frozenCase = (n: number, claimed = false): Case => {
   const routes = Array.from({ length: 1 + ri(2) }, (_, k) => sourceRoute(n * 10 + k));
   const carried = routes.filter(() => rng() < 0.85);
   const base = genesisAB();
   const account = { ...base.state.account, deltas: new Map([[T1, { ...zeroDelta(T1), collateral: 50n, ondelta: 10n }]]) };
-  const pulls = new Map(carried.map((c) => [c.sourcePull?.pullId ?? "", pullRowOf(c)] as const));
+  const pulls = new Map(carried.map((c) => [c.sourcePull?.pullId ?? "", pullRowOf(c, claimed)] as const));
   const state = { ...base.state, account, pulls };
   const proof = unwrap(localProof(unwrap(committedView(state)), { ok: true, value: DT }));
   const view = { ...unwrap(committedView(state)), domain: TERMS.domain };
@@ -266,6 +271,70 @@ describe("coverage-disputes: DisputeStarted against a Source hub holding a newer
     for (const k of ["🛡️ Locked n", "❌ Pull coun", "🌉 Cross-j c", "refused:J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT", "refused:J_COUNTER_DISPUTE_NONCE_REGRESSION",
       "refused:DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH", "refused:J_BATCH_LIMIT_EXCEEDED"]) {
       same(`${summary} ${k}`, [...counts.keys()].some((x) => x.startsWith(k)), true);
+    }
+  }, 120_000);
+});
+
+// ---- DisputeFinalized: every live route with a leg on the finalized Account settles or ends ----
+const finalityRoute = (n: number): CrossRoute => {
+  const route = rng() < 0.2 ? intentRoute(n) : sourceRoute(n);
+  return { ...route, expiresAt: pick([T0 + 60_000, T0 - 1, T0]), status: rng() < 0.15 ? "intent" : route.status };
+};
+const activeOf = (c: Case, startedByLeft: boolean): ActiveDispute => ({
+  startedByLeft, initialProofbodyHash: c.bodyHash, initialNonce: 1, initialProposerIsLeft: rng() < 0.5,
+  disputeTimeout: NOW_SEC - 5 + L + R, disputeStartTimestamp: NOW_SEC - 5 - pick([0, 0, 0, L]), jNonce: 1,
+  starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: Z32,
+  observedOnChain: true, observedBlockNumber: 1, finalizeQueued: false,
+});
+
+describe("coverage-disputes: DisputeFinalized settles the cross-j routes on the Account (og terminalizeCrossJurisdictionRoutesOnFinality)", () => {
+  test("MATCH: 160 random DisputeFinalized events over Accounts carrying Source pulls -- same verdict, messages, route statuses and settled times, jBatch and outputs as og", async () => {
+    const counts = new Map<string, number>();
+    const bump = (k: string): void => { counts.set(k, (counts.get(k) ?? 0) + 1); };
+    for (let n = 0; n < 160; n++) {
+      const c0 = frozenCase(n, rng() < 0.7);
+      const routes = [...c0.routes, ...Array.from({ length: ri(3) }, (_, k) => finalityRoute(n * 10 + 5 + k))];
+      const c: Case = { ...c0, routes };
+      const sender = pick([ALICE, BOB]);
+      const active = activeOf(c, sender === ALICE);
+      const data = {
+        sender, counterentity: sender === ALICE ? BOB : ALICE, initialNonce: "1", initialProofbodyHash: c.bodyHash,
+        finalProofbodyHash: rng() < 0.05 ? W("0d") : c.bodyHash, finalizationEvidenceHash: word(), finalProofbody: c.body,
+      };
+      const og = ogEntity(c.child, c.routes, undefined, active);
+      const range = aliceRange(asOg<OgState>(og), [{ type: "DisputeFinalized", data }]);
+      const ogRun = await ogApplyJEvent(og, asOg(range), asOg(OG_ENV), asOg({}), [], true, asOg(BOOK_SLOT))
+        .then((out) => ({ ok: true as const, out }), (e: unknown) => ({ ok: false as const, message: String((e as Error).message) }));
+      const created = unwrap(createEntity({
+        id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]),
+        jurisdictionConfig: { name: "j", entityProviderAddress: JEP },
+      })).state;
+      const rwState: EntityState = { ...created, crossJurisdictionSwaps: new Map(c.routes.map((r) => [r.orderId, r] as const)) };
+      const disputed = asOg<AccountReplica>({ ...c.child, _tag: "disputed", mempool: [], active });
+      const rw = foldTx(rwState, new Map([[BOB, disputed]]), asOg({ type: "j_event", data: range }), {
+        verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS, runtimeSeed: RUNTIME_SEED,
+      });
+      same(tag(n, "verdict"), rw.ok ? "ok" : reasonOf(rw.error), ogRun.ok ? "ok" : ogRun.message);
+      if (!ogRun.ok || !rw.ok) { bump(`refused:${(ogRun.ok ? "" : ogRun.message).split(":")[0]}`); continue; }
+      const d = rw.value;
+      const next = ogRun.out.newState;
+      const messages = readEntityFrameEvents(next).map((e) => e.message);
+      same(tag(n, "messages"), (d.events ?? []).map((e) => e.message), messages);
+      same(tag(n, "jBatch"), d.state.committed["jBatchState"] ?? null, next.jBatchState ?? null);
+      const ended = (r: { orderId: string; status: string; settledAt?: number | undefined }) => [r.orderId, r.status, r.settledAt ?? null];
+      same(tag(n, "routes"), [...(d.state.crossJurisdictionSwaps ?? new Map()).values()].map(ended),
+        [...(next.crossJurisdictionSwaps?.values() ?? [])].map(ended));
+      const rwOut = d.outputs.map((o) => [o.to, outputTypes(o)]);
+      const ogOut = ogRun.out.outputs.map((o) => [o.entityId, (o.entityTxs ?? []).map((t) => t.type).join(o.entityId === ALICE ? "," : "+")]);
+      same(tag(n, "outputs"), rwOut, ogOut);
+      for (const m of messages) bump(m.startsWith("🌉 Cross-j route") ? m.replace(/C\d+/, "C") : m.slice(0, 12));
+    }
+    const summary = `seed=${SEED} ${JSON.stringify([...counts])}`;
+    for (const k of ["🌉 Cross-j route C terminal after dispute finality: settled", "🌉 Cross-j route C terminal after dispute finality: cancelled",
+      "🌉 Cross-j route C terminal after dispute finality: expired", "🌉 Cross-j route C cancelled before Pull lock on Account finality",
+      // pins the full og refusal text (start, timeout and both windows), which the rewrite used to drop
+      "refused:CROSS_J_FINAL_CLOCK_MISMATCH"]) {
+      same(`${summary} ${k}`, counts.has(k), true);
     }
   }, 120_000);
 });

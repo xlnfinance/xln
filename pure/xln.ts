@@ -4310,31 +4310,41 @@ export const finalizedRouteLeg = (x: FinalizedLegQuery): Result<CrossLegRole | u
 type DisputeClock = Readonly<{ disputeStartTimestamp?: unknown; disputeTimeout?: unknown }>;
 type ProofWindows = Pick<ProofBody, "leftResponseSeconds" | "rightResponseSeconds">;
 type DisputeWindows = Readonly<{ start: number; left: number; right: number }>;
+/** og safeUint: a bounded unsigned field, refused under its own code with the value it held. */
+const finalUint = (v: unknown, max: number, code: string): Result<number, CrossError> => {
+  const n = safeUintOf(v, max);
+  return n === undefined ? crossErr(`${code}:${String(v)}`) : ok(n);
+};
 /** The active dispute's start and each side's window; its timeout must be start + left + right. */
 const disputeWindows = (
   active: DisputeClock | undefined, proofbody: ProofWindows,
 ): Result<DisputeWindows, CrossError> => {
-  const left = safeUintOf(proofbody.leftResponseSeconds, MAX_UINT32);
-  const right = safeUintOf(proofbody.rightResponseSeconds, MAX_UINT32);
-  const start = safeUintOf(active?.disputeStartTimestamp, Number.MAX_SAFE_INTEGER);
-  const timeout = safeUintOf(active?.disputeTimeout, Number.MAX_SAFE_INTEGER);
-  if (left === undefined || right === undefined || start === undefined || timeout === undefined) {
-    return crossErr("CROSS_J_FINAL_WINDOW_INVALID");
-  }
-  if (timeout !== start + left + right) return crossErr("CROSS_J_FINAL_CLOCK_MISMATCH");
-  return ok({ start, left, right });
+  const fields = all({
+    left: finalUint(proofbody.leftResponseSeconds, MAX_UINT32, "CROSS_J_FINAL_LEFT_WINDOW"),
+    right: finalUint(proofbody.rightResponseSeconds, MAX_UINT32, "CROSS_J_FINAL_RIGHT_WINDOW"),
+    start: finalUint(active?.disputeStartTimestamp, Number.MAX_SAFE_INTEGER, "CROSS_J_FINAL_START"),
+    timeout: finalUint(active?.disputeTimeout, Number.MAX_SAFE_INTEGER, "CROSS_J_FINAL_TIMEOUT"),
+  });
+  return chain(fields, ({ left, right, start, timeout }) =>
+    timeout === start + left + right
+      ? ok({ start, left, right })
+      : crossErr(`CROSS_J_FINAL_CLOCK_MISMATCH:${start}:${timeout}:${left}:${right}`),
+  );
 };
 /** The signed ratio, raised by a higher registry reveal inside the beneficiary's window (left for a positive pull). */
 const raisedByRecord = (
   pull: SignedProofBodyPull, w: DisputeWindows, record: HashLadderRegistryRecord | undefined,
 ): Result<number, CrossError> => {
   if (record === undefined) return ok(pull.claimedRatio);
-  const ratio = safeUintOf(record.fillRatio, MAX_FILL);
-  const revealedAt = safeUintOf(record.revealedAt, Number.MAX_SAFE_INTEGER);
-  if (ratio === undefined || revealedAt === undefined) return crossErr("CROSS_J_REGISTRY_RECORD_INVALID");
-  const window = pull.amount > 0n ? w.left : w.right;
-  const inWindow = revealedAt >= w.start && revealedAt <= w.start + window;
-  return ok(inWindow && ratio > pull.claimedRatio ? ratio : pull.claimedRatio);
+  const fields = all({
+    ratio: finalUint(record.fillRatio, MAX_FILL, "CROSS_J_REGISTRY_RECORD_RATIO"),
+    revealedAt: finalUint(record.revealedAt, Number.MAX_SAFE_INTEGER, "CROSS_J_REGISTRY_RECORD_TIME"),
+  });
+  return map(fields, ({ ratio, revealedAt }) => {
+    const window = pull.amount > 0n ? w.left : w.right;
+    const inWindow = revealedAt >= w.start && revealedAt <= w.start + window;
+    return inWindow && ratio > pull.claimedRatio ? ratio : pull.claimedRatio;
+  });
 };
 /** og resolveFinalizedPullFillRatio (DeltaTransformer.applyPull). */
 export const finalizedPullFillRatio = (x: Readonly<{
@@ -4344,7 +4354,8 @@ export const finalizedPullFillRatio = (x: Readonly<{
 }>): Result<number, CrossError> => {
   const found = findSignedProofBodyPull(x.proofbody, x.expectedPull, x.targetRole, x.transformerAddress);
   return chain(found, (pull): Result<number, CrossError> => {
-    if (pull === undefined) return crossErr("CROSS_J_FINAL_PULL_MISSING");
+    const role = x.targetRole ? "target" : "source";
+    if (pull === undefined) return crossErr(`CROSS_J_FINAL_PULL_MISSING:${x.expectedPull.pullId}:${role}`);
     return chain(disputeWindows(x.active, x.proofbody), (w) => raisedByRecord(pull, w, x.record));
   });
 };
