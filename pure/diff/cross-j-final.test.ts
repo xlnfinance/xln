@@ -64,7 +64,7 @@ const liveRoute = (r: Rand, n: number): CrossRoute => {
   return { ...c, status: pick(r, ["resting", "partially_filled", "clear_requested", "clear_requested", "clearing", "target_prepared", "settled", "cancelled", "intent"] as const) };
 };
 const ogColl = (m: ReadonlyMap<string, CrossRoute>) => {
-  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
+  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute) as Map<string, unknown>;
   for (const [k, v] of m) c.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(v as never));
   return c;
 };
@@ -101,7 +101,7 @@ const worldOf = (r: Rand, n: number, self: EntityId, count = 1): World => {
     accounts: new Map(hasAccount ? [[peer, { status: "active", mempool: queued.map(ogAccountTx), state: { swapOffers: new Map(offers), pulls: new Map(pulls) } }]] : []),
     orderbookExt: ogExt, crossJurisdictionSwaps: ogColl(stored),
   };
-  const rw: BookHost = { id: self, timestamp: T0, validators, ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile } as never, swaps: stored, admissions: undefined, accounts: new Map(hasAccount ? [[peer, account]] : []) };
+  const rw: BookHost = { id: self, timestamp: T0, validators, ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile }, swaps: stored, admissions: undefined, accounts: new Map(hasAccount ? [[peer, account]] : []) };
   return { rw, og, routes };
 };
 type Snap = { swaps: unknown; books: unknown; messages: unknown; outputs: unknown; accountTxs: unknown };
@@ -159,7 +159,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
     for (let i = 0, more = untilCovered(500, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H2, H2]), w = worldOf(r, i, self), route = w.routes[0]!, leg = self === H1 ? "source" : "target";
       const pull = leg === "source" ? route.sourcePull : route.targetPull;
-      const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never)); return f.ok ? f.value : 0; })();
+      const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route)); return f.ok ? f.value : 0; })();
       const at = pick(r, [cur, cur, cur, 0, 65_535, Math.max(0, cur - 1), 1 + int(r, 65_534)]);
       const binary = at > 0 && pull ? unwrap(crossPullReveal(at, unwrap(crossPrivateSeed(RUNTIME_SEED, route)))).binary : "0x";
       const built = route.sourcePull && route.targetPull ? buildCrossCloseProof(withCloseProofProgress(route, { fillRatio: at, cumulativeSourceAmount: 0n, cumulativeTargetAmount: 0n } as CrossCloseProof, route.updatedAt), binary) : undefined;
@@ -295,7 +295,7 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
     for (let i = 0, more = untilCovered(500, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H1, U1, H2, U2]), w = fworld(r, i, self), route = w.route;
       if (route.sourcePull === undefined || route.targetPull === undefined) continue;
-      const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never)); return f.ok ? f.value : 0; })();
+      const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route)); return f.ok ? f.value : 0; })();
       const at = pick(r, [cur, cur, cur, 0, 65_535, Math.max(0, cur - 1), 1 + int(r, 65_534)]);
       const binary = at > 0 ? unwrap(crossPullReveal(at, unwrap(crossPrivateSeed(RUNTIME_SEED, route)))).binary : "0x";
       const project = (t: bigint) => (at >= 65_535 ? t : (t * BigInt(at)) / 65_535n);

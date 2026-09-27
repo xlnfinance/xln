@@ -78,7 +78,7 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
           deltas: new Map([...deltas].map(([tk, d]) => [tk, { ...d, leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }])) } });
       }
       const r = unwrap(createEntity({ id: id as EntityId, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), ...(jc === undefined ? {} : { jurisdictionConfig: jc }),
-        committed: { profile, ...(hub === undefined ? {} : { hubRebalanceConfig: hub }), ...(key === undefined ? {} : { entityEncryptionPublicKey: key }) } as never }));
+        committed: { profile, ...(hub === undefined ? {} : { hubRebalanceConfig: hub }), ...(key === undefined ? {} : { entityEncryptionPublicKey: key }) } }));
       const og = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: key ?? "", profile, hubRebalanceConfig: hub, accounts: ogAccounts,
         config: { jurisdiction: jc === undefined ? undefined : { chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, ...jc } } } as never);
       expect([i, unwrap(entityProfileHash(r.state, replicas as never))]).toEqual([i, og]);
@@ -86,7 +86,7 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
   });
   test("MATCH (og appendFinalProfileHash / buildChangedEntityProfileHashToSign): the genesis frame always signs the profile hash; later frames only when the descriptor changed", () => {
     const id = lazyEntity(aliceAddr), ctx = { verify: verifiers.verify, timestamp: 5n };
-    const r = unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { profile: { name: "A", isHub: false, avatar: "", bio: "", website: "" } } as never }));
+    const r = unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { profile: { name: "A", isHub: false, avatar: "", bio: "", website: "" } } }));
     const ogHashOf = (profile: unknown): string => computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile, accounts: new Map(), config: {} } as never);
     const chat = (n: number): EntityTx => ({ type: "chat", data: { from: aliceAddr.toLowerCase(), message: `m${n}` } });
     const profilesOf = (s: typeof r.state, txs: readonly EntityTx[]) => { const f = unwrap(foldTxs(s, new Map(), txs, ctx)); return { state: f.draft.state, profiles: (f.draft.hashes ?? []).filter((h) => h.type === "profile") }; };
@@ -139,7 +139,7 @@ describe(seedTag("consensus-final: ethers v6 Transaction.from for blob (type 3) 
     try { decoded = ethers.decodeRlp(bytes.slice(1)) as F; } catch { return flip(); }
     if (!Array.isArray(decoded)) return flip();
     const wrapped = Array.isArray(decoded[0]), outer = decoded as F[], fields = [...(wrapped ? (outer[0] as F[]) : outer)];
-    const encode = (fs: F[], wrap: F[] | null = wrapped ? [...outer] : null): string => ethers.concat([bytes.slice(0, 1), ethers.encodeRlp((wrap === null ? fs : [fs, ...wrap.slice(1)]) as never)]);
+    const encode = (fs: F[], wrap: F[] | null = wrapped ? [...outer] : null): string => ethers.concat([bytes.slice(0, 1), ethers.encodeRlp((wrap === null ? fs : [fs, ...wrap.slice(1)]))]);
     const set = (i: number, v: F): string => { const fs = [...fields]; fs[i] = v; return encode(fs); };
     const type = bytes[0], sig = fields.length - 3, auths = type === 4 && Array.isArray(fields[9]) && Array.isArray((fields[9] as F[])[0]) ? (fields[9] as F[]) : [];
     const setAuth = (j: number, v: F): string => { const a = [...auths], row = [...(a[0] as F[])]; row[j] = v; a[0] = row; return set(9, a); };
@@ -189,7 +189,7 @@ describe(seedTag("consensus-final: ethers v6 Transaction.from for blob (type 3) 
       if (ethers.decodeRlp(ethers.getBytes(raw).slice(1)).length < 6) seen.sidecar++;
       for (let m = eri(3); m > 0; m--) raw = mutate(raw);
       const og = ethersView(raw);
-      expect([i, raw, rewriteView(raw)]).toEqual([i, raw, og] as never);
+      expect([i, raw, rewriteView(raw)]).toEqual([i, raw, og]);
       if (og === "REFUSED") seen.refused++; else if ((og as { type: number }).type === 3) seen.accepted3++; else seen.accepted4++;
     }
     expect(seen.accepted3).toBeGreaterThan(150);
@@ -308,7 +308,7 @@ describe(seedTag("consensus-final: the j_event frame-hash projection of og entit
       const txs: any[] = [{ type: "chat", data: { from: aliceAddr.toLowerCase(), message: "m" } }, { type: "j_event", data }];
       const root = "0x" + "11".repeat(32), auth = "0x" + "22".repeat(32);
       let og: string;
-      try { og = createEntityFrameHashFromStateRoot("genesis", 1, 50, txs as never, [], id, root, auth, ctxOf(id) as never); } catch (e) { og = (e as Error).message.split(":")[0] as string; }
+      try { og = createEntityFrameHashFromStateRoot("genesis", 1, 50, txs, [], id, root, auth, ctxOf(id)); } catch (e) { og = (e as Error).message.split(":")[0] as string; }
       const mine = entityFrameHash({ prevFrameHash: "genesis", height: 1, timestamp: 50, txs, events: [], entityId: id, stateRoot: root, authorityRoot: auth, entityContext: ctxOf(id) });
       const got = mine.ok ? mine.value : ((mine.error as { code?: string }).code ?? mine.error._tag).split(":")[0];
       expect([i, got]).toEqual([i, og]);
@@ -340,7 +340,7 @@ describe(seedTag("consensus-final: a received Account frame commits at once (reb
         const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [input] }, verifiers));
         rt = out.runtime;
         noneReceived(rt);
-        const i = input.input as any;
+        const i = input.input;
         if (i.kind === "txs") for (const tx of i.txs) if (tx.type === "accountInput" && tx.data.kind === "ack_frame" && tx.data.frame !== undefined) {
           received++;
           const key = replicaKey(input.entityId, signers.get(input.entityId) as Address), prior = before.entities.get(key)?.accountReplicas.get(tx.data.fromEntityId);
@@ -365,7 +365,7 @@ describe(seedTag("consensus-final: a received Account frame commits at once (reb
     for (let round = 0; round < 40; round++) {
       const from = ids[gi(3)] as EntityId, to = from === BOB ? (gi(2) === 0 ? ALICE : CAROL) : BOB;
       const tx: EntityTx = { type: "directPayment", data: { targetEntityId: to, tokenId: t1, amount: BigInt(1 + gi(5)), route: [from, to], deliveryMode: "direct" } } as EntityTx;
-      rt = quiet(rt, gi(3) === 0 ? [create(from, [tx]), create(to === BOB ? BOB : to, [{ ...tx, data: { ...(tx.data as any), targetEntityId: from, route: [to, from] } } as EntityTx])] : [create(from, [tx])]);
+      rt = quiet(rt, gi(3) === 0 ? [create(from, [tx]), create(to === BOB ? BOB : to, [{ ...tx, data: { ...(tx.data), targetEntityId: from, route: [to, from] } } as EntityTx])] : [create(from, [tx])]);
     }
     expect(received).toBeGreaterThan(40);
   });

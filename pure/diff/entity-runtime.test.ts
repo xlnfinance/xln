@@ -51,7 +51,7 @@ const addr = (i: number) => unwrap(address(`0x${(i + 16).toString(16).padStart(2
 
 describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
   test("MATCH: og proposer = validators[0] (positional CEO) for validators [B,A]; A's replica forwards its mempool to B", () => {
-    const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never);
+    const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) });
     expect(og.activeValidatorId).toBe(B);
     const rw = teaching([[B, 1n], [A, 1n]], 2n);
     expect(allowedProposer(rw.state.quorum)).toBe(B);
@@ -68,7 +68,7 @@ describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
       const n = 1 + ri(4), ids = [...new Set(Array.from({ length: n }, () => ri(8)))].map(addr), shares = ids.map(() => BigInt(1 + ri(5)));
       const total = shares.reduce((a, b) => a + b, 0n), threshold = 1n + BigInt(ri(Number(total)));
       const rw = teaching(ids.map((a, j) => [a, shares[j] ?? 1n] as const), threshold);
-      const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) } as never);
+      const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) });
       expect(allowedProposer(rw.state.quorum).toLowerCase()).toBe(og.activeValidatorId);
       expect(isSingleSigner(rw.state.quorum)).toBe(isSingleSignerBoard(ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold)));
     }
@@ -84,7 +84,7 @@ describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
     const message = { to: BOB, tx: { type: "accountInput", data: {} } } as unknown as EntityOutput;
     const routed = unwrap(convertOutput(rt, message, ALICE, 1n));
     expect(routed.signerId).toBe(B);
-    expect(getEntityLeaderState({ entityId: BOB, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never).activeValidatorId).toBe(B);
+    expect(getEntityLeaderState({ entityId: BOB, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) }).activeValidatorId).toBe(B);
     const consensus = unwrap(convertOutput(rt, { to: BOB, signerId: A, input: txs([]) }, BOB, 1n));
     expect(consensus).toEqual({ entityId: BOB, signerId: A, input: txs([]) });
   });
@@ -150,8 +150,8 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
     for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
       const ogValue = field === "paybook" ? { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } : value;
-      expect(rootRw({ [field]: value as never })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
-      expect(rootRw({ [field]: value as never })).not.toBe(rootRw({}));
+      expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
+      expect(rootRw({ [field]: value })).not.toBe(rootRw({}));
     }
     expect(rootRw({ notAField: 1 })).toBe(rootRw({}));
     expect(computeCanonicalEntityConsensusStateHash({ ...og, notAField: 1 })).toBe(computeCanonicalEntityConsensusStateHash(og));
@@ -176,7 +176,7 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     const ogHash = createEntityFrameHashFromStateRoot("genesis", 1, 50, ogTxs as never, [], r.state.id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never);
     expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogHash);
     // og appendFinalProfileHash: the genesis frame always signs the profile descriptor hash
-    const profile = computeEntityProfileHash(ogState as never);
+    const profile = computeEntityProfileHash(ogState);
     expect<readonly unknown[]>(frame.hashesToSign).toEqual(buildEntityHashesToSign(r.state.id, 1, ogHash, [{ hash: profile, type: "profile", context: `profile:${profile}` }]));
   });
 });

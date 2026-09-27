@@ -42,15 +42,15 @@ const W = (b: string) => `0x${b.repeat(32 / (b.length / 2))}`;
 const U256 = (1n << 256n) - 1n, SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 const b32 = () => W(pick(["11", "22", "aB", "00", "fe"]));
 const addr = () => pick([`0x${"ab".repeat(20)}`, "0x5FbDB2315678afecb367f032d93F642f64180aa3", `0x${"01".repeat(20)}`]);
-const DEPOSITORY = new Interface(Depository__factory.abi as any);
-const PROVIDER = new Interface(EntityProvider__factory.abi as any);
+const DEPOSITORY = new Interface(Depository__factory.abi);
+const PROVIDER = new Interface(EntityProvider__factory.abi);
 const COORDS = { blockNumber: 7, blockHash: W("0b"), transactionHash: W("0c"), logIndex: 3 };
 
 /** og ingress for one raw log: carrier parse, canonical args, then rawEventToJEvents (normalizers); null when og refuses. */
 const ogIngress = (iface: Interface, log: { topics: readonly string[]; data: string }, entityId: string, extraArgs: Record<string, unknown> = {}): any[] | null => {
   try {
     const parsed = iface.parseLog({ topics: [...log.topics], data: log.data })!;
-    return rawEventToJEvents({ name: parsed.name, args: { ...extractCanonicalDepositoryEventArgs(parsed), ...extraArgs }, ...COORDS } as any, entityId);
+    return rawEventToJEvents({ name: parsed.name, args: { ...extractCanonicalDepositoryEventArgs(parsed), ...extraArgs }, ...COORDS }, entityId);
   } catch { return null; }
 };
 const rwIngress = (log: { topics: readonly string[]; data: string }): readonly JEvent[] | null => { try { return readJEvents([{ topics: log.topics, data: log.data, ...COORDS }]); } catch { return null; } };
@@ -219,7 +219,7 @@ describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProof
         const ev: JEvent = { type: "DisputeFinalized", sender: W("99"), counterentity: f.counterentity.toLowerCase(), nonce: f.initialNonce, finalProofbodyHash, finalizationEvidenceHash: evidenceHash, meta: { transactionHash: W("0c") } };
         const got = withDisputeCalldata(ev, calldata);
         if (got.type !== "DisputeFinalized") throw new Error("type");
-        expect(got.evidence).toEqual({ ...ogEvidence, initialNonce: BigInt(ogEvidence.initialNonce), finalNonce: BigInt(ogEvidence.finalNonce) } as any);
+        expect(got.evidence).toEqual({ ...ogEvidence, initialNonce: BigInt(ogEvidence.initialNonce), finalNonce: BigInt(ogEvidence.finalNonce) });
         expect(lowerProof(got.finalProofbody!)).toEqual(rwProof(resolveDisputeProofBodyEvidence(og, "DisputeFinalized", args)));
         expect(got.initialProofbodyHash).toBe(ogEvidence.initialProofbodyHash);
         resolved++;
@@ -256,10 +256,10 @@ const ogClaimAccount = () => {
   const store = new Map<string, any>();
   const apply = (tx: any, byLeft: boolean): any | null => {
     const before = { ...state, deltas: new PMap([...state.deltas].map(([k, v]: any) => [k, { ...v }])) };
-    const session = createAccountJClaimSession({ get: (h: string) => store.get(h) } as any);
+    const session = createAccountJClaimSession({ get: (h: string) => store.get(h) });
     try {
-      const prepared = prepareAccountJClaimTx(state, tx, TERMS.domain as any, session);
-      const r = handleJEventClaim(account, prepared as any, byLeft, 1, PARTY_LEFT, [], jurisdictions, session);
+      const prepared = prepareAccountJClaimTx(state, tx, TERMS.domain, session);
+      const r = handleJEventClaim(account, prepared, byLeft, 1, PARTY_LEFT, [], jurisdictions, session);
       if (!r.ok) { Object.assign(state, before); return null; }
       for (const { hash, node } of session.changes()?.newNodes ?? []) store.set(hash, node);
       return prepared;
@@ -304,7 +304,7 @@ describe(seedTag("multi-claim Account frames (og prepareAccountJClaimTx / verify
           if (tx.leftProof.nodes.length > 1 || tx.rightProof.nodes.length > 1) branched++;
         });
         const ogFrame = { height: Number(frame.height), timestamp: Number(frame.timestamp), jHeight: Number(frame.jHeight), prevFrameHash: frame.prevFrameHash, accountStateRoot: frame.accountStateRoot, stateHash: "", accountTxs: prepared };
-        expect(computeFrameHash(ogFrame as any)).toBe(frame.stateHash);
+        expect(computeFrameHash(ogFrame)).toBe(frame.stateHash);
         // A received witness that is not the regenerated path refuses the frame, as og verifyAccountJClaimProof throws on it.
         const first: any = frame.txs[0];
         if (first !== undefined && first.leftProof.nodes.length > 0 && tampered < 12) {
@@ -316,7 +316,7 @@ describe(seedTag("multi-claim Account frames (og prepareAccountJClaimTx / verify
           const signed = { ...bad, stateHash: unwrap(frameStateHash(bad, replicaId(opened), byLeft)) };
           const offer = { ...offerOf(proposed, proposer), frame: signed, frameHanko: signAccountFrame(signed, proposer) };
           const p = prepared[0].data;
-          const record = createAccountJClaimRecord({ ...TERMS.domain, leftEntity: PARTY_LEFT, rightEntity: PARTY_RIGHT } as any, "left", { jHeight: p.jHeight, jBlockHash: p.jBlockHash, eventsHash: canonicalJurisdictionEventsHash(p.events) } as any);
+          const record = createAccountJClaimRecord({ ...TERMS.domain, leftEntity: PARTY_LEFT, rightEntity: PARTY_RIGHT }, "left", { jHeight: p.jHeight, jBlockHash: p.jBlockHash, eventsHash: canonicalJurisdictionEventsHash(p.events) });
           let ogThrown = "og accepted";
           try { verifyAccountJClaimProof(leftRootBefore, record, badProof); } catch (e) { ogThrown = (e as Error).message; }
           // og's thrown Error aborts the whole input (og replayIncomingFrameOnClone does not catch it): same text
@@ -397,7 +397,7 @@ describe(seedTag("Entity J observation (og j-event-payloads expandAccountSettled
         for (let k = 0; k < 1 + ri(3); k++) {
           const coords = { blockNumber, blockHash, transactionHash: W(pick(["c1", "c2"])), logIndex: ri(5) };
           const log = rng() < 0.7 ? settledLog(randomSettledRows()) : DEPOSITORY.encodeEventLog("ReserveUpdated", [pick([ENTITY, W("aa")]), BigInt(1 + ri(3)), BigInt(ri(1e6))]);
-          const ogEvents = (() => { try { const parsed = DEPOSITORY.parseLog(log)!; return rawEventToJEvents({ name: parsed.name, args: extractCanonicalDepositoryEventArgs(parsed), ...coords } as any, ENTITY); } catch { return null; } })();
+          const ogEvents = (() => { try { const parsed = DEPOSITORY.parseLog(log)!; return rawEventToJEvents({ name: parsed.name, args: extractCanonicalDepositoryEventArgs(parsed), ...coords }, ENTITY); } catch { return null; } })();
           if (ogEvents === null) continue;
           for (const e of ogEvents) og.apply(e, blockNumber);
           events.push(...entityJEvents(readJEvents([{ ...log, ...coords }]), ENTITY));
@@ -522,8 +522,8 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
         let ogThrew = false;
         const kind = pick(["r2r", "r2c", "r2c", "r2e"] as const), to = pick([PEER_ACTIVE, OTHER]);
         try {
-          if (kind === "r2r") await handleR2R(og, { type: "r2r", data: { toEntityId: to, tokenId, amount } } as any, true);
-          else if (kind === "r2e") await handleR2E(og, { type: "r2e", data: { receivingEntity: OTHER, tokenId, amount } } as any, true);
+          if (kind === "r2r") await handleR2R(og, { type: "r2r", data: { toEntityId: to, tokenId, amount } }, true);
+          else if (kind === "r2e") await handleR2E(og, { type: "r2e", data: { receivingEntity: OTHER, tokenId, amount } }, true);
         } catch { ogThrew = true; }
         if (kind === "r2c") {
           const counterparty = pick([PEER_ACTIVE, PEER_ACTIVE, OTHER, ENTITY]), receivingEntityId = rng() < 0.2 ? OTHER : undefined;
@@ -570,11 +570,11 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     for (let n = 0; n < 60; n++) {
       const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 1000n], [2, 1000n]]), debts: EMPTY_DEBTS, accounts: new Set([PEER_ACTIVE]) };
       let s: JBatchState = { ...initJBatch(), entityNonce: ri(4) };
-      for (let k = 1 + ri(3); k > 0; k--) s = unwrap(queueR2R({ ...e, jBatch: s }, OTHER, 1 + ri(2), BigInt(1 + ri(9))) as any);
+      for (let k = 1 + ri(3); k > 0; k--) s = unwrap(queueR2R({ ...e, jBatch: s }, OTHER, 1 + ri(2), BigInt(1 + ri(9))));
       if (rng() < 0.4) {
         const drafted = s;
         s = { ...initJBatch(), entityNonce: drafted.entityNonce, recoveryBatches: [drafted.batch] };
-        if (rng() < 0.6) s = unwrap(queueR2R({ ...e, jBatch: s }, PEER_ACTIVE, 2, 5n) as any);
+        if (rng() < 0.6) s = unwrap(queueR2R({ ...e, jBatch: s }, PEER_ACTIVE, 2, 5n));
       }
       const sealed = unwrap(jBroadcast(s, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: "s1", timestamp: 5 }) as any) as any;
       const sent = sealed.jBatch.sentBatch;
@@ -586,7 +586,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
       const event = { type: "HankoBatchProcessed" as const, entityId: kind === "entity" ? OTHER : ENTITY.toUpperCase().replace("0X", "0x"), batchHash: kind === "exact" ? sent.batchHash.toUpperCase().replace("0X", "0x") : W("dd"), nonce: BigInt(nonce) };
       const toOg = (j: JBatchState): any => ({ ...j, batch: ogDecoded(j.batch), ...(j.sentBatch === undefined ? {} : { sentBatch: { ...j.sentBatch, batch: ogDecoded(j.sentBatch.batch) } }), ...(j.recoveryBatches === undefined ? {} : { recoveryBatches: j.recoveryBatches.map(ogDecoded) }) });
       const og: any = { entityId: ENTITY, timestamp: 77, config: { validators: ["s1"] }, jBatchState: toOg(sealed.jBatch) }, outputs: any[] = [];
-      await applyHankoBatchProcessedEvent({ newState: og, event: { type: "HankoBatchProcessed", data: { entityId: event.entityId, batchHash: event.batchHash, nonce } } as any, blockNumber: 1, outputs });
+      await applyHankoBatchProcessedEvent({ newState: og, event: { type: "HankoBatchProcessed", data: { entityId: event.entityId, batchHash: event.batchHash, nonce } }, blockNumber: 1, outputs });
       const rw = unwrap(applyHankoBatchProcessed(sealed.jBatch, ENTITY, event, 77) as any) as any;
       expect(rw.jBatch.status).toBe(og.jBatchState.status);
       expect(rw.jBatch.entityNonce).toBe(og.jBatchState.entityNonce);
@@ -614,9 +614,9 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
   });
 
   test("MATCH (ER-16): the Host's r2r only queues into jBatchState; reserves move only on the finalized ReserveUpdated J event", () => {
-    const host = unwrap(genesisHost(ALICE, genesisAB()) as any) as any;
+    const host = unwrap(genesisHost(ALICE, genesisAB()));
     const ctx = { timestamp: 1n, jHeight: 0n };
-    const funded = unwrap(applyHost(host, { layer: "j", tx: { type: "j_event", blockNumber: 1, event: { type: "ReserveUpdated", entity: ALICE, tokenId: 1n, newBalance: 50n } } } as any, ctx, hankoVerify) as any) as any;
+    const funded = unwrap(applyHost(host, { layer: "j", tx: { type: "j_event", blockNumber: 1, event: { type: "ReserveUpdated", entity: ALICE, tokenId: 1n, newBalance: 50n } } }, ctx, hankoVerify));
     expect(funded.state.j.reserves).toEqual(new Map([[1, 50n]]));
     expect(applyHost(funded.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 60n } } as any, ctx, hankoVerify).ok).toBe(false);
     const queued = unwrap(applyHost(funded.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 20n } } as any, ctx, hankoVerify) as any) as any;

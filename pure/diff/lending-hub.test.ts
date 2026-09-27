@@ -32,7 +32,7 @@ const hex16 = (n: number): string => n.toString(16).padStart(16, "0");
 const JUR = TERMS.domain;
 
 /** The rewrite's flat Account tx as og's `{ type, data }` with a numeric tokenId. */
-const ogTx = (tx: AccountTx): any => unwrap(wireTx(tx, unwrap(accountId(ALICE, BOB)), true) as never);
+const ogTx = (tx: AccountTx): any => unwrap(wireTx(tx, unwrap(accountId(ALICE, BOB)), true));
 const cloneBook = (b: LendingBook | undefined): any => (b === undefined ? undefined : { pools: new Map([...b.pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...b.loans].map(([k, v]) => [k, { ...v }])) });
 
 // ---- the lending followup over random committed frames, og applyCommittedLendingFollowup live ----
@@ -121,8 +121,8 @@ describe(seedTag("lending-hub: committed lending followup (og committed-lending-
       });
       const withAccount = rng() < 0.95;
       const replicas = new Map(withAccount ? [[peer, rwReplica(hub, peer, rows, mempool)]] : []);
-      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { isHub: true } } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } } as never)).state;
-      const rw = lendingFollowups(state0, replicas as never, peer, frames, BigInt(ts));
+      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { isHub: true } } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } })).state;
+      const rw = lendingFollowups(state0, replicas, peer, frames, BigInt(ts));
       const og: any = { entityId: hub, timestamp: ts, profile: isHub ? { isHub: true } : undefined, accounts: new Map(withAccount ? [[peer, ogReplica(hub, peer, rows, mempool)]] : []), ...(book === undefined ? {} : { lending: cloneBook(book) }) };
       const accountTxs: any[] = [];
       let refused: string | undefined;
@@ -246,7 +246,7 @@ describe(seedTag("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og p
       applyHtlcSecretFollowups({ env: {}, state: newState, newState, outputs: [], accountTxs, candidateEffects, bookIntentSlot: slot } as never, [{ secret, hashlock }]);
       applyBookIntentProgram(newState, program);
       const jid = name.trim(), f0 = { paybook: { entries: new Map([[hashlock, route]]), feesEarned: 0n }, queue: [] };
-      const resolved = unwrap(resolveFollowup(f0 as never, peer, resolve as never, self, ts, jid));
+      const resolved = unwrap(resolveFollowup(f0, peer, resolve, self, ts, jid));
       const rw = secretFollowup(resolved, hashlock, secret, ts, self, jid);
       expect(json(rw.runtimeEvents ?? [])).toBe(json(candidateEffects.map((e) => ({ eventName: e.eventName, data: e.data }))));
       for (const e of candidateEffects) seen.add(`${e.eventName}:${"jurisdictionId" in e.data}`);

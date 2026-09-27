@@ -53,7 +53,7 @@ const env: any = { quietRuntimeLogs: true, state: { jReplicas: new Map([["j", { 
 /** ALICE's Entity (one validator) with an Account to BOB and random reserves; `named` puts the J replica name in its config. */
 const aliceEntity = (reserves: ReadonlyMap<number, bigint>, named = true): EntityState => unwrap(createEntity({
   id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]),
-  jurisdictionConfig: { ...(named ? { name: "j" } : {}), entityProviderAddress: EP }, committed: { reserves: new Map(reserves) as never },
+  jurisdictionConfig: { ...(named ? { name: "j" } : {}), entityProviderAddress: EP }, committed: { reserves: new Map(reserves) },
 })).state;
 /** og EntityState around the rewrite's committed jBatchState and reserves, with its Accounts behind a candidate-map shell. */
 const ogState = (s: EntityState, replicas: ReadonlyMap<EntityId, AccountReplica>, timestamp: number): any => {
@@ -162,7 +162,7 @@ describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchStat
     const queued = unwrap(foldTxs(cases[2]!, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }], { verify: verifiers.verify, timestamp: 5n })).draft.state;
     cases.push(queued);
     for (const s of cases) {
-      const og = ogState(s, replicas, 9), ogR = await ogRun(() => handleJBroadcast(og, { type: "j_broadcast", data: {} } as any, env, true));
+      const og = ogState(s, replicas, 9), ogR = await ogRun(() => handleJBroadcast(og, { type: "j_broadcast", data: {} }, env, true));
       const f = foldTxs(s, replicas, [{ type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: 9n });
       expect(f.ok).toBe(ogR.ok);
       if (!f.ok || !ogR.ok) { expect((f as any).error.reason).toBe((ogR as any).code); continue; }
@@ -246,7 +246,7 @@ describe(seedTag("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transa
       let raw = signedTx();
       for (let m = nri(3); m > 0; m--) { raw = mutateTx(raw); mutated++; }
       const og = ethersView(raw);
-      expect(rewriteView(raw)).toEqual(og as never);
+      expect(rewriteView(raw)).toEqual(og);
       if (og === "REFUSED") refused++; else accepted++;
     }
     expect(accepted).toBeGreaterThan(400);
@@ -310,7 +310,7 @@ describe(seedTag("entity-j RJ-9: durable numbered-registration intents (og numbe
         const owned = validators.includes(aliceAddr) && nri(4) > 0;
         return { name: `numbered-${run}-${i}`, validators, threshold: BigInt(1 + nri(validators.length)), ...(owned ? { localSignerId: aliceAddr, entitySeed: SEED } : { localSignerId: null, entitySeed: null }) };
       });
-      const request: any = buildNumberedRegistrationRequest(env, { ...(nri(2) === 0 ? { intentId: nhex(32) } : {}), jurisdiction, payerSignerId: payer.address, entities: definitions as never });
+      const request: any = buildNumberedRegistrationRequest(env, { ...(nri(2) === 0 ? { intentId: nhex(32) } : {}), jurisdiction, payerSignerId: payer.address, entities: definitions });
       const sign = (req: any, over: Parameters<typeof signedTx>[0] = {}): { raw: string; hash: string; nonce: number } => {
         const nonce = over.nonce ?? nri(20), raw = signedTx({ to: EP, data: encodeNumberedRegistrationCalldata(req), chainId: BigInt(CHAIN), value: 0n, wallet: payer, nonce, ...over });
         return { raw, hash: ethers.keccak256(raw), nonce };
@@ -377,7 +377,7 @@ describe(seedTag("entity-j RJ-9: durable numbered-registration intents (og numbe
         const encoded = iface.encodeEventLog(iface.getEvent("EntityRegistered"), [entityId, BigInt(entityNumber), registered]);
         const receipt = { transactionHash: pending.transactionHash, transactionIndex: 0, blockNumber: height, blockHash, type: 2, status: 1, cumulativeGasUsed: 21_000, logsBloom: `0x${"00".repeat(256)}`,
           logs: [{ address: EP, topics: encoded.topics, data: encoded.data, blockNumber: height, blockHash, transactionHash: pending.transactionHash, transactionIndex: 0, logIndex: 0 }] };
-        const root = await computeCanonicalReceiptsRoot([receipt] as never), proof = (await createCanonicalReceiptProofs([receipt] as never, root)).get(0) as object;
+        const root = await computeCanonicalReceiptsRoot([receipt]), proof = (await createCanonicalReceiptProofs([receipt], root)).get(0) as object;
         const log = { address: EP, topics: encoded.topics.map((t) => t.toLowerCase()), data: encoded.data.toLowerCase(), blockNumber: height, blockHash, transactionHash: pending.transactionHash, transactionIndex: 0, logIndex: 0, index: 0, receiptProof: { ...proof, receiptLogIndex: 0 } };
         const evidence = buildCertifiedRegistrationEvidence(env, replica as never, "EntityRegistered", log as never, { observedThroughHeight: height, observedTipBlockHash: blockHash, observedHeadHeight: height, confirmationDepth: 0 });
         if (nri(10) > 0) {
@@ -567,7 +567,7 @@ describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame con
     const seen = new Map<string, number>();
     for (let run = 0; run < 66; run++) {
       const variant = variants[run % variants.length]!;
-      let state = unwrap(createEntity({ id: NUM, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: EP }, committed: { reserves: new Map([[1, 10n]]) as never } })).state;
+      let state = unwrap(createEntity({ id: NUM, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: EP }, committed: { reserves: new Map([[1, 10n]]) } })).state;
       const replicas: ReadonlyMap<EntityId, AccountReplica> = new Map();
       const ogEnv: any = { quietRuntimeLogs: true, infrastructure: {} };
       let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };

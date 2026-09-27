@@ -49,8 +49,8 @@ const W = (byte: string): string => `0x${byte.repeat(32)}`;
 const LEFT = W("11"), RIGHT = W("22"), DEP = `0x${"ab".repeat(20)}`;
 const unwrapR = <T,>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => { if (!r.ok) throw new Error(`unwrap: ${stableJson(r.error)}`); return r.value; };
 const openAccount = (credit: bigint): AccountBody => {
-  const terms = unwrapR(accountTerms({ domain: { chainId: 1, depositoryAddress: DEP }, watchSeed: W("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } }) as never);
-  let body = genesisAccountBody(genesisAccount(unwrapR(accountId(unwrapR(entityId(LEFT) as never), unwrapR(entityId(RIGHT) as never)) as never)), terms as never);
+  const terms = unwrapR(accountTerms({ domain: { chainId: 1, depositoryAddress: DEP }, watchSeed: W("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } }));
+  let body = genesisAccountBody(genesisAccount(unwrapR(accountId(unwrapR(entityId(LEFT)), unwrapR(entityId(RIGHT))))), terms);
   for (const tokenId of ["1", "2", "3"]) for (const byLeft of [true, false])
     body = unwrapR(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit } as never, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n }) as never as { ok: true; value: { state: AccountBody } }).state;
   return body;
@@ -182,7 +182,7 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
         const tx = gen(r, body, byLeft, ts, jh, known);
         const o = await og.run((acc) => applyAccountTxMutation(acc, toOg(tx), byLeft, ts, jh, false, undefined, undefined, undefined, []));
         const ctx: FoldCtx = { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n };
-        const rw = applyAccountBody(body, tx, ctx) as any;
+        const rw = applyAccountBody(body, tx, ctx);
         if (rw.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${rw.ok ? "ok" : stableJson(rw.error)} tx=${stableJson(tx)}`);
         if (rw.ok) { body = rw.value.state; expect(unwrapR(committed(body) as never as { ok: true; value: { root: string } }).root).toBe(o.root!); continue; }
         const f = accountTxFailure(body, tx, ctx, rw.error, LEFT, { nextProofNonce: 1 });
@@ -206,7 +206,7 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
     const step = async (tx: any, byLeft: boolean, ts = 20, jh = 2, ogCtx?: any, settlement?: FoldCtx["settlement"]): Promise<{ ok: boolean; message?: string; thrown?: boolean }> => {
       const o = await og.run((acc) => (tx.type === "settle_transition" && ogCtx !== undefined ? handleSettleTransition(acc, toOg(tx), byLeft, ts, ogCtx) : applyAccountTxMutation(acc, toOg(tx), byLeft, ts, jh, false, undefined, undefined, undefined, [])));
       const ctx: FoldCtx = { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n, ...(settlement === undefined ? {} : { settlement }) };
-      const rw = applyAccountBody(body, tx, ctx) as any;
+      const rw = applyAccountBody(body, tx, ctx);
       if (rw.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${rw.ok ? "ok" : stableJson(rw.error)} tx=${stableJson(tx)}`);
       if (rw.ok) { body = rw.value.state; return { ok: true }; }
       const f = accountTxFailure(body, tx, ctx, rw.error, LEFT, { nextProofNonce: 1 });
@@ -239,7 +239,7 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
   });
 
   test("MATCH: settlement hanko failures carry og's texts (context, nonce against the account and workspace basis, hash, post-proof nonce, body and dispute hash)", async () => {
-    const jurisdictions = { jReplicas: new Map([["j", { chainId: 1, contracts: { depository: DEP, entityProvider: `0x${"c1".repeat(20)}`, account: `0x${"c2".repeat(20)}`, deltaTransformer: `0x${"c3".repeat(20)}` } }]]) } as any;
+    const jurisdictions = { jReplicas: new Map([["j", { chainId: 1, contracts: { depository: DEP, entityProvider: `0x${"c1".repeat(20)}`, account: `0x${"c2".repeat(20)}`, deltaTransformer: `0x${"c3".repeat(20)}` } }]]) };
     const ogCtx: any = { jReplicas: jurisdictions.jReplicas, resolveSettlementBoardAuthority: async () => undefined, verifyHanko: async (_h: string, _m: string, entityId: string) => ({ valid: true, entityId }) };
     const settlement = { verify: () => true, proofNonceFloor: 1 };
     const L = textLockstep(openAccount(10n ** 20n));
@@ -278,15 +278,15 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
 describe(seedTag("final-sweep: RF-18 outbox signer (og resolveEntityOutputSignerId)"), () => {
   test("MATCH: an Account message to an Entity with no local replica binds og's certified counterparty proposer (the frame Hanko's first member); without a Hanko og falls to the gossip route, and with neither refuses SIGNER_RESOLUTION_FAILED", () => {
     const J = "local", cfg = (a: string) => ({ mode: "proposer-based" as const, threshold: 1n, validators: [a], shares: { [a]: 1n }, jurisdiction: { name: J, chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, entityProviderAddress: "0x" + "e1".repeat(20) } });
-    const A = unwrapR(lazyBoardEntityId(cfg(aliceAddr)) as never) as string, B = unwrapR(lazyBoardEntityId(cfg(bobAddr)) as never) as string;
-    const imp = (id: string, signer: string): RuntimeTx => ({ type: "importReplica", entityId: id, signerId: signer, data: { config: cfg(signer), isProposer: true, entitySeed: "0x" + "5e".repeat(64) } }) as never;
+    const A = unwrapR(lazyBoardEntityId(cfg(aliceAddr))) as string, B = unwrapR(lazyBoardEntityId(cfg(bobAddr))) as string;
+    const imp = (id: string, signer: string): RuntimeTx => ({ type: "importReplica", entityId: id, signerId: signer, data: { config: cfg(signer), isProposer: true, entitySeed: "0x" + "5e".repeat(64) } });
     let now = 1_700_000_000_000n;
     let rt: Runtime = unwrapR(applyRuntime(createRuntime([J]), { runtimeTxs: [imp(A, aliceAddr), imp(B, bobAddr)], entityInputs: [], timestamp: now }, verifiers) as never as { ok: true; value: { runtime: Runtime } }).runtime;
     const sent: EntityOutput[] = [];
     let inputs: RoutedEntityInput[] = [{ entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] } }];
     for (let round = 0; inputs.length > 0 && round < 20; round++) {
       now += 1n;
-      const step = unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: inputs.map((i) => (i.input.kind === "txs" ? { ...i, input: { ...i.input, timestamp: now } } : i)) }, verifiers) as never) as { runtime: Runtime; outbox: readonly EntityOutput[] };
+      const step = unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: inputs.map((i) => (i.input.kind === "txs" ? { ...i, input: { ...i.input, timestamp: now } } : i)) }, verifiers)) as { runtime: Runtime; outbox: readonly EntityOutput[] };
       rt = step.runtime;
       sent.push(...step.outbox);
       inputs = step.outbox.map((o) => unwrapR(convertOutput(rt, o, ("tx" in o ? (o.tx.data as { fromEntityId: string }).fromEntityId : o.to) as never, now) as never));
@@ -324,7 +324,7 @@ describe(seedTag("final-sweep: SJ-18 settlement board authority fallback (og res
   const meta = (block: number, log: number) => ({ blockNumber: block, blockHash: word(30 + block), transactionHash: word(40 + block + log), logIndex: log });
   const foundation: JEvent = { type: "FoundationBootstrapped", recipient: "0x" + "11".repeat(20), boardHash: word(900), controlTokenId: 1n, dividendTokenId: 2n, meta: meta(2, 0) };
   const registered = (id: string, board: string, block = 3): JEvent => ({ type: "EntityRegistered", entityId: id, entityNumber: BigInt(id), boardHash: board, meta: meta(block, 0) });
-  const toOg = (e: JEvent): any => { const { meta: m, type, ...data } = e as any; return { type, ...m, data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v])) }; };
+  const toOg = (e: JEvent): any => { const { meta: m, type, ...data } = e; return { type, ...m, data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v])) }; };
   type Replica = { state: EntityState; og: any };
   const replica = (id: string, members: readonly (readonly [string, bigint])[], threshold: bigint, events: readonly JEvent[], ep: string | null, nodes: Map<string, any>): Replica => {
     const authority = new Map(members.map(([a, s]) => [unwrapR(address(a)), { shares: s }]));
@@ -345,7 +345,7 @@ describe(seedTag("final-sweep: SJ-18 settlement board authority fallback (og res
     for (let i = 0; i < 300; i++) {
       const n = 1 + Math.floor(r() * 3), members = [...SIGNERS].sort(() => r() - 0.5).slice(0, n).map((a) => [a, BigInt(1 + Math.floor(r() * 3))] as const);
       const power = members.reduce((t, [, s]) => t + s, 0n), threshold = BigInt(1 + Math.floor(r() * Number(power)));
-      const board = quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) } as never);
+      const board = quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) });
       const mode = pick(r, ["none", "lazy", "match", "mismatch", "unregistered", "noRegistry", "noJurisdiction", "configDiverge", "stackDiverge", "twoMatch"] as const);
       const id = mode === "lazy" ? board : word(2 + Math.floor(r() * 8)), nodes = new Map<string, any>();
       const events = mode === "noRegistry" || mode === "noJurisdiction" ? [] : [foundation, ...(mode === "unregistered" ? [registered(word(99), hex(r, 32))] : [registered(id, mode === "mismatch" ? hex(r, 32) : board)])];
@@ -369,12 +369,12 @@ describe(seedTag("final-sweep: RF-18 retained network outbox (og applyRecoveryRu
   test("MATCH: 400 random frames (prior retained outputs + new outputs of every lane, local / remote / unroutable / self-hinted targets, settled and live proposals) commit og's retained outbox or og's refusal", () => {
     const J = "local", SELF = "0x" + "5e".repeat(20), RT1 = "0x" + "a1".repeat(20), RT2 = "0x" + "a2".repeat(20);
     const cfg = (a: string) => ({ mode: "proposer-based" as const, threshold: 1n, validators: [a], shares: { [a]: 1n }, jurisdiction: { name: J, chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, entityProviderAddress: "0x" + "e1".repeat(20) } });
-    const A = unwrapR(lazyBoardEntityId(cfg(aliceAddr)) as never) as string, B = unwrapR(lazyBoardEntityId(cfg(bobAddr)) as never) as string, C = unwrapR(lazyBoardEntityId(cfg(carolAddr)) as never) as string;
-    const imp = (id: string, signer: string): RuntimeTx => ({ type: "importReplica", entityId: id, signerId: signer, data: { config: cfg(signer), isProposer: true, entitySeed: "0x" + "5e".repeat(64) } }) as never;
+    const A = unwrapR(lazyBoardEntityId(cfg(aliceAddr))) as string, B = unwrapR(lazyBoardEntityId(cfg(bobAddr))) as string, C = unwrapR(lazyBoardEntityId(cfg(carolAddr))) as string;
+    const imp = (id: string, signer: string): RuntimeTx => ({ type: "importReplica", entityId: id, signerId: signer, data: { config: cfg(signer), isProposer: true, entitySeed: "0x" + "5e".repeat(64) } });
     const now = 1_700_000_000_000n;
     let rt: Runtime = unwrapR(applyRuntime(createRuntime([J], SELF), { runtimeTxs: [imp(A, aliceAddr), imp(B, bobAddr), imp(C, carolAddr)], entityInputs: [], timestamp: now }, verifiers) as never as { ok: true; value: { runtime: Runtime } }).runtime;
     const open: RoutedEntityInput = { entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now + 1n, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] } };
-    rt = (unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: [open] }, verifiers) as never) as { runtime: Runtime }).runtime;
+    rt = (unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: [open] }, verifiers)) as { runtime: Runtime }).runtime;
     const alice = [...rt.entities.values()].find((r) => r.state.id === A)!, account = alice.accountReplicas.get(B as never)!;
     expect(account._tag).toBe("proposed");
     const pendingFrame = (account as Extract<typeof account, { _tag: "proposed" }>).candidate.frame;
@@ -427,7 +427,7 @@ describe(seedTag("final-sweep: RF-18 retained network outbox (og applyRecoveryRu
       try { ogOutputPlan(ogEnv, structuredClone(outs), deps, () => {}); og = { ok: true, rows: (ogEnv.pendingNetworkOutputs as unknown[]).map((o) => Buffer.from(ogEncodeBuffer(o, { omitSymbolKeys: true })).toString("hex")) }; } catch (e) { og = { ok: false, code: (e as Error).message }; }
       const routes: RuntimeRoutes = { verifiedProfileSigner: () => undefined, verifiedRuntime: (e) => verified[e.toLowerCase()], resolvedRuntime: (e) => resolved[e.toLowerCase()], crossJRuntime: (e) => crossJ[e.toLowerCase()] };
       const mine = networkOutboxStep({ ...rt, pendingNetworkOutputs: prior as NetworkOutput[] }, outs as NetworkOutput[], routes);
-      const got = mine.ok ? { ok: true as const, rows: mine.value.map((o) => Buffer.from(ogEncodeBuffer(o as never, { omitSymbolKeys: true })).toString("hex")) } : { ok: false as const, code: (mine.error as { code: string }).code };
+      const got = mine.ok ? { ok: true as const, rows: mine.value.map((o) => Buffer.from(ogEncodeBuffer(o, { omitSymbolKeys: true })).toString("hex")) } : { ok: false as const, code: (mine.error as { code: string }).code };
       if (!og.ok && og.code.startsWith("ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING") && !got.ok) expect(got.code.split(":")[0]).toBe("ACCOUNT_PROPOSAL_OUTBOX_SOURCE_ACCOUNT_MISSING");
       else expect(got).toEqual(og);
       seen.add(og.ok ? `ok:${og.rows.length > 0 ? "rows" : "empty"}` : og.code.split(/[: ]/)[0]!);
@@ -438,7 +438,7 @@ describe(seedTag("final-sweep: RF-18 retained network outbox (og applyRecoveryRu
 
   test("MATCH: transport retirement and og selectRetainedRecoveryOutbox (retained rows re-proven from prior evidence, in order; new rows skipped; forged or reordered rows refused)", () => {
     const RT1 = "0x" + "a1".repeat(20), RT2 = "0x" + "a2".repeat(20);
-    const row = (n: number, height: number, runtimeId = RT1): NetworkOutput => ({ entityId: W("71"), signerId: bobAddr.toLowerCase(), entityTxs: [{ type: "j_event", data: { n } }] as never, runtimeId, sourceRuntimeFrame: { height, timestamp: 9 } });
+    const row = (n: number, height: number, runtimeId = RT1): NetworkOutput => ({ entityId: W("71"), signerId: bobAddr.toLowerCase(), entityTxs: [{ type: "j_event", data: { n } }], runtimeId, sourceRuntimeFrame: { height, timestamp: 9 } });
     const prior = [row(1, 3), row(2, 4), row(3, 4)];
     const retired = retireNetworkOutputs({ ...createRuntime(), pendingNetworkOutputs: prior }, (o) => (o["entityTxs"] as any)[0].data.n === 2);
     expect(retired.pendingNetworkOutputs).toEqual([prior[0]!, prior[2]!]);

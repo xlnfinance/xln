@@ -286,7 +286,7 @@ describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core
       const run = (f: () => Out): Out | Error => { try { return f(); } catch (e) { return e as Error; } };
       if (roll < 13 || live.length === 0) {
         const cmd = { kind: 0 as const, ownerId: owners[ri(4)] as string, orderId: ri(15) === 0 && pick ? pick.orderId : `o${seed}-${i}`, side: ri(2) as 0 | 1, tif: [0, 0, 0, 1, 2][ri(5)] as 0 | 1 | 2, postOnly: ri(6) === 0, priceTicks: BigInt(ri(25) === 0 ? 0 : 95 + ri(11)), qtyLots: BigInt(ri(30) === 0 ? 0 : 1 + ri(12)) };
-        ogOut = run(() => ogBook.applyCommand(og, cmd, options as never)); rwOut = applyBookCommand(rw, cmd, options as never); kinds.add("place");
+        ogOut = run(() => ogBook.applyCommand(og, cmd, options)); rwOut = applyBookCommand(rw, cmd, options); kinds.add("place");
       } else if (roll < 16) {
         const cmd = { kind: 1 as const, ownerId: ri(5) === 0 ? "mallory" : pick?.ownerId ?? "x", orderId: ri(8) === 0 ? "missing" : pick?.orderId ?? "x" };
         ogOut = run(() => ogBook.applyCommand(og, cmd)); rwOut = applyBookCommand(rw, cmd); kinds.add("cancel");
@@ -298,7 +298,7 @@ describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core
         const o = { orderId: `r${seed}-${i}`, ownerId: owners[ri(4)] as string, side: ri(2) as 0 | 1, priceTicks: BigInt(95 + ri(11)), qtyLots: BigInt(1 + ri(9)) };
         ogOut = run(() => ({ state: ogBook.materializeCommittedRemainder(og, o), events: [] })); rwOut = map(materializeCommittedRemainder(rw, o), (state) => ({ state, events: [] })); kinds.add("remainder");
       } else if (roll === 18) {
-        ogOut = run(() => ogBook.resumeCrossedBook(og, options as never)); rwOut = resumeCrossedBook(rw, options as never); kinds.add("resume");
+        ogOut = run(() => ogBook.resumeCrossedBook(og, options)); rwOut = resumeCrossedBook(rw, options); kinds.add("resume");
       } else if (pick && ri(2) === 0) {
         const next = BigInt(ri(Number(pick.qtyLots) + 1));
         ogOut = run(() => ({ state: ogBook.reduceBookOrderQuantity(og, pick.orderId, next), events: [] })); rwOut = map(reduceBookOrderQuantity(rw, pick.orderId, next), (state) => ({ state, events: [] }));

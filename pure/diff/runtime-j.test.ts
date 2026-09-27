@@ -59,7 +59,7 @@ const both = async (p: Pair, tx: RuntimeTx): Promise<string | null> => {
   const rw = applyRuntimeTx(p.rt, tx, { replay: true });
   expect(rwCode(rw)).toBe(og);
   if (rw.ok) p.rt = rw.value;
-  expect(rwDigests(p.rt)).toEqual(ogDigests(p.env) as never);
+  expect(rwDigests(p.rt)).toEqual(ogDigests(p.env));
   return og;
 };
 
@@ -225,7 +225,7 @@ const ogFrame = async (env: OgEnv, tx: unknown): Promise<OgFrame> => {
   const snapshot = treeClone(env);
   try {
     const out = await ogApplyRuntimeTx(env as never, treeClone(tx) as never, { isReplay: true });
-    const split = splitJOutboxForDurableSubmit(out as never);
+    const split = splitJOutboxForDurableSubmit(out);
     registerPendingCommittedJOutbox(env as never, split.durable);
     return { code: null, jOutbox: [...((env.infrastructure["pendingCommittedJOutbox"] as unknown[] | undefined) ?? []), ...split.maintenance], retries: split.retries };
   } catch (e) {
@@ -328,7 +328,7 @@ describe(seedTag("runtime-j: the J submit ledger (og j-submit-state.ts / j-submi
           const ogLocal = (p.env.state.eReplicas.get(`${E}:${s}`) as { jSubmitState?: unknown }).jSubmitState;
           expect(stableJson(p.rt.replicaLocal.get(replicaKey(ALICE, s))?.jSubmitState)).toBe(stableJson(ogLocal));
         }
-        expect(rwDigests(p.rt)).toEqual(ogDigests(p.env) as never);
+        expect(rwDigests(p.rt)).toEqual(ogDigests(p.env));
       }
     }
     expect(retried).toBeGreaterThan(20);
@@ -565,7 +565,7 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
             return { transactionHash, transactionIndex: i, blockNumber: height, blockHash, type: pick([0, 2]), status: 1, cumulativeGasUsed: 21_000 * (i + 1), logsBloom: `0x${"00".repeat(256)}`,
               logs: logs.map((l, k) => ({ ...l, blockNumber: height, blockHash, transactionHash, transactionIndex: i, logIndex: k })) };
           });
-          const root = await computeCanonicalReceiptsRoot(receipts as never), proofs = await createCanonicalReceiptProofs(receipts as never, root);
+          const root = await computeCanonicalReceiptsRoot(receipts), proofs = await createCanonicalReceiptProofs(receipts, root);
           const other = (target + 1 + ri(Math.max(1, count - 1))) % count, corrupt = rng();
           let proof = { ...(proofs.get(target) as { proofNodes: string[]; transactionIndex: number; encodedReceipt: string; receiptsRoot: string }), receiptLogIndex: noise };
           if (corrupt < 0.08 && count > 1) proof = { ...proof, ...(proofs.get(other) as object), receiptLogIndex: noise } as typeof proof;
@@ -598,7 +598,7 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
         // The durable post-state view commits the evidence store exactly as og does.
         const held = env.infrastructure.certifiedRegistrationEvidence;
         const minimal: OgEnv = { state: { jReplicas: env.state.jReplicas, eReplicas: new Map(), timestamp: 0, height: 0 }, infrastructure: held !== undefined && held.size > 0 ? { certifiedRegistrationEvidence: held } : {}, runtimeId: env.runtimeId };
-        expect(rwDigests(rt)).toEqual(ogDigests(minimal) as never);
+        expect(rwDigests(rt)).toEqual(ogDigests(minimal));
       }
     }
     expect(stored).toBeGreaterThan(15);
@@ -622,7 +622,7 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
         const encoded = iface.encodeEventLog(iface.getEvent("EntityRegistered"), [word(entityNumber), BigInt(entityNumber), registered]);
         const receipt = { transactionHash: word(900 + height), transactionIndex: 0, blockNumber: height, blockHash, type: 2, status: 1, cumulativeGasUsed: 21_000, logsBloom: `0x${"00".repeat(256)}`,
           logs: [{ address: EP, topics: encoded.topics, data: encoded.data, blockNumber: height, blockHash, transactionHash: word(900 + height), transactionIndex: 0, logIndex: 0 }] };
-        const root = await computeCanonicalReceiptsRoot([receipt] as never), proof = (await createCanonicalReceiptProofs([receipt] as never, root)).get(0) as object;
+        const root = await computeCanonicalReceiptsRoot([receipt]), proof = (await createCanonicalReceiptProofs([receipt], root)).get(0) as object;
         const log = { address: EP, topics: encoded.topics.map((t) => t.toLowerCase()), data: encoded.data.toLowerCase(), blockNumber: height, blockHash, transactionHash: word(900 + height), transactionIndex: 0, logIndex: 0, index: 0, receiptProof: { ...proof, receiptLogIndex: 0 } };
         const evidence = buildCertifiedRegistrationEvidence(env as never, replica as never, "EntityRegistered", log as never, { observedThroughHeight: height, observedTipBlockHash: blockHash, observedHeadHeight: height, confirmationDepth: 0 });
         const tx = { type: "recordAuthenticatedJAuthority", data: evidence };

@@ -121,7 +121,7 @@ describe(seedTag("entity-txs-3: entityCommand codec and hashes (og command/comma
     // a protocol or individual tx inside a collective action is og ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN
     const chat: EntityTx = { type: "chat", data: { from: aliceAddr, message: "x" } };
     expect(entityTransactionAction([chat])).toEqual({ ok: false, error: { _tag: "entity_invariant", reason: "ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:chat" } });
-    expect(() => buildEntityTransactionProposalAction([chat as never])).toThrow("ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:chat");
+    expect(() => buildEntityTransactionProposalAction([chat])).toThrow("ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:chat");
   });
 });
 
@@ -174,7 +174,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
         const d = rw.value.draft;
         expect(bytes(d.state.committed["proposals"] ?? new Map())).toBe(bytes(ogOut.state.proposals));
         expect(bytes(d.state.committed["entityCommandNonces"] ?? null)).toBe(bytes(ogOut.state.entityCommandNonces ?? null));
-        expect(d.events ?? []).toEqual(readEntityFrameEvents(ogOut.state) as never);
+        expect(d.events ?? []).toEqual(readEntityFrameEvents(ogOut.state));
         if ((d.events ?? []).length > 0 && txs[0]?.type !== "chat") executed++;
         if (d.state.committed["profile"] !== undefined) expect(d.state.committed["profile"]).toEqual(ogOut.state.profile);
         history.push(command);
@@ -218,9 +218,9 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     expect(p.draft.state.committed["profile"]).toMatchObject({ name: "Solo" });
     const ogOut = ogApplyCommand(ogState(r.state, Number(NOW)), wire(authored[0] as EntityTx).data);
     if ("error" in ogOut) throw new Error(ogOut.message);
-    handleChatMessageEntityTx(ogOut.state, { type: "chatMessage", data: { message: "raw", timestamp: 2 } } as never, true);
+    handleChatMessageEntityTx(ogOut.state, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }, true);
     const ogEvents = readEntityFrameEvents(ogOut.state);
-    expect(p.frame.events).toEqual(ogEvents as never);
+    expect(p.frame.events).toEqual(ogEvents);
     expect(bytes(p.draft.state.committed["entityCommandNonces"])).toBe(bytes(ogOut.state.entityCommandNonces));
     expect<string>(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), p.frame.txs.map(wire), ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
   });
@@ -242,15 +242,15 @@ describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in t
     const opened = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
     const tok = unwrap(tokenId("1"));
     const cases: readonly [EntityTx, (s: any) => any][] = [
-      [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: tok, amount: 55n } }, (s) => handleExtendCreditEntityTx(s, { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 55n } } as never, true)],
-      [{ type: "lendingBorrow", data: { requestId: "borrow-00000000000000a1", hubEntityId: BOB, tokenId: tok, amount: 9n, termId: "1d" } }, (s) => handleLendingBorrowEntityTx(s, { type: "lendingBorrow", data: { requestId: "borrow-00000000000000a1", hubEntityId: BOB, tokenId: 1, amount: 9n, termId: "1d" } } as never, true)],
-      [{ type: "lendingClosePosition", data: { hubEntityId: BOB, positionId: "lend-00000000000000c3" } }, (s) => handleLendingClosePositionEntityTx(s, { type: "lendingClosePosition", data: { hubEntityId: BOB, positionId: "lend-00000000000000c3" } } as never, true)],
+      [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: tok, amount: 55n } }, (s) => handleExtendCreditEntityTx(s, { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 55n } }, true)],
+      [{ type: "lendingBorrow", data: { requestId: "borrow-00000000000000a1", hubEntityId: BOB, tokenId: tok, amount: 9n, termId: "1d" } }, (s) => handleLendingBorrowEntityTx(s, { type: "lendingBorrow", data: { requestId: "borrow-00000000000000a1", hubEntityId: BOB, tokenId: 1, amount: 9n, termId: "1d" } }, true)],
+      [{ type: "lendingClosePosition", data: { hubEntityId: BOB, positionId: "lend-00000000000000c3" } }, (s) => handleLendingClosePositionEntityTx(s, { type: "lendingClosePosition", data: { hubEntityId: BOB, positionId: "lend-00000000000000c3" } }, true)],
     ];
     for (const [tx, ogRun] of cases) {
       const d = unwrap(foldTxs(opened.state, opened.accountReplicas, [tx], { verify: hankoVerify, timestamp: NOW + 1n })).draft;
       const ogS: any = { entityId: a.state.id, config: ogConfig(a.state), accounts: new Map([[BOB, { state: { deltas: new Map([[1, {}]]) } }]]) };
       ogRun(ogS);
-      expect(d.events).toEqual(readEntityFrameEvents(ogS) as never);
+      expect(d.events).toEqual(readEntityFrameEvents(ogS));
     }
   });
 });
@@ -258,7 +258,7 @@ describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in t
 // ---- H7-b shadow rebalance policy, setHubConfig, setRebalancePolicy (og lifecycle/open-account.ts, lifecycle/admin.ts, request-collateral.ts) ----
 const openTx = (extra: Record<string, unknown> = {}, target: EntityId = BOB): EntityTx =>
   ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...extra } }) as EntityTx;
-const ogPolicyRoot = (entries: readonly (readonly [number, unknown])[]): string => PersistentAccountStateMap.fromEntries("rebalanceShadowPolicy", entries as never).rootHash();
+const ogPolicyRoot = (entries: readonly (readonly [number, unknown])[]): string => PersistentAccountStateMap.fromEntries("rebalanceShadowPolicy", entries).rootHash();
 const ogThrows = <T>(f: () => T): { ok: true; value: T } | { ok: false; reason: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, reason: (e as Error).message }; } };
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
 
@@ -324,7 +324,7 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
       const d = unwrap(rw).draft;
       expect<unknown>(d.state.committed["hubRebalanceConfig"]).toEqual(og.value.newState.hubRebalanceConfig);
       expect((d.state.committed["profile"] as { isHub?: boolean }).isHub).toBe(true);
-      expect(d.events).toEqual(readEntityFrameEvents(og.value.newState) as never);
+      expect(d.events).toEqual(readEntityFrameEvents(og.value.newState));
       const queued = [...d.accountReplicas].sort(([x], [y]) => (x < y ? -1 : 1)).flatMap(([peer, c]) => c.mempool.slice(replicas.get(peer)?.mempool.length ?? 0).map((t) => ({ accountId: peer, tx: t })));
       expect(queued.map(({ accountId, tx }) => ({ accountId, tx: { type: tx.type, data: { ...(tx as any), type: undefined, tokenId: Number((tx as any).tokenId) } } })))
         .toEqual((og.value.accountTxs ?? []).map(({ accountId, tx }: any) => ({ accountId, tx: { type: tx.type, data: { ...tx.data, type: undefined } } })));
@@ -354,9 +354,9 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
       const tx: EntityTx = { type: "setRebalancePolicy", data: { counterpartyEntityId: BOB, tokenId: k, ...policy } };
       const rw = foldTxs(opened.state, new Map([[BOB, child]]), [tx], { verify: hankoVerify, timestamp: NOW });
       const ogAcc: any = {
-        state: { leftEntity: base.state.account.id.left, rightEntity: base.state.account.id.right, deltas: PersistentAccountStateMap.fromEntries("deltas", [...deltas].map(([t, d]) => [Number(t), { ...d, tokenId: Number(t), leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }]) as never),
-          requestedRebalance: PersistentAccountStateMap.fromEntries("requestedRebalance", [...body.requested].map(([t, v]) => [Number(t), v]) as never), rebalanceFeePolicies: PersistentAccountStateMap.fromEntries("rebalanceFeePolicies", [...body.feePolicies].map(([t, v]) => [Number(t), v]) as never) },
-        shadow: { rebalance: { policy: PersistentAccountStateMap.fromEntries("rebalanceShadowPolicy", [...(base.rebalancePolicy ?? new Map())] as never), submittedAtByToken: PersistentAccountStateMap.empty("rebalanceShadowSubmitted") } }, pendingWithdrawals: PersistentAccountStateMap.empty("pendingWithdrawals"), proofHeader: { fromEntity: a.state.id, toEntity: BOB, nextProofNonce: 1 }, currentHeight: 0, status: "active",
+        state: { leftEntity: base.state.account.id.left, rightEntity: base.state.account.id.right, deltas: PersistentAccountStateMap.fromEntries("deltas", [...deltas].map(([t, d]) => [Number(t), { ...d, tokenId: Number(t), leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }])),
+          requestedRebalance: PersistentAccountStateMap.fromEntries("requestedRebalance", [...body.requested].map(([t, v]) => [Number(t), v])), rebalanceFeePolicies: PersistentAccountStateMap.fromEntries("rebalanceFeePolicies", [...body.feePolicies].map(([t, v]) => [Number(t), v])) },
+        shadow: { rebalance: { policy: PersistentAccountStateMap.fromEntries("rebalanceShadowPolicy", [...(base.rebalancePolicy ?? new Map())]), submittedAtByToken: PersistentAccountStateMap.empty("rebalanceShadowSubmitted") } }, pendingWithdrawals: PersistentAccountStateMap.empty("pendingWithdrawals"), proofHeader: { fromEntity: a.state.id, toEntity: BOB, nextProofNonce: 1 }, currentHeight: 0, status: "active",
         mempool: mempool.map((m: any) => ({ type: m.type, data: { ...m, tokenId: Number(m.tokenId) } })), ...(pending ? { pendingFrame: {} } : {}),
       };
       // og writes Accounts only through the frame's candidate map (getEntityAccountForWrite)
@@ -407,8 +407,8 @@ describe(seedTag("entity-txs-3: J7 dispute J events reach the Account (og j-even
   });
   const lower = (s: string): string => s.toLowerCase();
   test("MATCH: 120 random DisputeStarted / DisputeFinalized events: the account resolution, the frozen proof-body check and the resulting Account finality equal og's", () => {
-    const host0 = unwrap(genesisHost(ALICE, genesisAB()) as any) as any;
-    const proof: any = unwrap(localProof(unwrap(committedView(host0.account.state))) as any);
+    const host0 = unwrap(genesisHost(ALICE, genesisAB()));
+    const proof: any = unwrap(localProof(unwrap(committedView(host0.account.state))));
     const L = BigInt(TERMS.disputeConfig.leftResponseSeconds), R = BigInt(TERMS.disputeConfig.rightResponseSeconds);
     let started = 0, finalized = 0;
     for (let i = 0; i < 120; i++) {
@@ -428,12 +428,12 @@ describe(seedTag("entity-txs-3: J7 dispute J events reach the Account (og j-even
           const acc = ogAccount(jNonce0);
           const input: any = createAccountDisputeStartedInput(acc.state, lower(ALICE), { kind: "dispute_started", starterEntityId: lower(sender), initialProofbodyHash: bodyHash, initialNonce: Number(nonce), initialProposerIsLeft: event.proposerIsLeft,
             disputeTimeout: Number(event.disputeTimeout), disputeStartTimestamp: Number(t0), leftResponseSeconds: Number(L), rightResponseSeconds: Number(R), jNonce: Number(nonce), starterInitialArguments: "0x", starterCounterArguments: "0x",
-            starterCounterProofCommitment: ZERO_WORD, observedBlockNumber: 7, batchNonce: event.batchNonce } as any);
+            starterCounterProofCommitment: ZERO_WORD, observedBlockNumber: 7, batchNonce: event.batchNonce });
           applyAccountDisputeStarted(acc, input.finality);
           return { input, acc };
         });
         if (!og.ok) { expect(rw.ok).toBe(false); continue; }
-        const after: any = unwrap(rw as any);
+        const after: any = unwrap(rw);
         if (og.value === undefined) { expect(after.state.account).toBe(host.account); continue; }
         expect(after.state.account._tag).toBe("disputed");
         expect(after.state.account.active).toEqual(og.value.acc.activeDispute);
@@ -454,7 +454,7 @@ describe(seedTag("entity-txs-3: J7 dispute J events reach the Account (og j-even
           return { input, acc };
         });
         if (!og.ok) { expect(rw.ok).toBe(false); continue; }
-        const after: any = unwrap(rw as any);
+        const after: any = unwrap(rw);
         if (og.value === undefined) { expect(after.state.account).toBe(host.account); continue; }
         expect([after.state.account._tag, after.state.account.state.jNonce, after.state.account.dispute.nextProofNonce]).toEqual([og.value.acc.status, og.value.acc.state.jNonce, og.value.acc.proofHeader.nextProofNonce]);
         finalized++;
@@ -474,7 +474,7 @@ describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/hand
     shadow: { rebalance: { policy: PA("rebalanceShadowPolicy"), submittedAtByToken: PA("rebalanceShadowSubmitted") } }, ...(disputePrepare === undefined ? {} : { disputePrepare }),
   });
   const lowerId = (s: string): string => s.toLowerCase();
-  const ogEntity = (a: EntityState, ts: number, account?: any): any => ({ entityId: a.id, timestamp: ts, config: ogConfig(a), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(account === undefined ? [] : [[BOB, account]], a.id, () => ZERO_WORD as never)) });
+  const ogEntity = (a: EntityState, ts: number, account?: any): any => ({ entityId: a.id, timestamp: ts, config: ogConfig(a), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(account === undefined ? [] : [[BOB, account]], a.id, () => ZERO_WORD)) });
   const run = async (og: () => Promise<any>): Promise<{ ok: true; state: any } | { ok: false; reason: string }> => { try { return { ok: true, state: (await og()).newState }; } catch (e) { return { ok: false, reason: String((e as Error).message) }; } };
   test("MATCH: 60 random prepare / start calls on missing, open, preparing (cooldown) and disputed Accounts: og's status events, disputePrepare leaf, jBatchState and Account status", async () => {
     const a = lazyEntity([[aliceAddr, 1n]], 1n);
@@ -496,7 +496,7 @@ describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/hand
       const og = await run(() => (tx.type === "prepareDispute" ? handlePrepareDispute(ogS, wire(tx) as never, env, [], true) : handleDisputeStart(ogS, wire(tx) as never, env, [], true)));
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft;
-      expect(d.events).toEqual(readEntityFrameEvents(og.state) as never);
+      expect(d.events).toEqual(readEntityFrameEvents(og.state));
       expect(d.state.committed["jBatchState"]).toEqual(og.state.jBatchState);
       if ((d.events ?? []).some((e) => e.message.startsWith("❌ Missing counterparty dispute hanko"))) missingHanko++;
       const ogAfter = og.state.accounts.get(BOB), after = d.accountReplicas.get(BOB);
@@ -542,7 +542,7 @@ describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/hand
       const og = await run(() => handlePrepareDispute(ogS, wire(tx) as never, env, [], true));
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft;
-      expect(d.events).toEqual(readEntityFrameEvents(og.state) as never);
+      expect(d.events).toEqual(readEntityFrameEvents(og.state));
       const removed = (d.events ?? []).find((e) => e.message.startsWith("⚔️ Dispute removed"));
       if (removed === undefined) untouched++; else removedTotal += Number(removed.message.split(" ")[3]);
       if (!withExt) { expect(d.state.orderbookExt).toBeUndefined(); continue; }

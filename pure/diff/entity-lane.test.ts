@@ -225,7 +225,7 @@ const viewOf = (f: Fixture): CrossEntityView => {
 };
 const ogCollection = (m: ReadonlyMap<string, CrossRoute> | undefined): unknown => {
   if (m === undefined) return undefined;
-  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
+  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute) as Map<string, unknown>;
   for (const [k, v] of m) c.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(v as never));
   return c;
 };
@@ -440,7 +440,7 @@ describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/out
     expect(runtimeOutputAuthError(bob0.state, outTx.data)).toBe(null);
     const ogB = ogSetup.handlePrepareCrossJurisdictionSwapEntityTx(ogEnvAt(ta), ogBob0, outTx.data.entityTxs[0] as never, MUT);
     expect(stableJson(entriesOf(replicaOf(a.runtime, BOB).state.crossJurisdictionSwaps))).toBe(stableJson(entriesOf(ogB.newState.crossJurisdictionSwaps)));
-    expect(stableJson(wakesOf(a.outbox))).toBe(stableJson(materializeCommittedEntityOutputs(ogB.outputs as never, BOB, bobAddr.toLowerCase(), true)));
+    expect(stableJson(wakesOf(a.outbox))).toBe(stableJson(materializeCommittedEntityOutputs(ogB.outputs, BOB, bobAddr.toLowerCase(), true)));
     rt = a.runtime;
 
     // 2. The wake, one Entity at a time (applyEntityInput): og appends the proposer's materialization at admission; the frame emits both hubs' register commands
@@ -450,7 +450,7 @@ describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/out
     const ogBob1 = ogEntityState(bob1, tc), added = appendDefaultProposerCrossJMaterializations(ogEnvAt(tc), { entityId: BOB, signerId: bobAddr.toLowerCase(), state: ogBob1, mempool: [] } as never, []);
     expect(added.map((t) => t.type)).toEqual(["materializeCrossJurisdictionSwap"]);
     const ogC = ogSetup.handleMaterializeCrossJurisdictionSwapEntityTx(ogEnvAt(tc), ogBob1, added[0] as never, MUT);
-    expect(stableJson(runtimeOutputsOf(c.outputs))).toBe(stableJson(materializeCommittedEntityOutputs(ogC.outputs as never, BOB, bobAddr.toLowerCase(), true)));
+    expect(stableJson(runtimeOutputsOf(c.outputs))).toBe(stableJson(materializeCommittedEntityOutputs(ogC.outputs, BOB, bobAddr.toLowerCase(), true)));
     expect(stableJson(entriesOf(c.replica.state.crossJurisdictionSwaps))).toBe(stableJson(entriesOf(ogC.newState.crossJurisdictionSwaps)));
 
     // 3. BOB's own register command: authorized as the source hub's self edge and registered. A registration is a cross-j setup phase, so og

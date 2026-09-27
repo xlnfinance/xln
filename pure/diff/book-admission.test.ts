@@ -175,7 +175,7 @@ describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountI
       if (og !== undefined) {
         refused++;
         expect(rw.ok).toBe(false);
-        if (!rw.ok) expect(rw.error).toEqual({ _tag: "entity_invariant", reason: og } as never);
+        if (!rw.ok) expect(rw.error).toEqual({ _tag: "entity_invariant", reason: og });
       } else {
         accepted++;
         expect(rw.ok).toBe(true);
@@ -223,7 +223,7 @@ describe(seedTag("book-admission: orderbookExt state, init and root projection")
       if (og instanceof Error) {
         kinds.add("halt");
         expect([i, og.message, rw.ok]).toEqual([i, og.message, false]);
-        if (!rw.ok) expect([i, rw.error]).toEqual([i, { _tag: "entity_invariant", reason: og.message } as never]);
+        if (!rw.ok) expect([i, rw.error]).toEqual([i, { _tag: "entity_invariant", reason: og.message }]);
         continue;
       }
       expect([i, rw.ok]).toEqual([i, true]);
@@ -231,12 +231,12 @@ describe(seedTag("book-admission: orderbookExt state, init and root projection")
       const ext = rw.value.replica.state.orderbookExt;
       if (og.newState.orderbookExt === undefined) { kinds.add("noop"); expect(ext).toBeUndefined(); continue; }
       kinds.add("init");
-      expect(ext?.hubProfile).toEqual(og.newState.orderbookExt.hubProfile as never);
+      expect(ext?.hubProfile).toEqual(og.newState.orderbookExt.hubProfile);
       expect([ext?.books.size, ext?.pairDimensions.size, ext?.referrals.size]).toEqual([0, 0, 0]);
       // a second init is a no-op on both sides
       const again = unwrap(applyEntityInput(rw.value.replica, { kind: "txs", timestamp: NOW + 2n, txs: [{ type: "initOrderbookExt", data: initData() } as EntityTx] }, ctx));
       expect(again.replica.state.orderbookExt).toBe(ext);
-      expect(handleInitOrderbookExtEntityTx(og.newState as never, { type: "initOrderbookExt", data: initData() } as never).newState).toBe(og.newState as never);
+      expect(handleInitOrderbookExtEntityTx(og.newState, { type: "initOrderbookExt", data: initData() }).newState).toBe(og.newState);
     }
     expect([...kinds].sort()).toEqual(["halt", "init", "noop"]);
   });

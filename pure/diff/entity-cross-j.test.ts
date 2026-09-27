@@ -282,7 +282,7 @@ describe(seedTag("entity-cross-j: Entity htlcPayment origination (og payment-adm
       const tampered: PreparedOriginated = t === 1 ? { ...o, senderLockAmount: o.senderLockAmount + 1n, totalFee: o.totalFee + 1n } : t === 2 ? { ...o, timelock: o.timelock - 1n } : t === 3 ? { ...o, revealBeforeHeight: o.revealBeforeHeight + 3 }
         : t === 4 ? { ...o, description: "other" } : t === 5 ? { ...o, hashlock: hex(r, 32) } : t === 6 ? { ...o, txHash: hex(r, 32) } : o;
       const frameCtx = { version: 1, entries: [], originated: [tampered] };
-      same(ogTry(() => { validateHtlcPreparedInfraContext(frameCtx); return 1; }), preparedOriginOf(tampered as never) === null ? { ok: false } : { ok: true, value: 1 }, `shape${i}`);
+      same(ogTry(() => { validateHtlcPreparedInfraContext(frameCtx); return 1; }), preparedOriginOf(tampered) === null ? { ok: false } : { ok: true, value: 1 }, `shape${i}`);
       same(ogTry(() => ogAdmission.assertOriginatedHtlcPayments({ state: ogStateOf(alice, ts) as never, proposalTxs: [tx], profiles: profiles as never, height: 1, originated: [tampered] as never })),
         assertOriginated(view, { ...infra, originated: [tampered] }, [tx]), `assert${i}`);
       const status = pick(r, [undefined, undefined, "disputed"]);
@@ -298,7 +298,7 @@ describe(seedTag("entity-cross-j: Entity htlcPayment origination (og payment-adm
     const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, BOB, CAROL], deliveryMode: "instant", description: "invoice 7" } } as never, secret) as unknown as EntityTx;
     const txHash = ogAdmission.hashRawHtlcPaymentTx(tx as never);
     const ctx = { ...verifiers, htlcInfra: (id: EntityId) => (id === ALICE ? { profiles, secretFor: (h: string) => (h === txHash ? secret : undefined), online: () => true } : undefined) };
-    const step = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], BigInt(ts))] }, withKeys(ctx) as never));
+    const step = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], BigInt(ts))] }, withKeys(ctx)));
     expect(step.rejected.length).toBe(0);
     const after = replicaOf(step.runtime, ALICE);
     const og = await ogAdmission.materializeOriginatedHtlcPayments({ state: ogStateOf(alice, ts) as never, proposalTxs: [tx as never], profiles: profiles as never, height: 1, resolveRoute: async () => [] });
@@ -315,7 +315,7 @@ describe(seedTag("entity-cross-j: Entity htlcPayment origination (og payment-adm
     // the committed Entity frame carries exactly og's prepared origin; replaying the same input reproduces the same outbox
     const committed = [...step.runtime.entities.values()].length;
     expect(committed).toBe(3);
-    const replayed = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], BigInt(ts))] }, withKeys(ctx) as never));
+    const replayed = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], BigInt(ts))] }, withKeys(ctx)));
     expect(stableJson(replayed.outbox)).toBe(stableJson(step.outbox));
   });
 });
@@ -331,7 +331,7 @@ describe(seedTag("entity-cross-j: inbound HTLC (og materialize-context.ts + comm
     profile(ALICE, []), profile(BOB, [{ counterpartyId: ALICE, domain: JUR, tokenCapacities: caps(1000n, 0n) }, { counterpartyId: CAROL, domain: JUR, tokenCapacities: caps(0n, 1000n) }], { routingFeePPM: 5000, baseFee: 1n }), profile(CAROL, []),
   ];
   const secret = "0x" + "42".repeat(32);
-  const paymentTx = (amount = 100n) => withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount, maxSenderDebit: 200n, route: [ALICE, BOB, CAROL], deliveryMode: "instant", description: "invoice 9" } } as never, secret) as unknown as EntityTx;
+  const paymentTx = (amount = 100n) => withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount, maxSenderDebit: 200n, route: [ALICE, BOB, CAROL], deliveryMode: "instant", description: "invoice 9" } }, secret) as unknown as EntityTx;
   const infraFor = (tx: EntityTx, online: (id: string) => boolean = () => true) => {
     const txHash = ogAdmission.hashRawHtlcPaymentTx(tx as never);
     return { ...verifiers, htlcInfra: (id: EntityId) => ({ profiles: profiles(), online, encryptionPrivateKey: ENTITY_KEYS.get(id)!.priv, ...(id === ALICE ? { secretFor: (h: string) => (h === txHash ? secret : undefined) } : {}) }) };
@@ -383,10 +383,10 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
 
   test("MATCH: materializeHtlcPreparedInfraContext entries on 240 mutated inbound locks (AEAD, onion, next hop, liveness, capacity, fee policy, deadlines, keys, duplicates)", async () => {
     const secret = "0x" + "24".repeat(32);
-    const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, BOB, CAROL], deliveryMode: "instant" } } as never, secret) as unknown as EntityTx;
+    const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, BOB, CAROL], deliveryMode: "instant" } }, secret) as unknown as EntityTx;
     const txHash = ogAdmission.hashRawHtlcPaymentTx(tx as never);
     const ctx = { ...verifiers, htlcInfra: (id: EntityId) => (id === ALICE ? { profiles: profiles(), secretFor: (h: string) => (h === txHash ? secret : undefined), online: () => true } : undefined) };
-    const base = network(), step = unwrap(applyRuntime(base, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], NOW + 1000n)] }, withKeys(ctx) as never));
+    const base = network(), step = unwrap(applyRuntime(base, { runtimeTxs: [], entityInputs: [inputOf(ALICE, [tx], NOW + 1000n)] }, withKeys(ctx)));
     const out = step.outbox.find((o) => "tx" in o && o.to === BOB && o.tx.data.kind === "ack_frame") as { tx: { data: any } };
     const msg = out.tx.data, bob = replicaOf(step.runtime, BOB), lock0 = msg.frame.txs.find((t: any) => t.type === "htlc_lock");
     expect(lock0?.envelope).toBeDefined();
@@ -411,7 +411,7 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
       const priv = k === 12 ? ENTITY_KEYS.get(CAROL)!.priv : ENTITY_KEYS.get(BOB)!.priv;
       const rwTx = { type: "accountInput", data: m } as EntityTx, txs = k === 13 ? [rwTx, rwTx] : [rwTx];
       const committed = { ...bob.state.committed, ...(jHeight > 0 ? { lastFinalizedJHeight: jHeight } : {}), ...(hub === undefined ? {} : { hubRebalanceConfig: hub as unknown as Binary }) };
-      const rw = inboundHtlcEntries({ state: { ...bob.state, committed }, replicas, timestamp: ts, publicKey: ENTITY_KEYS.get(BOB)!.pub, privateKey: priv, online: up } as never, txs);
+      const rw = inboundHtlcEntries({ state: { ...bob.state, committed }, replicas, timestamp: ts, publicKey: ENTITY_KEYS.get(BOB)!.pub, privateKey: priv, online: up }, txs);
       const child = bob.accountReplicas.get(ALICE)!;
       const ogTx = { type: "accountInput", data: { kind: "ack_frame", fromEntityId: m.fromEntityId, toEntityId: m.toEntityId, domain: m.domain, proposal: { frame: { height: Number(frame.height), stateHash: frame.stateHash, timestamp: Number(frame.timestamp), accountTxs: frame.txs.map((t: any) => (t.type === "htlc_lock" ? ogAccountTx(t) : unwrap(wireTx(t, replicaId(child), isLeft(ALICE, replicaId(child)))))) } } } };
       const ogState = {
@@ -468,11 +468,11 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
               : { kind: "reject", reason: pick(r, ["decrypt_failed", "next_hop_offline", "fee_below_policy"]) };
           entries.push({ binding: { fromEntityId: peer, toEntityId: BOB, domain: { chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress.toLowerCase() }, accountFrameHash: stateHash, accountHeight: height, envelopeHash: htlcEnvelopeHash(envelope)!, hashlock: locks[j]!, tokenId: 1, amount: bindingAmount, timelock: lock.timelock, revealBeforeHeight: Number(lock.revealBeforeHeight) }, outcome } as PreparedHtlcEntry);
         }
-        return { frame: { height: BigInt(height), stateHash, txs: txs as never }, viaNewFrame };
+        return { frame: { height: BigInt(height), stateHash, txs: txs }, viaNewFrame };
       };
       const frames = [...(r() < 0.5 ? [frameOf(false, 3)] : []), ...(r() < 0.75 ? [frameOf(true, 4)] : [])];
       const received = frames.some((f) => f.viaNewFrame) ? toBob(peer) : undefined;
-      const rw = paybookFollowups({ paybook: { entries: entries0, feesEarned: fees0 }, queue: [] }, peer, frames, received as never, entries, ts, BOB);
+      const rw = paybookFollowups({ paybook: { entries: entries0, feesEarned: fees0 }, queue: [] }, peer, frames, received, entries, ts, BOB);
       // og committed-input.ts driver: per committed frame the frame followups then each tx's lock followup; then timeouts; then the peer frame's secrets
       const og = await ogTryAsync(async () => {
         const program = createBookIntentProgram(), slot = program.openSlot();
@@ -535,7 +535,7 @@ describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPre
     rt = quiet(rt, [hubInput([open(ALICE, 1000n), open(CAROL)], NOW)], hubOnly);
     rt = quiet(rt, [inputOf(CAROL, [{ type: "extendCredit", data: { counterpartyEntityId: HUB, tokenId: unwrap(tokenId("1")), amount: 1000n } }], NOW + 100n)], hubOnly);
     const secret = "0x" + "31".repeat(32);
-    const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, HUB, CAROL], deliveryMode: "instant" } } as never, secret) as unknown as EntityTx;
+    const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, HUB, CAROL], deliveryMode: "instant" } }, secret) as unknown as EntityTx;
     const txHash = ogAdmission.hashRawHtlcPaymentTx(tx as never);
     const hubProfile = { ...(profile(BOB, [{ counterpartyId: ALICE, domain: JUR, tokenCapacities: caps(1000n, 0n) }, { counterpartyId: CAROL, domain: JUR, tokenCapacities: caps(0n, 1000n) }], { routingFeePPM: 5000, baseFee: 1n }) as object), entityId: HUB, entityEncryptionPublicKey: hubKey.pub } as unknown as Binary;
     const profiles: Binary[] = [profile(ALICE, []), hubProfile, profile(CAROL, [])];

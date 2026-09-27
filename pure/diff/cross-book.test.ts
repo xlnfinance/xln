@@ -165,7 +165,7 @@ describe(seedTag("cross-book: market offer and instructions"), () => {
       same(`${i}:market`, og, rw);
       seen.add(!og.ok ? "halt" : og.value === null ? "null" : "offer");
       if (!og.ok || og.value === null || !rw.ok || rw.value === null) continue;
-      const meta = rw.value, ogMeta = og.value as never;
+      const meta = rw.value, ogMeta = og.value;
       const fill = { filledLots: BigInt(int(r, 3) === 0 ? 0 : 1 + int(r, 5000)), weightedCost: BigInt(int(r, 1e9)), ...(int(r, 3) === 0 ? { cancelRemainder: true } : {}) };
       same(`${i}:exec`, ogRun(() => ogOB.crossJurisdictionExecutionAmounts(ogMeta, fill)), rwRun(crossExecutionAmounts(meta, fill)));
       const ogFill = ogRun(() => ogOB.buildCrossJurisdictionFillInstruction(U1, route.orderId, `${U1}:${route.orderId}`, ogMeta, fill));
@@ -239,9 +239,9 @@ describe(seedTag("cross-book: hub cross matcher"), () => {
       const rwBooks = new Map<string, Book>();
       let placedOk = true;
       for (const row of rows) {
-        const meta = ogRun(() => buildCrossMarketOfferFromBookOrder({ ...ogHub(), accounts: ogAccounts() } as never, row.orderId));
+        const meta = ogRun(() => buildCrossMarketOfferFromBookOrder({ ...ogHub(), accounts: ogAccounts() }, row.orderId));
         if (!meta.ok || meta.value === null) continue;
-        const mv = meta.value as any, qty = BigInt(mv.baseAmount) / lotOf(DEC[mv.baseTokenId]!) + (row.skewQty ? 1n : 0n);
+        const mv = meta.value, qty = BigInt(mv.baseAmount) / lotOf(DEC[mv.baseTokenId]!) + (row.skewQty ? 1n : 0n);
         if (qty <= 0n) continue;
         const cmd = { kind: 0 as const, ownerId: mv.makerId, orderId: row.orderId, side: mv.side, tif: 0 as const, postOnly: false, priceTicks: mv.priceTicks, qtyLots: qty };
         const params = { bucketWidthTicks: 10n, maxOrders: 10_000, stpPolicy: 1 as const };
@@ -260,13 +260,13 @@ describe(seedTag("cross-book: hub cross matcher"), () => {
       const requests = LOCAL.flatMap((u) => [...offers.get(u)!.keys()].filter(() => int(r, 4) === 0).map((offerId) => ({ offerId, accountId: u })));
       const ogCancel = ogRun(() => ogProcessCancels(ogHub(), requests)), rwCancel = rwRun(processOrderbookCancels(hub, requests));
       same(`${s}:cancel`, ogCancel.ok ? { ok: true, value: { txs: ogCancel.value.accountTxs, fills: ogCancel.value.crossJurisdictionFills, books: ogCancel.value.bookUpdates.map((b: any) => b.pairId) } } : ogCancel,
-        rwCancel.ok ? { ok: true, value: { txs: rwCancel.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx as never) })), fills: rwCancel.value.crossFills, books: [...rwCancel.value.books.keys()] } } : rwCancel);
+        rwCancel.ok ? { ok: true, value: { txs: rwCancel.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) })), fills: rwCancel.value.crossFills, books: [...rwCancel.value.books.keys()] } } : rwCancel);
       if (ogCancel.ok && ogCancel.value.crossJurisdictionFills.length > 0) bump("cancel-request");
       // the cross pass
       const ogOffers = incoming.map((o) => markWorkingOrderbookOffer(normalizeSwapOfferForOrderbook({ ...o, accountOutputVerified: true } as never, o.accountId)));
       const og = ogRun(() => ogProcessSwaps(ogHub(), ogOffers)), rw = rwRun(processOrderbookSwaps(hub, incoming));
       same(`${s}:match`, og.ok ? { ok: true, value: { txs: og.value.accountTxs, fills: og.value.crossJurisdictionFills, books: og.value.bookUpdates.map((b: any) => [b.pairId, computeBookCommitmentHash(b.book)]) } } : og,
-        rw.ok ? { ok: true, value: { txs: rw.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx as never) })), fills: rw.value.crossFills, books: [...rw.value.books].map(([p, b]) => [p, bookCommitmentHash(b)]) } } : rw);
+        rw.ok ? { ok: true, value: { txs: rw.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) })), fills: rw.value.crossFills, books: [...rw.value.books].map(([p, b]) => [p, bookCommitmentHash(b)]) } } : rw);
       if (!og.ok) { bump(`halt:${og.message.split(/[:=]/)[0]}`); continue; }
       for (const f of og.value.crossJurisdictionFills) bump(f.executionSourceAmount > 0n ? (f.cancelRemainder ? "fill-cancel" : "fill") : "cancel");
       if (og.value.bookUpdates.length > 0) bump("book-update");
@@ -308,7 +308,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
   const entries = (m: ReadonlyMap<string, unknown> | undefined) => (m === undefined || m.size === 0 ? null : [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
   const params = { bucketWidthTicks: 10n, maxOrders: 10_000, stpPolicy: 1 as const };
   const ogColl = (m: ReadonlyMap<string, CrossRoute>) => {
-    const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
+    const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute) as Map<string, unknown>;
     for (const [k, v] of m) c.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(v as never));
     return c;
   };
@@ -414,7 +414,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
     const r = rng(0xf111), kinds = new Map<string, number>();
     for (let i = 0; i < 500; i++) {
       const w = worldOf(r, i, H1, pick(r, ["local", "local", "remote"] as const)), route = w.route;
-      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never);
+      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route);
       if (int(r, 2) === 0) {
         // og applyCrossJurisdictionBookFillToState
         const data: CrossProgress = {
@@ -466,7 +466,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
     const r = rng(0xf2ce), kinds = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
       const w = worldOf(r, i, H1, "local"), route = w.route;
-      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never);
+      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route);
       const data: CrossProgress = {
         orderId: int(r, 20) === 0 ? "other" : route.orderId, ...(int(r, 3) === 0 ? { routeHash: int(r, 4) === 0 ? "0x" + "ee".repeat(32) : route.routeHash } : {}),
         fillSeq: pick(r, [seq, seq + 1, seq + 1, seq + 2, 0]), cumulativeFillRatio: pick(r, [cur, Math.min(65_535, cur + 1 + int(r, 20_000)), 65_535, 65_535, int(r, 65_536)]), ...(int(r, 3) === 0 ? { cancelRemainder: true } : {}),

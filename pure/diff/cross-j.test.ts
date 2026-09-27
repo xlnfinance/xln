@@ -235,7 +235,7 @@ const LEFT = W("11"), RIGHT = W("22");
 const DEP = `0x${"ab".repeat(20)}`, HERE = `stack:1:${DEP}`, THERE = `stack:7:0x${"cd".repeat(20)}`;
 const unwrapR = <T,>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => { if (!r.ok) throw new Error(`unwrap: ${stableJson(r.error)}`); return r.value; };
 const openAccount = (credit: bigint): AccountBody => {
-  const terms = unwrapR(accountTerms({ domain: { chainId: 1, depositoryAddress: DEP }, watchSeed: W("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } }) as never);
+  const terms = unwrapR(accountTerms({ domain: { chainId: 1, depositoryAddress: DEP }, watchSeed: W("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } }));
   let body = genesisAccountBody(genesisAccount(unwrapR(accountId(unwrapR(entityId(LEFT) as never), unwrapR(entityId(RIGHT) as never)) as never)), terms as never);
   for (const tokenId of ["1", "2", "3"]) for (const byLeft of [true, false])
     body = unwrapR(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit } as never, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n }) as never as { ok: true; value: { state: AccountBody } }).state;
@@ -280,7 +280,7 @@ const lockstep = (start: AccountBody) => {
         default: return handleSwapCancelRequest(acc, ogTx, byLeft, jh);
       }
     });
-    const r = applyAccountBody(body, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n }) as any;
+    const r = applyAccountBody(body, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n });
     if (r.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${r.ok ? "ok" : stableJson(r.error)} tx=${stableJson(tx).slice(0, 400)}`);
     if (r.ok) { body = r.value.state; expect(unwrapR(committed(body) as never as { ok: true; value: { root: string } }).root).toBe(o.root!); }
     return r.ok;
@@ -456,7 +456,7 @@ describe(seedTag("cross-j: htlc_lock envelope and envelopeHash"), () => {
         const ogTx = toOg(tx);
         ogTx.data.revealBeforeHeight = 50;
         const o = await og.run((acc) => handleHtlcLock(acc, ogTx, byLeft, { committedTimestamp: 7, enforcementTimestamp: 7, enforcementJHeight: 3 }));
-        const rw = applyAccountBody(body, tx, { byLeft, nowMs: 7n, jHeight: 3n, accountHeight: 1n }) as any;
+        const rw = applyAccountBody(body, tx, { byLeft, nowMs: 7n, jHeight: 3n, accountHeight: 1n });
         expect(rw.ok).toBe(o.ok);
         if (rw.ok) { body = rw.value.state; accepted++; expect(unwrapR(committed(body) as never as { ok: true; value: { root: string } }).root).toBe(o.root!); }
       }
@@ -515,7 +515,7 @@ describe(seedTag("cross-j: Account outputs through og applyAccountTxMutation"), 
         if (tx.type === "htlc_lock") ogTx.data.revealBeforeHeight = 100;
         const effects: any[] = [];
         const o = await og.run((acc) => applyAccountTxMutation(acc, ogTx, byLeft, ts, jh, false, undefined, undefined, undefined, effects));
-        const rw = applyAccountBody(body, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n }) as any;
+        const rw = applyAccountBody(body, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n });
         if (rw.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${rw.ok ? "ok" : stableJson(rw.error)} tx=${stableJson(tx)}`);
         if (!rw.ok) continue;
         body = rw.value.state;
@@ -551,7 +551,7 @@ describe(seedTag("cross-j: submittedAtByToken shadow"), () => {
         const tx: any = { type: "rebalance_refund", requestId: r() < 0.9 ? requestId : "other", requestTokenId: "1", amount: BigInt(1 + Math.floor(r() * Number(fee))), reason: r() < 0.9 ? "manual" : "timeout" };
         const byLeft = r() < 0.85 ? !requesterIsLeft : requesterIsLeft;
         const o = await og.run((acc) => applyAccountTxMutation(acc, toOg(tx), byLeft, 9, 1, false, undefined, undefined, undefined, []));
-        const rw = applyAccountBody(body, tx, { byLeft, nowMs: 9n, jHeight: 1n, accountHeight: 3n }) as any;
+        const rw = applyAccountBody(body, tx, { byLeft, nowMs: 9n, jHeight: 1n, accountHeight: 3n });
         expect(rw.ok).toBe(o.ok);
         if (!rw.ok) continue;
         const had = body.submittedAt?.has(1) ?? false;
@@ -613,7 +613,7 @@ describe(seedTag("cross-j: pull registry settlement"), () => {
       const proofbody: any = { transformers: clauses, leftResponseSeconds: 10n, rightResponseSeconds: 20n };
       const addr = pick(r, [DT, DT, ethers.getAddress(DT), "0x1234", DT.slice(2)]);
       const expected = leg(r), targetRole = r() < 0.5;
-      const og = ogTry(() => findExactSignedProofBodyPull(proofbody, expected as never, targetRole, addr));
+      const og = ogTry(() => findExactSignedProofBodyPull(proofbody, expected, targetRole, addr));
       agree(og, findSignedProofBodyPull(proofbody, expected, targetRole, addr));
       if (og.ok && og.value !== undefined) found++;
       if (!og.ok) rejected++;
@@ -634,7 +634,7 @@ describe(seedTag("cross-j: pull registry settlement"), () => {
       const og = ogTry(() => resolveFinalizedPullFillRatio({ account: { activeDispute: active } as never, proofbody, canonicalDeltaTransformerAddress: DT, expectedPull: expected as never, targetRole, ...(record ? { record } : {}) }));
       agree(og, finalizedPullFillRatio({ active, proofbody, transformerAddress: DT, expectedPull: expected, targetRole, record }));
       const route = randomRoute(r), self = pick(r, [...ENTS]), peer = pick(r, [...ENTS]), localStack = r() < 0.1 ? undefined : pick(r, [...STACKS, STACKS[0].toUpperCase()]);
-      agree(ogTry(() => resolveFinalizedCrossJurisdictionRouteLeg({ route: route as never, self, counterparty: peer, ...(localStack ? { localStack } : {}) })), finalizedRouteLeg({ route, self, counterparty: peer, localStack }));
+      agree(ogTry(() => resolveFinalizedCrossJurisdictionRouteLeg({ route: route, self, counterparty: peer, ...(localStack ? { localStack } : {}) })), finalizedRouteLeg({ route, self, counterparty: peer, localStack }));
     }
   });
 });

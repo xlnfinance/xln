@@ -70,7 +70,7 @@ describe(seedTag("runtime-2: entity lending (ER-17, og payments/lending.ts)"), (
   test("MATCH: 400 random lendingOffer/Borrow/Repay/ClosePosition -- same accept/refuse code as og, same queued Account tx on the hub Account, same wake to validators[0]", () => {
     let accepted = 0, refused = 0;
     for (let i = 0; i < 400; i++) {
-      const tx = randomTx(), og = runOg(tx as never), rw = runRewrite(tx);
+      const tx = randomTx(), og = runOg(tx), rw = runRewrite(tx);
       if (!og.ok) {
         // og throws a plain Error: the whole input is refused (not an evict-and-retry reject disposition).
         expect(rw.ok).toBe(false);
@@ -95,7 +95,7 @@ describe(seedTag("runtime-2: entity lending (ER-17, og payments/lending.ts)"), (
   test("MATCH: a lendingOffer for a token the hub Account has not enabled is og LENDING_TOKEN_NOT_ENABLED; the missing hub is LENDING_HUB_ACCOUNT_MISSING", () => {
     const offer = (patch: Record<string, unknown>): EntityTx => ({ type: "lendingOffer", data: { positionId: `lend-${"a".repeat(16)}`, hubEntityId: BOB, tokenId: T1, amount: 5n, termId: "1d", interestBps: 50, ...patch } }) as EntityTx;
     for (const [patch, code] of [[{ tokenId: T2 }, "LENDING_TOKEN_NOT_ENABLED"], [{ hubEntityId: CAROL }, "LENDING_HUB_ACCOUNT_MISSING"], [{ interestBps: 10_001 }, "LENDING_INVALID_INTEREST_BPS"]] as const) {
-      const og = runOg(offer(patch) as never), rw = runRewrite(offer(patch));
+      const og = runOg(offer(patch)), rw = runRewrite(offer(patch));
       expect(og).toEqual({ ok: false, code });
       expect(rw.ok ? "accepted" : rw.error._tag === "lending_entity" ? rw.error.reason : rw.error._tag).toBe(code);
     }
@@ -152,7 +152,7 @@ describe(seedTag("runtime-2: og RuntimeTx capability authorization (og runtime/t
 
   test("MATCH: a locally created checkpoint barrier / adapter-command marker is admitted; a structurally equal copy from ingress is not", () => {
     const barrier = createCheckpointBarrierRuntimeTx() as unknown as RuntimeTx;
-    const command = markLocalRuntimeAdapterCommandTx({ type: "recordRuntimeAdapterCommand", data: { laneId: hex(32), sequence: 1, commandId: "cmd-0123456789abcdef", inputHash: hex(32), expiresAtMs: null } } as never) as unknown as RuntimeTx;
+    const command = markLocalRuntimeAdapterCommandTx({ type: "recordRuntimeAdapterCommand", data: { laneId: hex(32), sequence: 1, commandId: "cmd-0123456789abcdef", inputHash: hex(32), expiresAtMs: null } }) as unknown as RuntimeTx;
     for (const tx of [barrier, command]) {
       const copy = JSON.parse(JSON.stringify(tx)) as RuntimeTx;
       expect(ogThrowCode(() => assertRuntimeTxCapabilitiesAuthorized(tx as never))).toBeNull();
@@ -298,7 +298,7 @@ describe(seedTag("runtime-2: Runtime WAL commitments (og storage/hashes.ts, cano
     for (let i = 0; i < 300; i++) {
       const view = Object.fromEntries(Array.from({ length: ri(4) }, () => [pick(["infrastructure", "jReplicas", "gossip", "zeta"]), randomBinary()]));
       const components = unwrap(runtimeComponentDigests(view));
-      expect(components).toEqual(computeRuntimePostStateComponentDigests(view) as never);
+      expect(components).toEqual(computeRuntimePostStateComponentDigests(view));
       const meta = Array.from({ length: ri(4) }, () => ({ key: Uint8Array.from({ length: 1 + ri(8) }, () => ri(256)), value: Uint8Array.from({ length: ri(8) }, () => ri(256)) }));
       const metaDigest = unwrap(replicaMetaDigest(meta));
       expect(metaDigest).toBe(computeStorageReplicaMetaDigest(meta));

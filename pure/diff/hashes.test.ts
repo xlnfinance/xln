@@ -200,7 +200,7 @@ describe(seedTag("account state commitment"), () => {
 });
 
 // ---------------------------------------------------------------- events
-const DEPOSITORY = new Interface(Depository__factory.abi as any);
+const DEPOSITORY = new Interface(Depository__factory.abi);
 describe(seedTag("J event signatures vs Depository ABI (typechain from Types.sol/Depository.sol)"), () => {
   test("MATCH: HankoBatchProcessed, ReserveUpdated, DisputeStarted, DisputeFinalized topics equal the contract's", () => {
     for (const n of ["HankoBatchProcessed", "ReserveUpdated", "DisputeStarted", "DisputeFinalized"] as const) {
@@ -259,10 +259,10 @@ describe(seedTag("DisputeStarted clock validation (og j-event-payloads.ts assert
     const b = W("11");
     const MAX = BigInt(Number.MAX_SAFE_INTEGER);
     const ogAccepts = (log: { topics: readonly string[]; data: string }): boolean => {
-      const args = DEPOSITORY.parseLog(log as any)!.args.toObject();
+      const args = DEPOSITORY.parseLog(log)!.args.toObject();
       // og ingress attaches the initial ProofBody from the batch calldata; the log itself does not carry it.
       const initialProofbody = { watchSeed: args.watchSeed, leftResponseSeconds: args.leftResponseSeconds, rightResponseSeconds: args.rightResponseSeconds, offdeltas: [], tokenIds: [], transformers: [] };
-      try { return rawEventToJEvents({ name: "DisputeStarted", args: { ...args, initialProofbody }, blockNumber: 1, blockHash: W("01"), transactionHash: W("02"), logIndex: 0 } as any, b).length === 1; } catch { return false; }
+      try { return rawEventToJEvents({ name: "DisputeStarted", args: { ...args, initialProofbody }, blockNumber: 1, blockHash: W("01"), transactionHash: W("02"), logIndex: 0 }, b).length === 1; } catch { return false; }
     };
     const cases: [bigint, bigint, number, number][] = [[10n, 5n, 2, 3], [0n, 0n, 0, 0], [5n, 5n, 0, 0], [11n, 5n, 2, 3], [9n, 5n, 2, 3], [MAX, MAX - 7n, 3, 4], [MAX + 1n, MAX - 6n, 3, 4], [(1n << 256n) - 1n, 1n, 0, 0], [3n, 5n, 0, 0], [7n, 0n, 3, 4]];
     let accepted = 0;
@@ -347,9 +347,9 @@ describe(seedTag("Depository Batch ABI"), () => {
     for (const [chainId, depository] of bad) {
       expect(() => computeBatchHankoHash(BigInt(chainId), depository, "0x", 1n)).toThrow();
       expect(() => encodeBatchHash({ chainId, depository, encodedBatch: "0x", nonce: "1" })).toThrow();
-      expect(() => createDisputeProofHashWithNonce({ leftEntity: W("11"), rightEntity: W("22"), watchSeed: W("44") } as any, W("33"), { chainId, depositoryAddress: depository }, 1, true)).toThrow();
+      expect(() => createDisputeProofHashWithNonce({ leftEntity: W("11"), rightEntity: W("22"), watchSeed: W("44") }, W("33"), { chainId, depositoryAddress: depository }, 1, true)).toThrow();
       expect(() => encodeDisputeProofHash({ messageType: 1, chainId, contractAddress: depository, accountKey: computeAccountKey(W("11"), W("22")), nonce: "1", proposerIsLeft: true, proofbodyHash: W("33"), watchSeed: W("44") })).toThrow();
-      expect(() => createSettlementHashWithNonce({ leftEntity: W("11"), rightEntity: W("22") } as any, [], [], { chainId, depositoryAddress: depository }, 1)).toThrow();
+      expect(() => createSettlementHashWithNonce({ leftEntity: W("11"), rightEntity: W("22") }, [], [], { chainId, depositoryAddress: depository }, 1)).toThrow();
       expect(() => encodeCooperativeUpdateHash({ messageType: 0, chainId, contractAddress: depository, accountKey: computeAccountKey(W("11"), W("22")), nonce: "1", diffs: [], forgiveDebtsInTokenIds: [] })).toThrow();
     }
   });
@@ -387,7 +387,7 @@ describe(seedTag("dispute / cooperative-update hanko digests"), () => {
       const key = encodeAccountKey({ e1: l, e2: r }).lesserThenGreater;
       expect(key.toLowerCase()).toBe(computeAccountKey(l, r).toLowerCase());
       expect(encodeDisputeProofHash({ messageType: 1, chainId: domain.chainId, contractAddress: domain.depositoryAddress, accountKey: key, nonce: String(nonce), proposerIsLeft: prop, proofbodyHash: pbh, watchSeed: seed.toLowerCase() }))
-        .toBe(createDisputeProofHashWithNonce({ leftEntity: l, rightEntity: r, watchSeed: seed } as any, pbh, domain, nonce, prop));
+        .toBe(createDisputeProofHashWithNonce({ leftEntity: l, rightEntity: r, watchSeed: seed }, pbh, domain, nonce, prop));
     }
   });
   test("MATCH: encodeAccountKey == og computeAccountKey (lowercase packed, mixed-case input); non-bytes32 input refused by both", () => {
@@ -402,10 +402,10 @@ describe(seedTag("dispute / cooperative-update hanko digests"), () => {
       const diffs = arrOf(() => ({ tokenId: ri(100), leftDiff: pick([0n, 5n, -5n, U256, -U256]), rightDiff: pick([0n, 3n, -3n]), collateralDiff: pick([0n, 2n, -2n]), ondeltaDiff: pick([0n, -1n, 1n]) }));
       const forgive = arrOf(() => ri(50)), nonce = ri(1e6), l = W("11"), r = W("22");
       const rwText = (ds: typeof diffs) => ({ messageType: 0, chainId: domain.chainId, contractAddress: domain.depositoryAddress, accountKey: computeAccountKey(l, r), nonce: String(nonce), diffs: ds.map((d) => ({ tokenId: String(d.tokenId), leftDiff: String(d.leftDiff), rightDiff: String(d.rightDiff), collateralDiff: String(d.collateralDiff), ondeltaDiff: String(d.ondeltaDiff) })), forgiveDebtsInTokenIds: forgive.map(String) });
-      expect(encodeCooperativeUpdateHash(rwText(diffs))).toBe(createSettlementHashWithNonce({ leftEntity: l, rightEntity: r } as any, diffs, forgive, domain, nonce));
+      expect(encodeCooperativeUpdateHash(rwText(diffs))).toBe(createSettlementHashWithNonce({ leftEntity: l, rightEntity: r }, diffs, forgive, domain, nonce));
       for (const edge of [U256 + 1n, -U256 - 1n]) {
         const wide = [{ tokenId: 1, leftDiff: 0n, rightDiff: 0n, collateralDiff: 0n, ondeltaDiff: edge }];
-        expect(() => createSettlementHashWithNonce({ leftEntity: l, rightEntity: r } as any, wide, forgive, domain, nonce)).toThrow();
+        expect(() => createSettlementHashWithNonce({ leftEntity: l, rightEntity: r }, wide, forgive, domain, nonce)).toThrow();
         expect(() => encodeCooperativeUpdateHash(rwText(wide))).toThrow();
       }
     }
@@ -427,7 +427,7 @@ const KEYS = ["0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff8
 const addrOf = (k: string) => new ethers.Wallet(k).address;
 const idOf = (a: string) => ethers.zeroPadValue(a, 32).toLowerCase();
 const ogVerify = (hanko: string, digest: string, target: string, registered?: string): string => {
-  try { return verifyCanonicalHanko({ digest, hanko: hanko as any, expectedTargetEntityId: target, validateBoardAuthority: (id, bh) => registered !== undefined && id === target.toLowerCase() && bh === registered.toLowerCase() }).targetEntityId; }
+  try { return verifyCanonicalHanko({ digest, hanko: hanko, expectedTargetEntityId: target, validateBoardAuthority: (id, bh) => registered !== undefined && id === target.toLowerCase() && bh === registered.toLowerCase() }).targetEntityId; }
   catch (e) { return "REJECT"; }
 };
 const rwVerify = (hanko: string, digest: string, target: string, registered?: string): string => { const r = verifyAccountHanko(hanko, digest, target, registered); return r.ok ? r.value.entityId : "REJECT"; };
@@ -458,7 +458,7 @@ describe(seedTag("hanko"), () => {
       const packedOg = packHankoSignatures(sigs);
       expect(ethers.hexlify(packSignatures(sigs.map((b) => ({ r: b.subarray(0, 32), s: b.subarray(32, 64), v: b[64]! }))))).toBe(packedOg);
       const claims = [{ entityId: W("cc"), entityIndexes: [0], weights: [1], threshold: 1, boardChangeDelay: 0, controlChangeDelay: ri(5), dividendChangeDelay: 0 }];
-      const og = ogEncodeHankoEnvelope({ placeholders: [W("0a")], packedSignatures: packedOg, claims: claims.map((c) => ({ entityId: c.entityId, entityIndexes: c.entityIndexes.map(BigInt), weights: c.weights.map(BigInt), threshold: 1n, boardChangeDelay: 0n, controlChangeDelay: BigInt(c.controlChangeDelay), dividendChangeDelay: 0n })) as any, memberSignatures: [] });
+      const og = ogEncodeHankoEnvelope({ placeholders: [W("0a")], packedSignatures: packedOg, claims: claims.map((c) => ({ entityId: c.entityId, entityIndexes: c.entityIndexes.map(BigInt), weights: c.weights.map(BigInt), threshold: 1n, boardChangeDelay: 0n, controlChangeDelay: BigInt(c.controlChangeDelay), dividendChangeDelay: 0n })), memberSignatures: [] });
       expect(encodeHankoEnvelope({ placeholders: [W("0a")], packedSignatures: ethers.getBytes(packedOg), claims, memberSignatures: [] })).toBe(og);
     }
   });
@@ -529,7 +529,7 @@ describe(seedTag("hanko"), () => {
   test("MATCH: expected entity must be 0x+64 hex (og asHankoBytes32): decimal, short hex and padded forms are refused by both; mixed case and 0X accepted by both", () => {
     const digest = ethers.keccak256(ethers.toUtf8Bytes("lazy"));
     const a = addrOf(KEYS[0]!), lazy = lazySingleSignerEntityId(a);
-    const hanko = encodeSignedHanko({ digest, privateKeys: [ethers.getBytes(KEYS[0]!)], placeholders: [], claims: [{ entityId: lazy, entityIndexes: [0n], weights: [1n], threshold: 1n, boardChangeDelay: 0n, controlChangeDelay: 0n, dividendChangeDelay: 0n }] as any });
+    const hanko = encodeSignedHanko({ digest, privateKeys: [ethers.getBytes(KEYS[0]!)], placeholders: [], claims: [{ entityId: lazy, entityIndexes: [0n], weights: [1n], threshold: 1n, boardChangeDelay: 0n, controlChangeDelay: 0n, dividendChangeDelay: 0n }] });
     for (const target of [BigInt(lazy).toString(), `0x${BigInt(lazy).toString(16)}`.replace(/^0x0+/, "0x"), ` ${lazy}`, lazy.toUpperCase().replace(/^0X/, "0x"), lazy.replace(/^0x/, "0X"), "0x" + lazy.slice(3)]) {
       expect(rwVerify(hanko, digest, target)).toBe(ogVerify(hanko, digest, target));
     }
@@ -538,7 +538,7 @@ describe(seedTag("hanko"), () => {
   const ogLocal = (hanko: string, digest: string, registration: { encodedBoard: string; entityId: string } | null): string => {
     try {
       const board = registration === null ? undefined : ethers.keccak256(registration.encodedBoard).toLowerCase();
-      return verifyCanonicalHanko({ digest, hanko: hanko as any, ...(registration === null ? {} : { expectedTargetEntityId: registration.entityId }), validateBoardAuthority: (id, bh) => registration !== null && id === registration.entityId.toLowerCase() && bh === board }).targetEntityId;
+      return verifyCanonicalHanko({ digest, hanko: hanko, ...(registration === null ? {} : { expectedTargetEntityId: registration.entityId }), validateBoardAuthority: (id, bh) => registration !== null && id === registration.entityId.toLowerCase() && bh === board }).targetEntityId;
     } catch { return "REJECT"; }
   };
   const rwLocal = (hanko: string, digest: string, registration: { encodedBoard: string; entityId: string } | null): string => { const r = verifyHankoLocal(hanko, digest, registration); return r.ok && r.value.valid ? r.value.entityId : "REJECT"; };
@@ -679,9 +679,9 @@ describe(seedTag("entity account leaf, runtime side (H7)"), () => {
     const received: any = run(genesisAB(), offerOf(proposed, ALICE), BOB).replica;
     const acked = run(received, ackInput(received, BOB), BOB);
     const alice: any = run(proposed, acked.outputs.find((o: any) => o.kind === "ack"), ALICE).replica, bob: any = acked.replica;
-    const leafRoot = (self: any, peer: any, child: any) => unwrap(entityStateRoot({ config: CONFIG, accounts: [unwrap(installedAccount(self, peer, child) as any)] }));
+    const leafRoot = (self: any, peer: any, child: any) => unwrap(entityStateRoot({ config: CONFIG, accounts: [unwrap(installedAccount(self, peer, child))] }));
     const ogRoot = (self: string, peer: string, child: any, patch: Record<string, unknown> = {}) => {
-      const view: any = unwrap(committedView(child.state) as any), localIsLeft = self === view.leftEntity;
+      const view: any = unwrap(committedView(child.state)), localIsLeft = self === view.leftEntity;
       const ogRep: any = ogReplica(self, peer, { state: toOgState(view), currentHeight: Number(child.head.height), proofHeader: { fromEntity: self, toEntity: peer, nextProofNonce: child.dispute.nextProofNonce },
         currentFrame: { stateHash: child.head._tag === "genesis" ? "" : child.head.prevFrameHash } });
       if (child.head._tag === "installed") ogRep.counterpartyFrameHanko = localIsLeft ? child.head.certificate.right : child.head.certificate.left;
@@ -747,7 +747,7 @@ describe(seedTag("entity frame hash"), () => {
     const ctx = ENTITY_CONTEXT();
     for (const [stateRoot, authorityRoot] of [[W("AB"), W("32")], [W("31"), W("Cd")], ["0x1234", W("32")], [W("31"), "31".repeat(32)], [`0X${"31".repeat(32)}`, W("32")], [W("31"), W("32")]]) {
       let og: string; try { og = createEntityFrameHashFromStateRoot(W("22"), 1, 1, [], [], W("aa"), stateRoot!, authorityRoot!, ctx as any); } catch { og = "REJECT"; }
-      const r = entityFrameHash({ prevFrameHash: W("22"), height: 1, timestamp: 1, txs: [], events: [], entityId: W("aa"), stateRoot: stateRoot!, authorityRoot: authorityRoot!, entityContext: ctx } as any);
+      const r = entityFrameHash({ prevFrameHash: W("22"), height: 1, timestamp: 1, txs: [], events: [], entityId: W("aa"), stateRoot: stateRoot!, authorityRoot: authorityRoot!, entityContext: ctx });
       expect(r.ok ? r.value : "REJECT").toBe(og);
     }
   });
@@ -781,11 +781,11 @@ describe(seedTag("golden hashes hardcoded in pure/oracle.test.ts: does og itself
     const ogEvent = (c: bigint, o: bigint, n: number) => ({ type: "AccountSettled", data: { leftEntity: left, rightEntity: right, tokenId: 1, leftReserve: "0", rightReserve: "0", collateral: c.toString(), ondelta: o.toString(), nonce: n } });
     const e1 = canonicalJurisdictionEventsHash([ogEvent(125n, 7n, 3)] as any), e2 = canonicalJurisdictionEventsHash([ogEvent(126n, 8n, 4)] as any);
     const dom = { chainId: 31337, depositoryAddress: domain.depositoryAddress, leftEntity: left, rightEntity: right };
-    const r1 = createAccountJClaimRecord(dom as any, "left", { jHeight: 7, jBlockHash: W("33"), eventsHash: e1 } as any);
-    const r2 = createAccountJClaimRecord(dom as any, "left", { jHeight: 8, jBlockHash: W("34"), eventsHash: e2 } as any);
+    const r1 = createAccountJClaimRecord(dom, "left", { jHeight: 7, jBlockHash: W("33"), eventsHash: e1 });
+    const r2 = createAccountJClaimRecord(dom, "left", { jHeight: 8, jBlockHash: W("34"), eventsHash: e2 });
     const s1 = applyAccountJClaimInsert(createEmptyAccountJClaimAccumulator(), r1, { version: 1, nodes: [] });
     const store = new Map(s1.newNodes.map((n) => [n.hash, n.node]));
-    const s2 = applyAccountJClaimInsert(s1.state, r2, createAccountJClaimProof(store as any, s1.state.root, r2));
+    const s2 = applyAccountJClaimInsert(s1.state, r2, createAccountJClaimProof(store, s1.state.root, r2));
     expect(unwrap(committed(preview.draft.state)).view.leftPendingJClaims.root).toBe(s1.state.root);
     expect(s2.state.root).toBe("0x32a2477f6813fa0bdc1362166cf00922afe29372c9b0cf7a591095d9df31f2e1");
     expect(unwrap(committed(pending.state)).view.leftPendingJClaims.root).toBe(s2.state.root);
