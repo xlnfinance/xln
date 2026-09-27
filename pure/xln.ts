@@ -11041,6 +11041,8 @@ export type JurisdictionConfig = {
    * never committed (og projectConsensusConfigCommitment).
    */
   readonly name?: string | undefined;
+  /** og JurisdictionConfig.address: the RPC locator, carried in the certified head's authority but never committed. */
+  readonly address?: string | undefined;
   readonly entityProviderAddress: string;
   readonly registrationBlock?: number | undefined;
   readonly entityProviderDeploymentBlock?: number | undefined;
@@ -11823,7 +11825,12 @@ export type EntityContext = {
    * replica once per frame), `cross-j` is a trusted local cross-j command that must commit alone, `account-work`
    * proposes only queued Account work.
    */
-  readonly lane?: "defer" | "cross-j" | "account-work" | undefined;
+  readonly lane?: "defer" | "cross-j" | "account-work" | "flush" | undefined;
+  /**
+   * og prepareLocallyAuthoredEntityTxs at admission: the replica signs admitted txs into its own Entity commands (a
+   * host whose `sign` is the signer's real key); off, the mempool keeps the txs exactly as given.
+   */
+  readonly authorCommands?: boolean | undefined;
   /** og requiredEntityTx: the one accountInput of an atomic cross-j leg, which the proposal must select. */
   readonly required?: EntityTx | undefined;
   /**
@@ -11905,7 +11912,9 @@ export type EntityError =
       { address: string }
     >
   /** og J-prefix outcomes: an input reject/defer reason code, or a thrown failure's code, message and disposition. */
-  | Tagged<"j_prefix", { code: string; message: string; disposition: "reject" | "retry" | "halt" | "defer" }>;
+  | Tagged<"j_prefix", { code: string; message: string; disposition: "reject" | "retry" | "halt" | "defer" }>
+  /** og MalformedEntityFrameInputError.frameTx in a deferred flush: the last refused frame tx, evicted by the flush. */
+  | Tagged<"frame_tx_rejected", { tx: EntityTx; cause: EntityError }>;
 export type EntityGrammar = {
   readonly table: typeof EntityTransition;
   readonly replica: EntityReplica;
@@ -12429,6 +12438,48 @@ const binaryBody = (value: unknown): Result<Binary, BinaryError> => {
     map(binaryBody(value[key]), (walked) => [key, walked] as const));
   return map(fields, (entries) => Object.fromEntries(entries) as Binary);
 };
+/** og AccountAckFrame: a JS-number height beside the committed frame hash and its Hankos. */
+const wireAck = (a: AccountAck): unknown => ({
+  height: Number(a.height), frameHash: a.frameHash, frameHanko: a.frameHanko, disputeHanko: a.disputeHanko,
+});
+/** A JS number on og's wire; an absent field stays absent. */
+const wireNumber = (v: bigint | undefined): number | undefined => (v === undefined ? undefined : Number(v));
+/** og AccountFrame: JS-number clocks and the frame txs in og wire form, as the proposer hashed them. */
+const wireAccountFrame = (f: AccountFrame, id: AccountId, byLeft: boolean): Result<unknown, Uncommitted> =>
+  map(traverse(f.txs, (tx) => wireTx(tx, id, byLeft)), (accountTxs) => ({
+    height: wireNumber(f.height), timestamp: wireNumber(f.timestamp), jHeight: wireNumber(f.jHeight),
+    prevFrameHash: f.prevFrameHash, accountTxs, accountStateRoot: f.accountStateRoot, stateHash: f.stateHash,
+  }));
+/** An input carrying the fields its kind nests; anything else is already og wire (never reshaped). */
+const nestable = (i: AccountPeerInput): boolean => {
+  switch (i.kind) {
+    case "ack_frame": return i.frame !== undefined;
+    case "dispute": return true;
+    default: return i.height !== undefined;
+  }
+};
+/** og AccountInput (types/account.ts): the ACK and the proposal nest under `ack` / `proposal`. */
+const wireAccountInput = (i: AccountPeerInput): unknown => {
+  if (!nestable(i)) return i;
+  const { fromEntityId, toEntityId, domain, disputeConfig, watchSeed } = i;
+  const envelope = { fromEntityId, toEntityId, domain, disputeConfig, watchSeed };
+  switch (i.kind) {
+    case "ack": return { ...envelope, kind: i.kind, ack: wireAck(i) };
+    case "dispute": return { ...envelope, kind: i.kind, disputeHanko: i.disputeHanko };
+    case "board_hanko_refresh": return { ...envelope, kind: i.kind, boardHankoRefresh: {
+      ...(wireAck(i) as object),
+      boardActivationJHeight: i.boardActivationJHeight, boardActivationLogIndex: i.boardActivationLogIndex,
+    } };
+    case "ack_frame": {
+      const id = accountId(fromEntityId, toEntityId);
+      const frame = chain(mapErr(id, () => uncommitted({ _tag: "unsafe_number" })), (pair) =>
+        wireAccountFrame(i.frame, pair, isLeft(fromEntityId, pair)));
+      const wired = frame.ok ? frame.value : i.frame;
+      const proposal = { frame: wired, frameHanko: i.frameHanko, disputeHanko: i.disputeHanko };
+      return { ...envelope, kind: i.kind, ...(i.ack === null ? {} : { ack: wireAck(i.ack) }), proposal };
+    }
+  }
+};
 /** og wire: token ids are numbers inside entity tx data. */
 const wireData = (tx: EntityTx): unknown => {
   switch (tx.type) {
@@ -12440,7 +12491,7 @@ const wireData = (tx: EntityTx): unknown => {
       ...tx.data, tokenId: Number(tx.data.tokenId),
       ...(tx.data.feeTokenId === undefined ? {} : { feeTokenId: Number(tx.data.feeTokenId) }),
     };
-    case "accountInput": return tx.data;
+    case "accountInput": return wireAccountInput(tx.data);
     default:
       return "tokenId" in tx.data && tx.data.tokenId !== undefined
         ? { ...tx.data, tokenId: Number(tx.data.tokenId) }
@@ -12941,6 +12992,8 @@ type FoldContext = {
   readonly boardAuthority?: BoardAuthority | undefined;
   readonly jReplicas?: ReadonlyMap<string, JReplica> | undefined;
   readonly runtimeSeed?: string | undefined;
+  /** og's deferred flush: a frame whose every tx was refused names its frame tx (og MalformedEntityFrameInputError). */
+  readonly flush?: boolean | undefined;
 };
 /**
  * og env.state.eReplicas as a cross-j opening reads it: the live sibling replica of this Runtime by (Entity, signer),
@@ -18751,6 +18804,20 @@ const withoutCarriedAcks = (outputs: readonly EntityOutput[]): readonly EntityOu
     (o) => !("tx" in o && o.tx.data.kind === "ack" && carried.has(`${o.to}|${canon(ackOf(o.tx.data))}`)),
   );
 };
+const isAck = (o: EntityOutput): boolean => "tx" in o && o.tx.data.kind === "ack";
+/**
+ * og routeFinalAccountInput: the frame's other outputs first, then each Account's final input (its forced ACK or new
+ * frame) in worklist order.
+ */
+const flushOrder = (fold: readonly EntityOutput[], proposals: readonly EntityOutput[], order: readonly EntityId[]) => {
+  const rank = (o: EntityOutput): number => {
+    const i = order.indexOf(o.to);
+    return i < 0 ? order.length : i;
+  };
+  const finals = withoutCarriedAcks([...fold.filter(isAck), ...proposals]);
+  const ranked = finals.map((o, i) => ({ o, i })).toSorted((a, b) => rank(a.o) - rank(b.o) || a.i - b.i);
+  return [...fold.filter((o) => !isAck(o)), ...ranked.map(({ o }) => o)];
+};
 /**
  * og proposePendingAccountFrames: every proposable Account in worklist order proposes one frame at the Entity clock; a
  * refused proposal is not a frame. A cross-j opening proposes exactly its sibling cohort (og
@@ -18758,8 +18825,10 @@ const withoutCarriedAcks = (outputs: readonly EntityOutput[]): readonly EntityOu
  */
 const proposeAccounts = (d: Draft, order: readonly EntityId[], ctx: FoldContext): Result<Proposing, EntityError> => {
   const clock: FrameClock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
-  return map(foldResult(order, { draft: d, frames: 0 }, proposeOne(ctx, clock)), ({ draft, frames }) =>
-    ({ draft: { ...draft, outputs: withoutCarriedAcks(draft.outputs) }, frames }));
+  return map(foldResult(order, { draft: d, frames: 0 }, proposeOne(ctx, clock)), ({ draft, frames }) => {
+    const outputs = flushOrder(d.outputs, draft.outputs.slice(d.outputs.length), order);
+    return { draft: { ...draft, outputs }, frames };
+  });
 };
 type Validator = { readonly key: string; readonly share: bigint };
 /**
@@ -20689,7 +20758,10 @@ const foldNested = (
   const start: Draft = { state, accountReplicas: replicas, outputs: [], events: [] };
   return foldResult(txs, start, (acc, tx) => {
     const r = foldTx(acc.state, acc.accountReplicas, tx, ctx, lane);
-    if (r.ok) return ok(appendDraft(acc, r.value, r.value.touched ?? [peerOf(tx, state.id)]));
+    // og: an Account a signed command opens and nothing else touches proposes at H+1 (Runtime account work)
+    const touched = (d: Draft): readonly EntityId[] =>
+      tx.type === "openAccount" ? [] : (d.touched ?? [peerOf(tx, state.id)]);
+    if (r.ok) return ok(appendDraft(acc, r.value, touched(r.value)));
     return fatalTx(tx, r.error) && r.error._tag !== "entity_invariant" ? invariant(`${tx.type}:${r.error._tag}`) : r;
   });
 };
@@ -21778,6 +21850,41 @@ type Originating = {
   readonly originated: readonly PreparedOriginated[];
   readonly refused: ReadonlyMap<EntityTx, EntityError>;
 };
+/** og getEffectiveHtlcFrameTxs vote arm: a yes vote that brings a stored entity transaction to the threshold. */
+const votedTxs = (state: EntityState, v: EntityTxOf<"vote">["data"]): readonly EntityTx[] => {
+  const proposal = proposalsOf(state).get(v.proposalId);
+  if (proposal === undefined || v.choice !== "yes") return [];
+  const shares = boardShares(state).bySigner;
+  const choiceOf = (vote: StoredVote): VoteChoice => (typeof vote === "object" ? vote.choice : vote);
+  const yes = [...proposal.votes].filter(([, vote]) => choiceOf(vote) === "yes");
+  const currentYes = yes.reduce((total, [signer]) => total + (shares.get(signer) ?? 0n), 0n);
+  const voter = lower(v.voter.trim());
+  const voterShare = proposal.votes.has(voter) ? 0n : (shares.get(voter) ?? 0n);
+  const action = proposal.action as { readonly type?: string; readonly data?: { readonly txs?: unknown } };
+  const wired = action.type === "entity_transaction" && Array.isArray(action.data?.txs) ? action.data.txs : [];
+  return currentYes + voterShare >= thresholdOf(state.quorum) ? wired.map(unwireEntityTx) : [];
+};
+/**
+ * og getEffectiveHtlcFrameTxs: the txs a frame tx applies once opened (a signed command's txs, a threshold proposer's
+ * entity transaction, the entity transaction a completing vote executes), each paired with the frame tx carrying it.
+ */
+const openedTxs = (state: EntityState, carrier: EntityTx): readonly { carrier: EntityTx; tx: EntityTx }[] => {
+  const open = (tx: EntityTx): readonly EntityTx[] => {
+    switch (tx.type) {
+      case "entityCommand": return tx.data.txs.flatMap(open);
+      case "propose": {
+        const share = boardShares(state).bySigner.get(lower(tx.data.proposer.trim())) ?? 0n;
+        const a = tx.data.action;
+        return a.type === "entity_transaction" && share >= thresholdOf(state.quorum) ? a.data.txs.flatMap(open) : [];
+      }
+      case "vote": return votedTxs(state, tx.data).flatMap(open);
+      default: return [tx];
+    }
+  };
+  return effectiveTxs([carrier]).flatMap(open).map((tx) => ({ carrier, tx }));
+};
+const effectiveHtlcTxs = (state: EntityState, txs: readonly EntityTx[]): readonly EntityTx[] =>
+  txs.flatMap((carrier) => openedTxs(state, carrier).map(({ tx }) => tx));
 /**
  * og materializeOriginatedHtlcPayments (proposer only): per htlcPayment in order, the raw checks, route, secret ->
  * hashlock, quote, deadline window, profile/domain evidence and the onion; sorted by tx hash. An empty route is
@@ -21963,7 +22070,8 @@ const frameHtlcInfra = (
   originated: readonly PreparedOriginated[],
   included: readonly EntityTx[],
 ): Result<HtlcFrameInfra, EntityError> => {
-  const payments = included.filter((tx): tx is HtlcPaymentTx => tx.type === "htlcPayment");
+  const opened = effectiveHtlcTxs(v.state, included);
+  const payments = opened.filter((tx): tx is HtlcPaymentTx => tx.type === "htlcPayment");
   const inbound = htlcFrameTxs(included)
     ? materializeInbound({ ...v, online: onlineOf(infra) }, included)
     : ok({ entries: [], asked: [] });
@@ -25541,11 +25649,13 @@ const htlcPaymentTx = (s: TxScope, x: EntityTxOf<"htlcPayment">): Result<Draft, 
   const view = originView(s.state, s.replicas, s.ctx.timestamp);
   return chain(validatePreparedHtlcPayment(view, x, s.ctx.htlc ?? EMPTY_HTLC_INFRA), (p) => {
     const next = htlcPaymentStep(p, s.state.paybook ?? EMPTY_PAYBOOK, Number(s.ctx.timestamp));
-    return map(enqueueTo(s, p.nextHopEntityId as EntityId, [next.lock], []), (d) => ({
+    const quote = `🔒 HTLC: Recipient ${p.recipientAmount}, sender lock ${p.senderLockAmount} (fee ${p.totalFee})`;
+    const sent = `${quote} to ${p.targetEntityId.slice(-4)} via ${p.route.length - 1} hops`;
+    return map(enqueueTo(s, p.nextHopEntityId as EntityId, [next.lock], []), (d) => withStatus({
       ...d,
       state: { ...d.state, paybook: next.paybook },
       runtimeEvents: [htlcInitiated(s.state.id, p)],
-    }));
+    }, sent));
   });
 };
 /**
@@ -26038,6 +26148,14 @@ export type FoldedTxs = {
 /** The frame's txs folded so far, and the first refusal, which refuses a frame whose every tx was refused. */
 type Folding = FoldedTxs & { readonly first?: EntityError | undefined };
 /**
+ * og buildEntityProposalEvictingRejected rethrows the last tx standing; the deferred flush evicts that frame tx.
+ */
+const flushRefusal = (
+  ctx: { readonly flush?: boolean | undefined },
+  tx: EntityTx | undefined,
+  cause: EntityError,
+): EntityError => (ctx.flush === true && tx !== undefined ? { _tag: "frame_tx_rejected", tx, cause } : cause);
+/**
  * og buildEntityProposalEvictingRejected: a refused tx is evicted and the rest still fold. An openAccount refusal is a
  * plain Error in og (not a reject disposition), so it refuses the whole input, as does an og lending entity-tx refusal;
  * so does a frame whose every tx was refused.
@@ -26063,7 +26181,9 @@ const foldEvicting = (
     return fatalTx(tx, r.error) ? r : ok({ ...acc, evicted: [...acc.evicted, tx], first: acc.first ?? r.error });
   };
   return chain(foldResult(txs, start, step), ({ first, ...folded }) =>
-    folded.included.length === 0 && first !== undefined ? err(first) : ok(folded),
+    folded.included.length === 0 && first !== undefined
+      ? err(flushRefusal(ctx, folded.evicted.at(-1), first))
+      : ok(folded),
   );
 };
 /** og proposePendingAccountFrames worklist entries: the Accounts that could propose now, ascending. */
@@ -26117,9 +26237,10 @@ export const foldTxs = (
     return chain(
       chain(booked, (d) => materializeSettlements(d, ctx)),
       (settled) => {
-        const order = [
-          ...new Set([...primed, ...(settled.touched ?? []), ...proposableAccounts(settled.accountReplicas)]),
-        ];
+        const touched = settled.touched ?? [];
+        // an Account this frame opened and nothing else touched is not proposable yet (og openAccount)
+        const swept = proposableAccounts(settled.accountReplicas).filter((p) => replicas.has(p) || touched.includes(p));
+        const order = [...new Set([...primed, ...touched, ...swept])];
         const proposed = setupPhase ? ok({ draft: settled, frames: 0 }) : proposeAccounts(settled, order, ctx);
         return chain(proposed, (p) => {
           const signed = { ...p.draft, ...opt("hashes", settled.hashes), ...opt("jOutputs", settled.jOutputs) };
@@ -27002,10 +27123,15 @@ const admitTxs = <R extends EntityReplica>(
   return chain(crossMaterializations(r, input.txs, ctx, input.timestamp), (txs): Result<R, EntityError> => {
     if (r.mempool.length + txs.length > ENTITY_MEMPOOL_SIZE) return err({ _tag: "mempool_full" });
     const appended = appendMempool(r.mempool, txs);
-    // og admitEntityTransactions: a pure Account-input delta is appended; any other admission re-orders wake-first
+    // og admitEntityTransactions: a pure Account-input delta is appended; any other admission re-authors the whole
+    // mempool as this replica's signed commands (og prepareLocallyAuthoredEntityTxs), then re-orders wake-first
+    const authored = (): Result<readonly EntityTx[], EntityError> =>
+      ctx.authorCommands === true
+        ? authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId))
+        : ok(appended);
     const ordered: Result<readonly EntityTx[], EntityError> = txs.every((tx) => tx.type === "accountInput")
       ? ok(appended)
-      : prioritizeWake(appended);
+      : chain(authored(), prioritizeWake);
     return map(ordered, (mempool) => ({ ...r, mempool }));
   });
 };
@@ -27132,9 +27258,17 @@ const preparedPayments = (
   timestamp: bigint,
   ctx: EntityContext,
 ): Originating => {
-  if (!selected.some((tx) => tx.type === "htlcPayment")) return NO_PAYMENTS;
+  const carried = selected.flatMap((carrier) => openedTxs(queued.state, carrier));
+  if (!carried.some(({ tx }) => tx.type === "htlcPayment")) return NO_PAYMENTS;
   const view = originView(queued.state, queued.accountReplicas, timestamp);
-  return materializeOriginated(view, ctx.htlc?.profiles ?? [], selected, ctx.htlc ?? { profiles: [] });
+  const txs = carried.map(({ tx }) => tx);
+  const made = materializeOriginated(view, ctx.htlc?.profiles ?? [], txs, ctx.htlc ?? { profiles: [] });
+  // a payment it cannot prepare evicts the frame tx carrying it
+  const refusedCarrier = ({ carrier, tx }: { carrier: EntityTx; tx: EntityTx }) => {
+    const e = made.refused.get(tx);
+    return e === undefined ? [] : [[carrier, e] as const];
+  };
+  return { originated: made.originated, refused: new Map(carried.flatMap(refusedCarrier)) };
 };
 /** og materializeHtlcPreparedInfraContext: the pre-frame view every inbound onion layer decrypts against. */
 const inboundView = (r: EntityEnv, timestamp: bigint, ctx: EntityContext): Omit<HtlcInboundView, "online"> => ({
@@ -27236,7 +27370,9 @@ const proposeSelected = (
   const prepared = preparedPayments(queued, selected, timestamp, ctx);
   const txs = selected.filter((tx) => !prepared.refused.has(tx));
   const [firstRefusal] = prepared.refused.values();
-  if (txs.length === 0 && firstRefusal !== undefined) return err(firstRefusal);
+  const lastRefused = [...prepared.refused.keys()].at(-1);
+  if (txs.length === 0 && firstRefusal !== undefined)
+    return err(flushRefusal({ flush: ctx.lane === "flush" }, lastRefused, firstRefusal));
   return chain(foldProposal(queued, txs, prepared, timestamp, ctx), ({ folded, infra }) => {
     if (keep !== undefined && !keep(folded.accountFrames ?? 0)) return ok(noProposal(queued));
     const mempool = withoutTxs(queued.mempool, [...prepared.refused.keys(), ...folded.evicted]);
@@ -27964,6 +28100,7 @@ const frameFoldContext = (ctx: EntityContext, timestamp: bigint, htlc: HtlcFrame
   ...opt("boardAuthority", ctx.boardAuthority),
   ...opt("jReplicas", ctx.jReplicas),
   ...opt("runtimeSeed", ctx.runtimeSeed),
+  ...opt("flush", ctx.lane === "flush" ? true : undefined),
 });
 /**
  * og assertHtlcPreparedInfraContext: validators check the committed HTLC infra against public facts (the Entity key,
@@ -27973,7 +28110,9 @@ const replayInfra = (r: EntityEnv, frame: EntityFrame, ctx: EntityContext): Resu
   chain(frameInfraOf(frame), (infra) =>
     chain(entityKeypair(r.state, ctx), () =>
       chain(assertInboundEntries(r, frame, infra, ctx), () =>
-        map(assertOriginated(originView(r.state, r.accountReplicas, frame.timestamp), infra, frame.txs), () => infra),
+        map(assertOriginated(
+          originView(r.state, r.accountReplicas, frame.timestamp), infra, effectiveHtlcTxs(r.state, frame.txs),
+        ), () => infra),
       ),
     ),
   );
@@ -28901,6 +29040,8 @@ export type RuntimeCtx = Verifiers & {
    * never committed.
    */
   readonly routes?: RuntimeRoutes | undefined;
+  /** EntityContext.authorCommands for every Entity input of the frame. */
+  readonly authorCommands?: boolean | undefined;
 };
 /**
  * og transport view (never committed): `verifiedProfileSigner` is an Entity's verified gossip profile runtime signer
@@ -30430,6 +30571,7 @@ const requireBoundJurisdiction = (
 /** og ConsensusConfig.jurisdiction beyond the account Domain, as the Entity state carries it. */
 const jurisdictionConfigOf = (j: ImportJurisdiction): JurisdictionConfig => ({
   ...opt("name", j.name),
+  ...opt("address", j.address),
   entityProviderAddress: j.entityProviderAddress ?? "",
   ...opt("registrationBlock", j.registrationBlock),
   ...opt("entityProviderDeploymentBlock", j.entityProviderDeploymentBlock),
@@ -39581,13 +39723,45 @@ const drainCommands = (
     drainCommands(f, next, round + 1, nextSeen),
   );
 };
+/** og MAX_REPLICA_FLUSH_EVICTIONS: the proposal attempts one flush spends evicting refused frame txs. */
+const MAX_FLUSH_EVICTIONS = 8;
+/** og evictRejectedProposalTx: the replica without the refused frame tx, when its mempool still holds it. */
+const evictRefused = (b: InputBatch, key: string, e: RuntimeError): EntityReplica | undefined => {
+  const r = b.store.get(key);
+  if (e._tag !== "frame_tx_rejected" || r === undefined) return undefined;
+  const mempool = withoutTxs(r.mempool, [e.tx]);
+  return mempool.length < r.mempool.length ? { ...r, mempool } : undefined;
+};
+/** A refusal naming its frame tx, unwrapped to the tx's own refusal. */
+const frameTxCause = (e: RuntimeError): RuntimeError => (e._tag === "frame_tx_rejected" ? e.cause : e);
+/**
+ * og flushReplica: one proposal from the mempool; a refused frame tx is evicted and the proposal retried, up to the
+ * eviction cap (the rest waits for the next wake).
+ */
+const flushReplica = (
+  f: FrameScope,
+  s: InputBatch,
+  propose: RoutedEntityInput,
+  eviction: number,
+): Result<InputBatch, RuntimeError> => {
+  const key = replicaKey(propose.entityId, propose.signerId);
+  const staged = stageInput(f, s, propose, { lane: "flush", recordApplied: false });
+  const evicted = staged.ok ? undefined : evictRefused(s, key, staged.error);
+  if (staged.ok || evicted === undefined) {
+    const settled = staged.ok ? staged : err(frameTxCause(staged.error));
+    return chain(settleStaged(s, settled), (next) => drainCommands(f, next));
+  }
+  // reported as the tx's refusal (og logs entity_input.batch_tx_evicted); nothing committed carries it
+  const next = rejectOut({ ...s, store: mapSet(s.store, key, evicted) }, frameTxCause(staged.error));
+  return eviction + 1 < MAX_FLUSH_EVICTIONS || evicted.mempool.length === 0
+    ? flushReplica(f, next, propose, eviction + 1)
+    : drainCommands(f, next);
+};
 /** Each touched replica proposes once from its mempool, in first-touch order. */
 const flushDeferred = (f: FrameScope, b: InputBatch): Result<InputBatch, RuntimeError> =>
   foldResult(b.deferred.values(), { ...b, deferred: new Map() } as InputBatch, (s, { entityId, signerId }) => {
     const propose: RoutedEntityInput = { entityId, signerId, input: { kind: "txs", timestamp: f.timestamp, txs: [] } };
-    return chain(settleStaged(s, stageInput(f, s, propose, { recordApplied: false })), (next) =>
-      drainCommands(f, next),
-    );
+    return flushReplica(f, s, propose, 0);
   });
 /** A single input; a `txs` input carries no consensus evidence and only fills its mempool until the next flush. */
 const singleInput = (f: FrameScope, b: InputBatch, routed: RoutedEntityInput): Result<InputBatch, RuntimeError> => {
@@ -40846,6 +41020,17 @@ const planNetwork = (
       local: outputsIn(plan, "local"),
       remote: outputsIn(plan, "remote"),
     })));
+/**
+ * og planEntityOutputs' local lane: this frame's outputs deduplicated by route key and kept for this Runtime's own
+ * replicas, as og re-enqueues them into runtimeMempool.entityInputs.
+ */
+export const localNetworkOutputs = (
+  rt: Runtime,
+  outbox: readonly EntityOutput[],
+  routes?: RuntimeRoutes,
+): Result<readonly NetworkOutput[], RuntimeError> =>
+  chain(traverse(outbox, (o) => outputBinary(rt, o, routes)), (rows) =>
+    map(planNetwork(rt, rows as readonly NetworkOutput[], routes), (plan) => plan.local));
 /**
  * og applyRecoveryRuntimeOutputPlan after a frame: this frame's outputs are stamped with their source frame, joined to
  * the retained outbox, pruned of settled proposals, deduplicated and planned; the local outputs are this Runtime's own
