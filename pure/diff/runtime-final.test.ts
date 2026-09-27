@@ -244,7 +244,16 @@ describe(seedTag("runtime-final: RuntimeStep.events (og observability/env-events
     const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx);
     const queue: RoutedEntityInput[] = [{ entityId: id, signerId: aliceAddr, input: { kind: "txs", timestamp: NOW, txs: [open(BOB), open(CAROL)] } }];
     const seen: { signer: string; commits: boolean; events: string[] }[] = [];
-    for (let n = 0; queue.length > 0 && n < 20; n++) {
+    // og admission signs the two collective opens into Alice's propose: frame 1 commits it pending, Bob's signed yes
+    // executes both opens in frame 2
+    for (let n = 0, voted = false; (queue.length > 0 || !voted) && n < 20; n++) {
+      if (queue.length === 0) {
+        const proposals = rt.entities.get(replicaKey(id, bobAddr))?.state.committed["proposals"] as Map<string, unknown>;
+        const [proposalId] = [...proposals.keys()];
+        const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: bobAddr, choice: "yes" } };
+        queue.push({ entityId: id, signerId: bobAddr, input: { kind: "txs", timestamp: NOW, txs: [vote] } });
+        voted = true;
+      }
       const input = queue.shift() as RoutedEntityInput;
       const before = rt.entities.get(replicaKey(id, input.signerId))?.head.height ?? 0n;
       const step = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [input] }, verifiers));
@@ -256,7 +265,13 @@ describe(seedTag("runtime-final: RuntimeStep.events (og observability/env-events
     }
     const expected = [`AccountOpening:${BOB.toLowerCase()}`, `AccountOpening:${CAROL.toLowerCase()}`];
     expect(seen.filter((s) => !s.commits).every((s) => s.events.length === 0)).toBe(true);
-    expect(seen.filter((s) => s.commits).map((s) => [s.signer, s.events]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([[aliceAddr.toLowerCase(), expected], [bobAddr.toLowerCase(), expected]].sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+    const bySigner = (a: unknown[], b: unknown[]) => String(a[0]).localeCompare(String(b[0]));
+    const commits = seen.filter((s) => s.commits).map((s) => [s.signer, s.events]);
+    // frame 1 (the pending propose) publishes nothing; frame 2's opens publish once on each committing replica; the
+    // Account work frame that follows publishes nothing
+    expect(commits.slice(0, 2).sort(bySigner)).toEqual([[aliceAddr.toLowerCase(), []], [bobAddr.toLowerCase(), []]].sort(bySigner));
+    expect(commits.slice(2, 4).sort(bySigner)).toEqual([[aliceAddr.toLowerCase(), expected], [bobAddr.toLowerCase(), expected]].sort(bySigner));
+    expect(commits.slice(4).map(([, events]) => events)).toEqual([[], []]);
   });
 });
 

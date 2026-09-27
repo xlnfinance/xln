@@ -17,7 +17,8 @@ import {
   commitRuntimeFrame, entityId, hashEntityFrame, hashEntityState, isSingleSigner, quorumBoardHash, leaderOrder, recoverRuntime, replicaKey, spawn, signature, tokenId, ZERO_WORD,
   type Address, type EntityCommitted, type EntityFrame, type EntityId, type EntityInput, type EntityOutput, type EntityReplica, type EntityTx, type Precommits, type Signature,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
+import { ALICE, ANVIL_KEYS, BOB, CAROL, MORE_ANVIL_KEYS, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, signerAddress, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
+import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
 
 const A = aliceAddr; // lexicographically lower (anvil-keyed: og quorum Hankos need real signatures)
 const B = bobAddr; // lexicographically higher
@@ -27,8 +28,13 @@ const ogConfig = (validators: readonly string[], shares: Record<string, bigint>,
   ({ mode: "proposer-based" as const, threshold, validators: [...validators], shares });
 /** og assertQuorumBoardBinding: an Entity without a certified board registry signs only as its lazy id (the hash of its own board). */
 const lazyId = (members: readonly (readonly [Address, bigint])[], threshold: bigint): EntityId => unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) })));
+/** og admission authors openAccount only for an Entity with a jurisdiction (og materializeLocallyAuthoredEntityTx); unregistered, so no J-prefix certificate is needed. */
+const UNREGISTERED_J = { entityProviderAddress: `0x${"ee".repeat(20)}` };
+/** og config.jurisdiction for UNREGISTERED_J (its committed fields). */
+const OG_UNREGISTERED_J = { chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, ...UNREGISTERED_J };
+const ogConfigJ = (validators: readonly string[], shares: Record<string, bigint>, threshold: bigint) => ({ ...ogConfig(validators, shares, threshold), jurisdiction: OG_UNREGISTERED_J });
 const teaching = (members: readonly (readonly [Address, bigint])[], threshold: bigint, signerId?: Address) =>
-  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), ...(signerId === undefined ? {} : { signerId }) }));
+  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), jurisdictionConfig: UNREGISTERED_J, ...(signerId === undefined ? {} : { signerId }) }));
 const ctx = (signerId: Address, extra: Partial<{ from: EntityId }> = {}) => ({ ...verifiers, self: ALICE, signerId, ...extra });
 /** The fixture ctx names ALICE (the 1-of-1 lazy id); a multi-signer fixture Entity is its own lazy board id, so that placeholder resolves to the replica. */
 const applyEntityInput: typeof applyEntityInputAt = (r, input, c) => applyEntityInputAt(r, input, c.self === ALICE ? { ...c, self: r.state.id } : c);
@@ -38,6 +44,8 @@ const open = openTo(BOB);
 const txs = (list: readonly EntityTx[], timestamp = 1n): EntityInput => ({ kind: "txs", timestamp, txs: list });
 const propose = (r: EntityReplica, signer: Address, list: readonly EntityTx[] = [open], timestamp = 1n) => applyEntityInput(r, txs(list, timestamp), ctx(signer));
 const held = (r: EntityReplica): EntityFrame => { if (r._tag === "open") throw new Error("no frame"); return r.frame; };
+/** og Runtime account work: an Account opened inside a signed command proposes its first frame at H+1, not in the opening frame. */
+const accountWork = (r: EntityReplica, signer: Address, timestamp = 1n) => unwrap(applyEntityInput(r, txs([], timestamp), { ...ctx(signer), lane: "account-work" as const }));
 const precommitOf = (frame: EntityFrame, signer: Address, sigs: readonly Signature[] = signManifestAs(frame, signer)): EntityInput =>
   ({ kind: "precommit", height: frame.height, frameHash: unwrap(hashEntityFrame(frame)), signatures: new Map([[signer.toLowerCase(), sigs]]) });
 const consensusFor = (outputs: readonly EntityOutput[], signer: Address): EntityInput[] =>
@@ -47,7 +55,9 @@ const consensusFor = (outputs: readonly EntityOutput[], signer: Address): Entity
 let seed = seedOf(7);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
-const addr = (i: number) => unwrap(address(`0x${(i + 16).toString(16).padStart(2, "0").repeat(20)}`));
+/** Real anvil signers: og admission signs each proposal with the proposer's key. */
+const KEYED = [...ANVIL_KEYS, ...MORE_ANVIL_KEYS].map(signerAddress);
+const addr = (i: number) => unwrap(address(KEYED[i] ?? ""));
 
 describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
   test("MATCH: og proposer = validators[0] (positional CEO) for validators [B,A]; A's replica forwards its mempool to B", () => {
@@ -60,8 +70,9 @@ describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
     const validatorA = teaching([[B, 1n], [A, 1n]], 2n, A);
     const forwarded = unwrap(propose(validatorA, A));
     expect(forwarded.replica._tag).toBe("open");
-    expect(forwarded.replica.mempool).toEqual([open]);
-    expect(forwarded.outputs).toEqual([{ to: validatorA.state.id, signerId: B, input: txs([open]) }]);
+    // og admission: A signs the openAccount into its own command (a propose on this 2-of-2 board), then forwards it
+    expect(wired(forwarded.replica.mempool)).toEqual(ogAuthored(validatorA.state, A, [open]));
+    expect(forwarded.outputs).toEqual([{ to: validatorA.state.id, signerId: B, input: txs(forwarded.replica.mempool) }]);
   });
   test("MATCH: 40 random boards -- leader is og getEntityLeaderState(config).activeValidatorId", () => {
     for (let i = 0; i < 40; i++) {
@@ -96,15 +107,15 @@ describe(seedTag("entity-runtime: authority root (ER-2, H16)"), () => {
       const ids = [0, 1, 2, 3, 4, 5, 6, 7].sort(() => rng() - 0.5).slice(0, 2 + ri(3)).map(addr), shares = ids.map(() => BigInt(1 + ri(0xffff)));
       const threshold = 1n + BigInt(ri(Math.min(0xffff, Number(shares.reduce((a, b) => a + b, 0n)))));
       const p = unwrap(propose(teaching(ids.map((a, j) => [a, shares[j] ?? 1n] as const), threshold), ids[0] ?? A));
-      const og = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) } as never));
+      const og = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfigJ(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) } as never));
       expect(held(p.replica).authorityRoot).toBe(og);
     }
   });
   test("MATCH: [B,A] commits positional order (leader B), never the sorted one", () => {
     const p = unwrap(propose(teaching([[B, 1n], [A, 1n]], 2n), B));
-    const og = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never));
+    const og = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfigJ([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never));
     expect(held(p.replica).authorityRoot).toBe(og);
-    expect(og).not.toBe(computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfig([A, B], { [A]: 1n, [B]: 1n }, 2n) } as never)));
+    expect(og).not.toBe(computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({ config: ogConfigJ([A, B], { [A]: 1n, [B]: 1n }, 2n) } as never)));
   });
 });
 
@@ -145,7 +156,7 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     }
   });
   test("MATCH: each og section moves the root on both sides; a field outside og's allowlist moves neither", () => {
-    const r = teaching([[A, 1n]], 1n), og = ogEntityState(r, { paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } });
+    const r = teaching([[A, 1n]], 1n), og = ogEntityState(r, { paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } }, OG_UNREGISTERED_J);
     const rootRw = (committed: EntityCommitted) => unwrap(entityRootOf({ ...r.state, committed }, r.accountReplicas));
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
     for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
@@ -170,9 +181,13 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     const p = unwrap(applyEntityInput(r, txs([credit], 40n), { ...ctx(A), htlc: { profiles: [], encryptionPrivateKey: KEY_PRIV } }));
     const frame = held(p.replica);
     expect(frame.timestamp).toBe(50n); // og resolveEntityProposalTimestamp = max(runtime, committed)
-    const ogState = { ...ogEntityState({ ...r, state: { ...r.state, height: 1n, timestamp: 50n } }, { ...ogNoCron, crontabState: initCrontab() }, ogUnregistered), leaderState: { activeValidatorId: A.toLowerCase(), view: 0, changedAtHeight: 0 } }; // og proposal state records the proposer's leaderState
+    // og admission signs the credit into A's command: a propose on this 2-of-2 board, pending A's single yes
+    const ogTxs = ogAuthored(r.state, A, [credit]);
+    expect(wired(frame.txs)).toEqual(ogTxs);
+    const governance = ogAfterCommands(ogCommandState(r.state), ogTxs);
+    expect(governance.proposals.size).toBe(1);
+    const ogState = { ...ogEntityState({ ...r, state: { ...r.state, height: 1n, timestamp: 50n } }, { ...ogNoCron, crontabState: initCrontab() }, ogUnregistered), leaderState: { activeValidatorId: A.toLowerCase(), view: 0, changedAtHeight: 0 }, proposals: governance.proposals, entityCommandNonces: governance.entityCommandNonces }; // og proposal state records the proposer's leaderState
     expect(frame.stateRoot).toBe(computeCanonicalEntityConsensusStateHash(ogState));
-    const ogTxs = [{ type: "extendCredit", data: { counterpartyEntityId: CAROL, tokenId: 1, amount: 5n } }];
     const ogHash = createEntityFrameHashFromStateRoot("genesis", 1, 50, ogTxs as never, [], r.state.id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never);
     expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogHash);
     // og appendFinalProfileHash: the genesis frame always signs the profile descriptor hash
@@ -186,14 +201,21 @@ describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-
     const cfg = ogConfig([A, B], { [A]: 1n, [B]: 1n }, 2n);
     expect(calculateQuorumPower(cfg, [A]) >= cfg.threshold).toBe(false);
     expect(calculateQuorumPower(cfg, [A, B]) >= cfg.threshold).toBe(true);
-    const p = unwrap(propose(teaching([[A, 1n], [B, 1n]], 2n), A));
+    const base = teaching([[A, 1n], [B, 1n]], 2n);
+    const p = unwrap(propose(base, A));
     const r = p.replica;
     if (r._tag !== "proposed") throw new Error("phase");
     expect([...r.signatures.keys()]).toEqual([A.toLowerCase()]); // og collectedSigs starts with the proposer's own manifest
     expect(consensusFor(p.outputs, B)).toEqual([{ kind: "proposal", frame: r.frame, signatures: r.signatures }]);
     const two = unwrap(applyEntityInput(r, precommitOf(r.frame, B), ctx(A)));
     expect(two.replica._tag).toBe("open");
-    expect(two.replica.state.accounts.has(BOB)).toBe(true);
+    // og admission made the openAccount A's propose: the 2-of-2 commit installs og's pending proposal and nonce fence, not the Account
+    const ogTxs = ogAuthored(base.state, A, [open]);
+    expect(wired(r.frame.txs)).toEqual(ogTxs);
+    const governance = ogAfterCommands(ogCommandState(base.state, { timestamp: Number(r.frame.timestamp) }), ogTxs);
+    expect(consensusBytes(two.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
+    expect(consensusBytes(two.replica.state.committed["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
+    expect(two.replica.state.accounts.has(BOB)).toBe(false);
     expect(consensusFor(two.outputs, B)[0]?.kind).toBe("proposal"); // og broadcastCommit
   });
   test("MATCH: shares weighting -- one heavy validator's precommit reaches threshold", () => {
@@ -246,7 +268,13 @@ describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-
     expect(c1.replica._tag).toBe("open");
     const late = precommitOf(frame1, C);
     expect(unwrapErr(applyEntityInput(c1.replica, late, ctx(A)))._tag).toBe("precommit_not_active");
-    const p2 = unwrap(applyEntityInput(c1.replica, txs([openTo(CAROL)], 2n), ctx(A)));
+    // og assertEntityProposalCapacity: A's openAccount proposal is still pending, so a second one refuses the input
+    const second = ogAuthored(c1.replica.state, A, [openTo(CAROL)])[0] as { data: unknown };
+    const ogSecond = ogApplyCommand(ogCommandState(c1.replica.state), second.data);
+    const refused = unwrapErr(applyEntityInput(c1.replica, txs([openTo(CAROL)], 2n), ctx(A)));
+    expect("error" in ogSecond && ogSecond.message).toBe(`Error: ${"reason" in refused ? refused.reason : refused._tag}`);
+    const chat: EntityTx = { type: "chat", data: { from: A, message: "second frame" } };
+    const p2 = unwrap(applyEntityInput(c1.replica, txs([chat], 2n), ctx(A)));
     const c2 = unwrap(applyEntityInput(p2.replica, precommitOf(held(p2.replica), B), ctx(A)));
     expect(c2.replica.head.height).toBe(2n);
     const noop = unwrap(applyEntityInput(c2.replica, late, ctx(A)));
@@ -321,22 +349,32 @@ describe(seedTag("entity-runtime: validator replay (ER-6)"), () => {
 
 describe(seedTag("entity-runtime: mempool (ER-10, ER-21)"), () => {
   test("MATCH (og admission): txs arriving while a frame is proposed are queued and proposed after the commit", () => {
-    const p = unwrap(propose(teaching([[A, 1n], [B, 1n]], 2n), A));
-    const queued = unwrap(propose(p.replica, A, [openTo(CAROL)]));
+    // individual chats: two collective proposals from A would meet og's one-pending-proposal-per-proposer cap
+    const chatOf = (message: string): EntityTx => ({ type: "chat", data: { from: A, message } });
+    const base = teaching([[A, 1n], [B, 1n]], 2n);
+    const p = unwrap(propose(base, A, [chatOf("first")]));
+    expect(wired(p.replica.mempool)).toEqual(ogAuthored(base.state, A, [chatOf("first")]));
+    const queued = unwrap(propose(p.replica, A, [chatOf("second")]));
     expect(queued.replica._tag).toBe("proposed");
-    expect(queued.replica.mempool).toEqual([open, openTo(CAROL)]); // og keeps in-flight txs until they install
+    // og keeps in-flight txs until they install; admission re-authors the whole mempool, carrying the in-flight command
+    const ogQueued = ogAuthored(base.state, A, [...p.replica.mempool, chatOf("second")]);
+    expect(ogQueued.length).toBe(2);
+    expect(wired(queued.replica.mempool)).toEqual(ogQueued);
     const done = unwrap(applyEntityInput(queued.replica, precommitOf(held(queued.replica), B), ctx(A)));
-    expect(done.replica.mempool).toEqual([openTo(CAROL)]);
+    expect(wired(done.replica.mempool)).toEqual(ogQueued.slice(1));
     const next = unwrap(applyEntityInput(done.replica, txs([]), ctx(A)));
-    expect(held(next.replica).txs).toEqual([openTo(CAROL)]);
+    expect(wired(held(next.replica).txs)).toEqual(ogQueued.slice(1));
   });
   test("MATCH (og appendEntityMempoolTransactions): exact accountInput retries collapse, other txs keep multiplicity", () => {
     const ai = { type: "accountInput", data: { kind: "ack", fromEntityId: BOB, toEntityId: ALICE, x: 1 } } as unknown as EntityTx;
     const credit: EntityTx = { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 1n } };
     const r = teaching([[B, 1n], [A, 1n]], 2n, A);
     const once = unwrap(applyEntityInput(r, txs([ai, credit, ai, credit]), ctx(A)));
-    expect(once.replica.mempool).toEqual(appendEntityMempoolTransactions([], [ai, credit, ai, credit] as never) as never);
-    expect(once.replica.mempool.length).toBe(3);
+    // og admission: the retry collapses, then the whole mempool is authored -- the Account input passes as protocol, both credits join one propose
+    const appended = appendEntityMempoolTransactions([], [ai, credit, ai, credit] as never) as unknown as EntityTx[];
+    expect(appended.length).toBe(3);
+    expect(wired(once.replica.mempool)).toEqual(ogAuthored(r.state, A, appended));
+    expect(once.replica.mempool.map((t) => t.type)).toEqual(["accountInput", "entityCommand"]);
   });
   test("MATCH: a peer may deliver several Account inputs in one entity input; each must name the peer as sender", () => {
     const r = teaching([[B, 1n], [A, 1n]], 2n, A);
@@ -349,37 +387,51 @@ describe(seedTag("entity-runtime: mempool (ER-10, ER-21)"), () => {
 describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), () => {
   test("MATCH (og evict-and-retry): only the refused tx leaves the frame; the rest commits", () => {
     const bad: EntityTx = { type: "directPayment", data: { targetEntityId: CAROL, tokenId: unwrap(tokenId("1")), amount: 5n, route: [ALICE, CAROL], deliveryMode: "direct" } };
-    const p = unwrap(propose(teaching([[A, 1n]], 1n), A, [open, bad]));
+    const chat: EntityTx = { type: "chat", data: { from: A, message: "kept" } };
+    const base = teaching([[A, 1n]], 1n);
+    // og admission authors three commands (the open's propose, the chat, the payment's propose); only the payment's is evicted
+    const ogTxs = ogAuthored(base.state, A, [open, chat, bad]);
+    expect(ogTxs.map((t) => (t as { type: string }).type)).toEqual(["entityCommand", "entityCommand", "entityCommand"]);
+    const p = unwrap(propose(base, A, [open, chat, bad]));
     expect(p.replica._tag).toBe("open");
     expect(p.replica.state.accounts.has(BOB)).toBe(true);
     expect(p.replica.mempool).toEqual([]);
+    expect(consensusBytes(p.replica.state.committed["entityCommandNonces"])).toBe(consensusBytes(ogFenceAfter(ogCommandState(base.state), ogTxs.slice(0, 2))));
+    // og: a proposal of one tx is never evicted from, the refusal stops the input
     expect(unwrapErr(propose(teaching([[A, 1n]], 1n), A, [bad]))._tag).toBe("no_such_account");
   });
   test("MATCH (og OPEN_ACCOUNT_ALREADY_EXISTS, a plain Error): a duplicate openAccount refuses the whole input", () => {
-    expect(unwrapErr(propose(teaching([[A, 1n]], 1n), A, [open, open]))._tag).toBe("account_exists");
+    // og admission joins both opens into one propose; the approved second open throws inside it
+    expect(unwrapErr(propose(teaching([[A, 1n]], 1n), A, [open, open]))).toEqual({ _tag: "entity_invariant", reason: "openAccount:account_exists" });
   });
-  test("MATCH (og open-account.ts:262 + proposePendingAccountFrames): openAccount seeds add_delta for tokenId + [1,3,2] and the credit line; the same Entity frame proposes them as the first Account frame", () => {
+  test("MATCH (og open-account.ts:262 + proposePendingAccountFrames): openAccount seeds add_delta for tokenId + [1,3,2] and the credit line; Runtime account work proposes them as the first Account frame", () => {
     const p = unwrap(propose(teaching([[A, 1n]], 1n), A, [openTo(BOB, { tokenId: unwrap(tokenId("5")), creditAmount: 9n })]));
-    const child = p.replica.accountReplicas.get(BOB);
+    // og admission signs the open into a command: the opening frame only seeds the Account, H+1 proposes it
+    const seeded = p.replica.accountReplicas.get(BOB);
+    expect(seeded?._tag).toBe("open");
+    expect(seeded?.mempool.map((t): [string, string | undefined] => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
+    expect(p.outputs).toEqual([]);
+    const worked = accountWork(p.replica, A, 2n);
+    const child = worked.replica.accountReplicas.get(BOB);
     expect(child?._tag).toBe("proposed");
     expect(child?.mempool).toEqual([]);
-    expect(p.outputs.map((o) => ("tx" in o ? o.tx.data.kind : "consensus"))).toEqual(["ack_frame"]);
-    const sent = p.outputs[0];
+    expect(worked.outputs.map((o) => ("tx" in o ? o.tx.data.kind : "consensus"))).toEqual(["ack_frame"]);
+    const sent = worked.outputs[0];
     if (sent === undefined || !("tx" in sent) || sent.tx.data.kind !== "ack_frame") throw new Error("no frame");
     expect(sent.tx.data.frame.height).toBe(1n);
     expect(sent.tx.data.frame.txs.map((t): [string, string | undefined] => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
   });
   test("MATCH (og direct-payment.ts): amount < 1 is a silent no-op, a non-bilateral direct route and a trusted route are refused, a paid hop queues a payment and wakes validators[0]", () => {
-    const opened = unwrap(propose(teaching([[A, 1n]], 1n), A)).replica;
+    const opened = accountWork(unwrap(propose(teaching([[A, 1n]], 1n), A)).replica, A).replica;
     const pay = (amount: bigint, route: readonly EntityId[] = [ALICE, BOB], deliveryMode: "direct" | "trusted" = "direct"): EntityTx => ({ type: "directPayment", data: { targetEntityId: route[route.length - 1] ?? BOB, tokenId: unwrap(tokenId("1")), amount, route, deliveryMode } });
     const zero = unwrap(propose(opened, A, [pay(0n)], 2n));
-    expect(zero.replica.head.height).toBe(2n);
+    expect(zero.replica.head.height).toBe(3n);
     expect(zero.outputs).toEqual([]);
     expect(unwrapErr(propose(opened, A, [pay(5n, [ALICE, BOB, CAROL])], 2n))._tag).toBe("payment_route");
     expect(unwrapErr(propose(opened, A, [pay(5n, [BOB, ALICE])], 2n))._tag).toBe("payment_route");
     // og local-tx-admission.ts queues without validation: an unfunded hop commits the Entity frame and is dropped when the Account frame is proposed
     const unfunded = unwrap(propose(opened, A, [pay(5n)], 2n));
-    expect(unfunded.replica.head.height).toBe(2n);
+    expect(unfunded.replica.head.height).toBe(3n);
     expect(unfunded.replica.accountReplicas.get(BOB)?.mempool.map((t) => t.type)).toEqual(["payment"]);
     expect(unfunded.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
     const credit: EntityTx = { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n } };
@@ -406,7 +458,7 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
   });
   test("MATCH: runtime outbox preserves positional (input, then per-input) order, never sorted", () => {
     const e1 = teaching([[A, 1n]], 1n);
-    const opened = unwrap(propose(e1, A, [openTo(CAROL), open])).replica;
+    const opened = accountWork(unwrap(propose(e1, A, [openTo(CAROL), open])).replica, A).replica;
     const pay = (to: EntityId): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: unwrap(tokenId("1")), amount: 1n } });
     const rt = spawn(createRuntime(), opened);
     const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([pay(CAROL), pay(BOB)], 3n) }] }, verifiers));
@@ -421,10 +473,12 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     // og mergeEntityInputs: two local lanes for one replica collapse into one input, so the duplicate refuses both; a lane from another origin stays
     // apart, but (og createDeferredProposalBatch) both lanes only fill the mempool and the replica proposes once, so the duplicate refuses that frame too.
     const merged = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, input: txs([open]) }] }, verifiers));
-    expect(merged.rejected.map((e) => e._tag)).toEqual(["account_exists"]);
+    // og admission joins the opens into one signed propose; its approved duplicate open throws inside it
+    const duplicate = { _tag: "entity_invariant" as const, reason: "openAccount:account_exists" };
+    expect(merged.rejected).toEqual([duplicate]);
     expect(merged.runtime.entities.get(replicaKey(ALICE, A))?.state.accounts.has(BOB)).toBe(false);
     const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, from: "0x" + "77".repeat(20), input: txs([open]) }] }, verifiers));
-    expect(out.rejected.map((e) => e._tag)).toEqual(["account_exists"]);
+    expect(out.rejected).toEqual([duplicate]);
     expect(out.runtime.entities.get(replicaKey(ALICE, A))?.state.accounts.has(BOB)).toBe(false);
   });
   test("signEntityFrame still signs the entity frame hash (manifest head)", () => {
@@ -436,8 +490,9 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
 describe(seedTag("entity-runtime: runtime recovery (ER-23)"), () => {
   test("MATCH (og outbox-payload.ts ordered rows): recoverRuntime binds the persisted outbox positionally; a reordered outbox is refused", () => {
     const credit = (to: EntityId): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: unwrap(tokenId("1")), amount: 1n } });
-    const alice = unwrap(propose(teaching([[A, 1n]], 1n), A, [open])).replica;
-    const bob = unwrap(applyEntityInput(unwrap(createEntity({ id: BOB, jurisdiction: JUR, threshold: 1n, members: new Map([[B, { shares: 1n }]]) })), txs([openTo(ALICE)]), { ...ctx(B), self: BOB })).replica;
+    const alice = accountWork(unwrap(propose(teaching([[A, 1n]], 1n), A, [open])).replica, A).replica;
+    const bobEntity = unwrap(createEntity({ id: BOB, jurisdiction: JUR, threshold: 1n, members: new Map([[B, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
+    const bob = accountWork(unwrap(applyEntityInput(bobEntity, txs([openTo(ALICE)]), { ...ctx(B), self: BOB })).replica, B).replica;
     const start = spawn(spawn(createRuntime(), alice), bob);
     const commit = unwrap(commitRuntimeFrame(start, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([credit(BOB)], 3n) }, { entityId: BOB, signerId: B, input: txs([credit(ALICE)], 3n) }] }, verifiers));
     if (commit === null) throw new Error("no frame");

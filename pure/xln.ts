@@ -11857,11 +11857,6 @@ export type EntityContext = {
    * proposes only queued Account work.
    */
   readonly lane?: "defer" | "cross-j" | "account-work" | "flush" | undefined;
-  /**
-   * og prepareLocallyAuthoredEntityTxs at admission: the replica signs admitted txs into its own Entity commands (a
-   * host whose `sign` is the signer's real key); off, the mempool keeps the txs exactly as given.
-   */
-  readonly authorCommands?: boolean | undefined;
   /** og requiredEntityTx: the one accountInput of an atomic cross-j leg, which the proposal must select. */
   readonly required?: EntityTx | undefined;
   /**
@@ -20747,8 +20742,9 @@ const laneRefusal = (tx: EntityTx, lane: TxLane): EntityError | undefined => {
  * og plain Errors (openAccount, lending, governance invariants) refuse the whole input; a reject disposition evicts
  * only the outermost tx.
  */
-const fatalTx = (tx: EntityTx, e: EntityError): boolean =>
-  tx.type === "openAccount" ||
+const fatalTx = (tx: EntityTx, e: EntityError): boolean => tx.type === "openAccount" || fatalError(e);
+/** The plain Errors that refuse the input whichever tx raised them. */
+const fatalError = (e: EntityError): boolean =>
   e._tag === "lending_entity" ||
   e._tag === "swap_request_account_missing" ||
   e._tag === "entity_invariant" ||
@@ -20798,7 +20794,8 @@ const foldNested = (
     const touched = (d: Draft): readonly EntityId[] =>
       tx.type === "openAccount" ? [] : (d.touched ?? [peerOf(tx, state.id)]);
     if (r.ok) return ok(appendDraft(acc, r.value, touched(r.value)));
-    return fatalTx(tx, r.error) && r.error._tag !== "entity_invariant" ? invariant(`${tx.type}:${r.error._tag}`) : r;
+    // og rethrows the child's own Error: only an openAccount refusal needs marking to stay fatal outside its tx
+    return fatalTx(tx, r.error) && !fatalError(r.error) ? invariant(`${tx.type}:${r.error._tag}`) : r;
   });
 };
 const COMMAND_DOMAIN = "xln:entity-command:binary";
@@ -27161,13 +27158,12 @@ const admitTxs = <R extends EntityReplica>(
     const appended = appendMempool(r.mempool, txs);
     // og admitEntityTransactions: a pure Account-input delta is appended; any other admission re-authors the whole
     // mempool as this replica's signed commands (og prepareLocallyAuthoredEntityTxs), then re-orders wake-first
-    const authored = (): Result<readonly EntityTx[], EntityError> =>
-      ctx.authorCommands === true
-        ? authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId))
-        : ok(appended);
     const ordered: Result<readonly EntityTx[], EntityError> = txs.every((tx) => tx.type === "accountInput")
       ? ok(appended)
-      : chain(authored(), prioritizeWake);
+      : chain(
+          authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId)),
+          prioritizeWake,
+        );
     return map(ordered, (mempool) => ({ ...r, mempool }));
   });
 };
@@ -29076,8 +29072,6 @@ export type RuntimeCtx = Verifiers & {
    * never committed.
    */
   readonly routes?: RuntimeRoutes | undefined;
-  /** EntityContext.authorCommands for every Entity input of the frame. */
-  readonly authorCommands?: boolean | undefined;
 };
 /**
  * og transport view (never committed): `verifiedProfileSigner` is an Entity's verified gossip profile runtime signer
