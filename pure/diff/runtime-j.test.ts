@@ -21,7 +21,7 @@ import {
   type Binary, type EntityId, type EntityReplica, type EntityTx, type ImportConfig, type JInput, type JReplica, type Runtime, type RuntimeTx,
 } from "../xln.ts";
 import { ALICE, TERMS, aliceAddr, bobAddr, unwrap, verifiers } from "../xln_run.ts";
-import { jbOfOg } from "./og-state.ts";
+import { jbOfOg, withOg } from "./og-state.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -500,11 +500,13 @@ describe(seedTag("runtime-j: validator J history (og tx-handlers.ts observeJRang
         let tx: Record<string, unknown>;
         if (roll < 0.12 && anchor < top - 1) {
           // A committed Entity frame certifies a newer J head (og jHistoryFinality + lastFinalizedJHeight).
+          const baseHeight = anchor;
           anchor = anchor + 1 + ri(Math.min(3, top - anchor - 1));
-          const finality = { finalizedThroughHeight: anchor, tipBlockHash: chain[anchor], jurisdictionRef: REF, eventHistoryRoot: hex(32) };
+          // the whole record og's commitJRangeFinality writes
+          const finality = { jurisdictionRef: REF, baseHeight, finalizedThroughHeight: anchor, tipBlockHash: chain[anchor], eventHistoryRoot: hex(32), proposerSignerId: A.toLowerCase(), proposerSignature: "0x", entityHeight: step + 1 };
           ogState["lastFinalizedJHeight"] = anchor; ogState["jHistoryFinality"] = finality;
           const r = p.rt.entities.get(key) as EntityReplica;
-          p.rt = { ...p.rt, entities: new Map([[key, { ...r, state: { ...r.state, committed: { ...r.state.committed, lastFinalizedJHeight: anchor, jHistoryFinality: finality } } } as EntityReplica]]) };
+          p.rt = { ...p.rt, entities: new Map([[key, { ...r, state: withOg(r.state, { lastFinalizedJHeight: anchor, jHistoryFinality: finality as never }) } as EntityReplica]]) };
           continue;
         }
         if (roll < 0.8) {

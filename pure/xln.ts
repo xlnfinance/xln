@@ -11353,6 +11353,8 @@ export type EntityState = {
   readonly hub: EntityHub;
   /** og entityProviderActionState: the Entity's one EntityProvider action lane. */
   readonly providerActions: ProviderActions;
+  /** og lastFinalizedJHeight, jHistoryFinality and certifiedBoardState: how far the Entity trusts its J. */
+  readonly jFinality: JFinality;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12242,6 +12244,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   jBatch: s.jBatch,
   hub: s.hub,
   providerActions: s.providerActions,
+  jFinality: s.jFinality,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12877,10 +12880,14 @@ const authorityOf = (p: EntitySeed): Authority => {
   return { _tag: "board", board, entityId };
 };
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
-type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub" | "providerActions">;
+type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub" | "providerActions" | "jFinality">;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
-const importSections = (og: EntityCommitted): Result<TypedSections, EntityError> => {
-  const { jBatchState, entityProviderActionState, ...seeded } = og;
+const importSections = (
+  og: EntityCommitted,
+  config: JurisdictionConfig | undefined,
+): Result<TypedSections, EntityError> => {
+  const { jBatchState, entityProviderActionState, ...sectioned } = og;
+  const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, ...seeded } = sectioned;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
   const actions = entityProviderActionState as EntityProviderActionState | undefined;
@@ -12888,13 +12895,14 @@ const importSections = (og: EntityCommitted): Result<TypedSections, EntityError>
     jBatch: mapErr(importJBatchState(jBatchState as OgJBatchState | undefined), unreachable("J_BATCH")),
     hubbed: mapErr(importHub(seeded), unreachable("HUB")),
     providerActions: mapErr(importProviderActions(actions), unreachable("ENTITY_PROVIDER_ACTION")),
+    jFinality: mapErr(importJFinality(og, config), unreachable("J_FINALITY")),
   });
-  return map(imported, ({ jBatch, hubbed: { hub, committed }, providerActions }) =>
-    ({ committed, jBatch, hub, providerActions }));
+  return map(imported, ({ jBatch, hubbed: { hub, committed }, providerActions, jFinality }) =>
+    ({ committed, jBatch, hub, providerActions, jFinality }));
 };
 /** The state with its committed sections replaced by og-named ones (the inverse of ogSections). */
 export const withOgSections = (state: EntityState, og: EntityCommitted): Result<EntityState, EntityError> =>
-  map(importSections(og), (sections) => ({ ...state, ...sections }));
+  map(importSections(og, state.jurisdictionConfig), (sections) => ({ ...state, ...sections }));
 export const createEntity = (p: EntitySeed): Result<OpenEntity, EntityError> => {
   const parts = all({
     quorum: admitQuorum(authorityOf(p)),
@@ -12903,7 +12911,7 @@ export const createEntity = (p: EntitySeed): Result<OpenEntity, EntityError> => 
   return chain(parts, ({ quorum, jurisdiction }): Result<OpenEntity, EntityError> => {
     const signer = p.signerId === undefined ? quorum.proposer : memberId(quorum, p.signerId);
     if (signer === undefined) return err({ _tag: "unknown_member", address: p.signerId ?? "" });
-    return map(importSections(p.committed ?? {}), (sections) => {
+    return map(importSections(p.committed ?? {}, p.jurisdictionConfig), (sections) => {
       const state: EntityState = {
         id: p.id, quorum, jurisdiction, accounts: new Map(), height: 0n, timestamp: p.timestamp ?? 0n,
         ...opt("jurisdictionConfig", p.jurisdictionConfig), ...sections,
@@ -18523,10 +18531,7 @@ const answerFrame = (d: Draft, peer: EntityId, ctx: FoldContext): Result<Routed,
     return map(answered, ({ draft: acked, effects }) => ({ draft: afterAnswer(d, acked), effects }));
   }));
 };
-const entityJHeight = (state: EntityState): bigint => {
-  const h = state.committed["lastFinalizedJHeight"];
-  return typeof h === "number" && Number.isSafeInteger(h) && h >= 0 ? BigInt(h) : 0n;
-};
+const entityJHeight = (state: EntityState): bigint => BigInt(state.jFinality.height);
 // ---- og entity/transition/cross-j-proposer-materialization.ts: one exact opening cohort per sibling pair ----
 const openingText = (v: unknown): string => String(v ?? "").trim().toLowerCase();
 const byText = (a: string, b: string): number => a.localeCompare(b);
@@ -19715,7 +19720,7 @@ const entityBoardStack = (state: EntityState): BoardStack | undefined => {
 };
 /** og EntityState.certifiedBoardState (committed). */
 export const entityBoardRegistry = (state: EntityState): CertifiedBoardRegistryState | undefined =>
-  state.committed["certifiedBoardState"] as CertifiedBoardRegistryState | undefined;
+  state.jFinality.boards._tag === "registry" ? state.jFinality.boards.registry : undefined;
 const entityBoardNodes = (state: EntityState): BoardNodes => state.boardNodes ?? new Map();
 const fromRegistry = <T>(r: BoardResult<T>): Result<T, EntityError> =>
   mapErr(r, (e): EntityError => ({ _tag: "entity_invariant", reason: e.code }));
@@ -19854,8 +19859,7 @@ const boardRegistryStep = (
   return chain(fromRegistry(applyBoardRegistryEvent(entityBoardRegistry(state), nodes, j, event)), (applied) => {
     const step: BoardJEventStep = {
       state: {
-        ...state,
-        committed: { ...state.committed, certifiedBoardState: { ...applied.state } },
+        ...withJFinality(state, { boards: knownBoards({ ...applied.state }) }),
         boardNodes: applied.newNodes.size === 0 ? nodes : new Map([...nodes, ...applied.newNodes]),
       },
       events: [status(`🔐 BOARD AUTHORITY: ${event.type} | Block ${blockNumber}`)],
@@ -26650,6 +26654,7 @@ export const ogSections = (state: EntityState): EntityCommitted => {
   const actions = ogProviderActions(state.providerActions);
   return hubSections(state.hub, {
     ...state.committed,
+    ...ogJFinality(state.jFinality),
     ...(jBatch === undefined ? {} : { jBatchState: jBatch as unknown as Binary }),
     ...(actions === undefined ? {} : { entityProviderActionState: actions as unknown as Binary }),
   });
@@ -29926,6 +29931,7 @@ const reimport = (
     quorum: im.quorum,
     jurisdiction: im.domain,
     jurisdictionConfig: im.jurisdictionConfig,
+    jFinality: rebasedJFinality(replica.state.jFinality, im.jurisdictionConfig),
   };
   return ok(installImported(im, importedReplica(im, replica, state, replica.mempool), drop));
 };
@@ -29943,7 +29949,7 @@ const checkpointImport = (im: Importing, certified: EntityReplica): Result<Runti
   });
 /**
  * og buildGenesisReplica's committed root: the default profile, the crontab and the jurisdiction's default swap
- * pairs; lastFinalizedJHeight starts at the EntityProvider registration base (getJHistoryRegistrationBaseHeight).
+ * pairs (createEntity starts the J finality at the registration base).
  */
 const genesisCommitted = (im: Importing): EntityCommitted => {
   const profileName = im.tx.data.profileName;
@@ -29954,7 +29960,6 @@ const genesisCommitted = (im: Importing): EntityCommitted => {
     reserves: new Map(),
     deferredAccountProposals: new Map(),
     entityEncryptionPublicKey: im.publicKey,
-    lastFinalizedJHeight: jHistoryRegistrationBase(im.jurisdictionConfig),
     profile: {
       name: named ? profileName.trim() : `Entity ${im.entity.slice(-4)}`,
       isHub: false,
@@ -32553,6 +32558,92 @@ type JAnchor = {
   readonly jurisdictionRef: string;
   readonly eventHistoryRoot: string;
 };
+// ---- the Entity's J finality: og lastFinalizedJHeight, jHistoryFinality and certifiedBoardState ----
+/** og JHistoryFinality: the one certified J head, exactly as the range that certified it was signed. */
+export type JHistoryAnchor = Readonly<{
+  jurisdictionRef: string;
+  baseHeight: number;
+  finalizedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  proposerSignerId: string;
+  proposerSignature: string;
+  entityHeight: number;
+}>;
+/** Before its first certified range an Entity trusts only its registration base; afterwards, the certified head. */
+export type JHead = Readonly<{ _tag: "uncertified" }> | Readonly<{ _tag: "certified"; anchor: JHistoryAnchor }>;
+/** og certifiedBoardState: unknown until the first board event or certified range reaches the Entity. */
+export type CertifiedBoards =
+  | Readonly<{ _tag: "unknown" }>
+  | Readonly<{ _tag: "registry"; registry: CertifiedBoardRegistryState }>;
+/**
+ * `height` is the J block the Entity has applied through (og lastFinalizedJHeight). Between frames a certified head
+ * sits exactly on it; it runs ahead of the head only while a certified range folds block by block.
+ */
+export type JFinality = Readonly<{ height: number; head: JHead; boards: CertifiedBoards }>;
+export const UNCERTIFIED: JHead = { _tag: "uncertified" };
+export const NO_CERTIFIED_BOARDS: CertifiedBoards = { _tag: "unknown" };
+const certifiedHead = (anchor: JHistoryAnchor): JHead => ({ _tag: "certified", anchor });
+const knownBoards = (registry: CertifiedBoardRegistryState): CertifiedBoards => ({ _tag: "registry", registry });
+/** og buildGenesisReplica: nothing certified, the applied height at the EntityProvider registration base. */
+const genesisJFinality = (config: JurisdictionConfig | undefined): JFinality => ({
+  height: jHistoryRegistrationBase(config),
+  head: UNCERTIFIED,
+  boards: NO_CERTIFIED_BOARDS,
+});
+/** og importReplica over an uncertified replica: a height still at zero moves to the new registration base. */
+const rebasedJFinality = (f: JFinality, config: JurisdictionConfig): JFinality =>
+  f.height === 0 && f.head._tag === "uncertified" ? { ...f, height: jHistoryRegistrationBase(config) } : f;
+const withJFinality = (state: EntityState, change: Partial<JFinality>): EntityState =>
+  ({ ...state, jFinality: { ...state.jFinality, ...change } });
+const certifiedAnchorOf = (state: EntityState): JHistoryAnchor | undefined =>
+  state.jFinality.head._tag === "certified" ? state.jFinality.head.anchor : undefined;
+/** og's three root fields; the two a fresh Entity lacks stay absent. */
+const ogJFinality = (f: JFinality): EntityCommitted => ({
+  lastFinalizedJHeight: f.height,
+  ...(f.head._tag === "certified" ? { jHistoryFinality: f.head.anchor as unknown as Binary } : {}),
+  ...(f.boards._tag === "registry" ? { certifiedBoardState: f.boards.registry as unknown as Binary } : {}),
+});
+const ANCHOR_KEYS: readonly (keyof JHistoryAnchor)[] = [
+  "jurisdictionRef", "baseHeight", "finalizedThroughHeight", "tipBlockHash",
+  "eventHistoryRoot", "proposerSignerId", "proposerSignature", "entityHeight",
+];
+const normalText = (v: unknown): boolean => typeof v === "string" && v !== "" && v === nText(v);
+/** What commitJRangeFinality cannot have written: it copies a validated, normalized range onto the applied height. */
+const anchorProblems = (a: JRec, height: number): readonly string[] => [
+  Object.keys(a).some((k) => !ANCHOR_KEYS.includes(k as keyof JHistoryAnchor)) ? "an unknown anchor field" : undefined,
+  normalText(a["jurisdictionRef"]) ? undefined : "an unnormalized jurisdictionRef",
+  normalText(a["proposerSignerId"]) ? undefined : "an unnormalized proposerSignerId",
+  typeof a["proposerSignature"] === "string" ? undefined : "a non-text proposerSignature",
+  WORD32.test(String(a["tipBlockHash"])) ? undefined : "a malformed tipBlockHash",
+  WORD32.test(String(a["eventHistoryRoot"])) ? undefined : "a malformed eventHistoryRoot",
+  naturalSafeInt(a["baseHeight"]) ? undefined : "a malformed baseHeight",
+  positiveSafeInt(a["entityHeight"]) ? undefined : "a malformed entityHeight",
+  a["finalizedThroughHeight"] === height ? undefined : `an anchor off the applied height ${height}`,
+  Number(a["baseHeight"]) < height ? undefined : "an empty certified range",
+].filter((x) => x !== undefined);
+/** og's record, admitted only in a shape og reaches; a record without a height is a fresh Entity's. */
+const importJFinality = (og: EntityCommitted, config: JurisdictionConfig | undefined): Result<JFinality, string> => {
+  const raw = og["lastFinalizedJHeight"] ?? genesisJFinality(config).height;
+  const anchor = recOf(og["jHistoryFinality"]);
+  const registry = recOf(og["certifiedBoardState"]);
+  switch (true) {
+    case !naturalSafeInt(raw):
+      return err(`lastFinalizedJHeight ${String(raw)}`);
+    case anchor === null && og["jHistoryFinality"] !== undefined:
+      return err("a non-record jHistoryFinality");
+    case registry === null && og["certifiedBoardState"] !== undefined:
+      return err("a non-record certifiedBoardState");
+  }
+  const height = raw as number;
+  const problems = anchor === null ? [] : anchorProblems(anchor, height);
+  if (problems.length > 0) return err(problems.join(", "));
+  return ok({
+    height,
+    head: anchor === null ? UNCERTIFIED : certifiedHead(anchor as unknown as JHistoryAnchor),
+    boards: registry === null ? NO_CERTIFIED_BOARDS : knownBoards(registry as unknown as CertifiedBoardRegistryState),
+  });
+};
 /** og getJHistoryRegistrationBaseHeight: certify EntityProvider history from its deployment block. */
 const jHistoryRegistrationBase = (config: JurisdictionConfig | undefined): number => {
   const d = Number(config?.entityProviderDeploymentBlock ?? 0);
@@ -32573,33 +32664,15 @@ const unanchored = (state: EntityState, stateHeight: number): Result<null, Runti
     ? txErr(`J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${base}`)
     : ok(null);
 };
-/** og: the certified finality record, which must agree with the finalized height. */
-const finalityAnchor = (finality: JRec, stateHeight: number): Result<JAnchor, RuntimeError> => {
-  const claimed = finality["finalizedThroughHeight"];
-  const height = Number(claimed);
-  const hash = nText(finality["tipBlockHash"]);
-  const jurisdictionRef = nText(finality["jurisdictionRef"]);
-  const eventHistoryRoot = nText(finality["eventHistoryRoot"]);
-  switch (true) {
-    case !positiveSafeInt(height) || height !== stateHeight:
-      return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(claimed)}`);
-    case !WORD32.test(hash):
-      return txErr("J_HISTORY_FINALITY_HASH_CORRUPTION");
-    case !jurisdictionRef:
-      return txErr("J_HISTORY_FINALITY_JURISDICTION_CORRUPTION");
-    case !WORD32.test(eventHistoryRoot):
-      return txErr("J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid");
-    default:
-      return ok({ height, hash, jurisdictionRef, eventHistoryRoot });
-  }
-};
+/** og: the certified head as history reads it, sitting on the applied height (import admitted its words). */
+const finalityAnchor = (a: JHistoryAnchor, height: number): Result<JAnchor, RuntimeError> =>
+  a.finalizedThroughHeight === height
+    ? ok({ height, hash: a.tipBlockHash, jurisdictionRef: a.jurisdictionRef, eventHistoryRoot: a.eventHistoryRoot })
+    : txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${height}:anchor=${a.finalizedThroughHeight}`);
 /** og getEntityCertifiedJAnchor: the one Entity-certified J head (null before the first certified range). */
 const certifiedJAnchor = (state: EntityState): Result<JAnchor | null, RuntimeError> => {
-  const finality = recOf(state.committed["jHistoryFinality"]);
-  const raw = state.committed["lastFinalizedJHeight"];
-  const stateHeight = Number(raw || 0);
-  if (!naturalSafeInt(stateHeight)) return txErr(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${String(raw)}`);
-  return finality === null ? unanchored(state, stateHeight) : finalityAnchor(finality, stateHeight);
+  const { height, head } = state.jFinality;
+  return head._tag === "certified" ? finalityAnchor(head.anchor, height) : unanchored(state, height);
 };
 /** og: the cached history is on the anchor's jurisdiction and holds no other block at the anchor height. */
 const historyAgreesWithAnchor = (anchor: JAnchor, h: ValidatorJHistory): Result<void, RuntimeError> => {
@@ -32737,7 +32810,7 @@ const recordJHistory = (
       case anchor !== null && scannedThroughHeight < anchor.height:
         return txErr(`J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${scannedThroughHeight}:${anchor.height}`);
     }
-    const minimum = state === undefined ? 0 : Number(state.committed["lastFinalizedJHeight"]);
+    const minimum = state === undefined ? 0 : state.jFinality.height;
     const merged = chain(historyMatchesAnchor(anchor, current), () => {
       const retained = retainedHistory(current, anchor, minimum);
       const headed = foldResult(input.headers ?? [], retained.blockHashes, withHeader(anchor, scannedThroughHeight));
@@ -33258,7 +33331,7 @@ type JSuffix = {
  * certified head and must still fold to its signed root.
  */
 const reconcileJRange = (state: EntityState, d: JRange): Result<JSuffix | null, string> => {
-  const finalized = Number(state.committed["lastFinalizedJHeight"] || 0);
+  const finalized = state.jFinality.height;
   if (d.scannedThroughHeight <= finalized) return ok(null);
   if (d.baseHeight > finalized) return err(`J_RANGE_BASE_HEIGHT_AHEAD:${d.baseHeight}:${finalized}`);
   return chain(mapErr(certifiedJAnchor(state), jCode), (anchor) => {
@@ -34808,8 +34881,10 @@ const appliedJBlock =
     const folded = foldJHistoryRoot(s.root, [jBlockIdentity(jurisdictionRef)(block)]);
     if (!folded.ok) return invariant(folded.error);
     const st = s.step.draft.state;
-    const committed = { ...st.committed, lastFinalizedJHeight: block.blockNumber };
-    const atBlock: JEventStep = { ...s.step, draft: { ...s.step.draft, state: { ...st, committed } } };
+    const atBlock: JEventStep = {
+      ...s.step,
+      draft: { ...s.step.draft, state: withJFinality(st, { height: block.blockNumber }) },
+    };
     const evidence = block.disputeFinalizationEvidence ?? [];
     const applied = foldResult(block.events, atBlock, (step, e) => finalizedJEvent(step, e, ctx, evidence));
     return map(applied, (step) => ({ step, root: folded.value }));
@@ -34855,7 +34930,7 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
         return invariant(`J_HISTORY_FINALITY_ROOT_CORRUPTION:expected=${root}:certified=${suffix.eventHistoryRoot}`);
       const applied = step.draft.state;
       const stack = entityBoardStack(applied);
-      const finality: Binary = {
+      const anchor: JHistoryAnchor = {
         jurisdictionRef: r.jurisdictionRef,
         baseHeight: suffix.baseHeight,
         finalizedThroughHeight: suffix.scannedThroughHeight,
@@ -34875,13 +34950,12 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
       );
       return chain(fromRegistry(registry), (board) =>
         map(mapErr(mergeJOps(step.claims), asInvariant), (claims) => {
-          const committed = {
-            ...applied.committed,
-            lastFinalizedJHeight: suffix.scannedThroughHeight,
-            jHistoryFinality: finality,
-            certifiedBoardState: { ...board },
+          const jFinality: JFinality = {
+            height: suffix.scannedThroughHeight,
+            head: certifiedHead(anchor),
+            boards: knownBoards({ ...board }),
           };
-          const draft = admitClaims({ ...step.draft, state: { ...applied, committed } }, claims, state.id, ctx);
+          const draft = admitClaims({ ...step.draft, state: { ...applied, jFinality } }, claims, state.id, ctx);
           return { ...draft, touched: [...new Set(step.dirty)] as EntityId[] };
         }),
       );
@@ -35013,9 +35087,9 @@ const jpWord = (v: unknown, label: string): JP<string> => {
   return WORD32.test(s) ? ok(s) : jpFail(`J_PREFIX_${label}_INVALID:${String(v)}`);
 };
 // The committed Entity's side of a round.
-const jpFinalized = (v: JPrefixView): number => Number(v.state.committed["lastFinalizedJHeight"] || 0);
+const jpFinalized = (v: JPrefixView): number => v.state.jFinality.height;
 const jpEntityHeight = (v: JPrefixView): number => Number(v.state.height);
-const hasCertifiedAnchor = (v: JPrefixView): boolean => recOf(v.state.committed["jHistoryFinality"]) !== null;
+const hasCertifiedAnchor = (v: JPrefixView): boolean => v.state.jFinality.head._tag === "certified";
 /** og currentParentFrameHash. */
 const jpParent = (v: JPrefixView): string => (v.state.height === 0n ? GENESIS_PARENT : parentOf(v.head));
 /** The round the next frame belongs to. */
@@ -35140,25 +35214,18 @@ const jpSign = (crypto: JPrefixCrypto, signer: string, digest: string): JP<strin
  * a J prefix in every frame.
  */
 export const entityRequiresJPrefixCertificate = (state: EntityState): boolean =>
-  state.jurisdictionConfig?.registrationBlock !== undefined || Boolean(state.committed["jHistoryFinality"]);
+  state.jurisdictionConfig?.registrationBlock !== undefined || state.jFinality.head._tag === "certified";
 /** og buildCertifiedBaseClaim. */
 const jpCertifiedBase = (v: JPrefixView): JP<JPrefixClaim> => {
   const baseHeight = jpFinalized(v);
-  const finality = recOf(v.state.committed["jHistoryFinality"]);
+  const anchor = certifiedAnchorOf(v.state);
   const jurisdictionRef = jEventJurisdictionRef(v.state);
-  if (finality === null || finality["finalizedThroughHeight"] !== baseHeight) {
+  if (anchor === undefined || anchor.finalizedThroughHeight !== baseHeight) {
     return jpFail(`J_PREFIX_CERTIFIED_BASE_MISSING:${baseHeight}`);
   }
-  if (nText(finality["jurisdictionRef"]) !== jurisdictionRef) {
-    return jpFail("J_PREFIX_CERTIFIED_BASE_JURISDICTION_MISMATCH");
-  }
-  const words = all({
-    tipBlockHash: jpWord(finality["tipBlockHash"], "CERTIFIED_BASE_TIP_HASH"),
-    eventHistoryRoot: jpWord(finality["eventHistoryRoot"], "CERTIFIED_BASE_HISTORY_ROOT"),
-  });
-  return chain(words, ({ tipBlockHash, eventHistoryRoot }) =>
-    baseOnlyClaim(jurisdictionRef, baseHeight, tipBlockHash, eventHistoryRoot),
-  );
+  return anchor.jurisdictionRef === jurisdictionRef
+    ? baseOnlyClaim(jurisdictionRef, baseHeight, anchor.tipBlockHash, anchor.eventHistoryRoot)
+    : jpFail("J_PREFIX_CERTIFIED_BASE_JURISDICTION_MISMATCH");
 };
 /**
  * og buildBaseClaim: the certified base, or (before the first anchor) this validator's own header at the registration
@@ -38524,7 +38591,7 @@ const runtimeHtlcInfra = (ctx: RuntimeCtx, rt: Runtime, entityId: EntityId): Htl
  */
 const replicaJHistory = (rt: Runtime, key: string, r: EntityReplica): ValidatorJHistory | undefined => {
   const h = rt.replicaLocal.get(key)?.jHistory;
-  return unwrapOr(pruneFinalizedJHistory(h, Number(r.state.committed["lastFinalizedJHeight"] || 0)), () => h);
+  return unwrapOr(pruneFinalizedJHistory(h, r.state.jFinality.height), () => h);
 };
 // ---- og runtime/frame/cross-j/atomic-admission.ts: the two legs of a cross-j swap commit together ----
 //

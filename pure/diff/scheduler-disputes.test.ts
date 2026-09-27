@@ -162,7 +162,7 @@ describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og sc
       const tasks = new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun, enabled: true, params: {} }]]) as Crontab["tasks"];
       const state = withCrontab(entity([aliceAddr]), { ...crontab, tasks });
       const ogHooks = hooks.reduce((m, h) => m.updated(h.id, h), PersistentEntityCollectionMap.empty<unknown>());
-      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
+      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), lastFinalizedJHeight: state.jFinality.height, config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
         paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, crontabState: { tasks, hooks: ogHooks } };
       expect(unwrap(entityRootOf(state, new Map()))).toBe(computeCanonicalEntityConsensusStateHash(og as never));
     }

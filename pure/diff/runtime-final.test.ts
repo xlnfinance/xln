@@ -424,7 +424,7 @@ describe(seedTag("runtime-final: the per-frame J prefix (og jurisdiction/machine
     const chainHash = new Map<number, string>(); for (let h = 0; h <= L + 8; h++) chainHash.set(h, word());
     const eventHeights = new Set(Array.from({ length: ri(4) }, () => L + 1 + ri(8)));
     const balance = new Map([...eventHeights].map((h) => [h, String(ri(900))]));
-    const anchor = finality ? { jurisdictionRef: JREF, baseHeight: L - 1, finalizedThroughHeight: L, tipBlockHash: chainHash.get(L), eventHistoryRoot: word(), proposerSignerId: V[0], proposerSignature: "0x", entityHeight: H } : undefined;
+    const anchor = finality ? { jurisdictionRef: JREF, baseHeight: L - 1, finalizedThroughHeight: L, tipBlockHash: chainHash.get(L), eventHistoryRoot: word(), proposerSignerId: V[0], proposerSignature: "0x", entityHeight: Math.max(1, H) } : undefined;
     const jc = { name: "j", entityProviderAddress: EP, ...(finality ? {} : { entityProviderDeploymentBlock: L + 1 }), ...(registered ? { registrationBlock: 1 } : {}) };
     const members = new Map([aliceAddr, bobAddr, carolAddr].map((a, i) => [a, { shares: shares[i] as bigint }] as const));
     const created = unwrap(createEntity({ id: ID, jurisdiction: TERMS.domain, threshold, members: members as never, jurisdictionConfig: jc as never,
@@ -615,7 +615,7 @@ describe(seedTag("runtime-final: the per-frame J prefix (og jurisdiction/machine
           } else expect(range).toBeUndefined();
         }
         // the committed finality is the highest certified prefix; og finalizeCommitNotification prunes the local history to it at every commit
-        const finalized = Number(r.state.committed["lastFinalizedJHeight"] || 0), before = fx.histories.get(r.signerId.toLowerCase());
+        const finalized = r.state.jFinality.height, before = fx.histories.get(r.signerId.toLowerCase());
         expect(finalized).toBe(Math.max(fx.L, ...chain.map((f) => f.jPrefixCertificate?.selected.scannedThroughHeight ?? 0)));
         if (before !== undefined) expect(plain(rt.replicaLocal.get(replicaKey(id, r.signerId))?.jHistory)).toEqual(plain(ogPruneJHistory(before as never, finalized)));
       }

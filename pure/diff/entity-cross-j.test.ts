@@ -16,7 +16,7 @@ import {
   createOnionEnvelopes, decodeOnionLayer, decryptOpaqueHtlc, directionalFeePpm, encodeOnionLayer, encryptOpaqueHtlc, htlcEnvelopeContextHash, hopRevealHeight, hopTimelock,
   paymentDeadlineWindow, quoteHtlcRoute, requiredInbound, routingIndex, stableJson, type HtlcEnvelope, type OnionLayer, type RoutingProfile,
 } from "../xln.ts";
-import { asHub } from "./og-state.ts";
+import { asHub, withOg } from "./og-state.ts";
 
 export const rng = (base: number) => {
   let seed = seedOf(base);
@@ -411,8 +411,7 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
       if (k === 14) { const c = replicas.get(CAROL)!, tk = unwrap(tokenId("1")), d = c.state.account.deltas.get(tk)!; replicas = new Map(replicas).set(CAROL, { ...c, state: { ...c.state, account: { ...c.state.account, deltas: new Map(c.state.account.deltas).set(tk, { ...d, leftCreditLimit: BigInt(int(r, 120)), rightCreditLimit: BigInt(int(r, 120)) }) } } } as AccountReplica); }
       const priv = k === 12 ? ENTITY_KEYS.get(CAROL)!.priv : ENTITY_KEYS.get(BOB)!.priv;
       const rwTx = { type: "accountInput", data: m } as EntityTx, txs = k === 13 ? [rwTx, rwTx] : [rwTx];
-      const committed = { ...bob.state.committed, ...(jHeight > 0 ? { lastFinalizedJHeight: jHeight } : {}) };
-      const seeded = { ...bob.state, committed };
+      const seeded = withOg(bob.state, { lastFinalizedJHeight: jHeight });
       const rw = inboundHtlcEntries({ state: hub === undefined ? seeded : asHub(seeded, hub), replicas, timestamp: ts, publicKey: ENTITY_KEYS.get(BOB)!.pub, privateKey: priv, online: up }, txs);
       const child = bob.accountReplicas.get(ALICE)!;
       const ogTx = { type: "accountInput", data: { kind: "ack_frame", fromEntityId: m.fromEntityId, toEntityId: m.toEntityId, domain: m.domain, proposal: { frame: { height: Number(frame.height), stateHash: frame.stateHash, timestamp: Number(frame.timestamp), accountTxs: frame.txs.map((t: any) => (t.type === "htlc_lock" ? ogAccountTx(t) : unwrap(wireTx(t, replicaId(child), isLeft(ALICE, replicaId(child)))))) } } } };

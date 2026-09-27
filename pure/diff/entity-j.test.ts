@@ -40,7 +40,7 @@ import { getBoardHandoverFrameConfig } from "../../core/entity/consensus/authori
 import { handleBoardHandoverEntityTx } from "../../core/entity/tx/handlers/board-handover.ts";
 import { encodeBoard, hashBoard } from "../../core/entity/factory.ts";
 import { carolAddr } from "../xln_run.ts";
-import { ogJb } from "./og-state.ts";
+import { ogJb, ogOf } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xe7_1a);
@@ -472,7 +472,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
       for (let step = 0; step < 8; step++) {
         t += 1 + jri(9);
         const og: any = { ...ogState(state, replicas, t), ...structuredClone(carry) };
-        const finalized = Number(state.committed["lastFinalizedJHeight"] ?? 0), sent = ogJb(state)?.sentBatch;
+        const finalized = state.jFinality.height, sent = ogJb(state)?.sentBatch;
         const defect = jrng() < 0.7 ? "" : jpick(["stale", "ahead", "jurisdiction", "root", "from", "signature", "observed", "rangeHash"]);
         const data = signedRange(og, finalized, sent, defect);
         const before = 0;
@@ -483,7 +483,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
         if (!ogR.ok) seen.set(ogR.code.split(/[: ]/)[0]!, (seen.get(ogR.code.split(/[: ]/)[0]!) ?? 0) + 1);
         expect([defect, f.ok, f.ok ? "" : (f.error as any).reason]).toEqual([defect, ogR.ok, ogR.ok ? "" : ogR.code]);
         if (!ogR.ok || !f.ok) { expect(f.ok ? "" : (f.error as any).reason).toBe(ogR.ok ? "" : ogR.code); continue; }
-        const d = f.value.draft, out = ogR.value, next = out.newState, c = d.state.committed;
+        const d = f.value.draft, out = ogR.value, next = out.newState, c = ogOf(d.state);
         // og handleJEventEntityTx (tx/apply.ts): JEventReceived per event (or one liveness event) ahead of applyJEvent's own runtime events (runtime-final.md RF-6)
         const ogFull = await ogRun(() => ogApplyEntityTx({ quietRuntimeLogs: true, state: { timestamp: t, height: 0, eReplicas: new Map(), jReplicas: new Map() } } as any, { ...ogState(state, replicas, t), ...structuredClone(carry) }, { type: "j_event", data } as any, { mutableFrameState: true } as any));
         if (!ogFull.ok) throw new Error(ogFull.code);
@@ -582,7 +582,7 @@ describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame con
         const f = foldTxs(state, replicas, [{ type: "j_event", data: data as never }], { verify: verifiers.verify, timestamp: 10n });
         expect([f.ok, f.ok ? "" : (f.error as any).reason]).toEqual([ogR.ok, ogR.ok ? "" : (ogR as any).code]);
         if (!f.ok || !ogR.ok) continue;
-        expect(f.value.draft.state.committed["certifiedBoardState"]).toEqual(ogR.value.newState.certifiedBoardState);
+        expect(ogOf(f.value.draft.state)["certifiedBoardState"]).toEqual(ogR.value.newState.certifiedBoardState);
         state = f.value.draft.state;
         carry = { ...carry, lastFinalizedJHeight: ogR.value.newState.lastFinalizedJHeight, jHistoryFinality: ogR.value.newState.jHistoryFinality, certifiedBoardState: ogR.value.newState.certifiedBoardState };
       }
@@ -605,8 +605,8 @@ describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame con
       expect(Object.fromEntries([...q.members].map(([a, m]: any) => [a.toLowerCase(), m.shares]))).toEqual(next.config.shares);
       expect(q.threshold).toBe(next.config.threshold);
       expect(s.leaderState).toEqual(next.leaderState);
-      expect(s.committed["certifiedBoardState"]).toEqual(next.certifiedBoardState);
-      expect(Number(s.committed["lastFinalizedJHeight"])).toBe(next.lastFinalizedJHeight);
+      expect(ogOf(s)["certifiedBoardState"]).toEqual(next.certifiedBoardState);
+      expect(s.jFinality.height).toBe(next.lastFinalizedJHeight);
     }
     for (const k of ["ok:ok", "chain2:ok", "bobFirst:ok", "badPrev:refused", "hashMismatch:refused", "noActivation:refused", "upper:refused", "gossip:refused", "threshold0:refused", "shapeAlone:refused", "twice:refused", "unregistered:refused", "wrongRegistration:refused", "nested:ok", "nestedFirst:refused"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
   }, 120_000);
