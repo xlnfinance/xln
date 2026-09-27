@@ -245,7 +245,7 @@ describe("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-
     for (let i = 0; i < 400; i++) {
       const now = 5_000_000 + ri(20_000), nowSec = Math.floor(now / 1000), withJ = rng() < 0.8, kind = pick(["missing", "open", "queued", "observed", "observed", "observed", "observed"] as const);
       const initialNonce = pick([0, 1, 1, 2]), initialProposerIsLeft = rng() < 0.5;
-      const selected = rng() < 0.2 ? { selectedCounterNonce: pick([2, 3]), ...(rng() < 0.85 ? { selectedCounterProofbodyHash: pick([good, good, bad]) } : {}), ...(rng() < 0.85 ? { selectedCounterProposerIsLeft: rng() < 0.5 } : {}) } : {};
+      const selected: { selectedCounterNonce?: number; selectedCounterProofbodyHash?: string; selectedCounterProposerIsLeft?: boolean } = rng() < 0.2 ? { selectedCounterNonce: pick([2, 3]), ...(rng() < 0.85 ? { selectedCounterProofbodyHash: pick([good, good, bad]) } : {}), ...(rng() < 0.85 ? { selectedCounterProposerIsLeft: rng() < 0.5 } : {}) } : {};
       const wNonce = pick([1, 2, 3]), wLeft = rng() < 0.5, wBody = pick([good, good, bad]);
       const commitment = rng() < 0.5 ? commitmentOf(selected.selectedCounterNonce ?? wNonce, selected.selectedCounterProposerIsLeft ?? wLeft, selected.selectedCounterProofbodyHash ?? wBody) : ZERO_WORD;
       const active = kind === "queued" ? queuedStart() : observed(nowSec, {

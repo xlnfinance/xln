@@ -261,7 +261,8 @@ describe("runtime-final: RuntimeStep.events (og observability/env-events.ts publ
 
 // ---- og account/consensus: Account frame messages and runPostFrameAutoRebalanceCheck ----
 describe("runtime-final: Account frame messages and the post-commit auto-rebalance (og account/consensus)", () => {
-  const said = (outputs: readonly { readonly kind: string }[]): string[] => outputs.flatMap((o) => (o.kind === "message" ? [(o as { message: string }).message] : []));
+  const said = (outputs: readonly { readonly kind: string }[]): string[] =>
+    outputs.flatMap((o) => (o.kind === "message" && "message" in o && typeof o.message === "string" ? [o.message] : []));
   const door = (self: EntityId, autoRebalance: boolean) => ({ verify: hankoVerify, self, now: NOW, autoRebalance });
   test("MATCH (randomized): a full round says og's lines (`🚀`, handler lines + `🤝`, `✅`) and the ACK commit queues exactly og runPostFrameAutoRebalanceCheck's request_collateral", () => {
     let queued = 0, quiet = 0;
@@ -461,7 +462,7 @@ describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history
       expect(shape(mine)).toEqual(shape(og) as never);
       if (mine.ok && og.ok) {
         expect(unsigned(mine.value)).toEqual(unsigned(og.value));
-        if (og.value !== null) expect(unwrap(jPrefixAttestationHash(mine.value as never) as never)).toBe(ogHashJPrefixAttestation(unsigned(og.value)));
+        if (og.value !== null) expect<string>(unwrap(jPrefixAttestationHash(mine.value as never))).toBe(ogHashJPrefixAttestation(unsigned(og.value)));
       }
       const k = !mine.ok ? `err:${mine.message.split(":")[0]}` : mine.value === null ? "null" : (mine.value as JPrefixAttestation).scannedThroughHeight > fx.L ? "range" : "base";
       seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -586,7 +587,7 @@ describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history
         for (const frame of chain) {
           const cert = frame.jPrefixCertificate, range = frame.txs.find((tx) => tx.type === "j_event");
           // og createEntityFrameHashFromStateRoot: the certificate is in the frame hash
-          expect(unwrap(hashEntityFrame(frame))).toBe(ogEntityFrameHash(frame.prevFrameHash, Number(frame.height), Number(frame.timestamp), frame.txs.map(wireEntityTx) as never, frame.events as never, id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never, cert as never));
+          expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogEntityFrameHash(frame.prevFrameHash, Number(frame.height), Number(frame.timestamp), frame.txs.map(wireEntityTx) as never, frame.events as never, id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never, cert as never));
           if (frame.height !== 1n) continue;
           // og assertFrameJPrefix: without a certificate (an unregistered Entity whose validators see no pending J event) no range is certified
           if (cert === undefined) { uncertified++; expect(range).toBeUndefined(); expect(entityRequiresJPrefixCertificate(fx.view.state)).toBe(false); continue; }
@@ -964,7 +965,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
         catch (e) { want = ogCode(e); }
         const r = admitAtomicCrossPairs(env.rw, ins as never, replay);
         const got = r.ok ? { inputs: r.value.inputs.map((i) => crossInputView(i as never)), pairs: r.value.pairs.map((p) => crossPairView(p as never)) } : rwCode(r);
-        expect([n, replay, got]).toEqual([n, replay, want]);
+        expect<unknown>([n, replay, got]).toEqual([n, replay, want]);
         if (!replay && typeof want === "object" && (want as { pairs: unknown[] }).pairs.length > 0) grouped += 1;
       }
     }
@@ -1022,7 +1023,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
       let want: unknown;
       try { ogMarkAckOutputs(ogOutbox as never, ogPairs as never); want = ogOutbox.map((o) => (o as { atomicCrossJurisdictionPair?: unknown }).atomicCrossJurisdictionPair ?? null); } catch (e) { want = ogCode(e); }
       const r = markCommittedAckOutputs(outbox as never, pairs as never);
-      expect([n, r.ok ? r.value.map((o) => o.atomicCrossJurisdictionPair ?? null) : rwCode(r)]).toEqual([n, want]);
+      expect<unknown>([n, r.ok ? r.value.map((o) => o.atomicCrossJurisdictionPair ?? null) : rwCode(r)]).toEqual([n, want]);
       if (Array.isArray(want) && want.some((m) => m !== null)) markedRuns += 1;
     }
     expect(markedRuns).toBeGreaterThan(5);

@@ -173,10 +173,10 @@ describe("entity-runtime: entity state root commits every og field (H6)", () => 
     expect(frame.stateRoot).toBe(computeCanonicalEntityConsensusStateHash(ogState));
     const ogTxs = [{ type: "extendCredit", data: { counterpartyEntityId: CAROL, tokenId: 1, amount: 5n } }];
     const ogHash = createEntityFrameHashFromStateRoot("genesis", 1, 50, ogTxs as never, [], r.state.id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never);
-    expect(unwrap(hashEntityFrame(frame))).toBe(ogHash);
+    expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogHash);
     // og appendFinalProfileHash: the genesis frame always signs the profile descriptor hash
     const profile = computeEntityProfileHash(ogState as never);
-    expect(frame.hashesToSign).toEqual(buildEntityHashesToSign(r.state.id, 1, ogHash, [{ hash: profile, type: "profile", context: `profile:${profile}` }]));
+    expect<readonly unknown[]>(frame.hashesToSign).toEqual(buildEntityHashesToSign(r.state.id, 1, ogHash, [{ hash: profile, type: "profile", context: `profile:${profile}` }]));
   });
 });
 
@@ -366,7 +366,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
     const sent = p.outputs[0];
     if (sent === undefined || !("tx" in sent) || sent.tx.data.kind !== "ack_frame") throw new Error("no frame");
     expect(sent.tx.data.frame.height).toBe(1n);
-    expect(sent.tx.data.frame.txs.map((t) => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
+    expect(sent.tx.data.frame.txs.map((t): [string, string | undefined] => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
   });
   test("MATCH (og direct-payment.ts): amount < 1 is a silent no-op, a non-bilateral direct route and a trusted route are refused, a paid hop queues a payment and wakes validators[0]", () => {
     const opened = unwrap(propose(teaching([[A, 1n]], 1n), A)).replica;
@@ -383,7 +383,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
     expect(unfunded.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
     const credit: EntityTx = { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n } };
     const extended = unwrap(propose(opened, A, [credit], 2n));
-    expect(extended.replica.accountReplicas.get(BOB)?.mempool.at(-1)).toEqual({ type: "set_credit_limit", tokenId: "1", limit: 5n });
+    expect(extended.replica.accountReplicas.get(BOB)?.mempool.at(-1)).toEqual({ type: "set_credit_limit", tokenId: unwrap(tokenId("1")), limit: 5n });
     expect(extended.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
   });
   test("MATCH (og createInboundAccountState): the peer opens its side from the first Account frame; no openAccount output is needed", () => {

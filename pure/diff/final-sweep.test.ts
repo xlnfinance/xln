@@ -12,7 +12,7 @@ import { applyRuntime, convertOutput, createRuntime, lazyBoardEntityId, runtimeO
 import { TERMS, aliceAddr, bobAddr, verifiers } from "../xln_run.ts";
 import { createAccountConsensusContext as ogConsensusContext } from "../../core/entity/account/account-consensus-context.ts";
 import { applyCertifiedBoardRegistryEvent as ogApplyBoardEvent } from "../../core/jurisdiction/machine/board-registry/index.ts";
-import { applyBoardJEvent, createEntity, quorumBoardHash, settlementBoardAuthority, type EntityState, type JEvent } from "../xln.ts";
+import { address, applyBoardJEvent, createEntity, quorumBoardHash, settlementBoardAuthority, type EntityState, type JEvent } from "../xln.ts";
 import { carolAddr } from "../xln_run.ts";
 import { applyRecoveryRuntimeOutputPlan as ogOutputPlan } from "../../core/runtime/delivery/recovery-output.ts";
 import { encodeBuffer as ogEncodeBuffer } from "../../core/storage/codec/codec.ts";
@@ -323,8 +323,8 @@ describe("final-sweep: SJ-18 settlement board authority fallback (og resolveSett
   const toOg = (e: JEvent): any => { const { meta: m, type, ...data } = e as any; return { type, ...m, data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v])) }; };
   type Replica = { state: EntityState; og: any };
   const replica = (id: string, members: readonly (readonly [string, bigint])[], threshold: bigint, events: readonly JEvent[], ep: string | null, nodes: Map<string, any>): Replica => {
-    const authority = new Map(members.map(([a, s]) => [a, { shares: s }]));
-    let state = unwrapR(createEntity({ id: unwrapR(entityId(id) as never), jurisdiction: { chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress }, threshold, members: authority, ...(ep === null ? {} : { jurisdictionConfig: { entityProviderAddress: ep } }) }) as never as { ok: true; value: { state: EntityState } }).state;
+    const authority = new Map(members.map(([a, s]) => [unwrapR(address(a)), { shares: s }]));
+    let state = unwrapR(createEntity({ id: unwrapR(entityId(id)), jurisdiction: { chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress }, threshold, members: authority, ...(ep === null ? {} : { jurisdictionConfig: { entityProviderAddress: ep } }) })).state;
     let registry: any;
     const ogJ = { ...JUR, entityProviderAddress: ep ?? JUR.entityProviderAddress };
     for (const e of events) {
@@ -350,10 +350,10 @@ describe("final-sweep: SJ-18 settlement board authority fallback (og resolveSett
       if (mode === "stackDiverge") replicas.push(replica(id, members, threshold, events, OTHER_EP, nodes));
       if (mode === "twoMatch") replicas.push(replica(id, members, threshold, events, JUR.entityProviderAddress, nodes));
       const env = { state: { timestamp: 0, eReplicas: new Map(replicas.map((x, k) => [`${id}:${k}`, { state: x.og }])), jReplicas: new Map() }, infrastructure: { certifiedBoardNodes: nodes } };
-      let og: unknown;
-      try { og = { ok: true, value: await ogConsensusContext(env as never).resolveSettlementBoardAuthority(id) }; } catch (e) { og = { ok: false, error: (e as Error).message }; }
-      expect(settlementBoardAuthority(replicas.map((x) => x.state), id)).toEqual(og as never);
-      seen.add((og as { ok: boolean; value?: string; error?: string }).ok ? `ok:${(og as { value?: string }).value === undefined ? "none" : "pin"}` : String((og as { error: string }).error).split(":")[0]);
+      let og: { ok: true; value: unknown } | { ok: false; error: string };
+      try { og = { ok: true, value: await ogConsensusContext(env as never).resolveSettlementBoardAuthority(id) }; } catch (e) { og = { ok: false, error: String((e as Error).message) }; }
+      expect<unknown>(settlementBoardAuthority(replicas.map((x) => x.state), id)).toEqual(og);
+      seen.add(og.ok ? `ok:${og.value === undefined ? "none" : "pin"}` : og.error.split(":")[0] ?? og.error);
     }
     expect(seen.size).toBeGreaterThanOrEqual(6);
   });
@@ -436,7 +436,7 @@ describe("final-sweep: RF-18 retained network outbox (og applyRecoveryRuntimeOut
     const RT1 = "0x" + "a1".repeat(20), RT2 = "0x" + "a2".repeat(20);
     const row = (n: number, height: number, runtimeId = RT1): NetworkOutput => ({ entityId: W("71"), signerId: bobAddr.toLowerCase(), entityTxs: [{ type: "j_event", data: { n } }] as never, runtimeId, sourceRuntimeFrame: { height, timestamp: 9 } });
     const prior = [row(1, 3), row(2, 4), row(3, 4)];
-    const retired = retireNetworkOutputs({ pendingNetworkOutputs: prior } as Runtime, (o) => (o["entityTxs"] as any)[0].data.n === 2);
+    const retired = retireNetworkOutputs({ ...createRuntime(), pendingNetworkOutputs: prior }, (o) => (o["entityTxs"] as any)[0].data.n === 2);
     expect(retired.pendingNetworkOutputs).toEqual([prior[0]!, prior[2]!]);
     const cases: NetworkOutput[][] = [[row(1, 3), row(3, 4), row(9, 5)], [row(1, 3, RT2)], [row(3, 4), row(1, 3)], [row(4, 4)], [{ ...row(1, 3), sourceRuntimeFrame: { height: 6, timestamp: 9 } }], [{ ...row(1, 3), runtimeId: "" }]];
     for (const recorded of cases) {

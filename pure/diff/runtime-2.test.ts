@@ -242,7 +242,8 @@ describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", ()
     e: i.entityId.toLowerCase(), s: i.signerId.toLowerCase(), from: i.from ?? "",
     body: i.input.kind === "proposal" ? `frame-${i.input.frame.height}-${Number(i.input.frame.timestamp)}`
       : i.input.kind === "precommit" ? [...i.input.signatures].map(([k, v]) => [k, [...v]])
-      : i.input.txs.map((tx) => (tx.type === "extendCredit" ? Number(tx.data.amount) : -1)),
+      : i.input.kind === "txs" ? i.input.txs.map((tx) => (tx.type === "extendCredit" ? Number(tx.data.amount) : -1))
+      : `unexpected ${i.input.kind} input`,
   });
   const summaryOg = (i: Record<string, unknown>): unknown => {
     const pre = i["hashPrecommits"] as Map<string, string[]> | undefined, frame = i["proposedFrame"] as { hash: string } | undefined;

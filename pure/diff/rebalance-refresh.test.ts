@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   accountId, createEntity, crontabTaskHasPendingWork, executeCrontab, genesisReplica, initCrontab, rebalanceAccountIds, tokenId, withCrontab, crontabOf, ZERO_WORD,
   applyBoardJEvent, counterpartyProposer, rearmBoardRefreshes, derivedDeadlines, entityId, quorumBoardHash, quorumHanko, scheduleHook,
-  type AccountReplica, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
+  type AccountReplica, type Address, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, TERMS, aliceAddr, bobAddr, carolAddr, crypto, keyOf, signLazyAccountHanko, unwrap } from "../xln_run.ts";
 import { applyCertifiedBoardJEvent } from "../../core/entity/tx/j-events-board.ts";
@@ -161,7 +161,7 @@ const observeAs = (id: EntityId, threshold: bigint, members: ReadonlyMap<string,
 };
 const observed = observeAs(S, 1n, one);
 const uState = observeAs(UE, 2n, three).state;
-const uHanko = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+const uHanko = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
 
 type Side = DisputeHanko;
 type BoardSpec = { readonly peer: EntityId; readonly height: number; readonly frameHash: string; readonly own: string; readonly peerHanko: string; readonly current?: Side | undefined; readonly counterparty?: Side | undefined; readonly marker?: RefreshMigration | undefined };
@@ -233,6 +233,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       const run = rw.value;
       expect(run.outputs).toEqual([]);
       const mine = run.sent.map((o) => {
+        if (!("tx" in o)) throw new Error("the crontab sent a consensus input, not an Account input");
         const d = o.tx.data as any, route = unwrap(counterpartyProposer(state, replicas.get(o.to as EntityId) as AccountReplica, o.to as EntityId));
         expect(typeof d.frameHanko).toBe("string");
         return { entityId: o.to, signerId: route, entityTxs: [{ type: o.tx.type, data: { kind: d.kind, fromEntityId: d.fromEntityId, toEntityId: d.toEntityId, domain: d.domain, disputeConfig: d.disputeConfig,

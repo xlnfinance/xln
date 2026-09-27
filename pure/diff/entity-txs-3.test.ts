@@ -28,6 +28,11 @@ import * as ogBook from "../../core/orderbook/core.ts";
 import { computeBookCommitmentHash } from "../../core/orderbook/commitment.ts";
 import { rebuildOrderbookPairIndex } from "../../core/orderbook/order-index.ts";
 
+/** og's committed Account collections are Patricia-backed maps; their commitment is `rootHash()`. */
+const ogRootHash = (c: object): string => {
+  if (!("rootHash" in c) || typeof c.rootHash !== "function") throw new Error("og collection has no rootHash");
+  return String(c.rootHash());
+};
 let seed = 3;
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
@@ -216,7 +221,7 @@ describe("entity-txs-3: signed commands, propose and vote (og command/index.ts, 
     const ogEvents = readEntityFrameEvents(ogOut.state);
     expect(p.frame.events).toEqual(ogEvents as never);
     expect(bytes(p.draft.state.committed["entityCommandNonces"])).toBe(bytes(ogOut.state.entityCommandNonces));
-    expect(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), p.frame.txs.map(wire), ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
+    expect<string>(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), p.frame.txs.map(wire), ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
   });
   test("MATCH: plain propose / vote outside a command are og ENTITY_COMMAND_REQUIRED (a plain Error: the input is refused)", () => {
     const r = lazyEntity([[aliceAddr, 1n]], 1n);
@@ -316,7 +321,7 @@ describe("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/admin.ts
       const og = ogThrows(() => handleSetHubConfigEntityTx(env, structuredClone(ogS), { type: "setHubConfig", data } as never, true));
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft;
-      expect(d.state.committed["hubRebalanceConfig"]).toEqual(og.value.newState.hubRebalanceConfig);
+      expect<unknown>(d.state.committed["hubRebalanceConfig"]).toEqual(og.value.newState.hubRebalanceConfig);
       expect((d.state.committed["profile"] as { isHub?: boolean }).isHub).toBe(true);
       expect(d.events).toEqual(readEntityFrameEvents(og.value.newState) as never);
       const queued = [...d.accountReplicas].sort(([x], [y]) => (x < y ? -1 : 1)).flatMap(([peer, c]) => c.mempool.slice(replicas.get(peer)?.mempool.length ?? 0).map((t) => ({ accountId: peer, tx: t })));
@@ -359,13 +364,15 @@ describe("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/admin.ts
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft, after = d.accountReplicas.get(BOB);
       if (after === undefined) throw new Error("no account");
-      expect(unwrap(installedAccount(a.state.id, BOB, after)).policyRoot).toBe(og.value.newState.accounts.get(BOB).shadow.rebalance.policy.rootHash());
+      const ogAfter = og.value.newState.accounts.get(BOB);
+      if (ogAfter === undefined) throw new Error("og lost the account");
+      expect(unwrap(installedAccount(a.state.id, BOB, after)).policyRoot).toBe(ogRootHash(ogAfter.shadow.rebalance.policy));
       // the same Entity frame proposes the queued request as the next Account frame (og proposePendingAccountFrames)
       const queued = after._tag === "proposed" && child._tag === "open" ? after.candidate.frame.txs : after.mempool.slice(mempool.length);
       expect(queued.map((t: any) => ({ type: t.type, data: { ...t, type: undefined, tokenId: Number(t.tokenId), feeTokenId: Number(t.feeTokenId) } })))
-        .toEqual(og.value.accountTxs.map(({ tx }: any) => ({ type: tx.type, data: { ...tx.data, type: undefined } })));
+        .toEqual((og.value.accountTxs ?? []).map(({ tx }) => ({ type: tx.type, data: { ...tx.data, type: undefined } })));
       expect(d.outputs.filter((o) => !("tx" in o)).length).toBe(og.value.outputs.length);
-      queuedAny += og.value.accountTxs.length;
+      queuedAny += og.value.accountTxs?.length ?? 0;
     }
     expect(queuedAny).toBeGreaterThan(5);
   });
@@ -455,7 +462,7 @@ describe("entity-txs-3: J7 dispute J events reach the Account (og j-events.ts ap
 });
 
 describe("entity-txs-3: prepareDispute / disputeStart (og entity/tx/handlers/dispute)", () => {
-  const PA = (name: string) => PersistentAccountStateMap.empty(name);
+  const PA = (name: Parameters<typeof PersistentAccountStateMap.empty>[0]) => PersistentAccountStateMap.empty(name);
   /** An og Account the dispute handlers can claim through the frame's candidate map: no witnesses, no orders. */
   const ogAcc = (status: string, disputePrepare?: unknown): any => ({
     state: { leftEntity: lowerId(ALICE), rightEntity: lowerId(BOB), domain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, jNonce: 0,

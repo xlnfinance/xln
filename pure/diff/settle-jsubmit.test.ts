@@ -60,10 +60,10 @@ const randomJBatch = (): JBatchState => {
     disputeFinalizations: [],
     reserveToCollateral: rng() < 0.5 ? [] : [{ tokenId: BigInt(1 + ri(2)), receivingEntity: ENTITY, pairs: [{ entity: pick([PEER, OTHER]), amount: 5n }] }],
   };
-  const sealed = unwrap(jBroadcast({ ...s, batch: withOps }, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: SIGNER, timestamp: 5 }) as any) as any;
+  const sealed = unwrap(jBroadcast({ ...s, batch: withOps }, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: SIGNER, timestamp: 5 }));
   let out: JBatchState = sealed.jBatch;
-  if (rng() < 0.3) out = { ...out, batch: unwrap(queueR2R({ ...e, jBatch: { ...out, sentBatch: undefined } }, OTHER, 2, 4n) as any).batch };
-  if (rng() < 0.25) out = { ...out, recoveryBatches: [unwrap(queueR2R(e, PEER, 1, 2n) as any).batch] };
+  if (rng() < 0.3) out = { ...out, batch: unwrap(queueR2R({ ...e, jBatch: { ...out, sentBatch: undefined } }, OTHER, 2, 4n)).batch };
+  if (rng() < 0.25) out = { ...out, recoveryBatches: [unwrap(queueR2R(e, PEER, 1, 2n)).batch] };
   if (rng() < 0.15) out = { ...out, sentBatch: { ...out.sentBatch!, terminalFailure: { message: "J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:x", failedAt: 3 } } };
   else if (rng() < 0.15) out = { ...out, sentBatch: { ...out.sentBatch!, batch: emptyBatch() } };
   return out;
@@ -110,7 +110,7 @@ describe("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/j-batch/
       const accounts = accountsFor(jNonce, submitted), og = ogEntity(s, accounts);
       await handleJAbortSentBatch(og, { type: "j_abort_sent_batch", data: { ...(requeue === undefined ? {} : { requeueToCurrent: requeue }), ...(reason === undefined ? {} : { reason }) } } as any, env, true);
       const rw = jAbortSentBatch(s, { requeueToCurrent: requeue, reason }, (c) => (c === PEER ? jNonce : 0));
-      expect(rw.note).toBe(messages(og).at(-1));
+      expect<string | undefined>(rw.note).toBe(messages(og).at(-1));
       sameJBatch(rw.jBatch, og.jBatchState);
       const body = rw.release.submitted.filter((r) => r.accountId === PEER).reduce((b, r) => setRebalanceSubmittedAt(b, r.tokenId, undefined), { submittedAt: new Map(submitted.map((t) => [t, 77])) } as any);
       expect([...body.submittedAt.keys()].sort()).toEqual(submittedOf(accounts));
@@ -125,7 +125,7 @@ describe("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/j-batch/
       const accounts = accountsFor(0, submitted), og = ogEntity(s, accounts);
       await handleJClearBatch(og, { type: "j_clear_batch", data: { ...(reason === undefined ? {} : { reason }) } } as any, env, true);
       const rw = jClearBatch(s, { reason }, new Map([[PEER, submitted]]));
-      expect(rw.note).toBe(messages(og).at(-1));
+      expect<string | undefined>(rw.note).toBe(messages(og).at(-1));
       sameJBatch(rw.jBatch, og.jBatchState);
       if (s !== undefined) expect(submittedOf(accounts)).toEqual([]);
       expect(rw.release.submitted.map((r) => r.tokenId)).toEqual(s === undefined ? [] : [...submitted].sort((a, b) => a - b));
@@ -137,7 +137,7 @@ describe("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/j-batch/
       const og = ogEntity(undefined), out = await handleMintReserves(og, { type: "mintReserves", data: { tokenId, amount } } as any, env, true);
       const rw = mintReservesTx(ENTITY, tokenId, amount, 900);
       expect(rw.jTx).toEqual(out.jOutputs[0]!.jTxs[0] as any);
-      expect(rw.note).toBe(messages(og).at(-1));
+      expect<string | undefined>(rw.note).toBe(messages(og).at(-1));
     }
   });
 
@@ -351,7 +351,7 @@ describe("settle-jsubmit: settle_execute gates (og payments/settle.ts handleSett
         expect((rw.error as any).reason).toStartWith("SETTLEMENT_WORKSPACE_HASH_CORRUPTION:");
         continue;
       }
-      expect(unwrap(rw as any).draft.events).toEqual(readEntityFrameEvents(og) as never);
+      expect(unwrap(rw).draft.events).toEqual(readEntityFrameEvents(og) as never);
       counts.skipped++;
     }
     expect(counts.skipped).toBeGreaterThan(50);
