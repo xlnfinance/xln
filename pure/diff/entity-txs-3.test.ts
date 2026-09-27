@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag, untilCovered } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   authorEntityTxs, buildCommand, certifiedBoardStackKey, checkCommand, configBoardHash, createEntity, entityId, entityTransactionAction, foldTxs, hashCommand, hashCommandTxs, hashEntityFrame,
   hashProposalAction, applyEntityInput, proposalId, tokenId, wireEntityTx, installedAccount, ZERO_WORD, genesisHost, applyHost, localProof, committedView, envelopeOf, prepareFrozen, ogProofBody, spawn, createRuntime, applyRuntime, convertOutput, replicaKey,
@@ -35,7 +35,7 @@ const ogRootHash = (c: object): string => {
   return String(c.rootHash());
 };
 let seed = seedOf(3);
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const SIGNERS = [aliceAddr, bobAddr, carolAddr] as const;

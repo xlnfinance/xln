@@ -1,7 +1,7 @@
 // Behavioural diff: og bilateral Account consensus (core/account/consensus) vs pure/xln.ts.
 // Each "DIVERGES:" test PASSES while asserting the observed difference; "MATCH:" tests assert equivalence.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag } from "./seed.ts";
 
 // ---- og ----
 import { applyAccountInput as ogApply } from "../../core/account/consensus/index.ts";
@@ -333,7 +333,7 @@ describe(seedTag("account-consensus: driven scenarios"), () => {
   test("MATCH: proposer clock below the last committed frame — both clamp to max(entityTs, lastFrame.timestamp)", () => {
     const pairs: Array<[number, number]> = [[1_000, 5_000], [5_000, 5_000], [9_000, 5_000], [0, 0], [0, 7]];
     let seed = seedOf(7);
-    for (let i = 0; i < 6; i++) { seed = (seed * 1103515245 + 12345) % 2 ** 31; pairs.push([seed % 100_000, (seed >> 8) % 100_000]); }
+    for (let i = 0; i < 6; i++) { seed = lcg31(seed); pairs.push([seed % 100_000, (seed >> 8) % 100_000]); }
     for (const [entityTs, prevTs] of pairs) {
       const a = ogAccount();
       a.currentHeight = 1;

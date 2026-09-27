@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   applyBoardRegistryEvent, boardProof, emptyBoardRegistry, EMPTY_CERTIFIED_BOARD_ROOT, hashBoardNode, lookupBoardRecord, reachableBoardNodes, verifyBoardProof, advanceBoardFinality, boardStackKey,
   applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
@@ -23,7 +23,7 @@ import {
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
 
 let seed = seedOf(11);
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const word = (n: bigint | number): string => `0x${BigInt(n).toString(16).padStart(64, "0")}`;
@@ -384,8 +384,8 @@ describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/c
     const env: any = { state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) }, infrastructure: { certifiedBoardNodes: ogNodes } };
     const ogState = (): any => ({ entityId: S, height: 0, timestamp: 77, config: ogConfigOf(state, true), certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], S, computeEntityAccountValueHash) });
     const consent = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
-    const seen = new Set<string>();
-    for (let i = 0; i < 60; i += 1) {
+    const seen = new Set<string>(), wanted = ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"];
+    for (let i = 0, more = untilCovered(60, () => wanted.every((v) => seen.has(v))); more(i); i += 1) {
       const activate = rng() < 0.2;
       const target = pick([T, T, T, X, U, "0x12", T.toUpperCase().replace("0X", "0x")]);
       let tx: EntityTx;
@@ -409,7 +409,7 @@ describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/c
       expect((f.value.draft.events ?? []).map((e) => e.message)).toEqual(readEntityFrameEventMessages(ogS));
       seen.add(`consents:${(ogR.value.jOutputs[0].jTxs[0].data.supporterVotes ?? []).length}`);
     }
-    for (const v of ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"]) expect(seen.has(v)).toBe(true);
+    for (const v of wanted) expect([v, seen.has(v)]).toEqual([v, true]);
   });
 });
 

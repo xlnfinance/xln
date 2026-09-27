@@ -3,7 +3,7 @@
 // lending_overdue deadline (scheduler/derived-deadlines.ts, tx/handlers/account/committed-lending-close.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, outputs and state.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   accountId, createEntity, crontabTaskHasPendingWork, executeCrontab, genesisReplica, initCrontab, rebalanceAccountIds, tokenId, withCrontab, crontabOf, ZERO_WORD,
   applyBoardJEvent, counterpartyProposer, rearmBoardRefreshes, derivedDeadlines, entityId, quorumBoardHash, quorumHanko, scheduleHook,
@@ -24,7 +24,7 @@ import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../cor
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
 
 let seed = seedOf(29);
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
@@ -84,7 +84,8 @@ const readyWorkspace = (hubIsLeft: boolean): SettlementWorkspace => ({
 describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)"), () => {
   test("MATCH: 400 random hubs (R→C requests by strategy / policy / fee / reserve, submitted markers, C→R withdrawals and ready workspaces, sent-batch latch and staleness, manual broadcast, pair limits) -- og's outputs, J batch, markers, task and halts", async () => {
     const counts = new Map<string, number>();
-    for (let i = 0; i < 400; i++) {
+    const wanted = ["settle_propose", "settle_execute", "j_broadcast", "j_abort_sent_batch", "r2c", "halt:REBALANCE_REQUEST_FEE_STATE_MISSING", "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN"];
+    for (let i = 0, more = untilCovered(400, () => wanted.every((k) => (counts.get(k) ?? 0) > 3)); more(i); i++) {
       const hub = pick([ALICE, BOB, CAROL]), peers = [ALICE, BOB, CAROL].filter((p) => p !== hub) as EntityId[];
       const accts: Acct[] = peers.map((peer) => {
         const hubIsLeft = hub < peer, toks = [1, 3].filter(() => rng() < 0.8).map((t) => randomTok(t, hubIsLeft));
@@ -123,7 +124,7 @@ describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hu
       if (r2c) counts.set("r2c", (counts.get("r2c") ?? 0) + 1);
     }
     const seen = Object.fromEntries([...counts].map(([k, v]) => [k, v > 3]));
-    expect(seen).toMatchObject({ settle_propose: true, settle_execute: true, j_broadcast: true, j_abort_sent_batch: true, r2c: true, "halt:REBALANCE_REQUEST_FEE_STATE_MISSING": true, "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN": true });
+    expect(seen).toMatchObject(Object.fromEntries(wanted.map((k) => [k, true])));
     expect(counts.has("halt:J_BATCH_LIMIT_EXCEEDED")).toBe(true);
   }, 120_000);
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 // Runtime transport, scheduling and events, each run against live og (core/runtime, core/entity, core/account).
 import { applyRuntimeTx as ogApplyRuntimeTx } from "../../core/runtime/tx/tx-handlers.ts";
 import { computeCanonicalEntityConsensusStateHash } from "../../core/entity/consensus/state-root.ts";
@@ -55,7 +55,7 @@ import { entityRequiresJPrefixCertificate, buildLocalJPrefixAttestation, buildCe
 import { anvilKey, signDigestHex, carolAddr } from "../xln_run.ts";
 
 let seed = seedOf(71);
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const rwCode = (r: { readonly ok: boolean; readonly error?: unknown }): string | null => {
@@ -336,7 +336,7 @@ describe(seedTag("runtime-final: the Runtime tick's due wakes and leader timeout
 
   test("MATCH (randomized): 300 random Runtimes (leaders with due hooks and the hubRebalance task, validators with leader work and last progress, queued wakes and votes) -- og createDueScheduledWakeInputs, in og's (dueAt, entityId, signerId) order", () => {
     let wakes = 0, votes = 0, skipped = 0;
-    for (let run = 0; run < 300; run++) {
+    for (let run = 0, more = untilCovered(300, () => wakes > 80 && votes > 80 && skipped > 10); more(run); run++) {
       const reps: Rep[] = [ALICE, BOB, CAROL].flatMap((entity) => (rng() < 0.3 ? [] : [true, false].filter(() => rng() < 0.6).map((leader): Rep => ({
         entity, leader, hooks: Array.from({ length: ri(3) }, (_, j) => ({ id: `hub-kick:${j}`, triggerAt: 900 + ri(20_000), type: "hub_rebalance_kick", data: { reason: "r", counterpartyId: BOB } }) as ScheduledHook),
         lastRun: pick([0, 5_000, 30_000]), hub: rng() < 0.3, timestamp: ri(8_000), progress: rng() < 0.5 ? undefined : ri(12_000), work: rng() < 0.7, queuedWake: rng() < 0.1,
@@ -704,8 +704,8 @@ describe(seedTag("runtime-final: cross-j opening cohort (og selectCrossJOpeningA
   test("MATCH (randomized): 800 Accounts with cross pull locks, cross swap offers and sibling replicas (pending cohorts, missing replicas and Accounts, bad roles) -- og's cohort, wait or halt", () => {
     seed = seedOf(57);
     const ids = Array.from({ length: 5 }, (_, i) => `0x${String(i + 1).repeat(64)}`), signers = ids.map((_, i) => `0x${String.fromCharCode(97 + i).repeat(40)}`);
-    const seen = new Map<string, number>();
-    for (let n = 0; n < 800; n++) {
+    const seen = new Map<string, number>(), buckets = ["ordinary", "wait", "cohort"];
+    for (let n = 0, more = untilCovered(800, () => buckets.every((k) => (seen.get(k) ?? 0) > 40)); more(n); n++) {
       const orderIds = ["ord-a", "ord-b", "Ord-C", "ord-d"].slice(0, 1 + ri(4));
       const routes = new Map(orderIds.map((orderId) => {
         const roles = [...ids].sort(() => rng() - 0.5).slice(0, 4), signer = (i: number): string => (rng() < 0.03 ? "" : signers[ids.indexOf(roles[i] as string)] as string);
@@ -749,7 +749,7 @@ describe(seedTag("runtime-final: cross-j opening cohort (og selectCrossJOpeningA
       const bucket = og.startsWith("cohort") ? "cohort" : og;
       seen.set(bucket, (seen.get(bucket) ?? 0) + 1);
     }
-    for (const k of ["ordinary", "wait", "cohort"]) expect([k, (seen.get(k) ?? 0) > 40]).toEqual([k, true]);
+    for (const k of buckets) expect([k, (seen.get(k) ?? 0) > 40]).toEqual([k, true]);
     expect([...seen.keys()].filter((k) => k.startsWith("halt:")).length).toBeGreaterThan(2);
   });
 });

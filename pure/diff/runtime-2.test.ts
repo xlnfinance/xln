@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   handleLendingBorrowEntityTx, handleLendingClosePositionEntityTx, handleLendingOfferEntityTx, handleLendingRepayEntityTx,
 } from "../../core/entity/tx/handlers/payments/lending.ts";
@@ -11,7 +11,7 @@ import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, verifiers } from "../
 
 // seeded rng for randomized comparisons
 let seed = seedOf(11);
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const hex16 = (): string => Array.from({ length: 16 }, () => "0123456789abcdef"[ri(16)]).join("");
@@ -257,7 +257,7 @@ describe(seedTag("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.
 
   test("MATCH: 500 random batches of txs / precommit / proposal lanes -- same merged lanes in the same order, same equivocation refusals as og", () => {
     let merges = 0, refusals = 0, conflicts = 0;
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0, more = untilCovered(500, () => merges > 50 && refusals > 5 && conflicts > 5); more(i); i++) {
       const gens = Array.from({ length: 1 + ri(7) }, randomInput);
       let ogOut: Record<string, unknown>[] | undefined;
       const ogErr = ogThrowCode(() => { ogOut = ogMergeEntityInputs(gens.map((g) => g.og) as never) as never; });

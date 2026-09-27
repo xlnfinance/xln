@@ -23,6 +23,14 @@ export const seedOf = (base: number): number => {
   return (base ^ Math.imul(SEEDX, 0x9e37_79b1)) & 0x7fff_ffff;
 };
 
+/**
+ * One step of the 31-bit LCG (glibc constants) the older diff files draw from, in exact integer arithmetic.
+ * `(seed * 1103515245 + 12345) & 0x7fffffff` in doubles rounds the product once it passes 2^53, so the stream
+ * collapses into short cycles (period 10466 from every seed tried; 220 from base 137 at SEEDX=987654, which
+ * made one 800-batch test draw the same few batches). Math.imul keeps the low 32 bits exactly: full period 2^31.
+ */
+export const lcg31 = (seed: number): number => (Math.imul(seed, 1_103_515_245) + 12_345) & 0x7fff_ffff;
+
 /** A describe name that carries the seed: a failure reads `... [SEEDX=12345] > test`, which is the command to rerun. */
 export const seedTag = (name: string): string => `${name} [SEEDX=${SEEDX}]`;
 
