@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { encodeAccountStateValue, encodeAccountStateValueOracle, computeCanonicalMerkleRoot } from "../../core/account/commitment/state-root.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { computeAccountStateRoot } from "../../core/account/commitment/state-root.ts";
@@ -27,7 +28,7 @@ import { canon, encodeCanonicalValue, flatDigest, mapRoot, bytesToHex, accountFr
   encodeLazyEntityId, encodeHanko65, encodeHankoEnvelope, packSignatures, verifyAccountHanko, verifyHankoLocal, encodeBoardBytes, entityStateRoot, entityFrameHash, keccak256Hex, accountId as rwAccountId, entityId as rwEntityId, accountTerms, admit, genesisReplica, applyAccountInput, installedAccount, committedView, previewAccountProposal, applyAccountBody, committed, hexToBytes, signRaw, wordOf, concat, addressOf, type Batch, type ProofBody } from "../xln.ts";
 
 // seeded PRNG (mulberry32)
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 export const rng = prng(0xC0FFEE);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -47,7 +48,7 @@ const randValue = (d = 0): unknown => {
 const hex = (b: Uint8Array) => bytesToHex(b);
 const unwrap = <T,>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => { if (!r.ok) throw new Error(JSON.stringify(r.error)); return r.value; };
 
-describe("canonical value encoding (RLP)", () => {
+describe(seedTag("canonical value encoding (RLP)"), () => {
   test("MATCH: encodeCanonicalValue == og encodeAccountStateValue == og oracle on 500 random values", () => {
     for (let i = 0; i < 500; i++) {
       const v = randValue();
@@ -69,7 +70,7 @@ describe("canonical value encoding (RLP)", () => {
   });
 });
 
-describe("flat integrity digest", () => {
+describe(seedTag("flat integrity digest"), () => {
   test("MATCH: flatDigest == og computeCanonicalMerkleRoot(ns, entries, 'integrity') on 200 random section lists", () => {
     for (let i = 0; i < 200; i++) {
       const ns = pick(["account.frame", "account.state", "x", ""]);
@@ -83,7 +84,7 @@ describe("flat integrity digest", () => {
 const ogMapRoot = (m: Map<number | string, unknown>): string => PersistentAccountStateMap.fromEntries("locks", m).rootHash();
 const flatVal = (): unknown => { let v = randValue(); while (hasColl(v)) v = randValue(); return v; };
 const hasColl = (v: unknown): boolean => v instanceof Map || v instanceof Set || (Array.isArray(v) ? v.some(hasColl) : v !== null && typeof v === "object" && Object.values(v).some(hasColl));
-describe("account map (radix-16 Patricia) root", () => {
+describe(seedTag("account map (radix-16 Patricia) root"), () => {
   test("MATCH: mapRoot == og PersistentAccountStateMap.rootHash for 200 random numeric-key maps (0..many keys)", () => {
     for (let i = 0; i < 200; i++) {
       const n = pick([0, 1, 2, 3, 5, 17, 40]);
@@ -102,7 +103,7 @@ describe("account map (radix-16 Patricia) root", () => {
   });
 });
 
-describe("account map edge cases", () => {
+describe(seedTag("account map edge cases"), () => {
   const og = (m: Map<any, any>) => { try { return PersistentAccountStateMap.fromEntries("locks", m).rootHash(); } catch (e) { return "THROW"; } };
   test("MATCH: prefix collision, nested collection, >10000-byte leaf are refused by both; mixed non-colliding keys hash equal", () => {
     expect(og(new Map<any, any>([[0, 1], ["", 2]]))).toBe("THROW");
@@ -124,7 +125,7 @@ const randTx = (): { type: string; data: any } => {
   const data = (() => { const v = randValue(); return v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map) && !(v instanceof Set) ? v : { v }; })();
   return { type, data };
 };
-describe("account frame hash", () => {
+describe(seedTag("account frame hash"), () => {
   test("MATCH: accountFrameHash == og computeFrameHash on 300 random frames (non-j_event_claim txs, incl. settle_transition hanko stripping)", () => {
     for (let i = 0; i < 300; i++) {
       const f = { height: ri(1e6), timestamp: 1_700_000_000_000 + ri(1e9), jHeight: ri(1e5), prevFrameHash: W(pick(["00", "11", "Ab"])), accountStateRoot: W(pick(["33", "aB"])), accountTxs: Array.from({ length: ri(5) }, randTx) };
@@ -168,7 +169,7 @@ const randState = (): CommittedAccountState => {
     requestedRebalance: new Map(Array.from({ length: ri(3) }, () => [ri(100), BigInt(ri(1e6))] as const)), requestedRebalanceFeeState: new Map(), rebalanceFeePolicies: new Map(Array.from({ length: ri(3) }, () => [ri(100), { feePpm: ri(1000) }] as const)),
   };
 };
-describe("account state commitment", () => {
+describe(seedTag("account state commitment"), () => {
   test("MATCH: accountStateCommitment == og computeAccountStateRoot on 200 random states without a settlement workspace", () => {
     for (let i = 0; i < 200; i++) {
       const s = randState();
@@ -200,7 +201,7 @@ describe("account state commitment", () => {
 
 // ---------------------------------------------------------------- events
 const DEPOSITORY = new Interface(Depository__factory.abi as any);
-describe("J event signatures vs Depository ABI (typechain from Types.sol/Depository.sol)", () => {
+describe(seedTag("J event signatures vs Depository ABI (typechain from Types.sol/Depository.sol)"), () => {
   test("MATCH: HankoBatchProcessed, ReserveUpdated, DisputeStarted, DisputeFinalized topics equal the contract's", () => {
     for (const n of ["HankoBatchProcessed", "ReserveUpdated", "DisputeStarted", "DisputeFinalized"] as const) {
       const e = DEPOSITORY.getEvent(n)!;
@@ -253,7 +254,7 @@ describe("J event signatures vs Depository ABI (typechain from Types.sol/Deposit
   });
 });
 
-describe("DisputeStarted clock validation (og j-event-payloads.ts assertRawEventSpecificFields)", () => {
+describe(seedTag("DisputeStarted clock validation (og j-event-payloads.ts assertRawEventSpecificFields)"), () => {
   test("MATCH: a DisputeStarted log whose clock is not a positive safe-integer start + windows = timeout is refused by og ingress and by readJEvents", () => {
     const b = W("11");
     const MAX = BigInt(Number.MAX_SAFE_INTEGER);
@@ -308,7 +309,7 @@ const ogBatch = (b: Batch): any => ({ ...b,
   disputeFinalizations: b.disputeFinalizations.map((d) => ({ ...d, finalProofbody: ogProofBody(d.finalProofbody) })),
   hashLadderRegistrations: b.hashLadderRegistrations.map((h) => ({ ...h, witness: { ...h.witness, reveals: [...h.witness.reveals] } })) });
 const ogEncodeBatchNoLimit = (b: Batch): string => { try { return encodeJBatch(ogBatch(b)); } catch (e) { return "THROW:" + (e as Error).message; } };
-describe("Depository Batch ABI", () => {
+describe(seedTag("Depository Batch ABI"), () => {
   test("MATCH: encodeBatch == og encodeJBatch for 200 random batches without settlements/disputes (reserve ops, C2R, external tokens, reveals, hash-ladder)", () => {
     let n = 0;
     for (let i = 0; i < 200; i++) {
@@ -354,7 +355,7 @@ describe("Depository Batch ABI", () => {
   });
 });
 
-describe("ProofBody hash", () => {
+describe(seedTag("ProofBody hash"), () => {
   test("MATCH: proofBodyHash (Int512[] offdeltas) == og hashProofBodyStruct on 200 random bodies with tokens, incl. offdeltas beyond int256", () => {
     let n = 0;
     for (let i = 0; i < 200; i++) {
@@ -378,7 +379,7 @@ describe("ProofBody hash", () => {
   });
 });
 
-describe("dispute / cooperative-update hanko digests", () => {
+describe(seedTag("dispute / cooperative-update hanko digests"), () => {
   const domain = { chainId: 31337, depositoryAddress: "0x5FbDB2315678afecb367f032d93F642f64180aa3" };
   test("MATCH: encodeDisputeProofHash == og createDisputeProofHashWithNonce (200 random, mixed-case ids, max nonce)", () => {
     for (let i = 0; i < 200; i++) {
@@ -431,7 +432,7 @@ const ogVerify = (hanko: string, digest: string, target: string, registered?: st
 };
 const rwVerify = (hanko: string, digest: string, target: string, registered?: string): string => { const r = verifyAccountHanko(hanko, digest, target, registered); return r.ok ? r.value.entityId : "REJECT"; };
 const boardHashOf = (threshold: bigint, members: string[], weights: bigint[]) => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"], [[threshold, members, weights, 0, 0, 0]])).toLowerCase();
-describe("hanko", () => {
+describe(seedTag("hanko"), () => {
   test("MATCH: encodeLazyEntityId == og lazySingleSignerEntityId (mixed-case, lowercase addresses)", () => {
     for (const k of KEYS) { const a = addrOf(k); for (const v of [a, a.toLowerCase()]) expect(encodeLazyEntityId({ signer: v })).toBe(lazySingleSignerEntityId(v)); }
   });
@@ -600,7 +601,7 @@ const ogReplica = (self: string, peer: string, extra: Record<string, unknown> = 
   status: "active", currentHeight: 0, proofHeader: { fromEntity: self, toEntity: peer, nextProofNonce: 1 }, currentFrame: { stateHash: "" }, pendingWithdrawals: PA("pendingWithdrawals"), shadow: { rebalance: { policy: PA("rebalanceShadowPolicy"), submittedAtByToken: PA("rebalanceShadowSubmitted") } }, mempool: [], ...extra });
 const rwAccount = (self: string, peer: string, extra: Record<string, unknown> = {}): any => ({ fromEntity: self, toEntity: peer, status: "active", currentHeight: 0, nextProofNonce: 1, currentFrameHash: "", pendingWithdrawals: W("00"), policyRoot: W("00"), submittedAtByTokenRoot: W("00"),
   state: { ...emptyAccountState(self, peer), deltas: new Map(), locks: new Map(), pulls: new Map(), swapOffers: new Map(), subcontracts: new Map(), lendingIntents: new Map(), requestedRebalance: new Map(), requestedRebalanceFeeState: new Map(), rebalanceFeePolicies: new Map() }, ...extra });
-describe("entity state root", () => {
+describe(seedTag("entity state root"), () => {
   test("MATCH (golden provenance): og computeCanonicalEntityConsensusStateHash reproduces the oracle's hardcoded 0x1a37f4d7... and 0x72ac0104... -- but only for a synthetic EntityState that has ONLY {config, accounts, paybook}", () => {
     const self = W("aa"), peer = W("bb");
     const empty: any = { config: CONFIG, accounts: ogAccounts(self, []), paybook: { entries: new Map(), feesEarned: 0n } };
@@ -668,7 +669,7 @@ describe("entity state root", () => {
   });
 });
 
-describe("entity account leaf, runtime side (H7)", () => {
+describe(seedTag("entity account leaf, runtime side (H7)"), () => {
   test("MATCH: installedAccount fills og's committed replica fields -- genesis commits og's empty currentFrame.stateHash; after a round the peer frame Hanko, our dispute draft and the peer dispute witness are committed as og replaceLocalDisputeDraft/storeCounterpartyDisputeHanko store them", () => {
     const door = (self: any) => ({ verify: hankoVerify, self, now: NOW });
     const run = (r: any, input: any, self: any) => { const out = applyAccountInput(r, input, door(self)); if (!out.ok) throw new Error(JSON.stringify(out.error, (_k, v) => (typeof v === "bigint" ? `${v}` : v))); return out.value; };
@@ -717,7 +718,7 @@ const binVal = (d = 0): any => {
   if (r < 0.75) return Array.from({ length: ri(4) }, () => binVal(d + 1));
   const o: Record<string, any> = {}; for (let k = ri(4); k > 0; k--) o[pick(["a", "b", "Z", "_x", "10"])] = binVal(d + 1); return o;
 };
-describe("entity frame hash", () => {
+describe(seedTag("entity frame hash"), () => {
   test("MATCH: entityFrameHash == og createEntityFrameHashFromStateRoot on 200 random frames (plain txs, accountInput commitments, events, hex projection)", () => {
     for (let i = 0; i < 200; i++) {
       const txs = Array.from({ length: ri(4) }, () => (rng() < 0.4 ? { type: "accountInput", data: { kind: "ack", fromEntityId: W("aa"), toEntityId: W("bb"), x: binVal() } } : { type: pick(["openAccount", "directPayment", "extendCredit"]), data: { target: W("bb"), v: binVal() } }));
@@ -755,7 +756,7 @@ describe("entity frame hash", () => {
 // ---------------------------------------------------------------- golden provenance (oracle.test.ts hardcodes)
 const oracleSettlementTx = (settlementHash: string, settlementHanko: string, hanko: string) => ({ type: "settle_transition", data: { kind: "hanko", revision: 1, workspaceHash: W("61"), settlementNonce: 2, settlementHash, settlementHanko, postProof: { nonce: 3, proposerIsLeft: true, proofBodyHash: W("63"), disputeHash: W("64"), hanko } } });
 const oracleAccountFixture = () => ({ height: 7, timestamp: 1_700_000_000_123, jHeight: 42, prevFrameHash: W("11"), accountStateRoot: W("33"), accountTxs: [{ type: "set_credit_limit", data: { tokenId: 1, amount: 1234n } }, { type: "direct_payment", data: { tokenId: 1, amount: 55n, nonce: "payment-1" } }] });
-describe("golden hashes hardcoded in pure/oracle.test.ts: does og itself produce them?", () => {
+describe(seedTag("golden hashes hardcoded in pure/oracle.test.ts: does og itself produce them?"), () => {
   test("MATCH: settlement 0x31c1e688... and moved 0x2bbd9706... are og computeFrameHash outputs (og golden test only asserts equality/inequality, not these literals)", () => {
     const f = (h: string, q: string, p: string) => computeFrameHash({ ...oracleAccountFixture(), accountTxs: [oracleSettlementTx(h, q, p)], stateHash: "" } as any);
     expect(f(W("62"), "0xfirst-quorum", "0xfirst-proof-quorum")).toBe("0x31c1e688138ea34d358f85463110cac28bbb667cf756fd6d369aebff9c69330b");
@@ -799,7 +800,7 @@ describe("golden hashes hardcoded in pure/oracle.test.ts: does og itself produce
   });
 });
 
-describe("rewrite-only canon text (hashEntityState / hashAccountState / encodeEntityTx) -- no og counterpart", () => {
+describe(seedTag("rewrite-only canon text (hashEntityState / hashAccountState / encodeEntityTx) -- no og counterpart"), () => {
   test("EXTRA (kept: hashEntityState / hashAccountState / encodeEntityTx depend on it; no og counterpart): canon() keeps Sets and byte arrays distinct from plain objects, as og's RLP codec does", () => {
     expect(canon(new Set([1, 2]))).not.toBe(canon({}));
     expect(canon(new Set([1, 2]))).toBe(canon(new Set([2, 1])));

@@ -1,6 +1,7 @@
 // Differential tests: og account-tx handlers (core/account/tx/**) vs pure rewrite (pure/xln.ts applyAccountBody).
 // Each "DIVERGES:" test PASSES when the observed difference is present. "MATCH:" tests assert equivalence.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { deriveDelta } from "../../core/account/utils.ts";
 import { handleSetCreditLimit } from "../../core/account/tx/handlers/balance/set-credit-limit.ts";
 import { handleDirectPayment } from "../../core/account/tx/handlers/balance/direct-payment.ts";
@@ -130,7 +131,7 @@ const ogHarness = (body: AccountBody, self: string = A) => {
 };
 
 // ---------- balance ----------
-describe("account-tx: balance", () => {
+describe(seedTag("account-tx: balance"), () => {
   test("MATCH: outCapacity == deriveDelta.outCapacity over a grid (incl. holds, negative/positive delta)", () => {
     const vals = [0n, 1n, 7n, 50n, 100n];
     for (const c of vals) for (const L of vals) for (const Rr of vals) for (const t of [-120n, -30n, 0n, 30n, 120n]) for (const h of [0n, 5n]) {
@@ -205,7 +206,7 @@ describe("account-tx: balance", () => {
   });
 });
 
-describe("account-tx: direct_payment envelope (route, deliveryMode, trusted gateway)", () => {
+describe(seedTag("account-tx: direct_payment envelope (route, deliveryMode, trusted gateway)"), () => {
   test("MATCH: 400 random direct_payment envelopes (routes, modes, gateways, asserted direction, case) are accepted/refused alike and give equal roots", async () => {
     const C = word("33"), ents = [A, B, C, A.toUpperCase().replace("0X", "0x")];
     let accepted = 0, n = 0;
@@ -258,7 +259,7 @@ const lockedOg = async () => {
 };
 
 // seeded PRNG (mulberry32) for randomized MATCH cases
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xA7);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick3 = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -268,7 +269,7 @@ const pickSelf = (): string => (selfRng() < 0.5 ? A : B);
 const secretOf = (i: number) => `0x${i.toString(16).padStart(64, "0")}`;
 const rwLock = (secret: string, patch: Record<string, unknown> = {}) => ({ type: "htlc_lock", lockId: hashHtlcSecret(secret), hashlock: hashHtlcSecret(secret), timelock: 10n ** 15n, revealBeforeHeight: 5n, amount: 5n, tokenId: "1", ...patch });
 
-describe("account-tx: htlc", () => {
+describe(seedTag("account-tx: htlc"), () => {
   test("MATCH: hashlock = keccak256(bytes32 secret); a non-32-byte secret is refused by both", async () => {
     expect(rwHash(HEX_SECRET)).toBe(hashHtlcSecret(HEX_SECRET));
     expect(rwHash("preimage")).toBeNull();
@@ -341,7 +342,7 @@ describe("account-tx: htlc", () => {
   });
 });
 
-describe("account-tx: htlc committed state", () => {
+describe(seedTag("account-tx: htlc committed state"), () => {
   test("MATCH: 40 random lock/resolve sequences through the og overlay give the same Account root (committed HtlcLock shape, holds, offdelta)", async () => {
     let accepted = 0;
     for (let n = 0; n < 40; n++) {
@@ -397,7 +398,7 @@ const swapLockstep = (start: AccountBody) => {
 };
 const E18 = 10n ** 18n;
 
-describe("account-tx: swap", () => {
+describe(seedTag("account-tx: swap"), () => {
   test("MATCH: swap_cancel_request only requests — offer and hold stay in both; only the maker may ask", async () => {
     const { body } = open(null, 100n * E18);
     const ls = swapLockstep(body);
@@ -497,7 +498,7 @@ const reqTx = (tokenId: string, amount: bigint, feeAmount: bigint, patch: Record
 const refundTx = (requestId: string, requestTokenId: string, amount: bigint, reason = "manual") => ({ type: "rebalance_refund", requestId, requestTokenId, amount, reason });
 const policyTx = (tokenId: string, policyVersion: number, baseFee = 1n, liquidityFeeBps = 10n, gasFee = 2n) => ({ type: "rebalance_policy", tokenId, policyVersion, baseFee, liquidityFeeBps, gasFee });
 
-describe("account-tx: rebalance (og request_collateral / rebalance_refund / rebalance_policy)", () => {
+describe(seedTag("account-tx: rebalance (og request_collateral / rebalance_refund / rebalance_policy)"), () => {
   test("MATCH: request_collateral prepays the fee, stores one immutable request; refunds by the counterparty only, partial then full", async () => {
     const ls = rebalanceLockstep(open().body);
     expect(await ls.step(reqTx("1", 10n, 0n), true)).toBe(false); // fee must be > 0
@@ -549,7 +550,7 @@ describe("account-tx: rebalance (og request_collateral / rebalance_refund / reba
 });
 
 // ---------- Account-level lending ----------
-describe("account-tx: lending (og handlers/balance/lending.ts)", () => {
+describe(seedTag("account-tx: lending (og handlers/balance/lending.ts)"), () => {
   const lendingLockstep = (start: AccountBody) => {
     const self = pickSelf(), og = ogHarness(start, self);
     let body = start;
@@ -612,7 +613,7 @@ describe("account-tx: lending (og handlers/balance/lending.ts)", () => {
 });
 
 // ---------- wire form ----------
-describe("account-tx: og kind catalog", () => {
+describe(seedTag("account-tx: og kind catalog"), () => {
   test("MATCH: the rewrite-only custody kinds are gone — og refuses them as ACCOUNT_TX_TYPE_UNSUPPORTED and the rewrite has no arm, so a hub/custody account hashes like og", async () => {
     for (const type of ["deposit_to_custody", "withdraw_from_custody", "hub_custody_debit"]) {
       const og = ogAccount(ogState([ogDelta(1, { leftCreditLimit: 20n })]));
@@ -627,7 +628,7 @@ describe("account-tx: og kind catalog", () => {
   });
 });
 
-describe("account-tx: wire form of the ported kinds", () => {
+describe(seedTag("account-tx: wire form of the ported kinds"), () => {
   test("MATCH: rewrite wireOf/ownWire of swap, rebalance, lending, settlement and htlc kinds is og's AccountTx, so og computeFrameHash equals accountFrameHash", () => {
     const L = `lend-${"0".repeat(15)}1`;
     const pairs: [any, any][] = [
@@ -652,7 +653,7 @@ describe("account-tx: wire form of the ported kinds", () => {
 });
 
 // ---------- settlement / j-events ----------
-describe("account-tx: settlement + j_event_claim", () => {
+describe(seedTag("account-tx: settlement + j_event_claim"), () => {
   const ogSettleHarness = (body: AccountBody) => {
     const h = ogHarness(body);
     return { run: (tx: any, byLeft: boolean, ts: number, context: any = {}) => h.run((acc) => handleSettleTransition(acc, tx, byLeft, ts, context)), raw: h.run, reset: h.reset, workspace: () => h.replica().state.settlementWorkspace, replica: h.replica };
@@ -1107,7 +1108,7 @@ describe("account-tx: settlement + j_event_claim", () => {
   });
 });
 
-describe("account-tx: external finality (og settlement/j-finality.ts)", () => {
+describe(seedTag("account-tx: external finality (og settlement/j-finality.ts)"), () => {
   const DEPO = `0x${"ab".repeat(20)}`;
   const raw = { domain: { chainId: 1, depositoryAddress: DEPO }, watchSeed: word("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } };
   const pair = () => unwrap(accountId(unwrap(entityId(A) as any), unwrap(entityId(B) as any)) as any) as any;

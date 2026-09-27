@@ -1,5 +1,6 @@
 // consensus-final: Entity/Account consensus, admission, boards, orderbook and wire shapes (final wave). Every test runs og (core/ at 566c850) live.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { ethers } from "ethers";
 import { assertEntityEncryptionKeypair } from "../../core/protocol/htlc/multi-recipient.ts";
@@ -20,7 +21,7 @@ import {
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xc0_f1a1);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -29,7 +30,7 @@ const pubOf = (priv: string): string => "0x" + Buffer.from(x25519.getPublicKey(B
 const ogRun = <T,>(f: () => T): { ok: true; value: T } | { ok: false; code: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
 const lazyEntity = (signer: Address): EntityId => unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold: 1n, members: new Map([[signer, { shares: 1n }]]) })));
 
-describe("consensus-final: the Entity encryption keypair on every frame (cross-j.md row 48)", () => {
+describe(seedTag("consensus-final: the Entity encryption keypair on every frame (cross-j.md row 48)"), () => {
   test("MATCH (og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair): 200 random frames with no HTLC tx -- a missing, wrong, or malformed key refuses the proposal with og's error", () => {
     const seen = new Map<string, number>();
     for (let i = 0; i < 200; i++) {
@@ -54,7 +55,7 @@ describe("consensus-final: the Entity encryption keypair on every frame (cross-j
   });
 });
 
-describe("consensus-final: the profile descriptor is re-certified by the frame (og entity/profile/profile-descriptor.ts)", () => {
+describe(seedTag("consensus-final: the profile descriptor is re-certified by the frame (og entity/profile/profile-descriptor.ts)"), () => {
   test("MATCH (og computeEntityProfileHash): 150 random Entities with pinned and unpinned Accounts, hub configs, jurisdictions, and over 100 pinned rows", () => {
     const tiers = [0n, 999n, 1000n, 5_000n, 12_345n, 10n ** 18n] as const;
     for (let i = 0; i < 150; i++) {
@@ -101,7 +102,7 @@ describe("consensus-final: the profile descriptor is re-certified by the frame (
   });
 });
 
-describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-code (type 4) transactions (entity-j.md EJ-R4)", () => {
+describe(seedTag("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-code (type 4) transactions (entity-j.md EJ-R4)"), () => {
   const erng = prng(0x3_4e_4);
   const eri = (n: number) => Math.floor(erng() * n);
   const epick = <X,>(xs: readonly X[]): X => xs[eri(xs.length)] as X;
@@ -198,7 +199,7 @@ describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-
   }, 120_000);
 });
 
-describe("consensus-final: the proposal policy of og entity/consensus/proposal/policy.ts (entity-j.md EJ-R3)", () => {
+describe(seedTag("consensus-final: the proposal policy of og entity/consensus/proposal/policy.ts (entity-j.md EJ-R3)"), () => {
   const prng2 = prng(0x90_11c7);
   const pri = (n: number) => Math.floor(prng2() * n);
   const ppick = <X,>(xs: readonly X[]): X => xs[pri(xs.length)] as X;
@@ -282,7 +283,7 @@ describe("consensus-final: the proposal policy of og entity/consensus/proposal/p
   });
 });
 
-describe("consensus-final: the j_event frame-hash projection of og entity/consensus/frame.ts (canonicalJEventDataForFrameHash)", () => {
+describe(seedTag("consensus-final: the j_event frame-hash projection of og entity/consensus/frame.ts (canonicalJEventDataForFrameHash)"), () => {
   test("MATCH (og createEntityFrameHashFromStateRoot): 400 random J ranges -- mixed-case text, fractional heights, extra keys, raw events, missing rangeHash / blocks -- commit og's projection or refuse with og's code", () => {
     const g = prng(0x7e_4a54);
     const gi = (n: number) => Math.floor(g() * n);
@@ -317,7 +318,7 @@ describe("consensus-final: the j_event frame-hash projection of og entity/consen
   });
 });
 
-describe("consensus-final: a received Account frame commits at once (rebalance-refresh.md RR-12)", () => {
+describe(seedTag("consensus-final: a received Account frame commits at once (rebalance-refresh.md RR-12)"), () => {
   test("MATCH (og commits the peer's frame when it signs the ACK): 40 random credit / payment rounds between three Entities -- after every Runtime step no Account sits in 'received', and each ack_frame leaves the receiver's head at the frame height", () => {
     const g = prng(0x12_12);
     const gi = (n: number) => Math.floor(g() * n);

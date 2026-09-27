@@ -2,6 +2,7 @@
 // (crossPullClose), cross-j/sweep.ts (orderbookSweepCrossJurisdiction), transition/cross-j-proposer-materialization.ts (the clear reveal) and the
 // crossPullClose branch of auth/authorization.ts. Every MATCH runs live og (core/ at 566c850) on the same seeded random input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import * as ogBook from "../../core/orderbook/core.ts";
 import { rebuildOrderbookPairIndex } from "../../core/orderbook/order-index.ts";
@@ -19,7 +20,7 @@ import {
 } from "../xln.ts";
 import { TERMS, unwrap } from "../xln_run.ts";
 
-const rng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const rng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 type Rand = () => number;
 const int = (r: Rand, n: number): number => Math.floor(r() * n);
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[int(r, xs.length)] as T;
@@ -113,7 +114,7 @@ const rwSnap = (s: CrossHostStep): Snap => ({
 });
 const outcome = (o: Out<Snap>): string => (o.ok ? `ok:${(o.value.accountTxs as unknown[]).length}:${String((o.value.messages as string[]).at(-1) ?? "").replace(/C\d+/g, "#").replace(/ 0x[0-9a-f]+/g, "")}` : o.message);
 
-describe("cross-j-final: clear lifecycle Entity txs", () => {
+describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
   test("MATCH: requestCrossJurisdictionClear on 600 random source hubs, source users and strangers (terminal, snapshot drift, pure cancel, filled reveal, book row, queued close): same routes, books, messages, outputs, Account txs and halts as og", () => {
     const r = rng(0xc1ea), kinds = new Map<string, number>();
     for (let i = 0; i < 600; i++) {
@@ -231,7 +232,7 @@ describe("cross-j-final: clear lifecycle Entity txs", () => {
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from "../../core/entity/tx/handlers/account-cross-j-followups.ts";
 import { committedCrossFollowup, crossPullBinding, type CommittedCrossHost, type CommittedCrossStep, type Crontab } from "../xln.ts";
 
-describe("cross-j-final: committed cross-j Account tx followups", () => {
+describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () => {
   type FWorld = { rw: CommittedCrossHost; og: any; route: CrossRoute };
   /** A mirror at `self` for one prepared route: stored route / authorization / crontab / book at random stages. */
   const fworld = (r: Rand, n: number, self: EntityId): FWorld => {

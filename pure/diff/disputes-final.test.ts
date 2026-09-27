@@ -1,6 +1,7 @@
 // Behavioural diff: og disputes and cross-j recovery (core/protocol/dispute/proof-builder.ts, entity/tx/handlers/dispute/*, entity/tx/j-events*.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, state and bytes.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   accountProofBody, committedView, deltaTransformerFor, disputeArguments, knownDisputeSecrets, proofBodyHash, starterSecrets, tokenId,
   type AccountBody, type EntityTx, type HtlcLock, type JReplica, type Paybook, type PaybookEntry, type PullRow, type SwapOffer, type TokenId, type WireAccountTx,
@@ -53,7 +54,7 @@ import { applyFinality } from "../xln.ts";
 import { getDisputeHankoRequirementError as ogDisputeHankoRequirement } from "../../core/account/consensus/dispute/hanko.ts";
 import { disputeRequirement, disputeRequirementText } from "../xln.ts";
 
-let seed = 29;
+let seed = seedOf(29);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
@@ -98,7 +99,7 @@ const ogReplicaOf = (b: AccountBody): any => ({
   },
 });
 
-describe("disputes-final: Account ProofBody transformers (og protocol/dispute/proof-builder.ts buildAccountProofBody)", () => {
+describe(seedTag("disputes-final: Account ProofBody transformers (og protocol/dispute/proof-builder.ts buildAccountProofBody)"), () => {
   test("MATCH: 600 random Accounts with locks, swaps and pulls -- the same ProofBody hash, transformer clauses and allowances, or og's refusal code", () => {
     const seen = new Map<string, number>();
     for (let i = 0; i < 600; i++) {
@@ -149,7 +150,7 @@ describe("disputes-final: Account ProofBody transformers (og protocol/dispute/pr
   });
 });
 
-describe("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, entity/dispute-arguments.ts, j-events-htlc decodeDisputeStarterInitialSecrets)", () => {
+describe(seedTag("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, entity/dispute-arguments.ts, j-events-htlc decodeDisputeStarterInitialSecrets)"), () => {
   const secretOf = (): { secret: string; hashlock: string } => { const secret = hex32(); return { secret, hashlock: ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [secret])).toLowerCase() }; };
   test("MATCH: 500 random frozen Accounts with swap_resolve evidence and paybook secrets -- the same known secrets and left/right arguments as og", () => {
     let withArgs = 0, withSecrets = 0;
@@ -201,7 +202,7 @@ describe("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, e
 });
 
 // ---- cross-j recovery: the hash-ladder reveal queue (og entity/tx/j-events-htlc/index.ts) ----
-const xrng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const xrng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 type Rand = () => number;
 const xint = (r: Rand, n: number): number => Math.floor(r() * n);
 const xpick = <T,>(r: Rand, xs: readonly T[]): T => xs[xint(r, xs.length)] as T;
@@ -283,7 +284,7 @@ const ogView = (s: any, value: unknown) => ({ value, routes: routeView(s.crossJu
 const rwView = (h: CjHost, value: unknown) => ({ value, routes: routeView((h.swaps ?? new Map()) as Map<string, any>), jb: h.jb ?? null });
 
 console.warn = () => {};
-describe("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHashLadderRevealRegistration / flushDeferredHashLadderReveals / countDeferredHashLadderReveals)", () => {
+describe(seedTag("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHashLadderRevealRegistration / flushDeferredHashLadderReveals / countDeferredHashLadderReveals)"), () => {
   test("MATCH: queueHashLadderRevealRegistration on 250 random Entities (source and target roles, confirmed / queued / sent / recovery ratios, source windows, full batches): same result, routes, jBatchState and halts as og", () => {
     const r = xrng(0x1add), kinds = new Map<string, number>();
     for (let i = 0; i < 250; i++) {
@@ -393,7 +394,7 @@ const bookSlot = { getPaybookEntry: (s: any, h: string) => s.paybook.entries.get
 const routeRegistryView = (routes: Iterable<[string, any]>) => [...routes].map(([k, v]) => [k, v.status, v.sourceRegistryFillRatio ?? null, v.targetRegistryFillRatio ?? null, v.sourceRegistryRecord ?? null, v.targetRegistryRecord ?? null]);
 const paybookView = (p: any) => ({ fees: String(p.feesEarned), entries: [...p.entries].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, v.secret ?? null, v.pendingFee === undefined ? null : String(v.pendingFee)]) });
 
-describe("disputes-final: finalized J events on the Entity (og entity/tx/j-events.ts applyFinalizedJEvent SecretRevealed / HashLadderRevealRegistered)", () => {
+describe(seedTag("disputes-final: finalized J events on the Entity (og entity/tx/j-events.ts applyFinalizedJEvent SecretRevealed / HashLadderRevealRegistered)"), () => {
   test("MATCH: 150 random signed ranges of SecretRevealed and HashLadderRevealRegistered on ALICE (routes in every cross-j role, inbound / outbound locks, paybook routes with fees and cross-j relays, a disputed Account's Target recovery): same verdict, messages, paybook, routes' registry latches and records, recovery results, htlc_resolves and cross-j outputs as og", async () => {
     const r = xrng(0x5ec7), kinds = new Map<string, number>();
     for (let i = 0; i < 150; i++) {
@@ -440,7 +441,7 @@ const JREPLICAS = new Map([["j", { chainId: TERMS.domain.chainId, contracts: { d
 const sortedHooks = (m: ReadonlyMap<string, unknown> | undefined): unknown[] => [...(m ?? new Map())].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 const secretArgs = (secrets: readonly string[]): string => { const enc = ethers.AbiCoder.defaultAbiCoder(); return enc.encode(["bytes[]"], [[enc.encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [{ fillRatios: [], secrets }])]]); };
 
-describe("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFinalized on the Entity (og entity/tx/j-events.ts)", () => {
+describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFinalized on the Entity (og entity/tx/j-events.ts)"), () => {
   test("MATCH: 200 random signed dispute events on ALICE (starter / counterparty / third party, open / observed / queued BOB Account, frozen body and clock defects, starter secrets over paybook routes, counter-proof nonce rules, J batch retirement, crontab) -- same verdict, messages, J batch, activeDispute, jNonce, hooks, paybook and outputs as og", async () => {
     const r = xrng(0xd15b), kinds = new Map<string, number>();
     const good: string = (unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })) as any).bodyHash;
@@ -503,7 +504,7 @@ describe("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFin
 });
 
 // ---- og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame: an Account input answered with disposition 'dispute' ----
-describe("disputes-final: unsafe Account frames on the Entity (og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame)", () => {
+describe(seedTag("disputes-final: unsafe Account frames on the Entity (og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame)"), () => {
   test("MATCH: 200 random unsafe frames on ALICE's BOB Account (just-created Account, secret-window evidence over committed / frame-opened locks, paybook routes with inbound hops and conflicts, counterparty dispute Hankos, J batch in flight or full) -- same verdict, messages, paybook, J batch, Account status, kept frame evidence, outputs and upstream htlc_resolves as og", async () => {
     const r = xrng(0x05af), kinds = new Map<string, number>();
     const T1 = unwrap(tokenId("1")), aliceLeft = genesisAB().state.account.id.left === ALICE;
@@ -593,7 +594,7 @@ describe("disputes-final: unsafe Account frames on the Entity (og entity/tx/hand
 });
 
 // ---- og j-abort-sent-batch.ts / j-clear-batch.ts releaseFinalizeLatches: settle-jsubmit SJ-19 ----
-describe("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch (og entity/tx/handlers/j-batch)", () => {
+describe(seedTag("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch (og entity/tx/handlers/j-batch)"), () => {
   test("MATCH: 200 random aborts and clears over a disputed BOB Account whose disputeFinalize is queued (finalizations for BOB in any case / another peer, draft / sent / recovery batches, requeue / drop) -- same finalizeQueued latch, messages and J batch as og", async () => {
     const r = xrng(0x5319), kinds = new Map<string, number>();
     const nowSec = Math.floor(T0 / 1000);
@@ -630,7 +631,7 @@ describe("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch
 });
 
 // ---- og cross-j/salvage.ts and htlc/direct.ts resolveHtlcLock on ALICE's Entity (jCase fixtures) ----
-describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Entity (og entity/tx/handlers/cross-j/salvage.ts, htlc/direct.ts)", () => {
+describe(seedTag("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Entity (og entity/tx/handlers/cross-j/salvage.ts, htlc/direct.ts)"), () => {
   const payView = (p: any) => stableJson([...(p?.entries ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, { ...v, ...(v.inboundEntity ? { inboundEntity: String(v.inboundEntity).toLowerCase() } : {}), ...(v.outboundEntity ? { outboundEntity: String(v.outboundEntity).toLowerCase() } : {}) }]).concat([["fees", String(p?.feesEarned ?? 0n)]]));
   const withJb = (r: Rand, c: JCase): void => {
     if (xint(r, 3) === 0) return;
@@ -694,7 +695,7 @@ describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Enti
 });
 
 // ---- og handlePrepareDispute's cross-j Target recovery plan and crossJurisdictionForceSiblingDispute on ALICE's Entity ----
-describe("disputes-final: prepareDispute cross-j recovery / crossJurisdictionForceSiblingDispute on the Entity (og handlers/dispute/index.ts, cross-j/force-sibling-dispute.ts)", () => {
+describe(seedTag("disputes-final: prepareDispute cross-j recovery / crossJurisdictionForceSiblingDispute on the Entity (og handlers/dispute/index.ts, cross-j/force-sibling-dispute.ts)"), () => {
   test("MATCH: 250 random prepares and sibling-dispute fanouts over routes in every role, BOB Accounts holding the routes' Target / Source pulls (either sign) and stray pulls, terminal routes, observed peers on either leg -- same verdict, messages, Account status, disputePrepare (recovery, start intent), J batch and outputs as og", async () => {
     const r = xrng(0x51b1), kinds = new Map<string, number>();
     for (let i = 0; i < 250; i++) {
@@ -737,7 +738,7 @@ describe("disputes-final: prepareDispute cross-j recovery / crossJurisdictionFor
 });
 
 // ---- og cross-j/book-removal-ack.ts: the dispute branch (cross-book row 18) ----
-describe("disputes-final: crossJurisdictionBookOrderRemoved while a dispute waits on the removal (og entity/tx/handlers/cross-j/book-removal-ack.ts)", () => {
+describe(seedTag("disputes-final: crossJurisdictionBookOrderRemoved while a dispute waits on the removal (og entity/tx/handlers/cross-j/book-removal-ack.ts)"), () => {
   test("MATCH: 200 random removal ACKs at the source hub for a dispute-preparing BOB Account (this / other / no pending removal ids, cooldown elapsed or not, terminal or live route, hash drift, wrong hub) -- same verdict, messages, disputePrepare, Account status and J batch as og", async () => {
     const r = xrng(0xb00c), kinds = new Map<string, number>();
     for (let i = 0; i < 200; i++) {
@@ -775,7 +776,7 @@ describe("disputes-final: crossJurisdictionBookOrderRemoved while a dispute wait
 });
 
 // ---- og handlers/dispute/start.ts with a real counterparty dispute Hanko and argument overrides (entity-consensus-2 row 33) ----
-describe("disputes-final: disputeStart with argument overrides (og entity/tx/handlers/dispute/start.ts)", () => {
+describe(seedTag("disputes-final: disputeStart with argument overrides (og entity/tx/handlers/dispute/start.ts)"), () => {
   test("MATCH: 200 random disputeStart txs on a dispute-preparing BOB Account with BOB's real dispute Hanko (starter argument overrides valid / empty / malformed, counter-argument override, stale nonce, wrong body, draft / sent / full J batch) -- same verdict, messages, J batch row, Account status and queued dispute as og", async () => {
     const r = xrng(0x57a7), kinds = new Map<string, number>();
     const view = unwrap(committedView(genesisAB().state)), good: string = (unwrap(localProof(view, { ok: true, value: DT })) as any).bodyHash;
@@ -815,7 +816,7 @@ describe("disputes-final: disputeStart with argument overrides (og entity/tx/han
 });
 
 // ---- og auth/authorization.ts assertRuntimeCrossJRecoveryAuthority (entity-lane row 32) ----
-describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/auth/authorization.ts assertRuntimeCrossJRecoveryAuthority)", () => {
+describe(seedTag("disputes-final: cross-j recovery runtimeOutput authority (og entity/auth/authorization.ts assertRuntimeCrossJRecoveryAuthority)"), () => {
   test("MATCH: assertRuntimeOutputAuthorization on 800 random salvage / cross-j resolveHtlcLock / cross-j disputeStart / force-sibling envelopes (stored or missing route, every source and target role, wrong counterparties, extra data, terminal routes, signers) -- same accept or refusal text as og", () => {
     const r = xrng(0xa7c0), kinds = new Map<string, number>(), ids = [U1, H1, H2, U2, W("09")];
     for (let i = 0; i < 800; i++) {
@@ -846,7 +847,7 @@ describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/au
 });
 
 // ---- og entity/tx/handlers/dispute/start-admission.ts proofBodyHasPulls (the ethers decode text in DISPUTE_CANONICAL_DELTA_BATCH_INVALID) ----
-describe("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/start-admission.ts proofBodyHasPulls)", () => {
+describe(seedTag("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/start-admission.ts proofBodyHasPulls)"), () => {
   test("MATCH: proofBodyHasPulls on 1500 random ProofBodies (valid batches with and without pulls, truncated / overflowing / out-of-range offsets and counts, odd / non-hex / 0X bytes, foreign transformers) -- same verdict and the same DISPUTE_CANONICAL_DELTA_BATCH_INVALID ethers text as og", () => {
     const r = xrng(0xba7c), kinds = new Map<string, number>(), other = "0x" + "77".repeat(20);
     const payment = () => [BigInt(xint(r, 5)), [xint(r, 2) === 0, BigInt(xint(r, 1000))], BigInt(xint(r, 1000)), W(String(xint(r, 90) + 10))];
@@ -885,7 +886,7 @@ describe("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/sta
 });
 
 // ---- og account/settlement/j-finality.ts applyAccountDisputeFinality: the Account mempool on DisputeFinalized ----
-describe("disputes-final: the Account mempool on DisputeFinalized (og account/settlement/j-finality.ts applyAccountDisputeFinality)", () => {
+describe(seedTag("disputes-final: the Account mempool on DisputeFinalized (og account/settlement/j-finality.ts applyAccountDisputeFinality)"), () => {
   test("MATCH: 400 random live / preparing / disputed Accounts with mixed mempools and pending frames (settle_transition, j_event_claim, swap_resolve, evidence-bearing cross_pull_close, payments) -- og drops settle_transition then freezes as disputed, so both leave the same (empty) mempool, jNonce and nextProofNonce", () => {
     const r = xrng(0x3e3f), kinds = new Map<string, number>();
     const txOf = (): { type: string; data: Record<string, unknown> } => xpick(r, [
@@ -912,7 +913,7 @@ describe("disputes-final: the Account mempool on DisputeFinalized (og account/se
 });
 
 // ---- og account/consensus/dispute/hanko.ts getDisputeHankoRequirementError: the unsafe-frame dispute reason ----
-describe("disputes-final: the unsafe-frame dispute reason for a dispute Hanko refusal (og consensus/index.ts classifyIncomingValidationFailure + dispute/hanko.ts)", () => {
+describe(seedTag("disputes-final: the unsafe-frame dispute reason for a dispute Hanko refusal (og consensus/index.ts classifyIncomingValidationFailure + dispute/hanko.ts)"), () => {
   test("MATCH: 1500 random local proofs, stored counterparty witnesses, jNonces and received dispute Hankos -- the same verdict and og's exact DISPUTE_HANKO_* failure text", () => {
     const r = xrng(0x4a2d), kinds = new Map<string, number>(), hashes = [W("a1"), W("b2"), W("c3"), W("A1").toUpperCase().replace("0X", "0x")];
     for (let i = 0; i < 1500; i++) {

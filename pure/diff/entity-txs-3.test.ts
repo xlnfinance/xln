@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   authorEntityTxs, buildCommand, certifiedBoardStackKey, checkCommand, configBoardHash, createEntity, entityId, entityTransactionAction, foldTxs, hashCommand, hashCommandTxs, hashEntityFrame,
   hashProposalAction, applyEntityInput, proposalId, tokenId, wireEntityTx, installedAccount, ZERO_WORD, genesisHost, applyHost, localProof, committedView, envelopeOf, prepareFrozen, ogProofBody, spawn, createRuntime, applyRuntime, convertOutput, replicaKey,
@@ -33,7 +34,7 @@ const ogRootHash = (c: object): string => {
   if (!("rootHash" in c) || typeof c.rootHash !== "function") throw new Error("og collection has no rootHash");
   return String(c.rootHash());
 };
-let seed = 3;
+let seed = seedOf(3);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
@@ -79,7 +80,7 @@ const ogApplyCommand = (before: any, command: unknown): { state: any } | { error
   }
 };
 
-describe("entity-txs-3: entityCommand codec and hashes (og command/command-codec.ts, auth/authorization.ts)", () => {
+describe(seedTag("entity-txs-3: entityCommand codec and hashes (og command/command-codec.ts, auth/authorization.ts)"), () => {
   test("MATCH: hashEntityCommandTxs / hashEntityCommand / generateProposalId / stack keys over 200 random commands", () => {
     for (let i = 0; i < 200; i++) {
       const txs: EntityTx[] = Array.from({ length: 1 + ri(3) }, () => pick<EntityTx>([
@@ -124,7 +125,7 @@ describe("entity-txs-3: entityCommand codec and hashes (og command/command-codec
   });
 });
 
-describe("entity-txs-3: signed commands, propose and vote (og command/index.ts, system/basic.ts)", () => {
+describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/index.ts, system/basic.ts)"), () => {
   test("MATCH: 40 random governance runs (random board, 25 commands each, tampering) -- same accept / evict / refuse class, same proposals, nonces, events and profile as og", () => {
     let accepted = 0, rejected = 0, fatal = 0, executed = 0;
     for (let run = 0; run < 24; run++) {
@@ -235,7 +236,7 @@ describe("entity-txs-3: signed commands, propose and vote (og command/index.ts, 
   });
 });
 
-describe("entity-txs-3: frame events (og frame-events.ts, certified in the Entity frame hash)", () => {
+describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in the Entity frame hash)"), () => {
   test("MATCH: extendCredit and lending entity txs record og's status events", () => {
     const a = lazyEntity([[aliceAddr, 1n]], 1n);
     const opened = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
@@ -261,7 +262,7 @@ const ogPolicyRoot = (entries: readonly (readonly [number, unknown])[]): string 
 const ogThrows = <T>(f: () => T): { ok: true; value: T } | { ok: false; reason: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, reason: (e as Error).message }; } };
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
 
-describe("entity-txs-3: shadow rebalance policy root (og seedOpenAccountPolicies, createInboundAccountState)", () => {
+describe(seedTag("entity-txs-3: shadow rebalance policy root (og seedOpenAccountPolicies, createInboundAccountState)"), () => {
   test("MATCH: openAccount seeds og's policy map (requested policy, jurisdiction whole-USD defaults, token decimals); the leaf policyRoot equals og's PersistentAccountStateMap root, 120 random cases", () => {
     const a = lazyEntity([[aliceAddr, 1n]], 1n);
     for (let i = 0; i < 120; i++) {
@@ -298,7 +299,7 @@ describe("entity-txs-3: shadow rebalance policy root (og seedOpenAccountPolicies
   });
 });
 
-describe("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/admin.ts)", () => {
+describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/admin.ts)"), () => {
   const PEER2 = `0x${"ab".repeat(32)}` as EntityId;
   const withDeltas = (d: { readonly accountReplicas: ReadonlyMap<EntityId, AccountReplica> }, tokens: ReadonlyMap<EntityId, readonly number[]>): Map<EntityId, AccountReplica> =>
     new Map([...d.accountReplicas].map(([peer, c]) => [peer, { ...c, state: { ...c.state, account: { ...c.state.account, deltas: new Map((tokens.get(peer) ?? []).map((t) => { const k = unwrap(tokenId(String(t))); return [k, { tokenId: k, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 0n, rightCreditLimit: 0n }]; })) } } } as AccountReplica]));
@@ -395,7 +396,7 @@ describe("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/admin.ts
   });
 });
 
-describe("entity-txs-3: J7 dispute J events reach the Account (og j-events.ts applyDisputeStartedJEvent / applyDisputeFinalizedJEvent)", () => {
+describe(seedTag("entity-txs-3: J7 dispute J events reach the Account (og j-events.ts applyDisputeStartedJEvent / applyDisputeFinalizedJEvent)"), () => {
   /** og applyStartedDisputeAccountInput / resolveFinalizationEvidence (no evidence rows) field mapping, then og's own envelope builders and Account finality. */
   const ogAccount = (jNonce: number): any => ({
     state: { leftEntity: lower(ALICE), rightEntity: lower(BOB), domain: { ...TERMS.domain }, disputeConfig: { ...TERMS.disputeConfig }, jNonce, deltas: PersistentAccountStateMap.empty("deltas"), locks: PersistentAccountStateMap.empty("locks"),
@@ -461,7 +462,7 @@ describe("entity-txs-3: J7 dispute J events reach the Account (og j-events.ts ap
   });
 });
 
-describe("entity-txs-3: prepareDispute / disputeStart (og entity/tx/handlers/dispute)", () => {
+describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/handlers/dispute)"), () => {
   const PA = (name: Parameters<typeof PersistentAccountStateMap.empty>[0]) => PersistentAccountStateMap.empty(name);
   /** An og Account the dispute handlers can claim through the frame's candidate map: no witnesses, no orders. */
   const ogAcc = (status: string, disputePrepare?: unknown): any => ({

@@ -1,6 +1,7 @@
 // Differential tests: og cross-jurisdiction extension (core/extensions/cross-j/**, core/protocol/htlc/hash-ladder.ts)
 // vs the pure rewrite's cross-j kernel (pure/xln.ts). "MATCH:" tests assert equivalence against live og.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import * as ogLadder from "../../core/protocol/htlc/hash-ladder.ts";
 import * as ogCross from "../../core/extensions/cross-j/index.ts";
 import * as ogMarket from "../../core/extensions/cross-j/market.ts";
@@ -63,11 +64,14 @@ import {
 } from "../xln.ts";
 
 // Deterministic PRNG (mulberry32) so failures reproduce.
-export const rng = (seed: number) => () => {
-  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+export const rng = (base: number) => {
+  let seed = seedOf(base);
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 type Rand = () => number;
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)] as T;
@@ -111,7 +115,7 @@ export const randomRoute = (r: Rand): CrossRoute => {
   return route;
 };
 
-describe("cross-j: hash ladder (core/protocol/htlc/hash-ladder.ts)", () => {
+describe(seedTag("cross-j: hash ladder (core/protocol/htlc/hash-ladder.ts)"), () => {
   test("MATCH: build/reveal/decode/verify agree with og across random seeds and ratios", () => {
     const r = rng(7);
     for (let i = 0; i < 40; i++) {
@@ -136,7 +140,7 @@ describe("cross-j: hash ladder (core/protocol/htlc/hash-ladder.ts)", () => {
   });
 });
 
-describe("cross-j: route kernel (core/extensions/cross-j/index.ts, market.ts)", () => {
+describe(seedTag("cross-j: route kernel (core/extensions/cross-j/index.ts, market.ts)"), () => {
   test("MATCH: routeHash, canonical route, clone, market, book owner, pull ids, seeds agree with og", () => {
     const r = rng(11);
     for (let i = 0; i < 150; i++) {
@@ -356,7 +360,7 @@ const mutate = (r: Rand, tx: any): any => {
   return t;
 };
 
-describe("cross-j: account txs through the og transition overlay", () => {
+describe(seedTag("cross-j: account txs through the og transition overlay"), () => {
   test("MATCH: 60 random pull-lock / offer / resolve / close sequences agree on accept/reject and Account root", async () => {
     const r = rng(101);
     let locks = 0, offers = 0, closes = 0;
@@ -424,7 +428,7 @@ const randomEnvelope = (r: Rand): unknown => {
   }
 };
 
-describe("cross-j: htlc_lock envelope and envelopeHash", () => {
+describe(seedTag("cross-j: htlc_lock envelope and envelopeHash"), () => {
   test("MATCH: envelope validation and envelopeHash agree with og assertOpaqueHtlcCiphertext/hashOpaqueHtlcCiphertext on 600 random envelopes", () => {
     const r = rng(77);
     let valid = 0;
@@ -484,7 +488,7 @@ const ogMutationTx = (tx: any): any => {
   return { type: "direct_payment", data: { ...data, tokenId: Number(data.tokenId) } };
 };
 
-describe("cross-j: Account outputs through og applyAccountTxMutation", () => {
+describe(seedTag("cross-j: Account outputs through og applyAccountTxMutation"), () => {
   test("MATCH: 40 random sequences: accept/reject, Account root, and outputs (htlc_error, swap_cancel_requested, swap_cancelled, request_collateral_committed, directPaymentForward) agree", async () => {
     const r = rng(303);
     const seen = new Set<string>();
@@ -528,7 +532,7 @@ describe("cross-j: Account outputs through og applyAccountTxMutation", () => {
 });
 
 // ---------- replica shadow: rebalance submittedAtByToken (og refund.ts, j-events/finality.ts, envelope/entity-update.ts) ----------
-describe("cross-j: submittedAtByToken shadow", () => {
+describe(seedTag("cross-j: submittedAtByToken shadow"), () => {
   const shadowRoot = (og: ReturnType<typeof ogHarness>): string => og.replica().shadow.rebalance.submittedAtByToken.rootHash();
   const requested = (body: AccountBody, byLeft: boolean, tokenId: string, fee: bigint): AccountBody =>
     unwrapR(applyAccountBody(body, { type: "request_collateral", tokenId, amount: 1000n, feeAmount: fee, policyVersion: 1 } as never, { byLeft, nowMs: 5n, jHeight: 1n, accountHeight: 2n }) as never as { ok: true; value: { state: AccountBody } }).state;
@@ -578,7 +582,7 @@ describe("cross-j: submittedAtByToken shadow", () => {
 });
 
 // ---------- pull registry settlement (og account/pull-registry-settlement.ts) ----------
-describe("cross-j: pull registry settlement", () => {
+describe(seedTag("cross-j: pull registry settlement"), () => {
   const BATCH = ethers.ParamType.from(BATCH_ABI);
   const DT = `0x${"d7".repeat(20)}`;
   const encodeBatch = (pulls: Array<{ amount: bigint; claimedRatio: number; fullHash: string; partialRoot: string; targetRole: boolean }>, payments = 0): string =>

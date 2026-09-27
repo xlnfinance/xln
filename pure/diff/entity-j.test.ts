@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, batchOfOg, encodeBatch,
   type AccountReplica, type EntityId, type EntityState, type EntityTx,
@@ -40,7 +41,7 @@ import { handleBoardHandoverEntityTx } from "../../core/entity/tx/handlers/board
 import { encodeBoard, hashBoard } from "../../core/entity/factory.ts";
 import { carolAddr } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xe7_1a);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -100,7 +101,7 @@ const ogHandler = (tx: EntityTx, st: any): Promise<any> => {
 };
 const ogJTxOf = (out: any): any => out.jOutputs?.[0]?.jTxs?.[0];
 
-describe("entity-j: Entity-level J-batch txs on the committed jBatchState (og entity/tx/handlers/j-batch/*)", () => {
+describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchState (og entity/tx/handlers/j-batch/*)"), () => {
   test("MATCH: 40 random runs of r2r / r2e / e2r / r2c / j_broadcast / j_rebroadcast / j_abort_sent_batch / j_clear_batch / mintReserves give og's verdict, jBatchState, messages, J outputs and jBatch hashes to sign", async () => {
     const seen = new Map<string, number>();
     for (let run = 0; run < 40; run++) {
@@ -238,7 +239,7 @@ const rewriteView = (raw: string): unknown => {
   return { type: t.type, hash: t.hash, from: t.from === null ? null : t.from.ok ? t.from.value : "ERR", chainId: t.chainId, nonce: t.nonce, to: t.to, value: t.value, data: t.data };
 };
 
-describe("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.from)", () => {
+describe(seedTag("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.from)"), () => {
   test("MATCH (randomized): legacy EIP-155 / pre-155, EIP-2930 and EIP-1559 transactions and their mutations -- same refusal, hash, sender, chain, nonce, to, value, data", () => {
     let accepted = 0, refused = 0, mutated = 0;
     for (let i = 0; i < 1500; i++) {
@@ -261,7 +262,7 @@ describe("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.fr
   });
 });
 
-describe("entity-j RJ-9: durable numbered-registration intents (og numbered-registration-intent.ts)", () => {
+describe(seedTag("entity-j RJ-9: durable numbered-registration intents (og numbered-registration-intent.ts)"), () => {
   const iface = EntityProvider__factory.createInterface();
   const NDEP = "0x5fbdb2315678afecb367f032d93f642f64180aa3", CHAIN = 31337, SEED = `0x${"5e".repeat(64)}`;
   const word = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
@@ -453,7 +454,7 @@ const signedRange = (ogSt: any, finalized: number, sent: any, defect: string): R
     eventHistoryRoot, rangeHash: defect === "rangeHash" ? jword() : rangeHash, signature };
 };
 
-describe("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)", () => {
+describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)"), () => {
   test("MATCH (randomized): signed ranges of reserve / debt / AccountSettled / HankoBatchProcessed events and envelope defects -- same verdict, reserves, debts, jBatchState, certified J head, board finality, messages, dirty Accounts and follow-up outputs", async () => {
     const seen = new Map<string, number>();
     for (let run = 0; run < 45; run++) {
@@ -557,7 +558,7 @@ const handoverCase = (variant: string): { board: any; activationFor: (oldHash: s
   };
 };
 
-describe("entity-j RJ-10: boardHandover (og board-handover.ts, frame config derived inside consensus)", () => {
+describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame config derived inside consensus)"), () => {
   test("MATCH (randomized): certified BoardActivated handovers and their defects -- same frame authority verdict, handler verdict, new board, leader and certified registry", async () => {
     const variants = ["ok", "ok", "chain2", "bobFirst", "badPrev", "hashMismatch", "noActivation", "upper", "shareUpper", "gossip", "threshold0", "thresholdHigh", "dup", "outsider", "noShares", "shapeAlone", "shapeReversed", "twice", "unregistered", "wrongRegistration", "nested", "nestedFirst"];
     const seen = new Map<string, number>();

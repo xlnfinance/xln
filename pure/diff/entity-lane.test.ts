@@ -1,6 +1,7 @@
 // Differential tests: og Entity -> Entity command lane, cross-j Entity txs, gossip pathfinding vs pure/xln.ts.
 // Every test is "MATCH:" and runs og live on the same (seeded random) input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { buildNetworkGraph as ogBuildGraph } from "../../core/pathfinding/graph.ts";
 import { PathFinder } from "../../core/pathfinding/pathfinding.ts";
@@ -12,11 +13,14 @@ import {
   type Address, type Binary, type EntityId, type EntityReplica, type EntityTx, type RoutedEntityInput, type Runtime,
 } from "../xln.ts";
 
-const rng = (seed: number) => () => {
-  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const rng = (base: number) => {
+  let seed = seedOf(base);
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 type Rand = () => number;
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)] as T;
@@ -47,7 +51,7 @@ const randomProfiles = (r: Rand, ids: readonly string[], tokenId: number): Binar
   return (r() < 0.1 ? [...out, { ...out[0]!, metadata: { ...out[0]!.metadata, routingFeePPM: 7 } }] : out) as unknown as Binary[];
 };
 
-describe("entity-lane: gossip pathfinding (og pathfinding/graph.ts, pathfinding.ts, network/p2p/gossip findPaths)", () => {
+describe(seedTag("entity-lane: gossip pathfinding (og pathfinding/graph.ts, pathfinding.ts, network/p2p/gossip findPaths)"), () => {
   test("MATCH: buildNetworkGraph + PathFinder.findRoutes on 400 random gossip graphs (hub metadata, mirrored rows, funding first hop, capacities, fees)", () => {
     const r = rng(41);
     let found = 0;
@@ -120,7 +124,7 @@ const ogResolve = (profiles: readonly Binary[], source: string) => async (tx: { 
   return path;
 };
 
-describe("entity-lane: htlcPayment route discovery (og infra-context.ts resolveRoute)", () => {
+describe(seedTag("entity-lane: htlcPayment route discovery (og infra-context.ts resolveRoute)"), () => {
   const rt = network(), alice = replicaOf(rt, ALICE), ts = Number(NOW + 1000n);
   const view = { id: ALICE, timestamp: ts, jHeight: 0, encryptionKey: ENTITY_KEYS.get(ALICE)!.pub, paybook: { entries: new Map(), feesEarned: 0n }, replicas: alice.accountReplicas };
   test("MATCH: materializeOriginatedHtlcPayments with an empty route resolves og's route on 150 random profile sets and payments", async () => {
@@ -277,7 +281,7 @@ const mutateRoute = (r: Rand, route: CrossRoute): CrossRoute => {
   return route;
 };
 
-describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/setup.ts)", () => {
+describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/setup.ts)"), () => {
   test("MATCH: prepareCrossJurisdictionSwap at the source user, target user, source hub and a stranger on 400 random routes, accounts, validators and stored routes", () => {
     const r = rng(51), kinds = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
@@ -400,7 +404,7 @@ const routeOf = (o: EntityOutput): RoutedEntityInput => {
   return { entityId: o.to, signerId: o.signerId, input: o.input };
 };
 
-describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publication.ts, auth/authorization.ts, transition/cross-j-proposer-materialization.ts)", () => {
+describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/output/publication.ts, auth/authorization.ts, transition/cross-j-proposer-materialization.ts)"), () => {
   test("MATCH: a user authorization reaches the source hub as a runtimeOutput, the default proposer materializes it, and the hub registers its own leg, frame by frame against og", () => {
     // ALICE is the source user, BOB the source hub (their Account is live); the target leg names two remote Entities on another stack
     const H2x = ("0x" + "03".repeat(32)) as EntityId, U2x = ("0x" + "04".repeat(32)) as EntityId, ogEnvAt = (timestamp: number) => ({ state: { timestamp }, runtimeSeed: RUNTIME_SEED }) as never;

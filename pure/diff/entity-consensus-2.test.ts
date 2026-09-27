@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   buildEntityLeaderCertificate, buildEntityLeaderVoteBody, getEntityLeaderOrder, getEntityLeaderState, getEntityLeaderTimeoutMs, getNextEntityFailoverLeader, hashEntityLeaderVoteBody,
 } from "../../core/entity/consensus/leader/index.ts";
@@ -24,7 +25,7 @@ const A = aliceAddr, B = bobAddr, C = carolAddr;
 const JUR = TERMS.domain;
 // og buildQuorumHanko binds the Hanko to the lazy board of the config (assertQuorumBoardBinding): the Entity id is that board hash
 const ENTITY = unwrap(entityId(await getEntityConfigBoardHash({} as never, { threshold: 2n, validators: [A, B, C].map((a) => a.toLowerCase()), shares: Object.fromEntries([A, B, C].map((a) => [a.toLowerCase(), 1n])) })));
-let seed = 11;
+let seed = seedOf(11);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const addr = (i: number): Address => unwrap(address(`0x${(i + 16).toString(16).padStart(2, "0").repeat(20)}`));
@@ -48,7 +49,7 @@ const ogCert = (c: LeaderCertificate): any => ({ ...c, votes: new Map([...c.vote
 const inputsFor = (outputs: readonly EntityOutput[], signer: Address): EntityInput[] => outputs.flatMap((o) => ("input" in o && o.signerId.toLowerCase() === signer.toLowerCase() ? [o.input] : []));
 const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
 
-describe("entity-consensus-2: leader order, views and vote bodies (ER-18)", () => {
+describe(seedTag("entity-consensus-2: leader order, views and vote bodies (ER-18)"), () => {
   test("MATCH: getEntityLeaderOrder / getEntityLeaderState / getNextEntityFailoverLeader / buildEntityLeaderVoteBody / hashEntityLeaderVoteBody over 60 random configs and leader states", () => {
     for (let i = 0; i < 60; i++) {
       const ids = [...new Set(Array.from({ length: 1 + ri(5) }, () => ri(8)))].map(addr), shares = ids.map(() => BigInt(1 + ri(4)));
@@ -72,7 +73,7 @@ describe("entity-consensus-2: leader order, views and vote bodies (ER-18)", () =
   });
 });
 
-describe("entity-consensus-2: timeout certificate and certified view change (ER-18)", () => {
+describe(seedTag("entity-consensus-2: timeout certificate and certified view change (ER-18)"), () => {
   // [A, B, C] equal shares, threshold 2: A (the CEO) goes silent, B and C time out, B (order[1]) proposes at view 1
   const members = [[A, 1n], [B, 1n], [C, 1n]] as const;
   const run = () => {
@@ -153,7 +154,7 @@ describe("entity-consensus-2: timeout certificate and certified view change (ER-
   });
 });
 
-describe("entity-consensus-2: account Hankos through hashesToSign (ER-4)", () => {
+describe(seedTag("entity-consensus-2: account Hankos through hashesToSign (ER-4)"), () => {
   test("MATCH (og proposePendingAccountFrames + buildQuorumHanko): the view-1 frame signs the Account frame as a secondary hash and the committed Account carries the quorum Hanko", () => {
     const members = [[A, 1n], [B, 1n], [C, 1n]] as const;
     const b0 = teaching(members, 2n, B);
@@ -167,7 +168,7 @@ describe("entity-consensus-2: account Hankos through hashesToSign (ER-4)", () =>
   });
 });
 
-describe("entity-consensus-2: board Hanko refresh and the previous-board grace (AC-13)", () => {
+describe(seedTag("entity-consensus-2: board Hanko refresh and the previous-board grace (AC-13)"), () => {
   // Alice's Account with Bob at height 1, committed through the ordinary propose / ack_frame / ack exchange
   const committedAlice = (): AccountReplica => {
     const door = (self: EntityId): DoorContext => ({ verify: hankoVerify, self, now: NOW });
@@ -254,7 +255,7 @@ describe("entity-consensus-2: board Hanko refresh and the previous-board grace (
   });
 });
 
-describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, profile-update", () => {
+describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, profile-update"), () => {
   const single = () => teaching([[A, 1n]], 1n, A);
   const opened = () => unwrap(applyEntityInput(single(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
   test("MATCH (og handleProfileUpdateEntityTx): 300 random updates -- same refusal or the same committed profile", () => {
@@ -312,7 +313,7 @@ describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, p
   });
 });
 
-describe("entity-consensus-2: publicPinned (H7)", () => {
+describe(seedTag("entity-consensus-2: publicPinned (H7)"), () => {
   test("MATCH (og resolveOpenAccountPublicPin): the opener pins unless pinPublic is false; the leaf commits it (hashes.test.ts H7 compares the root with og)", () => {
     const open = (extra: Record<string, unknown>): EntityTx => ({ type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...extra } } as EntityTx);
     const run = (tx: EntityTx) => unwrap(applyEntityInput(teaching([[A, 1n]], 1n, A), { kind: "txs", timestamp: NOW, txs: [tx] }, ctx(A))).replica.accountReplicas.get(BOB);
@@ -321,7 +322,7 @@ describe("entity-consensus-2: publicPinned (H7)", () => {
   });
 });
 
-describe("entity-consensus-2: trusted gateway payments (ER-15)", () => {
+describe(seedTag("entity-consensus-2: trusted gateway payments (ER-15)"), () => {
   // three single-signer Entities on one runtime; every output is delivered until the network is quiet
   const party = (id: EntityId, signer: Address) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[signer, { shares: 1n }]]) }));
   const signers = new Map<EntityId, Address>([[ALICE, A], [BOB, B], [CAROL, C]]);

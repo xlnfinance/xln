@@ -1,6 +1,7 @@
 // Behavioural diff: og bilateral Account consensus (core/account/consensus) vs pure/xln.ts.
 // Each "DIVERGES:" test PASSES while asserting the observed difference; "MATCH:" tests assert equivalence.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 
 // ---- og ----
 import { applyAccountInput as ogApply } from "../../core/account/consensus/index.ts";
@@ -117,7 +118,7 @@ const ackFrameOf = (r: AccountReplica, from: EntityId, frame: AccountFrame, ack:
 } as AccountInput);
 
 // =====================================================================================================
-describe("account-consensus: pure predicates", () => {
+describe(seedTag("account-consensus: pure predicates"), () => {
   test("MATCH: dispute-hanko requirement ladder (unexpected / finalized / regression / reuse / body / required)", () => {
     const A = W("aa"), B = W("bb");
     const rows: Array<[string | undefined, string | undefined, number | undefined, number, { nonce: number; body: string } | undefined]> = [
@@ -174,7 +175,7 @@ describe("account-consensus: pure predicates", () => {
 });
 
 // =====================================================================================================
-describe("account-consensus: driven scenarios", () => {
+describe(seedTag("account-consensus: driven scenarios"), () => {
   test("MATCH: an authenticated EMPTY peer frame is accepted and commits on both sides", async () => {
     const ctx = ogCtx("diff-empty-frame");
     const a = ogAccount(L, R);                                   // we are LEFT, RIGHT proposes
@@ -331,7 +332,7 @@ describe("account-consensus: driven scenarios", () => {
 
   test("MATCH: proposer clock below the last committed frame — both clamp to max(entityTs, lastFrame.timestamp)", () => {
     const pairs: Array<[number, number]> = [[1_000, 5_000], [5_000, 5_000], [9_000, 5_000], [0, 0], [0, 7]];
-    let seed = 7;
+    let seed = seedOf(7);
     for (let i = 0; i < 6; i++) { seed = (seed * 1103515245 + 12345) % 2 ** 31; pairs.push([seed % 100_000, (seed >> 8) % 100_000]); }
     for (const [entityTs, prevTs] of pairs) {
       const a = ogAccount();
@@ -561,7 +562,7 @@ describe("account-consensus: driven scenarios", () => {
 });
 
 // =====================================================================================================
-describe("account-consensus: dispute preparation", () => {
+describe(seedTag("account-consensus: dispute preparation"), () => {
   test("MATCH: freeze keeps J claims + matcher evidence while preparing; preparing returns to active keeping only J claims", () => {
     // og
     const a = ogAccount();
@@ -589,7 +590,7 @@ describe("account-consensus: dispute preparation", () => {
   });
 });
 
-describe("account-consensus: frozen admission", () => {
+describe(seedTag("account-consensus: frozen admission"), () => {
   test("MATCH: og applyAccountEnqueue admits in any status — a preparing or disputed Account queues local txs (deduped), and nothing proposes them", () => {
     const ctx = ogCtx("diff-frozen-enqueue");
     for (const status of ["dispute_preparing", "disputed"] as const) {
@@ -611,10 +612,10 @@ describe("account-consensus: frozen admission", () => {
 });
 
 // =====================================================================================================
-describe("account-consensus: incoming preflight", () => {
+describe(seedTag("account-consensus: incoming preflight"), () => {
   test("MATCH: HTLC deadline preflight (og getIncomingAccountDeadlineViolation) — none / reject / dispute over randomized frames", () => {
     const now = 1_000_000, fin = 10, secret = W("5a");
-    let seed = 42;
+    let seed = seedOf(42);
     const rnd = (n: number) => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t ^= t + Math.imul(t ^ (t >>> 7), 61 | t); return ((t ^ (t >>> 14)) >>> 0) % n; };
     const around = (base: number, spread: number) => base - spread + rnd(2 * spread + 1);
     const verdicts = new Set<string>();
@@ -668,7 +669,7 @@ describe("account-consensus: incoming preflight", () => {
   });
 });
 
-describe("account-consensus: proposal selection (og admission.ts selectProposalWindow)", () => {
+describe(seedTag("account-consensus: proposal selection (og admission.ts selectProposalWindow)"), () => {
   test("MATCH: selected mempool subset — EMPTY / TOO_LARGE / NOT_IN_MEMPOOL refuse in both; a valid subset proposes only it and keeps the rest queued", () => {
     const ogTxs = [scl(1, 1n), scl(2, 2n), scl(3, 3n)];
     const TX3: WireAccountTx = { type: "set_credit_limit", tokenId: TOKEN, limit: 11n }, rwTxs: WireAccountTx[] = [TX, TX2, TX3];

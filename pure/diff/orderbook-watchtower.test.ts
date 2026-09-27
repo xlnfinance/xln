@@ -1,6 +1,7 @@
 // Differential tests: og watchtower (core/watchtower/{http,store}, core/storage/recovery/bundle) and og orderbook (core/orderbook,
 // entity swap requests) vs the pure rewrite. "MATCH:" tests run og live on the same input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ import {
   type TowerAppointmentV1, type TowerLookupDoc, type TowerStoreConfig, type TowerWrite, type Result, type TowerError,
 } from "../xln.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const TOWER_KEY = ethers.keccak256(ethers.toUtf8Bytes("pure:tower"));
 const hex = (rand: () => number, bytes: number): string => `0x${Array.from({ length: bytes }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("")}`;
 type Json = Record<string, unknown>;
@@ -97,7 +98,7 @@ const appointment = (s: Spec): Json => {
   return { type: "tower_appointment", version: 1, towerMode: mode, lookupKey, slot: s.slot ?? 0, bundle, ownerProof: { runtimeId: w.address.toLowerCase(), signedAt: s.signedAt, signature: w.signMessageSync(message) }, ...(s.payload ? { lastResortPayload: s.payload } : {}) };
 };
 
-describe("orderbook-watchtower: watchtower (ER-24)", () => {
+describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
   test("MATCH (og crypto.ts + ethers): envelope hash, payload digest, EIP-191 sign/recover, isAddress", () => {
     const rand = prng(7);
     for (let i = 0; i < 40; i++) {
@@ -117,7 +118,7 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
         try { ogRecovered = ethers.verifyMessage(message, variant).toLowerCase(); } catch { ogRecovered = undefined; }
         expect([v, recoverPersonalMessage(message, variant)]).toEqual([v, ogRecovered]);
       }
-      const addr = ethers.Wallet.createRandom().address;
+      const addr = new ethers.Wallet(key).address;
       for (const candidate of [addr, addr.toLowerCase(), addr.slice(2), addr.replace(/[a-f]/, (c) => c.toUpperCase()), addr.toUpperCase().replace("0X", "0x"), ethers.getIcapAddress(addr), ethers.getIcapAddress(addr).replace(/.$/, "0"), "0x123"])
         expect([candidate, isEthersAddress(candidate)]).toEqual([candidate, ethers.isAddress(candidate)]);
     }
@@ -219,7 +220,7 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
   });
 });
 
-describe("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)", () => {
+describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
   const opened = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
@@ -261,7 +262,7 @@ describe("orderbook-watchtower: entity swap requests (og payments/swap-requests.
   });
 });
 
-describe("orderbook-watchtower: price-page order book (og orderbook/core.ts, commitment.ts)", () => {
+describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core.ts, commitment.ts)"), () => {
   const owners = ["alice", "bob", "carol", "dave"];
   type Out = { state: any; events: unknown } | null;
   /** One random command stream through og and the rewrite: same events (or the same refusal) and the same book commitment after every step. */

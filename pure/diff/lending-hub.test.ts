@@ -2,6 +2,7 @@
 // extensions/lending.ts) and the Htlc* runtime events' jurisdictionId (committed-frame-followups.ts, committed-htlc-followups.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / refuse, lending book, returned Account txs and events.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   accountId, applyRuntime, convertOutput, wireTx, createEntity, createRuntime, genesisReplica, lendingFollowups, lendingInterest, lendingLoanId, localScheduledWake, replicaKey, resolveFollowup, secretFollowup, spawn, tokenId,
   type AccountReplica, type AccountTx, type EntityId, type EntityOutput, type EntityState, type EntityTx, type LendingBook, type LendingFrame, type LendingLoan, type LendingPool, type Runtime, type RoutedEntityInput,
@@ -15,7 +16,7 @@ import { createBookIntentProgram, applyBookIntentProgram } from "../../core/enti
 import { hashHtlcSecret } from "../../core/protocol/htlc/utils.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 
-let seed = 71;
+let seed = seedOf(71);
 /** mulberry32: a full-period 32-bit generator (the float LCG loses its low bits past 2^53 and cycles early). */
 const rng = (): number => {
   seed = (seed + 0x6d2b79f5) | 0;
@@ -51,7 +52,7 @@ const ogReplica = (hub: EntityId, peer: EntityId, rows: readonly Row[], mempool:
   };
 };
 
-describe("lending-hub: committed lending followup (og committed-lending-followup.ts, committed-lending-close.ts)", () => {
+describe(seedTag("lending-hub: committed lending followup (og committed-lending-followup.ts, committed-lending-close.ts)"), () => {
   test("MATCH: 3000 random hub lending books and committed frames -- og's accept / refuse message, lending book and returned lending_credit / lending_close_payout", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 3000; i++) {
@@ -154,7 +155,7 @@ describe("lending-hub: committed lending followup (og committed-lending-followup
 });
 
 // ---- end-to-end: entity lendingOffer / Borrow / Repay / ClosePosition -> Account lending txs -> hub followup -> lending_overdue default ----
-describe("lending-hub: end-to-end lending lifecycle through the Runtime", () => {
+describe(seedTag("lending-hub: end-to-end lending lifecycle through the Runtime"), () => {
   const T = tk(1);
   const openTo = (target: EntityId, creditAmount: bigint): EntityTx =>
     ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, tokenId: T, creditAmount } }) as EntityTx;
@@ -227,7 +228,7 @@ describe("lending-hub: end-to-end lending lifecycle through the Runtime", () => 
 });
 
 // ---- Htlc* runtime events carry og's jurisdictionId (committed-frame-followups.ts jurisdictionIdFor, committed-htlc-followups.ts getJurisdictionId) ----
-describe("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og protocol/htlc/events.ts)", () => {
+describe(seedTag("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og protocol/htlc/events.ts)"), () => {
   test("MATCH: 400 random paybook routes resolved by a committed secret and revealed upstream -- og's events byte for byte (keys, order, jurisdictionId)", () => {
     const json = (v: unknown): string => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? `${x}n` : x));
     const seen = new Set<string>();

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { getEntityLeaderOrder, getEntityLeaderState } from "../../core/entity/consensus/leader/index.ts";
 import { calculateQuorumPower, isSingleSignerBoard } from "../../core/entity/consensus/replica-validation.ts";
@@ -43,12 +44,12 @@ const consensusFor = (outputs: readonly EntityOutput[], signer: Address): Entity
   outputs.flatMap((o) => ("input" in o && o.signerId.toLowerCase() === signer.toLowerCase() ? [o.input] : []));
 
 // og replica rng for randomized comparisons
-let seed = 7;
+let seed = seedOf(7);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const addr = (i: number) => unwrap(address(`0x${(i + 16).toString(16).padStart(2, "0").repeat(20)}`));
 
-describe("entity-runtime: proposer selection (ER-1, ER-3)", () => {
+describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
   test("MATCH: og proposer = validators[0] (positional CEO) for validators [B,A]; A's replica forwards its mempool to B", () => {
     const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never);
     expect(og.activeValidatorId).toBe(B);
@@ -89,7 +90,7 @@ describe("entity-runtime: proposer selection (ER-1, ER-3)", () => {
   });
 });
 
-describe("entity-runtime: authority root (ER-2, H16)", () => {
+describe(seedTag("entity-runtime: authority root (ER-2, H16)"), () => {
   test("MATCH: frame authorityRoot == og computeEntityFrameAuthorityRoot for 40 random positional validator sets", () => {
     for (let i = 0; i < 40; i++) {
       const ids = [0, 1, 2, 3, 4, 5, 6, 7].sort(() => rng() - 0.5).slice(0, 2 + ri(3)).map(addr), shares = ids.map(() => BigInt(1 + ri(0xffff)));
@@ -133,7 +134,7 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
   };
 };
 
-describe("entity-runtime: entity state root commits every og field (H6)", () => {
+describe(seedTag("entity-runtime: entity state root commits every og field (H6)"), () => {
   test("MATCH: 30 random og-shaped EntityStates (entityId, height, timestamp, config+jurisdiction, nonces, reserves, profile, paybook, crontab, ...) == og computeCanonicalEntityConsensusStateHash", () => {
     for (let i = 0; i < 30; i++) {
       const { og, rw } = committedPair(i), withJ = rng() < 0.5;
@@ -180,7 +181,7 @@ describe("entity-runtime: entity state root commits every og field (H6)", () => 
   });
 });
 
-describe("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)", () => {
+describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)"), () => {
   test("MATCH: threshold is >= over summed shares; B's manifest precommit completes [A,B] 2-of-2", () => {
     const cfg = ogConfig([A, B], { [A]: 1n, [B]: 1n }, 2n);
     expect(calculateQuorumPower(cfg, [A]) >= cfg.threshold).toBe(false);
@@ -259,7 +260,7 @@ describe("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)
   });
 });
 
-describe("entity-runtime: validator replay (ER-6)", () => {
+describe(seedTag("entity-runtime: validator replay (ER-6)"), () => {
   const board = (signer: Address) => teaching([[A, 1n], [B, 1n]], 2n, signer);
   test("MATCH: proposer -> proposal -> validator replays, signs, locks, reaches quorum, commits and broadcasts; both replicas end on the same state", () => {
     const leader = unwrap(propose(board(A), A, [open], 5n));
@@ -318,7 +319,7 @@ describe("entity-runtime: validator replay (ER-6)", () => {
   });
 });
 
-describe("entity-runtime: mempool (ER-10, ER-21)", () => {
+describe(seedTag("entity-runtime: mempool (ER-10, ER-21)"), () => {
   test("MATCH (og admission): txs arriving while a frame is proposed are queued and proposed after the commit", () => {
     const p = unwrap(propose(teaching([[A, 1n], [B, 1n]], 2n), A));
     const queued = unwrap(propose(p.replica, A, [openTo(CAROL)]));
@@ -345,7 +346,7 @@ describe("entity-runtime: mempool (ER-10, ER-21)", () => {
   });
 });
 
-describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
+describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), () => {
   test("MATCH (og evict-and-retry): only the refused tx leaves the frame; the rest commits", () => {
     const bad: EntityTx = { type: "directPayment", data: { targetEntityId: CAROL, tokenId: unwrap(tokenId("1")), amount: 5n, route: [ALICE, CAROL], deliveryMode: "direct" } };
     const p = unwrap(propose(teaching([[A, 1n]], 1n), A, [open, bad]));
@@ -432,7 +433,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
   });
 });
 
-describe("entity-runtime: runtime recovery (ER-23)", () => {
+describe(seedTag("entity-runtime: runtime recovery (ER-23)"), () => {
   test("MATCH (og outbox-payload.ts ordered rows): recoverRuntime binds the persisted outbox positionally; a reordered outbox is refused", () => {
     const credit = (to: EntityId): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: unwrap(tokenId("1")), amount: 1n } });
     const alice = unwrap(propose(teaching([[A, 1n]], 1n), A, [open])).replica;

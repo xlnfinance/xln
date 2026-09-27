@@ -4,6 +4,7 @@
 // same-j / cross-j swap txs, plus direct-payment forwards. They assert the same accept / refuse, returned Account txs in mempool order, the
 // Account worklist order, runtime events, swap events, lending book and paybook.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import {
   EMPTY_HTLC_INFRA, accountId, committedFollowups, createEntity, crontabOf, withCrontab, type Crontab, encryptOpaqueHtlc, genesisReplica, hashHtlcSecret, htlcEnvelopeHash, isLeft, replicaId, tokenId, wireTx,
@@ -16,7 +17,7 @@ import { PersistentAccountStateMap } from "../../core/account/state/persistent-s
 import { admitLocalAccountTx } from "../../core/account/input/local-tx-admission.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 
-let seed = 5150;
+let seed = seedOf(5150);
 const rng = (): number => {
   seed = (seed + 0x6d2b79f5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -71,7 +72,7 @@ const ogAccount = (self: EntityId, peer: EntityId, row: Row, offers: ReadonlyMap
   };
 };
 
-describe("followup-order: committed-frame followups of one accountInput (og committed-input.ts applySuccessfulAccountInput)", () => {
+describe(seedTag("followup-order: committed-frame followups of one accountInput (og committed-input.ts applySuccessfulAccountInput)"), () => {
   test("MATCH: 600 random inputs committing our frame and the peer's (lending, HTLC resolve / lock, same-j and cross-j swaps, direct forwards) -- og's accept / refuse, returned Account txs in mempool order, worklist order, runtime and swap events, lending book, paybook", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 600; i++) {

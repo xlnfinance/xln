@@ -1,6 +1,7 @@
 // Cross-jurisdiction hub order book: og extensions/cross-j/orderbook.ts (admissions, USD caps, market offer, instructions),
 // entity/tx/handlers/account/orderbook/cross/* (the cross pass inside processOrderbookSwaps) and cancels.ts (cross branch). Every MATCH runs live og.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import * as ogOB from "../../core/extensions/cross-j/orderbook.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import { createEmptyEntityCollectionCandidate, entityCollectionCommitment as ogCollectionCommitment } from "../../core/entity/state/persistent-collection-map.ts";
@@ -23,7 +24,7 @@ import {
 } from "../xln.ts";
 import { unwrap } from "../xln_run.ts";
 
-const rng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const rng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 type Rand = () => number;
 const int = (r: Rand, n: number): number => Math.floor(r() * n);
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[int(r, xs.length)] as T;
@@ -62,7 +63,7 @@ const progressed = (r: Rand, route: CrossRoute, status: CrossRoute["status"] = "
 };
 
 // ============ og USD risk caps (crossJurisdictionLegUsdMicros / getCrossJurisdictionLocalUsdCapError), priced through orderbookExt ============
-describe("cross-book: USD caps", () => {
+describe(seedTag("cross-book: USD caps"), () => {
   const extOf = (r: Rand): { rw: OrderbookExt; og: unknown } | undefined => {
     if (int(r, 5) === 0) return undefined;
     const referenceTokenId = pick(r, [1, 1, 3, 4, 2, 5]);
@@ -99,7 +100,7 @@ describe("cross-book: USD caps", () => {
 });
 
 // ============ og book admissions: merge / resolving / closed / admission error, collection roots ============
-describe("cross-book: admissions", () => {
+describe(seedTag("cross-book: admissions"), () => {
   const rwRoot = (m: BookAdmissions | undefined) => (m === undefined ? null : unwrap(entityCollectionCommitment(new Map([...m].map(([k, v]) => [k, v as unknown as Binary])))));
   const entries = (m: ReadonlyMap<string, unknown> | undefined) => (m === undefined ? null : [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
   test("MATCH: 60 random admission streams (merge, resolving, closed, error, typed failure): same entries, collection roots and errors as og", () => {
@@ -147,7 +148,7 @@ describe("cross-book: admissions", () => {
 });
 
 // ============ og buildCrossJurisdictionMarketOffer, remaining amounts, execution price / amounts, fill and cancel instructions ============
-describe("cross-book: market offer and instructions", () => {
+describe(seedTag("cross-book: market offer and instructions"), () => {
   const offerOf = (route: CrossRoute, accountId: string): CrossBookOffer => ({
     offerId: route.orderId, accountId, makerIsLeft: true, fromEntity: route.source.entityId, toEntity: route.source.counterpartyEntityId, createdHeight: 1,
     giveTokenId: Number(route.source.tokenId), giveTokenDecimals: 6, giveAmount: BigInt(route.source.amount), wantTokenId: Number(route.target.tokenId), wantTokenDecimals: 18, wantAmount: BigInt(route.target.amount),
@@ -179,7 +180,7 @@ describe("cross-book: market offer and instructions", () => {
 });
 
 // ============ og cross pass inside processOrderbookSwaps and the cross branch of processOrderbookCancels ============
-describe("cross-book: hub cross matcher", () => {
+describe(seedTag("cross-book: hub cross matcher"), () => {
   const HUB = H1, LOCAL = [W("0b"), W("01"), W("cc")] as EntityId[], REMOTE = [W("e1"), W("e2"), W("0e")] as EntityId[];
   const DEC: Readonly<Record<number, number>> = { 1: 6, 2: 18, 3: 6, 4: 6 };
   const lotOf = (d: number) => 10n ** BigInt(Math.max(0, d - 6));
@@ -298,7 +299,7 @@ import {
 } from "../xln.ts";
 import { TERMS } from "../xln_run.ts";
 
-describe("cross-book: book lifecycle Entity txs", () => {
+describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
   const SIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
   const sig = (e: string): string => { const s = SIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
   const hubProfile = { entityId: H1, name: "hub", spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: W("99"), minTradeSize: 0n, supportedPairs: [] };

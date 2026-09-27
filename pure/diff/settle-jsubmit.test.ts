@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { decodeJBatch, encodeJBatch } from "../../core/jurisdiction/machine/batch/index.ts";
 import { handleJRebroadcast } from "../../core/entity/tx/handlers/j-batch/j-rebroadcast.ts";
 import { handleJAbortSentBatch } from "../../core/entity/tx/handlers/j-batch/j-abort-sent-batch.ts";
@@ -14,7 +15,7 @@ import {
 } from "../xln.ts";
 import { ALICE, BOB, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0x5e77_1e);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -69,7 +70,7 @@ const randomJBatch = (): JBatchState => {
   return out;
 };
 
-describe("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/j-batch/{j-rebroadcast,j-abort-sent-batch,j-clear-batch,mint-reserves}.ts)", () => {
+describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/j-batch/{j-rebroadcast,j-abort-sent-batch,j-clear-batch,mint-reserves}.ts)"), () => {
   test("MATCH: 150 random j_rebroadcast calls -- same refusal, same resealed sentBatch, generation, jTx (with gas bump) and jBatch hash to sign as og handleJRebroadcast", async () => {
     const outcomes = new Set<string>();
     for (let n = 0; n < 150; n++) {
@@ -210,7 +211,7 @@ const ogAccountOf = (w: SettlementWorkspace | undefined, pending: boolean): any 
 });
 const codeOf = (m: string): string => m.split(":")[0]!;
 
-describe("settle-jsubmit: settle_propose / update / approve / reject (og payments/settle.ts)", () => {
+describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og payments/settle.ts)"), () => {
   test("MATCH: 400 random settle_* txs against random workspaces -- same fatal refusal, same queued Account settle_transition, same status events and deferred approval as og", async () => {
     const counts = { refused: 0, queued: 0, skipped: 0, admission: 0, deferred: 0, materialize: 0, halted: 0 };
     for (let n = 0; n < 400; n++) {
@@ -316,7 +317,7 @@ describe("settle-jsubmit: settle_propose / update / approve / reject (og payment
   });
 });
 
-describe("settle-jsubmit: settle_execute gates (og payments/settle.ts handleSettleExecute)", () => {
+describe(seedTag("settle-jsubmit: settle_execute gates (og payments/settle.ts handleSettleExecute)"), () => {
   test("MATCH: 300 random settle_execute txs -- same skip status, same reject / fatal refusal code as og before the execution is prepared", async () => {
     const counts = { skipped: 0, refused: 0 };
     const aliceLeft = isLeft(ALICE, ACCOUNT_ID);
@@ -359,7 +360,7 @@ describe("settle-jsubmit: settle_execute gates (og payments/settle.ts handleSett
   });
 });
 
-describe("settle-jsubmit: settle_execute jBatch row (og jurisdiction/machine/batch batchAddSettlement)", () => {
+describe(seedTag("settle-jsubmit: settle_execute jBatch row (og jurisdiction/machine/batch batchAddSettlement)"), () => {
   test("MATCH: 300 random settlement-row sequences -- same full-settlement / pure-C2R shortcut rows, exact-retry no-op, conflict and limit refusals as og", () => {
     const ids = [W("11"), W("22"), W("33")];
     const diffOf = (): any => {
@@ -412,7 +413,7 @@ describe("settle-jsubmit: settle_execute jBatch row (og jurisdiction/machine/bat
 import { handleR2C } from "../../core/entity/tx/handlers/j-batch/r2c.ts";
 import { queueR2C } from "../xln.ts";
 
-describe("settle-jsubmit: r2c rebalance-fee path (og j-batch/r2c.ts collectRebalanceFee)", () => {
+describe(seedTag("settle-jsubmit: r2c rebalance-fee path (og j-batch/r2c.ts collectRebalanceFee)"), () => {
   test("MATCH: 300 random r2c deposits with / without rebalanceQuoteId -- og has no activeQuote writer, so a quoted deposit is refused with the same status and the jBatch is untouched", async () => {
     const OTHER = W("77"), counts = { fee: 0, queued: 0 };
     for (let n = 0; n < 300; n++) {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { Interface } from "ethers";
 import { Depository__factory } from "../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { EntityProvider__factory } from "../../jurisdictions/typechain-types/factories/EntityProvider__factory.ts";
@@ -33,7 +34,7 @@ import {
 } from "../xln.ts";
 import { ALICE, BOB, CLOCK, NOW, TERMS, TOKEN, ackInput, genesisAB, hankoVerify, offerOf, partyIn, proposeInput, signAccountFrame, unwrap } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0x5eed_1a);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -75,7 +76,7 @@ const asOg = (e: JEvent): { type: string; data: Record<string, unknown> } => {
 };
 const stripMeta = (e: any) => { const { blockNumber: _a, blockHash: _b, transactionHash: _c, logIndex: _d, eventIndex: _e, ...rest } = e; return rest; };
 
-describe("J event ingress (og core/jurisdiction/adapter/events/*, machine/event-normalizers.ts)", () => {
+describe(seedTag("J event ingress (og core/jurisdiction/adapter/events/*, machine/event-normalizers.ts)"), () => {
   test("MATCH: every consensus Depository and EntityProvider event has the contract's signature and topic0 (event-catalog.ts)", () => {
     const expected = [...DEPOSITORY_J_EVENTS.consensus.map((n) => [n, DEPOSITORY] as const), ...ENTITY_PROVIDER_J_EVENTS.consensus.map((n) => [n, PROVIDER] as const)];
     expect(Object.keys(J_EVENT_SIGNATURES).sort()).toEqual(expected.map(([n]) => n).sort());
@@ -160,7 +161,7 @@ const ogBatchOf = (b: Batch): any => {
 };
 const processBatchCalldata = (b: Batch) => DEPOSITORY.encodeFunctionData("processBatch", [encodeBatch(b), "0x", 1n]);
 
-describe("dispute calldata evidence (og rpc-public.ts decodeDisputeProofBodyEvidenceCalldata / decodeJBatch)", () => {
+describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProofBodyEvidenceCalldata / decodeJBatch)"), () => {
   test("MATCH: processBatch and watchtowerCounterDispute selectors equal the Depository ABI's", () => {
     expect(PROCESS_BATCH_SELECTOR).toBe(DEPOSITORY.getFunction("processBatch")!.selector);
     expect(WATCHTOWER_COUNTER_DISPUTE_SELECTOR).toBe(DEPOSITORY.getFunction("watchtowerCounterDispute")!.selector);
@@ -279,7 +280,7 @@ const randomClaim = (): ClaimCase => {
 };
 const stepIn = (r: AccountReplica, input: AccountInput, self: EntityId) => applyAccountInput(r, input, { verify: hankoVerify, self, now: NOW });
 
-describe("multi-claim Account frames (og prepareAccountJClaimTx / verifyAccountJClaimProof / activatePostSettlementProof)", () => {
+describe(seedTag("multi-claim Account frames (og prepareAccountJClaimTx / verifyAccountJClaimProof / activatePostSettlementProof)"), () => {
   test("MATCH: 30 random claim sequences, 1-3 claims per frame from either side (metadata, eventIndex, stale, conflicts, finalizing second claims): proposer witnesses, frame hash, tries and finality equal og; the peer replays and acks", () => {
     let tampered = 0, branched = 0;
     for (let n = 0; n < 30; n++) {
@@ -371,7 +372,7 @@ const ogEntity = () => {
 const rwObserver = (): JObserver => ({ entityId: ENTITY, reserves: new Map(), debts: EMPTY_DEBTS, accounts: new Map([[PEER_ACTIVE, { active: true }], [PEER_FROZEN, { active: false }]]) });
 const ledgerRows = (book: ReadonlyMap<number, ReadonlyMap<string, any>> | undefined) => [...(book ?? new Map()).entries()].map(([tk, b]) => [tk, [...b.values()].map((d: any) => ({ ...d }))]);
 
-describe("Entity J observation (og j-event-payloads expandAccountSettled, j-events-account-settled.ts, j-events-observations/*, mergeJEventClaimOps)", () => {
+describe(seedTag("Entity J observation (og j-event-payloads expandAccountSettled, j-events-account-settled.ts, j-events-observations/*, mergeJEventClaimOps)"), () => {
   test("MATCH: 80 random AccountSettled logs expand per Entity like og rawEventToJEvents (rows naming the Entity, one event per token, eventIndex only when several); none naming it refuses in both", () => {
     let expanded = 0, empty = 0;
     for (let i = 0; i < 80; i++) {
@@ -492,7 +493,7 @@ const randomDraft = (): Batch => {
   return b;
 };
 
-describe("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers/j-batch/*, j-events-batch.ts; entity-runtime ER-16)", () => {
+describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers/j-batch/*, j-events-batch.ts; entity-runtime ER-16)"), () => {
   test("MATCH: 400 random drafts simulate the initiator's reserves like og simulateDraftBatchReserveAvailability (debt sweeps, implicit flash deficit, batchRevert issues, final maps)", () => {
     let issues = 0, deficits = 0;
     for (let n = 0; n < 400; n++) {

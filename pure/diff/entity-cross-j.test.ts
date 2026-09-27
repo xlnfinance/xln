@@ -1,6 +1,7 @@
 // Differential tests: og Entity-side HTLC onion routing and cross-j Entity handlers vs pure/xln.ts.
 // Every test is "MATCH:" and runs og live on the same (seeded random) input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import * as ogMr from "../../core/protocol/htlc/multi-recipient.ts";
 import * as ogOnion from "../../core/protocol/htlc/codec/onion.ts";
@@ -16,11 +17,14 @@ import {
   paymentDeadlineWindow, quoteHtlcRoute, requiredInbound, routingIndex, stableJson, type HtlcEnvelope, type OnionLayer, type RoutingProfile,
 } from "../xln.ts";
 
-export const rng = (seed: number) => () => {
-  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+export const rng = (base: number) => {
+  let seed = seedOf(base);
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 type Rand = () => number;
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)] as T;
@@ -35,7 +39,7 @@ const same = (og: { ok: boolean; value?: unknown }, rw: { ok: boolean; value?: u
 };
 const keyPair = (r: Rand) => { const priv = x25519.utils.randomPrivateKey(); priv.set(bytes(r, 32)); return { priv: "0x" + Buffer.from(priv).toString("hex"), pub: "0x" + Buffer.from(x25519.getPublicKey(priv)).toString("hex") }; };
 
-describe("entity-cross-j: HTLC onion crypto (og protocol/htlc/multi-recipient.ts)", () => {
+describe(seedTag("entity-cross-j: HTLC onion crypto (og protocol/htlc/multi-recipient.ts)"), () => {
   test("MATCH: encryptOpaqueHtlcBytes is byte-identical for the same ephemeral key; decryptOpaqueHtlcBytes agrees on 300 random (and tampered) inputs", () => {
     const r = rng(7);
     for (let i = 0; i < 300; i++) {
@@ -63,7 +67,7 @@ const randomLayer = (r: Rand): OnionLayer => {
   const env = ogMr.encryptOpaqueHtlcBytes(bytes(r, int(r, 50)), keyPair(r).pub, hex(r, 32), keyPair(r).priv);
   return { nextHop: pick(r, [hex(r, 32), "", "hub"]), innerEnvelope: env, forwardAmount: pick(r, ["1", "0", "-5", "abc", (2n ** 256n).toString(), (2n ** 256n - 1n).toString(), String(int(r, 1e9))]) };
 };
-describe("entity-cross-j: onion layer codec (og codec/onion.ts)", () => {
+describe(seedTag("entity-cross-j: onion layer codec (og codec/onion.ts)"), () => {
   test("MATCH: encodeOnionLayer bytes and decodeOnionLayer on 600 random layers, truncations and bit flips", () => {
     const r = rng(11);
     for (let i = 0; i < 600; i++) {
@@ -82,7 +86,7 @@ describe("entity-cross-j: onion layer codec (og codec/onion.ts)", () => {
   });
 });
 
-describe("entity-cross-j: route economics (og pathfinding/htlc-quote.ts, fees.ts, protocol/htlc/utils.ts, payments/delivery.ts)", () => {
+describe(seedTag("entity-cross-j: route economics (og pathfinding/htlc-quote.ts, fees.ts, protocol/htlc/utils.ts, payments/delivery.ts)"), () => {
   test("MATCH: directional fee, required inbound, hop timelock/reveal and the payment deadline window on 500 random inputs", () => {
     const r = rng(3);
     for (let i = 0; i < 500; i++) {
@@ -221,7 +225,7 @@ const profile = (id: EntityId, accounts: readonly { counterpartyId: string; doma
   ({ entityId: id, entityEncryptionPublicKey: ENTITY_KEYS.get(id)!.pub, name: id.slice(-4), metadata: { isHub: false, routingFeePPM: 100, baseFee: 0n, ...meta }, accounts }) as unknown as Binary;
 const caps = (inC: bigint, outC: bigint) => new Map([[1, { inCapacity: inC, outCapacity: outC }]]);
 
-describe("entity-cross-j: Entity htlcPayment origination (og payment-admission.ts + handlers/htlc/payment.ts)", () => {
+describe(seedTag("entity-cross-j: Entity htlcPayment origination (og payment-admission.ts + handlers/htlc/payment.ts)"), () => {
   const rt = network(), alice = replicaOf(rt, ALICE), ts = Number(NOW + 1000n);
   const view = { id: ALICE, timestamp: ts, jHeight: 0, encryptionKey: ENTITY_KEYS.get(ALICE)!.pub, paybook: { entries: new Map(), feesEarned: 0n }, replicas: alice.accountReplicas };
   const baseProfiles = (): Binary[] => [
@@ -322,7 +326,7 @@ import * as ogHtlcFollow from "../../core/entity/tx/handlers/account/committed-h
 import * as ogFrameFollow from "../../core/entity/tx/handlers/account/committed-frame-followups.ts";
 import { hashHtlcSecret, inboundHtlcEntries, paybookFollowups, type AccountTxTarget, type CommittedHtlcFrame, type PaybookEntry, type PreparedHtlcEntry } from "../xln.ts";
 
-describe("entity-cross-j: inbound HTLC (og materialize-context.ts + committed HTLC followups)", () => {
+describe(seedTag("entity-cross-j: inbound HTLC (og materialize-context.ts + committed HTLC followups)"), () => {
   const profiles = (): Binary[] => [
     profile(ALICE, []), profile(BOB, [{ counterpartyId: ALICE, domain: JUR, tokenCapacities: caps(1000n, 0n) }, { counterpartyId: CAROL, domain: JUR, tokenCapacities: caps(0n, 1000n) }], { routingFeePPM: 5000, baseFee: 1n }), profile(CAROL, []),
   ];
@@ -372,7 +376,7 @@ const ogAccountTx = (t: any) => t.type === "htlc_resolve"
   ? { type: "htlc_resolve", data: t.outcome === "secret" ? { lockId: t.lockId, outcome: "secret", secret: t.secret } : { lockId: t.lockId, outcome: "error", ...(t.reason === undefined ? {} : { reason: t.reason }) } }
   : { type: "htlc_lock", data: { lockId: t.lockId, hashlock: t.hashlock, timelock: t.timelock, revealBeforeHeight: Number(t.revealBeforeHeight), amount: t.amount, tokenId: Number(t.tokenId), ...(t.envelope === undefined ? {} : { envelope: t.envelope }) } };
 
-describe("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.ts, committed-htlc-followups.ts, committed-frame-followups.ts)", () => {
+describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.ts, committed-htlc-followups.ts, committed-frame-followups.ts)"), () => {
   const profiles = (): Binary[] => [
     profile(ALICE, []), profile(BOB, [{ counterpartyId: ALICE, domain: JUR, tokenCapacities: caps(1000n, 0n) }, { counterpartyId: CAROL, domain: JUR, tokenCapacities: caps(0n, 1000n) }], { routingFeePPM: 5000, baseFee: 1n }), profile(CAROL, []),
   ];
@@ -503,7 +507,7 @@ describe("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.ts, comm
   });
 });
 
-describe("entity-cross-j: Account outputs above the Account (og committed-input.ts)", () => {
+describe(seedTag("entity-cross-j: Account outputs above the Account (og committed-input.ts)"), () => {
   test("MATCH: a committed request_collateral is consumed as og's runtime event on both Entities, never refused; the request lands in both Account replicas", () => {
     const rt = network(), tk = unwrap(tokenId("1"));
     const req: EntityTx = { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: tk, amount: 50n, feeAmount: 1n, policyVersion: 1 } } as EntityTx;
@@ -519,7 +523,7 @@ describe("entity-cross-j: Account outputs above the Account (og committed-input.
 import { getEntityConfigBoardHash } from "../../core/hanko/signing.ts";
 import { entityId } from "../xln.ts";
 
-describe("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPreparedInfraContext validator replay)", () => {
+describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPreparedInfraContext validator replay)"), () => {
   test("MATCH: the hub's second validator re-derives the proposer's inbound entries from the frame's peer assertions; the routed payment settles", async () => {
     const board = { threshold: 2n, validators: [bobAddr, carolAddr].map((a) => a.toLowerCase()), shares: Object.fromEntries([bobAddr, carolAddr].map((a) => [a.toLowerCase(), 1n])) };
     const HUB = unwrap(entityId(await getEntityConfigBoardHash({} as never, board as never)));

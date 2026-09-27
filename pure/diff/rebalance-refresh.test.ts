@@ -3,6 +3,7 @@
 // lending_overdue deadline (scheduler/derived-deadlines.ts, tx/handlers/account/committed-lending-close.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, outputs and state.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   accountId, createEntity, crontabTaskHasPendingWork, executeCrontab, genesisReplica, initCrontab, rebalanceAccountIds, tokenId, withCrontab, crontabOf, ZERO_WORD,
   applyBoardJEvent, counterpartyProposer, rearmBoardRefreshes, derivedDeadlines, entityId, quorumBoardHash, quorumHanko, scheduleHook,
@@ -22,7 +23,7 @@ import { PersistentAccountStateMap } from "../../core/account/state/persistent-s
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
 
-let seed = 29;
+let seed = seedOf(29);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
@@ -80,7 +81,7 @@ const readyWorkspace = (hubIsLeft: boolean): SettlementWorkspace => ({
   ...(rng() < 0.85 ? (hubIsLeft ? { rightHanko: "0xbeef" } : { leftHanko: "0xbeef" }) : {}),
 });
 
-describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)", () => {
+describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)"), () => {
   test("MATCH: 400 random hubs (R→C requests by strategy / policy / fee / reserve, submitted markers, C→R withdrawals and ready workspaces, sent-batch latch and staleness, manual broadcast, pair limits) -- og's outputs, J batch, markers, task and halts", async () => {
     const counts = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
@@ -213,7 +214,7 @@ const rwBoardState = (hooks: readonly ScheduledHook[]): EntityState => withCront
 const sortedHooks = (hooks: ReadonlyMap<string, unknown>): unknown[] => [...hooks.values()].map((h) => JSON.parse(JSON.stringify(h))).sort((x, y) => (x.id < y.id ? -1 : 1));
 const ogError = (f: () => unknown): string | undefined => { try { f(); return undefined; } catch (e) { return (e as Error).message; } };
 
-describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)", () => {
+describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)"), () => {
   test("MATCH: 150 random board_hanko_refresh hooks (cursor, markers, frame / dispute certification, peer Hankos under the certified board, >32 Accounts) -- og's outputs and proposer, hashesToSign, markers and hooks", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 150; i++) {
@@ -303,7 +304,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
 });
 
 // ---- lending_overdue: og collectDerivedDeadlines (loans) and settleOverdueLendingLoan through executeCrontab ----
-describe("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)", () => {
+describe(seedTag("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)"), () => {
   test("MATCH: 300 random hub lending books (active / repaid loans, due times, missing pools and Accounts, borrowed underflow, credit in the delta and queued in the mempool) -- og's derived deadlines, lending book and revokes", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 300; i++) {

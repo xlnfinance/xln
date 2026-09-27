@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   handleLendingBorrowEntityTx, handleLendingClosePositionEntityTx, handleLendingOfferEntityTx, handleLendingRepayEntityTx,
 } from "../../core/entity/tx/handlers/payments/lending.ts";
@@ -9,7 +10,7 @@ import {
 import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, verifiers } from "../xln_run.ts";
 
 // seeded rng for randomized comparisons
-let seed = 11;
+let seed = seedOf(11);
 const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
@@ -51,7 +52,7 @@ const runOg = (tx: { readonly type: string; readonly data: Record<string, unknow
 let hubAccount: OpenEntity | undefined;
 const runRewrite = (tx: EntityTx) => applyEntityInput((hubAccount ??= fundedHubAccount()), { kind: "txs", timestamp: NOW + 1n, txs: [tx] }, { ...verifiers, self: ALICE, signerId: aliceAddr });
 
-describe("runtime-2: entity lending (ER-17, og payments/lending.ts)", () => {
+describe(seedTag("runtime-2: entity lending (ER-17, og payments/lending.ts)"), () => {
   const randomTx = (): EntityTx => {
     const hub = pick<string>([BOB, BOB, BOB, BOB.toUpperCase().replace("0X", "0x"), ` ${BOB} `, CAROL, ""]);
     const id = (prefix: string): string => pick([`${prefix}-${hex16()}`, `${prefix}-${hex16()}`, `${prefix}-${hex16().toUpperCase()}`, `${prefix}-${hex16().slice(1)}`, `lend-${hex16()}`, `loan-${hex16()}`, "x"]);
@@ -140,7 +141,7 @@ const ALL_RUNTIME_TX_TYPES: readonly RuntimeTx["type"][] = [
   "recordEntityProviderActionSubmitResult", "recordGovernanceJSubmitResult", "importJ", "completeImportJ",
 ];
 
-describe("runtime-2: og RuntimeTx capability authorization (og runtime/tx/internal-tx-auth.ts)", () => {
+describe(seedTag("runtime-2: og RuntimeTx capability authorization (og runtime/tx/internal-tx-auth.ts)"), () => {
   test("MATCH: every og RuntimeTx kind -- external ingress refused with og's code, replay admitted, importReplica/importJ unguarded", () => {
     for (const type of ALL_RUNTIME_TX_TYPES) {
       const tx = { type, data: {} } as unknown as RuntimeTx;
@@ -174,7 +175,7 @@ describe("runtime-2: og RuntimeTx capability authorization (og runtime/tx/intern
   });
 });
 
-describe("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/frontier.ts)", () => {
+describe(seedTag("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/frontier.ts)"), () => {
   test("MATCH: 600 random adapter-command markers -- same accept/refuse code and same frontier map as og applyRuntimeAdapterCommandMarker", () => {
     const lanes = [hex(32), hex(32), hex(32)];
     let rt: Runtime = createRuntime();
@@ -206,7 +207,7 @@ describe("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/fr
   });
 });
 
-describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", () => {
+describe(seedTag("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)"), () => {
   const ENTITIES = [ALICE, BOB] as const, SIGNERS = [aliceAddr, bobAddr] as const;
   const ORIGINS = [undefined, undefined, "0x" + "77".repeat(20), "0x" + "88".repeat(20)] as const;
   const frames = new Map<string, EntityFrame>();
@@ -273,7 +274,7 @@ describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", ()
   });
 });
 
-describe("runtime-2: Runtime WAL commitments (og storage/hashes.ts, canonical-hash.ts, replica-meta-digest.ts, wal/outbox-payload.ts)", () => {
+describe(seedTag("runtime-2: Runtime WAL commitments (og storage/hashes.ts, canonical-hash.ts, replica-meta-digest.ts, wal/outbox-payload.ts)"), () => {
   const entityHashes = () => Array.from({ length: ri(4) }, () => ({ entityId: pick([hex(32), hex(32).toUpperCase().replace("0X", "0x")]), hash: hex(32), cellCount: 1 + ri(3) }));
   const randomBinary = (depth = 0): Binary => {
     const k = ri(depth > 2 ? 4 : 7);
@@ -334,7 +335,7 @@ const SEED = "0x" + "5e".repeat(64);
 /** secp256k1 generator G (private key 1), compressed: og resolveValidatorAddress derives its address. */
 const COMPRESSED = "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
 
-describe("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts importReplicaRuntimeTx)", () => {
+describe(seedTag("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts importReplicaRuntimeTx)"), () => {
   test("MATCH: 600 random boards -- lazyBoardEntityId equals og hashBoard(encodeBoard(config)) and refuses exactly when og throws", () => {
     let accepted = 0;
     for (let i = 0; i < 600; i++) {
@@ -385,7 +386,7 @@ describe("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts
   });
 });
 
-describe("runtime-2: WAL frame commit and recover (og storage write + read/verify.ts + replay)", () => {
+describe(seedTag("runtime-2: WAL frame commit and recover (og storage write + read/verify.ts + replay)"), () => {
   test("MATCH: a committed WAL row chains from og ZERO_FRAME_HASH and its frameHash / canonicalStateHash recompute under og's functions; tampering is refused", () => {
     // og resolveEntityProposerId: BOB has no local replica and no certified Account route yet, so its verified gossip profile names the signer
     // og retains a remote output only once its Runtime resolves (og resolveRuntimeIdForEntity), else ROUTE_TARGET_RUNTIME_UNKNOWN

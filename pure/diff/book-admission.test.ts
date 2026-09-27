@@ -1,6 +1,7 @@
 // Behavioural diff: og Account admission timing (core/account/input/local-tx-admission.ts) and the hub order book inside
 // entity consensus (core/entity/consensus/frame/application.ts) vs pure/xln.ts. Every test is MATCH and runs og live.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 
 // ---- og ----
 import { applyAccountEnqueue } from "../../core/account/input/local-tx-admission.ts";
@@ -31,7 +32,7 @@ import {
   processOrderbookCancels, processOrderbookSwaps, tradesMatched, foldTxs, replicaId, replicaKey, spawn, tokenId, wireOf, wireTx, type EntityInput, type EntityOutput, type EntityReplica, type AccountReplica, type Book, type BookTx, type Hub, type HubAccount, type OrderbookExt, type PairDimensions, type SwapOffer, type SwapOfferEvent, type SwapRef, type EntityId, type EntityTx, type WireAccountTx } from "../xln.ts";
 import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, partyIn, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xb00c_ad);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -85,7 +86,7 @@ const randomTx = (i: number): WireAccountTx => pick<() => WireAccountTx>([
 ])();
 const ogOf = (r: AccountReplica, self: EntityId, tx: WireAccountTx): OgTx => unwrap(wireTx(tx, replicaId(r), partyIn(r, self).left)) as unknown as OgTx;
 
-describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)", () => {
+describe(seedTag("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"), () => {
   test("MATCH: 300 random batches (unfunded payments, malformed swaps, expired HTLCs, repeated lifecycle txs): og queues without validation, dedups lifecycle payloads against mempool, keeps payment multiplicity, refuses the whole batch only on policyVersion", () => {
     let refused = 0, deduped = 0;
     for (let n = 0; n < 300; n++) {
@@ -151,7 +152,7 @@ describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"
 });
 
 // ============ og proposeAccountsNow (entity/tx/handlers/account/propose-accounts-now.ts) ============
-describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput bytes", () => {
+describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountInput bytes"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const ogState = (accounts: ReadonlyMap<string, unknown>) => ({ entityId: ALICE, height: 0, prevFrameHash: "", config: { validators: [aliceAddr], shares: { [aliceAddr]: 1n }, threshold: 1n, mode: "proposer-based" }, accounts }) as never;
   const marker = (data: object): EntityTx => ({ type: "proposeAccountsNow", data } as EntityTx);
@@ -206,7 +207,7 @@ describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput byt
 });
 
 // ============ og initOrderbookExt (system/basic.ts) and the orderbookExt root section (state-root.ts) ============
-describe("book-admission: orderbookExt state, init and root projection", () => {
+describe(seedTag("book-admission: orderbookExt state, init and root projection"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const alone = () => unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
   const spread = () => { const p = Array.from({ length: 5 }, () => ri(4000)); if (ri(3) > 0) p[4] = 10_000 - (p[0]! + p[1]! + p[2]! + p[3]!); return { makerBps: p[0]!, takerBps: p[1]!, hubBps: p[2]!, makerReferrerBps: p[3]!, takerReferrerBps: p[4]! }; };
@@ -270,7 +271,7 @@ describe("book-admission: orderbookExt state, init and root projection", () => {
 });
 
 // ============ og same-j hub matcher (entity/tx/handlers/account/orderbook/*, orderbook/cross-j/orderbook.ts) ============
-describe("book-admission: same-j hub matcher", () => {
+describe(seedTag("book-admission: same-j hub matcher"), () => {
   const HUB = W("aa"), USERS = [W("0b"), W("cc"), W("0d"), W("ee")];
   const PAIRS = [{ base: 2, quote: 1, bd: 18, qd: 6, mid: 25_000_000n }, { base: 4, quote: 1, bd: 6, qd: 6, mid: 1_200n }, { base: 7, quote: 8, bd: 6, qd: 6, mid: 5_000n }];
   const lotOf = (d: number) => 10n ** BigInt(Math.max(0, d - 6));
@@ -396,7 +397,7 @@ describe("book-admission: same-j hub matcher", () => {
 });
 
 // ============ the book inside entity consensus: peer swap frames reach the hub, the post-tx phase matches and settles ============
-describe("book-admission: hub order book inside entity consensus", () => {
+describe(seedTag("book-admission: hub order book inside entity consensus"), () => {
   const entityOf = (id: EntityId, signer: typeof aliceAddr) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer, { shares: 1n }]]) }));
   const signers = new Map<EntityId, typeof aliceAddr>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
   const world = () => {

@@ -1,6 +1,7 @@
 // Final sweep: the last recorded divergences, each proved against live og (core/ at 566c850).
 // "MATCH:" tests assert equivalence; findings in pure/findings/final-sweep.md.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { ethers } from "ethers";
 import { applyAccountTxMutation } from "../../core/account/tx/mutation.ts";
 import { handleSettleTransition } from "../../core/account/tx/handlers/settlement/transition.ts";
@@ -32,11 +33,14 @@ import {
   type FoldCtx,
 } from "../xln.ts";
 
-const rng = (seed: number) => () => {
-  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const rng = (base: number) => {
+  let seed = seedOf(base);
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 type Rand = () => number;
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)] as T;
@@ -81,7 +85,7 @@ const toOg = (tx: any): any => {
 };
 
 // ---------- disputes-final: og per-tx replay failure text (`Frame application failed: <og message>`) ----------
-describe("final-sweep: og per-tx failure text for every Account tx handler", () => {
+describe(seedTag("final-sweep: og per-tx failure text for every Account tx handler"), () => {
   const LEND = (p: string, r: Rand) => `${p}-${hex(r, 8).slice(2)}`;
   /** A random tx, deliberately malformed on some field more often than not. */
   const gen = (r: Rand, body: AccountBody, byLeft: boolean, ts: number, jh: number, known: { secrets: string[]; offers: string[]; lend: string[] }): any => {
@@ -271,7 +275,7 @@ describe("final-sweep: og per-tx failure text for every Account tx handler", () 
 
 // ---------- runtime-final RF-18: the signer an Account message's outbox row binds (og delivery/entity-output-signer.ts) ----------
 
-describe("final-sweep: RF-18 outbox signer (og resolveEntityOutputSignerId)", () => {
+describe(seedTag("final-sweep: RF-18 outbox signer (og resolveEntityOutputSignerId)"), () => {
   test("MATCH: an Account message to an Entity with no local replica binds og's certified counterparty proposer (the frame Hanko's first member); without a Hanko og falls to the gossip route, and with neither refuses SIGNER_RESOLUTION_FAILED", () => {
     const J = "local", cfg = (a: string) => ({ mode: "proposer-based" as const, threshold: 1n, validators: [a], shares: { [a]: 1n }, jurisdiction: { name: J, chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, entityProviderAddress: "0x" + "e1".repeat(20) } });
     const A = unwrapR(lazyBoardEntityId(cfg(aliceAddr)) as never) as string, B = unwrapR(lazyBoardEntityId(cfg(bobAddr)) as never) as string;
@@ -313,7 +317,7 @@ describe("final-sweep: RF-18 outbox signer (og resolveEntityOutputSignerId)", ()
 
 // ---------- consensus-final SJ-18: og resolveSettlementBoardAuthority's local-replica fallback (entity/account/account-consensus-context.ts) ----------
 
-describe("final-sweep: SJ-18 settlement board authority fallback (og resolveSettlementBoardAuthority)", () => {
+describe(seedTag("final-sweep: SJ-18 settlement board authority fallback (og resolveSettlementBoardAuthority)"), () => {
   const JUR = { name: "j", chainId: 31337, depositoryAddress: "0x5fbdb2315678afecb367f032d93f642f64180aa3", entityProviderAddress: "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512" };
   const OTHER_EP = "0x" + "e2".repeat(20);
   const word = (n: bigint | number): string => `0x${BigInt(n).toString(16).padStart(64, "0")}`;
@@ -361,7 +365,7 @@ describe("final-sweep: SJ-18 settlement board authority fallback (og resolveSett
 
 // ---------- runtime-final RF-18: the retained network outbox a frame commits (og delivery/recovery-output.ts applyRecoveryRuntimeOutputPlan) ----------
 
-describe("final-sweep: RF-18 retained network outbox (og applyRecoveryRuntimeOutputPlan)", () => {
+describe(seedTag("final-sweep: RF-18 retained network outbox (og applyRecoveryRuntimeOutputPlan)"), () => {
   test("MATCH: 400 random frames (prior retained outputs + new outputs of every lane, local / remote / unroutable / self-hinted targets, settled and live proposals) commit og's retained outbox or og's refusal", () => {
     const J = "local", SELF = "0x" + "5e".repeat(20), RT1 = "0x" + "a1".repeat(20), RT2 = "0x" + "a2".repeat(20);
     const cfg = (a: string) => ({ mode: "proposer-based" as const, threshold: 1n, validators: [a], shares: { [a]: 1n }, jurisdiction: { name: J, chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, entityProviderAddress: "0x" + "e1".repeat(20) } });
