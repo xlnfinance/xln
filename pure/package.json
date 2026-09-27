@@ -1,1 +1,6 @@
-{ "name": "pure-check", "private": true, "type": "module", "dependencies": { "@noble/curves": "^1.9.0", "@noble/hashes": "^1.8.0", "msgpackr": "^1.11.0" } }
+{ "name": "pure-check", "private": true, "type": "module",
+  "scripts": {
+    "test": "bun test --timeout 600000",
+    "test:seeds": "rc=0; for s in ${SEEDS:-0 12345 987654}; do echo \"== SEEDX=$s\"; SEEDX=$s bun test --timeout 600000 || rc=1; done; exit $rc"
+  },
+  "dependencies": { "@noble/curves": "^1.9.0", "@noble/hashes": "^1.8.0", "msgpackr": "^1.11.0" } }

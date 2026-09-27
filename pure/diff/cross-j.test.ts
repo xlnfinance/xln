@@ -540,7 +540,7 @@ describe(seedTag("cross-j: submittedAtByToken shadow"), () => {
   test("MATCH: 120 random refunds clear the marker exactly when og does (full refund only), with the same shadow root", async () => {
     const r = rng(404);
     let cleared = 0;
-    for (let n = 0; n < 30; n++) {
+    for (let n = 0, more = untilCovered(30, () => cleared > 5); more(n); n++) {
       const requesterIsLeft = r() < 0.5, fee = BigInt(2 + Math.floor(r() * 8));
       let body = requested(openAccount(10n ** 6n), requesterIsLeft, "1", fee);
       for (const tk of [1, 2, 3]) if (r() < 0.7) body = setRebalanceSubmittedAt(body, tk, 100 + tk);
@@ -605,7 +605,7 @@ describe(seedTag("cross-j: pull registry settlement"), () => {
   test("MATCH: findExactSignedProofBodyPull over 500 random (and corrupted) DeltaTransformer batches", () => {
     const r = rng(505);
     let found = 0, rejected = 0;
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0, more = untilCovered(500, () => found > 3 && rejected > 20); more(i); i++) {
       const pulls = Array.from({ length: Math.floor(r() * 4) }, () => ({ amount: pick(r, [5n, -5n, 7n, 0n]), claimedRatio: Math.floor(r() * 65_536), fullHash: pick(r, [W("f1"), W("f2")]), partialRoot: pick(r, [W("e1"), W("e2")]), targetRole: r() < 0.5 }));
       const batch = corrupt(r, encodeBatch(pulls, Math.floor(r() * 2)));
       const clauses = [{ transformerAddress: pick(r, [DT, DT.toUpperCase().replace("0X", "0x"), `0x${"11".repeat(20)}`]), encodedBatch: batch, allowances: [] },

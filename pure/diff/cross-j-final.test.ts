@@ -2,7 +2,7 @@
 // (crossPullClose), cross-j/sweep.ts (orderbookSweepCrossJurisdiction), transition/cross-j-proposer-materialization.ts (the clear reveal) and the
 // crossPullClose branch of auth/authorization.ts. Every MATCH runs live og (core/ at 566c850) on the same seeded random input.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import * as ogBook from "../../core/orderbook/core.ts";
 import { rebuildOrderbookPairIndex } from "../../core/orderbook/order-index.ts";
@@ -31,6 +31,7 @@ const ogRun = <T,>(f: () => T): Out<T> => { try { return { ok: true, value: f() 
 const rwRun = <T,>(r: Result<T, EntityError>): Out<T> => (r.ok ? { ok: true, value: r.value } : { ok: false, message: code(r.error._tag === "entity_invariant" || r.error._tag === "cross_j_entity" ? r.error.reason : r.error._tag) });
 const same = (label: string, og: Out<unknown>, rw: Out<unknown>): void => { expect(`${label}:${stableJson(rw)}`).toBe(`${label}:${stableJson(og)}`); };
 const bump = (kinds: Map<string, number>, k: string) => kinds.set(k, (kinds.get(k) ?? 0) + 1);
+const hasKinds = (kinds: Map<string, number>, want: readonly string[]): boolean => want.every((k) => [...kinds.keys()].some((x) => x.startsWith(k)));
 const expectKinds = (kinds: Map<string, number>, want: readonly string[]) => { for (const k of want) expect([k, [...kinds.keys()].some((x) => x.startsWith(k)), [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]); };
 
 const J1: Domain = { chainId: 1, depositoryAddress: "0x" + "11".repeat(20) }, J2: Domain = { chainId: 31337, depositoryAddress: "0x" + "ab".repeat(20) };
@@ -117,7 +118,9 @@ const outcome = (o: Out<Snap>): string => (o.ok ? `ok:${(o.value.accountTxs as u
 describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
   test("MATCH: requestCrossJurisdictionClear on 600 random source hubs, source users and strangers (terminal, snapshot drift, pure cancel, filled reveal, book row, queued close): same routes, books, messages, outputs, Account txs and halts as og", () => {
     const r = rng(0xc1ea), kinds = new Map<string, number>();
-    for (let i = 0; i < 600; i++) {
+    const want = ["CROSS_J_CLEAR_ROUTE_MISSING", "CROSS_J_CLEAR_CORRUPT_ROUTE", "CROSS_J_CLEAR_SOURCE_OFFER_MISSING", "CROSS_J_CLEAR_ROUTE_HASH_MISMATCH", "CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED",
+      "ok:1:🌉 Cross-j clear # queued atomic Hub pure-can", "ok:0:🌉 Cross-j clear # awaiting proposer reveal", "ok:1:🌉 Cross-j clear # queued through source Ac", "ok:0:🌉 Cross-j clear # ignored: source pull clo", "ok:0:🌉 Cross-j clear # waiting for source close"];
+    for (let i = 0, more = untilCovered(600, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H1, H1, H1, U1, U1, H2]), w = worldOf(r, i, self), route = w.routes[0]!;
       const data = { orderId: int(r, 25) === 0 ? "missing" : route.orderId, ...(int(r, 3) > 0 ? { cancelRemainder: r() < 0.6 } : {}) };
       const og = ogRun(() => { const res = handleRequestCrossJurisdictionClearEntityTx(ogEnv, w.og, { type: "requestCrossJurisdictionClear", data } as never, [], true); return ogSnap(res.newState, res); });
@@ -125,13 +128,14 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       same(`clear ${i}`, og, rw.ok ? { ok: true, value: rwSnap(rw.value) } : rw);
       bump(kinds, outcome(og));
     }
-    expectKinds(kinds, ["CROSS_J_CLEAR_ROUTE_MISSING", "CROSS_J_CLEAR_CORRUPT_ROUTE", "CROSS_J_CLEAR_SOURCE_OFFER_MISSING", "CROSS_J_CLEAR_ROUTE_HASH_MISMATCH", "CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED",
-      "ok:1:🌉 Cross-j clear # queued atomic Hub pure-can", "ok:0:🌉 Cross-j clear # awaiting proposer reveal", "ok:1:🌉 Cross-j clear # queued through source Ac", "ok:0:🌉 Cross-j clear # ignored: source pull clo", "ok:0:🌉 Cross-j clear # waiting for source close"]);
+    expectKinds(kinds, want);
   });
 
   test("MATCH: materializeCrossJurisdictionClear on 400 random source hubs (proposer, intent, reveal ratio, tampered proof, missing or queued source pull, fork hash): same routes, outputs, Account txs, rejects and halts as og", () => {
     const r = rng(0x3a7e), kinds = new Map<string, number>();
-    for (let i = 0; i < 400; i++) {
+    const want = ["ok:1:🌉 Cross-j clear # queued atomic Hub source+ta", "CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING", "CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID", "CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH",
+      "CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID", "CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH", "CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING", "CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING"];
+    for (let i = 0, more = untilCovered(400, () => hasKinds(kinds, want)); more(i); i++) {
       const w = worldOf(r, i, H1), route = w.routes[0]!;
       if (int(r, 5) > 0) { const next = new Map([...w.rw.swaps!].map(([k, v]) => [k, { ...v, status: "clear_requested" as const }])); w.rw = { ...w.rw, swaps: next }; w.og.crossJurisdictionSwaps = ogColl(next); }
       const ratio =(() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedFillAmounts(route as never).fillRatio); return f.ok ? f.value : 0; })();
@@ -146,13 +150,13 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       same(`materialize ${i}`, og, rw.ok ? { ok: true, value: rwSnap(rw.value) } : rw);
       bump(kinds, outcome(og));
     }
-    expectKinds(kinds, ["ok:1:🌉 Cross-j clear # queued atomic Hub source+ta", "CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING", "CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID", "CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH",
-      "CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID", "CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH", "CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING", "CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING"]);
+    expectKinds(kinds, want);
   });
 
   test("MATCH: crossPullClose at the source hub and the target hub on 500 random routes (status fences, command route, proof drift, rollback, binary): same routes, messages, Account txs and halts as og", () => {
     const r = rng(0x9c10), kinds = new Map<string, number>();
-    for (let i = 0; i < 500; i++) {
+    const want = ["source:ok:1:", "target:ok:1:", "source:CROSS_J_PULL_CLOSE_PROOF_INVALID", "target:CROSS_J_PULL_CLOSE_PROOF_INVALID", "target:CROSS_J_PULL_CLOSE_ACCOUNT_MISSING", "source:CROSS_J_PULL_CLOSE_ROUTE_MISSING"];
+    for (let i = 0, more = untilCovered(500, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H2, H2]), w = worldOf(r, i, self), route = w.routes[0]!, leg = self === H1 ? "source" : "target";
       const pull = leg === "source" ? route.sourcePull : route.targetPull;
       const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never)); return f.ok ? f.value : 0; })();
@@ -173,7 +177,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       same(`close ${i}`, og, rw.ok ? { ok: true, value: rwSnap(rw.value) } : rw);
       bump(kinds, `${leg}:${outcome(og)}`);
     }
-    expectKinds(kinds, ["source:ok:1:", "target:ok:1:", "source:CROSS_J_PULL_CLOSE_PROOF_INVALID", "target:CROSS_J_PULL_CLOSE_PROOF_INVALID", "target:CROSS_J_PULL_CLOSE_ACCOUNT_MISSING", "source:CROSS_J_PULL_CLOSE_ROUTE_MISSING"]);
+    expectKinds(kinds, want);
     expect([...kinds.keys()].some((k) => k.includes("blocked: route"))).toBe(true);
   });
 
@@ -193,7 +197,8 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
 
   test("MATCH: the default proposer's clear reveal (appendDefaultProposerCrossJMaterializations clear branch) on 300 random source hubs: same materializeCrossJurisdictionClear txs and halts as og", () => {
     const r = rng(0x7e7e), kinds = new Map<string, number>();
-    for (let i = 0; i < 300; i++) {
+    const want = ["ok:0", "ok:1"];
+    for (let i = 0, more = untilCovered(300, () => hasKinds(kinds, want)); more(i); i++) {
       const w = worldOf(r, i, H1, 1 + int(r, 3));
       // og's setup branch materializes raw intents too; only prepared routes are compared here
       const keep = new Map([...w.rw.swaps!].filter(([, v]) => v.status !== "intent" || v.sourcePull !== undefined));
@@ -206,7 +211,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       same(`reveal ${i}`, og, rw);
       bump(kinds, og.ok ? `ok:${og.value.length}` : og.message);
     }
-    expectKinds(kinds, ["ok:0", "ok:1"]);
+    expectKinds(kinds, want);
   });
 
   test("MATCH: assertRuntimeOutputAuthorization for crossPullClose on 400 random envelopes (stored vs command route, source hub, target hub, counterparty)", () => {
@@ -271,7 +276,8 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
 
   test("MATCH: committed cross_pull_lock at all four route participants on 500 random mirrors (carried route, conflict, leg binding, authorization, expiry hook, local or sibling book admission): same mirror, authorizations, hooks, admissions, outputs, created offers and halts as og", () => {
     const r = rng(0x10c4), kinds = new Map<string, number>();
-    for (let i = 0; i < 500; i++) {
+    const want = ["ok:0:0:", "CROSS_J_COMMITTED_PULL_AUTH_MISSING", "CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH", "CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT", "CROSS_J_EXPIRY_INVALID"];
+    for (let i = 0, more = untilCovered(500, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H1, U1, H2, U2]), w = fworld(r, i, self), route = { ...w.route, status: pick(r, ["target_prepared", "target_prepared", "resting", "intent", "settled"] as const) };
       if (route.sourcePull === undefined || route.targetPull === undefined) continue;
       const leg = self === H1 || self === U1 ? "source" : "target", pull = leg === "source" ? route.sourcePull : route.targetPull, binding = unwrap(crossPullBinding(route, int(r, 15) === 0 ? (leg === "source" ? "target" : "source") : leg));
@@ -279,13 +285,14 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
         crossJurisdictionRoute: int(r, 10) === 0 ? { ...route, expiresAt: T0 - 1 } : route };
       runBoth(w, int(r, 20) === 0 ? U2 : PEER[self]!, tx, `lock ${i}`, kinds);
     }
-    expectKinds(kinds, ["ok:0:0:", "CROSS_J_COMMITTED_PULL_AUTH_MISSING", "CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH", "CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT", "CROSS_J_EXPIRY_INVALID"]);
+    expectKinds(kinds, want);
     expect([...kinds.keys()].some((k) => /^ok:0:1:/.test(k))).toBe(true);
   });
 
   test("MATCH: committed cross_pull_close at all four route participants on 500 random mirrors (terminal replay, economics, rollback, hub state fence, settle/cancel/expire, book removal or sibling removal request): same mirror, hooks, admissions, books, outputs and halts as og", () => {
     const r = rng(0xc105e), kinds = new Map<string, number>();
-    for (let i = 0; i < 500; i++) {
+    const want = ["ok:0:0:", "CROSS_J_PULL_CLOSE_ROUTE_MISSING", "CROSS_J_PULL_CLOSE_ECONOMICS_MISMATCH", "CROSS_J_PULL_CLOSE_PROOF_MISMATCH", "CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH"];
+    for (let i = 0, more = untilCovered(500, () => hasKinds(kinds, want)); more(i); i++) {
       const self = pick(r, [H1, H1, U1, H2, U2]), w = fworld(r, i, self), route = w.route;
       if (route.sourcePull === undefined || route.targetPull === undefined) continue;
       const cur = (() => { const f = ogRun(() => ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never)); return f.ok ? f.value : 0; })();
@@ -304,6 +311,6 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
       const tx: WireAccountTx = { type: "cross_pull_close", pullId: int(r, 20) === 0 ? "none" : (self === H1 || self === U1 ? route.sourcePull.pullId : route.targetPull.pullId), binary, proof };
       runBoth(w, PEER[self]!, tx, `close ${i}`, kinds);
     }
-    expectKinds(kinds, ["ok:0:0:", "CROSS_J_PULL_CLOSE_ROUTE_MISSING", "CROSS_J_PULL_CLOSE_ECONOMICS_MISMATCH", "CROSS_J_PULL_CLOSE_PROOF_MISMATCH", "CROSS_J_TERMINAL_PULL_REPLAY_MISMATCH"]);
+    expectKinds(kinds, want);
   });
 });
