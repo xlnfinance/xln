@@ -4,6 +4,7 @@
 // Account carries, while ALICE holds BOB's newer signed proof: the non-starter locks it before T.
 import { describe, expect, test } from "bun:test";
 import { applyJEvent as ogApplyJEvent } from "../../core/entity/tx/j-events.ts";
+import { handleDisputeFinalize } from "../../core/entity/tx/handlers/dispute/finalize.ts";
 import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
@@ -14,8 +15,8 @@ import { compareCanonicalJurisdictionEvents, normalizeJurisdictionEvent } from "
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from "../../core/jurisdiction/machine/event-observation.ts";
 import { EMPTY_J_HISTORY_ROOT, buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from "../../core/jurisdiction/machine/history-consensus/index.ts";
 import {
-  accountDisputeHash, applyCrossFill, committedView, createEntity, foldTx, localProof, ogProofBody, prepareCrossRoute,
-  tokenId, zeroDelta,
+  accountDisputeHash, applyCrossFill, committedView, createEntity, foldTx, foldTxs, localProof, ogProofBody, prepareCrossRoute,
+  tokenId, wireEntityTx, zeroDelta,
   type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
 import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, unwrap, verifiers } from "../xln_run.ts";
@@ -266,9 +267,24 @@ describe("coverage-disputes: DisputeStarted against a Source hub holding a newer
       const ogOut = ogRun.out.outputs.map((o) => [o.entityId, (o.entityTxs ?? []).map((t) => t.type).join(o.entityId === ALICE ? "," : "+")]);
       same(tag(n, "outputs"), rwOut, ogOut);
       for (const m of messages) bump(m.slice(0, 12));
+      // after T the non-starter finalizes: a Source claim's hash-ladder registration still in the draft defers it
+      const after = T0 + (toT + 1 + ri(3)) * 1000;
+      const finalize: EntityTx = { type: "disputeFinalize", data: { counterpartyEntityId: BOB } };
+      const ogFinal = await handleDisputeFinalize(asOg({ ...next, timestamp: after }), asOg(wireEntityTx(finalize)), asOg(OG_ENV), true)
+        .then((out) => ({ ok: true as const, state: out.newState }), (e: unknown) => ({ ok: false as const, message: String((e as Error).message) }));
+      const rwFinal = foldTxs(d.state, d.accountReplicas, [finalize], {
+        verify: verifiers.verify, timestamp: BigInt(after), jReplicas: JREPLICAS, runtimeSeed: RUNTIME_SEED,
+      });
+      same(tag(n, "finalize verdict"), rwFinal.ok ? "ok" : reasonOf(rwFinal.error), ogFinal.ok ? "ok" : ogFinal.message);
+      if (!ogFinal.ok || !rwFinal.ok) { bump(`finalize:${(ogFinal.ok ? "" : ogFinal.message).split(":")[0]}`); continue; }
+      // og keeps the J event's frame events on the state it hands on; the finalize adds after them
+      const finalMessages = readEntityFrameEvents(ogFinal.state).map((e) => e.message).slice(messages.length);
+      same(tag(n, "finalize messages"), (rwFinal.value.draft.events ?? []).map((e) => e.message), finalMessages);
+      same(tag(n, "finalize jBatch"), rwFinal.value.draft.state.committed["jBatchState"] ?? null, ogFinal.state.jBatchState ?? null);
+      for (const m of finalMessages) bump(`finalize:${m.slice(0, 12)}`);
     }
     const summary = `seed=${SEED} ${JSON.stringify([...counts])}`;
-    for (const k of ["🛡️ Locked n", "❌ Pull coun", "🌉 Cross-j c", "refused:J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT", "refused:J_COUNTER_DISPUTE_NONCE_REGRESSION",
+    for (const k of ["finalize:⏳ disputeFin", "finalize:⚖️ Dispute f", "🛡️ Locked n", "❌ Pull coun", "🌉 Cross-j c", "refused:J_COUNTER_DISPUTE_INITIAL_BINDING_CONFLICT", "refused:J_COUNTER_DISPUTE_NONCE_REGRESSION",
       "refused:DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH", "refused:J_BATCH_LIMIT_EXCEEDED"]) {
       same(`${summary} ${k}`, [...counts.keys()].some((x) => x.startsWith(k)), true);
     }

@@ -14604,7 +14604,8 @@ const counterIdentity = (
   sel: FinalSelection,
   peer: EntityId,
 ): Result<void, EntityError> => {
-  if (sel.counter === undefined || w === undefined) return ok(undefined);
+  // og verifyCounterProofIdentity: a counter-proof that names no dispute hash has nothing to check
+  if (sel.counter === undefined || w === undefined || !w.hash) return ok(undefined);
   if (state.jurisdictionConfig === undefined) return invariant("DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING");
   const expected = accountDisputeHash(
     { ...sel.view, domain: state.jurisdiction },
