@@ -31,6 +31,12 @@ import {
 } from "../xln.ts";
 import { ALICE, BOB, NOW, TERMS, aliceAddr, anvilKey, genesisAB, hankoVerify, signDigestHex, unwrap, verifiers } from "../xln_run.ts";
 
+/** og's committed Account collections are Patricia-backed maps; their commitment is `rootHash()`. */
+const ogRootHash = (c: object): string => {
+  if (!("rootHash" in c) || typeof c.rootHash !== "function") throw new Error("og collection has no rootHash");
+  return String(c.rootHash());
+};
+
 const tk = (n: number) => unwrap(tokenId(String(n)));
 const W = (b: string) => ("0x" + b.repeat(32)) as EntityId;
 const ogThrows = <T,>(f: () => T): { ok: true; value: T } | { ok: false; reason: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, reason: (e as Error).message }; } };
@@ -126,13 +132,14 @@ describe("regressions: setRebalancePolicy beside a queued request_collateral", (
     const og = handleSetRebalancePolicyEntityTx({ quietRuntimeLogs: true } as never, ogS, { type: "setRebalancePolicy", data: { counterpartyEntityId: BOB, tokenId: 2, ...policy } } as never, true);
     expect(og.accountTxs).toEqual([]);
     const ogAfter = og.newState.accounts.get(BOB);
+    if (ogAfter === undefined) throw new Error("og dropped the account");
     expect(accountHasProposableMempoolForEntity(ogAfter, a.state.id)).toBe(true);
     const after = d.accountReplicas.get(BOB)!;
-    expect(unwrap(installedAccount(a.state.id, BOB, after)).policyRoot).toBe(ogAfter.shadow.rebalance.policy.rootHash());
+    expect(unwrap(installedAccount(a.state.id, BOB, after)).policyRoot).toBe(ogRootHash(ogAfter.shadow.rebalance.policy));
     expect(after._tag).toBe("proposed");
     const proposed = after._tag === "proposed" ? after.candidate.frame.txs : [];
     const asOg = (t: any) => ({ type: t.type, tokenId: Number(t.tokenId), amount: t.amount, feeAmount: t.feeAmount, policyVersion: t.policyVersion });
-    expect(proposed.map(asOg)).toEqual([...ogAfter.mempool, ...og.accountTxs.map((x: any) => x.tx)].map((t: any) => asOg(t.data)));
+    expect(proposed.map(asOg)).toEqual([...ogAfter.mempool, ...(og.accountTxs ?? []).map((x: any) => x.tx)].map((t: any) => asOg(t.data)));
   });
 });
 
