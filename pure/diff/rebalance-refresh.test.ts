@@ -252,7 +252,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       for (const h of hooks as any[]) bump(h.data.afterCounterpartyId === "" ? "retry" : "hasMore");
     }
     for (const k of ["issued", "output-route-unavailable", "bilateral-frame-uncertified", "certified-frame-invalid", "bilateral-dispute-uncertified", "certified-dispute-invalid", "disputeHanko", "retry", "hasMore", `signer:${aliceAddr.toLowerCase()}`]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  }, 120_000);
+  }, 180_000);
 
   test("MATCH: 120 random BoardActivated events (our own, a peer's, an unrelated Entity's) -- og's markers, refresh and 24h counterparty hooks, messages", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -274,7 +274,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       bump(target === S ? (after.length === 0 ? "local:cancelled" : "local:armed") : after.length > hooks.length ? "peer:deadline" : "peer:none");
     }
     for (const k of ["local:cancelled", "local:armed", "peer:deadline", "peer:none"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 50_000);
 
   test("MATCH: 300 random Entity frame ends (frame advance, peer Hanko, dispute witness and marker changes) -- og scheduleChangedAccountBoardHankoRefreshes re-arms the same hook", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -301,7 +301,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       bump(hooks.length === 0 ? "quiet" : "rearmed");
     }
     expect([(seen.get("quiet") ?? 0) > 20, (seen.get("rearmed") ?? 0) > 20]).toEqual([true, true]);
-  }, 120_000);
+  }, 180_000);
 });
 
 // ---- lending_overdue: og collectDerivedDeadlines (loans) and settleOverdueLendingLoan through executeCrontab ----

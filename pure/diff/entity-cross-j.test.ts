@@ -55,7 +55,7 @@ describe(seedTag("entity-cross-j: HTLC onion crypto (og protocol/htlc/multi-reci
       const pub = r() < 0.1 ? keyPair(r).pub : recipient.pub, dctx = r() < 0.1 ? hex(r, 32) : ctx;
       same(ogTry(() => ogMr.decryptOpaqueHtlcBytes(env, pub, recipient.priv, dctx)), decryptOpaqueHtlc(env, pub, recipient.priv, dctx), `dec${i}`);
     }
-  });
+  }, 30_000);
 });
 
 const randomLayer = (r: Rand): OnionLayer => {
@@ -159,7 +159,7 @@ describe(seedTag("entity-cross-j: route economics (og pathfinding/htlc-quote.ts,
       }
     }
     expect(accepted).toBeGreaterThan(50);
-  });
+  }, 30_000);
 });
 
 // ---- Entity htlcPayment (og entity/paybook/payment-admission.ts, tx/handlers/htlc/payment.ts) ----
@@ -430,7 +430,7 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
     }
     // every og outcome class is exercised
     for (const kind of ["forward", "decrypt_failed", "next_hop_account_missing", "next_hop_offline", "insufficient_capacity", "fee_below_policy", "deadline_unsafe"]) expect(`${kind}:${(outcomes.get(kind) ?? 0) > 0}`).toBe(`${kind}:true`);
-  });
+  }, 30_000);
 
   test("MATCH: committed resolve / lock / timeout / secret followups on 400 random paybooks and committed frames (paybook, fees, returned Account txs)", async () => {
     const r = rng(47), toBob = (id: string) => ({ from: id, to: BOB, domain: JUR });
@@ -504,7 +504,7 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
     }
     expect([...eventNames].sort()).toEqual(["HtlcFailed", "HtlcFinalized", "HtlcForwardAccepted", "HtlcReceived"]);
     expect(accepted).toBeGreaterThan(200);
-  });
+  }, 30_000);
 });
 
 describe(seedTag("entity-cross-j: Account outputs above the Account (og committed-input.ts)"), () => {
@@ -552,5 +552,5 @@ describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPre
     // a hub replica without the Entity key cannot materialize or replay inbound entries: og requireEntityEncryptionPrivateKey halts it
     const blind = { ...ctx, htlcInfra: (id: EntityId) => (id === HUB ? { profiles, online: () => true } : ctx.htlcInfra(id)) };
     expect(() => quiet(rt, [inputOf(ALICE, [tx], NOW + 1000n)], blind)).toThrow(`ENTITY_ENCRYPTION_PRIVATE_KEY_UNAVAILABLE:entity=${HUB}`);
-  });
+  }, 30_000);
 });

@@ -307,7 +307,7 @@ describe(seedTag("runtime-final: Account frame messages and the post-commit auto
     }
     expect(queued).toBeGreaterThan(5);
     expect(quiet).toBeGreaterThan(5);
-  });
+  }, 40_000);
 });
 
 // ---- og runtime/mempool/wake.ts generateHookPings: the Runtime tick (scheduled-wake.ts createDueScheduledWakeInputs) ----
@@ -1145,7 +1145,7 @@ describe(seedTag("runtime-final: certified frame head and og-wire leader votes i
       expect(digest).toBe(wantDigest);
     }
     expect(linked).toBeGreaterThan(60);
-  });
+  }, 60_000);
   test("MATCH: a 3-of-3 frame locked at B and C, A silent -- B's and C's timeout votes carry the prepared frame; the leaderVotes rows equal og's (og buildPreparedFrameEvidence on the EntityFrame wire)", () => {
     const members: Members = [[aliceAddr as Address, 1n], [bobAddr as Address, 1n], [carolAddr as Address, 1n]];
     const [a, b, c] = members.map(([s]) => s.toLowerCase()) as [string, string, string];

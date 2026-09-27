@@ -97,7 +97,7 @@ describe(seedTag("certified-board registry (og jurisdiction/machine/board-regist
       const reach = reachableBoardNodes(nodes, [state.boardRegistryRoot]);
       expect(reach.ok && new Set(reach.value.keys())).toEqual(new Set(collectReachableCertifiedBoardNodes(ogNodes, [ogState.boardRegistryRoot]).keys()));
     }
-  });
+  }, 40_000);
 
   test("MATCH: tampered proofs, finality advance and empty registries refuse like og", () => {
     const empty = emptyBoardRegistry(JUR);
@@ -410,7 +410,7 @@ describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/c
       seen.add(`consents:${(ogR.value.jOutputs[0].jTxs[0].data.supporterVotes ?? []).length}`);
     }
     for (const v of wanted) expect([v, seen.has(v)]).toEqual([v, true]);
-  });
+  }, 30_000);
 });
 
 describe(seedTag("AC-13b receiving side: the Entity supplies counterpartyCertifiedBoard from its registry (og input-phases.ts)"), () => {

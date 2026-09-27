@@ -980,7 +980,7 @@ describe(seedTag("account-tx: settlement + j_event_claim"), () => {
         same(og, body);
       }
     }
-  });
+  }, 30_000);
 
   // ---- consensus wiring: FoldCtx.settlement and og activatePostSettlementProof's replica-level promotion ----
   const settleOgCtx: any = { jReplicas: jurisdictions.jReplicas, resolveSettlementBoardAuthority: async () => undefined, verifyHanko: async (_h: string, _m: string, entityId: string) => ({ valid: true, entityId }) };

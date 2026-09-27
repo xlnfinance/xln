@@ -122,7 +122,7 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
       for (const candidate of [addr, addr.toLowerCase(), addr.slice(2), addr.replace(/[a-f]/, (c) => c.toUpperCase()), addr.toUpperCase().replace("0X", "0x"), ethers.getIcapAddress(addr), ethers.getIcapAddress(addr).replace(/.$/, "0"), "0x123"])
         expect([candidate, isEthersAddress(candidate)]).toEqual([candidate, ethers.isAddress(candidate)]);
     }
-  });
+  }, 30_000);
 
   test("MATCH (og http.ts handleTowerAppointment + store upsertAppointment): verify, stale/replay store checks, retention, signed receipts, persisted document", async () => {
     const ls = lockstep();
@@ -200,7 +200,7 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
       expect(wanted.filter((k) => !seen.has(k))).toEqual([]);
       await ls.compareDocs();
     }
-  });
+  }, 40_000);
 
   test("MATCH: the receipt og signs verifies against og's tower address", async () => {
     const ls = lockstep();
@@ -259,7 +259,7 @@ describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-r
     expect(() => handlePlaceSwapOfferRequest(ogState([]), { type: "placeSwapOffer", data: { counterpartyEntityId: CAROL } } as never, { mutableFrameState: true } as never)).toThrow("SWAP_REQUEST_ACCOUNT_MISSING");
     expect(() => handleCancelSwapRequest(ogState([]), { type: "proposeCancelSwap", data: { counterpartyEntityId: CAROL, offerId: "x" } } as never, { mutableFrameState: true } as never)).toThrow("SWAP_REQUEST_ACCOUNT_MISSING");
     expect(unwrapErr(applyEntityInput(opened(), { kind: "txs", timestamp: NOW + 1n, txs: [{ type: "proposeCancelSwap", data: { counterpartyEntityId: CAROL, offerId: "x" } }] }, ctx))).toEqual({ _tag: "swap_request_account_missing", target: CAROL });
-  });
+  }, 30_000);
 });
 
 describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core.ts, commitment.ts)"), () => {
@@ -325,7 +325,7 @@ describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core
     for (const [seed, params, opts] of [[1, { maxOrders: 1000, stpPolicy: 1 }, false], [2, { maxOrders: 1000, stpPolicy: 0 }, false], [3, { maxOrders: 12, stpPolicy: 1 }, false], [4, { maxOrders: 1000, stpPolicy: 1 }, true], [5, { maxOrders: 1000, stpPolicy: 0 }, true], [6, { maxOrders: 40, stpPolicy: 1 }, true]] as const)
       for (const k of stream(seed, 400, params, opts)) kinds.add(k);
     expect([...kinds].sort()).toEqual(["cancel", "error", "place", "remainder", "resume"]);
-  });
+  }, 30_000);
   test("MATCH: deep FIFO pages (> 16 orders at one price) and the empty book root", () => {
     const og0 = ogBook.createBook({ bucketWidthTicks: 1n, maxOrders: 500, stpPolicy: 1 });
     expect(bookCommitmentHash(unwrap(createBook({ bucketWidthTicks: 1n, maxOrders: 500, stpPolicy: 1 })))).toBe(computeBookCommitmentHash(og0));

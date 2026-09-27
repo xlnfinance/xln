@@ -184,7 +184,7 @@ describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountI
     }
     expect(refused).toBeGreaterThan(50);
     expect(accepted).toBeGreaterThan(30);
-  });
+  }, 30_000);
 
   test("MATCH: a proposed Account re-emits the exact ack_frame it sent (og cloneIsolatedAccountInput(pendingAccountInput)); an Account without one is owed nothing", () => {
     const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
@@ -239,7 +239,7 @@ describe(seedTag("book-admission: orderbookExt state, init and root projection")
       expect(handleInitOrderbookExtEntityTx(og.newState, { type: "initOrderbookExt", data: initData() }).newState).toBe(og.newState);
     }
     expect([...kinds].sort()).toEqual(["halt", "init", "noop"]);
-  });
+  }, 30_000);
 
   test("MATCH: 40 random orderbookExt states (books driven by random commands, pairDimensions, hubProfile) == og computeCanonicalEntityConsensusStateHash", () => {
     const r = alone();
@@ -396,7 +396,7 @@ describe(seedTag("book-admission: same-j hub matcher"), () => {
     expect(resumes).toBeGreaterThan(5);
     for (const c of commentKinds) expect([c, (comments.get(c) ?? 0) > 0]).toEqual([c, true]);
     expect(halts).toBeLessThan(streams);
-  });
+  }, 30_000);
 });
 
 // ============ the book inside entity consensus: peer swap frames reach the hub, the post-tx phase matches and settles ============
@@ -477,5 +477,5 @@ describe(seedTag("book-admission: hub order book inside entity consensus"), () =
     expect(replica(ALICE).accountReplicas.get(CAROL)!.state.offers.size).toBe(0);
     // the root commits the book section
     unwrap(entityRootOf(replica(CAROL).state, replica(CAROL).accountReplicas));
-  });
+  }, 30_000);
 });

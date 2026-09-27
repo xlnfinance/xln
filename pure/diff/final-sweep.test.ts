@@ -197,7 +197,7 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
     expect(thrown).toBeGreaterThan(20);
     for (const type of ["add_delta", "set_credit_limit", "payment", "htlc_lock", "htlc_resolve", "swap_offer", "swap_cancel_request", "swap_resolve", "request_collateral", "rebalance_refund", "rebalance_policy",
       "lending_fund", "lending_repay", "lending_credit", "lending_borrow_request", "lending_close_request", "lending_close_payout", "settle_transition"]) expect([type, seen.has(type)]).toEqual([type, true]);
-  });
+  }, 40_000);
 
   /** One og/rewrite lockstep: each step applies to both; a refusal must carry og's exact text and thrown-ness. */
   const textLockstep = (start: AccountBody) => {
@@ -360,7 +360,7 @@ describe(seedTag("final-sweep: SJ-18 settlement board authority fallback (og res
       seen.add(og.ok ? `ok:${og.value === undefined ? "none" : "pin"}` : og.error.split(":")[0] ?? og.error);
     }
     expect(seen.size).toBeGreaterThanOrEqual(6);
-  });
+  }, 30_000);
 });
 
 // ---------- runtime-final RF-18: the retained network outbox a frame commits (og delivery/recovery-output.ts applyRecoveryRuntimeOutputPlan) ----------

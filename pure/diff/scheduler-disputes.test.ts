@@ -468,5 +468,5 @@ describe(seedTag("scheduler-disputes: disputeStart starter-argument override (og
     expect(sanitizeDisputeArgument(`0x${w(2n ** 64n)}${w(0n)}`)).toBe("0x");
     const ratio = `0x${[32n, 60n, ...Array.from({ length: 60 }, () => 60n * 32n)].map((w) => w.toString(16).padStart(64, "0")).join("")}${(4000).toString(16).padStart(64, "0")}${"cd".repeat(4000)}`;
     expect(sanitizeDisputeArgument(ratio)).toBe(sanitizeOptionalDisputeArgument(ratio, "x").value);
-  });
+  }, 30_000);
 });

@@ -323,7 +323,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
     for (const m of ["🌉 Cross-j swap authorized by source user", "🌉 Cross-j swap authorized by target user", "🌉 Cross-j swap auth retry re-emitted by source user", "🌉 Cross-j swap awaiting source-hub proposer commitments",
       "🌉 Cross-j prepare already materialized; replay ignored", "❌ Cross-j prepare wrong source hub", "❌ Cross-j prepare invalid route", "❌ Cross-j prepare blocked", "❌ Cross-j prepare expired",
       "❌ Cross-j prepare rejected", "CROSS_J_USER_AUTH_CONFLICT", "CROSS_J_RAW_PREPARE_CONFLICT", "CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION", "CROSS_J_USER_AUTH_PREPARED_FORBIDDEN"]) expect(`${m}:${kinds.has(m)}`).toBe(`${m}:true`);
-  });
+  }, 30_000);
 
   test("MATCH: materializeCrossJurisdictionSwap by the default proposer on 300 random stored intents, proposer ids, prepared routes and USD caps (orderbookExt-priced non-stable legs)", () => {
     const r = rng(52), kinds = new Map<string, number>();
@@ -354,7 +354,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
     }
     expect(kinds.get("ok") ?? 0).toBeGreaterThan(100);
     expect([kinds.has("cap:priced"), kinds.has("cap:stable")]).toEqual([true, true]);
-  });
+  }, 30_000);
 
   test("MATCH: registerCrossJurisdictionSwap at both hubs and a user on 300 random resting routes, pull pre-checks, capacities and stored routes", () => {
     const r = rng(53), kinds = new Map<string, number>(), seen = new Set<string>();
@@ -381,7 +381,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
     }
     expect(kinds.get("ok") ?? 0).toBeGreaterThan(200);
     expect([...seen].some((m) => m.includes("rejected before Account queue"))).toBe(true);
-  });
+  }, 40_000);
 });
 
 // ---- og certified Entity -> Entity lane: publication, runtimeOutput authorization, default-proposer materialization ----

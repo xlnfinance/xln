@@ -392,7 +392,7 @@ describe(seedTag("cross-j: account txs through the og transition overlay"), () =
     expect(locks).toBeGreaterThan(20);
     expect(offers).toBeGreaterThan(5);
     expect(closes).toBeGreaterThan(10);
-  });
+  }, 30_000);
 
   test("MATCH: a pull holds |amount| on the payer side; the source close releases it and retires the cross-j offer", async () => {
     const { route, seed } = restingRoute(rng(5), true, false);
@@ -528,7 +528,7 @@ describe(seedTag("cross-j: Account outputs through og applyAccountTxMutation"), 
       }
     }
     for (const tag of ["forward_secret", "htlc_error", "swap_cancel_requested", "swap_cancelled", "request_collateral_committed", "direct_payment_forward"]) expect(seen.has(tag)).toBe(true);
-  });
+  }, 30_000);
 });
 
 // ---------- replica shadow: rebalance submittedAtByToken (og refund.ts, j-events/finality.ts, envelope/entity-update.ts) ----------

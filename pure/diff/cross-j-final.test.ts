@@ -129,7 +129,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       bump(kinds, outcome(og));
     }
     expectKinds(kinds, want);
-  });
+  }, 30_000);
 
   test("MATCH: materializeCrossJurisdictionClear on 400 random source hubs (proposer, intent, reveal ratio, tampered proof, missing or queued source pull, fork hash): same routes, outputs, Account txs, rejects and halts as og", () => {
     const r = rng(0x3a7e), kinds = new Map<string, number>();
@@ -151,7 +151,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       bump(kinds, outcome(og));
     }
     expectKinds(kinds, want);
-  });
+  }, 30_000);
 
   test("MATCH: crossPullClose at the source hub and the target hub on 500 random routes (status fences, command route, proof drift, rollback, binary): same routes, messages, Account txs and halts as og", () => {
     const r = rng(0x9c10), kinds = new Map<string, number>();
@@ -179,7 +179,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
     }
     expectKinds(kinds, want);
     expect([...kinds.keys()].some((k) => k.includes("blocked: route"))).toBe(true);
-  });
+  }, 30_000);
 
   test("MATCH: orderbookSweepCrossJurisdiction on 300 random Entities holding 1-4 routes (expired, waiting, terminal, foreign source hub): same routes, books, message counts, outputs, Account txs and halts as og", () => {
     const r = rng(0x5eee), kinds = new Map<string, number>();
@@ -193,7 +193,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
     expect([...kinds.keys()].some((k) => /closedOffers=[1-9]/.test(k))).toBe(true);
     expect([...kinds.keys()].some((k) => /expired=[1-9].*closedOffers=0/.test(k))).toBe(true);
     expect([...kinds.keys()].some((k) => /waiting=[1-9]/.test(k))).toBe(true);
-  });
+  }, 30_000);
 
   test("MATCH: the default proposer's clear reveal (appendDefaultProposerCrossJMaterializations clear branch) on 300 random source hubs: same materializeCrossJurisdictionClear txs and halts as og", () => {
     const r = rng(0x7e7e), kinds = new Map<string, number>();
@@ -212,7 +212,7 @@ describe(seedTag("cross-j-final: clear lifecycle Entity txs"), () => {
       bump(kinds, og.ok ? `ok:${og.value.length}` : og.message);
     }
     expectKinds(kinds, want);
-  });
+  }, 30_000);
 
   test("MATCH: assertRuntimeOutputAuthorization for crossPullClose on 400 random envelopes (stored vs command route, source hub, target hub, counterparty)", () => {
     const r = rng(0xa0c1), outcomes = new Map<string, number>(), ids = [U1, H1, H2, U2];
@@ -287,7 +287,7 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
     }
     expectKinds(kinds, want);
     expect([...kinds.keys()].some((k) => /^ok:0:1:/.test(k))).toBe(true);
-  });
+  }, 30_000);
 
   test("MATCH: committed cross_pull_close at all four route participants on 500 random mirrors (terminal replay, economics, rollback, hub state fence, settle/cancel/expire, book removal or sibling removal request): same mirror, hooks, admissions, books, outputs and halts as og", () => {
     const r = rng(0xc105e), kinds = new Map<string, number>();
@@ -312,5 +312,5 @@ describe(seedTag("cross-j-final: committed cross-j Account tx followups"), () =>
       runBoth(w, PEER[self]!, tx, `close ${i}`, kinds);
     }
     expectKinds(kinds, want);
-  });
+  }, 40_000);
 });

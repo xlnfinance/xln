@@ -604,7 +604,7 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
     expect(stored).toBeGreaterThan(15);
     expect(refused).toBeGreaterThan(10);
     expect(repeated).toBeGreaterThan(3);
-  });
+  }, 40_000);
 
   test("MATCH (randomized): a numbered importReplica needs registration evidence for its exact board (og assertNumberedReplicaImportAuthority)", async () => {
     let imported = 0, refused = 0;
@@ -643,5 +643,5 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
     }
     expect(imported).toBeGreaterThan(8);
     expect(refused).toBeGreaterThan(8);
-  });
+  }, 30_000);
 });

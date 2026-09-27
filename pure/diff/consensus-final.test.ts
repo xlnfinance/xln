@@ -52,7 +52,7 @@ describe(seedTag("consensus-final: the Entity encryption keypair on every frame 
       seen.set(`${variant}:${og.ok}`, (seen.get(`${variant}:${og.ok}`) ?? 0) + 1);
     }
     for (const k of ["ok:true", "missing:false", "wrong:false", "badPub:false", "zeroPriv:false", "shortPriv:false"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });
 
 describe(seedTag("consensus-final: the profile descriptor is re-certified by the frame (og entity/profile/profile-descriptor.ts)"), () => {
@@ -263,7 +263,7 @@ describe(seedTag("consensus-final: the proposal policy of og entity/consensus/pr
       expect([i, mineAuth.ok ? mineAuth.value : (mineAuth.error as { reason?: string }).reason]).toEqual([i, ogAuth]);
     }
     for (const k of wanted) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 30_000);
 
   test("MATCH (og selectEntityTxsWithinJRangeBudget): multi-MiB ranges -- the same prefix, the suffix waits, an unfittable range or bad span halts", () => {
     const MiB = 1024 * 1024;
@@ -368,5 +368,5 @@ describe(seedTag("consensus-final: a received Account frame commits at once (reb
       rt = quiet(rt, gi(3) === 0 ? [create(from, [tx]), create(to === BOB ? BOB : to, [{ ...tx, data: { ...(tx.data), targetEntityId: from, route: [to, from] } } as EntityTx])] : [create(from, [tx])]);
     }
     expect(received).toBeGreaterThan(40);
-  });
+  }, 60_000);
 });

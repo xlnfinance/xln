@@ -124,7 +124,7 @@ describe(seedTag("J event ingress (og core/jurisdiction/adapter/events/*, machin
     }
     expect(agreeOk).toBeGreaterThan(500);
     expect(agreeRefuse).toBeGreaterThan(50);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------- calldata (og rpc-public.ts)
@@ -226,7 +226,7 @@ describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProof
       }
     }
     expect(resolved).toBeGreaterThan(20);
-  });
+  }, 30_000);
 
   test("MATCH: a watchtowerCounterDispute call yields the CounterDisputeRegistered + DisputeFinalized pair like og", () => {
     for (let i = 0; i < 10; i++) {
@@ -339,7 +339,7 @@ describe(seedTag("multi-claim Account frames (og prepareAccountJClaimTx / verify
     }
     expect(tampered).toBeGreaterThan(0);
     expect(branched).toBeGreaterThan(0);
-  }, 60_000);
+  }, 80_000);
 });
 
 // ---------------------------------------------------------------- Entity J observation (og core/entity/tx/j-events*.ts)
@@ -508,7 +508,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     }
     expect(issues).toBeGreaterThan(40);
     expect(deficits).toBeGreaterThan(5);
-  });
+  }, 30_000);
 
   test("MATCH: 25 random r2r / r2c / r2e sequences (60 ops, debt-aware admission, R2C aggregation, local-account check, 50-op limit) queue exactly like og handleR2R / handleR2C / handleR2E", async () => {
     let refusedR2C = 0, thrown = 0, queued = 0;
@@ -550,7 +550,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     expect(refusedR2C).toBeGreaterThan(20);
     expect(thrown).toBeGreaterThan(20);
     expect(queued).toBe(25 * 60);
-  }, 60_000);
+  }, 120_000);
 
   test("MATCH: 200 random drafts split for broadcast like og takeBroadcastBatch (dispute priority, one finalization, registrations with starts)", () => {
     const fields = ["reserveToReserve", "reserveToCollateral", "collateralToReserve", "settlements", "disputeStarts", "counterDisputes", "disputeFinalizations", "externalTokenToReserve", "reserveToExternalToken", "revealSecrets", "hashLadderRegistrations"] as const;

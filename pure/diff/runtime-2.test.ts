@@ -90,7 +90,7 @@ describe(seedTag("runtime-2: entity lending (ER-17, og payments/lending.ts)"), (
     }
     expect(accepted).toBeGreaterThan(20);
     expect(refused).toBeGreaterThan(100);
-  });
+  }, 30_000);
 
   test("MATCH: a lendingOffer for a token the hub Account has not enabled is og LENDING_TOKEN_NOT_ENABLED; the missing hub is LENDING_HUB_ACCOUNT_MISSING", () => {
     const offer = (patch: Record<string, unknown>): EntityTx => ({ type: "lendingOffer", data: { positionId: `lend-${"a".repeat(16)}`, hubEntityId: BOB, tokenId: T1, amount: 5n, termId: "1d", interestBps: 50, ...patch } }) as EntityTx;

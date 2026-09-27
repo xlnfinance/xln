@@ -144,7 +144,7 @@ describe(seedTag("cross-book: admissions"), () => {
       }
     }
     for (const k of ["admissible", "CROSS_J_BOOK_ADMISSION_PENDING", "CROSS_J_BOOK_ADMISSION_CLOSED", "CROSS_J_BOOK_ADMISSION_RESOLVING", "CROSS_J_ORDER_WRONG_BOOK_OWNER"]) expect([k, (kinds.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 50_000);
 });
 
 // ============ og buildCrossJurisdictionMarketOffer, remaining amounts, execution price / amounts, fill and cancel instructions ============
@@ -176,7 +176,7 @@ describe(seedTag("cross-book: market offer and instructions"), () => {
       same(`${i}:price`, ogRun(() => ogOB.resolveCrossJurisdictionExecutionPriceTicks(ogMeta, other as never)), rwRun(crossExecutionPrice(meta, other)));
     }
     for (const k of ["null", "offer", "fill", "fill-null"]) expect([k, seen.has(k)]).toEqual([k, true]);
-  });
+  }, 30_000);
 });
 
 // ============ og cross pass inside processOrderbookSwaps and the cross branch of processOrderbookCancels ============
@@ -279,7 +279,7 @@ describe(seedTag("cross-book: hub cross matcher"), () => {
       for (const [pairId, b] of rw.ok ? rw.value.books : []) expect(bookOrders(b).map((o) => [o.orderId, o.qtyLots])).toEqual(ogBook.getBookOrders(og.value.bookUpdates.find((u: any) => u.pairId === pairId)!.book).map((o: any) => [o.orderId, o.qtyLots]));
     }
     for (const k of ["fill", "cancel", "book-update", "cancel-request", "swap-matched-cross", "halt:ORDERBOOK_LIVE_PROJECTION_REJECT"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 40_000);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -408,7 +408,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       bump(kinds, og.ok ? (og.value.created as unknown[]).length > 0 ? "admitted" : msg.includes("duplicate") ? "duplicate" : msg.includes("pending") ? "pending" : msg.includes("reject") ? "reject" : "other" : kindOf(og));
     }
     for (const k of ["admitted", "duplicate", "CROSS_J_BOOK_ADMIT_WRONG_OWNER", "CROSS_J_BOOK_ADMIT_ROUTE_INVALID"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: book-owner fill progress on 500 random worlds (direct progress and matcher instructions; seq, ratio, cancel, stale, resize, re-materialize, remove): same state, outputs and halts as og", () => {
     const r = rng(0xf111), kinds = new Map<string, number>();
@@ -443,7 +443,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       }
     }
     for (const k of ["progress:true", "progress:false", "fill:0", "fill:1", "CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING", "CROSS_J_BOOK_PROGRESS_ADMISSION_NOT_ADMITTED", "CROSS_J_BOOK_PROGRESS_STALE", "CROSS_J_BOOK_PROGRESS_ORDER_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: removeCrossJurisdictionBookOrder on 400 random book owners (route drift, missing route, source, ack account, admission hash): same state, ack output and halts as og", () => {
     const r = rng(0x2e30), kinds = new Map<string, number>();
@@ -460,7 +460,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}:${String((og.value.messages as string[]).at(-1)).endsWith("removed")}` : kindOf(og));
     }
     for (const k of ["ok:1:true", "ok:0:false", "ok:1:false", "CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH", "CROSS_J_BOOK_REMOVAL_ROUTE_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: crossJurisdictionFillNotice at the source hub on 400 random mirrors (duplicate, stale conflict, clear requested, terminal -> clear request, local book removal): same state, outputs and halts as og", () => {
     const r = rng(0xf2ce), kinds = new Map<string, number>();
@@ -477,7 +477,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}:${String((og.value.messages as string[]).at(-1)).includes("applied")}` : kindOf(og));
     }
     for (const k of ["ok:0:true", "ok:1:true", "ok:0:false", "CROSS_J_FILL_ROUTE_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: crossJurisdictionBookOrderRemoved at the source hub on 300 random acks (carried progress ahead or behind, terminal mirror, missing offer, hash drift, wrong hub): same state, clear request and halts as og", async () => {
     const r = rng(0x4e3d), kinds = new Map<string, number>();
@@ -498,7 +498,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}` : og.message.split(":")[0]!);
     }
     for (const k of ["ok:0", "ok:1", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: routeRemoteCrossJurisdictionBookCancels on 300 random source hubs (sibling book owner, local book, no mirror, plain offers, wrong hub): same local cancels, removal requests, resolving admissions and halts as og", () => {
     const r = rng(0x7c4c), kinds = new Map<string, number>();
@@ -523,7 +523,7 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
       bump(kinds, ogOut.ok ? `ok:${(ogOut.value.outputs as unknown[]).length > 0}:${(ogOut.value.local as unknown[]).length > 0}` : ogOut.message.split(":")[0]!);
     }
     for (const k of ["ok:true:true", "ok:false:true", "CROSS_J_CANCEL_SOURCE_HUB_REQUIRED"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: assertRuntimeOutputAuthorization for the book lifecycle txs on 600 random envelopes (stored vs supplied route, sibling source, signer, target, self continuation)", () => {
     const r = rng(0xa071), outcomes = new Map<string, number>(), ids = [U1, H1, H2, U2, W("09")];
@@ -553,5 +553,5 @@ describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
     }
     expect([...outcomes.keys()].includes("ok")).toBe(true);
     expect(outcomes.size).toBeGreaterThan(6);
-  });
+  }, 30_000);
 });

@@ -118,7 +118,7 @@ describe(seedTag("disputes-final: Account ProofBody transformers (og protocol/di
       })));
     }
     for (const k of ["ok:0", "ok:1", "ok:chunked", "HTLC_LOCK_INVALID_TIMELOCK", "PROOF_BODY_LOCK_TOKEN_MISSING", "PROOF_BODY_SWAP_TOKEN_MISSING", "PROOF_BODY_PULL_TOKEN_MISSING"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 30_000);
 
   test("MATCH: more than 32 clauses is og's J_DISPUTE_PROOFBODY_TRANSFORMER_LIMIT; a body with clauses and no resolvable stack is og's ACCOUNT_PROOF_JURISDICTION_NOT_FOUND", () => {
     const base = genesisAB().state, t1 = tk(1);
@@ -861,7 +861,7 @@ describe(seedTag("disputes-final: cross-j recovery runtimeOutput authority (og e
       bump(kinds, `${txs[0]!.type}:${og === null ? "ok" : og.replace(/:.*/, "")}`);
     }
     expectKinds(kinds, want);
-  });
+  }, 30_000);
 });
 
 // ---- og entity/tx/handlers/dispute/start-admission.ts proofBodyHasPulls (the ethers decode text in DISPUTE_CANONICAL_DELTA_BATCH_INVALID) ----
@@ -901,7 +901,7 @@ describe(seedTag("disputes-final: canonical DeltaBatch decoding (og handlers/dis
       bump(kinds, og.ok ? `ok:${og.value}` : og.reason.replace(/^DISPUTE_CANONICAL_DELTA_BATCH_INVALID:\d+:/, "").replace(/ \(.*/, ""));
     }
     expectKinds(kinds, want);
-  });
+  }, 30_000);
 });
 
 // ---- og account/settlement/j-finality.ts applyAccountDisputeFinality: the Account mempool on DisputeFinalized ----

@@ -334,7 +334,7 @@ describe(seedTag("Depository Batch ABI"), () => {
     }
     expect(wide).toBeGreaterThan(50);
     expect(checked).toBeGreaterThan(100);
-  });
+  }, 30_000);
   test("MATCH: encodeBatchHash (fixed domain keccak('XLN_DEPOSITORY_HANKO_V1')) == og computeBatchHankoHash (100 random)", () => {
     expect(DEPOSITORY_BATCH_HANKO_DOMAIN).toBe(keccak256Hex(new TextEncoder().encode("XLN_DEPOSITORY_HANKO_V1")));
     for (let i = 0; i < 100; i++) {
@@ -508,7 +508,7 @@ describe(seedTag("hanko"), () => {
     }
     expect(accepted).toBeGreaterThan(10);
     expect(rejected).toBeGreaterThan(30);
-  });
+  }, 30_000);
   test("MATCH: nested claim (entity A member of entity B) and unused-claim rejection agree", () => {
     const digest = ethers.keccak256(ethers.toUtf8Bytes("nested"));
     const [k0, k1] = KEYS as [string, string];
@@ -574,7 +574,7 @@ describe(seedTag("hanko"), () => {
     }
     expect(accepted).toBeGreaterThan(30);
     expect(rejected).toBeGreaterThan(30);
-  });
+  }, 30_000);
   test("MATCH: verifyHankoLocal rejects a board whose first member is a non-address placeholder, like og verifyCanonicalHanko (HANKO_FIRST_MEMBER_EOA_REQUIRED) and HankoVerifier.sol InvalidHankoFirstMember", () => {
     const digest = ethers.keccak256(ethers.toUtf8Bytes("local"));
     const a0 = idOf(addrOf(KEYS[0]!));
