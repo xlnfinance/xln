@@ -43792,6 +43792,14 @@ const publishBook = (pass: Pass, pairId: string, book: Book): Pass => ({
   cache: mapSet(pass.cache, pairId, book),
   updates: mapSet(pass.updates, pairId, book),
 });
+/**
+ * A book the pass works on but does not commit by itself: a sweep lands in the hot book, and reaches the committed
+ * books only when a later command on the pair publishes it.
+ */
+const warmBook = (pass: Pass, pairId: string, book: Book): Pass => ({
+  ...pass,
+  cache: mapSet(pass.cache, pairId, book),
+});
 /** og hasQueuedSwapResolveForEntityState. */
 const hasQueuedResolve = (q: Pick<Pass, "hub" | "queued">, accountId: string, offerId: string): boolean => {
   const pending = q.hub.accounts.get(accountId)?.queued ?? [];
@@ -43953,7 +43961,7 @@ const prepareSame = (pass: Pass, m: Materialized): Result<Passed<Prepared | null
   chain(hotBook(pass, m.bookKey, () => freshBook(m.pair.policy)), (hot) =>
     chain(sweptOnce(hot.pass, m, hot.book), (swept) => {
       const { book } = swept;
-      const touched = book === hot.book ? swept.pass : publishBook(swept.pass, m.bookKey, book);
+      const touched = book === hot.book ? swept.pass : warmBook(swept.pass, m.bookKey, book);
       return map(bookBand(m.pair, book), (band): Passed<Prepared | null> => {
         if (band !== undefined && (m.priceTicks < band.min || m.priceTicks > band.max)) {
           return { pass: cancelSame(touched, m.offer, `outside-anchor-band:${m.priceTicks}`), value: null };
