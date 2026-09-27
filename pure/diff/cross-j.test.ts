@@ -1,7 +1,7 @@
 // Differential tests: og cross-jurisdiction extension (core/extensions/cross-j/**, core/protocol/htlc/hash-ladder.ts)
 // vs the pure rewrite's cross-j kernel (pure/xln.ts). "MATCH:" tests assert equivalence against live og.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import * as ogLadder from "../../core/protocol/htlc/hash-ladder.ts";
 import * as ogCross from "../../core/extensions/cross-j/index.ts";
 import * as ogMarket from "../../core/extensions/cross-j/market.ts";
@@ -432,7 +432,7 @@ describe(seedTag("cross-j: htlc_lock envelope and envelopeHash"), () => {
   test("MATCH: envelope validation and envelopeHash agree with og assertOpaqueHtlcCiphertext/hashOpaqueHtlcCiphertext on 600 random envelopes", () => {
     const r = rng(77);
     let valid = 0;
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0, more = untilCovered(600, () => valid > 100); more(i); i++) {
       const env = randomEnvelope(r);
       const og = ogTry(() => hashOpaqueHtlcCiphertext(assertOpaqueHtlcCiphertext(env)));
       const rw = htlcEnvelopeHash(env);

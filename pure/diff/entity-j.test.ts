@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, batchOfOg, encodeBatch,
   type AccountReplica, type EntityId, type EntityState, type EntityTx,
@@ -297,7 +297,7 @@ describe(seedTag("entity-j RJ-9: durable numbered-registration intents (og numbe
   test("MATCH (randomized): record / repeat / conflict / quarantine / complete intents with certified evidence and imported replicas -- same decisions and the same durable store", async () => {
     const tally = { recorded: 0, refused: 0, completed: 0, quarantined: 0 };
     const refusals = new Set<string>();
-    for (let run = 0; run < 40; run++) {
+    for (let run = 0, more = untilCovered(40, () => tally.recorded > 6 && tally.refused > 6 && tally.completed > 2 && refusals.size > 8); more(run); run++) {
       const seed = `entity-j-numbered-${run}`, env = createEmptyEnv(seed) as any;
       registerSignerKey(env, env.runtimeId, deriveSignerKeySync(seed, "1"));
       const replica = { name: "Local", blockNumber: 7n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 }, chainId: CHAIN, contracts: { depository: NDEP, entityProvider: EP }, watcherConfirmationDepth: 0, entityProviderDeploymentBlock: 1 };
@@ -457,11 +457,16 @@ const signedRange = (ogSt: any, finalized: number, sent: any, defect: string): R
 describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)"), () => {
   test("MATCH (randomized): signed ranges of reserve / debt / AccountSettled / HankoBatchProcessed events and envelope defects -- same verdict, reserves, debts, jBatchState, certified J head, board finality, messages, dirty Accounts and follow-up outputs", async () => {
     const seen = new Map<string, number>();
-    for (let run = 0; run < 45; run++) {
-      let state = aliceEntity(new Map([[1, BigInt(jri(200))], [2, BigInt(jri(60))]]));
+    const wanted = ["clean:ok", "stale:ok", "ahead:refused", "jurisdiction:refused", "root:refused", "from:refused", "signature:refused", "rangeHash:refused",
+      "RESERVE", "DEBT:", "DEBT PAID", "DEBT FORGIVEN", "OBSERVED", "jBatch finalized", "quarantined", "snapshot | Block", "delta | Block",
+      "DEBT_LEDGER_DIVERGENCE", "DEBT_CREATED_AMOUNT_INVALID", "EXTERNAL_WALLET_BASELINE_MISSING", "EXTERNAL_WALLET_OWNER_NOT_SIGNER"];
+    for (let run = 0, more = untilCovered(45, () => wanted.every((k) => (seen.get(k) ?? 0) > 0)); more(run); run++) {
+      const reserve1 = BigInt(jri(200)), reserve2 = BigInt(jri(60));
+      let state = aliceEntity(new Map([[1, reserve1], [2, reserve2]]));
       let replicas: ReadonlyMap<EntityId, AccountReplica> = new Map([[BOB, genesisAB() as AccountReplica]]);
       let t = 1_000;
-      if (jrng() < 0.6) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
+      // a sent batch to settle against, when the reserve covers the r2r
+      if (jrng() < 0.6 && reserve1 >= 5n) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
       let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };
       for (let step = 0; step < 8; step++) {
         t += 1 + jri(9);
@@ -502,9 +507,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
         carry = { height: 0, lastFinalizedJHeight: next.lastFinalizedJHeight, jHistoryFinality: next.jHistoryFinality, certifiedBoardState: next.certifiedBoardState, outDebtsByToken: next.outDebtsByToken, inDebtsByToken: next.inDebtsByToken, ...(next.externalWallet ? { externalWallet: next.externalWallet } : {}) };
       }
     }
-    for (const k of ["clean:ok", "stale:ok", "ahead:refused", "jurisdiction:refused", "root:refused", "from:refused", "signature:refused", "rangeHash:refused"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-    for (const k of ["RESERVE", "DEBT:", "DEBT PAID", "DEBT FORGIVEN", "OBSERVED", "jBatch finalized", "quarantined", "snapshot | Block", "delta | Block"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-    for (const k of ["DEBT_LEDGER_DIVERGENCE", "DEBT_CREATED_AMOUNT_INVALID", "EXTERNAL_WALLET_BASELINE_MISSING", "EXTERNAL_WALLET_OWNER_NOT_SIGNER"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
+    for (const k of wanted) expect([k, seen.get(k) ?? 0]).not.toEqual([k, 0]);
   }, 120_000);
 });
 

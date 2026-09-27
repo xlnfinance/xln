@@ -18,7 +18,7 @@ const hex16 = (): string => Array.from({ length: 16 }, () => "0123456789abcdef"[
 
 const T1 = unwrap(tokenId("1")), T2 = unwrap(tokenId("2"));
 const openTo = (target: EntityId): EntityTx =>
-  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } }) as EntityTx;
+  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }) as EntityTx;
 
 /** A 1-of-1 ALICE with a committed Account to BOB whose token 1 row is funded on ALICE's side. */
 const fundedHubAccount = (): OpenEntity => {

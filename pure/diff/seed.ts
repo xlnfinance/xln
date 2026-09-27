@@ -25,3 +25,14 @@ export const seedOf = (base: number): number => {
 
 /** A describe name that carries the seed: a failure reads `... [SEEDX=12345] > test`, which is the command to rerun. */
 export const seedTag = (name: string): string => `${name} [SEEDX=${SEEDX}]`;
+
+/**
+ * The loop guard of a randomized MATCH loop whose test also asserts coverage (each outcome kind seen, or more
+ * than N accepted cases). It runs the nominal count, then keeps drawing fresh cases, every one compared in full,
+ * until `covered()` holds or `cap` iterations have run. The coverage assert after the loop stays as strict as it
+ * was; the loop only stops being tuned to one seed. At SEEDX=0 every such loop is covered at its nominal count,
+ * so the committed sample is unchanged.
+ *   for (let i = 0, more = untilCovered(600, () => valid > 100); more(i); i++) { ... }
+ */
+export const untilCovered = (nominal: number, covered: () => boolean, cap: number = nominal * 10) =>
+  (i: number): boolean => i < nominal || (i < cap && !covered());

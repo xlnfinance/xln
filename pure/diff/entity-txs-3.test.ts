@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   authorEntityTxs, buildCommand, certifiedBoardStackKey, checkCommand, configBoardHash, createEntity, entityId, entityTransactionAction, foldTxs, hashCommand, hashCommandTxs, hashEntityFrame,
   hashProposalAction, applyEntityInput, proposalId, tokenId, wireEntityTx, installedAccount, ZERO_WORD, genesisHost, applyHost, localProof, committedView, envelopeOf, prepareFrozen, ogProofBody, spawn, createRuntime, applyRuntime, convertOutput, replicaKey,
@@ -112,7 +112,7 @@ describe(seedTag("entity-txs-3: entityCommand codec and hashes (og command/comma
         { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: tok(1 + ri(3)), amount: BigInt(ri(1000)) } },
         { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: tok(1 + ri(3)), amount: BigInt(ri(1000)), feeAmount: 1n, policyVersion: 1, ...(rng() < 0.5 ? { feeTokenId: tok(2) } : {}) } },
         { type: "profile-update", data: { profile: { entityId: ALICE, name: `n${ri(9)}` } } },
-        { type: "openAccount", data: { targetEntityId: BOB, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...(rng() < 0.5 ? { tokenId: tok(2), creditAmount: 7n } : {}) } },
+        { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...(rng() < 0.5 ? { tokenId: tok(2), creditAmount: 7n } : {}) } },
       ]));
       const action = unwrap(entityTransactionAction(txs)), og = buildEntityTransactionProposalAction(txs.map(wire));
       expect(action.type === "entity_transaction" ? action.data.actionHash : "").toBe(og.data.actionHash);
@@ -239,7 +239,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
 describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in the Entity frame hash)"), () => {
   test("MATCH: extendCredit and lending entity txs record og's status events", () => {
     const a = lazyEntity([[aliceAddr, 1n]], 1n);
-    const opened = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
+    const opened = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
     const tok = unwrap(tokenId("1"));
     const cases: readonly [EntityTx, (s: any) => any][] = [
       [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: tok, amount: 55n } }, (s) => handleExtendCreditEntityTx(s, { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 55n } } as never, true)],
@@ -257,7 +257,7 @@ describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in t
 
 // ---- H7-b shadow rebalance policy, setHubConfig, setRebalancePolicy (og lifecycle/open-account.ts, lifecycle/admin.ts, request-collateral.ts) ----
 const openTx = (extra: Record<string, unknown> = {}, target: EntityId = BOB): EntityTx =>
-  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...extra } }) as EntityTx;
+  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...extra } }) as EntityTx;
 const ogPolicyRoot = (entries: readonly (readonly [number, unknown])[]): string => PersistentAccountStateMap.fromEntries("rebalanceShadowPolicy", entries as never).rootHash();
 const ogThrows = <T>(f: () => T): { ok: true; value: T } | { ok: false; reason: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, reason: (e as Error).message }; } };
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
@@ -341,7 +341,7 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
     if (base === undefined) throw new Error("no account");
     const selfIsLeft = base.state.account.id.left === a.state.id;
     let queuedAny = 0;
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0, more = untilCovered(300, () => queuedAny > 5); more(i); i++) {
       const tok = pick([1, 2, 3]), k = unwrap(tokenId(String(tok)));
       const delta = { tokenId: k, collateral: BigInt(ri(3) * 1000), ondelta: BigInt(ri(5) * 400 - 800), offdelta: BigInt(ri(5) * 500 - 1000), leftCreditLimit: 0n, rightCreditLimit: 0n };
       const fee = rng() < 0.85 ? { policyVersion: 1 + ri(3), baseFee: BigInt(ri(40)), liquidityFeeBps: BigInt(pick([0, 10, 100, 5000])), gasFee: BigInt(ri(20)), updatedAt: 1 } : undefined;
@@ -369,7 +369,9 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
       if (ogAfter === undefined) throw new Error("og lost the account");
       expect(unwrap(installedAccount(a.state.id, BOB, after)).policyRoot).toBe(ogRootHash(ogAfter.shadow.rebalance.policy));
       // the same Entity frame proposes the queued request as the next Account frame (og proposePendingAccountFrames)
-      const queued = after._tag === "proposed" && child._tag === "open" ? after.candidate.frame.txs : after.mempool.slice(mempool.length);
+      // what the handler queued: og proposes the Account mempool in order (frame/application.ts proposePendingAccountFrames), so the
+      // request the generator pre-seeded leads the proposed frame (or the mempool); the handler's own txs follow it
+      const queued = (after._tag === "proposed" && child._tag === "open" ? after.candidate.frame.txs : after.mempool).slice(mempool.length);
       expect(queued.map((t: any) => ({ type: t.type, data: { ...t, type: undefined, tokenId: Number(t.tokenId), feeTokenId: Number(t.feeTokenId) } })))
         .toEqual((og.value.accountTxs ?? []).map(({ tx }) => ({ type: tx.type, data: { ...tx.data, type: undefined } })));
       expect(d.outputs.filter((o) => !("tx" in o)).length).toBe(og.value.outputs.length);

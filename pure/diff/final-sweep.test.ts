@@ -283,7 +283,7 @@ describe(seedTag("final-sweep: RF-18 outbox signer (og resolveEntityOutputSigner
     let now = 1_700_000_000_000n;
     let rt: Runtime = unwrapR(applyRuntime(createRuntime([J]), { runtimeTxs: [imp(A, aliceAddr), imp(B, bobAddr)], entityInputs: [], timestamp: now }, verifiers) as never as { ok: true; value: { runtime: Runtime } }).runtime;
     const sent: EntityOutput[] = [];
-    let inputs: RoutedEntityInput[] = [{ entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx] } }];
+    let inputs: RoutedEntityInput[] = [{ entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] } }];
     for (let round = 0; inputs.length > 0 && round < 20; round++) {
       now += 1n;
       const step = unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: inputs.map((i) => (i.input.kind === "txs" ? { ...i, input: { ...i.input, timestamp: now } } : i)) }, verifiers) as never) as { runtime: Runtime; outbox: readonly EntityOutput[] };
@@ -373,7 +373,7 @@ describe(seedTag("final-sweep: RF-18 retained network outbox (og applyRecoveryRu
     const imp = (id: string, signer: string): RuntimeTx => ({ type: "importReplica", entityId: id, signerId: signer, data: { config: cfg(signer), isProposer: true, entitySeed: "0x" + "5e".repeat(64) } }) as never;
     const now = 1_700_000_000_000n;
     let rt: Runtime = unwrapR(applyRuntime(createRuntime([J], SELF), { runtimeTxs: [imp(A, aliceAddr), imp(B, bobAddr), imp(C, carolAddr)], entityInputs: [], timestamp: now }, verifiers) as never as { ok: true; value: { runtime: Runtime } }).runtime;
-    const open: RoutedEntityInput = { entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now + 1n, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx] } };
+    const open: RoutedEntityInput = { entityId: A as never, signerId: aliceAddr, input: { kind: "txs", timestamp: now + 1n, txs: [{ type: "openAccount", data: { targetEntityId: B, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] } };
     rt = (unwrapR(applyRuntime(rt, { runtimeTxs: [], entityInputs: [open] }, verifiers) as never) as { runtime: Runtime }).runtime;
     const alice = [...rt.entities.values()].find((r) => r.state.id === A)!, account = alice.accountReplicas.get(B as never)!;
     expect(account._tag).toBe("proposed");

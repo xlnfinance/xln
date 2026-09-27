@@ -158,7 +158,7 @@ describe(seedTag("lending-hub: committed lending followup (og committed-lending-
 describe(seedTag("lending-hub: end-to-end lending lifecycle through the Runtime"), () => {
   const T = tk(1);
   const openTo = (target: EntityId, creditAmount: bigint): EntityTx =>
-    ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, tokenId: T, creditAmount } }) as EntityTx;
+    ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, tokenId: T, creditAmount } }) as EntityTx;
   const signers = new Map<EntityId, string>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
   let rt: Runtime, now: bigint = NOW;
   const replica = (e: EntityId) => { const r = rt.entities.get(replicaKey(e, signers.get(e) as string)); if (r === undefined) throw new Error("no replica"); return r; };

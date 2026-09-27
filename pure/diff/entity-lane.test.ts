@@ -97,7 +97,7 @@ const quiet = (start: Runtime, first: RoutedEntityInput[], ctx: object = verifie
   }
   return rt;
 };
-const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
+const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
 const network = (): Runtime => {
   let rt = spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE)), entityOf(BOB)), entityOf(CAROL));
   rt = quiet(rt, [inputOf(BOB, [open(ALICE, 1000n), open(CAROL)], NOW)]);
@@ -263,6 +263,12 @@ const ogEnv = { state: { timestamp: T0 }, runtimeSeed: RUNTIME_SEED } as never;
 const MUT = { mutableFrameState: true } as never;
 const expectSame = (og: Outcome, rw: Outcome, label: string): void => { expect(`${label}:${stableJson(rw)}`).toBe(`${label}:${stableJson(og)}`); };
 
+/**
+ * The prepared form of a route, or the route itself when it cannot be prepared (a mutated route: an expired
+ * expiresAt, a foreign jurisdiction, ...; og buildPreparedCrossJurisdictionRoute throws the same code). A node
+ * only ever stores or forwards a prepared route that preparation accepted.
+ */
+const preparedOr = (route: CrossRoute): CrossRoute => { const p = prepareCrossRoute(route, { runtimeSeed: RUNTIME_SEED, now: T0 }); return p.ok ? p.value : route; };
 /** One random corruption of the route a handler sees. */
 const mutateRoute = (r: Rand, route: CrossRoute): CrossRoute => {
   const k = int(r, 22);
@@ -292,7 +298,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
       const stored = (): ReadonlyMap<string, CrossRoute> | undefined => {
         if (!canon.ok || r() < 0.5) return undefined;
         const c = canon.value, k = int(r, 5);
-        const v: CrossRoute = k === 0 ? c : k === 1 ? { ...c, memo: "different" } : k === 2 ? { ...c, status: "cancelled" } : k === 3 ? unwrap(prepareCrossRoute(c, { runtimeSeed: RUNTIME_SEED, now: T0 })) : { ...unwrap(prepareCrossRoute(c, { runtimeSeed: RUNTIME_SEED, now: T0 })), routeHash: "0x" + "dd".repeat(32) };
+        const v: CrossRoute = k === 0 ? c : k === 1 ? { ...c, memo: "different" } : k === 2 ? { ...c, status: "cancelled" } : k === 3 ? preparedOr(c) : { ...preparedOr(c), routeHash: "0x" + "dd".repeat(32) };
         return new Map([[c.orderId, v]]);
       };
       const fixture: Fixture = {
@@ -302,7 +308,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
         ...(r() < 0.2 ? { jurisdictionName: "other-name" } : {}),
       };
       // a prepared payload over the user lane (hub) or at a user
-      if (r() < 0.15 && canon.ok) route = unwrap(prepareCrossRoute(canon.value, { runtimeSeed: RUNTIME_SEED, now: T0 }));
+      if (r() < 0.15 && canon.ok) route = preparedOr(canon.value);
       if (r() < 0.05 && route.sourcePull !== undefined) { const { targetPull: _, ...rest } = route; route = rest as CrossRoute; }
       const og = ogOutcome(() => ogSetup.handlePrepareCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "prepareCrossJurisdictionSwap", data: { route } } as never, MUT) as never);
       const rw = rwOutcome(crossPrepare(viewOf(fixture), route));

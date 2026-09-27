@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 // og Runtime J subsystems (core/runtime/j-submit, core/runtime/registration, core/jurisdiction), each run against live og.
 import { applyRuntimeTx as ogApplyRuntimeTx } from "../../core/runtime/tx/tx-handlers.ts";
 import { buildJurisdictionImportRequestHash } from "../../core/runtime/j-submit/jurisdiction-import.ts";
@@ -608,7 +608,7 @@ describe(seedTag("runtime-j: receipt-proven registration evidence (og registrati
 
   test("MATCH (randomized): a numbered importReplica needs registration evidence for its exact board (og assertNumberedReplicaImportAuthority)", async () => {
     let imported = 0, refused = 0;
-    for (let run = 0; run < 16; run++) {
+    for (let run = 0, more = untilCovered(16, () => imported > 8 && refused > 8); more(run); run++) {
       const seed = `runtime-j-numbered-${run}`, env = createEmptyEnv(seed) as unknown as OgEnv & { runtimeId: string };
       registerSignerKey(env as never, env.runtimeId, deriveSignerKeySync(seed, "1"));
       const replica = { name: "Local", blockNumber: 7n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 }, chainId: CHAIN, contracts: { depository: DEP, entityProvider: EP }, watcherConfirmationDepth: 0, entityProviderDeploymentBlock: 1 };

@@ -33,7 +33,7 @@ const ctx = (signerId: Address, extra: Partial<{ from: EntityId }> = {}) => ({ .
 /** The fixture ctx names ALICE (the 1-of-1 lazy id); a multi-signer fixture Entity is its own lazy board id, so that placeholder resolves to the replica. */
 const applyEntityInput: typeof applyEntityInputAt = (r, input, c) => applyEntityInputAt(r, input, c.self === ALICE ? { ...c, self: r.state.id } : c);
 const openTo = (target: EntityId, extra: Record<string, unknown> = {}): EntityTx =>
-  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...extra } }) as EntityTx;
+  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...extra } }) as EntityTx;
 const open = openTo(BOB);
 const txs = (list: readonly EntityTx[], timestamp = 1n): EntityInput => ({ kind: "txs", timestamp, txs: list });
 const propose = (r: EntityReplica, signer: Address, list: readonly EntityTx[] = [open], timestamp = 1n) => applyEntityInput(r, txs(list, timestamp), ctx(signer));

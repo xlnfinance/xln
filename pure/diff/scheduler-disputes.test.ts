@@ -411,7 +411,7 @@ describe(seedTag("scheduler-disputes: Runtime/Entity event channel (og EntityCan
     const ctx = createAccountConsensusContext(ogEnv);
     for (const target of [BOB, CAROL]) {
       const state = entity([aliceAddr], true);
-      const tx = { type: "openAccount", data: { targetEntityId: target, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx;
+      const tx = { type: "openAccount", data: { targetEntityId: target, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx;
       const rw = unwrap(foldTxs(state, new Map(), [tx], { verify: hankoVerify, timestamp: NOW })).draft;
       const og: any = { entityId: ALICE, timestamp: Number(NOW), config: ogConfig(state, true), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([], ALICE, () => ZERO_WORD as never)), paybook: { entries: new Map(), feesEarned: 0n } };
       const effects: any[] = [];

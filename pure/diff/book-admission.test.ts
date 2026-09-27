@@ -1,7 +1,7 @@
 // Behavioural diff: og Account admission timing (core/account/input/local-tx-admission.ts) and the hub order book inside
 // entity consensus (core/entity/consensus/frame/application.ts) vs pure/xln.ts. Every test is MATCH and runs og live.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 
 // ---- og ----
 import { applyAccountEnqueue } from "../../core/account/input/local-tx-admission.ts";
@@ -187,7 +187,7 @@ describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountI
   });
 
   test("MATCH: a proposed Account re-emits the exact ack_frame it sent (og cloneIsolatedAccountInput(pendingAccountInput)); an Account without one is owed nothing", () => {
-    const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
+    const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
     const first = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx));
     const sent = first.outputs.filter((o) => "tx" in o && o.tx.data.kind === "ack_frame");
     expect(sent.length).toBe(1);
@@ -300,8 +300,11 @@ describe(seedTag("book-admission: same-j hub matcher"), () => {
 
   test("MATCH: 40 random hub streams (offers, fills, STP, bands, fees, dimensions, cancels, committed removals, resume): same resolves, books and pair dimensions", () => {
     const comments = new Map<string, number>();
-    let halts = 0, fills = 0, resumes = 0, cancelTxs = 0, matchedTrades = 0;
-    for (let s = 0; s < 40; s++) {
+    let halts = 0, fills = 0, resumes = 0, cancelTxs = 0, matchedTrades = 0, streams = 0;
+    const commentKinds = ["fill", "outside-anchor-band", "STP", "fee-authorization-exceeded", "quote-lot-misaligned", "pair-decimals-mismatch"];
+    const covered = () => fills > 50 && matchedTrades > 20 && cancelTxs > 5 && resumes > 5 && commentKinds.every((c) => (comments.get(c) ?? 0) > 0);
+    for (let s = 0, more = untilCovered(40, covered); more(s); s++) {
+      streams++;
       const takerFeeBps = pick([0, 0, 5, 30, 10_000]);
       const hubProfile = { entityId: HUB, name: "hub", spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: pick([...USERS, W("99")]), minTradeSize: pick([0n, 0n, 1_000n]), supportedPairs: [] };
       let rwExt: OrderbookExt = { books: new Map(), pairDimensions: new Map(), referrals: new Map(), hubProfile };
@@ -391,8 +394,8 @@ describe(seedTag("book-admission: same-j hub matcher"), () => {
     expect(matchedTrades).toBeGreaterThan(20);
     expect(cancelTxs).toBeGreaterThan(5);
     expect(resumes).toBeGreaterThan(5);
-    for (const c of ["fill", "outside-anchor-band", "STP", "fee-authorization-exceeded", "quote-lot-misaligned", "pair-decimals-mismatch"]) expect([c, (comments.get(c) ?? 0) > 0]).toEqual([c, true]);
-    expect(halts).toBeLessThan(40);
+    for (const c of commentKinds) expect([c, (comments.get(c) ?? 0) > 0]).toEqual([c, true]);
+    expect(halts).toBeLessThan(streams);
   });
 });
 
@@ -427,7 +430,7 @@ describe(seedTag("book-admission: hub order book inside entity consensus"), () =
     const replica = (id: EntityId) => rt.entities.get(replicaKey(id, signers.get(id)!))!;
     return { send, replica, log };
   };
-  const open = (target: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, creditAmount: 10n ** 30n, tokenId: T(2) } });
+  const open = (target: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, creditAmount: 10n ** 30n, tokenId: T(2) } });
   const credit = (to: EntityId, token: number): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: T(token), amount: 10n ** 30n } });
   const offer = (offerId: string, sellWeth: boolean, priceUsdc: bigint, weth: bigint): EntityTx => {
     const base = weth * 10n ** 18n, quote = weth * priceUsdc * 10n ** 6n;

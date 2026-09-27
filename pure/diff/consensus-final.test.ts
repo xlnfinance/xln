@@ -1,6 +1,6 @@
 // consensus-final: Entity/Account consensus, admission, boards, orderbook and wire shapes (final wave). Every test runs og (core/ at 566c850) live.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { ethers } from "ethers";
 import { assertEntityEncryptionKeypair } from "../../core/protocol/htlc/multi-recipient.ts";
@@ -232,7 +232,8 @@ describe(seedTag("consensus-final: the proposal policy of og entity/consensus/pr
   test("MATCH (og selectProposableEntityTxs + isSelfBoardAuthorityTransitionFrame): 300 random mempools of self board ranges, handovers, Account rows and plain txs, on lazy and uncertified Entities", async () => {
     const seen = new Map<string, number>();
     const signers = [aliceAddr, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"].map((a) => a.toLowerCase());
-    for (let i = 0; i < 300; i++) {
+    const wanted = ["SELF_BOARD_HANDOVER_PRIORITY", "SELF_BOARD_CONFIG_HANDOVER_REQUIRED", "SELF_BOARD_ROTATION_PRIORITY", "SELF_BOARD_ACTIVATION_REQUIRED", "SELF_BOARD_CERTIFICATION_REQUIRED", "COUNTERPARTY_BOARD_ACTIVATION_PRIORITY", "plain"];
+    for (let i = 0, more = untilCovered(300, () => wanted.every((k) => (seen.get(k) ?? 0) > 0)); more(i); i++) {
       const members = new Map([[aliceAddr, { shares: 1n }]]), lazy = pri(3) > 0, board = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
       const id = lazy ? board : pword();
       const r = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: TERMS.domain, threshold: 1n, members }));
@@ -261,7 +262,7 @@ describe(seedTag("consensus-final: the proposal policy of og entity/consensus/pr
       const mineAuth = selfAuthorityTransitionFrame(r.state, mempool as EntityTx[]);
       expect([i, mineAuth.ok ? mineAuth.value : (mineAuth.error as { reason?: string }).reason]).toEqual([i, ogAuth]);
     }
-    for (const k of ["SELF_BOARD_HANDOVER_PRIORITY", "SELF_BOARD_CONFIG_HANDOVER_REQUIRED", "SELF_BOARD_ROTATION_PRIORITY", "SELF_BOARD_ACTIVATION_REQUIRED", "SELF_BOARD_CERTIFICATION_REQUIRED", "COUNTERPARTY_BOARD_ACTIVATION_PRIORITY", "plain"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
+    for (const k of wanted) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
   });
 
   test("MATCH (og selectEntityTxsWithinJRangeBudget): multi-MiB ranges -- the same prefix, the suffix waits, an unfittable range or bad span halts", () => {
@@ -356,7 +357,7 @@ describe(seedTag("consensus-final: a received Account frame commits at once (reb
       return rt;
     };
     const create = (id: EntityId, txs: EntityTx[]): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp: (clock += 10n), txs } });
-    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, creditAmount: 1000n, tokenId: t1 } } as EntityTx);
+    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, creditAmount: 1000n, tokenId: t1 } } as EntityTx);
     let rt = spawn(spawn(spawn(createRuntime(), party(ALICE)), party(BOB)), party(CAROL));
     rt = quiet(rt, [create(BOB, [open(ALICE), open(CAROL)])]);
     rt = quiet(rt, [create(ALICE, [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: t1, amount: 1000n } } as EntityTx]), create(CAROL, [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: t1, amount: 1000n } } as EntityTx])]);

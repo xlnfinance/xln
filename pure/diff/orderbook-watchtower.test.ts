@@ -1,7 +1,7 @@
 // Differential tests: og watchtower (core/watchtower/{http,store}, core/storage/recovery/bundle) and og orderbook (core/orderbook,
 // entity swap requests) vs the pure rewrite. "MATCH:" tests run og live on the same input.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -185,8 +185,8 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
   test("MATCH (randomized): 120 appointments over 3 lookup keys, bundle cap 2 and a 3.5 KB quota", async () => {
     for (const [seed, opts] of [[11, { maxBundles: 2 }], [12, { maxBytes: 3500 }]] as const) {
       const ls = lockstep(opts), rand = prng(seed), base = ls.now - 100_000;
-      const seen = new Set<string>();
-      for (let i = 0; i < 60; i++) {
+      const seen = new Set<string>(), wanted = ["ok", "TOWER_APPOINTMENT_STALE", "TOWER_APPOINTMENT_REPLAY_MISMATCH"];
+      for (let i = 0, more = untilCovered(60, () => wanted.every((k) => seen.has(k))); more(i); i++) {
         const lookup = Math.floor(rand() * 3), delayed = rand() < 0.25;
         const spec: Spec = {
           ownerIndex: rand() < 0.05 ? 9 : lookup, lookup, slot: Math.floor(rand() * 3), signedAt: base + Math.floor(rand() * 20), height: Math.floor(rand() * 8), createdAt: Math.floor(rand() * 4),
@@ -197,7 +197,7 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
         ls.expectSame(r, `seed ${seed} step ${i}`);
         seen.add(r.og["ok"] === true ? "ok" : String(r.og["error"]).split(":")[0] ?? "");
       }
-      expect(seen.has("ok") && seen.has("TOWER_APPOINTMENT_STALE") && seen.has("TOWER_APPOINTMENT_REPLAY_MISMATCH")).toBe(true);
+      expect(wanted.filter((k) => !seen.has(k))).toEqual([]);
       await ls.compareDocs();
     }
   });
@@ -222,7 +222,7 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
 
 describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
-  const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
+  const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
   const opened = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
   const ogState = (accounts: readonly string[]) => ({ entityId: ALICE, accounts: new Map(accounts.map((a) => [a, { state: {} }])), config: { validators: [aliceAddr] } }) as never;
   /** og AccountTx `{type, data}` (numeric token ids) as the rewrite's flat wire tx. */

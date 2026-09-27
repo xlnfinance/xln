@@ -179,7 +179,7 @@ const T1 = unwrap(tokenId("1"));
 /** ALICE (1-of-1) with a committed Account to BOB whose token 1 row holds collateral. */
 const settleBase = (): OpenEntity => {
   const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
-  const open = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
+  const open = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
   if (open._tag !== "open") throw new Error(open._tag);
   const child = open.accountReplicas.get(BOB)!;
   const aliceLeft = isLeft(ALICE, child.state.account.id);
