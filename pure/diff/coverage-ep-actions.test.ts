@@ -21,6 +21,7 @@ import {
   type Runtime, type RuntimeTx,
 } from "../xln.ts";
 import { aliceAddr, bobAddr, signedTxs, unwrap, verifiers } from "../xln_run.ts";
+import { ogOf } from "./og-state.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
 const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 0xe9ac7;
@@ -125,7 +126,7 @@ const commitActions = (fx: Fixture, txs: (s: EntityState) => readonly EntityTx[]
 };
 type Pending = { readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number };
 const pendingOf = (s: EntityState): Pending | undefined =>
-  (s.committed["entityProviderActionState"] as { readonly pending?: Pending } | undefined)?.pending;
+  (ogOf(s)["entityProviderActionState"] as { readonly pending?: Pending } | undefined)?.pending;
 const fixture = (run: number, kind: ActionKind): Fixture => {
   const id = word(0x100 + run);
   const members = new Map([[aliceAddr, { shares: 1n }], [bobAddr, { shares: 1n }]]);

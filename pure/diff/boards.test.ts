@@ -22,6 +22,7 @@ import { PersistentEntityCollectionMap } from "../../core/entity/state/persisten
 import {
   advanceCertifiedBoardFinality, applyCertifiedBoardRegistryEvent, collectReachableCertifiedBoardNodes, createCertifiedBoardProof, getCertifiedBoardStackKey, lookupCertifiedBoardRecord, verifyCertifiedBoardProof,
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
+import { ogOf } from "./og-state.ts";
 
 let seed = seedOf(11);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -296,7 +297,7 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
       const env = ogEnv(ogNodes);
       for (let step = 0; step < 14; step += 1) {
         t += 1 + ri(5);
-        const pending = (state.committed["entityProviderActionState"] as any)?.pending, confirmed: bigint = (state.committed["entityProviderActionState"] as any)?.confirmedNonce ?? 0n;
+        const pending = (ogOf(state)["entityProviderActionState"] as any)?.pending, confirmed: bigint = (ogOf(state)["entityProviderActionState"] as any)?.confirmedNonce ?? 0n;
         const r = rng();
         const ogS = ogStateOf(state, ogRegistry, cloneAction(ogAction), t);
         let mine: { ok: boolean; error?: unknown; state?: EntityState; hashes?: unknown; jOutputs?: unknown; messages?: string[] }, ogR: ReturnType<typeof og>;
@@ -339,7 +340,7 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
           expect(mine.jOutputs).toEqual(ogR.value.jOutputs);
         }
         expect(mine.messages).toEqual(readEntityFrameEventMessages(ogS));
-        expect(mine.state.committed["entityProviderActionState"]).toEqual(ogS.entityProviderActionState);
+        expect(ogOf(mine.state)["entityProviderActionState"]).toEqual(ogS.entityProviderActionState);
         state = mine.state; ogAction = ogS.entityProviderActionState; ogRegistry = ogS.certifiedBoardState;
       }
     }
@@ -381,7 +382,7 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
     const p = unwrap(applyEntityInput({ ...replica, state }, { kind: "txs", timestamp: 9n, txs: [tx] }, { ...verifiers, self: state.id, signerId: aliceAddr })).replica;
     if (p._tag !== "proposed") throw new Error("phase");
     expect(wired(p.frame.txs)).toEqual(ogAuthored(state, aliceAddr, [tx], { certifiedBoardState: ogRegistry }, { infrastructure: { certifiedBoardNodes: ogNodes } }));
-    const action = (p.draft.state.committed["entityProviderActionState"] as any).pending;
+    const action = (ogOf(p.draft.state)["entityProviderActionState"] as any).pending;
     const frameHash = unwrap(hashEntityFrame(p.frame));
     // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash (og's genesis profile is all empty text)
     const profile = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile: { name: "", isHub: false, avatar: "", bio: "", website: "" }, accounts: new Map(), config: { jurisdiction: { ...OG_J, ...EP_J } } } as never);

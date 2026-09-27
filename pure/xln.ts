@@ -11351,6 +11351,8 @@ export type EntityState = {
   readonly jBatch: JSubmission;
   /** og hubRebalanceConfig, lending and profile.isHub: set together by setHubConfig and never cleared. */
   readonly hub: EntityHub;
+  /** og entityProviderActionState: the Entity's one EntityProvider action lane. */
+  readonly providerActions: ProviderActions;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12239,6 +12241,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   committed: s.committed,
   jBatch: s.jBatch,
   hub: s.hub,
+  providerActions: s.providerActions,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12874,17 +12877,20 @@ const authorityOf = (p: EntitySeed): Authority => {
   return { _tag: "board", board, entityId };
 };
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
-type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub">;
+type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub" | "providerActions">;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (og: EntityCommitted): Result<TypedSections, EntityError> => {
-  const { jBatchState, ...seeded } = og;
+  const { jBatchState, entityProviderActionState, ...seeded } = og;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
+  const actions = entityProviderActionState as EntityProviderActionState | undefined;
   const imported = all({
     jBatch: mapErr(importJBatchState(jBatchState as OgJBatchState | undefined), unreachable("J_BATCH")),
     hubbed: mapErr(importHub(seeded), unreachable("HUB")),
+    providerActions: mapErr(importProviderActions(actions), unreachable("ENTITY_PROVIDER_ACTION")),
   });
-  return map(imported, ({ jBatch, hubbed: { hub, committed } }) => ({ committed, jBatch, hub }));
+  return map(imported, ({ jBatch, hubbed: { hub, committed }, providerActions }) =>
+    ({ committed, jBatch, hub, providerActions }));
 };
 /** The state with its committed sections replaced by og-named ones (the inverse of ogSections). */
 export const withOgSections = (state: EntityState, og: EntityCommitted): Result<EntityState, EntityError> =>
@@ -19817,7 +19823,8 @@ export const applyBoardJEvent = (
 /** og: a pending EntityProvider action signed under an older board epoch expires at the Entity's own activation. */
 const expireStaleEpAction = (step: BoardJEventStep): Result<BoardJEventStep, EntityError> => {
   const { state, events } = step;
-  const { pending, ...kept } = epActionState(state);
+  const lane = actionLane(state);
+  const pending = lane.pending;
   if (pending === undefined) return ok(step);
   return chain(observerBoardRecord(state, state.id), (record) => {
     if (record === null) return invariant(`ENTITY_PROVIDER_ACTION_CERTIFIED_BOARD_MISSING:${state.id}`);
@@ -19829,7 +19836,7 @@ const expireStaleEpAction = (step: BoardJEventStep): Result<BoardJEventStep, Ent
         return ok(step);
       default:
         return ok({
-          state: putEpActionState(state, kept),
+          state: withActionLane(state, { ...lane, pending: undefined }),
           events: [...events, status("🛑 Pending EntityProvider action expired at board activation")],
         });
     }
@@ -19892,22 +19899,60 @@ export type EntityProviderActionIntent = {
   readonly actionHash: string;
 };
 /**
- * og EntityState.entityProviderActionState (committed): one action lane per Entity, `pending` until its J receipt or a
- * board activation.
+ * The Entity's EntityProvider action lane: unused until its first action, then the last confirmed nonce, the intent
+ * generation, and at most one pending intent. og's writers build a pending intent at the next nonce and generation, and
+ * its receipt or a board activation clears it.
  */
+export type ProviderActions =
+  | Readonly<{ _tag: "unused" }>
+  | Readonly<{
+      _tag: "lane";
+      confirmedNonce: bigint;
+      generation: number;
+      pending: EntityProviderActionIntent | undefined;
+    }>;
+type ActionLane = Omit<Extract<ProviderActions, { _tag: "lane" }>, "_tag">;
+export const NO_PROVIDER_ACTIONS: ProviderActions = { _tag: "unused" };
+/** og currentActionState: an unused lane reads as nonce 0 and generation 0, with nothing pending. */
+const actionLane = (state: EntityState): ActionLane =>
+  state.providerActions._tag === "lane"
+    ? state.providerActions
+    : { confirmedNonce: 0n, generation: 0, pending: undefined };
+const withActionLane = (state: EntityState, lane: ActionLane): EntityState => ({
+  ...state,
+  providerActions: { _tag: "lane", ...lane },
+});
+/** og EntityState.entityProviderActionState, as the root commits it: og deletes a cleared `pending`. */
 export type EntityProviderActionState = {
   readonly version: 1;
   readonly confirmedNonce: bigint;
   readonly generation: number;
   readonly pending?: EntityProviderActionIntent | undefined;
 };
-const EP_ACTION_EMPTY: EntityProviderActionState = { version: 1, confirmedNonce: 0n, generation: 0 };
-const epActionState = (state: EntityState): EntityProviderActionState =>
-  (state.committed["entityProviderActionState"] as EntityProviderActionState | undefined) ?? EP_ACTION_EMPTY;
-const putEpActionState = (state: EntityState, s: EntityProviderActionState): EntityState => ({
-  ...state,
-  committed: { ...state.committed, entityProviderActionState: s as unknown as Binary },
-});
+const ogProviderActions = (p: ProviderActions): EntityProviderActionState | undefined =>
+  p._tag === "unused"
+    ? undefined
+    : {
+        version: 1,
+        confirmedNonce: p.confirmedNonce,
+        generation: p.generation,
+        ...(p.pending === undefined ? {} : { pending: p.pending }),
+      };
+/** og's lane as the rewrite holds it; a lane og's writers cannot leave behind is refused. */
+const importProviderActions = (og: EntityProviderActionState | undefined): Result<ProviderActions, string> => {
+  if (og === undefined) return ok(NO_PROVIDER_ACTIONS);
+  const { confirmedNonce, generation, pending } = og;
+  const problems = [
+    og.version !== 1 ? `version ${String(og.version)}` : undefined,
+    typeof confirmedNonce !== "bigint" || confirmedNonce < 0n || confirmedNonce > EP_MAX_UINT
+      ? `confirmedNonce ${String(confirmedNonce)}`
+      : undefined,
+    !Number.isSafeInteger(generation) || generation < 0 ? `generation ${String(generation)}` : undefined,
+    pending !== undefined && pending.actionNonce !== confirmedNonce + 1n ? "pending off the next nonce" : undefined,
+    pending !== undefined && pending.generation !== generation ? "pending off the lane generation" : undefined,
+  ].filter((x) => x !== undefined);
+  return problems.length > 0 ? err(problems.join(", ")) : ok({ _tag: "lane", confirmedNonce, generation, pending });
+};
 const packedLabel = (label: string): Packed => ({ _tag: "bytes", value: bytesToHex(utf8(label)) });
 const packedAddress = (value: string): Packed => ({ _tag: "address", value });
 const u256 = (value: bigint): Packed => ({ _tag: "uint256", value });
@@ -19988,17 +20033,6 @@ const epDomain = (state: EntityState): Result<EpDomain, EntityError> => {
   if (depository === null || depository === EP_ZERO_ADDRESS) return epFail("INVALID_DEPOSITORY_ADDRESS");
   return ok({ name, chainId, entityProviderAddress: provider, depositoryAddress: depository });
 };
-const epCurrent = (state: EntityState): Result<EntityProviderActionState, EntityError> => {
-  const c = epActionState(state);
-  const sound =
-    c.version === 1 &&
-    typeof c.confirmedNonce === "bigint" &&
-    c.confirmedNonce >= 0n &&
-    c.confirmedNonce <= EP_MAX_UINT &&
-    Number.isSafeInteger(c.generation) &&
-    c.generation >= 0;
-  return sound ? ok(c) : epFail("ENTITY_PROVIDER_ACTION_STATE_INVALID");
-};
 const epEntityNumber = (entityId: string): Result<bigint, EntityError> => {
   if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(entityId.trim()))
     return epFail(`ENTITY_PROVIDER_ACTION_ENTITY_ID_INVALID:${entityId}`);
@@ -20055,11 +20089,15 @@ type EpCall = { readonly state: EntityState; readonly replicas: Replicas; readon
 /**
  * The Entity's action lane, ready for its next intent: the action domain, the committed lane and the signing leader.
  */
-type EpLane = { readonly domain: EpDomain; readonly current: EntityProviderActionState; readonly signer: string };
+type EpLane = { readonly domain: EpDomain; readonly current: ActionLane; readonly signer: string };
 /** The board epoch and on-chain number an intent is signed under. */
 type EpSigning = { readonly entityNumber: bigint; readonly boardEpoch: bigint };
+const epSigning = (state: EntityState): Result<EpSigning, EntityError> =>
+  chain(epEntityNumber(state.id), (entityNumber) =>
+    map(epBoardEpoch(state), (boardEpoch) => ({ entityNumber, boardEpoch })),
+  );
 /** A new intent takes the next generation, and the leader to submit it. */
-const epNextSigner = (state: EntityState, current: EntityProviderActionState): Result<string, EntityError> => {
+const epNextSigner = (state: EntityState, current: ActionLane): Result<string, EntityError> => {
   if (current.generation >= Number.MAX_SAFE_INTEGER) return epFail("ENTITY_PROVIDER_ACTION_GENERATION_EXHAUSTED");
   return activeSigner(state, "ENTITY_PROVIDER_ACTION_SUBMITTER_MISSING");
 };
@@ -20107,14 +20145,13 @@ const epIssue = (
   } as unknown as Binary;
   const nonce = `nonce=${intent.actionNonce}`;
   const context = `entityProviderAction:${state.id.slice(-4)}:${announce.label}:nonce:${intent.actionNonce}`;
-  const lanePending: EntityProviderActionState = {
-    version: 1,
+  const lanePending: ActionLane = {
     confirmedNonce: lane.current.confirmedNonce,
     generation: intent.generation,
     pending: intent,
   };
   return {
-    state: putEpActionState(state, lanePending),
+    state: withActionLane(state, lanePending),
     accountReplicas: replicas,
     outputs: [],
     events: [status(`${announce.icon} EntityProvider ${announce.label} → hashesToSign [${nonce}]`)],
@@ -20123,7 +20160,7 @@ const epIssue = (
   };
 };
 /** One action at a time, and never past the last nonce. */
-const epLaneOpen = (current: EntityProviderActionState): Result<void, EntityError> => {
+const epLaneOpen = (current: ActionLane): Result<void, EntityError> => {
   const pending = current.pending;
   if (pending !== undefined)
     return epFail(`ENTITY_PROVIDER_ACTION_PENDING:${pending.actionNonce}:${pending.actionHash}`);
@@ -20137,22 +20174,16 @@ const entityProviderAction = (
   timestamp: bigint,
 ): Result<Draft, EntityError> => {
   const call: EpCall = { state, replicas, timestamp };
+  const current = actionLane(state);
   return chain(epDomain(state), (domain) =>
-    chain(epCurrent(state), (current) =>
-      chain(epLaneOpen(current), () =>
-        chain(epNextSigner(state, current), (signer) => {
-          const lane: EpLane = { domain, current, signer };
-          return chain(epEntityNumber(state.id), (entityNumber) =>
-            chain(epBoardEpoch(state), (boardEpoch) =>
-              map(epPayload(tx), (payload) =>
-                epIssue(call, lane, epIntent(call, lane, { entityNumber, boardEpoch }, payload), {
-                  icon: "📤",
-                  label: payload.kind,
-                }),
-              ),
-            ),
-          );
-        }),
+    chain(epLaneOpen(current), () =>
+      chain(epNextSigner(state, current), (signer) =>
+        chain(epSigning(state), (signing) =>
+          map(epPayload(tx), (payload) => {
+            const lane: EpLane = { domain, current, signer };
+            return epIssue(call, lane, epIntent(call, lane, signing, payload), { icon: "📤", label: payload.kind });
+          }),
+        ),
       ),
     ),
   );
@@ -20188,7 +20219,7 @@ const epIntentValid = (
     : epFail(`ENTITY_PROVIDER_ACTION_HASH_MISMATCH:${intent.actionHash}:${recomputed}`);
 };
 type EpCancelTx = Extract<EntityTx, { readonly type: "entityProviderCancelAction" }>;
-/** A cancel must name the pending executable action, still sound under the current board, at the lane's next nonce. */
+/** A cancel must name the pending executable action, still sound under the current board. */
 const epCancelTarget = (
   state: EntityState,
   lane: Omit<EpLane, "signer">,
@@ -20199,14 +20230,11 @@ const epCancelTarget = (
   if (pending === undefined) return epFail("ENTITY_PROVIDER_ACTION_CANCEL_PENDING_MISSING");
   return chain(epIntentValid(pending, lane.domain, state.id, boardEpoch), () => {
     const requested = String(tx.data.actionHash ?? "").trim().toLowerCase();
-    const next = lane.current.confirmedNonce + 1n;
     switch (true) {
       case pending.payload.kind === "cancelPendingAction":
         return epFail(`ENTITY_PROVIDER_ACTION_CANCEL_ALREADY_PENDING:${pending.actionHash}`);
       case requested !== lower(pending.actionHash):
         return epFail(`ENTITY_PROVIDER_ACTION_CANCEL_TARGET_MISMATCH:${requested || "missing"}:${pending.actionHash}`);
-      case pending.actionNonce !== next:
-        return epFail(`ENTITY_PROVIDER_ACTION_PENDING_NONCE_CORRUPT:${pending.actionNonce}:${next}`);
       default:
         return ok(pending);
     }
@@ -20224,18 +20252,15 @@ const entityProviderCancel = (
   timestamp: bigint,
 ): Result<Draft, EntityError> => {
   const call: EpCall = { state, replicas, timestamp };
+  const current = actionLane(state);
   return chain(epDomain(state), (domain) =>
-    chain(epCurrent(state), (current) =>
-      chain(epBoardEpoch(state), (boardEpoch) =>
-        chain(epCancelTarget(state, { domain, current }, boardEpoch, tx), (target) =>
-          chain(epNextSigner(state, current), (signer) => {
+    chain(epBoardEpoch(state), (boardEpoch) =>
+      chain(epCancelTarget(state, { domain, current }, boardEpoch, tx), (target) =>
+        chain(epNextSigner(state, current), (signer) =>
+          map(epEntityNumber(state.id), (entityNumber) => {
             const lane: EpLane = { domain, current, signer };
-            return map(epEntityNumber(state.id), (entityNumber) =>
-              epIssue(call, lane, epIntent(call, lane, { entityNumber, boardEpoch }, cancelPayloadOf(target)), {
-                icon: "🛑",
-                label: "cancel",
-              }),
-            );
+            const intent = epIntent(call, lane, { entityNumber, boardEpoch }, cancelPayloadOf(target));
+            return epIssue(call, lane, intent, { icon: "🛑", label: "cancel" });
           }),
         ),
       ),
@@ -20302,15 +20327,9 @@ const epReceipt = (state: EntityState, event: EpReceiptEvent): Result<EpReceipt,
   });
 };
 /** The lane a receipt lands on must leave room for the nonce it confirms. */
-const epReceiptLane = (state: EntityState): Result<EntityProviderActionState, EntityError> => {
-  const c = epActionState(state);
-  const sound =
-    c.version === 1 &&
-    c.confirmedNonce >= 0n &&
-    c.confirmedNonce < EP_MAX_UINT &&
-    Number.isSafeInteger(c.generation) &&
-    c.generation >= 0;
-  return sound ? ok(c) : epFail("ENTITY_PROVIDER_ACTION_STATE_CORRUPT");
+const epReceiptLane = (state: EntityState): Result<ActionLane, EntityError> => {
+  const lane = actionLane(state);
+  return lane.confirmedNonce < EP_MAX_UINT ? ok(lane) : epFail("ENTITY_PROVIDER_ACTION_STATE_CORRUPT");
 };
 /** A pending intent must be the very action the receipt names (and, for a cancel, our own cancel if one is pending). */
 const receiptMatchesPending = (pending: EntityProviderActionIntent, r: EpReceipt): Result<void, EntityError> => {
@@ -20348,7 +20367,7 @@ export const applyEntityProviderActionJEvent = (
         () => {
           const outcome = r.executed ? "✅ EntityProvider action finalized" : "🛑 EntityProvider action cancelled";
           return ok({
-            state: putEpActionState(state, { version: 1, confirmedNonce: r.nonce, generation: current.generation }),
+            state: withActionLane(state, { ...current, confirmedNonce: r.nonce, pending: undefined }),
             events: [status(`${outcome} (nonce ${r.nonce}) | Block ${blockNumber}`)],
           });
         },
@@ -26627,9 +26646,13 @@ const settleCollections = (committed: EntityCommitted): Result<EntityCommitted, 
   });
 /** The committed sections under og's names, before the root replaces collections with their commitments. */
 export const ogSections = (state: EntityState): EntityCommitted => {
-  const og = ogJBatchOf(state.jBatch);
-  const jBatch = og === undefined ? {} : { jBatchState: og as unknown as Binary };
-  return hubSections(state.hub, { ...state.committed, ...jBatch });
+  const jBatch = ogJBatchOf(state.jBatch);
+  const actions = ogProviderActions(state.providerActions);
+  return hubSections(state.hub, {
+    ...state.committed,
+    ...(jBatch === undefined ? {} : { jBatchState: jBatch as unknown as Binary }),
+    ...(actions === undefined ? {} : { entityProviderActionState: actions as unknown as Binary }),
+  });
 };
 /**
  * og projectEntityConsensusState's committed sections: the settlement collections, the paybook, the cross-j
@@ -31541,7 +31564,7 @@ const ENTITY_PROVIDER_ACTION_LEDGER: ResultLedger<EntityProviderActionSubmitStat
   journal: (local) => local.entityProviderActionSubmitState,
   withJournal: (entityProviderActionSubmitState) => ({ entityProviderActionSubmitState }),
   current: (state, d) => {
-    const committed = epActionState(state).pending;
+    const committed = actionLane(state).pending;
     return committed !== undefined && sameAction(committed, d);
   },
   tracks: sameAction,
@@ -31677,7 +31700,7 @@ type TrustedEpPending = { readonly pending: EntityProviderActionIntent; readonly
  * certified board epoch.
  */
 const trustedEpPending = (rt: Runtime, r: EntityReplica): Result<TrustedEpPending, RuntimeError> => {
-  const pending = epActionState(r.state).pending;
+  const pending = actionLane(r.state).pending;
   const entityId = lower(r.state.id);
   if (pending === undefined) return txErr(`ENTITY_PROVIDER_ACTION_PENDING_MISSING:${entityId}`);
   return chain(entityJurisdiction(rt, r.state, "ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING"), (j) => {
@@ -31711,7 +31734,7 @@ const matchingEpSubmitState = (
   state: EntityState,
   local: EntityProviderActionSubmitState | undefined,
 ): EntityProviderActionSubmitState | undefined => {
-  const pending = epActionState(state).pending;
+  const pending = actionLane(state).pending;
   return pending !== undefined && local !== undefined && sameAction(local, pending) ? local : undefined;
 };
 /** og: the jTx type each EntityProvider action payload is submitted as. */
@@ -31870,7 +31893,7 @@ const pruneWitnesses = (
 ): ReadonlyMap<string, HankoWitness> => {
   const reachable = new Set([
     sentOf(state.jBatch)?.batchHash || undefined,
-    epActionState(state).pending?.actionHash || undefined,
+    actionLane(state).pending?.actionHash || undefined,
     newestProfileWitness(witness),
   ]);
   return new Map([...witness].filter(([hash]) => reachable.has(hash)));
@@ -38298,7 +38321,7 @@ const outboxHoldsAction = (input: JInput, raw: Binary, d: RetryEpActionData): bo
 const actionRetryDue =
   (w: WakeScan) =>
   ([key, r]: ReplicaEntry): RuntimeTx[] => {
-    const pending = epActionState(r.state).pending;
+    const pending = actionLane(r.state).pending;
     const name = jurisdictionNameOf(r.state);
     if (!isActiveLeader(r) || !w.canSubmit(r.signerId) || pending === undefined || !name) return [];
     const data: RetryEpActionData = {
