@@ -8,7 +8,7 @@ import { compareCanonicalJurisdictionEvents, normalizeJurisdictionEvent } from "
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from "../../core/jurisdiction/machine/event-observation.ts";
 import { registerSignerKey } from "../../core/account/crypto.ts";
 import {
-  buildLocalJPrefixAttestation, committedView, createEntity, jPrefixVerify, localProof, ogProofBody,
+  buildLocalJPrefixAttestation, committedView, createEntity, jPrefixVerify, localProof, queuedProofBody,
   type EntityFrameHash, type EntityState, type JPrefixCrypto, type JPrefixView, type ValidatorJBlock, type ValidatorJHistory,
 } from "../xln.ts";
 import { ALICE, TERMS, TEST_CONTRACTS, aliceAddr, anvilKey, genesisAB, signDigestHex, unwrap } from "../xln_run.ts";
@@ -43,7 +43,7 @@ const crypto: JPrefixCrypto = {
 const OG_ENV = { quietRuntimeLogs: true, runtimeSeed: `0x${"11".repeat(32)}` };
 registerSignerKey(asOg(OG_ENV), SIGNER, Buffer.from(KEY.slice(2), "hex"));
 const MIB = 1024 * 1024;
-const BODY = ogProofBody(unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: TEST_CONTRACTS.deltaTransformer })).body);
+const BODY = queuedProofBody(unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: TEST_CONTRACTS.deltaTransformer })).body);
 
 // ---- a 1-of-1 Entity at certified height L and its signer's local J history above it ----
 const L = 4;

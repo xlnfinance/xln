@@ -15,13 +15,13 @@ import { decodeDisputeStarterInitialSecrets } from "../../core/entity/tx/j-event
 import { ethers } from "ethers";
 import { txFingerprint } from "../../core/protocol/state/tx-multiset.ts";
 import {
-  applyCrossFill, countDeferredReveals, crossPrivateSeed, crossPullReveal, decodeHashLadderBinary, flushDeferredReveals, initJBatch, prepareCrossRoute, queueLadderReveal, stableJson,
-  type CjAccount, type CjHost, type CjJBatch, type CrossRoute, type EntityError, type EntityId, type Result,
+  applyCrossFill, countDeferredReveals, crossPrivateSeed, crossPullReveal, decodeHashLadderBinary, flushDeferredReveals, initJBatch, emptyQueuedBatch, prepareCrossRoute, queueLadderReveal, stableJson,
+  type CjAccount, type CjHost, type JBatchState, type QueuedBatch, type CrossRoute, type EntityError, type EntityId, type Result,
 } from "../xln.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import { ensureEntityCollectionCandidate } from "../../core/entity/state/persistent-collection-map.ts";
 import { countDeferredHashLadderReveals, flushDeferredHashLadderReveals, queueHashLadderRevealRegistration } from "../../core/entity/tx/j-events-htlc/index.ts";
-import { createEntity, foldTx, hashHtlcSecret, pullLadderHash, initCrontab, scheduleHook, withCrontab, crontabOf, localProof, ogProofBody, type AccountReplica, type EntityState } from "../xln.ts";
+import { createEntity, foldTx, hashHtlcSecret, pullLadderHash, initCrontab, scheduleHook, withCrontab, crontabOf, localProof, queuedProofBody, type AccountReplica, type EntityState } from "../xln.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batch/index.ts";
@@ -251,12 +251,11 @@ const ladderRow = (r: Rand, routes: readonly CrossRoute[], self: string) => {
   const cp = leg.entityId.toLowerCase() === self ? leg.counterpartyEntityId : leg.entityId;
   return { counterpartyEntity: cp.toLowerCase(), targetRole, fullHash: pull.fullHash, partialRoot: pull.partialRoot, witness: pendingOf(r) };
 };
-const jbOf = (r: Rand, routes: readonly CrossRoute[], self: string): CjJBatch | undefined => {
+const jbOf = (r: Rand, routes: readonly CrossRoute[], self: string): JBatchState | undefined => {
   if (xint(r, 6) === 0) return undefined;
-  const base = initJBatch() as unknown as { batch: Record<string, unknown[]> } & CjJBatch;
-  const fill = (): Record<string, unknown[]> => ({ ...base.batch, revealSecrets: [...otherRows(r, xpick(r, [0, 0, 0, 5, 49, 31]))] as never, hashLadderRegistrations: Array.from({ length: xpick(r, [0, 0, 1, 2, 32]) }, () => ladderRow(r, routes, self)) as never });
+  const fill = (): QueuedBatch => ({ ...emptyQueuedBatch(), revealSecrets: [...otherRows(r, xpick(r, [0, 0, 0, 5, 49, 31]))] as never, hashLadderRegistrations: Array.from({ length: xpick(r, [0, 0, 1, 2, 32]) }, () => ladderRow(r, routes, self)) as never });
   const batch = fill();
-  return { ...base, batch: batch as never, ...(xint(r, 3) === 0 ? { sentBatch: { batch: fill() as never, entityNonce: 3 } } : {}), ...(xint(r, 6) === 0 ? { recoveryBatches: [fill() as never] } : {}), status: "accumulating" } as unknown as CjJBatch;
+  return { ...initJBatch(), batch, ...(xint(r, 3) === 0 ? { sentBatch: { batch: fill(), entityNonce: 3 } as never } : {}), ...(xint(r, 6) === 0 ? { recoveryBatches: [fill()] } : {}), status: "accumulating" };
 };
 const hostOf = (r: Rand, n: number, self: EntityId): { host: CjHost; routes: CrossRoute[] } => {
   const routes = Array.from({ length: 1 + xint(r, 4) }, (_, k) => recoveryRoute(r, n * 10 + k));
@@ -455,7 +454,7 @@ describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / Di
   test("MATCH: 200 random signed dispute events on ALICE (starter / counterparty / third party, open / observed / queued BOB Account, frozen body and clock defects, starter secrets over paybook routes, counter-proof nonce rules, J batch retirement, crontab) -- same verdict, messages, J batch, activeDispute, jNonce, hooks, paybook and outputs as og", async () => {
     const r = xrng(0xd15b), kinds = new Map<string, number>();
     const good: string = (unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })) as any).bodyHash;
-    const goodBody = ogProofBody((unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })) as any).body);
+    const goodBody = queuedProofBody((unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })) as any).body);
     const L = TERMS.disputeConfig.leftResponseSeconds, R = TERMS.disputeConfig.rightResponseSeconds, nowSec = Math.floor(T0 / 1000);
     for (let i = 0; i < 200; i++) {
       const kind = xpick(r, ["DisputeStarted", "DisputeStarted", "CounterDisputeRegistered", "DisputeFinalized", "DisputeFinalized"] as const);

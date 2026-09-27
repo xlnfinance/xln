@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   authorEntityTxs, buildCommand, certifiedBoardStackKey, checkCommand, configBoardHash, createEntity, entityId, entityTransactionAction, foldTxs, hashCommand, hashCommandTxs, hashEntityFrame,
-  hashProposalAction, applyEntityInput, proposalId, tokenId, wireEntityTx, installedAccount, ZERO_WORD, genesisHost, applyHost, localProof, committedView, envelopeOf, prepareFrozen, ogProofBody, spawn, createRuntime, applyRuntime, convertOutput, replicaKey,
+  hashProposalAction, applyEntityInput, proposalId, tokenId, wireEntityTx, installedAccount, ZERO_WORD, genesisHost, applyHost, localProof, committedView, envelopeOf, prepareFrozen, queuedProofBody, spawn, createRuntime, applyRuntime, convertOutput, replicaKey,
   applyBookCommand, bookCommitmentHash, bookOrders, createBook, type Book,
   type AccountReplica, type Address, type EntityCommand, type EntityError, type EntityId, type EntityReplica, type EntityState, type EntityTx, type Hash, type ProposalAction,
 } from "../xln.ts";
@@ -551,11 +551,11 @@ describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/hand
     }
     expect([removedTotal > 10, untouched > 3]).toEqual([true, true]);
   }, 60_000);
-  test("MATCH: ogProofBody equals og canonicalizeProofBodyStruct over random offdeltas, token ids and allowances", () => {
+  test("MATCH: queuedProofBody equals og canonicalizeProofBodyStruct over random offdeltas, token ids and allowances", () => {
     for (let i = 0; i < 100; i++) {
       const body = { watchSeed: TERMS.watchSeed, leftResponseSeconds: BigInt(ri(99)), rightResponseSeconds: BigInt(ri(99)), offdeltas: Array.from({ length: ri(4) }, () => BigInt(ri(1e6)) * (rng() < 0.5 ? -1n : 1n) * (rng() < 0.2 ? 1n << 300n : 1n)),
         tokenIds: Array.from({ length: ri(3) }, () => BigInt(ri(9))), transformers: Array.from({ length: ri(2) }, () => ({ transformerAddress: `0x${"12".repeat(20)}`, encodedBatch: "0x00", allowances: [{ deltaIndex: 0n, rightAllowance: BigInt(ri(9)), leftAllowance: BigInt(ri(9)) }] })) };
-      expect(ogProofBody(body)).toEqual(canonicalizeProofBodyStruct({ ...body, offdeltas: body.offdeltas.map((v) => ({ high: v >> 256n, low: v & ((1n << 256n) - 1n) })) }, ALICE, BOB, "t") as never);
+      expect(queuedProofBody(body)).toEqual(canonicalizeProofBodyStruct({ ...body, offdeltas: body.offdeltas.map((v) => ({ high: v >> 256n, low: v & ((1n << 256n) - 1n) })) }, ALICE, BOB, "t") as never);
     }
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
-  createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, batchOfOg, encodeBatch,
+  createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, contractBatch, encodeBatch,
   type AccountReplica, type EntityId, type EntityState, type EntityTx,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, TERMS, aliceAddr, genesisAB, signedTxs, unwrap, verifiers } from "../xln_run.ts";
@@ -140,7 +140,7 @@ describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchStat
     for (const k of ["r2r:ok", "r2r:refused", "r2c:ok", "e2r:ok", "e2r:refused", "j_broadcast:ok", "j_broadcast:refused", "j_rebroadcast:ok", "j_abort_sent_batch:ok", "j_clear_batch:ok", "mintReserves:ok"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
   }, 120_000);
 
-  test("MATCH: batchOfOg reproduces og encodeJBatch bytes for og-shaped committed batches (numeric rows, Int512 proof bodies)", () => {
+  test("MATCH: contractBatch reproduces og encodeJBatch bytes for og-shaped committed batches (numeric rows, Int512 proof bodies)", () => {
     for (let i = 0; i < 60; i++) {
       const body = { watchSeed: `0x${"11".repeat(32)}`, leftResponseSeconds: 86400, rightResponseSeconds: 3600, offdeltas: [{ high: -1n, low: (1n << 256n) - BigInt(1 + ri(50)) }, { high: 0n, low: BigInt(ri(99)) }], tokenIds: [1n, 2n], transformers: [] };
       const b: any = {
@@ -151,7 +151,7 @@ describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchStat
         externalTokenToReserve: [{ entity: ALICE, contractAddress: TOKEN_CONTRACT, externalTokenId: 0n, tokenType: 0, internalTokenId: 1, amount: 4n }], reserveToExternalToken: [], revealSecrets: [],
         hashLadderRegistrations: [{ counterpartyEntity: BOB, targetRole: false, fullHash: `0x${"33".repeat(32)}`, partialRoot: `0x${"44".repeat(32)}`, witness: { fillRatio: ri(1000), fullSecret: `0x${"55".repeat(32)}`, reveals: [1, 2, 3, 4].map((n) => `0x${String(n).repeat(64)}`) } }],
       };
-      expect(encodeBatch(batchOfOg(b))).toBe(ogEncodeJBatch(b));
+      expect(encodeBatch(contractBatch(b))).toBe(ogEncodeJBatch(b));
     }
   });
 

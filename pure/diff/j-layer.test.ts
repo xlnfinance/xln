@@ -25,11 +25,12 @@ import { applyAccountSettledJEvent } from "../../core/entity/tx/j-events-account
 import { mergeJEventClaimOps } from "../../core/entity/tx/j-events-account.ts";
 import { applyDebtJEvent, applyReserveUpdatedJEvent } from "../../core/entity/tx/j-events-observations/index.ts";
 import { EntityAccountCandidateMap } from "../../core/entity/state/persistent-account-map.ts";
+import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import {
-  J_EVENT_SIGNATURES, jEventTopic, readJEvents, decodeBatch, disputeProofEvidence, finalizationEvidence, withDisputeCalldata, encodeBatch, emptyBatch, proofBodyHash, PROCESS_BATCH_SELECTOR, WATCHTOWER_COUNTER_DISPUTE_SELECTOR,
+  J_EVENT_SIGNATURES, jEventTopic, readJEvents, decodeBatch, disputeProofEvidence, finalizationEvidence, withDisputeCalldata, encodeBatch, emptyBatch, contractBatch, emptyQueuedBatch, proofBodyHash, PROCESS_BATCH_SELECTOR, WATCHTOWER_COUNTER_DISPUTE_SELECTOR,
   admit, applyAccountInput, committed, frameStateHash, getDelta, planAccountProposal, replicaId, entityJEvents, observeJBlocks, applyDebtEvent, withBatchNonces, EMPTY_DEBTS,
   simulateBatchReserves, openOutgoingDebtTotals, queueR2R, queueR2C, queueR2E, jBroadcast, takeBroadcastBatch, applyHankoBatchProcessed, initJBatch, genesisHost, applyHost,
-  type JObserver, type JObservation, type JBlock, type DebtLedger, type JEntity, type JBatchState,
+  type JObserver, type JObservation, type JBlock, type DebtLedger, type JEntity, type JBatchState, type QueuedBatch, type JQueued, type Result,
   type Batch, type ProofBody, type JEvent, type AccountFrame, type AccountInput, type AccountReplica, type EntityId, type ProposedAccount, type WireAccountTx,
 } from "../xln.ts";
 import { ALICE, BOB, CLOCK, NOW, TERMS, TOKEN, ackInput, genesisAB, hankoVerify, offerOf, partyIn, proposeInput, signAccountFrame, unwrap } from "../xln_run.ts";
@@ -466,24 +467,30 @@ describe(seedTag("Entity J observation (og j-event-payloads expandAccountSettled
 
 // ---------------------------------------------------------------- jBatchState queue, reserve admission, broadcast (og jurisdiction/machine/batch, entity/tx/handlers/j-batch, j-events-batch.ts)
 const OTHER = W("aa"), DEP = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const ogDecoded = (b: Batch): any => decodeJBatch(encodeBatch(b));
+/** The J batch a queue op must have produced. */
+const queuedBatch = (r: Result<JQueued, unknown>): JBatchState => {
+  const q = unwrap(r as any) as JQueued;
+  if (q._tag !== "queued") throw new Error(`refused: ${q.message}`);
+  return q.jBatch;
+};
+const ogDecoded = (b: QueuedBatch): any => decodeJBatch(encodeBatch(contractBatch(b)));
 const amt = () => BigInt(ri(100));
 const tok = () => 1 + ri(3);
 const randomReserves = () => new Map(Array.from({ length: 3 }, (_, k) => [k + 1, BigInt(ri(150))] as const).filter(() => rng() < 0.8));
 const randomDebt = () => new Map(Array.from({ length: 3 }, (_, k) => [k + 1, BigInt(ri(60))] as const).filter(([, d]) => d > 0n && rng() < 0.4));
 /** A debt book whose open outgoing totals equal `debt` (og getOpenOutgoingDebtTotals reads only status and remainingAmount). */
 const debtBook = (debt: ReadonlyMap<number, bigint>) => new Map([...debt].map(([tk, d]) => [tk, new Map([[`d${tk}`, { status: "open", remainingAmount: d } as any]])] as const));
-const randomDraft = (): Batch => {
-  const b: any = Object.fromEntries(Object.keys(emptyBatch()).map((f) => [f, []]));
+const randomDraft = (): QueuedBatch => {
+  const b: any = emptyQueuedBatch();
   for (let k = ri(7); k > 0; k--) {
-    const t = BigInt(tok());
+    const t = tok();
     switch (ri(6)) {
-      case 0: b.externalTokenToReserve.push({ entity: pick([ENTITY, OTHER]), contractAddress: `0x${"ab".repeat(20)}`, externalTokenId: 0n, tokenType: 0n, internalTokenId: t, amount: amt() }); break;
+      case 0: b.externalTokenToReserve.push({ entity: pick([ENTITY, OTHER]), contractAddress: "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB", externalTokenId: 0n, tokenType: 0, internalTokenId: t, amount: amt() }); break;
       case 1: b.reserveToReserve.push({ receivingEntity: pick([ENTITY, PEER_ACTIVE, OTHER]), tokenId: t, amount: amt() }); break;
-      case 2: b.collateralToReserve.push({ counterparty: PEER_ACTIVE, tokenId: t, amount: amt(), nonce: 1n, sig: "0x" }); break;
+      case 2: b.collateralToReserve.push({ counterparty: PEER_ACTIVE, tokenId: t, amount: amt(), nonce: 1, sig: "0x" }); break;
       case 3: {
         const [l, r] = pick([[PEER_ACTIVE, ENTITY], [PEER_ACTIVE, OTHER]]);
-        b.settlements.push({ leftEntity: l, rightEntity: r, diffs: Array.from({ length: 1 + ri(2) }, () => ({ tokenId: BigInt(tok()), leftDiff: amt() - 50n, rightDiff: amt() - 50n, collateralDiff: 0n, ondeltaDiff: 0n })), forgiveDebtsInTokenIds: [], sig: "0x", nonce: 1n });
+        b.settlements.push({ leftEntity: l, rightEntity: r, diffs: Array.from({ length: 1 + ri(2) }, () => ({ tokenId: tok(), leftDiff: amt() - 50n, rightDiff: amt() - 50n, collateralDiff: 0n, ondeltaDiff: 0n })), forgiveDebtsInTokenIds: [], sig: "0x", nonce: 1 });
         break;
       }
       case 4: b.reserveToCollateral.push({ tokenId: t, receivingEntity: ENTITY, pairs: Array.from({ length: 1 + ri(2) }, () => ({ entity: pick([PEER_ACTIVE, OTHER]), amount: 1n + amt() })) }); break;
@@ -498,6 +505,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     let issues = 0, deficits = 0;
     for (let n = 0; n < 400; n++) {
       const reserves = randomReserves(), debt = randomDebt(), b = randomDraft();
+      expect(ogDecoded(b)).toEqual(b);
       const rw = simulateBatchReserves(ENTITY, reserves, b, debt), og = simulateDraftBatchReserveAvailability(ENTITY, reserves, ogDecoded(b), debt);
       expect(rw.issues).toEqual(og.issues);
       expect(new Map(rw.reservesByToken)).toEqual(og.reservesByToken);
@@ -519,6 +527,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
       for (let s = 0; s < 60; s++) {
         const tokenId = rng() < 0.05 ? 0 : tok(), amount = BigInt(ri(40));
         const before = og.jBatchState === undefined ? undefined : encodeJBatch(og.jBatchState.batch);
+        const said = readEntityFrameEvents(og).length;
         let ogThrew = false;
         const kind = pick(["r2r", "r2c", "r2c", "r2e"] as const), to = pick([PEER_ACTIVE, OTHER]);
         try {
@@ -532,16 +541,20 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
           expect(r.ok).toBe(!ogThrew);
           if (r.ok) {
             const ogChanged = og.jBatchState !== undefined && encodeJBatch(og.jBatchState.batch) !== before;
-            expect(r.value.note === undefined).toBe(ogChanged);
-            if (r.value.note === undefined) rw = { ...rw, jBatch: r.value.jBatch }; else refusedR2C++;
+            expect(r.value._tag === "queued").toBe(ogChanged);
+            expect([r.value.message]).toEqual(readEntityFrameEvents(og).slice(said).map((e: any) => e.message));
+            if (r.value._tag === "queued") rw = { ...rw, jBatch: r.value.jBatch }; else refusedR2C++;
           }
         } else {
           const r = kind === "r2r" ? queueR2R(rw, to, tokenId, amount) : queueR2E(rw, OTHER, tokenId, amount);
           expect(r.ok).toBe(!ogThrew);
-          if (r.ok) rw = { ...rw, jBatch: r.value }; else thrown++;
+          if (r.ok && r.value._tag === "queued") {
+            expect([r.value.message]).toEqual(readEntityFrameEvents(og).slice(said).map((e: any) => e.message));
+            rw = { ...rw, jBatch: r.value.jBatch };
+          } else thrown++;
         }
         if (og.jBatchState !== undefined && rw.jBatch !== undefined) {
-          expect(encodeBatch(rw.jBatch.batch)).toBe(encodeJBatch(og.jBatchState.batch));
+          expect(rw.jBatch.batch).toEqual(og.jBatchState.batch);
           expect(rw.jBatch.status).toBe(og.jBatchState.status);
         }
         queued++;
@@ -570,11 +583,11 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     for (let n = 0; n < 60; n++) {
       const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 1000n], [2, 1000n]]), debts: EMPTY_DEBTS, accounts: new Set([PEER_ACTIVE]) };
       let s: JBatchState = { ...initJBatch(), entityNonce: ri(4) };
-      for (let k = 1 + ri(3); k > 0; k--) s = unwrap(queueR2R({ ...e, jBatch: s }, OTHER, 1 + ri(2), BigInt(1 + ri(9))));
+      for (let k = 1 + ri(3); k > 0; k--) s = queuedBatch(queueR2R({ ...e, jBatch: s }, OTHER, 1 + ri(2), BigInt(1 + ri(9))));
       if (rng() < 0.4) {
         const drafted = s;
         s = { ...initJBatch(), entityNonce: drafted.entityNonce, recoveryBatches: [drafted.batch] };
-        if (rng() < 0.6) s = unwrap(queueR2R({ ...e, jBatch: s }, PEER_ACTIVE, 2, 5n));
+        if (rng() < 0.6) s = queuedBatch(queueR2R({ ...e, jBatch: s }, PEER_ACTIVE, 2, 5n));
       }
       const sealed = unwrap(jBroadcast(s, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: "s1", timestamp: 5 }) as any) as any;
       const sent = sealed.jBatch.sentBatch;
@@ -592,7 +605,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
       expect(rw.jBatch.entityNonce).toBe(og.jBatchState.entityNonce);
       expect(rw.jBatch.sentBatch?.terminalFailure).toEqual(og.jBatchState.sentBatch?.terminalFailure);
       expect(rw.jBatch.sentBatch === undefined).toBe(og.jBatchState.sentBatch === undefined);
-      expect(encodeBatch(rw.jBatch.batch)).toBe(encodeJBatch(og.jBatchState.batch));
+      expect(rw.jBatch.batch).toEqual(og.jBatchState.batch);
       expect(rw.autoBroadcast).toBe(outputs.length > 0);
       outcomes.add(`${rw.jBatch.status}:${rw.autoBroadcast}`);
     }
@@ -603,7 +616,7 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     const ctx = { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: "s1", timestamp: 9 };
     expect(unwrap(jBroadcast(initJBatch(), ctx))).toEqual({ jBatch: initJBatch(), note: "j_broadcast skipped: jBatch is empty" });
     const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 100n]]), debts: EMPTY_DEBTS, accounts: new Set() };
-    const draft = unwrap(queueR2R(e, OTHER, 1, 3n) as any) as JBatchState, recovered = unwrap(queueR2R(e, PEER_ACTIVE, 1, 4n) as any) as JBatchState;
+    const draft = queuedBatch(queueR2R(e, OTHER, 1, 3n)), recovered = queuedBatch(queueR2R(e, PEER_ACTIVE, 1, 4n));
     const first = unwrap(jBroadcast({ ...draft, recoveryBatches: [recovered.batch] }, ctx) as any) as any;
     expect(first.jBatch.sentBatch.batch).toEqual(recovered.batch);
     expect(first.jBatch.batch).toEqual(draft.batch);
@@ -621,6 +634,6 @@ describe(seedTag("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers
     expect(applyHost(funded.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 60n } } as any, ctx, hankoVerify).ok).toBe(false);
     const queued = unwrap(applyHost(funded.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 20n } } as any, ctx, hankoVerify) as any) as any;
     expect(queued.state.j.reserves).toEqual(new Map([[1, 50n]]));
-    expect(queued.state.j.jBatch.batch.reserveToReserve).toEqual([{ receivingEntity: BOB, tokenId: 1n, amount: 20n }]);
+    expect(queued.state.j.jBatch.batch.reserveToReserve).toEqual([{ receivingEntity: BOB, tokenId: 1, amount: 20n }]);
   });
 });

@@ -15,7 +15,7 @@ import { compareCanonicalJurisdictionEvents, normalizeJurisdictionEvent } from "
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from "../../core/jurisdiction/machine/event-observation.ts";
 import { EMPTY_J_HISTORY_ROOT, buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from "../../core/jurisdiction/machine/history-consensus/index.ts";
 import {
-  accountDisputeHash, applyCrossFill, committedView, createEntity, foldTx, foldTxs, localProof, ogProofBody, prepareCrossRoute,
+  accountDisputeHash, applyCrossFill, committedView, createEntity, foldTx, foldTxs, localProof, queuedProofBody, prepareCrossRoute,
   tokenId, wireEntityTx, zeroDelta,
   type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
@@ -185,7 +185,7 @@ const frozenCase = (n: number, claimed = false): Case => {
     proofBodyHash: rng() < 0.05 ? W("0f") : proof.bodyHash, proofNonce, proposerIsLeft,
   };
   const child = { ...base, state, dispute: { ...base.dispute, ...(witness === undefined ? {} : { counterparty: witness }) } } as AccountReplica;
-  return { child, routes, bodyHash: proof.bodyHash, body: ogProofBody(proof.body), witness };
+  return { child, routes, bodyHash: proof.bodyHash, body: queuedProofBody(proof.body), witness };
 };
 /** A draft jBatch: empty, behind a sent batch, full, or already holding a counter row for BOB that ours must raise. */
 const draftJBatch = (c: Case, initialNonce: number): unknown => {
@@ -194,7 +194,7 @@ const draftJBatch = (c: Case, initialNonce: number): unknown => {
     counterentity: BOB.toLowerCase(), initialNonce: bound ? initialNonce : initialNonce + 1, initialProofbodyHash: c.bodyHash,
     counterNonce, proposerIsLeft, counterProofbody: body, sig: "0xaa",
   });
-  const otherBody = ogProofBody(unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })).body);
+  const otherBody = queuedProofBody(unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })).body);
   const nonce = c.witness?.proofNonce ?? 1;
   const others = (k: number) => Array.from({ length: k }, (_, i) => ({ counterentity: W((20 + i).toString(16)), initialNonce: 1, initialProofbodyHash: Z32, counterNonce: 2, proposerIsLeft: true, counterProofbody: otherBody, sig: "0xbb" }));
   switch (ri(9)) {
