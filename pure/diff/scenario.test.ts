@@ -16,7 +16,7 @@ import { describe, expect, test } from "bun:test";
 // alone and defers every other input; the scenario delivers a J range only on a quiescent frame, where that split
 // is a no-op. An HTLC is only sent over lanes the gossip profiles advertise: og's quote throws (a Runtime halt, not a
 // refusal) on an unadvertised lane.
-// The rewrite runs with authorCommands (og prepareLocallyAuthoredEntityTxs): the harness signs with real keys.
+// Admission signs local txs into Entity commands (og prepareLocallyAuthoredEntityTxs), so the harness uses real keys.
 process.env["XLN_LOG_LEVEL"] = process.env["XLN_LOG_LEVEL"] ?? "error";
 import { rmSync } from "fs";
 import { join } from "path";
@@ -261,7 +261,7 @@ const runScenario = async (seed: number): Promise<Coverage> => {
       secretFor: (h: string) => secrets.get(h),
     });
     // og admission signs every local tx into the replica's own Entity command (prepareLocallyAuthoredEntityTxs)
-    const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, authorCommands: true });
+    const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra });
     if (!committed.ok) return [`${label} rewrite refused the frame: ${stableJson(committed.error)}`];
     const c = committed.value;
     const after = c === null ? rt : c.runtime;

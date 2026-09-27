@@ -188,7 +188,9 @@ describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountI
 
   test("MATCH: a proposed Account re-emits the exact ack_frame it sent (og cloneIsolatedAccountInput(pendingAccountInput)); an Account without one is owed nothing", () => {
     const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
-    const first = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx));
+    const signed = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+    // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+    const first = unwrap(applyEntityInput(signed, { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx, lane: "account-work" }));
     const sent = first.outputs.filter((o) => "tx" in o && o.tx.data.kind === "ack_frame");
     expect(sent.length).toBe(1);
     const child = first.replica.accountReplicas.get(BOB);

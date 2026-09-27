@@ -533,6 +533,11 @@ describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPre
     let rt = spawn(spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE)), hub(bobAddr)), hub(carolAddr)), entityOf(CAROL));
     const hubOnly = { ...verifiers, htlcInfra: (id: EntityId) => (id === HUB ? { profiles: [], encryptionPrivateKey: hubKey.priv } : undefined) };
     rt = quiet(rt, [hubInput([open(ALICE, 1000n), open(CAROL)], NOW)], hubOnly);
+    // og admission signed Bob's collective opens into his propose; Carol's signed yes executes them
+    const proposals = rt.entities.get(replicaKey(HUB, carolAddr))!.state.committed["proposals"] as Map<string, unknown>;
+    const [proposalId] = [...proposals.keys()];
+    const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: carolAddr, choice: "yes" } };
+    rt = quiet(rt, [{ entityId: HUB, signerId: carolAddr, input: { kind: "txs", timestamp: NOW, txs: [vote] } }], hubOnly);
     rt = quiet(rt, [inputOf(CAROL, [{ type: "extendCredit", data: { counterpartyEntityId: HUB, tokenId: unwrap(tokenId("1")), amount: 1000n } }], NOW + 100n)], hubOnly);
     const secret = "0x" + "31".repeat(32);
     const tx = withDeterministicHtlcTestSecret({ type: "htlcPayment", data: { targetEntityId: CAROL, tokenId: 1, amount: 100n, maxSenderDebit: 200n, route: [ALICE, HUB, CAROL], deliveryMode: "instant" } }, secret) as unknown as EntityTx;

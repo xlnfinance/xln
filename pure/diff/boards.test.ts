@@ -7,6 +7,7 @@ import {
 } from "../xln.ts";
 import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, unwrap, verifiers } from "../xln_run.ts";
 import { assertEntityConfigBoardAuthority, buildQuorumHanko } from "../../core/hanko/signing.ts";
+import { ogAuthored, ogAuthorVerdict, wired } from "./og-author.ts";
 import { handleEntityProviderActivateBoard, handleEntityProviderProposeControlBoard } from "../../core/entity/tx/handlers/control-board-proposal.ts";
 import { handleEntityProviderCancelAction, handleEntityProviderReleaseControlShares, handleEntityProviderTransfer } from "../../core/entity/tx/handlers/entity-provider-action.ts";
 import { applyEntityProviderActionCancelled, applyEntityProviderActionExecuted } from "../../core/entity/tx/j-events-entity-provider-action.ts";
@@ -200,17 +201,27 @@ describe(seedTag("ER-4b: quorum board binding (og assertQuorumBoardBinding)"), (
     expect(reasonOf(quorumHanko(base.state, digest, sigs))).toBe(ogRefusal);
   });
 
-  test("MATCH: a numbered 1-of-1 Entity proposes only once its EntityRegistered is certified for its config board (og selectProposableEntityTxs SELF_BOARD_CERTIFICATION_REQUIRED)", () => {
+  test("MATCH: a numbered 1-of-1 Entity proposes only once its EntityRegistered is certified for its config board (og resolveEntityCommandBoard at admission)", () => {
     const id = unwrap(entityId(word(5))), members = new Map([[aliceAddr, { shares: 1n }]]);
     const base = unwrap(createEntity({ id, jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
     const chat: EntityTx = { type: "chat", data: { from: aliceAddr, message: "hi" } };
     const run = (r: typeof base) => applyEntityInput(r, { kind: "txs", timestamp: 10n, txs: [chat] }, { ...verifiers, self: id, signerId: aliceAddr });
-    // og: an uncertified board (no registry, or a registry certifying another board) selects nothing; the tx stays queued, no frame
-    const queuedOnly = (r: ReturnType<typeof run>) => (r.ok ? [r.value.replica._tag, r.value.replica.head.height, r.value.replica.mempool.length, r.value.outputs.length] : reasonOf(r));
-    expect(queuedOnly(run(base))).toEqual(["open", 0n, 1, 0]);
-    const certified = run({ ...base, state: observe(base.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))]).state });
+    // og admission signs the chat into a command under the certified board: an uncertified board (no registry, or a
+    // registry certifying another board) cannot author it, so og refuses the input
+    const ogVerdict = (events: readonly JEvent[]) => {
+      const { state, ogRegistry, ogNodes } = observe(base.state, events);
+      return ogAuthorVerdict(state, aliceAddr, [chat], ogRegistry === undefined ? {} : { certifiedBoardState: ogRegistry }, { infrastructure: { certifiedBoardNodes: ogNodes } });
+    };
+    const verdict = (r: ReturnType<typeof run>) => (r.ok ? "ok" : reasonOf(r));
+    expect(ogVerdict([])).toBe(`ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:${id}`);
+    expect(verdict(run(base))).toBe(ogVerdict([]));
+    const certifiedEvents = [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))];
+    expect(ogVerdict(certifiedEvents)).toBe("ok");
+    const certified = run({ ...base, state: observe(base.state, certifiedEvents).state });
     expect(certified.ok && certified.value.replica.head.height).toBe(1n);
-    expect(queuedOnly(run({ ...base, state: observe(base.state, [foundation, registered(id, word(4242))]).state }))).toEqual(["open", 0n, 1, 0]);
+    const otherBoard = [foundation, registered(id, word(4242))];
+    expect(ogVerdict(otherBoard)).toStartWith("ENTITY_COMMAND_CERTIFIED_BOARD_CONFIG_MISMATCH:");
+    expect(verdict(run({ ...base, state: observe(base.state, otherBoard).state }))).toBe(ogVerdict(otherBoard));
   });
 });
 
@@ -353,12 +364,15 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
   });
 
   test("MATCH: the frame manifest signs the action hash beside the frame hash (og buildEntityHashesToSign)", () => {
+    // threshold 1 of two members: og admission signs the transfer as alice's propose, which her share executes at once,
+    // while the two-member board still holds the frame for precommits
     const members = new Map([[aliceAddr, { shares: 1n }], [bobAddr, { shares: 1n }]]), id = word(72);
-    const replica = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 2n, members, jurisdictionConfig: EP_J }));
-    const { state } = observe(replica.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 2n, members }))]);
+    const replica = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: EP_J }));
+    const { state, ogRegistry, ogNodes } = observe(replica.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))]);
     const tx: EntityTx = { type: "entityProviderTransfer", data: { to: ADDRS[0] as string, tokenId: 1n, amount: 2n } };
     const p = unwrap(applyEntityInput({ ...replica, state }, { kind: "txs", timestamp: 9n, txs: [tx] }, { ...verifiers, self: state.id, signerId: aliceAddr })).replica;
     if (p._tag !== "proposed") throw new Error("phase");
+    expect(wired(p.frame.txs)).toEqual(ogAuthored(state, aliceAddr, [tx], { certifiedBoardState: ogRegistry }, { infrastructure: { certifiedBoardNodes: ogNodes } }));
     const action = (p.draft.state.committed["entityProviderActionState"] as any).pending;
     const frameHash = unwrap(hashEntityFrame(p.frame));
     // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash (og's genesis profile is all empty text)

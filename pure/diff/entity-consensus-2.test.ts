@@ -19,6 +19,8 @@ import { handleChatEntityTx, handleChatMessageEntityTx, handleProfileUpdateEntit
 import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { handleRequestCollateralEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/admin.ts";
 import { buildQuorumHanko, getEntityConfigBoardHash } from "../../core/hanko/signing.ts";
+import type { ConsensusConfig } from "../../core/entity/types";
+import { consensusBytes, ogAfterCommands, ogAuthored, ogCommandState, wired } from "./og-author.ts";
 
 // og leader failover (core/entity/consensus/leader/*): view change, timeout votes and certificates (ER-18)
 const A = aliceAddr, B = bobAddr, C = carolAddr;
@@ -32,15 +34,20 @@ const addr = (i: number): Address => unwrap(address(`0x${(i + 16).toString(16).p
 const word = (i: number): string => `0x${(i + 1).toString(16).padStart(64, "0")}`;
 /** og assertQuorumBoardBinding: an Entity without a certified registry is its own lazy board id (ENTITY for the 2-of-3 [A,B,C] board). */
 const lazyId = (members: readonly (readonly [Address, bigint])[], threshold: bigint): EntityId => unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) })));
+/** og admission authors openAccount only under a jurisdiction (og materializeLocallyAuthoredEntityTx); unregistered, so no J-prefix certificate is needed. */
+const UNREGISTERED_J = { entityProviderAddress: `0x${"ee".repeat(20)}` };
 const teaching = (members: readonly (readonly [Address, bigint])[], threshold: bigint, signerId?: Address) =>
-  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), ...(signerId === undefined ? {} : { signerId }) }));
+  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), jurisdictionConfig: UNREGISTERED_J, ...(signerId === undefined ? {} : { signerId }) }));
 const ctx = (signerId: Address) => ({ ...verifiers, self: ENTITY, signerId });
 /** The fixture ctx names ENTITY; another fixture board is its own lazy id, so that placeholder resolves to the replica. */
 const applyEntityInput: typeof applyEntityInputAt = (r, input, c) => applyEntityInputAt(r, input, c.self === ENTITY ? { ...c, self: r.state.id } : c);
 const ogConfigOf = (s: EntityState) => {
   if (s.quorum._tag !== "teaching") throw new Error("teaching");
   const members = [...s.quorum.members];
-  return { mode: "proposer-based" as const, threshold: s.quorum.threshold, validators: members.map(([a]) => a.toLowerCase()), shares: Object.fromEntries(members.map(([a, m]) => [a.toLowerCase(), m.shares])) };
+  // og reads only the stack fields (chain, depository, EntityProvider) of the configured jurisdiction
+  const ogJ = (ep: string) => ({ ...s.jurisdiction, entityProviderAddress: ep }) as unknown as ConsensusConfig["jurisdiction"];
+  const jurisdiction = s.jurisdictionConfig === undefined ? {} : { jurisdiction: ogJ(s.jurisdictionConfig.entityProviderAddress) };
+  return { mode: "proposer-based" as const, threshold: s.quorum.threshold, validators: members.map(([a]) => a.toLowerCase()), shares: Object.fromEntries(members.map(([a, m]) => [a.toLowerCase(), m.shares])), ...jurisdiction };
 };
 const ogView = (s: EntityState, height: bigint, prevFrameHash: string): any =>
   ({ entityId: s.id, height: Number(height), prevFrameHash, config: ogConfigOf(s), ...(s.leaderState === undefined ? {} : { leaderState: s.leaderState }) });
@@ -125,9 +132,33 @@ describe(seedTag("entity-consensus-2: timeout certificate and certified view cha
     const bCommitted = step(b, inputsFor(cLocked.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
     expect(bCommitted.replica._tag).toBe("open");
     expect(bCommitted.replica.state.leaderState).toEqual({ activeValidatorId: B.toLowerCase(), view: 1, changedAtHeight: 1 });
-    expect(bCommitted.replica.state.accounts.has(BOB)).toBe(true);
+    // og admission signed B's openBob into B's own propose: the certified frame commits it pending a second yes
+    if (b._tag !== "proposed") throw new Error("phase");
+    const ogTxs = ogAuthored(teaching(members, 2n, B).state, B, [openBob]);
+    expect(wired(b.frame.txs)).toEqual(ogTxs);
+    const governance = ogAfterCommands(ogCommandState(teaching(members, 2n, B).state, { timestamp: Number(b.frame.timestamp) }), ogTxs);
+    expect(consensusBytes(bCommitted.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
+    expect(bCommitted.replica.state.accounts.has(BOB)).toBe(false);
+    // C's signed yes reaches B (the view-1 leader) and executes the open in frame 2; og account work at H+1 then proposes
+    // the Account frame, which frame 3's manifest signs
+    const [proposalId] = [...governance.proposals.keys()] as string[];
+    const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: C, choice: "yes" } };
+    const cVoted = step(cLocked.replica, { kind: "txs", timestamp: NOW + 20_000n, txs: [vote] }, C);
+    // C's own signed openBob (its admission before the view change) still waits in its mempool ahead of the vote
+    expect(wired(cVoted.replica.mempool)).toEqual(ogAuthored(cLocked.replica.state, C, [...cLocked.replica.mempool, vote]));
+    const forwarded = inputsFor(cVoted.outputs, B)[0] as EntityInput;
+    const bFrame2 = step(bCommitted.replica, forwarded, B);
+    const cFrame2 = step(cVoted.replica, inputsFor(bFrame2.outputs, C).find((x) => x.kind === "proposal") as EntityInput, C);
+    const bOpened = step(bFrame2.replica, inputsFor(cFrame2.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
+    expect(bOpened.replica._tag).toBe("open");
+    expect(bOpened.replica.state.accounts.has(BOB)).toBe(true);
+    const bWork = unwrap(applyEntityInput(bOpened.replica, { kind: "txs", timestamp: NOW + 20_000n, txs: [] }, { ...ctx(B), lane: "account-work" }));
+    if (bWork.replica._tag !== "proposed") throw new Error("phase");
+    expect(bWork.replica.frame.hashesToSign.some((h) => h.type === "accountFrame" && h.context === `account:${BOB.slice(-8)}:frame:1`)).toBe(true);
+    const cFrame3 = step(cFrame2.replica, inputsFor(bWork.outputs, C).find((x) => x.kind === "proposal") as EntityInput, C);
+    const bCommitted3 = step(bWork.replica, inputsFor(cFrame3.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
     // og buildQuorumHanko over the B and C manifest signatures of the Account frame is exactly the Hanko B sends
-    const sent = bCommitted.outputs.find((o) => "tx" in o && o.tx.data.kind === "ack_frame");
+    const sent = bCommitted3.outputs.find((o) => "tx" in o && o.tx.data.kind === "ack_frame");
     if (sent === undefined || !("tx" in sent) || sent.tx.data.kind !== "ack_frame") throw new Error("no account frame");
     const digest = sent.tx.data.frame.stateHash, config = ogConfigOf(b.state);
     const sigs = [B, C].map((s) => ({ signerId: s.toLowerCase(), signature: ogSig(unwrap(crypto.sign(digest as Hash, s))) }));
@@ -156,9 +187,17 @@ describe(seedTag("entity-consensus-2: timeout certificate and certified view cha
 
 describe(seedTag("entity-consensus-2: account Hankos through hashesToSign (ER-4)"), () => {
   test("MATCH (og proposePendingAccountFrames + buildQuorumHanko): the view-1 frame signs the Account frame as a secondary hash and the committed Account carries the quorum Hanko", () => {
-    const members = [[A, 1n], [B, 1n], [C, 1n]] as const;
+    // A's share alone passes its signed propose of openBob, so frame 1 opens the Account; og account work proposes the
+    // Account frame at H+1, and that frame's manifest signs it
+    const members = [[A, 2n], [B, 1n], [C, 1n]] as const;
     const b0 = teaching(members, 2n, B);
-    const f = unwrap(applyEntityInput(teaching(members, 2n, A), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
+    const opening = unwrap(applyEntityInput(teaching(members, 2n, A), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
+    if (opening._tag !== "proposed") throw new Error("phase");
+    expect(opening.frame.hashesToSign.some((h) => h.type === "accountFrame")).toBe(false);
+    const opened = unwrap(applyEntityInput(opening, { kind: "txs", timestamp: NOW, txs: [] }, ctx(A))).replica;
+    expect(opened._tag).toBe("open");
+    expect(opened.state.accounts.has(BOB)).toBe(true);
+    const f = unwrap(applyEntityInput(opened, { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx(A), lane: "account-work" })).replica;
     if (f._tag !== "proposed") throw new Error("phase");
     const frame: EntityFrame = f.frame;
     expect(frame.hashesToSign.map((h) => h.type)).toEqual(["entityFrame", ...frame.hashesToSign.slice(1).map((h) => h.type)]);
@@ -299,14 +338,15 @@ describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestColla
     expect(p.replica.head.height).toBe(2n);
     expect(p.replica.state.committed["profile"]).toMatchObject({ name: "Hub", sectors: ["finance"] });
     // a held 2-of-2 proposal exposes the frame: its hash is og's over og's wire txs (numeric token ids, the same data keys)
-    const held = unwrap(applyEntityInput(pair, { kind: "txs", timestamp: NOW, txs: [...pairList, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n, feeTokenId: unwrap(tokenId("2")), feeAmount: 1n, policyVersion: 1 } }] }, ctx(A))).replica;
+    const pairTxs: EntityTx[] = [...pairList, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n, feeTokenId: unwrap(tokenId("2")), feeAmount: 1n, policyVersion: 1 } }];
+    const held = unwrap(applyEntityInput(pair, { kind: "txs", timestamp: NOW, txs: pairTxs }, ctx(A))).replica;
     if (held._tag !== "proposed") throw new Error("phase");
     const f = held.frame;
-    const ogTxs = [...pairList.map((t) => ({ type: t.type, data: t.data })), { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 5n, feeTokenId: 2, feeAmount: 1n, policyVersion: 1 } }];
-    // og frame events: the chat text event and the chatMessage status event, as og's handlers record them
-    const ogState: any = { entityId: pair.state.id };
-    handleChatEntityTx(ogState, list[0] as never, true);
-    handleChatMessageEntityTx(ogState, list[1] as never, true);
+    // og admission: the chat is A's command, the collective txs A's propose (pending B's yes on this 2-of-2 board)
+    const ogTxs = ogAuthored(pair.state, A, pairTxs);
+    expect(wired(f.txs)).toEqual(ogTxs);
+    // og frame events: the chat text event (the pending proposal executes nothing), as og's handlers record them
+    const ogState = ogAfterCommands(ogCommandState(pair.state, { timestamp: Number(NOW) }), ogTxs);
     const ogEvents = readEntityFrameEvents(ogState);
     expect(f.events).toEqual(ogEvents as never);
     expect<string>(unwrap(hashEntityFrame(f))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, pair.state.id, f.stateRoot, f.authorityRoot, f.entityContext as never));

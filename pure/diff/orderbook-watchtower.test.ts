@@ -223,7 +223,9 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
 describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
-  const opened = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+  const signed = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+  // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+  const opened = () => unwrap(applyEntityInput(signed(), { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx, lane: "account-work" })).replica;
   const ogState = (accounts: readonly string[]) => ({ entityId: ALICE, accounts: new Map(accounts.map((a) => [a, { state: {} }])), config: { validators: [aliceAddr] } }) as never;
   /** og AccountTx `{type, data}` (numeric token ids) as the rewrite's flat wire tx. */
   const rwAccountTx = (t: { type: string; data: Record<string, unknown> }): WireAccountTx =>

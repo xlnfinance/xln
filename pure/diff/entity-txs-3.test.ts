@@ -12,11 +12,10 @@ import { applyAccountDisputeFinality, applyAccountDisputeStarted } from "../../c
 import { canonicalizeProofBodyStruct, handleDisputeStart, handlePrepareDispute } from "../../core/entity/tx/handlers/dispute/index.ts";
 import { encodeCanonicalConsensusBytes } from "../../core/protocol/serialization/binary-codec.ts";
 import { hashEntityCommand, hashEntityCommandTxs, UNREGISTERED_ENTITY_COMMAND_STACK_KEY } from "../../core/entity/command/command-codec.ts";
-import { advanceEntityCommandNonce, assertSignedEntityCommand, getEntityCommandDisposition, resolveEntityCommandBoard } from "../../core/entity/command/index.ts";
+import { assertSignedEntityCommand, resolveEntityCommandBoard } from "../../core/entity/command/index.ts";
 import { buildEntityTransactionProposalAction, hashEntityProposalAction } from "../../core/entity/auth/authorization.ts";
 import { generateProposalId } from "../../core/entity/tx/processing/proposals.ts";
-import { handleChatEntityTx, handleChatMessageEntityTx, handleProfileUpdateEntityTx, handleProposeEntityTx, handleVoteEntityTx } from "../../core/entity/tx/handlers/system/basic.ts";
-import { EntityCommandRejectionError } from "../../core/entity/tx/processing/invariant-errors.ts";
+import { ogApplyCommand as ogApplyCommandIn, ogAuthored } from "./og-author.ts";
 import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { getCertifiedBoardStackKey } from "../../core/jurisdiction/machine/board-registry/index.ts";
 import { createEntityFrameHashFromStateRoot } from "../../core/entity/consensus/frame.ts";
@@ -56,29 +55,8 @@ const ogConfig = (s: EntityState) => {
 /** og EntityState fields governance reads and writes. */
 const ogState = (s: EntityState, timestamp: number): any => ({ entityId: s.id, config: ogConfig(s), proposals: new Map(), profile: { name: `Entity ${s.id.slice(-4)}`, avatar: "", bio: "", website: "" }, timestamp });
 const wire = (tx: EntityTx): any => wireEntityTx(tx);
-const tagOf = (e: unknown): "entity_command" | "entity_invariant" => (e instanceof EntityCommandRejectionError ? "entity_command" : "entity_invariant");
-/** og applyNestedEntityTx (frame/application.ts) with og's own handlers: signed-command checks, disposition, the individual txs, approved collective txs, nonce advance. */
-const ogApplyCommand = (before: any, command: unknown): { state: any } | { error: "entity_command" | "entity_invariant"; message: string } => {
-  const st = structuredClone(before);
-  try {
-    const c = assertSignedEntityCommand(env, st, command);
-    if (getEntityCommandDisposition(st, c) !== "next") return { state: st };
-    let cur = st;
-    const collective = (tx: any): void => {
-      if (tx.type === "chatMessage") cur = handleChatMessageEntityTx(cur, tx, true).newState;
-      else if (tx.type === "profile-update") cur = handleProfileUpdateEntityTx(env, cur, tx, true).newState;
-      else throw new Error(`test: collective ${tx.type}`);
-    };
-    for (const tx of c.txs as any[]) {
-      const r = tx.type === "propose" ? handleProposeEntityTx(env, cur, tx, true) : tx.type === "vote" ? handleVoteEntityTx(env, cur, tx, true) : handleChatEntityTx(cur, tx, true);
-      cur = r.newState;
-      for (const approved of r.approvedEntityTxs ?? []) collective(approved);
-    }
-    return { state: advanceEntityCommandNonce(cur, c) };
-  } catch (e) {
-    return { error: tagOf(e), message: String(e) };
-  }
-};
+/** og applyNestedEntityTx with og's own handlers (./og-author.ts), under this file's og env. */
+const ogApplyCommand = (before: any, command: unknown) => ogApplyCommandIn(before, command, env);
 
 describe(seedTag("entity-txs-3: entityCommand codec and hashes (og command/command-codec.ts, auth/authorization.ts)"), () => {
   test("MATCH: hashEntityCommandTxs / hashEntityCommand / generateProposalId / stack keys over 200 random commands", () => {
@@ -216,13 +194,19 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     const p = unwrap(applyEntityInput(r, { kind: "txs", timestamp: NOW, txs: [...authored, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }] }, { ...verifiers, self: r.state.id, signerId: aliceAddr })).replica;
     if (p._tag !== "proposed") throw new Error("phase");
     expect(p.draft.state.committed["profile"]).toMatchObject({ name: "Solo" });
-    const ogOut = ogApplyCommand(ogState(r.state, Number(NOW)), wire(authored[0] as EntityTx).data);
-    if ("error" in ogOut) throw new Error(ogOut.message);
-    handleChatMessageEntityTx(ogOut.state, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }, true);
-    const ogEvents = readEntityFrameEvents(ogOut.state);
+    // og admission carries the signed command and signs the raw chatMessage into A's next command (its own propose)
+    const ogTxs = ogAuthored(r.state, aliceAddr, [...authored, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }]);
+    expect(ogTxs.length).toBe(2);
+    expect(p.frame.txs.map(wire)).toEqual(ogTxs);
+    const ogOut = ogTxs.reduce<any>((s, tx) => {
+      const out = ogApplyCommand(s, (tx as { data: unknown }).data);
+      if ("error" in out) throw new Error(out.message);
+      return out.state;
+    }, ogState(r.state, Number(NOW)));
+    const ogEvents = readEntityFrameEvents(ogOut);
     expect(p.frame.events).toEqual(ogEvents);
-    expect(bytes(p.draft.state.committed["entityCommandNonces"])).toBe(bytes(ogOut.state.entityCommandNonces));
-    expect<string>(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), p.frame.txs.map(wire), ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
+    expect(bytes(p.draft.state.committed["entityCommandNonces"])).toBe(bytes(ogOut.entityCommandNonces));
+    expect<string>(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
   });
   test("MATCH: plain propose / vote outside a command are og ENTITY_COMMAND_REQUIRED (a plain Error: the input is refused)", () => {
     const r = lazyEntity([[aliceAddr, 1n]], 1n);
@@ -239,7 +223,9 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
 describe(seedTag("entity-txs-3: frame events (og frame-events.ts, certified in the Entity frame hash)"), () => {
   test("MATCH: extendCredit and lending entity txs record og's status events", () => {
     const a = lazyEntity([[aliceAddr, 1n]], 1n);
-    const opened = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
+    const signed = unwrap(applyEntityInput(a, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }] }, { ...verifiers, self: a.state.id, signerId: aliceAddr })).replica;
+    // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+    const opened = unwrap(applyEntityInput(signed, { kind: "txs", timestamp: NOW, txs: [] }, { ...verifiers, self: a.state.id, signerId: aliceAddr, lane: "account-work" })).replica;
     const tok = unwrap(tokenId("1"));
     const cases: readonly [EntityTx, (s: any) => any][] = [
       [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: tok, amount: 55n } }, (s) => handleExtendCreditEntityTx(s, { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 55n } }, true)],
