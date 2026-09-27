@@ -141,7 +141,7 @@ describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"
         const added = r.value.mempool.length - rw.mempool.length;
         if (added < cases.length) (cases.some((c) => c.h <= fin) ? dups++ : conflicts++);
         rw = r.value;
-        expect(rw.mempool.map((tx) => (tx.type === "j_event_claim" ? [Number(tx.jHeight), tx.jBlockHash] : []))).toEqual(o.mempool.map((tx) => [(tx as { data: { jHeight: number } }).data.jHeight, (tx as { data: { jBlockHash: string } }).data.jBlockHash]));
+        expect<unknown>(rw.mempool.map((tx) => (tx.type === "j_event_claim" ? [Number(tx.jHeight), tx.jBlockHash] : []))).toEqual(o.mempool.map((tx) => [(tx as { data: { jHeight: number } }).data.jHeight, (tx as { data: { jBlockHash: string } }).data.jBlockHash]));
       }
     }
     expect(conflicts).toBeGreaterThan(10);
@@ -198,9 +198,9 @@ describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput byt
       proposal: { frame: { height: 1, timestamp: 1, jHeight: 0, accountTxs: [], prevFrameHash: "genesis", accountStateRoot: W("01"), stateHash: W("02") } } };
     const listed = [BOB, CAROL].map((x) => x.toLowerCase()).sort();
     const og = handleProposeAccountsNowEntityTx(ogState(new Map([[BOB.toLowerCase(), { pendingAccountInput: ogPending }], [CAROL.toLowerCase(), {}]])), { type: "proposeAccountsNow", data: { version: 1, proposerSignerId: aliceAddr, counterparties: listed } } as never);
-    expect(og.accountInputWorks.map((w) => [w.accountId, w.force, w.response])).toEqual([[BOB.toLowerCase(), true, ogPending]]);
+    expect<unknown>(og.accountInputWorks.map((w) => [w.accountId, w.force, w.response])).toEqual([[BOB.toLowerCase(), true, ogPending]]);
     const again = unwrap(applyEntityInput(first.replica, { kind: "txs", timestamp: NOW + 1n, txs: [marker({ version: 1, proposerSignerId: aliceAddr, counterparties: listed })] }, ctx));
-    expect(again.outputs.filter((o) => "tx" in o)).toEqual(sent);
+    expect<readonly unknown[]>(again.outputs.filter((o) => "tx" in o)).toEqual(sent);
     expect(again.replica.accountReplicas.get(BOB)).toEqual(child);
   });
 });
@@ -216,8 +216,8 @@ describe("book-admission: orderbookExt state, init and root projection", () => {
     const kinds = new Set<string>();
     for (let i = 0; i < 200; i++) {
       const data = initData(), tx = { type: "initOrderbookExt", data } as EntityTx;
-      let og: { newState: { orderbookExt?: { hubProfile: unknown } } } | Error;
-      try { og = handleInitOrderbookExtEntityTx({ entityId: ALICE } as never, { type: "initOrderbookExt", data } as never, true) as never; } catch (e) { og = e as Error; }
+      let og: ReturnType<typeof handleInitOrderbookExtEntityTx> | Error;
+      try { og = handleInitOrderbookExtEntityTx({ entityId: ALICE } as never, { type: "initOrderbookExt", data } as never, true); } catch (e) { og = e as Error; }
       const rw = applyEntityInput(base, { kind: "txs", timestamp: NOW + 1n, txs: [tx] }, ctx);
       if (og instanceof Error) {
         kinds.add("halt");
@@ -294,7 +294,7 @@ describe("book-admission: same-j hub matcher", () => {
     expect([i, [...rw.pairDimensions].sort()]).toEqual([i, [...og.pairDimensions].sort()]);
   };
   const sameTxs = (i: string, rw: readonly BookTx[], og: readonly { accountId: string; tx: unknown }[]) =>
-    expect([i, rw.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) }))]).toEqual([i, og.map(({ accountId, tx }) => ({ accountId, tx }))]);
+    expect<unknown>([i, rw.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) }))]).toEqual([i, og.map(({ accountId, tx }) => ({ accountId, tx }))]);
   const sameHalt = (i: string, og: Error, rw: { ok: boolean; error?: unknown }) => expect([i, rw.ok ? "ok" : (rw.error as { reason: string }).reason]).toEqual([i, og.message]);
 
   test("MATCH: 40 random hub streams (offers, fills, STP, bands, fees, dimensions, cancels, committed removals, resume): same resolves, books and pair dimensions", () => {

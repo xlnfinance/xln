@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applyBoardRegistryEvent, boardProof, emptyBoardRegistry, EMPTY_CERTIFIED_BOARD_ROOT, hashBoardNode, lookupBoardRecord, reachableBoardNodes, verifyBoardProof, advanceBoardFinality, boardStackKey,
   applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
-  type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
+  type Address, type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
 } from "../xln.ts";
 import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, unwrap, verifiers } from "../xln_run.ts";
 import { assertEntityConfigBoardAuthority, buildQuorumHanko } from "../../core/hanko/signing.ts";
@@ -220,7 +220,7 @@ describe("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_
     const { state, ogRegistry } = observe(base.state, [foundation, registered(id, word(77))]);
     const ogOf = (extra: Record<string, unknown>): any => ({
       entityId: id, height: 0, timestamp: 0, accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
-      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { name: "j", address: "", ...OG_J } },
+      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { address: "", ...OG_J } },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, ...extra,
     });
     const withJ = { ...state, jurisdictionConfig: { entityProviderAddress: JUR.entityProviderAddress } };
@@ -362,7 +362,7 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
     const frameHash = unwrap(hashEntityFrame(p.frame));
     // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash (og's genesis profile is all empty text)
     const profile = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile: { name: "", isHub: false, avatar: "", bio: "", website: "" }, accounts: new Map(), config: { jurisdiction: { ...OG_J, ...EP_J } } } as never);
-    expect(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
+    expect<readonly unknown[]>(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
     expect(p.frame.hashesToSign.length).toBe(3);
   });
 });
@@ -382,7 +382,7 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
     const uState = observe(uBase.state, events).state;
     const env: any = { state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) }, infrastructure: { certifiedBoardNodes: ogNodes } };
     const ogState = (): any => ({ entityId: S, height: 0, timestamp: 77, config: ogConfigOf(state, true), certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], S, computeEntityAccountValueHash) });
-    const consent = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+    const consent = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
     const seen = new Set<string>();
     for (let i = 0; i < 60; i += 1) {
       const activate = rng() < 0.2;

@@ -214,7 +214,7 @@ describe("cross-book: hub cross matcher", () => {
           wantAmount: BigInt(rt.target.amount), maxFee: 0n, minNetReceive: BigInt(rt.target.amount), priceTicks: 1n, timeInForce: tf, makerIsLeft: u < HUB, createdHeight: resting ? 1 : 2 + int(r, 2), quantizedGive: BigInt(rt.source.amount), quantizedWant: BigInt(rt.target.amount), crossJurisdiction: rt };
         offers.get(u)!.set(offer.offerId, offer);
         if (int(r, 12) === 0) mempool.get(u)!.push({ type: "swap_resolve", offerId: offer.offerId });
-        if (int(r, 10) === 0) mirror.set(offer.offerId, { ...rt, status: pick(r, ["resting", "partially_filled", "cancel_requested"] as const) });
+        if (int(r, 10) === 0) mirror.set(offer.offerId, { ...rt, status: pick(r, ["resting", "partially_filled", "clear_requested"] as const) });
         if (int(r, 10) === 0) admissions.set(bookAdmissionKey(u, rt.orderId), { orderId: rt.orderId, routeHash: rt.routeHash ?? "", sourceEntityId: u, bookOwnerEntityId: HUB, status: pick(r, ["admitted", "resolving", "closed"] as const), route: rt, updatedAt: T0 - 10 });
         if (resting) rows.push({ orderId: `${u}:${rt.orderId}`, accountId: u, skewQty: int(r, 30) === 0 });
         else incoming.push({ offerId: offer.offerId, accountId: u, makerIsLeft: offer.makerIsLeft, fromEntity: leftOf(u), toEntity: rightOf(u), createdHeight: offer.createdHeight, giveTokenId: giveTok, giveTokenDecimals: offer.giveTokenDecimals,
@@ -300,6 +300,7 @@ import { TERMS } from "../xln_run.ts";
 
 describe("cross-book: book lifecycle Entity txs", () => {
   const SIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
+  const sig = (e: string): string => { const s = SIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
   const hubProfile = { entityId: H1, name: "hub", spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: W("99"), minTradeSize: 0n, supportedPairs: [] };
   const ogEnv = { state: { timestamp: T0 }, runtimeSeed: RUNTIME_SEED } as never;
   const MUT = { mutableFrameState: true, storageChanges: [] } as never;
@@ -316,7 +317,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       : routeOf(r, {
         orderId: `B${n}`, makerEntityId: U2, hubEntityId: H2, bookOwnerEntityId: shape === "remote" ? H1 : H2,
         source: { jurisdiction: S2, entityId: U2, counterpartyEntityId: H2, tokenId: 2, amount: 1n }, target: { jurisdiction: S1, entityId: H1, counterpartyEntityId: U1, tokenId: pick(r, [1, 3]), amount: 1n },
-        sourceSignerId: SIG[U2], sourceHubSignerId: SIG[H2], targetHubSignerId: SIG[H1], targetSignerId: SIG[U1],
+        sourceSignerId: sig(U2), sourceHubSignerId: sig(H2), targetHubSignerId: sig(H1), targetSignerId: sig(U1),
       });
     const sized: CrossRoute = shape === "local"
       ? { ...base, source: { ...base.source, amount: pick(r, [10n ** 9n, 7n * 10n ** 6n, BigInt(1 + int(r, 1e9))]) }, target: { ...base.target, amount: pick(r, [10n ** 21n, 3n * 10n ** 18n, 10n ** 12n * BigInt(1 + int(r, 1e6))]) } }
@@ -331,7 +332,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
     const rwBooks = new Map<string, Book>();
     const og: any = {
       entityId: self, timestamp: T0, accounts: new Map(), orderbookExt: ogExt,
-      config: { mode: "proposer-based", threshold: 1n, validators: [SIG[self]], shares: { [SIG[self]!]: 1n }, jurisdiction: ogJur(J1) },
+      config: { mode: "proposer-based", threshold: 1n, validators: [sig(self)], shares: { [sig(self)]: 1n }, jurisdiction: ogJur(J1) },
     };
     let swaps: Map<string, CrossRoute> | undefined;
     const mirror = int(r, 6);
@@ -359,7 +360,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
         admissions = unwrap(markAdmissionClosed(admissions, route.source.entityId, route.orderId, now, "x"));
       }
     }
-    const rw0: BookHost = { id: self, timestamp: T0, validators: [SIG[self]!], ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile }, swaps, admissions, accounts: new Map() };
+    const rw0: BookHost = { id: self, timestamp: T0, validators: [sig(self)], ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile }, swaps, admissions, accounts: new Map() };
     const row = pick(r, ["none", "book", "row", "row", "skew"] as const), event = committedCrossOfferEvent(rw0, route);
     if (row !== "none" && event.ok) {
       const meta = ogRun(() => ogOB.buildCrossJurisdictionMarketOffer(normalizeSwapOfferForOrderbook(event.value as never, event.value.accountId) as never, self) as any);
@@ -513,7 +514,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       if (swaps.size > 0) og.crossJurisdictionSwaps = ogColl(swaps);
       og.accounts = new Map([[U1, { state: { swapOffers: new Map(offers) } }]]);
       const account: HubAccount = { active: true, left: U1, right: H1, offers, queued: [] };
-      const host: BookHost = { id: self, timestamp: T0, validators: [SIG[self]!], swaps: swaps.size > 0 ? swaps : undefined, admissions, accounts: new Map([[U1, account]]) };
+      const host: BookHost = { id: self, timestamp: T0, validators: [sig(self)], swaps: swaps.size > 0 ? swaps : undefined, admissions, accounts: new Map([[U1, account]]) };
       const cancels = [...offers.keys(), "missing"].filter(() => int(r, 3) > 0).map((offerId) => ({ offerId, accountId: int(r, 12) === 0 ? U2 : U1 }));
       const ogOut = ogRun(() => { const res = ogProcessRoute(ogEnv, og, cancels as never); return { local: res.localBookCancels, admissions: entries(og.crossJurisdictionBookAdmissions === undefined ? undefined : new Map(og.crossJurisdictionBookAdmissions)), outputs: res.outputs.map((o: any) => ({ entityId: o.entityId, signerId: o.signerId, txs: o.entityTxs })) }; });
       const res = routeRemoteCancels(host, cancels), rw: Out<unknown> = res.ok ? { ok: true, value: { local: res.value.local, admissions: entries(res.value.host.admissions), outputs: res.value.outputs } } : rwRun(res);
@@ -528,7 +529,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
     for (let i = 0; i < 600; i++) {
       const route = lifeRoute(r, i, pick(r, ["local", "remote", "foreign"] as const));
       const target = pick(r, [H1, H1, H2, U1]), source = int(r, 5) === 0 ? target : pick(r, ids);
-      const signer = int(r, 10) < 7 ? (SIG[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", SIG[H1]!]);
+      const signer = int(r, 10) < 7 ? (SIG[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", sig(H1)]);
       const drift: CrossRoute = int(r, 6) === 0 ? { ...route, routeHash: "0x" + "ee".repeat(32) } : route;
       const oid = int(r, 12) === 0 ? "other" : route.orderId, src = int(r, 10) === 0 ? U1 : route.source.entityId;
       const txOf = (): EntityTx => {

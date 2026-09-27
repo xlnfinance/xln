@@ -115,7 +115,7 @@ describe("account map edge cases", () => {
   });
 });
 
-const W = (b: string) => `0x${b.repeat(32)}`;
+const W = (b: string): `0x${string}` => `0x${b.repeat(32)}`;
 const TX_TYPES = ["direct_payment", "set_credit_limit", "add_delta", "htlc_lock", "swap_offer", "deposit_collateral", "rebalance_policy", "settle_transition"];
 const randTx = (): { type: string; data: any } => {
   const type = pick(TX_TYPES);
@@ -211,7 +211,7 @@ describe("J event signatures vs Depository ABI (typechain from Types.sol/Deposit
   test("MATCH: AccountSettled -- contract TokenSettlement.ondelta is Int512 (int256 high, uint256 low); rewrite signature and topic0 equal the contract's", () => {
     const e = DEPOSITORY.getEvent("AccountSettled")!;
     expect(e.format("sighash")).toBe("AccountSettled((bytes32,bytes32,(uint256,uint256,uint256,uint256,(int256,uint256))[],uint256)[])");
-    expect(J_EVENT_SIGNATURES.AccountSettled).toBe(e.format("sighash"));
+    expect<string>(J_EVENT_SIGNATURES.AccountSettled).toBe(e.format("sighash"));
     expect(jEventTopic("AccountSettled")).toBe(e.topicHash);
   });
   test("MATCH: readJEvents decodes real contract AccountSettled logs (Int512 ondelta, og decodeInt512) and encodeAccountSettledData emits the contract layout (50 random)", () => {

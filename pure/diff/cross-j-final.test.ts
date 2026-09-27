@@ -37,6 +37,7 @@ const S1 = `stack:1:${J1.depositoryAddress}`, S2 = `stack:31337:${J2.depositoryA
 const W = (b: string) => ("0x" + b.repeat(32)) as EntityId;
 const U1 = W("01"), H1 = W("02"), H2 = W("03"), U2 = W("04");
 const SIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
+const sig = (e: string): string => { const s = SIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
 const PEER: Readonly<Record<string, EntityId>> = { [U1]: H1, [H1]: U1, [H2]: U2, [U2]: H2 };
 const T0 = 1_700_000_050_000, CLOCK60 = { leftResponseSeconds: 60, rightResponseSeconds: 60 }, RUNTIME_SEED = "0x" + "5e".repeat(32);
 const ogEnv = { state: { timestamp: T0 }, runtimeSeed: RUNTIME_SEED } as never;
@@ -48,7 +49,7 @@ const routeOf = (r: Rand, n: number): CrossRoute => ({
   source: { jurisdiction: S1, entityId: U1, counterpartyEntityId: H1, tokenId: pick(r, [1, 3]), amount: pick(r, [10n ** 9n, 7n * 10n ** 6n, BigInt(1 + int(r, 1e9))]) },
   target: { jurisdiction: S2, entityId: H2, counterpartyEntityId: U2, tokenId: 2, amount: pick(r, [10n ** 21n, 3n * 10n ** 18n, BigInt(1 + int(r, 1e12))]) },
   sourceDisputeConfig: CLOCK60, targetDisputeConfig: CLOCK60, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: pick(r, [T0 + 60_000, T0 + 60_000, T0 - 10, T0]),
-  sourceSignerId: SIG[U1], sourceHubSignerId: SIG[H1], targetHubSignerId: SIG[H2], targetSignerId: SIG[U2],
+  sourceSignerId: sig(U1), sourceHubSignerId: sig(H1), targetHubSignerId: sig(H2), targetSignerId: sig(U2),
 });
 /** A prepared route at a random status and committed fill (none, partial, full). */
 const liveRoute = (r: Rand, n: number): CrossRoute => {
@@ -91,7 +92,7 @@ const worldOf = (r: Rand, n: number, self: EntityId, count = 1): World => {
     }
   }
   rebuildOrderbookPairIndex(ogExt);
-  const hasAccount = int(r, 10) > 0, validators = int(r, 20) === 0 ? [] : [SIG[self]!];
+  const hasAccount = int(r, 10) > 0, validators = int(r, 20) === 0 ? [] : [sig(self)];
   const account: HubAccount = { active: true, left: self < peer ? self : peer, right: self < peer ? peer : self, offers, queued, pulls: pulls as never };
   const og = {
     entityId: self, timestamp: T0, config: { mode: "proposer-based", threshold: 1n, validators, shares: Object.fromEntries(validators.map((v) => [v, 1n])), jurisdiction: { name: "J", ...J1 } },
@@ -138,7 +139,7 @@ describe("cross-j-final: clear lifecycle Entity txs", () => {
       const built = route.sourcePull && route.targetPull ? buildCrossCloseProof(route, binary) : undefined;
       const proof: CrossCloseProof = built?.ok ? (int(r, 8) === 0 ? { ...built.value, cumulativeSourceAmount: built.value.cumulativeSourceAmount + 1n } : built.value)
         : { orderId: route.orderId, routeHash: "0x", sourcePullId: "", targetPullId: "", fillRatio: 0, cumulativeSourceAmount: 0n, cumulativeTargetAmount: 0n, binaryHash: "0x", closeMode: "pure_cancel" };
-      const data = { proposerSignerId: int(r, 12) === 0 ? "0x" + "55".repeat(20) : int(r, 12) === 0 ? SIG[H1]!.toUpperCase().replace("0X", "0x") : SIG[H1]!, orderId: route.orderId, binary, proof };
+      const data = { proposerSignerId: int(r, 12) === 0 ? "0x" + "55".repeat(20) : int(r, 12) === 0 ? sig(H1).toUpperCase().replace("0X", "0x") : sig(H1), orderId: route.orderId, binary, proof };
       const og = ogRun(() => { const res = handleMaterializeCrossJurisdictionClearEntityTx(ogEnv, w.og, { type: "materializeCrossJurisdictionClear", data } as never, true); return ogSnap(res.newState, res); });
       const rw = rwRun(materializeCrossClear(w.rw, data));
       same(`materialize ${i}`, og, rw.ok ? { ok: true, value: rwSnap(rw.value) } : rw);
@@ -196,11 +197,11 @@ describe("cross-j-final: clear lifecycle Entity txs", () => {
       // og's setup branch materializes raw intents too; only prepared routes are compared here
       const keep = new Map([...w.rw.swaps!].filter(([, v]) => v.status !== "intent" || v.sourcePull !== undefined));
       w.rw = { ...w.rw, swaps: keep }; w.og.crossJurisdictionSwaps = ogColl(keep);
-      const pendingIds = [...keep.keys()].filter(() => int(r, 8) === 0), mempool = pendingIds.map((orderId) => ({ type: "materializeCrossJurisdictionClear", data: { proposerSignerId: SIG[H1], orderId, binary: "0x", proof: {} } }));
-      const replica = { entityId: H1, signerId: SIG[H1], state: w.og, mempool };
+      const pendingIds = [...keep.keys()].filter(() => int(r, 8) === 0), mempool = pendingIds.map((orderId) => ({ type: "materializeCrossJurisdictionClear", data: { proposerSignerId: sig(H1), orderId, binary: "0x", proof: {} } }));
+      const replica = { entityId: H1, signerId: sig(H1), state: w.og, mempool };
       const og = ogRun(() => appendDefaultProposerCrossJMaterializations(ogEnv, replica as never, []));
       // og: only the default proposer (validators[0]) materializes
-      const rw = w.rw.validators[0] !== SIG[H1] ? { ok: true as const, value: [] } : rwRun(crossClearReveals(w.rw, SIG[H1]!, RUNTIME_SEED, new Set(pendingIds.map((id) => `clear:${id}`))));
+      const rw = w.rw.validators[0] !== sig(H1) ? { ok: true as const, value: [] } : rwRun(crossClearReveals(w.rw, sig(H1), RUNTIME_SEED, new Set(pendingIds.map((id) => `clear:${id}`))));
       same(`reveal ${i}`, og, rw);
       bump(kinds, og.ok ? `ok:${og.value.length}` : og.message);
     }
@@ -211,10 +212,10 @@ describe("cross-j-final: clear lifecycle Entity txs", () => {
     const r = rng(0xa0c1), outcomes = new Map<string, number>(), ids = [U1, H1, H2, U2];
     for (let i = 0; i < 400; i++) {
       const route = liveRoute(r, i), target = pick(r, [H2, H2, H1, U2]), source = pick(r, [H1, H1, ids[int(r, 4)]!]);
-      const signer = int(r, 10) < 8 ? SIG[source]! : "0x" + "55".repeat(20), drift: CrossRoute = int(r, 6) === 0 ? { ...route, routeHash: "0x" + "ee".repeat(32) } : route;
+      const signer = int(r, 10) < 8 ? sig(source) : "0x" + "55".repeat(20), drift: CrossRoute = int(r, 6) === 0 ? { ...route, routeHash: "0x" + "ee".repeat(32) } : route;
       const proof = { orderId: int(r, 12) === 0 ? "other" : route.orderId, routeHash: route.routeHash ?? "", sourcePullId: "", targetPullId: "", fillRatio: 0, cumulativeSourceAmount: 0n, cumulativeTargetAmount: 0n, binaryHash: "0x", closeMode: "pure_cancel" as const };
       const tx = { type: "crossPullClose", data: { counterpartyEntityId: int(r, 8) === 0 ? U1 : U2, pullId: "p", binary: "0x", proof, ...(int(r, 4) > 0 ? { route: drift } : {}) } } as EntityTx;
-      const stored = int(r, 3) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [SIG[target]!];
+      const stored = int(r, 3) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [sig(target)];
       const ogState = { entityId: target, config: { mode: "proposer-based", threshold: 1n, validators, shares: { [validators[0]!]: 1n } }, ...(stored ? { crossJurisdictionSwaps: ogColl(stored) } : {}) };
       const rwState = { id: target, quorum: unwrap(createEntity({ id: target, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[validators[0] as Address, { shares: 1n }]]) })).state.quorum, ...(stored ? { crossJurisdictionSwaps: stored } : {}) } as unknown as EntityState;
       const og = (() => { try { assertRuntimeOutputAuthorization(source, signer, target, [tx] as never, ogState as never); return null; } catch (e) { return (e as Error).message; } })();

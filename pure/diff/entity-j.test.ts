@@ -177,6 +177,7 @@ const npick = <X,>(xs: readonly X[]): X => xs[nri(xs.length)] as X;
 const nhex = (bytes: number): string => `0x${Array.from({ length: bytes * 2 }, () => "0123456789abcdef"[nri(16)]).join("")}`;
 const SECP_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 const wallets = [1, 2, 3].map((i) => new ethers.Wallet(`0x${String(i).padStart(2, "0").repeat(32)}`));
+const other = (w: ethers.Wallet): ethers.Wallet => { const o = wallets.find((x) => x !== w); if (o === undefined) throw new Error("one wallet only"); return o; };
 /** A random signed transaction of type 0 (EIP-155 or pre-155), 1 or 2, serialized by ethers. */
 const signedTx = (over: { to?: string; data?: string; chainId?: bigint; nonce?: number; value?: bigint; type?: number; wallet?: ethers.Wallet } = {}): string => {
   const type = over.type ?? npick([0, 0, 1, 2, 2]), chainId = over.chainId ?? npick([31337n, 1n, 0n, 8453n]);
@@ -189,19 +190,21 @@ const signedTx = (over: { to?: string; data?: string; chainId?: bigint; nonce?: 
   tx.signature = (over.wallet ?? npick(wallets)).signingKey.sign(tx.unsignedHash);
   return tx.serialized;
 };
+/** Flip one random bit of a copy (the byte index is drawn before the bit). */
+const flipByte = (b: Uint8Array): string => { const i = nri(b.length); b[i] = (b[i] ?? 0) ^ (1 << nri(8)); return ethers.hexlify(b); };
 /** One structural mutation of a serialized transaction, at the RLP-field level or on the raw bytes. */
-const mutateTx = (raw: string): string => { try { return mutateFields(raw); } catch { const b = ethers.getBytes(raw).slice(); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); } };
+const mutateTx = (raw: string): string => { try { return mutateFields(raw); } catch { return flipByte(ethers.getBytes(raw).slice()); } };
 const mutateFields = (raw: string): string => {
   const bytes = ethers.getBytes(raw), typed = bytes[0]! < 0x7f, prefix = typed ? ethers.hexlify(bytes.slice(0, 1)) : "0x";
   let decoded: unknown;
   try { decoded = ethers.decodeRlp(typed ? bytes.slice(1) : bytes); } catch { decoded = null; }
-  if (!Array.isArray(decoded) || decoded.length < 6 || decoded.some((f) => typeof f !== "string" && !Array.isArray(f))) { const b = new Uint8Array(bytes); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); }
+  if (!Array.isArray(decoded) || decoded.length < 6 || decoded.some((f) => typeof f !== "string" && !Array.isArray(f))) return flipByte(new Uint8Array(bytes));
   const fields = decoded as any[], sig = fields.length - 3;
   const encode = (fs: unknown[]): string => ethers.concat([prefix, ethers.encodeRlp(fs as never)]);
   const big = (h: string): bigint => (h === "0x" ? 0n : BigInt(h)), be = (n: bigint): string => (n === 0n ? "0x" : ethers.toBeHex(n));
   const set = (i: number, v: unknown): string => { const fs = [...fields]; fs[i] = v; return encode(fs); };
   switch (nri(17)) {
-    case 0: { const b = new Uint8Array(bytes); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); }
+    case 0: return flipByte(new Uint8Array(bytes));
     case 1: return ethers.hexlify(bytes.slice(0, Math.max(1, bytes.length - 1 - nri(4))));
     case 2: return ethers.concat([raw, npick(["0x00", "0x80", "0xc0"])]);
     case 3: { const i = nri(typed ? 7 : 5); return set(i, ethers.concat(["0x00", fields[i]])); }
@@ -299,7 +302,7 @@ describe("entity-j RJ-9: durable numbered-registration intents (og numbered-regi
       const replica = { name: "Local", blockNumber: 7n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 }, chainId: CHAIN, contracts: { depository: NDEP, entityProvider: EP }, watcherConfirmationDepth: 0, entityProviderDeploymentBlock: 1 };
       env.state.jReplicas.set("Local", replica);
       let rt: Runtime = createRuntime([clone(replica) as unknown as JReplica], env.runtimeId);
-      const jurisdiction = { name: "Local", chainId: CHAIN, depositoryAddress: NDEP, entityProviderAddress: EP };
+      const jurisdiction = { address: NDEP, name: "Local", chainId: CHAIN, depositoryAddress: NDEP, entityProviderAddress: EP };
       const payer = npick(wallets), local = aliceAddr.toLowerCase();
       const definitions = Array.from({ length: 1 + nri(3) }, (_, i) => {
         const validators = npick([[aliceAddr, bobAddr], [aliceAddr], [bobAddr, aliceAddr], [bobAddr]]);
@@ -319,7 +322,7 @@ describe("entity-j RJ-9: durable numbered-registration intents (og numbered-regi
       else if (defect === 1) pending = { ...pending, transactionHash: nhex(32) };
       else if (defect === 2) pending = { ...pending, transactionNonce: pending.transactionNonce + 1 };
       else if (defect === 3) pending = { ...pendingOf(request, { to: nhex(20) }) };
-      else if (defect === 4) pending = { ...pendingOf(request, { wallet: wallets.find((w) => w !== payer) }) };
+      else if (defect === 4) pending = { ...pendingOf(request, { wallet: other(payer) }) };
       else if (defect === 5) pending = { ...pendingOf(request, { data: nhex(40) }) };
       else if (defect === 6) pending = { ...pendingOf(request, { chainId: npick([1n, 0n]), type: 0 }) };
       else if (defect === 7) pending = { ...pendingOf(request, { value: 1n }) };

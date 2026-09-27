@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   accountProofBody, committedView, deltaTransformerFor, disputeArguments, knownDisputeSecrets, proofBodyHash, starterSecrets, tokenId,
-  type AccountBody, type HtlcLock, type JReplica, type Paybook, type PaybookEntry, type PullRow, type SwapOffer, type TokenId, type WireAccountTx,
+  type AccountBody, type EntityTx, type HtlcLock, type JReplica, type Paybook, type PaybookEntry, type PullRow, type SwapOffer, type TokenId, type WireAccountTx,
 } from "../xln.ts";
 import { TERMS, TEST_CONTRACTS, genesisAB, unwrap } from "../xln_run.ts";
 import { buildAccountProofBody } from "../../core/protocol/dispute/proof-builder.ts";
@@ -215,6 +215,7 @@ const W = (b: string) => ("0x" + b.repeat(32)) as EntityId;
 const U1 = W("01"), H1 = W("02"), H2 = W("03"), U2 = W("04");
 const XSIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
 const XPEER: Readonly<Record<string, EntityId>> = { [U1]: H1, [H1]: U1, [H2]: U2, [U2]: H2 };
+const xsig = (e: EntityId): string => { const s = XSIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
 const T0 = 1_700_000_050_000, CLOCK60 = { leftResponseSeconds: 60, rightResponseSeconds: 60 }, RUNTIME_SEED = "0x" + "5e".repeat(32);
 const Z32 = "0x" + "00".repeat(32);
 const baseRoute = (r: Rand, n: number): CrossRoute => ({
@@ -222,7 +223,7 @@ const baseRoute = (r: Rand, n: number): CrossRoute => ({
   source: { jurisdiction: `stack:1:0x${"11".repeat(20)}`, entityId: U1, counterpartyEntityId: H1, tokenId: 1, amount: BigInt(1 + xint(r, 1e9)) },
   target: { jurisdiction: `stack:31337:0x${"ab".repeat(20)}`, entityId: H2, counterpartyEntityId: U2, tokenId: 2, amount: BigInt(1 + xint(r, 1e12)) },
   sourceDisputeConfig: CLOCK60, targetDisputeConfig: CLOCK60, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: T0 + 60_000,
-  sourceSignerId: XSIG[U1], sourceHubSignerId: XSIG[H1], targetHubSignerId: XSIG[H2], targetSignerId: XSIG[U2],
+  sourceSignerId: xsig(U1), sourceHubSignerId: xsig(H1), targetHubSignerId: xsig(H2), targetSignerId: xsig(U2),
 });
 const decodedAt = (r: Rand, ratio: number) => {
   if (ratio <= 0 || ratio > 65_535 || !Number.isInteger(ratio)) return { fillRatio: ratio };
@@ -266,7 +267,7 @@ const hostOf = (r: Rand, n: number, self: EntityId): { host: CjHost; routes: Cro
   const peers = [...new Set([XPEER[self]!, ...(xint(r, 3) === 0 ? [xpick(r, [U1, H1, H2, U2].filter((x) => x !== self))] : [])])];
   const accounts = new Map(peers.filter(() => xint(r, 10) > 0).map((p) => [p.toLowerCase(), accountOf(p)] as const));
   const jb = jbOf(r, routes, self.toLowerCase());
-  return { host: { id: self, timestamp: T0, validators: [XSIG[self]!], swaps, ...(jb === undefined ? {} : { jb }), accounts }, routes };
+  return { host: { id: self, timestamp: T0, validators: [xsig(self)], swaps, ...(jb === undefined ? {} : { jb }), accounts }, routes };
 };
 const ogStateOf = (h: CjHost): any => {
   const swaps = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
@@ -830,7 +831,7 @@ describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/au
         }
       };
       const txs = xint(r, 8) === 0 ? [txOf(), txOf()] : [txOf()];
-      const stored = xint(r, 5) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [XSIG[target]!];
+      const stored = xint(r, 5) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [xsig(target)];
       const swaps = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
       for (const [k, v] of stored ?? []) swaps.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(structuredClone(v) as never));
       const ogState = { entityId: target, config: { mode: "proposer-based", threshold: 1n, validators, shares: { [validators[0]!]: 1n } }, ...(stored ? { crossJurisdictionSwaps: swaps } : {}) };

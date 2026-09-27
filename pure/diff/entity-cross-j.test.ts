@@ -47,7 +47,7 @@ describe("entity-cross-j: HTLC onion crypto (og protocol/htlc/multi-recipient.ts
       same(og, rw, `enc${i}`);
       if (!og.ok || !rw.ok) continue;
       let env: HtlcEnvelope = rw.value;
-      if (r() < 0.3) { const b = Buffer.from(env.ciphertext, "base64"); b[int(r, b.length)] ^= 1 << int(r, 8); env = { ...env, ciphertext: b.toString("base64") }; }
+      if (r() < 0.3) { const b = Buffer.from(env.ciphertext, "base64"), j = int(r, b.length); b[j] = (b[j] ?? 0) ^ (1 << int(r, 8)); env = { ...env, ciphertext: b.toString("base64") }; }
       const pub = r() < 0.1 ? keyPair(r).pub : recipient.pub, dctx = r() < 0.1 ? hex(r, 32) : ctx;
       same(ogTry(() => ogMr.decryptOpaqueHtlcBytes(env, pub, recipient.priv, dctx)), decryptOpaqueHtlc(env, pub, recipient.priv, dctx), `dec${i}`);
     }
@@ -75,7 +75,7 @@ describe("entity-cross-j: onion layer codec (og codec/onion.ts)", () => {
       let enc = rw.value.slice();
       const mode = int(r, 4);
       if (mode === 1) enc = enc.slice(0, int(r, enc.length));
-      if (mode === 2 && enc.length > 0) enc[int(r, enc.length)] ^= 1 << int(r, 8);
+      if (mode === 2 && enc.length > 0) { const j = int(r, enc.length); enc[j] = (enc[j] ?? 0) ^ (1 << int(r, 8)); }
       if (mode === 3) enc = Uint8Array.from([...enc, 0]);
       same(ogTry(() => ogOnion.decodeOnionLayer(enc)), decodeOnionLayer(enc), `dec${i}`);
     }
@@ -272,7 +272,7 @@ describe("entity-cross-j: Entity htlcPayment origination (og payment-admission.t
       same(og, rw.refused.size === 0 ? { ok: true, value: rw.originated } : { ok: false }, `mat${i}`);
       if (!og.ok || rw.refused.size > 0) continue;
       accepted++;
-      const infra: HtlcFrameInfra = { gossipProfiles: profiles, peerAssertions: [], originated: rw.originated };
+      const infra: HtlcFrameInfra = { gossipProfiles: profiles, peerAssertions: [], originated: rw.originated, entries: [] };
       // tamper one committed field of the prepared origin; og and the rewrite must agree on every variant
       const t = int(r, 8), o = rw.originated[0]!;
       const tampered: PreparedOriginated = t === 1 ? { ...o, senderLockAmount: o.senderLockAmount + 1n, totalFee: o.totalFee + 1n } : t === 2 ? { ...o, timelock: o.timelock - 1n } : t === 3 ? { ...o, revealBeforeHeight: o.revealBeforeHeight + 3 }
@@ -400,7 +400,7 @@ describe("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.ts, comm
       const ts = k === 6 ? Number(lock0.timelock) - 30_000 + int(r, 20_000) : Number(NOW) + 2000;
       const jHeight = k === 7 ? Number(lock0.revealBeforeHeight) - int(r, 6) : 0;
       const hub = k === 8 ? { routingFeePPM: pick(r, [1, 20_000, 999_999]), baseFee: pick(r, [0n, 1n, 3n, 50n]) } : undefined;
-      const known = new Set(k === 10 ? [ALICE, BOB] : [ALICE, BOB, CAROL]), up = (id: string) => known.has(id) && !(k === 9 && id === CAROL);
+      const known = new Set<string>(k === 10 ? [ALICE, BOB] : [ALICE, BOB, CAROL]), up = (id: string) => known.has(id) && !(k === 9 && id === CAROL);
       let replicas = bob.accountReplicas;
       if (k === 11) replicas = new Map([...replicas].filter(([p]) => p !== CAROL));
       if (k === 14) { const c = replicas.get(CAROL)!, tk = unwrap(tokenId("1")), d = c.state.account.deltas.get(tk)!; replicas = new Map(replicas).set(CAROL, { ...c, state: { ...c.state, account: { ...c.state.account, deltas: new Map(c.state.account.deltas).set(tk, { ...d, leftCreditLimit: BigInt(int(r, 120)), rightCreditLimit: BigInt(int(r, 120)) }) } } } as AccountReplica); }

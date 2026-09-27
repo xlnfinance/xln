@@ -308,7 +308,7 @@ describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, p
     handleChatMessageEntityTx(ogState, list[1] as never, true);
     const ogEvents = readEntityFrameEvents(ogState);
     expect(f.events).toEqual(ogEvents as never);
-    expect(unwrap(hashEntityFrame(f))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, pair.state.id, f.stateRoot, f.authorityRoot, f.entityContext as never));
+    expect<string>(unwrap(hashEntityFrame(f))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, pair.state.id, f.stateRoot, f.authorityRoot, f.entityContext as never));
   });
 });
 
@@ -342,7 +342,7 @@ describe("entity-consensus-2: trusted gateway payments (ER-15)", () => {
     }
     return rt;
   };
-  const create = (id: EntityId, txs: EntityTx[], timestamp = NOW): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp, txs } });
+  const create = (id: EntityId, txs: EntityTx[], timestamp: bigint = NOW): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp, txs } });
   const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
   const offdelta = (rt: Runtime, self: EntityId, peer: EntityId): bigint | undefined => rt.entities.get(replicaKey(self, signers.get(self) as Address))?.accountReplicas.get(peer)?.state.account.deltas.get(unwrap(tokenId("1")))?.offdelta;
   test("MATCH (og direct-payment.ts requireTrustedPaymentGateway + applyDirectPaymentForwardFollowups): Alice pays Carol through gateway Bob; Bob forwards the committed first leg once", async () => {

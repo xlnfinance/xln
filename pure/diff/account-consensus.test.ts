@@ -29,10 +29,10 @@ import type { AccountFrame as OgFrame, AccountInput as OgInput, AccountReplica a
 
 // ---- rewrite ----
 import {
-  ACCOUNT_MEMPOOL_SIZE, ACCOUNT_NETWORK_ALLOWANCE_MS, accountDisputeHash, applyEntityInput, createEntity, accountStateRoot, admit, applyAccountInput, committedView, disputeUnsafe, incomingDeadline, keccakUtf8, disputeRequirement, disputeShapes, frameStateHash, localProof, planAccountProposal, proposalPlan, receiverClock, replicaId, unqueued,
+  ACCOUNT_MEMPOOL_SIZE, tokenId, ACCOUNT_NETWORK_ALLOWANCE_MS, accountDisputeHash, applyEntityInput, createEntity, accountStateRoot, admit, applyAccountInput, committedView, disputeUnsafe, incomingDeadline, keccakUtf8, disputeRequirement, disputeShapes, frameStateHash, localProof, planAccountProposal, proposalPlan, receiverClock, replicaId, unqueued,
 } from "../xln.ts";
-import type { AccountFrame, AccountInput, AccountReplica, EntityId, WireAccountTx } from "../xln.ts";
-import { ALICE, BOB, CLOCK, NOW, TERMS, aliceAddr, verifiers, causeOf, ackInput, disputeFor, envelopeAB, genesisAB, hankoVerify, offerOf, partyIn, proposeInput, signAccountFrame, unwrap, unwrapErr } from "../xln_run.ts";
+import type { AccountFrame, AccountInput, AccountReplica, EntityId, FrameClock, WireAccountTx } from "../xln.ts";
+import { ALICE, BOB, CLOCK, NOW, TERMS, TOKEN, aliceAddr, verifiers, causeOf, ackInput, disputeFor, envelopeAB, genesisAB, hankoVerify, offerOf, partyIn, proposeInput, signAccountFrame, unwrap, unwrapErr } from "../xln_run.ts";
 
 // ============ og fixture (copied from core/__tests__/account/consensus/account-input-rejection.test.ts) ============
 const L = `0x${"11".repeat(32)}`, R = `0x${"22".repeat(32)}`;
@@ -67,7 +67,7 @@ const ogCtx = (name: string, verify: AccountConsensusContext["verifyHanko"] = as
 };
 const ogEnvelope = (a: OgReplica) => ({ fromEntityId: a.proofHeader.toEntity, toEntityId: a.proofHeader.fromEntity, domain: { ...a.state.domain }, disputeConfig: { ...a.state.disputeConfig }, watchSeed: a.state.watchSeed });
 const ogFrame = (a: OgReplica, over: Partial<OgFrame> = {}): OgFrame => {
-  const f = { height: a.currentHeight + 1, timestamp: 1_000, jHeight: 0, accountTxs: [], prevFrameHash: a.currentHeight === 0 ? "genesis" : a.currentFrame.stateHash, accountStateRoot: computeAccountStateRoot(a.state), deltas: [], stateHash: "", byLeft: false, ...over } as OgFrame;
+  const f = { height: a.currentHeight + 1, timestamp: 1_000, jHeight: 0, accountTxs: [], prevFrameHash: a.currentHeight === 0 ? "genesis" : a.currentFrame.stateHash, accountStateRoot: computeAccountStateRoot(a.state), stateHash: "", ...over };
   f.stateHash = computeFrameHash(f);
   return f;
 };
@@ -79,23 +79,25 @@ const ogPeerDispute = (ctx: AccountConsensusContext, a: OgReplica, proposerIsLef
 const scl = (tokenId: number, amount: bigint): OgTx => ({ type: "set_credit_limit", data: { tokenId, amount } }) as OgTx;
 
 /** The Account's status lines (og HandleAccountInputResult `events`), in output order. */
-const saidOf = (outputs: readonly { readonly kind: string }[]): string[] => outputs.flatMap((o) => (o.kind === "message" ? [(o as { message: string }).message] : []));
+const saidOf = (outputs: readonly { readonly kind: string }[]): string[] =>
+  outputs.flatMap((o) => (o.kind === "message" && "message" in o && typeof o.message === "string" ? [o.message] : []));
 /** og fixture ids (L/R) and the rewrite's (ALICE/BOB) differ; a message naming `Entity <tail>` is compared with the tail normalized. */
 const tails = (xs: readonly string[]): string[] => xs.map((m) => m.replace(/Entity [0-9a-fA-F]{4}/g, "Entity ****"));
 // ============ rewrite drivers ============
 const DOOR = (self: EntityId, now = NOW) => ({ verify: hankoVerify, self, now });
 const leftOf = (): EntityId => (partyIn(genesisAB(), ALICE).left ? ALICE : BOB);
 const rightOf = (): EntityId => (leftOf() === ALICE ? BOB : ALICE);
-const TX: WireAccountTx = { type: "set_credit_limit", tokenId: "0", limit: 7n } as WireAccountTx;
-const TX2: WireAccountTx = { type: "set_credit_limit", tokenId: "0", limit: 9n } as WireAccountTx;
+const TOK1 = unwrap(tokenId("1"));
+const TX: WireAccountTx = { type: "set_credit_limit", tokenId: TOKEN, limit: 7n };
+const TX2: WireAccountTx = { type: "set_credit_limit", tokenId: TOKEN, limit: 9n };
 const step = (r: AccountReplica, input: AccountInput, self: EntityId, now = NOW) => unwrap(applyAccountInput(r, input, DOOR(self, now)));
 /** Propose one frame from `self` holding `txs`. */
-const proposeFrom = (r: AccountReplica, self: EntityId, txs: readonly WireAccountTx[], clock = CLOCK) => {
+const proposeFrom = (r: AccountReplica, self: EntityId, txs: readonly WireAccountTx[], clock: FrameClock = CLOCK) => {
   const opened = unwrap(admit(r, txs));
   return step(opened, proposeInput(opened, self, clock), self);
 };
 /** Full round: `proposer` proposes, peer receives and acks, proposer commits. Returns both replicas. */
-const round = (p: AccountReplica, q: AccountReplica, proposer: EntityId, peer: EntityId, txs: readonly WireAccountTx[], clock = CLOCK) => {
+const round = (p: AccountReplica, q: AccountReplica, proposer: EntityId, peer: EntityId, txs: readonly WireAccountTx[], clock: FrameClock = CLOCK) => {
   const proposed = proposeFrom(p, proposer, txs, clock).replica;
   if (proposed._tag !== "proposed") throw new Error(proposed._tag);
   const received = step(q, offerOf(proposed, proposer), peer).replica;
@@ -165,7 +167,7 @@ describe("account-consensus: pure predicates", () => {
     prependUniqueMempoolTxs(a, [dup, pay, scl(2, 1n)]);
     expect(a.mempool.map((t) => t.type)).toEqual(["direct_payment", "set_credit_limit", "set_credit_limit", "direct_payment"]);
     // rewrite: restore() = [...unqueued(frame.txs, mempool), ...mempool]
-    const payW = { type: "payment", tokenId: "0", amount: 3n } as WireAccountTx;
+    const payW: WireAccountTx = { type: "payment", tokenId: TOKEN, amount: 3n };
     const restored = [...unqueued([TX, payW, TX2], [TX, payW]), TX, payW];
     expect(restored.map((t) => t.type)).toEqual(["payment", "set_credit_limit", "set_credit_limit", "payment"]);
   });
@@ -245,9 +247,9 @@ describe("account-consensus: driven scenarios", () => {
     const halted = unwrap(admit(genesisAB(), [resolve]));
     expect(unwrapErr(applyAccountInput(halted, { kind: "propose", ...CLOCK }, DOOR(ALICE)))).toMatchObject({ _tag: "proposal_halt", txType: "swap_resolve", message: ogHalt });
     const lock = { type: "htlc_lock", lockId: W("5a"), hashlock: W("5a"), timelock: 10n ** 15n, revealBeforeHeight: 50n, amount: 1n, tokenId: "1", envelope: { version: 9, ciphertext: "x" } } as unknown as WireAccountTx;
-    expect(unwrapErr(applyAccountInput(unwrap(admit(genesisAB(), [{ ...TX, tokenId: "1" } as WireAccountTx, lock])), { kind: "propose", ...CLOCK }, DOOR(ALICE)))).toEqual({ _tag: "account_tx_thrown", message: ogThrown });
-    const overdraw = { type: "payment", tokenId: "0", amount: 10n ** 30n } as WireAccountTx;
-    const proposed = proposeFrom(genesisAB(), ALICE, [TX, overdraw, { ...TX2, tokenId: "1" } as WireAccountTx]).replica;
+    expect(unwrapErr(applyAccountInput(unwrap(admit(genesisAB(), [{ ...TX, tokenId: TOK1 }, lock])), { kind: "propose", ...CLOCK }, DOOR(ALICE)))).toEqual({ _tag: "account_tx_thrown", message: ogThrown });
+    const overdraw: WireAccountTx = { type: "payment", tokenId: TOKEN, amount: 10n ** 30n };
+    const proposed = proposeFrom(genesisAB(), ALICE, [TX, overdraw, { ...TX2, tokenId: TOK1 }]).replica;
     if (proposed._tag !== "proposed") throw new Error(proposed._tag);
     expect([proposed.candidate.frame.txs.length, proposed.mempool.length]).toEqual([2, 0]);
     const idle = step(unwrap(admit(genesisAB(), [overdraw])), { kind: "propose", ...CLOCK }, ALICE).replica;
@@ -316,7 +318,7 @@ describe("account-consensus: driven scenarios", () => {
   test("MATCH: the mempool limit counts pending-frame txs (og mempool.ts outstanding = mempool + pendingFrame)", () => {
     const ctx = ogCtx("diff-admit-pending-limit");
     const many = (n: number) => Array.from({ length: n }, (_, i) => scl(2, BigInt(i + 1)));
-    const manyW = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "set_credit_limit", tokenId: "1", limit: BigInt(i + 1) }) as WireAccountTx);
+    const manyW = (n: number) => Array.from({ length: n }, (_, i): WireAccountTx => ({ type: "set_credit_limit", tokenId: TOK1, limit: BigInt(i + 1) }));
     const proposed = proposeFrom(genesisAB(), ALICE, [TX]).replica;
     for (const n of [ACCOUNT_MEMPOOL_SIZE - 1, ACCOUNT_MEMPOOL_SIZE]) {
       const a = ogAccount();
@@ -351,9 +353,9 @@ describe("account-consensus: driven scenarios", () => {
     // og LEFT
     const ctx = ogCtx("diff-collision-left");
     const a = ogAccount(L, R);
-    const own = ogFrame(a, { accountTxs: [scl(1, 1n)], byLeft: true });
+    const own = ogFrame(a, { accountTxs: [scl(1, 1n)] });
     a.pendingFrame = own;
-    a.pendingAccountInput = { kind: "ack_frame", fromEntityId: L, toEntityId: R, domain: { ...ogDomain }, disputeConfig: { ...a.state.disputeConfig }, watchSeed: a.state.watchSeed, proposal: { frame: own } } as OgReplica["pendingAccountInput"];
+    a.pendingAccountInput = { kind: "ack_frame", fromEntityId: L, toEntityId: R, domain: { ...ogDomain }, disputeConfig: { ...a.state.disputeConfig }, watchSeed: a.state.watchSeed, proposal: { frame: own } } as NonNullable<OgReplica["pendingAccountInput"]>;
     const theirs = ogFrame(a, { accountTxs: [scl(2, 2n)], timestamp: 1_001 });
     const res = await ogApply(ctx, a, { kind: "ack_frame", ...ogEnvelope(a), proposal: { frame: theirs, frameHanko: `0x${"66".repeat(65)}` } } as OgInput);
     expect(res.ok).toBe(true);
@@ -375,9 +377,9 @@ describe("account-consensus: driven scenarios", () => {
     // og RIGHT (accepting an empty LEFT frame so the og proof/dispute path is simple)
     const ctx = ogCtx("diff-collision-right");
     const b = ogAccount(R, L);
-    b.pendingFrame = ogFrame(b, { accountTxs: [scl(1, 1n)], byLeft: false });
+    b.pendingFrame = ogFrame(b, { accountTxs: [scl(1, 1n)] });
     b.mempool = [scl(3, 3n)];
-    const theirs = ogFrame(b, { accountTxs: [], byLeft: true });
+    const theirs = ogFrame(b, { accountTxs: [] });
     const res = await ogApply(ctx, b, { kind: "ack_frame", ...ogEnvelope(b), proposal: { frame: theirs, frameHanko: `0x${"66".repeat(65)}`, disputeHanko: ogPeerDispute(ctx, b, true) } } as OgInput);
     expect(res.ok).toBe(true);
     expect(b.currentHeight).toBe(1);
@@ -471,7 +473,7 @@ describe("account-consensus: driven scenarios", () => {
     a.currentHeight = 3; a.currentFrame = { ...a.currentFrame, height: 3, prevFrameHash: W("44"), stateHash: W("55") };
     const res = await ogApply(ctx, a, { kind: "ack", ...ogEnvelope(a), ack: { height: 1, frameHash: W("aa"), frameHanko: `0x${"bb".repeat(65)}` } } as OgInput);
     expect(res.ok).toBe(true);
-    let p = genesisAB(), q = genesisAB(), first: AccountInput | undefined;
+    let p: AccountReplica = genesisAB(), q: AccountReplica = genesisAB(), first: AccountInput | undefined;
     for (const tx of [TX, TX2, { ...TX, limit: 11n } as WireAccountTx]) { const r = round(p, q, ALICE, BOB, [tx]); p = r.p; q = r.q; first ??= r.ack; }
     expect(p.head.height).toBe(3n);
     // og ack-commit.ts handleObsoleteAck: `ℹ️ Ignored stale ACK 1 (current=3)` and nothing else
@@ -507,7 +509,7 @@ describe("account-consensus: driven scenarios", () => {
     const lock = W("5c"), cases: Array<[OgTx, WireAccountTx]> = [
       [{ type: "htlc_resolve", data: { lockId: lock, outcome: "secret", secret: W("01") } } as OgTx, { type: "htlc_resolve", lockId: lock, outcome: "secret", secret: W("01") } as WireAccountTx],
       [{ type: "swap_cancel_request", data: { offerId: "nope" } } as OgTx, { type: "swap_cancel_request", offerId: "nope" } as WireAccountTx],
-      [{ type: "direct_payment", data: { tokenId: 1, amount: 5n, route: [L], fromEntityId: R, toEntityId: L, deliveryMode: "direct" } } as OgTx, { type: "payment", tokenId: "1", amount: 5n, route: [leftOf()], fromEntityId: rightOf(), toEntityId: leftOf(), deliveryMode: "direct" } as WireAccountTx],
+      [{ type: "direct_payment", data: { tokenId: 1, amount: 5n, route: [L], fromEntityId: R, toEntityId: L, deliveryMode: "direct" } } as OgTx, { type: "payment", tokenId: TOK1, amount: 5n, route: [leftOf()], fromEntityId: rightOf(), toEntityId: leftOf(), deliveryMode: "direct" }],
     ];
     for (const [ogTx, tx] of cases) {
       const ctx = ogCtx("diff-frame-application");
@@ -549,7 +551,7 @@ describe("account-consensus: driven scenarios", () => {
     const a = ogAccount();
     const many = Array.from({ length: ACCOUNT_MEMPOOL_SIZE + 1 }, (_, i) => scl(1, BigInt(i + 1)));
     expect(() => applyAccountEnqueue(a, { kind: "enqueue", txs: many }, ctx.jClaimNodeStore)).toThrow("ACCOUNT_MEMPOOL_LIMIT_EXCEEDED");
-    const manyW = Array.from({ length: ACCOUNT_MEMPOOL_SIZE + 1 }, (_, i) => ({ type: "set_credit_limit", tokenId: "0", limit: BigInt(i + 1) }) as WireAccountTx);
+    const manyW = Array.from({ length: ACCOUNT_MEMPOOL_SIZE + 1 }, (_, i): WireAccountTx => ({ type: "set_credit_limit", tokenId: TOKEN, limit: BigInt(i + 1) }));
     expect(unwrapErr(admit(genesisAB(), manyW))).toEqual({ _tag: "mempool_full", limit: ACCOUNT_MEMPOOL_SIZE });
     // exactly at the limit both admit
     const b = ogAccount();
@@ -578,9 +580,9 @@ describe("account-consensus: dispute preparation", () => {
     const held = proposeFrom(genesisAB(), ALICE, [TX]).replica, proposed = { ...held, mempool: [...held.mempool, claim, TX2, resolve] } as AccountReplica;
     const preparing = step(proposed, { kind: "freeze" }, ALICE).replica;
     expect(preparing._tag).toBe("preparing");
-    expect(preparing.mempool.map((t) => t.type)).toEqual(ogPreparing);
+    expect<readonly string[]>(preparing.mempool.map((t) => t.type)).toEqual(ogPreparing);
     const resumed = step(preparing, { kind: "resume" }, ALICE).replica;
-    expect([resumed._tag === "open" ? "active" : resumed._tag, resumed.mempool.map((t) => t.type)]).toEqual(ogResumed);
+    expect<readonly unknown[]>([resumed._tag === "open" ? "active" : resumed._tag, resumed.mempool.map((t) => t.type)]).toEqual(ogResumed);
     // only a preparing Account returns (og ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID)
     expect(() => returnPreparedAccountToActive(ogAccount())).toThrow("ACCOUNT_DISPUTE_PREPARATION_RETURN_INVALID");
     expect(applyAccountInput(genesisAB(), { kind: "resume" }, DOOR(ALICE)).ok).toBe(false);
@@ -645,7 +647,7 @@ describe("account-consensus: incoming preflight", () => {
 
   test("MATCH: an incoming frame with a too-short HTLC lock is refused before replay", () => {
     const r = genesisAB(), from = rightOf(), self = leftOf();
-    const lock = { type: "htlc_lock", lockId: "L", hashlock: keccakUtf8(W("5a")), timelock: NOW + 10_000n, revealBeforeHeight: 100n, amount: 1n, tokenId: "0" } as WireAccountTx;
+    const lock: WireAccountTx = { type: "htlc_lock", lockId: "L", hashlock: keccakUtf8(W("5a")), timelock: NOW + 10_000n, revealBeforeHeight: 100n, amount: 1n, tokenId: TOKEN };
     const e = unwrapErr(applyAccountInput(r, ackFrameOf(r, from, peerFrame(r, from, { txs: [lock] })), DOOR(self)));
     expect(e).toEqual({ _tag: "frame_deadline", reason: "lock_window", lockId: "L" });
   });
@@ -669,8 +671,8 @@ describe("account-consensus: incoming preflight", () => {
 describe("account-consensus: proposal selection (og admission.ts selectProposalWindow)", () => {
   test("MATCH: selected mempool subset — EMPTY / TOO_LARGE / NOT_IN_MEMPOOL refuse in both; a valid subset proposes only it and keeps the rest queued", () => {
     const ogTxs = [scl(1, 1n), scl(2, 2n), scl(3, 3n)];
-    const rwTxs: WireAccountTx[] = [TX, TX2, { type: "set_credit_limit", tokenId: "0", limit: 11n } as WireAccountTx];
-    const TX4 = { type: "set_credit_limit", tokenId: "0", limit: 13n } as WireAccountTx;
+    const TX3: WireAccountTx = { type: "set_credit_limit", tokenId: TOKEN, limit: 11n }, rwTxs: WireAccountTx[] = [TX, TX2, TX3];
+    const TX4: WireAccountTx = { type: "set_credit_limit", tokenId: TOKEN, limit: 13n };
     const ogWindow = (sel: number[] | "none" | "huge" | "foreign"): string => {
       const a = ogAccount(L, R);
       a.mempool = [...ogTxs];
@@ -698,9 +700,9 @@ describe("account-consensus: proposal selection (og admission.ts selectProposalW
     expect(ogWindow("huge")).toBe("ACCOUNT_PROPOSAL_SELECTION_TOO_LARGE");
     expect(ogWindow([0, 0])).toBe("ACCOUNT_PROPOSAL_SELECTION_NOT_IN_MEMPOOL");
     // The Account input carries the selection: the proposed frame holds only it, the rest stays in the mempool (og finalizeAccountProposal).
-    const out = step(opened, proposeInput(opened, self, CLOCK, [rwTxs[1]!]), self).replica;
+    const out = step(opened, proposeInput(opened, self, CLOCK, [TX2]), self).replica;
     if (out._tag !== "proposed") throw new Error(out._tag);
-    expect(out.candidate.frame.txs).toEqual([rwTxs[1]]);
-    expect(out.mempool).toEqual([rwTxs[0], rwTxs[2]]);
+    expect(out.candidate.frame.txs).toEqual([TX2]);
+    expect(out.mempool).toEqual([TX, TX3]);
   });
 });

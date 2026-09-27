@@ -188,6 +188,7 @@ const J1: Domain = { chainId: 1, depositoryAddress: "0x" + "11".repeat(20) }, J2
 const S1 = `stack:1:${J1.depositoryAddress}`, S2 = `stack:31337:${J2.depositoryAddress}`;
 const U1 = ("0x" + "01".repeat(32)) as EntityId, H1 = ("0x" + "02".repeat(32)) as EntityId, H2 = ("0x" + "03".repeat(32)) as EntityId, U2 = ("0x" + "04".repeat(32)) as EntityId;
 const SIGNER: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
+const signerOf = (e: string): string => { const s = SIGNER[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
 const T0 = 1_700_000_050_000, RUNTIME_SEED = "0x" + "5e".repeat(32), CLOCK60 = { leftResponseSeconds: 60, rightResponseSeconds: 60 };
 const PEER: Readonly<Record<string, EntityId>> = { [U1]: H1, [H1]: U1, [H2]: U2, [U2]: H2 };
 const JUR: Readonly<Record<string, Domain>> = { [U1]: J1, [H1]: J1, [H2]: J2, [U2]: J2 };
@@ -197,7 +198,7 @@ const baseRoute = (r: Rand): CrossRoute => ({
   source: { jurisdiction: S1, entityId: U1, counterpartyEntityId: H1, tokenId: pick(r, [1, 1, 3, 2]), amount: pick(r, [10n ** 6n, 5n * 10n ** 9n, 7n * 10n ** 12n, BigInt(1 + int(r, 1e9))]) },
   target: { jurisdiction: S2, entityId: H2, counterpartyEntityId: U2, tokenId: pick(r, [1, 2, 3, 4]), amount: pick(r, [10n ** 6n, 10n ** 18n, 7n * 10n ** 12n, BigInt(1 + int(r, 1e9))]) },
   sourceDisputeConfig: CLOCK60, targetDisputeConfig: CLOCK60, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: T0 + 60_000,
-  sourceSignerId: SIGNER[U1], sourceHubSignerId: SIGNER[H1], targetHubSignerId: SIGNER[H2], targetSignerId: SIGNER[U2],
+  sourceSignerId: signerOf(U1), sourceHubSignerId: signerOf(H1), targetHubSignerId: signerOf(H2), targetSignerId: signerOf(U2),
 });
 type AcctSpec = { readonly disputeConfig: { leftResponseSeconds: number; rightResponseSeconds: number }; readonly collateral: bigint; readonly ondelta: bigint; readonly leftCredit: bigint; readonly rightCredit: bigint; readonly pulls: readonly { pullId: string; fullHash: string; partialRoot: string; orderId?: string }[] };
 const acct = (self: EntityId, spec: AcctSpec): { rw: AccountReplica; og: unknown } => {
@@ -213,7 +214,7 @@ const acct = (self: EntityId, spec: AcctSpec): { rw: AccountReplica; og: unknown
   };
   return { rw, og };
 };
-type Fixture = { readonly self: EntityId; readonly validators: readonly string[]; readonly account?: AcctSpec | undefined; readonly swaps?: ReadonlyMap<string, CrossRoute>; readonly auths?: ReadonlyMap<string, CrossRoute>; readonly jurisdictionName?: string; readonly ext?: { readonly books: Map<string, { lastAcceptedUsdAskPriceTicks: bigint }>; readonly hubProfile: { referenceTokenId: number } } };
+type Fixture = { readonly self: EntityId; readonly validators: readonly string[]; readonly account?: AcctSpec | undefined; readonly swaps?: ReadonlyMap<string, CrossRoute> | undefined; readonly auths?: ReadonlyMap<string, CrossRoute> | undefined; readonly jurisdictionName?: string; readonly ext?: { readonly books: Map<string, { lastAcceptedUsdAskPriceTicks: bigint }>; readonly hubProfile: { referenceTokenId: number } } };
 const viewOf = (f: Fixture): CrossEntityView => {
   const a = f.account === undefined ? undefined : acct(f.self, f.account);
   return { id: f.self, timestamp: T0, validators: f.validators, jurisdiction: JUR[f.self]!, jurisdictionName: f.jurisdictionName ?? "J-local", replicas: new Map(a === undefined ? [] : [[PEER[f.self]!, a.rw]]), swaps: f.swaps, auths: f.auths, ext: f.ext as never };
@@ -291,7 +292,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
         return new Map([[c.orderId, v]]);
       };
       const fixture: Fixture = {
-        self, validators: r() < 0.1 ? ["0x" + "77".repeat(20)] : r() < 0.1 ? [] : [SIGNER[self]!, ...(r() < 0.3 ? ["0x" + "78".repeat(20)] : [])],
+        self, validators: r() < 0.1 ? ["0x" + "77".repeat(20)] : r() < 0.1 ? [] : [signerOf(self), ...(r() < 0.3 ? ["0x" + "78".repeat(20)] : [])],
         ...(r() < 0.9 ? { account: { disputeConfig: r() < 0.9 ? CLOCK60 : { leftResponseSeconds: 60, rightResponseSeconds: 30 }, collateral: 0n, ondelta: 0n, leftCredit: 0n, rightCredit: 0n, pulls: [] } } : {}),
         ...(self === H1 ? { swaps: stored() } : { auths: stored() }),
         ...(r() < 0.2 ? { jurisdictionName: "other-name" } : {}),
@@ -330,10 +331,10 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
       if (t === 2) prepared = { ...prepared, targetPull: { ...prepared.targetPull!, fullHash: "0x" + "12".repeat(32) } };
       if (t === 3) prepared = { ...prepared, sourcePull: { ...prepared.sourcePull!, pullId: "0x" + "34".repeat(32) } };
       const fixture: Fixture = {
-        self: H1, validators: [SIGNER[H1]!], swaps: stored, ...(() => { const ext = extOf(); return ext === undefined ? {} : { ext }; })(),
+        self: H1, validators: [signerOf(H1)], swaps: stored, ...(() => { const ext = extOf(); return ext === undefined ? {} : { ext }; })(),
         ...(r() < 0.95 ? { account: { disputeConfig: r() < 0.93 ? CLOCK60 : { leftResponseSeconds: 60, rightResponseSeconds: 1 }, collateral: 0n, ondelta: 0n, leftCredit: 0n, rightCredit: 0n, pulls: [] } } : {}),
       };
-      const proposerSignerId = r() < 0.9 ? SIGNER[H1]! : "0x" + "66".repeat(20);
+      const proposerSignerId = r() < 0.9 ? signerOf(H1) : "0x" + "66".repeat(20);
       const data = { proposerSignerId, route: prepared };
       const og = ogOutcome(() => ogSetup.handleMaterializeCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "materializeCrossJurisdictionSwap", data } as never, MUT) as never);
       const rw = rwOutcome(crossMaterialize(viewOf(fixture), data));
@@ -359,7 +360,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
         : r() < 0.1 ? [{ pullId: "other", fullHash: prepared.sourcePull!.fullHash, partialRoot: "0x" + "58".repeat(32) }] : [];
       const big = 10n ** 30n;
       const fixture: Fixture = {
-        self, validators: [SIGNER[self]!], swaps,
+        self, validators: [signerOf(self)], swaps,
         ...(r() < 0.95 ? { account: { disputeConfig: CLOCK60, collateral: pick(r, [0n, big]), ondelta: pick(r, [0n, big, -big]), leftCredit: pick(r, [0n, big, 10n]), rightCredit: pick(r, [0n, big, 10n]), pulls } } : {}),
       };
       const og = ogOutcome(() => ogSetup.handleRegisterCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "registerCrossJurisdictionSwap", data: { route } } as never, MUT) as never);
@@ -410,7 +411,7 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
       source: { jurisdiction: stackIdOf(TERMS.domain), entityId: ALICE, counterpartyEntityId: BOB, tokenId: 1, amount: 100n },
       target: { jurisdiction: S1, entityId: H2x, counterpartyEntityId: U2x, tokenId: 2, amount: 10n ** 18n },
       sourceDisputeConfig: TERMS.disputeConfig, targetDisputeConfig: CLOCK60, status: "intent", createdAt: t0, updatedAt: t0, expiresAt: t0 + 3_600_000,
-      sourceSignerId: aliceAddr.toLowerCase(), sourceHubSignerId: bobAddr.toLowerCase(), targetHubSignerId: SIGNER[H2]!, targetSignerId: SIGNER[U2]!,
+      sourceSignerId: aliceAddr.toLowerCase(), sourceHubSignerId: bobAddr.toLowerCase(), targetHubSignerId: signerOf(H2), targetSignerId: signerOf(U2),
     };
     const ctx = { ...verifiers, runtimeSeed: RUNTIME_SEED, htlcInfra: (id: EntityId) => ({ profiles: [], encryptionPrivateKey: ENTITY_KEYS.get(id)?.priv }) } as typeof verifiers;
     const apply = (inputs: RoutedEntityInput[]) => { const s = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: inputs }, ctx)); expect(s.rejected).toEqual([]); return s; };
@@ -445,7 +446,8 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
     // 3. BOB's own register command: authorized as the source hub's self edge and registered. A registration is a cross-j setup phase, so og
     //    proposes no Account frame in it (prepareEntityFrameWorkingSet crossJSetupPhase): the legs wait in the ALICE Account mempool like og's.
     const self = c.outputs.find((o) => o.to === BOB && runtimeOutputsOf([o]).length === 1)!, td = tc + 10_000;
-    const reg = (self as { input: { txs: EntityTx[] } }).input.txs[0] as Extract<EntityTx, { type: "runtimeOutput" }>, ogBob2 = ogEntityState(c.replica, td);
+    if (!("input" in self) || self.input.kind !== "txs") throw new Error("expected a signed txs input to BOB");
+    const reg = self.input.txs[0] as Extract<EntityTx, { type: "runtimeOutput" }>, ogBob2 = ogEntityState(c.replica, td);
     expect(ogTry(() => assertRuntimeOutputAuthorization(reg.data.sourceEntityId, reg.data.sourceSignerId, reg.data.targetEntityId, reg.data.entityTxs as never, ogBob2)).ok).toBe(true);
     expect(runtimeOutputAuthError(c.replica.state, reg.data)).toBe(null);
     const d = unwrap(applyEntityInput(c.replica, { kind: "txs", timestamp: BigInt(td), txs: [reg] }, ectx(BOB)));
@@ -477,7 +479,7 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
     for (let i = 0; i < 400; i++) {
       const route = ogCrossIndex.withCanonicalCrossJurisdictionRouteHash(baseRoute(r) as never) as unknown as CrossRoute;
       const target = pick(r, ids), source = r() < 0.2 ? target : pick(r, ids);
-      const signer = r() < 0.7 ? (SIGNER[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", SIGNER[H1]!]);
+      const signer = r() < 0.7 ? (SIGNER[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", signerOf(H1)]);
       const kind = int(r, 7);
       const txs: EntityTx[] = kind === 0 ? [] : kind === 1 ? [{ type: "prepareCrossJurisdictionSwap", data: { route } } as EntityTx] : kind === 2 ? [{ type: "registerCrossJurisdictionSwap", data: { route } } as EntityTx]
         : kind === 3 ? [{ type: "chat", data: { from: "x", message: "hi" } } as EntityTx] : kind === 4 ? [{ type: "accountInput", data: {} } as unknown as EntityTx]

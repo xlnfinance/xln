@@ -81,7 +81,7 @@ describe("J event ingress (og core/jurisdiction/adapter/events/*, machine/event-
     expect(Object.keys(J_EVENT_SIGNATURES).sort()).toEqual(expected.map(([n]) => n).sort());
     for (const [n, iface] of expected) {
       const e = iface.getEvent(n)!;
-      expect(J_EVENT_SIGNATURES[n as keyof typeof J_EVENT_SIGNATURES]).toBe(e.format("sighash"));
+      expect<string>(J_EVENT_SIGNATURES[n as keyof typeof J_EVENT_SIGNATURES]).toBe(e.format("sighash"));
       expect(jEventTopic(n as keyof typeof J_EVENT_SIGNATURES)).toBe(e.topicHash);
     }
   });
@@ -600,7 +600,7 @@ describe("jBatchState (og jurisdiction/machine/batch, entity/tx/handlers/j-batch
 
   test("PORT (og handleJBroadcast needs a runtime jurisdiction registry): j_broadcast refuses while a batch is in flight, skips an empty draft, seals recovery work first and latches autoBroadcastDraft while work remains", () => {
     const ctx = { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: "s1", timestamp: 9 };
-    expect(unwrap(jBroadcast(initJBatch(), ctx) as any)).toEqual({ jBatch: initJBatch(), note: "j_broadcast skipped: jBatch is empty" });
+    expect(unwrap(jBroadcast(initJBatch(), ctx))).toEqual({ jBatch: initJBatch(), note: "j_broadcast skipped: jBatch is empty" });
     const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 100n]]), debts: EMPTY_DEBTS, accounts: new Set() };
     const draft = unwrap(queueR2R(e, OTHER, 1, 3n) as any) as JBatchState, recovered = unwrap(queueR2R(e, PEER_ACTIVE, 1, 4n) as any) as JBatchState;
     const first = unwrap(jBroadcast({ ...draft, recoveryBatches: [recovered.batch] }, ctx) as any) as any;

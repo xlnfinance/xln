@@ -133,7 +133,7 @@ describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-
   /** One structural mutation of a type 3/4 transaction: its fields, its sidecar, its authorizations, or its raw bytes. */
   const mutate = (raw: string): string => {
     const bytes = ethers.getBytes(raw);
-    const flip = (): string => { const b = new Uint8Array(bytes); b[eri(b.length)] ^= 1 << eri(8); return ethers.hexlify(b); };
+    const flip = (): string => { const b = new Uint8Array(bytes), i = eri(b.length); b[i] = (b[i] ?? 0) ^ (1 << eri(8)); return ethers.hexlify(b); };
     let decoded: F;
     try { decoded = ethers.decodeRlp(bytes.slice(1)) as F; } catch { return flip(); }
     if (!Array.isArray(decoded)) return flip();
