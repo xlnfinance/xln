@@ -18,7 +18,7 @@ import {
   type Address, type EntityCommitted, type EntityFrame, type EntityId, type EntityInput, type EntityOutput, type EntityReplica, type EntityTx, type Precommits, type Signature,
 } from "../xln.ts";
 import { ALICE, ANVIL_KEYS, BOB, CAROL, MORE_ANVIL_KEYS, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, signerAddress, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
-import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
+import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogAuthorVerdict, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
 
 const A = aliceAddr; // lexicographically lower (anvil-keyed: og quorum Hankos need real signatures)
 const B = bobAddr; // lexicographically higher
@@ -428,7 +428,11 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     expect(zero.replica.head.height).toBe(3n);
     expect(zero.outputs).toEqual([]);
     expect(unwrapErr(propose(opened, A, [pay(5n, [ALICE, BOB, CAROL])], 2n))._tag).toBe("payment_route");
-    expect(unwrapErr(propose(opened, A, [pay(5n, [BOB, ALICE])], 2n))._tag).toBe("payment_route");
+    // og materializeLocallyAuthoredEntityTx: a route that does not start here is refused at admission, before signing
+    const reversed = pay(5n, [BOB, ALICE]);
+    const ogReversed = ogAuthorVerdict(opened.state, A, [reversed]);
+    expect(ogReversed.startsWith("DIRECT_PAYMENT_ROUTE_START_INVALID:")).toBe(true);
+    expect(unwrapErr(propose(opened, A, [reversed], 2n))).toEqual({ _tag: "entity_invariant", reason: ogReversed });
     // og local-tx-admission.ts queues without validation: an unfunded hop commits the Entity frame and is dropped when the Account frame is proposed
     const unfunded = unwrap(propose(opened, A, [pay(5n)], 2n));
     expect(unfunded.replica.head.height).toBe(3n);
@@ -440,8 +444,8 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     expect(extended.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
   });
   test("MATCH (og createInboundAccountState): the peer opens its side from the first Account frame; no openAccount output is needed", () => {
-    const alice = unwrap(createEntity({ id: ALICE, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
-    const bob = unwrap(createEntity({ id: BOB, jurisdiction: JUR, threshold: 1n, members: new Map([[bobAddr, { shares: 1n }]]) }));
+    const alice = unwrap(createEntity({ id: ALICE, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
+    const bob = unwrap(createEntity({ id: BOB, jurisdiction: JUR, threshold: 1n, members: new Map([[bobAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
     let rt = spawn(spawn(createRuntime(), alice), bob);
     const run = (entityInputs: Parameters<typeof applyRuntime>[1]["entityInputs"]) => { const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs }, verifiers)); expect(out.rejected).toEqual([]); rt = out.runtime; return out.outbox; };
     // og proposePendingAccountFrames: the openAccount frame itself proposes the first Account frame, Hanko'd through the manifest

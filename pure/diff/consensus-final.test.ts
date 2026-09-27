@@ -19,7 +19,7 @@ import {
   parseEvmTx, quorumBoardHash, selectProposable, selfAuthorityTransitionFrame, withoutCounterpartyBoardActivationConflicts,
   type Address, type EntityId, type EntityInput, type EntityTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xc0_f1a1);
@@ -89,7 +89,8 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
     const r = unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { profile: { name: "A", isHub: false, avatar: "", bio: "", website: "" } } }));
     const ogHashOf = (profile: unknown): string => computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile, accounts: new Map(), config: {} } as never);
     const chat = (n: number): EntityTx => ({ type: "chat", data: { from: aliceAddr.toLowerCase(), message: `m${n}` } });
-    const profilesOf = (s: typeof r.state, txs: readonly EntityTx[]) => { const f = unwrap(foldTxs(s, new Map(), txs, ctx)); return { state: f.draft.state, profiles: (f.draft.hashes ?? []).filter((h) => h.type === "profile") }; };
+    // og: the frame carries Alice's local txs as her signed Entity commands
+    const profilesOf = (s: typeof r.state, txs: readonly EntityTx[]) => { const f = unwrap(foldTxs(s, new Map(), signedTxs(s, aliceAddr, txs), ctx)); return { state: f.draft.state, profiles: (f.draft.hashes ?? []).filter((h) => h.type === "profile") }; };
     const genesis = profilesOf(r.state, [chat(0)]);
     const h0 = ogHashOf({ name: "A", isHub: false, avatar: "", bio: "", website: "" });
     expect(genesis.profiles).toEqual([{ hash: h0, type: "profile", context: `profile:${h0}` }]);
@@ -324,7 +325,7 @@ describe(seedTag("consensus-final: a received Account frame commits at once (reb
     const g = prng(0x12_12);
     const gi = (n: number) => Math.floor(g() * n);
     const signers = new Map<EntityId, Address>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
-    const party = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signers.get(id) as Address, { shares: 1n }]]) }));
+    const party = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signers.get(id) as Address, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
     const t1 = unwrap(tokenId("1"));
     let clock = NOW, received = 0;
     const noneReceived = (rt: Runtime): void => {

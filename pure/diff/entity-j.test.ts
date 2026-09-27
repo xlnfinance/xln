@@ -4,7 +4,7 @@ import {
   createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, batchOfOg, encodeBatch,
   type AccountReplica, type EntityId, type EntityState, type EntityTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, TERMS, aliceAddr, genesisAB, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, TERMS, aliceAddr, genesisAB, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 import { handleR2R } from "../../core/entity/tx/handlers/j-batch/r2r.ts";
 import { handleR2E } from "../../core/entity/tx/handlers/j-batch/r2e.ts";
 import { handleE2R } from "../../core/entity/tx/handlers/j-batch/e2r.ts";
@@ -113,7 +113,7 @@ describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchStat
         t += 1 + ri(9);
         const tx = randomTx(state), og = ogState(state, replicas, t);
         const ogR = await ogRun(() => ogHandler(tx, og));
-        const f = foldTxs(state, replicas, [tx], { verify: verifiers.verify, timestamp: BigInt(t) });
+        const f = foldTxs(state, replicas, signedTxs(state, aliceAddr, [tx]), { verify: verifiers.verify, timestamp: BigInt(t) });
         const key = `${tx.type}:${ogR.ok ? "ok" : "refused"}`;
         seen.set(key, (seen.get(key) ?? 0) + 1);
         expect(f.ok).toBe(ogR.ok);
@@ -159,11 +159,11 @@ describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchStat
     const replicas: ReadonlyMap<EntityId, AccountReplica> = new Map([[BOB, genesisAB() as AccountReplica]]);
     const fresh = aliceEntity(new Map([[1, 100n]]));
     const cases: EntityState[] = [fresh, { ...fresh, committed: { ...fresh.committed, jBatchState: initJBatch() as never } }, aliceEntity(new Map([[1, 100n]]), false)];
-    const queued = unwrap(foldTxs(cases[2]!, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }], { verify: verifiers.verify, timestamp: 5n })).draft.state;
+    const queued = unwrap(foldTxs(cases[2]!, replicas, signedTxs(cases[2]!, aliceAddr, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }]), { verify: verifiers.verify, timestamp: 5n })).draft.state;
     cases.push(queued);
     for (const s of cases) {
       const og = ogState(s, replicas, 9), ogR = await ogRun(() => handleJBroadcast(og, { type: "j_broadcast", data: {} }, env, true));
-      const f = foldTxs(s, replicas, [{ type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: 9n });
+      const f = foldTxs(s, replicas, signedTxs(s, aliceAddr, [{ type: "j_broadcast", data: {} }]), { verify: verifiers.verify, timestamp: 9n });
       expect(f.ok).toBe(ogR.ok);
       if (!f.ok || !ogR.ok) { expect((f as any).error.reason).toBe((ogR as any).code); continue; }
       expect((f.value.draft.events ?? []).map((e) => e.message)).toEqual(messages(ogR.value.newState));
@@ -466,7 +466,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
       let replicas: ReadonlyMap<EntityId, AccountReplica> = new Map([[BOB, genesisAB() as AccountReplica]]);
       let t = 1_000;
       // a sent batch to settle against, when the reserve covers the r2r
-      if (jrng() < 0.6 && reserve1 >= 5n) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
+      if (jrng() < 0.6 && reserve1 >= 5n) state = unwrap(foldTxs(state, replicas, signedTxs(state, aliceAddr, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }]), { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
       let carry: any = { height: 0, lastFinalizedJHeight: 0 };
       for (let step = 0; step < 8; step++) {
         t += 1 + jri(9);

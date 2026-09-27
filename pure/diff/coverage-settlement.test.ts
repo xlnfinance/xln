@@ -15,7 +15,7 @@ import {
 } from "../xln.ts";
 import {
   ALICE, BOB, CAROL, NOW, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, hankoVerify, keyOf, signLazyAccountHanko,
-  unwrap, verifiers,
+  signedTxs, unwrap, verifiers,
 } from "../xln_run.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
@@ -111,12 +111,15 @@ const funded = (child: AccountReplica): AccountReplica => {
 const baseEntity = (withConfig: boolean): OpenEntity => {
   const created = unwrap(createEntity({
     id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]),
-    ...(withConfig ? { jurisdictionConfig: { name: "j", entityProviderAddress: TEST_CONTRACTS.entityProvider } } : {}),
+    jurisdictionConfig: { name: "j", entityProviderAddress: TEST_CONTRACTS.entityProvider },
   }));
+  // og openAccount needs config.jurisdiction at admission; an Entity without one still holds the Accounts its peers
+  // opened (og createInboundAccountState), so the unconfigured base drops the config once the Accounts exist
   const opened = openTo(openTo(created, BOB), CAROL);
   const replicas = new Map([...opened.accountReplicas].map(([peer, child]) => [peer, funded(child)] as const));
   const accounts = new Map([...replicas].map(([peer, child]) => [peer, child.state.account] as const));
-  return { ...opened, accountReplicas: replicas, state: { ...opened.state, accounts } };
+  const { jurisdictionConfig: _dropped, ...unconfigured } = opened.state;
+  return { ...opened, accountReplicas: replicas, state: { ...(withConfig ? opened.state : unconfigured), accounts } };
 };
 const BASE = baseEntity(true);
 const BASE_NO_CONFIG = baseEntity(false);
@@ -267,7 +270,7 @@ describe("coverage-settlement: settle_execute success path (og handleSettleExecu
       const ogRun = await handleSettleExecute(og, { type: "settle_execute", data }, ogEnv(), true)
         .then((out) => ({ ok: true as const, out }), (e: unknown) => ({ ok: false as const, message: String((e as Error).message) }));
       const state: EntityState = jBatch === undefined ? base.state : { ...base.state, committed: { ...base.state.committed, jBatchState: structuredClone(jBatch) as Binary } };
-      const rw = foldTxs(state, replicas, [{ type: "settle_execute", data } as EntityTx], { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
+      const rw = foldTxs(state, replicas, signedTxs(state, aliceAddr, [{ type: "settle_execute", data } as EntityTx]), { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
       if (!ogRun.ok) {
         same(tag(n, defect), rw.ok ? "accepted" : reasonOf(rw.error), ogRun.message);
         bump(`refused:${codeOf(ogRun.message)}`);
@@ -344,7 +347,7 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       const ogRun = await handleSettlePropose(ogState, asOg({ type: "settle_propose", data: structuredClone(data) }), ogEnv(), true)
         .then(() => null, (e: unknown) => String((e as Error).message));
       const state: EntityState = already ? { ...BASE.state, committed: { ...BASE.state.committed, settlementContinuations: asOg<Binary>(pinned) } } : BASE.state;
-      const rw = foldTxs(state, BASE.accountReplicas, [asOg<EntityTx>({ type: "settle_propose", data })], { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
+      const rw = foldTxs(state, BASE.accountReplicas, signedTxs(state, aliceAddr, [asOg<EntityTx>({ type: "settle_propose", data })]), { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
       if (ogRun !== null) {
         same(tag(n, "refusal"), rw.ok ? "accepted" : reasonOf(rw.error), ogRun);
         bump(codeOf(ogRun));

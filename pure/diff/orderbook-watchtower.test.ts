@@ -14,7 +14,7 @@ import { serializeTaggedJson } from "../../core/protocol/serialization/index.ts"
 import * as ogBook from "../../core/orderbook/core.ts";
 import { computeBookCommitmentHash } from "../../core/orderbook/commitment.ts";
 import { handleCancelSwapRequest, handlePlaceSwapOfferRequest } from "../../core/entity/tx/handlers/payments/swap-requests.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
 import {
   decodeTowerLookupDoc, hexToBytes, isEthersAddress, recoverPersonalMessage, signPersonalMessage, towerEnvelopeHash, towerPayloadDigest, upsertTowerAppointment, upsertTowerRecoveryArchive,
   verifyTowerAppointment, verifyTowerReceiptSignature, applyEntityInput, admitAt, createEntity, tokenId, type EntityTx, type WireAccountTx,
@@ -223,7 +223,7 @@ describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
 describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
-  const signed = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+  const signed = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
   // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
   const opened = () => unwrap(applyEntityInput(signed(), { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx, lane: "account-work" })).replica;
   const ogState = (accounts: readonly string[]) => ({ entityId: ALICE, accounts: new Map(accounts.map((a) => [a, { state: {} }])), config: { validators: [aliceAddr] } }) as never;

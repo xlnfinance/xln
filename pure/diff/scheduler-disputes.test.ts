@@ -7,7 +7,7 @@ import {
   createEntity, derivedDeadlines, sanitizeDisputeArgument, disputeFinalizedEffects, disputeStartedEffects, dueWakeJobs, entityRootOf, executeCrontab, foldTxs, initCrontab, prioritizeWake, scheduleHook, withCrontab, crontabOf, wireEntityTx, genesisHost, applyHost, localProof, committedView, ZERO_WORD,
   type AccountReplica, type ActiveDispute, type Binary, type Crontab, type EntityError, type EntityId, type EntityState, type EntityTx, type PaybookEntry, type ScheduledHook, type ScheduledWakeJob,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, hankoVerify, signedTxs, unwrap } from "../xln_run.ts";
 import { assertScheduledWakeFrameOrder, assertScheduledWakeMatchesState } from "../../core/entity/scheduler/wake/scheduled-wake-validation.ts";
 import { prioritizeScheduledWakeTransactions } from "../../core/entity/consensus/input/merge.ts";
 import { collectDerivedDeadlines } from "../../core/entity/scheduler/derived-deadlines.ts";
@@ -81,7 +81,8 @@ describe(seedTag("scheduler-disputes: scheduledWake validation (og scheduler/wak
   test("MATCH: 200 random frames -- og assertScheduledWakeFrameOrder (a wake is the unique first tx) and og prioritizeScheduledWakeTransactions", () => {
     const state = entity([aliceAddr]), ts = 50_000;
     const wakeA = wakeOf(aliceAddr, ts - 5, [{ kind: "hook", id: "h", dueAt: ts - 5 }]), wakeB = wakeOf(aliceAddr, ts - 4, [{ kind: "hook", id: "h", dueAt: ts - 4 }]);
-    const chat: EntityTx = { type: "chat", data: { from: aliceAddr, message: "hi" } };
+    // og: a frame's user tx is Alice's signed chat command (admission signs every local tx)
+    const [chat] = signedTxs(state, aliceAddr, [{ type: "chat", data: { from: aliceAddr, message: "hi" } }]) as [EntityTx];
     let refused = 0, conflicting = 0;
     for (let i = 0; i < 200; i++) {
       const txs = Array.from({ length: 1 + ri(4) }, () => pick<EntityTx>([chat, chat, wakeA, wakeA, wakeB]));
@@ -265,7 +266,7 @@ describe(seedTag("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, f
         ...(jb === "sent" ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [{ counterentity: BOB }] : [] }, entityNonce: 9 } } : {}) };
       const tx: EntityTx = { type: "disputeFinalize", data: { counterpartyEntityId: BOB, ...(rng() < 0.6 ? { description: pick(["", "auto-finalize-after-timeout"]) } : {}), ...(rng() < 0.5 ? { useOnchainRegistry: true } : {}) } };
       const state = entity([aliceAddr], withJ, jBatch === undefined ? {} : { jBatchState: jBatch });
-      const rw = foldTxs(state, kind === "missing" ? new Map() : new Map([[BOB, rwChild]]), [tx], { verify: hankoVerify, timestamp: BigInt(now), jReplicas: ogJ.jReplicas as never });
+      const rw = foldTxs(state, kind === "missing" ? new Map() : new Map([[BOB, rwChild]]), signedTxs(state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: BigInt(now), jReplicas: ogJ.jReplicas as never });
       const ogState: any = { entityId: ALICE, timestamp: now, config: ogConfig(state, withJ), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(kind === "missing" ? [] : [[BOB, ogAcc]], ALICE, () => ZERO_WORD as never)),
         paybook: { entries: new Map(), feesEarned: 0n }, crontabState: ogInitCrontab(), ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) };
       let og: any, ogErr: string | undefined;
@@ -405,14 +406,18 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
 });
 
 describe(seedTag("scheduler-disputes: Runtime/Entity event channel (og EntityCandidateEffect runtimeEvent)"), () => {
-  test("MATCH: openAccount emits og's AccountOpening runtime event (og lifecycle/open-account.ts insertLocalAccount), and it survives the same frame's first Account proposal", async () => {
+  test("MATCH: openAccount emits og's AccountOpening runtime event (og lifecycle/open-account.ts insertLocalAccount) in the frame its signed command commits; the Account's first proposal at H+1 emits none", async () => {
     const ogEnv = createEmptyEnv("scheduler-disputes");
     ogEnv.quietRuntimeLogs = true;
     const ctx = createAccountConsensusContext(ogEnv);
     for (const target of [BOB, CAROL]) {
       const state = entity([aliceAddr], true);
       const tx = { type: "openAccount", data: { targetEntityId: target, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx;
-      const rw = unwrap(foldTxs(state, new Map(), [tx], { verify: hankoVerify, timestamp: NOW })).draft;
+      const rw = unwrap(foldTxs(state, new Map(), signedTxs(state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: NOW })).draft;
+      // og Runtime account work at H+1: the new Account proposes its first frame, publishing no runtime event
+      const work = unwrap(foldTxs(rw.state, rw.accountReplicas, [], { verify: hankoVerify, timestamp: NOW })).draft;
+      expect(work.accountReplicas.get(target)?._tag).toBe("proposed");
+      expect(work.runtimeEvents ?? []).toEqual([]);
       const og: any = { entityId: ALICE, timestamp: Number(NOW), config: ogConfig(state, true), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([], ALICE, () => ZERO_WORD)), paybook: { entries: new Map(), feesEarned: 0n } };
       const effects: any[] = [];
       await handleOpenAccountEntityTx(og, wireEntityTx(tx) as never, ctx, effects, true);

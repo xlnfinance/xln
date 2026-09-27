@@ -169,7 +169,7 @@ import { handleHtlcPayment } from "../../core/entity/tx/handlers/htlc/payment.ts
 import { createBookIntentProgram, applyBookIntentProgram } from "../../core/entity/books/book-intents.ts";
 import { validateHtlcPreparedInfraContext } from "../../core/entity/paybook/prepared-context-validation.ts";
 import { entityCollectionCommitment as ogCollection } from "../../core/entity/state/persistent-collection-map.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
 import {
   applyRuntime, assertOriginated, convertOutput, createEntity, createRuntime, entityCollectionCommitment, holds, htlcPaymentTxHash, isLeft, materializeOriginated, preparedOriginOf, replicaId, replicaKey, spawn, tokenId,
   validatePreparedHtlcPayment, wireTx, type AccountReplica, type Address, type Binary, type EntityId, type EntityReplica, type EntityTx, type HtlcFrameInfra, type PreparedOriginated, type RoutedEntityInput, type Runtime,
@@ -178,7 +178,7 @@ import {
 const JUR = TERMS.domain;
 const ENTITY_KEYS = new Map([ALICE, BOB, CAROL].map((id, i) => { const priv = new Uint8Array(32).fill(i + 7); return [id, { priv: "0x" + Buffer.from(priv).toString("hex"), pub: "0x" + Buffer.from(x25519.getPublicKey(priv)).toString("hex") }] as const; }));
 const SIGNERS = new Map<EntityId, Address>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
-const entityOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[SIGNERS.get(id)!, { shares: 1n }]]), committed: { entityEncryptionPublicKey: ENTITY_KEYS.get(id)!.pub } }));
+const entityOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[SIGNERS.get(id)!, { shares: 1n }]]), committed: { entityEncryptionPublicKey: ENTITY_KEYS.get(id)!.pub }, jurisdictionConfig: UNREGISTERED_J }));
 /** og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair run on every proposal and replay: every validator holds its Entity's key. */
 const withKeys = (ctx: any): typeof verifiers => ({ ...ctx, htlcInfra: (id: EntityId) => {
   const given = ctx.htlcInfra?.(id), key = ENTITY_KEYS.get(id)?.priv;
@@ -528,7 +528,7 @@ describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPre
     const board = { threshold: 2n, validators: [bobAddr, carolAddr].map((a) => a.toLowerCase()), shares: Object.fromEntries([bobAddr, carolAddr].map((a) => [a.toLowerCase(), 1n])) };
     const HUB = unwrap(entityId(await getEntityConfigBoardHash({} as never, board as never)));
     const hubKey = (() => { const priv = new Uint8Array(32).fill(29); return { priv: "0x" + Buffer.from(priv).toString("hex"), pub: "0x" + Buffer.from(x25519.getPublicKey(priv)).toString("hex") }; })();
-    const hub = (signer: Address) => unwrap(createEntity({ id: HUB, jurisdiction: JUR, threshold: 2n, members: new Map([[bobAddr, { shares: 1n }], [carolAddr, { shares: 1n }]]), signerId: signer, committed: { entityEncryptionPublicKey: hubKey.pub } }));
+    const hub = (signer: Address) => unwrap(createEntity({ id: HUB, jurisdiction: JUR, threshold: 2n, members: new Map([[bobAddr, { shares: 1n }], [carolAddr, { shares: 1n }]]), signerId: signer, committed: { entityEncryptionPublicKey: hubKey.pub }, jurisdictionConfig: UNREGISTERED_J }));
     const hubInput = (txs: EntityTx[], timestamp: bigint): RoutedEntityInput => ({ entityId: HUB, signerId: bobAddr, input: { kind: "txs", timestamp, txs } });
     let rt = spawn(spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE)), hub(bobAddr)), hub(carolAddr)), entityOf(CAROL));
     const hubOnly = { ...verifiers, htlcInfra: (id: EntityId) => (id === HUB ? { profiles: [], encryptionPrivateKey: hubKey.priv } : undefined) };

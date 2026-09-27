@@ -364,7 +364,7 @@ describe(seedTag("entity-consensus-2: publicPinned (H7)"), () => {
 
 describe(seedTag("entity-consensus-2: trusted gateway payments (ER-15)"), () => {
   // three single-signer Entities on one runtime; every output is delivered until the network is quiet
-  const party = (id: EntityId, signer: Address) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[signer, { shares: 1n }]]) }));
+  const party = (id: EntityId, signer: Address) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[signer, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   const signers = new Map<EntityId, Address>([[ALICE, A], [BOB, B], [CAROL, C]]);
   const quiet = (start: Runtime, first: RoutedEntityInput[]): Runtime => {
     let rt = start, clock = NOW;

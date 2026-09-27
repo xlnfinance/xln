@@ -7,7 +7,7 @@ import {
   accountId, applyRuntime, convertOutput, wireTx, createEntity, createRuntime, genesisReplica, lendingFollowups, lendingInterest, lendingLoanId, localScheduledWake, replicaKey, resolveFollowup, secretFollowup, spawn, tokenId,
   type AccountReplica, type AccountTx, type EntityId, type EntityOutput, type EntityState, type EntityTx, type LendingBook, type LendingFrame, type LendingLoan, type LendingPool, type Runtime, type RoutedEntityInput,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
 import { applyCommittedLendingFollowup } from "../../core/entity/tx/handlers/account/committed-lending-followup.ts";
 import { buildLendingLoanId, computeLendingInterest, LENDING_TERM_MS } from "../../core/extensions/lending.ts";
 import { applyCommittedAccountFrameFollowups } from "../../core/entity/tx/handlers/account/committed-frame-followups.ts";
@@ -183,7 +183,7 @@ describe(seedTag("lending-hub: end-to-end lending lifecycle through the Runtime"
   };
 
   test("MATCH: fund -> borrow -> grant -> repay -> revoke -> close -> payout, then an unpaid loan defaults at its derived deadline -- og's loan id, interest, term and book", () => {
-    rt = [ALICE, BOB, CAROL].reduce((r, e) => spawn(r, unwrap(createEntity({ id: e, jurisdiction: JUR, threshold: 1n, members: new Map([[signers.get(e) as never, { shares: 1n }]]) }))), createRuntime());
+    rt = [ALICE, BOB, CAROL].reduce((r, e) => spawn(r, unwrap(createEntity({ id: e, jurisdiction: JUR, threshold: 1n, members: new Map([[signers.get(e) as never, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }))), createRuntime());
     run(BOB, { type: "setHubConfig", data: {} } as EntityTx);
     expect((replica(BOB).state.committed["profile"] as { isHub?: boolean }).isHub).toBe(true);
     run(ALICE, openTo(BOB, 10_000n));

@@ -20717,9 +20717,9 @@ const isProtocolTx = (tx: EntityTx): boolean => PROTOCOL_TXS.has(tx.type);
 const isIndividualTx = (tx: EntityTx): boolean => INDIVIDUAL_TXS.has(tx.type);
 const isCollectiveTx = (tx: EntityTx): boolean => !isProtocolTx(tx) && !isIndividualTx(tx);
 /**
- * og assertEntityTxAuthorization. A signed command applies only individual txs and an approved proposal only collective
- * ones. og refuses every other top-level tx with ENTITY_COMMAND_REQUIRED; the rewrite's top-level `txs` lane stays the
- * trusted local lane for the txs it already carried, and refuses the governance txs og only accepts inside a command.
+ * og assertEntityTxAuthorization. A signed command applies only individual txs, an approved proposal only collective
+ * ones, and a frame's top level only protocol txs: admission signs every local tx into a command, so a raw user tx
+ * there is og ENTITY_COMMAND_REQUIRED.
  */
 const laneRefusal = (tx: EntityTx, lane: TxLane): EntityError | undefined => {
   const refuse = (reason: string): EntityError => ({ _tag: "entity_invariant", reason });
@@ -20732,7 +20732,7 @@ const laneRefusal = (tx: EntityTx, lane: TxLane): EntityError | undefined => {
       return refuse(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
     case lane === "collective" && !isCollectiveTx(tx):
       return refuse(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
-    case lane === "top" && (tx.type === "propose" || tx.type === "vote"):
+    case lane === "top":
       return refuse(`ENTITY_COMMAND_REQUIRED:${tx.type}`);
     default:
       return undefined;
@@ -21380,11 +21380,91 @@ const authorTx = (a: Authoring, tx: EntityTx, by: CommandAuthor): Result<Authori
   const joinable = a.kind === undefined || a.kind === kind ? ok(a) : flushRun(a, by);
   return map(joinable, (open) => ({ ...open, kind, run: [...open.run, tx] }));
 };
+/** og requireCommittedDirectPaymentRoute refusal: a reject-disposition Error `DIRECT_PAYMENT_<code>:<detail>`. */
+const routeRefusal = (code: string, detail: string): Result<never, EntityError> =>
+  invariant(`DIRECT_PAYMENT_${code}:${detail}`);
+/** og requireCommittedDirectPaymentRoute: the exact route from this Entity to the target, at most 100 hops. */
+const committedRoute = (
+  source: string,
+  target: string,
+  route: readonly EntityId[],
+): Result<readonly EntityId[], EntityError> => {
+  const hops = Array.isArray(route) ? route : [];
+  const blank = hops.findIndex((id) => typeof id !== "string" || id.length === 0);
+  const last = hops.at(-1) ?? "";
+  switch (true) {
+    case hops.length === 0:
+      return routeRefusal("ROUTE_REQUIRED", `target=${target}`);
+    case hops.length > MAX_ROUTE_HOPS:
+      return routeRefusal("ROUTE_TOO_LONG", `${hops.length}:${MAX_ROUTE_HOPS}`);
+    case blank >= 0:
+      return routeRefusal("ROUTE_ENTRY_INVALID", String(blank));
+    case hops[0] !== source:
+      return routeRefusal("ROUTE_START_INVALID", `entity=${source}:route0=${hops[0] ?? ""}:target=${target}`);
+    case last !== target:
+      return routeRefusal("ROUTE_END_INVALID", `entity=${source}:last=${last}:target=${target}`);
+    default:
+      return ok(hops);
+  }
+};
+/** og normalizeAccountStateDomain: a positive chain id and a checksum-valid depository, lowercased. */
+const accountStateDomain = (d: Domain): Result<Domain, EntityError> => {
+  const shown = String(d.depositoryAddress || "") || "missing";
+  const refusal = `ACCOUNT_STATE_DOMAIN_INVALID: chainId=${String(d.chainId)} depository=${shown}`;
+  return mapErr(domainOf(d), (): EntityError => ({ _tag: "entity_invariant", reason: refusal }));
+};
 /**
- * og prepareLocallyAuthoredEntityTxs (without its openAccount/directPayment materialization): protocol txs pass
- * through, a signed command is re-checked against the running cursor (a stale one is dropped), runs of individual txs
- * become one command and runs of collective txs one command carrying a `propose` of them. `sign` is the author's key on
- * a 32-byte digest.
+ * og materializeLocallyAuthoredEntityTx for openAccount: the Entity's jurisdiction commits the Account domain; the
+ * dispute clock is canonical and the watch seed lowercase.
+ */
+const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<OpenAccountData, EntityError> => {
+  if (state.jurisdictionConfig === undefined) return invariant(`OPEN_ACCOUNT_SOURCE_JURISDICTION_REQUIRED:${state.id}`);
+  return chain(accountStateDomain(state.jurisdiction), (committed) => {
+    const asked = data.accountDomain === undefined ? ok(committed) : accountStateDomain(data.accountDomain);
+    return chain(asked, (domain) => {
+      const clockIssue = data.disputeConfig === undefined
+        ? "OPEN_ACCOUNT_DISPUTE_CONFIG_REQUIRED"
+        : disputeConfigIssue(data.disputeConfig);
+      switch (true) {
+        case !sameDomain(domain, committed):
+          return invariant("OPEN_ACCOUNT_DOMAIN_MISMATCH");
+        case clockIssue !== undefined:
+          return invariant(clockIssue);
+        case !isWatchSeed(data.watchSeed):
+          return invariant("OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID");
+        default:
+          return ok({
+            ...data,
+            accountDomain: committed,
+            disputeConfig: {
+              leftResponseSeconds: Number(data.disputeConfig.leftResponseSeconds),
+              rightResponseSeconds: Number(data.disputeConfig.rightResponseSeconds),
+            },
+            watchSeed: data.watchSeed.toLowerCase(),
+          });
+      }
+    });
+  });
+};
+/**
+ * og materializeLocallyAuthoredEntityTx: before signing, a local directPayment carries its committed route and a local
+ * openAccount its committed Account terms.
+ */
+const materializeLocalTx = (state: EntityState, tx: EntityTx): Result<EntityTx, EntityError> => {
+  switch (tx.type) {
+    case "directPayment":
+      return map(committedRoute(state.id, tx.data.targetEntityId, tx.data.route), (route) =>
+        ({ ...tx, data: { ...tx.data, route } }));
+    case "openAccount":
+      return map(localOpenAccount(state, tx.data), (data) => ({ ...tx, data }));
+    default:
+      return ok(tx);
+  }
+};
+/**
+ * og prepareLocallyAuthoredEntityTxs: every tx is materialized first; then protocol txs pass through, a signed command
+ * is re-checked against the running cursor (a stale one is dropped), runs of individual txs become one command and runs
+ * of collective txs one command carrying a `propose` of them. `sign` is the author's key on a 32-byte digest.
  */
 export const authorEntityTxs = (
   state: EntityState,
@@ -21394,7 +21474,9 @@ export const authorEntityTxs = (
 ): Result<readonly EntityTx[], EntityError> => {
   const by: CommandAuthor = { author, sign };
   const start: Authoring = { cursor: state, out: [], run: [], kind: undefined, seen: new Set() };
-  return chain(foldResult(txs, start, (a, tx) => authorTx(a, tx, by)), (a) => map(flushRun(a, by), (done) => done.out));
+  const authored = (prepared: readonly EntityTx[]) =>
+    chain(foldResult(prepared, start, (a, tx) => authorTx(a, tx, by)), (a) => map(flushRun(a, by), (done) => done.out));
+  return chain(traverse(txs, (tx) => materializeLocalTx(state, tx)), authored);
 };
 /** og buildSignedEntityCommand. */
 export const buildCommand = (

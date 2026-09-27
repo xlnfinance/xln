@@ -16,7 +16,7 @@ import {
   accountId, accountRuntimeEvents, accountTxMessages, accountTerms, applyAccountBody, applyRuntime, applyRuntimeTx, committed, convertOutput, createEntity, createRuntime, lazyBoardEntityId, spawn, entityId as rwEntityId, entityRootOf, genesisAccount, genesisAccountBody, replicaKey,
   type AccountBody, type Address, type EntityId, type EntityTx, type FoldCtx, type RoutedEntityInput, type ImportConfig, type JReplica, type Runtime, type RuntimeTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, unwrap, verifiers, genesisAB, proposeInput, offerOf, ackInput, hankoVerify } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, unwrap, verifiers, genesisAB, proposeInput, offerOf, ackInput, hankoVerify } from "../xln_run.ts";
 import { admit, applyAccountInput, type AccountReplica, type AccountInput, type OpenAccount, type WireAccountTx } from "../xln.ts";
 import { runPostFrameAutoRebalanceCheck } from "../../core/account/consensus/helpers.ts";
 import { runtimeWake, entityEncryptionPublicKey, crontabOf, initCrontab, scheduleHook, withCrontab, ZERO_WORD, type Crontab, type EntityReplica, type ScheduledHook } from "../xln.ts";
@@ -238,7 +238,7 @@ describe(seedTag("runtime-final: RuntimeStep.events (og observability/env-events
     const members = new Map<Address, { shares: bigint }>([[aliceAddr, { shares: 1n }], [bobAddr, { shares: 1n }]]);
     const id = unwrap(lazyBoardEntityId({ mode: "proposer-based", threshold: 2n, validators: [aliceAddr, bobAddr], shares: { [aliceAddr]: 1n, [bobAddr]: 1n } } as never)) as EntityId;
     const SEED = `0x${"5a".repeat(64)}`;
-    const replicaFor = (signerId: Address) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 2n, members, signerId, committed: { entityEncryptionPublicKey: entityEncryptionPublicKey(SEED, id) } }));
+    const replicaFor = (signerId: Address) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 2n, members, signerId, committed: { entityEncryptionPublicKey: entityEncryptionPublicKey(SEED, id) }, jurisdictionConfig: UNREGISTERED_J }));
     // og: every proposal and replay checks the validator's Entity key pair (the Runtime derives it from the retained seed)
     let rt: Runtime = { ...spawn(spawn(createRuntime(), replicaFor(aliceAddr)), replicaFor(bobAddr)), encryptionSeeds: new Map([[id, SEED]]) };
     const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx);
@@ -988,7 +988,7 @@ describe(seedTag("runtime-final: atomic cross-j Account pair admission (og entit
     expect(grouped).toBeGreaterThan(20);
   });
   test("MATCH: the Runtime applies an admitted pair atomically -- a leg that cannot commit discards both, rejects the pair and re-applies the rest; a lone leg is stripped; replay refuses (og applyAtomicEntityInputPair)", () => {
-    const solo = (id: EntityId, signer: string) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer as Address, { shares: 1n }]]), signerId: signer as Address }));
+    const solo = (id: EntityId, signer: string) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer as Address, { shares: 1n }]]), signerId: signer as Address, jurisdictionConfig: UNREGISTERED_J }));
     const rt = spawn(spawn(createRuntime(), solo(ALICE, aliceAddr)), solo(BOB, bobAddr));
     const proof = { orderId: "o1", routeHash: "0x" + "aa".repeat(32), sourcePullId: "sp-o1", targetPullId: "tp-o1", fillRatio: 1, cumulativeSourceAmount: 5n, cumulativeTargetAmount: 6n, binaryHash: "0xbb", closeMode: "full" };
     const leg = (to: EntityId, signer: string, pullId: string, n: number): RoutedEntityInput => ({ entityId: to, signerId: signer, input: { kind: "txs", timestamp: NOW, txs: [
@@ -1297,7 +1297,7 @@ describe(seedTag("runtime-final: outbox rows on og's RoutedEntityInput wire (og 
     for (const r of reps.values()) rt = spawn(rt, r);
     await expectRows(rt, outbox, () => (reps.get(a) as EntityReplica).state, () => { throw new Error("no account output"); });
     // an Account opening from solo ALICE to solo BOB: the Account message binds BOB's active leader
-    const solo = (id: EntityId, signer: string) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer as Address, { shares: 1n }]]), signerId: signer as Address }));
+    const solo = (id: EntityId, signer: string) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer as Address, { shares: 1n }]]), signerId: signer as Address, jurisdictionConfig: UNREGISTERED_J }));
     const ab = spawn(spawn(createRuntime(), solo(ALICE, aliceAddr)), solo(BOB, bobAddr));
     const open: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx;
     const step = unwrap(applyRuntime(ab, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: aliceAddr, input: { kind: "txs", timestamp: NOW, txs: [open] } }] }, verifiers));

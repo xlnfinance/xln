@@ -29,7 +29,7 @@ import {
   type AccountReplica, type BookTx, type EntityId, type EntityReplica, type EntityState, type EntityTx, type HtlcLock, type Hub, type HubAccount,
   type OrderbookExt, type SwapOffer, type SwapOfferEvent, type WireAccountTx,
 } from "../xln.ts";
-import { ALICE, BOB, NOW, TERMS, aliceAddr, anvilKey, genesisAB, hankoVerify, signDigestHex, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, NOW, TERMS, UNREGISTERED_J, aliceAddr, anvilKey, genesisAB, hankoVerify, signDigestHex, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 
 /** og's committed Account collections are Patricia-backed maps; their commitment is `rootHash()`. */
 const ogRootHash = (c: object): string => {
@@ -104,10 +104,11 @@ describe("regressions: finalized SecretRevealed on the Entity", () => {
 // og's returned txs, never a request the rewrite invented.
 describe("regressions: setRebalancePolicy beside a queued request_collateral", () => {
   test("MATCH: og returns no request and primes the Account; the rewrite's proposed frame is exactly the queued mempool", () => {
-    const seedOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
+    const seedOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
     const a: EntityReplica = seedOf(unwrap(entityId(configBoardHash(seedOf(ALICE).state.quorum))));
     const openTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx;
-    const opened = unwrap(foldTxs(a.state, a.accountReplicas, [openTx], { verify: hankoVerify, timestamp: NOW })).draft;
+    // og: a frame carries Alice's local txs as her signed Entity commands
+    const opened = unwrap(foldTxs(a.state, a.accountReplicas, signedTxs(a.state, aliceAddr, [openTx]), { verify: hankoVerify, timestamp: NOW })).draft;
     const base = opened.accountReplicas.get(BOB)!;
     const selfIsLeft = base.state.account.id.left === a.state.id;
     const k = tk(2), delta = { tokenId: k, collateral: 0n, ondelta: -400n, offdelta: -500n, leftCreditLimit: 0n, rightCreditLimit: 0n };
@@ -117,7 +118,7 @@ describe("regressions: setRebalancePolicy beside a queued request_collateral", (
     const queuedTx = { type: "request_collateral", tokenId: k, amount: 1n, feeAmount: 0n, policyVersion: 1 } as never;
     const child = { ...base, _tag: "open", state: body, mempool: [queuedTx] } as AccountReplica;
     const tx: EntityTx = { type: "setRebalancePolicy", data: { counterpartyEntityId: BOB, tokenId: k, ...policy } };
-    const d = unwrap(foldTxs(opened.state, new Map([[BOB, child]]), [tx], { verify: hankoVerify, timestamp: NOW })).draft;
+    const d = unwrap(foldTxs(opened.state, new Map([[BOB, child]]), signedTxs(opened.state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: NOW })).draft;
     const ogAcc: any = {
       state: { leftEntity: base.state.account.id.left, rightEntity: base.state.account.id.right,
         deltas: PersistentAccountStateMap.fromEntries("deltas", [[2, { ...delta, tokenId: 2, leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }]] as never),

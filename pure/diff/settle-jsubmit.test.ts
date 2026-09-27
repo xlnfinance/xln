@@ -173,12 +173,12 @@ import {
   applyEntityInput, createEntity, foldTxs, isLeft, mapSet, ownWire, wireOf, workspaceHashOf, zeroDelta, tokenId, canAutoApproveWorkspace, entityCollectionCommitment, addSettlementRow,
   type AccountReplica, type EntityTx, type OpenEntity, type SettlementOp, type SettlementWorkspace, type WireAccountTx,
 } from "../xln.ts";
-import { CAROL, NOW, TERMS, aliceAddr, verifiers } from "../xln_run.ts";
+import { CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, signedTxs, verifiers } from "../xln_run.ts";
 
 const T1 = unwrap(tokenId("1"));
 /** ALICE (1-of-1) with a committed Account to BOB whose token 1 row holds collateral. */
 const settleBase = (): OpenEntity => {
-  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
+  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   const open = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [{ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
   if (open._tag !== "open") throw new Error(open._tag);
   const child = open.accountReplicas.get(BOB)!;
@@ -231,7 +231,7 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
       const handler = { settle_propose: handleSettlePropose, settle_update: handleSettleUpdate, settle_approve: handleSettleApprove, settle_reject: handleSettleReject }[txKind] as any;
       let ogOut: any, ogErr: string | undefined;
       try { ogOut = await handler(og, { type: txKind, data: structuredClone(data) }, {}, true); } catch (e) { ogErr = (e as Error).message; }
-      const rw = foldTxs(SETTLE_BASE.state, replicas, [tx], { verify: hankoVerify, timestamp: NOW + 1n });
+      const rw = foldTxs(SETTLE_BASE.state, replicas, signedTxs(SETTLE_BASE.state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: NOW + 1n });
       if (ogErr !== undefined) {
         expect(rw.ok).toBe(false);
         if (!rw.ok) expect(codeOf((rw.error as any).reason ?? rw.error._tag)).toBe(codeOf(ogErr));
@@ -333,7 +333,7 @@ describe(seedTag("settle-jsubmit: settle_execute gates (og payments/settle.ts ha
       const og: any = { entityId: ALICE, accounts: new Map([[BOB, ogAccountOf(w, pending)]]) };
       let ogOut: any, ogErr: string | undefined;
       try { ogOut = await handleSettleExecute(og, { type: "settle_execute", data: structuredClone(data) } as any, {} as any, true); } catch (e) { ogErr = (e as Error).message; }
-      const rw = foldTxs(SETTLE_BASE.state, replicas, [{ type: "settle_execute", data } as EntityTx], { verify: hankoVerify, timestamp: NOW + 1n });
+      const rw = foldTxs(SETTLE_BASE.state, replicas, signedTxs(SETTLE_BASE.state, aliceAddr, [{ type: "settle_execute", data } as EntityTx]), { verify: hankoVerify, timestamp: NOW + 1n });
       if (ogErr !== undefined) {
         expect(rw.ok).toBe(false);
         if (!rw.ok) expect(codeOf((rw.error as any).reason ?? rw.error._tag)).toBe(codeOf(ogErr));

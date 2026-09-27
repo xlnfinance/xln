@@ -623,7 +623,8 @@ describe(seedTag("disputes-final: finalize latches on j_abort_sent_batch / j_cle
         : { type: "j_abort_sent_batch", data: { ...(r() < 0.7 ? { requeueToCurrent: r() < 0.5 } : {}), ...(r() < 0.5 ? { reason: "stuck" } : {}) } } as EntityTx;
       const rw = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: JEP }, committed: (jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) as never })).state;
       const rwBob = { ...genesisAB(), _tag: "disputed", mempool: [], active } as unknown as AccountReplica;
-      const f = foldTx(rw, new Map([[BOB, rwBob]]), tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never });
+      // og runs the handler on an approved proposal's collective lane (a raw top-level tx is ENTITY_COMMAND_REQUIRED)
+      const f = foldTx(rw, new Map([[BOB, rwBob]]), tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never }, "collective");
       const og: any = { entityId: ALICE, timestamp: T0, height: 0, config: { mode: "proposer-based", threshold: 1n, validators: [ALICE_SIGNERX], shares: { [ALICE_SIGNERX]: 1n }, jurisdiction: OG_JX },
         accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([[BOB, ogBobAccount("disputed", active)]], ALICE, () => Z32 as never)), ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) };
       const env = { quietRuntimeLogs: true, state: { jReplicas: JREPLICAS } } as never;
@@ -687,7 +688,7 @@ describe(seedTag("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on 
       const matching = lock === undefined ? undefined : c.secrets.find((x) => hashHtlcSecret(x) === lock.hashlock);
       const secret = matching !== undefined && xint(r, 5) > 0 ? matching : xpick(r, [word(r), "0x12", ...c.secrets]);
       const tx = { type: "resolveHtlcLock", data: { counterpartyEntityId: xpick(r, [BOB, BOB, BOB.toUpperCase().replace("0X", "0x"), W("0e")]), lockId, secret } } as EntityTx;
-      const f = foldTx(c.rw, c.replicas, tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never });
+      const f = foldTx(c.rw, c.replicas, tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never }, "collective");
       let ogOut: Out<any>;
       try { ogOut = { ok: true, value: ogResolveHtlcLock(c.og, tx as never, true, slot as never) }; } catch (e) { ogOut = { ok: false, message: String((e as Error).message) }; }
       expect([i, f.ok ? "ok" : (f.error as any).reason]).toEqual([i, ogOut.ok ? "ok" : ogOut.message]);
@@ -814,7 +815,7 @@ describe(seedTag("disputes-final: disputeStart with argument overrides (og entit
         accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([[BOB, ogBob]], ALICE, () => Z32 as never)), paybook: { entries: new Map(), feesEarned: 0n }, ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) };
       const override = xpick(r, [undefined, undefined, "0x", "0x1234", "0xabcdef00", "0xzz", "12"]);
       const tx = { type: "disputeStart", data: { counterpartyEntityId: BOB, ...(override === undefined ? {} : { starterInitialArguments: override }), ...(xint(r, 10) === 0 ? { starterCounterArguments: "0x" } : {}), ...(r() < 0.5 ? { description: "why" } : {}) } } as EntityTx;
-      const f = foldTx(rw, new Map([[BOB, rwBob]]), tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never });
+      const f = foldTx(rw, new Map([[BOB, rwBob]]), tx, { verify: verifiers.verify, timestamp: BigInt(T0), jReplicas: JREPLICAS as never }, "collective");
       let ogOut: Out<any>;
       try { ogOut = { ok: true, value: await ogDisputeStart(og, tx as never, { quietRuntimeLogs: true, state: { jReplicas: JREPLICAS } } as never, [], true) }; } catch (e) { ogOut = { ok: false, message: String((e as Error).message) }; }
       expect([i, f.ok ? "ok" : (f.error as any).reason]).toEqual([i, ogOut.ok ? "ok" : ogOut.message]);

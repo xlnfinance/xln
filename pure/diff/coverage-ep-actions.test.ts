@@ -20,7 +20,7 @@ import {
   type Binary, type EntityReplica, type EntityState, type EntityTx, type HankoWitness, type JEvent, type JInput,
   type Runtime, type RuntimeTx,
 } from "../xln.ts";
-import { aliceAddr, bobAddr, unwrap, verifiers } from "../xln_run.ts";
+import { aliceAddr, bobAddr, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
 const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 0xe9ac7;
@@ -119,7 +119,8 @@ const commitActions = (fx: Fixture, txs: (s: EntityState) => readonly EntityTx[]
       : t.type === "entityProviderReleaseControlShares" ? handleEntityProviderReleaseControlShares
         : handleEntityProviderCancelAction;
   for (const t of planned) handler(t)(asOg(ogState), asOg(t), asOg(env), true);
-  const folded = unwrap(foldTxs(fx.state, new Map(), planned, { verify: verifiers.verify, timestamp: BigInt(T0) }));
+  // og: the frame carries Alice's signed command proposing the actions (1 of 2 shares meets the threshold)
+  const folded = unwrap(foldTxs(fx.state, new Map(), signedTxs(fx.state, aliceAddr, planned), { verify: verifiers.verify, timestamp: BigInt(T0) }));
   return { ...fx, state: folded.draft.state, ogAction: ogState["entityProviderActionState"] };
 };
 type Pending = { readonly actionHash: string; readonly actionNonce: bigint; readonly generation: number };

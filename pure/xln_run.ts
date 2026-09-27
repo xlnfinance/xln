@@ -3,14 +3,14 @@
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bytesToHex as nobleHex } from "@noble/hashes/utils";
 import {
-  accountId, ackPlan, address, addressOf, applyAccountBody, bytesToHex, concat, encodeHankoEnvelope, encodeLazyAccountHanko, encodeLazyEntityId, entityId, genesisAccount, genesisAccountBody,
+  accountId, ackPlan, address, addressOf, applyAccountBody, authorEntityTxs, bytesToHex, concat, encodeHankoEnvelope, encodeLazyAccountHanko, encodeLazyEntityId, entityId, genesisAccount, genesisAccountBody,
   genesisReplica, getDelta, hashEntityFrame, hexToBytes, isLeft, match, matchBy, ok, opt, packSignatures, partyOf, planAccountProposal, previewAck, replicaId, sentBy, setCreditLimit, signRaw, signature, tokenId,
   recoverRawSigner, unwrapOr, updateDelta, verifyAccountHanko, wordOf,
 } from "./xln.ts";
 import type {
   AccountEnvelope, AccountFrame, AccountGrammar, AccountId, AccountInput, AccountInputFor, AccountMessage, AccountOutput, AccountPhase, AccountReplica, AccountReplicaError, AccountTerms, Address, At, Board, DisputeHanko,
   DisputePlan, EntityFrame, EntityGrammar, EntityId, EntityPhase, EntityReplica, FrameClock, Hanko, HankoClaimInput, Hash, OpenAccount, Party, ProposedAccount, RawSig, Result, Signature, Verify, WireAccountTx,
-  DeltaTransformerRef, JReplica, Runtime,
+  DeltaTransformerRef, EntityState, EntityTx, JReplica, Runtime,
 } from "./xln.ts";
 
 
@@ -120,6 +120,11 @@ export const TERMS: AccountTerms = {
   disputeConfig: { leftResponseSeconds: 86400, rightResponseSeconds: 3600 },
 };
 export const JURISDICTION = TERMS.domain;
+/** A jurisdiction on an EntityProvider that registered no board: og openAccount needs config.jurisdiction; the command stack stays unregistered. */
+export const UNREGISTERED_J = { entityProviderAddress: `0x${"ee".repeat(20)}` };
+/** og admission: a board member's local txs as the frame carries them, signed into its Entity commands (og prepareLocallyAuthoredEntityTxs). */
+export const signedTxs = (state: EntityState, signer: Address, txs: readonly EntityTx[]): readonly EntityTx[] =>
+  unwrap(authorEntityTxs(state, signer, txs, (h) => crypto.sign(h, signer)));
 /** The durable jurisdiction stack of TERMS.domain: og requireAccountDeltaTransformerAddress reads it for every Account proof body with clauses. */
 export const TEST_CONTRACTS = { depository: TERMS.domain.depositoryAddress, entityProvider: `0x${"55".repeat(20)}`, account: `0x${"66".repeat(20)}`, deltaTransformer: `0x${"77".repeat(20)}` } as const;
 export const TEST_DT: DeltaTransformerRef = ok(TEST_CONTRACTS.deltaTransformer);

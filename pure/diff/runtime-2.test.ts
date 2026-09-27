@@ -7,7 +7,7 @@ import {
   applyEntityInput, createEntity, isLeft, mapSet, ownWire, retireNetworkOutputs, tokenId, wireOf, zeroDelta,
   type AccountReplica, type EntityId, type EntityTx, type OpenEntity, type WireAccountTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, unwrap, verifiers } from "../xln_run.ts";
 
 // seeded rng for randomized comparisons
 let seed = seedOf(11);
@@ -22,7 +22,7 @@ const openTo = (target: EntityId): EntityTx =>
 
 /** A 1-of-1 ALICE with a committed Account to BOB whose token 1 row is funded on ALICE's side. */
 const fundedHubAccount = (): OpenEntity => {
-  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
+  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   const signed = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [openTo(BOB)] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
   // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
   const opened = unwrap(applyEntityInput(signed, { kind: "txs", timestamp: NOW, txs: [] }, { ...verifiers, self: ALICE, signerId: aliceAddr, lane: "account-work" })).replica;

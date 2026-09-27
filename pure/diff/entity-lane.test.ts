@@ -7,7 +7,7 @@ import { buildNetworkGraph as ogBuildGraph } from "../../core/pathfinding/graph.
 import { PathFinder } from "../../core/pathfinding/pathfinding.ts";
 import * as ogAdmission from "../../core/entity/paybook/payment-admission.ts";
 import { withDeterministicHtlcTestSecret } from "../../core/protocol/htlc/test-secret-capability.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
 import {
   applyRuntime, convertOutput, createEntity, createRuntime, findPaths, isLeft, materializeOriginated, replicaId, replicaKey, spawn, stableJson, tokenId,
   type Address, type Binary, type EntityId, type EntityReplica, type EntityTx, type RoutedEntityInput, type Runtime,
@@ -74,7 +74,7 @@ describe(seedTag("entity-lane: gossip pathfinding (og pathfinding/graph.ts, path
 // ---- htlcPayment with an empty route (og infra-context.ts resolveRoute) ----
 const ENTITY_KEYS = new Map([ALICE, BOB, CAROL].map((id, i) => { const priv = new Uint8Array(32).fill(i + 7); return [id, { priv: "0x" + Buffer.from(priv).toString("hex"), pub: "0x" + Buffer.from(x25519.getPublicKey(priv)).toString("hex") }] as const; }));
 const SIGNERS = new Map<EntityId, Address>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
-const entityOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[SIGNERS.get(id)!, { shares: 1n }]]), committed: { entityEncryptionPublicKey: ENTITY_KEYS.get(id)!.pub } }));
+const entityOf = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[SIGNERS.get(id)!, { shares: 1n }]]), committed: { entityEncryptionPublicKey: ENTITY_KEYS.get(id)!.pub }, jurisdictionConfig: UNREGISTERED_J }));
 const inputOf = (id: EntityId, txs: EntityTx[], timestamp: bigint): RoutedEntityInput => ({ entityId: id, signerId: SIGNERS.get(id)!, input: { kind: "txs", timestamp, txs } });
 /** og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair run on every proposal and replay: every validator holds its Entity's key. */
 const withKeys = (ctx: any): typeof verifiers => ({ ...ctx, htlcInfra: (id: EntityId) => {

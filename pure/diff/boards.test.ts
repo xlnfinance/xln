@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   applyBoardRegistryEvent, boardProof, emptyBoardRegistry, EMPTY_CERTIFIED_BOARD_ROOT, hashBoardNode, lookupBoardRecord, reachableBoardNodes, verifyBoardProof, advanceBoardFinality, boardStackKey,
-  applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
+  applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTx, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
   type Address, type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
 } from "../xln.ts";
-import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 import { assertEntityConfigBoardAuthority, buildQuorumHanko } from "../../core/hanko/signing.ts";
 import { ogAuthored, ogAuthorVerdict, wired } from "./og-author.ts";
 import { handleEntityProviderActivateBoard, handleEntityProviderProposeControlBoard } from "../../core/entity/tx/handlers/control-board-proposal.ts";
@@ -270,6 +270,14 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
     entityId: s.id, height: 0, timestamp, config: { ...ogConfigOf(s, true), jurisdiction: { ...OG_J, ...(s.jurisdictionConfig?.name === undefined ? { name: undefined } : {}) } },
     certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], s.id, computeEntityAccountValueHash), ...(action === undefined ? {} : { entityProviderActionState: action }),
   });
+  /**
+   * og's handler as an approved proposal runs it (the collective lane): a board activation can leave the Entity's own
+   * config off the certified board, where og admission could no longer sign it a command, yet og's handler still runs.
+   */
+  const handlerRun = (state: EntityState, tx: EntityTx, timestamp: bigint) => {
+    const d = foldTx(state, new Map(), tx, { verify: verifiers.verify, timestamp }, "collective");
+    return d.ok ? { ok: true as const, value: { draft: d.value } } : d;
+  };
   const cloneAction = (a: any): any => (a === undefined ? undefined : { ...a });
   const og = (f: () => any): { ok: true; value: any } | { ok: false; code: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
   const ADDRS = ["0x" + "b1".repeat(20), "0x" + "00".repeat(20), "0xzz", "0xB1b1B1B1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", "c2".repeat(20), " 0x" + "c3".repeat(20)];
@@ -297,12 +305,12 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
             ? { type: "entityProviderTransfer", data: { to: pick(ADDRS), tokenId: pick([1n, 7n, -1n, 0n]), amount: pick([11n, 0n, 5n, -2n, 99n]) } }
             : { type: "entityProviderReleaseControlShares", data: { recipientAddress: pick(ADDRS), controlAmount: pick([0n, 3n, -1n]), dividendAmount: pick([0n, 4n]), purpose: pick(["", "payout", "x".repeat(1025), 5 as unknown as string]) } };
           ogR = og(() => (tx.type === "entityProviderTransfer" ? handleEntityProviderTransfer : handleEntityProviderReleaseControlShares)(ogS, tx as any, env, true));
-          const f = foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: BigInt(t) });
+          const f = handlerRun(state, tx, BigInt(t));
           mine = f.ok ? { ok: true, state: f.value.draft.state, hashes: f.value.draft.hashes, jOutputs: f.value.draft.jOutputs, messages: (f.value.draft.events ?? []).map((e) => e.message) } : f;
         } else if (r < 0.7) {
           const tx: EntityTx = { type: "entityProviderCancelAction", data: { actionHash: rng() < 0.75 && pending !== undefined ? pending.actionHash : pick([rword(), ""]) } };
           ogR = og(() => handleEntityProviderCancelAction(ogS, tx as any, env, true));
-          const f = foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: BigInt(t) });
+          const f = handlerRun(state, tx, BigInt(t));
           mine = f.ok ? { ok: true, state: f.value.draft.state, hashes: f.value.draft.hashes, jOutputs: f.value.draft.jOutputs, messages: (f.value.draft.events ?? []).map((e) => e.message) } : f;
         } else if (r < 0.88) {
           const executed = rng() < 0.5, nonce = confirmed + (rng() < 0.85 ? 1n : 2n);
@@ -343,16 +351,16 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
     const tx: EntityTx = { type: "entityProviderTransfer", data: { to: ADDRS[0] as string, tokenId: 1n, amount: 2n } };
     const unnamed = setup(word(70), JCONF);
     const ogUnnamed = og(() => handleEntityProviderTransfer(ogStateOf(unnamed.state, unnamed.ogRegistry, undefined, 5), tx as any, ogEnv(unnamed.ogNodes), true));
-    expect(reasonOf(foldTxs(unnamed.state, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n }))).toBe(ogUnnamed.ok ? "ok" : ogUnnamed.code);
+    expect(reasonOf(foldTxs(unnamed.state, new Map(), signedTxs(unnamed.state, bobAddr, [tx]), { verify: verifiers.verify, timestamp: 5n }))).toBe(ogUnnamed.ok ? "ok" : ogUnnamed.code);
     const members = new Map([[bobAddr, { shares: 1n }]]), lazy = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
     const lazyState = unwrap(createEntity({ id: unwrap(entityId(lazy)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: EP_J })).state;
     const ogLazy = og(() => handleEntityProviderTransfer(ogStateOf(lazyState, undefined, undefined, 5), tx as any, ogEnv(new Map()), true));
-    expect(reasonOf(foldTxs(lazyState, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n }))).toBe(ogLazy.ok ? "ok" : ogLazy.code);
+    expect(reasonOf(foldTxs(lazyState, new Map(), signedTxs(lazyState, bobAddr, [tx]), { verify: verifiers.verify, timestamp: 5n }))).toBe(ogLazy.ok ? "ok" : ogLazy.code);
     // the pending intent is committed in the Entity root exactly as og commits entityProviderActionState
     const { state, ogRegistry, ogNodes } = setup(word(71));
     const ogS = ogStateOf(state, ogRegistry, undefined, 5);
     handleEntityProviderTransfer(ogS, tx as any, ogEnv(ogNodes), true);
-    const folded = unwrap(foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n })).draft.state;
+    const folded = unwrap(handlerRun(state, tx, 5n)).draft.state;
     const rootOf = (s: EntityState) => unwrap(entityRootOf({ ...s, timestamp: 5n }, new Map()));
     const ogRoot = (extra: Record<string, unknown>) => computeCanonicalEntityConsensusStateHash({
       entityId: state.id, height: 0, timestamp: 5, accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
@@ -413,7 +421,7 @@ describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/c
       }
       const ogS = ogState();
       const ogR = await og(() => (activate ? handleEntityProviderActivateBoard(ogS, tx as any, env, true) : handleEntityProviderProposeControlBoard(ogS, tx as any, env, true)));
-      const f = foldTxs(state, new Map(), [tx], { verify: realVerify, timestamp: 77n });
+      const f = foldTxs(state, new Map(), signedTxs(state, bobAddr, [tx]), { verify: realVerify, timestamp: 77n });
       expect(f.ok ? "ok" : reasonOf(f)).toBe(ogR.ok ? "ok" : ogR.code);
       seen.add(`${tx.type}:${ogR.ok ? "ok" : ogR.code.split(":")[0]}`);
       if (!f.ok || !ogR.ok) continue;

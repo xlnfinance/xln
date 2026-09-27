@@ -19,7 +19,7 @@ import {
   tokenId, wireEntityTx, zeroDelta,
   type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
-import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
 const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 0xd15c0;
@@ -272,7 +272,7 @@ describe("coverage-disputes: DisputeStarted against a Source hub holding a newer
       const finalize: EntityTx = { type: "disputeFinalize", data: { counterpartyEntityId: BOB } };
       const ogFinal = await handleDisputeFinalize(asOg({ ...next, timestamp: after }), asOg(wireEntityTx(finalize)), asOg(OG_ENV), true)
         .then((out) => ({ ok: true as const, state: out.newState }), (e: unknown) => ({ ok: false as const, message: String((e as Error).message) }));
-      const rwFinal = foldTxs(d.state, d.accountReplicas, [finalize], {
+      const rwFinal = foldTxs(d.state, d.accountReplicas, signedTxs(d.state, aliceAddr, [finalize]), {
         verify: verifiers.verify, timestamp: BigInt(after), jReplicas: JREPLICAS, runtimeSeed: RUNTIME_SEED,
       });
       same(tag(n, "finalize verdict"), rwFinal.ok ? "ok" : reasonOf(rwFinal.error), ogFinal.ok ? "ok" : ogFinal.message);
