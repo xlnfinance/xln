@@ -7902,8 +7902,8 @@ const closeProofFailure = (pull: PullRow, binding: CrossPullBinding, proof: Clos
 const closeBinaryFailure = (pull: PullRow, x: PullCloseTx): AccountTxFailure | null => {
   const { proof, binary } = x;
   const h = crossCloseBinaryHash(binary);
-  // og ethers.keccak256 throws on a non-hex binary before any comparison.
-  if (!h.ok) return threwTx(h.error.reason);
+  // og ethers.keccak256 throws on a non-hex binary before any comparison, in ethers' own words.
+  if (!h.ok) return threwTx(ethersBytesText("data", String(binary || "0x")));
   if (h.value.toLowerCase() !== String(proof.binaryHash).toLowerCase()) {
     return refusedTx("Cross-j close binary hash mismatch");
   }
@@ -14106,6 +14106,12 @@ const ethersValueText = (value: unknown): string => {
     default: return String(value);
   }
 };
+/** ethers' INVALID_ARGUMENT for a non-BytesLike `value` passed as `argument`. */
+const ethersBytesText = (argument: string, value: unknown): string => {
+  const shown = ethersValueText(value);
+  const detail = `argument="${argument}", value=${shown}, code=INVALID_ARGUMENT, version=${ETHERS_VERSION}`;
+  return `invalid BytesLike value (${detail})`;
+};
 /** The og DeltaBatch arrays in slot order (payments, swaps, pulls), each as its static tuple's word count. */
 const DELTA_BATCH_SLOTS = [[0, 5], [1, 5], [2, 7]] as const;
 /**
@@ -14117,9 +14123,7 @@ const DELTA_BATCH_SLOTS = [[0, 5], [1, 5], [2, 7]] as const;
  */
 export const ethersBatchPulls = (encoded: unknown): Result<number, string> => {
   if (typeof encoded !== "string" || encoded.length % 2 !== 0 || !/^0x[0-9a-f]*$/i.test(encoded)) {
-    const value = ethersValueText(encoded);
-    const detail = `argument="value", value=${value}, code=INVALID_ARGUMENT, version=${ETHERS_VERSION}`;
-    return err(`invalid BytesLike value (${detail})`);
+    return err(ethersBytesText("value", encoded));
   }
   const data = hexToBytes(`0x${encoded.slice(2)}`);
   const deferred = (name: string): Result<never, string> =>
