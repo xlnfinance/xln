@@ -34710,6 +34710,16 @@ const debtMessage = (e: WireJEvent, blockNumber: number): string => {
       return `🩶 DEBT FORGIVEN: ${units("amountForgiven")} between ${debtor} and ${creditor} | ${block} · debt #${index}`;
   }
 };
+/**
+ * A debt ledger is committed only while it holds a debt: og creates a direction on its first debt and deletes it once
+ * emptied, and an empty ledger would commit a root section that an absent one does not.
+ */
+const withDebts = (committed: EntityCommitted, debts: DebtLedger): EntityCommitted => {
+  const { outDebtsByToken: _out, inDebtsByToken: _in, ...rest } = committed;
+  const ledger = (field: string, book: DebtLedger["out"]): EntityCommitted =>
+    (book.size === 0 ? {} : { [field]: book as unknown as Binary });
+  return { ...rest, ...ledger("outDebtsByToken", debts.out), ...ledger("inDebtsByToken", debts.in) };
+};
 /** og: a debt event updates this Entity's debt ledgers when it is a party; every one is said. */
 const debtJEvent = (
   step: JEventStep,
@@ -34720,12 +34730,7 @@ const debtJEvent = (
   const state = step.draft.state;
   const held = committedDebts(state);
   return map(mapErr(applyDebtEvent(held, state.id, typed), asInvariant), (debts) => {
-    const committed = {
-      ...state.committed,
-      outDebtsByToken: debts.out as unknown as Binary,
-      inDebtsByToken: debts.in as unknown as Binary,
-    };
-    const next = debts === held ? state : { ...state, committed };
+    const next = debts === held ? state : { ...state, committed: withDebts(state.committed, debts) };
     return { ...step, draft: jSay({ ...step.draft, state: next }, debtMessage(e, blockNumber)) };
   });
 };

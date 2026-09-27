@@ -65,7 +65,7 @@ const ogState = (s: EntityState, replicas: ReadonlyMap<EntityId, AccountReplica>
   const jb = s.committed["jBatchState"];
   return {
     entityId: s.id, timestamp, config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr.toLowerCase()], shares: { [aliceAddr.toLowerCase()]: 1n }, jurisdiction: s.jurisdictionConfig?.name === undefined ? { ...OG_J, name: undefined } : OG_J },
-    reserves: new Map(s.committed["reserves"] as never), outDebtsByToken: new Map(), accounts: shell, ...(jb === undefined ? {} : { jBatchState: structuredClone(jb) }),
+    reserves: new Map(s.committed["reserves"] as never), accounts: shell, ...(jb === undefined ? {} : { jBatchState: structuredClone(jb) }),
   };
 };
 const messages = (state: any): string[] => readEntityFrameEvents(state).map((e: any) => e.message);
@@ -467,7 +467,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
       let t = 1_000;
       // a sent batch to settle against, when the reserve covers the r2r
       if (jrng() < 0.6 && reserve1 >= 5n) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
-      let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };
+      let carry: any = { height: 0, lastFinalizedJHeight: 0 };
       for (let step = 0; step < 8; step++) {
         t += 1 + jri(9);
         const og: any = { ...ogState(state, replicas, t), ...structuredClone(carry) };
@@ -495,8 +495,9 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
         expect(c["jHistoryFinality"]).toEqual(next.jHistoryFinality);
         expect(c["certifiedBoardState"]).toEqual(next.certifiedBoardState);
         expect(c["jBatchState"]).toEqual(next.jBatchState);
-        expect(c["outDebtsByToken"] ?? new Map()).toEqual(next.outDebtsByToken);
-        expect(c["inDebtsByToken"] ?? new Map()).toEqual(next.inDebtsByToken);
+        // og keeps a debt ledger only while it holds a debt: absent and empty commit different roots
+        expect(c["outDebtsByToken"]).toEqual(next.outDebtsByToken);
+        expect(c["inDebtsByToken"]).toEqual(next.inDebtsByToken);
         expect(c["externalWallet"]).toEqual(next.externalWallet);
         expect([...(d.touched ?? [])].sort()).toEqual([...out.dirtyAccounts].sort());
         // the Accounts' own frame proposals are the Entity frame's later step in og; the j_event outputs are the self j_broadcast follow-ups
@@ -504,7 +505,7 @@ describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts apply
         expect(selfOutputs).toEqual(out.outputs.map((o: any) => ({ entityId: o.entityId, signerId: String(o.signerId).toLowerCase(), types: o.entityTxs.map((x: any) => x.type) })));
         state = d.state;
         replicas = d.accountReplicas;
-        carry = { height: 0, lastFinalizedJHeight: next.lastFinalizedJHeight, jHistoryFinality: next.jHistoryFinality, certifiedBoardState: next.certifiedBoardState, outDebtsByToken: next.outDebtsByToken, inDebtsByToken: next.inDebtsByToken, ...(next.externalWallet ? { externalWallet: next.externalWallet } : {}) };
+        carry = { height: 0, lastFinalizedJHeight: next.lastFinalizedJHeight, jHistoryFinality: next.jHistoryFinality, certifiedBoardState: next.certifiedBoardState, ...(next.outDebtsByToken ? { outDebtsByToken: next.outDebtsByToken } : {}), ...(next.inDebtsByToken ? { inDebtsByToken: next.inDebtsByToken } : {}), ...(next.externalWallet ? { externalWallet: next.externalWallet } : {}) };
       }
     }
     for (const k of wanted) expect([k, seen.get(k) ?? 0]).not.toEqual([k, 0]);
@@ -570,7 +571,7 @@ describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame con
       let state = unwrap(createEntity({ id: NUM, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: EP }, committed: { reserves: new Map([[1, 10n]]) } })).state;
       const replicas: ReadonlyMap<EntityId, AccountReplica> = new Map();
       const ogEnv: any = { quietRuntimeLogs: true, infrastructure: {} };
-      let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };
+      let carry: any = { height: 0, lastFinalizedJHeight: 0 };
       const ogFresh = (t: number): any => ({ ...ogState(state, replicas, t), ...structuredClone(carry) });
       const oldHash = ogBoardHash(ogFresh(1).config);
       if (variant !== "unregistered") {
