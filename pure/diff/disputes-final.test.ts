@@ -1,9 +1,10 @@
 // Behavioural diff: og disputes and cross-j recovery (core/protocol/dispute/proof-builder.ts, entity/tx/handlers/dispute/*, entity/tx/j-events*.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, state and bytes.
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   accountProofBody, committedView, deltaTransformerFor, disputeArguments, knownDisputeSecrets, proofBodyHash, starterSecrets, tokenId,
-  type AccountBody, type HtlcLock, type JReplica, type Paybook, type PaybookEntry, type PullRow, type SwapOffer, type TokenId, type WireAccountTx,
+  type AccountBody, type EntityTx, type HtlcLock, type JReplica, type Paybook, type PaybookEntry, type PullRow, type SwapOffer, type TokenId, type WireAccountTx,
 } from "../xln.ts";
 import { TERMS, TEST_CONTRACTS, genesisAB, unwrap } from "../xln_run.ts";
 import { buildAccountProofBody } from "../../core/protocol/dispute/proof-builder.ts";
@@ -12,6 +13,7 @@ import { buildDisputeArgumentsFromState } from "../../core/protocol/dispute/argu
 import { collectKnownDisputeSecretsForState } from "../../core/entity/dispute-arguments.ts";
 import { decodeDisputeStarterInitialSecrets } from "../../core/entity/tx/j-events-htlc/index.ts";
 import { ethers } from "ethers";
+import { txFingerprint } from "../../core/protocol/state/tx-multiset.ts";
 import {
   applyCrossFill, countDeferredReveals, crossPrivateSeed, crossPullReveal, decodeHashLadderBinary, flushDeferredReveals, initJBatch, prepareCrossRoute, queueLadderReveal, stableJson,
   type CjAccount, type CjHost, type CjJBatch, type CrossRoute, type EntityError, type EntityId, type Result,
@@ -53,8 +55,8 @@ import { applyFinality } from "../xln.ts";
 import { getDisputeHankoRequirementError as ogDisputeHankoRequirement } from "../../core/account/consensus/dispute/hanko.ts";
 import { disputeRequirement, disputeRequirementText } from "../xln.ts";
 
-let seed = 29;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(29);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const big = (bits: number): bigint => { let v = 0n; for (let i = 0; i < bits; i += 16) v = (v << 16n) | BigInt(ri(0x10000)); return v & ((1n << BigInt(bits)) - 1n); };
@@ -98,7 +100,7 @@ const ogReplicaOf = (b: AccountBody): any => ({
   },
 });
 
-describe("disputes-final: Account ProofBody transformers (og protocol/dispute/proof-builder.ts buildAccountProofBody)", () => {
+describe(seedTag("disputes-final: Account ProofBody transformers (og protocol/dispute/proof-builder.ts buildAccountProofBody)"), () => {
   test("MATCH: 600 random Accounts with locks, swaps and pulls -- the same ProofBody hash, transformer clauses and allowances, or og's refusal code", () => {
     const seen = new Map<string, number>();
     for (let i = 0; i < 600; i++) {
@@ -116,7 +118,7 @@ describe("disputes-final: Account ProofBody transformers (og protocol/dispute/pr
       })));
     }
     for (const k of ["ok:0", "ok:1", "ok:chunked", "HTLC_LOCK_INVALID_TIMELOCK", "PROOF_BODY_LOCK_TOKEN_MISSING", "PROOF_BODY_SWAP_TOKEN_MISSING", "PROOF_BODY_PULL_TOKEN_MISSING"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 30_000);
 
   test("MATCH: more than 32 clauses is og's J_DISPUTE_PROOFBODY_TRANSFORMER_LIMIT; a body with clauses and no resolvable stack is og's ACCOUNT_PROOF_JURISDICTION_NOT_FOUND", () => {
     const base = genesisAB().state, t1 = tk(1);
@@ -149,7 +151,7 @@ describe("disputes-final: Account ProofBody transformers (og protocol/dispute/pr
   });
 });
 
-describe("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, entity/dispute-arguments.ts, j-events-htlc decodeDisputeStarterInitialSecrets)", () => {
+describe(seedTag("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, entity/dispute-arguments.ts, j-events-htlc decodeDisputeStarterInitialSecrets)"), () => {
   const secretOf = (): { secret: string; hashlock: string } => { const secret = hex32(); return { secret, hashlock: ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [secret])).toLowerCase() }; };
   test("MATCH: 500 random frozen Accounts with swap_resolve evidence and paybook secrets -- the same known secrets and left/right arguments as og", () => {
     let withArgs = 0, withSecrets = 0;
@@ -201,7 +203,7 @@ describe("disputes-final: dispute arguments (og protocol/dispute/arguments.ts, e
 });
 
 // ---- cross-j recovery: the hash-ladder reveal queue (og entity/tx/j-events-htlc/index.ts) ----
-const xrng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const xrng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 type Rand = () => number;
 const xint = (r: Rand, n: number): number => Math.floor(r() * n);
 const xpick = <T,>(r: Rand, xs: readonly T[]): T => xs[xint(r, xs.length)] as T;
@@ -210,11 +212,13 @@ const ogRun = <T,>(f: () => T): Out<T> => { try { return { ok: true, value: f() 
 const rwRun = <T,>(r: Result<T, EntityError>): Out<T> => (r.ok ? { ok: true, value: r.value } : { ok: false, message: r.error._tag === "entity_invariant" ? r.error.reason : r.error._tag });
 const same = (label: string, og: Out<unknown>, rw: Out<unknown>): void => { expect(`${label}:${stableJson(rw)}`).toBe(`${label}:${stableJson(og)}`); };
 const bump = (kinds: Map<string, number>, k: string) => kinds.set(k, (kinds.get(k) ?? 0) + 1);
+const hasKinds = (kinds: Map<string, number>, want: readonly string[]): boolean => want.every((k) => [...kinds.keys()].some((x) => x.startsWith(k)));
 const expectKinds = (kinds: Map<string, number>, want: readonly string[]) => { for (const k of want) expect([k, [...kinds.keys()].some((x) => x.startsWith(k)), [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]); };
 const W = (b: string) => ("0x" + b.repeat(32)) as EntityId;
 const U1 = W("01"), H1 = W("02"), H2 = W("03"), U2 = W("04");
 const XSIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
 const XPEER: Readonly<Record<string, EntityId>> = { [U1]: H1, [H1]: U1, [H2]: U2, [U2]: H2 };
+const xsig = (e: EntityId): string => { const s = XSIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
 const T0 = 1_700_000_050_000, CLOCK60 = { leftResponseSeconds: 60, rightResponseSeconds: 60 }, RUNTIME_SEED = "0x" + "5e".repeat(32);
 const Z32 = "0x" + "00".repeat(32);
 const baseRoute = (r: Rand, n: number): CrossRoute => ({
@@ -222,7 +226,7 @@ const baseRoute = (r: Rand, n: number): CrossRoute => ({
   source: { jurisdiction: `stack:1:0x${"11".repeat(20)}`, entityId: U1, counterpartyEntityId: H1, tokenId: 1, amount: BigInt(1 + xint(r, 1e9)) },
   target: { jurisdiction: `stack:31337:0x${"ab".repeat(20)}`, entityId: H2, counterpartyEntityId: U2, tokenId: 2, amount: BigInt(1 + xint(r, 1e12)) },
   sourceDisputeConfig: CLOCK60, targetDisputeConfig: CLOCK60, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: T0 + 60_000,
-  sourceSignerId: XSIG[U1], sourceHubSignerId: XSIG[H1], targetHubSignerId: XSIG[H2], targetSignerId: XSIG[U2],
+  sourceSignerId: xsig(U1), sourceHubSignerId: xsig(H1), targetHubSignerId: xsig(H2), targetSignerId: xsig(U2),
 });
 const decodedAt = (r: Rand, ratio: number) => {
   if (ratio <= 0 || ratio > 65_535 || !Number.isInteger(ratio)) return { fillRatio: ratio };
@@ -266,7 +270,7 @@ const hostOf = (r: Rand, n: number, self: EntityId): { host: CjHost; routes: Cro
   const peers = [...new Set([XPEER[self]!, ...(xint(r, 3) === 0 ? [xpick(r, [U1, H1, H2, U2].filter((x) => x !== self))] : [])])];
   const accounts = new Map(peers.filter(() => xint(r, 10) > 0).map((p) => [p.toLowerCase(), accountOf(p)] as const));
   const jb = jbOf(r, routes, self.toLowerCase());
-  return { host: { id: self, timestamp: T0, validators: [XSIG[self]!], swaps, ...(jb === undefined ? {} : { jb }), accounts }, routes };
+  return { host: { id: self, timestamp: T0, validators: [xsig(self)], swaps, ...(jb === undefined ? {} : { jb }), accounts }, routes };
 };
 const ogStateOf = (h: CjHost): any => {
   const swaps = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
@@ -282,10 +286,11 @@ const ogView = (s: any, value: unknown) => ({ value, routes: routeView(s.crossJu
 const rwView = (h: CjHost, value: unknown) => ({ value, routes: routeView((h.swaps ?? new Map()) as Map<string, any>), jb: h.jb ?? null });
 
 console.warn = () => {};
-describe("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHashLadderRevealRegistration / flushDeferredHashLadderReveals / countDeferredHashLadderReveals)", () => {
+describe(seedTag("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHashLadderRevealRegistration / flushDeferredHashLadderReveals / countDeferredHashLadderReveals)"), () => {
   test("MATCH: queueHashLadderRevealRegistration on 250 random Entities (source and target roles, confirmed / queued / sent / recovery ratios, source windows, full batches): same result, routes, jBatchState and halts as og", () => {
     const r = xrng(0x1add), kinds = new Map<string, number>();
-    for (let i = 0; i < 250; i++) {
+    const want = ["queued", "already-queued", "deferred-batch-pending", "source-window-expired", "J_HASH_LADDER_FILL_RATIO_INVALID", "J_HASH_LADDER_COUNTERPARTY_INVALID", "J_HASH_LADDER_REGISTRATION_CONFLICT", "J_HASH_LADDER_SOURCE_ACTIVE_DISPUTE_MISSING"];
+    for (let i = 0, more = untilCovered(250, () => hasKinds(kinds, want)); more(i); i++) {
       const self = xpick(r, [H1, H1, U2, U2, U1, H2]), { host, routes } = hostOf(r, i, self), route = xpick(r, routes), targetRole = r() < 0.5;
       const pull = (targetRole ? route.targetPull : route.sourcePull)!, leg = targetRole ? route.target : route.source;
       const cp = xint(r, 12) === 0 ? xpick(r, ["0x12", U1, H2]) : leg.entityId.toLowerCase() === self ? leg.counterpartyEntityId : leg.entityId;
@@ -297,12 +302,13 @@ describe("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHa
       same(`queue ${i}`, og, rw.ok ? { ok: true, value: rwView(rw.value.host, rw.value.result) } : rw);
       bump(kinds, og.ok ? String((og.value as { value: string }).value) : og.message.split(":")[0]!);
     }
-    expectKinds(kinds, ["queued", "already-queued", "deferred-batch-pending", "source-window-expired", "J_HASH_LADDER_FILL_RATIO_INVALID", "J_HASH_LADDER_COUNTERPARTY_INVALID", "J_HASH_LADDER_REGISTRATION_CONFLICT", "J_HASH_LADDER_SOURCE_ACTIVE_DISPUTE_MISSING"]);
+    expectKinds(kinds, want);
   }, 120_000);
 
   test("MATCH: flushDeferredHashLadderReveals and countDeferredHashLadderReveals on 250 random Entities (scoped and unscoped, sent batch, stashed source / target witnesses): same count, flushed, routes, jBatchState and halts as og", () => {
     const r = xrng(0xf1a5), kinds = new Map<string, number>();
-    for (let i = 0; i < 250; i++) {
+    const want = ["flushed:0", "flushed:1", "J_HASH_LADDER"];
+    for (let i = 0, more = untilCovered(250, () => hasKinds(kinds, want)); more(i); i++) {
       const self = xpick(r, [H1, U2, H1, U2, U1, H2]), { host } = hostOf(r, i, self);
       expect([i, countDeferredReveals(host)]).toEqual([i, countDeferredHashLadderReveals(ogStateOf(host))]);
       const scope = xint(r, 3) === 0 ? xpick(r, [XPEER[self]!, XPEER[self]!.toUpperCase().replace("0X", "0x"), U1]) : undefined;
@@ -311,7 +317,7 @@ describe("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHa
       same(`flush ${i}`, og, rw.ok ? { ok: true, value: rwView(rw.value.host, rw.value.flushed) } : rw);
       bump(kinds, og.ok ? `flushed:${Math.min(1, (og.value as { value: number }).value)}` : og.message.split(":")[0]!);
     }
-    expectKinds(kinds, ["flushed:0", "flushed:1", "J_HASH_LADDER"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
@@ -392,10 +398,11 @@ const bookSlot = { getPaybookEntry: (s: any, h: string) => s.paybook.entries.get
 const routeRegistryView = (routes: Iterable<[string, any]>) => [...routes].map(([k, v]) => [k, v.status, v.sourceRegistryFillRatio ?? null, v.targetRegistryFillRatio ?? null, v.sourceRegistryRecord ?? null, v.targetRegistryRecord ?? null]);
 const paybookView = (p: any) => ({ fees: String(p.feesEarned), entries: [...p.entries].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, v.secret ?? null, v.pendingFee === undefined ? null : String(v.pendingFee)]) });
 
-describe("disputes-final: finalized J events on the Entity (og entity/tx/j-events.ts applyFinalizedJEvent SecretRevealed / HashLadderRevealRegistered)", () => {
+describe(seedTag("disputes-final: finalized J events on the Entity (og entity/tx/j-events.ts applyFinalizedJEvent SecretRevealed / HashLadderRevealRegistered)"), () => {
   test("MATCH: 150 random signed ranges of SecretRevealed and HashLadderRevealRegistered on ALICE (routes in every cross-j role, inbound / outbound locks, paybook routes with fees and cross-j relays, a disputed Account's Target recovery): same verdict, messages, paybook, routes' registry latches and records, recovery results, htlc_resolves and cross-j outputs as og", async () => {
     const r = xrng(0x5ec7), kinds = new Map<string, number>();
-    for (let i = 0; i < 150; i++) {
+    const want = ["ok", "resolves", "relay", "recovery", "🔓 HTLC reveal", "🌉 Cross-j reveal", "CROSS_J_REGISTRY", "CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING"];
+    for (let i = 0, more = untilCovered(150, () => hasKinds(kinds, want)); more(i); i++) {
       const c = jCase(r, i), data = aliceRange(r, c.og, c.events.map((e) => [e]));
       const resultsBefore = Object.keys(c.og.accounts.get(BOB).activeDispute?.crossJurisdictionRecovery?.resultsByPullId ?? {}).length;
       let og: Out<any>;
@@ -412,8 +419,13 @@ describe("disputes-final: finalized J events on the Entity (og entity/tx/j-event
       expect([i, routeRegistryView((d.state.crossJurisdictionSwaps ?? new Map()) as Map<string, any>)]).toEqual([i, routeRegistryView(next.crossJurisdictionSwaps)]);
       const rwActive: any = (d.accountReplicas.get(BOB) as any).active, ogActive = next.accounts.get(BOB).activeDispute;
       expect([i, rwActive?.crossJurisdictionRecovery ?? null]).toEqual([i, ogActive?.crossJurisdictionRecovery ?? null]);
-      // og returns the htlc_resolves; applyLocalAccountEffects admits them only into a live Account
-      const ogResolves = og.value.accountTxs.filter((t: any) => t.tx.type === "htlc_resolve" && t.accountId === BOB && next.accounts.get(BOB).status === "active").map((t: any) => [t.tx.data.lockId, t.tx.data.secret]);
+      // og returns one htlc_resolve per revealing event; applyLocalAccountEffects admits them only into a live Account, and og's
+      // Account admission (account/input/local-tx-admission.ts planLocalAccountTxAdmission) skips a lifecycle tx whose exact payload
+      // is already queued (mempool, pending frame, or earlier in the same batch): a secret revealed twice in one range resolves once.
+      const ogBob = next.accounts.get(BOB), queuedFps = new Set([...(ogBob.mempool ?? []), ...(ogBob.pendingFrame?.accountTxs ?? [])].filter((t: any) => t.type !== "direct_payment").map(txFingerprint));
+      const ogResolves = og.value.accountTxs.filter((t: any) => t.accountId === BOB && ogBob.status === "active")
+        .filter((t: any) => { const fp = txFingerprint(t.tx); if (queuedFps.has(fp)) return false; queuedFps.add(fp); return true; })
+        .filter((t: any) => t.tx.type === "htlc_resolve").map((t: any) => [t.tx.data.lockId, t.tx.data.secret]);
       const rwResolves = (d.accountReplicas.get(BOB)!.mempool ?? []).slice(bobBefore).filter((t: any) => t.type === "htlc_resolve").map((t: any) => [t.lockId, t.secret]);
       expect([i, rwResolves]).toEqual([i, ogResolves]);
       const rwOut = d.outputs.flatMap((o: any) => o.input.txs.filter((t: any) => t.type === "runtimeOutput").map((t: any) => ({ entityId: o.to, signerId: String(o.signerId), txs: t.data.entityTxs })));
@@ -423,7 +435,7 @@ describe("disputes-final: finalized J events on the Entity (og entity/tx/j-event
       if (rwOut.some((o) => o.txs.some((t: any) => t.type === "resolveHtlcLock"))) bump(kinds, "relay");
       if (Object.keys(ogActive?.crossJurisdictionRecovery?.resultsByPullId ?? {}).length > resultsBefore) bump(kinds, "recovery");
     }
-    expectKinds(kinds, ["ok", "resolves", "relay", "recovery", "🔓 HTLC reveal", "🌉 Cross-j reveal", "CROSS_J_REGISTRY", "CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
@@ -439,7 +451,7 @@ const JREPLICAS = new Map([["j", { chainId: TERMS.domain.chainId, contracts: { d
 const sortedHooks = (m: ReadonlyMap<string, unknown> | undefined): unknown[] => [...(m ?? new Map())].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 const secretArgs = (secrets: readonly string[]): string => { const enc = ethers.AbiCoder.defaultAbiCoder(); return enc.encode(["bytes[]"], [[enc.encode(["tuple(uint16[] fillRatios, bytes32[] secrets)"], [{ fillRatios: [], secrets }])]]); };
 
-describe("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFinalized on the Entity (og entity/tx/j-events.ts)", () => {
+describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFinalized on the Entity (og entity/tx/j-events.ts)"), () => {
   test("MATCH: 200 random signed dispute events on ALICE (starter / counterparty / third party, open / observed / queued BOB Account, frozen body and clock defects, starter secrets over paybook routes, counter-proof nonce rules, J batch retirement, crontab) -- same verdict, messages, J batch, activeDispute, jNonce, hooks, paybook and outputs as og", async () => {
     const r = xrng(0xd15b), kinds = new Map<string, number>();
     const good: string = (unwrap(localProof(unwrap(committedView(genesisAB().state)), { ok: true, value: DT })) as any).bodyHash;
@@ -502,14 +514,15 @@ describe("disputes-final: DisputeStarted / CounterDisputeRegistered / DisputeFin
 });
 
 // ---- og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame: an Account input answered with disposition 'dispute' ----
-describe("disputes-final: unsafe Account frames on the Entity (og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame)", () => {
+describe(seedTag("disputes-final: unsafe Account frames on the Entity (og entity/tx/handlers/account/dispute-input.ts handleUnsafeAccountFrame)"), () => {
   test("MATCH: 200 random unsafe frames on ALICE's BOB Account (just-created Account, secret-window evidence over committed / frame-opened locks, paybook routes with inbound hops and conflicts, counterparty dispute Hankos, J batch in flight or full) -- same verdict, messages, paybook, J batch, Account status, kept frame evidence, outputs and upstream htlc_resolves as og", async () => {
     const r = xrng(0x05af), kinds = new Map<string, number>();
     const T1 = unwrap(tokenId("1")), aliceLeft = genesisAB().state.account.id.left === ALICE;
     const carolBase = unwrap(genesisReplica(unwrap(rwAccountId(ALICE, CAROL)), TERMS)) as AccountReplica;
     const payView = (p: any) => stableJson([...(p?.entries ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, { ...v, ...(v.inboundEntity ? { inboundEntity: String(v.inboundEntity).toLowerCase() } : {}), ...(v.outboundEntity ? { outboundEntity: String(v.outboundEntity).toLowerCase() } : {}) }]).concat([["fees", String(p?.feesEarned ?? 0n)]]));
     const slot = { ...bookSlot, putPaybookEntry: (s: any, h: string, e: any) => { s.paybook.entries.set(h, e); } };
-    for (let i = 0; i < 200; i++) {
+    const want = ["ok", "resolve", "latched", "committed:HTLC_SECRET_ENFORCEM", "committed:Bilateral account ", "HTLC_DISPUTE_EVIDENCE_LOCK_MISSING", "PAYBOOK_SECRET_CONFLICT", "PAYBOOK_ENTITY_CONFLICT", "⚠️ Rejected uncommitted account genesis", "⚠️ Unsafe account frame rejected; dispute start", "⚠️ Unsafe account frame rejected; dispute prep", "⚔️ Dispute started"];
+    for (let i = 0, more = untilCovered(200, () => hasKinds(kinds, want)); more(i); i++) {
       const created = xint(r, 12) === 0, windowCause = xint(r, 4) !== 0;
       const secrets = Array.from({ length: 3 }, () => word(r)), hashes = secrets.map((x) => hashHtlcSecret(x)!);
       const nLocks = windowCause ? 1 + xint(r, 2) : xint(r, 2) * (1 + xint(r, 2));
@@ -587,16 +600,17 @@ describe("disputes-final: unsafe Account frames on the Entity (og entity/tx/hand
       if (rwResolves.length > 0) bump(kinds, "resolve");
       if (next.jBatchState?.autoBroadcastDraft) bump(kinds, "latched");
     }
-    expectKinds(kinds, ["ok", "resolve", "latched", "committed:HTLC_SECRET_ENFORCEM", "committed:Bilateral account ", "HTLC_DISPUTE_EVIDENCE_LOCK_MISSING", "PAYBOOK_SECRET_CONFLICT", "PAYBOOK_ENTITY_CONFLICT", "⚠️ Rejected uncommitted account genesis", "⚠️ Unsafe account frame rejected; dispute start", "⚠️ Unsafe account frame rejected; dispute prep", "⚔️ Dispute started"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
 // ---- og j-abort-sent-batch.ts / j-clear-batch.ts releaseFinalizeLatches: settle-jsubmit SJ-19 ----
-describe("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch (og entity/tx/handlers/j-batch)", () => {
+describe(seedTag("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch (og entity/tx/handlers/j-batch)"), () => {
   test("MATCH: 200 random aborts and clears over a disputed BOB Account whose disputeFinalize is queued (finalizations for BOB in any case / another peer, draft / sent / recovery batches, requeue / drop) -- same finalizeQueued latch, messages and J batch as og", async () => {
     const r = xrng(0x5319), kinds = new Map<string, number>();
     const nowSec = Math.floor(T0 / 1000);
-    for (let i = 0; i < 200; i++) {
+    const want = ["j_clear_batch:released", "j_clear_batch:kept", "j_abort_sent_batch:released", "j_abort_sent_batch:kept"];
+    for (let i = 0, more = untilCovered(200, () => hasKinds(kinds, want)); more(i); i++) {
       const latched = r() < 0.8, active = { startedByLeft: true, initialProofbodyHash: Z32, initialNonce: 1, initialProposerIsLeft: true, disputeTimeout: nowSec - 10, disputeStartTimestamp: nowSec - 100, jNonce: 1,
         starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: Z32, observedOnChain: true, observedBlockNumber: 1, finalizeQueued: latched };
       const fin = () => ({ counterentity: xpick(r, [BOB.toLowerCase(), BOB.toUpperCase().replace("0X", "0x"), W("0c")]), initialNonce: 1, finalNonce: 1, initialProofbodyHash: Z32, finalProofbodyHash: Z32, finalProofbody: undefined, sig: "0x", leftArguments: "0x", rightArguments: "0x", cooperative: false, finalizationEvidenceHash: Z32 });
@@ -624,12 +638,12 @@ describe("disputes-final: finalize latches on j_abort_sent_batch / j_clear_batch
       expect([i, after.active.finalizeQueued]).toEqual([i, ogLatch]);
       bump(kinds, `${tx.type}:${latched && !ogLatch ? "released" : ogLatch ? "kept" : "unlatched"}`);
     }
-    expectKinds(kinds, ["j_clear_batch:released", "j_clear_batch:kept", "j_abort_sent_batch:released", "j_abort_sent_batch:kept"]);
+    expectKinds(kinds, want);
   }, 60_000);
 });
 
 // ---- og cross-j/salvage.ts and htlc/direct.ts resolveHtlcLock on ALICE's Entity (jCase fixtures) ----
-describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Entity (og entity/tx/handlers/cross-j/salvage.ts, htlc/direct.ts)", () => {
+describe(seedTag("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Entity (og entity/tx/handlers/cross-j/salvage.ts, htlc/direct.ts)"), () => {
   const payView = (p: any) => stableJson([...(p?.entries ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, { ...v, ...(v.inboundEntity ? { inboundEntity: String(v.inboundEntity).toLowerCase() } : {}), ...(v.outboundEntity ? { outboundEntity: String(v.outboundEntity).toLowerCase() } : {}) }]).concat([["fees", String(p?.feesEarned ?? 0n)]]));
   const withJb = (r: Rand, c: JCase): void => {
     if (xint(r, 3) === 0) return;
@@ -639,7 +653,8 @@ describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Enti
   };
   test("MATCH: 250 random reveal ports (owned / foreign / unknown routes, terminal routes, valid / foreign / empty binaries, claimed ratio mismatches, target dispute clock present or not, draft / full / sent J batch) -- same verdict, messages, stashed reveals, J batch and j_broadcast as og", async () => {
     const r = xrng(0x5a17), kinds = new Map<string, number>();
-    for (let i = 0; i < 250; i++) {
+    const want = ["ok", "🌉 Cross-j reveal port ignored for C#: inval", "⏳ Cross-j reveal port C#: waiting for the ta", "🌉 Cross-j reveal port C# skipped: route not", "🌉 Cross-j reveal port C#: registering ratio", "❌ Cross-j reveal port C# fill mismatch", "❌ Cross-j reveal port C# invalid pull binary", "⏳ Cross-j reveal port C#: queued behind the", "J_HASH_LADDER_REGISTRATION_CONFLICT"];
+    for (let i = 0, more = untilCovered(250, () => hasKinds(kinds, want)); more(i); i++) {
       const c = jCase(r, i);
       withJb(r, c);
       const k = xint(r, c.routes.length + 1), route = c.routes[k], pre = c.raw[k];
@@ -660,12 +675,13 @@ describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Enti
       expect([i, d.outputs.map((o: any) => [o.to, o.input?.txs?.map((t: any) => t.type).join(",")])]).toEqual([i, ogOut.value.outputs.map((o: any) => [o.entityId, o.entityTxs.map((t: any) => t.type).join(",")])]);
       for (const m of msgs) bump(kinds, String(m).replace(/C[0-9]+/g, "C#").slice(0, 44));
     }
-    expectKinds(kinds, ["ok", "🌉 Cross-j reveal port ignored for C#: inval", "⏳ Cross-j reveal port C#: waiting for the ta", "🌉 Cross-j reveal port C# skipped: route not", "🌉 Cross-j reveal port C#: registering ratio", "❌ Cross-j reveal port C# fill mismatch", "❌ Cross-j reveal port C# invalid pull binary", "⏳ Cross-j reveal port C#: queued behind the", "J_HASH_LADDER_REGISTRATION_CONFLICT"]);
+    expectKinds(kinds, want);
   }, 120_000);
   test("MATCH: 200 random resolveHtlcLock txs (known / unknown Account in any case, malformed / unknown lock ids, wrong or malformed secrets, paybook conflicts, live or disputed Account) -- same verdict, message, paybook, wake and queued htlc_resolve as og", async () => {
     const r = xrng(0x4e50), kinds = new Map<string, number>();
     const slot = { ...bookSlot, putPaybookEntry: (s: any, h: string, e: any) => { s.paybook.entries.set(h, e); } };
-    for (let i = 0; i < 200; i++) {
+    const want = ["ok", "queued", "HTLC_RESOLVE_ACCOUNT_MISSING", "HTLC_RESOLVE_LOCK_ID_INVALID", "HTLC_RESOLVE_SECRET_INVALID", "HTLC_RESOLVE_LOCK_MISSING", "HTLC_RESOLVE_HASHLOCK_MISMATCH", "PAYBOOK_"];
+    for (let i = 0, more = untilCovered(200, () => hasKinds(kinds, want)); more(i); i++) {
       const c = jCase(r, i), lockIds = [...c.locks.keys()];
       const lockId = xpick(r, [...lockIds, ...lockIds, word(r), "lock-bad"]), lock = c.locks.get(lockId);
       const matching = lock === undefined ? undefined : c.secrets.find((x) => hashHtlcSecret(x) === lock.hashlock);
@@ -688,15 +704,16 @@ describe("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on the Enti
         bump(kinds, "queued");
       }
     }
-    expectKinds(kinds, ["ok", "queued", "HTLC_RESOLVE_ACCOUNT_MISSING", "HTLC_RESOLVE_LOCK_ID_INVALID", "HTLC_RESOLVE_SECRET_INVALID", "HTLC_RESOLVE_LOCK_MISSING", "HTLC_RESOLVE_HASHLOCK_MISMATCH", "PAYBOOK_"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
 // ---- og handlePrepareDispute's cross-j Target recovery plan and crossJurisdictionForceSiblingDispute on ALICE's Entity ----
-describe("disputes-final: prepareDispute cross-j recovery / crossJurisdictionForceSiblingDispute on the Entity (og handlers/dispute/index.ts, cross-j/force-sibling-dispute.ts)", () => {
+describe(seedTag("disputes-final: prepareDispute cross-j recovery / crossJurisdictionForceSiblingDispute on the Entity (og handlers/dispute/index.ts, cross-j/force-sibling-dispute.ts)"), () => {
   test("MATCH: 250 random prepares and sibling-dispute fanouts over routes in every role, BOB Accounts holding the routes' Target / Source pulls (either sign) and stray pulls, terminal routes, observed peers on either leg -- same verdict, messages, Account status, disputePrepare (recovery, start intent), J batch and outputs as og", async () => {
     const r = xrng(0x51b1), kinds = new Map<string, number>();
-    for (let i = 0; i < 250; i++) {
+    const want = ["prepareDispute:ok", "crossJurisdictionForceSiblingDispute:ok", "recovery:pulls", "⏳ Dispute prepared vs", "❌ Missing counterparty d", "crossJurisdictionForceSiblingDispute:CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID", "crossJurisdictionForceSiblingDispute:CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING", "crossJurisdictionForceSiblingDispute:DISPUTE_START_CROSS_J_ROUTE_INACTIVE"];
+    for (let i = 0, more = untilCovered(250, () => hasKinds(kinds, want)); more(i); i++) {
       const sibling = xint(r, 2) === 0, c = jCase(r, i, sibling ? undefined : xpick(r, [U2, U2, U2, H1]));
       const pulls = new Map<string, PullRow>();
       for (const route of c.routes) for (const [pull, leg] of [[route.targetPull, "target"], [route.sourcePull, "source"]] as const) {
@@ -731,15 +748,16 @@ describe("disputes-final: prepareDispute cross-j recovery / crossJurisdictionFor
       if (ogAfter.disputePrepare?.crossJurisdictionRecovery) bump(kinds, `recovery:${ogAfter.disputePrepare.crossJurisdictionRecovery.requiredPullIds.length > 0 ? "pulls" : "empty"}`);
       for (const m of msgs) bump(kinds, String(m).slice(0, 24));
     }
-    expectKinds(kinds, ["prepareDispute:ok", "crossJurisdictionForceSiblingDispute:ok", "recovery:pulls", "⏳ Dispute prepared vs", "❌ Missing counterparty d", "crossJurisdictionForceSiblingDispute:CROSS_J_SIBLING_DISPUTE_OBSERVED_LEG_INVALID", "crossJurisdictionForceSiblingDispute:CROSS_J_SIBLING_DISPUTE_ROUTE_MISSING", "crossJurisdictionForceSiblingDispute:DISPUTE_START_CROSS_J_ROUTE_INACTIVE"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
 // ---- og cross-j/book-removal-ack.ts: the dispute branch (cross-book row 18) ----
-describe("disputes-final: crossJurisdictionBookOrderRemoved while a dispute waits on the removal (og entity/tx/handlers/cross-j/book-removal-ack.ts)", () => {
+describe(seedTag("disputes-final: crossJurisdictionBookOrderRemoved while a dispute waits on the removal (og entity/tx/handlers/cross-j/book-removal-ack.ts)"), () => {
   test("MATCH: 200 random removal ACKs at the source hub for a dispute-preparing BOB Account (this / other / no pending removal ids, cooldown elapsed or not, terminal or live route, hash drift, wrong hub) -- same verdict, messages, disputePrepare, Account status and J batch as og", async () => {
     const r = xrng(0xb00c), kinds = new Map<string, number>();
-    for (let i = 0; i < 200; i++) {
+    const want = ["ok", "🌉 Cross-j dispute book", "❌ Missing counterparty d", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED", "CROSS_J_ROUTE_HASH_MISMATCH", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING"];
+    for (let i = 0, more = untilCovered(200, () => hasKinds(kinds, want)); more(i); i++) {
       const c = jCase(r, i, xpick(r, [H1, H1, H1, U1]));
       // jCase swaps entity ids after hashing: re-hash the acknowledged route on both sides
       const picked = xpick(r, c.routes), route = { ...picked, routeHash: unwrapOk(crossRouteHash(picked)) }, others = [`X${i}a`, `X${i}b`].filter(() => r() < 0.4);
@@ -769,16 +787,17 @@ describe("disputes-final: crossJurisdictionBookOrderRemoved while a dispute wait
       expect([i, unwrap(installedAccount(ALICE, BOB, after)).committed?.["disputePrepare"] ?? null]).toEqual([i, ogAfter.disputePrepare ?? null]);
       for (const m of msgs) bump(kinds, String(m).slice(0, 24));
     }
-    expectKinds(kinds, ["ok", "🌉 Cross-j dispute book", "❌ Missing counterparty d", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED", "CROSS_J_ROUTE_HASH_MISMATCH", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
 // ---- og handlers/dispute/start.ts with a real counterparty dispute Hanko and argument overrides (entity-consensus-2 row 33) ----
-describe("disputes-final: disputeStart with argument overrides (og entity/tx/handlers/dispute/start.ts)", () => {
+describe(seedTag("disputes-final: disputeStart with argument overrides (og entity/tx/handlers/dispute/start.ts)"), () => {
   test("MATCH: 200 random disputeStart txs on a dispute-preparing BOB Account with BOB's real dispute Hanko (starter argument overrides valid / empty / malformed, counter-argument override, stale nonce, wrong body, draft / sent / full J batch) -- same verdict, messages, J batch row, Account status and queued dispute as og", async () => {
     const r = xrng(0x57a7), kinds = new Map<string, number>();
     const view = unwrap(committedView(genesisAB().state)), good: string = (unwrap(localProof(view, { ok: true, value: DT })) as any).bodyHash;
-    for (let i = 0; i < 200; i++) {
+    const want = ["ok", "⚔️ Dispute started vs", "ℹ️ disputeStart queued t", "❌ Stale dispute proof no", "❌ Counterparty dispute p", "J_BATCH_LIMIT_EXCEEDED", "DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED", "DISPUTE_START_PROOFBODY_HASH_MISMATCH"];
+    for (let i = 0, more = untilCovered(200, () => hasKinds(kinds, want)); more(i); i++) {
       const nonce = xpick(r, [1, 2, 3]), pl = r() < 0.5, body = xint(r, 8) === 0 ? word(r) : good, hash = unwrap(accountDisputeHash(view, body, nonce, pl));
       const hanko = xint(r, 10) === 0 ? signLazyAccountHanko(word(r), keyOf(BOB), BOB) : signLazyAccountHanko(hash, keyOf(BOB), BOB);
       const jNonce = xpick(r, [0, 0, 1, 3]);
@@ -809,15 +828,16 @@ describe("disputes-final: disputeStart with argument overrides (og entity/tx/han
       expect([i, after.queued ?? null]).toEqual([i, ogAfter.activeDispute ?? null]);
       for (const m of msgs) bump(kinds, String(m).slice(0, 24));
     }
-    expectKinds(kinds, ["ok", "⚔️ Dispute started vs", "ℹ️ disputeStart queued t", "❌ Stale dispute proof no", "❌ Counterparty dispute p", "J_BATCH_LIMIT_EXCEEDED", "DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED", "DISPUTE_START_PROOFBODY_HASH_MISMATCH"]);
+    expectKinds(kinds, want);
   }, 120_000);
 });
 
 // ---- og auth/authorization.ts assertRuntimeCrossJRecoveryAuthority (entity-lane row 32) ----
-describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/auth/authorization.ts assertRuntimeCrossJRecoveryAuthority)", () => {
+describe(seedTag("disputes-final: cross-j recovery runtimeOutput authority (og entity/auth/authorization.ts assertRuntimeCrossJRecoveryAuthority)"), () => {
   test("MATCH: assertRuntimeOutputAuthorization on 800 random salvage / cross-j resolveHtlcLock / cross-j disputeStart / force-sibling envelopes (stored or missing route, every source and target role, wrong counterparties, extra data, terminal routes, signers) -- same accept or refusal text as og", () => {
     const r = xrng(0xa7c0), kinds = new Map<string, number>(), ids = [U1, H1, H2, U2, W("09")];
-    for (let i = 0; i < 800; i++) {
+    const want = ["crossJurisdictionSalvage:ok", "resolveHtlcLock:ok", "disputeStart:ok", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_SOURCE_ENTITY_MISMATCH", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID", "resolveHtlcLock:RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH", "crossJurisdictionForceSiblingDispute:RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN"];
+    for (let i = 0, more = untilCovered(800, () => hasKinds(kinds, want)); more(i); i++) {
       const route = recoveryRoute(r, i), target = xpick(r, [U1, H1, H2, U2]), source = xint(r, 6) === 0 ? target : xpick(r, ids);
       const signer = xint(r, 10) < 8 ? (XSIG[source] ?? "0x" + "55".repeat(20)) : xpick(r, ["0x" + "55".repeat(20), ""]);
       const rid = xint(r, 10) === 0 ? "C-missing" : route.orderId, anyId = () => xpick(r, [...ids, route.source.entityId, route.source.counterpartyEntityId, route.target.entityId, route.target.counterpartyEntityId]);
@@ -830,7 +850,7 @@ describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/au
         }
       };
       const txs = xint(r, 8) === 0 ? [txOf(), txOf()] : [txOf()];
-      const stored = xint(r, 5) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [XSIG[target]!];
+      const stored = xint(r, 5) > 0 ? new Map([[route.orderId, route]]) : undefined, validators = [xsig(target)];
       const swaps = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
       for (const [k, v] of stored ?? []) swaps.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(structuredClone(v) as never));
       const ogState = { entityId: target, config: { mode: "proposer-based", threshold: 1n, validators, shares: { [validators[0]!]: 1n } }, ...(stored ? { crossJurisdictionSwaps: swaps } : {}) };
@@ -840,12 +860,12 @@ describe("disputes-final: cross-j recovery runtimeOutput authority (og entity/au
       expect(`${i}:${runtimeOutputAuthError(rwState, data as never)}`).toBe(`${i}:${og}`);
       bump(kinds, `${txs[0]!.type}:${og === null ? "ok" : og.replace(/:.*/, "")}`);
     }
-    expectKinds(kinds, ["crossJurisdictionSalvage:ok", "resolveHtlcLock:ok", "disputeStart:ok", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_SOURCE_ENTITY_MISMATCH", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH", "crossJurisdictionSalvage:RUNTIME_OUTPUT_SALVAGE_TARGET_INVALID", "resolveHtlcLock:RUNTIME_OUTPUT_SEMANTIC_TARGET_MISMATCH", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN", "disputeStart:RUNTIME_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH", "crossJurisdictionForceSiblingDispute:RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN"]);
-  });
+    expectKinds(kinds, want);
+  }, 30_000);
 });
 
 // ---- og entity/tx/handlers/dispute/start-admission.ts proofBodyHasPulls (the ethers decode text in DISPUTE_CANONICAL_DELTA_BATCH_INVALID) ----
-describe("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/start-admission.ts proofBodyHasPulls)", () => {
+describe(seedTag("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/start-admission.ts proofBodyHasPulls)"), () => {
   test("MATCH: proofBodyHasPulls on 1500 random ProofBodies (valid batches with and without pulls, truncated / overflowing / out-of-range offsets and counts, odd / non-hex / 0X bytes, foreign transformers) -- same verdict and the same DISPUTE_CANONICAL_DELTA_BATCH_INVALID ethers text as og", () => {
     const r = xrng(0xba7c), kinds = new Map<string, number>(), other = "0x" + "77".repeat(20);
     const payment = () => [BigInt(xint(r, 5)), [xint(r, 2) === 0, BigInt(xint(r, 1000))], BigInt(xint(r, 1000)), W(String(xint(r, 90) + 10))];
@@ -871,7 +891,8 @@ describe("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/sta
         default: return setWord(setWord(hex, xpick(r, [1, 2, 3, 4, 5, 6]), BigInt(xint(r, 20)) * 32n), xpick(r, [4, 5, 6, 7, 8]), BigInt(xint(r, 1 << 16)));
       }
     };
-    for (let i = 0; i < 1500; i++) {
+    const want = ["ok:true", "ok:false", "data out-of-bounds", "insufficient data length", "overflow", "invalid BytesLike value", "deferred error during ABI decoding triggered accessing property \"pull\"", "deferred error during ABI decoding triggered accessing index 0"];
+    for (let i = 0, more = untilCovered(1500, () => hasKinds(kinds, want)); more(i); i++) {
       const transformers = Array.from({ length: 1 + xint(r, 3) }, () => ({ transformerAddress: xint(r, 5) === 0 ? other : xint(r, 2) === 0 ? DT.toUpperCase().replace("0X", "0x") : DT, encodedBatch: corrupt(valid()) as string, allowances: [] }));
       const body = { transformers } as never;
       const og = ogThrows(() => ogProofBodyHasPulls(body, DT));
@@ -879,19 +900,20 @@ describe("disputes-final: canonical DeltaBatch decoding (og handlers/dispute/sta
       expect(`${i}:${JSON.stringify(rw.ok ? { ok: true, value: rw.value } : { ok: false, reason: (rw.error as { reason: string }).reason })}`).toBe(`${i}:${JSON.stringify(og)}`);
       bump(kinds, og.ok ? `ok:${og.value}` : og.reason.replace(/^DISPUTE_CANONICAL_DELTA_BATCH_INVALID:\d+:/, "").replace(/ \(.*/, ""));
     }
-    expectKinds(kinds, ["ok:true", "ok:false", "data out-of-bounds", "insufficient data length", "overflow", "invalid BytesLike value", "deferred error during ABI decoding triggered accessing property \"pull\"", "deferred error during ABI decoding triggered accessing index 0"]);
-  });
+    expectKinds(kinds, want);
+  }, 30_000);
 });
 
 // ---- og account/settlement/j-finality.ts applyAccountDisputeFinality: the Account mempool on DisputeFinalized ----
-describe("disputes-final: the Account mempool on DisputeFinalized (og account/settlement/j-finality.ts applyAccountDisputeFinality)", () => {
+describe(seedTag("disputes-final: the Account mempool on DisputeFinalized (og account/settlement/j-finality.ts applyAccountDisputeFinality)"), () => {
   test("MATCH: 400 random live / preparing / disputed Accounts with mixed mempools and pending frames (settle_transition, j_event_claim, swap_resolve, evidence-bearing cross_pull_close, payments) -- og drops settle_transition then freezes as disputed, so both leave the same (empty) mempool, jNonce and nextProofNonce", () => {
     const r = xrng(0x3e3f), kinds = new Map<string, number>();
     const txOf = (): { type: string; data: Record<string, unknown> } => xpick(r, [
       { type: "settle_transition", data: {} }, { type: "j_event_claim", data: {} }, { type: "swap_resolve", data: { offerId: "o" } },
       { type: "cross_pull_close", data: { binary: "0x01", proof: { p: 1 } } }, { type: "cross_pull_close", data: { binary: "0x01" } }, { type: "direct_payment", data: { amount: 1n } },
     ]);
-    for (let i = 0; i < 400; i++) {
+    const want = ["active:mempool:settle", "dispute_preparing:mempool:settle", "disputed:mempool:settle", "dispute_preparing:mempool:none"];
+    for (let i = 0, more = untilCovered(400, () => hasKinds(kinds, want)); more(i); i++) {
       const status = xpick(r, ["active", "dispute_preparing", "disputed"] as const), mempool = Array.from({ length: xint(r, 6) }, txOf), pending = Array.from({ length: xint(r, 3) }, txOf);
       const jNonce = xint(r, 6), finalizedJNonce = xint(r, 9), nextProofNonce = 1 + xint(r, 9);
       const og = ogBobAccount("open", xint(r, 2) === 0 ? { jNonce } : undefined);
@@ -906,15 +928,16 @@ describe("disputes-final: the Account mempool on DisputeFinalized (og account/se
         .toBe(`${i}:${JSON.stringify([og.mempool, og.state.jNonce, og.proofHeader.nextProofNonce, removed], (_k, v) => (typeof v === "bigint" ? `${v}n` : v))}`);
       bump(kinds, `${status}:${mempool.length > 0 ? "mempool" : "empty"}:${removed > 0 ? "settle" : "none"}`);
     }
-    expectKinds(kinds, ["active:mempool:settle", "dispute_preparing:mempool:settle", "disputed:mempool:settle", "dispute_preparing:mempool:none"]);
+    expectKinds(kinds, want);
   });
 });
 
 // ---- og account/consensus/dispute/hanko.ts getDisputeHankoRequirementError: the unsafe-frame dispute reason ----
-describe("disputes-final: the unsafe-frame dispute reason for a dispute Hanko refusal (og consensus/index.ts classifyIncomingValidationFailure + dispute/hanko.ts)", () => {
+describe(seedTag("disputes-final: the unsafe-frame dispute reason for a dispute Hanko refusal (og consensus/index.ts classifyIncomingValidationFailure + dispute/hanko.ts)"), () => {
   test("MATCH: 1500 random local proofs, stored counterparty witnesses, jNonces and received dispute Hankos -- the same verdict and og's exact DISPUTE_HANKO_* failure text", () => {
     const r = xrng(0x4a2d), kinds = new Map<string, number>(), hashes = [W("a1"), W("b2"), W("c3"), W("A1").toUpperCase().replace("0X", "0x")];
-    for (let i = 0; i < 1500; i++) {
+    const want = ["undefined", "DISPUTE_HANKO_UNEXPECTED_WITHOUT_LOCAL_PROOF", "DISPUTE_HANKO_NONCE_ALREADY_FINALIZED", "DISPUTE_HANKO_NONCE_REGRESSION", "DISPUTE_HANKO_NONCE_REUSE", "DISPUTE_HANKO_PROOFBODY_MISMATCH", "DISPUTE_HANKO_REQUIRED"];
+    for (let i = 0, more = untilCovered(1500, () => hasKinds(kinds, want)); more(i); i++) {
       const expected = xint(r, 12) === 0 ? undefined : xpick(r, hashes), jNonce = xint(r, 5);
       const prev = xint(r, 3) === 0 ? undefined : { proofNonce: xint(r, 7), proofBodyHash: xpick(r, hashes) };
       const received = xint(r, 3) === 0 ? undefined : { hanko: "0x01", hash: Z32, proofNonce: xint(r, 8), proofBodyHash: xpick(r, hashes), proposerIsLeft: xint(r, 2) === 0 };
@@ -924,6 +947,6 @@ describe("disputes-final: the unsafe-frame dispute reason for a dispute Hanko re
       expect(`${i}:${text}`).toBe(`${i}:${og}`);
       bump(kinds, String(og).replace(/:.*/, ""));
     }
-    expectKinds(kinds, ["undefined", "DISPUTE_HANKO_UNEXPECTED_WITHOUT_LOCAL_PROOF", "DISPUTE_HANKO_NONCE_ALREADY_FINALIZED", "DISPUTE_HANKO_NONCE_REGRESSION", "DISPUTE_HANKO_NONCE_REUSE", "DISPUTE_HANKO_PROOFBODY_MISMATCH", "DISPUTE_HANKO_REQUIRED"]);
+    expectKinds(kinds, want);
   });
 });

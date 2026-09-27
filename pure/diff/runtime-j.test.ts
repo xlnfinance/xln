@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 // og Runtime J subsystems (core/runtime/j-submit, core/runtime/registration, core/jurisdiction), each run against live og.
 import { applyRuntimeTx as ogApplyRuntimeTx } from "../../core/runtime/tx/tx-handlers.ts";
 import { buildJurisdictionImportRequestHash } from "../../core/runtime/j-submit/jurisdiction-import.ts";
@@ -21,8 +22,8 @@ import {
 } from "../xln.ts";
 import { ALICE, TERMS, aliceAddr, bobAddr, unwrap, verifiers } from "../xln_run.ts";
 
-let seed = 29;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(29);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const hex = (bytes: number): string => `0x${Array.from({ length: bytes * 2 }, () => "0123456789abcdef"[ri(16)]).join("")}`;
@@ -58,7 +59,7 @@ const both = async (p: Pair, tx: RuntimeTx): Promise<string | null> => {
   const rw = applyRuntimeTx(p.rt, tx, { replay: true });
   expect(rwCode(rw)).toBe(og);
   if (rw.ok) p.rt = rw.value;
-  expect(rwDigests(p.rt)).toEqual(ogDigests(p.env) as never);
+  expect(rwDigests(p.rt)).toEqual(ogDigests(p.env));
   return og;
 };
 
@@ -118,7 +119,7 @@ const randomResult = (pending: { importId: string; requestHash: string; request:
   return pick([base, base, base, base, { ...base, importId: hex(32) }, { ...base, ticker: "OTHER" }, { ...base, rpcs: ["http://other.example/"] }]);
 };
 
-describe("runtime-j: the J import registry (og runtime/j-submit/jurisdiction-import.ts)", () => {
+describe(seedTag("runtime-j: the J import registry (og runtime/j-submit/jurisdiction-import.ts)"), () => {
   test("MATCH: the importJ request hash is og buildJurisdictionImportRequestHash over the normalized request", () => {
     let hashed = 0;
     for (let i = 0; i < 300; i++) {
@@ -168,7 +169,7 @@ describe("runtime-j: the J import registry (og runtime/j-submit/jurisdiction-imp
 
 // ---- importReplica binds its jurisdiction through the J replica registry (og requireBoundEntityConfig) ----
 const SEED = "0x" + "5e".repeat(64);
-describe("runtime-j: importReplica jurisdiction binding (og jurisdiction-runtime requireBoundEntityConfig)", () => {
+describe(seedTag("runtime-j: importReplica jurisdiction binding (og jurisdiction-runtime requireBoundEntityConfig)"), () => {
   test("MATCH (randomized): the named / active / stack-ref J replica completes the config; unavailable, incomplete and conflicting stacks are refused", async () => {
     let imported = 0;
     for (let run = 0; run < 80; run++) {
@@ -224,7 +225,7 @@ const ogFrame = async (env: OgEnv, tx: unknown): Promise<OgFrame> => {
   const snapshot = treeClone(env);
   try {
     const out = await ogApplyRuntimeTx(env as never, treeClone(tx) as never, { isReplay: true });
-    const split = splitJOutboxForDurableSubmit(out as never);
+    const split = splitJOutboxForDurableSubmit(out);
     registerPendingCommittedJOutbox(env as never, split.durable);
     return { code: null, jOutbox: [...((env.infrastructure["pendingCommittedJOutbox"] as unknown[] | undefined) ?? []), ...split.maintenance], retries: split.retries };
   } catch (e) {
@@ -239,7 +240,7 @@ const rwFrame = (p: Pair, tx: RuntimeTx, now: number): { code: string | null; jO
   return { code: null, jOutbox: r.value.jOutbox, retries: r.value.queuedRetries };
 };
 
-describe("runtime-j: the J submit ledger (og j-submit-state.ts / j-submit-result.ts)", () => {
+describe(seedTag("runtime-j: the J submit ledger (og j-submit-state.ts / j-submit-result.ts)"), () => {
   test("MATCH (randomized): retryJSubmit / recordJSubmitResult frames -- same decisions, J outbox, pending attempts, replica ledgers and post-state digests", async () => {
     const E = ALICE.toLowerCase(), A = aliceAddr.toLowerCase(), B = bobAddr.toLowerCase();
     let retried = 0, recorded = 0;
@@ -327,7 +328,7 @@ describe("runtime-j: the J submit ledger (og j-submit-state.ts / j-submit-result
           const ogLocal = (p.env.state.eReplicas.get(`${E}:${s}`) as { jSubmitState?: unknown }).jSubmitState;
           expect(stableJson(p.rt.replicaLocal.get(replicaKey(ALICE, s))?.jSubmitState)).toBe(stableJson(ogLocal));
         }
-        expect(rwDigests(p.rt)).toEqual(ogDigests(p.env) as never);
+        expect(rwDigests(p.rt)).toEqual(ogDigests(p.env));
       }
     }
     expect(retried).toBeGreaterThan(20);
@@ -347,7 +348,7 @@ describe("runtime-j: the J submit ledger (og j-submit-state.ts / j-submit-result
 });
 
 // ---- og runtime/mempool/propose-accounts-now.ts assertProposeAccountsNowTxAuthorized, run by og admission.ts for every EntityInput tx ----
-describe("runtime-j: proposeAccountsNow ingress (og propose-accounts-now.ts)", () => {
+describe(seedTag("runtime-j: proposeAccountsNow ingress (og propose-accounts-now.ts)"), () => {
   test("MATCH (randomized): an unmarked proposeAccountsNow outside replay refuses the whole Runtime frame; a local mark or replay admits it", () => {
     const LOCAL = Symbol.for("xln.runtime.propose-accounts-now.local");
     let refused = 0, admitted = 0;
@@ -371,7 +372,7 @@ describe("runtime-j: proposeAccountsNow ingress (og propose-accounts-now.ts)", (
 });
 
 // ---- og j-submit-state.ts splitJOutboxForDurableSubmit / registerPendingCommittedJOutbox, governance-submit-state.ts, failure-taxonomy.ts ----
-describe("runtime-j: durable J outbox split and pending register (og j-submit-state.ts / governance-submit-state.ts)", () => {
+describe(seedTag("runtime-j: durable J outbox split and pending register (og j-submit-state.ts / governance-submit-state.ts)"), () => {
   test("MATCH (randomized): batches, governance proposals and maintenance jTxs split and register identically, across frames", () => {
     let durable = 0, retried = 0, refused = 0;
     for (let run = 0; run < 30; run++) {
@@ -443,7 +444,7 @@ describe("runtime-j: durable J outbox split and pending register (og j-submit-st
 });
 
 // ---- og runtime/tx/tx-handlers.ts observeJRange / rewindJHistory over jurisdiction/machine/local-history ----
-describe("runtime-j: validator J history (og tx-handlers.ts observeJRangeRuntimeTx / rewindJHistoryRuntimeTx, local-history)", () => {
+describe(seedTag("runtime-j: validator J history (og tx-handlers.ts observeJRangeRuntimeTx / rewindJHistoryRuntimeTx, local-history)"), () => {
   const E = ALICE.toLowerCase(), A = aliceAddr.toLowerCase(), EP = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
   const REF = `stack:${TERMS.domain.chainId}:${TERMS.domain.depositoryAddress.toLowerCase()}`;
   const proofBody = (): Record<string, unknown> => ({
@@ -532,7 +533,7 @@ describe("runtime-j: validator J history (og tx-handlers.ts observeJRangeRuntime
 });
 
 // ---- og tx-handlers.ts recordAuthenticatedJAuthority over jurisdiction/machine/registration-evidence + receipt-codec ----
-describe("runtime-j: receipt-proven registration evidence (og registration-evidence.ts recordAuthenticatedJAuthority)", () => {
+describe(seedTag("runtime-j: receipt-proven registration evidence (og registration-evidence.ts recordAuthenticatedJAuthority)"), () => {
   const iface = EntityProvider__factory.createInterface();
   const DEP = "0x5fbdb2315678afecb367f032d93f642f64180aa3", EP = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512", CHAIN = 31337;
   const word = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
@@ -564,7 +565,7 @@ describe("runtime-j: receipt-proven registration evidence (og registration-evide
             return { transactionHash, transactionIndex: i, blockNumber: height, blockHash, type: pick([0, 2]), status: 1, cumulativeGasUsed: 21_000 * (i + 1), logsBloom: `0x${"00".repeat(256)}`,
               logs: logs.map((l, k) => ({ ...l, blockNumber: height, blockHash, transactionHash, transactionIndex: i, logIndex: k })) };
           });
-          const root = await computeCanonicalReceiptsRoot(receipts as never), proofs = await createCanonicalReceiptProofs(receipts as never, root);
+          const root = await computeCanonicalReceiptsRoot(receipts), proofs = await createCanonicalReceiptProofs(receipts, root);
           const other = (target + 1 + ri(Math.max(1, count - 1))) % count, corrupt = rng();
           let proof = { ...(proofs.get(target) as { proofNodes: string[]; transactionIndex: number; encodedReceipt: string; receiptsRoot: string }), receiptLogIndex: noise };
           if (corrupt < 0.08 && count > 1) proof = { ...proof, ...(proofs.get(other) as object), receiptLogIndex: noise } as typeof proof;
@@ -597,17 +598,17 @@ describe("runtime-j: receipt-proven registration evidence (og registration-evide
         // The durable post-state view commits the evidence store exactly as og does.
         const held = env.infrastructure.certifiedRegistrationEvidence;
         const minimal: OgEnv = { state: { jReplicas: env.state.jReplicas, eReplicas: new Map(), timestamp: 0, height: 0 }, infrastructure: held !== undefined && held.size > 0 ? { certifiedRegistrationEvidence: held } : {}, runtimeId: env.runtimeId };
-        expect(rwDigests(rt)).toEqual(ogDigests(minimal) as never);
+        expect(rwDigests(rt)).toEqual(ogDigests(minimal));
       }
     }
     expect(stored).toBeGreaterThan(15);
     expect(refused).toBeGreaterThan(10);
     expect(repeated).toBeGreaterThan(3);
-  });
+  }, 40_000);
 
   test("MATCH (randomized): a numbered importReplica needs registration evidence for its exact board (og assertNumberedReplicaImportAuthority)", async () => {
     let imported = 0, refused = 0;
-    for (let run = 0; run < 16; run++) {
+    for (let run = 0, more = untilCovered(16, () => imported > 8 && refused > 8); more(run); run++) {
       const seed = `runtime-j-numbered-${run}`, env = createEmptyEnv(seed) as unknown as OgEnv & { runtimeId: string };
       registerSignerKey(env as never, env.runtimeId, deriveSignerKeySync(seed, "1"));
       const replica = { name: "Local", blockNumber: 7n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 }, chainId: CHAIN, contracts: { depository: DEP, entityProvider: EP }, watcherConfirmationDepth: 0, entityProviderDeploymentBlock: 1 };
@@ -621,7 +622,7 @@ describe("runtime-j: receipt-proven registration evidence (og registration-evide
         const encoded = iface.encodeEventLog(iface.getEvent("EntityRegistered"), [word(entityNumber), BigInt(entityNumber), registered]);
         const receipt = { transactionHash: word(900 + height), transactionIndex: 0, blockNumber: height, blockHash, type: 2, status: 1, cumulativeGasUsed: 21_000, logsBloom: `0x${"00".repeat(256)}`,
           logs: [{ address: EP, topics: encoded.topics, data: encoded.data, blockNumber: height, blockHash, transactionHash: word(900 + height), transactionIndex: 0, logIndex: 0 }] };
-        const root = await computeCanonicalReceiptsRoot([receipt] as never), proof = (await createCanonicalReceiptProofs([receipt] as never, root)).get(0) as object;
+        const root = await computeCanonicalReceiptsRoot([receipt]), proof = (await createCanonicalReceiptProofs([receipt], root)).get(0) as object;
         const log = { address: EP, topics: encoded.topics.map((t) => t.toLowerCase()), data: encoded.data.toLowerCase(), blockNumber: height, blockHash, transactionHash: word(900 + height), transactionIndex: 0, logIndex: 0, index: 0, receiptProof: { ...proof, receiptLogIndex: 0 } };
         const evidence = buildCertifiedRegistrationEvidence(env as never, replica as never, "EntityRegistered", log as never, { observedThroughHeight: height, observedTipBlockHash: blockHash, observedHeadHeight: height, confirmationDepth: 0 });
         const tx = { type: "recordAuthenticatedJAuthority", data: evidence };
@@ -642,5 +643,5 @@ describe("runtime-j: receipt-proven registration evidence (og registration-evide
     }
     expect(imported).toBeGreaterThan(8);
     expect(refused).toBeGreaterThan(8);
-  });
+  }, 30_000);
 });

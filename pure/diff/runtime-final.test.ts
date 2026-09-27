@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 // Runtime transport, scheduling and events, each run against live og (core/runtime, core/entity, core/account).
 import { applyRuntimeTx as ogApplyRuntimeTx } from "../../core/runtime/tx/tx-handlers.ts";
 import { computeCanonicalEntityConsensusStateHash } from "../../core/entity/consensus/state-root.ts";
@@ -53,8 +54,8 @@ import { entityRequiresJPrefixCertificate, buildLocalJPrefixAttestation, buildCe
   hashEntityFrame, wireEntityTx, mergeEntityInputs, canon, crossOpeningSelection, readyAccountWorkTargets, potentialCrossPairs, markPotentialCrossPairs, matchedCrossPairs, admitAtomicCrossPairs, markCommittedAckOutputs, replicaMetaRows, replicaMetaDigest, type EntityFrame, type EntityOutput } from "../xln.ts";
 import { anvilKey, signDigestHex, carolAddr } from "../xln_run.ts";
 
-let seed = 71;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(71);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const rwCode = (r: { readonly ok: boolean; readonly error?: unknown }): string | null => {
@@ -80,7 +81,7 @@ const runOg = async (env: OgEnv, tx: unknown): Promise<string | null> => {
 
 // ---- R2-6b / RG-1: the importReplica genesis replica (og buildGenesisReplica) ----
 const SEED = "0x" + "5e".repeat(64);
-describe("runtime-final: importReplica genesis (og tx-handlers.ts buildGenesisReplica)", () => {
+describe(seedTag("runtime-final: importReplica genesis (og tx-handlers.ts buildGenesisReplica)"), () => {
   test("MATCH (randomized): profile name, swap pairs, crontab and position -- the genesis Entity root equals og computeCanonicalEntityConsensusStateHash", async () => {
     let imported = 0;
     for (let run = 0; run < 24; run++) {
@@ -152,7 +153,7 @@ const ogAccountHarness = (body: AccountBody) => {
 };
 const eventsOf = (effects: readonly { kind: string; eventName?: string; data?: unknown }[]): unknown[] => effects.filter((e) => e.kind === "runtimeEvent").map((e) => ({ eventName: e.eventName, data: e.data }));
 
-describe("runtime-final: Account runtime events (og account/tx/mutation.ts, j-events/claim.ts)", () => {
+describe(seedTag("runtime-final: Account runtime events (og account/tx/mutation.ts, j-events/claim.ts)"), () => {
   test("MATCH (randomized): request_collateral emits og's request_collateral_committed event from the local side", async () => {
     let emitted = 0;
     for (let run = 0; run < 12; run++) {
@@ -231,7 +232,7 @@ describe("runtime-final: Account runtime events (og account/tx/mutation.ts, j-ev
 });
 
 // ---- the Runtime event channel (og publishEntityCandidateEffects -> env.emit) ----
-describe("runtime-final: RuntimeStep.events (og observability/env-events.ts publishEntityCandidateEffects)", () => {
+describe(seedTag("runtime-final: RuntimeStep.events (og observability/env-events.ts publishEntityCandidateEffects)"), () => {
   test("og semantics: runtime events publish only at commit, once on every committing validator replica (og installCommittedState), in commit order", () => {
     // A 2-of-2 Entity: the proposer's frame publishes nothing until the quorum commits it; then the proposer and the validator each publish its events.
     const members = new Map<Address, { shares: bigint }>([[aliceAddr, { shares: 1n }], [bobAddr, { shares: 1n }]]);
@@ -240,7 +241,7 @@ describe("runtime-final: RuntimeStep.events (og observability/env-events.ts publ
     const replicaFor = (signerId: Address) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 2n, members, signerId, committed: { entityEncryptionPublicKey: entityEncryptionPublicKey(SEED, id) } }));
     // og: every proposal and replay checks the validator's Entity key pair (the Runtime derives it from the retained seed)
     let rt: Runtime = { ...spawn(spawn(createRuntime(), replicaFor(aliceAddr)), replicaFor(bobAddr)), encryptionSeeds: new Map([[id, SEED]]) };
-    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx);
+    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx);
     const queue: RoutedEntityInput[] = [{ entityId: id, signerId: aliceAddr, input: { kind: "txs", timestamp: NOW, txs: [open(BOB), open(CAROL)] } }];
     const seen: { signer: string; commits: boolean; events: string[] }[] = [];
     for (let n = 0; queue.length > 0 && n < 20; n++) {
@@ -260,8 +261,9 @@ describe("runtime-final: RuntimeStep.events (og observability/env-events.ts publ
 });
 
 // ---- og account/consensus: Account frame messages and runPostFrameAutoRebalanceCheck ----
-describe("runtime-final: Account frame messages and the post-commit auto-rebalance (og account/consensus)", () => {
-  const said = (outputs: readonly { readonly kind: string }[]): string[] => outputs.flatMap((o) => (o.kind === "message" ? [(o as { message: string }).message] : []));
+describe(seedTag("runtime-final: Account frame messages and the post-commit auto-rebalance (og account/consensus)"), () => {
+  const said = (outputs: readonly { readonly kind: string }[]): string[] =>
+    outputs.flatMap((o) => (o.kind === "message" && "message" in o && typeof o.message === "string" ? [o.message] : []));
   const door = (self: EntityId, autoRebalance: boolean) => ({ verify: hankoVerify, self, now: NOW, autoRebalance });
   test("MATCH (randomized): a full round says og's lines (`🚀`, handler lines + `🤝`, `✅`) and the ACK commit queues exactly og runPostFrameAutoRebalanceCheck's request_collateral", () => {
     let queued = 0, quiet = 0;
@@ -305,11 +307,11 @@ describe("runtime-final: Account frame messages and the post-commit auto-rebalan
     }
     expect(queued).toBeGreaterThan(5);
     expect(quiet).toBeGreaterThan(5);
-  });
+  }, 40_000);
 });
 
 // ---- og runtime/mempool/wake.ts generateHookPings: the Runtime tick (scheduled-wake.ts createDueScheduledWakeInputs) ----
-describe("runtime-final: the Runtime tick's due wakes and leader timeout votes (og runtime/mempool/scheduled-wake.ts)", () => {
+describe(seedTag("runtime-final: the Runtime tick's due wakes and leader timeout votes (og runtime/mempool/scheduled-wake.ts)"), () => {
   type Rep = { readonly entity: EntityId; readonly leader: boolean; readonly hooks: readonly ScheduledHook[]; readonly lastRun: number; readonly hub: boolean; readonly timestamp: number; readonly progress: number | undefined; readonly work: boolean; readonly queuedWake: boolean };
   const JUR = TERMS.domain;
   const crontabFor = (r: Rep): Crontab => r.hooks.reduce(scheduleHook, { ...initCrontab(), tasks: new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun: r.lastRun, enabled: true, params: {} }]]) });
@@ -334,7 +336,7 @@ describe("runtime-final: the Runtime tick's due wakes and leader timeout votes (
 
   test("MATCH (randomized): 300 random Runtimes (leaders with due hooks and the hubRebalance task, validators with leader work and last progress, queued wakes and votes) -- og createDueScheduledWakeInputs, in og's (dueAt, entityId, signerId) order", () => {
     let wakes = 0, votes = 0, skipped = 0;
-    for (let run = 0; run < 300; run++) {
+    for (let run = 0, more = untilCovered(300, () => wakes > 80 && votes > 80 && skipped > 10); more(run); run++) {
       const reps: Rep[] = [ALICE, BOB, CAROL].flatMap((entity) => (rng() < 0.3 ? [] : [true, false].filter(() => rng() < 0.6).map((leader): Rep => ({
         entity, leader, hooks: Array.from({ length: ri(3) }, (_, j) => ({ id: `hub-kick:${j}`, triggerAt: 900 + ri(20_000), type: "hub_rebalance_kick", data: { reason: "r", counterpartyId: BOB } }) as ScheduledHook),
         lastRun: pick([0, 5_000, 30_000]), hub: rng() < 0.3, timestamp: ri(8_000), progress: rng() < 0.5 ? undefined : ri(12_000), work: rng() < 0.7, queuedWake: rng() < 0.1,
@@ -375,7 +377,7 @@ describe("runtime-final: the Runtime tick's due wakes and leader timeout votes (
 });
 
 // ---- og jurisdiction/machine/history/j-prefix-consensus.ts: the per-frame J prefix (attestations, rounds, certificates, the frame rule) ----
-describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history/j-prefix-consensus.ts, local-history getJEventRangeValidationError)", () => {
+describe(seedTag("runtime-final: the per-frame J prefix (og jurisdiction/machine/history/j-prefix-consensus.ts, local-history getJEventRangeValidationError)"), () => {
   const EP = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
   const OG_J = { name: "j", chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, entityProviderAddress: EP };
   const JREF = getJEventJurisdictionRef(OG_J);
@@ -461,7 +463,7 @@ describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history
       expect(shape(mine)).toEqual(shape(og) as never);
       if (mine.ok && og.ok) {
         expect(unsigned(mine.value)).toEqual(unsigned(og.value));
-        if (og.value !== null) expect(unwrap(jPrefixAttestationHash(mine.value as never) as never)).toBe(ogHashJPrefixAttestation(unsigned(og.value)));
+        if (og.value !== null) expect<string>(unwrap(jPrefixAttestationHash(mine.value as never))).toBe(ogHashJPrefixAttestation(unsigned(og.value)));
       }
       const k = !mine.ok ? `err:${mine.message.split(":")[0]}` : mine.value === null ? "null" : (mine.value as JPrefixAttestation).scannedThroughHeight > fx.L ? "range" : "base";
       seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -586,7 +588,7 @@ describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history
         for (const frame of chain) {
           const cert = frame.jPrefixCertificate, range = frame.txs.find((tx) => tx.type === "j_event");
           // og createEntityFrameHashFromStateRoot: the certificate is in the frame hash
-          expect(unwrap(hashEntityFrame(frame))).toBe(ogEntityFrameHash(frame.prevFrameHash, Number(frame.height), Number(frame.timestamp), frame.txs.map(wireEntityTx) as never, frame.events as never, id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never, cert as never));
+          expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogEntityFrameHash(frame.prevFrameHash, Number(frame.height), Number(frame.timestamp), frame.txs.map(wireEntityTx) as never, frame.events as never, id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never, cert as never));
           if (frame.height !== 1n) continue;
           // og assertFrameJPrefix: without a certificate (an unregistered Entity whose validators see no pending J event) no range is certified
           if (cert === undefined) { uncertified++; expect(range).toBeUndefined(); expect(entityRequiresJPrefixCertificate(fx.view.state)).toBe(false); continue; }
@@ -611,7 +613,7 @@ describe("runtime-final: the per-frame J prefix (og jurisdiction/machine/history
 });
 
 // ---- og runtime/tx/tx-handlers.ts rewindJHistoryRuntimeTx: a precommit cannot be revoked ----
-describe("runtime-final: rewindJHistory against a locked frame (og tx-handlers.ts J_HISTORY_SIGNED_LOCK_REORG)", () => {
+describe(seedTag("runtime-final: rewindJHistory against a locked frame (og tx-handlers.ts J_HISTORY_SIGNED_LOCK_REORG)"), () => {
   test("MATCH (randomized): 200 rewinds -- og refuses exactly a height inside the range this validator's locked frame signed", async () => {
     const E = ALICE.toLowerCase(), A = aliceAddr.toLowerCase(), EP = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512";
     const REF = `stack:${TERMS.domain.chainId}:${TERMS.domain.depositoryAddress.toLowerCase()}`;
@@ -640,7 +642,7 @@ describe("runtime-final: rewindJHistory against a locked frame (og tx-handlers.t
 });
 
 // ---- og entity/consensus/input/merge.ts: every Entity-input lane (R2-5b) ----
-describe("runtime-final: Entity-input lanes (og input/merge.ts mergeEntityInputs)", () => {
+describe(seedTag("runtime-final: Entity-input lanes (og input/merge.ts mergeEntityInputs)"), () => {
   const E2 = [ALICE, BOB], S2 = [aliceAddr, bobAddr], ORIGINS = [undefined, "rt-a", "rt-b"];
   const hex32 = (): string => `0x${Array.from({ length: 64 }, () => "0123456789abcdef"[ri(16)]).join("")}`;
   const credit = (n: number): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: CAROL, tokenId: "1", amount: BigInt(n) } } as EntityTx);
@@ -681,7 +683,7 @@ describe("runtime-final: Entity-input lanes (og input/merge.ts mergeEntityInputs
 
   test("MATCH (randomized): 600 batches with runtimeOutput envelopes, repeated J observations, scheduled wakes, timeout votes and proposals -- og's lanes, order and refusals", () => {
     const seen = new Map<string, number>();
-    seed = Number(process.env["LANES_SEED"] ?? 26);
+    seed = seedOf(Number(process.env["LANES_SEED"] ?? 26));
     RANGES = [hex32(), hex32()]; SIGS = [hex32(), hex32()];
     for (let n = 0; n < 600; n++) {
       const gens = Array.from({ length: 1 + ri(8) }, gen);
@@ -698,12 +700,12 @@ describe("runtime-final: Entity-input lanes (og input/merge.ts mergeEntityInputs
 });
 
 // ---- og entity/transition/cross-j-proposer-materialization.ts selectCrossJOpeningAccountProposalTxs: one exact sibling opening cohort ----
-describe("runtime-final: cross-j opening cohort (og selectCrossJOpeningAccountProposalTxs)", () => {
+describe(seedTag("runtime-final: cross-j opening cohort (og selectCrossJOpeningAccountProposalTxs)"), () => {
   test("MATCH (randomized): 800 Accounts with cross pull locks, cross swap offers and sibling replicas (pending cohorts, missing replicas and Accounts, bad roles) -- og's cohort, wait or halt", () => {
-    seed = 57;
+    seed = seedOf(57);
     const ids = Array.from({ length: 5 }, (_, i) => `0x${String(i + 1).repeat(64)}`), signers = ids.map((_, i) => `0x${String.fromCharCode(97 + i).repeat(40)}`);
-    const seen = new Map<string, number>();
-    for (let n = 0; n < 800; n++) {
+    const seen = new Map<string, number>(), buckets = ["ordinary", "wait", "cohort"];
+    for (let n = 0, more = untilCovered(800, () => buckets.every((k) => (seen.get(k) ?? 0) > 40)); more(n); n++) {
       const orderIds = ["ord-a", "ord-b", "Ord-C", "ord-d"].slice(0, 1 + ri(4));
       const routes = new Map(orderIds.map((orderId) => {
         const roles = [...ids].sort(() => rng() - 0.5).slice(0, 4), signer = (i: number): string => (rng() < 0.03 ? "" : signers[ids.indexOf(roles[i] as string)] as string);
@@ -747,15 +749,15 @@ describe("runtime-final: cross-j opening cohort (og selectCrossJOpeningAccountPr
       const bucket = og.startsWith("cohort") ? "cohort" : og;
       seen.set(bucket, (seen.get(bucket) ?? 0) + 1);
     }
-    for (const k of ["ordinary", "wait", "cohort"]) expect([k, (seen.get(k) ?? 0) > 40]).toEqual([k, true]);
+    for (const k of buckets) expect([k, (seen.get(k) ?? 0) > 40]).toEqual([k, true]);
     expect([...seen.keys()].filter((k) => k.startsWith("halt:")).length).toBeGreaterThan(2);
   });
 });
 
 // ---- og runtime/admit/entity-input-output.ts collectReadyLocalAccountWorkTargets: who gets the same-frame Account-work poke ----
-describe("runtime-final: local Account work (og entity-input-output.ts collectReadyLocalAccountWorkTargets)", () => {
+describe(seedTag("runtime-final: local Account work (og entity-input-output.ts collectReadyLocalAccountWorkTargets)"), () => {
   test("MATCH (randomized): 300 Runtimes of 1-6 replicas (boards, failed-over leaders, frames in flight, queued or pending Accounts) -- og's targets and order", () => {
-    seed = 83;
+    seed = seedOf(83);
     const people = [aliceAddr, bobAddr, carolAddr].map((a) => a.toLowerCase());
     let nonEmpty = 0;
     for (let n = 0; n < 300; n++) {
@@ -897,9 +899,9 @@ const crossPairView = (p: Record<string, unknown>) => {
   const frame = (f: Record<string, unknown>) => ({ ...f, height: Number(f["height"]) });
   return { ...p, ...(p["sourceAccountFrame"] ? { sourceAccountFrame: frame(p["sourceAccountFrame"] as Record<string, unknown>), targetAccountFrame: frame(p["targetAccountFrame"] as Record<string, unknown>) } : {}) };
 };
-describe("runtime-final: atomic cross-j Account pair admission (og entity-routing.ts, atomic-admission.ts)", () => {
+describe(seedTag("runtime-final: atomic cross-j Account pair admission (og entity-routing.ts, atomic-admission.ts)"), () => {
   test("MATCH (randomized): 800 input batches -- og selectPotentialCrossJAccountInputPairs (both frame policies) and markPotentialAtomicCrossJInputPairs", () => {
-    seed = 131;
+    seed = seedOf(131);
     const w = crossWorld();
     let paired = 0, marked = 0;
     for (let n = 0; n < 800; n++) {
@@ -918,7 +920,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
     expect(marked).toBeGreaterThan(100);
   });
   test("MATCH (randomized): 800 batches against a Runtime of hubs and spokes -- og selectMatchedCrossJAccountInputPairs (pairs, rejected legs with reason and detail, retained inputs)", () => {
-    seed = 137;
+    seed = seedOf(137);
     const w = crossWorld(), reasons = new Map<string, number>();
     let pairs = 0;
     for (let n = 0; n < 800; n++) {
@@ -949,7 +951,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
     expect(replays).toBeGreaterThan(20);
   });
   test("MATCH (randomized): 500 merged batches -- og admitAtomicCrossJAccountInputs (retry coalescing, stripped legs, pairs grouped first and marked; replay refuses)", () => {
-    seed = 139;
+    seed = seedOf(139);
     const w = crossWorld();
     let grouped = 0;
     for (let n = 0; n < 500; n++) {
@@ -964,7 +966,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
         catch (e) { want = ogCode(e); }
         const r = admitAtomicCrossPairs(env.rw, ins as never, replay);
         const got = r.ok ? { inputs: r.value.inputs.map((i) => crossInputView(i as never)), pairs: r.value.pairs.map((p) => crossPairView(p as never)) } : rwCode(r);
-        expect([n, replay, got]).toEqual([n, replay, want]);
+        expect<unknown>([n, replay, got]).toEqual([n, replay, want]);
         if (!replay && typeof want === "object" && (want as { pairs: unknown[] }).pairs.length > 0) grouped += 1;
       }
     }
@@ -1003,7 +1005,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
     expect(rwCode(applyRuntime(rt, { runtimeTxs: [], entityInputs: [marked] }, verifiers))).toBe("ENTITY_INPUT_ATOMIC_CROSS_J_SOURCE_FRAME_MISSING");
   });
   test("MATCH (randomized): 400 committed pairs and Runtime outboxes -- og markCommittedAtomicCrossJAckOutputs (exactly one distinct ACK output per leg gets the ACK marker)", () => {
-    seed = 149;
+    seed = seedOf(149);
     const ENTS = [ALICE, BOB, CAROL].map((e) => e.toLowerCase()), HASHES = ["0x" + "71".repeat(32), "0x" + "72".repeat(32)];
     let markedRuns = 0;
     for (let n = 0; n < 400; n++) {
@@ -1022,7 +1024,7 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
       let want: unknown;
       try { ogMarkAckOutputs(ogOutbox as never, ogPairs as never); want = ogOutbox.map((o) => (o as { atomicCrossJurisdictionPair?: unknown }).atomicCrossJurisdictionPair ?? null); } catch (e) { want = ogCode(e); }
       const r = markCommittedAckOutputs(outbox as never, pairs as never);
-      expect([n, r.ok ? r.value.map((o) => o.atomicCrossJurisdictionPair ?? null) : rwCode(r)]).toEqual([n, want]);
+      expect<unknown>([n, r.ok ? r.value.map((o) => o.atomicCrossJurisdictionPair ?? null) : rwCode(r)]).toEqual([n, want]);
       if (Array.isArray(want) && want.some((m) => m !== null)) markedRuns += 1;
     }
     expect(markedRuns).toBeGreaterThan(5);
@@ -1030,9 +1032,9 @@ describe("runtime-final: atomic cross-j Account pair admission (og entity-routin
 });
 
 // ---- og storage/replica/replicas.ts buildStorageLiveReplicaMetaCommitment: the per-replica rows of the Runtime replica-meta digest ----
-describe("runtime-final: live replica-meta rows (og storage/replica/replicas.ts)", () => {
+describe(seedTag("runtime-final: live replica-meta rows (og storage/replica/replicas.ts)"), () => {
   test("MATCH (randomized): 300 Runtimes -- rows (key and exact value bytes, leader votes, pending leader certificate and J-prefix round included) and digest equal og buildStorageLiveReplicaMetaCommitment", () => {
-    seed = 151;
+    seed = seedOf(151);
     const addrs = [aliceAddr, bobAddr, carolAddr].map((a) => a.toLowerCase()), word = (): string => "0x" + Array.from({ length: 32 }, () => ri(256).toString(16).padStart(2, "0")).join("");
     const body = (entity: string) => ({ entityId: entity.toLowerCase(), targetHeight: 1 + ri(5), previousFrameHash: word(), fromView: ri(3), toView: 1 + ri(3), previousLeaderId: pick(addrs), nextLeaderId: pick(addrs) });
     let withFields = 0;
@@ -1065,7 +1067,7 @@ describe("runtime-final: live replica-meta rows (og storage/replica/replicas.ts)
 });
 
 // ---- og frame/lineage.ts buildCertifiedEntityFrameLink + storage/replica/replicas.ts: certifiedFrameHeadDigest and og-wire leader votes in replica meta ----
-describe("runtime-final: certified frame head and og-wire leader votes in replica meta (og frame/lineage.ts, leader/index.ts, storage/replica/replicas.ts)", () => {
+describe(seedTag("runtime-final: certified frame head and og-wire leader votes in replica meta (og frame/lineage.ts, leader/index.ts, storage/replica/replicas.ts)"), () => {
   const sig0x = (s: string): string => (s.startsWith("0x") ? s : `0x${s}`);
   type Members = readonly (readonly [Address, bigint])[];
   const lazyEntity = (members: Members, threshold: bigint): EntityId => unwrap(rwEntityId(quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) })));
@@ -1107,7 +1109,7 @@ describe("runtime-final: certified frame head and og-wire leader votes in replic
     return { got: rows.map((row) => [hex(row.key), hex(row.value)]), want: want.entries.map((row) => [hex(row.key), hex(row.value)]), digest: unwrap(replicaMetaDigest(rows)), wantDigest: want.digest };
   };
   test("MATCH (randomized): 40 validator sets committing 1-3 frames -- each committed replica's row carries og's certifiedFrameHeadDigest (og buildCertifiedEntityFrameLink over og-rebuilt frame, Hanko and post authority)", async () => {
-    seed = 157;
+    seed = seedOf(157);
     let linked = 0;
     for (let n = 0; n < 40; n++) {
       const pool = [aliceAddr, bobAddr, carolAddr] as Address[], size = 2 + ri(2);
@@ -1143,7 +1145,7 @@ describe("runtime-final: certified frame head and og-wire leader votes in replic
       expect(digest).toBe(wantDigest);
     }
     expect(linked).toBeGreaterThan(60);
-  });
+  }, 60_000);
   test("MATCH: a 3-of-3 frame locked at B and C, A silent -- B's and C's timeout votes carry the prepared frame; the leaderVotes rows equal og's (og buildPreparedFrameEvidence on the EntityFrame wire)", () => {
     const members: Members = [[aliceAddr as Address, 1n], [bobAddr as Address, 1n], [carolAddr as Address, 1n]];
     const [a, b, c] = members.map(([s]) => s.toLowerCase()) as [string, string, string];
@@ -1184,7 +1186,7 @@ describe("runtime-final: certified frame head and og-wire leader votes in replic
 });
 
 // ---- og storage/wal/outbox-payload.ts prepareRuntimeOutputRows: each outbox row is og's RoutedEntityInput wire (entity/types.ts EntityInput) ----
-describe("runtime-final: outbox rows on og's RoutedEntityInput wire (og storage/wal/outbox-payload.ts, delivery/entity-output-signer.ts)", () => {
+describe(seedTag("runtime-final: outbox rows on og's RoutedEntityInput wire (og storage/wal/outbox-payload.ts, delivery/entity-output-signer.ts)"), () => {
   const sig0x = (s: string): string => (s.startsWith("0x") ? s : `0x${s}`);
   type Members = readonly (readonly [Address, bigint])[];
   const lazyEntity = (members: Members, threshold: bigint): EntityId => unwrap(rwEntityId(quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) })));
@@ -1225,7 +1227,7 @@ describe("runtime-final: outbox rows on og's RoutedEntityInput wire (og storage/
     expect(sig0x(unwrap(runtimeOutputsDigest(rows)))).toBe(ogOutputRows(1, og as never).commitment.digest);
   };
   test("MATCH (randomized): 40 validator sets -- every Entity output (forwarded txs, proposals, precommits, commit notices with og's frame Hanko) encodes as og RoutedEntityInput; the outbox digest equals og prepareRuntimeOutputRows", async () => {
-    seed = 163;
+    seed = seedOf(163);
     let notices = 0, lanes = new Set<string>();
     for (let n = 0; n < 40; n++) {
       const pool = [aliceAddr, bobAddr, carolAddr] as Address[], size = 2 + ri(2);
@@ -1282,7 +1284,7 @@ describe("runtime-final: outbox rows on og's RoutedEntityInput wire (og storage/
     // an Account opening from solo ALICE to solo BOB: the Account message binds BOB's active leader
     const solo = (id: EntityId, signer: string) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer as Address, { shares: 1n }]]), signerId: signer as Address }));
     const ab = spawn(spawn(createRuntime(), solo(ALICE, aliceAddr)), solo(BOB, bobAddr));
-    const open: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx;
+    const open: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx;
     const step = unwrap(applyRuntime(ab, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: aliceAddr, input: { kind: "txs", timestamp: NOW, txs: [open] } }] }, verifiers));
     const accountOut = step.outbox.filter((o) => !("input" in o));
     expect(accountOut.length).toBe(1);

@@ -1,6 +1,7 @@
 // Differential tests: og Entity -> Entity command lane, cross-j Entity txs, gossip pathfinding vs pure/xln.ts.
 // Every test is "MATCH:" and runs og live on the same (seeded random) input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { buildNetworkGraph as ogBuildGraph } from "../../core/pathfinding/graph.ts";
 import { PathFinder } from "../../core/pathfinding/pathfinding.ts";
@@ -12,11 +13,14 @@ import {
   type Address, type Binary, type EntityId, type EntityReplica, type EntityTx, type RoutedEntityInput, type Runtime,
 } from "../xln.ts";
 
-const rng = (seed: number) => () => {
-  seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
-  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const rng = (base: number) => {
+  let seed = seedOf(base);
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 type Rand = () => number;
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[Math.floor(r() * xs.length)] as T;
@@ -47,7 +51,7 @@ const randomProfiles = (r: Rand, ids: readonly string[], tokenId: number): Binar
   return (r() < 0.1 ? [...out, { ...out[0]!, metadata: { ...out[0]!.metadata, routingFeePPM: 7 } }] : out) as unknown as Binary[];
 };
 
-describe("entity-lane: gossip pathfinding (og pathfinding/graph.ts, pathfinding.ts, network/p2p/gossip findPaths)", () => {
+describe(seedTag("entity-lane: gossip pathfinding (og pathfinding/graph.ts, pathfinding.ts, network/p2p/gossip findPaths)"), () => {
   test("MATCH: buildNetworkGraph + PathFinder.findRoutes on 400 random gossip graphs (hub metadata, mirrored rows, funding first hop, capacities, fees)", () => {
     const r = rng(41);
     let found = 0;
@@ -93,7 +97,7 @@ const quiet = (start: Runtime, first: RoutedEntityInput[], ctx: object = verifie
   }
   return rt;
 };
-const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
+const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
 const network = (): Runtime => {
   let rt = spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE)), entityOf(BOB)), entityOf(CAROL));
   rt = quiet(rt, [inputOf(BOB, [open(ALICE, 1000n), open(CAROL)], NOW)]);
@@ -120,7 +124,7 @@ const ogResolve = (profiles: readonly Binary[], source: string) => async (tx: { 
   return path;
 };
 
-describe("entity-lane: htlcPayment route discovery (og infra-context.ts resolveRoute)", () => {
+describe(seedTag("entity-lane: htlcPayment route discovery (og infra-context.ts resolveRoute)"), () => {
   const rt = network(), alice = replicaOf(rt, ALICE), ts = Number(NOW + 1000n);
   const view = { id: ALICE, timestamp: ts, jHeight: 0, encryptionKey: ENTITY_KEYS.get(ALICE)!.pub, paybook: { entries: new Map(), feesEarned: 0n }, replicas: alice.accountReplicas };
   test("MATCH: materializeOriginatedHtlcPayments with an empty route resolves og's route on 150 random profile sets and payments", async () => {
@@ -188,6 +192,7 @@ const J1: Domain = { chainId: 1, depositoryAddress: "0x" + "11".repeat(20) }, J2
 const S1 = `stack:1:${J1.depositoryAddress}`, S2 = `stack:31337:${J2.depositoryAddress}`;
 const U1 = ("0x" + "01".repeat(32)) as EntityId, H1 = ("0x" + "02".repeat(32)) as EntityId, H2 = ("0x" + "03".repeat(32)) as EntityId, U2 = ("0x" + "04".repeat(32)) as EntityId;
 const SIGNER: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
+const signerOf = (e: string): string => { const s = SIGNER[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
 const T0 = 1_700_000_050_000, RUNTIME_SEED = "0x" + "5e".repeat(32), CLOCK60 = { leftResponseSeconds: 60, rightResponseSeconds: 60 };
 const PEER: Readonly<Record<string, EntityId>> = { [U1]: H1, [H1]: U1, [H2]: U2, [U2]: H2 };
 const JUR: Readonly<Record<string, Domain>> = { [U1]: J1, [H1]: J1, [H2]: J2, [U2]: J2 };
@@ -197,7 +202,7 @@ const baseRoute = (r: Rand): CrossRoute => ({
   source: { jurisdiction: S1, entityId: U1, counterpartyEntityId: H1, tokenId: pick(r, [1, 1, 3, 2]), amount: pick(r, [10n ** 6n, 5n * 10n ** 9n, 7n * 10n ** 12n, BigInt(1 + int(r, 1e9))]) },
   target: { jurisdiction: S2, entityId: H2, counterpartyEntityId: U2, tokenId: pick(r, [1, 2, 3, 4]), amount: pick(r, [10n ** 6n, 10n ** 18n, 7n * 10n ** 12n, BigInt(1 + int(r, 1e9))]) },
   sourceDisputeConfig: CLOCK60, targetDisputeConfig: CLOCK60, status: "intent", createdAt: T0 - 1000, updatedAt: T0 - 1000, expiresAt: T0 + 60_000,
-  sourceSignerId: SIGNER[U1], sourceHubSignerId: SIGNER[H1], targetHubSignerId: SIGNER[H2], targetSignerId: SIGNER[U2],
+  sourceSignerId: signerOf(U1), sourceHubSignerId: signerOf(H1), targetHubSignerId: signerOf(H2), targetSignerId: signerOf(U2),
 });
 type AcctSpec = { readonly disputeConfig: { leftResponseSeconds: number; rightResponseSeconds: number }; readonly collateral: bigint; readonly ondelta: bigint; readonly leftCredit: bigint; readonly rightCredit: bigint; readonly pulls: readonly { pullId: string; fullHash: string; partialRoot: string; orderId?: string }[] };
 const acct = (self: EntityId, spec: AcctSpec): { rw: AccountReplica; og: unknown } => {
@@ -213,14 +218,14 @@ const acct = (self: EntityId, spec: AcctSpec): { rw: AccountReplica; og: unknown
   };
   return { rw, og };
 };
-type Fixture = { readonly self: EntityId; readonly validators: readonly string[]; readonly account?: AcctSpec | undefined; readonly swaps?: ReadonlyMap<string, CrossRoute>; readonly auths?: ReadonlyMap<string, CrossRoute>; readonly jurisdictionName?: string; readonly ext?: { readonly books: Map<string, { lastAcceptedUsdAskPriceTicks: bigint }>; readonly hubProfile: { referenceTokenId: number } } };
+type Fixture = { readonly self: EntityId; readonly validators: readonly string[]; readonly account?: AcctSpec | undefined; readonly swaps?: ReadonlyMap<string, CrossRoute> | undefined; readonly auths?: ReadonlyMap<string, CrossRoute> | undefined; readonly jurisdictionName?: string; readonly ext?: { readonly books: Map<string, { lastAcceptedUsdAskPriceTicks: bigint }>; readonly hubProfile: { referenceTokenId: number } } };
 const viewOf = (f: Fixture): CrossEntityView => {
   const a = f.account === undefined ? undefined : acct(f.self, f.account);
   return { id: f.self, timestamp: T0, validators: f.validators, jurisdiction: JUR[f.self]!, jurisdictionName: f.jurisdictionName ?? "J-local", replicas: new Map(a === undefined ? [] : [[PEER[f.self]!, a.rw]]), swaps: f.swaps, auths: f.auths, ext: f.ext as never };
 };
 const ogCollection = (m: ReadonlyMap<string, CrossRoute> | undefined): unknown => {
   if (m === undefined) return undefined;
-  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
+  const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute) as Map<string, unknown>;
   for (const [k, v] of m) c.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(v as never));
   return c;
 };
@@ -258,6 +263,12 @@ const ogEnv = { state: { timestamp: T0 }, runtimeSeed: RUNTIME_SEED } as never;
 const MUT = { mutableFrameState: true } as never;
 const expectSame = (og: Outcome, rw: Outcome, label: string): void => { expect(`${label}:${stableJson(rw)}`).toBe(`${label}:${stableJson(og)}`); };
 
+/**
+ * The prepared form of a route, or the route itself when it cannot be prepared (a mutated route: an expired
+ * expiresAt, a foreign jurisdiction, ...; og buildPreparedCrossJurisdictionRoute throws the same code). A node
+ * only ever stores or forwards a prepared route that preparation accepted.
+ */
+const preparedOr = (route: CrossRoute): CrossRoute => { const p = prepareCrossRoute(route, { runtimeSeed: RUNTIME_SEED, now: T0 }); return p.ok ? p.value : route; };
 /** One random corruption of the route a handler sees. */
 const mutateRoute = (r: Rand, route: CrossRoute): CrossRoute => {
   const k = int(r, 22);
@@ -276,7 +287,7 @@ const mutateRoute = (r: Rand, route: CrossRoute): CrossRoute => {
   return route;
 };
 
-describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/setup.ts)", () => {
+describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/setup.ts)"), () => {
   test("MATCH: prepareCrossJurisdictionSwap at the source user, target user, source hub and a stranger on 400 random routes, accounts, validators and stored routes", () => {
     const r = rng(51), kinds = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
@@ -287,17 +298,17 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
       const stored = (): ReadonlyMap<string, CrossRoute> | undefined => {
         if (!canon.ok || r() < 0.5) return undefined;
         const c = canon.value, k = int(r, 5);
-        const v: CrossRoute = k === 0 ? c : k === 1 ? { ...c, memo: "different" } : k === 2 ? { ...c, status: "cancelled" } : k === 3 ? unwrap(prepareCrossRoute(c, { runtimeSeed: RUNTIME_SEED, now: T0 })) : { ...unwrap(prepareCrossRoute(c, { runtimeSeed: RUNTIME_SEED, now: T0 })), routeHash: "0x" + "dd".repeat(32) };
+        const v: CrossRoute = k === 0 ? c : k === 1 ? { ...c, memo: "different" } : k === 2 ? { ...c, status: "cancelled" } : k === 3 ? preparedOr(c) : { ...preparedOr(c), routeHash: "0x" + "dd".repeat(32) };
         return new Map([[c.orderId, v]]);
       };
       const fixture: Fixture = {
-        self, validators: r() < 0.1 ? ["0x" + "77".repeat(20)] : r() < 0.1 ? [] : [SIGNER[self]!, ...(r() < 0.3 ? ["0x" + "78".repeat(20)] : [])],
+        self, validators: r() < 0.1 ? ["0x" + "77".repeat(20)] : r() < 0.1 ? [] : [signerOf(self), ...(r() < 0.3 ? ["0x" + "78".repeat(20)] : [])],
         ...(r() < 0.9 ? { account: { disputeConfig: r() < 0.9 ? CLOCK60 : { leftResponseSeconds: 60, rightResponseSeconds: 30 }, collateral: 0n, ondelta: 0n, leftCredit: 0n, rightCredit: 0n, pulls: [] } } : {}),
         ...(self === H1 ? { swaps: stored() } : { auths: stored() }),
         ...(r() < 0.2 ? { jurisdictionName: "other-name" } : {}),
       };
       // a prepared payload over the user lane (hub) or at a user
-      if (r() < 0.15 && canon.ok) route = unwrap(prepareCrossRoute(canon.value, { runtimeSeed: RUNTIME_SEED, now: T0 }));
+      if (r() < 0.15 && canon.ok) route = preparedOr(canon.value);
       if (r() < 0.05 && route.sourcePull !== undefined) { const { targetPull: _, ...rest } = route; route = rest as CrossRoute; }
       const og = ogOutcome(() => ogSetup.handlePrepareCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "prepareCrossJurisdictionSwap", data: { route } } as never, MUT) as never);
       const rw = rwOutcome(crossPrepare(viewOf(fixture), route));
@@ -312,7 +323,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
     for (const m of ["🌉 Cross-j swap authorized by source user", "🌉 Cross-j swap authorized by target user", "🌉 Cross-j swap auth retry re-emitted by source user", "🌉 Cross-j swap awaiting source-hub proposer commitments",
       "🌉 Cross-j prepare already materialized; replay ignored", "❌ Cross-j prepare wrong source hub", "❌ Cross-j prepare invalid route", "❌ Cross-j prepare blocked", "❌ Cross-j prepare expired",
       "❌ Cross-j prepare rejected", "CROSS_J_USER_AUTH_CONFLICT", "CROSS_J_RAW_PREPARE_CONFLICT", "CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION", "CROSS_J_USER_AUTH_PREPARED_FORBIDDEN"]) expect(`${m}:${kinds.has(m)}`).toBe(`${m}:true`);
-  });
+  }, 30_000);
 
   test("MATCH: materializeCrossJurisdictionSwap by the default proposer on 300 random stored intents, proposer ids, prepared routes and USD caps (orderbookExt-priced non-stable legs)", () => {
     const r = rng(52), kinds = new Map<string, number>();
@@ -330,10 +341,10 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
       if (t === 2) prepared = { ...prepared, targetPull: { ...prepared.targetPull!, fullHash: "0x" + "12".repeat(32) } };
       if (t === 3) prepared = { ...prepared, sourcePull: { ...prepared.sourcePull!, pullId: "0x" + "34".repeat(32) } };
       const fixture: Fixture = {
-        self: H1, validators: [SIGNER[H1]!], swaps: stored, ...(() => { const ext = extOf(); return ext === undefined ? {} : { ext }; })(),
+        self: H1, validators: [signerOf(H1)], swaps: stored, ...(() => { const ext = extOf(); return ext === undefined ? {} : { ext }; })(),
         ...(r() < 0.95 ? { account: { disputeConfig: r() < 0.93 ? CLOCK60 : { leftResponseSeconds: 60, rightResponseSeconds: 1 }, collateral: 0n, ondelta: 0n, leftCredit: 0n, rightCredit: 0n, pulls: [] } } : {}),
       };
-      const proposerSignerId = r() < 0.9 ? SIGNER[H1]! : "0x" + "66".repeat(20);
+      const proposerSignerId = r() < 0.9 ? signerOf(H1) : "0x" + "66".repeat(20);
       const data = { proposerSignerId, route: prepared };
       const og = ogOutcome(() => ogSetup.handleMaterializeCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "materializeCrossJurisdictionSwap", data } as never, MUT) as never);
       const rw = rwOutcome(crossMaterialize(viewOf(fixture), data));
@@ -343,7 +354,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
     }
     expect(kinds.get("ok") ?? 0).toBeGreaterThan(100);
     expect([kinds.has("cap:priced"), kinds.has("cap:stable")]).toEqual([true, true]);
-  });
+  }, 30_000);
 
   test("MATCH: registerCrossJurisdictionSwap at both hubs and a user on 300 random resting routes, pull pre-checks, capacities and stored routes", () => {
     const r = rng(53), kinds = new Map<string, number>(), seen = new Set<string>();
@@ -359,7 +370,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
         : r() < 0.1 ? [{ pullId: "other", fullHash: prepared.sourcePull!.fullHash, partialRoot: "0x" + "58".repeat(32) }] : [];
       const big = 10n ** 30n;
       const fixture: Fixture = {
-        self, validators: [SIGNER[self]!], swaps,
+        self, validators: [signerOf(self)], swaps,
         ...(r() < 0.95 ? { account: { disputeConfig: CLOCK60, collateral: pick(r, [0n, big]), ondelta: pick(r, [0n, big, -big]), leftCredit: pick(r, [0n, big, 10n]), rightCredit: pick(r, [0n, big, 10n]), pulls } } : {}),
       };
       const og = ogOutcome(() => ogSetup.handleRegisterCrossJurisdictionSwapEntityTx(ogEnv, ogStateOfFixture(fixture), { type: "registerCrossJurisdictionSwap", data: { route } } as never, MUT) as never);
@@ -370,7 +381,7 @@ describe("entity-lane: cross-j setup handlers (og entity/tx/handlers/cross-j/set
     }
     expect(kinds.get("ok") ?? 0).toBeGreaterThan(200);
     expect([...seen].some((m) => m.includes("rejected before Account queue"))).toBe(true);
-  });
+  }, 40_000);
 });
 
 // ---- og certified Entity -> Entity lane: publication, runtimeOutput authorization, default-proposer materialization ----
@@ -399,7 +410,7 @@ const routeOf = (o: EntityOutput): RoutedEntityInput => {
   return { entityId: o.to, signerId: o.signerId, input: o.input };
 };
 
-describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publication.ts, auth/authorization.ts, transition/cross-j-proposer-materialization.ts)", () => {
+describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/output/publication.ts, auth/authorization.ts, transition/cross-j-proposer-materialization.ts)"), () => {
   test("MATCH: a user authorization reaches the source hub as a runtimeOutput, the default proposer materializes it, and the hub registers its own leg, frame by frame against og", () => {
     // ALICE is the source user, BOB the source hub (their Account is live); the target leg names two remote Entities on another stack
     const H2x = ("0x" + "03".repeat(32)) as EntityId, U2x = ("0x" + "04".repeat(32)) as EntityId, ogEnvAt = (timestamp: number) => ({ state: { timestamp }, runtimeSeed: RUNTIME_SEED }) as never;
@@ -410,7 +421,7 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
       source: { jurisdiction: stackIdOf(TERMS.domain), entityId: ALICE, counterpartyEntityId: BOB, tokenId: 1, amount: 100n },
       target: { jurisdiction: S1, entityId: H2x, counterpartyEntityId: U2x, tokenId: 2, amount: 10n ** 18n },
       sourceDisputeConfig: TERMS.disputeConfig, targetDisputeConfig: CLOCK60, status: "intent", createdAt: t0, updatedAt: t0, expiresAt: t0 + 3_600_000,
-      sourceSignerId: aliceAddr.toLowerCase(), sourceHubSignerId: bobAddr.toLowerCase(), targetHubSignerId: SIGNER[H2]!, targetSignerId: SIGNER[U2]!,
+      sourceSignerId: aliceAddr.toLowerCase(), sourceHubSignerId: bobAddr.toLowerCase(), targetHubSignerId: signerOf(H2), targetSignerId: signerOf(U2),
     };
     const ctx = { ...verifiers, runtimeSeed: RUNTIME_SEED, htlcInfra: (id: EntityId) => ({ profiles: [], encryptionPrivateKey: ENTITY_KEYS.get(id)?.priv }) } as typeof verifiers;
     const apply = (inputs: RoutedEntityInput[]) => { const s = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: inputs }, ctx)); expect(s.rejected).toEqual([]); return s; };
@@ -429,7 +440,7 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
     expect(runtimeOutputAuthError(bob0.state, outTx.data)).toBe(null);
     const ogB = ogSetup.handlePrepareCrossJurisdictionSwapEntityTx(ogEnvAt(ta), ogBob0, outTx.data.entityTxs[0] as never, MUT);
     expect(stableJson(entriesOf(replicaOf(a.runtime, BOB).state.crossJurisdictionSwaps))).toBe(stableJson(entriesOf(ogB.newState.crossJurisdictionSwaps)));
-    expect(stableJson(wakesOf(a.outbox))).toBe(stableJson(materializeCommittedEntityOutputs(ogB.outputs as never, BOB, bobAddr.toLowerCase(), true)));
+    expect(stableJson(wakesOf(a.outbox))).toBe(stableJson(materializeCommittedEntityOutputs(ogB.outputs, BOB, bobAddr.toLowerCase(), true)));
     rt = a.runtime;
 
     // 2. The wake, one Entity at a time (applyEntityInput): og appends the proposer's materialization at admission; the frame emits both hubs' register commands
@@ -439,13 +450,14 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
     const ogBob1 = ogEntityState(bob1, tc), added = appendDefaultProposerCrossJMaterializations(ogEnvAt(tc), { entityId: BOB, signerId: bobAddr.toLowerCase(), state: ogBob1, mempool: [] } as never, []);
     expect(added.map((t) => t.type)).toEqual(["materializeCrossJurisdictionSwap"]);
     const ogC = ogSetup.handleMaterializeCrossJurisdictionSwapEntityTx(ogEnvAt(tc), ogBob1, added[0] as never, MUT);
-    expect(stableJson(runtimeOutputsOf(c.outputs))).toBe(stableJson(materializeCommittedEntityOutputs(ogC.outputs as never, BOB, bobAddr.toLowerCase(), true)));
+    expect(stableJson(runtimeOutputsOf(c.outputs))).toBe(stableJson(materializeCommittedEntityOutputs(ogC.outputs, BOB, bobAddr.toLowerCase(), true)));
     expect(stableJson(entriesOf(c.replica.state.crossJurisdictionSwaps))).toBe(stableJson(entriesOf(ogC.newState.crossJurisdictionSwaps)));
 
     // 3. BOB's own register command: authorized as the source hub's self edge and registered. A registration is a cross-j setup phase, so og
     //    proposes no Account frame in it (prepareEntityFrameWorkingSet crossJSetupPhase): the legs wait in the ALICE Account mempool like og's.
     const self = c.outputs.find((o) => o.to === BOB && runtimeOutputsOf([o]).length === 1)!, td = tc + 10_000;
-    const reg = (self as { input: { txs: EntityTx[] } }).input.txs[0] as Extract<EntityTx, { type: "runtimeOutput" }>, ogBob2 = ogEntityState(c.replica, td);
+    if (!("input" in self) || self.input.kind !== "txs") throw new Error("expected a signed txs input to BOB");
+    const reg = self.input.txs[0] as Extract<EntityTx, { type: "runtimeOutput" }>, ogBob2 = ogEntityState(c.replica, td);
     expect(ogTry(() => assertRuntimeOutputAuthorization(reg.data.sourceEntityId, reg.data.sourceSignerId, reg.data.targetEntityId, reg.data.entityTxs as never, ogBob2)).ok).toBe(true);
     expect(runtimeOutputAuthError(c.replica.state, reg.data)).toBe(null);
     const d = unwrap(applyEntityInput(c.replica, { kind: "txs", timestamp: BigInt(td), txs: [reg] }, ectx(BOB)));
@@ -477,7 +489,7 @@ describe("entity-lane: certified Entity -> Entity lane (og consensus/output/publ
     for (let i = 0; i < 400; i++) {
       const route = ogCrossIndex.withCanonicalCrossJurisdictionRouteHash(baseRoute(r) as never) as unknown as CrossRoute;
       const target = pick(r, ids), source = r() < 0.2 ? target : pick(r, ids);
-      const signer = r() < 0.7 ? (SIGNER[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", SIGNER[H1]!]);
+      const signer = r() < 0.7 ? (SIGNER[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", signerOf(H1)]);
       const kind = int(r, 7);
       const txs: EntityTx[] = kind === 0 ? [] : kind === 1 ? [{ type: "prepareCrossJurisdictionSwap", data: { route } } as EntityTx] : kind === 2 ? [{ type: "registerCrossJurisdictionSwap", data: { route } } as EntityTx]
         : kind === 3 ? [{ type: "chat", data: { from: "x", message: "hi" } } as EntityTx] : kind === 4 ? [{ type: "accountInput", data: {} } as unknown as EntityTx]

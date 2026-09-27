@@ -1,6 +1,7 @@
 // Cross-jurisdiction hub order book: og extensions/cross-j/orderbook.ts (admissions, USD caps, market offer, instructions),
 // entity/tx/handlers/account/orderbook/cross/* (the cross pass inside processOrderbookSwaps) and cancels.ts (cross branch). Every MATCH runs live og.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import * as ogOB from "../../core/extensions/cross-j/orderbook.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import { createEmptyEntityCollectionCandidate, entityCollectionCommitment as ogCollectionCommitment } from "../../core/entity/state/persistent-collection-map.ts";
@@ -23,7 +24,7 @@ import {
 } from "../xln.ts";
 import { unwrap } from "../xln_run.ts";
 
-const rng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const rng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 type Rand = () => number;
 const int = (r: Rand, n: number): number => Math.floor(r() * n);
 const pick = <T,>(r: Rand, xs: readonly T[]): T => xs[int(r, xs.length)] as T;
@@ -62,7 +63,7 @@ const progressed = (r: Rand, route: CrossRoute, status: CrossRoute["status"] = "
 };
 
 // ============ og USD risk caps (crossJurisdictionLegUsdMicros / getCrossJurisdictionLocalUsdCapError), priced through orderbookExt ============
-describe("cross-book: USD caps", () => {
+describe(seedTag("cross-book: USD caps"), () => {
   const extOf = (r: Rand): { rw: OrderbookExt; og: unknown } | undefined => {
     if (int(r, 5) === 0) return undefined;
     const referenceTokenId = pick(r, [1, 1, 3, 4, 2, 5]);
@@ -99,7 +100,7 @@ describe("cross-book: USD caps", () => {
 });
 
 // ============ og book admissions: merge / resolving / closed / admission error, collection roots ============
-describe("cross-book: admissions", () => {
+describe(seedTag("cross-book: admissions"), () => {
   const rwRoot = (m: BookAdmissions | undefined) => (m === undefined ? null : unwrap(entityCollectionCommitment(new Map([...m].map(([k, v]) => [k, v as unknown as Binary])))));
   const entries = (m: ReadonlyMap<string, unknown> | undefined) => (m === undefined ? null : [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
   test("MATCH: 60 random admission streams (merge, resolving, closed, error, typed failure): same entries, collection roots and errors as og", () => {
@@ -143,11 +144,11 @@ describe("cross-book: admissions", () => {
       }
     }
     for (const k of ["admissible", "CROSS_J_BOOK_ADMISSION_PENDING", "CROSS_J_BOOK_ADMISSION_CLOSED", "CROSS_J_BOOK_ADMISSION_RESOLVING", "CROSS_J_ORDER_WRONG_BOOK_OWNER"]) expect([k, (kinds.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 50_000);
 });
 
 // ============ og buildCrossJurisdictionMarketOffer, remaining amounts, execution price / amounts, fill and cancel instructions ============
-describe("cross-book: market offer and instructions", () => {
+describe(seedTag("cross-book: market offer and instructions"), () => {
   const offerOf = (route: CrossRoute, accountId: string): CrossBookOffer => ({
     offerId: route.orderId, accountId, makerIsLeft: true, fromEntity: route.source.entityId, toEntity: route.source.counterpartyEntityId, createdHeight: 1,
     giveTokenId: Number(route.source.tokenId), giveTokenDecimals: 6, giveAmount: BigInt(route.source.amount), wantTokenId: Number(route.target.tokenId), wantTokenDecimals: 18, wantAmount: BigInt(route.target.amount),
@@ -164,7 +165,7 @@ describe("cross-book: market offer and instructions", () => {
       same(`${i}:market`, og, rw);
       seen.add(!og.ok ? "halt" : og.value === null ? "null" : "offer");
       if (!og.ok || og.value === null || !rw.ok || rw.value === null) continue;
-      const meta = rw.value, ogMeta = og.value as never;
+      const meta = rw.value, ogMeta = og.value;
       const fill = { filledLots: BigInt(int(r, 3) === 0 ? 0 : 1 + int(r, 5000)), weightedCost: BigInt(int(r, 1e9)), ...(int(r, 3) === 0 ? { cancelRemainder: true } : {}) };
       same(`${i}:exec`, ogRun(() => ogOB.crossJurisdictionExecutionAmounts(ogMeta, fill)), rwRun(crossExecutionAmounts(meta, fill)));
       const ogFill = ogRun(() => ogOB.buildCrossJurisdictionFillInstruction(U1, route.orderId, `${U1}:${route.orderId}`, ogMeta, fill));
@@ -175,11 +176,11 @@ describe("cross-book: market offer and instructions", () => {
       same(`${i}:price`, ogRun(() => ogOB.resolveCrossJurisdictionExecutionPriceTicks(ogMeta, other as never)), rwRun(crossExecutionPrice(meta, other)));
     }
     for (const k of ["null", "offer", "fill", "fill-null"]) expect([k, seen.has(k)]).toEqual([k, true]);
-  });
+  }, 30_000);
 });
 
 // ============ og cross pass inside processOrderbookSwaps and the cross branch of processOrderbookCancels ============
-describe("cross-book: hub cross matcher", () => {
+describe(seedTag("cross-book: hub cross matcher"), () => {
   const HUB = H1, LOCAL = [W("0b"), W("01"), W("cc")] as EntityId[], REMOTE = [W("e1"), W("e2"), W("0e")] as EntityId[];
   const DEC: Readonly<Record<number, number>> = { 1: 6, 2: 18, 3: 6, 4: 6 };
   const lotOf = (d: number) => 10n ** BigInt(Math.max(0, d - 6));
@@ -214,7 +215,7 @@ describe("cross-book: hub cross matcher", () => {
           wantAmount: BigInt(rt.target.amount), maxFee: 0n, minNetReceive: BigInt(rt.target.amount), priceTicks: 1n, timeInForce: tf, makerIsLeft: u < HUB, createdHeight: resting ? 1 : 2 + int(r, 2), quantizedGive: BigInt(rt.source.amount), quantizedWant: BigInt(rt.target.amount), crossJurisdiction: rt };
         offers.get(u)!.set(offer.offerId, offer);
         if (int(r, 12) === 0) mempool.get(u)!.push({ type: "swap_resolve", offerId: offer.offerId });
-        if (int(r, 10) === 0) mirror.set(offer.offerId, { ...rt, status: pick(r, ["resting", "partially_filled", "cancel_requested"] as const) });
+        if (int(r, 10) === 0) mirror.set(offer.offerId, { ...rt, status: pick(r, ["resting", "partially_filled", "clear_requested"] as const) });
         if (int(r, 10) === 0) admissions.set(bookAdmissionKey(u, rt.orderId), { orderId: rt.orderId, routeHash: rt.routeHash ?? "", sourceEntityId: u, bookOwnerEntityId: HUB, status: pick(r, ["admitted", "resolving", "closed"] as const), route: rt, updatedAt: T0 - 10 });
         if (resting) rows.push({ orderId: `${u}:${rt.orderId}`, accountId: u, skewQty: int(r, 30) === 0 });
         else incoming.push({ offerId: offer.offerId, accountId: u, makerIsLeft: offer.makerIsLeft, fromEntity: leftOf(u), toEntity: rightOf(u), createdHeight: offer.createdHeight, giveTokenId: giveTok, giveTokenDecimals: offer.giveTokenDecimals,
@@ -238,9 +239,9 @@ describe("cross-book: hub cross matcher", () => {
       const rwBooks = new Map<string, Book>();
       let placedOk = true;
       for (const row of rows) {
-        const meta = ogRun(() => buildCrossMarketOfferFromBookOrder({ ...ogHub(), accounts: ogAccounts() } as never, row.orderId));
+        const meta = ogRun(() => buildCrossMarketOfferFromBookOrder({ ...ogHub(), accounts: ogAccounts() }, row.orderId));
         if (!meta.ok || meta.value === null) continue;
-        const mv = meta.value as any, qty = BigInt(mv.baseAmount) / lotOf(DEC[mv.baseTokenId]!) + (row.skewQty ? 1n : 0n);
+        const mv = meta.value, qty = BigInt(mv.baseAmount) / lotOf(DEC[mv.baseTokenId]!) + (row.skewQty ? 1n : 0n);
         if (qty <= 0n) continue;
         const cmd = { kind: 0 as const, ownerId: mv.makerId, orderId: row.orderId, side: mv.side, tif: 0 as const, postOnly: false, priceTicks: mv.priceTicks, qtyLots: qty };
         const params = { bucketWidthTicks: 10n, maxOrders: 10_000, stpPolicy: 1 as const };
@@ -259,13 +260,13 @@ describe("cross-book: hub cross matcher", () => {
       const requests = LOCAL.flatMap((u) => [...offers.get(u)!.keys()].filter(() => int(r, 4) === 0).map((offerId) => ({ offerId, accountId: u })));
       const ogCancel = ogRun(() => ogProcessCancels(ogHub(), requests)), rwCancel = rwRun(processOrderbookCancels(hub, requests));
       same(`${s}:cancel`, ogCancel.ok ? { ok: true, value: { txs: ogCancel.value.accountTxs, fills: ogCancel.value.crossJurisdictionFills, books: ogCancel.value.bookUpdates.map((b: any) => b.pairId) } } : ogCancel,
-        rwCancel.ok ? { ok: true, value: { txs: rwCancel.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx as never) })), fills: rwCancel.value.crossFills, books: [...rwCancel.value.books.keys()] } } : rwCancel);
+        rwCancel.ok ? { ok: true, value: { txs: rwCancel.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) })), fills: rwCancel.value.crossFills, books: [...rwCancel.value.books.keys()] } } : rwCancel);
       if (ogCancel.ok && ogCancel.value.crossJurisdictionFills.length > 0) bump("cancel-request");
       // the cross pass
       const ogOffers = incoming.map((o) => markWorkingOrderbookOffer(normalizeSwapOfferForOrderbook({ ...o, accountOutputVerified: true } as never, o.accountId)));
       const og = ogRun(() => ogProcessSwaps(ogHub(), ogOffers)), rw = rwRun(processOrderbookSwaps(hub, incoming));
       same(`${s}:match`, og.ok ? { ok: true, value: { txs: og.value.accountTxs, fills: og.value.crossJurisdictionFills, books: og.value.bookUpdates.map((b: any) => [b.pairId, computeBookCommitmentHash(b.book)]) } } : og,
-        rw.ok ? { ok: true, value: { txs: rw.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx as never) })), fills: rw.value.crossFills, books: [...rw.value.books].map(([p, b]) => [p, bookCommitmentHash(b)]) } } : rw);
+        rw.ok ? { ok: true, value: { txs: rw.value.accountTxs.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) })), fills: rw.value.crossFills, books: [...rw.value.books].map(([p, b]) => [p, bookCommitmentHash(b)]) } } : rw);
       if (!og.ok) { bump(`halt:${og.message.split(/[:=]/)[0]}`); continue; }
       for (const f of og.value.crossJurisdictionFills) bump(f.executionSourceAmount > 0n ? (f.cancelRemainder ? "fill-cancel" : "fill") : "cancel");
       if (og.value.bookUpdates.length > 0) bump("book-update");
@@ -278,7 +279,7 @@ describe("cross-book: hub cross matcher", () => {
       for (const [pairId, b] of rw.ok ? rw.value.books : []) expect(bookOrders(b).map((o) => [o.orderId, o.qtyLots])).toEqual(ogBook.getBookOrders(og.value.bookUpdates.find((u: any) => u.pairId === pairId)!.book).map((o: any) => [o.orderId, o.qtyLots]));
     }
     for (const k of ["fill", "cancel", "book-update", "cancel-request", "swap-matched-cross", "halt:ORDERBOOK_LIVE_PROJECTION_REJECT"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 40_000);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -298,15 +299,16 @@ import {
 } from "../xln.ts";
 import { TERMS } from "../xln_run.ts";
 
-describe("cross-book: book lifecycle Entity txs", () => {
+describe(seedTag("cross-book: book lifecycle Entity txs"), () => {
   const SIG: Readonly<Record<string, string>> = { [U1]: "0x" + "a1".repeat(20), [H1]: "0x" + "a2".repeat(20), [H2]: "0x" + "a3".repeat(20), [U2]: "0x" + "a4".repeat(20) };
+  const sig = (e: string): string => { const s = SIG[e]; if (s === undefined) throw new Error(`no signer for ${e}`); return s; };
   const hubProfile = { entityId: H1, name: "hub", spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: W("99"), minTradeSize: 0n, supportedPairs: [] };
   const ogEnv = { state: { timestamp: T0 }, runtimeSeed: RUNTIME_SEED } as never;
   const MUT = { mutableFrameState: true, storageChanges: [] } as never;
   const entries = (m: ReadonlyMap<string, unknown> | undefined) => (m === undefined || m.size === 0 ? null : [...m.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
   const params = { bucketWidthTicks: 10n, maxOrders: 10_000, stpPolicy: 1 as const };
   const ogColl = (m: ReadonlyMap<string, CrossRoute>) => {
-    const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
+    const c = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute) as Map<string, unknown>;
     for (const [k, v] of m) c.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(v as never));
     return c;
   };
@@ -316,7 +318,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       : routeOf(r, {
         orderId: `B${n}`, makerEntityId: U2, hubEntityId: H2, bookOwnerEntityId: shape === "remote" ? H1 : H2,
         source: { jurisdiction: S2, entityId: U2, counterpartyEntityId: H2, tokenId: 2, amount: 1n }, target: { jurisdiction: S1, entityId: H1, counterpartyEntityId: U1, tokenId: pick(r, [1, 3]), amount: 1n },
-        sourceSignerId: SIG[U2], sourceHubSignerId: SIG[H2], targetHubSignerId: SIG[H1], targetSignerId: SIG[U1],
+        sourceSignerId: sig(U2), sourceHubSignerId: sig(H2), targetHubSignerId: sig(H1), targetSignerId: sig(U1),
       });
     const sized: CrossRoute = shape === "local"
       ? { ...base, source: { ...base.source, amount: pick(r, [10n ** 9n, 7n * 10n ** 6n, BigInt(1 + int(r, 1e9))]) }, target: { ...base.target, amount: pick(r, [10n ** 21n, 3n * 10n ** 18n, 10n ** 12n * BigInt(1 + int(r, 1e6))]) } }
@@ -331,7 +333,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
     const rwBooks = new Map<string, Book>();
     const og: any = {
       entityId: self, timestamp: T0, accounts: new Map(), orderbookExt: ogExt,
-      config: { mode: "proposer-based", threshold: 1n, validators: [SIG[self]], shares: { [SIG[self]!]: 1n }, jurisdiction: ogJur(J1) },
+      config: { mode: "proposer-based", threshold: 1n, validators: [sig(self)], shares: { [sig(self)]: 1n }, jurisdiction: ogJur(J1) },
     };
     let swaps: Map<string, CrossRoute> | undefined;
     const mirror = int(r, 6);
@@ -359,7 +361,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
         admissions = unwrap(markAdmissionClosed(admissions, route.source.entityId, route.orderId, now, "x"));
       }
     }
-    const rw0: BookHost = { id: self, timestamp: T0, validators: [SIG[self]!], ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile }, swaps, admissions, accounts: new Map() };
+    const rw0: BookHost = { id: self, timestamp: T0, validators: [sig(self)], ext: { books: rwBooks, pairDimensions: new Map(), referrals: new Map(), hubProfile }, swaps, admissions, accounts: new Map() };
     const row = pick(r, ["none", "book", "row", "row", "skew"] as const), event = committedCrossOfferEvent(rw0, route);
     if (row !== "none" && event.ok) {
       const meta = ogRun(() => ogOB.buildCrossJurisdictionMarketOffer(normalizeSwapOfferForOrderbook(event.value as never, event.value.accountId) as never, self) as any);
@@ -406,13 +408,13 @@ describe("cross-book: book lifecycle Entity txs", () => {
       bump(kinds, og.ok ? (og.value.created as unknown[]).length > 0 ? "admitted" : msg.includes("duplicate") ? "duplicate" : msg.includes("pending") ? "pending" : msg.includes("reject") ? "reject" : "other" : kindOf(og));
     }
     for (const k of ["admitted", "duplicate", "CROSS_J_BOOK_ADMIT_WRONG_OWNER", "CROSS_J_BOOK_ADMIT_ROUTE_INVALID"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: book-owner fill progress on 500 random worlds (direct progress and matcher instructions; seq, ratio, cancel, stale, resize, re-materialize, remove): same state, outputs and halts as og", () => {
     const r = rng(0xf111), kinds = new Map<string, number>();
     for (let i = 0; i < 500; i++) {
       const w = worldOf(r, i, H1, pick(r, ["local", "local", "remote"] as const)), route = w.route;
-      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never);
+      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route);
       if (int(r, 2) === 0) {
         // og applyCrossJurisdictionBookFillToState
         const data: CrossProgress = {
@@ -441,7 +443,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       }
     }
     for (const k of ["progress:true", "progress:false", "fill:0", "fill:1", "CROSS_J_BOOK_PROGRESS_ADMISSION_MISSING", "CROSS_J_BOOK_PROGRESS_ADMISSION_NOT_ADMITTED", "CROSS_J_BOOK_PROGRESS_STALE", "CROSS_J_BOOK_PROGRESS_ORDER_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: removeCrossJurisdictionBookOrder on 400 random book owners (route drift, missing route, source, ack account, admission hash): same state, ack output and halts as og", () => {
     const r = rng(0x2e30), kinds = new Map<string, number>();
@@ -458,13 +460,13 @@ describe("cross-book: book lifecycle Entity txs", () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}:${String((og.value.messages as string[]).at(-1)).endsWith("removed")}` : kindOf(og));
     }
     for (const k of ["ok:1:true", "ok:0:false", "ok:1:false", "CROSS_J_BOOK_REMOVAL_ROUTE_MISMATCH", "CROSS_J_BOOK_REMOVAL_ROUTE_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: crossJurisdictionFillNotice at the source hub on 400 random mirrors (duplicate, stale conflict, clear requested, terminal -> clear request, local book removal): same state, outputs and halts as og", () => {
     const r = rng(0xf2ce), kinds = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
       const w = worldOf(r, i, H1, "local"), route = w.route;
-      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route as never);
+      const seq = Math.floor(Number(route.fillSeq ?? 0)), cur = ogCrossIndex.getCrossJurisdictionCommittedProofRatio(route);
       const data: CrossProgress = {
         orderId: int(r, 20) === 0 ? "other" : route.orderId, ...(int(r, 3) === 0 ? { routeHash: int(r, 4) === 0 ? "0x" + "ee".repeat(32) : route.routeHash } : {}),
         fillSeq: pick(r, [seq, seq + 1, seq + 1, seq + 2, 0]), cumulativeFillRatio: pick(r, [cur, Math.min(65_535, cur + 1 + int(r, 20_000)), 65_535, 65_535, int(r, 65_536)]), ...(int(r, 3) === 0 ? { cancelRemainder: true } : {}),
@@ -475,7 +477,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}:${String((og.value.messages as string[]).at(-1)).includes("applied")}` : kindOf(og));
     }
     for (const k of ["ok:0:true", "ok:1:true", "ok:0:false", "CROSS_J_FILL_ROUTE_MISSING"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: crossJurisdictionBookOrderRemoved at the source hub on 300 random acks (carried progress ahead or behind, terminal mirror, missing offer, hash drift, wrong hub): same state, clear request and halts as og", async () => {
     const r = rng(0x4e3d), kinds = new Map<string, number>();
@@ -496,7 +498,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       bump(kinds, og.ok ? `ok:${(og.value.outputs as unknown[]).length}` : og.message.split(":")[0]!);
     }
     for (const k of ["ok:0", "ok:1", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_STATE_MISSING", "CROSS_J_BOOK_REMOVAL_ACK_SOURCE_HUB_REQUIRED"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: routeRemoteCrossJurisdictionBookCancels on 300 random source hubs (sibling book owner, local book, no mirror, plain offers, wrong hub): same local cancels, removal requests, resolving admissions and halts as og", () => {
     const r = rng(0x7c4c), kinds = new Map<string, number>();
@@ -513,7 +515,7 @@ describe("cross-book: book lifecycle Entity txs", () => {
       if (swaps.size > 0) og.crossJurisdictionSwaps = ogColl(swaps);
       og.accounts = new Map([[U1, { state: { swapOffers: new Map(offers) } }]]);
       const account: HubAccount = { active: true, left: U1, right: H1, offers, queued: [] };
-      const host: BookHost = { id: self, timestamp: T0, validators: [SIG[self]!], swaps: swaps.size > 0 ? swaps : undefined, admissions, accounts: new Map([[U1, account]]) };
+      const host: BookHost = { id: self, timestamp: T0, validators: [sig(self)], swaps: swaps.size > 0 ? swaps : undefined, admissions, accounts: new Map([[U1, account]]) };
       const cancels = [...offers.keys(), "missing"].filter(() => int(r, 3) > 0).map((offerId) => ({ offerId, accountId: int(r, 12) === 0 ? U2 : U1 }));
       const ogOut = ogRun(() => { const res = ogProcessRoute(ogEnv, og, cancels as never); return { local: res.localBookCancels, admissions: entries(og.crossJurisdictionBookAdmissions === undefined ? undefined : new Map(og.crossJurisdictionBookAdmissions)), outputs: res.outputs.map((o: any) => ({ entityId: o.entityId, signerId: o.signerId, txs: o.entityTxs })) }; });
       const res = routeRemoteCancels(host, cancels), rw: Out<unknown> = res.ok ? { ok: true, value: { local: res.value.local, admissions: entries(res.value.host.admissions), outputs: res.value.outputs } } : rwRun(res);
@@ -521,14 +523,14 @@ describe("cross-book: book lifecycle Entity txs", () => {
       bump(kinds, ogOut.ok ? `ok:${(ogOut.value.outputs as unknown[]).length > 0}:${(ogOut.value.local as unknown[]).length > 0}` : ogOut.message.split(":")[0]!);
     }
     for (const k of ["ok:true:true", "ok:false:true", "CROSS_J_CANCEL_SOURCE_HUB_REQUIRED"]) expect([k, (kinds.get(k) ?? 0) > 0, [...kinds].join(",")]).toEqual([k, true, [...kinds].join(",")]);
-  });
+  }, 30_000);
 
   test("MATCH: assertRuntimeOutputAuthorization for the book lifecycle txs on 600 random envelopes (stored vs supplied route, sibling source, signer, target, self continuation)", () => {
     const r = rng(0xa071), outcomes = new Map<string, number>(), ids = [U1, H1, H2, U2, W("09")];
     for (let i = 0; i < 600; i++) {
       const route = lifeRoute(r, i, pick(r, ["local", "remote", "foreign"] as const));
       const target = pick(r, [H1, H1, H2, U1]), source = int(r, 5) === 0 ? target : pick(r, ids);
-      const signer = int(r, 10) < 7 ? (SIG[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", SIG[H1]!]);
+      const signer = int(r, 10) < 7 ? (SIG[source] ?? "0x" + "55".repeat(20)) : pick(r, ["0x" + "55".repeat(20), "", sig(H1)]);
       const drift: CrossRoute = int(r, 6) === 0 ? { ...route, routeHash: "0x" + "ee".repeat(32) } : route;
       const oid = int(r, 12) === 0 ? "other" : route.orderId, src = int(r, 10) === 0 ? U1 : route.source.entityId;
       const txOf = (): EntityTx => {
@@ -551,5 +553,5 @@ describe("cross-book: book lifecycle Entity txs", () => {
     }
     expect([...outcomes.keys()].includes("ok")).toBe(true);
     expect(outcomes.size).toBeGreaterThan(6);
-  });
+  }, 30_000);
 });

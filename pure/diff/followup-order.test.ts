@@ -4,6 +4,7 @@
 // same-j / cross-j swap txs, plus direct-payment forwards. They assert the same accept / refuse, returned Account txs in mempool order, the
 // Account worklist order, runtime events, swap events, lending book and paybook.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import {
   EMPTY_HTLC_INFRA, accountId, committedFollowups, createEntity, crontabOf, withCrontab, type Crontab, encryptOpaqueHtlc, genesisReplica, hashHtlcSecret, htlcEnvelopeHash, isLeft, replicaId, tokenId, wireTx,
@@ -16,7 +17,7 @@ import { PersistentAccountStateMap } from "../../core/account/state/persistent-s
 import { admitLocalAccountTx } from "../../core/account/input/local-tx-admission.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 
-let seed = 5150;
+let seed = seedOf(5150);
 const rng = (): number => {
   seed = (seed + 0x6d2b79f5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -71,7 +72,7 @@ const ogAccount = (self: EntityId, peer: EntityId, row: Row, offers: ReadonlyMap
   };
 };
 
-describe("followup-order: committed-frame followups of one accountInput (og committed-input.ts applySuccessfulAccountInput)", () => {
+describe(seedTag("followup-order: committed-frame followups of one accountInput (og committed-input.ts applySuccessfulAccountInput)"), () => {
   test("MATCH: 600 random inputs committing our frame and the peer's (lending, HTLC resolve / lock, same-j and cross-j swaps, direct forwards) -- og's accept / refuse, returned Account txs in mempool order, worklist order, runtime and swap events, lending book, paybook", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 600; i++) {
@@ -198,7 +199,7 @@ describe("followup-order: committed-frame followups of one accountInput (og comm
       // returned Account txs: each Account's mempool, in og's order
       for (const p of [peer, other]) expect(sortedJson((d.accountReplicas.get(p)?.mempool ?? []).map((t) => ogTx(t, self, p)))).toBe(sortedJson(ogState.accounts.get(p).mempool));
       // the worklist: the input's Account, then each Account a returned tx was admitted to, in admission order
-      expect([...new Set(d.touched ?? [])]).toEqual([...new Set(marked)]);
+      expect([...new Set<string>(d.touched ?? [])]).toEqual([...new Set(marked)]);
       expect(sortedJson((d.runtimeEvents ?? []).map((e) => ({ eventName: e.eventName, data: e.data })))).toBe(sortedJson(effectsOg.candidateEffects.filter((e: any) => e.kind === "runtimeEvent").map((e: any) => ({ eventName: e.eventName, data: e.data }))));
       // swap events in og's order, including og's same-j `accountOutputVerified` marker (followup-order #11)
       expect(sortedJson({ created: d.swaps?.created ?? [], cancelled: d.swaps?.cancelled ?? [], cancelRequests: d.swaps?.cancelRequests ?? [] }))

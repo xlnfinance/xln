@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { getEntityLeaderOrder, getEntityLeaderState } from "../../core/entity/consensus/leader/index.ts";
 import { calculateQuorumPower, isSingleSignerBoard } from "../../core/entity/consensus/replica-validation.ts";
@@ -32,7 +33,7 @@ const ctx = (signerId: Address, extra: Partial<{ from: EntityId }> = {}) => ({ .
 /** The fixture ctx names ALICE (the 1-of-1 lazy id); a multi-signer fixture Entity is its own lazy board id, so that placeholder resolves to the replica. */
 const applyEntityInput: typeof applyEntityInputAt = (r, input, c) => applyEntityInputAt(r, input, c.self === ALICE ? { ...c, self: r.state.id } : c);
 const openTo = (target: EntityId, extra: Record<string, unknown> = {}): EntityTx =>
-  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...extra } }) as EntityTx;
+  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...extra } }) as EntityTx;
 const open = openTo(BOB);
 const txs = (list: readonly EntityTx[], timestamp = 1n): EntityInput => ({ kind: "txs", timestamp, txs: list });
 const propose = (r: EntityReplica, signer: Address, list: readonly EntityTx[] = [open], timestamp = 1n) => applyEntityInput(r, txs(list, timestamp), ctx(signer));
@@ -43,14 +44,14 @@ const consensusFor = (outputs: readonly EntityOutput[], signer: Address): Entity
   outputs.flatMap((o) => ("input" in o && o.signerId.toLowerCase() === signer.toLowerCase() ? [o.input] : []));
 
 // og replica rng for randomized comparisons
-let seed = 7;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(7);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const addr = (i: number) => unwrap(address(`0x${(i + 16).toString(16).padStart(2, "0").repeat(20)}`));
 
-describe("entity-runtime: proposer selection (ER-1, ER-3)", () => {
+describe(seedTag("entity-runtime: proposer selection (ER-1, ER-3)"), () => {
   test("MATCH: og proposer = validators[0] (positional CEO) for validators [B,A]; A's replica forwards its mempool to B", () => {
-    const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never);
+    const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) });
     expect(og.activeValidatorId).toBe(B);
     const rw = teaching([[B, 1n], [A, 1n]], 2n);
     expect(allowedProposer(rw.state.quorum)).toBe(B);
@@ -67,7 +68,7 @@ describe("entity-runtime: proposer selection (ER-1, ER-3)", () => {
       const n = 1 + ri(4), ids = [...new Set(Array.from({ length: n }, () => ri(8)))].map(addr), shares = ids.map(() => BigInt(1 + ri(5)));
       const total = shares.reduce((a, b) => a + b, 0n), threshold = 1n + BigInt(ri(Number(total)));
       const rw = teaching(ids.map((a, j) => [a, shares[j] ?? 1n] as const), threshold);
-      const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) } as never);
+      const og = getEntityLeaderState({ entityId: ALICE, height: 0, prevFrameHash: "", config: ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold) });
       expect(allowedProposer(rw.state.quorum).toLowerCase()).toBe(og.activeValidatorId);
       expect(isSingleSigner(rw.state.quorum)).toBe(isSingleSignerBoard(ogConfig(ids, Object.fromEntries(ids.map((a, j) => [a, shares[j] ?? 1n])), threshold)));
     }
@@ -83,13 +84,13 @@ describe("entity-runtime: proposer selection (ER-1, ER-3)", () => {
     const message = { to: BOB, tx: { type: "accountInput", data: {} } } as unknown as EntityOutput;
     const routed = unwrap(convertOutput(rt, message, ALICE, 1n));
     expect(routed.signerId).toBe(B);
-    expect(getEntityLeaderState({ entityId: BOB, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) } as never).activeValidatorId).toBe(B);
+    expect(getEntityLeaderState({ entityId: BOB, height: 0, prevFrameHash: "", config: ogConfig([B, A], { [B]: 1n, [A]: 1n }, 2n) }).activeValidatorId).toBe(B);
     const consensus = unwrap(convertOutput(rt, { to: BOB, signerId: A, input: txs([]) }, BOB, 1n));
     expect(consensus).toEqual({ entityId: BOB, signerId: A, input: txs([]) });
   });
 });
 
-describe("entity-runtime: authority root (ER-2, H16)", () => {
+describe(seedTag("entity-runtime: authority root (ER-2, H16)"), () => {
   test("MATCH: frame authorityRoot == og computeEntityFrameAuthorityRoot for 40 random positional validator sets", () => {
     for (let i = 0; i < 40; i++) {
       const ids = [0, 1, 2, 3, 4, 5, 6, 7].sort(() => rng() - 0.5).slice(0, 2 + ri(3)).map(addr), shares = ids.map(() => BigInt(1 + ri(0xffff)));
@@ -133,7 +134,7 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
   };
 };
 
-describe("entity-runtime: entity state root commits every og field (H6)", () => {
+describe(seedTag("entity-runtime: entity state root commits every og field (H6)"), () => {
   test("MATCH: 30 random og-shaped EntityStates (entityId, height, timestamp, config+jurisdiction, nonces, reserves, profile, paybook, crontab, ...) == og computeCanonicalEntityConsensusStateHash", () => {
     for (let i = 0; i < 30; i++) {
       const { og, rw } = committedPair(i), withJ = rng() < 0.5;
@@ -149,8 +150,8 @@ describe("entity-runtime: entity state root commits every og field (H6)", () => 
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
     for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
       const ogValue = field === "paybook" ? { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } : value;
-      expect(rootRw({ [field]: value as never })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
-      expect(rootRw({ [field]: value as never })).not.toBe(rootRw({}));
+      expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
+      expect(rootRw({ [field]: value })).not.toBe(rootRw({}));
     }
     expect(rootRw({ notAField: 1 })).toBe(rootRw({}));
     expect(computeCanonicalEntityConsensusStateHash({ ...og, notAField: 1 })).toBe(computeCanonicalEntityConsensusStateHash(og));
@@ -173,14 +174,14 @@ describe("entity-runtime: entity state root commits every og field (H6)", () => 
     expect(frame.stateRoot).toBe(computeCanonicalEntityConsensusStateHash(ogState));
     const ogTxs = [{ type: "extendCredit", data: { counterpartyEntityId: CAROL, tokenId: 1, amount: 5n } }];
     const ogHash = createEntityFrameHashFromStateRoot("genesis", 1, 50, ogTxs as never, [], r.state.id, frame.stateRoot, frame.authorityRoot, frame.entityContext as never);
-    expect(unwrap(hashEntityFrame(frame))).toBe(ogHash);
+    expect<string>(unwrap(hashEntityFrame(frame))).toBe(ogHash);
     // og appendFinalProfileHash: the genesis frame always signs the profile descriptor hash
-    const profile = computeEntityProfileHash(ogState as never);
-    expect(frame.hashesToSign).toEqual(buildEntityHashesToSign(r.state.id, 1, ogHash, [{ hash: profile, type: "profile", context: `profile:${profile}` }]));
+    const profile = computeEntityProfileHash(ogState);
+    expect<readonly unknown[]>(frame.hashesToSign).toEqual(buildEntityHashesToSign(r.state.id, 1, ogHash, [{ hash: profile, type: "profile", context: `profile:${profile}` }]));
   });
 });
 
-describe("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)", () => {
+describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)"), () => {
   test("MATCH: threshold is >= over summed shares; B's manifest precommit completes [A,B] 2-of-2", () => {
     const cfg = ogConfig([A, B], { [A]: 1n, [B]: 1n }, 2n);
     expect(calculateQuorumPower(cfg, [A]) >= cfg.threshold).toBe(false);
@@ -259,7 +260,7 @@ describe("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-8, ER-9)
   });
 });
 
-describe("entity-runtime: validator replay (ER-6)", () => {
+describe(seedTag("entity-runtime: validator replay (ER-6)"), () => {
   const board = (signer: Address) => teaching([[A, 1n], [B, 1n]], 2n, signer);
   test("MATCH: proposer -> proposal -> validator replays, signs, locks, reaches quorum, commits and broadcasts; both replicas end on the same state", () => {
     const leader = unwrap(propose(board(A), A, [open], 5n));
@@ -318,7 +319,7 @@ describe("entity-runtime: validator replay (ER-6)", () => {
   });
 });
 
-describe("entity-runtime: mempool (ER-10, ER-21)", () => {
+describe(seedTag("entity-runtime: mempool (ER-10, ER-21)"), () => {
   test("MATCH (og admission): txs arriving while a frame is proposed are queued and proposed after the commit", () => {
     const p = unwrap(propose(teaching([[A, 1n], [B, 1n]], 2n), A));
     const queued = unwrap(propose(p.replica, A, [openTo(CAROL)]));
@@ -345,7 +346,7 @@ describe("entity-runtime: mempool (ER-10, ER-21)", () => {
   });
 });
 
-describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
+describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), () => {
   test("MATCH (og evict-and-retry): only the refused tx leaves the frame; the rest commits", () => {
     const bad: EntityTx = { type: "directPayment", data: { targetEntityId: CAROL, tokenId: unwrap(tokenId("1")), amount: 5n, route: [ALICE, CAROL], deliveryMode: "direct" } };
     const p = unwrap(propose(teaching([[A, 1n]], 1n), A, [open, bad]));
@@ -366,7 +367,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
     const sent = p.outputs[0];
     if (sent === undefined || !("tx" in sent) || sent.tx.data.kind !== "ack_frame") throw new Error("no frame");
     expect(sent.tx.data.frame.height).toBe(1n);
-    expect(sent.tx.data.frame.txs.map((t) => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
+    expect(sent.tx.data.frame.txs.map((t): [string, string | undefined] => [t.type, "tokenId" in t ? t.tokenId : undefined])).toEqual([["add_delta", "5"], ["add_delta", "1"], ["add_delta", "3"], ["add_delta", "2"], ["set_credit_limit", "5"]]);
   });
   test("MATCH (og direct-payment.ts): amount < 1 is a silent no-op, a non-bilateral direct route and a trusted route are refused, a paid hop queues a payment and wakes validators[0]", () => {
     const opened = unwrap(propose(teaching([[A, 1n]], 1n), A)).replica;
@@ -383,7 +384,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
     expect(unfunded.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
     const credit: EntityTx = { type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n } };
     const extended = unwrap(propose(opened, A, [credit], 2n));
-    expect(extended.replica.accountReplicas.get(BOB)?.mempool.at(-1)).toEqual({ type: "set_credit_limit", tokenId: "1", limit: 5n });
+    expect(extended.replica.accountReplicas.get(BOB)?.mempool.at(-1)).toEqual({ type: "set_credit_limit", tokenId: unwrap(tokenId("1")), limit: 5n });
     expect(extended.outputs).toEqual([{ to: ALICE, signerId: A, input: txs([], 2n) }]);
   });
   test("MATCH (og createInboundAccountState): the peer opens its side from the first Account frame; no openAccount output is needed", () => {
@@ -432,7 +433,7 @@ describe("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)", () => {
   });
 });
 
-describe("entity-runtime: runtime recovery (ER-23)", () => {
+describe(seedTag("entity-runtime: runtime recovery (ER-23)"), () => {
   test("MATCH (og outbox-payload.ts ordered rows): recoverRuntime binds the persisted outbox positionally; a reordered outbox is refused", () => {
     const credit = (to: EntityId): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: unwrap(tokenId("1")), amount: 1n } });
     const alice = unwrap(propose(teaching([[A, 1n]], 1n), A, [open])).replica;

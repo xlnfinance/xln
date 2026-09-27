@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   createEntity, foldTxs, initJBatch, setRebalanceSubmittedAt, batchOfOg, encodeBatch,
   type AccountReplica, type EntityId, type EntityState, type EntityTx,
@@ -40,7 +41,7 @@ import { handleBoardHandoverEntityTx } from "../../core/entity/tx/handlers/board
 import { encodeBoard, hashBoard } from "../../core/entity/factory.ts";
 import { carolAddr } from "../xln_run.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xe7_1a);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -52,7 +53,7 @@ const env: any = { quietRuntimeLogs: true, state: { jReplicas: new Map([["j", { 
 /** ALICE's Entity (one validator) with an Account to BOB and random reserves; `named` puts the J replica name in its config. */
 const aliceEntity = (reserves: ReadonlyMap<number, bigint>, named = true): EntityState => unwrap(createEntity({
   id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]),
-  jurisdictionConfig: { ...(named ? { name: "j" } : {}), entityProviderAddress: EP }, committed: { reserves: new Map(reserves) as never },
+  jurisdictionConfig: { ...(named ? { name: "j" } : {}), entityProviderAddress: EP }, committed: { reserves: new Map(reserves) },
 })).state;
 /** og EntityState around the rewrite's committed jBatchState and reserves, with its Accounts behind a candidate-map shell. */
 const ogState = (s: EntityState, replicas: ReadonlyMap<EntityId, AccountReplica>, timestamp: number): any => {
@@ -100,7 +101,7 @@ const ogHandler = (tx: EntityTx, st: any): Promise<any> => {
 };
 const ogJTxOf = (out: any): any => out.jOutputs?.[0]?.jTxs?.[0];
 
-describe("entity-j: Entity-level J-batch txs on the committed jBatchState (og entity/tx/handlers/j-batch/*)", () => {
+describe(seedTag("entity-j: Entity-level J-batch txs on the committed jBatchState (og entity/tx/handlers/j-batch/*)"), () => {
   test("MATCH: 40 random runs of r2r / r2e / e2r / r2c / j_broadcast / j_rebroadcast / j_abort_sent_batch / j_clear_batch / mintReserves give og's verdict, jBatchState, messages, J outputs and jBatch hashes to sign", async () => {
     const seen = new Map<string, number>();
     for (let run = 0; run < 40; run++) {
@@ -161,7 +162,7 @@ describe("entity-j: Entity-level J-batch txs on the committed jBatchState (og en
     const queued = unwrap(foldTxs(cases[2]!, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }], { verify: verifiers.verify, timestamp: 5n })).draft.state;
     cases.push(queued);
     for (const s of cases) {
-      const og = ogState(s, replicas, 9), ogR = await ogRun(() => handleJBroadcast(og, { type: "j_broadcast", data: {} } as any, env, true));
+      const og = ogState(s, replicas, 9), ogR = await ogRun(() => handleJBroadcast(og, { type: "j_broadcast", data: {} }, env, true));
       const f = foldTxs(s, replicas, [{ type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: 9n });
       expect(f.ok).toBe(ogR.ok);
       if (!f.ok || !ogR.ok) { expect((f as any).error.reason).toBe((ogR as any).code); continue; }
@@ -177,6 +178,7 @@ const npick = <X,>(xs: readonly X[]): X => xs[nri(xs.length)] as X;
 const nhex = (bytes: number): string => `0x${Array.from({ length: bytes * 2 }, () => "0123456789abcdef"[nri(16)]).join("")}`;
 const SECP_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 const wallets = [1, 2, 3].map((i) => new ethers.Wallet(`0x${String(i).padStart(2, "0").repeat(32)}`));
+const other = (w: ethers.Wallet): ethers.Wallet => { const o = wallets.find((x) => x !== w); if (o === undefined) throw new Error("one wallet only"); return o; };
 /** A random signed transaction of type 0 (EIP-155 or pre-155), 1 or 2, serialized by ethers. */
 const signedTx = (over: { to?: string; data?: string; chainId?: bigint; nonce?: number; value?: bigint; type?: number; wallet?: ethers.Wallet } = {}): string => {
   const type = over.type ?? npick([0, 0, 1, 2, 2]), chainId = over.chainId ?? npick([31337n, 1n, 0n, 8453n]);
@@ -189,19 +191,21 @@ const signedTx = (over: { to?: string; data?: string; chainId?: bigint; nonce?: 
   tx.signature = (over.wallet ?? npick(wallets)).signingKey.sign(tx.unsignedHash);
   return tx.serialized;
 };
+/** Flip one random bit of a copy (the byte index is drawn before the bit). */
+const flipByte = (b: Uint8Array): string => { const i = nri(b.length); b[i] = (b[i] ?? 0) ^ (1 << nri(8)); return ethers.hexlify(b); };
 /** One structural mutation of a serialized transaction, at the RLP-field level or on the raw bytes. */
-const mutateTx = (raw: string): string => { try { return mutateFields(raw); } catch { const b = ethers.getBytes(raw).slice(); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); } };
+const mutateTx = (raw: string): string => { try { return mutateFields(raw); } catch { return flipByte(ethers.getBytes(raw).slice()); } };
 const mutateFields = (raw: string): string => {
   const bytes = ethers.getBytes(raw), typed = bytes[0]! < 0x7f, prefix = typed ? ethers.hexlify(bytes.slice(0, 1)) : "0x";
   let decoded: unknown;
   try { decoded = ethers.decodeRlp(typed ? bytes.slice(1) : bytes); } catch { decoded = null; }
-  if (!Array.isArray(decoded) || decoded.length < 6 || decoded.some((f) => typeof f !== "string" && !Array.isArray(f))) { const b = new Uint8Array(bytes); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); }
+  if (!Array.isArray(decoded) || decoded.length < 6 || decoded.some((f) => typeof f !== "string" && !Array.isArray(f))) return flipByte(new Uint8Array(bytes));
   const fields = decoded as any[], sig = fields.length - 3;
   const encode = (fs: unknown[]): string => ethers.concat([prefix, ethers.encodeRlp(fs as never)]);
   const big = (h: string): bigint => (h === "0x" ? 0n : BigInt(h)), be = (n: bigint): string => (n === 0n ? "0x" : ethers.toBeHex(n));
   const set = (i: number, v: unknown): string => { const fs = [...fields]; fs[i] = v; return encode(fs); };
   switch (nri(17)) {
-    case 0: { const b = new Uint8Array(bytes); b[nri(b.length)] ^= 1 << nri(8); return ethers.hexlify(b); }
+    case 0: return flipByte(new Uint8Array(bytes));
     case 1: return ethers.hexlify(bytes.slice(0, Math.max(1, bytes.length - 1 - nri(4))));
     case 2: return ethers.concat([raw, npick(["0x00", "0x80", "0xc0"])]);
     case 3: { const i = nri(typed ? 7 : 5); return set(i, ethers.concat(["0x00", fields[i]])); }
@@ -235,14 +239,14 @@ const rewriteView = (raw: string): unknown => {
   return { type: t.type, hash: t.hash, from: t.from === null ? null : t.from.ok ? t.from.value : "ERR", chainId: t.chainId, nonce: t.nonce, to: t.to, value: t.value, data: t.data };
 };
 
-describe("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.from)", () => {
+describe(seedTag("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.from)"), () => {
   test("MATCH (randomized): legacy EIP-155 / pre-155, EIP-2930 and EIP-1559 transactions and their mutations -- same refusal, hash, sender, chain, nonce, to, value, data", () => {
     let accepted = 0, refused = 0, mutated = 0;
     for (let i = 0; i < 1500; i++) {
       let raw = signedTx();
       for (let m = nri(3); m > 0; m--) { raw = mutateTx(raw); mutated++; }
       const og = ethersView(raw);
-      expect(rewriteView(raw)).toEqual(og as never);
+      expect(rewriteView(raw)).toEqual(og);
       if (og === "REFUSED") refused++; else accepted++;
     }
     expect(accepted).toBeGreaterThan(400);
@@ -258,7 +262,7 @@ describe("entity-j RJ-9: signed EVM transaction parser (ethers v6 Transaction.fr
   });
 });
 
-describe("entity-j RJ-9: durable numbered-registration intents (og numbered-registration-intent.ts)", () => {
+describe(seedTag("entity-j RJ-9: durable numbered-registration intents (og numbered-registration-intent.ts)"), () => {
   const iface = EntityProvider__factory.createInterface();
   const NDEP = "0x5fbdb2315678afecb367f032d93f642f64180aa3", CHAIN = 31337, SEED = `0x${"5e".repeat(64)}`;
   const word = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
@@ -293,20 +297,20 @@ describe("entity-j RJ-9: durable numbered-registration intents (og numbered-regi
   test("MATCH (randomized): record / repeat / conflict / quarantine / complete intents with certified evidence and imported replicas -- same decisions and the same durable store", async () => {
     const tally = { recorded: 0, refused: 0, completed: 0, quarantined: 0 };
     const refusals = new Set<string>();
-    for (let run = 0; run < 40; run++) {
+    for (let run = 0, more = untilCovered(40, () => tally.recorded > 6 && tally.refused > 6 && tally.completed > 2 && refusals.size > 8); more(run); run++) {
       const seed = `entity-j-numbered-${run}`, env = createEmptyEnv(seed) as any;
       registerSignerKey(env, env.runtimeId, deriveSignerKeySync(seed, "1"));
       const replica = { name: "Local", blockNumber: 7n, stateRoot: null, mempool: [], blockDelayMs: 300, lastBlockTimestamp: 0, position: { x: 0, y: 50, z: 0 }, chainId: CHAIN, contracts: { depository: NDEP, entityProvider: EP }, watcherConfirmationDepth: 0, entityProviderDeploymentBlock: 1 };
       env.state.jReplicas.set("Local", replica);
       let rt: Runtime = createRuntime([clone(replica) as unknown as JReplica], env.runtimeId);
-      const jurisdiction = { name: "Local", chainId: CHAIN, depositoryAddress: NDEP, entityProviderAddress: EP };
+      const jurisdiction = { address: NDEP, name: "Local", chainId: CHAIN, depositoryAddress: NDEP, entityProviderAddress: EP };
       const payer = npick(wallets), local = aliceAddr.toLowerCase();
       const definitions = Array.from({ length: 1 + nri(3) }, (_, i) => {
         const validators = npick([[aliceAddr, bobAddr], [aliceAddr], [bobAddr, aliceAddr], [bobAddr]]);
         const owned = validators.includes(aliceAddr) && nri(4) > 0;
         return { name: `numbered-${run}-${i}`, validators, threshold: BigInt(1 + nri(validators.length)), ...(owned ? { localSignerId: aliceAddr, entitySeed: SEED } : { localSignerId: null, entitySeed: null }) };
       });
-      const request: any = buildNumberedRegistrationRequest(env, { ...(nri(2) === 0 ? { intentId: nhex(32) } : {}), jurisdiction, payerSignerId: payer.address, entities: definitions as never });
+      const request: any = buildNumberedRegistrationRequest(env, { ...(nri(2) === 0 ? { intentId: nhex(32) } : {}), jurisdiction, payerSignerId: payer.address, entities: definitions });
       const sign = (req: any, over: Parameters<typeof signedTx>[0] = {}): { raw: string; hash: string; nonce: number } => {
         const nonce = over.nonce ?? nri(20), raw = signedTx({ to: EP, data: encodeNumberedRegistrationCalldata(req), chainId: BigInt(CHAIN), value: 0n, wallet: payer, nonce, ...over });
         return { raw, hash: ethers.keccak256(raw), nonce };
@@ -319,7 +323,7 @@ describe("entity-j RJ-9: durable numbered-registration intents (og numbered-regi
       else if (defect === 1) pending = { ...pending, transactionHash: nhex(32) };
       else if (defect === 2) pending = { ...pending, transactionNonce: pending.transactionNonce + 1 };
       else if (defect === 3) pending = { ...pendingOf(request, { to: nhex(20) }) };
-      else if (defect === 4) pending = { ...pendingOf(request, { wallet: wallets.find((w) => w !== payer) }) };
+      else if (defect === 4) pending = { ...pendingOf(request, { wallet: other(payer) }) };
       else if (defect === 5) pending = { ...pendingOf(request, { data: nhex(40) }) };
       else if (defect === 6) pending = { ...pendingOf(request, { chainId: npick([1n, 0n]), type: 0 }) };
       else if (defect === 7) pending = { ...pendingOf(request, { value: 1n }) };
@@ -373,7 +377,7 @@ describe("entity-j RJ-9: durable numbered-registration intents (og numbered-regi
         const encoded = iface.encodeEventLog(iface.getEvent("EntityRegistered"), [entityId, BigInt(entityNumber), registered]);
         const receipt = { transactionHash: pending.transactionHash, transactionIndex: 0, blockNumber: height, blockHash, type: 2, status: 1, cumulativeGasUsed: 21_000, logsBloom: `0x${"00".repeat(256)}`,
           logs: [{ address: EP, topics: encoded.topics, data: encoded.data, blockNumber: height, blockHash, transactionHash: pending.transactionHash, transactionIndex: 0, logIndex: 0 }] };
-        const root = await computeCanonicalReceiptsRoot([receipt] as never), proof = (await createCanonicalReceiptProofs([receipt] as never, root)).get(0) as object;
+        const root = await computeCanonicalReceiptsRoot([receipt]), proof = (await createCanonicalReceiptProofs([receipt], root)).get(0) as object;
         const log = { address: EP, topics: encoded.topics.map((t) => t.toLowerCase()), data: encoded.data.toLowerCase(), blockNumber: height, blockHash, transactionHash: pending.transactionHash, transactionIndex: 0, logIndex: 0, index: 0, receiptProof: { ...proof, receiptLogIndex: 0 } };
         const evidence = buildCertifiedRegistrationEvidence(env, replica as never, "EntityRegistered", log as never, { observedThroughHeight: height, observedTipBlockHash: blockHash, observedHeadHeight: height, confirmationDepth: 0 });
         if (nri(10) > 0) {
@@ -450,14 +454,19 @@ const signedRange = (ogSt: any, finalized: number, sent: any, defect: string): R
     eventHistoryRoot, rangeHash: defect === "rangeHash" ? jword() : rangeHash, signature };
 };
 
-describe("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)", () => {
+describe(seedTag("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)"), () => {
   test("MATCH (randomized): signed ranges of reserve / debt / AccountSettled / HankoBatchProcessed events and envelope defects -- same verdict, reserves, debts, jBatchState, certified J head, board finality, messages, dirty Accounts and follow-up outputs", async () => {
     const seen = new Map<string, number>();
-    for (let run = 0; run < 45; run++) {
-      let state = aliceEntity(new Map([[1, BigInt(jri(200))], [2, BigInt(jri(60))]]));
+    const wanted = ["clean:ok", "stale:ok", "ahead:refused", "jurisdiction:refused", "root:refused", "from:refused", "signature:refused", "rangeHash:refused",
+      "RESERVE", "DEBT:", "DEBT PAID", "DEBT FORGIVEN", "OBSERVED", "jBatch finalized", "quarantined", "snapshot | Block", "delta | Block",
+      "DEBT_LEDGER_DIVERGENCE", "DEBT_CREATED_AMOUNT_INVALID", "EXTERNAL_WALLET_BASELINE_MISSING", "EXTERNAL_WALLET_OWNER_NOT_SIGNER"];
+    for (let run = 0, more = untilCovered(45, () => wanted.every((k) => (seen.get(k) ?? 0) > 0)); more(run); run++) {
+      const reserve1 = BigInt(jri(200)), reserve2 = BigInt(jri(60));
+      let state = aliceEntity(new Map([[1, reserve1], [2, reserve2]]));
       let replicas: ReadonlyMap<EntityId, AccountReplica> = new Map([[BOB, genesisAB() as AccountReplica]]);
       let t = 1_000;
-      if (jrng() < 0.6) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
+      // a sent batch to settle against, when the reserve covers the r2r
+      if (jrng() < 0.6 && reserve1 >= 5n) state = unwrap(foldTxs(state, replicas, [{ type: "r2r", data: { toEntityId: OTHER, tokenId: 1, amount: 5n } }, { type: "j_broadcast", data: {} }], { verify: verifiers.verify, timestamp: BigInt(t) })).draft.state;
       let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };
       for (let step = 0; step < 8; step++) {
         t += 1 + jri(9);
@@ -498,9 +507,7 @@ describe("entity-j: Entity-level j_event (og entity/tx/j-events.ts applyJEvent)"
         carry = { height: 0, lastFinalizedJHeight: next.lastFinalizedJHeight, jHistoryFinality: next.jHistoryFinality, certifiedBoardState: next.certifiedBoardState, outDebtsByToken: next.outDebtsByToken, inDebtsByToken: next.inDebtsByToken, ...(next.externalWallet ? { externalWallet: next.externalWallet } : {}) };
       }
     }
-    for (const k of ["clean:ok", "stale:ok", "ahead:refused", "jurisdiction:refused", "root:refused", "from:refused", "signature:refused", "rangeHash:refused"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-    for (const k of ["RESERVE", "DEBT:", "DEBT PAID", "DEBT FORGIVEN", "OBSERVED", "jBatch finalized", "quarantined", "snapshot | Block", "delta | Block"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-    for (const k of ["DEBT_LEDGER_DIVERGENCE", "DEBT_CREATED_AMOUNT_INVALID", "EXTERNAL_WALLET_BASELINE_MISSING", "EXTERNAL_WALLET_OWNER_NOT_SIGNER"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
+    for (const k of wanted) expect([k, seen.get(k) ?? 0]).not.toEqual([k, 0]);
   }, 120_000);
 });
 
@@ -554,13 +561,13 @@ const handoverCase = (variant: string): { board: any; activationFor: (oldHash: s
   };
 };
 
-describe("entity-j RJ-10: boardHandover (og board-handover.ts, frame config derived inside consensus)", () => {
+describe(seedTag("entity-j RJ-10: boardHandover (og board-handover.ts, frame config derived inside consensus)"), () => {
   test("MATCH (randomized): certified BoardActivated handovers and their defects -- same frame authority verdict, handler verdict, new board, leader and certified registry", async () => {
     const variants = ["ok", "ok", "chain2", "bobFirst", "badPrev", "hashMismatch", "noActivation", "upper", "shareUpper", "gossip", "threshold0", "thresholdHigh", "dup", "outsider", "noShares", "shapeAlone", "shapeReversed", "twice", "unregistered", "wrongRegistration", "nested", "nestedFirst"];
     const seen = new Map<string, number>();
     for (let run = 0; run < 66; run++) {
       const variant = variants[run % variants.length]!;
-      let state = unwrap(createEntity({ id: NUM, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: EP }, committed: { reserves: new Map([[1, 10n]]) as never } })).state;
+      let state = unwrap(createEntity({ id: NUM, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: EP }, committed: { reserves: new Map([[1, 10n]]) } })).state;
       const replicas: ReadonlyMap<EntityId, AccountReplica> = new Map();
       const ogEnv: any = { quietRuntimeLogs: true, infrastructure: {} };
       let carry: any = { height: 0, lastFinalizedJHeight: 0, outDebtsByToken: new Map(), inDebtsByToken: new Map() };

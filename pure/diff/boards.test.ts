@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   applyBoardRegistryEvent, boardProof, emptyBoardRegistry, EMPTY_CERTIFIED_BOARD_ROOT, hashBoardNode, lookupBoardRecord, reachableBoardNodes, verifyBoardProof, advanceBoardFinality, boardStackKey,
   applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
-  type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
+  type Address, type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
 } from "../xln.ts";
 import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, unwrap, verifiers } from "../xln_run.ts";
 import { assertEntityConfigBoardAuthority, buildQuorumHanko } from "../../core/hanko/signing.ts";
@@ -21,8 +22,8 @@ import {
   advanceCertifiedBoardFinality, applyCertifiedBoardRegistryEvent, collectReachableCertifiedBoardNodes, createCertifiedBoardProof, getCertifiedBoardStackKey, lookupCertifiedBoardRecord, verifyCertifiedBoardProof,
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
 
-let seed = 11;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(11);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const word = (n: bigint | number): string => `0x${BigInt(n).toString(16).padStart(64, "0")}`;
@@ -39,7 +40,7 @@ const toRewrite = (e: OgEvent): JEvent => {
   return { type: "ReserveUpdated", entity: word(2), tokenId: 1n, newBalance: 5n, meta };
 };
 
-describe("certified-board registry (og jurisdiction/machine/board-registry)", () => {
+describe(seedTag("certified-board registry (og jurisdiction/machine/board-registry)"), () => {
   test("MATCH: stack key validation equals og getCertifiedBoardStackKey", () => {
     const cases = [JUR, { ...JUR, chainId: 0 }, { ...JUR, depositoryAddress: "0x5FbDB2315678afecb367f032d93F642f64180aa3" }, { ...JUR, depositoryAddress: "0x5fbdb2315678afecb367f032d93f642f64180aa" },
       { ...JUR, entityProviderAddress: "E7f1725E7734CE288F8367e1Bb143E90bb3F0512" }, { ...JUR, entityProviderAddress: "0xE7f1725E7734ce288F8367e1Bb143E90bb3F0512" }, { ...JUR, chainId: 1.5 }];
@@ -96,7 +97,7 @@ describe("certified-board registry (og jurisdiction/machine/board-registry)", ()
       const reach = reachableBoardNodes(nodes, [state.boardRegistryRoot]);
       expect(reach.ok && new Set(reach.value.keys())).toEqual(new Set(collectReachableCertifiedBoardNodes(ogNodes, [ogState.boardRegistryRoot]).keys()));
     }
-  });
+  }, 40_000);
 
   test("MATCH: tampered proofs, finality advance and empty registries refuse like og", () => {
     const empty = emptyBoardRegistry(JUR);
@@ -163,7 +164,7 @@ const ogConfigOf = (s: EntityState, withJ: boolean) => {
 };
 const reasonOf = (r: { ok: boolean; error?: unknown }): string => (r.ok ? "ok" : String((r.error as { reason?: string }).reason ?? (r.error as { _tag: string })._tag));
 
-describe("ER-4b: quorum board binding (og assertQuorumBoardBinding)", () => {
+describe(seedTag("ER-4b: quorum board binding (og assertQuorumBoardBinding)"), () => {
   const SIGNERS = [aliceAddr, bobAddr, carolAddr] as const;
   test("MATCH: 200 random boards x {lazy id, certified match, certified mismatch, unregistered, no registry, no jurisdiction} give og's assertEntityConfigBoardAuthority verdict", async () => {
     const seen = new Set<string>();
@@ -213,14 +214,14 @@ describe("ER-4b: quorum board binding (og assertQuorumBoardBinding)", () => {
   });
 });
 
-describe("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_ROOT_FIELDS)", () => {
+describe(seedTag("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_ROOT_FIELDS)"), () => {
   test("MATCH: the committed registry section moves the root exactly as og's computeCanonicalEntityConsensusStateHash", () => {
     const members = new Map([[aliceAddr, { shares: 1n }]]), id = unwrap(entityId(word(6)));
     const base = unwrap(createEntity({ id, jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
     const { state, ogRegistry } = observe(base.state, [foundation, registered(id, word(77))]);
     const ogOf = (extra: Record<string, unknown>): any => ({
       entityId: id, height: 0, timestamp: 0, accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
-      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { name: "j", address: "", ...OG_J } },
+      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { address: "", ...OG_J } },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, ...extra,
     });
     const withJ = { ...state, jurisdictionConfig: { entityProviderAddress: JUR.entityProviderAddress } };
@@ -232,7 +233,7 @@ describe("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_
   });
 });
 
-describe("entity command board from the certified registry (og resolveEntityCommandBoard)", () => {
+describe(seedTag("entity command board from the certified registry (og resolveEntityCommandBoard)"), () => {
   test("MATCH: a certified numbered Entity signs commands at its record's epoch; a registry board that is not the config board refuses", () => {
     const members = new Map([[bobAddr, { shares: 1n }]]), id = word(8), board = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
     const base = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
@@ -248,7 +249,7 @@ describe("entity command board from the certified registry (og resolveEntityComm
   });
 });
 
-describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.ts, j-events-entity-provider-action.ts, j-events-board.ts)", () => {
+describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-action.ts, j-events-entity-provider-action.ts, j-events-board.ts)"), () => {
   const EP_J = { ...JCONF, name: "j" };
   const ogEnv = (nodes: Map<string, any>): any => ({
     state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) },
@@ -362,12 +363,12 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
     const frameHash = unwrap(hashEntityFrame(p.frame));
     // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash (og's genesis profile is all empty text)
     const profile = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile: { name: "", isHub: false, avatar: "", bio: "", website: "" }, accounts: new Map(), config: { jurisdiction: { ...OG_J, ...EP_J } } } as never);
-    expect(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
+    expect<readonly unknown[]>(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
     expect(p.frame.hashesToSign.length).toBe(3);
   });
 });
 
-describe("CONTROL board proposal and activation (og entity/tx/handlers/control-board-proposal.ts)", () => {
+describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/control-board-proposal.ts)"), () => {
   const EP_J = { ...JCONF, name: "j" };
   const og = async (f: () => any): Promise<{ ok: true; value: any } | { ok: false; code: string }> => { try { return { ok: true, value: await f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
   const realVerify = (d: string, hanko: string, entity: string, authority?: { readonly registeredBoardHash?: string | undefined }): boolean => verifyAccountHanko(hanko, d, entity, authority?.registeredBoardHash).ok;
@@ -382,9 +383,9 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
     const uState = observe(uBase.state, events).state;
     const env: any = { state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) }, infrastructure: { certifiedBoardNodes: ogNodes } };
     const ogState = (): any => ({ entityId: S, height: 0, timestamp: 77, config: ogConfigOf(state, true), certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], S, computeEntityAccountValueHash) });
-    const consent = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
-    const seen = new Set<string>();
-    for (let i = 0; i < 60; i += 1) {
+    const consent = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+    const seen = new Set<string>(), wanted = ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"];
+    for (let i = 0, more = untilCovered(60, () => wanted.every((v) => seen.has(v))); more(i); i += 1) {
       const activate = rng() < 0.2;
       const target = pick([T, T, T, X, U, "0x12", T.toUpperCase().replace("0X", "0x")]);
       let tx: EntityTx;
@@ -408,11 +409,11 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
       expect((f.value.draft.events ?? []).map((e) => e.message)).toEqual(readEntityFrameEventMessages(ogS));
       seen.add(`consents:${(ogR.value.jOutputs[0].jTxs[0].data.supporterVotes ?? []).length}`);
     }
-    for (const v of ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"]) expect(seen.has(v)).toBe(true);
-  });
+    for (const v of wanted) expect([v, seen.has(v)]).toEqual([v, true]);
+  }, 30_000);
 });
 
-describe("AC-13b receiving side: the Entity supplies counterpartyCertifiedBoard from its registry (og input-phases.ts)", () => {
+describe(seedTag("AC-13b receiving side: the Entity supplies counterpartyCertifiedBoard from its registry (og input-phases.ts)"), () => {
   test("MATCH: a board_hanko_refresh for a committed Account is checked against the sender's certified board record; without one the Account refuses (og CERTIFIED_BOARD_MISSING)", () => {
     const door = (self: EntityId): DoorContext => ({ verify: hankoVerify, self, now: NOW });
     const a0 = unwrap(admit(genesisAB(), [{ type: "add_delta", tokenId: unwrap(tokenId("1")) }]));

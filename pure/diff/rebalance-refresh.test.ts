@@ -3,10 +3,11 @@
 // lending_overdue deadline (scheduler/derived-deadlines.ts, tx/handlers/account/committed-lending-close.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, outputs and state.
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   accountId, createEntity, crontabTaskHasPendingWork, executeCrontab, genesisReplica, initCrontab, rebalanceAccountIds, tokenId, withCrontab, crontabOf, ZERO_WORD,
   applyBoardJEvent, counterpartyProposer, rearmBoardRefreshes, derivedDeadlines, entityId, quorumBoardHash, quorumHanko, scheduleHook,
-  type AccountReplica, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
+  type AccountReplica, type Address, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, TERMS, aliceAddr, bobAddr, carolAddr, crypto, keyOf, signLazyAccountHanko, unwrap } from "../xln_run.ts";
 import { applyCertifiedBoardJEvent } from "../../core/entity/tx/j-events-board.ts";
@@ -22,8 +23,8 @@ import { PersistentAccountStateMap } from "../../core/account/state/persistent-s
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
 
-let seed = 29;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(29);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
@@ -80,10 +81,11 @@ const readyWorkspace = (hubIsLeft: boolean): SettlementWorkspace => ({
   ...(rng() < 0.85 ? (hubIsLeft ? { rightHanko: "0xbeef" } : { leftHanko: "0xbeef" }) : {}),
 });
 
-describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)", () => {
+describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)"), () => {
   test("MATCH: 400 random hubs (R→C requests by strategy / policy / fee / reserve, submitted markers, C→R withdrawals and ready workspaces, sent-batch latch and staleness, manual broadcast, pair limits) -- og's outputs, J batch, markers, task and halts", async () => {
     const counts = new Map<string, number>();
-    for (let i = 0; i < 400; i++) {
+    const wanted = ["settle_propose", "settle_execute", "j_broadcast", "j_abort_sent_batch", "r2c", "halt:REBALANCE_REQUEST_FEE_STATE_MISSING", "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN"];
+    for (let i = 0, more = untilCovered(400, () => wanted.every((k) => (counts.get(k) ?? 0) > 3)); more(i); i++) {
       const hub = pick([ALICE, BOB, CAROL]), peers = [ALICE, BOB, CAROL].filter((p) => p !== hub) as EntityId[];
       const accts: Acct[] = peers.map((peer) => {
         const hubIsLeft = hub < peer, toks = [1, 3].filter(() => rng() < 0.8).map((t) => randomTok(t, hubIsLeft));
@@ -122,7 +124,7 @@ describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalan
       if (r2c) counts.set("r2c", (counts.get("r2c") ?? 0) + 1);
     }
     const seen = Object.fromEntries([...counts].map(([k, v]) => [k, v > 3]));
-    expect(seen).toMatchObject({ settle_propose: true, settle_execute: true, j_broadcast: true, j_abort_sent_batch: true, r2c: true, "halt:REBALANCE_REQUEST_FEE_STATE_MISSING": true, "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN": true });
+    expect(seen).toMatchObject(Object.fromEntries(wanted.map((k) => [k, true])));
     expect(counts.has("halt:J_BATCH_LIMIT_EXCEEDED")).toBe(true);
   }, 120_000);
 });
@@ -161,7 +163,7 @@ const observeAs = (id: EntityId, threshold: bigint, members: ReadonlyMap<string,
 };
 const observed = observeAs(S, 1n, one);
 const uState = observeAs(UE, 2n, three).state;
-const uHanko = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+const uHanko = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
 
 type Side = DisputeHanko;
 type BoardSpec = { readonly peer: EntityId; readonly height: number; readonly frameHash: string; readonly own: string; readonly peerHanko: string; readonly current?: Side | undefined; readonly counterparty?: Side | undefined; readonly marker?: RefreshMigration | undefined };
@@ -213,7 +215,7 @@ const rwBoardState = (hooks: readonly ScheduledHook[]): EntityState => withCront
 const sortedHooks = (hooks: ReadonlyMap<string, unknown>): unknown[] => [...hooks.values()].map((h) => JSON.parse(JSON.stringify(h))).sort((x, y) => (x.id < y.id ? -1 : 1));
 const ogError = (f: () => unknown): string | undefined => { try { f(); return undefined; } catch (e) { return (e as Error).message; } };
 
-describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)", () => {
+describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)"), () => {
   test("MATCH: 150 random board_hanko_refresh hooks (cursor, markers, frame / dispute certification, peer Hankos under the certified board, >32 Accounts) -- og's outputs and proposer, hashesToSign, markers and hooks", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 150; i++) {
@@ -233,6 +235,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       const run = rw.value;
       expect(run.outputs).toEqual([]);
       const mine = run.sent.map((o) => {
+        if (!("tx" in o)) throw new Error("the crontab sent a consensus input, not an Account input");
         const d = o.tx.data as any, route = unwrap(counterpartyProposer(state, replicas.get(o.to as EntityId) as AccountReplica, o.to as EntityId));
         expect(typeof d.frameHanko).toBe("string");
         return { entityId: o.to, signerId: route, entityTxs: [{ type: o.tx.type, data: { kind: d.kind, fromEntityId: d.fromEntityId, toEntityId: d.toEntityId, domain: d.domain, disputeConfig: d.disputeConfig,
@@ -249,7 +252,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       for (const h of hooks as any[]) bump(h.data.afterCounterpartyId === "" ? "retry" : "hasMore");
     }
     for (const k of ["issued", "output-route-unavailable", "bilateral-frame-uncertified", "certified-frame-invalid", "bilateral-dispute-uncertified", "certified-dispute-invalid", "disputeHanko", "retry", "hasMore", `signer:${aliceAddr.toLowerCase()}`]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  }, 120_000);
+  }, 180_000);
 
   test("MATCH: 120 random BoardActivated events (our own, a peer's, an unrelated Entity's) -- og's markers, refresh and 24h counterparty hooks, messages", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -271,7 +274,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       bump(target === S ? (after.length === 0 ? "local:cancelled" : "local:armed") : after.length > hooks.length ? "peer:deadline" : "peer:none");
     }
     for (const k of ["local:cancelled", "local:armed", "peer:deadline", "peer:none"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 50_000);
 
   test("MATCH: 300 random Entity frame ends (frame advance, peer Hanko, dispute witness and marker changes) -- og scheduleChangedAccountBoardHankoRefreshes re-arms the same hook", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -298,11 +301,11 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       bump(hooks.length === 0 ? "quiet" : "rearmed");
     }
     expect([(seen.get("quiet") ?? 0) > 20, (seen.get("rearmed") ?? 0) > 20]).toEqual([true, true]);
-  }, 120_000);
+  }, 180_000);
 });
 
 // ---- lending_overdue: og collectDerivedDeadlines (loans) and settleOverdueLendingLoan through executeCrontab ----
-describe("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)", () => {
+describe(seedTag("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)"), () => {
   test("MATCH: 300 random hub lending books (active / repaid loans, due times, missing pools and Accounts, borrowed underflow, credit in the delta and queued in the mempool) -- og's derived deadlines, lending book and revokes", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 300; i++) {

@@ -1,6 +1,7 @@
 // Differential tests: og account-tx handlers (core/account/tx/**) vs pure rewrite (pure/xln.ts applyAccountBody).
 // Each "DIVERGES:" test PASSES when the observed difference is present. "MATCH:" tests assert equivalence.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import { deriveDelta } from "../../core/account/utils.ts";
 import { handleSetCreditLimit } from "../../core/account/tx/handlers/balance/set-credit-limit.ts";
 import { handleDirectPayment } from "../../core/account/tx/handlers/balance/direct-payment.ts";
@@ -57,8 +58,10 @@ import {
   genesisWitnesses,
   previewAccountProposal,
   promoteSettled,
+  tokenId,
   type AccountBody,
   type FoldCtx,
+  type TokenId,
 } from "../xln.ts";
 
 // ---------- helpers ----------
@@ -67,6 +70,7 @@ const unwrap = <T, E>(r: R<T, E>): T => {
   if (!r.ok) throw new Error(`unwrap: ${JSON.stringify(r.error, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))}`);
   return r.value;
 };
+const tok = (s: string): TokenId => unwrap(tokenId(s));
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 const A = word("11"); // left (lexicographically smaller)
 const B = word("22");
@@ -96,19 +100,19 @@ const open = (_hub: null = null, credit = 20n): { body: AccountBody; ctx: FoldCt
   }) as any) as any;
   const ctx: FoldCtx = { byLeft: true, nowMs: 1n, jHeight: 0n, accountHeight: 1n };
   let body = genesisAccountBody(genesisAccount(unwrap(accountId(unwrap(entityId(A) as any), unwrap(entityId(B) as any)) as any)), terms);
-  for (const tokenId of ["0", "1"] as const) {
-    body = unwrap(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit }, ctx) as any as R<any, any>).state;
-    body = unwrap(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit }, { ...ctx, byLeft: false }) as any as R<any, any>).state;
+  for (const tokenId of [tok("0"), tok("1")]) {
+    body = unwrap(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit }, ctx)).state;
+    body = unwrap(applyAccountBody(body, { type: "set_credit_limit", tokenId, limit: credit }, { ...ctx, byLeft: false })).state;
   }
   return { body, ctx };
 };
-const apply = (b: AccountBody, tx: any, ctx: FoldCtx) => applyAccountBody(b, tx, ctx) as any as R<{ state: AccountBody; effects: any[] }, any>;
+const apply = (b: AccountBody, tx: any, ctx: FoldCtx) => applyAccountBody(b, tx, ctx);
 
 
 const PA = (ns: string, m: ReadonlyMap<any, any> = new Map()) => PersistentAccountStateMap.fromEntries(ns as any, m);
 /** og side of a lockstep: a persistent og replica seeded from the rewrite's committed view, driven through the real transition overlay; each accepted tx yields og's Account root. */
 const ogHarness = (body: AccountBody, self: string = A) => {
-  const v: any = unwrap(committed(body) as any).view;
+  const v: any = unwrap(committed(body)).view;
   const state: any = { domain: v.domain, leftEntity: v.leftEntity, rightEntity: v.rightEntity, watchSeed: v.watchSeed, disputeConfig: v.disputeConfig, jNonce: v.jNonce, lastFinalizedJHeight: v.lastFinalizedJHeight,
     leftPendingJClaims: v.leftPendingJClaims, rightPendingJClaims: v.rightPendingJClaims,
     ...Object.fromEntries(["deltas", "locks", "pulls", "swapOffers", "subcontracts", "lendingIntents", "requestedRebalance", "requestedRebalanceFeeState", "rebalanceFeePolicies"].map((n) => [n, PA(n, v[n])])) };
@@ -127,7 +131,7 @@ const ogHarness = (body: AccountBody, self: string = A) => {
 };
 
 // ---------- balance ----------
-describe("account-tx: balance", () => {
+describe(seedTag("account-tx: balance"), () => {
   test("MATCH: outCapacity == deriveDelta.outCapacity over a grid (incl. holds, negative/positive delta)", () => {
     const vals = [0n, 1n, 7n, 50n, 100n];
     for (const c of vals) for (const L of vals) for (const Rr of vals) for (const t of [-120n, -30n, 0n, 30n, 120n]) for (const h of [0n, 5n]) {
@@ -202,7 +206,7 @@ describe("account-tx: balance", () => {
   });
 });
 
-describe("account-tx: direct_payment envelope (route, deliveryMode, trusted gateway)", () => {
+describe(seedTag("account-tx: direct_payment envelope (route, deliveryMode, trusted gateway)"), () => {
   test("MATCH: 400 random direct_payment envelopes (routes, modes, gateways, asserted direction, case) are accepted/refused alike and give equal roots", async () => {
     const C = word("33"), ents = [A, B, C, A.toUpperCase().replace("0X", "0x")];
     let accepted = 0, n = 0;
@@ -219,7 +223,7 @@ describe("account-tx: direct_payment envelope (route, deliveryMode, trusted gate
       const { tokenId: _t, ...rest } = data;
       const r = apply(body, { type: "payment", tokenId: "1", ...rest }, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n });
       expect([route, r.ok, o.ok]).toEqual([route, want, want]);
-      if (r.ok) { body = r.value.state; expect(unwrap(committed(body) as any).root).toBe(o.root); if (route.length === 2) n++; }
+      if (r.ok) { body = r.value.state; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); if (route.length === 2) n++; }
     }
     for (let i = 0; i < 400; i++) {
       const byLeft = ri(2) === 0, payer = byLeft ? A : B, payee = byLeft ? B : A;
@@ -233,7 +237,7 @@ describe("account-tx: direct_payment envelope (route, deliveryMode, trusted gate
       expect([i, r.ok]).toEqual([i, o.ok]);
       // og direct-payment.ts appendPaymentEvent / forward: the handler's messages from this harness's side (A)
       if (r.ok) { expect(accountTxMessages(body, { type: "payment", tokenId: "1", ...rest } as any, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n }, r.value.state, A)).toEqual(o.events as any); }
-      if (r.ok) { body = r.value.state; accepted++; expect(unwrap(committed(body) as any).root).toBe(o.root); if (route.length === 2) n++; }
+      if (r.ok) { body = r.value.state; accepted++; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); if (route.length === 2) n++; }
     }
     expect(accepted).toBeGreaterThan(15);
     expect(n).toBeGreaterThan(1);
@@ -255,7 +259,7 @@ const lockedOg = async () => {
 };
 
 // seeded PRNG (mulberry32) for randomized MATCH cases
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xA7);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick3 = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -265,7 +269,7 @@ const pickSelf = (): string => (selfRng() < 0.5 ? A : B);
 const secretOf = (i: number) => `0x${i.toString(16).padStart(64, "0")}`;
 const rwLock = (secret: string, patch: Record<string, unknown> = {}) => ({ type: "htlc_lock", lockId: hashHtlcSecret(secret), hashlock: hashHtlcSecret(secret), timelock: 10n ** 15n, revealBeforeHeight: 5n, amount: 5n, tokenId: "1", ...patch });
 
-describe("account-tx: htlc", () => {
+describe(seedTag("account-tx: htlc"), () => {
   test("MATCH: hashlock = keccak256(bytes32 secret); a non-32-byte secret is refused by both", async () => {
     expect(rwHash(HEX_SECRET)).toBe(hashHtlcSecret(HEX_SECRET));
     expect(rwHash("preimage")).toBeNull();
@@ -338,7 +342,7 @@ describe("account-tx: htlc", () => {
   });
 });
 
-describe("account-tx: htlc committed state", () => {
+describe(seedTag("account-tx: htlc committed state"), () => {
   test("MATCH: 40 random lock/resolve sequences through the og overlay give the same Account root (committed HtlcLock shape, holds, offdelta)", async () => {
     let accepted = 0;
     for (let n = 0; n < 40; n++) {
@@ -361,7 +365,7 @@ describe("account-tx: htlc committed state", () => {
         const r = apply(body, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n });
         expect(r.ok).toBe(o.ok);
         if (r.ok) expect(accountTxMessages(before, tx, { byLeft, nowMs: BigInt(ts), jHeight: BigInt(jh), accountHeight: 1n }, r.value.state, A)).toEqual(o.events as any);
-        if (r.ok) { body = r.value.state; accepted++; expect(unwrap(committed(body) as any).root).toBe(o.root); }
+        if (r.ok) { body = r.value.state; accepted++; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); }
       }
     }
     expect(accepted).toBeGreaterThan(100);
@@ -387,14 +391,14 @@ const swapLockstep = (start: AccountBody) => {
     const r = apply(body, tx, { byLeft, nowMs: 1n, jHeight: 3n, accountHeight: 1n });
     if (r.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${r.ok ? "ok" : JSON.stringify(r.error, (_k, x) => (typeof x === "bigint" ? `${x}n` : x))} tx=${JSON.stringify(tx, (_k, x) => (typeof x === "bigint" ? `${x}n` : x))}`);
     if (r.ok) expect(accountTxMessages(body, tx, { byLeft, nowMs: 1n, jHeight: 3n, accountHeight: 1n }, r.value.state, A)).toEqual(o.events as any);
-    if (r.ok) { body = r.value.state; expect(unwrap(committed(body) as any).root).toBe(o.root); }
+    if (r.ok) { body = r.value.state; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); }
     return r.ok;
   };
   return { step, body: () => body, og };
 };
 const E18 = 10n ** 18n;
 
-describe("account-tx: swap", () => {
+describe(seedTag("account-tx: swap"), () => {
   test("MATCH: swap_cancel_request only requests — offer and hold stay in both; only the maker may ask", async () => {
     const { body } = open(null, 100n * E18);
     const ls = swapLockstep(body);
@@ -485,7 +489,7 @@ const rebalanceLockstep = (start: AccountBody) => {
     const r = apply(body, tx, { byLeft, nowMs, jHeight: 0n, accountHeight: 1n });
     if (r.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${r.ok ? "ok" : JSON.stringify(r.error, (_k, x) => (typeof x === "bigint" ? `${x}n` : x))} tx=${JSON.stringify(tx, (_k, x) => (typeof x === "bigint" ? `${x}n` : x))}`);
     if (r.ok) expect(accountTxMessages(body, tx, { byLeft, nowMs, jHeight: 0n, accountHeight: 1n }, r.value.state, A)).toEqual(o.events as any);
-    if (r.ok) { body = r.value.state; expect(unwrap(committed(body) as any).root).toBe(o.root); }
+    if (r.ok) { body = r.value.state; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); }
     return r.ok;
   };
   return { step, body: () => body, og };
@@ -494,7 +498,7 @@ const reqTx = (tokenId: string, amount: bigint, feeAmount: bigint, patch: Record
 const refundTx = (requestId: string, requestTokenId: string, amount: bigint, reason = "manual") => ({ type: "rebalance_refund", requestId, requestTokenId, amount, reason });
 const policyTx = (tokenId: string, policyVersion: number, baseFee = 1n, liquidityFeeBps = 10n, gasFee = 2n) => ({ type: "rebalance_policy", tokenId, policyVersion, baseFee, liquidityFeeBps, gasFee });
 
-describe("account-tx: rebalance (og request_collateral / rebalance_refund / rebalance_policy)", () => {
+describe(seedTag("account-tx: rebalance (og request_collateral / rebalance_refund / rebalance_policy)"), () => {
   test("MATCH: request_collateral prepays the fee, stores one immutable request; refunds by the counterparty only, partial then full", async () => {
     const ls = rebalanceLockstep(open().body);
     expect(await ls.step(reqTx("1", 10n, 0n), true)).toBe(false); // fee must be > 0
@@ -546,7 +550,7 @@ describe("account-tx: rebalance (og request_collateral / rebalance_refund / reba
 });
 
 // ---------- Account-level lending ----------
-describe("account-tx: lending (og handlers/balance/lending.ts)", () => {
+describe(seedTag("account-tx: lending (og handlers/balance/lending.ts)"), () => {
   const lendingLockstep = (start: AccountBody) => {
     const self = pickSelf(), og = ogHarness(start, self);
     let body = start;
@@ -557,7 +561,7 @@ describe("account-tx: lending (og handlers/balance/lending.ts)", () => {
       const r = apply(body, tx, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n });
       if (r.ok !== o.ok) throw new Error(`accept mismatch og=${o.ok}(${o.error}) rw=${r.ok ? "ok" : JSON.stringify(r.error)} tx=${JSON.stringify(tx, (_k, x) => (typeof x === "bigint" ? `${x}n` : x))}`);
       if (r.ok) expect(accountTxMessages(body, tx, { byLeft, nowMs: 1n, jHeight: 0n, accountHeight: 1n }, r.value.state, self)).toEqual(o.events as any);
-      if (r.ok) { body = r.value.state; expect(unwrap(committed(body) as any).root).toBe(o.root); }
+      if (r.ok) { body = r.value.state; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); }
       return r.ok;
     };
     return { step, body: () => body };
@@ -609,7 +613,7 @@ describe("account-tx: lending (og handlers/balance/lending.ts)", () => {
 });
 
 // ---------- wire form ----------
-describe("account-tx: og kind catalog", () => {
+describe(seedTag("account-tx: og kind catalog"), () => {
   test("MATCH: the rewrite-only custody kinds are gone — og refuses them as ACCOUNT_TX_TYPE_UNSUPPORTED and the rewrite has no arm, so a hub/custody account hashes like og", async () => {
     for (const type of ["deposit_to_custody", "withdraw_from_custody", "hub_custody_debit"]) {
       const og = ogAccount(ogState([ogDelta(1, { leftCreditLimit: 20n })]));
@@ -620,11 +624,11 @@ describe("account-tx: og kind catalog", () => {
     }
     // lendingIntents is og's map alone: no custody/debit/hub rows are committed.
     const { body } = open();
-    expect([...(unwrap(committed(body) as any) as any).view.lendingIntents.keys()]).toEqual([]);
+    expect([...(unwrap(committed(body)) as any).view.lendingIntents.keys()]).toEqual([]);
   });
 });
 
-describe("account-tx: wire form of the ported kinds", () => {
+describe(seedTag("account-tx: wire form of the ported kinds"), () => {
   test("MATCH: rewrite wireOf/ownWire of swap, rebalance, lending, settlement and htlc kinds is og's AccountTx, so og computeFrameHash equals accountFrameHash", () => {
     const L = `lend-${"0".repeat(15)}1`;
     const pairs: [any, any][] = [
@@ -644,12 +648,12 @@ describe("account-tx: wire form of the ported kinds", () => {
     ];
     for (const [rw, og] of pairs) expect(ownWire(wireOf(rw))).toEqual(og);
     const frame = { height: 3, timestamp: 1_700_000_000_000, jHeight: 2, prevFrameHash: word("00"), accountStateRoot: word("33") };
-    expect(unwrap(accountFrameHash({ ...frame, accountTxs: pairs.map(([rw]) => ownWire(wireOf(rw))) }) as any)).toBe(computeFrameHash({ ...frame, stateHash: "", accountTxs: pairs.map(([, og]) => og) } as any));
+    expect(unwrap(accountFrameHash({ ...frame, accountTxs: pairs.map(([rw]) => ownWire(wireOf(rw))) }))).toBe(computeFrameHash({ ...frame, stateHash: "", accountTxs: pairs.map(([, og]) => og) } as any));
   });
 });
 
 // ---------- settlement / j-events ----------
-describe("account-tx: settlement + j_event_claim", () => {
+describe(seedTag("account-tx: settlement + j_event_claim"), () => {
   const ogSettleHarness = (body: AccountBody) => {
     const h = ogHarness(body);
     return { run: (tx: any, byLeft: boolean, ts: number, context: any = {}) => h.run((acc) => handleSettleTransition(acc, tx, byLeft, ts, context)), raw: h.run, reset: h.reset, workspace: () => h.replica().state.settlementWorkspace, replica: h.replica };
@@ -667,14 +671,14 @@ describe("account-tx: settlement + j_event_claim", () => {
       if (r.ok) {
         body = r.value.state;
         accepted++;
-        expect(unwrap(committed(body) as any).root).toBe(o.root);
+        expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root);
         expect(body.settlement?.workspaceHash).toBe(og.workspace()?.workspaceHash);
       }
     }
     return { body, og, accepted };
   };
   const upsert = (revision: number, ops: any[], executorIsLeft = true, previousWorkspaceHash?: string, memo?: string) =>
-    ({ type: "settle_transition", data: { kind: "upsert", revision, ops, executorIsLeft, ...(previousWorkspaceHash !== undefined ? { previousWorkspaceHash } : {}), ...(memo !== undefined ? { memo } : {}) } });
+    ({ type: "settle_transition", data: { kind: "upsert" as const, revision, ops, executorIsLeft, ...(previousWorkspaceHash !== undefined ? { previousWorkspaceHash } : {}), ...(memo !== undefined ? { memo } : {}) } });
   const target = (kind: "submit" | "clear", revision: number, workspaceHash: string) => ({ type: "settle_transition", data: { kind, revision, workspaceHash } });
 
   test("MATCH: hanko/submit/clear with no workspace are refused by both (SETTLEMENT_WORKSPACE_MISSING)", async () => {
@@ -730,7 +734,7 @@ describe("account-tx: settlement + j_event_claim", () => {
       const og = ogSettleHarness(open().body);
       let body = open().body;
       for (let i = 0; i < 8; i++) {
-        const cur = og.workspace(), kind = pick3(["upsert", "upsert", "clear", "submit"]), byLeft = ri(2) === 0, ts = 1 + i;
+        const cur = og.workspace(), kind = pick3(["upsert", "upsert", "clear", "submit"] as const), byLeft = ri(2) === 0, ts = 1 + i;
         const revision = (cur?.revision ?? 0) + (ri(5) === 0 ? ri(3) - 1 : 1);
         const tx = kind === "upsert"
           ? upsert(revision, Array.from({ length: 1 + ri(3) }, op), ri(2) === 0, revision > 1 ? (ri(6) === 0 ? word("77") : cur?.workspaceHash) : undefined, ri(3) === 0 ? "memo" : undefined)
@@ -739,7 +743,7 @@ describe("account-tx: settlement + j_event_claim", () => {
         const r = apply(body, { type: "settle_transition", ...tx.data }, { byLeft, nowMs: BigInt(ts), jHeight: 0n, accountHeight: 1n });
         expect(r.ok).toBe(o.ok);
         if (r.ok) expect(accountTxMessages(body, { type: "settle_transition", ...tx.data }, { byLeft, nowMs: BigInt(ts), jHeight: 0n, accountHeight: 1n }, r.value.state, A)).toEqual(o.events as any);
-    if (r.ok) { body = r.value.state; expect(unwrap(committed(body) as any).root).toBe(o.root); }
+    if (r.ok) { body = r.value.state; expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root); }
       }
     }
   });
@@ -778,7 +782,7 @@ describe("account-tx: settlement + j_event_claim", () => {
       const r = apply(body, { type: "settle_transition", ...tx.data }, rwCtx(byLeft));
       if (!r.ok) { rewriteAgrees = false; expect(JSON.stringify(r.error)).toMatch(/POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH|POST_SETTLEMENT_DISPUTE_HASH_MISMATCH|SETTLEMENT_HANKO_HASH_MISMATCH/); break; }
       body = r.value.state;
-      expect(unwrap(committed(body) as any).root).toBe(o.root);
+      expect<string | undefined>(unwrap(committed(body)).root).toBe(o.root);
     }
     expect(rewriteAgrees).toBe(true);
     {
@@ -789,7 +793,7 @@ describe("account-tx: settlement + j_event_claim", () => {
       const sub = await og.run(target("submit", 1, hash), true, 7, ogCtx);
       const r = apply(body, { type: "settle_transition", ...target("submit", 1, hash).data }, { ...rwCtx(true), nowMs: 7n });
       expect(sub.ok).toBe(true);
-      expect(unwrap(committed(unwrap(r).state) as any).root).toBe(sub.root);
+      expect<string | undefined>(unwrap(committed(unwrap(r).state)).root).toBe(sub.root);
     }
   });
 
@@ -876,7 +880,7 @@ describe("account-tx: settlement + j_event_claim", () => {
   const ogClaim = (jHeight: number, block: string, rows: Parameters<typeof rwClaim>[2]) =>
     ({ type: "j_event_claim", data: { jHeight, jBlockHash: block, events: rows.map((r) => ogSettled(r.tokenId, r.collateral, r.ondelta, r.nonce, r.left, r.right)) } });
   const same = (og: ReturnType<typeof ogClaimHarness>, body: AccountBody) => {
-    const view = unwrap(committed(body) as any) as any;
+    const view = unwrap(committed(body)) as any;
     expect(view.view.lastFinalizedJHeight).toBe(og.state.lastFinalizedJHeight);
     expect(view.view.jNonce).toBe(og.state.jNonce);
     expect(view.view.leftPendingJClaims.root).toBe(og.state.leftPendingJClaims.root);
@@ -976,7 +980,7 @@ describe("account-tx: settlement + j_event_claim", () => {
         same(og, body);
       }
     }
-  });
+  }, 30_000);
 
   // ---- consensus wiring: FoldCtx.settlement and og activatePostSettlementProof's replica-level promotion ----
   const settleOgCtx: any = { jReplicas: jurisdictions.jReplicas, resolveSettlementBoardAuthority: async () => undefined, verifyHanko: async (_h: string, _m: string, entityId: string) => ({ valid: true, entityId }) };
@@ -1018,7 +1022,7 @@ describe("account-tx: settlement + j_event_claim", () => {
     const clock = { timestamp: 5n, jHeight: 0n };
     const preview: any = unwrap(previewAccountProposal(r, B as any, clock, () => true) as any);
     expect(preview.frame.txs.length).toBe(1);
-    expect(unwrap(committed(preview.draft.state) as any).root).toBe(o.root);
+    expect<string | undefined>(unwrap(committed(preview.draft.state)).root).toBe(o.root);
     // Without a verifier (no consensus context) the rewrite still refuses; the Account consensus path always supplies one.
     expect(previewAccountProposal(r, B as any, clock)).toMatchObject({ ok: false, error: { _tag: "proposal_halt", cause: { reason: "SETTLEMENT_HANKO_CONTEXT_MISSING" } } });
     // og getMinimumSafeSettlementNonce: a signed dispute proof at nonce 3 raises the floor to 4 on both sides.
@@ -1086,7 +1090,7 @@ describe("account-tx: settlement + j_event_claim", () => {
     expect(w.counterparty).toEqual({ hanko: ogr.counterpartyDisputeProofHanko, hash: ogr.counterpartyDisputeHash, proofBodyHash: ogr.counterpartyDisputeProofBodyHash, proofNonce: ogr.counterpartyDisputeProofNonce, proposerIsLeft: ogr.counterpartyDisputeProofProposerIsLeft });
     expect(w.nextProofNonce).toBe(ogr.proofHeader.nextProofNonce);
     // Not the finalizing claim (first side only): no promotion, as og only promotes inside activatePostSettlementProof.
-    expect(unwrap(promoteSettled(genesisWitnesses(), body, first, true) as any)).toEqual(genesisWitnesses());
+    expect(unwrap(promoteSettled(genesisWitnesses(), body, first, true))).toEqual(genesisWitnesses());
     // og equivocation: a held proof at the same nonce with a different body refuses.
     const clash = { hanko: "0x09", hash: word("73"), proofBodyHash: word("74"), proofNonce: 2, proposerIsLeft: true };
     expect(promoteSettled({ nextProofNonce: 3, current: clash }, first, second, false)).toMatchObject({ ok: false, error: { _tag: "dispute_hanko" } });
@@ -1104,7 +1108,7 @@ describe("account-tx: settlement + j_event_claim", () => {
   });
 });
 
-describe("account-tx: external finality (og settlement/j-finality.ts)", () => {
+describe(seedTag("account-tx: external finality (og settlement/j-finality.ts)"), () => {
   const DEPO = `0x${"ab".repeat(20)}`;
   const raw = { domain: { chainId: 1, depositoryAddress: DEPO }, watchSeed: word("44"), disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 } };
   const pair = () => unwrap(accountId(unwrap(entityId(A) as any), unwrap(entityId(B) as any)) as any) as any;
@@ -1142,16 +1146,16 @@ describe("account-tx: external finality (og settlement/j-finality.ts)", () => {
     const og = ogSide(body);
     applyAccountDisputeStarted(og.replica(), started() as any);
     const o = { root: computeAccountStateRoot(og.replica().state) };
-    const r: any = unwrap(applyAccountInput(rwSide(body), { kind: "external_finality", ...env, finality: started() } as any, door) as any).replica;
+    const r: any = unwrap(applyAccountInput(rwSide(body), { kind: "external_finality", ...env, finality: started() } as any, door)).replica;
     const ogr: any = og.replica();
     expect([r._tag, ogr.status]).toEqual(["disputed", "disputed"]);
     expect(r.active).toEqual(ogr.activeDispute);
     expect(Object.keys(r.active)).toEqual(Object.keys(ogr.activeDispute));
     expect(r.state.jNonce).toBe(ogr.state.jNonce);
-    expect(unwrap(committed(r.state) as any).root).toBe(o.root);
+    expect<string | undefined>(unwrap(committed(r.state)).root).toBe(o.root);
     expect(r.mempool.length).toBe(ogr.mempool.length);
     // A lower on-chain jNonce never lowers ours (og Math.max).
-    const low: any = unwrap(applyAccountInput(r, { kind: "external_finality", ...env, finality: started({ jNonce: 0 }) } as any, door) as any).replica;
+    const low: any = unwrap(applyAccountInput(r, { kind: "external_finality", ...env, finality: started({ jNonce: 0 }) } as any, door)).replica;
     expect(low.state.jNonce).toBe(3);
   });
 
@@ -1161,10 +1165,10 @@ describe("account-tx: external finality (og settlement/j-finality.ts)", () => {
       const og = ogSide(body);
       applyAccountDisputeFinality(og.replica(), 6, tokens);
       const o = { root: computeAccountStateRoot(og.replica().state) };
-      const r: any = unwrap(applyAccountInput(rwSide(body), { kind: "external_finality", ...env, finality: { kind: "dispute_finalized", finalizedJNonce: 6, finalizedTokenIds: tokens } } as any, door) as any).replica;
+      const r: any = unwrap(applyAccountInput(rwSide(body), { kind: "external_finality", ...env, finality: { kind: "dispute_finalized", finalizedJNonce: 6, finalizedTokenIds: tokens } } as any, door)).replica;
       const ogr: any = og.replica();
       expect([r._tag, ogr.status]).toEqual(["disputed", "disputed"]);
-      expect(unwrap(committed(r.state) as any).root).toBe(o.root);
+      expect<string | undefined>(unwrap(committed(r.state)).root).toBe(o.root);
       expect([r.state.jNonce, r.dispute.nextProofNonce, r.mempool.length]).toEqual([ogr.state.jNonce, ogr.proofHeader.nextProofNonce, ogr.mempool.length]);
       expect(r.dispute.counterparty).toBeUndefined();
       expect(ogr.counterpartyDisputeProofHanko).toBeUndefined();
