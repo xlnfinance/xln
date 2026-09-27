@@ -22,6 +22,7 @@ import { initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batc
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
+import { ogJb, ogSentBatch } from "./og-jbatch.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -93,7 +94,8 @@ describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hu
       });
       const now = 1_000_000 + ri(1_000), runtimeNow = now + ri(3) * 100_000, manual = rng() < 0.15;
       const r2cRows = rng() < 0.2 ? [{ tokenId: 1, receivingEntity: hub, pairs: Array.from({ length: pick([1, 64, 256]) }, (_, n) => ({ entity: n === 0 ? peers[0] as string : `0x${(n + 9).toString(16).padStart(64, "0")}`, amount: 1n })) }] : [];
-      const sent = rng() < 0.2 ? { sentBatch: { batch: ogInitJBatch().batch, batchHash: ZERO_WORD, encodedBatch: "0x", entityNonce: 2, firstSubmittedAt: 1, lastSubmittedAt: pick([0, runtimeNow - 1_000, runtimeNow - 200_000]), submitAttempts: 1 }, lastBroadcast: pick([0, runtimeNow - 500]) } : {};
+      // og consensus never records a submit time on the sent batch: its age is the last broadcast's
+      const sent = rng() < 0.2 ? { status: "sent", sentBatch: ogSentBatch(ogInitJBatch().batch, ZERO_WORD, 2, 1), lastBroadcast: pick([0, runtimeNow - 500, runtimeNow - 1_000, runtimeNow - 200_000]) } : {};
       const jBatch = { ...ogInitJBatch(), ...(r2cRows.length > 0 ? { batch: { ...ogInitJBatch().batch, reserveToCollateral: r2cRows }, status: "accumulating" } : {}), ...sent };
       const config = { matchingStrategy: pick(["amount", "fee", "time", "bogus"]), policyVersion: pick([1, 1, 2, 0]), rebalanceLiquidityFeeBps: pick([0n, 1n, 100n]), disputeAutoFinalizeMode: "auto", ...(rng() < 0.03 ? { c2rWithdrawSoftLimit: 1n } : {}) };
       const reserves = new Map([[1, pick([0n, 100n * U, 5_000n * U, 5_000n * U])], [3, pick([0n, 400n * U, 5_000n * U])]]);
@@ -116,11 +118,11 @@ describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hu
       if (ogErr !== undefined) { counts.set(`halt:${ogErr.split(":")[0]}`, (counts.get(`halt:${ogErr.split(":")[0]}`) ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const run = unwrap(rw);
       expect(run.outputs).toEqual((ogOut ?? []).map((o) => ({ signerId: o.signerId, txs: o.entityTxs })));
-      expect(run.state.committed["jBatchState"]).toEqual(og.jBatchState);
+      expect(ogJb(run.state)).toEqual(og.jBatchState);
       expect(unwrap(crontabOf(run.state)).tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
       for (const a of accts) expect([...((run.accountReplicas.get(a.peer)?.state.submittedAt ?? new Map()) as ReadonlyMap<number, number>)].sort()).toEqual([...og.accounts.get(a.peer).shadow.rebalance.submittedAtByToken].sort() as never);
       for (const o of run.outputs) for (const tx of o.txs) counts.set(tx.type, (counts.get(tx.type) ?? 0) + 1);
-      const r2c = ((run.state.committed["jBatchState"] as any).batch.reserveToCollateral as readonly unknown[]).length > r2cRows.length || JSON.stringify((run.state.committed["jBatchState"] as any).batch.reserveToCollateral, (_, v) => (typeof v === "bigint" ? String(v) : v)) !== JSON.stringify(r2cRows, (_, v) => (typeof v === "bigint" ? String(v) : v));
+      const r2c = (ogJb(run.state)!.batch.reserveToCollateral as readonly unknown[]).length > r2cRows.length || JSON.stringify(ogJb(run.state)!.batch.reserveToCollateral, (_, v) => (typeof v === "bigint" ? String(v) : v)) !== JSON.stringify(r2cRows, (_, v) => (typeof v === "bigint" ? String(v) : v));
       if (r2c) counts.set("r2c", (counts.get("r2c") ?? 0) + 1);
     }
     const seen = Object.fromEntries([...counts].map(([k, v]) => [k, v > 3]));

@@ -27,6 +27,7 @@ import { handleLendingBorrowEntityTx, handleLendingClosePositionEntityTx } from 
 import * as ogBook from "../../core/orderbook/core.ts";
 import { computeBookCommitmentHash } from "../../core/orderbook/commitment.ts";
 import { rebuildOrderbookPairIndex } from "../../core/orderbook/order-index.ts";
+import { ogJb } from "./og-jbatch.ts";
 
 /** og's committed Account collections are Patricia-backed maps; their commitment is `rootHash()`. */
 const ogRootHash = (c: object): string => {
@@ -493,7 +494,7 @@ describe(seedTag("entity-txs-3: prepareDispute / disputeStart (og entity/tx/hand
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft;
       expect(d.events).toEqual(readEntityFrameEvents(og.state));
-      expect(d.state.committed["jBatchState"]).toEqual(og.state.jBatchState);
+      expect(ogJb(d.state)).toEqual(og.state.jBatchState);
       if ((d.events ?? []).some((e) => e.message.startsWith("❌ Missing counterparty dispute hanko"))) missingHanko++;
       const ogAfter = og.state.accounts.get(BOB), after = d.accountReplicas.get(BOB);
       if (ogAfter === undefined || after === undefined) { expect(after).toEqual(ogAfter); continue; }

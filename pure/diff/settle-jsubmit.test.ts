@@ -10,10 +10,11 @@ import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { EntityAccountCandidateMap } from "../../core/entity/state/persistent-account-map.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import {
-  encodeBatch, contractBatch, emptyQueuedBatch, initJBatch, queueR2R, jBroadcast, jRebroadcast, jAbortSentBatch, jClearBatch, mintReservesTx, genesisHost, applyHost, setRebalanceSubmittedAt, EMPTY_DEBTS,
-  type Batch, type JBatchState, type JEntity, type JQueued, type QueuedBatch, type Result,
+  encodeBatch, contractBatch, emptyQueuedBatch, initJBatch, queueR2R, jBroadcast, jRebroadcast, jAbortSentBatch, jClearBatch, mintReservesTx, genesisHost, applyHost, setRebalanceSubmittedAt, EMPTY_DEBTS, DORMANT, ogJBatchOf, ogJBatchState, sentOf,
+  type Batch, type JBatch, type JSubmission, type JEntity, type JQueued, type QueuedBatch, type Result,
 } from "../xln.ts";
 import { ALICE, BOB, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
+import { jbOfOg } from "./og-jbatch.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0x5e77_1e);
@@ -23,21 +24,25 @@ const W = (b: string) => `0x${b.repeat(32 / (b.length / 2))}`;
 const ENTITY = W("e1"), PEER = W("0f"), OTHER = W("aa"), DEP = "0x5FbDB2315678afecb367f032d93F642f64180aa3", EP = `0x${"c1".repeat(20)}`, SIGNER = `0x${"5a".repeat(20)}`;
 const ogDecoded = (b: QueuedBatch): any => decodeJBatch(encodeBatch(contractBatch(b)));
 /** The J batch a queue op must have produced. */
-const queuedBatch = (r: Result<JQueued, unknown>): JBatchState => {
+const queuedBatch = (r: Result<JQueued, unknown>): JBatch => {
   const q = unwrap(r as any) as JQueued;
   if (q._tag !== "queued") throw new Error(`refused: ${q.message}`);
-  return q.jBatch;
+  return q.jBatch as JBatch;
 };
-const toOg = (j: JBatchState): any => ({ ...j, batch: ogDecoded(j.batch), ...(j.sentBatch === undefined ? {} : { sentBatch: { ...j.sentBatch, batch: ogDecoded(j.sentBatch.batch) } }), ...(j.recoveryBatches === undefined ? {} : { recoveryBatches: j.recoveryBatches.map(ogDecoded) }) });
+const toOg = (live: JBatch): any => {
+  const j = ogJBatchState(live);
+  return { ...j, batch: ogDecoded(j.batch), ...(j.sentBatch === undefined ? {} : { sentBatch: { ...j.sentBatch, batch: ogDecoded(j.sentBatch.batch) } }), ...(j.recoveryBatches === undefined ? {} : { recoveryBatches: j.recoveryBatches.map(ogDecoded) }) };
+};
 const env: any = { state: { jReplicas: new Map([["j", { name: "j", chainId: 31337, contracts: { depository: DEP, entityProvider: EP }, rpcs: [] }]]) } };
 const jurisdiction = { name: "j", chainId: 31337, depositoryAddress: DEP, entityProviderAddress: EP, address: "jreplica://j" };
 /** og Entity state around a jBatchState, with accounts behind a candidate-map shell (og getEntityAccountForWrite). */
-const ogEntity = (j: JBatchState | undefined, accounts: ReadonlyMap<string, any> = new Map()): any => {
+const ogEntity = (j: JSubmission, accounts: ReadonlyMap<string, any> = new Map()): any => {
   const shell = Object.assign(Object.create(EntityAccountCandidateMap.prototype), { get: (id: string) => accounts.get(id), getForWrite: (id: string) => accounts.get(id), has: (id: string) => accounts.has(id), keys: () => accounts.keys() });
-  return { entityId: ENTITY, timestamp: 900, config: { validators: [SIGNER], threshold: 1n, shares: { [SIGNER]: 1n }, mode: "proposer-based", jurisdiction }, accounts: shell, ...(j === undefined ? {} : { jBatchState: toOg(j) }) };
+  return { entityId: ENTITY, timestamp: 900, config: { validators: [SIGNER], threshold: 1n, shares: { [SIGNER]: 1n }, mode: "proposer-based", jurisdiction }, accounts: shell, ...(j._tag === "dormant" ? {} : { jBatchState: toOg(j) }) };
 };
 const messages = (state: any): string[] => readEntityFrameEvents(state).map((e: any) => e.message);
-const sameJBatch = (rw: JBatchState | undefined, og: any): void => {
+const sameJBatch = (s: JSubmission, og: any): void => {
+  const rw = ogJBatchOf(s);
   expect(rw === undefined).toBe(og === undefined);
   if (rw === undefined) return;
   expect(rw.batch).toEqual(og.batch);
@@ -55,24 +60,25 @@ const sameJBatch = (rw: JBatchState | undefined, og: any): void => {
 };
 
 /** A random jBatchState in every lifecycle shape: draft only, sealed, sealed with recovery, quarantined, an empty stale sentBatch. */
-const randomJBatch = (): JBatchState => {
-  const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 10_000n], [2, 10_000n]]), debts: EMPTY_DEBTS, accounts: new Set([PEER]) };
-  let s: JBatchState = { ...initJBatch(), entityNonce: ri(4), broadcastCount: ri(3) };
+const randomJBatch = (): JBatch => {
+  const e: JEntity = { entityId: ENTITY, reserves: new Map([[1, 10_000n], [2, 10_000n]]), debts: EMPTY_DEBTS, jBatch: DORMANT, accounts: new Set([PEER]) };
+  let s: JBatch = { ...initJBatch(), chainNonce: ri(4), broadcasts: { count: ri(3), last: 0 } };
   for (let k = ri(4); k > 0; k--) s = queuedBatch(queueR2R({ ...e, jBatch: s }, pick([OTHER, PEER]), 1 + ri(2), BigInt(1 + ri(9))));
   if (rng() < 0.2) return s;
-  if (s.batch.reserveToReserve.length === 0) s = queuedBatch(queueR2R({ ...e, jBatch: s }, OTHER, 1, 3n));
+  if (s.draft.reserveToReserve.length === 0) s = queuedBatch(queueR2R({ ...e, jBatch: s }, OTHER, 1, 3n));
   const withOps: QueuedBatch = {
-    ...s.batch,
+    ...s.draft,
     collateralToReserve: Array.from({ length: ri(3) }, () => ({ counterparty: pick([PEER, OTHER]), tokenId: 1, amount: BigInt(1 + ri(5)), nonce: 1 + ri(4), sig: "0x12" })),
     disputeFinalizations: [],
     reserveToCollateral: rng() < 0.5 ? [] : [{ tokenId: 1 + ri(2), receivingEntity: ENTITY, pairs: [{ entity: pick([PEER, OTHER]), amount: 5n }] }],
   };
-  const sealed = unwrap(jBroadcast({ ...s, batch: withOps }, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: SIGNER, timestamp: 5 }));
-  let out: JBatchState = sealed.jBatch;
-  if (rng() < 0.3) out = { ...out, batch: queuedBatch(queueR2R({ ...e, jBatch: { ...out, sentBatch: undefined } }, OTHER, 2, 4n)).batch };
-  if (rng() < 0.25) out = { ...out, recoveryBatches: [queuedBatch(queueR2R(e, PEER, 1, 2n)).batch] };
-  if (rng() < 0.15) out = { ...out, sentBatch: { ...out.sentBatch!, terminalFailure: { message: "J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:x", failedAt: 3 } } };
-  else if (rng() < 0.15) out = { ...out, sentBatch: { ...out.sentBatch!, batch: emptyQueuedBatch() } };
+  const sealed = unwrap(jBroadcast({ ...s, draft: withOps }, { entityId: ENTITY, chainId: 31337, depository: DEP, signerId: SIGNER, timestamp: 5 }));
+  let out = sealed.jBatch as JBatch;
+  const sent = sentOf(out)!;
+  if (rng() < 0.3) out = { ...out, draft: queuedBatch(queueR2R({ ...e, jBatch: { ...out, phase: { _tag: "idle", accumulating: false } } }, OTHER, 2, 4n)).draft };
+  if (rng() < 0.25) out = { ...out, recovery: [queuedBatch(queueR2R(e, PEER, 1, 2n)).draft] };
+  if (rng() < 0.15) out = { ...out, phase: { _tag: "quarantined", sent, failure: { message: "J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:x", failedAt: 3 } } };
+  else if (rng() < 0.15) out = { ...out, phase: { _tag: "inFlight", sent: { ...sent, batch: emptyQueuedBatch() } } };
   return out;
 };
 
@@ -80,7 +86,7 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
   test("MATCH: 150 random j_rebroadcast calls -- same refusal, same resealed sentBatch, generation, jTx (with gas bump) and jBatch hash to sign as og handleJRebroadcast", async () => {
     const outcomes = new Set<string>();
     for (let n = 0; n < 150; n++) {
-      const s = rng() < 0.1 ? undefined : randomJBatch(), bump = pick([undefined, 0, 1250, -5, 30_000, 12.7, Number.NaN]);
+      const s: JSubmission = rng() < 0.1 ? DORMANT : randomJBatch(), bump = pick([undefined, 0, 1250, -5, 30_000, 12.7, Number.NaN]);
       const og = ogEntity(s);
       let ogOut: any, ogErr: string | undefined;
       try { ogOut = await handleJRebroadcast(og, { type: "j_rebroadcast", data: { ...(bump === undefined ? {} : { gasBumpBps: bump }) } } as any, env, true); } catch (e) { ogErr = (e as Error).message; }
@@ -89,7 +95,7 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
       if (!rw.ok) { expect((rw.error as any).reason).toBe(ogErr); outcomes.add("refused"); continue; }
       const msgs = messages(og);
       expect(rw.value.note).toBe(msgs[msgs.length - 1]);
-      if (s !== undefined) sameJBatch(rw.value.jBatch, og.jBatchState);
+      sameJBatch(rw.value.jBatch, og.jBatchState);
       const ogTx = ogOut.jOutputs[0]?.jTxs[0];
       expect(rw.value.jTx === undefined).toBe(ogTx === undefined);
       if (ogTx !== undefined) {
@@ -112,7 +118,7 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
   test("MATCH: 150 random j_abort_sent_batch calls (requeue / drop, stale C2R by Account jNonce, R2C submitted markers) change the jBatchState and the Account latches like og handleJAbortSentBatch", async () => {
     const outcomes = new Set<string>();
     for (let n = 0; n < 150; n++) {
-      const s = rng() < 0.1 ? undefined : randomJBatch(), jNonce = ri(5), submitted = [1, 2].filter(() => rng() < 0.6);
+      const s: JSubmission = rng() < 0.1 ? DORMANT : randomJBatch(), jNonce = ri(5), submitted = [1, 2].filter(() => rng() < 0.6);
       const requeue = pick([undefined, true, false]), reason = pick([undefined, "", "stuck"]);
       const accounts = accountsFor(jNonce, submitted), og = ogEntity(s, accounts);
       await handleJAbortSentBatch(og, { type: "j_abort_sent_batch", data: { ...(requeue === undefined ? {} : { requeueToCurrent: requeue }), ...(reason === undefined ? {} : { reason }) } } as any, env, true);
@@ -121,27 +127,27 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
       sameJBatch(rw.jBatch, og.jBatchState);
       const body = rw.release.submitted.filter((r) => r.accountId === PEER).reduce((b, r) => setRebalanceSubmittedAt(b, r.tokenId, undefined), { submittedAt: new Map(submitted.map((t) => [t, 77])) } as any);
       expect([...body.submittedAt.keys()].sort()).toEqual(submittedOf(accounts));
-      outcomes.add(s?.sentBatch === undefined ? "none" : requeue === false ? "dropped" : "requeued");
+      outcomes.add(sentOf(s) === undefined ? "none" : requeue === false ? "dropped" : "requeued");
     }
     expect(outcomes).toEqual(new Set(["none", "dropped", "requeued"]));
   }, 60_000);
 
   test("MATCH: 100 random j_clear_batch calls empty the draft, sentBatch and recovery batches and reset every submitted marker like og handleJClearBatch", async () => {
     for (let n = 0; n < 100; n++) {
-      const s = rng() < 0.1 ? undefined : randomJBatch(), submitted = [1, 2, 3].filter(() => rng() < 0.5), reason = pick([undefined, "manual"]);
+      const s: JSubmission = rng() < 0.1 ? DORMANT : randomJBatch(), submitted = [1, 2, 3].filter(() => rng() < 0.5), reason = pick([undefined, "manual"]);
       const accounts = accountsFor(0, submitted), og = ogEntity(s, accounts);
       await handleJClearBatch(og, { type: "j_clear_batch", data: { ...(reason === undefined ? {} : { reason }) } } as any, env, true);
       const rw = jClearBatch(s, { reason }, new Map([[PEER, submitted]]));
       expect<string | undefined>(rw.note).toBe(messages(og).at(-1));
       sameJBatch(rw.jBatch, og.jBatchState);
-      if (s !== undefined) expect(submittedOf(accounts)).toEqual([]);
-      expect(rw.release.submitted.map((r) => r.tokenId)).toEqual(s === undefined ? [] : [...submitted].sort((a, b) => a - b));
+      if (s._tag === "live") expect(submittedOf(accounts)).toEqual([]);
+      expect(rw.release.submitted.map((r) => r.tokenId)).toEqual(s._tag === "dormant" ? [] : [...submitted].sort((a, b) => a - b));
     }
   });
 
   test("MATCH: mintReserves emits og's direct `mint` JTx (outside the batch) with the Entity timestamp", async () => {
     for (const [tokenId, amount] of [[1, 5n], [3, 0n], [2, 10n ** 30n]] as const) {
-      const og = ogEntity(undefined), out = await handleMintReserves(og, { type: "mintReserves", data: { tokenId, amount } } as any, env, true);
+      const og = ogEntity(DORMANT), out = await handleMintReserves(og, { type: "mintReserves", data: { tokenId, amount } } as any, env, true);
       const rw = mintReservesTx(ENTITY, tokenId, amount, 900);
       expect(rw.jTx).toEqual(out.jOutputs[0]!.jTxs[0] as any);
       expect<string | undefined>(rw.note).toBe(messages(og).at(-1));
@@ -153,13 +159,13 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
     const funded = unwrap(applyHost(host0, { layer: "j", tx: { type: "j_event", blockNumber: 1, event: { type: "ReserveUpdated", entity: ALICE, tokenId: 1n, newBalance: 50n } } } as any, ctx, hankoVerify) as any) as any;
     const q1 = unwrap(applyHost(funded.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 20n } } as any, ctx, hankoVerify) as any) as any;
     const sealed = unwrap(applyHost(q1.state, { layer: "j", tx: { type: "j_broadcast", chainId: 31337, depository: DEP, signerId: SIGNER } } as any, ctx, hankoVerify) as any) as any;
-    const sent = sealed.state.j.jBatch.sentBatch;
+    const sent = sentOf(sealed.state.j.jBatch)!;
     expect(sealed.effects).toEqual([{ _tag: "j_submit", jTx: expect.objectContaining({ type: "batch", entityId: ALICE }), hashToSign: { hash: sent.batchHash, type: "jBatch", context: `jBatch:${ALICE.slice(-4)}:nonce:1` } }]);
     const parked = unwrap(applyHost(sealed.state, { layer: "j", tx: { type: "r2r", toEntity: BOB, tokenId: "1", amount: 5n } } as any, ctx, hankoVerify) as any) as any;
     const resent = unwrap(applyHost(parked.state, { layer: "j", tx: { type: "j_rebroadcast", chainId: 31337, depository: DEP, signerId: SIGNER, gasBumpBps: 500 } } as any, ctx, hankoVerify) as any) as any;
     expect(resent.effects[0].jTx.data.feeOverrides).toEqual({ gasBumpBps: 500 });
     expect(resent.effects[0].hashToSign.context).toBe(`jBatch:${ALICE.slice(-4)}:nonce:1:rebroadcast`);
-    const auto = { ...resent.state.j.jBatch, autoBroadcastDraft: true };
+    const auto = { ...resent.state.j.jBatch, autoBroadcast: true };
     const event = { type: "HankoBatchProcessed", entityId: ALICE, batchHash: sent.batchHash, nonce: 1n };
     const done = unwrap(applyHost({ ...resent.state, j: { ...resent.state.j, jBatch: auto } }, { layer: "j", tx: { type: "j_event", blockNumber: 2, event } } as any, ctx, hankoVerify) as any) as any;
     const og: any = { entityId: ALICE, timestamp: 9, config: { validators: [SIGNER] }, jBatchState: toOg(auto) }, outputs: any[] = [];
@@ -381,7 +387,7 @@ describe(seedTag("settle-jsubmit: settle_execute jBatch row (og jurisdiction/mac
     const counts = { settlements: 0, shortcuts: 0, conflicts: 0 };
     for (let n = 0; n < 300; n++) {
       const og: any = ogInitJBatch();
-      let rw: any = structuredClone(og);
+      let rw = jbOfOg(structuredClone(og)) as JBatch;
       const prior: any[] = [];
       for (let k = 0; k < 1 + ri(4); k++) {
         const retry = prior.length > 0 && rng() < 0.3 ? structuredClone(pick(prior)) : undefined;
@@ -401,11 +407,12 @@ describe(seedTag("settle-jsubmit: settle_execute jBatch row (og jurisdiction/mac
           break;
         }
         expect(r.ok).toBe(true);
-        rw = unwrap(r as any);
+        rw = unwrap(r);
       }
-      expect(rw.status).toBe(og.status);
-      expect(rw.batch.settlements).toEqual(og.batch.settlements);
-      expect(rw.batch.collateralToReserve).toEqual(og.batch.collateralToReserve);
+      const after = ogJBatchState(rw);
+      expect(after.status).toBe(og.status);
+      expect(after.batch.settlements).toEqual(og.batch.settlements);
+      expect(after.batch.collateralToReserve).toEqual(og.batch.collateralToReserve);
       counts.settlements += og.batch.settlements.length;
       counts.shortcuts += og.batch.collateralToReserve.length;
     }
@@ -428,14 +435,14 @@ describe(seedTag("settle-jsubmit: r2c rebalance-fee path (og j-batch/r2c.ts coll
       const fee = rng() < 0.5 ? { rebalanceQuoteId: 1000 + ri(5), rebalanceFeeAmount: BigInt(ri(3)), rebalanceFeeTokenId: pick([1, 2]) } : undefined;
       const og: any = { entityId: ALICE, timestamp: 5000, reserves: new Map(reserves), accounts: new Map([[BOB, { shadow: { rebalance: {} } }]]) };
       const ogOut: any = await handleR2C({} as any, og, { type: "r2c", data: { counterpartyId: counterparty, receivingEntityId, tokenId, amount, ...(fee ?? {}) } } as any, true);
-      const rw: JEntity = { entityId: ALICE, reserves, debts: EMPTY_DEBTS, accounts: new Set([BOB]) } as any;
+      const rw: JEntity = { entityId: ALICE, reserves, debts: EMPTY_DEBTS, jBatch: DORMANT, accounts: new Set([BOB]) };
       const r = unwrap(queueR2C(rw, counterparty, tokenId, amount, receivingEntityId, fee));
       const ogQueued = og.jBatchState !== undefined && og.jBatchState.batch.reserveToCollateral.length > 0;
       expect(r._tag === "queued").toBe(ogQueued);
       expect(ogOut.accountTxs ?? []).toEqual([]);
       expect(messages(og)).toEqual([r.message]);
       if (r.message.startsWith("❌ Rebalance fee")) counts.fee++;
-      if (r._tag === "queued") { expect(r.jBatch.batch).toEqual(og.jBatchState.batch); counts.queued++; }
+      if (r._tag === "queued") { expect((r.jBatch as JBatch).draft).toEqual(og.jBatchState.batch); counts.queued++; }
     }
     expect(counts.fee).toBeGreaterThan(20);
     expect(counts.queued).toBeGreaterThan(20);

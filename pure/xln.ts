@@ -2286,22 +2286,136 @@ export type FeeOverrides = Readonly<{
   gasBumpBps?: number | undefined; maxFeePerGasWei?: string | undefined;
   maxPriorityFeePerGasWei?: string | undefined;
 }>;
+/** A sealed batch the Entity keeps until the chain processes it at `entityNonce`. */
 export type SentJBatch = Readonly<{
   batch: QueuedBatch; batchHash: string; encodedBatch: string; entityNonce: number; firstSubmittedAt: number;
-  lastSubmittedAt: number; submitAttempts: number;
-  terminalFailure?: { readonly message: string; readonly failedAt: number } | undefined;
   feeOverrides?: FeeOverrides | undefined;
 }>;
-/** og JBatchState: the editable draft, the in-flight batch, recovered work, the chain's entity nonce. */
-export type JBatchState = Readonly<{
+/** The chain processed a different batch at the sent batch's nonce; only an abort or a clear moves on. */
+export type BatchFailure = Readonly<{ message: string; failedAt: number }>;
+/**
+ * Where the Entity's submission stands. `idle.accumulating` is og's status flag: it turns on when an op is queued into
+ * an empty batch and is recomputed only when a sent batch leaves, so it can disagree with the draft (a queued dispute
+ * start never sets it).
+ */
+export type SubmissionPhase =
+  | Readonly<{ _tag: "idle"; accumulating: boolean }>
+  | Readonly<{ _tag: "inFlight"; sent: SentJBatch }>
+  | Readonly<{ _tag: "quarantined"; sent: SentJBatch; failure: BatchFailure }>;
+/** The Entity's Depository work once it first queued an op (og JBatch). */
+export type JBatch = Readonly<{
+  _tag: "live";
+  /** The editable batch the next op joins. */
+  draft: QueuedBatch;
+  /** Work taken back from a sent batch, sealed before the draft; never an empty batch. */
+  recovery: readonly QueuedBatch[];
+  /** The highest entity nonce the chain has processed; 0 before the first. */
+  chainNonce: number;
+  /** Broadcast again as soon as the batch in flight finalizes (og autoBroadcastDraft). */
+  autoBroadcast: boolean;
+  broadcasts: Readonly<{ count: number; last: number }>;
+  phase: SubmissionPhase;
+}>;
+/** og keeps no jBatchState until the Entity first queues an op, and never deletes it after. */
+export type JSubmission = Readonly<{ _tag: "dormant" }> | JBatch;
+export const DORMANT: JSubmission = { _tag: "dormant" };
+export const initJBatch = (): JBatch => ({
+  _tag: "live",
+  draft: emptyQueuedBatch(),
+  recovery: [],
+  chainNonce: 0,
+  autoBroadcast: false,
+  broadcasts: { count: 0, last: 0 },
+  phase: { _tag: "idle", accumulating: false },
+});
+/** og "initialize jBatch on first use". */
+export const liveJBatch = (s: JSubmission): JBatch => (s._tag === "live" ? s : initJBatch());
+export const sentOf = (s: JSubmission): SentJBatch | undefined =>
+  (s._tag === "dormant" || s.phase._tag === "idle" ? undefined : s.phase.sent);
+/** The batch left idle: og's status once a sent batch leaves is whether any work remains. */
+const settled = (s: Omit<JBatch, "phase">, accumulating: boolean): JBatch =>
+  ({ ...s, phase: { _tag: "idle", accumulating } });
+
+// -- og's JBatch record: how the Entity root commits the J batch, and how og hands one in --
+
+export type OgSentJBatch = SentJBatch & Readonly<{
+  lastSubmittedAt: number; submitAttempts: number; terminalFailure?: BatchFailure | undefined;
+}>;
+export type OgJBatchState = Readonly<{
   batch: QueuedBatch; jurisdiction: null; lastBroadcast: number; broadcastCount: number; failedAttempts: number;
-  status: "empty" | "accumulating" | "sent" | "failed"; sentBatch?: SentJBatch | undefined;
+  status: "empty" | "accumulating" | "sent" | "failed"; sentBatch?: OgSentJBatch | undefined;
   recoveryBatches?: readonly QueuedBatch[] | undefined; autoBroadcastDraft?: boolean | undefined;
   entityNonce?: number | undefined;
 }>;
-export const initJBatch = (): JBatchState =>
-  ({ batch: emptyQueuedBatch(), jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0,
-    status: "empty" });
+const ogStatus = (p: SubmissionPhase): OgJBatchState["status"] => {
+  switch (p._tag) {
+    case "idle": return p.accumulating ? "accumulating" : "empty";
+    case "inFlight": return "sent";
+    case "quarantined": return "failed";
+  }
+};
+/** og never records submit attempts in consensus state: the sent batch keeps og's zero counters. */
+const ogSent = (p: SubmissionPhase): Pick<OgJBatchState, "sentBatch"> => {
+  switch (p._tag) {
+    case "idle": return {};
+    case "inFlight": return { sentBatch: { ...p.sent, lastSubmittedAt: 0, submitAttempts: 0 } };
+    case "quarantined":
+      return { sentBatch: { ...p.sent, lastSubmittedAt: 0, submitAttempts: 0, terminalFailure: p.failure } };
+  }
+};
+/** The og record the Entity root commits: og omits an empty recovery list, an unset latch and a zero nonce. */
+export const ogJBatchState = (s: JBatch): OgJBatchState => ({
+  batch: s.draft,
+  jurisdiction: null,
+  lastBroadcast: s.broadcasts.last,
+  broadcastCount: s.broadcasts.count,
+  failedAttempts: 0,
+  status: ogStatus(s.phase),
+  ...ogSent(s.phase),
+  ...(s.recovery.length === 0 ? {} : { recoveryBatches: s.recovery }),
+  ...(s.autoBroadcast ? { autoBroadcastDraft: true } : {}),
+  ...(s.chainNonce === 0 ? {} : { entityNonce: s.chainNonce }),
+});
+/** The og field for a J submission: absent while dormant. */
+export const ogJBatchOf = (s: JSubmission): OgJBatchState | undefined =>
+  (s._tag === "live" ? ogJBatchState(s) : undefined);
+const importedPhase = (og: OgJBatchState): Result<SubmissionPhase, string> => {
+  const sent = og.sentBatch;
+  if (sent === undefined) {
+    return og.status === "empty" || og.status === "accumulating"
+      ? ok({ _tag: "idle", accumulating: og.status === "accumulating" })
+      : err(`status ${og.status} without a sentBatch`);
+  }
+  if (sent.lastSubmittedAt !== 0 || sent.submitAttempts !== 0) return err("sentBatch submit counters are not og's");
+  const { lastSubmittedAt: _l, submitAttempts: _a, terminalFailure, ...kept } = sent;
+  if (og.status === "sent" && terminalFailure === undefined) return ok({ _tag: "inFlight", sent: kept });
+  if (og.status === "failed" && terminalFailure !== undefined) {
+    return ok({ _tag: "quarantined", sent: kept, failure: terminalFailure });
+  }
+  return err(`status ${og.status} with a sentBatch ${terminalFailure === undefined ? "in flight" : "quarantined"}`);
+};
+/** og's JBatch as the rewrite holds it; a record og cannot reach is refused, naming what is wrong. */
+export const importJBatchState = (og: OgJBatchState | undefined): Result<JSubmission, string> => {
+  if (og === undefined) return ok(DORMANT);
+  const recovery = og.recoveryBatches ?? [];
+  const problems = [
+    og.jurisdiction !== null || og.failedAttempts !== 0 ? "og constants changed" : undefined,
+    og.recoveryBatches !== undefined && recovery.length === 0 ? "empty recoveryBatches" : undefined,
+    recovery.some(batchEmpty) ? "an empty recovery batch" : undefined,
+    og.autoBroadcastDraft === false ? "autoBroadcastDraft false" : undefined,
+    og.entityNonce !== undefined && !(og.entityNonce >= 1) ? `entityNonce ${og.entityNonce}` : undefined,
+  ].filter((p) => p !== undefined);
+  if (problems.length > 0) return err(problems.join(", "));
+  return map(importedPhase(og), (phase): JSubmission => ({
+    _tag: "live",
+    draft: og.batch,
+    recovery,
+    chainNonce: og.entityNonce ?? 0,
+    autoBroadcast: og.autoBroadcastDraft === true,
+    broadcasts: { count: og.broadcastCount, last: og.lastBroadcast },
+    phase,
+  }));
+};
 export const J_BATCH_LIMITS = {
   maxTotalOps: 50, maxSettlements: 32, maxSettlementDiffs: 32, maxSettlementForgivenessIds: 32,
   maxDisputeStarts: 8, maxCounterDisputes: 8, maxDisputeFinalizations: 1, maxReserveToCollateralPairs: 64,
@@ -2309,11 +2423,14 @@ export const J_BATCH_LIMITS = {
 } as const;
 export const batchOpCount = (b: QueuedBatch): number => BATCH_FIELDS.reduce((n, f) => n + b[f].length, 0);
 const batchEmpty = (b: QueuedBatch): boolean => batchOpCount(b) === 0;
-/** Every batch the state holds: the draft, the one in flight, then the recovered ones. */
-const batchesOf = (s: JBatchState): readonly QueuedBatch[] =>
-  [s.batch, ...(s.sentBatch === undefined ? [] : [s.sentBatch.batch]), ...(s.recoveryBatches ?? [])];
-export const hasJBatchWork = (s: JBatchState): boolean =>
-  (s.recoveryBatches ?? []).some((b) => !batchEmpty(b)) || !batchEmpty(s.batch);
+/** Every batch the Entity holds: the draft, the one in flight, then the recovered ones. */
+const batchesOf = (s: JSubmission): readonly QueuedBatch[] => {
+  if (s._tag === "dormant") return [];
+  const sent = sentOf(s);
+  return [s.draft, ...(sent === undefined ? [] : [sent.batch]), ...s.recovery];
+};
+/** Work a broadcast could seal: the draft or a recovery batch (never empty) holds an op. */
+export const hasJBatchWork = (s: JBatch): boolean => s.recovery.length > 0 || !batchEmpty(s.draft);
 export type JBatchError = Tagged<"j_batch", { reason: string }>;
 const batchErr = (reason: string): Result<never, JBatchError> => err({ _tag: "j_batch", reason });
 const pairCount = (b: QueuedBatch): number => b.reserveToCollateral.reduce((n, op) => n + op.pairs.length, 0);
@@ -2565,16 +2682,17 @@ const appendCandidate = (b: QueuedBatch, c: ReserveCandidate): Appended => {
 /** The Entity-side view og's j-batch handlers read. */
 export type JEntity = Readonly<{
   entityId: string; reserves: ReadonlyMap<number, bigint>; debts: DebtLedger;
-  jBatch?: JBatchState | undefined; accounts: ReadonlySet<string>;
+  jBatch: JSubmission; accounts: ReadonlySet<string>;
 }>;
 /** og getReserveCandidateIssue: simulate the draft plus the candidate; its own issue, else the first. */
 export const reserveCandidateIssue = (e: JEntity, c: ReserveCandidate): ReserveIssue | undefined => {
-  const { batch, index } = appendCandidate(e.jBatch?.batch ?? emptyQueuedBatch(), c);
+  const { batch, index } = appendCandidate(liveJBatch(e.jBatch).draft, c);
   const sim = simulateBatchReserves(e.entityId, e.reserves, batch, openOutgoingDebtTotals(e.debts.out));
   return sim.issues.find((i) => i.opType === c.type && i.opIndex === index) ?? sim.issues[0];
 };
-const accumulating = (s: JBatchState, batch: QueuedBatch): JBatchState =>
-  ({ ...s, batch, status: s.status === "empty" ? "accumulating" : s.status });
+/** The draft with a new op: og turns an empty batch's status to accumulating, and leaves any other as it was. */
+const accumulating = (s: JBatch, draft: QueuedBatch): JBatch =>
+  ({ ...s, draft, phase: s.phase._tag === "idle" ? { _tag: "idle", accumulating: true } : s.phase });
 const limitErr = (reason: string): JBatchError => ({ _tag: "j_batch", reason: `J_BATCH_LIMIT_EXCEEDED: ${reason}` });
 /** og requireBatchRoom: `added` more ops must keep the batch within the contract's total-op limit. */
 export const batchRoom = (b: QueuedBatch, op: string, added = 1): Result<void, JBatchError> => {
@@ -2587,32 +2705,30 @@ export const listRoom = (name: string, length: number, max: number, added = 1): 
   guard(length + added <= max, limitErr(`${name} ${length + added}/${max}`));
 type AppendedField = "reserveToReserve" | "reserveToExternalToken" | "externalTokenToReserve";
 /** og batchAddReserveToReserve / ToExternal / ExternalTokenToReserve: one op within the 50-op limit. */
-const addOp = <F extends AppendedField>(
-  s: JBatchState, field: F, op: QueuedBatch[F][number],
-): Result<JBatchState, JBatchError> =>
-  map(batchRoom(s.batch, field), () => accumulating(s, { ...s.batch, [field]: [...s.batch[field], op] }));
+const addOp = <F extends AppendedField>(s: JBatch, field: F, op: QueuedBatch[F][number]): Result<JBatch, JBatchError> =>
+  map(batchRoom(s.draft, field), () => accumulating(s, { ...s.draft, [field]: [...s.draft[field], op] }));
 /** og batchAddReserveToCollateral: aggregate into the (receivingEntity, tokenId) entry within the pair limits. */
 export const addReserveToCollateral = (
-  s: JBatchState,
+  s: JBatch,
   entity: string,
   counterparty: string,
   tokenId: number,
   amount: bigint,
-): Result<JBatchState, JBatchError> => {
+): Result<JBatch, JBatchError> => {
   if (amount <= 0n) return batchErr("R2C_AMOUNT_MUST_BE_POSITIVE");
   if (!Number.isSafeInteger(tokenId) || tokenId <= 0) return batchErr("R2C_TOKEN_ID_INVALID");
   if (entity === "" || counterparty === "" || entity === counterparty) return batchErr("R2C_ACCOUNT_PARTIES_INVALID");
   const L = J_BATCH_LIMITS;
   const candidate = { type: "reserveToCollateral" as const, receivingEntity: entity, counterparty, tokenId, amount };
-  const added = (): JBatchState => accumulating(s, appendCandidate(s.batch, candidate).batch);
+  const added = (): JBatch => accumulating(s, appendCandidate(s.draft, candidate).batch);
   const sameEntry = (op: QueuedDeposit): boolean =>
     op.receivingEntity === entity && op.tokenId === tokenId;
-  const entry = s.batch.reserveToCollateral.find(sameEntry);
+  const entry = s.draft.reserveToCollateral.find(sameEntry);
   // Topping up an existing pair adds no op and no pair, so no limit can refuse it.
   if (entry !== undefined && entry.pairs.some((p) => p.entity === counterparty)) return ok(added());
   const room = checks(
-    entry === undefined ? batchRoom(s.batch, "reserveToCollateral") : ok(undefined),
-    listRoom("reserveToCollateral.pairs total", pairCount(s.batch), L.maxReserveToCollateralPairsTotal),
+    entry === undefined ? batchRoom(s.draft, "reserveToCollateral") : ok(undefined),
+    listRoom("reserveToCollateral.pairs total", pairCount(s.draft), L.maxReserveToCollateralPairsTotal),
     entry === undefined
       ? ok(undefined)
       : listRoom("reserveToCollateral.pairs", entry.pairs.length, L.maxReserveToCollateralPairs),
@@ -2624,9 +2740,9 @@ export const addReserveToCollateral = (
  * only a message, with the Entity otherwise as it was, so a refused first deposit creates no J batch.
  */
 export type JQueued =
-  | { readonly _tag: "queued"; readonly jBatch: JBatchState; readonly message: string }
+  | { readonly _tag: "queued"; readonly jBatch: JBatch; readonly message: string }
   | { readonly _tag: "refused"; readonly message: string };
-const queued = (message: string) => (jBatch: JBatchState): JQueued => ({ _tag: "queued", jBatch, message });
+const queued = (message: string) => (jBatch: JBatch): JQueued => ({ _tag: "queued", jBatch, message });
 const refused = (message: string): Result<JQueued, JBatchError> => ok({ _tag: "refused", message });
 const insufficient = (issue: ReserveIssue, amount: bigint, tokenId: number): string =>
   `have ${issue.availableAfterDebt}, need ${amount} token ${tokenId}`;
@@ -2641,7 +2757,7 @@ const queueReserveOut = (
 ): Result<JQueued, JBatchError> => {
   const issue = reserveCandidateIssue(e, { type, receivingEntity, tokenId, amount });
   if (issue !== undefined) return batchErr(`❌ Insufficient spendable reserve: ${insufficient(issue, amount, tokenId)}`);
-  return map(addOp(e.jBatch ?? initJBatch(), type, { receivingEntity, tokenId, amount }), queued(message));
+  return map(addOp(liveJBatch(e.jBatch), type, { receivingEntity, tokenId, amount }), queued(message));
 };
 /** og handleR2R. */
 export const queueR2R = (e: JEntity, to: string, tokenId: number, amount: bigint): Result<JQueued, JBatchError> =>
@@ -2665,7 +2781,7 @@ export const queueE2R = (e: JEntity, x: ExternalDeposit): Result<JQueued, JBatch
     tokenType: x.tokenType ?? 0, internalTokenId: x.internalTokenId ?? 0, amount: x.amount,
   };
   const message = `📦 Queued E→R: ${x.amount} via ${x.contractAddress.slice(0, 10)}... (use j_broadcast to commit)`;
-  return map(addOp(e.jBatch ?? initJBatch(), "externalTokenToReserve", op), queued(message));
+  return map(addOp(liveJBatch(e.jBatch), "externalTokenToReserve", op), queued(message));
 };
 /**
  * og r2c.ts collectRebalanceFee: a deposit carrying `rebalanceQuoteId` needs the Account's accepted
@@ -2704,7 +2820,7 @@ export const queueR2C = (
       : "❌ Rebalance fee unsupported for remote reserve → account deposits");
   }
   const message = `📦 Queued R→C: ${amount} token ${tokenId} to ${receiving.slice(-4)}↔${counterparty.slice(-4)}`;
-  const drafted = addReserveToCollateral(e.jBatch ?? initJBatch(), receiving, counterparty, tokenId, amount);
+  const drafted = addReserveToCollateral(liveJBatch(e.jBatch), receiving, counterparty, tokenId, amount);
   return map(drafted, queued(`${message} (use j_broadcast to commit)`));
 };
 
@@ -2743,7 +2859,8 @@ export type JBatchTx = Readonly<{
 /** og HashToSign of type "jBatch": the Entity quorum signs the batch hash for its Hanko. */
 export type JBatchHashToSign = { readonly hash: string; readonly type: "jBatch"; readonly context: string };
 export type Broadcast = Readonly<{
-  jBatch: JBatchState; jTx?: JBatchTx | undefined; hashToSign?: JBatchHashToSign | undefined; note?: string | undefined;
+  jBatch: JSubmission; jTx?: JBatchTx | undefined; hashToSign?: JBatchHashToSign | undefined;
+  note?: string | undefined;
 }>;
 type BroadcastContext = Readonly<{
   entityId: string; chainId: number; depository: string; signerId: string; timestamp: number;
@@ -2752,31 +2869,29 @@ const unusableDepository = (ctx: BroadcastContext): boolean =>
   !domainOf({ chainId: ctx.chainId, depositoryAddress: ctx.depository }).ok || /^0x0{40}$/.test(ctx.depository);
 const sealedHash = (ctx: BroadcastContext, encodedBatch: string, nonce: number): string =>
   encodeBatchHash({ chainId: ctx.chainId, depository: ctx.depository, encodedBatch, nonce: String(nonce) });
-/** Recovered work goes first: a non-empty recovery batch is sealed before the draft. */
-const nextToSeal = (s: JBatchState) => {
-  const recovery = s.recoveryBatches?.[0];
-  const fromRecovery = recovery !== undefined && !batchEmpty(recovery);
-  return { fromRecovery, ...takeBroadcastBatch(fromRecovery ? recovery : s.batch) };
+/** Recovered work goes first: the first recovery batch is sealed before the draft. */
+const nextToSeal = (s: JBatch) => {
+  const [recovery] = s.recovery;
+  return { fromRecovery: recovery !== undefined, ...takeBroadcastBatch(recovery ?? s.draft) };
 };
-/** What stays behind once `selected` is sealed: its remainder goes back where it came from. */
-const parkRemainder = (s: JBatchState, fromRecovery: boolean, remainder: QueuedBatch): JBatchState => {
-  const later = (s.recoveryBatches ?? []).slice(1);
-  const queue = !fromRecovery ? s.recoveryBatches : batchEmpty(remainder) ? later : [remainder, ...later];
-  const { recoveryBatches: _r, autoBroadcastDraft: _a, ...rest } = s;
-  const parked = { ...rest, batch: fromRecovery ? s.batch : remainder };
-  return queue === undefined || queue.length === 0 ? parked : { ...parked, recoveryBatches: queue };
+/** What stays behind once `selected` is sealed: its remainder goes back where it came from, and the latch drops. */
+const parkRemainder = (s: JBatch, fromRecovery: boolean, remainder: QueuedBatch): JBatch => {
+  if (!fromRecovery) return { ...s, draft: remainder, autoBroadcast: false };
+  const later = s.recovery.slice(1);
+  return { ...s, recovery: batchEmpty(remainder) ? later : [remainder, ...later], autoBroadcast: false };
 };
 /**
  * og handleJBroadcast: refuse while a batch is in flight; skip an empty draft; seal the next batch
  * at entityNonce + 1, park the rest, and hand its batch hash to the quorum.
  */
 export const jBroadcast = (
-  s: JBatchState | undefined, ctx: BroadcastContext & { readonly feeOverrides?: FeeOverrides | undefined },
+  s: JSubmission, ctx: BroadcastContext & { readonly feeOverrides?: FeeOverrides | undefined },
 ): Result<Broadcast, JBatchError> => {
-  if (s === undefined) return batchErr("No jBatchState found for j_broadcast");
-  const sent = s.sentBatch;
-  if (sent !== undefined) {
-    return batchErr(`Cannot broadcast: sentBatch pending nonce=${sent.entityNonce} attempts=${sent.submitAttempts}`);
+  if (s._tag === "dormant") return batchErr("No jBatchState found for j_broadcast");
+  const pending = sentOf(s);
+  // og counts submit attempts outside consensus: a committed sent batch always reads zero
+  if (pending !== undefined) {
+    return batchErr(`Cannot broadcast: sentBatch pending nonce=${pending.entityNonce} attempts=0`);
   }
   if (!hasJBatchWork(s)) return ok({ jBatch: s, note: "j_broadcast skipped: jBatch is empty" });
   if (ctx.chainId === 0) return ok({ jBatch: s, note: "Missing chainId" });
@@ -2786,18 +2901,19 @@ export const jBroadcast = (
   const limit = jBatchLimitIssue(selected);
   if (limit !== undefined) return batchErr(`J_BATCH_LIMIT_EXCEEDED: j_broadcast: ${limit}`);
   return map(encodeJBatch(selected), (encodedBatch): Broadcast => {
-    const nonce = (s.entityNonce ?? 0) + 1;
+    const nonce = s.chainNonce + 1;
     const batchHash = sealedHash(ctx, encodedBatch, nonce);
-    const generation = s.broadcastCount + 1;
+    const generation = s.broadcasts.count + 1;
     const fee = ctx.feeOverrides === undefined ? {} : { feeOverrides: { ...ctx.feeOverrides } };
     const parked = parkRemainder(s, fromRecovery, remainder);
-    const sentBatch: SentJBatch = {
-      batch: selected, batchHash, encodedBatch, entityNonce: nonce, firstSubmittedAt: ctx.timestamp,
-      lastSubmittedAt: 0, submitAttempts: 0, ...fee,
+    const sent: SentJBatch = {
+      batch: selected, batchHash, encodedBatch, entityNonce: nonce, firstSubmittedAt: ctx.timestamp, ...fee,
     };
-    const jBatch: JBatchState = {
-      ...parked, ...(hasJBatchWork(parked) ? { autoBroadcastDraft: true } : {}),
-      sentBatch, broadcastCount: generation, lastBroadcast: ctx.timestamp, status: "sent",
+    const jBatch: JBatch = {
+      ...parked,
+      autoBroadcast: hasJBatchWork(parked),
+      broadcasts: { count: generation, last: ctx.timestamp },
+      phase: { _tag: "inFlight", sent },
     };
     const data = {
       batch: selected, batchHash, encodedBatch, entityNonce: nonce, batchGeneration: generation, ...fee,
@@ -2812,37 +2928,32 @@ export const jBroadcast = (
  * `autoBroadcast`: og finalizePendingBatch queues a follow-up j_broadcast when the sealed batch
  * parked work behind it.
  */
-export type BatchProcessed = { readonly jBatch: JBatchState | undefined; readonly autoBroadcast: boolean };
+export type BatchProcessed = { readonly jBatch: JSubmission; readonly autoBroadcast: boolean };
 /**
- * og applyHankoBatchProcessedEvent: the chain nonce is authoritative. The exact pending (nonce,
- * hash) finalizes; a different hash at or past the pending nonce quarantines the pending batch.
+ * og applyHankoBatchProcessedEvent: the chain nonce is authoritative (a first event creates the J batch to keep it).
+ * The exact pending (nonce, hash) finalizes; a different hash at or past the pending nonce quarantines the pending
+ * batch.
  */
 export const applyHankoBatchProcessed = (
-  s: JBatchState | undefined, entity: string, e: Extract<JEvent, { readonly type: "HankoBatchProcessed" }>,
+  s: JSubmission, entity: string, e: Extract<JEvent, { readonly type: "HankoBatchProcessed" }>,
   timestamp: number,
 ): Result<BatchProcessed, JBatchError> => {
   if (e.entityId.toLowerCase() !== entity.toLowerCase()) return ok({ jBatch: s, autoBroadcast: false });
   const hash = e.batchHash.trim().toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(hash)) return batchErr("J_BATCH_EVENT_BATCH_HASH_INVALID");
   if (e.nonce < 1n || e.nonce > SAFE_UINT) return batchErr("J_BATCH_EVENT_NONCE_INVALID");
-  const cur = s ?? initJBatch();
   const nonce = Number(e.nonce);
-  const synced = Math.max(cur.entityNonce ?? 0, nonce);
-  const sent = cur.sentBatch;
-  const finalizesPending = sent !== undefined && sent.entityNonce === nonce && sent.batchHash.toLowerCase() === hash;
-  if (finalizesPending) {
-    const { sentBatch: _s, ...rest } = cur;
-    const jBatch: JBatchState = { ...rest, status: hasJBatchWork(cur) ? "accumulating" : "empty", entityNonce: synced };
-    return ok({ jBatch, autoBroadcast: jBatch.autoBroadcastDraft === true && hasJBatchWork(jBatch) });
+  const cur = liveJBatch(s);
+  const synced = { ...cur, chainNonce: Math.max(cur.chainNonce, nonce) };
+  const sent = sentOf(cur);
+  if (sent !== undefined && sent.entityNonce === nonce && sent.batchHash.toLowerCase() === hash) {
+    const jBatch = settled(synced, hasJBatchWork(cur));
+    return ok({ jBatch, autoBroadcast: jBatch.autoBroadcast && hasJBatchWork(jBatch) });
   }
-  if (sent === undefined || nonce < sent.entityNonce) {
-    return ok({ jBatch: { ...cur, entityNonce: synced }, autoBroadcast: false });
-  }
+  if (sent === undefined || nonce < sent.entityNonce) return ok({ jBatch: synced, autoBroadcast: false });
   const pending = `pending=${sent.batchHash.toLowerCase()}:pendingNonce=${sent.entityNonce}:finalizedNonce=${nonce}`;
-  const message = `J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${hash}:${pending}`;
-  const quarantined = { ...sent, terminalFailure: { message, failedAt: timestamp } };
-  const jBatch: JBatchState = { ...cur, entityNonce: synced, status: "failed", sentBatch: quarantined };
-  return ok({ autoBroadcast: false, jBatch });
+  const failure = { message: `J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${hash}:${pending}`, failedAt: timestamp };
+  return ok({ jBatch: { ...synced, phase: { _tag: "quarantined", sent, failure } }, autoBroadcast: false });
 };
 /** og normalizeGasBumpBps: floored and clamped to [0, 20000]; a non-finite bump is dropped. */
 const gasBump = (v: number | undefined): number | undefined =>
@@ -2852,15 +2963,14 @@ const gasBump = (v: number | undefined): number | undefined =>
  * the next generation; an empty stale sent batch is dropped instead.
  */
 export const jRebroadcast = (
-  s: JBatchState | undefined, ctx: BroadcastContext & { readonly gasBumpBps?: number | undefined },
+  s: JSubmission, ctx: BroadcastContext & { readonly gasBumpBps?: number | undefined },
 ): Result<Broadcast, JBatchError> => {
-  const sent = s?.sentBatch;
-  if (s === undefined || sent === undefined) {
-    return ok({ jBatch: s ?? initJBatch(), note: "⚠️ j_rebroadcast skipped: no sentBatch" });
+  if (s._tag === "dormant" || s.phase._tag === "idle") {
+    return ok({ jBatch: s, note: "⚠️ j_rebroadcast skipped: no sentBatch" });
   }
-  if (sent.terminalFailure !== undefined) {
-    const failure = sent.terminalFailure.message;
-    return batchErr(`❌ Cannot rebroadcast quarantined jBatch nonce=${sent.entityNonce}: ${failure}`);
+  const sent = s.phase.sent;
+  if (s.phase._tag === "quarantined") {
+    return batchErr(`❌ Cannot rebroadcast quarantined jBatch nonce=${sent.entityNonce}: ${s.phase.failure.message}`);
   }
   if (ctx.signerId === "") return batchErr("❌ No signerId available for j_rebroadcast");
   const bump = gasBump(ctx.gasBumpBps);
@@ -2868,18 +2978,18 @@ export const jRebroadcast = (
   if (unusableDepository(ctx)) {
     return ok({ jBatch: s, note: "❌ Jurisdiction unavailable for j_rebroadcast: INVALID_DEPOSITORY_ADDRESS" });
   }
-  const generation = s.broadcastCount + 1;
+  // og's status here reads the draft alone, not the recovery batches
   if (batchEmpty(sent.batch)) {
-    const { sentBatch: _s, ...rest } = s;
     const note = `🧹 j_rebroadcast cleared empty stale sentBatch nonce=${sent.entityNonce}`;
-    return ok({ jBatch: { ...rest, status: batchEmpty(s.batch) ? "empty" : "accumulating" }, note });
+    return ok({ jBatch: settled(s, !batchEmpty(s.draft)), note });
   }
+  const generation = s.broadcasts.count + 1;
   return map(encodeJBatch(sent.batch), (encodedBatch): Broadcast => {
     const batchHash = sealedHash(ctx, encodedBatch, sent.entityNonce);
     const fee = bump === undefined ? {} : { feeOverrides: { gasBumpBps: bump } };
-    const sentBatch = { ...sent, batchHash, encodedBatch, ...fee };
-    const jBatch: JBatchState = {
-      ...s, sentBatch, lastBroadcast: ctx.timestamp, broadcastCount: generation, status: "sent",
+    const resealed = { ...sent, batchHash, encodedBatch, ...fee };
+    const jBatch: JBatch = {
+      ...s, broadcasts: { count: generation, last: ctx.timestamp }, phase: { _tag: "inFlight", sent: resealed },
     };
     const data = {
       batch: sent.batch, batchHash, encodedBatch, entityNonce: sent.entityNonce, batchGeneration: generation,
@@ -2898,7 +3008,7 @@ export const jRebroadcast = (
 export type JLatchRelease = Readonly<{
   submitted: readonly { readonly accountId: string; readonly tokenId: number }[]; finalizers: readonly string[];
 }>;
-export type JRecovered = Readonly<{ jBatch: JBatchState | undefined; note: string; release: JLatchRelease }>;
+export type JRecovered = Readonly<{ jBatch: JSubmission; note: string; release: JLatchRelease }>;
 const NOTHING_RELEASED: JLatchRelease = { submitted: [], finalizers: [] };
 const finalizersOf = (b: QueuedBatch): readonly string[] =>
   b.disputeFinalizations.map((op) => op.counterentity.toLowerCase());
@@ -2908,54 +3018,50 @@ const finalizersOf = (b: QueuedBatch): readonly string[] =>
  * R2C submitted markers.
  */
 export const jAbortSentBatch = (
-  s: JBatchState | undefined,
+  s: JSubmission,
   x: { readonly requeueToCurrent?: boolean | undefined; readonly reason?: string | undefined },
   jNonceOf: (counterparty: string) => number,
 ): JRecovered => {
-  const sent = s?.sentBatch;
-  if (s === undefined || sent === undefined) {
+  if (s._tag === "dormant" || s.phase._tag === "idle") {
     return { jBatch: s, note: "⚠️ No sentBatch to abort", release: NOTHING_RELEASED };
   }
+  const sent = s.phase.sent;
   const requeue = x.requeueToCurrent !== false;
   const notYetSpent = (op: QueuedWithdrawal): boolean => op.nonce > jNonceOf(op.counterparty.toLowerCase());
   const unspent = sent.batch.collateralToReserve.filter(notYetSpent);
   const kept: QueuedBatch = { ...sent.batch, disputeFinalizations: [], collateralToReserve: unspent };
-  const { sentBatch: _s, recoveryBatches, ...rest } = s;
-  const queue = requeue && !batchEmpty(kept) ? [kept, ...(recoveryBatches ?? [])] : recoveryBatches;
-  const parked: JBatchState = { ...rest, ...(queue === undefined ? {} : { recoveryBatches: queue }) };
+  const parked = { ...s, recovery: requeue && !batchEmpty(kept) ? [kept, ...s.recovery] : s.recovery };
   const submitted = requeue ? [] : sent.batch.reserveToCollateral.flatMap((op) =>
-    op.pairs.map((p) => ({ accountId: p.entity.toLowerCase(), tokenId: Number(op.tokenId) })));
+    op.pairs.map((p) => ({ accountId: p.entity.toLowerCase(), tokenId: op.tokenId })));
   const how = requeue ? " (requeued to current)" : " (dropped)";
   const why = x.reason ? ` (${x.reason})` : "";
   const note = `🛑 Aborted sentBatch nonce=${sent.entityNonce} ops=${batchOpCount(sent.batch)}${how}${why}`;
   const finalizers = [...new Set(finalizersOf(sent.batch))];
-  const jBatch: JBatchState = { ...parked, status: hasJBatchWork(parked) ? "accumulating" : "empty" };
-  return { jBatch, note, release: { submitted, finalizers } };
+  return { jBatch: settled(parked, hasJBatchWork(parked)), note, release: { submitted, finalizers } };
 };
 /**
  * og handleJClearBatch: drop the draft, the sent batch and every recovery batch; release every
  * Account's submitted markers and the dropped finalize latches.
  */
 export const jClearBatch = (
-  s: JBatchState | undefined, x: { readonly reason?: string | undefined },
+  s: JSubmission, x: { readonly reason?: string | undefined },
   submittedTokens: ReadonlyMap<string, readonly number[]>,
 ): JRecovered => {
-  if (s === undefined) return { jBatch: s, note: "⚠️ No jBatchState to clear", release: NOTHING_RELEASED };
-  const recovery = s.recoveryBatches ?? [];
-  const sentBatches = s.sentBatch === undefined ? [] : [s.sentBatch.batch];
-  const finalizers = [...new Set([s.batch, ...sentBatches, ...recovery].flatMap(finalizersOf))];
+  if (s._tag === "dormant") return { jBatch: s, note: "⚠️ No jBatchState to clear", release: NOTHING_RELEASED };
+  const sent = sentOf(s);
+  const finalizers = [...new Set(batchesOf(s).flatMap(finalizersOf))];
   const submitted = [...submittedTokens].flatMap(([accountId, tokens]) =>
     tokens.toSorted((a, b) => a - b).map((tokenId) => ({ accountId, tokenId })));
-  const recoveryOps = recovery.reduce((n, b) => n + batchOpCount(b), 0);
+  const recoveryOps = s.recovery.reduce((n, b) => n + batchOpCount(b), 0);
   const note = [
-    `🗑️ Cleared jBatch current=${batchOpCount(s.batch)}`,
-    s.sentBatch === undefined ? "" : ` [sentBatch=${batchOpCount(s.sentBatch.batch)} ops]`,
+    `🗑️ Cleared jBatch current=${batchOpCount(s.draft)}`,
+    sent === undefined ? "" : ` [sentBatch=${batchOpCount(sent.batch)} ops]`,
     recoveryOps > 0 ? ` [recoveryBatch=${recoveryOps} ops]` : "",
     x.reason ? ` (${x.reason})` : "",
     submitted.length > 0 ? `; reset ${submitted.length} submitted rebalance marker(s)` : "",
   ].join("");
-  const { sentBatch: _s, recoveryBatches: _r, ...rest } = s;
-  return { jBatch: { ...rest, batch: emptyQueuedBatch(), status: "empty" }, note, release: { submitted, finalizers } };
+  const cleared = settled({ ...s, draft: emptyQueuedBatch(), recovery: [] }, false);
+  return { jBatch: cleared, note, release: { submitted, finalizers } };
 };
 /** og JTx `mint` (handleMintReserves): a direct admin mint, outside the batch. */
 export type JMintTx = Readonly<{
@@ -11241,6 +11347,8 @@ export type EntityState = {
   readonly timestamp: bigint;
   readonly jurisdictionConfig?: JurisdictionConfig | undefined;
   readonly committed: EntityCommitted;
+  /** og jBatchState: the Depository work the Entity queued, sealed and has in flight. */
+  readonly jBatch: JSubmission;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -11637,7 +11745,7 @@ export type EntityTx =
   | SettleEntityTx
   | JBatchEntityTx;
 /**
- * og types/entity-tx.ts J-batch txs (entity/tx/handlers/j-batch): queue reserve ops into the committed jBatchState,
+ * og types/entity-tx.ts J-batch txs (entity/tx/handlers/j-batch): queue reserve ops into the J batch,
  * seal / resend / abort / clear it, the direct admin mint.
  */
 export type JBatchEntityTx =
@@ -12127,6 +12235,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   timestamp: s.timestamp,
   jurisdictionConfig: s.jurisdictionConfig,
   committed: s.committed,
+  jBatch: s.jBatch,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12770,11 +12879,16 @@ export const createEntity = (p: EntitySeed): Result<OpenEntity, EntityError> => 
   return chain(parts, ({ quorum, jurisdiction }): Result<OpenEntity, EntityError> => {
     const signer = p.signerId === undefined ? quorum.proposer : memberId(quorum, p.signerId);
     if (signer === undefined) return err({ _tag: "unknown_member", address: p.signerId ?? "" });
-    const state: EntityState = {
-      id: p.id, quorum, jurisdiction, accounts: new Map(), height: 0n, timestamp: p.timestamp ?? 0n,
-      ...opt("jurisdictionConfig", p.jurisdictionConfig), committed: p.committed ?? {},
-    };
-    return ok(openEntity(signer, state, genesisHead(), [], new Map()));
+    const { jBatchState, ...committed } = p.committed ?? {};
+    const imported = mapErr(importJBatchState(jBatchState as OgJBatchState | undefined), (reason): EntityError =>
+      ({ _tag: "entity_invariant", reason: `J_BATCH_STATE_UNREACHABLE: ${reason}` }));
+    return map(imported, (jBatch) => {
+      const state: EntityState = {
+        id: p.id, quorum, jurisdiction, accounts: new Map(), height: 0n, timestamp: p.timestamp ?? 0n,
+        ...opt("jurisdictionConfig", p.jurisdictionConfig), committed, jBatch,
+      };
+      return openEntity(signer, state, genesisHead(), [], new Map());
+    });
   });
 };
 const memberSigned = (q: Quorum, h: string, sig: Signature, addr: Address, ctx: EntityContext): boolean => match(q, {
@@ -13782,29 +13896,22 @@ const entityLending = (
 };
 // ---- dispute start: prepareDispute, disputeStart ----
 // og entity/tx/handlers/dispute/{index,start,start-admission,start-evidence,start-hanko}.ts
-/** The Entity's J batch: og keeps no jBatchState until the Entity first queues an op. */
-const jBatchOf = (state: EntityState): JBatchState | undefined =>
-  state.committed["jBatchState"] as JBatchState | undefined;
-/** og never deletes jBatchState, so a step that yields none (the Entity had none) leaves the state as it was. */
-const withJBatch = (state: EntityState, jBatch: JBatchState | undefined): EntityState =>
-  (jBatch === undefined
-    ? state
-    : { ...state, committed: { ...state.committed, jBatchState: jBatch as unknown as Binary } });
+const withJBatch = (state: EntityState, jBatch: JSubmission): EntityState => ({ ...state, jBatch });
 /** The J batch the Entity's next op extends: its own, or og's fresh one. */
-const draftJBatch = (state: EntityState): JBatchState => jBatchOf(state) ?? initJBatch();
+const draftJBatch = (state: EntityState): JBatch => liveJBatch(state.jBatch);
 /**
  * og hasQueuedDisputeStart / hasQueuedDisputeFinalize: an operation for this counterparty in the draft, the sent
  * batch or a recovery batch.
  */
 const queuedDisputeOp = (
-  jb: JBatchState, peer: string, kind: "disputeStarts" | "disputeFinalizations",
+  jb: JBatch, peer: string, kind: "disputeStarts" | "disputeFinalizations",
 ): boolean => {
   const target = lower(peer);
   const names = (rows: readonly { readonly counterentity: string }[]): boolean =>
     rows.some((r) => lower(r.counterentity) === target);
   return batchesOf(jb).some((b) => names(b[kind]));
 };
-const queuedDisputeStart = (jb: JBatchState, peer: EntityId): boolean => queuedDisputeOp(jb, peer, "disputeStarts");
+const queuedDisputeStart = (jb: JBatch, peer: EntityId): boolean => queuedDisputeOp(jb, peer, "disputeStarts");
 /** og canonicalizeProofBodyStruct: u32 response seconds as numbers, offdeltas as Int512 {high, low} words. */
 export const queuedProofBody = (b: ProofBody): QueuedProofBody => ({
   watchSeed: b.watchSeed,
@@ -14106,14 +14213,14 @@ const routeCarriesPull = (
 /** A start that passed og's admission: the seeded draft, its batch, the preparing Account and how it is judged. */
 type StartCase = {
   readonly admitted: Draft;
-  readonly jb: JBatchState;
+  readonly jb: JBatch;
   readonly child: PreparingAccount;
   readonly peer: EntityId;
   readonly intent: StartIntent;
   readonly dt: DeltaTransformerRef;
 };
 /** og start admission: the Account's status and readiness; og's status line when the start cannot proceed. */
-const startGate = (d: Draft, jb: JBatchState, peer: EntityId, now: number): PreparingAccount | string => {
+const startGate = (d: Draft, jb: JBatch, peer: EntityId, now: number): PreparingAccount | string => {
   const child = d.accountReplicas.get(peer), tag = peer.slice(-4);
   if (child === undefined) return `❌ No account with ${tag} - cannot start dispute`;
   if (child._tag === "disputed") return `❌ Account with ${tag} is disputed - reopen required`;
@@ -14149,12 +14256,12 @@ const startRefusal = (c: StartCase, refusal: StartRefusal): Result<Draft, Entity
   }
 };
 /** og queueDisputeStart limits: a Pull-bearing start rides an empty batch; starts and total ops stay bounded. */
-const startBatchFits = (jb: JBatchState, hasPulls: boolean): Result<void, EntityError> => {
-  const total = batchOpCount(jb.batch);
+const startBatchFits = (jb: JBatch, hasPulls: boolean): Result<void, EntityError> => {
+  const total = batchOpCount(jb.draft);
   if (hasPulls && total !== 0) return invariant(`DISPUTE_START_PULL_BATCH_NOT_EMPTY:${total}`);
   const room = checks(
-    listRoom("disputeStarts", jb.batch.disputeStarts.length, J_BATCH_LIMITS.maxDisputeStarts),
-    batchRoom(jb.batch, "disputeStart"),
+    listRoom("disputeStarts", jb.draft.disputeStarts.length, J_BATCH_LIMITS.maxDisputeStarts),
+    batchRoom(jb.draft, "disputeStart"),
   );
   return mapErr(room, batchThrew);
 };
@@ -14187,8 +14294,8 @@ const startQueued = (c: StartCase, s: DisputeStart, starterInitialArguments: str
     finalizeQueued: false,
   };
   // og queueDisputeStart pushes the row without touching the batch status
-  const disputeStarts = [...jb.batch.disputeStarts, row];
-  const state = withJBatch(admitted.state, { ...jb, batch: { ...jb.batch, disputeStarts } });
+  const disputeStarts = [...jb.draft.disputeStarts, row];
+  const state = withJBatch(admitted.state, { ...jb, draft: { ...jb.draft, disputeStarts } });
   return { ...admitted, ...putChild(state, admitted.accountReplicas, peer, startPrepared(child, s, queued)) };
 };
 /**
@@ -14364,16 +14471,16 @@ const bundleSourceClaim = (claimed: CjHost) => (next: Cj, c: SourceClaim): Resul
     case "source-window-expired": return invariant(`DISPUTE_START_SOURCE_CLAIM_WINDOW_IMPOSSIBLE:${c.routeId}`);
     case "already-queued": return ok(next);
     case "queued": return ok(cjSay(next, `🌉 Cross-j claim ${c.routeId}: source reveal bundled with dispute start`));
-    case "deferred-batch-pending": return claimed.jb?.sentBatch === undefined
+    case "deferred-batch-pending": return sentOf(claimed.jb) === undefined
       ? invariant(`DISPUTE_START_SOURCE_CLAIM_NOT_ATOMIC:${c.routeId}`)
       : ok(cjSay(next, `⏳ Cross-j claim ${c.routeId}: start/reveal held behind immutable jBatch`));
   }
 };
 /** og latches autoBroadcastDraft; without a sent batch it also broadcasts through `validators[0]`. */
 const latchBroadcast = (signerId: string | undefined) => (next: Cj): Result<Cj, EntityError> => {
-  const jb = next.host.jb ?? initJBatch();
-  const latched = cjHost(next, { ...next.host, jb: { ...jb, autoBroadcastDraft: true } });
-  if (jb.sentBatch !== undefined) return ok(latched);
+  const jb = liveJBatch(next.host.jb);
+  const latched = cjHost(next, { ...next.host, jb: { ...jb, autoBroadcast: true } });
+  if (sentOf(jb) !== undefined) return ok(latched);
   return signerId
     ? ok(cjBroadcast(latched, signerId))
     : invariant("DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING");
@@ -14698,23 +14805,19 @@ const finalizeDispute = (d: Draft, x: FinalizeIntent, ctx: FoldContext): Result<
   });
 };
 /** og seeds jBatchState before admission; an op queued while a sent batch is pending joins the current draft batch. */
-const seededBatch = (d: Draft, op: string): { readonly jb: JBatchState; readonly admitted: Draft } => {
+const seededBatch = (d: Draft, op: string): { readonly jb: JBatch; readonly admitted: Draft } => {
   const jb = draftJBatch(d.state);
   const seeded: Draft = { ...d, state: withJBatch(d.state, jb) };
-  const admitted =
-    jb.sentBatch === undefined
-      ? seeded
-      : withStatus(
-          seeded,
-          `ℹ️ ${op} queued to current batch while sentBatch nonce=${jb.sentBatch.entityNonce} is still pending`,
-        );
+  const sent = sentOf(jb);
+  const behind = (nonce: number) => `ℹ️ ${op} queued to current batch while sentBatch nonce=${nonce} is still pending`;
+  const admitted = sent === undefined ? seeded : withStatus(seeded, behind(sent.entityNonce));
   return { jb, admitted };
 };
 type FinalizeGate =
   | Tagged<"answered", { draft: Draft }>
   | Tagged<"admitted", { child: DisputedAccount; active: ActiveDispute }>;
 /** og finalize admission: an observed dispute not yet queued; one already in the batch lifecycle only latches. */
-const finalizeGate = (admitted: Draft, jb: JBatchState, peer: EntityId): FinalizeGate => {
+const finalizeGate = (admitted: Draft, jb: JBatch, peer: EntityId): FinalizeGate => {
   const tag = peer.slice(-4);
   const child = admitted.accountReplicas.get(peer);
   const disputed = child?._tag === "disputed" ? child : undefined;
@@ -14926,20 +15029,20 @@ const deferFinalize = (
     ),
   );
 };
-const finalizationFits = (jb: JBatchState): Result<void, EntityError> =>
+const finalizationFits = (jb: JBatch): Result<void, EntityError> =>
   mapErr(
     checks(
-      listRoom("disputeFinalizations", jb.batch.disputeFinalizations.length, J_BATCH_LIMITS.maxDisputeFinalizations),
-      batchRoom(jb.batch, "disputeFinalize"),
+      listRoom("disputeFinalizations", jb.draft.disputeFinalizations.length, J_BATCH_LIMITS.maxDisputeFinalizations),
+      batchRoom(jb.draft, "disputeFinalize"),
     ),
     batchThrew,
   );
 /** og batchAddRevealSecret: an exact duplicate is skipped; the batch's total ops and reveal count stay bounded. */
-const addRevealSecret = (jb: JBatchState, transformer: string) =>
+const addRevealSecret = (jb: JBatch, transformer: string) =>
   (reveals: readonly RevealSecret[], secret: string): Result<readonly RevealSecret[], EntityError> => {
     if (reveals.some((r) => r.transformer === transformer && r.secret === secret)) return ok(reveals);
     const room = checks(
-      batchRoom({ ...jb.batch, revealSecrets: reveals }, "revealSecret"),
+      batchRoom({ ...jb.draft, revealSecrets: reveals }, "revealSecret"),
       listRoom("revealSecrets", reveals.length, J_BATCH_LIMITS.maxSecretReveals),
     );
     return mapErr(map(room, () => [...reveals, { transformer, secret }]), batchThrew);
@@ -14966,21 +15069,21 @@ const finalizationRow = (
  */
 const queueFinalization = (
   flushed: Draft,
-  jb: JBatchState,
+  jb: JBatch,
   peer: EntityId,
   registry: Registry,
   row: QueuedFinalization,
   x: FinalizeIntent,
 ): Result<Draft, EntityError> => {
-  const held = jb.batch.revealSecrets;
+  const held = jb.draft.revealSecrets;
   const reveals = chain(finalizationFits(jb), () =>
     foldResult(registry.secrets, held, addRevealSecret(jb, registry.transformer)),
   );
   return map(reveals, (revealSecrets) => {
+    const disputeFinalizations = [...jb.draft.disputeFinalizations, row];
+    const draft = { ...jb.draft, revealSecrets, disputeFinalizations };
     // og batchAddRevealSecret moves an empty batch to accumulating; the finalization row itself does not
-    const status = revealSecrets.length > held.length && jb.status === "empty" ? "accumulating" : jb.status;
-    const disputeFinalizations = [...jb.batch.disputeFinalizations, row];
-    const drafted = { ...jb, status, batch: { ...jb.batch, revealSecrets, disputeFinalizations } };
+    const drafted = revealSecrets.length > held.length ? accumulating(jb, draft) : { ...jb, draft };
     const latest = flushed.accountReplicas.get(peer) as DisputedAccount;
     const latestActive = activeOf(latest) as ActiveDispute;
     const state = withJBatch(flushed.state, drafted);
@@ -15022,7 +15125,7 @@ const finalizeReady = (
       return chain(flushDeferredReveals(cjOf(d, ctx.timestamp, ctx.runtimeSeed).host, undefined), ({ host }) => {
         const flushed = cjInto(d, { host, messages: [], outputs: [] }, ctx.timestamp);
         const jb = draftJBatch(flushed.state);
-        const pending = jb.batch.hashLadderRegistrations.length + countDeferredReveals(host);
+        const pending = jb.draft.hashLadderRegistrations.length + countDeferredReveals(host);
         return pending > 0
           ? deferFinalize(flushed, host, pending, peer, timeoutSec, ctx)
           : queueFinalization(flushed, jb, peer, registry, row, x);
@@ -15057,7 +15160,7 @@ export type CjHost = {
   readonly validators: readonly string[];
   readonly runtimeSeed?: string | undefined;
   readonly swaps?: ReadonlyMap<string, CrossRoute> | undefined;
-  readonly jb?: JBatchState | undefined;
+  readonly jb: JSubmission;
   readonly accounts: ReadonlyMap<string, CjAccount>;
 };
 /**
@@ -15193,7 +15296,7 @@ export const countDeferredReveals = (h: CjHost): number => routesOf(h).reduce((n
   return n + source + target;
 }, 0);
 type RegistryRatios = {
-  readonly jb: JBatchState;
+  readonly jb: JBatch;
   readonly confirmed: readonly number[];
   readonly queued: readonly number[];
 };
@@ -15207,7 +15310,7 @@ const existingRegistryRatios = (
   ladder: string,
   targetRole: boolean,
 ): Result<RegistryRatios, EntityError> => {
-  const jb = h.jb ?? initJBatch();
+  const jb = liveJBatch(h.jb);
   return map(ladderRoutes(h, cp, ladder, targetRole), (routes) => {
     const confirmed = routes.flatMap(
       ([, r]) => (targetRole ? r.targetRegistryFillRatio : r.sourceRegistryFillRatio) ?? [],
@@ -15235,9 +15338,9 @@ const ladderRoom = (b: QueuedBatch, r: QueuedLadderRegistration): boolean => {
  * og batchAddHashLadderRegistration + upsertHashLadderRegistration: an exact retry is a no-op, a Source change or a
  * Target regression conflicts.
  */
-const upsertLadder = (jb: JBatchState, r: QueuedLadderRegistration): Result<JBatchState, EntityError> => {
+const upsertLadder = (jb: JBatch, r: QueuedLadderRegistration): Result<JBatch, EntityError> => {
   const key = ladderRegistrationKey(r);
-  const rows = jb.batch.hashLadderRegistrations;
+  const rows = jb.draft.hashLadderRegistrations;
   const at = rows.findIndex((e) => lc(e.counterpartyEntity) === lc(r.counterpartyEntity) && sameLadderSlot(e, r));
   const held = at >= 0 ? rows[at] : undefined;
   const ratio = r.witness.fillRatio;
@@ -15260,22 +15363,21 @@ const upsertLadder = (jb: JBatchState, r: QueuedLadderRegistration): Result<JBat
     }
     if (held !== undefined) return ok(rows.with(at, row));
     const room = checks(
-      batchRoom(jb.batch, "hashLadderRegistration"),
+      batchRoom(jb.draft, "hashLadderRegistration"),
       listRoom("hashLadderRegistrations", rows.length, J_BATCH_LIMITS.maxHashLadderRegistrations),
     );
     return mapErr(map(room, () => [...rows, row]), batchThrew);
   };
   if (held !== undefined && held.witness.fillRatio === ratio) return ok(jb);
-  return map(slotted(), (hashLadderRegistrations) => accumulating(jb, { ...jb.batch, hashLadderRegistrations }));
+  return map(slotted(), (hashLadderRegistrations) => accumulating(jb, { ...jb.draft, hashLadderRegistrations }));
 };
 type LadderQueued = { readonly host: CjHost; readonly result: LadderRevealResult };
 /** A sent batch in flight: the draft broadcasts automatically once it lands. */
-const latchDraft = (jb: JBatchState): JBatchState =>
-  (jb.sentBatch !== undefined ? { ...jb, autoBroadcastDraft: true } : jb);
+const latchDraft = (jb: JBatch): JBatch => (sentOf(jb) !== undefined ? { ...jb, autoBroadcast: true } : jb);
 /** The witness enters the draft batch, or, with no room, waits stashed on its routes. */
 const registerReveal = (
   seeded: CjHost,
-  jb: JBatchState,
+  jb: JBatch,
   cp: string,
   pull: LadderPull,
   decoded: LadderDecoded,
@@ -15288,13 +15390,13 @@ const registerReveal = (
     partialRoot: pull.partialRoot,
     witness: pendingReveal(decoded),
   };
-  if (ladderRoom(jb.batch, row)) {
+  if (ladderRoom(jb.draft, row)) {
     return map(upsertLadder(jb, row), (next): LadderQueued => ({
       host: { ...seeded, jb: latchDraft(next) },
       result: "queued",
     }));
   }
-  const held = batchOpCount(jb.batch) > 0 ? latchDraft(jb) : jb;
+  const held = batchOpCount(jb.draft) > 0 ? latchDraft(jb) : jb;
   return map(stashReveal(seeded, cp, pull, decoded, targetRole), (stashed): LadderQueued => ({
     host: { ...stashed, jb: held },
     result: "deferred-batch-pending",
@@ -15368,7 +15470,7 @@ const requeueWitness = (
  * dispute) re-enters the queue, Source first; a route whose Source witness is out of scope is skipped whole.
  */
 export const flushDeferredReveals = (h: CjHost, scoped?: string): Result<Flushed, EntityError> => {
-  if (h.jb?.sentBatch !== undefined) return ok({ host: h, flushed: 0 });
+  if (sentOf(h.jb) !== undefined) return ok({ host: h, flushed: 0 });
   const scope = scoped?.toLowerCase();
   const flushRoute = (acc: Flushed, key: string): Result<Flushed, EntityError> => {
     const found = acc.host.swaps?.get(key);
@@ -15704,8 +15806,7 @@ export const siblingFanout = (cj: Cj, counterparty: string, observedAt?: number)
  */
 const localJBroadcast = (cj: Cj): Result<{ readonly cj: Cj; readonly value: boolean }, EntityError> => {
   const jb = cj.host.jb, signerId = cj.host.validators[0];
-  const unsent = jb !== undefined && jb.sentBatch === undefined
-    && ((jb.recoveryBatches ?? []).some((b) => batchOpCount(b) > 0) || batchOpCount(jb.batch) > 0);
+  const unsent = jb._tag === "live" && sentOf(jb) === undefined && hasJBatchWork(jb);
   if (!unsent || cj.outputs.some((o) => o.kind === "j_broadcast")) return ok({ cj, value: false });
   if (!signerId) return invariant("J_BATCH_AUTO_BROADCAST_SIGNER_MISSING");
   return ok({ cj: cjBroadcast(cj, signerId), value: true });
@@ -15728,7 +15829,7 @@ const cjAccountOf = (child: AccountReplica): CjAccount => {
     rightPullIds: pulls.rightPullIds,
   };
 };
-/** The Entity's og helper view: routes, committed jBatchState, and every Account by lowercase counterparty. */
+/** The Entity's og helper view: routes, the J batch, and every Account by lowercase counterparty. */
 const cjHostOf = (
   state: EntityState,
   replicas: Replicas,
@@ -15740,7 +15841,7 @@ const cjHostOf = (
   validators: rootConfig(state).validators,
   ...opt("runtimeSeed", runtimeSeed),
   ...opt("swaps", state.crossJurisdictionSwaps),
-  ...opt("jb", jBatchOf(state)),
+  jb: state.jBatch,
   accounts: new Map([...replicas].map(([peer, child]): [string, CjAccount] => [lc(peer), cjAccountOf(child)])),
 });
 /** A Cj over the Draft's Entity, fresh messages and outputs. */
@@ -15850,7 +15951,7 @@ const portReveal = (cj: Cj, routeId: string, port: VerifiedPort): Result<Cj, Ent
   return chain(queueLadderReveal(cj.host, counterparty, pull, decoded, true), ({ host, result }) => {
     const queued = cjHost(cj, host);
     const jb = host.jb;
-    const sent = jb?.sentBatch !== undefined;
+    const sent = sentOf(jb) !== undefined;
     const broadcast = (): Result<Cj, EntityError> =>
       signerId ? ok(cjBroadcast(queued, signerId)) : invariant(`CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
     switch (result) {
@@ -15861,7 +15962,7 @@ const portReveal = (cj: Cj, routeId: string, port: VerifiedPort): Result<Cj, Ent
               cjSay(c, `🌉 Cross-j reveal port ${routeId}: registering ratio ${decoded.fillRatio} on the target chain`),
             );
       case "deferred-batch-pending":
-        return map(!sent && jb !== undefined && batchOpCount(jb.batch) > 0 ? broadcast() : ok(queued), (c) =>
+        return map(!sent && jb._tag === "live" && batchOpCount(jb.draft) > 0 ? broadcast() : ok(queued), (c) =>
           cjSay(c, `⏳ Cross-j reveal port ${routeId}: deferred until the pending jBatch is acknowledged`),
         );
       default:
@@ -16062,7 +16163,8 @@ const withRejectedFrame = (d: Draft, peer: EntityId, evidence: FrameEvidence, re
   };
   return frozen === undefined ? d : { ...d, ...putChild(d.state, d.accountReplicas, peer, recorded(frozen)) };
 };
-const disputeStartCount = (state: EntityState): number => jBatchOf(state)?.batch["disputeStarts"]?.length ?? 0;
+const disputeStartCount = (state: EntityState): number =>
+  (state.jBatch._tag === "live" ? state.jBatch.draft.disputeStarts.length : 0);
 /**
  * og effects.accountTxs: each returned resolve is admitted after the Entity tx, so one on the just-frozen Account is
  * suppressed.
@@ -16115,21 +16217,21 @@ export const unsafeAccountFrame = (
       frameHanko: evidence.frameHanko,
     };
     return map(prepareDispute(base, { counterpartyEntityId: peer, description: reason }, ctx), (prepared) => {
-      const jb = jBatchOf(prepared.state);
-      const started = jb !== undefined && disputeStartCount(prepared.state) > startsBefore;
+      const jb = prepared.state.jBatch;
+      const started = jb._tag === "live" && disputeStartCount(prepared.state) > startsBefore ? jb : undefined;
       const kept = withRejectedFrame(prepared, peer, evidence, rejectedFrame);
-      const latched: Draft = started
-        ? { ...kept, state: withJBatch(kept.state, { ...jb, autoBroadcastDraft: true }) }
-        : kept;
+      const latched: Draft = started === undefined
+        ? kept
+        : { ...kept, state: withJBatch(kept.state, { ...started, autoBroadcast: true }) };
       const said = withStatus(
         latched,
-        started
-          ? "⚠️ Unsafe account frame rejected; dispute start queued"
-          : "⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko",
+        started === undefined
+          ? "⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko"
+          : "⚠️ Unsafe account frame rejected; dispute start queued",
       );
       const signerId = rootConfig(said.state).validators[0];
       const broadcast =
-        started && jb.sentBatch === undefined && signerId !== undefined
+        started !== undefined && sentOf(started) === undefined && signerId !== undefined
           ? [selfJBroadcast(said.state, signerId, ctx.timestamp)]
           : [];
       return queueResolves({ ...said, outputs: [...said.outputs, ...broadcast] }, resolves);
@@ -16373,7 +16475,7 @@ const compareJobs = (a: ScheduledWakeJob, b: ScheduledWakeJob): number =>
  */
 export const crontabTaskHasPendingWork = (state: EntityState, replicas: Replicas): boolean => {
   if (state.committed["hubRebalanceConfig"] === undefined) return false;
-  if (jBatchOf(state)?.sentBatch !== undefined) return true;
+  if (sentOf(state.jBatch) !== undefined) return true;
   const ids = rebalanceAccountIds(state, replicas);
   return !ids.ok || ids.value.length > 0;
 };
@@ -16866,15 +16968,15 @@ type FinalizeQueue = {
   readonly recovery: boolean;
   readonly inFlight: boolean;
 };
-const finalizeQueue = (jb: JBatchState | undefined, accountId: string): FinalizeQueue => {
+const finalizeQueue = (jb: JSubmission, accountId: string): FinalizeQueue => {
   const target = lower(accountId);
-  const has = (b: QueuedBatch | undefined): boolean =>
-    (b?.disputeFinalizations ?? []).some((r) => lower(r.counterentity) === target);
+  const has = (b: QueuedBatch): boolean => b.disputeFinalizations.some((r) => lower(r.counterentity) === target);
+  const sent = sentOf(jb);
   return {
-    draft: has(jb?.batch),
-    sent: has(jb?.sentBatch?.batch),
-    recovery: (jb?.recoveryBatches ?? []).some(has),
-    inFlight: jb?.sentBatch !== undefined,
+    draft: jb._tag === "live" && has(jb.draft),
+    sent: sent !== undefined && has(sent.batch),
+    recovery: jb._tag === "live" && jb.recovery.some(has),
+    inFlight: sent !== undefined,
   };
 };
 const autoFinalizeMode = (state: EntityState): string | undefined =>
@@ -16897,7 +16999,7 @@ const disputeDeadline = (
   const nowSec = Math.floor(now / 1000);
   if (active.observedOnChain !== true) return retryDeadline(run, hook, 5000, now);
   if (!timeoutSec || nowSec < timeoutSec) return retryDeadline(run, hook, 1000, now);
-  const queue = finalizeQueue(jBatchOf(run.state), accountId);
+  const queue = finalizeQueue(run.state.jBatch, accountId);
   const disputed = child as DisputedAccount;
   if (queue.sent || queue.inFlight) {
     const latched = latchRun(run, accountId, disputed, active, queue.sent || active.finalizeQueued);
@@ -16930,7 +17032,7 @@ const secretAckTimeout = (
   if (!child.state.locks.has(hashlock))
     return ok(withPaybook(run, { ...paybook, entries: mapDelete(paybook.entries, hashlock) }));
   if (activeOf(child) !== undefined) return ok(run);
-  const queued = (jBatchOf(run.state)?.batch["disputeStarts"] ?? []).length;
+  const queued = disputeStartCount(run.state);
   if (queued + run.prepare.size >= J_BATCH_LIMITS.maxDisputeStarts && !run.prepare.has(cp)) {
     const rearmed: PaybookEntry = { ...route, secretAckDeadlineAt: now + HTLC_SECRET_ACK_TIMEOUT_MS };
     return ok(withPaybook(run, { ...paybook, entries: mapSet(paybook.entries, hashlock, rearmed) }));
@@ -17643,12 +17745,10 @@ export const hubRebalance = (
   const self = d.state.id;
   const leader = leaderStateOf(d.state).activeValidatorId;
   const jb0 = draftJBatch(d.state);
-  const sent = jb0.sentBatch;
+  const sent = sentOf(jb0);
   const seeded: Folded = { ...d, state: withJBatch(d.state, jb0) };
-  if (
-    sent !== undefined &&
-    runtimeNow - (sent.lastSubmittedAt || jb0.lastBroadcast || 0) > HUB_PENDING_BROADCAST_STALE_MS
-  ) {
+  // og reads sentBatch.lastSubmittedAt first, which consensus state never sets, so the last broadcast decides
+  if (sent !== undefined && runtimeNow - jb0.broadcasts.last > HUB_PENDING_BROADCAST_STALE_MS) {
     const abort: WakeTx = {
       type: "j_abort_sent_batch",
       data: { reason: "stale-hub-rebalance-latch", requeueToCurrent: true },
@@ -17682,7 +17782,7 @@ export const hubRebalance = (
             const txs = rebalanceTxs(
               work,
               targets.length > 0,
-              canTouch && jb.sentBatch === undefined && !manualBroadcast,
+              canTouch && sentOf(jb) === undefined && !manualBroadcast,
             );
             return { state, accountReplicas, outputs: txs.length > 0 ? [{ signerId: leader, txs }] : [] };
           },
@@ -17787,7 +17887,7 @@ const foldWake = (state: EntityState, replicas: Replicas, w: WakeData, ctx: Fold
       return map(applied, (d) => withCrontabEffects(d, run));
     }),
   );
-// ---- the Entity J-batch txs on the committed jBatchState ----
+// ---- the Entity J-batch txs on the J batch ----
 // og entity/tx/handlers/j-batch/{r2r, r2e, e2r, r2c, j-broadcast, j-rebroadcast, j-abort-sent-batch, j-clear-batch,
 // mint-reserves}.ts
 type OgRow = { readonly [field: string]: unknown };
@@ -17841,13 +17941,13 @@ const jEntityView = (d: Draft): JEntity => ({
   reserves: committedReserves(d.state),
   debts: committedDebts(d.state),
   accounts: new Set(d.accountReplicas.keys()),
-  jBatch: jBatchOf(d.state),
+  jBatch: d.state.jBatch,
 });
 const jSay = (d: Draft, ...messages: readonly string[]): Draft => ({
   ...d,
   events: [...(d.events ?? []), ...messages.map(status)],
 });
-const jQueued = (d: Draft, jb: JBatchState, message: string): Draft =>
+const jQueued = (d: Draft, jb: JBatch, message: string): Draft =>
   jSay({ ...d, state: withJBatch(d.state, jb) }, message);
 /** A J-batch refusal og throws fails the Entity tx with og's text. */
 const batchThrew = (e: JBatchError): EntityError => ({ _tag: "entity_invariant", reason: e.reason });
@@ -17908,10 +18008,11 @@ const sealJBroadcast = (d: Draft, x: EntityJTx<"j_broadcast">, timestamp: bigint
   // entityJBroadcast refused an Entity without a J batch, and the flush never removes one
   const jb = draftJBatch(d.state);
   const refuse = (m: string): Result<Draft, EntityError> => ok(jSay(d, m));
-  if (jb.sentBatch !== undefined)
-    return invariant(
-      `❌ Cannot broadcast: sentBatch pending nonce=${jb.sentBatch.entityNonce} attempts=${jb.sentBatch.submitAttempts}`,
-    );
+  const pending = sentOf(jb);
+  // og counts submit attempts outside consensus: a committed sent batch always reads zero
+  if (pending !== undefined) {
+    return invariant(`❌ Cannot broadcast: sentBatch pending nonce=${pending.entityNonce} attempts=0`);
+  }
   if (!hasJBatchWork(jb)) return refuse("ℹ️ j_broadcast skipped: jBatch is empty");
   const name = jurisdictionNameOf(d.state);
   if (name === "") return refuse("❌ No jurisdiction configured for this entity");
@@ -17925,9 +18026,7 @@ const sealJBroadcast = (d: Draft, x: EntityJTx<"j_broadcast">, timestamp: bigint
   if (!sealed.ok) return invariant(sealed.error.reason);
   const { jBatch, jTx, hashToSign } = sealed.value;
   if (jTx === undefined) return invariant("J_BROADCAST_SEALED_WITHOUT_JTX");
-  const head = jb.recoveryBatches?.[0];
-  const next = head !== undefined && batchOpCount(head) > 0 ? head : jb.batch;
-  const priority = takeBroadcastBatch(next).disputePriority
+  const priority = takeBroadcastBatch(jb.recovery[0] ?? jb.draft).disputePriority
     ? ["⚖️ Dispute operations broadcast before ordinary queued operations"]
     : [];
   const sent = `📤 Batch (${jTx.data.batchSize} ops) → hashesToSign [nonce=${jTx.data.entityNonce}]`;
@@ -17942,7 +18041,7 @@ const sealJBroadcast = (d: Draft, x: EntityJTx<"j_broadcast">, timestamp: bigint
  * Before the sentBatch check, og flushDeferredHashLadderReveals moves every stashed hash-ladder witness into the draft.
  */
 const entityJBroadcast = (d: Draft, x: EntityJTx<"j_broadcast">, timestamp: bigint): Result<Draft, EntityError> => {
-  if (jBatchOf(d.state) === undefined) return invariant("❌ No jBatchState found for j_broadcast");
+  if (d.state.jBatch._tag === "dormant") return invariant("❌ No jBatchState found for j_broadcast");
   return chain(flushBeforeBroadcast(d, timestamp), (flushed) => sealJBroadcast(flushed, x, timestamp));
 };
 /**
@@ -17950,17 +18049,16 @@ const entityJBroadcast = (d: Draft, x: EntityJTx<"j_broadcast">, timestamp: bigi
  * chain); refusals as in the shared jRebroadcast.
  */
 const entityJRebroadcast = (d: Draft, x: EntityJTx<"j_rebroadcast">, timestamp: bigint): Result<Draft, EntityError> => {
-  const jb = jBatchOf(d.state);
-  const sent = jb?.sentBatch;
+  const jb = d.state.jBatch;
+  const inFlight = jb._tag === "live" && jb.phase._tag === "inFlight";
   const name = jurisdictionNameOf(d.state);
   const signer = leaderStateOf(d.state).activeValidatorId;
-  if (sent !== undefined && sent.terminalFailure === undefined && signer !== "" && name === "")
-    return ok(jSay(d, "❌ No jurisdiction configured for j_rebroadcast"));
+  if (inFlight && signer !== "" && name === "") return ok(jSay(d, "❌ No jurisdiction configured for j_rebroadcast"));
   const r = jRebroadcast(jb, { ...jSubmission(d.state, signer, timestamp), gasBumpBps: x.gasBumpBps });
   if (!r.ok) return invariant(r.error.reason);
   const { jBatch, note, jTx, hashToSign } = r.value;
   const next = jSay(
-    jb === undefined ? d : { ...d, state: withJBatch(d.state, jBatch) },
+    { ...d, state: withJBatch(d.state, jBatch) },
     ...(note === undefined ? [] : [note]),
   );
   return ok(jTx === undefined ? next : jOutput(next, name, jTx, hashToSign));
@@ -17997,8 +18095,8 @@ const accountJNonce = (d: Draft, peer: string): number =>
  * rest first; drop releases the R2C markers.
  */
 const entityJAbort = (d: Draft, x: EntityJTx<"j_abort_sent_batch">): Draft => {
-  const jb = jBatchOf(d.state), r = jAbortSentBatch(jb, x, (peer) => accountJNonce(d, peer));
-  const aborted = jb?.sentBatch === undefined ? d : { ...d, state: withJBatch(d.state, r.jBatch) };
+  const r = jAbortSentBatch(d.state.jBatch, x, (peer) => accountJNonce(d, peer));
+  const aborted = { ...d, state: withJBatch(d.state, r.jBatch) };
   return jSay(releaseEntityLatches(aborted, r.release), r.note);
 };
 /**
@@ -18006,14 +18104,13 @@ const entityJAbort = (d: Draft, x: EntityJTx<"j_abort_sent_batch">): Draft => {
  * latches.
  */
 const entityJClear = (d: Draft, x: EntityJTx<"j_clear_batch">): Draft => {
-  const jb = jBatchOf(d.state);
   const submitted = new Map(
     [...d.accountReplicas].map(
       ([peer, c]) => [peer as string, [...(c.state.submittedAt ?? new Map<number, number>()).keys()]] as const,
     ),
   );
-  const r = jClearBatch(jb, x, jb === undefined ? new Map() : submitted);
-  const cleared = jb === undefined ? d : { ...d, state: withJBatch(d.state, r.jBatch) };
+  const r = jClearBatch(d.state.jBatch, x, submitted);
+  const cleared = { ...d, state: withJBatch(d.state, r.jBatch) };
   return jSay(releaseEntityLatches(cleared, r.release), r.note);
 };
 /** og handleMintReserves: the direct admin `mint` JTx to the Entity's J replica (outside the batch). */
@@ -18069,46 +18166,44 @@ const scrubAll = (b: QueuedBatch, scrubs: readonly Scrub[]): Scrubbed =>
  * og retireSentBatchInvalidatedBy*: a sent batch that lost operations goes to the front of the recovery queue (unless
  * emptied).
  */
-const requeueSent = (scrubbed: JBatchState, sentLeft: QueuedBatch): JBatchState => {
-  const { sentBatch: _s, ...unsent } = scrubbed;
-  const queue = batchEmpty(sentLeft) ? scrubbed.recoveryBatches : [sentLeft, ...(scrubbed.recoveryBatches ?? [])];
-  const requeued = { ...unsent, ...(queue === undefined ? {} : { recoveryBatches: queue }) };
-  return { ...requeued, status: hasJBatchWork(requeued) ? "accumulating" : "empty" };
+const requeueSent = (scrubbed: JBatch, sentLeft: QueuedBatch): JBatch => {
+  const recovery = batchEmpty(sentLeft) ? scrubbed.recovery : [sentLeft, ...scrubbed.recovery];
+  const requeued = { ...scrubbed, recovery };
+  return settled(requeued, hasJBatchWork(requeued));
 };
-type Retirement = { readonly jb: JBatchState; readonly removed: number; readonly broadcast: boolean };
+type Retirement = { readonly jb: JBatch; readonly removed: number; readonly broadcast: boolean };
 /**
  * og's shared retirement shape (retireStartedDisputeBatchOps, retireFinalizedDisputeState): scrub the draft and every
  * recovery batch (dropping the emptied ones), then, unless the sent batch will still be acknowledged, move a sent
  * batch that lost operations to the front of the recovery queue (og retireSentBatchInvalidatedBy*). `broadcast`: og
  * queueLocalJBatchBroadcast after a sent or recovery removal.
  */
-const retireJBatch = (jb: JBatchState, scrubs: readonly Scrub[], keepSent: boolean): Retirement => {
-  const draft = scrubAll(jb.batch, scrubs), recovered = (jb.recoveryBatches ?? []).map((b) => scrubAll(b, scrubs));
+const retireJBatch = (jb: JBatch, scrubs: readonly Scrub[], keepSent: boolean): Retirement => {
+  const draft = scrubAll(jb.draft, scrubs), recovered = jb.recovery.map((b) => scrubAll(b, scrubs));
   const removedRecovery = recovered.reduce((n, r) => n + r.removed, 0);
-  const left = recovered.map((r) => r.batch).filter((b) => !batchEmpty(b));
-  const { recoveryBatches: _r, ...rest } = jb;
-  const keptRecovery = jb.recoveryBatches === undefined || left.length === 0 ? {} : { recoveryBatches: left };
-  const scrubbed: JBatchState = { ...rest, batch: draft.batch, ...keptRecovery };
-  const sent = keepSent || jb.sentBatch === undefined ? undefined : scrubAll(jb.sentBatch.batch, scrubs);
+  const recovery = recovered.map((r) => r.batch).filter((b) => !batchEmpty(b));
+  const scrubbed: JBatch = { ...jb, draft: draft.batch, recovery };
+  const inFlight = sentOf(jb);
+  const sent = keepSent || inFlight === undefined ? undefined : scrubAll(inFlight.batch, scrubs);
   const removedSent = sent?.removed ?? 0;
   const retired = sent === undefined || removedSent === 0 ? scrubbed : requeueSent(scrubbed, sent.batch);
-  const broadcast = (removedSent > 0 || removedRecovery > 0) && retired.sentBatch === undefined
+  const broadcast = (removedSent > 0 || removedRecovery > 0) && sentOf(retired) === undefined
     && hasJBatchWork(retired);
   return { jb: retired, removed: draft.removed + removedRecovery + removedSent, broadcast };
 };
-type NonceSync = { readonly jb: JBatchState | undefined; readonly message?: string | undefined };
+type NonceSync = { readonly jb: JSubmission; readonly message?: string | undefined };
 /** og syncJBatchEntityNonceFromEvent: our own event's batch nonce raises the J batch nonce. */
 const syncBatchNonce = (
-  jb: JBatchState | undefined,
+  jb: JSubmission,
   sender: string,
   self: string,
   batchNonce: number | undefined,
 ): NonceSync => {
-  if (rowId(sender) !== rowId(self) || batchNonce === undefined || batchNonce <= 0 || jb === undefined) return { jb };
-  const current = jb.entityNonce || 0;
-  if (batchNonce <= current) return { jb };
+  const own = rowId(sender) === rowId(self) && batchNonce !== undefined && batchNonce > 0;
+  if (!own || jb._tag === "dormant" || batchNonce <= jb.chainNonce) return { jb };
+  const current = jb.chainNonce;
   return {
-    jb: { ...jb, entityNonce: batchNonce },
+    jb: { ...jb, chainNonce: batchNonce },
     message: `↻ Synced J batch nonce from event (${current} → ${batchNonce})`,
   };
 };
@@ -18146,7 +18241,7 @@ export const disputeStartedEffects = (
   const self = rowId(state.id);
   const peer = disputePeerOf(self, e.sender, e.counterentity);
   const weAreStarter = rowId(e.sender) === self;
-  const retired = startedRetirement(jBatchOf(state), self, e);
+  const retired = startedRetirement(state.jBatch, self, e);
   const triggerAt = Math.max(0, Number.isFinite(timestamp) ? timestamp : 0) + (weAreStarter ? 1 : 5000);
   const deadline: ScheduledHook = {
     id: `dispute-deadline:${peer}`,
@@ -18188,7 +18283,7 @@ export const disputeFinalizedEffects = (
 ): Result<DisputeJEffects, EntityError> => {
   const self = rowId(state.id);
   const peer = disputePeerOf(self, e.sender, e.counterentity);
-  const retired = finalizedRetirement(jBatchOf(state), self, e);
+  const retired = finalizedRetirement(state.jBatch, self, e);
   const cp = peer.slice(-4);
   const messages = messagesOf(
     retired.synced,
@@ -18206,23 +18301,25 @@ export const disputeFinalizedEffects = (
   });
 };
 /**
- * og J7's J-batch part, shared by the Entity (its committed jBatchState) and the Host (its JBatchState): the nonce
+ * og J7's J-batch part, shared by the Entity and the Host (each holding a JSubmission): the nonce
  * sync, then the retirement.
  */
 type RetiredJBatch = {
-  readonly jb: JBatchState | undefined;
+  readonly jb: JSubmission;
   readonly synced?: string | undefined;
   readonly removed: number;
   readonly broadcast: boolean;
 };
 const retiredWith = (synced: NonceSync, scrubs: readonly Scrub[], keepSent: boolean): RetiredJBatch => {
-  if (synced.jb === undefined) return { jb: undefined, ...opt("synced", synced.message), removed: 0, broadcast: false };
-  const r = retireJBatch(synced.jb, scrubs, keepSent);
+  const r: Omit<RetiredJBatch, "synced"> =
+    synced.jb._tag === "dormant"
+      ? { jb: synced.jb, removed: 0, broadcast: false }
+      : retireJBatch(synced.jb, scrubs, keepSent);
   return { jb: r.jb, ...opt("synced", synced.message), removed: r.removed, broadcast: r.broadcast };
 };
 /** Whether our sent batch still carries the start of this very dispute (og keeps it until its HankoBatchProcessed). */
-const sentStartOf = (jb: JBatchState | undefined, peer: string, initialHash: string): boolean =>
-  (jb?.sentBatch?.batch.disputeStarts ?? []).some(
+const sentStartOf = (jb: JSubmission, peer: string, initialHash: string): boolean =>
+  (sentOf(jb)?.batch.disputeStarts ?? []).some(
     (s) => rowId(s.counterentity) === peer && s.proofbodyHash.toLowerCase() === initialHash,
   );
 /**
@@ -18230,7 +18327,7 @@ const sentStartOf = (jb: JBatchState | undefined, peer: string, initialHash: str
  * sent start until its HankoBatchProcessed.
  */
 const startedRetirement = (
-  jb: JBatchState | undefined,
+  jb: JSubmission,
   self: string,
   e: Pick<StartedDisputeEvent, "sender" | "counterentity" | "proofbodyHash" | "batchNonce">,
 ): RetiredJBatch => {
@@ -18243,12 +18340,12 @@ const startedRetirement = (
 };
 /** og sentBatchOwnsDisputeFinalityAck: our sent batch, at the event's nonce, finalizes exactly this dispute. */
 const sentAcksFinality = (
-  jb: JBatchState | undefined,
+  jb: JSubmission,
   batchNonce: number | undefined,
   peer: string,
   initialHash: string,
 ): boolean => {
-  const sent = jb?.sentBatch;
+  const sent = sentOf(jb);
   if (sent === undefined || batchNonce === undefined || !Number.isSafeInteger(batchNonce) || batchNonce <= 0)
     return false;
   return (
@@ -18263,7 +18360,7 @@ const sentAcksFinality = (
  * goes, keeping a sent batch that acknowledges exactly this finalization.
  */
 const finalizedRetirement = (
-  jb: JBatchState | undefined,
+  jb: JSubmission,
   self: string,
   e: {
     readonly sender: string;
@@ -18295,7 +18392,7 @@ export const hostDisputeJBatch = (
   const r =
     e.type === "DisputeStarted" ? startedRetirement(jb, rowId(self), e) : finalizedRetirement(jb, rowId(self), e);
   const effects: readonly HostEffect[] = r.broadcast ? [{ _tag: "j_broadcast_request", entityId: self }] : [];
-  return ok({ j: r.jb === undefined ? j : { ...j, jBatch: r.jb }, effects });
+  return ok({ j: { ...j, jBatch: r.jb }, effects });
 };
 // ---- Account Hankos through the Entity manifest ----
 // og accountInput response + proposePendingAccountFrames, hanko-witness.ts, hanko/signing.ts
@@ -23268,19 +23365,19 @@ const c2rCounterparty = (
   }
 };
 /**
- * og batchAddSettlement on the committed (og-shaped) jBatchState: exact retries are ignored, a conflict throws, a pure
+ * og batchAddSettlement on the J draft: exact retries are ignored, a conflict throws, a pure
  * C2R the initiator withdraws is compressed into collateralToReserve.
  */
 export const addSettlementRow = (
-  jb: JBatchState,
+  jb: JBatch,
   row: QueuedSettlement,
   initiator: string,
   disableShortcut: boolean,
-): Result<JBatchState, EntityError> => {
+): Result<JBatch, EntityError> => {
   const issue = settlementRowIssue(row);
   if (issue !== undefined) return invariant(issue);
   const conflict = invariant(`J_BATCH_SETTLEMENT_CONFLICT:${row.leftEntity.slice(-4)}:${row.rightEntity.slice(-4)}`);
-  const { settlements, collateralToReserve: c2rs } = jb.batch;
+  const { settlements, collateralToReserve: c2rs } = jb.draft;
   const samePair = (s: QueuedSettlement): boolean =>
     lower(s.leftEntity) === lower(row.leftEntity) && lower(s.rightEntity) === lower(row.rightEntity);
   const existing = settlements.find(samePair);
@@ -23291,15 +23388,15 @@ export const addSettlementRow = (
     counterparty === undefined ? undefined : c2rs.find((op) => lower(op.counterparty) === lower(counterparty));
   if (prior !== undefined) return shortcut !== undefined && sameC2RRow(prior, shortcut) ? ok(jb) : conflict;
   if (shortcut !== undefined) {
-    const withdrawn = map(batchRoom(jb.batch, "collateralToReserve"), () =>
-      accumulating(jb, { ...jb.batch, collateralToReserve: [...c2rs, shortcut] }));
+    const withdrawn = map(batchRoom(jb.draft, "collateralToReserve"), () =>
+      accumulating(jb, { ...jb.draft, collateralToReserve: [...c2rs, shortcut] }));
     return mapErr(withdrawn, batchThrew);
   }
   const room = checks(
     listRoom("settlements", settlements.length, J_BATCH_LIMITS.maxSettlements),
-    batchRoom(jb.batch, "settlement"),
+    batchRoom(jb.draft, "settlement"),
   );
-  return mapErr(map(room, () => accumulating(jb, { ...jb.batch, settlements: [...settlements, row] })), batchThrew);
+  return mapErr(map(room, () => accumulating(jb, { ...jb.draft, settlements: [...settlements, row] })), batchThrew);
 };
 const sameDiff = (a: WorkspaceDiff, b: WorkspaceDiff | undefined): boolean =>
   b !== undefined &&
@@ -23401,7 +23498,7 @@ const batchExecution = (
   const jb = draftJBatch(d.state);
   const seeded: Draft = { ...d, state: withJBatch(d.state, jb) };
   // og: a nonce-bound settlement never waits behind another on-chain batch
-  if (jb.sentBatch !== undefined) return ok(settleSay(seeded, "⏭️ settle_execute skipped: jBatch sentBatch pending"));
+  if (sentOf(jb) !== undefined) return ok(settleSay(seeded, "⏭️ settle_execute skipped: jBatch sentBatch pending"));
   const row: QueuedSettlement = {
     leftEntity: e.t.iAmLeft ? self : e.peer,
     rightEntity: e.t.iAmLeft ? e.peer : self,
@@ -23702,8 +23799,8 @@ const materializeContinuation = (d: Draft, ctx: FoldContext, queue: SettleEnqueu
   if (settlePending(child)) return ok(d);
   const w = child.state.settlement;
   if (w === undefined) return discard("workspace missing");
-  const jb = jBatchOf(d.state);
-  const jBatchBusy = jb !== undefined && (jb.sentBatch !== undefined || batchOpCount(jb.batch) > 0);
+  const jb = d.state.jBatch;
+  const jBatchBusy = jb._tag === "live" && (sentOf(jb) !== undefined || batchOpCount(jb.draft) > 0);
   const decide = (hash: string): Result<Draft, EntityError> => {
     switch (true) {
       case hash !== c.workspaceHash:
@@ -25751,7 +25848,7 @@ export const foldTx = (
     materializeCrossJurisdictionClear: (x) => cleared(materializeCrossClear(book(), x.data)),
     crossPullClose: (x) => cleared(crossPullCloseTx(book(), x.data)),
     orderbookSweepCrossJurisdiction: (x) => cleared(crossSweep(book(), x.data.reason)),
-    // og entity/tx/handlers/j-batch on the committed jBatchState
+    // og entity/tx/handlers/j-batch on the J batch
     r2r: (x) => entityR2R(skip, x.data),
     r2e: (x) => entityR2E(skip, x.data),
     e2r: (x) => entityE2R(skip, x.data),
@@ -26479,7 +26576,9 @@ const committedSections = (state: EntityState): Result<EntityCommitted, EntityEr
       : map(paybookSection(state.paybook), (paybook): EntityCommitted => ({ ...c, paybook }));
   const withBook = (c: EntityCommitted): EntityCommitted =>
     state.orderbookExt === undefined ? c : { ...c, orderbookExt: orderbookSection(state.orderbookExt) };
-  const paid = chain(settleCollections(state.committed), withPaybook);
+  const og = ogJBatchOf(state.jBatch);
+  const jBatch = og === undefined ? {} : { jBatchState: og as unknown as Binary };
+  const paid = chain(settleCollections({ ...state.committed, ...jBatch }), withPaybook);
   return chain(
     chain(paid, (c) => map(crossSections(c, state), withBook)),
     crontabSection,
@@ -30897,15 +30996,17 @@ const sentMatches = (sent: SentJBatch | undefined, batchHash: unknown, entityNon
   Number(sent.entityNonce) === Number(entityNonce);
 /** og: consensus has sealed exactly this batch, in this broadcast generation. */
 const sealedBatchIs = (state: EntityState, target: BatchTarget): boolean => {
-  const jb = jBatchOf(state);
+  const jb = state.jBatch;
   return (
-    sentMatches(jb?.sentBatch, target.batchHash, target.entityNonce) && target.batchGeneration === jb?.broadcastCount
+    jb._tag === "live" &&
+    sentMatches(sentOf(jb), target.batchHash, target.entityNonce) &&
+    target.batchGeneration === jb.broadcasts.count
   );
 };
 /** og: the sealed batch a retry names, while it is still live (not terminally failed). */
 const liveSentBatch = (state: EntityState, target: BatchTarget): SentJBatch | undefined => {
-  const sent = jBatchOf(state)?.sentBatch;
-  return sealedBatchIs(state, target) && sent !== undefined && !sent.terminalFailure ? sent : undefined;
+  const jb = state.jBatch;
+  return sealedBatchIs(state, target) && jb._tag === "live" && jb.phase._tag === "inFlight" ? jb.phase.sent : undefined;
 };
 const sameBatch = (a: BatchTarget, b: BatchTarget): boolean =>
   submitId(a.batchHash) === submitId(b.batchHash) &&
@@ -31704,7 +31805,7 @@ const pruneWitnesses = (
   state: EntityState,
 ): ReadonlyMap<string, HankoWitness> => {
   const reachable = new Set([
-    jBatchOf(state)?.sentBatch?.batchHash || undefined,
+    sentOf(state.jBatch)?.batchHash || undefined,
     epActionState(state).pending?.actionHash || undefined,
     newestProfileWitness(witness),
   ]);
@@ -33295,15 +33396,14 @@ const finalizedBatch = (
   runtimeSeed: string | undefined,
 ): Result<Draft, EntityError> =>
   map(flushDeferredReveals(cjOf(draft, timestamp, runtimeSeed).host), ({ host, flushed }) => {
-    const latched: JBatchState | undefined =
-      flushed > 0 && host.jb !== undefined ? { ...host.jb, status: "accumulating", autoBroadcastDraft: true } : host.jb;
+    const latched: JSubmission =
+      flushed > 0 && host.jb._tag === "live"
+        ? { ...accumulating(host.jb, host.jb.draft), autoBroadcast: true }
+        : host.jb;
     const drafted =
-      flushed > 0
-        ? cjInto(draft, { host: { ...host, ...opt("jb", latched) }, messages: [], outputs: [] }, timestamp)
-        : draft;
-    const after = jBatchOf(drafted.state);
-    const auto =
-      flushed > 0 ? after !== undefined && after.autoBroadcastDraft === true && hasJBatchWork(after) : autoBroadcast;
+      flushed > 0 ? cjInto(draft, { host: { ...host, jb: latched }, messages: [], outputs: [] }, timestamp) : draft;
+    const after = drafted.state.jBatch;
+    const auto = flushed > 0 ? after._tag === "live" && after.autoBroadcast && hasJBatchWork(after) : autoBroadcast;
     const leader = [...membersOf(state.quorum).keys()][0] ?? "";
     const broadcast: EntityOutput = {
       to: state.id,
@@ -33313,7 +33413,7 @@ const finalizedBatch = (
     return { ...drafted, outputs: [...drafted.outputs, ...(auto ? [broadcast] : [])] };
   });
 /**
- * og applyHankoBatchProcessedEvent on the committed jBatchState: finalize the exact pending batch (and queue its
+ * og applyHankoBatchProcessedEvent on the J batch: finalize the exact pending batch (and queue its
  * follow-up j_broadcast), or quarantine it.
  */
 const batchProcessedJEvent = (
@@ -33325,8 +33425,8 @@ const batchProcessedJEvent = (
 ): Result<JEventStep, EntityError> => {
   const state = step.draft.state;
   if (lower(e.entityId) !== lower(state.id)) return ok(step);
-  const before = jBatchOf(state);
-  const sent = before?.sentBatch;
+  const before = state.jBatch;
+  const sent = sentOf(before);
   const nonce = Number(e.nonce);
   const hash = lower(e.batchHash);
   const processed = mapErr(applyHankoBatchProcessed(before, state.id, e, Number(timestamp)), (x): EntityError => ({
@@ -33650,17 +33750,17 @@ const raisedCounterRow = (
   }
 };
 /** og batchAddCounterDispute on the draft: one row per counterparty, only ever raised; limits as og. */
-const addCounterRow = (jb: JBatchState, row: QueuedCounterDispute): Result<JBatchState, EntityError> => {
+const addCounterRow = (jb: JBatch, row: QueuedCounterDispute): Result<JBatch, EntityError> => {
   const cp = lc(row.counterentity);
-  const rows = jb.batch.counterDisputes;
+  const rows = jb.draft.counterDisputes;
   const at = rows.findIndex((r) => lc(r.counterentity) === cp);
-  const put = (counterDisputes: readonly QueuedCounterDispute[]): JBatchState =>
-    accumulating(jb, { ...jb.batch, counterDisputes });
+  const put = (counterDisputes: readonly QueuedCounterDispute[]): JBatch =>
+    accumulating(jb, { ...jb.draft, counterDisputes });
   const existing = rows[at];
   if (existing !== undefined)
     return map(raisedCounterRow(existing, row, cp), (verdict) => (verdict === "keep" ? jb : put(rows.with(at, row))));
   const room = checks(
-    batchRoom(jb.batch, "counterDispute"),
+    batchRoom(jb.draft, "counterDispute"),
     listRoom("counterDisputes", rows.length, J_BATCH_LIMITS.maxCounterDisputes),
   );
   return mapErr(map(room, () => put([...rows, row])), batchThrew);
@@ -33730,7 +33830,7 @@ const queuePullCounter = (x: JEv, p: PullCounter, ctx: FoldContext): Result<Pull
   const nowSec = Math.floor(Number(ctx.timestamp) / 1000);
   if (nowSec >= p.active.disputeTimeout)
     return ok(notQueued(jevSay(x, `❌ Pull counter-proof ${finalNonce} missed T=${p.active.disputeTimeout}`)));
-  const jb = x.cj.host.jb ?? initJBatch();
+  const jb = liveJBatch(x.cj.host.jb);
   const row: QueuedCounterDispute = {
     counterentity: p.peer,
     initialNonce: p.active.initialNonce,
@@ -33809,9 +33909,9 @@ const startedEventOf = (
 };
 const batchNonceOf = (data: JRec): number | undefined =>
   typeof data["batchNonce"] === "number" ? data["batchNonce"] : undefined;
-const withRetiredJb = (x: JEv, jb: JBatchState | undefined): JEv => ({
+const withRetiredJb = (x: JEv, jb: JSubmission): JEv => ({
   ...x,
-  cj: cjHost(x.cj, { ...x.cj.host, ...opt("jb", jb) }),
+  cj: cjHost(x.cj, { ...x.cj.host, jb }),
 });
 /** og: the retired jBatch installed, its nonce sync and removals said, and a broadcast queued when it asks for one. */
 const retiredOps = (x: JEv, retired: RetiredJBatch, ops: string, peer: string): Result<JEv, EntityError> =>
@@ -33981,9 +34081,9 @@ const counterIssue = (active: ActiveDispute, c: SelectedCounter): string | undef
  */
 const retiredCounters = (x: JEv, c: SelectedCounter): Result<JEv, EntityError> => {
   const jb = x.cj.host.jb;
-  if (jb === undefined) return ok(x);
+  if (jb._tag === "dormant") return ok(x);
   const drafted = retireJBatch(jb, [scrubSuperseded(c.peer, c.nonce, c.left, c.hash, false)], true);
-  const sent = drafted.jb.sentBatch;
+  const sent = sentOf(drafted.jb);
   const scrubbedSent =
     sent === undefined ? undefined : scrubSuperseded(c.peer, c.nonce, c.left, c.hash, true)(sent.batch);
   const removedSent = scrubbedSent?.removed ?? 0;
@@ -38096,16 +38196,11 @@ const batchRetryData = (r: EntityReplica, sent: SentJBatch, generation: number):
 const batchRetryDue =
   (w: WakeScan) =>
   ([key, r]: ReplicaEntry): RuntimeTx[] => {
-    const jb = jBatchOf(r.state);
-    const sent = jb?.sentBatch;
-    const unsendable =
-      !isActiveLeader(r) ||
-      !w.canSubmit(r.signerId) ||
-      sent === undefined ||
-      sent.terminalFailure ||
-      sentBatchEmpty(sent);
+    const jb = r.state.jBatch;
+    const sent = jb._tag === "live" && jb.phase._tag === "inFlight" ? jb.phase.sent : undefined;
+    const unsendable = !isActiveLeader(r) || !w.canSubmit(r.signerId) || sent === undefined || sentBatchEmpty(sent);
     if (unsendable || abortQueued(w, r.state.id)) return [];
-    const data = batchRetryData(r, sent, jb?.broadcastCount ?? 0);
+    const data = batchRetryData(r, sent, jb._tag === "live" ? jb.broadcasts.count : 0);
     const local = matchingJSubmitState(r.state, w.rt.replicaLocal.get(key)?.jSubmitState);
     const queued = w.queued.runtimeTxs.some((tx) => tx.type === "retryJSubmit" && sameBatchRetry(tx.data, data));
     if (local?.terminalFailure || local?.lastResultOutcome === "reconciled" || queued) return [];
@@ -41244,7 +41339,7 @@ export type JOp =
 export type JState = {
   readonly reserves: ReadonlyMap<number, bigint>;
   readonly debts: DebtLedger;
-  readonly jBatch?: JBatchState | undefined;
+  readonly jBatch: JSubmission;
 };
 export type LadderTx = {
   readonly type: "ladder_reveal";
@@ -41312,7 +41407,7 @@ export const genesisHost = (self: EntityId, account: AccountReplica): Result<Hos
   map(partyOf(replicaId(account), self), () => ({
     self,
     account,
-    j: { reserves: new Map(), debts: EMPTY_DEBTS },
+    j: { reserves: new Map(), debts: EMPTY_DEBTS, jBatch: DORMANT },
     ladder: new Map(),
     height: 0n,
     frameHash: ZERO_HASH as RuntimeFrameHash,
@@ -41346,7 +41441,7 @@ export type JApplied = {
   readonly release?: JLatchRelease | undefined;
 };
 const quietly = (j: JState): JApplied => ({ j, effects: [] });
-const withBatch = (j: JState, jBatch: JBatchState | undefined): JState => ({ ...j, jBatch });
+const withBatch = (j: JState, jBatch: JSubmission): JState => ({ ...j, jBatch });
 const queuedInto = (j: JState, queued: Result<JQueued, JBatchError>): Result<JApplied, HostError> =>
   map(queued, (q) => quietly(q._tag === "queued" ? withBatch(j, q.jBatch) : j));
 /** A broadcast seals the batch and, when it produced a J tx, submits it for the quorum to sign. */

@@ -30,6 +30,7 @@ import { sentBatchOwnsDisputeFinalityAck } from "../../core/entity/tx/j-events.t
 import { handleOpenAccountEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/open-account.ts";
 import { createEmptyEnv } from "../../core/runtime.ts";
 import { createAccountConsensusContext } from "../../core/entity/account/account-consensus-context.ts";
+import { jbOfOg, ogJb, ogReach } from "./og-jbatch.ts";
 
 let seed = seedOf(11);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -136,7 +137,7 @@ describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og sc
       const hooks: ScheduledHook[] = Array.from({ length: ri(3) }, (_, j) => ({ id: `hub-kick:${j}`, triggerAt: 900 + ri(500), type: "hub_rebalance_kick", data: { reason: "r", counterpartyId: BOB } }));
       const lastRun = pick([0, 500, 1_200]), config = rng() < 0.4 ? { disputeAutoFinalizeMode: "auto" } : undefined, sent = rng() < 0.5;
       const crontab: Crontab = hooks.reduce(scheduleHook, { ...initCrontab(), tasks: new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun, enabled: rng() < 0.9, params: {} }]]) });
-      const jBatch = { ...ogInitJBatch(), ...(sent ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 3 } } : {}) };
+      const jBatch = ogReach({ ...ogInitJBatch(), ...(sent ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 3 } } : {}) });
       const state = { ...withCrontab(entity([aliceAddr], false, { jBatchState: jBatch, ...(config ? { hubRebalanceConfig: config } : {}) }), crontab), paybook: { entries, feesEarned: 0n } };
       const replicas: Replicas = new Map(specs.map((s) => [s.peer, rwAccountOf(s)]));
       const og: any = { entityId: ALICE, timestamp: 0, config: ogConfig(state), accounts: ogAccounts(specs), paybook: { entries, feesEarned: 0n }, crontabState: { tasks: crontab.tasks, hooks: new Map(crontab.hooks) }, jBatchState: jBatch, ...(config ? { hubRebalanceConfig: config } : {}) };
@@ -199,9 +200,9 @@ describe(seedTag("scheduler-disputes: executeCrontab (og scheduler/index.ts, due
       const config = rng() < 0.25 ? { disputeAutoFinalizeMode: pick(["ignore", "auto"]) } : undefined;
       const bobRow = { counterentity: BOB }, other = (n: number) => ({ counterentity: word(500 + n) });
       const draft = { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.2 ? [bobRow] : [], disputeStarts: Array.from({ length: pick([0, 0, 7, 8]) }, (_, n) => other(n)) };
-      const jBatch = { ...ogInitJBatch(), batch: draft,
+      const jBatch = ogReach({ ...ogInitJBatch(), batch: draft,
         ...(rng() < 0.25 ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [bobRow] : [] }, entityNonce: 4 } } : {}),
-        ...(rng() < 0.1 ? { recoveryBatches: [{ ...ogInitJBatch().batch, disputeFinalizations: [bobRow] }] } : {}) };
+        ...(rng() < 0.1 ? { recoveryBatches: [{ ...ogInitJBatch().batch, disputeFinalizations: [bobRow] }] } : {}) });
       const hooks: ScheduledHook[] = [
         ...(rng() < 0.7 ? [{ id: `dispute-deadline:${lowerId(BOB)}`, triggerAt: pick([now - ri(10), now + 100]), type: "dispute_deadline", data: { accountId: BOB } } as const] : []),
         ...(rng() < 0.2 ? [{ id: `dispute-deadline:${lowerId(CAROL)}`, triggerAt: now - 1, type: "dispute_deadline", data: { accountId: CAROL } } as const] : []),
@@ -262,8 +263,8 @@ describe(seedTag("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, f
       if (witness) Object.assign(ogAcc, { counterpartyDisputeProofHanko: witness.hanko, counterpartyDisputeHash: witness.hash, counterpartyDisputeProofBodyHash: witness.proofBodyHash, counterpartyDisputeProofNonce: witness.proofNonce, counterpartyDisputeProofProposerIsLeft: witness.proposerIsLeft });
       const rwChild = { ...rwAccountOf(spec), dispute: { nextProofNonce: 1, ...(witness ? { counterparty: witness } : {}) } } as AccountReplica;
       const jb = pick([undefined, "draft", "draft", "sent", "own", "full"] as const);
-      const jBatch = jb === undefined ? undefined : { ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeFinalizations: jb === "own" ? [{ counterentity: BOB }] : jb === "full" ? [{ counterentity: CAROL }] : [] },
-        ...(jb === "sent" ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [{ counterentity: BOB }] : [] }, entityNonce: 9 } } : {}) };
+      const jBatch = jb === undefined ? undefined : ogReach({ ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeFinalizations: jb === "own" ? [{ counterentity: BOB }] : jb === "full" ? [{ counterentity: CAROL }] : [] },
+        ...(jb === "sent" ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [{ counterentity: BOB }] : [] }, entityNonce: 9 } } : {}) });
       const tx: EntityTx = { type: "disputeFinalize", data: { counterpartyEntityId: BOB, ...(rng() < 0.6 ? { description: pick(["", "auto-finalize-after-timeout"]) } : {}), ...(rng() < 0.5 ? { useOnchainRegistry: true } : {}) } };
       const state = entity([aliceAddr], withJ, jBatch === undefined ? {} : { jBatchState: jBatch });
       const rw = foldTxs(state, kind === "missing" ? new Map() : new Map([[BOB, rwChild]]), signedTxs(state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: BigInt(now), jReplicas: ogJ.jReplicas as never });
@@ -274,7 +275,7 @@ describe(seedTag("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, f
       if (ogErr !== undefined) { counts.set(ogErr.split(":")[0] as string, (counts.get(ogErr.split(":")[0] as string) ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const d = unwrap(rw).draft, events = readEntityFrameEvents(og) as { message: string }[];
       expect(d.events).toEqual(events as never);
-      expect(d.state.committed["jBatchState"]).toEqual(og.jBatchState);
+      expect(ogJb(d.state)).toEqual(og.jBatchState);
       const child = d.accountReplicas.get(BOB) as any;
       expect(child?.active ?? child?.queued).toEqual(og.accounts.get(BOB)?.activeDispute);
       const key = (events.at(-1)?.message ?? "none").slice(0, 12);
@@ -297,7 +298,7 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
     hashLadderRegistrations: Array.from({ length: ri(3) }, () => ({ counterpartyEntity: peerId(), targetRole: rng() < 0.5 })),
     reserveToReserve: rng() < 0.3 ? [{ receivingEntity: lowerId(CAROL), tokenId: 1, amount: 5n }] : [],
   });
-  const randomJBatch = (): any => ({ ...ogInitJBatch(), batch: randomBatch(), entityNonce: pick([0, 2, 5]),
+  const randomJBatch = (): any => ogReach({ ...ogInitJBatch(), batch: randomBatch(), entityNonce: pick([0, 2, 5]),
     ...(rng() < 0.6 ? { sentBatch: { batch: randomBatch(), entityNonce: pick([3, 5]) } } : {}), ...(rng() < 0.4 ? { recoveryBatches: Array.from({ length: 1 + ri(2) }, randomBatch) } : {}) });
   // og j-events.ts, transcribed over og's own exported guards and batch helpers (the composing functions are module-private in og)
   const ogSync = (st: any, sender: string, self: string, batchNonce: number | undefined, msgs: string[]): void => {
@@ -353,7 +354,7 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
         if (r.removed > 0) msgs.push(`🧹 Removed ${r.removed} stale dispute-finalize op(s) for ${cp.slice(-4)}`);
         rw = unwrap(disputeFinalizedEffects(state, { sender, counterentity, initialProofbodyHash, initialNonce, hadActiveDispute, settlementInvalidated, ...(batchNonce === undefined ? {} : { batchNonce }) }));
       }
-      expect(rw.state.committed["jBatchState"]).toEqual(og.jBatchState);
+      expect(ogJb(rw.state)).toEqual(og.jBatchState);
       expect(rw.events.map((e) => e.message)).toEqual(msgs);
       expect(rw.broadcast).toBe(ogBroadcast);
       expect(sortedEntries(unwrap(crontabOf(rw.state)).hooks)).toEqual(sortedEntries(og.crontabState.hooks));
@@ -374,7 +375,7 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
     for (let i = 0; i < 200; i++) {
       const jBatch = rng() < 0.9 ? swap(randomJBatch()) : undefined, [sender, counterentity] = pick([[BOB, ALICE], [ALICE, BOB], [CAROL, ALICE]] as const), batchNonce = pick([undefined, 0, 3, 5, 7]);
       const self = lowerId(ALICE), cp = lowerId(sender) === self ? lowerId(counterentity) : lowerId(sender), started = rng() < 0.5;
-      const host = { ...host0, j: { ...host0.j, ...(jBatch === undefined ? {} : { jBatch: structuredClone(jBatch) }) } };
+      const host = { ...host0, j: { ...host0.j, jBatch: jbOfOg(structuredClone(jBatch)) } };
       const og: any = { entityId: ALICE, ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) }, msgs: string[] = [];
       let ogBroadcast = false;
       const t0 = BigInt(1_000 + ri(50)), initialProofbodyHash = pick([good, h2]);
@@ -397,7 +398,7 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
         applied++;
       }
       const rw: any = unwrap(applyHost(host, { layer: "j", tx: { type: "j_event", blockNumber: 7, event } } as any, { timestamp: NOW, jHeight: 0n }, hankoVerify) as any);
-      expect(rw.state.j.jBatch).toEqual(og.jBatchState);
+      expect(ogJb(rw.state.j)).toEqual(og.jBatchState);
       expect(rw.effects.filter((e: any) => e._tag === "j_broadcast_request")).toEqual(ogBroadcast ? [{ _tag: "j_broadcast_request", entityId: ALICE }] : []);
       if (ogBroadcast) broadcasts++;
     }

@@ -17,10 +17,11 @@ import { deriveSignerKeySync, registerSignerKey, signAccountFrame } from "../../
 import { createEmptyEnv } from "../../core/runtime/composition.ts";
 import { EntityProvider__factory } from "../../jurisdictions/typechain-types/index.ts";
 import {
-  applyRuntime, applyRuntimeTx, classifyJBatchFailure, createEntity, createRuntime, epActionAttemptId, initJBatch, jSubmitAttemptId, jurisdictionImportRequestHash, registerPendingJOutbox, replicaKey, runtimeComponentDigests, runtimeView, splitJOutbox, stableJson,
+  applyRuntime, applyRuntimeTx, classifyJBatchFailure, createEntity, ogJBatchState, createRuntime, epActionAttemptId, initJBatch, jSubmitAttemptId, jurisdictionImportRequestHash, registerPendingJOutbox, replicaKey, runtimeComponentDigests, runtimeView, splitJOutbox, stableJson,
   type Binary, type EntityId, type EntityReplica, type EntityTx, type ImportConfig, type JInput, type JReplica, type Runtime, type RuntimeTx,
 } from "../xln.ts";
 import { ALICE, TERMS, aliceAddr, bobAddr, unwrap, verifiers } from "../xln_run.ts";
+import { jbOfOg } from "./og-jbatch.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -252,8 +253,8 @@ describe(seedTag("runtime-j: the J submit ledger (og j-submit-state.ts / j-submi
       let batchHash = hashes[0] ?? "", nonce = 1 + ri(3), generation = 1 + ri(2), leader = pick([A, A, B]), terminal = false, now = 1_700_000_000_000;
       const witnessed = new Set<string>();
       const sync = (): void => {
-        const sentBatch = { batch: initJBatch().batch, batchHash, encodedBatch: "0x1234", entityNonce: nonce, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 0, ...(terminal ? { terminalFailure: { message: "consumed", failedAt: 1 } } : {}) };
-        const jBatchState = { ...initJBatch(), sentBatch, broadcastCount: generation, status: "sent" };
+        const sentBatch = { batch: initJBatch().draft, batchHash, encodedBatch: "0x1234", entityNonce: nonce, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 0, ...(terminal ? { terminalFailure: { message: "consumed", failedAt: 1 } } : {}) };
+        const jBatchState = { ...ogJBatchState(initJBatch()), sentBatch, broadcastCount: generation, status: terminal ? "failed" : "sent" };
         const witness = new Map([...witnessed].map((h) => [h, { hanko: `0x${"ab".repeat(40)}`, type: "jBatch" as const, entityHeight: 1, createdAt: 1 }]));
         for (const s of signers) {
           const ogKey = `${E}:${s}`, prior = p.env.state.eReplicas.get(ogKey) as { jSubmitState?: unknown } | undefined;
@@ -262,7 +263,7 @@ describe(seedTag("runtime-j: the J submit ledger (og j-submit-state.ts / j-submi
             state: { entityId: E, config: { validators: signers, shares: { [A]: 1n, [B]: 1n } }, leaderState: { activeValidatorId: leader, view: 0, changedAtHeight: 0 }, jBatchState: treeClone(jBatchState) },
           });
           const key = replicaKey(ALICE, s);
-          const mine = { ...base, signerId: s === A ? aliceAddr : bobAddr, state: { ...base.state, leaderState: { activeValidatorId: leader, view: 0, changedAtHeight: 0 }, committed: { ...base.state.committed, jBatchState: jBatchState as unknown as Binary } } } as EntityReplica;
+          const mine = { ...base, signerId: s === A ? aliceAddr : bobAddr, state: { ...base.state, leaderState: { activeValidatorId: leader, view: 0, changedAtHeight: 0 }, jBatch: jbOfOg(jBatchState) } } as EntityReplica;
           const local = p.rt.replicaLocal.get(key) ?? {};
           p.rt = { ...p.rt, entities: new Map([...p.rt.entities, [key, mine]]), replicaLocal: new Map([...p.rt.replicaLocal, [key, { ...local, hankoWitness: witness }]]) };
         }
@@ -391,7 +392,7 @@ describe(seedTag("runtime-j: durable J outbox split and pending register (og j-s
             return tx;
           }
           const batchHash = hex(32), entityNonce = 1 + ri(3), batchGeneration = pick([1, 2, 1, 2, 0]);
-          const data: Record<string, unknown> = { batch: initJBatch().batch, batchHash, encodedBatch: "0x1234", entityNonce, batchGeneration, hankoSignature: "0xab", batchSize: 0, signerId };
+          const data: Record<string, unknown> = { batch: initJBatch().draft, batchHash, encodedBatch: "0x1234", entityNonce, batchGeneration, hankoSignature: "0xab", batchSize: 0, signerId };
           if (rng() < 0.6) {
             const attemptNumber = 1 + ri(2), id = jSubmitAttemptId({ jurisdictionName: "Local", entityId, signerId, entityNonce, batchGeneration, batchHash, attemptNumber });
             data["runtimeSubmitAttempt"] = { attemptId: id.ok && rng() < 0.95 ? id.value : hex(32), attemptNumber, attemptedAt: timestamp, batchGeneration: rng() < 0.95 ? batchGeneration : batchGeneration + 1 };

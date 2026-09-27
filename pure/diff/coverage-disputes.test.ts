@@ -20,6 +20,7 @@ import {
   type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
 import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, signedTxs, unwrap, verifiers } from "../xln_run.ts";
+import { ogJb, ogSentBatch } from "./og-jbatch.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
 const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 0xd15c0;
@@ -199,7 +200,7 @@ const draftJBatch = (c: Case, initialNonce: number): unknown => {
   const others = (k: number) => Array.from({ length: k }, (_, i) => ({ counterentity: W((20 + i).toString(16)), initialNonce: 1, initialProofbodyHash: Z32, counterNonce: 2, proposerIsLeft: true, counterProofbody: otherBody, sig: "0xbb" }));
   switch (ri(9)) {
     case 0: return undefined;
-    case 1: return { ...base, sentBatch: { batch: ogInitJBatch().batch, batchHash: W("5b"), encodedBatch: "0x", entityNonce: 1, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 1 } };
+    case 1: return { ...base, status: "sent", sentBatch: ogSentBatch(ogInitJBatch().batch, W("5b"), 1) };
     case 2: return { ...base, status: "accumulating", batch: { ...base.batch, counterDisputes: [row(nonce + pick([-1, 1]), rng() < 0.5, c.body)] } };
     case 3: return { ...base, status: "accumulating", batch: { ...base.batch, counterDisputes: [row(nonce, !(c.witness?.proposerIsLeft ?? true), c.body)] } };
     case 4: return { ...base, status: "accumulating", batch: { ...base.batch, counterDisputes: [row(nonce, c.witness?.proposerIsLeft ?? true, pick([c.body, otherBody]))] } };
@@ -257,7 +258,7 @@ describe("coverage-disputes: DisputeStarted against a Source hub holding a newer
       const next = ogRun.out.newState;
       const messages = readEntityFrameEvents(next).map((e) => e.message);
       same(tag(n, "messages"), (d.events ?? []).map((e) => e.message), messages);
-      same(tag(n, "jBatch"), d.state.committed["jBatchState"] ?? null, next.jBatchState ?? null);
+      same(tag(n, "jBatch"), ogJb(d.state) ?? null, next.jBatchState ?? null);
       same(tag(n, "routes"), [...(d.state.crossJurisdictionSwaps ?? new Map()).values()].map((r) => [r.orderId, r.pendingSourceRegistryReveal ?? null]),
         [...(next.crossJurisdictionSwaps?.values() ?? [])].map((r) => [r.orderId, r.pendingSourceRegistryReveal ?? null]));
       const child = d.accountReplicas.get(BOB) as (AccountReplica & { readonly active?: unknown }) | undefined;
@@ -280,7 +281,7 @@ describe("coverage-disputes: DisputeStarted against a Source hub holding a newer
       // og keeps the J event's frame events on the state it hands on; the finalize adds after them
       const finalMessages = readEntityFrameEvents(ogFinal.state).map((e) => e.message).slice(messages.length);
       same(tag(n, "finalize messages"), (rwFinal.value.draft.events ?? []).map((e) => e.message), finalMessages);
-      same(tag(n, "finalize jBatch"), rwFinal.value.draft.state.committed["jBatchState"] ?? null, ogFinal.state.jBatchState ?? null);
+      same(tag(n, "finalize jBatch"), ogJb(rwFinal.value.draft.state) ?? null, ogFinal.state.jBatchState ?? null);
       for (const m of finalMessages) bump(`finalize:${m.slice(0, 12)}`);
     }
     const summary = `seed=${SEED} ${JSON.stringify([...counts])}`;
@@ -336,7 +337,7 @@ describe("coverage-disputes: DisputeFinalized settles the cross-j routes on the 
       const next = ogRun.out.newState;
       const messages = readEntityFrameEvents(next).map((e) => e.message);
       same(tag(n, "messages"), (d.events ?? []).map((e) => e.message), messages);
-      same(tag(n, "jBatch"), d.state.committed["jBatchState"] ?? null, next.jBatchState ?? null);
+      same(tag(n, "jBatch"), ogJb(d.state) ?? null, next.jBatchState ?? null);
       const ended = (r: { orderId: string; status: string; settledAt?: number | undefined }) => [r.orderId, r.status, r.settledAt ?? null];
       same(tag(n, "routes"), [...(d.state.crossJurisdictionSwaps ?? new Map()).values()].map(ended),
         [...(next.crossJurisdictionSwaps?.values() ?? [])].map(ended));

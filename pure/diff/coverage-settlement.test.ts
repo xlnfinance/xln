@@ -205,7 +205,7 @@ const randomJBatch = (peer: EntityId, aliceLeft: boolean): unknown => {
   switch (ri(6)) {
     case 0: return { ...base, status: "accumulating", batch: { ...base.batch, settlements: [conflicting] } };
     case 1: return { ...base, status: "accumulating", batch: { ...base.batch, reserveToReserve: [other] } };
-    case 2: return { ...base, status: "sent", sentBatch: { batch: ogInitJBatch().batch, batchHash: W("5b"), encodedBatch: "0x", entityNonce: 1, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 1 } };
+    case 2: return { ...base, status: "sent", sentBatch: ogSentBatch(ogInitJBatch().batch, W("5b"), 1) };
     case 3: return base;
     default: return undefined;
   }
@@ -269,7 +269,7 @@ describe("coverage-settlement: settle_execute success path (og handleSettleExecu
       const data = { counterpartyEntityId: peer, ...(disable ? { disableC2RShortcut: true } : {}) };
       const ogRun = await handleSettleExecute(og, { type: "settle_execute", data }, ogEnv(), true)
         .then((out) => ({ ok: true as const, out }), (e: unknown) => ({ ok: false as const, message: String((e as Error).message) }));
-      const state: EntityState = jBatch === undefined ? base.state : { ...base.state, committed: { ...base.state.committed, jBatchState: structuredClone(jBatch) as Binary } };
+      const state: EntityState = jBatch === undefined ? base.state : withOgJb(base.state, structuredClone(jBatch));
       const rw = foldTxs(state, replicas, signedTxs(state, aliceAddr, [{ type: "settle_execute", data } as EntityTx]), { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
       if (!ogRun.ok) {
         same(tag(n, defect), rw.ok ? "accepted" : reasonOf(rw.error), ogRun.message);
@@ -282,7 +282,7 @@ describe("coverage-settlement: settle_execute success path (og handleSettleExecu
       const d = folded.draft;
       const messages = (d.events ?? []).map((e) => e.message).filter((m) => !m.startsWith("🚀 Proposed frame "));
       same(tag(n, "messages"), messages, readEntityFrameEvents(og).map((e) => e.message));
-      same(tag(n, "jBatch"), d.state.committed["jBatchState"] ?? null, og.jBatchState ?? null);
+      same(tag(n, "jBatch"), ogJb(d.state) ?? null, og.jBatchState ?? null);
       const submits = queuedSettle(d.accountReplicas.get(peer)).map((t) => ({ type: t.type, data: { kind: t.kind, revision: t.revision, workspaceHash: "workspaceHash" in t ? t.workspaceHash : undefined } }));
       same(tag(n, "submit"), submits, ogRun.out.accountTxs.map((a) => a.tx));
       const batch = og.jBatchState?.batch;
@@ -301,6 +301,7 @@ import { handleSettlePropose } from "../../core/entity/tx/handlers/payments/sett
 import { selectSettlementContinuation } from "../../core/entity/consensus/account/settlement-continuation.ts";
 import { applyEntityTx as ogApplyEntityTx } from "../../core/entity/tx/apply.ts";
 import { type SettlementContinuationAction, type SettlementContinuationPlan } from "../xln.ts";
+import { ogJb, ogSentBatch, withOgJb } from "./og-jbatch.ts";
 
 type OgTx = Parameters<typeof ogApplyEntityTx>[2];
 const ENTITY_IDS = [W("77"), W("0c"), BOB] as const;
@@ -402,7 +403,7 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       same(tag(n, "messages"), messages, readEntityFrameEvents(og).map((e) => e.message));
       same(tag(n, "continuations"), continuationsOfRw(d.state), continuationsOfOg(og));
       same(tag(n, "reserves"), d.state.committed["reserves"] ?? null, og.reserves ?? null);
-      same(tag(n, "jBatch"), sealedView(d.state.committed["jBatchState"]), sealedView(og.jBatchState));
+      same(tag(n, "jBatch"), sealedView(ogJb(d.state)), sealedView(og.jBatchState));
       bump(`${disposition.kind}${plan.broadcast ? "+broadcast" : ""}`);
     }
     const summary = `seed=${SEED} ${JSON.stringify([...counts])}`;

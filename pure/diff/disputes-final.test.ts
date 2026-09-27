@@ -15,8 +15,8 @@ import { decodeDisputeStarterInitialSecrets } from "../../core/entity/tx/j-event
 import { ethers } from "ethers";
 import { txFingerprint } from "../../core/protocol/state/tx-multiset.ts";
 import {
-  applyCrossFill, countDeferredReveals, crossPrivateSeed, crossPullReveal, decodeHashLadderBinary, flushDeferredReveals, initJBatch, emptyQueuedBatch, prepareCrossRoute, queueLadderReveal, stableJson,
-  type CjAccount, type CjHost, type JBatchState, type QueuedBatch, type CrossRoute, type EntityError, type EntityId, type Result,
+  applyCrossFill, countDeferredReveals, crossPrivateSeed, crossPullReveal, decodeHashLadderBinary, flushDeferredReveals, DORMANT, emptyQueuedBatch, prepareCrossRoute, queueLadderReveal, stableJson,
+  type CjAccount, type CjHost, type JSubmission, type QueuedBatch, type CrossRoute, type EntityError, type EntityId, type Result,
 } from "../xln.ts";
 import * as ogCrossIndex from "../../core/extensions/cross-j/index.ts";
 import { ensureEntityCollectionCandidate } from "../../core/entity/state/persistent-collection-map.ts";
@@ -54,6 +54,7 @@ import { applyAccountDisputeFinality as ogApplyAccountDisputeFinality } from "..
 import { applyFinality } from "../xln.ts";
 import { getDisputeHankoRequirementError as ogDisputeHankoRequirement } from "../../core/account/consensus/dispute/hanko.ts";
 import { disputeRequirement, disputeRequirementText } from "../xln.ts";
+import { jbOfOg, ogJb, ogReach, withOgJb } from "./og-jbatch.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -251,11 +252,11 @@ const ladderRow = (r: Rand, routes: readonly CrossRoute[], self: string) => {
   const cp = leg.entityId.toLowerCase() === self ? leg.counterpartyEntityId : leg.entityId;
   return { counterpartyEntity: cp.toLowerCase(), targetRole, fullHash: pull.fullHash, partialRoot: pull.partialRoot, witness: pendingOf(r) };
 };
-const jbOf = (r: Rand, routes: readonly CrossRoute[], self: string): JBatchState | undefined => {
-  if (xint(r, 6) === 0) return undefined;
+const jbOf = (r: Rand, routes: readonly CrossRoute[], self: string): JSubmission => {
+  if (xint(r, 6) === 0) return DORMANT;
   const fill = (): QueuedBatch => ({ ...emptyQueuedBatch(), revealSecrets: [...otherRows(r, xpick(r, [0, 0, 0, 5, 49, 31]))] as never, hashLadderRegistrations: Array.from({ length: xpick(r, [0, 0, 1, 2, 32]) }, () => ladderRow(r, routes, self)) as never });
   const batch = fill();
-  return { ...initJBatch(), batch, ...(xint(r, 3) === 0 ? { sentBatch: { batch: fill(), entityNonce: 3 } as never } : {}), ...(xint(r, 6) === 0 ? { recoveryBatches: [fill()] } : {}), status: "accumulating" };
+  return jbOfOg(ogReach({ ...ogInitJBatch(), batch, ...(xint(r, 3) === 0 ? { sentBatch: { batch: fill(), entityNonce: 3 } } : {}), ...(xint(r, 6) === 0 ? { recoveryBatches: [fill()] } : {}), status: "accumulating" }));
 };
 const hostOf = (r: Rand, n: number, self: EntityId): { host: CjHost; routes: CrossRoute[] } => {
   const routes = Array.from({ length: 1 + xint(r, 4) }, (_, k) => recoveryRoute(r, n * 10 + k));
@@ -269,20 +270,20 @@ const hostOf = (r: Rand, n: number, self: EntityId): { host: CjHost; routes: Cro
   const peers = [...new Set([XPEER[self]!, ...(xint(r, 3) === 0 ? [xpick(r, [U1, H1, H2, U2].filter((x) => x !== self))] : [])])];
   const accounts = new Map(peers.filter(() => xint(r, 10) > 0).map((p) => [p.toLowerCase(), accountOf(p)] as const));
   const jb = jbOf(r, routes, self.toLowerCase());
-  return { host: { id: self, timestamp: T0, validators: [xsig(self)], swaps, ...(jb === undefined ? {} : { jb }), accounts }, routes };
+  return { host: { id: self, timestamp: T0, validators: [xsig(self)], swaps, jb, accounts }, routes };
 };
 const ogStateOf = (h: CjHost): any => {
   const swaps = ensureEntityCollectionCandidate(undefined, ogCrossIndex.cloneCrossJurisdictionRoute as never) as Map<string, unknown>;
   for (const [k, v] of h.swaps ?? []) swaps.set(k, ogCrossIndex.cloneCrossJurisdictionRoute(structuredClone(v) as never));
   return {
-    entityId: h.id, timestamp: h.timestamp, config: { validators: [...h.validators] }, crossJurisdictionSwaps: swaps, ...(h.jb === undefined ? {} : { jBatchState: structuredClone(h.jb) }),
+    entityId: h.id, timestamp: h.timestamp, config: { validators: [...h.validators] }, crossJurisdictionSwaps: swaps, ...(h.jb._tag === "dormant" ? {} : { jBatchState: structuredClone(ogJb({ jBatch: h.jb })) }),
     accounts: new Map([...h.accounts].map(([k, a]) => [k, { ...(a.active === undefined ? {} : { activeDispute: { ...a.active } }), state: { leftEntity: a.left, rightEntity: a.right, disputeConfig: { leftResponseSeconds: a.leftResponseSeconds, rightResponseSeconds: a.rightResponseSeconds } } }])),
   };
 };
 /** The reveal-relevant route fields and the jBatchState, both sides. */
 const routeView = (routes: Iterable<[string, any]>) => [...routes].map(([k, v]) => [k, v.pendingSourceRegistryReveal ?? null, v.pendingTargetRegistryReveal ?? null, v.updatedAt]);
 const ogView = (s: any, value: unknown) => ({ value, routes: routeView(s.crossJurisdictionSwaps), jb: s.jBatchState ?? null });
-const rwView = (h: CjHost, value: unknown) => ({ value, routes: routeView((h.swaps ?? new Map()) as Map<string, any>), jb: h.jb ?? null });
+const rwView = (h: CjHost, value: unknown) => ({ value, routes: routeView((h.swaps ?? new Map()) as Map<string, any>), jb: ogJb({ jBatch: h.jb }) ?? null });
 
 console.warn = () => {};
 describe(seedTag("disputes-final: the hash-ladder reveal queue (og j-events-htlc queueHashLadderRevealRegistration / flushDeferredHashLadderReveals / countDeferredHashLadderReveals)"), () => {
@@ -293,7 +294,7 @@ describe(seedTag("disputes-final: the hash-ladder reveal queue (og j-events-htlc
       const self = xpick(r, [H1, H1, U2, U2, U1, H2]), { host, routes } = hostOf(r, i, self), route = xpick(r, routes), targetRole = r() < 0.5;
       const pull = (targetRole ? route.targetPull : route.sourcePull)!, leg = targetRole ? route.target : route.source;
       const cp = xint(r, 12) === 0 ? xpick(r, ["0x12", U1, H2]) : leg.entityId.toLowerCase() === self ? leg.counterpartyEntityId : leg.entityId;
-      const existing = xint(r, 4) === 0 ? host.jb?.batch["hashLadderRegistrations"]?.[0] as { witness?: { fillRatio: number } } | undefined : undefined;
+      const existing = xint(r, 4) === 0 ? (host.jb._tag === "live" ? host.jb.draft.hashLadderRegistrations[0] : undefined) as { witness?: { fillRatio: number } } | undefined : undefined;
       const ratio = existing?.witness?.fillRatio ?? xpick(r, [100, 200, 65_535, 1 + xint(r, 65_534), 0, 70_000, 1.5]);
       const decoded = decodedAt(r, ratio) as never;
       const og = ogRun(() => { const s = ogStateOf(host); const v = queueHashLadderRevealRegistration(s, cp, pull as never, decoded, targetRole); return ogView(s, v); });
@@ -466,7 +467,7 @@ describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / Di
       const hashIn = xint(r, 10) === 0 ? word(r) : good, peerRow = (h: string) => ({ counterentity: xpick(r, [BOB.toLowerCase(), W("0c")]), proofbodyHash: h, initialProofbodyHash: h, counterNonce: xpick(r, [2, 3, 4]), proposerIsLeft: r() < 0.5, counterProofbody: goodBody });
       const batch = { ...ogInitJBatch().batch, disputeStarts: Array.from({ length: xint(r, 3) }, () => peerRow(xpick(r, [good, Z32]))), counterDisputes: Array.from({ length: xint(r, 3) }, () => peerRow(xpick(r, [good, Z32]))),
         disputeFinalizations: Array.from({ length: xint(r, 2) }, () => peerRow(good)) };
-      const jBatch = xint(r, 5) === 0 ? undefined : { ...ogInitJBatch(), batch, entityNonce: xpick(r, [0, 2, 5]), ...(xint(r, 4) === 0 ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeStarts: [peerRow(good)], counterDisputes: [peerRow(good)] }, entityNonce: 6, batchHash: Z32 } } : {}) };
+      const jBatch = xint(r, 5) === 0 ? undefined : ogReach({ ...ogInitJBatch(), batch, entityNonce: xpick(r, [0, 2, 5]), ...(xint(r, 4) === 0 ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeStarts: [peerRow(good)], counterDisputes: [peerRow(good)] }, entityNonce: 6, batchHash: Z32 } } : {}) });
       const crontab = xint(r, 3) === 0 ? undefined : xint(r, 2) === 0 ? initCrontab() : scheduleHook(initCrontab(), { id: `dispute-deadline:${BOB.toLowerCase()}`, triggerAt: 9, type: "dispute_deadline", data: { accountId: BOB } });
       const entries = new Map<string, PaybookEntry>(secrets.filter(() => r() < 0.7).map((sec) => { const h = hashHtlcSecret(sec)!; return [h, { hashlock: h, createdTimestamp: 1, inboundEntity: xpick(r, [BOB, W("0c")]), pendingFee: 2n }] as const; }));
       let rw = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: JEP }, committed: (jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) as never })).state;
@@ -496,7 +497,7 @@ describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / Di
       if (!ogOut.ok || !f.ok) continue;
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
-      expect([i, d.state.committed["jBatchState"] ?? null]).toEqual([i, next.jBatchState ?? null]);
+      expect([i, ogJb(d.state) ?? null]).toEqual([i, next.jBatchState ?? null]);
       const child: any = d.accountReplicas.get(BOB), ogBob = next.accounts.get(BOB);
       expect([i, child?.active ?? child?.queued ?? null]).toEqual([i, ogBob?.activeDispute ?? null]);
       expect([i, child?.state.jNonce ?? null]).toEqual([i, ogBob?.state.jNonce ?? null]);
@@ -545,8 +546,8 @@ describe(seedTag("disputes-final: unsafe Account frames on the Entity (og entity
       if (pk === 4) entries.set(h, { hashlock: h, createdTimestamp: 1, tokenId: xpick(r, [1, 2]), amount: xpick(r, [7n, 8n]) } as PaybookEntry);
       if (pk === 5) entries.set(h, { hashlock: h, createdTimestamp: 1, outboundEntity: xpick(r, [BOB, CAROL]), inboundEntity: CAROL } as PaybookEntry);
       const jb = xpick(r, [undefined, "draft", "draft", "sent", "full"] as const);
-      const jBatch = jb === undefined ? undefined : { ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeStarts: jb === "full" ? Array.from({ length: 8 }, (_, n) => ({ counterentity: W(String(10 + n)) })) : [] },
-        ...(jb === "sent" ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 4, batchHash: Z32 } } : {}) };
+      const jBatch = jb === undefined ? undefined : ogReach({ ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeStarts: jb === "full" ? Array.from({ length: 8 }, (_, n) => ({ counterentity: W(String(10 + n)) })) : [] },
+        ...(jb === "sent" ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 4, batchHash: Z32 } } : {}) });
       let rw = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: JEP }, committed: (jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) as never })).state;
       if (entries.size > 0 || r() < 0.5) rw = { ...rw, paybook: { entries, feesEarned: 0n } };
       // BOB's counterparty dispute Hanko over the committed proof body (a lock-free Account), so a start can queue
@@ -583,7 +584,7 @@ describe(seedTag("disputes-final: unsafe Account frames on the Entity (og entity
       if (!ogOut.ok || !f.ok) continue;
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
-      expect([i, d.state.committed["jBatchState"]]).toEqual([i, next.jBatchState]);
+      expect([i, ogJb(d.state)]).toEqual([i, next.jBatchState]);
       expect([i, payView(d.state.paybook ?? { entries: new Map(), feesEarned: 0n })]).toEqual([i, payView(next.paybook)]);
       const ogAfter = next.accounts.get(BOB), after: any = d.accountReplicas.get(BOB);
       expect([i, after?._tag === "open" ? "active" : after?._tag === "preparing" ? "dispute_preparing" : after?._tag]).toEqual([i, ogAfter?.status]);
@@ -615,9 +616,9 @@ describe(seedTag("disputes-final: finalize latches on j_abort_sent_batch / j_cle
       const fin = () => ({ counterentity: xpick(r, [BOB.toLowerCase(), BOB.toUpperCase().replace("0X", "0x"), W("0c")]), initialNonce: 1, finalNonce: 1, initialProofbodyHash: Z32, finalProofbodyHash: Z32, finalProofbody: undefined, sig: "0x", leftArguments: "0x", rightArguments: "0x", cooperative: false, finalizationEvidenceHash: Z32 });
       const rows = (n: number) => ({ ...ogInitJBatch().batch, disputeFinalizations: Array.from({ length: n }, fin) });
       const shape = xpick(r, ["none", "draft", "sent", "sent", "recovery"] as const);
-      const jBatch = shape === "none" ? undefined : { ...ogInitJBatch(), entityNonce: 3, batch: rows(shape === "draft" ? 1 + xint(r, 2) : xint(r, 2)),
-        ...(shape === "sent" || shape === "recovery" ? { sentBatch: { batch: rows(xint(r, 3)), entityNonce: 3, batchHash: Z32, encodedBatch: "0x", firstSubmittedAt: 1, lastSubmittedAt: 1, submitAttempts: 1 }, status: "sent" } : {}),
-        ...(shape === "recovery" ? { recoveryBatches: [rows(1 + xint(r, 2))] } : {}) };
+      const jBatch = shape === "none" ? undefined : ogReach({ ...ogInitJBatch(), entityNonce: 3, batch: rows(shape === "draft" ? 1 + xint(r, 2) : xint(r, 2)),
+        ...(shape === "sent" || shape === "recovery" ? { sentBatch: { batch: rows(xint(r, 3)), entityNonce: 3, batchHash: Z32, encodedBatch: "0x", firstSubmittedAt: 1 }, status: "sent" } : {}),
+        ...(shape === "recovery" ? { recoveryBatches: [rows(1 + xint(r, 2))] } : {}) });
       const tx: EntityTx = xint(r, 2) === 0 ? { type: "j_clear_batch", data: { ...(r() < 0.5 ? { reason: "manual" } : {}) } } as EntityTx
         : { type: "j_abort_sent_batch", data: { ...(r() < 0.7 ? { requeueToCurrent: r() < 0.5 } : {}), ...(r() < 0.5 ? { reason: "stuck" } : {}) } } as EntityTx;
       const rw = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: JEP }, committed: (jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) as never })).state;
@@ -633,7 +634,7 @@ describe(seedTag("disputes-final: finalize latches on j_abort_sent_batch / j_cle
       if (!f.ok || !ogOut.ok) continue;
       const next = ogOut.value.newState, after: any = f.value.accountReplicas.get(BOB);
       expect([i, (f.value.events ?? []).map((e) => e.message)]).toEqual([i, readEntityFrameEvents(next).map((e: any) => e.message)]);
-      expect([i, f.value.state.committed["jBatchState"]]).toEqual([i, next.jBatchState]);
+      expect([i, ogJb(f.value.state)]).toEqual([i, next.jBatchState]);
       const ogLatch = next.accounts.get(BOB).activeDispute.finalizeQueued;
       expect([i, after.active.finalizeQueued]).toEqual([i, ogLatch]);
       bump(kinds, `${tx.type}:${latched && !ogLatch ? "released" : ogLatch ? "kept" : "unlatched"}`);
@@ -647,8 +648,8 @@ describe(seedTag("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on 
   const payView = (p: any) => stableJson([...(p?.entries ?? new Map())].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]: [string, any]) => [k, { ...v, ...(v.inboundEntity ? { inboundEntity: String(v.inboundEntity).toLowerCase() } : {}), ...(v.outboundEntity ? { outboundEntity: String(v.outboundEntity).toLowerCase() } : {}) }]).concat([["fees", String(p?.feesEarned ?? 0n)]]));
   const withJb = (r: Rand, c: JCase): void => {
     if (xint(r, 3) === 0) return;
-    const jb = { ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, revealSecrets: otherRows(r, xpick(r, [0, 0, 1, 49])) }, ...(xint(r, 3) === 0 ? { sentBatch: { batch: { ...ogInitJBatch().batch, revealSecrets: otherRows(r, 1) }, entityNonce: 3, batchHash: Z32 } } : {}) };
-    c.rw = { ...c.rw, committed: { ...c.rw.committed, jBatchState: structuredClone(jb) as never } };
+    const jb = ogReach({ ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, revealSecrets: otherRows(r, xpick(r, [0, 0, 1, 49])) }, ...(xint(r, 3) === 0 ? { sentBatch: { batch: { ...ogInitJBatch().batch, revealSecrets: otherRows(r, 1) }, entityNonce: 3, batchHash: Z32 } } : {}) });
+    c.rw = withOgJb(c.rw, structuredClone(jb));
     c.og.jBatchState = structuredClone(jb);
   };
   test("MATCH: 250 random reveal ports (owned / foreign / unknown routes, terminal routes, valid / foreign / empty binaries, claimed ratio mismatches, target dispute clock present or not, draft / full / sent J batch) -- same verdict, messages, stashed reveals, J batch and j_broadcast as og", async () => {
@@ -671,7 +672,7 @@ describe(seedTag("disputes-final: crossJurisdictionSalvage / resolveHtlcLock on 
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
       expect([i, routeView((d.state.crossJurisdictionSwaps ?? new Map()) as Map<string, any>)]).toEqual([i, routeView(next.crossJurisdictionSwaps)]);
-      expect([i, d.state.committed["jBatchState"] ?? null]).toEqual([i, next.jBatchState ?? null]);
+      expect([i, ogJb(d.state) ?? null]).toEqual([i, next.jBatchState ?? null]);
       expect([i, d.outputs.map((o: any) => [o.to, o.input?.txs?.map((t: any) => t.type).join(",")])]).toEqual([i, ogOut.value.outputs.map((o: any) => [o.entityId, o.entityTxs.map((t: any) => t.type).join(",")])]);
       for (const m of msgs) bump(kinds, String(m).replace(/C[0-9]+/g, "C#").slice(0, 44));
     }
@@ -739,7 +740,7 @@ describe(seedTag("disputes-final: prepareDispute cross-j recovery / crossJurisdi
       if (!f.ok || !ogOut.ok) continue;
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
-      expect([i, d.state.committed["jBatchState"] ?? null]).toEqual([i, next.jBatchState ?? null]);
+      expect([i, ogJb(d.state) ?? null]).toEqual([i, next.jBatchState ?? null]);
       const ogAfter = next.accounts.get(BOB), after = d.accountReplicas.get(BOB)!;
       expect([i, after._tag === "open" ? "active" : after._tag === "preparing" ? "dispute_preparing" : after._tag]).toEqual([i, ogAfter.status]);
       const prepare = unwrap(installedAccount(ALICE, BOB, after)).committed?.["disputePrepare"];
@@ -781,7 +782,7 @@ describe(seedTag("disputes-final: crossJurisdictionBookOrderRemoved while a disp
       if (!f.ok || !ogOut.ok) continue;
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
-      expect([i, d.state.committed["jBatchState"] ?? null]).toEqual([i, next.jBatchState ?? null]);
+      expect([i, ogJb(d.state) ?? null]).toEqual([i, next.jBatchState ?? null]);
       const ogAfter = next.accounts.get(BOB), after = d.accountReplicas.get(BOB)!;
       expect([i, after._tag === "open" ? "active" : after._tag === "preparing" ? "dispute_preparing" : after._tag]).toEqual([i, ogAfter.status]);
       expect([i, unwrap(installedAccount(ALICE, BOB, after)).committed?.["disputePrepare"] ?? null]).toEqual([i, ogAfter.disputePrepare ?? null]);
@@ -807,8 +808,8 @@ describe(seedTag("disputes-final: disputeStart with argument overrides (og entit
       ogBob.state.jNonce = jNonce;
       Object.assign(ogBob, { status: "dispute_preparing", disputePrepare: structuredClone(prepare), counterpartyDisputeProofHanko: hanko, counterpartyDisputeHash: hash, counterpartyDisputeProofBodyHash: body, counterpartyDisputeProofNonce: nonce, counterpartyDisputeProofProposerIsLeft: pl });
       const jb = xpick(r, [undefined, "draft", "sent", "full"] as const);
-      const jBatch = jb === undefined ? undefined : { ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeStarts: jb === "full" ? Array.from({ length: 8 }, (_, n) => ({ counterentity: W(String(10 + n)) })) : [] },
-        ...(jb === "sent" ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 4, batchHash: Z32 } } : {}) };
+      const jBatch = jb === undefined ? undefined : ogReach({ ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeStarts: jb === "full" ? Array.from({ length: 8 }, (_, n) => ({ counterentity: W(String(10 + n)) })) : [] },
+        ...(jb === "sent" ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 4, batchHash: Z32 } } : {}) });
       const rw = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: { name: "j", entityProviderAddress: JEP }, committed: (jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) as never })).state;
       const og: any = { entityId: ALICE, timestamp: T0, height: 0, config: { mode: "proposer-based", threshold: 1n, validators: [ALICE_SIGNERX], shares: { [ALICE_SIGNERX]: 1n }, jurisdiction: OG_JX },
         accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([[BOB, ogBob]], ALICE, () => Z32 as never)), paybook: { entries: new Map(), feesEarned: 0n }, ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) };
@@ -822,7 +823,7 @@ describe(seedTag("disputes-final: disputeStart with argument overrides (og entit
       if (!f.ok || !ogOut.ok) continue;
       const d = f.value, next = ogOut.value.newState, msgs = readEntityFrameEvents(next).map((e: any) => e.message);
       expect([i, (d.events ?? []).map((e) => e.message)]).toEqual([i, msgs]);
-      expect([i, d.state.committed["jBatchState"] ?? null]).toEqual([i, next.jBatchState ?? null]);
+      expect([i, ogJb(d.state) ?? null]).toEqual([i, next.jBatchState ?? null]);
       const ogAfter = next.accounts.get(BOB), after: any = d.accountReplicas.get(BOB)!;
       expect([i, after._tag === "preparing" ? "dispute_preparing" : after._tag]).toEqual([i, ogAfter.status]);
       expect([i, after.queued ?? null]).toEqual([i, ogAfter.activeDispute ?? null]);
