@@ -128,8 +128,10 @@ const KEY_PRIV = `0x${"12".repeat(32)}`, KEY_PUB = `0x${Buffer.from(x25519.getPu
 const committedPair = (i: number): { og: Record<string, unknown>; rw: EntityCommitted } => {
   const nonces = new Map(Array.from({ length: ri(3) }, (_, j) => [`0x${(j + 1).toString(16).padStart(40, "0")}`, ri(9)] as const));
   const reserves = new Map(Array.from({ length: ri(3) }, (_, j) => [j + 1, BigInt(ri(1e9)) * 10n ** 12n] as const));
-  const profile = { name: `Entity ${i}`, isHub: rng() < 0.5, avatar: "", bio: "", website: "" };
-  const shared = { nonces, proposals: new Map(), reserves, lastFinalizedJHeight: ri(100), profile, entityEncryptionPublicKey: KEY_PUB, swapTradingPairs: [{ pairId: "1/2", baseTokenId: 1, quoteTokenId: 2 }] };
+  // og setHubConfig commits the config and the profile's hub flag together
+  const hubbed = rng() < 0.5, profile = { name: `Entity ${i}`, isHub: hubbed, avatar: "", bio: "", website: "" };
+  const hub = hubbed ? { hubRebalanceConfig: { matchingStrategy: "amount", policyVersion: 1 + ri(3), routingFeePPM: ri(500), baseFee: BigInt(ri(9)), rebalanceLiquidityFeeBps: BigInt(ri(50)) } } : {};
+  const shared = { nonces, proposals: new Map(), reserves, lastFinalizedJHeight: ri(100), profile, ...hub, entityEncryptionPublicKey: KEY_PUB, swapTradingPairs: [{ pairId: "1/2", baseTokenId: 1, quoteTokenId: 2 }] };
   const feesEarned = BigInt(ri(50));
   return {
     og: { ...shared, paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned }, crontabState: initCrontab(), deferredAccountProposals: PersistentEntityCollectionMap.empty(), crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.empty() },
@@ -159,7 +161,7 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     const r = teaching([[A, 1n]], 1n), og = ogEntityState(r, { paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } }, OG_UNREGISTERED_J);
     const rootRw = (committed: EntityCommitted) => unwrap(entityRootOf({ ...r.state, committed }, r.accountReplicas));
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
-    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
+    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x", isHub: false }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
       const ogValue = field === "paybook" ? { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } : value;
       expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
       expect(rootRw({ [field]: value })).not.toBe(rootRw({}));

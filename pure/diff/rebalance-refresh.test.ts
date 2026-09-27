@@ -22,7 +22,7 @@ import { initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batc
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
-import { ogJb, ogSentBatch } from "./og-jbatch.ts";
+import { ogJb, ogOf, ogSentBatch } from "./og-state.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -307,6 +307,8 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
 });
 
 // ---- lending_overdue: og collectDerivedDeadlines (loans) and settleOverdueLendingLoan through executeCrontab ----
+/** og keeps a lending book only on a hub, which setHubConfig gave a config; the overdue path never reads it. */
+const LENDING_HUB = { matchingStrategy: "amount", policyVersion: 1, disputeAutoFinalizeMode: "auto" };
 describe(seedTag("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)"), () => {
   test("MATCH: 300 random hub lending books (active / repaid loans, due times, missing pools and Accounts, borrowed underflow, credit in the delta and queued in the mempool) -- og's derived deadlines, lending book and revokes", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -330,13 +332,13 @@ describe(seedTag("rebalance-refresh: lending_overdue (og derived-deadlines.ts, c
       const ogAccts = accts.map((a) => [a.peer, { ...ogAccount(hub, { peer: a.peer, toks: [], settlePending: false }), mempool: a.queued === undefined ? [] : [a.queued.lending ? { type: "lending_credit", data: { action: "grant", loanId: "loan-q", hubEntityId: hub, borrowerEntityId: a.peer, tokenId: a.queued.t, creditLimit: a.queued.limit } } : { type: "set_credit_limit", data: { tokenId: a.queued.t, amount: a.queued.limit } }] }] as const);
       for (const [peer, acc] of ogAccts) { const a = accts.find((x) => x.peer === peer)!; acc.state.deltas = PA("deltas", a.tokens.map((x) => [x.t, { tokenId: x.t, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: x.left, rightCreditLimit: x.right, leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }])); }
       const og: any = { entityId: hub, timestamp: now, config: ogConfigOf([aliceAddr]), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(ogAccts as never, hub, () => ZERO_WORD as never)),
-        lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) }, crontabState: { tasks: new Map(), hooks: new Map() }, paybook: { entries: new Map(), feesEarned: 0n }, reserves: new Map() };
-      const state = withCrontab(unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr as never, { shares: 1n }]]), committed: { lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) } } as never })).state, { tasks: new Map(), hooks: new Map() } as Crontab);
+        hubRebalanceConfig: { ...LENDING_HUB }, lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) }, crontabState: { tasks: new Map(), hooks: new Map() }, paybook: { entries: new Map(), feesEarned: 0n }, reserves: new Map() };
+      const state = withCrontab(unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr as never, { shares: 1n }]]), committed: { hubRebalanceConfig: { ...LENDING_HUB }, lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) } } as never })).state, { tasks: new Map(), hooks: new Map() } as Crontab);
       expect(derivedDeadlines(state, replicas)).toEqual(ogCollectDerivedDeadlines(og) as never);
       const ctx = { manualBroadcastInInput: false, bookIntentSlot: createBookIntentProgram().openSlot(), hashesToSign: [], accountChanges: new Set<string>(), candidateEffects: [], accountTxs: [] as any[] };
       await ogExecuteCrontab({ quietRuntimeLogs: true, state: { timestamp: now } } as never, { entityId: hub, state: og } as never, og.crontabState, ctx as never);
       const run = unwrap(executeCrontab(state, replicas, now));
-      expect(run.state.committed["lending"]).toEqual(og.lending);
+      expect(ogOf(run.state)["lending"]).toEqual(og.lending);
       expect(run.accountTxs.map(({ accountId: id, tx }) => { const x = tx as any; return { accountId: id, tx: { type: x.type, data: { action: x.action, loanId: x.loanId, hubEntityId: x.hubEntityId, borrowerEntityId: x.borrowerEntityId, tokenId: Number(x.tokenId), creditLimit: x.creditLimit } } }; })).toEqual(ctx.accountTxs);
       expect(run.outputs).toEqual([]);
       for (const l of og.lending.loans.values()) if (l.status === "defaulted") bump("defaulted");

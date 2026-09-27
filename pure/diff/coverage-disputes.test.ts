@@ -20,7 +20,7 @@ import {
   type AccountReplica, type ActiveDispute, type Binary, type CrossRoute, type DisputeHanko, type EntityOutput, type EntityState, type EntityTx, type PullRow,
 } from "../xln.ts";
 import { ALICE, BOB, TERMS, TEST_CONTRACTS, TEST_JREPLICA, aliceAddr, anvilKey, genesisAB, signDigestHex, signedTxs, unwrap, verifiers } from "../xln_run.ts";
-import { ogJb, ogSentBatch } from "./og-jbatch.ts";
+import { ogJb, ogSentBatch } from "./og-state.ts";
 
 // ---- seeded randomness: SEEDX overrides the fixed seed, and every failure names the seed ----
 const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 0xd15c0;

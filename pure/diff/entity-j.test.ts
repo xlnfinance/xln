@@ -40,7 +40,7 @@ import { getBoardHandoverFrameConfig } from "../../core/entity/consensus/authori
 import { handleBoardHandoverEntityTx } from "../../core/entity/tx/handlers/board-handover.ts";
 import { encodeBoard, hashBoard } from "../../core/entity/factory.ts";
 import { carolAddr } from "../xln_run.ts";
-import { ogJb } from "./og-jbatch.ts";
+import { ogJb } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xe7_1a);

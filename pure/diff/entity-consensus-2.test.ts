@@ -21,6 +21,7 @@ import { handleRequestCollateralEntityTx } from "../../core/entity/tx/handlers/a
 import { buildQuorumHanko, getEntityConfigBoardHash } from "../../core/hanko/signing.ts";
 import type { ConsensusConfig } from "../../core/entity/types";
 import { consensusBytes, ogAfterCommands, ogAuthored, ogCommandState, wired } from "./og-author.ts";
+import { ogOf, withOg } from "./og-state.ts";
 
 // og leader failover (core/entity/consensus/leader/*): view change, timeout votes and certificates (ER-18)
 const A = aliceAddr, B = bobAddr, C = carolAddr;
@@ -302,9 +303,10 @@ describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestColla
     const texts = [undefined, "", "  Hub  ", "x"];
     for (let i = 0; i < 300; i++) {
       const pick = <X>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
-      const prev = { name: pick(["Old", ""]), isHub: rng() < 0.5, ...(rng() < 0.5 ? { entityKind: "company" } : {}), ...(rng() < 0.5 ? { sectors: ["media"] } : {}), avatar: "a", bio: "b", website: "w" };
+      const hubbed = rng() < 0.5, prev = { name: pick(["Old", ""]), isHub: hubbed, ...(rng() < 0.5 ? { entityKind: "company" } : {}), ...(rng() < 0.5 ? { sectors: ["media"] } : {}), avatar: "a", bio: "b", website: "w" };
       const r = teaching([[A, 1n]], 1n, A);
-      const base = { ...r, state: { ...r.state, committed: { ...r.state.committed, profile: prev } } } as EntityReplica;
+      // og setHubConfig commits the config with the profile's hub flag
+      const base = { ...r, state: withOg(r.state, { profile: prev, ...(hubbed ? { hubRebalanceConfig: { matchingStrategy: "amount", policyVersion: 1 } } : {}) }) } as EntityReplica;
       const profile: Record<string, unknown> = { entityId: rng() < 0.05 ? BOB : r.state.id };
       for (const [k, v] of [["name", pick(texts)], ["entityKind", pick(kinds)], ["sectors", pick(sectorSets)], ["avatar", pick(texts)], ["bio", pick(texts)], ["website", pick(texts)]] as const) if (v !== undefined) profile[k] = v;
       const tx = { type: "profile-update", data: { profile } } as EntityTx;
@@ -312,7 +314,7 @@ describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestColla
       try { ogProfile = handleProfileUpdateEntityTx({} as never, { entityId: r.state.id, profile: structuredClone(prev) } as never, tx as never, true).newState.profile; } catch (e) { ogError = String(e); }
       const rw = applyEntityInput(base, { kind: "txs", timestamp: NOW, txs: [tx] }, ctx(A));
       if (ogError !== undefined) { expect(rw.ok).toBe(false); continue; }
-      const committed = unwrap(rw).replica.state.committed["profile"];
+      const committed = ogOf(unwrap(rw).replica.state)["profile"];
       expect(JSON.parse(JSON.stringify(committed))).toEqual(JSON.parse(JSON.stringify(ogProfile)));
     }
   }, 30_000);
@@ -336,7 +338,7 @@ describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestColla
     const list = listFor(r.state.id), pairList = listFor(pair.state.id);
     const p = unwrap(applyEntityInput(r, { kind: "txs", timestamp: NOW + 1n, txs: list }, ctx(A)));
     expect(p.replica.head.height).toBe(2n);
-    expect(p.replica.state.committed["profile"]).toMatchObject({ name: "Hub", sectors: ["finance"] });
+    expect(ogOf(p.replica.state)["profile"]).toMatchObject({ name: "Hub", sectors: ["finance"] });
     // a held 2-of-2 proposal exposes the frame: its hash is og's over og's wire txs (numeric token ids, the same data keys)
     const pairTxs: EntityTx[] = [...pairList, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n, feeTokenId: unwrap(tokenId("2")), feeAmount: 1n, policyVersion: 1 } }];
     const held = unwrap(applyEntityInput(pair, { kind: "txs", timestamp: NOW, txs: pairTxs }, ctx(A))).replica;

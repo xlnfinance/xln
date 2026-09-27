@@ -16,6 +16,7 @@ import { createBookIntentProgram, applyBookIntentProgram } from "../../core/enti
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { admitLocalAccountTx } from "../../core/account/input/local-tx-admission.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
+import { ogOf } from "./og-state.ts";
 
 let seed = seedOf(5150);
 const rng = (): number => {
@@ -84,7 +85,8 @@ describe(seedTag("followup-order: committed-frame followups of one accountInput 
         interestBps: pick([0, 100]), termId: "1h", termMs: 3_600_000, createdAt: 1, updatedAt: 1, status: "open" });
       for (const [n, status] of [[1, "opening"], [2, "active"]] as const) if (rng() < 0.5) loans.set(`loan-${hex16(n)}`, { requestId: `borrow-${hex16(n)}`, loanId: `loan-${hex16(n)}`, hubEntityId: self, borrowerEntityId: peer, lenderEntityId: peer,
         positionId: `lend-${hex16(1)}`, tokenId: 1, principalAmount: 40n, interestAmount: 1n, repaymentAmount: 41n, repaidAmount: 0n, interestBps: 100, termId: "1h", termMs: 3_600_000, openedAt: 1, dueAt: 3_600_001, updatedAt: 1, status });
-      const book: LendingBook | undefined = pools.size + loans.size > 0 ? ({ pools, loans } as LendingBook) : undefined;
+      // og opens a lending book only on a hub
+      const book: LendingBook | undefined = isHub && pools.size + loans.size > 0 ? ({ pools, loans } as LendingBook) : undefined;
       const lendingTx = (proposer: EntityId): AccountTx => {
         if (proposer === self) {
           const loan = pick([...loans.values(), undefined]);
@@ -152,7 +154,8 @@ describe(seedTag("followup-order: committed-frame followups of one accountInput 
         return { height: BigInt(height), timestamp: BigInt(ts - 5 + height), jHeight: 0n, stateHash, txs } as unknown as AccountFrame;
       };
       const createdAcc = hasReceived && !hasOwn && rng() < 0.3, own = hasOwn ? frameOf(false, 3) : undefined, received = hasReceived ? frameOf(true, createdAcc ? 1 : 4, createdAcc) : undefined;
-      const hubCfg = isHub && rng() < 0.6 ? { policyVersion: 1 + ri(3), rebalanceLiquidityFeeBps: BigInt(ri(50)) } : undefined, lastRun = pick([0, ts - 1, ts, ts + 1]);
+      // og setHubConfig marks the hub and commits its config together
+      const hubCfg = isHub ? { policyVersion: 1 + ri(3), rebalanceLiquidityFeeBps: BigInt(ri(50)) } : undefined, lastRun = pick([0, ts - 1, ts, ts + 1]);
       const forwards = Array.from({ length: rng() < 0.5 ? 0 : 1 + ri(2) }, () => ({ tokenId: 1, amount: BigInt(1 + ri(100)), route: [self, pick([peer, other]), ...(rng() < 0.5 ? [hex(32)] : [])], ...(rng() < 0.5 ? { description: "fwd" } : {}), trustedGatewayEntityId: self }));
       for (const f of forwards) {
         effects.push({ _tag: "direct_payment_forward", ...f } as Effect);
@@ -204,7 +207,7 @@ describe(seedTag("followup-order: committed-frame followups of one accountInput 
       // swap events in og's order, including og's same-j `accountOutputVerified` marker (followup-order #11)
       expect(sortedJson({ created: d.swaps?.created ?? [], cancelled: d.swaps?.cancelled ?? [], cancelRequests: d.swaps?.cancelRequests ?? [] }))
         .toBe(sortedJson({ created: effectsOg.swapOffersCreated, cancelled: effectsOg.swapOffersCancelled, cancelRequests: effectsOg.swapCancelRequests }));
-      expect(sortedJson(d.state.committed["lending"])).toBe(sortedJson(ogState.lending));
+      expect(sortedJson(ogOf(d.state)["lending"])).toBe(sortedJson(ogState.lending));
       expect(sortedJson(d.state.paybook)).toBe(sortedJson(ogState.paybook));
       // og scheduleCommittedAccountWork: the hub-rebalance-kick hook
       expect(sortedJson(unwrap(crontabOf(d.state)).hooks)).toBe(sortedJson(ogState.crontabState.hooks));

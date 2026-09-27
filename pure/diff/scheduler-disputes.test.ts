@@ -30,7 +30,7 @@ import { sentBatchOwnsDisputeFinalityAck } from "../../core/entity/tx/j-events.t
 import { handleOpenAccountEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/open-account.ts";
 import { createEmptyEnv } from "../../core/runtime.ts";
 import { createAccountConsensusContext } from "../../core/entity/account/account-consensus-context.ts";
-import { jbOfOg, ogJb, ogReach } from "./og-jbatch.ts";
+import { jbOfOg, ogJb, ogReach } from "./og-state.ts";
 
 let seed = seedOf(11);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };

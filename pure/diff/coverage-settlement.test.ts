@@ -301,7 +301,7 @@ import { handleSettlePropose } from "../../core/entity/tx/handlers/payments/sett
 import { selectSettlementContinuation } from "../../core/entity/consensus/account/settlement-continuation.ts";
 import { applyEntityTx as ogApplyEntityTx } from "../../core/entity/tx/apply.ts";
 import { type SettlementContinuationAction, type SettlementContinuationPlan } from "../xln.ts";
-import { ogJb, ogSentBatch, withOgJb } from "./og-jbatch.ts";
+import { ogJb, ogSentBatch, withOgJb } from "./og-state.ts";
 
 type OgTx = Parameters<typeof ogApplyEntityTx>[2];
 const ENTITY_IDS = [W("77"), W("0c"), BOB] as const;

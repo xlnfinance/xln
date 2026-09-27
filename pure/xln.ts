@@ -11349,6 +11349,8 @@ export type EntityState = {
   readonly committed: EntityCommitted;
   /** og jBatchState: the Depository work the Entity queued, sealed and has in flight. */
   readonly jBatch: JSubmission;
+  /** og hubRebalanceConfig, lending and profile.isHub: set together by setHubConfig and never cleared. */
+  readonly hub: EntityHub;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12236,6 +12238,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   jurisdictionConfig: s.jurisdictionConfig,
   committed: s.committed,
   jBatch: s.jBatch,
+  hub: s.hub,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12871,6 +12874,21 @@ const authorityOf = (p: EntitySeed): Authority => {
   return { _tag: "board", board, entityId };
 };
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
+type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub">;
+/** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
+const importSections = (og: EntityCommitted): Result<TypedSections, EntityError> => {
+  const { jBatchState, ...seeded } = og;
+  const unreachable = (section: string) => (reason: string): EntityError =>
+    ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
+  const imported = all({
+    jBatch: mapErr(importJBatchState(jBatchState as OgJBatchState | undefined), unreachable("J_BATCH")),
+    hubbed: mapErr(importHub(seeded), unreachable("HUB")),
+  });
+  return map(imported, ({ jBatch, hubbed: { hub, committed } }) => ({ committed, jBatch, hub }));
+};
+/** The state with its committed sections replaced by og-named ones (the inverse of ogSections). */
+export const withOgSections = (state: EntityState, og: EntityCommitted): Result<EntityState, EntityError> =>
+  map(importSections(og), (sections) => ({ ...state, ...sections }));
 export const createEntity = (p: EntitySeed): Result<OpenEntity, EntityError> => {
   const parts = all({
     quorum: admitQuorum(authorityOf(p)),
@@ -12879,13 +12897,10 @@ export const createEntity = (p: EntitySeed): Result<OpenEntity, EntityError> => 
   return chain(parts, ({ quorum, jurisdiction }): Result<OpenEntity, EntityError> => {
     const signer = p.signerId === undefined ? quorum.proposer : memberId(quorum, p.signerId);
     if (signer === undefined) return err({ _tag: "unknown_member", address: p.signerId ?? "" });
-    const { jBatchState, ...committed } = p.committed ?? {};
-    const imported = mapErr(importJBatchState(jBatchState as OgJBatchState | undefined), (reason): EntityError =>
-      ({ _tag: "entity_invariant", reason: `J_BATCH_STATE_UNREACHABLE: ${reason}` }));
-    return map(imported, (jBatch) => {
+    return map(importSections(p.committed ?? {}), (sections) => {
       const state: EntityState = {
         id: p.id, quorum, jurisdiction, accounts: new Map(), height: 0n, timestamp: p.timestamp ?? 0n,
-        ...opt("jurisdictionConfig", p.jurisdictionConfig), committed, jBatch,
+        ...opt("jurisdictionConfig", p.jurisdictionConfig), ...sections,
       };
       return openEntity(signer, state, genesisHead(), [], new Map());
     });
@@ -13630,8 +13645,58 @@ type HubConfig = {
   readonly rebalanceLiquidityFeeBps: bigint;
   readonly rebalanceTimeoutMs: number;
 };
-const hubConfigOf = (state: EntityState): HubConfig | undefined =>
-  state.committed["hubRebalanceConfig"] as HubConfig | undefined;
+/**
+ * og marks an Entity a hub only in setHubConfig, which commits the config and `profile.isHub` together; the lending
+ * book appears only on a hub (og applyCommittedLendingFollowup returns early elsewhere). None of it is ever cleared.
+ */
+export type EntityHub =
+  | Readonly<{ _tag: "spoke" }>
+  | Readonly<{ _tag: "hub"; config: HubConfig; lending: LendingBook | undefined }>;
+type HubRole = Extract<EntityHub, { _tag: "hub" }>;
+export const SPOKE: EntityHub = { _tag: "spoke" };
+const hubOf = (state: EntityState): HubRole | undefined => (state.hub._tag === "hub" ? state.hub : undefined);
+const hubConfigOf = (state: EntityState): HubConfig | undefined => hubOf(state)?.config;
+/** og's hub sections for the root: the config, the lending book once opened, and the profile's hub flag. */
+const hubSections = (hub: EntityHub, committed: EntityCommitted): EntityCommitted => {
+  const profile = committed["profile"] as { readonly [k: string]: Binary } | undefined;
+  return {
+    ...committed,
+    ...(profile === undefined ? {} : { profile: { ...profile, isHub: hub._tag === "hub" } }),
+    ...(hub._tag === "spoke" ? {} : { hubRebalanceConfig: hub.config as unknown as Binary }),
+    ...(hub._tag === "spoke" || hub.lending === undefined ? {} : { lending: hub.lending as unknown as Binary }),
+  };
+};
+type SeededProfile = { readonly [k: string]: Binary };
+const wellFormedBook = (raw: unknown): raw is LendingBook => {
+  const book = raw as Partial<LendingBook> | undefined;
+  return book?.pools instanceof Map && book.loans instanceof Map;
+};
+/** What og's setHubConfig and lending followup can never leave behind. */
+const hubProblems = (config: Binary | undefined, lending: Binary | undefined, profile?: SeededProfile): string[] => {
+  const flag = profile?.["isHub"];
+  return [
+    profile !== undefined && typeof flag !== "boolean" ? "profile without isHub" : undefined,
+    profile !== undefined && (flag === true) !== (config !== undefined)
+      ? "profile.isHub disagrees with hubRebalanceConfig"
+      : undefined,
+    lending !== undefined && config === undefined ? "lending on a spoke" : undefined,
+    lending !== undefined && !wellFormedBook(lending) ? "malformed lending" : undefined,
+  ].filter((x) => x !== undefined);
+};
+/** og's hub fields as the rewrite holds them: the profile keeps everything but the flag the hub carries. */
+const importHub = (committed: EntityCommitted): Result<{ hub: EntityHub; committed: EntityCommitted }, string> => {
+  const { hubRebalanceConfig: config, lending, ...rest } = committed;
+  const profile = committed["profile"] as SeededProfile | undefined;
+  const problems = hubProblems(config, lending, profile);
+  if (problems.length > 0) return err(problems.join(", "));
+  const { isHub: _flag, ...kept } = profile ?? {};
+  const stored = profile === undefined ? rest : { ...rest, profile: kept };
+  const book = wellFormedBook(lending) ? lending : undefined;
+  const hub: EntityHub = config === undefined
+    ? SPOKE
+    : { _tag: "hub", config: config as unknown as HubConfig, lending: book };
+  return ok({ hub, committed: stored });
+};
 /** og buildHubRebalancePolicyTx: the hub's per-token fee terms at the token-default base fee and zero gas fee. */
 const hubPolicyTx = (config: HubConfig, tokenId: TokenId): Result<AccountTx, EntityError> =>
   map(defaultRebalanceBaseFee(Number(tokenId)), (baseFee): AccountTx => ({
@@ -16411,10 +16476,7 @@ export type LendingBook = {
   readonly pools: ReadonlyMap<string, LendingPool>;
   readonly loans: ReadonlyMap<string, LendingLoan>;
 };
-const lendingBook = (state: EntityState): LendingBook | undefined => {
-  const raw = state.committed["lending"] as Partial<LendingBook> | undefined;
-  return raw?.pools instanceof Map && raw.loans instanceof Map ? (raw as LendingBook) : undefined;
-};
+const lendingBook = (state: EntityState): LendingBook | undefined => hubOf(state)?.lending;
 export type DueHook = ScheduledHook | DerivedDeadline;
 type Deadline = { readonly triggerAt: number; readonly id: string };
 /** og compareDeadlines: triggerAt, then the id text. */
@@ -16474,7 +16536,7 @@ const compareJobs = (a: ScheduledWakeJob, b: ScheduledWakeJob): number =>
  * rebalance work (og getRebalanceAccountIds).
  */
 export const crontabTaskHasPendingWork = (state: EntityState, replicas: Replicas): boolean => {
-  if (state.committed["hubRebalanceConfig"] === undefined) return false;
+  if (state.hub._tag === "spoke") return false;
   if (sentOf(state.jBatch) !== undefined) return true;
   const ids = rebalanceAccountIds(state, replicas);
   return !ids.ok || ids.value.length > 0;
@@ -16979,9 +17041,7 @@ const finalizeQueue = (jb: JSubmission, accountId: string): FinalizeQueue => {
     inFlight: sent !== undefined,
   };
 };
-const autoFinalizeMode = (state: EntityState): string | undefined =>
-  (state.committed["hubRebalanceConfig"] as { readonly disputeAutoFinalizeMode?: string } | undefined)
-    ?.disputeAutoFinalizeMode;
+const autoFinalizeMode = (state: EntityState): string | undefined => hubConfigOf(state)?.disputeAutoFinalizeMode;
 /**
  * og processDisputeDeadlineHook: wait for the observed start and its timeout, defer behind a sent batch, latch an
  * already drafted finalization, else finalize (one per batch).
@@ -17074,9 +17134,11 @@ const projectedHubCredit = (
  * without its pool or Account is dropped.
  */
 const lendingOverdue = (run: HookRun, loanId: string, now: number): HookRun => {
-  const book = lendingBook(run.state);
+  const role = hubOf(run.state);
+  const book = role?.lending;
   const loan = book?.loans.get(loanId);
-  if (book === undefined || loan === undefined || loan.status !== "active" || loan.dueAt > now) return run;
+  if (role === undefined || book === undefined || loan === undefined || loan.status !== "active" || loan.dueAt > now)
+    return run;
   const pool = book.pools.get(loan.positionId);
   const borrower = lower(loan.borrowerEntityId);
   const child = run.accountReplicas.get(borrower as EntityId);
@@ -17107,8 +17169,7 @@ const lendingOverdue = (run: HookRun, loanId: string, now: number): HookRun => {
       creditLimit: current > principal ? current - principal : 0n,
     },
   };
-  const state = { ...run.state, committed: { ...run.state.committed, lending: lending as unknown as Binary } };
-  return { ...run, state, accountTxs: [...run.accountTxs, revoke] };
+  return { ...run, state: withLendingBook(run.state, role, lending), accountTxs: [...run.accountTxs, revoke] };
 };
 // ---- the hub's lending book producer ----
 // og tx/handlers/account/committed-lending-followup.ts, committed-lending-close.ts, extensions/lending.ts
@@ -17176,8 +17237,8 @@ const withLoan = (book: LendingBook, l: LendingLoan): LendingBook => ({
   ...book,
   loans: mapSet(book.loans, l.loanId, l),
 });
-const withLendingBook = (state: EntityState, book: LendingBook): EntityState =>
-  ({ ...state, committed: { ...state.committed, lending: book as unknown as Binary } });
+const withLendingBook = (state: EntityState, hub: HubRole, book: LendingBook): EntityState =>
+  ({ ...state, hub: { ...hub, lending: book } });
 /** og's `lending_credit` revoke: the borrower's credit line shrinks by the loan's principal, never below zero. */
 const creditRevoke = (loan: LendingLoan, hub: string, tokenId: TokenId, current: bigint): AccountTxTarget => ({
   accountId: loan.borrowerEntityId,
@@ -17404,8 +17465,6 @@ const lendingMove = (x: LendingCtx, tx: AccountTx): Result<LendingMove, EntityEr
     default: return undefined;
   }
 };
-const isHubEntity = (state: EntityState): boolean =>
-  (state.committed["profile"] as { readonly isHub?: unknown } | undefined)?.isHub === true;
 /**
  * og applyCommittedLendingFollowup for every tx of the committed frames of one Account input: on a hub
  * (profile.isHub), a lending tx naming this hub moves the committed `lending` book (fund opens a pool, borrow opens a
@@ -17422,11 +17481,12 @@ export const lendingFollowups = (
   timestamp: bigint,
   queued: readonly AccountTxTarget[] = [],
 ): Result<LendingFollowup, EntityError> => {
-  if (!isHubEntity(state)) return ok({ state, accountTxs: queued });
+  const role = hubOf(state);
+  if (role === undefined) return ok({ state, accountTxs: queued });
   const hub = lowerText(state.id);
   const cp = lowerText(peerRaw);
   const child = replicas.get(cp as EntityId);
-  const before = lendingBook(state);
+  const before = role.lending;
   const steps = frames.flatMap(({ frame, proposer }) => {
     const now = Math.max(Math.floor(Number(frame.timestamp)), Math.floor(Number(timestamp)));
     return frame.txs.map((tx) => ({ tx, proposer: lowerText(proposer), now }));
@@ -17445,7 +17505,7 @@ export const lendingFollowups = (
     }));
   };
   return map(foldResult(steps, { book: before, accountTxs: queued }, follow), (run): LendingFollowup => ({
-    state: run.book === before || run.book === undefined ? state : withLendingBook(state, run.book),
+    state: run.book === before || run.book === undefined ? state : withLendingBook(state, role, run.book),
     accountTxs: run.accountTxs,
   }));
 };
@@ -19003,7 +19063,7 @@ const updatedKind = (next: string | null | undefined, prev: unknown): string | u
 };
 /**
  * og system/basic.ts handleProfileUpdateEntityTx: the committed profile with og's defaults, kind and canonical sector
- * rules; `isHub` is never taken from the update.
+ * rules; `isHub` is never taken from the update (the Hub carries it).
  */
 const profileUpdate = (state: EntityState, p: ProfileUpdate): Result<Binary, EntityError> => {
   const bad = (reason: Of<EntityError, "profile_update">["reason"]): Result<never, EntityError> =>
@@ -19027,7 +19087,6 @@ const profileUpdate = (state: EntityState, p: ProfileUpdate): Result<Binary, Ent
     typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim() : `Entity ${state.id.slice(-4)}`;
   return ok({
     name,
-    ...(prev["isHub"] === undefined ? {} : { isHub: prev["isHub"] as Binary }),
     ...(entityKind ? { entityKind } : {}),
     ...(canonical.length > 0 ? { sectors: canonical } : {}),
     avatar: typeof p.avatar === "string" ? p.avatar : text("avatar"),
@@ -22380,7 +22439,7 @@ const envelopeValid = (layer: OnionLayer): boolean =>
  * og calculateHopFee with the hub policy (routingFeePPM ?? 1, baseFee ?? 0n) at the Account's directional utilization.
  */
 const hubForwardFee = (state: EntityState, amount: bigint, out: bigint, inn: bigint): bigint => {
-  const cfg = state.committed["hubRebalanceConfig"] as Fields | null | undefined;
+  const cfg = hubConfigOf(state) as Fields | undefined;
   const ppm = directionalFeePpm(sanitizeFeePpm(cfg?.["routingFeePPM"] ?? 1, 1), out, inn);
   const baseFee = cfg?.["baseFee"];
   const base = typeof baseFee === "bigint" && baseFee > 0n ? baseFee : 0n;
@@ -25506,12 +25565,13 @@ const hubConfigMessage = (config: HubConfig): string => {
  */
 const setHubConfigTx = (s: TxScope, x: EntityTxOf<"setHubConfig">): Result<Draft, EntityError> =>
   chain(buildHubConfig(hubConfigOf(s.state), x.data), (config) => {
-    const profile = { ...((s.state.committed["profile"] ?? {}) as { readonly [k: string]: Binary }), isHub: true };
-    const committed = { ...s.state.committed, hubRebalanceConfig: config as unknown as Binary, profile };
+    // og spreads the profile to set isHub, so a profile-less Entity gains one
+    const committed = { ...s.state.committed, profile: s.state.committed["profile"] ?? {} };
+    const hub: EntityHub = { _tag: "hub", config, lending: lendingBook(s.state) };
     const targets = hubPolicyPairs(s.replicas);
     const clock = { ...L0_CLOCK, timestamp: s.ctx.timestamp };
     const start: Draft = {
-      state: { ...s.state, committed },
+      state: { ...s.state, committed, hub },
       accountReplicas: s.replicas,
       outputs: [],
       touched: [...new Set(targets.map(([peer]) => peer))],
@@ -26313,7 +26373,7 @@ const hubRebalanceTerms = (hub: Loose): Loose => ({
 });
 /** og's descriptor metadata: the hub flag and kind, sectors, fees, the jurisdiction, and a hub's rebalance terms. */
 const profileMetadata = (state: EntityState, profile: Loose, hub: Loose | undefined): Loose => {
-  const isHub = profile["isHub"] === true;
+  const isHub = state.hub._tag === "hub";
   const sectors = profile["sectors"] as readonly unknown[] | undefined;
   return {
     isHub,
@@ -26334,7 +26394,7 @@ const profileDescriptor = (
   accounts: readonly ProfileRow[],
 ): ProfileDescriptor => {
   const profile = (state.committed["profile"] ?? {}) as Loose;
-  const hub = state.committed["hubRebalanceConfig"] as Loose | undefined;
+  const hub = hubConfigOf(state) as Loose | undefined;
   const text = (v: unknown): string => (v === undefined ? "" : String(v));
   return {
     entityId: lower(state.id),
@@ -26565,6 +26625,12 @@ const settleCollections = (committed: EntityCommitted): Result<EntityCommitted, 
         }))
       : ok(c);
   });
+/** The committed sections under og's names, before the root replaces collections with their commitments. */
+export const ogSections = (state: EntityState): EntityCommitted => {
+  const og = ogJBatchOf(state.jBatch);
+  const jBatch = og === undefined ? {} : { jBatchState: og as unknown as Binary };
+  return hubSections(state.hub, { ...state.committed, ...jBatch });
+};
 /**
  * og projectEntityConsensusState's committed sections: the settlement collections, the paybook, the cross-j
  * collections, the order book, the crontab.
@@ -26576,9 +26642,7 @@ const committedSections = (state: EntityState): Result<EntityCommitted, EntityEr
       : map(paybookSection(state.paybook), (paybook): EntityCommitted => ({ ...c, paybook }));
   const withBook = (c: EntityCommitted): EntityCommitted =>
     state.orderbookExt === undefined ? c : { ...c, orderbookExt: orderbookSection(state.orderbookExt) };
-  const og = ogJBatchOf(state.jBatch);
-  const jBatch = og === undefined ? {} : { jBatchState: og as unknown as Binary };
-  const paid = chain(settleCollections({ ...state.committed, ...jBatch }), withPaybook);
+  const paid = chain(settleCollections(ogSections(state)), withPaybook);
   return chain(
     chain(paid, (c) => map(crossSections(c, state), withBook)),
     crontabSection,
@@ -38734,10 +38798,7 @@ const accountWith = (replica: EntityReplica | undefined, peer: string): AccountR
   [...(replica?.accountReplicas ?? [])].find(([id]) => idOf(id) === idOf(peer))?.[1];
 const headIs = (account: AccountReplica, height: bigint, hash: string): boolean =>
   account.head.height === height && idOf(account.head.prevFrameHash) === idOf(hash);
-const isHub = (replica: EntityReplica): boolean => {
-  const profile = (replica.state.committed["profile"] ?? {}) as { readonly [k: string]: unknown };
-  return profile["isHub"] === true;
-};
+const isHub = (replica: EntityReplica): boolean => replica.state.hub._tag === "hub";
 
 /** A hub's ACK names its pending proposal, or replays the committed head (kept with its cross-j txs). */
 const ackLeg = (

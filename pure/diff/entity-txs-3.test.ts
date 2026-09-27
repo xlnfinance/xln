@@ -27,7 +27,7 @@ import { handleLendingBorrowEntityTx, handleLendingClosePositionEntityTx } from 
 import * as ogBook from "../../core/orderbook/core.ts";
 import { computeBookCommitmentHash } from "../../core/orderbook/commitment.ts";
 import { rebuildOrderbookPairIndex } from "../../core/orderbook/order-index.ts";
-import { ogJb } from "./og-jbatch.ts";
+import { ogJb, ogOf } from "./og-state.ts";
 
 /** og's committed Account collections are Patricia-backed maps; their commitment is `rootHash()`. */
 const ogRootHash = (c: object): string => {
@@ -64,7 +64,7 @@ const ogConfig = (s: EntityState) => {
   return { mode: "proposer-based" as const, threshold: s.quorum.threshold, validators: members.map(([a]) => a.toLowerCase()), shares: Object.fromEntries(members.map(([a, m]) => [a.toLowerCase(), m.shares])) };
 };
 /** og EntityState fields governance reads and writes. */
-const ogState = (s: EntityState, timestamp: number): any => ({ entityId: s.id, config: ogConfig(s), proposals: new Map(), profile: { name: `Entity ${s.id.slice(-4)}`, avatar: "", bio: "", website: "" }, timestamp });
+const ogState = (s: EntityState, timestamp: number): any => ({ entityId: s.id, config: ogConfig(s), proposals: new Map(), profile: { name: `Entity ${s.id.slice(-4)}`, isHub: false, avatar: "", bio: "", website: "" }, timestamp });
 const wire = (tx: EntityTx): any => wireEntityTx(tx);
 /** og applyNestedEntityTx with og's own handlers (./og-author.ts), under this file's og env. */
 const ogApplyCommand = (before: any, command: unknown) => ogApplyCommandIn(before, command, env);
@@ -165,7 +165,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
         expect(bytes(d.state.committed["entityCommandNonces"] ?? null)).toBe(bytes(ogOut.state.entityCommandNonces ?? null));
         expect(d.events ?? []).toEqual(readEntityFrameEvents(ogOut.state));
         if ((d.events ?? []).length > 0 && txs[0]?.type !== "chat") executed++;
-        if (d.state.committed["profile"] !== undefined) expect(d.state.committed["profile"]).toEqual(ogOut.state.profile);
+        if (ogOf(d.state)["profile"] !== undefined) expect(ogOf(d.state)["profile"]).toEqual(ogOut.state.profile);
         history.push(command);
         r = { ...r, state: d.state };
         og = { ...ogOut.state, ...{ ["__xlnEntityFrameEvents"]: [] } };
@@ -191,12 +191,12 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     const folded = unwrap(foldTxs(r.state, r.accountReplicas, authored, { verify: hankoVerify, timestamp: NOW })).draft;
     const pending = [...(folded.state.committed["proposals"] as ReadonlyMap<string, unknown>).keys()];
     expect(pending.length).toBe(1);
-    expect(folded.state.committed["profile"]).toBeUndefined();
+    expect(ogOf(folded.state)["profile"]).toBeUndefined();
     expect(folded.events).toEqual([{ type: "text", validatorId: aliceAddr.toLowerCase(), message: "hello" }]);
     const vote = unwrap(authorEntityTxs(folded.state, bobAddr, [{ type: "vote", data: { proposalId: pending[0] as string, voter: bobAddr, choice: "yes" } }], signAs(bobAddr)));
     const voted = unwrap(foldTxs(folded.state, folded.accountReplicas, vote, { verify: hankoVerify, timestamp: NOW + 1n })).draft;
     expect((voted.state.committed["proposals"] as ReadonlyMap<string, unknown>).size).toBe(0);
-    expect(voted.state.committed["profile"]).toMatchObject({ name: "Board" });
+    expect(ogOf(voted.state)["profile"]).toMatchObject({ name: "Board" });
   });
   test("MATCH (og createEntityFrameHashFromStateRoot): a frame carrying a signed collective command hashes like og, its events included", () => {
     // [A, B] with threshold 1: A's own share executes the proposal at once, and the 2-member board holds the frame so it can be inspected
@@ -204,7 +204,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     const authored = unwrap(authorEntityTxs(r.state, aliceAddr, [{ type: "profile-update", data: { profile: { entityId: r.state.id, name: "Solo" } } }, { type: "chatMessage", data: { message: "note", timestamp: 1 } }], signAs(aliceAddr)));
     const p = unwrap(applyEntityInput(r, { kind: "txs", timestamp: NOW, txs: [...authored, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }] }, { ...verifiers, self: r.state.id, signerId: aliceAddr })).replica;
     if (p._tag !== "proposed") throw new Error("phase");
-    expect(p.draft.state.committed["profile"]).toMatchObject({ name: "Solo" });
+    expect(ogOf(p.draft.state)["profile"]).toMatchObject({ name: "Solo" });
     // og admission carries the signed command and signs the raw chatMessage into A's next command (its own propose)
     const ogTxs = ogAuthored(r.state, aliceAddr, [...authored, { type: "chatMessage", data: { message: "raw", timestamp: 2 } }]);
     expect(ogTxs.length).toBe(2);
@@ -319,8 +319,8 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
       const og = ogThrows(() => handleSetHubConfigEntityTx(env, structuredClone(ogS), { type: "setHubConfig", data } as never, true));
       if (!og.ok) { expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(og.reason); continue; }
       const d = unwrap(rw).draft;
-      expect<unknown>(d.state.committed["hubRebalanceConfig"]).toEqual(og.value.newState.hubRebalanceConfig);
-      expect((d.state.committed["profile"] as { isHub?: boolean }).isHub).toBe(true);
+      expect<unknown>(ogOf(d.state)["hubRebalanceConfig"]).toEqual(og.value.newState.hubRebalanceConfig);
+      expect((ogOf(d.state)["profile"] as { isHub?: boolean }).isHub).toBe(true);
       expect(d.events).toEqual(readEntityFrameEvents(og.value.newState));
       const queued = [...d.accountReplicas].sort(([x], [y]) => (x < y ? -1 : 1)).flatMap(([peer, c]) => c.mempool.slice(replicas.get(peer)?.mempool.length ?? 0).map((t) => ({ accountId: peer, tx: t })));
       expect(queued.map(({ accountId, tx }) => ({ accountId, tx: { type: tx.type, data: { ...(tx as any), type: undefined, tokenId: Number((tx as any).tokenId) } } })))
@@ -382,7 +382,7 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
     const d = accountWork(unwrap(foldTxs(hub.state, hub.accountReplicas, frameOf(hub.state, [openTx({ tokenId: unwrap(tokenId("2")), creditAmount: 9n })]), { verify: hankoVerify, timestamp: NOW + 1n })).draft, NOW + 1n);
     const child = d.accountReplicas.get(BOB);
     if (child === undefined || child._tag !== "proposed") throw new Error("no proposal");
-    const cfg = hub.state.committed["hubRebalanceConfig"] as never, ids = [2, 1, 3];
+    const cfg = ogOf(hub.state)["hubRebalanceConfig"] as never, ids = [2, 1, 3];
     const og = [...ids.map((t) => ({ type: "add_delta", data: { tokenId: t } })), ...ids.map((t) => buildHubRebalancePolicyTx(cfg, t)), { type: "set_credit_limit", data: { tokenId: 2, amount: 9n } }];
     expect(child.candidate.frame.txs.map((t: any) => ({ type: t.type, data: { ...t, type: undefined, tokenId: Number(t.tokenId), ...(t.limit === undefined ? {} : { limit: undefined, amount: t.limit }) } })))
       .toEqual(og.map((t: any) => ({ type: t.type, data: { ...t.data, type: undefined } })));

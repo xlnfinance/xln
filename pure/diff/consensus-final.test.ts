@@ -20,6 +20,7 @@ import {
   type Address, type EntityId, type EntityInput, type EntityTx,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, signedTxs, unwrap, verifiers } from "../xln_run.ts";
+import { ogOf } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xc0_f1a1);
@@ -62,7 +63,7 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
       const id = hex32(), many = i % 25 === 0, count = many ? 101 + ri(6) : ri(6);
       const jc = pick([undefined, { name: "  Anvil ", entityProviderAddress: "0xAbCdEf0000000000000000000000000000000001" }, { name: "", entityProviderAddress: "0x" + "22".repeat(20) }]);
       const hub = pick([undefined, { routingFeePPM: ri(500), baseFee: BigInt(ri(9)), policyVersion: 1, rebalanceLiquidityFeeBps: BigInt(ri(50)), rebalanceGasFee: 7n, hubName: pick(["", "H1"]), ...(rng() < 0.5 ? { swapTakerFeeBps: ri(30), rebalanceBaseFee: 3n, rebalanceTimeoutMs: 60_000 } : {}) }]);
-      const profile = { name: pick(["", " Hub A ", "b"]), isHub: rng() < 0.5, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "business", sectors: pick([[], ["finance"]]) } : {}) };
+      const profile = { name: pick(["", " Hub A ", "b"]), isHub: hub !== undefined, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "business", sectors: pick([[], ["finance"]]) } : {}) };
       const key = pick([undefined, pubOf(hex32())]);
       const replicas = new Map<string, unknown>(), ogAccounts = new Map<string, unknown>();
       for (let a = 0; a < count; a++) {
@@ -97,7 +98,7 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
     const later = { ...genesis.state, height: 1n };
     expect(profilesOf(later, [chat(1)]).profiles).toEqual([]);
     const renamed = profilesOf(later, [{ type: "profile-update", data: { profile: { entityId: id, name: " B ", bio: "hi" } } } as EntityTx]);
-    const h1 = ogHashOf(renamed.state.committed["profile"]);
+    const h1 = ogHashOf(ogOf(renamed.state)["profile"]);
     expect(h1).not.toBe(h0);
     expect(renamed.profiles).toEqual([{ hash: h1, type: "profile", context: `profile:${h1}` }]);
   });

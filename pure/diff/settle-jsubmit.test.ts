@@ -14,7 +14,7 @@ import {
   type Batch, type JBatch, type JSubmission, type JEntity, type JQueued, type QueuedBatch, type Result,
 } from "../xln.ts";
 import { ALICE, BOB, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
-import { jbOfOg } from "./og-jbatch.ts";
+import { jbOfOg } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0x5e77_1e);

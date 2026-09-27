@@ -54,7 +54,7 @@ import { applyAccountDisputeFinality as ogApplyAccountDisputeFinality } from "..
 import { applyFinality } from "../xln.ts";
 import { getDisputeHankoRequirementError as ogDisputeHankoRequirement } from "../../core/account/consensus/dispute/hanko.ts";
 import { disputeRequirement, disputeRequirementText } from "../xln.ts";
-import { jbOfOg, ogJb, ogReach, withOgJb } from "./og-jbatch.ts";
+import { jbOfOg, ogJb, ogReach, withOgJb } from "./og-state.ts";
 
 let seed = seedOf(29);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };

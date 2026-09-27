@@ -1,8 +1,22 @@
-// The J batch crosses the og boundary here: og hands in its JBatch record, the rewrite holds a JSubmission, and the
-// Entity root commits the og record back. A test that seeds or compares og's jBatchState goes through these.
-import { importJBatchState, ogJBatchOf, type EntityState, type JSubmission, type OgJBatchState, type QueuedBatch } from "../xln.ts";
+// The Entity's typed sections cross the og boundary here. og hands in its records (jBatchState, hubRebalanceConfig,
+// lending, profile.isHub), the rewrite holds typed sections, and the root commits og's records back. A test that seeds
+// or compares og-named sections goes through these.
+import {
+  importJBatchState, ogJBatchOf, ogSections, withOgSections,
+  type EntityCommitted, type EntityState, type JSubmission, type OgJBatchState, type QueuedBatch,
+} from "../xln.ts";
 import { unwrap } from "../xln_run.ts";
 
+/** The committed sections under og's names. */
+export const ogOf = (s: EntityState): EntityCommitted => ogSections(s);
+/** The state with some og-named sections replaced; a section og cannot reach fails the test. */
+export const withOg = (s: EntityState, patch: Record<string, unknown>): EntityState =>
+  unwrap(withOgSections(s, { ...ogSections(s), ...patch } as EntityCommitted));
+/** The state made a hub with this config, as og setHubConfig leaves it (a profile, when present, says so). */
+export const asHub = (s: EntityState, config: unknown): EntityState => {
+  const profile = ogSections(s)["profile"] as Record<string, unknown> | undefined;
+  return withOg(s, { hubRebalanceConfig: config, ...(profile === undefined ? {} : { profile: { ...profile, isHub: true } }) });
+};
 /** The og jBatchState a rewrite state commits (absent while dormant). */
 export const ogJb = (s: { readonly jBatch: JSubmission }): OgJBatchState | undefined => ogJBatchOf(s.jBatch);
 /** og's record as the rewrite holds it; a record og cannot reach fails the test. */
