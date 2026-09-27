@@ -202,7 +202,7 @@ const randomJBatch = (peer: EntityId, aliceLeft: boolean): unknown => {
   switch (ri(6)) {
     case 0: return { ...base, status: "accumulating", batch: { ...base.batch, settlements: [conflicting] } };
     case 1: return { ...base, status: "accumulating", batch: { ...base.batch, reserveToReserve: [other] } };
-    case 2: return { ...base, status: "sent", sentBatch: { batch: base.batch, batchHash: W("5b"), encodedBatch: "0x", entityNonce: 1, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 1 } };
+    case 2: return { ...base, status: "sent", sentBatch: { batch: ogInitJBatch().batch, batchHash: W("5b"), encodedBatch: "0x", entityNonce: 1, firstSubmittedAt: 0, lastSubmittedAt: 0, submitAttempts: 1 } };
     case 3: return base;
     default: return undefined;
   }
