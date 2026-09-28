@@ -198,6 +198,29 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     expect((voted.state.proposals as ReadonlyMap<string, unknown>).size).toBe(0);
     expect(ogOf(voted.state)["profile"]).toMatchObject({ name: "Board" });
   });
+  test("MATCH (og system/basic.ts noPowerToBlockQuorum): on a 2-of-3 board one 'no' leaves the proposal open, a second rejects it", () => {
+    // total 3, threshold 2: a proposal is dead only once 'no' holds total - threshold + 1 = 2 shares
+    const r = lazyEntity([[aliceAddr, 1n], [bobAddr, 1n], [carolAddr, 1n]], 2n);
+    const profile: EntityTx = { type: "profile-update", data: { profile: { entityId: r.state.id, name: "Board" } } };
+    const [proposed] = unwrap(authorEntityTxs(r.state, aliceAddr, [profile], signAs(aliceAddr)));
+    const ogProposed = ogApplyCommand(ogState(r.state, Number(NOW)), wire(proposed!).data);
+    if ("error" in ogProposed) throw new Error(ogProposed.message);
+    const afterPropose = unwrap(foldTxs(r.state, r.accountReplicas, [proposed!], { verify: hankoVerify, timestamp: NOW })).draft;
+    const [id] = [...(afterPropose.state.proposals as ReadonlyMap<string, unknown>).keys()];
+    const voteNo = (state: EntityState, voter: Address, og: any, timestamp: bigint) => {
+      const [cmd] = unwrap(authorEntityTxs(state, voter, [{ type: "vote", data: { proposalId: id as string, voter, choice: "no" } }], signAs(voter)));
+      const ogOut = ogApplyCommand({ ...og, timestamp: Number(timestamp) }, wire(cmd!).data);
+      if ("error" in ogOut) throw new Error(ogOut.message);
+      const rw = unwrap(foldTxs(state, afterPropose.accountReplicas, [cmd!], { verify: hankoVerify, timestamp })).draft;
+      expect(bytes(rw.state.proposals ?? new Map())).toBe(bytes(ogOut.state.proposals));
+      return { state: rw.state, og: { ...ogOut.state, ["__xlnEntityFrameEvents"]: [] } };
+    };
+    const oneNo = voteNo(afterPropose.state, bobAddr, { ...ogProposed.state, ["__xlnEntityFrameEvents"]: [] }, NOW + 1n);
+    expect((oneNo.state.proposals as ReadonlyMap<string, unknown>).size).toBe(1);
+    const twoNo = voteNo(oneNo.state, carolAddr, oneNo.og, NOW + 2n);
+    expect((twoNo.state.proposals as ReadonlyMap<string, unknown>).size).toBe(0);
+    expect(ogOf(twoNo.state)["profile"]).toEqual(ogOf(r.state)["profile"]);
+  });
   test("MATCH (og createEntityFrameHashFromStateRoot): a frame carrying a signed collective command hashes like og, its events included", () => {
     // [A, B] with threshold 1: A's own share executes the proposal at once, and the 2-member board holds the frame so it can be inspected
     const r = lazyEntity([[aliceAddr, 1n], [bobAddr, 1n]], 1n);
