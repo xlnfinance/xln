@@ -194,6 +194,8 @@ type OgEnvelope = {
 export type Outgoing = { readonly og: readonly OgEnvelope[]; readonly rw: readonly Shipped[] };
 /** One of the rewrite's remote rows, keyed by what og's envelope carries of it, and the input it arrives as. */
 type Shipped = { readonly key: string; readonly input: RoutedEntityInput };
+/** A wire tx as the transport compares it. */
+const wireKey = (tx: unknown): string => stableJson(plain(tx));
 /** An output row as og's envelope carries it: its source frame and atomic cohort move to the envelope. */
 const rowKey = (row: unknown): string => {
   const { sourceRuntimeFrame: _frame, atomicCrossJurisdictionPair: _pair, ...carried } = row as Record<string, unknown>;
@@ -301,9 +303,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
     [...env.state.eReplicas.values()].reduce((sum, r) => sum + Number(r.state.height), 0);
 
   /**
-   * The rewrite's remote inputs of one frame, one per og output row (og merges an Entity's outputs into rows): each
-   * row takes its Entity's next typed txs, as many as it carries, and its source Runtime, addressed Runtime and source
-   * frame, as og's ingress stamps them.
+   * The rewrite's remote inputs of one frame, one per og output row: each row's txs are the typed txs of the outbox
+   * that carry exactly its wire txs (og's dedupe keeps the latest of an Entity's outputs, so a row may skip an earlier
+   * superseded one), with its source Runtime, addressed Runtime and source frame, as og's ingress stamps them.
    */
   const remoteInputs = (after: Runtime, outbox: readonly EntityOutput[], rows: readonly NetworkOutput[]) => {
     const local = localIds();
@@ -311,18 +313,22 @@ export const createLane = (cfg: LaneConfig): Lane => {
       if ("tx" in o) return [o.tx];
       return o.input.kind === "txs" ? o.input.txs : [];
     };
-    const queues = outbox
+    type Typed = { readonly to: string; readonly key: string; readonly tx: EntityTx };
+    const typed = outbox
       .filter((o) => !local.has(o.to.toLowerCase()))
-      .reduce((m, o) => {
-        const to = o.to.toLowerCase();
-        return new Map(m).set(to, [...(m.get(to) ?? []), ...txsOf(o)]);
-      }, new Map<string, readonly EntityTx[]>());
-    type Taken = { readonly used: ReadonlyMap<string, number>; readonly out: readonly Shipped[] };
+      .flatMap((o) => txsOf(o).map((tx): Typed => ({ to: o.to.toLowerCase(), key: wireKey(wireEntityTx(tx)), tx })));
+    /** The row's wire txs, each taken as the latest unused typed tx to its Entity with the same wire form. */
+    const pick = (to: string, wire: readonly unknown[], used: ReadonlySet<Typed>): readonly Typed[] =>
+      wire.reduce<readonly Typed[]>((taken, w) => {
+        const key = wireKey(w);
+        const match = typed.findLast((t) => t.to === to && t.key === key && !used.has(t) && !taken.includes(t));
+        return match === undefined ? taken : [...taken, match];
+      }, []);
+    type Taken = { readonly used: ReadonlySet<Typed>; readonly out: readonly Shipped[] };
     const taken = rows.reduce<Taken>((acc, row) => {
       const to = String(row["entityId"]).toLowerCase();
-      const n = Array.isArray(row["entityTxs"]) ? row["entityTxs"].length : 0;
-      const start = acc.used.get(to) ?? 0;
-      const txs = (queues.get(to) ?? []).slice(start, start + n);
+      const wire = Array.isArray(row["entityTxs"]) ? (row["entityTxs"] as readonly unknown[]) : [];
+      const picked = pick(to, wire, acc.used);
       const frame = row["sourceRuntimeFrame"] as unknown as SourceRuntimeFrame;
       const input: RoutedEntityInput = {
         entityId: to as EntityId,
@@ -333,11 +339,12 @@ export const createLane = (cfg: LaneConfig): Lane => {
         ...(row["atomicCrossJurisdictionPair"] === undefined
           ? {}
           : { atomicCrossJurisdictionPair: row["atomicCrossJurisdictionPair"] as never }),
-        input: { kind: "txs", timestamp: BigInt(frame.timestamp), txs },
+        input: { kind: "txs", timestamp: BigInt(frame.timestamp), txs: picked.map((t) => t.tx) },
       };
       const shipped = { key: rowKey(row), input };
-      return { used: new Map(acc.used).set(to, start + n), out: txs.length === 0 ? acc.out : [...acc.out, shipped] };
-    }, { used: new Map(), out: [] });
+      const used = new Set([...acc.used, ...picked]);
+      return { used, out: picked.length === 0 ? acc.out : [...acc.out, shipped] };
+    }, { used: new Set(), out: [] });
     return taken.out;
   };
 
