@@ -9972,16 +9972,6 @@ const refreshableHanko = (r: OpenAccount): RetryRule => {
     return n !== undefined && n.required === required && n.supplied !== required;
   };
 };
-/**
- * Departs from og (review/og-issues-halts-2026-09-28.md, issue 2): when txs ahead of a settle hanko in the same frame
- * change its post-settlement proof (a payment staged beside the deferred approval), the hanko stays queued instead
- * of halting the Runtime in og throwCriticalProposalFailure. Once the payment frame commits, the hanko's nonce is
- * stale, so the Entity's refresh (refreshStaleHanko) re-defers the approval and it signs again on the settled state;
- * the stale hanko stays queued, as og's refresh keeps it (see refreshStaleHanko).
- */
-const outdatedHanko: RetryRule = (tx, e) =>
-  tx.type === "settle_transition" && tx.kind === "hanko"
-  && e._tag === "settlement" && e.reason === "POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH";
 /** The frame a proposal's included txs make, with its proof and the dispute Hanko plan it needs. */
 const framePlan = (
   r: OpenAccount, party: Party, dt: DeltaTransformerRef | undefined,
@@ -10017,8 +10007,7 @@ const planWindow = (
   const folded = proposalFold(r.state, window, ctx);
   const failure: FailureText = (index, e) =>
     accountTxFailure(lenientBefore(r.state, window, index, ctx), txAt(window, index), ctx, e, party.self, r.dispute);
-  const retry: RetryRule = (tx, e) => refreshableHanko(r)(tx, e) || outdatedHanko(tx, e);
-  const deferred = map(proposalRefusals(window, folded.refused, retry, failure), (retried) =>
+  const deferred = map(proposalRefusals(window, folded.refused, refreshableHanko(r), failure), (retried) =>
     withoutAccountTxs(r.mempool, withoutAccountTxs(window, retried)));
   return chain(deferred, (kept) => {
     const [firstRefusal] = folded.refused;

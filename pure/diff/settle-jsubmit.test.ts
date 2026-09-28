@@ -13,7 +13,7 @@ import {
   encodeBatch, contractBatch, emptyQueuedBatch, initJBatch, queueR2R, jBroadcast, jRebroadcast, jAbortSentBatch, jClearBatch, mintReservesTx, genesisHost, applyHost, setRebalanceSubmittedAt, EMPTY_DEBTS, DORMANT, ogJBatchOf, ogJBatchState, sentOf,
   type Batch, type JBatch, type JSubmission, type JEntity, type JQueued, type QueuedBatch, type Result,
 } from "../xln.ts";
-import { ALICE, BOB, ackInput, genesisAB, hankoVerify, offerOf, proposeInput, unwrap } from "../xln_run.ts";
+import { ALICE, BOB, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
 import { jbOfOg, ogOf } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
@@ -185,8 +185,8 @@ import { handleSettleApprove, handleSettleExecute, handleSettlePropose, handleSe
 import { entityCollectionCommitment as ogCollectionCommitment } from "../../core/entity/state/persistent-collection-map.ts";
 import { batchAddSettlement, initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batch/index.ts";
 import {
-  applyAccountInput, applyEntityInput, createEntity, foldTxs, planAccountProposal, isLeft, mapSet, ownWire, wireOf, workspaceHashOf, zeroDelta, tokenId, canAutoApproveWorkspace, entityCollectionCommitment, addSettlementRow,
-  type AccountInput, type AccountReplica, type EntityId, type EntityTx, type OpenEntity, type SettlementOp, type SettlementWorkspace, type WireAccountTx,
+  applyEntityInput, createEntity, foldTxs, planAccountProposal, isLeft, mapSet, ownWire, wireOf, workspaceHashOf, zeroDelta, tokenId, canAutoApproveWorkspace, entityCollectionCommitment, addSettlementRow,
+  type AccountReplica, type EntityId, type EntityTx, type OpenEntity, type SettlementOp, type SettlementWorkspace, type WireAccountTx,
 } from "../xln.ts";
 import { CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, signedTxs, verifiers } from "../xln_run.ts";
 
@@ -342,48 +342,25 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
     expect(JSON.stringify(d.events ?? [])).toContain("Settlement approval expired: the workspace cannot be signed (SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1)");
   });
 
-  test("DEPARTS: a payment staged beside a deferred approval changes the proof og just signed -> og's proposal halts (POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH); the rewrite keeps the hanko queued and re-signs it once the Account is idle", () => {
+  test("HALTS like og: a payment staged beside a deferred approval changes the proof the approval just signed -> proposing the hanko halts with og's POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH (review/og-issues-halts-2026-09-28.md, issue 2; walk seeds 0x5ef1c1 f52, 0x2f1e55 f11)", () => {
     const child = SETTLE_BASE.accountReplicas.get(BOB)!;
     const bobLeft = !isLeft(ALICE, ACCOUNT_ID);
     const w = workspaceOf("unsigned", [{ type: "c2r", tokenId: 1, amount: 100n }], bobLeft, bobLeft, undefined)!;
     const approve = { type: "settle_approve", data: { counterpartyEntityId: BOB, workspaceHash: w.workspaceHash } } as EntityTx;
     const pay = { type: "directPayment", data: { targetEntityId: BOB, tokenId: T1, amount: 5n, route: [ALICE, BOB], deliveryMode: "direct" } } as EntityTx;
-    const hankos = (txs: readonly WireAccountTx[]): any[] => txs.filter((t: any) => t.type === "settle_transition" && t.kind === "hanko");
     const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
     // the Entity's own not-yet-signed hanko, as its proposal verifies it (pendingVerify)
     const verify = (d: string, h: string, e: string): boolean => (h === `0xfe${d.slice(2).toLowerCase()}` && e === ALICE) || hankoVerify(d, h, e as EntityId);
-    const plan = (r: AccountReplica): any => unwrap(planAccountProposal(r, ALICE, { timestamp: NOW + 1n, jHeight: 0n } as never, verify as never) as any);
     const base = { ...SETTLE_BASE, accountReplicas: mapSet(SETTLE_BASE.accountReplicas, BOB, { ...child, state: { ...child.state, settlement: w } } as AccountReplica) };
-    // frame 1: the approval signs over the empty arrived mempool (og's guard), after the staged payment
+    // og materializeDeferredSettlementApprovals signs over the empty arrived mempool, after the staged payment
     const first = unwrap(applyEntityInput(base, { kind: "txs", timestamp: NOW + 1n, txs: [approve, pay] }, ctx)).replica as OpenEntity;
     const staged = first.accountReplicas.get(BOB)!;
     expect(staged.mempool.map((t) => t.type)).toEqual(["payment", "settle_transition"]);
-    const [outdated] = hankos(staged.mempool);
-    // og halts proposing it; the rewrite's frame carries the payment and keeps the hanko queued
-    const { preview } = plan(staged);
-    expect(preview.frame.txs.map((t: any) => t.type)).toEqual(["payment"]);
-    expect(hankos(preview.deferred)).toEqual([outdated]);
-    // the payment frame commits for real: Alice proposes, Bob acks, Alice takes the ack (nextProofNonce moves on)
-    const door = (self: EntityId) => ({ verify: verify as never, self, now: NOW + 1n });
-    const step = (r: AccountReplica, input: AccountInput, self: EntityId) => unwrap(applyAccountInput(r, input, door(self)));
-    const proposed = step(staged, proposeInput(staged, ALICE, { timestamp: NOW + 1n, jHeight: 0n } as never), ALICE).replica;
-    expect(proposed._tag).toBe("proposed");
-    const bob = { ...base.accountReplicas.get(BOB)!, mempool: [] } as AccountReplica;
-    const received = step(bob, offerOf(proposed as never, ALICE), BOB).replica;
-    const ack = step(received, ackInput(received, BOB), BOB).outputs.find((o: any) => o.kind === "ack") as AccountInput;
-    const committed = step(proposed, ack, ALICE).replica;
-    expect(committed._tag).toBe("open");
-    expect(hankos(committed.mempool)).toEqual([outdated]);
-    // frame 2, on the committed payment frame: the nonce refresh re-defers the approval and it signs again; like og's
-    // Account worker post-account, the committed mempool still queues the outdated hanko ahead of the fresh one
-    const chat = { type: "chatMessage", data: { message: "idle", timestamp: 1 } } as EntityTx;
-    const second = unwrap(applyEntityInput({ ...first, accountReplicas: mapSet(first.accountReplicas, BOB, committed) }, { kind: "txs", timestamp: NOW + 2n, txs: [chat] }, ctx)).replica as OpenEntity;
-    const resigned = second.accountReplicas.get(BOB)!;
-    const [kept, fresh] = hankos(resigned.mempool);
-    expect(kept).toEqual(outdated);
-    expect(fresh.postProof.proofBodyHash).not.toBe(outdated.postProof.proofBodyHash);
-    // the outdated hanko is still refreshable (og isRefreshableStaleSettlementHanko), so only the fresh one is proposed
-    expect(hankos(plan(resigned).preview.frame.txs)).toEqual([fresh]);
+    // og throwCriticalProposalFailure: the payment ahead of the hanko changed its post-settlement proof
+    const planned = planAccountProposal(staged, ALICE, { timestamp: NOW + 1n, jHeight: 0n } as never, verify as never) as any;
+    expect(planned.ok).toBe(false);
+    expect(planned.error._tag).toBe("proposal_halt");
+    expect(planned.error.message).toMatch(/^SETTLEMENT_TRANSITION_PROPOSAL_FAILED:hanko:POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:0x[0-9a-f]{64}:0x[0-9a-f]{64}$/);
   });
 
   test("MATCH: 300 random workspaces auto-approve exactly when og canAutoApproveWorkspace does (no forgiveness / rawDiff; own reserve and collateral share never shrink)", () => {

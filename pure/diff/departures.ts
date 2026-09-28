@@ -59,23 +59,5 @@ const staleTransition: HaltDeparture = {
   },
 };
 
-/**
- * og halts proposing a settle hanko whose post-settlement proof the txs ahead of it in the frame changed
- * (review/og-issues-halts-2026-09-28.md, issue 2): a deferred approval signed while a payment of the same Entity frame
- * was still staged. The rewrite proposes the frame without the hanko and keeps it queued, so the approval survives to be
- * re-signed: the Account og halted on is proposed, its mempool holds the hanko, and its candidate frame does not.
- */
-const outdatedHanko: HaltDeparture = {
-  name: "outdated settlement hanko kept for re-signing",
-  halts: (ogHalt) => /SETTLEMENT_TRANSITION_PROPOSAL_FAILED:hanko:POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:0x/.test(ogHalt),
-  instead: (after) => {
-    const hanko = (tx: { type: string; kind?: string }): boolean => tx.type === "settle_transition" && tx.kind === "hanko";
-    const keptOut = (a: Account): boolean =>
-      a._tag === "proposed" && (a.mempool as readonly { type: string; kind?: string }[]).some(hanko)
-      && !(a.candidate.frame.txs as readonly { type: string; kind?: string }[]).some(hanko);
-    return accounts(after).some(keptOut) ? null : "no proposed Account keeps the hanko queued out of its frame";
-  },
-};
-
-export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval, staleTransition, outdatedHanko];
+export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval, staleTransition];
 export const haltDeparture = (ogHalt: string): HaltDeparture | undefined => HALT_DEPARTURES.find((d) => d.halts(ogHalt));
