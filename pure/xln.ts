@@ -5874,10 +5874,10 @@ export const genesisAccountBody = (account: AccountState, terms: AccountTerms): 
 
 // ---- spending room ----
 const putState = (a: AccountBody, account: AccountState): AccountBody => ({ ...a, account });
-/** Everything a side has held back on a token: its lock holds plus its allowances. */
+/** Everything a side has held back on a token and not yet paid. */
 export const holds = (a: AccountBody, tk: TokenId, byLeft: boolean): bigint => {
   const s = sideTotals(a, tk);
-  return at(s.leftHold + s.leftAllowance, s.rightHold + s.rightAllowance, byLeft);
+  return at(s.leftHold, s.rightHold, byLeft);
 };
 const ensureRoom = (a: AccountBody, tk: TokenId, amount: bigint, byLeft: boolean): Result<void, BodyError> => {
   const available = outCapacity(getDelta(a.account, tk), byLeft, holds(a, tk, byLeft));
@@ -5885,8 +5885,7 @@ const ensureRoom = (a: AccountBody, tk: TokenId, amount: bigint, byLeft: boolean
 };
 /** A side's total hold on one token stays within one payment (og's uint256 hold). */
 const holdRoom = (a: AccountBody, tk: TokenId, amount: bigint, onLeft: boolean): Result<void, BodyError> => {
-  const totals = sideTotals(a, tk);
-  const held = at(totals.leftHold, totals.rightHold, onLeft);
+  const held = holds(a, tk, onLeft);
   return held + amount > MAX_PAYMENT_AMOUNT ? err({ _tag: "hold_overflow" }) : ok(undefined);
 };
 const positive = (amount: bigint): Result<void, BodyError> => guard(amount > 0n, { _tag: "non_positive_payment" });
@@ -6259,10 +6258,9 @@ const workspaceRoom = (a: AccountBody, diffs: readonly WorkspaceDiff[]): Result<
     const tk = String(diff.tokenId) as TokenId;
     const d = a.account.deltas.get(tk);
     if (d === undefined) return settleErr("SETTLEMENT_HOLD_DELTA_MISSING");
-    const t = sideTotals(a, tk);
     const held = { left: holds(a, tk, true), right: holds(a, tk, false) };
     return chain(chargeSettlement(d, diff, held), (plan) => {
-      const overflows = t.leftHold + plan.left > MAX_PAYMENT_AMOUNT || t.rightHold + plan.right > MAX_PAYMENT_AMOUNT;
+      const overflows = held.left + plan.left > MAX_PAYMENT_AMOUNT || held.right + plan.right > MAX_PAYMENT_AMOUNT;
       return overflows ? settleErr("HOLD_ADD_OVERFLOW") : ok(undefined);
     });
   });
@@ -7851,8 +7849,7 @@ const paidRowText = (a: AccountBody, tk: TokenId, payerIsLeft: boolean, amount: 
 const holdOverflowText = (
   a: AccountBody, tk: TokenId | number, isLeft: boolean, amount: bigint,
 ): FailureCheck => () => {
-  const totals = sideTotals(a, tokenKey(tk));
-  const held = at(totals.leftHold, totals.rightHold, isLeft);
+  const held = holds(a, tokenKey(tk), isLeft);
   const text = `HOLD_ADD_OVERFLOW:${sideName(isLeft)} hold=${held} amount=${amount}`;
   return refuse(held + amount > MAX_PAYMENT_AMOUNT, text);
 };
@@ -8821,12 +8818,11 @@ const pendingOn = (b: AccountBody, onLeft: boolean): Result<JClaimAccumulator, V
   return chain(claimKeyOf(b), (accountKey) => claimAccumulator(accountKey, rows));
 };
 
-// Holds: what each side has committed but not yet paid, per token. Allowances are always zero here.
-export type SideTotals = {
-  readonly leftHold: bigint; readonly rightHold: bigint;
-  readonly leftAllowance: bigint; readonly rightAllowance: bigint;
-};
-const NO_TOTALS: SideTotals = { leftHold: 0n, rightHold: 0n, leftAllowance: 0n, rightAllowance: 0n };
+// Holds: what each side has committed but not yet paid, per token.
+// og's Delta also carries left/rightAllowance, but og only ever writes them as 0n (createDefaultDelta in
+// account/state/delta.ts, the finality reset in account/settlement/j-finality.ts), so the committed view emits 0n.
+export type SideTotals = { readonly leftHold: bigint; readonly rightHold: bigint };
+const NO_TOTALS: SideTotals = { leftHold: 0n, rightHold: 0n };
 type Hold = Readonly<{ tokenId: TokenId; onLeft: boolean; amount: bigint }>;
 /** An unsubmitted workspace holds each side's outgoing diff until it lands. */
 const workspaceHolds = (w: SettlementWorkspace | undefined): readonly Hold[] => {
@@ -8868,7 +8864,7 @@ const committedDeltas = (b: AccountBody): ReadonlyMap<number, CommittedDelta> =>
     return [d.tokenId, {
       tokenId: Number(d.tokenId), collateral: d.collateral, ondelta: d.ondelta, offdelta: d.offdelta,
       leftCreditLimit: d.leftCreditLimit, rightCreditLimit: d.rightCreditLimit,
-      leftAllowance: s.leftAllowance, rightAllowance: s.rightAllowance, leftHold: s.leftHold, rightHold: s.rightHold,
+      leftAllowance: 0n, rightAllowance: 0n, leftHold: s.leftHold, rightHold: s.rightHold,
     }];
   }));
 };
