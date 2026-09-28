@@ -18,7 +18,10 @@
 //       minTradeSize, misaligned base or quote lots, price outside the 30% band, a full book all cancel the offer
 //       with a zero fill (swap_resolve); a hub with no book never matches the offer
 //     - a fill the hub cannot pay (want above the hub's out capacity) fails its swap_resolve proposal:
-//       SWAP_RESOLVE_PROPOSAL_FAILED, a halt (account/consensus/proposal/transactions.ts)
+//       SWAP_RESOLVE_PROPOSAL_FAILED, a halt (account/consensus/proposal/transactions.ts:220). og holds the give leg
+//       when the offer commits but checks the want leg only at fill time (swap/resolve/settlement.ts:14), so one
+//       taker can fill several of a maker's offers past what the hub can pay: see `hubCanPay`. Core payments from
+//       other areas that shrink the hub's side under a resting offer are not guarded here.
 //   proposeCancelSwap (payments/swap-requests.ts, account/tx/handlers/swap/lifecycle/cancel.ts)
 //     - no Account: SWAP_REQUEST_ACCOUNT_MISSING, a halt
 //     - no such offer, or the caller is not its maker: rejected, dropped
@@ -29,7 +32,7 @@ import { tokenId, type EntityTx, type TokenId } from "../../xln.ts";
 import { unwrap } from "../../xln_run.ts";
 import { HUB, SPOKES, type World } from "../world.ts";
 import { arises, drawn, type Moves, type Step, type WorldMoves } from "./areas.ts";
-import { active, isLeft, pick } from "./world-view.ts";
+import { active, isLeft, pick, replica, type OgAccountReplica } from "./world-view.ts";
 
 // ---- the market ----
 
@@ -67,46 +70,66 @@ const termsOf = (o: Order): Terms => {
 
 // ---- og's committed state, as draws read it ----
 
-type OgSwapOffer = { readonly offerId: string; readonly makerIsLeft: boolean };
-type OgSwapAccount = {
-  readonly status?: string;
-  readonly mempool?: readonly unknown[];
-  readonly pendingFrame?: unknown;
-  readonly state?: {
-    readonly deltas?: ReadonlyMap<number, Parameters<typeof deriveDelta>[0]>;
-    readonly swapOffers?: ReadonlyMap<string, OgSwapOffer>;
-  };
+type OgSwapOffer = {
+  readonly offerId: string;
+  readonly makerIsLeft: boolean;
+  readonly wantTokenId: number;
+  readonly wantAmount: bigint;
+};
+type OgSwapOfferTx = { readonly type: "swap_offer"; readonly data: Omit<OgSwapOffer, "makerIsLeft"> };
+type OgSwapState = {
+  readonly deltas?: ReadonlyMap<number, Parameters<typeof deriveDelta>[0]>;
+  readonly swapOffers?: ReadonlyMap<string, OgSwapOffer>;
 };
 
-const account = (w: World, x: number, y: number): OgSwapAccount | undefined => w.ogAccount(x, y) as never;
+const swapState = (w: World, x: number, y: number): OgSwapState | undefined => replica(w, x, y)?.state as never;
 const hasBook = (w: World): boolean => (w.ogState(HUB) as { orderbookExt?: unknown } | undefined)?.orderbookExt != null;
-/** Neither side of the Account has a frame or mempool in flight, so committed state is what the next frame sees. */
-const quiet = (w: World, x: number, y: number): boolean =>
-  [account(w, x, y), account(w, y, x)].every((a) => a?.pendingFrame == null && (a?.mempool ?? []).length === 0);
 /** Spokes trading with the hub: both replicas of their hub Account are active. */
 const traders = (w: World): readonly number[] => SPOKES.filter((s) => active(w, s, HUB) && active(w, HUB, s));
 
 type Capacity = { readonly out: bigint; readonly in: bigint };
 /** og deriveDelta from the maker's side of its hub Account; a token with no delta has no capacity. */
 const capacity = (w: World, maker: number, token: TokenId): Capacity => {
-  const delta = account(w, maker, HUB)?.state?.deltas?.get(Number(token));
+  const delta = swapState(w, maker, HUB)?.deltas?.get(Number(token));
   if (delta === undefined) return { out: 0n, in: 0n };
   const derived = deriveDelta(delta, isLeft(w, maker, HUB));
   return { out: derived.outCapacity, in: derived.inCapacity };
 };
+/** The maker's own resting offers on its hub Account. */
+const restingOffers = (w: World, maker: number): readonly OgSwapOffer[] => {
+  const offers = [...(swapState(w, maker, HUB)?.swapOffers?.values() ?? [])];
+  return offers.filter((o) => o.makerIsLeft === isLeft(w, maker, HUB));
+};
+/** The maker's swap_offer txs not committed yet: in its Account mempool or in the frame it has in flight. */
+const inFlightOffers = (w: World, maker: number): readonly OgSwapOfferTx["data"][] => {
+  const r: OgAccountReplica | undefined = replica(w, maker, HUB);
+  const txs = [...(r?.mempool ?? []), ...(r?.pendingFrame?.accountTxs ?? [])] as readonly { type: string }[];
+  return txs.filter((t): t is OgSwapOfferTx => t.type === "swap_offer").map((t) => t.data);
+};
+/** Everything the hub may owe the maker in `token` once its offers fill, at their own limit prices. */
+const wantsOn = (w: World, maker: number, token: TokenId): bigint =>
+  [...restingOffers(w, maker), ...inFlightOffers(w, maker)]
+    .filter((o) => o.wantTokenId === Number(token))
+    .reduce((sum, o) => sum + o.wantAmount, 0n);
+
 /**
- * The maker can give its leg now, and the hub can pay the wanted leg with room to spare: og's matcher does not check
- * the hub's capacity before it fills, and a fill the hub cannot pay halts og (SWAP_RESOLVE_PROPOSAL_FAILED).
+ * How far a fill can pay past an offer's own limit. og executes a same-j match at the resting maker's price
+ * (orderbook/core.ts:243), so an offer that crosses as the taker receives up to the other limit: a sell at the lowest
+ * in-band price filled by a buy at the highest gets want * max / min. Every limit og keeps on the book is in IN_BAND:
+ * the hub cancels OUT_OF_BAND at its price band (entity/tx/handlers/account/orderbook/helpers.ts:345) and the off-lot
+ * order at the quote-lot check (helpers.ts:288).
+ */
+const IMPROVEMENT = { max: IN_BAND[IN_BAND.length - 1]!, min: IN_BAND[0] } as const;
+
+/**
+ * The maker can give its leg now, and the hub can pay every fill of the maker's offers on the wanted token, this one
+ * included, at the best price improvement: og's matcher does not check the hub's capacity before it fills.
  */
 const affordable = (w: World, maker: number, t: Terms): boolean => {
   const canGive = t.give.amount <= capacity(w, maker, t.give.tokenId).out;
-  const hubCanPay = t.want.amount * 2n <= capacity(w, maker, t.want.tokenId).in;
+  const owed = wantsOn(w, maker, t.want.tokenId) + t.want.amount;
+  const hubCanPay = owed * IMPROVEMENT.max <= capacity(w, maker, t.want.tokenId).in * IMPROVEMENT.min;
   return canGive && hubCanPay;
-};
-/** The maker's own resting offers on its hub Account. */
-const restingOffers = (w: World, maker: number): readonly OgSwapOffer[] => {
-  const offers = [...(account(w, maker, HUB)?.state?.swapOffers?.values() ?? [])];
-  return offers.filter((o) => o.makerIsLeft === isLeft(w, maker, HUB));
 };
 
 // ---- draws ----
@@ -198,9 +221,11 @@ const placeOffer = (w: World): Step => {
   return { runtimeTxs: [], users: [w.user(maker, [offer(w, order)])] };
 };
 
-/** Makers with a resting offer and a quiet hub Account (an in-flight fill could remove the offer under the tx). */
-const cancellers = (w: World): readonly number[] =>
-  traders(w).filter((s) => restingOffers(w, s).length > 0 && quiet(w, s, HUB));
+/**
+ * Makers with a resting offer. A cancel reads nothing og can halt on once the Account exists: a fill that removes the
+ * offer first makes og reject the request (swap/lifecycle/cancel.ts:37) and skip it on the hub (orderbook/cancels.ts:132).
+ */
+const cancellers = (w: World): readonly number[] => traders(w).filter((s) => restingOffers(w, s).length > 0);
 
 const cancelOffer = (w: World): Step => {
   const maker = pick(w, cancellers(w));
