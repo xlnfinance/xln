@@ -1,7 +1,7 @@
 // Final sweep: the last recorded divergences, each proved against live og (core/ at 566c850).
 // "MATCH:" tests assert equivalence; findings in pure/findings/final-sweep.md.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { ethers } from "ethers";
 import { applyAccountTxMutation } from "../../core/account/tx/mutation.ts";
 import { handleSettleTransition } from "../../core/account/tx/handlers/settlement/transition.ts";
@@ -172,7 +172,10 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
     const seen = new Set<string>();
     let refusals = 0, thrown = 0;
     const texts = new Set<string>();
-    for (let n = 0; n < 80; n++) {
+    const handlers = ["add_delta", "set_credit_limit", "payment", "htlc_lock", "htlc_resolve", "swap_offer", "swap_cancel_request", "swap_resolve", "request_collateral", "rebalance_refund", "rebalance_policy",
+      "lending_fund", "lending_repay", "lending_credit", "lending_borrow_request", "lending_close_request", "lending_close_payout", "settle_transition"];
+    const covered = (): boolean => texts.size > 100 && refusals > 600 && thrown > 20 && handlers.every((type) => seen.has(type));
+    for (let n = 0, more = untilCovered(80, covered); more(n); n++) {
       const start = openAccount(10n ** 20n);
       const og = ogHarness(start);
       let body = start;
@@ -195,8 +198,7 @@ describe(seedTag("final-sweep: og per-tx failure text for every Account tx handl
     expect(texts.size).toBeGreaterThan(100);
     expect(refusals).toBeGreaterThan(600);
     expect(thrown).toBeGreaterThan(20);
-    for (const type of ["add_delta", "set_credit_limit", "payment", "htlc_lock", "htlc_resolve", "swap_offer", "swap_cancel_request", "swap_resolve", "request_collateral", "rebalance_refund", "rebalance_policy",
-      "lending_fund", "lending_repay", "lending_credit", "lending_borrow_request", "lending_close_request", "lending_close_payout", "settle_transition"]) expect([type, seen.has(type)]).toEqual([type, true]);
+    for (const type of handlers) expect([type, seen.has(type)]).toEqual([type, true]);
   }, 40_000);
 
   /** One og/rewrite lockstep: each step applies to both; a refusal must carry og's exact text and thrown-ness. */
