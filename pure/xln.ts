@@ -9976,7 +9976,8 @@ const refreshableHanko = (r: OpenAccount): RetryRule => {
  * Departs from og (review/og-issues-halts-2026-09-28.md, issue 2): when txs ahead of a settle hanko in the same frame
  * change its post-settlement proof (a payment staged beside the deferred approval), the hanko stays queued instead
  * of halting the Runtime in og throwCriticalProposalFailure. Once the payment frame commits, the hanko's nonce is
- * stale, so the Entity's refresh (refreshStaleHanko) drops it and the approval signs again on the settled state.
+ * stale, so the Entity's refresh (refreshStaleHanko) re-defers the approval and it signs again on the settled state;
+ * the stale hanko stays queued, as og's refresh keeps it (see refreshStaleHanko).
  */
 const outdatedHanko: RetryRule = (tx, e) =>
   tx.type === "settle_transition" && tx.kind === "hanko"
@@ -24020,29 +24021,41 @@ const settlementHankoDraft = (
     });
   });
 };
+/** A queued hanko intent for the current workspace signed at a stale nonce, and that workspace's hash. */
+type StaleHankoIntent = { readonly hash: string; readonly stale: (tx: WireAccountTx) => boolean };
 /**
- * og refreshStaleUncommittedSettlementHankos for one idle, unsigned Account: a queued hanko intent signed at a stale
- * nonce is dropped and its approval deferred again.
+ * og isStaleUncommittedSettlementHanko on one idle, unsigned Account (application.ts:510-519, :524-529): the stale
+ * hanko intents og refreshStaleUncommittedSettlementHankos finds, or undefined when the refresh does not apply.
  */
-const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
-  const child = d.accountReplicas.get(peer);
-  const w = child?.state.settlement;
-  if (child === undefined || child.mempool.length === 0 || w === undefined) return ok(d);
-  if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(d);
-  const refresh = (hash: string): Result<Draft, EntityError> => {
-    const expected = nextSettlementNonce(child);
+const staleHankoIntent = (child: AccountReplica): Result<StaleHankoIntent | undefined, EntityError> => {
+  const w = child.state.settlement;
+  if (child.mempool.length === 0 || w === undefined) return ok(undefined);
+  if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(undefined);
+  const expected = nextSettlementNonce(child);
+  return map(bodyInvariant(canonicalWorkspaceHash(child.state, w)), (hash) => {
     const stale = (tx: WireAccountTx): boolean =>
       tx.type === "settle_transition" &&
       tx.kind === "hanko" &&
       tx.revision === w.revision &&
       tx.workspaceHash.toLowerCase() === hash &&
       tx.settlementNonce !== expected;
-    if (!child.mempool.some(stale)) return ok(d);
-    const fresh = { ...child, mempool: child.mempool.filter((tx) => !stale(tx)) } as AccountReplica;
-    const deferred = deferApproval(d.state, peer, hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
-    return map(deferred, (state) => ({ ...d, ...putChild(state, d.accountReplicas, peer, fresh) }));
-  };
-  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), refresh);
+    return child.mempool.some(stale) ? { hash, stale } : undefined;
+  });
+};
+/**
+ * og refreshStaleUncommittedSettlementHankos for one Account: a stale hanko intent re-defers its approval
+ * (application.ts:546-556). og's filter of the mempool (:541-545) reaches only the Entity's TypeScript view: the
+ * Account worker never receives it, and rscore/ts-worker/provider.ts #executeOutbound (materializeOutboundAccounts)
+ * then replaces that view with the worker's post-account. So the committed Account keeps the stale hanko queued.
+ */
+const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
+  const child = d.accountReplicas.get(peer);
+  if (child === undefined) return ok(d);
+  return chain(staleHankoIntent(child), (intent) => {
+    if (intent === undefined) return ok(d);
+    const deferred = deferApproval(d.state, peer, intent.hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
+    return map(deferred, (state) => ({ ...d, state }));
+  });
 };
 /**
  * og materializeDeferredSettlementApprovals for one Account: an idle Account's still-current approval becomes its hanko
@@ -24057,50 +24070,61 @@ const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError>
 const materializeDeferred =
   (ctx: FoldContext, arrived: Replicas) =>
   (d: Draft, [peer, approved]: readonly [string, string]): Result<Draft, EntityError> => {
-    const self = d.state.id;
     const id = peer as EntityId;
     const child = d.accountReplicas.get(id);
     if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    // og refreshStaleUncommittedSettlementHankos drops a stale hanko from the very mempool this check reads
     const seen = arrived.get(id) ?? child;
-    const held = new Set(child.mempool.map(canon));
-    const visible = { ...seen, mempool: seen.mempool.filter((tx) => held.has(canon(tx))) } as AccountReplica;
-    if (child._tag === "proposed" || settlePending(visible)) return ok(d);
-    const w = child.state.settlement;
-    const expired = settleSay(
-      { ...d, state: forgetDeferred(d.state, peer) },
-      "⚠️ Settlement approval expired because the workspace changed",
-    );
-    const admit = (built: HankoDraft): Result<Draft, EntityError> => {
-      const clock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
-      const admitted = admitAt(child, [built.tx], self, clock, pendingVerify(ctx.verify, self));
-      if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) {
-        return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
-      }
-      return ok({
-        ...d,
-        ...putChild(forgetDeferred(d.state, peer), d.accountReplicas, id, admitted.value),
-        hashes: [...(d.hashes ?? []), ...built.hashes],
-        touched: [...(d.touched ?? []), id],
-      });
-    };
-    const current = whenDefined(w, (ws) => bodyInvariant(canonicalWorkspaceHash(child.state, ws)));
-    return chain(current, (hash) => {
-      if (w === undefined || hash !== approved) return ok(expired);
-      // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
-      // them
-      if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
-      // Departs from og (review/og-issues-halts-2026-09-28.md, issue 1): og's projection throws here and halts the
-      // Runtime; a peer reaches it with one out-of-range settle_update we auto-approve. The approval expires instead.
-      const unsignable = unsignableWorkspace(child.state, w);
-      if (unsignable !== null) {
-        const expiry = `⚠️ Settlement approval expired: the workspace cannot be signed (${unsignable})`;
-        return ok(settleSay({ ...d, state: forgetDeferred(d.state, peer) }, expiry));
-      }
-      const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
-      return chain(built, admit);
+    return chain(staleHankoIntent(child), (intent) => {
+      // og's idle check (application.ts:463) reads the Entity view the refresh filtered (:541-545), without the
+      // stale hanko the committed Account still queues
+      const mempool = intent === undefined ? seen.mempool : seen.mempool.filter((tx) => !intent.stale(tx));
+      return materializeVisible(ctx, d, peer, approved, { ...seen, mempool } as AccountReplica);
     });
   };
+/** og materializeDeferredSettlementApprovals past the refresh, with the Account as its idle check sees it. */
+const materializeVisible = (
+  ctx: FoldContext, d: Draft, peer: string, approved: string, visible: AccountReplica,
+): Result<Draft, EntityError> => {
+  const self = d.state.id;
+  const id = peer as EntityId;
+  const child = d.accountReplicas.get(id);
+  if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
+  if (child._tag === "proposed" || settlePending(visible)) return ok(d);
+  const w = child.state.settlement;
+  const expired = settleSay(
+    { ...d, state: forgetDeferred(d.state, peer) },
+    "⚠️ Settlement approval expired because the workspace changed",
+  );
+  const admit = (built: HankoDraft): Result<Draft, EntityError> => {
+    const clock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
+    const admitted = admitAt(child, [built.tx], self, clock, pendingVerify(ctx.verify, self));
+    if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) {
+      return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
+    }
+    return ok({
+      ...d,
+      ...putChild(forgetDeferred(d.state, peer), d.accountReplicas, id, admitted.value),
+      hashes: [...(d.hashes ?? []), ...built.hashes],
+      touched: [...(d.touched ?? []), id],
+    });
+  };
+  const current = whenDefined(w, (ws) => bodyInvariant(canonicalWorkspaceHash(child.state, ws)));
+  return chain(current, (hash) => {
+    if (w === undefined || hash !== approved) return ok(expired);
+    // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
+    // them
+    if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+    // Departs from og (review/og-issues-halts-2026-09-28.md, issue 1): og's projection throws here and halts the
+    // Runtime; a peer reaches it with one out-of-range settle_update we auto-approve. The approval expires instead.
+    const unsignable = unsignableWorkspace(child.state, w);
+    if (unsignable !== null) {
+      const expiry = `⚠️ Settlement approval expired: the workspace cannot be signed (${unsignable})`;
+      return ok(settleSay({ ...d, state: forgetDeferred(d.state, peer) }, expiry));
+    }
+    const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
+    return chain(built, admit);
+  });
+};
 /**
  * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refresh every stale uncommitted hanko intent,
  * then materialize each deferred approval, both in ascending counterparty order.

@@ -374,14 +374,16 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
     const committed = step(proposed, ack, ALICE).replica;
     expect(committed._tag).toBe("open");
     expect(hankos(committed.mempool)).toEqual([outdated]);
-    // frame 2, on the committed payment frame: the nonce refresh drops the outdated hanko and the approval signs again
+    // frame 2, on the committed payment frame: the nonce refresh re-defers the approval and it signs again; like og's
+    // Account worker post-account, the committed mempool still queues the outdated hanko ahead of the fresh one
     const chat = { type: "chatMessage", data: { message: "idle", timestamp: 1 } } as EntityTx;
     const second = unwrap(applyEntityInput({ ...first, accountReplicas: mapSet(first.accountReplicas, BOB, committed) }, { kind: "txs", timestamp: NOW + 2n, txs: [chat] }, ctx)).replica as OpenEntity;
     const resigned = second.accountReplicas.get(BOB)!;
-    const [fresh] = hankos(resigned.mempool);
-    expect(hankos(resigned.mempool)).toHaveLength(1);
+    const [kept, fresh] = hankos(resigned.mempool);
+    expect(kept).toEqual(outdated);
     expect(fresh.postProof.proofBodyHash).not.toBe(outdated.postProof.proofBodyHash);
-    expect(hankos(plan(resigned).preview.frame.txs)).toHaveLength(1);
+    // the outdated hanko is still refreshable (og isRefreshableStaleSettlementHanko), so only the fresh one is proposed
+    expect(hankos(plan(resigned).preview.frame.txs)).toEqual([fresh]);
   });
 
   test("MATCH: 300 random workspaces auto-approve exactly when og canAutoApproveWorkspace does (no forgiveness / rawDiff; own reserve and collateral share never shrink)", () => {
