@@ -480,8 +480,9 @@ describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/out
     const refused = applyRuntime(rt, { runtimeTxs: [], entityInputs: [routeOf(wake)] }, ctx);
     expect(refused.ok).toBe(false);
     const code = refused.ok ? "" : String((refused.error as { code?: string }).code);
-    expect(code.startsWith("RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:")).toBe(true);
-    expect(code.split("detail=")[1]!.split(":")[0]).toBe(ogMessage.split(":")[0]);
+    // og drainImmediateCrossJurisdictionOutputs wraps only a non-committed outcome; a thrown halt leaves
+    // applyEntityInputToReplica as RuntimeEntityInputApplyError, whose cause is og's text (the lane compares the same)
+    expect(code).toBe(ogMessage);
   });
 
   test("MATCH: assertRuntimeOutputAuthorization on 400 random runtimeOutput envelopes (source, signer, target, tx kinds, self edges, stored routes)", () => {

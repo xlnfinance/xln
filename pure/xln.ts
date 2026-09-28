@@ -40154,6 +40154,9 @@ const drainCommands = (
   };
   const lane = command.kind === "entity-txs" ? "cross-j" : "account-work";
   const staged = stageInput(f, { ...b, queue, localEvents }, input, { lane, recordApplied: false });
+  // og wraps only an outcome that comes back rejected (entity-input-output.ts); a thrown Account worker fatal halts the
+  // frame with its own text
+  if (!staged.ok && haltsRuntime(staged.error)) return frameErr(haltText(staged.error));
   if (!staged.ok) {
     const outcome = `round=${round}:outcome=rejected:detail=${runtimeErrorText(staged.error)}`;
     return frameErr(`RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${command.targetEntityId}:${outcome}`);
