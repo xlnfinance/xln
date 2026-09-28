@@ -24027,15 +24027,22 @@ const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError>
 /**
  * og materializeDeferredSettlementApprovals for one Account: an idle Account's still-current approval becomes its hanko
  * transition; a changed or missing workspace expires it.
+ *
+ * og reads the Account's mempool through the cutover authority's replica (rscore entity-stage executeAccountInput):
+ * it holds the frame's peer arrivals, but every local `enqueue` of this Entity frame (an extendCredit, an orderbook
+ * fill, this hanko itself) stays staged in admissionRequests until prepareEntityAccountOutbound. So "idle" is judged on
+ * the post-arrival mempool `arrived`; local txs admitted earlier in the frame do not hold the approval back, and still
+ * precede the hanko in the Account's mempool.
  */
 const materializeDeferred =
-  (ctx: FoldContext) =>
+  (ctx: FoldContext, arrived: Replicas) =>
   (d: Draft, [peer, approved]: readonly [string, string]): Result<Draft, EntityError> => {
     const self = d.state.id;
     const id = peer as EntityId;
     const child = d.accountReplicas.get(id);
     if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    if (child._tag === "proposed" || settlePending(child)) return ok(d);
+    const visible = arrived.get(id) ?? child;
+    if (child._tag === "proposed" || settlePending(visible)) return ok(d);
     const w = child.state.settlement;
     const expired = settleSay(
       { ...d, state: forgetDeferred(d.state, peer) },
@@ -24059,7 +24066,7 @@ const materializeDeferred =
       if (w === undefined || hash !== approved) return ok(expired);
       // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
       // them
-      if (child.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+      if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
       const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
       return chain(built, admit);
     });
@@ -24068,11 +24075,11 @@ const materializeDeferred =
  * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refresh every stale uncommitted hanko intent,
  * then materialize each deferred approval, both in ascending counterparty order.
  */
-const materializeSettlements = (d: Draft, ctx: FoldContext): Result<Draft, EntityError> => {
+const materializeSettlements = (d: Draft, ctx: FoldContext, arrived: Replicas): Result<Draft, EntityError> => {
   const peers = [...d.accountReplicas.keys()].toSorted(asc);
   return chain(foldResult(peers, d, refreshStaleHanko), (refreshed) => {
     const deferred = [...deferredOf(refreshed.state)].toSorted(([a], [b]) => asc(a, b));
-    return foldResult(deferred, refreshed, materializeDeferred(ctx));
+    return foldResult(deferred, refreshed, materializeDeferred(ctx, arrived));
   });
 };
 /** og continuationActionToTx: the r2r / r2e / r2c follow-up of an executed settlement. */
@@ -26488,17 +26495,15 @@ const arrivedProposable = (c: AccountReplica | undefined): boolean => {
 };
 /**
  * og's cutover Account authority (rscore entity-stage beginEntityAccountFrame) runs every peer ack and ack_frame of
- * the frame on its Account before primeEntityFrameAccountWork reads the work index. An Account whose pending frame
- * those arrivals commit, and whose mempool still holds work, is therefore primed (ascending, with the Accounts
- * proposable before the frame) ahead of every Account the tx loop touches. An arrival its Account refuses changes
- * nothing here; the tx loop refuses it again.
+ * the frame on its Account before the tx loop, and the Entity reads its Accounts through those post-arrival replicas.
+ * An arrival its Account refuses changes nothing here; the tx loop refuses it again.
  */
-const primedAccounts = (
+const arrivedReplicas = (
   state: EntityState,
   replicas: Replicas,
   txs: readonly EntityTx[],
   ctx: FoldContext,
-): readonly EntityId[] => {
+): Replicas => {
   const arrive = (acc: Replicas, tx: EntityTx): Replicas => {
     if (tx.type !== "accountInput" || (tx.data.kind !== "ack" && tx.data.kind !== "ack_frame")) return acc;
     const peer = peerOf(tx, state.id);
@@ -26509,12 +26514,18 @@ const primedAccounts = (
     const applied = applyAccountInput(child, tx.data, accountDoor(scope, record.value, peer));
     return applied.ok ? mapSet(acc, peer, applied.value.replica) : acc;
   };
-  const arrived = txs.reduce(arrive, replicas);
-  return [...arrived]
+  return txs.reduce(arrive, replicas);
+};
+/**
+ * og primeEntityFrameAccountWork reads the work index on the post-arrival replicas: an Account whose pending frame
+ * those arrivals commit, and whose mempool still holds work, is primed (ascending, with the Accounts proposable before
+ * the frame) ahead of every Account the tx loop touches.
+ */
+const primedAccounts = (arrived: Replicas): readonly EntityId[] =>
+  [...arrived]
     .filter(([, c]) => arrivedProposable(c))
     .map(([peer]) => peer)
     .toSorted(asc);
-};
 /**
  * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
  * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
@@ -26527,7 +26538,8 @@ export const foldTxs = (
 ): Result<FoldedTxs, EntityError> => {
   // og proposePendingAccountFrames worklist: Accounts proposable once the frame's peer arrivals ran (sorted), then the
   // Accounts the included txs touched, in order
-  const primed = primedAccounts(state, replicas, txs, ctx);
+  const arrived = arrivedReplicas(state, replicas, txs, ctx);
+  const primed = primedAccounts(arrived);
   // og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget, then assertScheduledWakeFrameOrder
   // (prepareEntityFrameWorkingSet): plain Errors for the whole frame
   const budgets = frameBudgets(txs);
@@ -26558,7 +26570,7 @@ export const foldTxs = (
     const continued = materializeContinuation(folded.draft, ctx, queue);
     const booked = chain(continued, (d) => bookPhase(d, ctx.timestamp));
     return chain(
-      chain(booked, (d) => materializeSettlements(d, ctx)),
+      chain(booked, (d) => materializeSettlements(d, ctx, arrived)),
       (settled) => {
         const touched = settled.touched ?? [];
         // an Account this frame opened and nothing else touched is not proposable yet (og openAccount)
