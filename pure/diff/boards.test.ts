@@ -239,7 +239,7 @@ describe(seedTag("certifiedBoardState in the Entity root (og state-root.ts ENTIT
     const withJ = { ...state, jurisdictionConfig: { entityProviderAddress: JUR.entityProviderAddress } };
     const rootOf = (s: EntityState) => unwrap(entityRootOf(s, new Map()));
     const ogJ = ogOf({}).config.jurisdiction;
-    const bare = { ...withJ, committed: {}, jFinality: base.state.jFinality };
+    const bare = { ...withJ, jFinality: base.state.jFinality };
     expect(rootOf(bare)).toBe(computeCanonicalEntityConsensusStateHash({ ...ogOf({}), config: { ...ogOf({}).config, jurisdiction: ogJ } }));
     expect(rootOf(withJ)).toBe(computeCanonicalEntityConsensusStateHash(ogOf({ certifiedBoardState: ogRegistry })));
     expect(rootOf(withJ)).not.toBe(rootOf(bare));

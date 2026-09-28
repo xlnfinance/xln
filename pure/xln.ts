@@ -11389,7 +11389,6 @@ export type EntityState = {
   readonly height: bigint;
   readonly timestamp: bigint;
   readonly jurisdictionConfig?: JurisdictionConfig | undefined;
-  readonly committed: EntityCommitted;
   /** og jBatchState: the Depository work the Entity queued, sealed and has in flight. */
   readonly jBatch: JSubmission;
   /** og hubRebalanceConfig, lending and profile.isHub: set together by setHubConfig and never cleared. */
@@ -11421,14 +11420,9 @@ export type EntityState = {
   /** og externalWallet. */
   readonly wallet: ExternalWallet;
   readonly leaderState?: LeaderState | undefined;
-  /**
-   * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
-   */
+  /** og EntityState.paybook: absent until the first HTLC entry; the root commits og's empty paybook until then. */
   readonly paybook?: Paybook | undefined;
-  /**
-   * og infrastructure.certifiedBoardNodes: the content-addressed registry nodes under `committed.certifiedBoardState`;
-   * never in the root.
-   */
+  /** og infrastructure.certifiedBoardNodes: the registry nodes under the certified boards; never in the root. */
   readonly boardNodes?: BoardNodes | undefined;
   /**
    * og crossJurisdictionSwaps / crossJurisdictionAuthorizations: absent until the first cross-j setup; the root then
@@ -12305,7 +12299,6 @@ export const encodeEntityState = (s: EntityState): string => canon({
   height: s.height,
   timestamp: s.timestamp,
   jurisdictionConfig: s.jurisdictionConfig,
-  committed: s.committed,
   jBatch: s.jBatch,
   hub: s.hub,
   providerActions: s.providerActions,
@@ -12958,7 +12951,6 @@ const authorityOf = (p: EntitySeed): Authority => {
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
 type TypedSections = Pick<
   EntityState,
-  | "committed"
   | "jBatch"
   | "hub"
   | "providerActions"
@@ -12975,7 +12967,6 @@ type TypedSections = Pick<
   | "swapPairs"
   | "wallet"
 >;
-/** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 // ---- og's smaller sections: the key, the swap pairs, proposals and the legacy nonces ----
 /** og entityEncryptionPublicKey: registration provisions one; only an Entity made without an import is keyless. */
 export type EncryptionKey = Readonly<{ _tag: "keyless" }> | Readonly<{ _tag: "key"; publicKey: string }>;
@@ -13014,7 +13005,7 @@ const ogSmallSections = (state: EntityState): EntityCommitted => ({
   ...(state.swapPairs._tag === "pairs" ? { swapTradingPairs: state.swapPairs.pairs as unknown as Binary } : {}),
   ...ogWallet(state.wallet),
 });
-/** og's root fields the typed sections own; whatever else og commits still rides in `committed`. */
+/** og's root fields the typed sections own. */
 const SECTION_FIELDS: ReadonlySet<string> = new Set([
   "jBatchState",
   "entityProviderActionState",
@@ -13037,6 +13028,14 @@ const SECTION_FIELDS: ReadonlySet<string> = new Set([
   "swapTradingPairs",
   "externalWallet",
 ]);
+/**
+ * og's root fields the rewrite builds by its own handlers (the paybook, the order book, the cross-j collections), never
+ * from a record; the rest of an og record (accounts, entityId, fields outside og's allowlist) never reaches og's root.
+ */
+const UNIMPORTED_FIELDS: readonly string[] = ENTITY_STATE_ROOT_FIELDS.filter(
+  (field) => !SECTION_FIELDS.has(field) && !DERIVED_ROOT_FIELDS.has(field),
+);
+/** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (
   og: EntityCommitted,
   id: EntityId,
@@ -13069,8 +13068,10 @@ const importSections = (
     swapPairs: mapErr(importPairs(og["swapTradingPairs"]), unreachable("SWAP_PAIRS")),
     wallet: mapErr(importWallet(og["externalWallet"]), unreachable("EXTERNAL_WALLET")),
   });
-  const committed = Object.fromEntries(Object.entries(og).filter(([field]) => !SECTION_FIELDS.has(field)));
-  return map(imported, (sections) => ({ ...sections, committed }));
+  const unimported = UNIMPORTED_FIELDS.find((field) => og[field] !== undefined);
+  return unimported === undefined
+    ? imported
+    : err({ _tag: "entity_invariant", reason: `SECTION_NOT_IMPORTED: ${unimported}` });
 };
 /** The state with its committed sections replaced by og-named ones (the inverse of ogSections). */
 export const withOgSections = (state: EntityState, og: EntityCommitted): Result<EntityState, EntityError> =>
@@ -26928,7 +26929,6 @@ export const ogSections = (state: EntityState): EntityCommitted => {
   const actions = ogProviderActions(state.providerActions);
   const fence = ogCommandFence(state.commandFence);
   return {
-    ...state.committed,
     ...ogHub(state.hub),
     profile: ogProfile(state.profile, state.hub._tag === "hub"),
     ...ogSmallSections(state),

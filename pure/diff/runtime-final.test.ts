@@ -896,7 +896,7 @@ const crossWorld = () => {
         ogAccounts.set(peer, { currentFrame: head ? ogFrame(head) : { height: 0, stateHash: "", prevFrameHash: "", accountTxs: [] }, ...(pending ? { pendingFrame: ogFrame(pending) } : {}), state: { pulls } });
       }
       const auths = new Map(ORDERS.flatMap((o) => { const r = rng(); return r < 0.3 ? [] : r < 0.8 ? [[o, shared.get(o)]] : r < 0.9 ? [[o, { ...auth(o), status: "resting" }]] : [[o, { ...auth(o), memo: "divergent" }]]; }) as [string, unknown][]);
-      const state = { id: i.entityId, timestamp: 5n, committed: { profile: {} }, hub: hub ? { _tag: "hub", config: {}, lending: undefined } : { _tag: "spoke" }, crossJurisdictionAuthorizations: auths };
+      const state = { id: i.entityId, timestamp: 5n, hub: hub ? { _tag: "hub", config: {}, lending: undefined } : { _tag: "spoke" }, crossJurisdictionAuthorizations: auths };
       rw.set(key, { state, signerId: i.signerId, accountReplicas: rwAccounts });
       ogReplicas.set(key, { entityId: i.entityId, signerId: i.signerId, state: { entityId: i.entityId, timestamp: 5, profile: { isHub: hub }, accounts: ogAccounts, crossJurisdictionAuthorizations: auths } });
     }

@@ -15,7 +15,7 @@ import { appendEntityMempoolTransactions } from "../../core/entity/consensus/inp
 import {
   address, allowedProposer, applyEntityInput as applyEntityInputAt, applyRuntime, convertOutput, createEntity, createRuntime, entityRootOf, entityStateRoot,
   commitRuntimeFrame, entityId, hashEntityFrame, hashEntityState, isSingleSigner, quorumBoardHash, leaderOrder, recoverRuntime, replicaKey, spawn, signature, tokenId, ZERO_WORD,
-  type Address, type EntityCommitted, type EntityFrame, type EntityId, type EntityInput, type EntityOutput, type EntityReplica, type EntityTx, type Precommits, type Signature,
+  EMPTY_PAYBOOK, type Address, type EntityCommitted, type EntityFrame, type EntityId, type EntityInput, type EntityOutput, type EntityReplica, type EntityState, type EntityTx, type Precommits, type Signature,
 } from "../xln.ts";
 import { ALICE, ANVIL_KEYS, BOB, CAROL, MORE_ANVIL_KEYS, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, signerAddress, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
 import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogAuthorVerdict, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
@@ -126,7 +126,10 @@ const JCONF = { entityProviderAddress: `0x${"EE".repeat(20)}`, registrationBlock
 const ogJurisdiction = { name: "local", address: "http://127.0.0.1:8545", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, ...JCONF };
 /** A real X25519 Entity keypair: og checks the validator's private key against the committed public key on every proposal. */
 const KEY_PRIV = `0x${"12".repeat(32)}`, KEY_PUB = `0x${Buffer.from(x25519.getPublicKey(Buffer.from("12".repeat(32), "hex"))).toString("hex")}`;
-const committedPair = (i: number): { og: Record<string, unknown>; rw: EntityCommitted } => {
+// The paybook and the cross-j book admissions are built by their handlers, never imported: the rewrite seeds them typed.
+type Typed = Pick<EntityState, "paybook" | "crossJurisdictionBookAdmissions">;
+const withTyped = (r: EntityReplica, typed: Typed): EntityReplica => ({ ...r, state: { ...r.state, ...typed } });
+const committedPair = (i: number): { og: Record<string, unknown>; rw: EntityCommitted; typed: Typed } => {
   const nonces = new Map(Array.from({ length: ri(3) }, (_, j) => [`0x${(j + 1).toString(16).padStart(40, "0")}`, ri(9)] as const));
   const reserves = new Map(Array.from({ length: ri(3) }, (_, j) => [j + 1, BigInt(ri(1e9)) * 10n ** 12n] as const));
   // og setHubConfig commits the config and the profile's hub flag together
@@ -136,7 +139,8 @@ const committedPair = (i: number): { og: Record<string, unknown>; rw: EntityComm
   const feesEarned = BigInt(ri(50));
   return {
     og: { ...shared, paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned }, crontabState: initCrontab(), deferredAccountProposals: PersistentEntityCollectionMap.empty(), crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.empty() },
-    rw: { ...shared, paybook: { entries: EMPTY, feesEarned }, crontabState: { tasks: initCrontab().tasks as never, hooks: EMPTY }, deferredAccountProposals: new Map(), crossJurisdictionBookAdmissions: EMPTY },
+    rw: { ...shared, crontabState: { tasks: initCrontab().tasks as never, hooks: EMPTY }, deferredAccountProposals: new Map() },
+    typed: { paybook: { ...EMPTY_PAYBOOK, feesEarned }, crossJurisdictionBookAdmissions: new Map() },
   };
 };
 const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jurisdiction?: unknown): any => {
@@ -151,22 +155,25 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
 describe(seedTag("entity-runtime: entity state root commits every og field (H6)"), () => {
   test("MATCH: 30 random og-shaped EntityStates (entityId, height, timestamp, config+jurisdiction, nonces, reserves, profile, paybook, crontab, ...) == og computeCanonicalEntityConsensusStateHash", () => {
     for (let i = 0; i < 30; i++) {
-      const { og, rw } = committedPair(i), withJ = rng() < 0.5;
+      const { og, rw, typed } = committedPair(i), withJ = rng() < 0.5;
       const ids = [...new Set([ri(8), ri(8)])].map(addr);
       const base = unwrap(createEntity({ id: ALICE, jurisdiction: JUR, threshold: 1n, members: new Map(ids.map((a) => [a, { shares: 1n }])), committed: rw, timestamp: BigInt(1_700_000_000_000 + ri(1e6)), ...(withJ ? { jurisdictionConfig: JCONF } : {}) }));
-      const r = { ...base, state: { ...base.state, height: BigInt(ri(50)) } };
+      const r = { ...base, state: { ...base.state, ...typed, height: BigInt(ri(50)) } };
       expect(unwrap(entityRootOf(r.state, r.accountReplicas))).toBe(computeCanonicalEntityConsensusStateHash(ogEntityState(r, og, withJ ? ogJurisdiction : undefined)));
     }
   });
   test("MATCH: each og section moves the root on both sides; a field outside og's allowlist moves neither", () => {
     const r = teaching([[A, 1n]], 1n), og = ogEntityState(r, { paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } }, OG_UNREGISTERED_J);
-    const rootRw = (committed: EntityCommitted) => unwrap(entityRootOf(withOg(r.state, committed), r.accountReplicas));
+    const rootOf = (state: EntityState) => unwrap(entityRootOf(state, r.accountReplicas));
+    const rootRw = (committed: EntityCommitted) => rootOf(withOg(r.state, committed));
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
-    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x", isHub: false, avatar: "", bio: "", website: "" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
-      const ogValue = field === "paybook" ? { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } : value;
-      expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
+    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x", isHub: false, avatar: "", bio: "", website: "" }]] as const) {
+      expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: value }));
       expect(rootRw({ [field]: value })).not.toBe(rootRw({}));
     }
+    const paid = rootOf({ ...r.state, paybook: { ...EMPTY_PAYBOOK, feesEarned: 12n } });
+    expect(paid).toBe(computeCanonicalEntityConsensusStateHash({ ...og, paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } }));
+    expect(paid).not.toBe(rootRw({}));
     expect(rootRw({ notAField: 1 })).toBe(rootRw({}));
     expect(computeCanonicalEntityConsensusStateHash({ ...og, notAField: 1 })).toBe(computeCanonicalEntityConsensusStateHash(og));
   });
@@ -175,11 +182,11 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     expect(unwrap(entityStateRoot({ config: ogConfig([signer], { [signer]: 1n }, 1n), accounts: [] }))).toBe("0x1a37f4d778a6abc66ac52c98367338a4d7dd3d9f92f2f365305a7154bfc6b9a4");
   });
   test("MATCH: a proposed frame's stateRoot is og's root of the proposal state (height+1, frame timestamp, og crontab default) and its hash is og's frame hash", () => {
-    const { og, rw } = committedPair(99);
+    const { og, rw, typed } = committedPair(99);
     const { crontabState: _c, ...rwNoCron } = rw, { crontabState: _o, ...ogNoCron } = og;
     // og assertFrameJPrefix: every frame of a registered Entity needs a J-prefix certificate (runtime-final.test.ts), so this frame is an unregistered Entity's
     const { registrationBlock: _registered, ...unregistered } = JCONF, { registrationBlock: _ogRegistered, ...ogUnregistered } = ogJurisdiction;
-    const r = unwrap(createEntity({ id: lazyId([[A, 1n], [B, 1n]], 2n), jurisdiction: JUR, threshold: 2n, members: new Map([[A, { shares: 1n }], [B, { shares: 1n }]]), committed: rwNoCron, timestamp: 50n, jurisdictionConfig: { ...unregistered, name: ogJurisdiction.name } }));
+    const r = withTyped(unwrap(createEntity({ id: lazyId([[A, 1n], [B, 1n]], 2n), jurisdiction: JUR, threshold: 2n, members: new Map([[A, { shares: 1n }], [B, { shares: 1n }]]), committed: rwNoCron, timestamp: 50n, jurisdictionConfig: { ...unregistered, name: ogJurisdiction.name } })), typed);
     const credit: EntityTx = { type: "extendCredit", data: { counterpartyEntityId: CAROL, tokenId: unwrap(tokenId("1")), amount: 5n } }; // no account: og no-op
     const p = unwrap(applyEntityInput(r, txs([credit], 40n), { ...ctx(A), htlc: { profiles: [], encryptionPrivateKey: KEY_PRIV } }));
     const frame = held(p.replica);
