@@ -185,8 +185,8 @@ import { handleSettleApprove, handleSettleExecute, handleSettlePropose, handleSe
 import { entityCollectionCommitment as ogCollectionCommitment } from "../../core/entity/state/persistent-collection-map.ts";
 import { batchAddSettlement, initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batch/index.ts";
 import {
-  applyEntityInput, createEntity, foldTxs, isLeft, mapSet, ownWire, wireOf, workspaceHashOf, zeroDelta, tokenId, canAutoApproveWorkspace, entityCollectionCommitment, addSettlementRow,
-  type AccountReplica, type EntityTx, type OpenEntity, type SettlementOp, type SettlementWorkspace, type WireAccountTx,
+  applyEntityInput, createEntity, foldTxs, planAccountProposal, isLeft, mapSet, ownWire, wireOf, workspaceHashOf, zeroDelta, tokenId, canAutoApproveWorkspace, entityCollectionCommitment, addSettlementRow,
+  type AccountReplica, type EntityId, type EntityTx, type OpenEntity, type SettlementOp, type SettlementWorkspace, type WireAccountTx,
 } from "../xln.ts";
 import { CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, signedTxs, verifiers } from "../xln_run.ts";
 
@@ -340,6 +340,27 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
     expect([...(deferred ?? new Map())]).toEqual([]);
     expect([...after.mempool, ...(after._tag === "proposed" ? after.candidate.frame.txs : [])].filter((t: any) => t.type === "settle_transition")).toEqual([]);
     expect(JSON.stringify(d.events ?? [])).toContain("Settlement approval expired: the workspace cannot be signed (SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1)");
+  });
+
+  test("HALTS like og: a payment staged beside a deferred approval changes the proof the approval just signed -> proposing the hanko halts with og's POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH (review/og-issues-halts-2026-09-28.md, issue 2; walk seeds 0x5ef1c1 f52, 0x2f1e55 f11)", () => {
+    const child = SETTLE_BASE.accountReplicas.get(BOB)!;
+    const bobLeft = !isLeft(ALICE, ACCOUNT_ID);
+    const w = workspaceOf("unsigned", [{ type: "c2r", tokenId: 1, amount: 100n }], bobLeft, bobLeft, undefined)!;
+    const approve = { type: "settle_approve", data: { counterpartyEntityId: BOB, workspaceHash: w.workspaceHash } } as EntityTx;
+    const pay = { type: "directPayment", data: { targetEntityId: BOB, tokenId: T1, amount: 5n, route: [ALICE, BOB], deliveryMode: "direct" } } as EntityTx;
+    const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
+    // the Entity's own not-yet-signed hanko, as its proposal verifies it (pendingVerify)
+    const verify = (d: string, h: string, e: string): boolean => (h === `0xfe${d.slice(2).toLowerCase()}` && e === ALICE) || hankoVerify(d, h, e as EntityId);
+    const base = { ...SETTLE_BASE, accountReplicas: mapSet(SETTLE_BASE.accountReplicas, BOB, { ...child, state: { ...child.state, settlement: w } } as AccountReplica) };
+    // og materializeDeferredSettlementApprovals signs over the empty arrived mempool, after the staged payment
+    const first = unwrap(applyEntityInput(base, { kind: "txs", timestamp: NOW + 1n, txs: [approve, pay] }, ctx)).replica as OpenEntity;
+    const staged = first.accountReplicas.get(BOB)!;
+    expect(staged.mempool.map((t) => t.type)).toEqual(["payment", "settle_transition"]);
+    // og throwCriticalProposalFailure: the payment ahead of the hanko changed its post-settlement proof
+    const planned = planAccountProposal(staged, ALICE, { timestamp: NOW + 1n, jHeight: 0n } as never, verify as never) as any;
+    expect(planned.ok).toBe(false);
+    expect(planned.error._tag).toBe("proposal_halt");
+    expect(planned.error.message).toMatch(/^SETTLEMENT_TRANSITION_PROPOSAL_FAILED:hanko:POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:0x[0-9a-f]{64}:0x[0-9a-f]{64}$/);
   });
 
   test("MATCH: 300 random workspaces auto-approve exactly when og canAutoApproveWorkspace does (no forgiveness / rawDiff; own reserve and collateral share never shrink)", () => {
