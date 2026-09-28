@@ -12767,6 +12767,8 @@ const wireData = (tx: EntityTx): unknown => {
       ...(tx.data.feeTokenId === undefined ? {} : { feeTokenId: Number(tx.data.feeTokenId) }),
     };
     case "accountInput": return wireAccountInput(tx.data);
+    // og types this token id as a bigint (types/entity-tx.ts:479); a number here changes the command and action hashes
+    case "entityProviderTransfer": return tx.data;
     default:
       return "tokenId" in tx.data && tx.data.tokenId !== undefined
         ? { ...tx.data, tokenId: Number(tx.data.tokenId) }
