@@ -18,6 +18,7 @@ import {
 import { EntityCommandRejectionError } from "../../core/entity/tx/processing/invariant-errors.ts";
 import { encodeCanonicalConsensusBytes } from "../../core/protocol/serialization/binary-codec.ts";
 import { wireEntityTx, type EntityState, type EntityTx } from "../xln.ts";
+import { ogOf } from "./og-state.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signerAddress } from "../xln_run.ts";
 
 /** og signs with the runtime's registered signer keys: every real key the rewrite's test crypto signs with. */
@@ -37,7 +38,7 @@ export const ogCommandState = (s: EntityState, extra: Record<string, unknown> = 
   const jurisdiction = s.jurisdictionConfig === undefined
     ? {}
     : { jurisdiction: { ...s.jurisdiction, entityProviderAddress: s.jurisdictionConfig.entityProviderAddress } };
-  const nonces = s.committed["entityCommandNonces"];
+  const nonces = ogOf(s)["entityCommandNonces"];
   return {
     entityId: s.id,
     timestamp: Number(s.timestamp),

@@ -57,6 +57,7 @@ import {
 } from "./xln.ts";
 import { anvilKey, crypto, signerAddress } from "./xln_run.ts";
 import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og-author.ts";
+import { ogOf } from "./diff/og-state.ts";
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 /** og jBlockHash is a 0x-prefixed block hash; the rewrite's Hash brand has no 0x constructor, so this one fixture is branded directly. */
@@ -593,7 +594,7 @@ describe("oracle", () => {
     // the installed frame commits og's pending proposal (and the proposer's nonce), not yet the Account
     const governance = ogAfterCommands(ogCommandState(entity.state, { timestamp: Number(frame.timestamp) }), ogTxs);
     expect(consensusBytes(two.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
-    expect(consensusBytes(two.replica.state.committed["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
+    expect(consensusBytes(ogOf(two.replica.state)["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
     expect(two.replica.state.accounts.size).toBe(0);
   });
 });

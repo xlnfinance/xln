@@ -11355,6 +11355,8 @@ export type EntityState = {
   readonly providerActions: ProviderActions;
   /** og lastFinalizedJHeight, jHistoryFinality and certifiedBoardState: how far the Entity trusts its J. */
   readonly jFinality: JFinality;
+  /** og entityCommandNonces: the replay fence over signed Entity commands. */
+  readonly commandFence: CommandFence;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12245,6 +12247,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   hub: s.hub,
   providerActions: s.providerActions,
   jFinality: s.jFinality,
+  commandFence: s.commandFence,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12880,14 +12883,17 @@ const authorityOf = (p: EntitySeed): Authority => {
   return { _tag: "board", board, entityId };
 };
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
-type TypedSections = Pick<EntityState, "committed" | "jBatch" | "hub" | "providerActions" | "jFinality">;
+type TypedSections = Pick<
+  EntityState,
+  "committed" | "jBatch" | "hub" | "providerActions" | "jFinality" | "commandFence"
+>;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (
   og: EntityCommitted,
   config: JurisdictionConfig | undefined,
 ): Result<TypedSections, EntityError> => {
   const { jBatchState, entityProviderActionState, ...sectioned } = og;
-  const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, ...seeded } = sectioned;
+  const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, entityCommandNonces, ...seeded } = sectioned;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
   const actions = entityProviderActionState as EntityProviderActionState | undefined;
@@ -12896,9 +12902,9 @@ const importSections = (
     hubbed: mapErr(importHub(seeded), unreachable("HUB")),
     providerActions: mapErr(importProviderActions(actions), unreachable("ENTITY_PROVIDER_ACTION")),
     jFinality: mapErr(importJFinality(og, config), unreachable("J_FINALITY")),
+    commandFence: mapErr(importCommandFence(entityCommandNonces), unreachable("ENTITY_COMMAND_NONCE")),
   });
-  return map(imported, ({ jBatch, hubbed: { hub, committed }, providerActions, jFinality }) =>
-    ({ committed, jBatch, hub, providerActions, jFinality }));
+  return map(imported, ({ hubbed: { hub, committed }, ...sections }) => ({ ...sections, committed, hub }));
 };
 /** The state with its committed sections replaced by og-named ones (the inverse of ogSections). */
 export const withOgSections = (state: EntityState, og: EntityCommitted): Result<EntityState, EntityError> =>
@@ -20883,34 +20889,77 @@ const checkAction = (a: ProposalAction): Result<ProposalAction, EntityError> => 
 export const hashProposalAction = (a: ProposalAction): Result<string, EntityError> =>
   chain(checkAction(a), (checked) => consensusHash({ domain: PROPOSAL_ACTION_DOMAIN, action: wireAction(checked) }));
 type NonceSlot = { readonly nonce: bigint; readonly commandHash: string };
-type StoredNonces = {
-  readonly boardHash?: string;
-  readonly boardEpoch?: number;
-  readonly bySigner?: ReadonlyMap<string, NonceSlot>;
-};
-const storedNonces = (state: EntityState): StoredNonces | undefined =>
-  state.committed["entityCommandNonces"] as StoredNonces | undefined;
-const onBoard = (stored: { readonly boardHash?: string; readonly boardEpoch?: number }, board: CommandBoard): boolean =>
-  stored.boardHash === board.boardHash && stored.boardEpoch === board.boardEpoch;
+/**
+ * og entityCommandNonces: each signer's last command nonce, namespaced by the board that accepted it. Unused until the
+ * first command; a board rotation resets it to an empty fence on the new board.
+ */
+export type CommandFence =
+  | Readonly<{ _tag: "unused" }>
+  | Readonly<{ _tag: "fence"; boardHash: string; boardEpoch: number; bySigner: ReadonlyMap<string, NonceSlot> }>;
+type Fence = Extract<CommandFence, { _tag: "fence" }>;
+export const NO_COMMAND_FENCE: CommandFence = { _tag: "unused" };
+const onBoard = (fence: CommandFence, board: CommandBoard): fence is Fence =>
+  fence._tag === "fence" && fence.boardHash === board.boardHash && fence.boardEpoch === board.boardEpoch;
 /** og canonicalCommandNonceState: the committed fence for the current board, empty after a board rotation. */
-const nonceSlots = (state: EntityState, board: CommandBoard): ReadonlyMap<string, NonceSlot> => {
-  const stored = storedNonces(state);
-  return stored?.bySigner !== undefined && onBoard(stored, board) ? stored.bySigner : new Map();
-};
-const nonceBinary = (board: CommandBoard, slots: ReadonlyMap<string, NonceSlot>): Binary => ({
-  version: 1,
-  boardHash: board.boardHash,
-  boardEpoch: board.boardEpoch,
-  bySigner: new Map([...slots].map(([k, v]) => [k, { nonce: v.nonce, commandHash: v.commandHash }])),
-});
+const nonceSlots = (state: EntityState, board: CommandBoard): ReadonlyMap<string, NonceSlot> =>
+  onBoard(state.commandFence, board) ? state.commandFence.bySigner : new Map();
 const withNonceFence = (
   state: EntityState,
   board: CommandBoard,
-  slots: ReadonlyMap<string, NonceSlot>,
+  bySigner: ReadonlyMap<string, NonceSlot>,
 ): EntityState => ({
   ...state,
-  committed: { ...state.committed, entityCommandNonces: nonceBinary(board, slots) },
+  commandFence: { _tag: "fence", boardHash: board.boardHash, boardEpoch: board.boardEpoch, bySigner },
 });
+/** og's record; slots keep only og's two fields. */
+const ogCommandFence = (fence: CommandFence): Binary | undefined =>
+  fence._tag === "unused"
+    ? undefined
+    : {
+        version: 1,
+        boardHash: fence.boardHash,
+        boardEpoch: fence.boardEpoch,
+        bySigner: new Map([...fence.bySigner].map(([k, v]) => [k, { nonce: v.nonce, commandHash: v.commandHash }])),
+      };
+/** og LIMITS.MAX_VALIDATORS: the most signer slots a fence from any board can hold. */
+const MAX_FENCE_SIGNERS = 100;
+const slotProblem = ([signer, slot]: readonly [unknown, unknown]): string | undefined => {
+  const s = recOf(slot);
+  if (!normalText(signer)) return `an unnormalized signer ${String(signer)}`;
+  if (s === null) return `a malformed slot for ${String(signer)}`;
+  switch (true) {
+    case Object.keys(s).toSorted().join(",") !== "commandHash,nonce":
+      return `a malformed slot for ${String(signer)}`;
+    case typeof s["nonce"] !== "bigint" || s["nonce"] < 1n:
+      return `a nonce below 1 for ${String(signer)}`;
+    case !WORD32.test(String(s["commandHash"])):
+      return `a malformed commandHash for ${String(signer)}`;
+    default:
+      return undefined;
+  }
+};
+/** og's record, admitted only in the canonical shape canonicalCommandNonceState writes. */
+const importCommandFence = (og: Binary | undefined): Result<CommandFence, string> => {
+  if (og === undefined) return ok(NO_COMMAND_FENCE);
+  const f = recOf(og);
+  const bySigner = f?.["bySigner"];
+  const problems = [
+    f === null ? "a non-record fence" : undefined,
+    f?.["version"] !== 1 ? `version ${String(f?.["version"])}` : undefined,
+    WORD32.test(String(f?.["boardHash"])) ? undefined : "a malformed boardHash",
+    naturalSafeInt(f?.["boardEpoch"]) ? undefined : "a malformed boardEpoch",
+    bySigner instanceof Map ? undefined : "a non-map bySigner",
+    bySigner instanceof Map && bySigner.size > MAX_FENCE_SIGNERS ? `${bySigner.size} signer slots` : undefined,
+    ...(bySigner instanceof Map ? [...bySigner].map(slotProblem) : []),
+  ].filter((x) => x !== undefined);
+  if (problems.length > 0) return err(problems.join(", "));
+  return ok({
+    _tag: "fence",
+    boardHash: f?.["boardHash"] as string,
+    boardEpoch: f?.["boardEpoch"] as number,
+    bySigner: bySigner as ReadonlyMap<string, NonceSlot>,
+  });
+};
 /** The fence after `signer` spends `slot`. */
 const withNonceSlot = (state: EntityState, board: CommandBoard, signer: string, slot: NonceSlot): EntityState =>
   withNonceFence(state, board, new Map([...nonceSlots(state, board), [signer, slot]]));
@@ -21272,14 +21321,14 @@ const actionOf = (wired: Binary): ProposalAction => {
  */
 const normalizeGovernance = (state: EntityState): Result<EntityState, EntityError> => {
   const proposals = proposalsOf(state);
-  const nonces = storedNonces(state);
-  if (proposals.size === 0 && nonces === undefined) return ok(state);
+  const fence = state.commandFence;
+  if (proposals.size === 0 && fence._tag === "unused") return ok(state);
   return map(commandBoard(state), (board) => {
     const current = ([, p]: readonly [string, StoredProposal]): boolean =>
       p.boardHash.toLowerCase() === board.boardHash && p.boardEpoch === board.boardEpoch;
     const kept = new Map([...proposals].filter(current));
     const next = kept.size === proposals.size ? state : withProposals(state, kept);
-    return nonces === undefined || onBoard(nonces, board) ? next : withNonceFence(next, board, new Map());
+    return fence._tag === "unused" || onBoard(fence, board) ? next : withNonceFence(next, board, new Map());
   });
 };
 type CommandSigner = (digest: Hash) => Result<Signature, unknown>;
@@ -26652,9 +26701,11 @@ const settleCollections = (committed: EntityCommitted): Result<EntityCommitted, 
 export const ogSections = (state: EntityState): EntityCommitted => {
   const jBatch = ogJBatchOf(state.jBatch);
   const actions = ogProviderActions(state.providerActions);
+  const fence = ogCommandFence(state.commandFence);
   return hubSections(state.hub, {
     ...state.committed,
     ...ogJFinality(state.jFinality),
+    ...(fence === undefined ? {} : { entityCommandNonces: fence }),
     ...(jBatch === undefined ? {} : { jBatchState: jBatch as unknown as Binary }),
     ...(actions === undefined ? {} : { entityProviderActionState: actions as unknown as Binary }),
   });

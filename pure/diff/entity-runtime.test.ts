@@ -19,7 +19,7 @@ import {
 } from "../xln.ts";
 import { ALICE, ANVIL_KEYS, BOB, CAROL, MORE_ANVIL_KEYS, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, signerAddress, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
 import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogAuthorVerdict, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
-import { withOg } from "./og-state.ts";
+import { ogOf, withOg } from "./og-state.ts";
 
 const A = aliceAddr; // lexicographically lower (anvil-keyed: og quorum Hankos need real signatures)
 const B = bobAddr; // lexicographically higher
@@ -217,7 +217,7 @@ describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-
     expect(wired(r.frame.txs)).toEqual(ogTxs);
     const governance = ogAfterCommands(ogCommandState(base.state, { timestamp: Number(r.frame.timestamp) }), ogTxs);
     expect(consensusBytes(two.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
-    expect(consensusBytes(two.replica.state.committed["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
+    expect(consensusBytes(ogOf(two.replica.state)["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
     expect(two.replica.state.accounts.has(BOB)).toBe(false);
     expect(consensusFor(two.outputs, B)[0]?.kind).toBe("proposal"); // og broadcastCommit
   });
@@ -399,7 +399,7 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     expect(p.replica._tag).toBe("open");
     expect(p.replica.state.accounts.has(BOB)).toBe(true);
     expect(p.replica.mempool).toEqual([]);
-    expect(consensusBytes(p.replica.state.committed["entityCommandNonces"])).toBe(consensusBytes(ogFenceAfter(ogCommandState(base.state), ogTxs.slice(0, 2))));
+    expect(consensusBytes(ogOf(p.replica.state)["entityCommandNonces"])).toBe(consensusBytes(ogFenceAfter(ogCommandState(base.state), ogTxs.slice(0, 2))));
     // og: a proposal of one tx is never evicted from, the refusal stops the input
     expect(unwrapErr(propose(teaching([[A, 1n]], 1n), A, [bad]))._tag).toBe("no_such_account");
   });

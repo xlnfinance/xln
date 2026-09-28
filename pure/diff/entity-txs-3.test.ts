@@ -162,7 +162,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
         accepted++;
         const d = rw.value.draft;
         expect(bytes(d.state.committed["proposals"] ?? new Map())).toBe(bytes(ogOut.state.proposals));
-        expect(bytes(d.state.committed["entityCommandNonces"] ?? null)).toBe(bytes(ogOut.state.entityCommandNonces ?? null));
+        expect(bytes(ogOf(d.state)["entityCommandNonces"] ?? null)).toBe(bytes(ogOut.state.entityCommandNonces ?? null));
         expect(d.events ?? []).toEqual(readEntityFrameEvents(ogOut.state));
         if ((d.events ?? []).length > 0 && txs[0]?.type !== "chat") executed++;
         if (ogOf(d.state)["profile"] !== undefined) expect(ogOf(d.state)["profile"]).toEqual(ogOut.state.profile);
@@ -216,7 +216,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     }, ogState(r.state, Number(NOW)));
     const ogEvents = readEntityFrameEvents(ogOut);
     expect(p.frame.events).toEqual(ogEvents);
-    expect(bytes(p.draft.state.committed["entityCommandNonces"])).toBe(bytes(ogOut.entityCommandNonces));
+    expect(bytes(ogOf(p.draft.state)["entityCommandNonces"])).toBe(bytes(ogOut.entityCommandNonces));
     expect<string>(unwrap(hashEntityFrame(p.frame))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, r.state.id, p.frame.stateRoot, p.frame.authorityRoot, p.frame.entityContext as never));
   });
   test("MATCH: plain propose / vote outside a command are og ENTITY_COMMAND_REQUIRED (a plain Error: the input is refused)", () => {
