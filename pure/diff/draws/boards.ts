@@ -27,7 +27,7 @@
 //   r2e  entity/tx/handlers/j-batch/r2e.ts
 //     the draft batch plus this op stays within the reserve   "Insufficient spendable reserve" (og's own
 //       after debts                                           getReserveCandidateIssue decides it here)
-//     the draft batch has room                                J_BATCH_LIMIT_EXCEEDED (batch/index.ts:224)
+//     the draft batch holds fewer than 50 ops                 J_BATCH_LIMIT_EXCEEDED (batch/index.ts:204, :224)
 //     A sealed batch does not block it: og queues into the draft and only warns.
 //
 //   entityProviderTransfer, entityProviderReleaseControlShares  entity/tx/handlers/entity-provider-action.ts:152
@@ -56,6 +56,12 @@
 // neither, so those rows stay pending, and their draws wait in WAITING until the world gives their preconditions: the
 // area walk fails on a drawn kind it never commits.
 import { getReserveCandidateIssue } from "../../../core/entity/tx/handlers/j-batch/j-batch-reserve-admission.ts";
+import {
+  batchOpCount,
+  createEmptyBatch,
+  J_BATCH_CONTRACT_LIMITS,
+  type JBatch,
+} from "../../../core/jurisdiction/machine/batch/index.ts";
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
@@ -163,7 +169,12 @@ const admits = (w: World, x: number, withdrawal: bigint): boolean => {
   };
   return state !== undefined && getReserveCandidateIssue(state as never, candidate) === null;
 };
-const withdrawers = (w: World): readonly number[] => where(PARTIES, (x) => w.reserveOf(x) > 0n && admits(w, x, 1n));
+/** og's committed draft batch: the ops queued for the next broadcast. */
+const draftOf = (w: World, x: number): JBatch => (w.batchOf(x)?.batch as JBatch | undefined) ?? createEmptyBatch();
+/** og requireBatchRoom: one more op keeps the draft batch within the contract's op limit. */
+const batchRoom = (w: World, x: number): boolean => batchOpCount(draftOf(w, x)) < J_BATCH_CONTRACT_LIMITS.maxTotalOps;
+const withdrawers = (w: World): readonly number[] =>
+  where(PARTIES, (x) => w.reserveOf(x) > 0n && batchRoom(w, x) && admits(w, x, 1n));
 /** A share of the reserve when the draft batch leaves room for it, else the smallest withdrawal. */
 const withdrawal = (w: World, x: number): bigint => {
   const share = 1n + (w.reserveOf(x) * BigInt(w.ri(20))) / 100n;
