@@ -25259,13 +25259,19 @@ const semanticRoute = (
 const authBookOwner = (route: CrossRoute): string =>
   trimLower(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
 /**
- * og selfRuntimeContinuationTxTypes this port carries: exact next-frame work a certified frame emitted back to its own
- * Entity.
+ * og selfRuntimeContinuationTxTypes: the work a certified frame emits back to its own Entity, applied in the same
+ * Runtime frame.
  */
 const SELF_CONTINUATIONS: ReadonlySet<string> = new Set([
+  "disputeFinalize",
+  "j_abort_sent_batch",
+  "j_broadcast",
   "orderbookSweepCrossJurisdiction",
   "prepareDispute",
+  "processHtlcTimeouts",
   "requestCrossJurisdictionClear",
+  "settle_execute",
+  "settle_propose",
 ]);
 /**
  * One certified runtime output's edge, normalized: who sent it, under which signer, to whom, and the receiver's state.
@@ -25615,19 +25621,40 @@ const hostDraft = (d: Draft, s: BookHostStep, timestamp: bigint): Draft => {
  */
 const clearDraft = (d: Draft, s: CrossHostStep, timestamp: bigint): Draft =>
   s.accountTxs.reduce(queueTouching, hostDraft(d, s, timestamp));
+/** Who publishes a committed frame's outputs: the Entity, this replica's signer, and the frame's emitter. */
+export type Publisher = { readonly entity: EntityId; readonly self: Address; readonly emitter: string };
+/** og getAccountOnlyEntityTx: a raw Account message is exactly one accountInput. */
+const accountOnly = (txs: readonly EntityTx[]): boolean => txs.length === 1 && txs[0]?.type === "accountInput";
 /**
- * og materializeCommittedEntityOutputs: a cross-j command leaves only from the frame's emitter, stamped with its
- * signer; wakes pass on every replica.
+ * og materializeCommittedEntityOutputs' canonical Runtime output for one mutating output, signed by the emitter: a
+ * command this Entity's handlers already wrapped unsigned (crossOutputInput) is stamped, any other txs are wrapped.
  */
-const publishCommitted = (outputs: readonly EntityOutput[], self: Address, emitter: string): readonly EntityOutput[] =>
+const runtimeCommand = (p: Publisher, to: EntityId, txs: readonly EntityTx[]): EntityTx => {
+  const only = txs.length === 1 ? txs[0] : undefined;
+  if (only?.type === "runtimeOutput" && only.data.sourceSignerId === "") {
+    return { ...only, data: { ...only.data, sourceSignerId: signerId(p.self) } };
+  }
+  const data: RuntimeOutputData = {
+    protocol: "cross-j",
+    sourceEntityId: lower(p.entity),
+    sourceSignerId: signerId(p.self),
+    targetEntityId: lower(to),
+    entityTxs: txs,
+  };
+  return { type: "runtimeOutput", data };
+};
+/**
+ * og materializeCommittedEntityOutputs: a wake (no txs) and a raw Account message pass on every replica; every other
+ * mutating output is one canonical cross-j runtimeOutput, left only by the frame's emitter. A local target applies it
+ * in this same Runtime frame (og routeCommittedEntityOutputs, drainImmediateCrossJurisdictionOutputs).
+ */
+export const publishCommitted = (outputs: readonly EntityOutput[], p: Publisher): readonly EntityOutput[] =>
   outputs.flatMap((o): readonly EntityOutput[] => {
     if (!("input" in o) || o.input.kind !== "txs") return [o];
     const input = o.input;
-    const tx = input.txs.length === 1 ? input.txs[0] : undefined;
-    if (tx?.type !== "runtimeOutput" || tx.data.sourceSignerId !== "") return [o];
-    if (signerId(self) !== signerId(emitter)) return [];
-    const stamped: EntityTx = { ...tx, data: { ...tx.data, sourceSignerId: signerId(self) } };
-    return [{ ...o, input: { ...input, txs: [stamped] } }];
+    if (input.txs.length === 0 || accountOnly(input.txs)) return [o];
+    if (signerId(p.self) !== signerId(p.emitter)) return [];
+    return [{ ...o, input: { ...input, txs: [runtimeCommand(p, o.to, input.txs)] } }];
   });
 const byOrderId = (a: CrossRoute, b: CrossRoute): number => a.orderId.localeCompare(b.orderId);
 /** The materialization a mempool or frame tx already carries for an order: its setup, or its clear. */
@@ -27510,7 +27537,11 @@ const publishFrame = (
     };
     const certified: EntityInput = { kind: "proposal", frame: r.frame, signatures, hankos: [hanko] };
     return done(opened, [
-      ...publishCommitted(draft.outputs, r.signerId, frameEmitter(r.frame, frameHash)),
+      ...publishCommitted(draft.outputs, {
+        entity: draft.state.id,
+        self: r.signerId,
+        emitter: frameEmitter(r.frame, frameHash),
+      }),
       ...toOtherValidators(r.state.id, broadcastBoard(broadcast, draft.state.quorum), r.signerId, certified),
     ]);
   });

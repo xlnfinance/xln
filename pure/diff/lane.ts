@@ -218,6 +218,26 @@ const rowKey = (row: unknown): string => {
   return stableJson(plain(carried));
 };
 
+/** One local continuation under its og route key. */
+type Slot = readonly [string, RoutedEntityInput];
+/**
+ * og dedupeEntityOutputs (the rewrite's dedupeNetwork) over the host's local continuations: outputs on one route key
+ * share the first one's slot, a later one's txs appended, so the wakes several txs send one Entity are one input.
+ */
+const slotted = (continuations: readonly Slot[]): readonly RoutedEntityInput[] =>
+  continuations
+    .reduce<readonly Slot[]>((slots, [key, next]) => {
+      const at = slots.findIndex(([k]) => k === key);
+      if (at < 0) return [...slots, [key, next]];
+      const first = slots[at]![1];
+      const appended =
+        first.input.kind === "txs" && next.input.kind === "txs" && next.input.txs.length > 0
+          ? { ...first, input: { ...first.input, txs: [...first.input.txs, ...next.input.txs] } }
+          : first;
+      return slots.map((slot, i): Slot => (i === at ? [key, appended] : slot));
+    }, [])
+    .map(([, continuation]) => continuation);
+
 /**
  * og's watcher input: a validator's own J-prefix attestation, keyed by the input's own signer (og
  * jurisdiction/adapter/events/history-ingress.ts). A board member's relay of it to the others (og
@@ -560,13 +580,16 @@ export const createLane = (cfg: LaneConfig): Lane => {
       rt = sent.og.length > 0 ? retireNetworkOutputs(c.runtime, () => true) : c.runtime;
       sent = { og: sent.og, rw: shipped };
       const localTo = localIds();
-      // og's host re-enqueues its own continuations without transport provenance: no `from`
-      pending = c.outbox
+      // og's host re-enqueues its own continuations without transport provenance (no `from`), one per route key as its
+      // output plan dedupes them (localNetworkOutputs), so the hostInputs weave pairs them one to one with og's queue
+      const continuations = c.outbox
         .filter((o) => localTo.has(o.to.toLowerCase()))
-        .map((o) => {
+        .map((o): Slot => {
           const { from: _local, ...routed } = unwrap(convertOutput(rt, o, o.to, rt.timestamp));
-          return routed;
+          const key = unwrap(localNetworkOutputs(rt, [o], cfg.routes)).map(rowKey).join("\n");
+          return [key, routed];
         });
+      pending = slotted(continuations);
     }
     return diffs;
   };
