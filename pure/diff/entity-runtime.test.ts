@@ -480,20 +480,18 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     expect(out.outbox.length).toBe(2);
     expect(out.outbox.every((o) => "input" in o && o.signerId === A)).toBe(true);
   });
-  test("MATCH (ER-25): a refused runtime input never stops the batch; an entity mismatch is 'wrong_entity'", () => {
+  test("MATCH (ER-25): an entity mismatch is 'wrong_entity'; a duplicate open inside an approved command halts", () => {
     const r = teaching([[A, 1n]], 1n);
     expect(unwrapErr(applyEntityInput(r, txs([open]), { ...ctx(A), self: BOB }))._tag).toBe("wrong_entity");
     const rt = spawn(createRuntime(), r);
-    // og mergeEntityInputs: two local lanes for one replica collapse into one input, so the duplicate refuses both; a lane from another origin stays
-    // apart, but (og createDeferredProposalBatch) both lanes only fill the mempool and the replica proposes once, so the duplicate refuses that frame too.
-    const merged = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, input: txs([open]) }] }, verifiers));
-    // og admission joins the opens into one signed propose; its approved duplicate open throws inside it
-    const duplicate = { _tag: "entity_invariant" as const, reason: "openAccount:account_exists" };
-    expect(merged.rejected).toEqual([duplicate]);
-    expect(merged.runtime.entities.get(replicaKey(ALICE, A))?.state.accounts.has(BOB)).toBe(false);
-    const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, from: "0x" + "77".repeat(20), input: txs([open]) }] }, verifiers));
-    expect(out.rejected).toEqual([duplicate]);
-    expect(out.runtime.entities.get(replicaKey(ALICE, A))?.state.accounts.has(BOB)).toBe(false);
+    // og admission joins the opens into one signed propose; its approved duplicate open throws a plain Error inside
+    // it (OPEN_ACCOUNT_ALREADY_EXISTS), a local bug by og's failure taxonomy, so the Runtime halts and nothing commits.
+    // Two local lanes merge into one input; a lane from another origin stays apart but only fills the same mempool.
+    const halted = { _tag: "runtime_frame" as const, code: "openAccount:account_exists" };
+    const merged = applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, input: txs([open]) }] }, verifiers);
+    expect(unwrapErr(merged)).toEqual(halted);
+    const out = applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, from: "0x" + "77".repeat(20), input: txs([open]) }] }, verifiers);
+    expect(unwrapErr(out)).toEqual(halted);
   });
   test("signEntityFrame still signs the entity frame hash (manifest head)", () => {
     const p = unwrap(propose(teaching([[A, 1n], [B, 1n]], 2n), A)), frame = held(p.replica);

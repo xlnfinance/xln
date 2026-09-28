@@ -9550,7 +9550,15 @@ const claimProofsMatch = (given: readonly WireAccountTx[], stamped: readonly Wir
     return tx.type !== "j_event_claim" || (s?.type === "j_event_claim"
       && sameClaimProof(tx.leftProof, s.leftProof) && sameClaimProof(tx.rightProof, s.rightProof));
   });
+/** og's j_event_claim as it travels: the chain block, its canonical events and both Patricia witnesses. */
 const claimWire = (tx: TxOf<"j_event_claim">): Result<WireTx, ClaimError> => {
+  const { leftProof, rightProof } = tx;
+  if (leftProof === undefined || rightProof === undefined) return err({ _tag: "claim_proof" });
+  return map(claimFrame(tx), ({ jHeight, jBlockHash, events }) =>
+    ({ type: tx.type, data: { jHeight, jBlockHash, events, leftProof, rightProof } }));
+};
+/** og canonicalJEventClaimForFrameHash: the signed frame also binds the claim frame's version and events hash. */
+const claimHashed = (tx: TxOf<"j_event_claim">): Result<WireTx, ClaimError> => {
   const { leftProof, rightProof } = tx;
   if (leftProof === undefined || rightProof === undefined) return err({ _tag: "claim_proof" });
   return map(claimFrame(tx), (data) => ({ type: tx.type, data: { ...data, leftProof, rightProof } }));
@@ -9581,7 +9589,8 @@ export const frameStateHash = (
 ): Result<string, Uncommitted> => {
   const wire = all({
     height: safe(f.height), timestamp: safe(f.timestamp), jHeight: safe(f.jHeight),
-    accountTxs: traverse(f.txs, (tx) => wireTx(tx, id, byLeft)),
+    accountTxs: traverse(f.txs, (tx) =>
+      (tx.type === "j_event_claim" ? mapErr(claimHashed(tx), uncommitted) : wireTx(tx, id, byLeft))),
   });
   const links = { prevFrameHash: f.prevFrameHash, accountStateRoot: f.accountStateRoot };
   return chain(wire, (w) => mapErr(accountFrameHash({ ...w, ...links }), uncommitted));
@@ -10768,7 +10777,31 @@ export const restoreCandidate = (
   return chain(verified, () => chain(replay(held.state, frame, byLeft, settlement), ({ draft, view }) =>
     map(localProof(view, dt), (frameProof) => establish({ frame, frameHanko, frameProof, draft, floor, sent }))));
 };
-export const dropFrozen = <R extends FrozenAccount>(r: R): Verb<R> => ok(done(r));
+/** What a peer input names, as og rejectFrozenAccountInput reports it: its reference height, its txs, its ACK. */
+const frozenDropNote = (input: AccountInput, peer: EntityId): string => {
+  const seen = ((): { readonly height?: bigint; readonly txs: readonly WireAccountTx[]; readonly acked: boolean } => {
+    switch (input.kind) {
+      case "ack": return { height: input.height, txs: [], acked: true };
+      case "ack_frame": {
+        const acked = input.ack !== null;
+        return { height: input.ack?.height ?? input.frame.height, txs: input.frame.txs, acked };
+      }
+      default: return { txs: [], acked: false };
+    }
+  })();
+  const height = seen.height === undefined ? "n/a" : String(seen.height);
+  const txs = seen.txs.map((tx) => tx.type).join(",");
+  return `🛑 Frozen account input dropped for ${peer.slice(-4)} (height=${height}, txs=[${txs}], ack=${seen.acked})`;
+};
+/**
+ * og rejectFrozenAccountInput: a frozen Account drops a peer input before consensus, and the Entity certifies the drop
+ * as a status line (a frozen Account holds no pending frame, so only a proposal names txs).
+ */
+export const dropFrozen = <R extends FrozenAccount>(
+  r: R,
+  input: AccountInput,
+  ctx: { readonly party: Party },
+): Verb<R> => ok(done(r, [accountSay(frozenDropNote(input, ctx.party.peer))]));
 // og freezeAccountForDispute: J claims survive while preparation can still return to active; matcher evidence survives
 // preparation only.
 const isDeferredClaim = (tx: WireAccountTx): boolean => tx.type === "j_event_claim";
@@ -12211,7 +12244,7 @@ export type EntityError =
   | Tagged<"lending_entity", { reason: string }>
   /** og EntityCommandRejectionError (a MalformedEntityFrameInputError): the outermost frame tx is evicted. */
   | Tagged<"entity_command", { reason: string }>
-  /** og plain Error from an entity-tx reducer: not a reject disposition, so the whole input is refused. */
+  /** og plain Error from an entity-tx reducer: a local bug, so og halts the Runtime and the frame never commits. */
   | Tagged<"entity_invariant", { reason: string }>
   | Tagged<
       | "proposal_digest"
@@ -13761,7 +13794,8 @@ const proposeAccountsNowOk = (state: EntityState, d: ProposeAccountsNow): Result
 /**
  * Peer Account txs an Entity takes into a received frame beyond L0: the HTLC and swap flows, the collateral request,
  * og lending (the hub's committed lending followup consumes them, committed-lending-followup.ts) and the rebalance
- * policy a hub proposes on an inbound Account right after genesis (og queueInitialHubPolicies).
+ * policy a hub proposes on an inbound Account right after genesis (og queueInitialHubPolicies), and the peer's
+ * J-event claim (a bilateral finality co-sign both sides propose).
  */
 const ENTITY_PEER_TX_TYPES: ReadonlySet<WireAccountTx["type"]> = new Set([
   "htlc_lock",
@@ -13779,6 +13813,7 @@ const ENTITY_PEER_TX_TYPES: ReadonlySet<WireAccountTx["type"]> = new Set([
   "lending_close_request",
   "lending_close_payout",
   "rebalance_policy",
+  "j_event_claim",
 ]);
 const entityAcceptsPeerTx = (tx: WireAccountTx): boolean => isL0Tx(tx) || ENTITY_PEER_TX_TYPES.has(tx.type);
 /** og DEFAULT_ACCOUNT_TOKEN_IDS (account/config/defaults.ts). */
@@ -22232,6 +22267,24 @@ const openedTxs = (state: EntityState, carrier: EntityTx): readonly { carrier: E
 const effectiveHtlcTxs = (state: EntityState, txs: readonly EntityTx[]): readonly EntityTx[] =>
   txs.flatMap((carrier) => openedTxs(state, carrier).map(({ tx }) => tx));
 /**
+ * og originatedPaymentInputs: each payment's deadline counts from the J height its frame has reached by then, so a
+ * certified j_event earlier in the same frame moves it to that range's scanned height.
+ */
+const paymentJHeights = (finalized: number, txs: readonly EntityTx[]): ReadonlyMap<EntityTx, number> =>
+  txs.reduce<{ readonly jHeight: number; readonly at: ReadonlyMap<EntityTx, number> }>(
+    (acc, tx) => {
+      switch (tx.type) {
+        case "j_event":
+          return { ...acc, jHeight: Number(tx.data["scannedThroughHeight"]) };
+        case "htlcPayment":
+          return { ...acc, at: mapSet(acc.at, tx, acc.jHeight) };
+        default:
+          return acc;
+      }
+    },
+    { jHeight: finalized, at: new Map() },
+  ).at;
+/**
  * og materializeOriginatedHtlcPayments (proposer only): per htlcPayment in order, the raw checks, route, secret ->
  * hashlock, quote, deadline window, profile/domain evidence and the onion; sorted by tx hash. An empty route is
  * resolved like og resolveRoute: the cheapest findPaths route over every gossip Profile.
@@ -22243,10 +22296,11 @@ export const materializeOriginated = (
   infra: HtlcProposerInfra,
 ): Originating => {
   const index = gossipRoutingIndex(profiles);
+  const heights = paymentJHeights(v.jHeight, txs);
   const step = (acc: Originating, tx: EntityTx): Originating => {
     if (tx.type !== "htlcPayment") return acc;
     const refuse = (e: EntityError): Originating => ({ ...acc, refused: new Map([...acc.refused, [tx, e]]) });
-    const one = originate(v, index, infra, acc.originated, tx);
+    const one = originate({ ...v, jHeight: heights.get(tx) ?? v.jHeight }, index, infra, acc.originated, tx);
     if (!one.ok) return refuse(one.error);
     const { txHash } = one.value;
     return acc.originated.some((o) => o.txHash === txHash)
@@ -22323,9 +22377,11 @@ export const assertOriginated = (
   if (payments.length !== infra.originated.length) return htlcReject("HTLC_PAYMENT_PREPARED_ORIGIN_COUNT_MISMATCH");
   const index = gossipRoutingIndex(infra.gossipProfiles);
   const origins = new Map(infra.originated.map((o) => [o.txHash, o]));
-  const checked = foldResult(payments, new Set<string>() as ReadonlySet<string>, (taken, tx) =>
-    map(checkOrigin(v, index, origins, taken, tx), (hashlock) => new Set([...taken, hashlock])),
-  );
+  const heights = paymentJHeights(v.jHeight, txs);
+  const checked = foldResult(payments, new Set<string>() as ReadonlySet<string>, (taken, tx) => {
+    const at = { ...v, jHeight: heights.get(tx) ?? v.jHeight };
+    return map(checkOrigin(at, index, origins, taken, tx), (hashlock) => new Set([...taken, hashlock]));
+  });
   return map(checked, () => undefined);
 };
 /** The prepared origin still describes the raw tx it was prepared for. */
@@ -26050,11 +26106,15 @@ const applyRouted = (run: AccountInputRun, at: Folded): Result<Draft, EntityErro
   onAccount(run, at, false, (child, applied) =>
     routed(at.state, at.accountReplicas, run.peer, disputeUnsafe(child, applied, run.door)),
   );
-/** og committedFrames: our own frame commits when the peer's ACK for it lands (the Account reached its height). */
-const ownCommitted = (run: AccountInputRun, d: Draft): AccountFrame | undefined => {
+/**
+ * og committedFrames: our own frame commits when the peer's ACK for it lands (the Account reached its height), unless
+ * the peer's frame took that height instead (og incoming/collision.ts: RIGHT rolled its own frame back).
+ */
+const ownCommitted = (run: AccountInputRun, d: Draft, taken?: AccountFrame): AccountFrame | undefined => {
   const after = d.accountReplicas.get(run.peer);
   const own = run.pendingOwn;
-  return own !== undefined && after !== undefined && after.head.height >= own.height ? own : undefined;
+  if (own === undefined || after === undefined || taken?.height === own.height) return undefined;
+  return after.head.height >= own.height ? own : undefined;
 };
 /** og answerFrame on a received peer frame: we sign it, and it commits once installed at its height. */
 const signReceived = (
@@ -26072,7 +26132,8 @@ const signReceived = (
     const installed = frame !== undefined && after !== undefined && after.head.height >= frame.height;
     const received = installed ? { frame, from: i.fromEntityId, to: i.toEntityId, domain: i.domain } : undefined;
     const effects = [...own, ...signed];
-    return committedFollowups(answered, from, ownCommitted(run, answered), received, effects, run.scope.ctx, created);
+    const committedOwn = ownCommitted(run, answered, received?.frame);
+    return committedFollowups(answered, from, committedOwn, received, effects, run.scope.ctx, created);
   });
 };
 /**
@@ -26512,6 +26573,38 @@ const proposableAccounts = (replicas: Replicas): readonly EntityId[] =>
     .filter(([, c]) => proposableChild(c))
     .map(([peer]) => peer)
     .toSorted(asc);
+/** A peer frame the input left received commits once answered, so its Account holds no pending frame either. */
+const arrivedProposable = (c: AccountReplica | undefined): boolean =>
+  c !== undefined && (c._tag === "open" || c._tag === "received") && c.mempool.length > 0;
+/**
+ * og's cutover Account authority (rscore entity-stage beginEntityAccountFrame) runs every peer ack and ack_frame of
+ * the frame on its Account before primeEntityFrameAccountWork reads the work index. An Account whose pending frame
+ * those arrivals commit, and whose mempool still holds work, is therefore primed (ascending, with the Accounts
+ * proposable before the frame) ahead of every Account the tx loop touches. An arrival its Account refuses changes
+ * nothing here; the tx loop refuses it again.
+ */
+const primedAccounts = (
+  state: EntityState,
+  replicas: Replicas,
+  txs: readonly EntityTx[],
+  ctx: FoldContext,
+): readonly EntityId[] => {
+  const arrive = (acc: Replicas, tx: EntityTx): Replicas => {
+    if (tx.type !== "accountInput" || (tx.data.kind !== "ack" && tx.data.kind !== "ack_frame")) return acc;
+    const peer = peerOf(tx, state.id);
+    const child = acc.get(peer);
+    const record = observerBoardRecord(state, tx.data.fromEntityId);
+    if (child === undefined || !record.ok) return acc;
+    const scope: TxScope = { state, replicas: acc, ctx, skip: { state, accountReplicas: acc, outputs: [] } };
+    const applied = applyAccountInput(child, tx.data, accountDoor(scope, record.value, peer));
+    return applied.ok ? mapSet(acc, peer, applied.value.replica) : acc;
+  };
+  const arrived = txs.reduce(arrive, replicas);
+  return [...arrived]
+    .filter(([, c]) => arrivedProposable(c))
+    .map(([peer]) => peer)
+    .toSorted(asc);
+};
 /**
  * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
  * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
@@ -26522,9 +26615,9 @@ export const foldTxs = (
   txs: readonly EntityTx[],
   ctx: FoldContext,
 ): Result<FoldedTxs, EntityError> => {
-  // og proposePendingAccountFrames worklist: Accounts proposable before the frame (sorted), then the Accounts the
-  // included txs touched, in order
-  const primed = proposableAccounts(replicas);
+  // og proposePendingAccountFrames worklist: Accounts proposable once the frame's peer arrivals ran (sorted), then the
+  // Accounts the included txs touched, in order
+  const primed = primedAccounts(state, replicas, txs, ctx);
   // og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget, then assertScheduledWakeFrameOrder
   // (prepareEntityFrameWorkingSet): plain Errors for the whole frame
   const budgets = frameBudgets(txs);
@@ -39889,13 +39982,19 @@ const pairLegRefusal = (
 ): Result<PairRefusal, RuntimeError> => {
   if (INGRESS_REJECTIONS.has(error._tag)) return ok("CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED");
   const transported = String(leg.from ?? "").trim() !== "";
-  const broken =
-    error._tag === "entity_invariant" ||
-    error._tag === "no_such_entity" ||
-    accountThrew(error as EntityError);
+  const broken = haltsRuntime(error) || error._tag === "no_such_entity";
   if (broken || !transported || replay) return frameErr(runtimeErrorText(error));
   return ok("CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED");
 };
+/**
+ * og classifyEntityInputApplyFailure: a plain Error (an invariant) or a thrown Account handler is a local bug, whose
+ * disposition halts the Runtime; og never commits the frame it was applying.
+ */
+const haltsRuntime = (error: RuntimeError): boolean =>
+  error._tag === "entity_invariant" || accountThrew(error as EntityError);
+/** A refused input: rejected at its position, or the whole frame refused when og would halt on it. */
+const refuseInput = (b: InputBatch, error: RuntimeError): Result<InputBatch, RuntimeError> =>
+  haltsRuntime(error) ? frameErr(runtimeErrorText(error)) : ok(rejectOut(b, error));
 /** The Runtime frame every Entity input applies under: the Runtime after its txs, the frame clock, the host context. */
 type FrameScope = { readonly rt: Runtime; readonly timestamp: bigint; readonly ctx: RuntimeCtx };
 /** og: a `txs` or J-prefix input takes the frame's timestamp. */
@@ -40028,7 +40127,7 @@ const collectCommit = (b: InputBatch, staged: Staged, cause: CommitCause): Resul
   );
 /** A refused input is recorded as rejected; an applied one has its outputs collected. */
 const settleStaged = (b: InputBatch, staged: StagedIn): Result<InputBatch, RuntimeError> =>
-  staged.ok ? collectCommit(staged.value[0], staged.value[1], "input") : ok(rejectOut(b, staged.error));
+  staged.ok ? collectCommit(staged.value[0], staged.value[1], "input") : refuseInput(b, staged.error);
 /** The txs a local command delivers: the cross-j runtimeOutput itself, or nothing (an Account-work poke proposes). */
 const commandTxs = (command: CrossCommand): readonly EntityTx[] =>
   command.kind === "account-work"
@@ -40130,7 +40229,7 @@ const flushDeferred = (f: FrameScope, b: InputBatch): Result<InputBatch, Runtime
 const singleInput = (f: FrameScope, b: InputBatch, routed: RoutedEntityInput): Result<InputBatch, RuntimeError> => {
   const deferrable = routed.input.kind === "txs";
   const staged = stageInput(f, b, routed, { lane: deferrable ? "defer" : undefined, recordApplied: true });
-  if (!staged.ok) return ok(rejectOut(b, staged.error));
+  if (!staged.ok) return refuseInput(b, staged.error);
   const [next, stagedInput] = staged.value;
   const { key, committed } = stagedInput;
   const deferred = committed
