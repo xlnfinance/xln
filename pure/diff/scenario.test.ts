@@ -156,6 +156,7 @@ const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
 
   try {
     const expectClean = (diffs: string[]): void => expect(diffs).toEqual([]);
+    expectClean([...w.evidence]);
     const [imports, opens] = w.importAll();
     expectClean(await tick(imports, []));
     expectClean(await tick([], opens));
