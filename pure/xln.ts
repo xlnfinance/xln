@@ -28130,10 +28130,16 @@ const certifiedSelfWake = (r: OpenEntity, s: Attested<OpenEntity>): readonly Ent
  * og finalizeCommitNotification tail: pruneReplicaFinalizedJHistory, then advanceLocalJPrefixRoundAfterCommit (the
  * committed round was cleared by publishFrame): due J work re-signs for the next height.
  */
+/** og pruneReplicaFinalizedJHistory throws a plain Error at commit, which halts the Runtime frame (an invariant). */
+const pruneAtCommit = (
+  h: ValidatorJHistory | undefined,
+  finalized: number,
+): Result<ValidatorJHistory | undefined, EntityError> =>
+  mapErr(pruneFinalizedJHistory(h, finalized), (f): EntityError => ({ _tag: "entity_invariant", reason: f.message }));
 const afterCommit = (a: EntityApply, ctx: EntityContext): Result<EntityApply, EntityError> => {
   const r = a.replica;
   if (r._tag !== "open") return ok(a);
-  return chain(jpE(pruneFinalizedJHistory(ctx.jHistory, jpFinalized(jpView(r)))), (history) =>
+  return chain(pruneAtCommit(ctx.jHistory, jpFinalized(jpView(r))), (history) =>
     chain(jpE(hasDueLocalJPrefixAdvance(jpView(r), history)), (due) =>
       due
         ? map(ensureLocalJPrefix(r, { ...ctx, jHistory: history }, false), (s): EntityApply => ({

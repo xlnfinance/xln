@@ -2,10 +2,11 @@
 // each pinned by the negative case it reproduced.
 import { describe, expect, test } from "bun:test";
 import {
-  admit, applyAccountInput, createEntity, foldResult, ogSections, ok, err, tag, withOgSections, type EntityCommitted,
+  admit, applyAccountInput, applyRuntime, createEntity, createRuntime, replicaKey, foldResult, ogSections, ok, err, tag, withOgSections, type EntityCommitted,
 } from "../xln.ts";
 import {
   ALICE, BOB, CLOCK, NOW, TERMS, TOKEN, UNREGISTERED_J, aliceAddr, genesisAB, hankoVerify, offerOf, proposeInput, unwrap,
+  verifiers,
 } from "../xln_run.ts";
 
 const entity = () =>
@@ -90,5 +91,25 @@ describe("contracts: a held Account frame", () => {
     const altered = { ...offer, frame: { ...offer.frame, txs: [{ type: "set_credit_limit" as const, tokenId: TOKEN, limit: 999n }] } };
     const retry = applyAccountInput(received, altered, door(BOB));
     expect(retry.ok ? "accepted" : retry.error._tag).toBe("frame_hash_mismatch");
+  });
+});
+
+describe("contracts: J history behind the finalized height at commit", () => {
+  test("halts the Runtime frame with og's prune invariant", () => {
+    const created = unwrap(createEntity({
+      id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]),
+      jurisdictionConfig: UNREGISTERED_J,
+    }));
+    const ahead = { ...created, state: { ...created.state, jFinality: { ...created.state.jFinality, height: 2 } } };
+    const history = {
+      jurisdictionRef: "test", scannedThroughHeight: 1, contiguousThroughHeight: 1, tipBlockHash: `0x${"11".repeat(32)}`,
+      eventBlocks: new Map(), blockHashes: new Map(),
+    };
+    const chat = { type: "chat" as const, data: { from: aliceAddr.toLowerCase(), message: "hi" } };
+    const key = replicaKey(ALICE, aliceAddr);
+    const rt = { ...createRuntime(), entities: new Map([[key, ahead]]), replicaLocal: new Map([[key, { jHistory: history }]]) };
+    const input = { entityId: ALICE, signerId: aliceAddr, input: { kind: "txs" as const, timestamp: NOW, txs: [chat] } };
+    const applied = applyRuntime(rt as never, { runtimeTxs: [], entityInputs: [input] }, verifiers);
+    expect(applied.ok ? "committed" : applied.error).toEqual({ _tag: "runtime_frame", code: "J_HISTORY_LOCAL_PRUNE_HEIGHT_INVALID:2:1" });
   });
 });
