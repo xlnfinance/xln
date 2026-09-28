@@ -154,6 +154,8 @@ export type Coverage = {
   disputesFinalized: number;
   actions: Record<string, number>;
   accountTxs: Set<string>;
+  /** Entity tx kinds that were inputs of a frame both sides committed (whether their handler accepted or refused). */
+  entityTxs: Set<string>;
 };
 export const emptyCoverage = (): Coverage => ({
   frames: 0,
@@ -162,6 +164,7 @@ export const emptyCoverage = (): Coverage => ({
   disputesFinalized: 0,
   actions: {},
   accountTxs: new Set(),
+  entityTxs: new Set(),
 });
 
 /** Runtime txs only og's I/O makes: its watcher's observations and cursor, and its adapter's submit results. */
@@ -485,6 +488,10 @@ export const createLane = (cfg: LaneConfig): Lane => {
       }),
     );
     if (rec !== undefined) coverage.frames += 1;
+    if (c !== null) {
+      input.entityInputs.forEach(({ input: i }) =>
+        (i.kind === "txs" ? i.txs : []).forEach((tx) => coverage.entityTxs.add(tx.type)));
+    }
     const ogQueued = ogMempool().runtimeTxs;
     const ownTxs = c === null ? own.runtimeTxs : [...planWake!.input.runtimeTxs, ...c.queuedRetries];
     cmp("queued", ogQueued.filter((tx) => !IO_TXS.has(tx.type)), ownTxs);
