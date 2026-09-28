@@ -7662,16 +7662,21 @@ export const accountTxMessages = (
  * og proposal/transactions.ts + incoming replay: every tx's handler messages across a frame folded from `s`; [] if
  * the frame does not fold.
  */
+/**
+ * The handler messages of a frame that already folded once, replayed in order. A replay that fails means the context
+ * differs from the one the frame folded with, so the failure surfaces (it once silently dropped a settlement message
+ * og's frame hash covers).
+ */
 export const frameTxMessages = (
   s: AccountBody, f: AccountFrame, byLeft: boolean, self: string, settlement?: SettlementCtx,
-): readonly string[] => {
+): Result<readonly string[], BodyError> => {
   const ctx = foldCtx(f, byLeft, settlement);
   type Replay = Readonly<{ body: AccountBody; messages: readonly string[] }>;
   const replay = (r: Replay, tx: WireAccountTx): Result<Replay, BodyError> =>
     map(applyAccountBody(r.body, tx, ctx), (next) => ({
       body: next.state, messages: [...r.messages, ...accountTxMessages(r.body, tx, ctx, next.state, self)],
     }));
-  return unwrapOr(map(foldResult(f.txs, { body: s, messages: [] }, replay), (r) => r.messages), () => []);
+  return map(foldResult(f.txs, { body: s, messages: [] }, replay), (r) => r.messages);
 };
 // ---- the Account tx validator: og's handler checks, in og's order, with og's text ----
 // Every tx passes these checks before the handlers above apply it (applyAccountBody). og answers a refusal with text,
@@ -9174,10 +9179,15 @@ const draftPlan = (
 ): Result<DisputePlan, DisputeError> =>
   map(asProof(accountDisputeHash(view, bodyHash, proofNonce, proposerIsLeft)), (hash): DisputePlan =>
     ({ _tag: "sign", draft: { hash, proofBodyHash: bodyHash, proofNonce, proposerIsLeft } }));
+/**
+ * og prepareProposalProof: the witness the Account held before this frame decides whether the frame's proof needs a
+ * fresh signature; its nonce comes from the frame's witnesses, which a finalized settlement may have promoted past it.
+ */
 export const proposalPlan = (
-  view: CommittedAccountState, proof: LocalProof, witnesses: DisputeWitnesses, proposerIsLeft: boolean,
+  view: CommittedAccountState, proof: LocalProof, held: DisputeWitnesses, witnesses: DisputeWitnesses,
+  proposerIsLeft: boolean,
 ): Result<DisputePlan, DisputeError> => {
-  const { current } = witnesses;
+  const { current } = held;
   if (staleWitness(current, proof)) {
     return draftPlan(view, proof.bodyHash, freshNonce(witnesses, proof.jNonce), proposerIsLeft);
   }
@@ -9822,7 +9832,7 @@ const frozenError = (phase: FrozenAccount["_tag"]): AccountReplicaError => ({ _t
 export type Preview = {
   readonly frame: AccountFrame; readonly draft: FrameFold;
   readonly frameProof: LocalProof; readonly dispute: DisputePlan;
-  readonly deferred: readonly WireAccountTx[]; readonly witnesses: DisputeWitnesses; readonly floor: number;
+  readonly deferred: readonly WireAccountTx[]; readonly floor: number;
 };
 export type ProposalPlan =
   | Tagged<"frame", { preview: Preview }>
@@ -9964,11 +9974,11 @@ const framePlan = (
       witnesses: promoteSettled(r.dispute, r.state, folded.state, party.left, stamped.finalized),
     });
     return chain(sealed, ({ stateHash, frameProof, witnesses }) =>
-      map(proposalPlan(view, frameProof, witnesses, party.left), (dispute): ProposalPlan => ({
+      map(proposalPlan(view, frameProof, r.dispute, witnesses, party.left), (dispute): ProposalPlan => ({
         _tag: "frame",
         preview: {
           frame: { ...unhashed, stateHash }, draft: { state: folded.state, effects: folded.effects },
-          frameProof, dispute, deferred, witnesses, floor,
+          frameProof, dispute, deferred, floor,
         },
       })));
   });
@@ -10212,13 +10222,17 @@ const install = (
 const residentAck = (r: OpenAccount): AccountAck | null =>
   (r.acknowledged !== undefined && r.acknowledged.height === r.head.height ? r.acknowledged : null);
 type ProposeResult = Verb<OpenAccount | ProposedAccount>;
-/** Our own frame goes out only with our frame Hanko on it and the dispute Hanko its plan asks for. */
+/**
+ * Our own frame goes out only with our frame Hanko on it and the dispute Hanko its plan asks for. The witnesses stay
+ * the pre-frame ones plus that signature: og's prepared commit replays only the bilateral state, so a settlement the
+ * frame finalizes never promotes the proposer's witnesses (og ack-commit.ts applyPendingFrameTransactions).
+ */
 const proposeFrame = (r: OpenAccount, input: Propose, ctx: AccountContext, preview: Preview): ProposeResult => {
-  const { frame, draft, frameProof, dispute, deferred, witnesses: promoted, floor } = preview;
+  const { frame, draft, frameProof, dispute, deferred, floor } = preview;
   const frameHanko = input.frameHanko;
   if (frameHanko === undefined) return err({ _tag: "invalid_hanko", entity: ctx.party.self });
   const sealed = checks(frameStructure(frame), certifies(ctx.verify, frame.stateHash, frameHanko, ctx.party.self));
-  const settled = chain(sealed, () => settleLocal(dispute, input.disputeHanko, promoted, ctx.party.self, ctx.verify));
+  const settled = chain(sealed, () => settleLocal(dispute, input.disputeHanko, r.dispute, ctx.party.self, ctx.verify));
   return map(settled, ({ carried, witnesses }) => {
     const ack = residentAck(r), sent: SentProposal = { ack, ...opt("disputeHanko", carried) };
     const candidate = establish({ frame, frameHanko, frameProof, draft, floor, sent });
@@ -10353,10 +10367,15 @@ const ownAck = <R extends ProposedAccount | ReceivedAccount>(r: R, input: Ack, c
     default: return proceedIf(certifies(ctx.verify, frame.stateHash, input.frameHanko, ctx.party.self));
   }
 };
-/** og replays the received frame's handler messages under the settlement context it folded with. */
+/**
+ * og replays the received frame's handler messages under the settlement context it folded with: og
+ * replayIncomingFrameOnClone collects `processEvents` from the one validating replay, so the context is
+ * peerFrameSettlement's, DeltaTransformer included (a settlement hanko's post-proof body needs it).
+ */
 const receivedFrameSettlement = (r: ReceivedAccount, ctx: AccountContext): SettlementCtx => ({
   verify: ctx.verify,
   proofNonceFloor: r.candidate.floor,
+  ...opt("deltaTransformer", ctx.deltaTransformer),
   ...opt("registeredBoardHash", ctx.counterpartyBoard?.boardHash),
   ...opt("boardAuthority", ctx.boardAuthority),
 });
@@ -10367,25 +10386,25 @@ const acceptReceived = (r: ReceivedAccount, input: Ack, ctx: AccountContext): Re
   const byLeft = proposerIsLeft(r, ctx.party);
   const settled = chain(ackPlan(r, byLeft), (plan) =>
     settleLocal(plan, input.disputeHanko, r.dispute, ctx.party.self, ctx.verify));
-  return map(settled, ({ carried, witnesses }) => {
+  // og consensus/index.ts commit: the frame's handler messages (replayed from the proposer's side),
+  // `🤝 Accepted frame`, then the post-commit rebalance
+  const said = frameTxMessages(r.state, frame, byLeft, ctx.party.self, receivedFrameSettlement(r, ctx));
+  return chain(settled, ({ carried, witnesses }) => map(said, (messages) => {
     const ackOut: AccountAck = {
       height: frame.height, frameHash: frame.stateHash, frameHanko: input.frameHanko, ...opt("disputeHanko", carried),
     };
     const signed = signedBy(ctx.party, input.frameHanko, frameHanko);
     const dispute = storeCounterparty(witnesses, r.disputeHanko);
     const installed = install(r, signed, { dispute, acknowledged: ackOut });
-    // og consensus/index.ts commit: the frame's handler messages (replayed from the proposer's side),
-    // `🤝 Accepted frame`, then the post-commit rebalance
-    const said = frameTxMessages(r.state, frame, byLeft, ctx.party.self, receivedFrameSettlement(r, ctx));
     const post = postCommitRebalance(installed.state, ctx, "frame commit");
     return done<OpenAccount | ReceivedAccount, AccountOutput>(post.replica, [
       { kind: "ack", ...sentBy(r, ctx.party), ...ackOut },
-      ...said.map(accountSay),
+      ...messages.map(accountSay),
       accountSay(`🤝 Accepted frame ${frame.height} from Entity ${ctx.party.peer.slice(-4)}`),
       ...post.outputs,
       ...effectsOut(installed.effects),
     ]);
-  });
+  }));
 };
 const createAck = (r: ReceivedAccount, input: Ack, ctx: AccountContext): ReceivedAckResult =>
   match(ownAck(r, input, ctx), {
@@ -13682,31 +13701,6 @@ const proposeAccountsNowOk = (state: EntityState, d: ProposeAccountsNow): Result
   }
   return foldResult(cps, undefined as void, (_, cp: unknown, i) => counterpartyIssue(cp, cps[i - 1]));
 };
-/**
- * Peer Account txs an Entity takes into a received frame beyond L0: the HTLC and swap flows, the collateral request,
- * og lending (the hub's committed lending followup consumes them, committed-lending-followup.ts) and the rebalance
- * policy a hub proposes on an inbound Account right after genesis (og queueInitialHubPolicies), and the peer's
- * J-event claim (a bilateral finality co-sign both sides propose).
- */
-const ENTITY_PEER_TX_TYPES: ReadonlySet<WireAccountTx["type"]> = new Set([
-  "htlc_lock",
-  "htlc_resolve",
-  "request_collateral",
-  "swap_offer",
-  "swap_cancel_request",
-  "swap_resolve",
-  "cross_pull_lock",
-  "cross_pull_close",
-  "lending_fund",
-  "lending_borrow_request",
-  "lending_repay",
-  "lending_credit",
-  "lending_close_request",
-  "lending_close_payout",
-  "rebalance_policy",
-  "j_event_claim",
-]);
-const entityAcceptsPeerTx = (tx: WireAccountTx): boolean => isL0Tx(tx) || ENTITY_PEER_TX_TYPES.has(tx.type);
 /** og DEFAULT_ACCOUNT_TOKEN_IDS (account/config/defaults.ts). */
 const DEFAULT_ACCOUNT_TOKEN_IDS = ["1", "3", "2"] as const;
 /**
@@ -18584,11 +18578,30 @@ const pendingDispute = (plan: DisputePlan): DisputeHanko | undefined =>
     none: () => undefined,
   });
 /**
- * og accountHasProposableMempool (without the settlement-freeze and HTLC-cap refinements): an active Account with no
- * frame in flight and queued txs.
+ * og accountTxAwaitsPostCommitHanko: our settlement hanko intent is admitted while this Entity frame folds, but its
+ * Hankos are this frame's own manifest entries, still the `pendingHanko` placeholders `installFrame` fills after
+ * quorum. og routes only the forced ACK and proposes the intent on the next Entity frame (the Account wake).
  */
+const awaitsPostCommitHanko = (tx: AccountTx): boolean =>
+  tx.type === "settle_transition" &&
+  tx.kind === "hanko" &&
+  (tx.postProof.hanko === undefined ||
+    tx.postProof.hanko === pendingHanko(tx.postProof.disputeHash) ||
+    tx.settlementHanko === pendingHanko(tx.settlementHash));
+/**
+ * og accountHasProposableMempool's mempool terms: no settlement hanko still waiting for this Entity frame's quorum,
+ * and a tx a frame could carry: neither an HTLC lock past the lock cap nor a tx a signed settlement workspace freezes.
+ */
+const mempoolProposable = (c: { readonly state: AccountBody; readonly mempool: readonly WireAccountTx[] }): boolean => {
+  if (c.mempool.some(awaitsPostCommitHanko)) return false;
+  const locksFull = c.state.locks.size >= MAX_ACCOUNT_HTLC_LOCKS;
+  const carried = (tx: WireAccountTx): boolean =>
+    !(locksFull && tx.type === "htlc_lock") && settlementFreeze(c.state, tx).ok;
+  return c.mempool.some(carried);
+};
+/** og accountHasProposableMempool: an active Account with no frame in flight and a proposable mempool. */
 const proposableChild = (c: AccountReplica | undefined): c is OpenAccount =>
-  c !== undefined && c._tag === "open" && c.mempool.length > 0;
+  c !== undefined && c._tag === "open" && mempoolProposable(c);
 const hasProposableAccount = (r: Folded): boolean => [...r.accountReplicas.values()].some(proposableChild);
 /**
  * The Entity draft after an Account answer: the answer's state, both drafts' outputs and events, and the cross-j swaps
@@ -18851,12 +18864,14 @@ const proposeOne =
       if (selected === null) return ok(acc);
       const dt = accountDt(ctx, child);
       const party = partyOf(replicaId(child), self);
-      const plan = planAccountProposal(child, self, clock, ctx.verify, selected, dt, ctx.boardAuthority);
+      // the plan folds our own pending Hankos (a settlement hanko intent) the same way the proposal does
+      const verify = pendingVerify(ctx.verify, self);
+      const plan = planAccountProposal(child, self, clock, verify, selected, dt, ctx.boardAuthority);
       if (!plan.ok) return accountThrew(plan.error) ? err(plan.error) : ok(acc);
       if (!party.ok) return ok(acc);
       const input = proposalInput(plan.value, clock, selected) as Propose;
       const proposed = propose(child, input, {
-        verify: pendingVerify(ctx.verify, self),
+        verify,
         party: party.value,
         deltaTransformer: dt,
       });
@@ -24007,15 +24022,22 @@ const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError>
 /**
  * og materializeDeferredSettlementApprovals for one Account: an idle Account's still-current approval becomes its hanko
  * transition; a changed or missing workspace expires it.
+ *
+ * og reads the Account's mempool through the cutover authority's replica (rscore entity-stage executeAccountInput):
+ * it holds the frame's peer arrivals, but every local `enqueue` of this Entity frame (an extendCredit, an orderbook
+ * fill, this hanko itself) stays staged in admissionRequests until prepareEntityAccountOutbound. So "idle" is judged on
+ * the post-arrival mempool `arrived`; local txs admitted earlier in the frame do not hold the approval back, and still
+ * precede the hanko in the Account's mempool.
  */
 const materializeDeferred =
-  (ctx: FoldContext) =>
+  (ctx: FoldContext, arrived: Replicas) =>
   (d: Draft, [peer, approved]: readonly [string, string]): Result<Draft, EntityError> => {
     const self = d.state.id;
     const id = peer as EntityId;
     const child = d.accountReplicas.get(id);
     if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    if (child._tag === "proposed" || settlePending(child)) return ok(d);
+    const visible = arrived.get(id) ?? child;
+    if (child._tag === "proposed" || settlePending(visible)) return ok(d);
     const w = child.state.settlement;
     const expired = settleSay(
       { ...d, state: forgetDeferred(d.state, peer) },
@@ -24039,7 +24061,7 @@ const materializeDeferred =
       if (w === undefined || hash !== approved) return ok(expired);
       // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
       // them
-      if (child.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+      if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
       const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
       return chain(built, admit);
     });
@@ -24048,11 +24070,11 @@ const materializeDeferred =
  * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refresh every stale uncommitted hanko intent,
  * then materialize each deferred approval, both in ascending counterparty order.
  */
-const materializeSettlements = (d: Draft, ctx: FoldContext): Result<Draft, EntityError> => {
+const materializeSettlements = (d: Draft, ctx: FoldContext, arrived: Replicas): Result<Draft, EntityError> => {
   const peers = [...d.accountReplicas.keys()].toSorted(asc);
   return chain(foldResult(peers, d, refreshStaleHanko), (refreshed) => {
     const deferred = [...deferredOf(refreshed.state)].toSorted(([a], [b]) => asc(a, b));
-    return foldResult(deferred, refreshed, materializeDeferred(ctx));
+    return foldResult(deferred, refreshed, materializeDeferred(ctx, arrived));
   });
 };
 /** og continuationActionToTx: the r2r / r2e / r2c follow-up of an executed settlement. */
@@ -26025,8 +26047,8 @@ const signReceived = (
   });
 };
 /**
- * A peer frame (with its ACK of ours): only L0 txs a peer may send; an unknown peer's genesis frame opens the inbound
- * Account.
+ * A peer frame (with its ACK of ours): og takes any Account tx a peer proposes, its handlers decide; an unknown peer's
+ * genesis frame opens the inbound Account.
  */
 const receivedFrame = (
   run: AccountInputRun,
@@ -26035,11 +26057,7 @@ const receivedFrame = (
 ): Result<Draft, EntityError> => {
   const { state, replicas } = run.scope;
   const created = !replicas.has(from);
-  const at: Result<Folded, EntityError> = !i.frame.txs.every(entityAcceptsPeerTx)
-    ? err({ _tag: "not_l0" })
-    : created
-      ? inboundChild(state, replicas, from, i)
-      : ok(run.held);
+  const at: Result<Folded, EntityError> = created ? inboundChild(state, replicas, from, i) : ok(run.held);
   return chain(at, (a) =>
     applyRaw(run, a, ({ draft, effects }) => signReceived(run, draft, effects, i, from, created), created),
   );
@@ -26461,22 +26479,26 @@ const proposableAccounts = (replicas: Replicas): readonly EntityId[] =>
     .filter(([, c]) => proposableChild(c))
     .map(([peer]) => peer)
     .toSorted(asc);
-/** A peer frame the input left received commits once answered, so its Account holds no pending frame either. */
-const arrivedProposable = (c: AccountReplica | undefined): boolean =>
-  c !== undefined && (c._tag === "open" || c._tag === "received") && c.mempool.length > 0;
+/**
+ * A peer frame the input left received commits once answered, so its Account holds no pending frame either and og reads
+ * the work index (accountHasProposableMempool) on the state that frame commits.
+ */
+const arrivedProposable = (c: AccountReplica | undefined): boolean => {
+  if (c === undefined) return false;
+  if (c._tag === "received") return mempoolProposable({ state: c.candidate.draft.state, mempool: c.mempool });
+  return c._tag === "open" && mempoolProposable(c);
+};
 /**
  * og's cutover Account authority (rscore entity-stage beginEntityAccountFrame) runs every peer ack and ack_frame of
- * the frame on its Account before primeEntityFrameAccountWork reads the work index. An Account whose pending frame
- * those arrivals commit, and whose mempool still holds work, is therefore primed (ascending, with the Accounts
- * proposable before the frame) ahead of every Account the tx loop touches. An arrival its Account refuses changes
- * nothing here; the tx loop refuses it again.
+ * the frame on its Account before the tx loop, and the Entity reads its Accounts through those post-arrival replicas.
+ * An arrival its Account refuses changes nothing here; the tx loop refuses it again.
  */
-const primedAccounts = (
+const arrivedReplicas = (
   state: EntityState,
   replicas: Replicas,
   txs: readonly EntityTx[],
   ctx: FoldContext,
-): readonly EntityId[] => {
+): Replicas => {
   const arrive = (acc: Replicas, tx: EntityTx): Replicas => {
     if (tx.type !== "accountInput" || (tx.data.kind !== "ack" && tx.data.kind !== "ack_frame")) return acc;
     const peer = peerOf(tx, state.id);
@@ -26487,12 +26509,18 @@ const primedAccounts = (
     const applied = applyAccountInput(child, tx.data, accountDoor(scope, record.value, peer));
     return applied.ok ? mapSet(acc, peer, applied.value.replica) : acc;
   };
-  const arrived = txs.reduce(arrive, replicas);
-  return [...arrived]
+  return txs.reduce(arrive, replicas);
+};
+/**
+ * og primeEntityFrameAccountWork reads the work index on the post-arrival replicas: an Account whose pending frame
+ * those arrivals commit, and whose mempool still holds work, is primed (ascending, with the Accounts proposable before
+ * the frame) ahead of every Account the tx loop touches.
+ */
+const primedAccounts = (arrived: Replicas): readonly EntityId[] =>
+  [...arrived]
     .filter(([, c]) => arrivedProposable(c))
     .map(([peer]) => peer)
     .toSorted(asc);
-};
 /**
  * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
  * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
@@ -26505,7 +26533,8 @@ export const foldTxs = (
 ): Result<FoldedTxs, EntityError> => {
   // og proposePendingAccountFrames worklist: Accounts proposable once the frame's peer arrivals ran (sorted), then the
   // Accounts the included txs touched, in order
-  const primed = primedAccounts(state, replicas, txs, ctx);
+  const arrived = arrivedReplicas(state, replicas, txs, ctx);
+  const primed = primedAccounts(arrived);
   // og assertEntityFrameTxByteBudget + assertEntityFrameJRangeBudget, then assertScheduledWakeFrameOrder
   // (prepareEntityFrameWorkingSet): plain Errors for the whole frame
   const budgets = frameBudgets(txs);
@@ -26536,7 +26565,7 @@ export const foldTxs = (
     const continued = materializeContinuation(folded.draft, ctx, queue);
     const booked = chain(continued, (d) => bookPhase(d, ctx.timestamp));
     return chain(
-      chain(booked, (d) => materializeSettlements(d, ctx)),
+      chain(booked, (d) => materializeSettlements(d, ctx, arrived)),
       (settled) => {
         const touched = settled.touched ?? [];
         // an Account this frame opened and nothing else touched is not proposable yet (og openAccount)
@@ -33750,11 +33779,10 @@ const tokenAmountText = (tokenId: number, amount: bigint): Result<string, Entity
   });
 const rawUnits = (tokenId: number, amount: unknown): string =>
   `${BigInt(String(amount ?? "0")).toString()} raw units of token #${tokenId}`;
-/** One finalized event's Entity effects: the Draft so far, the Account claims it queued, the Accounts it touched. */
+/** One finalized event's Entity effects: the Draft so far and the Account claims it queued. */
 type JEventStep = {
   readonly draft: Draft;
   readonly claims: readonly AccountTxTarget[];
-  readonly dirty: readonly string[];
 };
 /** og: the settled row's reserve for this Entity, when the row carries one. */
 const withOwnReserve = (state: EntityState, tokenId: number, own: unknown): EntityState => {
@@ -33815,7 +33843,6 @@ const settledJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number): Re
   return map(tokenAmountText(tokenId, token.collateral), (coll) => ({
     draft: jSay(draft, `⚖️ OBSERVED: ${who} | coll=${coll} | j-block ${blockNumber} (awaiting 2-of-2)`),
     claims: [...step.claims, { accountId: counterparty, tx: settlementClaim(e, left, right, token, blockNumber) }],
-    dirty: [...step.dirty, counterparty],
   }));
 };
 /**
@@ -33886,24 +33913,21 @@ const batchProcessedJEvent = (
 // j-events-htlc applyKnownHtlcSecret
 /**
  * One finalized event's working set: the Draft (Accounts, paybook, crontab), the og helper view (routes, jBatchState,
- * messages, this event's outputs), queued Account txs, dirty Accounts.
+ * messages, this event's outputs), queued Account txs.
  */
 type JEv = {
   readonly draft: Draft;
   readonly cj: Cj;
   readonly ops: readonly AccountTxTarget[];
-  readonly dirty: readonly string[];
 };
 const jevOf = (step: JEventStep, ctx: FoldContext): JEv => ({
   draft: step.draft,
   cj: cjOf(step.draft, ctx.timestamp, ctx.runtimeSeed),
   ops: step.claims,
-  dirty: step.dirty,
 });
 const jevDone = (x: JEv, ctx: FoldContext): JEventStep => ({
   draft: cjInto(x.draft, x.cj, ctx.timestamp),
   claims: x.ops,
-  dirty: x.dirty,
 });
 const jevSay = (x: JEv, ...messages: readonly string[]): JEv => ({ ...x, cj: cjSay(x.cj, ...messages) });
 const jevBroadcast = (x: JEv): Result<JEv, EntityError> => map(localJBroadcast(x.cj), (b) => ({ ...x, cj: b.cj }));
@@ -34356,12 +34380,12 @@ const retiredOps = (x: JEv, retired: RetiredJBatch, ops: string, peer: string): 
     sayWhen(retired.removed > 0, `🧹 Removed ${retired.removed} stale ${ops} op(s) for ${peer.slice(-4)}`),
   );
 /**
- * og: stashed reveals flush into the host (the Account is dirty now), and the jBatch wakes when `wake` says so for
+ * og: stashed reveals flush into the host, and the jBatch wakes when `wake` says so for
  * the flushed count.
  */
-const flushedReveals = (x: JEv, peer: string, wake: (flushed: number) => boolean): Result<JEv, EntityError> =>
+const flushedReveals = (x: JEv, wake: (flushed: number) => boolean): Result<JEv, EntityError> =>
   chain(flushDeferredReveals(x.cj.host), ({ host, flushed }) =>
-    broadcastWhen(wake(flushed))({ ...x, cj: cjHost(x.cj, host), dirty: [...x.dirty, peer] }),
+    broadcastWhen(wake(flushed))({ ...x, cj: cjHost(x.cj, host) }),
   );
 const withActiveDispute = (x: JEv, peer: string, child: AccountReplica, active: ActiveDispute): JEv => ({
   ...x,
@@ -34448,7 +34472,7 @@ const disputeStartedJEvent = (
           return chain(retiredOps(x, retired, "dispute-start", peer), (retiredX) =>
             chain(lockPullCounter(retiredX, peer, ctx), ({ x: locked, queued }) => {
               const wake = (flushed: number): boolean => (flushed > 0 || queued) && retired.removed === 0;
-              return chain(flushedReveals(locked, peer, wake), (woke) =>
+              return chain(flushedReveals(locked, wake), (woke) =>
                 chain(requireDt(ctx, child), (dt) => {
                   const followed = jevPipe(
                     woke,
@@ -34581,7 +34605,7 @@ const counterRegisteredJEvent = (
       const locked = `🛡️ Counter-proof N${c.nonce} locked for ${peer.slice(-4)}`;
       return chain(requireDt(ctx, child), (dt) =>
         chain(eventSourceClaims(x1, peer, body, dt), (claimed) =>
-          map(retiredCounters(claimed, c), (x) => jevDone(jevSay({ ...x, dirty: [...x.dirty, peer] }, locked), ctx)),
+          map(retiredCounters(claimed, c), (x) => jevDone(jevSay(x, locked), ctx)),
         ),
       );
     });
@@ -34804,7 +34828,7 @@ const disputeFinalizedJEvent = (
       chain(finalizedNonceOf(child, data, evidence, finalHash), ({ finalizedJNonce, initialNonce }) => {
         const x0 = jevOf(step, ctx);
         const synced = syncBatchNonce(x0.cj.host.jb, sender, self, batchNonce);
-        const base: JEv = { ...withRetiredJb(x0, synced.jb), dirty: [...x0.dirty, peer] };
+        const base: JEv = withRetiredJb(x0, synced.jb);
         const x = synced.message === undefined ? base : jevSay(base, synced.message);
         return chain(requireDt(ctx, child), (dt) => {
           const scope: SettlementScope = {
@@ -34975,7 +34999,7 @@ const recoveryLearned = (x: JEv, data: LadderRevealEvent, fillRatio: string): JE
     ...active,
     crossJurisdictionRecovery: { ...recovery, resultsByPullId },
   });
-  return { ...withRecovery, dirty: [...x.dirty, accountId] };
+  return withRecovery;
 };
 const ladderRegisteredJEvent = (
   step: JEventStep,
@@ -35154,15 +35178,21 @@ const appliedJBlock =
     const applied = foldResult(block.events, atBlock, (step, e) => finalizedJEvent(step, e, ctx, evidence));
     return map(applied, (step) => ({ step, root: folded.value }));
   };
-/** og applyLocalAccountEffects: a claim for a missing or non-active Account, or one the Account refuses, is skipped. */
+/**
+ * og applyLocalAccountEffects: each claim enters its live Account's mempool in order, and an Account that admitted one
+ * joins the proposal worklist (markProposableAccount, a set: first admission wins), in that order. A claim for a
+ * missing or non-active Account, or one the Account refuses, is skipped.
+ */
 const admitClaims = (draft: Draft, claims: readonly AccountTxTarget[], self: EntityId, ctx: FoldContext): Draft =>
   claims.reduce((d, op) => {
-    const child = d.accountReplicas.get(op.accountId as EntityId);
+    const peer = op.accountId as EntityId;
+    const child = d.accountReplicas.get(peer);
     if (child === undefined || !liveAccount(child)) return d;
     const admitted = admitAt(child, [op.tx], self, L0_CLOCK, ctx.verify);
-    return admitted.ok
-      ? { ...d, ...putChild(d.state, d.accountReplicas, op.accountId as EntityId, admitted.value) }
-      : d;
+    if (!admitted.ok) return d;
+    const touched = d.touched ?? [];
+    const marked = touched.includes(peer) ? touched : [...touched, peer];
+    return { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value), touched: marked };
   }, draft);
 /**
  * og handleJEventEntityTx + applyJEvent: the active proposer's signed range is validated before anything else, a
@@ -35187,7 +35217,7 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
   return chain(reconciled, (suffix): Result<Draft, EntityError> => {
     if (suffix === null) return ok({ ...d, runtimeEvents, touched: [] });
     const start: AppliedJBlock = {
-      step: { draft: { ...d, runtimeEvents }, claims: [], dirty: [] },
+      step: { draft: { ...d, runtimeEvents }, claims: [] },
       root: anchorRoot(state),
     };
     return chain(foldResult(suffix.blocks, start, appliedJBlock(r.jurisdictionRef, ctx)), ({ step, root }) => {
@@ -35220,8 +35250,7 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
             head: certifiedHead(anchor),
             boards: knownBoards({ ...board }),
           };
-          const draft = admitClaims({ ...step.draft, state: { ...applied, jFinality } }, claims, state.id, ctx);
-          return { ...draft, touched: [...new Set(step.dirty)] as EntityId[] };
+          return admitClaims({ ...step.draft, state: { ...applied, jFinality }, touched: [] }, claims, state.id, ctx);
         }),
       );
     });
@@ -40120,6 +40149,9 @@ const drainCommands = (
   };
   const lane = command.kind === "entity-txs" ? "cross-j" : "account-work";
   const staged = stageInput(f, { ...b, queue, localEvents }, input, { lane, recordApplied: false });
+  // og wraps only an outcome that comes back rejected (entity-input-output.ts); a thrown Account worker fatal halts the
+  // frame with its own text
+  if (!staged.ok && haltsRuntime(staged.error)) return frameErr(haltText(staged.error));
   if (!staged.ok) {
     const outcome = `round=${round}:outcome=rejected:detail=${runtimeErrorText(staged.error)}`;
     return frameErr(`RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${command.targetEntityId}:${outcome}`);

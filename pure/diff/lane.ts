@@ -150,18 +150,24 @@ export type Coverage = {
   entityFrames: number;
   /** Frames og halted on (a local bug by og's taxonomy) and the rewrite refused. */
   halts: number;
+  /** og's failure text for each of those halts, in order. */
+  haltTexts: string[];
   /** Disputes both sides saw finalized on chain (the Account stays frozen, its active dispute cleared). */
   disputesFinalized: number;
   actions: Record<string, number>;
   accountTxs: Set<string>;
+  /** Entity tx kinds that were inputs of a frame both sides committed (whether their handler accepted or refused). */
+  entityTxs: Set<string>;
 };
 export const emptyCoverage = (): Coverage => ({
   frames: 0,
   entityFrames: 0,
   halts: 0,
+  haltTexts: [],
   disputesFinalized: 0,
   actions: {},
   accountTxs: new Set(),
+  entityTxs: new Set(),
 });
 
 /** Runtime txs only og's I/O makes: its watcher's observations and cursor, and its adapter's submit results. */
@@ -245,8 +251,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
   let arrived: readonly RoutedEntityInput[] = [];
   let sent: { og: OgEnvelope[]; rw: readonly Shipped[] } = { og: [], rw: [] };
   /**
-   * The host's own queue for the next frame, as og's host loop builds it after a frame: the plan-time wake
-   * (generateHookPings in planRuntimeOutputs: due pings and J-submit retries), then the frame's J-submit retries.
+   * The host's own queue for the next frame, as og's host loop builds it after a frame: the local continuations
+   * (applyOutputPlan), then the plan-time wake (generateHookPings in planRuntimeFrameOutputs: due pings and J-submit
+   * retries), then the frame's J-submit retries.
    */
   let own: { runtimeTxs: readonly RuntimeTx[]; pings: readonly RoutedEntityInput[]; local: Set<unknown> } = {
     runtimeTxs: [],
@@ -357,7 +364,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
       signerId: SIGNERS[u.entity]!,
       entityTxs: treeClone(u.txs.map(wireEntityTx)),
     }));
-    const host = hostInputs([...own.pings, ...pending]);
+    const host = hostInputs([...pending, ...own.pings]);
     arrived = [];
     if (runtimeTxs.length + users.length > 0) {
       enqueueRuntimeInput(env, { runtimeTxs: treeClone(runtimeTxs), entityInputs } as never);
@@ -412,6 +419,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, routes: cfg.routes, runtimeSeed });
     if (ogHalt !== undefined) {
       coverage.halts += 1;
+      coverage.haltTexts.push(ogHalt);
       if (committed.ok) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
       // both refuse the frame, and for the same reason: the rewrite's refusal code is og's halt text, or the whole
       // failure message og's Account worker wrapped into it (`...TS_ACCOUNT_WORKER_FATAL:<n>:<text>\n<stack>`)
@@ -462,7 +470,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
       entityTxs: p.input.kind === "txs" ? p.input.txs.map(wireEntityTx) : [],
     }));
     const ogRouted = ogMempool().entityInputs.filter((i) => !watched(i));
-    const rwRouted = c === null ? [] : [...pingWire, ...unwrap(localNetworkOutputs(c.runtime, c.outbox, cfg.routes))];
+    const rwRouted = c === null ? [] : [...unwrap(localNetworkOutputs(c.runtime, c.outbox, cfg.routes)), ...pingWire];
     cmp("routed", ogRouted, rwRouted);
     // what og's transport carried off this frame is exactly the retained outbox the rewrite committed
     // og's envelope carries the source frame once, for all its rows
@@ -485,6 +493,10 @@ export const createLane = (cfg: LaneConfig): Lane => {
       }),
     );
     if (rec !== undefined) coverage.frames += 1;
+    if (c !== null) {
+      input.entityInputs.forEach(({ input: i }) =>
+        (i.kind === "txs" ? i.txs : []).forEach((tx) => coverage.entityTxs.add(tx.type)));
+    }
     const ogQueued = ogMempool().runtimeTxs;
     const ownTxs = c === null ? own.runtimeTxs : [...planWake!.input.runtimeTxs, ...c.queuedRetries];
     cmp("queued", ogQueued.filter((tx) => !IO_TXS.has(tx.type)), ownTxs);

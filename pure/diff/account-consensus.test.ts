@@ -188,7 +188,7 @@ describe(seedTag("account-consensus: driven scenarios"), () => {
     const r = genesisAB(), from = rightOf(), self = leftOf();
     const f = peerFrame(r, from, { txs: [], accountStateRoot: unwrap(accountStateRoot(r.state)) });
     const view = unwrap(committedView(r.state));
-    const disputeHanko = disputeFor(unwrap(proposalPlan(view, unwrap(localProof(view)), r.dispute, partyIn(r, from).left)), from);
+    const disputeHanko = disputeFor(unwrap(proposalPlan(view, unwrap(localProof(view)), r.dispute, r.dispute, partyIn(r, from).left)), from);
     const received = step(r, { ...ackFrameOf(r, from, f), disputeHanko } as AccountInput, self).replica;
     expect(received._tag).toBe("received");
     const acked = step(received, ackInput(received, self), self);
