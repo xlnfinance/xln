@@ -70,7 +70,7 @@ export type World = {
 export const openWorld = async (seed: number, name: string): Promise<World> => {
   const rand = prng(seed);
   const ri = (n: number): number => Math.floor(rand() * n);
-  const tag = `SEEDX=0x${seed.toString(16)}`;
+  const tag = `WALK_SEED=0x${seed.toString(16)}`;
   const chain = await bootChain();
   const { J, JREPLICA } = jurisdictionOf(chain);
   const ns = `scn-diff-${process.pid}-${name}-${seed.toString(16)}`;

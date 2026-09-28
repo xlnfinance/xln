@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test";
 // Guards come from og's handlers (ast-grep `if ($C) throw $E` over core/entity/tx/handlers): a plain Error there
 // halts og's Runtime, so a draw only offers inputs whose guards hold, and refusal branches are drawn on purpose.
 import { isBatchEmpty } from "../../core/jurisdiction/machine/batch/index.ts";
-import { untilCovered } from "./seed.ts";
+import { seedOf, untilCovered } from "./seed.ts";
 import { tracing } from "./scenario-trace.ts";
 import { SIGNERS, type Coverage, type User } from "./lane.ts";
 import { HUB, openWorld, SPOKES, TOKEN, type World } from "./world.ts";
@@ -29,9 +29,10 @@ type Move =
   | { readonly _tag: "arises"; readonly via: string }
   | { readonly _tag: "pending"; readonly needs: string };
 
-const DEFAULT_SEED = 0x30de1;
-const SEED = Number(process.env["SEEDX"] ?? DEFAULT_SEED);
-const SEEDS = [SEED, SEED + 1, SEED + 2];
+// three walks per run, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1-3); WALK_SEED=0x... replays
+// one walk seed exactly, as the walk prints it
+const WALK_SEED = process.env["WALK_SEED"];
+const SEEDS = WALK_SEED === undefined ? [0x30de1, 0x30de2, 0x30de3].map(seedOf) : [Number(WALK_SEED)];
 /** Committed Runtime frames per run before the walk draws only for coverage. */
 const FRAMES = 30;
 
