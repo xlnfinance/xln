@@ -6,8 +6,8 @@ import { uncovered, walk, walkLine, walkSeeds } from "./walk.ts";
 
 const WALK_SEED = process.env["WALK_SEED"];
 const SEEDS = WALK_SEED === undefined ? walkSeeds(3) : [Number(WALK_SEED)];
-const ROWS = drawnIn([]);
-const WORLD = worldIn([]);
+const ROWS = drawnIn("all");
+const WORLD = worldIn("all");
 
 describe("model: every drawn Entity tx kind, og processRuntime vs the rewrite, frame by frame", () => {
   const seen = new Set<string>();

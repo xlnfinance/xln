@@ -1,5 +1,5 @@
 // Multi-signer boards and Entity provider action draws. Owner: the "boards and provider actions" area thread.
-import { arises, pending, type Moves } from "./areas.ts";
+import { arises, pending, type Moves, type WorldMoves } from "./areas.ts";
 
 export const BOARDS: Moves<"boards"> = {
   propose: pending("a multi-signer board"),
@@ -12,3 +12,6 @@ export const BOARDS: Moves<"boards"> = {
   entityProviderCancelAction: pending("a queued provider action"),
   entityProviderReleaseControlShares: pending("provider control shares"),
 };
+
+/** World moves: none yet. */
+export const BOARDS_WORLD: WorldMoves = {};

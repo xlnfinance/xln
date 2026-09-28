@@ -1,5 +1,5 @@
 // Order book draws: same-j swaps, and the cross-j book and swap kinds. Owner: the "order book" area thread.
-import { arises, pending, type Moves } from "./areas.ts";
+import { arises, pending, type Moves, type WorldMoves } from "./areas.ts";
 
 export const ORDERBOOK: Moves<"orderbook"> = {
   initOrderbookExt: pending("a second token on the hub Accounts (same-j swaps)"),
@@ -17,3 +17,6 @@ export const ORDERBOOK: Moves<"orderbook"> = {
   crossPullClose: arises("cross-j pull settlement"),
   orderbookSweepCrossJurisdiction: arises("the hub's cross-j book sweep"),
 };
+
+/** World moves: none yet. */
+export const ORDERBOOK_WORLD: WorldMoves = {};

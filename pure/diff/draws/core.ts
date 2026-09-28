@@ -1,6 +1,6 @@
 // Core draws: the base world every area walks on (Accounts, credit, payments, reserves, the J batch, chat, profile
 // and hub config). Owner: thread "Independent review of main".
-import { drawn, arises, pending, type Moves, type Step, type WorldMove } from "./areas.ts";
+import { drawn, arises, pending, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { PARTIES, activePairs, pick, amount, one, tx, sealed, queued } from "./world-view.ts";
 import { HUB, SPOKES, TOKEN } from "../world.ts";
 import { SIGNERS } from "../lane.ts";
@@ -102,7 +102,7 @@ export const CORE: Moves<"core"> = {
 };
 
 /** World moves: the chain funds a random Entity's reserve, which og's watcher reports; or the walk idles a frame. */
-export const CORE_WORLD: Readonly<Record<string, WorldMove>> = {
+export const CORE_WORLD: WorldMoves = {
   fund: {
     enabled: () => true,
     draw: async (w): Promise<Step> => {

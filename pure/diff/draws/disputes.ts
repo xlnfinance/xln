@@ -1,5 +1,5 @@
 // Watchtower and dispute draws. Owner: the "watchtower and disputes" area thread.
-import { arises, pending, type Moves } from "./areas.ts";
+import { arises, pending, type Moves, type WorldMoves } from "./areas.ts";
 
 export const DISPUTES: Moves<"disputes"> = {
   prepareDispute: pending("a dispute freezes its Account for the rest of the run; scenario.test.ts drives the lifecycle"),
@@ -8,3 +8,6 @@ export const DISPUTES: Moves<"disputes"> = {
   crossJurisdictionForceSiblingDispute: arises("cross-j dispute salvage"),
   crossJurisdictionSalvage: arises("cross-j dispute salvage"),
 };
+
+/** World moves: none yet. */
+export const DISPUTES_WORLD: WorldMoves = {};

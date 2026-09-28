@@ -14,7 +14,7 @@ import { tracing } from "./scenario-trace.ts";
 import type { Coverage } from "./lane.ts";
 import { openWorld } from "./world.ts";
 import { AREAS, type Area } from "./draws/areas.ts";
-import { drawnIn, worldIn, type Drawn, type NamedWorldMove } from "./draws/index.ts";
+import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -55,7 +55,7 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
       const chosen = at < 0 ? undefined : enabled[at];
       // no Entity tx drawn: one of the enabled world moves, uniformly
       const open = world.filter(([, m]) => m.enabled(w));
-      const around = chosen === undefined ? open[Math.floor(w.rand() * open.length)] : undefined;
+      const around = chosen === undefined ? open[w.ri(open.length)] : undefined;
       const step = chosen !== undefined ? chosen[1].draw(w) : await (around?.[1].draw(w) ?? { runtimeTxs: [], users: [] });
       const name = chosen?.[0] ?? around?.[0] ?? "world";
       tried.set(name, (tried.get(name) ?? 0) + 1);
@@ -96,13 +96,13 @@ const parseArgs = (argv: readonly string[]): Args | string => {
   return { area: area as Area | undefined, seeds, seed: seed === undefined ? undefined : Number(seed) };
 };
 /** The areas an area's walk draws from: the core world plus the area's own (every area when none is named). */
-const areasFor = (area: Area | undefined): readonly Area[] =>
-  area === undefined ? [] : area === "core" ? ["core"] : ["core", area];
-const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(areasFor(area));
+const scopeOf = (area: Area | undefined): Scope =>
+  area === undefined ? "all" : area === "core" ? ["core"] : ["core", area];
+const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(scopeOf(area));
 
 /** One walk in this process: 0 when the lane agreed on every frame. */
 const one = async (area: Area | undefined, seed: number): Promise<number> => {
-  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(areasFor(area)));
+  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)));
   console.log(walkLine(seed, coverage));
   diffs.forEach((d) => console.log(`  DIFF ${d}`));
   console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs] })}`);

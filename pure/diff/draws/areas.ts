@@ -1,9 +1,8 @@
 // Who draws what: every Entity tx kind belongs to exactly one area. The table is typed by the rewrite's EntityTx union,
 // so a new kind without an area is a tsc error, and each area's draws file (draws/<area>.ts) is typed by exactly the
 // kinds this table gives it, so a missing or foreign kind there is a tsc error too. review/walk-areas.md says why.
-import type { EntityTx } from "../../xln.ts";
+import type { EntityTx, RuntimeTx } from "../../xln.ts";
 import type { World } from "../world.ts";
-import type { RuntimeTx } from "../../xln.ts";
 import type { User } from "../lane.ts";
 
 export type Kind = EntityTx["type"];
@@ -99,6 +98,8 @@ export type WorldMove = {
   readonly enabled: (w: World) => boolean;
   readonly draw: (w: World) => Step | Promise<Step>;
 };
+/** One area's world moves, by name (`{}` when it has none). */
+export type WorldMoves = Readonly<Record<string, WorldMove>>;
 /** One area's rows: exactly its kinds. */
 export type Moves<A extends Area> = { readonly [K in KindsOf<A>]: Move };
 

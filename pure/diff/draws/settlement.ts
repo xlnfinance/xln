@@ -1,6 +1,6 @@
 // Settlement draws (og entity/tx/handlers/payments/settle.ts). Owner: thread "Independent review of main".
-import { drawn, type Moves } from "./areas.ts";
-import { activePairs, pick, one, tx, isLeft, sealed } from "./world-view.ts";
+import { drawn, type Moves, type WorldMoves } from "./areas.ts";
+import { activePairs, pick, one, tx, isLeft, sealed, replica, quiet } from "./world-view.ts";
 import type { World } from "../world.ts";
 import type { SettlementOp } from "../../xln.ts";
 
@@ -13,19 +13,11 @@ type OgWorkspace = {
   executorIsLeft: boolean;
   postSettlementDisputeProof?: { leftHanko?: string; rightHanko?: string };
 };
-type OgAccountReplica = {
-  mempool?: { type: string }[];
-  pendingFrame?: { accountTxs: { type: string }[] };
-  state?: { settlementWorkspace?: OgWorkspace & { leftHanko?: string; rightHanko?: string; settlementHash?: string } };
+type SettledState = {
+  settlementWorkspace?: OgWorkspace & { leftHanko?: string; rightHanko?: string; settlementHash?: string };
 };
-const replica = (w: World, x: number, y: number): OgAccountReplica | undefined => w.ogAccount(x, y) as never;
-const workspace = (w: World, x: number, y: number) => replica(w, x, y)?.state?.settlementWorkspace;
-/**
- * Neither side has Account work in flight: a draw reads committed state, and a frame applies routed Account inputs
- * before user txs, so an in-flight frame could sign or replace the workspace under the tx (og then throws, a halt).
- */
-const quiet = (w: World, x: number, y: number): boolean =>
-  [replica(w, x, y), replica(w, y, x)].every((r) => r?.pendingFrame == null && (r?.mempool ?? []).length === 0);
+const workspace = (w: World, x: number, y: number) =>
+  (replica(w, x, y)?.state as SettledState | undefined)?.settlementWorkspace;
 const unsigned = (w: World, x: number, y: number): boolean => {
   const ws = workspace(w, x, y);
   return ws !== undefined && ws.leftHanko === undefined && ws.rightHanko === undefined && ws.settlementHash === undefined;
@@ -106,3 +98,6 @@ export const SETTLEMENT: Moves<"settlement"> = {
     },
   ),
 };
+
+/** World moves: none yet. */
+export const SETTLEMENT_WORLD: WorldMoves = {};
