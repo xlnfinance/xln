@@ -9,9 +9,11 @@
 //     active loan, a close of a pool with loans out or more cash than the hub can pay back.
 // The followup checks the book when the hub commits, a frame or two after the draw, so a draw must not race a tx that
 // changes what it reads. Borrow and close contend for a pool's cash: each waits until no borrow or close request is in
-// flight (two borrows could each see the same liquidity). Close also checks the hub's capacity to pay the lender, so it
-// waits until every hub Account is quiet: og proposes Account frames only after an Entity frame's inputs, so nothing
-// drawn next can cross it. Offer and repay touch only their own pool or loan, and wait only for their own Account.
+// flight (two borrows could each see the same liquidity). Close also checks the hub's capacity to pay the lender, which
+// only a frame the hub commits on the lender's Account first can lower. The lender's Account is idle, so such a frame
+// needs a tx in flight elsewhere that the hub turns into one on the lender's Account when it commits: a lock or a
+// routed payment it forwards, or an offer it fills against the lender's. Close waits until no hub Account carries one.
+// Offer and repay touch only their own pool or loan, and wait only for their own Account.
 // Refusal the walk does draw: a pool funded beyond the lender's own balance, which the Account handler rejects
 // (LENDING_FUND_OWNED_BALANCE_INSUFFICIENT) without a throw.
 import { deriveDelta } from "../../../core/account/utils.ts";
@@ -82,8 +84,16 @@ const contendsForCash = (tx: AccountTxRef): boolean =>
 /** No borrow or close request is queued or proposed on any hub Account, from either side. */
 const cashSettled = (w: World): boolean =>
   SPOKES.every((s) => sides(w, s).every((a) => !inFlight(a).some(contendsForCash)));
-/** Every hub Account is quiet on both sides, so the hub's capacities are the ones it will commit against. */
-const hubQuiet = (w: World): boolean => SPOKES.every((s) => quiet(w, s, HUB));
+/**
+ * The txs whose commit makes the hub queue a tx on another of its Accounts that can take from its side: og forwards a
+ * lock (committed-htlc-followups.ts:147) and a routed payment (:229) to the next hop, and fills a maker's offer with a
+ * swap_resolve on the maker's Account (orderbook/queue.ts:59). A resolve travels back to the payer and only pays the hub.
+ */
+const routesToOthers = (tx: AccountTxRef): boolean =>
+  tx.type === "htlc_lock" || tx.type === "direct_payment" || tx.type === "swap_offer";
+/** No hub Account carries a tx the hub could turn into one on another Account, so its capacities hold until it commits. */
+const nothingRouted = (w: World): boolean =>
+  SPOKES.every((s) => sides(w, s).every((a) => !inFlight(a).some(routesToOthers)));
 /**
  * A spoke that trades with the hub: both sides hold the Account, neither is frozen by a dispute, and no settlement
  * workspace is open on it. og freezes an Account's ordinary txs once its workspace is signed
@@ -195,7 +205,7 @@ export const LENDING: Moves<"lending"> = {
   lendingOffer: drawn(when((w) => idleSpokes(w).some((s) => ownFunds(w, s) > 0n)), offer),
   lendingBorrow: drawn(when((w) => cashSettled(w) && lendable(w).length > 0 && tradingSpokes(w).length > 0), borrow),
   lendingRepay: drawn(when((w) => repayable(w).length > 0), repay),
-  lendingClosePosition: drawn(when((w) => hubQuiet(w) && closable(w).length > 0), close),
+  lendingClosePosition: drawn(when((w) => cashSettled(w) && nothingRouted(w) && closable(w).length > 0), close),
 };
 
 /** World moves: none; the lending book is built from Entity txs alone. */
