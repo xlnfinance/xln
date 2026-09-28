@@ -54,7 +54,7 @@ import {
 
 export const T0 = 1_700_000_000_000;
 
-/** Anvil account #3: xln_run keys only #0-#2, so its signer signs through the scenario's own member signer. */
+/** Anvil account #3 (xln_run MORE_ANVIL_KEYS[0]): Entity D's signer, which the lane signs for with its own key. */
 const EXTRA_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
 const EXTRA_SIGNER = signerAddress(EXTRA_KEY);
 /** Anvil accounts #4 and #5: the numbered Entities' sole validators (xln_run's verifiers sign for #3-#9). */

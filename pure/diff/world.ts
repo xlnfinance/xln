@@ -13,6 +13,12 @@ import { withDeterministicHtlcTestSecret } from "../../core/protocol/htlc/test-s
 import { getTokenCapacity } from "../../core/pathfinding/capacity.ts";
 import { attachLiveJAdapter } from "../../core/runtime/j-submit/live-jadapters.ts";
 import type { BrowserVMProvider } from "../../core/jurisdiction/adapter/browservm/browservm-provider.ts";
+import {
+  getCertifiedBoardNodeStore,
+  getCertifiedBoardStackKey,
+  resolveObserverCertifiedBoardRecord,
+} from "../../core/jurisdiction/machine/board-registry/index.ts";
+import { registrationEvidenceKey } from "../../core/jurisdiction/machine/registration-evidence/index.ts";
 import { unwrap } from "../xln_run.ts";
 import { bootChain, createLane, emptyCoverage, jurisdictionOf, KEYS, prng, SIGNERS, T0, treeClone } from "./lane.ts";
 import type { Coverage, Lane, User } from "./lane.ts";
@@ -24,33 +30,33 @@ export const HUB = 1;
 export const SPOKES = [0, 2, 3] as const;
 /**
  * One Entity of the world: its board as indexes into SIGNERS in board order (board index 0 proposes), its threshold,
- * and whether it is numbered (registered on chain, so it holds a certified board record) or lazy (its id is its board
+ * and its kind: numbered (registered on chain, so it holds a certified board record) or lazy (its id is its board
  * hash).
  */
 type Member = {
   readonly name: string;
   readonly board: readonly number[];
   readonly threshold: bigint;
-  readonly numbered: boolean;
+  readonly kind: "lazy" | "numbered";
 };
-const soleSigner = (name: string, signer: number, numbered: boolean): Member => ({
+const soleSigner = (name: string, signer: number, kind: Member["kind"]): Member => ({
   name,
   board: [signer],
   threshold: 1n,
-  numbered,
+  kind,
 });
 /** Two numbered 1-of-1 Entities, each over a signer of its own; each can target the other. */
 export const NUMBERED = [4, 5] as const;
 /** The 2-of-3 lazy board over SIGNERS 0, 1 and 2, signer 0 proposing; it joins only under WALK_BOARD (see below). */
 export const BOARD = 6;
 const MEMBERS: readonly Member[] = [
-  soleSigner("A", 0, false),
-  soleSigner("H", 1, false),
-  soleSigner("C", 2, false),
-  soleSigner("D", 3, false),
-  soleSigner("N1", 4, true),
-  soleSigner("N2", 5, true),
-  { name: "B", board: [0, 1, 2], threshold: 2n, numbered: false },
+  soleSigner("A", 0, "lazy"),
+  soleSigner("H", 1, "lazy"),
+  soleSigner("C", 2, "lazy"),
+  soleSigner("D", 3, "lazy"),
+  soleSigner("N1", 4, "numbered"),
+  soleSigner("N2", 5, "numbered"),
+  { name: "B", board: [0, 1, 2], threshold: 2n, kind: "lazy" },
 ];
 export const NAMES = MEMBERS.map((m) => m.name);
 /**
@@ -58,7 +64,7 @@ export const NAMES = MEMBERS.map((m) => m.name);
  * preparation (runtime/mempool/entity-height-barrier.ts applyEntityHeightDurabilityBarrier) keeps one merge group per
  * certificate-carrying replica lane in a Runtime frame and requeues the rest; the rewrite has no such barrier.
  */
-const boardJoins = (): boolean => process.env["WALK_BOARD"] !== undefined;
+const boardJoins = (): boolean => process.env["WALK_BOARD"] === "1";
 
 type ProfileRow = { counterpartyId: string; tokenCapacities: unknown };
 /** og's committed Account, as far as steps read it. */
@@ -82,6 +88,12 @@ type OgEntityState = {
 export type World = {
   readonly tag: string;
   readonly lane: Lane;
+  /**
+   * The registration evidence frame openWorld commits before any import: its lane diffs, and a line for each numbered
+   * Entity og holds no evidence for (og scenarios/harness/boot.ts REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISSING). Empty
+   * when both sides agree and the evidence is there; a caller treats it as its first setup frame.
+   */
+  readonly evidence: readonly string[];
   readonly chain: Awaited<ReturnType<typeof bootChain>>;
   readonly coverage: Coverage;
   readonly ids: readonly EntityId[];
@@ -94,8 +106,8 @@ export type World = {
   /** The multi-signer Entities in this world (none unless WALK_BOARD). */
   readonly boards: readonly number[];
   /**
-   * og's Entity holds a certified board registry: its first J-prefix frame has committed the chain's board events
-   * (og entity/tx/j-events-board.ts applyCertifiedBoardJEvent), so a numbered Entity finds its own record.
+   * og finds Entity x's own certified board record in x's registry (og board-registry resolveObserverCertifiedBoardRecord):
+   * a numbered Entity once its first J-prefix frame has committed the chain's board events; never a lazy one.
    */
   readonly certified: (x: number) => boolean;
   /** The world's own draws, in order: every random choice a run makes comes from here. */
@@ -159,7 +171,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
   const numberWord = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
   const numberedIds = new Map<number, string>(NUMBERED.map((x, i) => [x, numberWord(numbers[i]!)]));
   const idOf = (m: Member, x: number): EntityId =>
-    (m.numbered ? numberedIds.get(x)! : unwrap(lazyBoardEntityId(config(x))).toLowerCase()) as EntityId;
+    (m.kind === "numbered" ? numberedIds.get(x)! : unwrap(lazyBoardEntityId(config(x))).toLowerCase()) as EntityId;
   const ids = members.map(idOf);
   const secrets = new Map<string, string>();
   const gossip = (env as unknown as { gossip?: { getProfile?: (id: string) => unknown } }).gossip;
@@ -183,8 +195,12 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
   // og registerEntities: a numbered H0 never shares a Runtime frame with the evidence that authorizes it, so the
   // watcher's registration evidence (recordAuthenticatedJAuthority) commits in a frame of its own first
   await chain.pollNow?.();
-  const evidence = await lane.tick([], []);
-  if (evidence.length > 0) throw new Error(`${tag} registration evidence frame differs:\n${evidence.join("\n")}`);
+  const evidenceDiffs = await lane.tick([], []);
+  const stackKey = getCertifiedBoardStackKey(J);
+  const held = env.infrastructure?.certifiedRegistrationEvidence;
+  const missing = NUMBERED.filter((x) => held?.get(registrationEvidenceKey(stackKey, ids[x]!)) === undefined)
+    .map((x) => `${tag} REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISSING:${NAMES[x]}:${ids[x]}`);
+  const evidence = [...evidenceDiffs, ...missing];
 
   const user = (entity: number, txs: readonly EntityTx[], signer?: number): User =>
     signer === undefined ? { entity, txs } : { entity, txs, signer };
@@ -270,6 +286,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
   return {
     tag,
     lane,
+    evidence,
     chain,
     coverage,
     ids,
@@ -290,7 +307,11 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
     hasAccount: (x, y) => ogState(x)?.accounts?.has(ids[y]!) ?? false,
     reserveOf: (x) => ogState(x)?.reserves?.get(1) ?? 0n,
     batchOf: (x) => ogState(x)?.jBatchState,
-    certified: (x) => ogState(x)?.certifiedBoardState != null,
+    certified: (x) => {
+      const state = ogState(x);
+      return state !== undefined
+        && resolveObserverCertifiedBoardRecord(state as never, getCertifiedBoardNodeStore(env as never), ids[x]!) !== null;
+    },
     importAll,
     close,
   };
