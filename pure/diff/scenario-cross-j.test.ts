@@ -26,6 +26,7 @@ import {
   bootChain,
   createLane,
   emptyCoverage,
+  holdAccountWorkers,
   jurisdictionOf,
   KEYS,
   prng,
@@ -94,6 +95,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
     coverage.actions[kind] = (coverage.actions[kind] ?? 0) + 1;
   };
   const namespaces: string[] = [];
+  const accountWorkers: ReturnType<typeof holdAccountWorkers>[] = [];
 
   /** One Runtime: both chains bound through its own adapter view (og gives each Runtime its own watcher). */
   const host = async (name: string, hosted: readonly number[]) => {
@@ -105,6 +107,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
     env.state.timestamp = T0;
     env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } } as never;
     env.activeJurisdiction = js[0]!.J.name;
+    accountWorkers.push(holdAccountWorkers(env));
     await js.reduce(async (prev, j, i) => {
       await prev;
       const chain = chains[i]!;
@@ -390,6 +393,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
     }, Promise.resolve());
     return { coverage, settled: state.settled, materialized: state.materialized };
   } finally {
+    await Promise.all(accountWorkers.map((workers) => workers.close()));
     await [envU, envH].reduce(async (prev, env) => {
       await prev;
       await closeRuntimeDb(env);
