@@ -18,8 +18,9 @@ export type Tagged<Tag extends string, Extra extends object = {}> =
 export type Of<T extends { readonly _tag: string }, K extends T["_tag"]> =
   Extract<T, { readonly _tag: K }>;
 export type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** A tagged value: the payload is required (`{}` for none) and cannot carry a `_tag` of its own. */
 export const tag = <T extends string>(_tag: T) =>
-  <X extends object = {}>(x: X = {} as X): Tagged<T, X> => ({ _tag, ...x }) as Tagged<T, X>;
+  <X extends object & { readonly _tag?: never }>(x: X): Tagged<T, X> => ({ _tag, ...x }) as Tagged<T, X>;
 /** `{k: v}` when defined, `{}` otherwise — absence and undefined are one value (§4.2). */
 export const opt = <K extends string, V>(k: K, v: V | undefined): { readonly [P in K]?: V } =>
   (v === undefined ? {} : { [k]: v }) as { readonly [P in K]?: V };
@@ -39,7 +40,7 @@ export const mapErr = <T, E, F>(r: Result<T, E>, f: (e: E) => F): Result<T, F> =
   (r.ok ? r : err(f(r.error)));
 export const guard = <E>(pass: boolean, e: E): Result<void, E> => (pass ? ok(undefined) : err(e));
 export const unwrapOr = <T, E>(r: Result<T, E>, f: (e: E) => T): T => (r.ok ? r.value : f(r.error));
-/** Folds left to right; the first refusal is the answer and later items are not visited. */
+/** Snapshots the iterable, then folds left to right; the first refusal is the answer and `f` sees no later item. */
 export const foldResult = <S, X, E>(
   xs: Iterable<X>, init: S, f: (s: S, x: X, i: number) => Result<S, E>,
 ): Result<S, E> =>
@@ -8772,6 +8773,9 @@ const project = (b: AccountBody): Result<CommittedAccountState, ViewError> => {
 };
 // Projection and preparation are pure but costly, so each body's view is computed once and the bodies whose
 // commitment was already prepared are remembered; preparing a successor then only hashes what changed.
+// The caches key on identity, so they rely on a body never changing after it is built: every transition here makes
+// a new body. A caller that keeps a mutable Map it put into a body and mutates it later gets the stale root; copy
+// such containers before building the body.
 const views = new WeakMap<AccountBody, Result<CommittedAccountState, ViewError>>();
 const preparedBodies = new WeakSet<AccountBody>();
 export const committedView = (b: AccountBody): Result<CommittedAccountState, ViewError> => {
@@ -12878,10 +12882,42 @@ const importPairs = (og: Binary | undefined): Result<SwapPairs, string> => {
     ? ok({ _tag: "pairs", pairs: og as unknown as readonly DefaultSwapPair[] })
     : err("malformed swapTradingPairs");
 };
-/** og proposals (every Entity has the map) and og's legacy per-signer nonces, which nothing in og still moves. */
-const importMap = <V,>(og: Binary | undefined, field: string): Result<ReadonlyMap<string, V>, string> => {
+/**
+ * og proposals (every Entity has the map) and og's legacy per-signer nonces, which nothing in og still moves. Every
+ * entry is checked before the map is trusted as `V`: a record og cannot produce is refused, naming the entry.
+ */
+const importMap = <V,>(
+  og: Binary | undefined,
+  field: string,
+  problem: (key: string, value: unknown) => string | undefined,
+): Result<ReadonlyMap<string, V>, string> => {
   if (og === undefined) return ok(new Map());
-  return og instanceof Map ? ok(og as unknown as ReadonlyMap<string, V>) : err(`a non-map ${field}`);
+  if (!(og instanceof Map)) return err(`a non-map ${field}`);
+  const problems = [...og].map(([k, v]) => (typeof k === "string" ? problem(k, v) : `a non-text ${field} key`));
+  const first = problems.find((p) => p !== undefined);
+  return first === undefined ? ok(og as unknown as ReadonlyMap<string, V>) : err(first);
+};
+const nonceProblem = (signer: string, nonce: unknown): string | undefined => {
+  const counted = typeof nonce === "number" && Number.isSafeInteger(nonce) && nonce >= 0;
+  return counted ? undefined : `a malformed nonce for ${signer}`;
+};
+/** og system/basic.ts only ever stores 'yes' or 'no', bare or with a comment. */
+const storedVote = (vote: unknown): boolean => {
+  const choice = (c: unknown): boolean => c === "yes" || c === "no";
+  const commented = recOf(vote);
+  const withComment = commented !== null && choice(commented["choice"]) && typeof commented["comment"] === "string";
+  return choice(vote) || withComment;
+};
+/** og Proposal (entity/types.ts), keyed by its own id. */
+const proposalProblem = (id: string, value: unknown): string | undefined => {
+  const p = recOf(value);
+  const text = (k: string): boolean => p !== null && typeof p[k] === "string";
+  const count = (k: string): boolean => p !== null && typeof p[k] === "number" && Number.isSafeInteger(p[k]);
+  const votes = p?.["votes"];
+  const wellFormed = p !== null && p["id"] === id && text("proposer") && text("boardHash") && text("actionHash")
+    && count("boardEpoch") && count("created") && recOf(p["action"]) !== null
+    && votes instanceof Map && [...votes].every(([voter, vote]) => typeof voter === "string" && storedVote(vote));
+  return wellFormed ? undefined : `a malformed proposal ${id}`;
 };
 const ogSwapPairs = (p: SwapPairs): EntityCommitted =>
   (p._tag === "pairs" ? { swapTradingPairs: p.pairs as unknown as Binary } : {});
@@ -12949,8 +12985,11 @@ const importSections = (
     ),
     treasury: mapErr(importTreasury(og), unreachable("TREASURY")),
     schedule: mapErr(importSchedule(og["crontabState"]), unreachable("CRONTAB")),
-    nonces: mapErr(importMap<number>(og["nonces"], "nonces"), unreachable("NONCES")),
-    proposals: mapErr(importMap<StoredProposal>(og["proposals"], "proposals"), unreachable("PROPOSALS")),
+    nonces: mapErr(importMap<number>(og["nonces"], "nonces", nonceProblem), unreachable("NONCES")),
+    proposals: mapErr(
+      importMap<StoredProposal>(og["proposals"], "proposals", proposalProblem),
+      unreachable("PROPOSALS"),
+    ),
     encryptionKey: mapErr(importKey(og["entityEncryptionPublicKey"]), unreachable("ENCRYPTION_KEY")),
     swapPairs: mapErr(importPairs(og["swapTradingPairs"]), unreachable("SWAP_PAIRS")),
     wallet: mapErr(importWallet(og["externalWallet"]), unreachable("EXTERNAL_WALLET")),
