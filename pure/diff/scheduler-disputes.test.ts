@@ -145,7 +145,7 @@ describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og sc
       expect(d).toEqual(collectDerivedDeadlines(og, now));
       deadlines += d.length;
       const at = now ?? 1_300, periodic = rng() < 0.7;
-      const rwJobs = dueWakeJobs(state, replicas, unwrap(crontabOf(state)), at, periodic);
+      const rwJobs = dueWakeJobs(state, replicas, crontabOf(state), at, periodic);
       expect(rwJobs).toEqual(collectDueScheduledWakeJobs(og, at, periodic));
       jobs += rwJobs.length;
     }
@@ -226,7 +226,7 @@ describe(seedTag("scheduler-disputes: executeCrontab (og scheduler/index.ts, due
       if (ogErr !== undefined) { counts.set("halt", (counts.get("halt") ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const run = unwrap(rw);
       expect(run.outputs).toEqual((ogOut ?? []).map((o) => ({ signerId: o.signerId, txs: o.entityTxs })));
-      const after = unwrap(crontabOf(run.state));
+      const after = crontabOf(run.state);
       expect(sortedEntries(after.hooks)).toEqual(sortedEntries(og.crontabState.hooks));
       expect(after.tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
       const child = run.accountReplicas.get(BOB) as any;
@@ -357,7 +357,7 @@ describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/
       expect(ogJb(rw.state)).toEqual(og.jBatchState);
       expect(rw.events.map((e) => e.message)).toEqual(msgs);
       expect(rw.broadcast).toBe(ogBroadcast);
-      expect(sortedEntries(unwrap(crontabOf(rw.state)).hooks)).toEqual(sortedEntries(og.crontabState.hooks));
+      expect(sortedEntries(crontabOf(rw.state).hooks)).toEqual(sortedEntries(og.crontabState.hooks));
       if (msgs.some((m) => m.startsWith("🧹 Removed"))) removedAny++;
       if (ogBroadcast) broadcasts++;
       if (msgs.some((m) => m.startsWith("↻"))) synced++;

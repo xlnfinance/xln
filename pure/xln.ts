@@ -11406,6 +11406,8 @@ export type EntityState = {
   readonly continuations: LazyMap<PendingContinuation>;
   /** og reserves and debt ledgers. */
   readonly treasury: Treasury;
+  /** og crontabState: the periodic tasks and the stored deadline hooks. */
+  readonly schedule: Schedule;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12300,6 +12302,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   deferredApprovals: s.deferredApprovals,
   continuations: s.continuations,
   treasury: s.treasury,
+  schedule: s.schedule,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12946,6 +12949,7 @@ type TypedSections = Pick<
   | "deferredApprovals"
   | "continuations"
   | "treasury"
+  | "schedule"
 >;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (
@@ -12955,7 +12959,7 @@ const importSections = (
   const { jBatchState, entityProviderActionState, ...sectioned } = og;
   const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, entityCommandNonces, ...rest } = sectioned;
   const { deferredAccountProposals, settlementContinuations, ...unsettled } = rest;
-  const { reserves, outDebtsByToken, inDebtsByToken, ...seeded } = unsettled;
+  const { reserves, outDebtsByToken, inDebtsByToken, crontabState, ...seeded } = unsettled;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
   const actions = entityProviderActionState as EntityProviderActionState | undefined;
@@ -12974,6 +12978,7 @@ const importSections = (
       unreachable("CONTINUATION"),
     ),
     treasury: mapErr(importTreasury(og), unreachable("TREASURY")),
+    schedule: mapErr(importSchedule(crontabState), unreachable("CRONTAB")),
   });
   return map(imported, ({ hubbed: { hub, committed }, ...sections }) => ({ ...sections, committed, hub }));
 };
@@ -16045,14 +16050,14 @@ const scheduleDisputeDeadline = (
   peer: string,
   triggerAt: number,
 ): Result<EntityState, EntityError> => {
-  if (state.committed["crontabState"] === undefined) return ok(state);
+  if (state.schedule._tag === "unscheduled") return ok(state);
   const hook: ScheduledHook = {
     id: `dispute-deadline:${peer.toLowerCase()}`,
     triggerAt,
     type: "dispute_deadline",
     data: { accountId: peer },
   };
-  return map(crontabOf(state), (c) => withCrontab(state, scheduleHook(c, hook)));
+  return ok(withCrontab(state, scheduleHook(crontabOf(state), hook)));
 };
 // ---- cross-j salvage, forced sibling disputes, direct HTLC resolution ----
 // og entity/tx/handlers/cross-j/{salvage,force-sibling-dispute}.ts, htlc/direct.ts handleResolveHtlcLockEntityTx,
@@ -16491,28 +16496,38 @@ export const cancelHook = (c: Crontab, id: string): Crontab =>
   c.hooks.has(id) ? { ...c, hooks: mapDelete(c.hooks, id) } : c;
 /** og crontabTaskDueAt. */
 export const crontabTaskDueAt = (t: Pick<CrontabTask, "lastRun" | "intervalMs">): number => t.lastRun + t.intervalMs;
+/** og crontabState: absent only before the Entity's first frame, whose applyEntityFrame creates it. */
+export type Schedule = Readonly<{ _tag: "unscheduled" }> | Readonly<{ _tag: "crontab"; crontab: Crontab }>;
+export const UNSCHEDULED: Schedule = { _tag: "unscheduled" };
+/** The Entity's crontab (og `state.crontabState ??= initCrontab()` before the frame's txs). */
+export const crontabOf = (state: EntityState): Crontab =>
+  state.schedule._tag === "crontab" ? state.schedule.crontab : initCrontab();
+export const withCrontab = (state: EntityState, crontab: Crontab): EntityState =>
+  ({ ...state, schedule: { _tag: "crontab", crontab } });
+/** og applyEntityFrame's `??=`: a frame always leaves a crontab behind. */
+const scheduled = (state: EntityState): EntityState =>
+  state.schedule._tag === "crontab" ? state : withCrontab(state, initCrontab());
+/** og's record: the tasks as held, the hooks as a map the root turns into their Entity collection commitment. */
+const ogSchedule = (s: Schedule): EntityCommitted =>
+  s._tag === "unscheduled"
+    ? {}
+    : { crontabState: { tasks: s.crontab.tasks, hooks: s.crontab.hooks } as unknown as Binary };
 const emptyCollection = (v: unknown): boolean =>
   typeof v === "object" && v !== null && !(v instanceof Map) && (v as { readonly leafCount?: unknown }).leafCount === 0;
-/** The hooks as held: a map, or an empty collection commitment; a non-empty commitment cannot be read back. */
-const heldHooks = (hooks: unknown): ReadonlyMap<string, ScheduledHook> | undefined => {
-  switch (true) {
-    case hooks instanceof Map: return hooks as ReadonlyMap<string, ScheduledHook>;
-    case emptyCollection(hooks): return new Map();
-    default: return undefined;
-  }
+/** og's record; hooks held as an empty collection commitment read as none. */
+const importSchedule = (og: Binary | undefined): Result<Schedule, string> => {
+  if (og === undefined) return ok(UNSCHEDULED);
+  const raw = recOf(og);
+  const hooks = raw?.["hooks"];
+  const tasks = raw?.["tasks"];
+  const held = hooks instanceof Map ? hooks : emptyCollection(hooks) ? new Map() : undefined;
+  if (held === undefined || !(tasks instanceof Map)) return err("a crontab without task and hook maps");
+  const crontab: Crontab = {
+    tasks: tasks as ReadonlyMap<"hubRebalance", CrontabTask>,
+    hooks: held as ReadonlyMap<string, ScheduledHook>,
+  };
+  return ok({ _tag: "crontab", crontab });
 };
-/** The Entity's crontab (og `state.crontabState ??= initCrontab()` before the frame's txs). */
-export const crontabOf = (state: EntityState): Result<Crontab, EntityError> => {
-  const raw = state.committed["crontabState"] as { readonly tasks?: unknown; readonly hooks?: unknown } | undefined;
-  if (raw === undefined) return ok(initCrontab());
-  const hooks = heldHooks(raw.hooks);
-  if (hooks === undefined || !(raw.tasks instanceof Map)) return invariant("SCHEDULED_WAKE_CRONTAB_MISSING");
-  return ok({ tasks: raw.tasks as ReadonlyMap<"hubRebalance", CrontabTask>, hooks });
-};
-export const withCrontab = (state: EntityState, c: Crontab): EntityState => ({
-  ...state,
-  committed: { ...state.committed, crontabState: { tasks: c.tasks, hooks: c.hooks } as unknown as Binary },
-});
 /**
  * og projectEntityConsensusState `crontabState`: the tasks as held, the hooks as their Entity collection commitment.
  */
@@ -16659,11 +16674,11 @@ export const dueWakeJobs = (
  */
 export const nextWakeAt = (r: EntityReplica): number | undefined => {
   const c = crontabOf(r.state);
-  if (!isActiveLeader(r) || !c.ok) return undefined;
+  if (!isActiveLeader(r)) return undefined;
   const times = [
     ...derivedDeadlines(r.state, r.accountReplicas).map((d) => d.triggerAt),
-    ...[...c.value.hooks.values()].map((h) => h.triggerAt),
-    ...pendingTasks(r.state, r.accountReplicas, c.value).map(crontabTaskDueAt),
+    ...[...c.hooks.values()].map((h) => h.triggerAt),
+    ...pendingTasks(r.state, r.accountReplicas, c).map(crontabTaskDueAt),
   ];
   return times.length === 0 ? undefined : times.reduce((a, b) => Math.min(a, b));
 };
@@ -16672,9 +16687,9 @@ export const nextWakeAt = (r: EntityReplica): number | undefined => {
  * tx (none while a wake is queued).
  */
 export const localScheduledWake = (r: EntityReplica, now: bigint): EntityInput | undefined => {
-  const c = crontabOf(r.state);
-  if (!isActiveLeader(r) || !c.ok || r.mempool.some((tx) => tx.type === "scheduledWake")) return undefined;
-  const jobs = dueWakeJobs(r.state, r.accountReplicas, c.value, Number(now), true).slice(0, MAX_SCHEDULED_WAKE_JOBS);
+  if (!isActiveLeader(r) || r.mempool.some((tx) => tx.type === "scheduledWake")) return undefined;
+  const due = dueWakeJobs(r.state, r.accountReplicas, crontabOf(r.state), Number(now), true);
+  const jobs = due.slice(0, MAX_SCHEDULED_WAKE_JOBS);
   const first = jobs[0];
   if (first === undefined) return undefined;
   const wake: WakeData = { version: 1, proposerSignerId: signerId(r.signerId), dueAt: first.dueAt, jobs };
@@ -17015,10 +17030,7 @@ export const rearmBoardRefreshes = <D extends Folded>(before: Replicas, d: D, no
     undefined,
   );
   if (latest === undefined) return ok(d);
-  return map(crontabOf(d.state), (c) => ({
-    ...d,
-    state: withCrontab(d.state, scheduleHook(c, refreshHookFor(latest, now, ""))),
-  }));
+  return ok({ ...d, state: withCrontab(d.state, scheduleHook(crontabOf(d.state), refreshHookFor(latest, now, ""))) });
 };
 type ActivationStep = BoardJEventStep & { readonly accountReplicas: Replicas };
 /** A peer's activation: a certified Account with it arms the 24h counterparty refresh deadline hook. */
@@ -17087,7 +17099,8 @@ const boardActivation = (
     return invariant(`BOARD_HANKO_REFRESH_ACTIVATION_LOG_INDEX_INVALID:${String(event.meta?.logIndex)}`);
   const a: Activation = { jHeight, logIndex };
   const activated = lower(event.entityId);
-  return map(crontabOf(step.state), (crontab) =>
+  const crontab = crontabOf(step.state);
+  return ok(
     activated === lower(step.state.id)
       ? ownActivation(step, replicas, crontab, a, now)
       : peerActivation(step, replicas, crontab, activated, a, now),
@@ -17963,8 +17976,8 @@ export const executeCrontab = (
   now: number,
   manualBroadcast = false,
   runtimeNow = now,
-): Result<CrontabRun, EntityError> =>
-  chain(crontabOf(state), (crontab) => {
+): Result<CrontabRun, EntityError> => {
+    const crontab = crontabOf(state);
     const stored = [...crontab.hooks.values()].filter((h) => h.triggerAt <= now);
     const due: readonly DueHook[] = [...derivedDeadlines(state, replicas, now), ...stored].toSorted(compareDeadlines);
     const first = signerId([...membersOf(state.quorum).keys()][0] ?? "");
@@ -18008,7 +18021,7 @@ export const executeCrontab = (
         };
       });
     });
-  });
+  };
 /** og returns the crontab's outputs to other Entities and its hashesToSign beside the approved self txs. */
 const withCrontabEffects = (d: Draft, run: CrontabRun): Draft => {
   const hashes = [...run.hashes, ...(d.hashes ?? [])];
@@ -18401,11 +18414,11 @@ export const disputeStartedEffects = (
     retired.removed > 0 && `🧹 Removed ${retired.removed} stale dispute-start op(s) for ${peer.slice(-4)}`,
     `⚔️ DISPUTE ${weAreStarter ? "STARTED" : "vs us"} with ${peer.slice(-4)}, timeout: unix ${e.disputeTimeout}`,
   );
-  return map(crontabOf(state), (crontab) => ({
-    state: withCrontab(withJBatch(state, retired.jb), scheduleHook(crontab, deadline)),
+  return ok({
+    state: withCrontab(withJBatch(state, retired.jb), scheduleHook(crontabOf(state), deadline)),
     events: messages.map(status),
     broadcast: retired.broadcast,
-  }));
+  });
 };
 /** A DisputeFinalized as the Entity reads it, with the Account finality's result. */
 type FinalizedDisputeEvent = {
@@ -18438,13 +18451,11 @@ export const disputeFinalizedEffects = (
     e.hadActiveDispute && `✅ DISPUTE FINALIZED with ${cp} (nonce ${e.initialNonce})`,
     retired.removed > 0 && `🧹 Removed ${retired.removed} stale dispute-finalize op(s) for ${cp}`,
   );
-  return map(crontabOf(state), (crontab) => {
-    const next = withJBatch(state, retired.jb);
-    return {
-      state: e.hadActiveDispute ? withCrontab(next, cancelHook(crontab, `dispute-deadline:${peer}`)) : next,
-      events: messages.map(status),
-      broadcast: retired.broadcast,
-    };
+  const next = withJBatch(state, retired.jb);
+  return ok({
+    state: e.hadActiveDispute ? withCrontab(next, cancelHook(crontabOf(state), `dispute-deadline:${peer}`)) : next,
+    events: messages.map(status),
+    broadcast: retired.broadcast,
   });
 };
 /**
@@ -24126,11 +24137,10 @@ const paybookStep = (f: Following, c: FollowedFrame, at: CommittedAt): Result<Fo
 const openCross = (f: Following, at: CommittedAt): Result<CrossFollowing, EntityError> => {
   if (f.cross !== undefined) return ok(f.cross);
   const { state, accountReplicas } = f.d;
-  return map(crontabOf(state), (crontab) => {
-    const book = bookHostOf(state, accountReplicas, at.ctx.timestamp);
-    const host = { ...book, auths: state.crossJurisdictionAuthorizations, crontab };
-    return { crontab0: crontab, step: { host, outputs: [], messages: [], created: [], handled: false } };
-  });
+  const crontab = crontabOf(state);
+  const book = bookHostOf(state, accountReplicas, at.ctx.timestamp);
+  const host = { ...book, auths: state.crossJurisdictionAuthorizations, crontab };
+  return ok({ crontab0: crontab, step: { host, outputs: [], messages: [], created: [], handled: false } });
 };
 /**
  * og applyCommittedCrossJurisdictionFollowup: the input's first cross-j pull opens the book host; each pull steps it.
@@ -24294,7 +24304,7 @@ const rebalanceKick = (d: Draft, at: CommittedAt): Result<Draft, EntityError> =>
     const hook: ScheduledHook = { id: "hub-rebalance-kick", triggerAt: now, type: "hub_rebalance_kick", data };
     return due ? { ...d, state: withCrontab(d.state, scheduleHook(crontab, hook)) } : d;
   };
-  return chain(hasRebalanceWork(at.self, child), (work) => (work ? map(crontabOf(d.state), kick) : ok(d)));
+  return chain(hasRebalanceWork(at.self, child), (work) => (work ? ok(kick(crontabOf(d.state))) : ok(d)));
 };
 /**
  * og applyLocalAccountEffects: each returned Account tx is admitted alone and in order; an Account that admits one
@@ -26640,14 +26650,6 @@ const profileHashToSign = (
     const signed: HashToSign = { hash, type: "profile", context: `profile:${hash}` };
     return map(previous, (p) => (p === hash ? after : { ...after, hashes: [...(after.hashes ?? []), signed] }));
   });
-const EMPTY_COLLECTION = { radix: 16, leafCount: 0, root: ZERO_WORD } as const;
-/** og applyEntityFrame `state.crontabState ??= initCrontab()`: the hubRebalance task at the 1s cadence, no hooks. */
-const DEFAULT_CRONTAB: Binary = {
-  tasks: new Map([
-    ["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun: 0, enabled: true, params: {} }],
-  ]),
-  hooks: EMPTY_COLLECTION,
-};
 const rootConfig = (state: EntityState): EntityRootConfig => {
   const members = [...membersOf(state.quorum)].map(([id, member]) => [signerId(id), member.shares] as const);
   const j = state.jurisdictionConfig;
@@ -26792,6 +26794,7 @@ export const ogSections = (state: EntityState): EntityCommitted => {
     ...state.committed,
     ...ogJFinality(state.jFinality),
     ...ogTreasury(state.treasury),
+    ...ogSchedule(state.schedule),
     ...(fence === undefined ? {} : { entityCommandNonces: fence }),
     ...ogLazyMap("deferredAccountProposals", state.deferredApprovals),
     ...ogLazyMap("settlementContinuations", state.continuations),
@@ -26969,11 +26972,7 @@ const buildFrame = (
   const height = r.head.height + 1n;
   const parent = parentOf(r.head);
   const signer = signerId(leader.proposerSignerId);
-  const committed: EntityCommitted =
-    "crontabState" in folded.state.committed
-      ? folded.state.committed
-      : { ...folded.state.committed, crontabState: DEFAULT_CRONTAB };
-  const draft: Draft = { ...folded, state: { ...folded.state, height, timestamp, committed, leaderState } };
+  const draft: Draft = { ...folded, state: { ...scheduled(folded.state), height, timestamp, leaderState } };
   const roots = all({
     heightNo: frameNumber(height),
     stateRoot: entityRootOf(draft.state, draft.accountReplicas),
@@ -30107,7 +30106,7 @@ const genesisCommitted = (im: Importing): EntityCommitted => {
       bio: "",
       website: "",
     },
-    crontabState: DEFAULT_CRONTAB,
+    crontabState: { tasks: initCrontab().tasks, hooks: new Map() } as unknown as Binary,
     swapTradingPairs: defaultEntitySwapPairs(im.jurisdictionConfig.name, im.domain.chainId) as unknown as Binary,
   };
 };
@@ -34625,12 +34624,12 @@ const disputeClosed =
   (x) => {
     const state = x.draft.state;
     const unhooked =
-      state.committed["crontabState"] !== undefined
-        ? map(crontabOf(state), (c) => withCrontab(state, cancelHook(c, `dispute-deadline:${peer}`)))
-        : ok(state);
-    return map(unhooked, (s) =>
+      state.schedule._tag === "crontab"
+        ? withCrontab(state, cancelHook(state.schedule.crontab, `dispute-deadline:${peer}`))
+        : state;
+    return ok(
       jevSay(
-        { ...x, draft: { ...x.draft, state: s } },
+        { ...x, draft: { ...x.draft, state: unhooked } },
         `✅ DISPUTE FINALIZED with ${peer.slice(-4)} (nonce ${initialNonce})`,
       ),
     );

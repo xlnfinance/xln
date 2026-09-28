@@ -501,7 +501,7 @@ describe(seedTag("disputes-final: DisputeStarted / CounterDisputeRegistered / Di
       const child: any = d.accountReplicas.get(BOB), ogBob = next.accounts.get(BOB);
       expect([i, child?.active ?? child?.queued ?? null]).toEqual([i, ogBob?.activeDispute ?? null]);
       expect([i, child?.state.jNonce ?? null]).toEqual([i, ogBob?.state.jNonce ?? null]);
-      expect([i, sortedHooks(crontab === undefined ? undefined : unwrap(crontabOf(d.state)).hooks)]).toEqual([i, sortedHooks(next.crontabState?.hooks)]);
+      expect([i, sortedHooks(crontab === undefined ? undefined : crontabOf(d.state).hooks)]).toEqual([i, sortedHooks(next.crontabState?.hooks)]);
       expect([i, paybookView(d.state.paybook ?? { entries: new Map(), feesEarned: 0n })]).toEqual([i, paybookView(next.paybook)]);
       const rwOut = d.outputs.map((o: any) => [o.to, o.input.txs.map((t: any) => t.type === "runtimeOutput" ? t.data.entityTxs.map((x: any) => x.type).join("+") : t.type).join(",")]);
       expect([i, rwOut]).toEqual([i, ogOut.value.outputs.map((o: any) => [o.entityId, o.entityTxs.map((t: any) => t.type).join(o.entityId === ALICE ? "," : "+")])]);

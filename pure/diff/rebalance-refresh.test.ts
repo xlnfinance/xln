@@ -119,7 +119,7 @@ describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hu
       const run = unwrap(rw);
       expect(run.outputs).toEqual((ogOut ?? []).map((o) => ({ signerId: o.signerId, txs: o.entityTxs })));
       expect(ogJb(run.state)).toEqual(og.jBatchState);
-      expect(unwrap(crontabOf(run.state)).tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
+      expect(crontabOf(run.state).tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
       for (const a of accts) expect([...((run.accountReplicas.get(a.peer)?.state.submittedAt ?? new Map()) as ReadonlyMap<number, number>)].sort()).toEqual([...og.accounts.get(a.peer).shadow.rebalance.submittedAtByToken].sort() as never);
       for (const o of run.outputs) for (const tx of o.txs) counts.set(tx.type, (counts.get(tx.type) ?? 0) + 1);
       const r2c = (ogJb(run.state)!.batch.reserveToCollateral as readonly unknown[]).length > r2cRows.length || JSON.stringify(ogJb(run.state)!.batch.reserveToCollateral, (_, v) => (typeof v === "bigint" ? String(v) : v)) !== JSON.stringify(r2cRows, (_, v) => (typeof v === "bigint" ? String(v) : v));
@@ -247,7 +247,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       expect(mine).toEqual(ogOut);
       expect(run.hashes).toEqual(ctx.hashesToSign as never);
       for (const s of specs) expect(run.accountReplicas.get(s.peer)?.refreshMigration).toEqual(og.accounts.get(s.peer).boardHankoRefreshMigration);
-      const hooks = sortedHooks(unwrap(crontabOf(run.state)).hooks);
+      const hooks = sortedHooks(crontabOf(run.state).hooks);
       expect(hooks).toEqual(sortedHooks(og.crontabState.hooks) as never);
       for (const s of specs) { const m = run.accountReplicas.get(s.peer)?.refreshMigration; if (m !== undefined && m !== s.marker) bump(m.reason); }
       for (const o of ogOut) { bump(`signer:${o.signerId}`); if (o.entityTxs[0].data.boardHankoRefresh.disputeHanko !== undefined) bump("disputeHanko"); }
@@ -271,7 +271,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       if (!rw.ok) continue;
       expect(rw.value.events.map((e) => e.message)).toEqual(readEntityFrameEventMessages(og));
       for (const s of specs) expect(rw.value.accountReplicas.get(s.peer)?.refreshMigration).toEqual(og.accounts.get(s.peer).boardHankoRefreshMigration);
-      const after = sortedHooks(unwrap(crontabOf(rw.value.state)).hooks);
+      const after = sortedHooks(crontabOf(rw.value.state).hooks);
       expect(after).toEqual(sortedHooks(og.crontabState.hooks) as never);
       bump(target === S ? (after.length === 0 ? "local:cancelled" : "local:armed") : after.length > hooks.length ? "peer:deadline" : "peer:none");
     }
@@ -298,7 +298,7 @@ describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hank
       scheduleChangedAccountBoardHankoRefreshes(og, evidence, new Set(after.map((s) => s.peer)));
       const d = { state: rwBoardState([]), accountReplicas: new Map(after.map((s) => [s.peer, rwBoardAccount(s)])) };
       const rw = unwrap(rearmBoardRefreshes(new Map(before.map((s) => [s.peer, rwBoardAccount(s)])), d, now));
-      const hooks = sortedHooks(unwrap(crontabOf(rw.state)).hooks);
+      const hooks = sortedHooks(crontabOf(rw.state).hooks);
       expect(hooks).toEqual(sortedHooks(og.crontabState.hooks) as never);
       bump(hooks.length === 0 ? "quiet" : "rearmed");
     }

@@ -210,7 +210,7 @@ describe(seedTag("followup-order: committed-frame followups of one accountInput 
       expect(sortedJson(ogOf(d.state)["lending"])).toBe(sortedJson(ogState.lending));
       expect(sortedJson(d.state.paybook)).toBe(sortedJson(ogState.paybook));
       // og scheduleCommittedAccountWork: the hub-rebalance-kick hook
-      expect(sortedJson(unwrap(crontabOf(d.state)).hooks)).toBe(sortedJson(ogState.crontabState.hooks));
+      expect(sortedJson(crontabOf(d.state).hooks)).toBe(sortedJson(ogState.crontabState.hooks));
       if (ogState.crontabState.hooks.size > 0) bump("kick");
       if (createdAcc) bump(`created:${ogTargets.some((t) => t.tx.type === "rebalance_policy")}`);
       if (own && received && ogTargets.length > 0) bump("both-frames-with-targets");

@@ -387,7 +387,7 @@ describe(seedTag("runtime-final: the Runtime tick's due wakes and leader timeout
     expect(applyRuntime(rt, tick.input, { ...verifiers, replay: true }).ok).toBe(true);
     const step = unwrap(applyRuntime(rt, tick.input, { ...verifiers, local: tick.local }));
     expect(step.rejected).toEqual([]);
-    expect([...unwrap(crontabOf((step.runtime.entities.get(replicaKey(ALICE, aliceAddr)) as EntityReplica).state)).hooks.keys()]).not.toContain("hub-kick:0");
+    expect([...crontabOf((step.runtime.entities.get(replicaKey(ALICE, aliceAddr)) as EntityReplica).state).hooks.keys()]).not.toContain("hub-kick:0");
   });
 });
 
