@@ -412,7 +412,10 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, routes: cfg.routes, runtimeSeed });
     if (ogHalt !== undefined) {
       coverage.halts += 1;
-      return committed.ok ? [`${label} og halted (${ogHalt}) but the rewrite committed`] : [];
+      if (committed.ok) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
+      // both refuse the frame, and for the same reason: the rewrite's refusal code is og's halt text
+      const refusal = (committed.error as { code?: unknown }).code;
+      return refusal === ogHalt ? [] : [`${label} og halted (${ogHalt}) but the rewrite refused ${stableJson(committed.error)}`];
     }
     if (!committed.ok) return [`${label} rewrite refused the frame: ${stableJson(committed.error)}`];
     const c = committed.value;
