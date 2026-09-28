@@ -29078,15 +29078,44 @@ const leaderVote = (
   chain(acceptVote(r, input, ctx), ({ vote, outputs }) =>
     chain(addVote(r, vote), ({ votes, fresh }) =>
       chain(fresh ? certify(r, vote, votes, ctx) : ok(r), (next) => {
+        // og: an accepted vote goes on to admission, whose forward (admission.ts:197-198) follows the vote's own
+        // broadcast; an open replica forwards in startProposal
         const after = match(next, {
           open: (o): Result<EntityApply<EntityReplica>, EntityError> => startProposal(o, input.timestamp, ctx),
-          proposed: (p): Result<EntityApply<EntityReplica>, EntityError> => heldQuorum(p, []),
-          locked: (l): Result<EntityApply<EntityReplica>, EntityError> => relayPrepared(l) ?? heldQuorum(l, []),
+          proposed: (p): Result<EntityApply<EntityReplica>, EntityError> => forwardFirst(p, heldQuorum(p, [])),
+          locked: (l): Result<EntityApply<EntityReplica>, EntityError> =>
+            forwardFirst<EntityReplica>(l, relayPrepared(l) ?? heldQuorum(l, [])),
         });
         return map(after, (a): EntityApply<EntityReplica> => ({ ...a, outputs: [...outputs, ...a.outputs] }));
       }),
     ),
   );
+/**
+ * og admitEntityTransactions (core/entity/consensus/input/admission.ts:197-198) runs forwardValidatorMempool
+ * (admission.ts:114) on every input but account work, before the commit notice, the proposal and the precommits are
+ * handled (consensus.ts:299-322): a non-leader re-forwards the mempool it still holds (kept until commit,
+ * admission.ts:29) to the leader, and that forward leads the input's outputs. A noop, deferred or rejected input keeps
+ * no outputs (og input/types.ts:96-133), so the forward survives only an input that goes on or commits.
+ */
+const forwardFirst = <S extends EntityReplica>(
+  admitting: EntityEnv,
+  applied: Result<EntityApply<S>, EntityError>,
+): Result<EntityApply<S>, EntityError> =>
+  chain(forwarded(admitting, admitting.state.timestamp), (forward) =>
+    map(applied, (a): EntityApply<S> => ({ ...a, outputs: [...forward, ...a.outputs] })),
+  );
+/**
+ * og's only noop proposals (consensus.ts:75-80 COMMIT_STALE / COMMIT_ALREADY_APPLIED, proposal/input.ts:29-34
+ * PROPOSAL_STALE / PROPOSAL_ALREADY_COMMITTED): a frame the committed head already holds forwards nothing.
+ */
+const proposalForwardFirst = <S extends EntityReplica>(
+  admitting: EntityEnv,
+  input: ProposalInput,
+  applied: Result<EntityApply<S>, EntityError>,
+): Result<EntityApply<S>, EntityError> => {
+  const frameHash = unwrapOr(hashEntityFrame(input.frame), () => "");
+  return alreadyCommitted(admitting, input.frame, frameHash) ? applied : forwardFirst(admitting, applied);
+};
 const entityVerb = grammar<EntityGrammar>(EntityTransition);
 const applyTxs = entityVerb("txs", {
   open: applyTxsOpen,
@@ -29094,14 +29123,15 @@ const applyTxs = entityVerb("txs", {
   locked: (r: LockedEntity, i, c) => queueOnly(r, i, c),
 });
 const applyProposal = entityVerb("proposal", {
-  open: proposalOpen,
-  proposed: proposalProposed,
-  locked: proposalLocked,
+  open: (r: OpenEntity, i, c) => proposalForwardFirst(r, i, proposalOpen(r, i, c)),
+  proposed: (r: ProposedEntity, i, c) => proposalForwardFirst(r, i, proposalProposed(r, i, c)),
+  locked: (r: LockedEntity, i, c) => proposalForwardFirst(r, i, proposalLocked(r, i, c)),
 });
+/** og handleHashPrecommits never answers noop: a stale precommit commits the input (precommit-input.ts:151-152). */
 const applyPrecommit = entityVerb("precommit", {
-  open: precommitOpen,
-  proposed: (r: ProposedEntity, i, c) => applyPrecommitHeld(r, i, c),
-  locked: (r: LockedEntity, i, c) => applyPrecommitHeld(r, i, c),
+  open: (r: OpenEntity, i, c) => forwardFirst(r, precommitOpen(r, i)),
+  proposed: (r: ProposedEntity, i, c) => forwardFirst(r, applyPrecommitHeld(r, i, c)),
+  locked: (r: LockedEntity, i, c) => forwardFirst(r, applyPrecommitHeld(r, i, c)),
 });
 /**
  * A proposed replica keeps its own proposal (og never replaces `proposal` on a view change), so it only ever leaves as
