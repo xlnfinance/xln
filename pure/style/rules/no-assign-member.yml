@@ -1,0 +1,10 @@
+id: no-assign-member
+language: TypeScript
+severity: error
+message: assignment into an existing object or array; return a new value
+rule:
+  any:
+    - { kind: assignment_expression, has: { field: left, any: [ { kind: member_expression }, { kind: subscript_expression } ] } }
+    - { kind: augmented_assignment_expression }
+    - { kind: update_expression }
+files: [xln.ts]

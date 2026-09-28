@@ -1,12 +1,13 @@
 // Behavioural diff: og Entity scheduler (core/entity/scheduler, runtime/mempool/scheduled-wake.ts), scheduledWake, disputeFinalize vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, state and bytes.
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag } from "./seed.ts";
 import { ethers } from "ethers";
 import {
   createEntity, derivedDeadlines, sanitizeDisputeArgument, disputeFinalizedEffects, disputeStartedEffects, dueWakeJobs, entityRootOf, executeCrontab, foldTxs, initCrontab, prioritizeWake, scheduleHook, withCrontab, crontabOf, wireEntityTx, genesisHost, applyHost, localProof, committedView, ZERO_WORD,
   type AccountReplica, type ActiveDispute, type Binary, type Crontab, type EntityError, type EntityId, type EntityState, type EntityTx, type PaybookEntry, type ScheduledHook, type ScheduledWakeJob,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, hankoVerify, signedTxs, unwrap } from "../xln_run.ts";
 import { assertScheduledWakeFrameOrder, assertScheduledWakeMatchesState } from "../../core/entity/scheduler/wake/scheduled-wake-validation.ts";
 import { prioritizeScheduledWakeTransactions } from "../../core/entity/consensus/input/merge.ts";
 import { collectDerivedDeadlines } from "../../core/entity/scheduler/derived-deadlines.ts";
@@ -29,9 +30,10 @@ import { sentBatchOwnsDisputeFinalityAck } from "../../core/entity/tx/j-events.t
 import { handleOpenAccountEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/open-account.ts";
 import { createEmptyEnv } from "../../core/runtime.ts";
 import { createAccountConsensusContext } from "../../core/entity/account/account-consensus-context.ts";
+import { jbOfOg, ogGenesisProfile, ogJb, ogReach } from "./og-state.ts";
 
-let seed = 11;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(11);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const env = { quietRuntimeLogs: true } as never;
@@ -54,7 +56,7 @@ type Wake = Extract<EntityTx, { type: "scheduledWake" }>;
 const wakeOf = (proposerSignerId: string, dueAt: number, jobs: readonly ScheduledWakeJob[], version = 1): Wake => ({ type: "scheduledWake", data: { version: version as 1, proposerSignerId, dueAt, jobs } });
 const compareJobs = (a: ScheduledWakeJob, b: ScheduledWakeJob): number => a.dueAt - b.dueAt || (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-describe("scheduler-disputes: scheduledWake validation (og scheduler/wake/scheduled-wake-validation.ts, consensus/input/merge.ts)", () => {
+describe(seedTag("scheduler-disputes: scheduledWake validation (og scheduler/wake/scheduled-wake-validation.ts, consensus/input/merge.ts)"), () => {
   test("MATCH: 400 random wakes -- same accept / SCHEDULED_WAKE_PROPOSER_MISMATCH / SCHEDULED_WAKE_INVALID_PAYLOAD (with og's job text) as og assertScheduledWakeMatchesState", () => {
     const seen = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
@@ -80,7 +82,8 @@ describe("scheduler-disputes: scheduledWake validation (og scheduler/wake/schedu
   test("MATCH: 200 random frames -- og assertScheduledWakeFrameOrder (a wake is the unique first tx) and og prioritizeScheduledWakeTransactions", () => {
     const state = entity([aliceAddr]), ts = 50_000;
     const wakeA = wakeOf(aliceAddr, ts - 5, [{ kind: "hook", id: "h", dueAt: ts - 5 }]), wakeB = wakeOf(aliceAddr, ts - 4, [{ kind: "hook", id: "h", dueAt: ts - 4 }]);
-    const chat: EntityTx = { type: "chat", data: { from: aliceAddr, message: "hi" } };
+    // og: a frame's user tx is Alice's signed chat command (admission signs every local tx)
+    const [chat] = signedTxs(state, aliceAddr, [{ type: "chat", data: { from: aliceAddr, message: "hi" } }]) as [EntityTx];
     let refused = 0, conflicting = 0;
     for (let i = 0; i < 200; i++) {
       const txs = Array.from({ length: 1 + ri(4) }, () => pick<EntityTx>([chat, chat, wakeA, wakeA, wakeB]));
@@ -91,7 +94,7 @@ describe("scheduler-disputes: scheduledWake validation (og scheduler/wake/schedu
       const ogP = ogThrows(() => prioritizeScheduledWakeTransactions(txs.map(wireEntityTx) as never));
       const rwP = prioritizeWake(txs);
       if (!ogP.ok) { conflicting++; expect(rwP.ok ? "ok" : reasonOf(rwP.error)).toBe(ogP.reason); }
-      else expect(unwrap(rwP).map(wireEntityTx)).toEqual(ogP.value as never);
+      else expect(unwrap(rwP).map(wireEntityTx)).toEqual(ogP.value);
     }
     expect([refused > 30, conflicting > 10]).toEqual([true, true]);
   });
@@ -105,7 +108,7 @@ type Lock = { readonly lockId: string; readonly hashlock: string; readonly timel
 type Spec = { readonly peer: EntityId; readonly tag: "open" | "preparing" | "disputed"; readonly locks: readonly Lock[]; readonly active?: ActiveDispute | Record<string, unknown> | undefined; readonly queued?: boolean };
 const ogAccountOf = (s: Spec): any => ({
   state: { leftEntity: lowerId(ALICE), rightEntity: lowerId(s.peer), domain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, jNonce: 0,
-    deltas: PA("deltas"), locks: PersistentAccountStateMap.fromEntries("locks" as never, s.locks.map((l) => [l.lockId, l] as const) as never), swapOffers: PA("swapOffers"), pulls: PA("pulls"), requestedRebalance: PA("requestedRebalance"), requestedRebalanceFeeState: PA("requestedRebalanceFeeState"), rebalanceFeePolicies: PA("rebalanceFeePolicies") },
+    deltas: PA("deltas"), locks: PersistentAccountStateMap.fromEntries("locks", s.locks.map((l) => [l.lockId, l] as const)), swapOffers: PA("swapOffers"), pulls: PA("pulls"), requestedRebalance: PA("requestedRebalance"), requestedRebalanceFeeState: PA("requestedRebalanceFeeState"), rebalanceFeePolicies: PA("rebalanceFeePolicies") },
   status: STATUS[s.tag], mempool: [], currentHeight: 0, proofHeader: { fromEntity: lowerId(ALICE), toEntity: s.peer, nextProofNonce: 1 }, pendingWithdrawals: PA("pendingWithdrawals"),
   shadow: { rebalance: { policy: PA("rebalanceShadowPolicy"), submittedAtByToken: PA("rebalanceShadowSubmitted") } }, ...(s.active === undefined ? {} : { activeDispute: { ...s.active } }),
 });
@@ -116,7 +119,7 @@ const rwAccountOf = (s: Spec): AccountReplica => {
   if (s.tag === "preparing") return { ...base, _tag: "preparing", state, mempool: [], unready: { _tag: "not_attempted" } } as unknown as AccountReplica;
   return { ...base, _tag: "disputed", state, mempool: [], ...(s.active === undefined ? {} : s.queued ? { queued: s.active } : { active: s.active }) } as unknown as AccountReplica;
 };
-const ogAccounts = (specs: readonly Spec[]): any => new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(specs.map((s) => [s.peer, ogAccountOf(s)]), ALICE, () => ZERO_WORD as never));
+const ogAccounts = (specs: readonly Spec[]): any => new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(specs.map((s) => [s.peer, ogAccountOf(s)]), ALICE, () => ZERO_WORD));
 const randomLocks = (): Lock[] => [...new Set(Array.from({ length: ri(3) }, () => word(1 + ri(6))))].map((h) => ({ lockId: h, hashlock: h, timelock: pick([0n, -5n, BigInt(900 + ri(400)), BigInt(900 + ri(400)), 2n ** 60n]) }));
 const randomPaybook = (peers: readonly EntityId[]): Map<string, PaybookEntry> => new Map(Array.from({ length: ri(4) }, (): [string, PaybookEntry] => {
   const h = word(1 + ri(6)), started = pick([900, 1_000, 1.5, Number.NaN]);
@@ -124,7 +127,7 @@ const randomPaybook = (peers: readonly EntityId[]): Map<string, PaybookEntry> =>
     secretAckStartedAt: started, secretAckDeadlineAt: pick([900 + ri(400), 900 + ri(400), 800, 2.5]) }];
 }));
 
-describe("scheduler-disputes: derived deadlines and due wake jobs (og scheduler/derived-deadlines.ts, runtime/mempool/scheduled-wake.ts)", () => {
+describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og scheduler/derived-deadlines.ts, runtime/mempool/scheduled-wake.ts)"), () => {
   test("MATCH: 300 random Entities (Account locks by status, paybook secret-ack entries, stored hooks, the hubRebalance task) -- og collectDerivedDeadlines and collectDueScheduledWakeJobs", () => {
     let deadlines = 0, jobs = 0;
     for (let i = 0; i < 300; i++) {
@@ -134,16 +137,16 @@ describe("scheduler-disputes: derived deadlines and due wake jobs (og scheduler/
       const hooks: ScheduledHook[] = Array.from({ length: ri(3) }, (_, j) => ({ id: `hub-kick:${j}`, triggerAt: 900 + ri(500), type: "hub_rebalance_kick", data: { reason: "r", counterpartyId: BOB } }));
       const lastRun = pick([0, 500, 1_200]), config = rng() < 0.4 ? { disputeAutoFinalizeMode: "auto" } : undefined, sent = rng() < 0.5;
       const crontab: Crontab = hooks.reduce(scheduleHook, { ...initCrontab(), tasks: new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun, enabled: rng() < 0.9, params: {} }]]) });
-      const jBatch = { ...ogInitJBatch(), ...(sent ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 3 } } : {}) };
+      const jBatch = ogReach({ ...ogInitJBatch(), ...(sent ? { sentBatch: { batch: ogInitJBatch().batch, entityNonce: 3 } } : {}) });
       const state = { ...withCrontab(entity([aliceAddr], false, { jBatchState: jBatch, ...(config ? { hubRebalanceConfig: config } : {}) }), crontab), paybook: { entries, feesEarned: 0n } };
       const replicas: Replicas = new Map(specs.map((s) => [s.peer, rwAccountOf(s)]));
       const og: any = { entityId: ALICE, timestamp: 0, config: ogConfig(state), accounts: ogAccounts(specs), paybook: { entries, feesEarned: 0n }, crontabState: { tasks: crontab.tasks, hooks: new Map(crontab.hooks) }, jBatchState: jBatch, ...(config ? { hubRebalanceConfig: config } : {}) };
       const d = derivedDeadlines(state, replicas, now);
-      expect(d).toEqual(collectDerivedDeadlines(og, now) as never);
+      expect(d).toEqual(collectDerivedDeadlines(og, now));
       deadlines += d.length;
       const at = now ?? 1_300, periodic = rng() < 0.7;
-      const rwJobs = dueWakeJobs(state, replicas, unwrap(crontabOf(state)), at, periodic);
-      expect(rwJobs).toEqual(collectDueScheduledWakeJobs(og, at, periodic) as never);
+      const rwJobs = dueWakeJobs(state, replicas, crontabOf(state), at, periodic);
+      expect(rwJobs).toEqual(collectDueScheduledWakeJobs(og, at, periodic));
       jobs += rwJobs.length;
     }
     expect([deadlines > 100, jobs > 150]).toEqual([true, true]);
@@ -159,12 +162,12 @@ describe("scheduler-disputes: derived deadlines and due wake jobs (og scheduler/
       const tasks = new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun, enabled: true, params: {} }]]) as Crontab["tasks"];
       const state = withCrontab(entity([aliceAddr]), { ...crontab, tasks });
       const ogHooks = hooks.reduce((m, h) => m.updated(h.id, h), PersistentEntityCollectionMap.empty<unknown>());
-      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
+      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(state.id), config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
         paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, crontabState: { tasks, hooks: ogHooks } };
       expect(unwrap(entityRootOf(state, new Map()))).toBe(computeCanonicalEntityConsensusStateHash(og as never));
     }
     // og initCrontab: the hubRebalance task at the 1s cadence, no hooks
-    expect({ tasks: [...initCrontab().tasks], hooks: initCrontab().hooks.size }).toEqual({ tasks: [...ogInitCrontab().tasks] as never, hooks: ogInitCrontab().hooks.size });
+    expect({ tasks: [...initCrontab().tasks], hooks: initCrontab().hooks.size }).toEqual({ tasks: [...ogInitCrontab().tasks], hooks: ogInitCrontab().hooks.size });
   });
 });
 
@@ -176,7 +179,7 @@ const observed = (nowSec: number, over: Partial<ActiveDispute> = {}): ActiveDisp
 const queuedStart = (): Record<string, unknown> => ({ startedByLeft: true, initialProofbodyHash: word(7), initialNonce: 1, initialProposerIsLeft: true, disputeTimeout: 0, jNonce: 1, starterInitialArguments: "0x", starterCounterArguments: "0x",
   starterCounterProofCommitment: ZERO_WORD, observedOnChain: false, finalizeQueued: false });
 
-describe("scheduler-disputes: executeCrontab (og scheduler/index.ts, due-hooks.ts, dispute-deadline-hook.ts)", () => {
+describe(seedTag("scheduler-disputes: executeCrontab (og scheduler/index.ts, due-hooks.ts, dispute-deadline-hook.ts)"), () => {
   test("MATCH: 300 random due sets (HTLC timeouts, secret-ack deadlines, dispute deadlines against the J batch lifecycle, kicks, sweeps, board-refresh deadlines, the hubRebalance task) -- og's outputs, re-armed hooks, latches, paybook and task", async () => {
     const counts = new Map<string, number>();
     for (let i = 0; i < 300; i++) {
@@ -197,9 +200,9 @@ describe("scheduler-disputes: executeCrontab (og scheduler/index.ts, due-hooks.t
       const config = rng() < 0.25 ? { disputeAutoFinalizeMode: pick(["ignore", "auto"]) } : undefined;
       const bobRow = { counterentity: BOB }, other = (n: number) => ({ counterentity: word(500 + n) });
       const draft = { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.2 ? [bobRow] : [], disputeStarts: Array.from({ length: pick([0, 0, 7, 8]) }, (_, n) => other(n)) };
-      const jBatch = { ...ogInitJBatch(), batch: draft,
+      const jBatch = ogReach({ ...ogInitJBatch(), batch: draft,
         ...(rng() < 0.25 ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [bobRow] : [] }, entityNonce: 4 } } : {}),
-        ...(rng() < 0.1 ? { recoveryBatches: [{ ...ogInitJBatch().batch, disputeFinalizations: [bobRow] }] } : {}) };
+        ...(rng() < 0.1 ? { recoveryBatches: [{ ...ogInitJBatch().batch, disputeFinalizations: [bobRow] }] } : {}) });
       const hooks: ScheduledHook[] = [
         ...(rng() < 0.7 ? [{ id: `dispute-deadline:${lowerId(BOB)}`, triggerAt: pick([now - ri(10), now + 100]), type: "dispute_deadline", data: { accountId: BOB } } as const] : []),
         ...(rng() < 0.2 ? [{ id: `dispute-deadline:${lowerId(CAROL)}`, triggerAt: now - 1, type: "dispute_deadline", data: { accountId: CAROL } } as const] : []),
@@ -223,29 +226,29 @@ describe("scheduler-disputes: executeCrontab (og scheduler/index.ts, due-hooks.t
       if (ogErr !== undefined) { counts.set("halt", (counts.get("halt") ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const run = unwrap(rw);
       expect(run.outputs).toEqual((ogOut ?? []).map((o) => ({ signerId: o.signerId, txs: o.entityTxs })));
-      const after = unwrap(crontabOf(run.state));
-      expect(sortedEntries(after.hooks)).toEqual(sortedEntries(og.crontabState.hooks) as never);
+      const after = crontabOf(run.state);
+      expect(sortedEntries(after.hooks)).toEqual(sortedEntries(og.crontabState.hooks));
       expect(after.tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
       const child = run.accountReplicas.get(BOB) as any;
       expect(child?.active ?? child?.queued).toEqual(og.accounts.get(BOB)?.activeDispute);
-      expect(sortedEntries(run.state.paybook?.entries)).toEqual(sortedEntries(og.paybook.entries) as never);
+      expect(sortedEntries(run.state.paybook?.entries)).toEqual(sortedEntries(og.paybook.entries));
       for (const o of run.outputs) for (const tx of o.txs) counts.set(tx.type, (counts.get(tx.type) ?? 0) + 1);
     }
     expect(Object.fromEntries([...counts].filter(([k]) => k !== "halt").map(([k, v]) => [k, v > 3]))).toEqual({ processHtlcTimeouts: true, prepareDispute: true, disputeFinalize: true, j_broadcast: true, orderbookSweepCrossJurisdiction: true });
   }, 60_000);
 });
 
-describe("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-admission.ts, finalize-proof.ts)", () => {
+describe(seedTag("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-admission.ts, finalize-proof.ts)"), () => {
   const ogJ = { jReplicas: new Map([["j", { chainId: JUR.chainId, contracts: { depository: JUR.depositoryAddress, entityProvider: `0x${"55".repeat(20)}`, account: `0x${"66".repeat(20)}`, deltaTransformer: `0x${"77".repeat(20)}` } }]]) };
   const ogEnv = { quietRuntimeLogs: true, state: ogJ } as never;
   const commitmentOf = (nonce: number, left: boolean, hash: string): string => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["uint256", "bool", "bytes32"], [nonce, left, hash]));
   test("MATCH: 400 random finalizations (missing / open / queued / observed disputes, counterparty witnesses, selected counter-proofs, starter arguments, timing, J batch lifecycle) -- og's events, J batch row, latch and halts", async () => {
-    const good: string = (unwrap(localProof(unwrap(committedView(genesisAB().state)))) as any).bodyHash, bad = word(4242);
+    const good: string = (unwrap(localProof(unwrap(committedView(genesisAB().state))))).bodyHash, bad = word(4242);
     const counts = new Map<string, number>();
     for (let i = 0; i < 400; i++) {
       const now = 5_000_000 + ri(20_000), nowSec = Math.floor(now / 1000), withJ = rng() < 0.8, kind = pick(["missing", "open", "queued", "observed", "observed", "observed", "observed"] as const);
       const initialNonce = pick([0, 1, 1, 2]), initialProposerIsLeft = rng() < 0.5;
-      const selected = rng() < 0.2 ? { selectedCounterNonce: pick([2, 3]), ...(rng() < 0.85 ? { selectedCounterProofbodyHash: pick([good, good, bad]) } : {}), ...(rng() < 0.85 ? { selectedCounterProposerIsLeft: rng() < 0.5 } : {}) } : {};
+      const selected: { selectedCounterNonce?: number; selectedCounterProofbodyHash?: string; selectedCounterProposerIsLeft?: boolean } = rng() < 0.2 ? { selectedCounterNonce: pick([2, 3]), ...(rng() < 0.85 ? { selectedCounterProofbodyHash: pick([good, good, bad]) } : {}), ...(rng() < 0.85 ? { selectedCounterProposerIsLeft: rng() < 0.5 } : {}) } : {};
       const wNonce = pick([1, 2, 3]), wLeft = rng() < 0.5, wBody = pick([good, good, bad]);
       const commitment = rng() < 0.5 ? commitmentOf(selected.selectedCounterNonce ?? wNonce, selected.selectedCounterProposerIsLeft ?? wLeft, selected.selectedCounterProofbodyHash ?? wBody) : ZERO_WORD;
       const active = kind === "queued" ? queuedStart() : observed(nowSec, {
@@ -260,11 +263,11 @@ describe("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-
       if (witness) Object.assign(ogAcc, { counterpartyDisputeProofHanko: witness.hanko, counterpartyDisputeHash: witness.hash, counterpartyDisputeProofBodyHash: witness.proofBodyHash, counterpartyDisputeProofNonce: witness.proofNonce, counterpartyDisputeProofProposerIsLeft: witness.proposerIsLeft });
       const rwChild = { ...rwAccountOf(spec), dispute: { nextProofNonce: 1, ...(witness ? { counterparty: witness } : {}) } } as AccountReplica;
       const jb = pick([undefined, "draft", "draft", "sent", "own", "full"] as const);
-      const jBatch = jb === undefined ? undefined : { ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeFinalizations: jb === "own" ? [{ counterentity: BOB }] : jb === "full" ? [{ counterentity: CAROL }] : [] },
-        ...(jb === "sent" ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [{ counterentity: BOB }] : [] }, entityNonce: 9 } } : {}) };
+      const jBatch = jb === undefined ? undefined : ogReach({ ...ogInitJBatch(), batch: { ...ogInitJBatch().batch, disputeFinalizations: jb === "own" ? [{ counterentity: BOB }] : jb === "full" ? [{ counterentity: CAROL }] : [] },
+        ...(jb === "sent" ? { sentBatch: { batch: { ...ogInitJBatch().batch, disputeFinalizations: rng() < 0.5 ? [{ counterentity: BOB }] : [] }, entityNonce: 9 } } : {}) });
       const tx: EntityTx = { type: "disputeFinalize", data: { counterpartyEntityId: BOB, ...(rng() < 0.6 ? { description: pick(["", "auto-finalize-after-timeout"]) } : {}), ...(rng() < 0.5 ? { useOnchainRegistry: true } : {}) } };
       const state = entity([aliceAddr], withJ, jBatch === undefined ? {} : { jBatchState: jBatch });
-      const rw = foldTxs(state, kind === "missing" ? new Map() : new Map([[BOB, rwChild]]), [tx], { verify: hankoVerify, timestamp: BigInt(now), jReplicas: ogJ.jReplicas as never });
+      const rw = foldTxs(state, kind === "missing" ? new Map() : new Map([[BOB, rwChild]]), signedTxs(state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: BigInt(now), jReplicas: ogJ.jReplicas as never });
       const ogState: any = { entityId: ALICE, timestamp: now, config: ogConfig(state, withJ), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(kind === "missing" ? [] : [[BOB, ogAcc]], ALICE, () => ZERO_WORD as never)),
         paybook: { entries: new Map(), feesEarned: 0n }, crontabState: ogInitCrontab(), ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) };
       let og: any, ogErr: string | undefined;
@@ -272,7 +275,7 @@ describe("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-
       if (ogErr !== undefined) { counts.set(ogErr.split(":")[0] as string, (counts.get(ogErr.split(":")[0] as string) ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const d = unwrap(rw).draft, events = readEntityFrameEvents(og) as { message: string }[];
       expect(d.events).toEqual(events as never);
-      expect(d.state.committed["jBatchState"]).toEqual(og.jBatchState);
+      expect(ogJb(d.state)).toEqual(og.jBatchState);
       const child = d.accountReplicas.get(BOB) as any;
       expect(child?.active ?? child?.queued).toEqual(og.accounts.get(BOB)?.activeDispute);
       const key = (events.at(-1)?.message ?? "none").slice(0, 12);
@@ -284,7 +287,7 @@ describe("scheduler-disputes: disputeFinalize (og dispute/finalize.ts, finalize-
   }, 60_000);
 });
 
-describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-events.ts, dispute-finalize-guards.ts)", () => {
+describe(seedTag("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-events.ts, dispute-finalize-guards.ts)"), () => {
   const h1 = word(71), h2 = word(72);
   const peerId = (): string => pick([lowerId(BOB), lowerId(CAROL), BOB.toUpperCase().replace("0X", "0x")]);
   const randomBatch = (): any => ({
@@ -295,7 +298,7 @@ describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-eve
     hashLadderRegistrations: Array.from({ length: ri(3) }, () => ({ counterpartyEntity: peerId(), targetRole: rng() < 0.5 })),
     reserveToReserve: rng() < 0.3 ? [{ receivingEntity: lowerId(CAROL), tokenId: 1, amount: 5n }] : [],
   });
-  const randomJBatch = (): any => ({ ...ogInitJBatch(), batch: randomBatch(), entityNonce: pick([0, 2, 5]),
+  const randomJBatch = (): any => ogReach({ ...ogInitJBatch(), batch: randomBatch(), entityNonce: pick([0, 2, 5]),
     ...(rng() < 0.6 ? { sentBatch: { batch: randomBatch(), entityNonce: pick([3, 5]) } } : {}), ...(rng() < 0.4 ? { recoveryBatches: Array.from({ length: 1 + ri(2) }, randomBatch) } : {}) });
   // og j-events.ts, transcribed over og's own exported guards and batch helpers (the composing functions are module-private in og)
   const ogSync = (st: any, sender: string, self: string, batchNonce: number | undefined, msgs: string[]): void => {
@@ -351,10 +354,10 @@ describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-eve
         if (r.removed > 0) msgs.push(`🧹 Removed ${r.removed} stale dispute-finalize op(s) for ${cp.slice(-4)}`);
         rw = unwrap(disputeFinalizedEffects(state, { sender, counterentity, initialProofbodyHash, initialNonce, hadActiveDispute, settlementInvalidated, ...(batchNonce === undefined ? {} : { batchNonce }) }));
       }
-      expect(rw.state.committed["jBatchState"]).toEqual(og.jBatchState);
+      expect(ogJb(rw.state)).toEqual(og.jBatchState);
       expect(rw.events.map((e) => e.message)).toEqual(msgs);
       expect(rw.broadcast).toBe(ogBroadcast);
-      expect(sortedEntries(unwrap(crontabOf(rw.state)).hooks)).toEqual(sortedEntries(og.crontabState.hooks) as never);
+      expect(sortedEntries(crontabOf(rw.state).hooks)).toEqual(sortedEntries(og.crontabState.hooks));
       if (msgs.some((m) => m.startsWith("🧹 Removed"))) removedAny++;
       if (ogBroadcast) broadcasts++;
       if (msgs.some((m) => m.startsWith("↻"))) synced++;
@@ -364,22 +367,22 @@ describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-eve
     expect(disputeStartedEffects(entity([aliceAddr]), { sender: BOB, counterentity: ALICE, proofbodyHash: h1, disputeTimeout: 1, starterInitialArguments: "0xabcd" }, 0).ok).toBe(true);
   });
   test("MATCH: 200 random DisputeStarted / DisputeFinalized J events through the Host's J-event path -- og's J batch retirement, nonce sync and queueLocalJBatchBroadcast on the Host's jBatchState", () => {
-    const host0: any = unwrap(genesisHost(ALICE, genesisAB()) as any);
-    const good: string = (unwrap(localProof(unwrap(committedView(host0.account.state)))) as any).bodyHash;
+    const host0: any = unwrap(genesisHost(ALICE, genesisAB()));
+    const good: string = (unwrap(localProof(unwrap(committedView(host0.account.state))))).bodyHash;
     const L = BigInt(TERMS.disputeConfig.leftResponseSeconds), R = BigInt(TERMS.disputeConfig.rightResponseSeconds);
     const swap = (v: any): any => (typeof v === "string" ? (v === h1 ? good : v) : Array.isArray(v) ? v.map(swap) : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)])) : v);
     let removedAny = 0, broadcasts = 0, applied = 0;
     for (let i = 0; i < 200; i++) {
       const jBatch = rng() < 0.9 ? swap(randomJBatch()) : undefined, [sender, counterentity] = pick([[BOB, ALICE], [ALICE, BOB], [CAROL, ALICE]] as const), batchNonce = pick([undefined, 0, 3, 5, 7]);
       const self = lowerId(ALICE), cp = lowerId(sender) === self ? lowerId(counterentity) : lowerId(sender), started = rng() < 0.5;
-      const host = { ...host0, j: { ...host0.j, ...(jBatch === undefined ? {} : { jBatch: structuredClone(jBatch) }) } };
+      const host = { ...host0, j: { ...host0.j, jBatch: jbOfOg(structuredClone(jBatch)) } };
       const og: any = { entityId: ALICE, ...(jBatch === undefined ? {} : { jBatchState: structuredClone(jBatch) }) }, msgs: string[] = [];
       let ogBroadcast = false;
       const t0 = BigInt(1_000 + ri(50)), initialProofbodyHash = pick([good, h2]);
       const event = started
         ? { type: "DisputeStarted", sender, counterentity, nonce: BigInt(1 + ri(4)), proposerIsLeft: rng() < 0.5, proofbodyHash: good, watchSeed: TERMS.watchSeed, starterInitialArguments: "0x", starterCounterArguments: "0x", starterCounterProofCommitment: ZERO_WORD,
-          disputeTimeout: t0 + L + R, disputeStartTimestamp: t0, leftResponseSeconds: L, rightResponseSeconds: R, initialProofbody: (unwrap(localProof(unwrap(committedView(host0.account.state)))) as any).body, ...(batchNonce === undefined ? {} : { batchNonce }) }
-        : { type: "DisputeFinalized", sender, counterentity, nonce: BigInt(ri(4)), finalProofbodyHash: good, finalizationEvidenceHash: ZERO_WORD, finalProofbody: (unwrap(localProof(unwrap(committedView(host0.account.state)))) as any).body, initialProofbodyHash, ...(batchNonce === undefined ? {} : { batchNonce }) };
+          disputeTimeout: t0 + L + R, disputeStartTimestamp: t0, leftResponseSeconds: L, rightResponseSeconds: R, initialProofbody: (unwrap(localProof(unwrap(committedView(host0.account.state))))).body, ...(batchNonce === undefined ? {} : { batchNonce }) }
+        : { type: "DisputeFinalized", sender, counterentity, nonce: BigInt(ri(4)), finalProofbodyHash: good, finalizationEvidenceHash: ZERO_WORD, finalProofbody: (unwrap(localProof(unwrap(committedView(host0.account.state))))).body, initialProofbodyHash, ...(batchNonce === undefined ? {} : { batchNonce }) };
       // og resolveDisputeAccountContext: only the Account's own events run J7 (account_missing is a no-op)
       if (cp === lowerId(BOB)) {
         ogSync(og, lowerId(sender), self, batchNonce, msgs);
@@ -395,7 +398,7 @@ describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-eve
         applied++;
       }
       const rw: any = unwrap(applyHost(host, { layer: "j", tx: { type: "j_event", blockNumber: 7, event } } as any, { timestamp: NOW, jHeight: 0n }, hankoVerify) as any);
-      expect(rw.state.j.jBatch).toEqual(og.jBatchState);
+      expect(ogJb(rw.state.j)).toEqual(og.jBatchState);
       expect(rw.effects.filter((e: any) => e._tag === "j_broadcast_request")).toEqual(ogBroadcast ? [{ _tag: "j_broadcast_request", entityId: ALICE }] : []);
       if (ogBroadcast) broadcasts++;
     }
@@ -403,16 +406,20 @@ describe("scheduler-disputes: J7 Entity-side dispute effects (og entity/tx/j-eve
   });
 });
 
-describe("scheduler-disputes: Runtime/Entity event channel (og EntityCandidateEffect runtimeEvent)", () => {
-  test("MATCH: openAccount emits og's AccountOpening runtime event (og lifecycle/open-account.ts insertLocalAccount), and it survives the same frame's first Account proposal", async () => {
+describe(seedTag("scheduler-disputes: Runtime/Entity event channel (og EntityCandidateEffect runtimeEvent)"), () => {
+  test("MATCH: openAccount emits og's AccountOpening runtime event (og lifecycle/open-account.ts insertLocalAccount) in the frame its signed command commits; the Account's first proposal at H+1 emits none", async () => {
     const ogEnv = createEmptyEnv("scheduler-disputes");
     ogEnv.quietRuntimeLogs = true;
     const ctx = createAccountConsensusContext(ogEnv);
     for (const target of [BOB, CAROL]) {
       const state = entity([aliceAddr], true);
-      const tx = { type: "openAccount", data: { targetEntityId: target, accountDomain: JUR, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } } as EntityTx;
-      const rw = unwrap(foldTxs(state, new Map(), [tx], { verify: hankoVerify, timestamp: NOW })).draft;
-      const og: any = { entityId: ALICE, timestamp: Number(NOW), config: ogConfig(state, true), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([], ALICE, () => ZERO_WORD as never)), paybook: { entries: new Map(), feesEarned: 0n } };
+      const tx = { type: "openAccount", data: { targetEntityId: target, accountDomain: { ...JUR }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } } as EntityTx;
+      const rw = unwrap(foldTxs(state, new Map(), signedTxs(state, aliceAddr, [tx]), { verify: hankoVerify, timestamp: NOW })).draft;
+      // og Runtime account work at H+1: the new Account proposes its first frame, publishing no runtime event
+      const work = unwrap(foldTxs(rw.state, rw.accountReplicas, [], { verify: hankoVerify, timestamp: NOW })).draft;
+      expect(work.accountReplicas.get(target)?._tag).toBe("proposed");
+      expect(work.runtimeEvents ?? []).toEqual([]);
+      const og: any = { entityId: ALICE, timestamp: Number(NOW), config: ogConfig(state, true), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries([], ALICE, () => ZERO_WORD)), paybook: { entries: new Map(), feesEarned: 0n } };
       const effects: any[] = [];
       await handleOpenAccountEntityTx(og, wireEntityTx(tx) as never, ctx, effects, true);
       expect(rw.runtimeEvents).toEqual(effects.map((e) => ({ eventName: e.eventName, data: e.data })));
@@ -420,7 +427,7 @@ describe("scheduler-disputes: Runtime/Entity event channel (og EntityCandidateEf
   });
 });
 
-describe("scheduler-disputes: disputeStart starter-argument override (og dispute/start-evidence.ts buildStarterArguments)", () => {
+describe(seedTag("scheduler-disputes: disputeStart starter-argument override (og dispute/start-evidence.ts buildStarterArguments)"), () => {
   test("MATCH: 600 random overrides (valid bytes[], truncated / re-pointed / oversized-count / huge-index / inflated encodings, bad hex, over 64 KiB) -- og sanitizeOptionalDisputeArgument", () => {
     const abi = ethers.AbiCoder.defaultAbiCoder();
     const randHex = (n: number): string => `0x${Array.from({ length: n }, () => ri(256).toString(16).padStart(2, "0")).join("")}`;
@@ -467,5 +474,5 @@ describe("scheduler-disputes: disputeStart starter-argument override (og dispute
     expect(sanitizeDisputeArgument(`0x${w(2n ** 64n)}${w(0n)}`)).toBe("0x");
     const ratio = `0x${[32n, 60n, ...Array.from({ length: 60 }, () => 60n * 32n)].map((w) => w.toString(16).padStart(64, "0")).join("")}${(4000).toString(16).padStart(64, "0")}${"cd".repeat(4000)}`;
     expect(sanitizeDisputeArgument(ratio)).toBe(sanitizeOptionalDisputeArgument(ratio, "x").value);
-  });
+  }, 30_000);
 });

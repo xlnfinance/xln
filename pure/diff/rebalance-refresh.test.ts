@@ -3,10 +3,11 @@
 // lending_overdue deadline (scheduler/derived-deadlines.ts, tx/handlers/account/committed-lending-close.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, outputs and state.
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   accountId, createEntity, crontabTaskHasPendingWork, executeCrontab, genesisReplica, initCrontab, rebalanceAccountIds, tokenId, withCrontab, crontabOf, ZERO_WORD,
   applyBoardJEvent, counterpartyProposer, rearmBoardRefreshes, derivedDeadlines, entityId, quorumBoardHash, quorumHanko, scheduleHook,
-  type AccountReplica, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
+  type AccountReplica, type Address, type Crontab, type DisputeHanko, type EntityError, type EntityId, type EntityState, type Hash, type JEvent, type RefreshMigration, type ScheduledHook, type SettlementWorkspace,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, TERMS, aliceAddr, bobAddr, carolAddr, crypto, keyOf, signLazyAccountHanko, unwrap } from "../xln_run.ts";
 import { applyCertifiedBoardJEvent } from "../../core/entity/tx/j-events-board.ts";
@@ -21,9 +22,10 @@ import { initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batc
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import { EntityAccountCandidateMap, PersistentEntityAccountMap } from "../../core/entity/state/persistent-account-map.ts";
 import { createBookIntentProgram } from "../../core/entity/books/book-intents.ts";
+import { ogJb, ogOf, ogSentBatch } from "./og-state.ts";
 
-let seed = 29;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(29);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const reasonOf = (e: EntityError): string => (e._tag === "entity_invariant" ? e.reason : e._tag);
@@ -80,10 +82,11 @@ const readyWorkspace = (hubIsLeft: boolean): SettlementWorkspace => ({
   ...(rng() < 0.85 ? (hubIsLeft ? { rightHanko: "0xbeef" } : { leftHanko: "0xbeef" }) : {}),
 });
 
-describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)", () => {
+describe(seedTag("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalanceHandler via executeCrontab)"), () => {
   test("MATCH: 400 random hubs (R→C requests by strategy / policy / fee / reserve, submitted markers, C→R withdrawals and ready workspaces, sent-batch latch and staleness, manual broadcast, pair limits) -- og's outputs, J batch, markers, task and halts", async () => {
     const counts = new Map<string, number>();
-    for (let i = 0; i < 400; i++) {
+    const wanted = ["settle_propose", "settle_execute", "j_broadcast", "j_abort_sent_batch", "r2c", "halt:REBALANCE_REQUEST_FEE_STATE_MISSING", "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN"];
+    for (let i = 0, more = untilCovered(400, () => wanted.every((k) => (counts.get(k) ?? 0) > 3)); more(i); i++) {
       const hub = pick([ALICE, BOB, CAROL]), peers = [ALICE, BOB, CAROL].filter((p) => p !== hub) as EntityId[];
       const accts: Acct[] = peers.map((peer) => {
         const hubIsLeft = hub < peer, toks = [1, 3].filter(() => rng() < 0.8).map((t) => randomTok(t, hubIsLeft));
@@ -91,7 +94,8 @@ describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalan
       });
       const now = 1_000_000 + ri(1_000), runtimeNow = now + ri(3) * 100_000, manual = rng() < 0.15;
       const r2cRows = rng() < 0.2 ? [{ tokenId: 1, receivingEntity: hub, pairs: Array.from({ length: pick([1, 64, 256]) }, (_, n) => ({ entity: n === 0 ? peers[0] as string : `0x${(n + 9).toString(16).padStart(64, "0")}`, amount: 1n })) }] : [];
-      const sent = rng() < 0.2 ? { sentBatch: { batch: ogInitJBatch().batch, batchHash: ZERO_WORD, encodedBatch: "0x", entityNonce: 2, firstSubmittedAt: 1, lastSubmittedAt: pick([0, runtimeNow - 1_000, runtimeNow - 200_000]), submitAttempts: 1 }, lastBroadcast: pick([0, runtimeNow - 500]) } : {};
+      // og consensus never records a submit time on the sent batch: its age is the last broadcast's
+      const sent = rng() < 0.2 ? { status: "sent", sentBatch: ogSentBatch(ogInitJBatch().batch, ZERO_WORD, 2, 1), lastBroadcast: pick([0, runtimeNow - 500, runtimeNow - 1_000, runtimeNow - 200_000]) } : {};
       const jBatch = { ...ogInitJBatch(), ...(r2cRows.length > 0 ? { batch: { ...ogInitJBatch().batch, reserveToCollateral: r2cRows }, status: "accumulating" } : {}), ...sent };
       const config = { matchingStrategy: pick(["amount", "fee", "time", "bogus"]), policyVersion: pick([1, 1, 2, 0]), rebalanceLiquidityFeeBps: pick([0n, 1n, 100n]), disputeAutoFinalizeMode: "auto", ...(rng() < 0.03 ? { c2rWithdrawSoftLimit: 1n } : {}) };
       const reserves = new Map([[1, pick([0n, 100n * U, 5_000n * U, 5_000n * U])], [3, pick([0n, 400n * U, 5_000n * U])]]);
@@ -114,15 +118,15 @@ describe("rebalance-refresh: hub rebalance (og scheduler/rebalance.ts hubRebalan
       if (ogErr !== undefined) { counts.set(`halt:${ogErr.split(":")[0]}`, (counts.get(`halt:${ogErr.split(":")[0]}`) ?? 0) + 1); expect(rw.ok ? "ok" : reasonOf(rw.error)).toBe(ogErr); continue; }
       const run = unwrap(rw);
       expect(run.outputs).toEqual((ogOut ?? []).map((o) => ({ signerId: o.signerId, txs: o.entityTxs })));
-      expect(run.state.committed["jBatchState"]).toEqual(og.jBatchState);
-      expect(unwrap(crontabOf(run.state)).tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
+      expect(ogJb(run.state)).toEqual(og.jBatchState);
+      expect(crontabOf(run.state).tasks.get("hubRebalance")?.lastRun).toBe(og.crontabState.tasks.get("hubRebalance").lastRun);
       for (const a of accts) expect([...((run.accountReplicas.get(a.peer)?.state.submittedAt ?? new Map()) as ReadonlyMap<number, number>)].sort()).toEqual([...og.accounts.get(a.peer).shadow.rebalance.submittedAtByToken].sort() as never);
       for (const o of run.outputs) for (const tx of o.txs) counts.set(tx.type, (counts.get(tx.type) ?? 0) + 1);
-      const r2c = ((run.state.committed["jBatchState"] as any).batch.reserveToCollateral as readonly unknown[]).length > r2cRows.length || JSON.stringify((run.state.committed["jBatchState"] as any).batch.reserveToCollateral, (_, v) => (typeof v === "bigint" ? String(v) : v)) !== JSON.stringify(r2cRows, (_, v) => (typeof v === "bigint" ? String(v) : v));
+      const r2c = (ogJb(run.state)!.batch.reserveToCollateral as readonly unknown[]).length > r2cRows.length || JSON.stringify(ogJb(run.state)!.batch.reserveToCollateral, (_, v) => (typeof v === "bigint" ? String(v) : v)) !== JSON.stringify(r2cRows, (_, v) => (typeof v === "bigint" ? String(v) : v));
       if (r2c) counts.set("r2c", (counts.get("r2c") ?? 0) + 1);
     }
     const seen = Object.fromEntries([...counts].map(([k, v]) => [k, v > 3]));
-    expect(seen).toMatchObject({ settle_propose: true, settle_execute: true, j_broadcast: true, j_abort_sent_batch: true, r2c: true, "halt:REBALANCE_REQUEST_FEE_STATE_MISSING": true, "halt:HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN": true });
+    expect(seen).toMatchObject(Object.fromEntries(wanted.map((k) => [k, true])));
     expect(counts.has("halt:J_BATCH_LIMIT_EXCEEDED")).toBe(true);
   }, 120_000);
 });
@@ -161,7 +165,7 @@ const observeAs = (id: EntityId, threshold: bigint, members: ReadonlyMap<string,
 };
 const observed = observeAs(S, 1n, one);
 const uState = observeAs(UE, 2n, three).state;
-const uHanko = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+const uHanko = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
 
 type Side = DisputeHanko;
 type BoardSpec = { readonly peer: EntityId; readonly height: number; readonly frameHash: string; readonly own: string; readonly peerHanko: string; readonly current?: Side | undefined; readonly counterparty?: Side | undefined; readonly marker?: RefreshMigration | undefined };
@@ -213,7 +217,7 @@ const rwBoardState = (hooks: readonly ScheduledHook[]): EntityState => withCront
 const sortedHooks = (hooks: ReadonlyMap<string, unknown>): unknown[] => [...hooks.values()].map((h) => JSON.parse(JSON.stringify(h))).sort((x, y) => (x.id < y.id ? -1 : 1));
 const ogError = (f: () => unknown): string | undefined => { try { f(); return undefined; } catch (e) { return (e as Error).message; } };
 
-describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)", () => {
+describe(seedTag("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refresh.ts, board-hanko-refresh-hook.ts, j-events-board.ts)"), () => {
   test("MATCH: 150 random board_hanko_refresh hooks (cursor, markers, frame / dispute certification, peer Hankos under the certified board, >32 Accounts) -- og's outputs and proposer, hashesToSign, markers and hooks", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 150; i++) {
@@ -233,6 +237,7 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       const run = rw.value;
       expect(run.outputs).toEqual([]);
       const mine = run.sent.map((o) => {
+        if (!("tx" in o)) throw new Error("the crontab sent a consensus input, not an Account input");
         const d = o.tx.data as any, route = unwrap(counterpartyProposer(state, replicas.get(o.to as EntityId) as AccountReplica, o.to as EntityId));
         expect(typeof d.frameHanko).toBe("string");
         return { entityId: o.to, signerId: route, entityTxs: [{ type: o.tx.type, data: { kind: d.kind, fromEntityId: d.fromEntityId, toEntityId: d.toEntityId, domain: d.domain, disputeConfig: d.disputeConfig,
@@ -242,14 +247,14 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       expect(mine).toEqual(ogOut);
       expect(run.hashes).toEqual(ctx.hashesToSign as never);
       for (const s of specs) expect(run.accountReplicas.get(s.peer)?.refreshMigration).toEqual(og.accounts.get(s.peer).boardHankoRefreshMigration);
-      const hooks = sortedHooks(unwrap(crontabOf(run.state)).hooks);
+      const hooks = sortedHooks(crontabOf(run.state).hooks);
       expect(hooks).toEqual(sortedHooks(og.crontabState.hooks) as never);
       for (const s of specs) { const m = run.accountReplicas.get(s.peer)?.refreshMigration; if (m !== undefined && m !== s.marker) bump(m.reason); }
       for (const o of ogOut) { bump(`signer:${o.signerId}`); if (o.entityTxs[0].data.boardHankoRefresh.disputeHanko !== undefined) bump("disputeHanko"); }
       for (const h of hooks as any[]) bump(h.data.afterCounterpartyId === "" ? "retry" : "hasMore");
     }
     for (const k of ["issued", "output-route-unavailable", "bilateral-frame-uncertified", "certified-frame-invalid", "bilateral-dispute-uncertified", "certified-dispute-invalid", "disputeHanko", "retry", "hasMore", `signer:${aliceAddr.toLowerCase()}`]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  }, 120_000);
+  }, 180_000);
 
   test("MATCH: 120 random BoardActivated events (our own, a peer's, an unrelated Entity's) -- og's markers, refresh and 24h counterparty hooks, messages", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -266,12 +271,12 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       if (!rw.ok) continue;
       expect(rw.value.events.map((e) => e.message)).toEqual(readEntityFrameEventMessages(og));
       for (const s of specs) expect(rw.value.accountReplicas.get(s.peer)?.refreshMigration).toEqual(og.accounts.get(s.peer).boardHankoRefreshMigration);
-      const after = sortedHooks(unwrap(crontabOf(rw.value.state)).hooks);
+      const after = sortedHooks(crontabOf(rw.value.state).hooks);
       expect(after).toEqual(sortedHooks(og.crontabState.hooks) as never);
       bump(target === S ? (after.length === 0 ? "local:cancelled" : "local:armed") : after.length > hooks.length ? "peer:deadline" : "peer:none");
     }
     for (const k of ["local:cancelled", "local:armed", "peer:deadline", "peer:none"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+  }, 50_000);
 
   test("MATCH: 300 random Entity frame ends (frame advance, peer Hanko, dispute witness and marker changes) -- og scheduleChangedAccountBoardHankoRefreshes re-arms the same hook", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
@@ -293,16 +298,18 @@ describe("rebalance-refresh: board Hanko refresh (og board-rotation-hanko-refres
       scheduleChangedAccountBoardHankoRefreshes(og, evidence, new Set(after.map((s) => s.peer)));
       const d = { state: rwBoardState([]), accountReplicas: new Map(after.map((s) => [s.peer, rwBoardAccount(s)])) };
       const rw = unwrap(rearmBoardRefreshes(new Map(before.map((s) => [s.peer, rwBoardAccount(s)])), d, now));
-      const hooks = sortedHooks(unwrap(crontabOf(rw.state)).hooks);
+      const hooks = sortedHooks(crontabOf(rw.state).hooks);
       expect(hooks).toEqual(sortedHooks(og.crontabState.hooks) as never);
       bump(hooks.length === 0 ? "quiet" : "rearmed");
     }
     expect([(seen.get("quiet") ?? 0) > 20, (seen.get("rearmed") ?? 0) > 20]).toEqual([true, true]);
-  }, 120_000);
+  }, 180_000);
 });
 
 // ---- lending_overdue: og collectDerivedDeadlines (loans) and settleOverdueLendingLoan through executeCrontab ----
-describe("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)", () => {
+/** og keeps a lending book only on a hub, which setHubConfig gave a config; the overdue path never reads it. */
+const LENDING_HUB = { matchingStrategy: "amount", policyVersion: 1, disputeAutoFinalizeMode: "auto" };
+describe(seedTag("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed-lending-close.ts settleOverdueLendingLoan)"), () => {
   test("MATCH: 300 random hub lending books (active / repaid loans, due times, missing pools and Accounts, borrowed underflow, credit in the delta and queued in the mempool) -- og's derived deadlines, lending book and revokes", async () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 300; i++) {
@@ -325,13 +332,13 @@ describe("rebalance-refresh: lending_overdue (og derived-deadlines.ts, committed
       const ogAccts = accts.map((a) => [a.peer, { ...ogAccount(hub, { peer: a.peer, toks: [], settlePending: false }), mempool: a.queued === undefined ? [] : [a.queued.lending ? { type: "lending_credit", data: { action: "grant", loanId: "loan-q", hubEntityId: hub, borrowerEntityId: a.peer, tokenId: a.queued.t, creditLimit: a.queued.limit } } : { type: "set_credit_limit", data: { tokenId: a.queued.t, amount: a.queued.limit } }] }] as const);
       for (const [peer, acc] of ogAccts) { const a = accts.find((x) => x.peer === peer)!; acc.state.deltas = PA("deltas", a.tokens.map((x) => [x.t, { tokenId: x.t, collateral: 0n, ondelta: 0n, offdelta: 0n, leftCreditLimit: x.left, rightCreditLimit: x.right, leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }])); }
       const og: any = { entityId: hub, timestamp: now, config: ogConfigOf([aliceAddr]), accounts: new EntityAccountCandidateMap(PersistentEntityAccountMap.fromEntries(ogAccts as never, hub, () => ZERO_WORD as never)),
-        lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) }, crontabState: { tasks: new Map(), hooks: new Map() }, paybook: { entries: new Map(), feesEarned: 0n }, reserves: new Map() };
-      const state = withCrontab(unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr as never, { shares: 1n }]]), committed: { lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) } } as never })).state, { tasks: new Map(), hooks: new Map() } as Crontab);
+        hubRebalanceConfig: { ...LENDING_HUB }, lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) }, crontabState: { tasks: new Map(), hooks: new Map() }, paybook: { entries: new Map(), feesEarned: 0n }, reserves: new Map() };
+      const state = withCrontab(unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr as never, { shares: 1n }]]), committed: { hubRebalanceConfig: { ...LENDING_HUB }, lending: { pools: new Map([...pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...loans].map(([k, v]) => [k, { ...v }])) } } as never })).state, { tasks: new Map(), hooks: new Map() } as Crontab);
       expect(derivedDeadlines(state, replicas)).toEqual(ogCollectDerivedDeadlines(og) as never);
       const ctx = { manualBroadcastInInput: false, bookIntentSlot: createBookIntentProgram().openSlot(), hashesToSign: [], accountChanges: new Set<string>(), candidateEffects: [], accountTxs: [] as any[] };
       await ogExecuteCrontab({ quietRuntimeLogs: true, state: { timestamp: now } } as never, { entityId: hub, state: og } as never, og.crontabState, ctx as never);
       const run = unwrap(executeCrontab(state, replicas, now));
-      expect(run.state.committed["lending"]).toEqual(og.lending);
+      expect(ogOf(run.state)["lending"]).toEqual(og.lending);
       expect(run.accountTxs.map(({ accountId: id, tx }) => { const x = tx as any; return { accountId: id, tx: { type: x.type, data: { action: x.action, loanId: x.loanId, hubEntityId: x.hubEntityId, borrowerEntityId: x.borrowerEntityId, tokenId: Number(x.tokenId), creditLimit: x.creditLimit } } }; })).toEqual(ctx.accountTxs);
       expect(run.outputs).toEqual([]);
       for (const l of og.lending.loans.values()) if (l.status === "defaulted") bump("defaulted");

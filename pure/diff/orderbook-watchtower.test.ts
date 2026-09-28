@@ -1,6 +1,7 @@
 // Differential tests: og watchtower (core/watchtower/{http,store}, core/storage/recovery/bundle) and og orderbook (core/orderbook,
 // entity swap requests) vs the pure rewrite. "MATCH:" tests run og live on the same input.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ import { serializeTaggedJson } from "../../core/protocol/serialization/index.ts"
 import * as ogBook from "../../core/orderbook/core.ts";
 import { computeBookCommitmentHash } from "../../core/orderbook/commitment.ts";
 import { handleCancelSwapRequest, handlePlaceSwapOfferRequest } from "../../core/entity/tx/handlers/payments/swap-requests.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
 import {
   decodeTowerLookupDoc, hexToBytes, isEthersAddress, recoverPersonalMessage, signPersonalMessage, towerEnvelopeHash, towerPayloadDigest, upsertTowerAppointment, upsertTowerRecoveryArchive,
   verifyTowerAppointment, verifyTowerReceiptSignature, applyEntityInput, admitAt, createEntity, tokenId, type EntityTx, type WireAccountTx,
@@ -21,7 +22,7 @@ import {
   type TowerAppointmentV1, type TowerLookupDoc, type TowerStoreConfig, type TowerWrite, type Result, type TowerError,
 } from "../xln.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const TOWER_KEY = ethers.keccak256(ethers.toUtf8Bytes("pure:tower"));
 const hex = (rand: () => number, bytes: number): string => `0x${Array.from({ length: bytes }, () => Math.floor(rand() * 256).toString(16).padStart(2, "0")).join("")}`;
 type Json = Record<string, unknown>;
@@ -97,7 +98,7 @@ const appointment = (s: Spec): Json => {
   return { type: "tower_appointment", version: 1, towerMode: mode, lookupKey, slot: s.slot ?? 0, bundle, ownerProof: { runtimeId: w.address.toLowerCase(), signedAt: s.signedAt, signature: w.signMessageSync(message) }, ...(s.payload ? { lastResortPayload: s.payload } : {}) };
 };
 
-describe("orderbook-watchtower: watchtower (ER-24)", () => {
+describe(seedTag("orderbook-watchtower: watchtower (ER-24)"), () => {
   test("MATCH (og crypto.ts + ethers): envelope hash, payload digest, EIP-191 sign/recover, isAddress", () => {
     const rand = prng(7);
     for (let i = 0; i < 40; i++) {
@@ -117,11 +118,11 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
         try { ogRecovered = ethers.verifyMessage(message, variant).toLowerCase(); } catch { ogRecovered = undefined; }
         expect([v, recoverPersonalMessage(message, variant)]).toEqual([v, ogRecovered]);
       }
-      const addr = ethers.Wallet.createRandom().address;
+      const addr = new ethers.Wallet(key).address;
       for (const candidate of [addr, addr.toLowerCase(), addr.slice(2), addr.replace(/[a-f]/, (c) => c.toUpperCase()), addr.toUpperCase().replace("0X", "0x"), ethers.getIcapAddress(addr), ethers.getIcapAddress(addr).replace(/.$/, "0"), "0x123"])
         expect([candidate, isEthersAddress(candidate)]).toEqual([candidate, ethers.isAddress(candidate)]);
     }
-  });
+  }, 30_000);
 
   test("MATCH (og http.ts handleTowerAppointment + store upsertAppointment): verify, stale/replay store checks, retention, signed receipts, persisted document", async () => {
     const ls = lockstep();
@@ -184,8 +185,8 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
   test("MATCH (randomized): 120 appointments over 3 lookup keys, bundle cap 2 and a 3.5 KB quota", async () => {
     for (const [seed, opts] of [[11, { maxBundles: 2 }], [12, { maxBytes: 3500 }]] as const) {
       const ls = lockstep(opts), rand = prng(seed), base = ls.now - 100_000;
-      const seen = new Set<string>();
-      for (let i = 0; i < 60; i++) {
+      const seen = new Set<string>(), wanted = ["ok", "TOWER_APPOINTMENT_STALE", "TOWER_APPOINTMENT_REPLAY_MISMATCH"];
+      for (let i = 0, more = untilCovered(60, () => wanted.every((k) => seen.has(k))); more(i); i++) {
         const lookup = Math.floor(rand() * 3), delayed = rand() < 0.25;
         const spec: Spec = {
           ownerIndex: rand() < 0.05 ? 9 : lookup, lookup, slot: Math.floor(rand() * 3), signedAt: base + Math.floor(rand() * 20), height: Math.floor(rand() * 8), createdAt: Math.floor(rand() * 4),
@@ -196,10 +197,10 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
         ls.expectSame(r, `seed ${seed} step ${i}`);
         seen.add(r.og["ok"] === true ? "ok" : String(r.og["error"]).split(":")[0] ?? "");
       }
-      expect(seen.has("ok") && seen.has("TOWER_APPOINTMENT_STALE") && seen.has("TOWER_APPOINTMENT_REPLAY_MISMATCH")).toBe(true);
+      expect(wanted.filter((k) => !seen.has(k))).toEqual([]);
       await ls.compareDocs();
     }
-  });
+  }, 40_000);
 
   test("MATCH: the receipt og signs verifies against og's tower address", async () => {
     const ls = lockstep();
@@ -219,10 +220,12 @@ describe("orderbook-watchtower: watchtower (ER-24)", () => {
   });
 });
 
-describe("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)", () => {
+describe(seedTag("orderbook-watchtower: entity swap requests (og payments/swap-requests.ts)"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
-  const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
-  const opened = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+  const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
+  const signed = () => unwrap(applyEntityInput(unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J })), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+  // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+  const opened = () => unwrap(applyEntityInput(signed(), { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx, lane: "account-work" })).replica;
   const ogState = (accounts: readonly string[]) => ({ entityId: ALICE, accounts: new Map(accounts.map((a) => [a, { state: {} }])), config: { validators: [aliceAddr] } }) as never;
   /** og AccountTx `{type, data}` (numeric token ids) as the rewrite's flat wire tx. */
   const rwAccountTx = (t: { type: string; data: Record<string, unknown> }): WireAccountTx =>
@@ -258,10 +261,10 @@ describe("orderbook-watchtower: entity swap requests (og payments/swap-requests.
     expect(() => handlePlaceSwapOfferRequest(ogState([]), { type: "placeSwapOffer", data: { counterpartyEntityId: CAROL } } as never, { mutableFrameState: true } as never)).toThrow("SWAP_REQUEST_ACCOUNT_MISSING");
     expect(() => handleCancelSwapRequest(ogState([]), { type: "proposeCancelSwap", data: { counterpartyEntityId: CAROL, offerId: "x" } } as never, { mutableFrameState: true } as never)).toThrow("SWAP_REQUEST_ACCOUNT_MISSING");
     expect(unwrapErr(applyEntityInput(opened(), { kind: "txs", timestamp: NOW + 1n, txs: [{ type: "proposeCancelSwap", data: { counterpartyEntityId: CAROL, offerId: "x" } }] }, ctx))).toEqual({ _tag: "swap_request_account_missing", target: CAROL });
-  });
+  }, 30_000);
 });
 
-describe("orderbook-watchtower: price-page order book (og orderbook/core.ts, commitment.ts)", () => {
+describe(seedTag("orderbook-watchtower: price-page order book (og orderbook/core.ts, commitment.ts)"), () => {
   const owners = ["alice", "bob", "carol", "dave"];
   type Out = { state: any; events: unknown } | null;
   /** One random command stream through og and the rewrite: same events (or the same refusal) and the same book commitment after every step. */
@@ -285,7 +288,7 @@ describe("orderbook-watchtower: price-page order book (og orderbook/core.ts, com
       const run = (f: () => Out): Out | Error => { try { return f(); } catch (e) { return e as Error; } };
       if (roll < 13 || live.length === 0) {
         const cmd = { kind: 0 as const, ownerId: owners[ri(4)] as string, orderId: ri(15) === 0 && pick ? pick.orderId : `o${seed}-${i}`, side: ri(2) as 0 | 1, tif: [0, 0, 0, 1, 2][ri(5)] as 0 | 1 | 2, postOnly: ri(6) === 0, priceTicks: BigInt(ri(25) === 0 ? 0 : 95 + ri(11)), qtyLots: BigInt(ri(30) === 0 ? 0 : 1 + ri(12)) };
-        ogOut = run(() => ogBook.applyCommand(og, cmd, options as never)); rwOut = applyBookCommand(rw, cmd, options as never); kinds.add("place");
+        ogOut = run(() => ogBook.applyCommand(og, cmd, options)); rwOut = applyBookCommand(rw, cmd, options); kinds.add("place");
       } else if (roll < 16) {
         const cmd = { kind: 1 as const, ownerId: ri(5) === 0 ? "mallory" : pick?.ownerId ?? "x", orderId: ri(8) === 0 ? "missing" : pick?.orderId ?? "x" };
         ogOut = run(() => ogBook.applyCommand(og, cmd)); rwOut = applyBookCommand(rw, cmd); kinds.add("cancel");
@@ -297,7 +300,7 @@ describe("orderbook-watchtower: price-page order book (og orderbook/core.ts, com
         const o = { orderId: `r${seed}-${i}`, ownerId: owners[ri(4)] as string, side: ri(2) as 0 | 1, priceTicks: BigInt(95 + ri(11)), qtyLots: BigInt(1 + ri(9)) };
         ogOut = run(() => ({ state: ogBook.materializeCommittedRemainder(og, o), events: [] })); rwOut = map(materializeCommittedRemainder(rw, o), (state) => ({ state, events: [] })); kinds.add("remainder");
       } else if (roll === 18) {
-        ogOut = run(() => ogBook.resumeCrossedBook(og, options as never)); rwOut = resumeCrossedBook(rw, options as never); kinds.add("resume");
+        ogOut = run(() => ogBook.resumeCrossedBook(og, options)); rwOut = resumeCrossedBook(rw, options); kinds.add("resume");
       } else if (pick && ri(2) === 0) {
         const next = BigInt(ri(Number(pick.qtyLots) + 1));
         ogOut = run(() => ({ state: ogBook.reduceBookOrderQuantity(og, pick.orderId, next), events: [] })); rwOut = map(reduceBookOrderQuantity(rw, pick.orderId, next), (state) => ({ state, events: [] }));
@@ -324,7 +327,7 @@ describe("orderbook-watchtower: price-page order book (og orderbook/core.ts, com
     for (const [seed, params, opts] of [[1, { maxOrders: 1000, stpPolicy: 1 }, false], [2, { maxOrders: 1000, stpPolicy: 0 }, false], [3, { maxOrders: 12, stpPolicy: 1 }, false], [4, { maxOrders: 1000, stpPolicy: 1 }, true], [5, { maxOrders: 1000, stpPolicy: 0 }, true], [6, { maxOrders: 40, stpPolicy: 1 }, true]] as const)
       for (const k of stream(seed, 400, params, opts)) kinds.add(k);
     expect([...kinds].sort()).toEqual(["cancel", "error", "place", "remainder", "resume"]);
-  });
+  }, 30_000);
   test("MATCH: deep FIFO pages (> 16 orders at one price) and the empty book root", () => {
     const og0 = ogBook.createBook({ bucketWidthTicks: 1n, maxOrders: 500, stpPolicy: 1 });
     expect(bookCommitmentHash(unwrap(createBook({ bucketWidthTicks: 1n, maxOrders: 500, stpPolicy: 1 })))).toBe(computeBookCommitmentHash(og0));

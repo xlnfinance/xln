@@ -2,11 +2,12 @@
 // extensions/lending.ts) and the Htlc* runtime events' jurisdictionId (committed-frame-followups.ts, committed-htlc-followups.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / refuse, lending book, returned Account txs and events.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag } from "./seed.ts";
 import {
   accountId, applyRuntime, convertOutput, wireTx, createEntity, createRuntime, genesisReplica, lendingFollowups, lendingInterest, lendingLoanId, localScheduledWake, replicaKey, resolveFollowup, secretFollowup, spawn, tokenId,
-  type AccountReplica, type AccountTx, type EntityId, type EntityOutput, type EntityState, type EntityTx, type LendingBook, type LendingFrame, type Runtime, type RoutedEntityInput,
+  type AccountReplica, type AccountTx, type EntityId, type EntityOutput, type EntityState, type EntityTx, type LendingBook, type LendingFrame, type LendingLoan, type LendingPool, type Runtime, type RoutedEntityInput,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
 import { applyCommittedLendingFollowup } from "../../core/entity/tx/handlers/account/committed-lending-followup.ts";
 import { buildLendingLoanId, computeLendingInterest, LENDING_TERM_MS } from "../../core/extensions/lending.ts";
 import { applyCommittedAccountFrameFollowups } from "../../core/entity/tx/handlers/account/committed-frame-followups.ts";
@@ -14,8 +15,9 @@ import { applyHtlcSecretFollowups } from "../../core/entity/tx/handlers/account/
 import { createBookIntentProgram, applyBookIntentProgram } from "../../core/entity/books/book-intents.ts";
 import { hashHtlcSecret } from "../../core/protocol/htlc/utils.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
+import { ogOf } from "./og-state.ts";
 
-let seed = 71;
+let seed = seedOf(71);
 /** mulberry32: a full-period 32-bit generator (the float LCG loses its low bits past 2^53 and cycles early). */
 const rng = (): number => {
   seed = (seed + 0x6d2b79f5) | 0;
@@ -31,7 +33,7 @@ const hex16 = (n: number): string => n.toString(16).padStart(16, "0");
 const JUR = TERMS.domain;
 
 /** The rewrite's flat Account tx as og's `{ type, data }` with a numeric tokenId. */
-const ogTx = (tx: AccountTx): any => unwrap(wireTx(tx, unwrap(accountId(ALICE, BOB)), true) as never);
+const ogTx = (tx: AccountTx): any => unwrap(wireTx(tx, unwrap(accountId(ALICE, BOB)), true));
 const cloneBook = (b: LendingBook | undefined): any => (b === undefined ? undefined : { pools: new Map([...b.pools].map(([k, v]) => [k, { ...v }])), loans: new Map([...b.loans].map(([k, v]) => [k, { ...v }])) });
 
 // ---- the lending followup over random committed frames, og applyCommittedLendingFollowup live ----
@@ -51,7 +53,10 @@ const ogReplica = (hub: EntityId, peer: EntityId, rows: readonly Row[], mempool:
   };
 };
 
-describe("lending-hub: committed lending followup (og committed-lending-followup.ts, committed-lending-close.ts)", () => {
+/** og setHubConfig commits a config with the hub flag; the lending followup never reads it. */
+const HUB_CONFIG = { matchingStrategy: "amount", policyVersion: 1 } as never;
+
+describe(seedTag("lending-hub: committed lending followup (og committed-lending-followup.ts, committed-lending-close.ts)"), () => {
   test("MATCH: 3000 random hub lending books and committed frames -- og's accept / refuse message, lending book and returned lending_credit / lending_close_payout", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
     for (let i = 0; i < 3000; i++) {
@@ -60,17 +65,18 @@ describe("lending-hub: committed lending followup (og committed-lending-followup
       const rows: Row[] = [1, 3].filter(() => rng() < 0.9).map((t) => ({ t, collateral: pick([0n, 100n, 1_000n]), ondelta: pick([0n, 300n, -300n]), offdelta: pick([0n, 40n, -40n, 900n]), left: lim(), right: lim(), hubHold: rng() < 0.15 ? pick([10n, 500n]) : 0n }));
       const mempool: AccountTx[] = rng() < 0.3 ? [rng() < 0.5 ? { type: "set_credit_limit", tokenId: tk(pick([1, 3])), limit: lim() } : { type: "lending_credit", action: "grant", loanId: `loan-${hex16(999)}`, hubEntityId: hub, borrowerEntityId: peer, tokenId: tk(pick([1, 3])), creditLimit: lim() }] : [];
       const positions = [`lend-${hex16(1)}`, `lend-${hex16(2)}`, `lend-${hex16(3)}`], requests = [`borrow-${hex16(4)}`, `borrow-${hex16(5)}`];
-      const pools = new Map<string, any>(), loans = new Map<string, any>();
+      const pools = new Map<string, LendingPool>(), loans = new Map<string, LendingLoan>();
       if (rng() < 0.8) {
         for (const p of positions.filter(() => rng() < 0.5)) pools.set(p, { positionId: p, hubEntityId: hub, lenderEntityId: pick([peer, peer, hub]), tokenId: pick([1, 1, 3]), principalAmount: 500n, availableAmount: pick([0n, 60n, 300n, 500n, 500n]), borrowedAmount: pick([0n, 0n, 40n, 200n]),
-          interestBps: pick([0, 3, 100, 500]), termId: pick(["1h", "1h", "1d"]), termMs: 3_600_000, createdAt: pick([1, 2]), updatedAt: 1, status: pick(["open", "open", "open", "open", "open", "closing", "closed"]) });
+          interestBps: pick([0, 3, 100, 500]), termId: pick(["1h", "1h", "1d"]), termMs: 3_600_000, createdAt: pick([1, 2]), updatedAt: 1, status: pick(["open", "open", "open", "open", "open", "closing", "closed"] as const) });
         for (let l = 0, n = 1 + ri(3); l < n; l++) {
           const loanId = `loan-${hex16(100 + l)}`, principal = pick([10n, 40n, 60n]);
           loans.set(loanId, { requestId: pick(requests), loanId, hubEntityId: hub, borrowerEntityId: pick([peer, peer, hub]), lenderEntityId: peer, positionId: pick([...positions, "lend-missing"]), tokenId: pick([1, 3]), principalAmount: principal,
-            interestAmount: 1n, repaymentAmount: principal + 1n, repaidAmount: pick([0n, 0n, 5n]), interestBps: 100, termId: "1h", termMs: 3_600_000, openedAt: 1, dueAt: 3_600_001, updatedAt: 1, status: pick(["opening", "active", "active", "active", "closing", "repaid", "defaulted"]) });
+            interestAmount: 1n, repaymentAmount: principal + 1n, repaidAmount: pick([0n, 0n, 5n]), interestBps: 100, termId: "1h", termMs: 3_600_000, openedAt: 1, dueAt: 3_600_001, updatedAt: 1, status: pick(["opening", "active", "active", "active", "closing", "repaid", "defaulted"] as const) });
         }
       }
-      const book: LendingBook | undefined = pools.size + loans.size > 0 || rng() < 0.5 ? { pools, loans } as LendingBook : undefined;
+      // og opens a lending book only on a hub
+      const book: LendingBook | undefined = isHub && (pools.size + loans.size > 0 || rng() < 0.5) ? { pools, loans } : undefined;
       const loanIds = [...loans.keys(), `loan-${hex16(777)}`];
       const randomTx = (proposer: EntityId): AccountTx => {
         const other = proposer === hub ? peer : hub, hubRef = pick([hub, hub, hub, hub.toUpperCase().replace("0X", "0x"), other]);
@@ -120,9 +126,9 @@ describe("lending-hub: committed lending followup (og committed-lending-followup
       });
       const withAccount = rng() < 0.95;
       const replicas = new Map(withAccount ? [[peer, rwReplica(hub, peer, rows, mempool)]] : []);
-      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { isHub: true } } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } } as never)).state;
-      const rw = lendingFollowups(state0, replicas as never, peer, frames, BigInt(ts));
-      const og: any = { entityId: hub, timestamp: ts, profile: isHub ? { isHub: true } : undefined, accounts: new Map(withAccount ? [[peer, ogReplica(hub, peer, rows, mempool)]] : []), ...(book === undefined ? {} : { lending: cloneBook(book) }) };
+      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { name: "Hub", isHub: true, avatar: "", bio: "", website: "" }, hubRebalanceConfig: HUB_CONFIG } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } })).state;
+      const rw = lendingFollowups(state0, replicas, peer, frames, BigInt(ts));
+      const og: any = { entityId: hub, timestamp: ts, ...(isHub ? { profile: { name: "Hub", isHub: true, avatar: "", bio: "", website: "" }, hubRebalanceConfig: HUB_CONFIG } : {}), accounts: new Map(withAccount ? [[peer, ogReplica(hub, peer, rows, mempool)]] : []), ...(book === undefined ? {} : { lending: cloneBook(book) }) };
       const accountTxs: any[] = [];
       let refused: string | undefined;
       try {
@@ -134,10 +140,10 @@ describe("lending-hub: committed lending followup (og committed-lending-followup
       expect(`${i}:${rw.ok ? "ok" : rw.error._tag === "entity_invariant" ? rw.error.reason : rw.error._tag}`).toBe(`${i}:${refused ?? "ok"}`);
       bump(refused === undefined ? "accepted" : refused.split(/[:\s]/)[0] ?? "");
       if (!rw.ok) continue;
-      expect(rw.value.state.committed["lending"]).toEqual(og.lending);
+      expect(ogOf(rw.value.state)["lending"]).toEqual(og.lending);
       expect(rw.value.accountTxs.map(({ accountId: a, tx }) => ({ accountId: a, tx: ogTx(tx) }))).toEqual(accountTxs);
       for (const t of accountTxs) bump(`${t.tx.type}:${t.tx.data.action ?? ""}`);
-      for (const l of og.lending?.loans.values() ?? []) if (!loans.has(l.loanId)) bump("loan-opened"); else if (l.status !== loans.get(l.loanId).status) bump(`loan-${l.status}`);
+      for (const l of og.lending?.loans.values() ?? []) if (!loans.has(l.loanId)) bump("loan-opened"); else if (l.status !== loans.get(l.loanId)?.status) bump(`loan-${l.status}`);
     }
     for (const k of ["accepted", "loan-opened", "loan-active", "loan-closing", "loan-repaid", "lending_credit:grant", "lending_credit:revoke", "lending_close_payout:", "LENDING_FUND_PROPOSER_MISMATCH", "LENDING_LIQUIDITY_UNAVAILABLE", "LENDING_REPAYMENT_MISMATCH", "LENDING_CLOSE_PAYOUT_CAPACITY", "LENDING_CREDIT_PROPOSER_MISMATCH",
       "LENDING_GRANT_STATUS_INVALID", "LENDING_REVOKE_STATUS_INVALID", "LENDING_PAYOUT_MISMATCH", "LENDING_CLOSE_ACTIVE_LOANS", "LENDING_ACCOUNT_MISSING", "LENDING_POSITION_ALREADY_EXISTS"]) expect([k, (seen.get(k) ?? 0) > 2]).toEqual([k, true]);
@@ -154,14 +160,14 @@ describe("lending-hub: committed lending followup (og committed-lending-followup
 });
 
 // ---- end-to-end: entity lendingOffer / Borrow / Repay / ClosePosition -> Account lending txs -> hub followup -> lending_overdue default ----
-describe("lending-hub: end-to-end lending lifecycle through the Runtime", () => {
+describe(seedTag("lending-hub: end-to-end lending lifecycle through the Runtime"), () => {
   const T = tk(1);
   const openTo = (target: EntityId, creditAmount: bigint): EntityTx =>
-    ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, tokenId: T, creditAmount } }) as EntityTx;
+    ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, tokenId: T, creditAmount } }) as EntityTx;
   const signers = new Map<EntityId, string>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
-  let rt: Runtime, now = NOW;
+  let rt: Runtime, now: bigint = NOW;
   const replica = (e: EntityId) => { const r = rt.entities.get(replicaKey(e, signers.get(e) as string)); if (r === undefined) throw new Error("no replica"); return r; };
-  const book = (): LendingBook => replica(BOB).state.committed["lending"] as unknown as LendingBook;
+  const book = (): LendingBook => ogOf(replica(BOB).state)["lending"] as unknown as LendingBook;
   const pump = (first: readonly RoutedEntityInput[], local?: ReadonlySet<EntityTx>): void => {
     let inputs = first;
     for (let round = 0; inputs.length > 0; round++) {
@@ -182,9 +188,9 @@ describe("lending-hub: end-to-end lending lifecycle through the Runtime", () => 
   };
 
   test("MATCH: fund -> borrow -> grant -> repay -> revoke -> close -> payout, then an unpaid loan defaults at its derived deadline -- og's loan id, interest, term and book", () => {
-    rt = [ALICE, BOB, CAROL].reduce((r, e) => spawn(r, unwrap(createEntity({ id: e, jurisdiction: JUR, threshold: 1n, members: new Map([[signers.get(e) as never, { shares: 1n }]]) }))), createRuntime());
+    rt = [ALICE, BOB, CAROL].reduce((r, e) => spawn(r, unwrap(createEntity({ id: e, jurisdiction: JUR, threshold: 1n, members: new Map([[signers.get(e) as never, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }))), createRuntime());
     run(BOB, { type: "setHubConfig", data: {} } as EntityTx);
-    expect((replica(BOB).state.committed["profile"] as { isHub?: boolean }).isHub).toBe(true);
+    expect((ogOf(replica(BOB).state)["profile"] as { isHub?: boolean }).isHub).toBe(true);
     run(ALICE, openTo(BOB, 10_000n));
     run(CAROL, openTo(BOB, 10_000n));
     // the hub pays each side from the credit it was given, so the lender owns funds and the borrower can pay interest
@@ -227,7 +233,7 @@ describe("lending-hub: end-to-end lending lifecycle through the Runtime", () => 
 });
 
 // ---- Htlc* runtime events carry og's jurisdictionId (committed-frame-followups.ts jurisdictionIdFor, committed-htlc-followups.ts getJurisdictionId) ----
-describe("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og protocol/htlc/events.ts)", () => {
+describe(seedTag("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og protocol/htlc/events.ts)"), () => {
   test("MATCH: 400 random paybook routes resolved by a committed secret and revealed upstream -- og's events byte for byte (keys, order, jurisdictionId)", () => {
     const json = (v: unknown): string => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? `${x}n` : x));
     const seen = new Set<string>();
@@ -245,7 +251,7 @@ describe("lending-hub: HtlcReceived / HtlcFinalized jurisdictionId (og protocol/
       applyHtlcSecretFollowups({ env: {}, state: newState, newState, outputs: [], accountTxs, candidateEffects, bookIntentSlot: slot } as never, [{ secret, hashlock }]);
       applyBookIntentProgram(newState, program);
       const jid = name.trim(), f0 = { paybook: { entries: new Map([[hashlock, route]]), feesEarned: 0n }, queue: [] };
-      const resolved = unwrap(resolveFollowup(f0 as never, peer, resolve as never, self, ts, jid));
+      const resolved = unwrap(resolveFollowup(f0, peer, resolve, self, ts, jid));
       const rw = secretFollowup(resolved, hashlock, secret, ts, self, jid);
       expect(json(rw.runtimeEvents ?? [])).toBe(json(candidateEffects.map((e) => ({ eventName: e.eventName, data: e.data }))));
       for (const e of candidateEffects) seen.add(`${e.eventName}:${"jurisdictionId" in e.data}`);

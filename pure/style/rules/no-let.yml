@@ -1,0 +1,6 @@
+id: no-let
+language: TypeScript
+severity: error
+message: mutable binding; use const and an expression (fold, map, recursion)
+rule: { kind: lexical_declaration, regex: '^let\s' }
+files: [xln.ts]

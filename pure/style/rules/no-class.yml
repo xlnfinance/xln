@@ -1,0 +1,6 @@
+id: no-class
+language: TypeScript
+severity: error
+message: class; use data plus functions
+rule: { kind: class_declaration }
+files: [xln.ts]

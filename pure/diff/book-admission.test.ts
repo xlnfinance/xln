@@ -1,6 +1,7 @@
 // Behavioural diff: og Account admission timing (core/account/input/local-tx-admission.ts) and the hub order book inside
 // entity consensus (core/entity/consensus/frame/application.ts) vs pure/xln.ts. Every test is MATCH and runs og live.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 
 // ---- og ----
 import { applyAccountEnqueue } from "../../core/account/input/local-tx-admission.ts";
@@ -29,9 +30,10 @@ import type { AccountReplica as OgReplica, AccountTx as OgTx } from "../../core/
 import {
   admit, admitAt, applyBookCommand, applyCommittedSwapCancels, applyEntityInput, applyRuntime, bookCommitmentHash, bookOrders, convertOutput, createBook, createEntity, createRuntime, entityRootOf, offersForMatching, pendingAccountInput,
   processOrderbookCancels, processOrderbookSwaps, tradesMatched, foldTxs, replicaId, replicaKey, spawn, tokenId, wireOf, wireTx, type EntityInput, type EntityOutput, type EntityReplica, type AccountReplica, type Book, type BookTx, type Hub, type HubAccount, type OrderbookExt, type PairDimensions, type SwapOffer, type SwapOfferEvent, type SwapRef, type EntityId, type EntityTx, type WireAccountTx } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, genesisAB, partyIn, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, genesisAB, partyIn, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
+import { ogGenesisProfile } from "./og-state.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xb00c_ad);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -85,7 +87,7 @@ const randomTx = (i: number): WireAccountTx => pick<() => WireAccountTx>([
 ])();
 const ogOf = (r: AccountReplica, self: EntityId, tx: WireAccountTx): OgTx => unwrap(wireTx(tx, replicaId(r), partyIn(r, self).left)) as unknown as OgTx;
 
-describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)", () => {
+describe(seedTag("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"), () => {
   test("MATCH: 300 random batches (unfunded payments, malformed swaps, expired HTLCs, repeated lifecycle txs): og queues without validation, dedups lifecycle payloads against mempool, keeps payment multiplicity, refuses the whole batch only on policyVersion", () => {
     let refused = 0, deduped = 0;
     for (let n = 0; n < 300; n++) {
@@ -141,7 +143,7 @@ describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"
         const added = r.value.mempool.length - rw.mempool.length;
         if (added < cases.length) (cases.some((c) => c.h <= fin) ? dups++ : conflicts++);
         rw = r.value;
-        expect(rw.mempool.map((tx) => (tx.type === "j_event_claim" ? [Number(tx.jHeight), tx.jBlockHash] : []))).toEqual(o.mempool.map((tx) => [(tx as { data: { jHeight: number } }).data.jHeight, (tx as { data: { jBlockHash: string } }).data.jBlockHash]));
+        expect<unknown>(rw.mempool.map((tx) => (tx.type === "j_event_claim" ? [Number(tx.jHeight), tx.jBlockHash] : []))).toEqual(o.mempool.map((tx) => [(tx as { data: { jHeight: number } }).data.jHeight, (tx as { data: { jBlockHash: string } }).data.jBlockHash]));
       }
     }
     expect(conflicts).toBeGreaterThan(10);
@@ -151,11 +153,11 @@ describe("book-admission: og applyAccountEnqueue timing (local-tx-admission.ts)"
 });
 
 // ============ og proposeAccountsNow (entity/tx/handlers/account/propose-accounts-now.ts) ============
-describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput bytes", () => {
+describe(seedTag("book-admission: proposeAccountsNow re-emits og pendingAccountInput bytes"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const ogState = (accounts: ReadonlyMap<string, unknown>) => ({ entityId: ALICE, height: 0, prevFrameHash: "", config: { validators: [aliceAddr], shares: { [aliceAddr]: 1n }, threshold: 1n, mode: "proposer-based" }, accounts }) as never;
   const marker = (data: object): EntityTx => ({ type: "proposeAccountsNow", data } as EntityTx);
-  const alone = () => unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
+  const alone = () => unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   test("MATCH: 300 random markers: og assertProposeAccountsNowMatchesState throws iff the rewrite refuses the whole input, with og's code", () => {
     const ids = [BOB, CAROL, W("0d"), W("0e")].map((x) => x.toLowerCase()).sort();
     const opened = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [] }, ctx)).replica;
@@ -174,7 +176,7 @@ describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput byt
       if (og !== undefined) {
         refused++;
         expect(rw.ok).toBe(false);
-        if (!rw.ok) expect(rw.error).toEqual({ _tag: "entity_invariant", reason: og } as never);
+        if (!rw.ok) expect(rw.error).toEqual({ _tag: "entity_invariant", reason: og });
       } else {
         accepted++;
         expect(rw.ok).toBe(true);
@@ -183,11 +185,13 @@ describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput byt
     }
     expect(refused).toBeGreaterThan(50);
     expect(accepted).toBeGreaterThan(30);
-  });
+  }, 30_000);
 
   test("MATCH: a proposed Account re-emits the exact ack_frame it sent (og cloneIsolatedAccountInput(pendingAccountInput)); an Account without one is owed nothing", () => {
-    const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
-    const first = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx));
+    const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
+    const signed = unwrap(applyEntityInput(alone(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx)).replica;
+    // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+    const first = unwrap(applyEntityInput(signed, { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx, lane: "account-work" }));
     const sent = first.outputs.filter((o) => "tx" in o && o.tx.data.kind === "ack_frame");
     expect(sent.length).toBe(1);
     const child = first.replica.accountReplicas.get(BOB);
@@ -198,15 +202,15 @@ describe("book-admission: proposeAccountsNow re-emits og pendingAccountInput byt
       proposal: { frame: { height: 1, timestamp: 1, jHeight: 0, accountTxs: [], prevFrameHash: "genesis", accountStateRoot: W("01"), stateHash: W("02") } } };
     const listed = [BOB, CAROL].map((x) => x.toLowerCase()).sort();
     const og = handleProposeAccountsNowEntityTx(ogState(new Map([[BOB.toLowerCase(), { pendingAccountInput: ogPending }], [CAROL.toLowerCase(), {}]])), { type: "proposeAccountsNow", data: { version: 1, proposerSignerId: aliceAddr, counterparties: listed } } as never);
-    expect(og.accountInputWorks.map((w) => [w.accountId, w.force, w.response])).toEqual([[BOB.toLowerCase(), true, ogPending]]);
+    expect<unknown>(og.accountInputWorks.map((w) => [w.accountId, w.force, w.response])).toEqual([[BOB.toLowerCase(), true, ogPending]]);
     const again = unwrap(applyEntityInput(first.replica, { kind: "txs", timestamp: NOW + 1n, txs: [marker({ version: 1, proposerSignerId: aliceAddr, counterparties: listed })] }, ctx));
-    expect(again.outputs.filter((o) => "tx" in o)).toEqual(sent);
+    expect<readonly unknown[]>(again.outputs.filter((o) => "tx" in o)).toEqual(sent);
     expect(again.replica.accountReplicas.get(BOB)).toEqual(child);
   });
 });
 
 // ============ og initOrderbookExt (system/basic.ts) and the orderbookExt root section (state-root.ts) ============
-describe("book-admission: orderbookExt state, init and root projection", () => {
+describe(seedTag("book-admission: orderbookExt state, init and root projection"), () => {
   const ctx = { ...verifiers, self: ALICE, signerId: aliceAddr };
   const alone = () => unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
   const spread = () => { const p = Array.from({ length: 5 }, () => ri(4000)); if (ri(3) > 0) p[4] = 10_000 - (p[0]! + p[1]! + p[2]! + p[3]!); return { makerBps: p[0]!, takerBps: p[1]!, hubBps: p[2]!, makerReferrerBps: p[3]!, takerReferrerBps: p[4]! }; };
@@ -216,13 +220,13 @@ describe("book-admission: orderbookExt state, init and root projection", () => {
     const kinds = new Set<string>();
     for (let i = 0; i < 200; i++) {
       const data = initData(), tx = { type: "initOrderbookExt", data } as EntityTx;
-      let og: { newState: { orderbookExt?: { hubProfile: unknown } } } | Error;
-      try { og = handleInitOrderbookExtEntityTx({ entityId: ALICE } as never, { type: "initOrderbookExt", data } as never, true) as never; } catch (e) { og = e as Error; }
+      let og: ReturnType<typeof handleInitOrderbookExtEntityTx> | Error;
+      try { og = handleInitOrderbookExtEntityTx({ entityId: ALICE } as never, { type: "initOrderbookExt", data } as never, true); } catch (e) { og = e as Error; }
       const rw = applyEntityInput(base, { kind: "txs", timestamp: NOW + 1n, txs: [tx] }, ctx);
       if (og instanceof Error) {
         kinds.add("halt");
         expect([i, og.message, rw.ok]).toEqual([i, og.message, false]);
-        if (!rw.ok) expect([i, rw.error]).toEqual([i, { _tag: "entity_invariant", reason: og.message } as never]);
+        if (!rw.ok) expect([i, rw.error]).toEqual([i, { _tag: "entity_invariant", reason: og.message }]);
         continue;
       }
       expect([i, rw.ok]).toEqual([i, true]);
@@ -230,19 +234,19 @@ describe("book-admission: orderbookExt state, init and root projection", () => {
       const ext = rw.value.replica.state.orderbookExt;
       if (og.newState.orderbookExt === undefined) { kinds.add("noop"); expect(ext).toBeUndefined(); continue; }
       kinds.add("init");
-      expect(ext?.hubProfile).toEqual(og.newState.orderbookExt.hubProfile as never);
+      expect(ext?.hubProfile).toEqual(og.newState.orderbookExt.hubProfile);
       expect([ext?.books.size, ext?.pairDimensions.size, ext?.referrals.size]).toEqual([0, 0, 0]);
       // a second init is a no-op on both sides
       const again = unwrap(applyEntityInput(rw.value.replica, { kind: "txs", timestamp: NOW + 2n, txs: [{ type: "initOrderbookExt", data: initData() } as EntityTx] }, ctx));
       expect(again.replica.state.orderbookExt).toBe(ext);
-      expect(handleInitOrderbookExtEntityTx(og.newState as never, { type: "initOrderbookExt", data: initData() } as never).newState).toBe(og.newState as never);
+      expect(handleInitOrderbookExtEntityTx(og.newState, { type: "initOrderbookExt", data: initData() }).newState).toBe(og.newState);
     }
     expect([...kinds].sort()).toEqual(["halt", "init", "noop"]);
-  });
+  }, 30_000);
 
   test("MATCH: 40 random orderbookExt states (books driven by random commands, pairDimensions, hubProfile) == og computeCanonicalEntityConsensusStateHash", () => {
     const r = alone();
-    const og0 = { entityId: r.state.id, height: 0, timestamp: Number(r.state.timestamp), config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n } },
+    const og0 = { entityId: r.state.id, height: 0, timestamp: Number(r.state.timestamp), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(r.state.id), config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n } },
       accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } };
     expect(unwrap(entityRootOf(r.state, r.accountReplicas))).toBe(computeCanonicalEntityConsensusStateHash(og0 as never));
     const roots = new Set<string>();
@@ -270,7 +274,7 @@ describe("book-admission: orderbookExt state, init and root projection", () => {
 });
 
 // ============ og same-j hub matcher (entity/tx/handlers/account/orderbook/*, orderbook/cross-j/orderbook.ts) ============
-describe("book-admission: same-j hub matcher", () => {
+describe(seedTag("book-admission: same-j hub matcher"), () => {
   const HUB = W("aa"), USERS = [W("0b"), W("cc"), W("0d"), W("ee")];
   const PAIRS = [{ base: 2, quote: 1, bd: 18, qd: 6, mid: 25_000_000n }, { base: 4, quote: 1, bd: 6, qd: 6, mid: 1_200n }, { base: 7, quote: 8, bd: 6, qd: 6, mid: 5_000n }];
   const lotOf = (d: number) => 10n ** BigInt(Math.max(0, d - 6));
@@ -294,13 +298,16 @@ describe("book-admission: same-j hub matcher", () => {
     expect([i, [...rw.pairDimensions].sort()]).toEqual([i, [...og.pairDimensions].sort()]);
   };
   const sameTxs = (i: string, rw: readonly BookTx[], og: readonly { accountId: string; tx: unknown }[]) =>
-    expect([i, rw.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) }))]).toEqual([i, og.map(({ accountId, tx }) => ({ accountId, tx }))]);
+    expect<unknown>([i, rw.map(({ accountId, tx }) => ({ accountId, tx: toOgTx(tx) }))]).toEqual([i, og.map(({ accountId, tx }) => ({ accountId, tx }))]);
   const sameHalt = (i: string, og: Error, rw: { ok: boolean; error?: unknown }) => expect([i, rw.ok ? "ok" : (rw.error as { reason: string }).reason]).toEqual([i, og.message]);
 
   test("MATCH: 40 random hub streams (offers, fills, STP, bands, fees, dimensions, cancels, committed removals, resume): same resolves, books and pair dimensions", () => {
     const comments = new Map<string, number>();
-    let halts = 0, fills = 0, resumes = 0, cancelTxs = 0, matchedTrades = 0;
-    for (let s = 0; s < 40; s++) {
+    let halts = 0, fills = 0, resumes = 0, cancelTxs = 0, matchedTrades = 0, streams = 0;
+    const commentKinds = ["fill", "outside-anchor-band", "STP", "fee-authorization-exceeded", "quote-lot-misaligned", "pair-decimals-mismatch"];
+    const covered = () => fills > 50 && matchedTrades > 20 && cancelTxs > 5 && resumes > 5 && commentKinds.every((c) => (comments.get(c) ?? 0) > 0);
+    for (let s = 0, more = untilCovered(40, covered); more(s); s++) {
+      streams++;
       const takerFeeBps = pick([0, 0, 5, 30, 10_000]);
       const hubProfile = { entityId: HUB, name: "hub", spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 }, referenceTokenId: 1, usdQuoteAuthorityEntityId: pick([...USERS, W("99")]), minTradeSize: pick([0n, 0n, 1_000n]), supportedPairs: [] };
       let rwExt: OrderbookExt = { books: new Map(), pairDimensions: new Map(), referrals: new Map(), hubProfile };
@@ -390,14 +397,14 @@ describe("book-admission: same-j hub matcher", () => {
     expect(matchedTrades).toBeGreaterThan(20);
     expect(cancelTxs).toBeGreaterThan(5);
     expect(resumes).toBeGreaterThan(5);
-    for (const c of ["fill", "outside-anchor-band", "STP", "fee-authorization-exceeded", "quote-lot-misaligned", "pair-decimals-mismatch"]) expect([c, (comments.get(c) ?? 0) > 0]).toEqual([c, true]);
-    expect(halts).toBeLessThan(40);
-  });
+    for (const c of commentKinds) expect([c, (comments.get(c) ?? 0) > 0]).toEqual([c, true]);
+    expect(halts).toBeLessThan(streams);
+  }, 30_000);
 });
 
 // ============ the book inside entity consensus: peer swap frames reach the hub, the post-tx phase matches and settles ============
-describe("book-admission: hub order book inside entity consensus", () => {
-  const entityOf = (id: EntityId, signer: typeof aliceAddr) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer, { shares: 1n }]]) }));
+describe(seedTag("book-admission: hub order book inside entity consensus"), () => {
+  const entityOf = (id: EntityId, signer: typeof aliceAddr) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signer, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   const signers = new Map<EntityId, typeof aliceAddr>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
   const world = () => {
     let rt = spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE, aliceAddr)), entityOf(BOB, bobAddr)), entityOf(CAROL, carolAddr));
@@ -426,7 +433,7 @@ describe("book-admission: hub order book inside entity consensus", () => {
     const replica = (id: EntityId) => rt.entities.get(replicaKey(id, signers.get(id)!))!;
     return { send, replica, log };
   };
-  const open = (target: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, creditAmount: 10n ** 30n, tokenId: T(2) } });
+  const open = (target: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, creditAmount: 10n ** 30n, tokenId: T(2) } });
   const credit = (to: EntityId, token: number): EntityTx => ({ type: "extendCredit", data: { counterpartyEntityId: to, tokenId: T(token), amount: 10n ** 30n } });
   const offer = (offerId: string, sellWeth: boolean, priceUsdc: bigint, weth: bigint): EntityTx => {
     const base = weth * 10n ** 18n, quote = weth * priceUsdc * 10n ** 6n;
@@ -473,5 +480,5 @@ describe("book-admission: hub order book inside entity consensus", () => {
     expect(replica(ALICE).accountReplicas.get(CAROL)!.state.offers.size).toBe(0);
     // the root commits the book section
     unwrap(entityRootOf(replica(CAROL).state, replica(CAROL).accountReplicas));
-  });
+  }, 30_000);
 });

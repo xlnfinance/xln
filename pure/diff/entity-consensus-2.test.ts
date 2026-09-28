@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag } from "./seed.ts";
 import {
   buildEntityLeaderCertificate, buildEntityLeaderVoteBody, getEntityLeaderOrder, getEntityLeaderState, getEntityLeaderTimeoutMs, getNextEntityFailoverLeader, hashEntityLeaderVoteBody,
 } from "../../core/entity/consensus/leader/index.ts";
@@ -18,37 +19,45 @@ import { handleChatEntityTx, handleChatMessageEntityTx, handleProfileUpdateEntit
 import { readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { handleRequestCollateralEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/admin.ts";
 import { buildQuorumHanko, getEntityConfigBoardHash } from "../../core/hanko/signing.ts";
+import type { ConsensusConfig } from "../../core/entity/types";
+import { consensusBytes, ogAfterCommands, ogAuthored, ogCommandState, wired } from "./og-author.ts";
+import { ogOf, withOg } from "./og-state.ts";
 
 // og leader failover (core/entity/consensus/leader/*): view change, timeout votes and certificates (ER-18)
 const A = aliceAddr, B = bobAddr, C = carolAddr;
 const JUR = TERMS.domain;
 // og buildQuorumHanko binds the Hanko to the lazy board of the config (assertQuorumBoardBinding): the Entity id is that board hash
 const ENTITY = unwrap(entityId(await getEntityConfigBoardHash({} as never, { threshold: 2n, validators: [A, B, C].map((a) => a.toLowerCase()), shares: Object.fromEntries([A, B, C].map((a) => [a.toLowerCase(), 1n])) })));
-let seed = 11;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(11);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const addr = (i: number): Address => unwrap(address(`0x${(i + 16).toString(16).padStart(2, "0").repeat(20)}`));
 const word = (i: number): string => `0x${(i + 1).toString(16).padStart(64, "0")}`;
 /** og assertQuorumBoardBinding: an Entity without a certified registry is its own lazy board id (ENTITY for the 2-of-3 [A,B,C] board). */
 const lazyId = (members: readonly (readonly [Address, bigint])[], threshold: bigint): EntityId => unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])) })));
+/** og admission authors openAccount only under a jurisdiction (og materializeLocallyAuthoredEntityTx); unregistered, so no J-prefix certificate is needed. */
+const UNREGISTERED_J = { entityProviderAddress: `0x${"ee".repeat(20)}` };
 const teaching = (members: readonly (readonly [Address, bigint])[], threshold: bigint, signerId?: Address) =>
-  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), ...(signerId === undefined ? {} : { signerId }) }));
+  unwrap(createEntity({ id: lazyId(members, threshold), jurisdiction: JUR, threshold, members: new Map(members.map(([a, s]) => [a, { shares: s }])), jurisdictionConfig: UNREGISTERED_J, ...(signerId === undefined ? {} : { signerId }) }));
 const ctx = (signerId: Address) => ({ ...verifiers, self: ENTITY, signerId });
 /** The fixture ctx names ENTITY; another fixture board is its own lazy id, so that placeholder resolves to the replica. */
 const applyEntityInput: typeof applyEntityInputAt = (r, input, c) => applyEntityInputAt(r, input, c.self === ENTITY ? { ...c, self: r.state.id } : c);
 const ogConfigOf = (s: EntityState) => {
   if (s.quorum._tag !== "teaching") throw new Error("teaching");
   const members = [...s.quorum.members];
-  return { mode: "proposer-based" as const, threshold: s.quorum.threshold, validators: members.map(([a]) => a.toLowerCase()), shares: Object.fromEntries(members.map(([a, m]) => [a.toLowerCase(), m.shares])) };
+  // og reads only the stack fields (chain, depository, EntityProvider) of the configured jurisdiction
+  const ogJ = (ep: string) => ({ ...s.jurisdiction, entityProviderAddress: ep }) as unknown as ConsensusConfig["jurisdiction"];
+  const jurisdiction = s.jurisdictionConfig === undefined ? {} : { jurisdiction: ogJ(s.jurisdictionConfig.entityProviderAddress) };
+  return { mode: "proposer-based" as const, threshold: s.quorum.threshold, validators: members.map(([a]) => a.toLowerCase()), shares: Object.fromEntries(members.map(([a, m]) => [a.toLowerCase(), m.shares])), ...jurisdiction };
 };
 const ogView = (s: EntityState, height: bigint, prevFrameHash: string): any =>
   ({ entityId: s.id, height: Number(height), prevFrameHash, config: ogConfigOf(s), ...(s.leaderState === undefined ? {} : { leaderState: s.leaderState }) });
 const ogSig = (s: string): string => (s.startsWith("0x") ? s : `0x${s}`);
 const ogCert = (c: LeaderCertificate): any => ({ ...c, votes: new Map([...c.votes].map(([k, s]) => [k, ogSig(s)])) });
 const inputsFor = (outputs: readonly EntityOutput[], signer: Address): EntityInput[] => outputs.flatMap((o) => ("input" in o && o.signerId.toLowerCase() === signer.toLowerCase() ? [o.input] : []));
-const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } };
+const openBob: EntityTx = { type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } };
 
-describe("entity-consensus-2: leader order, views and vote bodies (ER-18)", () => {
+describe(seedTag("entity-consensus-2: leader order, views and vote bodies (ER-18)"), () => {
   test("MATCH: getEntityLeaderOrder / getEntityLeaderState / getNextEntityFailoverLeader / buildEntityLeaderVoteBody / hashEntityLeaderVoteBody over 60 random configs and leader states", () => {
     for (let i = 0; i < 60; i++) {
       const ids = [...new Set(Array.from({ length: 1 + ri(5) }, () => ri(8)))].map(addr), shares = ids.map(() => BigInt(1 + ri(4)));
@@ -72,7 +81,7 @@ describe("entity-consensus-2: leader order, views and vote bodies (ER-18)", () =
   });
 });
 
-describe("entity-consensus-2: timeout certificate and certified view change (ER-18)", () => {
+describe(seedTag("entity-consensus-2: timeout certificate and certified view change (ER-18)"), () => {
   // [A, B, C] equal shares, threshold 2: A (the CEO) goes silent, B and C time out, B (order[1]) proposes at view 1
   const members = [[A, 1n], [B, 1n], [C, 1n]] as const;
   const run = () => {
@@ -124,9 +133,33 @@ describe("entity-consensus-2: timeout certificate and certified view change (ER-
     const bCommitted = step(b, inputsFor(cLocked.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
     expect(bCommitted.replica._tag).toBe("open");
     expect(bCommitted.replica.state.leaderState).toEqual({ activeValidatorId: B.toLowerCase(), view: 1, changedAtHeight: 1 });
-    expect(bCommitted.replica.state.accounts.has(BOB)).toBe(true);
+    // og admission signed B's openBob into B's own propose: the certified frame commits it pending a second yes
+    if (b._tag !== "proposed") throw new Error("phase");
+    const ogTxs = ogAuthored(teaching(members, 2n, B).state, B, [openBob]);
+    expect(wired(b.frame.txs)).toEqual(ogTxs);
+    const governance = ogAfterCommands(ogCommandState(teaching(members, 2n, B).state, { timestamp: Number(b.frame.timestamp) }), ogTxs);
+    expect(consensusBytes(bCommitted.replica.state.proposals)).toBe(consensusBytes(governance.proposals));
+    expect(bCommitted.replica.state.accounts.has(BOB)).toBe(false);
+    // C's signed yes reaches B (the view-1 leader) and executes the open in frame 2; og account work at H+1 then proposes
+    // the Account frame, which frame 3's manifest signs
+    const [proposalId] = [...governance.proposals.keys()] as string[];
+    const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: C, choice: "yes" } };
+    const cVoted = step(cLocked.replica, { kind: "txs", timestamp: NOW + 20_000n, txs: [vote] }, C);
+    // C's own signed openBob (its admission before the view change) still waits in its mempool ahead of the vote
+    expect(wired(cVoted.replica.mempool)).toEqual(ogAuthored(cLocked.replica.state, C, [...cLocked.replica.mempool, vote]));
+    const forwarded = inputsFor(cVoted.outputs, B)[0] as EntityInput;
+    const bFrame2 = step(bCommitted.replica, forwarded, B);
+    const cFrame2 = step(cVoted.replica, inputsFor(bFrame2.outputs, C).find((x) => x.kind === "proposal") as EntityInput, C);
+    const bOpened = step(bFrame2.replica, inputsFor(cFrame2.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
+    expect(bOpened.replica._tag).toBe("open");
+    expect(bOpened.replica.state.accounts.has(BOB)).toBe(true);
+    const bWork = unwrap(applyEntityInput(bOpened.replica, { kind: "txs", timestamp: NOW + 20_000n, txs: [] }, { ...ctx(B), lane: "account-work" }));
+    if (bWork.replica._tag !== "proposed") throw new Error("phase");
+    expect(bWork.replica.frame.hashesToSign.some((h) => h.type === "accountFrame" && h.context === `account:${BOB.slice(-8)}:frame:1`)).toBe(true);
+    const cFrame3 = step(cFrame2.replica, inputsFor(bWork.outputs, C).find((x) => x.kind === "proposal") as EntityInput, C);
+    const bCommitted3 = step(bWork.replica, inputsFor(cFrame3.outputs, B).find((x) => x.kind === "precommit") as EntityInput, B);
     // og buildQuorumHanko over the B and C manifest signatures of the Account frame is exactly the Hanko B sends
-    const sent = bCommitted.outputs.find((o) => "tx" in o && o.tx.data.kind === "ack_frame");
+    const sent = bCommitted3.outputs.find((o) => "tx" in o && o.tx.data.kind === "ack_frame");
     if (sent === undefined || !("tx" in sent) || sent.tx.data.kind !== "ack_frame") throw new Error("no account frame");
     const digest = sent.tx.data.frame.stateHash, config = ogConfigOf(b.state);
     const sigs = [B, C].map((s) => ({ signerId: s.toLowerCase(), signature: ogSig(unwrap(crypto.sign(digest as Hash, s))) }));
@@ -153,11 +186,19 @@ describe("entity-consensus-2: timeout certificate and certified view change (ER-
   });
 });
 
-describe("entity-consensus-2: account Hankos through hashesToSign (ER-4)", () => {
+describe(seedTag("entity-consensus-2: account Hankos through hashesToSign (ER-4)"), () => {
   test("MATCH (og proposePendingAccountFrames + buildQuorumHanko): the view-1 frame signs the Account frame as a secondary hash and the committed Account carries the quorum Hanko", () => {
-    const members = [[A, 1n], [B, 1n], [C, 1n]] as const;
+    // A's share alone passes its signed propose of openBob, so frame 1 opens the Account; og account work proposes the
+    // Account frame at H+1, and that frame's manifest signs it
+    const members = [[A, 2n], [B, 1n], [C, 1n]] as const;
     const b0 = teaching(members, 2n, B);
-    const f = unwrap(applyEntityInput(teaching(members, 2n, A), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
+    const opening = unwrap(applyEntityInput(teaching(members, 2n, A), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
+    if (opening._tag !== "proposed") throw new Error("phase");
+    expect(opening.frame.hashesToSign.some((h) => h.type === "accountFrame")).toBe(false);
+    const opened = unwrap(applyEntityInput(opening, { kind: "txs", timestamp: NOW, txs: [] }, ctx(A))).replica;
+    expect(opened._tag).toBe("open");
+    expect(opened.state.accounts.has(BOB)).toBe(true);
+    const f = unwrap(applyEntityInput(opened, { kind: "txs", timestamp: NOW, txs: [] }, { ...ctx(A), lane: "account-work" })).replica;
     if (f._tag !== "proposed") throw new Error("phase");
     const frame: EntityFrame = f.frame;
     expect(frame.hashesToSign.map((h) => h.type)).toEqual(["entityFrame", ...frame.hashesToSign.slice(1).map((h) => h.type)]);
@@ -167,7 +208,7 @@ describe("entity-consensus-2: account Hankos through hashesToSign (ER-4)", () =>
   });
 });
 
-describe("entity-consensus-2: board Hanko refresh and the previous-board grace (AC-13)", () => {
+describe(seedTag("entity-consensus-2: board Hanko refresh and the previous-board grace (AC-13)"), () => {
   // Alice's Account with Bob at height 1, committed through the ordinary propose / ack_frame / ack exchange
   const committedAlice = (): AccountReplica => {
     const door = (self: EntityId): DoorContext => ({ verify: hankoVerify, self, now: NOW });
@@ -254,7 +295,7 @@ describe("entity-consensus-2: board Hanko refresh and the previous-board grace (
   });
 });
 
-describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, profile-update", () => {
+describe(seedTag("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, profile-update"), () => {
   const single = () => teaching([[A, 1n]], 1n, A);
   const opened = () => unwrap(applyEntityInput(single(), { kind: "txs", timestamp: NOW, txs: [openBob] }, ctx(A))).replica;
   test("MATCH (og handleProfileUpdateEntityTx): 300 random updates -- same refusal or the same committed profile", () => {
@@ -262,9 +303,10 @@ describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, p
     const texts = [undefined, "", "  Hub  ", "x"];
     for (let i = 0; i < 300; i++) {
       const pick = <X>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
-      const prev = { name: pick(["Old", ""]), isHub: rng() < 0.5, ...(rng() < 0.5 ? { entityKind: "company" } : {}), ...(rng() < 0.5 ? { sectors: ["media"] } : {}), avatar: "a", bio: "b", website: "w" };
+      const hubbed = rng() < 0.5, prev = { name: pick(["Old", ""]), isHub: hubbed, ...(rng() < 0.5 ? { entityKind: "company" } : {}), ...(rng() < 0.5 ? { sectors: ["media"] } : {}), avatar: "a", bio: "b", website: "w" };
       const r = teaching([[A, 1n]], 1n, A);
-      const base = { ...r, state: { ...r.state, committed: { ...r.state.committed, profile: prev } } } as EntityReplica;
+      // og setHubConfig commits the config with the profile's hub flag
+      const base = { ...r, state: withOg(r.state, { profile: prev, ...(hubbed ? { hubRebalanceConfig: { matchingStrategy: "amount", policyVersion: 1 } } : {}) }) } as EntityReplica;
       const profile: Record<string, unknown> = { entityId: rng() < 0.05 ? BOB : r.state.id };
       for (const [k, v] of [["name", pick(texts)], ["entityKind", pick(kinds)], ["sectors", pick(sectorSets)], ["avatar", pick(texts)], ["bio", pick(texts)], ["website", pick(texts)]] as const) if (v !== undefined) profile[k] = v;
       const tx = { type: "profile-update", data: { profile } } as EntityTx;
@@ -272,10 +314,10 @@ describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, p
       try { ogProfile = handleProfileUpdateEntityTx({} as never, { entityId: r.state.id, profile: structuredClone(prev) } as never, tx as never, true).newState.profile; } catch (e) { ogError = String(e); }
       const rw = applyEntityInput(base, { kind: "txs", timestamp: NOW, txs: [tx] }, ctx(A));
       if (ogError !== undefined) { expect(rw.ok).toBe(false); continue; }
-      const committed = unwrap(rw).replica.state.committed["profile"];
+      const committed = ogOf(unwrap(rw).replica.state)["profile"];
       expect(JSON.parse(JSON.stringify(committed))).toEqual(JSON.parse(JSON.stringify(ogProfile)));
     }
-  });
+  }, 30_000);
   test("MATCH (og handleRequestCollateralEntityTx): a missing Account is a no-op; otherwise the request_collateral Account tx is queued and proposed in the same frame", () => {
     const tx = (to: EntityId): EntityTx => ({ type: "requestCollateral", data: { counterpartyEntityId: to, tokenId: unwrap(tokenId("1")), amount: 50n, feeTokenId: unwrap(tokenId("1")), feeAmount: 2n, policyVersion: 1 } });
     const og = handleRequestCollateralEntityTx({ entityId: ENTITY, accounts: new Map([[BOB, {}]]), config: { validators: [A] } } as never, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 50n, feeTokenId: 1, feeAmount: 2n, policyVersion: 1 } } as never, true);
@@ -296,34 +338,35 @@ describe("entity-consensus-2: entity txs chat, chatMessage, requestCollateral, p
     const list = listFor(r.state.id), pairList = listFor(pair.state.id);
     const p = unwrap(applyEntityInput(r, { kind: "txs", timestamp: NOW + 1n, txs: list }, ctx(A)));
     expect(p.replica.head.height).toBe(2n);
-    expect(p.replica.state.committed["profile"]).toMatchObject({ name: "Hub", sectors: ["finance"] });
+    expect(ogOf(p.replica.state)["profile"]).toMatchObject({ name: "Hub", sectors: ["finance"] });
     // a held 2-of-2 proposal exposes the frame: its hash is og's over og's wire txs (numeric token ids, the same data keys)
-    const held = unwrap(applyEntityInput(pair, { kind: "txs", timestamp: NOW, txs: [...pairList, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n, feeTokenId: unwrap(tokenId("2")), feeAmount: 1n, policyVersion: 1 } }] }, ctx(A))).replica;
+    const pairTxs: EntityTx[] = [...pairList, { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: unwrap(tokenId("1")), amount: 5n, feeTokenId: unwrap(tokenId("2")), feeAmount: 1n, policyVersion: 1 } }];
+    const held = unwrap(applyEntityInput(pair, { kind: "txs", timestamp: NOW, txs: pairTxs }, ctx(A))).replica;
     if (held._tag !== "proposed") throw new Error("phase");
     const f = held.frame;
-    const ogTxs = [...pairList.map((t) => ({ type: t.type, data: t.data })), { type: "requestCollateral", data: { counterpartyEntityId: BOB, tokenId: 1, amount: 5n, feeTokenId: 2, feeAmount: 1n, policyVersion: 1 } }];
-    // og frame events: the chat text event and the chatMessage status event, as og's handlers record them
-    const ogState: any = { entityId: pair.state.id };
-    handleChatEntityTx(ogState, list[0] as never, true);
-    handleChatMessageEntityTx(ogState, list[1] as never, true);
+    // og admission: the chat is A's command, the collective txs A's propose (pending B's yes on this 2-of-2 board)
+    const ogTxs = ogAuthored(pair.state, A, pairTxs);
+    expect(wired(f.txs)).toEqual(ogTxs);
+    // og frame events: the chat text event (the pending proposal executes nothing), as og's handlers record them
+    const ogState = ogAfterCommands(ogCommandState(pair.state, { timestamp: Number(NOW) }), ogTxs);
     const ogEvents = readEntityFrameEvents(ogState);
     expect(f.events).toEqual(ogEvents as never);
-    expect(unwrap(hashEntityFrame(f))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, pair.state.id, f.stateRoot, f.authorityRoot, f.entityContext as never));
+    expect<string>(unwrap(hashEntityFrame(f))).toBe(createEntityFrameHashFromStateRoot("genesis", 1, Number(NOW), ogTxs as never, ogEvents, pair.state.id, f.stateRoot, f.authorityRoot, f.entityContext as never));
   });
 });
 
-describe("entity-consensus-2: publicPinned (H7)", () => {
+describe(seedTag("entity-consensus-2: publicPinned (H7)"), () => {
   test("MATCH (og resolveOpenAccountPublicPin): the opener pins unless pinPublic is false; the leaf commits it (hashes.test.ts H7 compares the root with og)", () => {
-    const open = (extra: Record<string, unknown>): EntityTx => ({ type: "openAccount", data: { targetEntityId: BOB, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...extra } } as EntityTx);
+    const open = (extra: Record<string, unknown>): EntityTx => ({ type: "openAccount", data: { targetEntityId: BOB, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...extra } } as EntityTx);
     const run = (tx: EntityTx) => unwrap(applyEntityInput(teaching([[A, 1n]], 1n, A), { kind: "txs", timestamp: NOW, txs: [tx] }, ctx(A))).replica.accountReplicas.get(BOB);
     expect(run(open({}))?.publicPinned).toBe(true);
     expect(run(open({ pinPublic: false }))?.publicPinned).toBeUndefined();
   });
 });
 
-describe("entity-consensus-2: trusted gateway payments (ER-15)", () => {
+describe(seedTag("entity-consensus-2: trusted gateway payments (ER-15)"), () => {
   // three single-signer Entities on one runtime; every output is delivered until the network is quiet
-  const party = (id: EntityId, signer: Address) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[signer, { shares: 1n }]]) }));
+  const party = (id: EntityId, signer: Address) => unwrap(createEntity({ id, jurisdiction: JUR, threshold: 1n, members: new Map([[signer, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
   const signers = new Map<EntityId, Address>([[ALICE, A], [BOB, B], [CAROL, C]]);
   const quiet = (start: Runtime, first: RoutedEntityInput[]): Runtime => {
     let rt = start, clock = NOW;
@@ -342,8 +385,8 @@ describe("entity-consensus-2: trusted gateway payments (ER-15)", () => {
     }
     return rt;
   };
-  const create = (id: EntityId, txs: EntityTx[], timestamp = NOW): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp, txs } });
-  const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
+  const create = (id: EntityId, txs: EntityTx[], timestamp: bigint = NOW): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp, txs } });
+  const open = (to: EntityId, creditAmount?: bigint): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, ...(creditAmount === undefined ? {} : { creditAmount, tokenId: unwrap(tokenId("1")) }) } } as EntityTx);
   const offdelta = (rt: Runtime, self: EntityId, peer: EntityId): bigint | undefined => rt.entities.get(replicaKey(self, signers.get(self) as Address))?.accountReplicas.get(peer)?.state.account.deltas.get(unwrap(tokenId("1")))?.offdelta;
   test("MATCH (og direct-payment.ts requireTrustedPaymentGateway + applyDirectPaymentForwardFollowups): Alice pays Carol through gateway Bob; Bob forwards the committed first leg once", async () => {
     let rt = spawn(spawn(spawn(createRuntime(), party(ALICE, A)), party(BOB, B)), party(CAROL, C));

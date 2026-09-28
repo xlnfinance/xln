@@ -1,0 +1,11 @@
+id: no-mutating-call
+language: TypeScript
+severity: error
+message: in-place mutation; build a new value (spread, mapSet, concat)
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: member_expression
+    has: { field: property, regex: '^(push|pop|shift|unshift|splice|set|delete|add|clear|sort|reverse|fill)$' }
+files: [xln.ts]

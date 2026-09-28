@@ -1,5 +1,6 @@
 // consensus-final: Entity/Account consensus, admission, boards, orderbook and wire shapes (final wave). Every test runs og (core/ at 566c850) live.
 import { describe, expect, test } from "bun:test";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import { ethers } from "ethers";
 import { assertEntityEncryptionKeypair } from "../../core/protocol/htlc/multi-recipient.ts";
@@ -18,9 +19,10 @@ import {
   parseEvmTx, quorumBoardHash, selectProposable, selfAuthorityTransitionFrame, withoutCounterpartyBoardActivationConflicts,
   type Address, type EntityId, type EntityInput, type EntityTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, bobAddr, carolAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, signedTxs, unwrap, verifiers } from "../xln_run.ts";
+import { ogOf } from "./og-state.ts";
 
-const prng = (seed: number) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0xc0_f1a1);
 const ri = (n: number) => Math.floor(rng() * n);
 const pick = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
@@ -29,7 +31,7 @@ const pubOf = (priv: string): string => "0x" + Buffer.from(x25519.getPublicKey(B
 const ogRun = <T,>(f: () => T): { ok: true; value: T } | { ok: false; code: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
 const lazyEntity = (signer: Address): EntityId => unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold: 1n, members: new Map([[signer, { shares: 1n }]]) })));
 
-describe("consensus-final: the Entity encryption keypair on every frame (cross-j.md row 48)", () => {
+describe(seedTag("consensus-final: the Entity encryption keypair on every frame (cross-j.md row 48)"), () => {
   test("MATCH (og requireEntityEncryptionPrivateKey + assertEntityEncryptionKeypair): 200 random frames with no HTLC tx -- a missing, wrong, or malformed key refuses the proposal with og's error", () => {
     const seen = new Map<string, number>();
     for (let i = 0; i < 200; i++) {
@@ -51,17 +53,17 @@ describe("consensus-final: the Entity encryption keypair on every frame (cross-j
       seen.set(`${variant}:${og.ok}`, (seen.get(`${variant}:${og.ok}`) ?? 0) + 1);
     }
     for (const k of ["ok:true", "missing:false", "wrong:false", "badPub:false", "zeroPriv:false", "shortPriv:false"]) expect(seen.get(k) ?? 0).toBeGreaterThan(0);
-  });
+  }, 30_000);
 });
 
-describe("consensus-final: the profile descriptor is re-certified by the frame (og entity/profile/profile-descriptor.ts)", () => {
+describe(seedTag("consensus-final: the profile descriptor is re-certified by the frame (og entity/profile/profile-descriptor.ts)"), () => {
   test("MATCH (og computeEntityProfileHash): 150 random Entities with pinned and unpinned Accounts, hub configs, jurisdictions, and over 100 pinned rows", () => {
     const tiers = [0n, 999n, 1000n, 5_000n, 12_345n, 10n ** 18n] as const;
     for (let i = 0; i < 150; i++) {
       const id = hex32(), many = i % 25 === 0, count = many ? 101 + ri(6) : ri(6);
       const jc = pick([undefined, { name: "  Anvil ", entityProviderAddress: "0xAbCdEf0000000000000000000000000000000001" }, { name: "", entityProviderAddress: "0x" + "22".repeat(20) }]);
       const hub = pick([undefined, { routingFeePPM: ri(500), baseFee: BigInt(ri(9)), policyVersion: 1, rebalanceLiquidityFeeBps: BigInt(ri(50)), rebalanceGasFee: 7n, hubName: pick(["", "H1"]), ...(rng() < 0.5 ? { swapTakerFeeBps: ri(30), rebalanceBaseFee: 3n, rebalanceTimeoutMs: 60_000 } : {}) }]);
-      const profile = { name: pick(["", " Hub A ", "b"]), isHub: rng() < 0.5, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "business", sectors: pick([[], ["finance"]]) } : {}) };
+      const profile = { name: pick(["", " Hub A ", "b"]), isHub: hub !== undefined, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "company", ...(rng() < 0.5 ? {} : { sectors: ["finance"] }) } : {}) };
       const key = pick([undefined, pubOf(hex32())]);
       const replicas = new Map<string, unknown>(), ogAccounts = new Map<string, unknown>();
       for (let a = 0; a < count; a++) {
@@ -77,7 +79,7 @@ describe("consensus-final: the profile descriptor is re-certified by the frame (
           deltas: new Map([...deltas].map(([tk, d]) => [tk, { ...d, leftAllowance: 0n, rightAllowance: 0n, leftHold: 0n, rightHold: 0n }])) } });
       }
       const r = unwrap(createEntity({ id: id as EntityId, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), ...(jc === undefined ? {} : { jurisdictionConfig: jc }),
-        committed: { profile, ...(hub === undefined ? {} : { hubRebalanceConfig: hub }), ...(key === undefined ? {} : { entityEncryptionPublicKey: key }) } as never }));
+        committed: { profile, ...(hub === undefined ? {} : { hubRebalanceConfig: hub }), ...(key === undefined ? {} : { entityEncryptionPublicKey: key }) } }));
       const og = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: key ?? "", profile, hubRebalanceConfig: hub, accounts: ogAccounts,
         config: { jurisdiction: jc === undefined ? undefined : { chainId: TERMS.domain.chainId, depositoryAddress: TERMS.domain.depositoryAddress, ...jc } } } as never);
       expect([i, unwrap(entityProfileHash(r.state, replicas as never))]).toEqual([i, og]);
@@ -85,23 +87,24 @@ describe("consensus-final: the profile descriptor is re-certified by the frame (
   });
   test("MATCH (og appendFinalProfileHash / buildChangedEntityProfileHashToSign): the genesis frame always signs the profile hash; later frames only when the descriptor changed", () => {
     const id = lazyEntity(aliceAddr), ctx = { verify: verifiers.verify, timestamp: 5n };
-    const r = unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { profile: { name: "A", isHub: false, avatar: "", bio: "", website: "" } } as never }));
+    const r = unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { profile: { name: "A", isHub: false, avatar: "", bio: "", website: "" } } }));
     const ogHashOf = (profile: unknown): string => computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile, accounts: new Map(), config: {} } as never);
     const chat = (n: number): EntityTx => ({ type: "chat", data: { from: aliceAddr.toLowerCase(), message: `m${n}` } });
-    const profilesOf = (s: typeof r.state, txs: readonly EntityTx[]) => { const f = unwrap(foldTxs(s, new Map(), txs, ctx)); return { state: f.draft.state, profiles: (f.draft.hashes ?? []).filter((h) => h.type === "profile") }; };
+    // og: the frame carries Alice's local txs as her signed Entity commands
+    const profilesOf = (s: typeof r.state, txs: readonly EntityTx[]) => { const f = unwrap(foldTxs(s, new Map(), signedTxs(s, aliceAddr, txs), ctx)); return { state: f.draft.state, profiles: (f.draft.hashes ?? []).filter((h) => h.type === "profile") }; };
     const genesis = profilesOf(r.state, [chat(0)]);
     const h0 = ogHashOf({ name: "A", isHub: false, avatar: "", bio: "", website: "" });
     expect(genesis.profiles).toEqual([{ hash: h0, type: "profile", context: `profile:${h0}` }]);
     const later = { ...genesis.state, height: 1n };
     expect(profilesOf(later, [chat(1)]).profiles).toEqual([]);
     const renamed = profilesOf(later, [{ type: "profile-update", data: { profile: { entityId: id, name: " B ", bio: "hi" } } } as EntityTx]);
-    const h1 = ogHashOf(renamed.state.committed["profile"]);
+    const h1 = ogHashOf(ogOf(renamed.state)["profile"]);
     expect(h1).not.toBe(h0);
     expect(renamed.profiles).toEqual([{ hash: h1, type: "profile", context: `profile:${h1}` }]);
   });
 });
 
-describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-code (type 4) transactions (entity-j.md EJ-R4)", () => {
+describe(seedTag("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-code (type 4) transactions (entity-j.md EJ-R4)"), () => {
   const erng = prng(0x3_4e_4);
   const eri = (n: number) => Math.floor(erng() * n);
   const epick = <X,>(xs: readonly X[]): X => xs[eri(xs.length)] as X;
@@ -133,12 +136,12 @@ describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-
   /** One structural mutation of a type 3/4 transaction: its fields, its sidecar, its authorizations, or its raw bytes. */
   const mutate = (raw: string): string => {
     const bytes = ethers.getBytes(raw);
-    const flip = (): string => { const b = new Uint8Array(bytes); b[eri(b.length)] ^= 1 << eri(8); return ethers.hexlify(b); };
+    const flip = (): string => { const b = new Uint8Array(bytes), i = eri(b.length); b[i] = (b[i] ?? 0) ^ (1 << eri(8)); return ethers.hexlify(b); };
     let decoded: F;
     try { decoded = ethers.decodeRlp(bytes.slice(1)) as F; } catch { return flip(); }
     if (!Array.isArray(decoded)) return flip();
     const wrapped = Array.isArray(decoded[0]), outer = decoded as F[], fields = [...(wrapped ? (outer[0] as F[]) : outer)];
-    const encode = (fs: F[], wrap: F[] | null = wrapped ? [...outer] : null): string => ethers.concat([bytes.slice(0, 1), ethers.encodeRlp((wrap === null ? fs : [fs, ...wrap.slice(1)]) as never)]);
+    const encode = (fs: F[], wrap: F[] | null = wrapped ? [...outer] : null): string => ethers.concat([bytes.slice(0, 1), ethers.encodeRlp((wrap === null ? fs : [fs, ...wrap.slice(1)]))]);
     const set = (i: number, v: F): string => { const fs = [...fields]; fs[i] = v; return encode(fs); };
     const type = bytes[0], sig = fields.length - 3, auths = type === 4 && Array.isArray(fields[9]) && Array.isArray((fields[9] as F[])[0]) ? (fields[9] as F[]) : [];
     const setAuth = (j: number, v: F): string => { const a = [...auths], row = [...(a[0] as F[])]; row[j] = v; a[0] = row; return set(9, a); };
@@ -188,7 +191,7 @@ describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-
       if (ethers.decodeRlp(ethers.getBytes(raw).slice(1)).length < 6) seen.sidecar++;
       for (let m = eri(3); m > 0; m--) raw = mutate(raw);
       const og = ethersView(raw);
-      expect([i, raw, rewriteView(raw)]).toEqual([i, raw, og] as never);
+      expect([i, raw, rewriteView(raw)]).toEqual([i, raw, og]);
       if (og === "REFUSED") seen.refused++; else if ((og as { type: number }).type === 3) seen.accepted3++; else seen.accepted4++;
     }
     expect(seen.accepted3).toBeGreaterThan(150);
@@ -198,7 +201,7 @@ describe("consensus-final: ethers v6 Transaction.from for blob (type 3) and set-
   }, 120_000);
 });
 
-describe("consensus-final: the proposal policy of og entity/consensus/proposal/policy.ts (entity-j.md EJ-R3)", () => {
+describe(seedTag("consensus-final: the proposal policy of og entity/consensus/proposal/policy.ts (entity-j.md EJ-R3)"), () => {
   const prng2 = prng(0x90_11c7);
   const pri = (n: number) => Math.floor(prng2() * n);
   const ppick = <X,>(xs: readonly X[]): X => xs[pri(xs.length)] as X;
@@ -231,7 +234,8 @@ describe("consensus-final: the proposal policy of og entity/consensus/proposal/p
   test("MATCH (og selectProposableEntityTxs + isSelfBoardAuthorityTransitionFrame): 300 random mempools of self board ranges, handovers, Account rows and plain txs, on lazy and uncertified Entities", async () => {
     const seen = new Map<string, number>();
     const signers = [aliceAddr, "0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"].map((a) => a.toLowerCase());
-    for (let i = 0; i < 300; i++) {
+    const wanted = ["SELF_BOARD_HANDOVER_PRIORITY", "SELF_BOARD_CONFIG_HANDOVER_REQUIRED", "SELF_BOARD_ROTATION_PRIORITY", "SELF_BOARD_ACTIVATION_REQUIRED", "SELF_BOARD_CERTIFICATION_REQUIRED", "COUNTERPARTY_BOARD_ACTIVATION_PRIORITY", "plain"];
+    for (let i = 0, more = untilCovered(300, () => wanted.every((k) => (seen.get(k) ?? 0) > 0)); more(i); i++) {
       const members = new Map([[aliceAddr, { shares: 1n }]]), lazy = pri(3) > 0, board = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
       const id = lazy ? board : pword();
       const r = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: TERMS.domain, threshold: 1n, members }));
@@ -260,8 +264,8 @@ describe("consensus-final: the proposal policy of og entity/consensus/proposal/p
       const mineAuth = selfAuthorityTransitionFrame(r.state, mempool as EntityTx[]);
       expect([i, mineAuth.ok ? mineAuth.value : (mineAuth.error as { reason?: string }).reason]).toEqual([i, ogAuth]);
     }
-    for (const k of ["SELF_BOARD_HANDOVER_PRIORITY", "SELF_BOARD_CONFIG_HANDOVER_REQUIRED", "SELF_BOARD_ROTATION_PRIORITY", "SELF_BOARD_ACTIVATION_REQUIRED", "SELF_BOARD_CERTIFICATION_REQUIRED", "COUNTERPARTY_BOARD_ACTIVATION_PRIORITY", "plain"]) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
-  });
+    for (const k of wanted) expect([k, (seen.get(k) ?? 0) > 0]).toEqual([k, true]);
+  }, 30_000);
 
   test("MATCH (og selectEntityTxsWithinJRangeBudget): multi-MiB ranges -- the same prefix, the suffix waits, an unfittable range or bad span halts", () => {
     const MiB = 1024 * 1024;
@@ -282,7 +286,7 @@ describe("consensus-final: the proposal policy of og entity/consensus/proposal/p
   });
 });
 
-describe("consensus-final: the j_event frame-hash projection of og entity/consensus/frame.ts (canonicalJEventDataForFrameHash)", () => {
+describe(seedTag("consensus-final: the j_event frame-hash projection of og entity/consensus/frame.ts (canonicalJEventDataForFrameHash)"), () => {
   test("MATCH (og createEntityFrameHashFromStateRoot): 400 random J ranges -- mixed-case text, fractional heights, extra keys, raw events, missing rangeHash / blocks -- commit og's projection or refuse with og's code", () => {
     const g = prng(0x7e_4a54);
     const gi = (n: number) => Math.floor(g() * n);
@@ -306,7 +310,7 @@ describe("consensus-final: the j_event frame-hash projection of og entity/consen
       const txs: any[] = [{ type: "chat", data: { from: aliceAddr.toLowerCase(), message: "m" } }, { type: "j_event", data }];
       const root = "0x" + "11".repeat(32), auth = "0x" + "22".repeat(32);
       let og: string;
-      try { og = createEntityFrameHashFromStateRoot("genesis", 1, 50, txs as never, [], id, root, auth, ctxOf(id) as never); } catch (e) { og = (e as Error).message.split(":")[0] as string; }
+      try { og = createEntityFrameHashFromStateRoot("genesis", 1, 50, txs, [], id, root, auth, ctxOf(id)); } catch (e) { og = (e as Error).message.split(":")[0] as string; }
       const mine = entityFrameHash({ prevFrameHash: "genesis", height: 1, timestamp: 50, txs, events: [], entityId: id, stateRoot: root, authorityRoot: auth, entityContext: ctxOf(id) });
       const got = mine.ok ? mine.value : ((mine.error as { code?: string }).code ?? mine.error._tag).split(":")[0];
       expect([i, got]).toEqual([i, og]);
@@ -317,12 +321,12 @@ describe("consensus-final: the j_event frame-hash projection of og entity/consen
   });
 });
 
-describe("consensus-final: a received Account frame commits at once (rebalance-refresh.md RR-12)", () => {
+describe(seedTag("consensus-final: a received Account frame commits at once (rebalance-refresh.md RR-12)"), () => {
   test("MATCH (og commits the peer's frame when it signs the ACK): 40 random credit / payment rounds between three Entities -- after every Runtime step no Account sits in 'received', and each ack_frame leaves the receiver's head at the frame height", () => {
     const g = prng(0x12_12);
     const gi = (n: number) => Math.floor(g() * n);
     const signers = new Map<EntityId, Address>([[ALICE, aliceAddr], [BOB, bobAddr], [CAROL, carolAddr]]);
-    const party = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signers.get(id) as Address, { shares: 1n }]]) }));
+    const party = (id: EntityId) => unwrap(createEntity({ id, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[signers.get(id) as Address, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
     const t1 = unwrap(tokenId("1"));
     let clock = NOW, received = 0;
     const noneReceived = (rt: Runtime): void => {
@@ -338,7 +342,7 @@ describe("consensus-final: a received Account frame commits at once (rebalance-r
         const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [input] }, verifiers));
         rt = out.runtime;
         noneReceived(rt);
-        const i = input.input as any;
+        const i = input.input;
         if (i.kind === "txs") for (const tx of i.txs) if (tx.type === "accountInput" && tx.data.kind === "ack_frame" && tx.data.frame !== undefined) {
           received++;
           const key = replicaKey(input.entityId, signers.get(input.entityId) as Address), prior = before.entities.get(key)?.accountReplicas.get(tx.data.fromEntityId);
@@ -355,7 +359,7 @@ describe("consensus-final: a received Account frame commits at once (rebalance-r
       return rt;
     };
     const create = (id: EntityId, txs: EntityTx[]): RoutedEntityInput => ({ entityId: id, signerId: signers.get(id) as Address, input: { kind: "txs", timestamp: (clock += 10n), txs } });
-    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig, creditAmount: 1000n, tokenId: t1 } } as EntityTx);
+    const open = (to: EntityId): EntityTx => ({ type: "openAccount", data: { targetEntityId: to, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig }, creditAmount: 1000n, tokenId: t1 } } as EntityTx);
     let rt = spawn(spawn(spawn(createRuntime(), party(ALICE)), party(BOB)), party(CAROL));
     rt = quiet(rt, [create(BOB, [open(ALICE), open(CAROL)])]);
     rt = quiet(rt, [create(ALICE, [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: t1, amount: 1000n } } as EntityTx]), create(CAROL, [{ type: "extendCredit", data: { counterpartyEntityId: BOB, tokenId: t1, amount: 1000n } } as EntityTx])]);
@@ -363,8 +367,8 @@ describe("consensus-final: a received Account frame commits at once (rebalance-r
     for (let round = 0; round < 40; round++) {
       const from = ids[gi(3)] as EntityId, to = from === BOB ? (gi(2) === 0 ? ALICE : CAROL) : BOB;
       const tx: EntityTx = { type: "directPayment", data: { targetEntityId: to, tokenId: t1, amount: BigInt(1 + gi(5)), route: [from, to], deliveryMode: "direct" } } as EntityTx;
-      rt = quiet(rt, gi(3) === 0 ? [create(from, [tx]), create(to === BOB ? BOB : to, [{ ...tx, data: { ...(tx.data as any), targetEntityId: from, route: [to, from] } } as EntityTx])] : [create(from, [tx])]);
+      rt = quiet(rt, gi(3) === 0 ? [create(from, [tx]), create(to === BOB ? BOB : to, [{ ...tx, data: { ...(tx.data), targetEntityId: from, route: [to, from] } } as EntityTx])] : [create(from, [tx])]);
     }
     expect(received).toBeGreaterThan(40);
-  });
+  }, 60_000);
 });

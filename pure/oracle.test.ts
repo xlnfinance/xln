@@ -47,6 +47,7 @@ import {
   signRaw,
   signature,
   wordOf,
+  wireEntityTx,
   tokenId,
   type AccountBody,
   type Hash,
@@ -54,6 +55,9 @@ import {
   type EntityFrameHashInput,
   type FoldCtx,
 } from "./xln.ts";
+import { anvilKey, crypto, signerAddress } from "./xln_run.ts";
+import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og-author.ts";
+import { ogOf } from "./diff/og-state.ts";
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 /** og jBlockHash is a 0x-prefixed block hash; the rewrite's Hash brand has no 0x constructor, so this one fixture is branded directly. */
@@ -453,28 +457,29 @@ describe("oracle", () => {
 
   test("a proposed entity frame hash is entityFrameHash of its own fields", () => {
     const peer = unwrap(entityId(word("bb")));
-    const signer = unwrap(address(`0x${"01".repeat(20)}`));
+    // og admission signs the openAccount into the proposer's command: real anvil keys, and a jurisdiction to open under
+    const signer = unwrap(address(signerAddress(anvilKey(0))));
     const terms = unwrap(accountTerms({
       domain: { chainId: 1, depositoryAddress: `0x${"ab".repeat(20)}` },
       watchSeed: word("44"),
       disputeConfig: { leftResponseSeconds: 1, rightResponseSeconds: 1 },
     }));
-    const second = unwrap(address(`0x${"02".repeat(20)}`));
+    const second = unwrap(address(signerAddress(anvilKey(1))));
     // og assertQuorumBoardBinding: without a certified registry the Entity id is its own lazy board hash
     const self = unwrap(entityId(quorumBoardHash({ _tag: "teaching", threshold: 2n, members: new Map([[signer, { shares: 1n }], [second, { shares: 1n }]]) })));
-    const created = unwrap(createEntity({ id: self, jurisdiction: terms.domain, threshold: 2n, members: new Map([[signer, { shares: 1n }], [second, { shares: 1n }]]) }));
+    const created = unwrap(createEntity({ id: self, jurisdiction: terms.domain, threshold: 2n, members: new Map([[signer, { shares: 1n }], [second, { shares: 1n }]]), jurisdictionConfig: { entityProviderAddress: `0x${"ee".repeat(20)}` } }));
     const open = { targetEntityId: peer, accountDomain: terms.domain, watchSeed: terms.watchSeed, disputeConfig: terms.disputeConfig };
     const proposed = unwrap(applyEntityInput(created, { kind: "txs", timestamp: 5n, txs: [{ type: "openAccount", data: open }] }, {
-      verify: () => true, verifyMember: () => true, sign: () => signature("ab"), self, signerId: signer,
+      verify: () => true, verifyMember: () => true, sign: crypto.sign, self, signerId: signer,
     }));
     if (proposed.replica._tag !== "proposed") throw new Error(proposed.replica._tag);
     const frame = proposed.replica.frame;
-    const [tx] = frame.txs;
-    if (tx === undefined || tx.type !== "openAccount") throw new Error("open");
+    const ogTxs = ogAuthored(created.state, signer, [{ type: "openAccount", data: open }]);
+    expect<unknown[]>(frame.txs.map(wireEntityTx)).toEqual(ogTxs);
     expect<string>(frame.prevFrameHash).toBe("genesis");
     const fields = (stateRoot: string, events: typeof frame.events) => ({
       prevFrameHash: frame.prevFrameHash, height: Number(frame.height), timestamp: Number(frame.timestamp),
-      txs: [{ type: tx.type, data: open }], events, entityId: frame.entityContext.entityId,
+      txs: ogTxs as EntityFrameHashInput["txs"], events, entityId: frame.entityContext.entityId,
       stateRoot, authorityRoot: frame.authorityRoot, entityContext: frame.entityContext,
     });
     const hashed = unwrap(hashEntityFrame(frame));
@@ -542,9 +547,21 @@ describe("oracle", () => {
       controlChangeDelay: 2,
       dividendChangeDelay: 3,
     };
-    // og assertQuorumBoardBinding: the Entity signs as its lazy board id (the board hash, delays included)
-    const self = unwrap(entityId(quorumBoardHash({ _tag: "board", board, entityId: board.entityId })));
-    const entity = unwrap(createEntity({ id: self, jurisdiction: terms.domain, board }));
+    const jurisdictionConfig = { entityProviderAddress: `0x${"ee".repeat(20)}` };
+    const lazyEntity = (b: typeof board) => {
+      // og assertQuorumBoardBinding: the Entity signs as its lazy board id (the board hash, delays included)
+      const id = unwrap(entityId(quorumBoardHash({ _tag: "board", board: b, entityId: b.entityId })));
+      return { self: id, entity: unwrap(createEntity({ id, jurisdiction: terms.domain, board: b, jurisdictionConfig })) };
+    };
+    const delayed = lazyEntity(board);
+    const delayedProposer = allowedProposer(delayed.entity.state.quorum);
+    const openTx = { type: "openAccount" as const, data: { targetEntityId: peer, accountDomain: terms.domain, watchSeed: terms.watchSeed, disputeConfig: terms.disputeConfig } };
+    // og resolveEntityCommandBoard hashes the config board with zero delays: a lazy id with delays is no command board, so og admission refuses
+    const refusedByOg = ogAuthorVerdict(delayed.entity.state, delayedProposer, [openTx]);
+    expect(refusedByOg).toStartWith("ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:");
+    const refused = applyEntityInput(delayed.entity, { kind: "txs", timestamp: 1n, txs: [openTx] }, { self: delayed.self, signerId: delayedProposer, verify: () => true, verifyMember: () => false, sign: crypto.sign });
+    expect(refused.ok ? "ok" : "reason" in refused.error ? refused.error.reason : refused.error._tag).toBe(refusedByOg);
+    const { self, entity } = lazyEntity({ ...board, boardChangeDelay: 0, controlChangeDelay: 0, dividendChangeDelay: 0 });
     const proposer = allowedProposer(entity.state.quorum);
     expect<string | undefined>(proposer.toLowerCase()).toBe(signers[0]?.toLowerCase());
     const raw = (index: number, digest: string) => {
@@ -554,15 +571,17 @@ describe("oracle", () => {
       return unwrap(signature(bytesToHex(concat([wordOf(signed.r), wordOf(signed.s), Uint8Array.of(signed.recovery)])).slice(2)));
     };
     const sign = (digest: string, who: string) => ({ ok: true as const, value: raw(signers.findIndex((s) => s.toLowerCase() === who.toLowerCase()), digest) });
-    const open = { targetEntityId: peer, accountDomain: terms.domain, watchSeed: terms.watchSeed, disputeConfig: terms.disputeConfig };
-    const proposed = unwrap(applyEntityInput(entity, { kind: "txs", timestamp: 1n, txs: [{ type: "openAccount", data: open }] }, {
+    const proposed = unwrap(applyEntityInput(entity, { kind: "txs", timestamp: 1n, txs: [openTx] }, {
       self, signerId: proposer, verify: () => true, verifyMember: () => false, sign,
     }));
     if (proposed.replica._tag !== "proposed") throw new Error(proposed.replica._tag);
     const frame = proposed.replica.frame;
+    // og admission: the proposer's signed propose of the openAccount (one yes of the two the board needs)
+    const ogTxs = ogAuthored(entity.state, proposer, [openTx]);
+    expect<unknown[]>(frame.txs.map(wireEntityTx)).toEqual(ogTxs);
     const frameHash = unwrap(hashEntityFrame(frame));
     // the proposer's own manifest signature is one of two needed: the frame stays proposed
-    expect(proposed.replica.signatures.get(proposer.toLowerCase())).toEqual(frame.hashesToSign.map((h) => raw(0, h.hash))); // og: the frame hash plus the Account frame and dispute proof it Hankos
+    expect(proposed.replica.signatures.get(proposer.toLowerCase())).toEqual(frame.hashesToSign.map((h) => raw(0, h.hash)));
     const precommit = (index: number) => ({ kind: "precommit" as const, height: frame.height, frameHash, signatures: new Map([[(signers[index] ?? "").toLowerCase(), frame.hashesToSign.map((h) => raw(index, h.hash))]]) });
     const bad = applyEntityInput(proposed.replica, { ...precommit(1), signatures: new Map([[(signers[1] ?? "").toLowerCase(), [raw(2, frameHash)]]]) }, {
       self, signerId: proposer, verify: () => true, verifyMember: () => false, sign,
@@ -572,7 +591,11 @@ describe("oracle", () => {
       self, signerId: proposer, verify: () => true, verifyMember: () => false, sign,
     }));
     expect(two.replica._tag).toBe("open");
-    expect(two.replica.state.accounts.size).toBe(1);
+    // the installed frame commits og's pending proposal (and the proposer's nonce), not yet the Account
+    const governance = ogAfterCommands(ogCommandState(entity.state, { timestamp: Number(frame.timestamp) }), ogTxs);
+    expect(consensusBytes(two.replica.state.proposals)).toBe(consensusBytes(governance.proposals));
+    expect(consensusBytes(ogOf(two.replica.state)["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
+    expect(two.replica.state.accounts.size).toBe(0);
   });
 });
 

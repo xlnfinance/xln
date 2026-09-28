@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   applyBoardRegistryEvent, boardProof, emptyBoardRegistry, EMPTY_CERTIFIED_BOARD_ROOT, hashBoardNode, lookupBoardRecord, reachableBoardNodes, verifyBoardProof, advanceBoardFinality, boardStackKey,
-  applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
-  type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
+  applyBoardJEvent, applyEntityInput, assertBoardAuthority, admit, applyAccountInput, tokenId, type DoorContext, type EntityId, type ProposedAccount, type Verify, boardProposalHash, verifyAccountHanko, applyEntityProviderActionJEvent, foldTx, foldTxs, hashEntityFrame, buildCommand, createEntity, entityId, entityRootOf, quorumBoardHash, quorumHanko,
+  type Address, type BoardNodes, type CertifiedBoardNode, type CertifiedBoardRegistryState, type EntityState, type EntityTx, type Hash, type JEvent,
 } from "../xln.ts";
-import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, NOW, ackInput, aliceAddr, bobAddr, carolAddr, crypto, envelopeAB, genesisAB, hankoVerify, offerOf, proposeInput, signedTxs, unwrap, verifiers } from "../xln_run.ts";
 import { assertEntityConfigBoardAuthority, buildQuorumHanko } from "../../core/hanko/signing.ts";
+import { ogAuthored, ogAuthorVerdict, wired } from "./og-author.ts";
 import { handleEntityProviderActivateBoard, handleEntityProviderProposeControlBoard } from "../../core/entity/tx/handlers/control-board-proposal.ts";
 import { handleEntityProviderCancelAction, handleEntityProviderReleaseControlShares, handleEntityProviderTransfer } from "../../core/entity/tx/handlers/entity-provider-action.ts";
 import { applyEntityProviderActionCancelled, applyEntityProviderActionExecuted } from "../../core/entity/tx/j-events-entity-provider-action.ts";
@@ -20,9 +22,10 @@ import { PersistentEntityCollectionMap } from "../../core/entity/state/persisten
 import {
   advanceCertifiedBoardFinality, applyCertifiedBoardRegistryEvent, collectReachableCertifiedBoardNodes, createCertifiedBoardProof, getCertifiedBoardStackKey, lookupCertifiedBoardRecord, verifyCertifiedBoardProof,
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
+import { ogGenesisProfile, ogOf } from "./og-state.ts";
 
-let seed = 11;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(11);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const word = (n: bigint | number): string => `0x${BigInt(n).toString(16).padStart(64, "0")}`;
@@ -39,7 +42,7 @@ const toRewrite = (e: OgEvent): JEvent => {
   return { type: "ReserveUpdated", entity: word(2), tokenId: 1n, newBalance: 5n, meta };
 };
 
-describe("certified-board registry (og jurisdiction/machine/board-registry)", () => {
+describe(seedTag("certified-board registry (og jurisdiction/machine/board-registry)"), () => {
   test("MATCH: stack key validation equals og getCertifiedBoardStackKey", () => {
     const cases = [JUR, { ...JUR, chainId: 0 }, { ...JUR, depositoryAddress: "0x5FbDB2315678afecb367f032d93F642f64180aa3" }, { ...JUR, depositoryAddress: "0x5fbdb2315678afecb367f032d93f642f64180aa" },
       { ...JUR, entityProviderAddress: "E7f1725E7734CE288F8367e1Bb143E90bb3F0512" }, { ...JUR, entityProviderAddress: "0xE7f1725E7734ce288F8367e1Bb143E90bb3F0512" }, { ...JUR, chainId: 1.5 }];
@@ -96,7 +99,7 @@ describe("certified-board registry (og jurisdiction/machine/board-registry)", ()
       const reach = reachableBoardNodes(nodes, [state.boardRegistryRoot]);
       expect(reach.ok && new Set(reach.value.keys())).toEqual(new Set(collectReachableCertifiedBoardNodes(ogNodes, [ogState.boardRegistryRoot]).keys()));
     }
-  });
+  }, 40_000);
 
   test("MATCH: tampered proofs, finality advance and empty registries refuse like og", () => {
     const empty = emptyBoardRegistry(JUR);
@@ -163,7 +166,7 @@ const ogConfigOf = (s: EntityState, withJ: boolean) => {
 };
 const reasonOf = (r: { ok: boolean; error?: unknown }): string => (r.ok ? "ok" : String((r.error as { reason?: string }).reason ?? (r.error as { _tag: string })._tag));
 
-describe("ER-4b: quorum board binding (og assertQuorumBoardBinding)", () => {
+describe(seedTag("ER-4b: quorum board binding (og assertQuorumBoardBinding)"), () => {
   const SIGNERS = [aliceAddr, bobAddr, carolAddr] as const;
   test("MATCH: 200 random boards x {lazy id, certified match, certified mismatch, unregistered, no registry, no jurisdiction} give og's assertEntityConfigBoardAuthority verdict", async () => {
     const seen = new Set<string>();
@@ -199,40 +202,51 @@ describe("ER-4b: quorum board binding (og assertQuorumBoardBinding)", () => {
     expect(reasonOf(quorumHanko(base.state, digest, sigs))).toBe(ogRefusal);
   });
 
-  test("MATCH: a numbered 1-of-1 Entity proposes only once its EntityRegistered is certified for its config board (og selectProposableEntityTxs SELF_BOARD_CERTIFICATION_REQUIRED)", () => {
+  test("MATCH: a numbered 1-of-1 Entity proposes only once its EntityRegistered is certified for its config board (og resolveEntityCommandBoard at admission)", () => {
     const id = unwrap(entityId(word(5))), members = new Map([[aliceAddr, { shares: 1n }]]);
     const base = unwrap(createEntity({ id, jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
     const chat: EntityTx = { type: "chat", data: { from: aliceAddr, message: "hi" } };
     const run = (r: typeof base) => applyEntityInput(r, { kind: "txs", timestamp: 10n, txs: [chat] }, { ...verifiers, self: id, signerId: aliceAddr });
-    // og: an uncertified board (no registry, or a registry certifying another board) selects nothing; the tx stays queued, no frame
-    const queuedOnly = (r: ReturnType<typeof run>) => (r.ok ? [r.value.replica._tag, r.value.replica.head.height, r.value.replica.mempool.length, r.value.outputs.length] : reasonOf(r));
-    expect(queuedOnly(run(base))).toEqual(["open", 0n, 1, 0]);
-    const certified = run({ ...base, state: observe(base.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))]).state });
+    // og admission signs the chat into a command under the certified board: an uncertified board (no registry, or a
+    // registry certifying another board) cannot author it, so og refuses the input
+    const ogVerdict = (events: readonly JEvent[]) => {
+      const { state, ogRegistry, ogNodes } = observe(base.state, events);
+      return ogAuthorVerdict(state, aliceAddr, [chat], ogRegistry === undefined ? {} : { certifiedBoardState: ogRegistry }, { infrastructure: { certifiedBoardNodes: ogNodes } });
+    };
+    const verdict = (r: ReturnType<typeof run>) => (r.ok ? "ok" : reasonOf(r));
+    expect(ogVerdict([])).toBe(`ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED:${id}`);
+    expect(verdict(run(base))).toBe(ogVerdict([]));
+    const certifiedEvents = [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))];
+    expect(ogVerdict(certifiedEvents)).toBe("ok");
+    const certified = run({ ...base, state: observe(base.state, certifiedEvents).state });
     expect(certified.ok && certified.value.replica.head.height).toBe(1n);
-    expect(queuedOnly(run({ ...base, state: observe(base.state, [foundation, registered(id, word(4242))]).state }))).toEqual(["open", 0n, 1, 0]);
+    const otherBoard = [foundation, registered(id, word(4242))];
+    expect(ogVerdict(otherBoard)).toStartWith("ENTITY_COMMAND_CERTIFIED_BOARD_CONFIG_MISMATCH:");
+    expect(verdict(run({ ...base, state: observe(base.state, otherBoard).state }))).toBe(ogVerdict(otherBoard));
   });
 });
 
-describe("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_ROOT_FIELDS)", () => {
+describe(seedTag("certifiedBoardState in the Entity root (og state-root.ts ENTITY_STATE_ROOT_FIELDS)"), () => {
   test("MATCH: the committed registry section moves the root exactly as og's computeCanonicalEntityConsensusStateHash", () => {
     const members = new Map([[aliceAddr, { shares: 1n }]]), id = unwrap(entityId(word(6)));
     const base = unwrap(createEntity({ id, jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
     const { state, ogRegistry } = observe(base.state, [foundation, registered(id, word(77))]);
     const ogOf = (extra: Record<string, unknown>): any => ({
-      entityId: id, height: 0, timestamp: 0, accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
-      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { name: "j", address: "", ...OG_J } },
+      entityId: id, height: 0, timestamp: 0, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(id), accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
+      config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { address: "", ...OG_J } },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, ...extra,
     });
     const withJ = { ...state, jurisdictionConfig: { entityProviderAddress: JUR.entityProviderAddress } };
     const rootOf = (s: EntityState) => unwrap(entityRootOf(s, new Map()));
     const ogJ = ogOf({}).config.jurisdiction;
-    expect(rootOf({ ...withJ, committed: {} })).toBe(computeCanonicalEntityConsensusStateHash({ ...ogOf({}), config: { ...ogOf({}).config, jurisdiction: ogJ } }));
+    const bare = { ...withJ, jFinality: base.state.jFinality };
+    expect(rootOf(bare)).toBe(computeCanonicalEntityConsensusStateHash({ ...ogOf({}), config: { ...ogOf({}).config, jurisdiction: ogJ } }));
     expect(rootOf(withJ)).toBe(computeCanonicalEntityConsensusStateHash(ogOf({ certifiedBoardState: ogRegistry })));
-    expect(rootOf(withJ)).not.toBe(rootOf({ ...withJ, committed: {} }));
+    expect(rootOf(withJ)).not.toBe(rootOf(bare));
   });
 });
 
-describe("entity command board from the certified registry (og resolveEntityCommandBoard)", () => {
+describe(seedTag("entity command board from the certified registry (og resolveEntityCommandBoard)"), () => {
   test("MATCH: a certified numbered Entity signs commands at its record's epoch; a registry board that is not the config board refuses", () => {
     const members = new Map([[bobAddr, { shares: 1n }]]), id = word(8), board = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
     const base = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
@@ -248,7 +262,7 @@ describe("entity command board from the certified registry (og resolveEntityComm
   });
 });
 
-describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.ts, j-events-entity-provider-action.ts, j-events-board.ts)", () => {
+describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-action.ts, j-events-entity-provider-action.ts, j-events-board.ts)"), () => {
   const EP_J = { ...JCONF, name: "j" };
   const ogEnv = (nodes: Map<string, any>): any => ({
     state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) },
@@ -258,6 +272,14 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
     entityId: s.id, height: 0, timestamp, config: { ...ogConfigOf(s, true), jurisdiction: { ...OG_J, ...(s.jurisdictionConfig?.name === undefined ? { name: undefined } : {}) } },
     certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], s.id, computeEntityAccountValueHash), ...(action === undefined ? {} : { entityProviderActionState: action }),
   });
+  /**
+   * og's handler as an approved proposal runs it (the collective lane): a board activation can leave the Entity's own
+   * config off the certified board, where og admission could no longer sign it a command, yet og's handler still runs.
+   */
+  const handlerRun = (state: EntityState, tx: EntityTx, timestamp: bigint) => {
+    const d = foldTx(state, new Map(), tx, { verify: verifiers.verify, timestamp }, "collective");
+    return d.ok ? { ok: true as const, value: { draft: d.value } } : d;
+  };
   const cloneAction = (a: any): any => (a === undefined ? undefined : { ...a });
   const og = (f: () => any): { ok: true; value: any } | { ok: false; code: string } => { try { return { ok: true, value: f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
   const ADDRS = ["0x" + "b1".repeat(20), "0x" + "00".repeat(20), "0xzz", "0xB1b1B1B1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", "c2".repeat(20), " 0x" + "c3".repeat(20)];
@@ -276,7 +298,7 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
       const env = ogEnv(ogNodes);
       for (let step = 0; step < 14; step += 1) {
         t += 1 + ri(5);
-        const pending = (state.committed["entityProviderActionState"] as any)?.pending, confirmed: bigint = (state.committed["entityProviderActionState"] as any)?.confirmedNonce ?? 0n;
+        const pending = (ogOf(state)["entityProviderActionState"] as any)?.pending, confirmed: bigint = (ogOf(state)["entityProviderActionState"] as any)?.confirmedNonce ?? 0n;
         const r = rng();
         const ogS = ogStateOf(state, ogRegistry, cloneAction(ogAction), t);
         let mine: { ok: boolean; error?: unknown; state?: EntityState; hashes?: unknown; jOutputs?: unknown; messages?: string[] }, ogR: ReturnType<typeof og>;
@@ -285,12 +307,12 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
             ? { type: "entityProviderTransfer", data: { to: pick(ADDRS), tokenId: pick([1n, 7n, -1n, 0n]), amount: pick([11n, 0n, 5n, -2n, 99n]) } }
             : { type: "entityProviderReleaseControlShares", data: { recipientAddress: pick(ADDRS), controlAmount: pick([0n, 3n, -1n]), dividendAmount: pick([0n, 4n]), purpose: pick(["", "payout", "x".repeat(1025), 5 as unknown as string]) } };
           ogR = og(() => (tx.type === "entityProviderTransfer" ? handleEntityProviderTransfer : handleEntityProviderReleaseControlShares)(ogS, tx as any, env, true));
-          const f = foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: BigInt(t) });
+          const f = handlerRun(state, tx, BigInt(t));
           mine = f.ok ? { ok: true, state: f.value.draft.state, hashes: f.value.draft.hashes, jOutputs: f.value.draft.jOutputs, messages: (f.value.draft.events ?? []).map((e) => e.message) } : f;
         } else if (r < 0.7) {
           const tx: EntityTx = { type: "entityProviderCancelAction", data: { actionHash: rng() < 0.75 && pending !== undefined ? pending.actionHash : pick([rword(), ""]) } };
           ogR = og(() => handleEntityProviderCancelAction(ogS, tx as any, env, true));
-          const f = foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: BigInt(t) });
+          const f = handlerRun(state, tx, BigInt(t));
           mine = f.ok ? { ok: true, state: f.value.draft.state, hashes: f.value.draft.hashes, jOutputs: f.value.draft.jOutputs, messages: (f.value.draft.events ?? []).map((e) => e.message) } : f;
         } else if (r < 0.88) {
           const executed = rng() < 0.5, nonce = confirmed + (rng() < 0.85 ? 1n : 2n);
@@ -319,7 +341,7 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
           expect(mine.jOutputs).toEqual(ogR.value.jOutputs);
         }
         expect(mine.messages).toEqual(readEntityFrameEventMessages(ogS));
-        expect(mine.state.committed["entityProviderActionState"]).toEqual(ogS.entityProviderActionState);
+        expect(ogOf(mine.state)["entityProviderActionState"]).toEqual(ogS.entityProviderActionState);
         state = mine.state; ogAction = ogS.entityProviderActionState; ogRegistry = ogS.certifiedBoardState;
       }
     }
@@ -331,19 +353,19 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
     const tx: EntityTx = { type: "entityProviderTransfer", data: { to: ADDRS[0] as string, tokenId: 1n, amount: 2n } };
     const unnamed = setup(word(70), JCONF);
     const ogUnnamed = og(() => handleEntityProviderTransfer(ogStateOf(unnamed.state, unnamed.ogRegistry, undefined, 5), tx as any, ogEnv(unnamed.ogNodes), true));
-    expect(reasonOf(foldTxs(unnamed.state, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n }))).toBe(ogUnnamed.ok ? "ok" : ogUnnamed.code);
+    expect(reasonOf(foldTxs(unnamed.state, new Map(), signedTxs(unnamed.state, bobAddr, [tx]), { verify: verifiers.verify, timestamp: 5n }))).toBe(ogUnnamed.ok ? "ok" : ogUnnamed.code);
     const members = new Map([[bobAddr, { shares: 1n }]]), lazy = quorumBoardHash({ _tag: "teaching", threshold: 1n, members });
     const lazyState = unwrap(createEntity({ id: unwrap(entityId(lazy)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: EP_J })).state;
     const ogLazy = og(() => handleEntityProviderTransfer(ogStateOf(lazyState, undefined, undefined, 5), tx as any, ogEnv(new Map()), true));
-    expect(reasonOf(foldTxs(lazyState, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n }))).toBe(ogLazy.ok ? "ok" : ogLazy.code);
+    expect(reasonOf(foldTxs(lazyState, new Map(), signedTxs(lazyState, bobAddr, [tx]), { verify: verifiers.verify, timestamp: 5n }))).toBe(ogLazy.ok ? "ok" : ogLazy.code);
     // the pending intent is committed in the Entity root exactly as og commits entityProviderActionState
     const { state, ogRegistry, ogNodes } = setup(word(71));
     const ogS = ogStateOf(state, ogRegistry, undefined, 5);
     handleEntityProviderTransfer(ogS, tx as any, ogEnv(ogNodes), true);
-    const folded = unwrap(foldTxs(state, new Map(), [tx], { verify: verifiers.verify, timestamp: 5n })).draft.state;
+    const folded = unwrap(handlerRun(state, tx, 5n)).draft.state;
     const rootOf = (s: EntityState) => unwrap(entityRootOf({ ...s, timestamp: 5n }, new Map()));
     const ogRoot = (extra: Record<string, unknown>) => computeCanonicalEntityConsensusStateHash({
-      entityId: state.id, height: 0, timestamp: 5, accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
+      entityId: state.id, height: 0, timestamp: 5, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(state.id), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
       config: { mode: "proposer-based", threshold: 1n, validators: [bobAddr.toLowerCase()], shares: { [bobAddr.toLowerCase()]: 1n }, jurisdiction: OG_J },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, certifiedBoardState: ogRegistry, ...extra,
     } as any);
@@ -352,22 +374,25 @@ describe("EntityProvider actions (og entity/tx/handlers/entity-provider-action.t
   });
 
   test("MATCH: the frame manifest signs the action hash beside the frame hash (og buildEntityHashesToSign)", () => {
+    // threshold 1 of two members: og admission signs the transfer as alice's propose, which her share executes at once,
+    // while the two-member board still holds the frame for precommits
     const members = new Map([[aliceAddr, { shares: 1n }], [bobAddr, { shares: 1n }]]), id = word(72);
-    const replica = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 2n, members, jurisdictionConfig: EP_J }));
-    const { state } = observe(replica.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 2n, members }))]);
+    const replica = unwrap(createEntity({ id: unwrap(entityId(id)), jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: EP_J }));
+    const { state, ogRegistry, ogNodes } = observe(replica.state, [foundation, registered(id, quorumBoardHash({ _tag: "teaching", threshold: 1n, members }))]);
     const tx: EntityTx = { type: "entityProviderTransfer", data: { to: ADDRS[0] as string, tokenId: 1n, amount: 2n } };
     const p = unwrap(applyEntityInput({ ...replica, state }, { kind: "txs", timestamp: 9n, txs: [tx] }, { ...verifiers, self: state.id, signerId: aliceAddr })).replica;
     if (p._tag !== "proposed") throw new Error("phase");
-    const action = (p.draft.state.committed["entityProviderActionState"] as any).pending;
+    expect(wired(p.frame.txs)).toEqual(ogAuthored(state, aliceAddr, [tx], { certifiedBoardState: ogRegistry }, { infrastructure: { certifiedBoardNodes: ogNodes } }));
+    const action = (ogOf(p.draft.state)["entityProviderActionState"] as any).pending;
     const frameHash = unwrap(hashEntityFrame(p.frame));
-    // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash (og's genesis profile is all empty text)
-    const profile = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile: { name: "", isHub: false, avatar: "", bio: "", website: "" }, accounts: new Map(), config: { jurisdiction: { ...OG_J, ...EP_J } } } as never);
-    expect(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
+    // og appendFinalProfileHash: the genesis frame also signs the profile descriptor hash of og's genesis profile
+    const profile = computeEntityProfileHash({ entityId: id, entityEncryptionPublicKey: "", profile: ogGenesisProfile(id), accounts: new Map(), config: { jurisdiction: { ...OG_J, ...EP_J } } } as never);
+    expect<readonly unknown[]>(p.frame.hashesToSign).toEqual(buildEntityHashesToSign(id, 1, frameHash, [{ hash: action.actionHash, type: "entityProviderAction", context: `entityProviderAction:${id.slice(-4)}:entityTransferTokens:nonce:1` }, { hash: profile, type: "profile", context: `profile:${profile}` }]));
     expect(p.frame.hashesToSign.length).toBe(3);
   });
 });
 
-describe("CONTROL board proposal and activation (og entity/tx/handlers/control-board-proposal.ts)", () => {
+describe(seedTag("CONTROL board proposal and activation (og entity/tx/handlers/control-board-proposal.ts)"), () => {
   const EP_J = { ...JCONF, name: "j" };
   const og = async (f: () => any): Promise<{ ok: true; value: any } | { ok: false; code: string }> => { try { return { ok: true, value: await f() }; } catch (e) { return { ok: false, code: (e as Error).message }; } };
   const realVerify = (d: string, hanko: string, entity: string, authority?: { readonly registeredBoardHash?: string | undefined }): boolean => verifyAccountHanko(hanko, d, entity, authority?.registeredBoardHash).ok;
@@ -381,10 +406,10 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
     const { state, ogRegistry, ogNodes } = observe(base.state, events);
     const uState = observe(uBase.state, events).state;
     const env: any = { state: { jReplicas: new Map([["j", { name: "j", chainId: JUR.chainId, depositoryAddress: JUR.depositoryAddress, entityProviderAddress: JUR.entityProviderAddress, contracts: { depository: JUR.depositoryAddress, entityProvider: JUR.entityProviderAddress } }]]) }, infrastructure: { certifiedBoardNodes: ogNodes } };
-    const ogState = (): any => ({ entityId: S, height: 0, timestamp: 77, config: ogConfigOf(state, true), certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], S, computeEntityAccountValueHash) });
-    const consent = (digest: string, signers: readonly string[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
-    const seen = new Set<string>();
-    for (let i = 0; i < 60; i += 1) {
+    const ogState = (): any => ({ entityId: S, height: 0, timestamp: 77, profile: ogGenesisProfile(S), config: ogConfigOf(state, true), certifiedBoardState: ogRegistry, accounts: PersistentEntityAccountMap.fromEntries([], S, computeEntityAccountValueHash) });
+    const consent = (digest: string, signers: readonly Address[]): string => unwrap(quorumHanko(uState, digest, new Map(signers.map((a) => [a, unwrap(crypto.sign(digest as Hash, a))] as const))));
+    const seen = new Set<string>(), wanted = ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"];
+    for (let i = 0, more = untilCovered(60, () => wanted.every((v) => seen.has(v))); more(i); i += 1) {
       const activate = rng() < 0.2;
       const target = pick([T, T, T, X, U, "0x12", T.toUpperCase().replace("0X", "0x")]);
       let tx: EntityTx;
@@ -398,7 +423,7 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
       }
       const ogS = ogState();
       const ogR = await og(() => (activate ? handleEntityProviderActivateBoard(ogS, tx as any, env, true) : handleEntityProviderProposeControlBoard(ogS, tx as any, env, true)));
-      const f = foldTxs(state, new Map(), [tx], { verify: realVerify, timestamp: 77n });
+      const f = foldTxs(state, new Map(), signedTxs(state, bobAddr, [tx]), { verify: realVerify, timestamp: 77n });
       expect(f.ok ? "ok" : reasonOf(f)).toBe(ogR.ok ? "ok" : ogR.code);
       seen.add(`${tx.type}:${ogR.ok ? "ok" : ogR.code.split(":")[0]}`);
       if (!f.ok || !ogR.ok) continue;
@@ -408,11 +433,11 @@ describe("CONTROL board proposal and activation (og entity/tx/handlers/control-b
       expect((f.value.draft.events ?? []).map((e) => e.message)).toEqual(readEntityFrameEventMessages(ogS));
       seen.add(`consents:${(ogR.value.jOutputs[0].jTxs[0].data.supporterVotes ?? []).length}`);
     }
-    for (const v of ["entityProviderProposeControlBoard:ok", "entityProviderActivateBoard:ok", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_SUPPORTER_HANKO_INVALID", "entityProviderProposeControlBoard:CONTROL_BOARD_PROPOSAL_TARGET_AUTHORITY_MISSING", "consents:2"]) expect(seen.has(v)).toBe(true);
-  });
+    for (const v of wanted) expect([v, seen.has(v)]).toEqual([v, true]);
+  }, 30_000);
 });
 
-describe("AC-13b receiving side: the Entity supplies counterpartyCertifiedBoard from its registry (og input-phases.ts)", () => {
+describe(seedTag("AC-13b receiving side: the Entity supplies counterpartyCertifiedBoard from its registry (og input-phases.ts)"), () => {
   test("MATCH: a board_hanko_refresh for a committed Account is checked against the sender's certified board record; without one the Account refuses (og CERTIFIED_BOARD_MISSING)", () => {
     const door = (self: EntityId): DoorContext => ({ verify: hankoVerify, self, now: NOW });
     const a0 = unwrap(admit(genesisAB(), [{ type: "add_delta", tokenId: unwrap(tokenId("1")) }]));

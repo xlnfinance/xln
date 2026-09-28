@@ -3,14 +3,14 @@
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bytesToHex as nobleHex } from "@noble/hashes/utils";
 import {
-  accountId, ackPlan, address, addressOf, applyAccountBody, bytesToHex, concat, encodeHankoEnvelope, encodeLazyAccountHanko, encodeLazyEntityId, entityId, genesisAccount, genesisAccountBody,
+  accountId, ackPlan, address, addressOf, applyAccountBody, authorEntityTxs, bytesToHex, concat, encodeHankoEnvelope, encodeLazyAccountHanko, encodeLazyEntityId, entityId, genesisAccount, genesisAccountBody,
   genesisReplica, getDelta, hashEntityFrame, hexToBytes, isLeft, match, matchBy, ok, opt, packSignatures, partyOf, planAccountProposal, previewAck, replicaId, sentBy, setCreditLimit, signRaw, signature, tokenId,
   recoverRawSigner, unwrapOr, updateDelta, verifyAccountHanko, wordOf,
 } from "./xln.ts";
 import type {
   AccountEnvelope, AccountFrame, AccountGrammar, AccountId, AccountInput, AccountInputFor, AccountMessage, AccountOutput, AccountPhase, AccountReplica, AccountReplicaError, AccountTerms, Address, At, Board, DisputeHanko,
   DisputePlan, EntityFrame, EntityGrammar, EntityId, EntityPhase, EntityReplica, FrameClock, Hanko, HankoClaimInput, Hash, OpenAccount, Party, ProposedAccount, RawSig, Result, Signature, Verify, WireAccountTx,
-  DeltaTransformerRef, JReplica, Runtime,
+  DeltaTransformerRef, EntityState, EntityTx, JReplica, Runtime,
 } from "./xln.ts";
 
 
@@ -41,7 +41,7 @@ export const TOKEN = unwrap(tokenId("0"));
 const digest = (h: Hash, addr: Address): Signature => unwrap(signature(nobleHex(keccak_256(new TextEncoder().encode(`sig:${h}:${addr}`)))));
 /** Anvil-keyed signer addresses sign real ECDSA (0/1 recovery, og's validator signatures, so og's quorum Hanko builds); any other address signs a fake digest. */
 let keyedSigners: ReadonlyMap<string, string> | undefined;
-const keyFor = (addr: string): string | undefined => (keyedSigners ??= new Map(ANVIL_KEYS.map((k) => [signerAddress(k), k] as const))).get(addr.toLowerCase());
+const keyFor = (addr: string): string | undefined => (keyedSigners ??= new Map([...ANVIL_KEYS, ...MORE_ANVIL_KEYS].map((k) => [signerAddress(k), k] as const))).get(addr.toLowerCase());
 export const makeCrypto = () => {
   const issued = new Map<string, Signature>();
   const sign = (h: Hash, addr: Address): Result<Signature, "sign_failed"> => {
@@ -60,6 +60,16 @@ export const ANVIL_KEYS = [
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
   "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+] as const;
+/** Anvil accounts #3-#9: more real keys for boards wider than three (og admission signs every local tx as its author). */
+export const MORE_ANVIL_KEYS = [
+  "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
+  "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
+  "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
+  "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
+  "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356",
+  "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97",
+  "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6",
 ] as const;
 export const anvilKey = (i: number): string => { const k = ANVIL_KEYS[i]; if (k === undefined) throw new Error(`no anvil key at index ${i}`); return k; };
 const rawOf = (h: Uint8Array, key: string) => { const s = signRaw(h, hexToBytes(key)); return { r: wordOf(s.r), s: wordOf(s.s), recovery: s.recovery, publicKey: s.publicKey }; };
@@ -110,6 +120,11 @@ export const TERMS: AccountTerms = {
   disputeConfig: { leftResponseSeconds: 86400, rightResponseSeconds: 3600 },
 };
 export const JURISDICTION = TERMS.domain;
+/** A jurisdiction on an EntityProvider that registered no board: og openAccount needs config.jurisdiction; the command stack stays unregistered. */
+export const UNREGISTERED_J = { entityProviderAddress: `0x${"ee".repeat(20)}` };
+/** og admission: a board member's local txs as the frame carries them, signed into its Entity commands (og prepareLocallyAuthoredEntityTxs). */
+export const signedTxs = (state: EntityState, signer: Address, txs: readonly EntityTx[]): readonly EntityTx[] =>
+  unwrap(authorEntityTxs(state, signer, txs, (h) => crypto.sign(h, signer)));
 /** The durable jurisdiction stack of TERMS.domain: og requireAccountDeltaTransformerAddress reads it for every Account proof body with clauses. */
 export const TEST_CONTRACTS = { depository: TERMS.domain.depositoryAddress, entityProvider: `0x${"55".repeat(20)}`, account: `0x${"66".repeat(20)}`, deltaTransformer: `0x${"77".repeat(20)}` } as const;
 export const TEST_DT: DeltaTransformerRef = ok(TEST_CONTRACTS.deltaTransformer);

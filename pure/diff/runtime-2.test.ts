@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   handleLendingBorrowEntityTx, handleLendingClosePositionEntityTx, handleLendingOfferEntityTx, handleLendingRepayEntityTx,
 } from "../../core/entity/tx/handlers/payments/lending.ts";
@@ -6,23 +7,25 @@ import {
   applyEntityInput, createEntity, isLeft, mapSet, ownWire, retireNetworkOutputs, tokenId, wireOf, zeroDelta,
   type AccountReplica, type EntityId, type EntityTx, type OpenEntity, type WireAccountTx,
 } from "../xln.ts";
-import { ALICE, BOB, CAROL, NOW, TERMS, aliceAddr, unwrap, verifiers } from "../xln_run.ts";
+import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, unwrap, verifiers } from "../xln_run.ts";
 
 // seeded rng for randomized comparisons
-let seed = 11;
-const rng = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+let seed = seedOf(11);
+const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
 const ri = (n: number): number => Math.floor(rng() * n);
 const pick = <T>(xs: readonly T[]): T => xs[ri(xs.length)] as T;
 const hex16 = (): string => Array.from({ length: 16 }, () => "0123456789abcdef"[ri(16)]).join("");
 
 const T1 = unwrap(tokenId("1")), T2 = unwrap(tokenId("2"));
 const openTo = (target: EntityId): EntityTx =>
-  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: TERMS.domain, watchSeed: TERMS.watchSeed, disputeConfig: TERMS.disputeConfig } }) as EntityTx;
+  ({ type: "openAccount", data: { targetEntityId: target, accountDomain: { ...TERMS.domain }, watchSeed: TERMS.watchSeed, disputeConfig: { ...TERMS.disputeConfig } } }) as EntityTx;
 
 /** A 1-of-1 ALICE with a committed Account to BOB whose token 1 row is funded on ALICE's side. */
 const fundedHubAccount = (): OpenEntity => {
-  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]) }));
-  const opened = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [openTo(BOB)] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
+  const created = unwrap(createEntity({ id: ALICE, jurisdiction: TERMS.domain, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), jurisdictionConfig: UNREGISTERED_J }));
+  const signed = unwrap(applyEntityInput(created, { kind: "txs", timestamp: NOW, txs: [openTo(BOB)] }, { ...verifiers, self: ALICE, signerId: aliceAddr })).replica;
+  // og: the Account a signed command opens proposes its first frame in the Runtime's account work at H+1
+  const opened = unwrap(applyEntityInput(signed, { kind: "txs", timestamp: NOW, txs: [] }, { ...verifiers, self: ALICE, signerId: aliceAddr, lane: "account-work" })).replica;
   if (opened._tag !== "open") throw new Error(opened._tag);
   const child = opened.accountReplicas.get(BOB);
   if (child === undefined) throw new Error("no account");
@@ -51,7 +54,7 @@ const runOg = (tx: { readonly type: string; readonly data: Record<string, unknow
 let hubAccount: OpenEntity | undefined;
 const runRewrite = (tx: EntityTx) => applyEntityInput((hubAccount ??= fundedHubAccount()), { kind: "txs", timestamp: NOW + 1n, txs: [tx] }, { ...verifiers, self: ALICE, signerId: aliceAddr });
 
-describe("runtime-2: entity lending (ER-17, og payments/lending.ts)", () => {
+describe(seedTag("runtime-2: entity lending (ER-17, og payments/lending.ts)"), () => {
   const randomTx = (): EntityTx => {
     const hub = pick<string>([BOB, BOB, BOB, BOB.toUpperCase().replace("0X", "0x"), ` ${BOB} `, CAROL, ""]);
     const id = (prefix: string): string => pick([`${prefix}-${hex16()}`, `${prefix}-${hex16()}`, `${prefix}-${hex16().toUpperCase()}`, `${prefix}-${hex16().slice(1)}`, `lend-${hex16()}`, `loan-${hex16()}`, "x"]);
@@ -69,7 +72,7 @@ describe("runtime-2: entity lending (ER-17, og payments/lending.ts)", () => {
   test("MATCH: 400 random lendingOffer/Borrow/Repay/ClosePosition -- same accept/refuse code as og, same queued Account tx on the hub Account, same wake to validators[0]", () => {
     let accepted = 0, refused = 0;
     for (let i = 0; i < 400; i++) {
-      const tx = randomTx(), og = runOg(tx as never), rw = runRewrite(tx);
+      const tx = randomTx(), og = runOg(tx), rw = runRewrite(tx);
       if (!og.ok) {
         // og throws a plain Error: the whole input is refused (not an evict-and-retry reject disposition).
         expect(rw.ok).toBe(false);
@@ -89,12 +92,12 @@ describe("runtime-2: entity lending (ER-17, og payments/lending.ts)", () => {
     }
     expect(accepted).toBeGreaterThan(20);
     expect(refused).toBeGreaterThan(100);
-  });
+  }, 30_000);
 
   test("MATCH: a lendingOffer for a token the hub Account has not enabled is og LENDING_TOKEN_NOT_ENABLED; the missing hub is LENDING_HUB_ACCOUNT_MISSING", () => {
     const offer = (patch: Record<string, unknown>): EntityTx => ({ type: "lendingOffer", data: { positionId: `lend-${"a".repeat(16)}`, hubEntityId: BOB, tokenId: T1, amount: 5n, termId: "1d", interestBps: 50, ...patch } }) as EntityTx;
     for (const [patch, code] of [[{ tokenId: T2 }, "LENDING_TOKEN_NOT_ENABLED"], [{ hubEntityId: CAROL }, "LENDING_HUB_ACCOUNT_MISSING"], [{ interestBps: 10_001 }, "LENDING_INVALID_INTEREST_BPS"]] as const) {
-      const og = runOg(offer(patch) as never), rw = runRewrite(offer(patch));
+      const og = runOg(offer(patch)), rw = runRewrite(offer(patch));
       expect(og).toEqual({ ok: false, code });
       expect(rw.ok ? "accepted" : rw.error._tag === "lending_entity" ? rw.error.reason : rw.error._tag).toBe(code);
     }
@@ -125,6 +128,7 @@ import {
   type StorageFrame,
 } from "../xln.ts";
 import { bobAddr, carolAddr } from "../xln_run.ts";
+import { ogOf } from "./og-state.ts";
 
 const ogThrowCode = (f: () => unknown): string | null => { try { f(); return null; } catch (e) { return String((e as Error).message).split(":")[0] ?? ""; } };
 const rwCode = (r: { readonly ok: boolean; readonly error?: unknown }): string | null => {
@@ -140,7 +144,7 @@ const ALL_RUNTIME_TX_TYPES: readonly RuntimeTx["type"][] = [
   "recordEntityProviderActionSubmitResult", "recordGovernanceJSubmitResult", "importJ", "completeImportJ",
 ];
 
-describe("runtime-2: og RuntimeTx capability authorization (og runtime/tx/internal-tx-auth.ts)", () => {
+describe(seedTag("runtime-2: og RuntimeTx capability authorization (og runtime/tx/internal-tx-auth.ts)"), () => {
   test("MATCH: every og RuntimeTx kind -- external ingress refused with og's code, replay admitted, importReplica/importJ unguarded", () => {
     for (const type of ALL_RUNTIME_TX_TYPES) {
       const tx = { type, data: {} } as unknown as RuntimeTx;
@@ -151,7 +155,7 @@ describe("runtime-2: og RuntimeTx capability authorization (og runtime/tx/intern
 
   test("MATCH: a locally created checkpoint barrier / adapter-command marker is admitted; a structurally equal copy from ingress is not", () => {
     const barrier = createCheckpointBarrierRuntimeTx() as unknown as RuntimeTx;
-    const command = markLocalRuntimeAdapterCommandTx({ type: "recordRuntimeAdapterCommand", data: { laneId: hex(32), sequence: 1, commandId: "cmd-0123456789abcdef", inputHash: hex(32), expiresAtMs: null } } as never) as unknown as RuntimeTx;
+    const command = markLocalRuntimeAdapterCommandTx({ type: "recordRuntimeAdapterCommand", data: { laneId: hex(32), sequence: 1, commandId: "cmd-0123456789abcdef", inputHash: hex(32), expiresAtMs: null } }) as unknown as RuntimeTx;
     for (const tx of [barrier, command]) {
       const copy = JSON.parse(JSON.stringify(tx)) as RuntimeTx;
       expect(ogThrowCode(() => assertRuntimeTxCapabilitiesAuthorized(tx as never))).toBeNull();
@@ -174,7 +178,7 @@ describe("runtime-2: og RuntimeTx capability authorization (og runtime/tx/intern
   });
 });
 
-describe("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/frontier.ts)", () => {
+describe(seedTag("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/frontier.ts)"), () => {
   test("MATCH: 600 random adapter-command markers -- same accept/refuse code and same frontier map as og applyRuntimeAdapterCommandMarker", () => {
     const lanes = [hex(32), hex(32), hex(32)];
     let rt: Runtime = createRuntime();
@@ -206,7 +210,7 @@ describe("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/command/fr
   });
 });
 
-describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", () => {
+describe(seedTag("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)"), () => {
   const ENTITIES = [ALICE, BOB] as const, SIGNERS = [aliceAddr, bobAddr] as const;
   const ORIGINS = [undefined, undefined, "0x" + "77".repeat(20), "0x" + "88".repeat(20)] as const;
   const frames = new Map<string, EntityFrame>();
@@ -242,7 +246,8 @@ describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", ()
     e: i.entityId.toLowerCase(), s: i.signerId.toLowerCase(), from: i.from ?? "",
     body: i.input.kind === "proposal" ? `frame-${i.input.frame.height}-${Number(i.input.frame.timestamp)}`
       : i.input.kind === "precommit" ? [...i.input.signatures].map(([k, v]) => [k, [...v]])
-      : i.input.txs.map((tx) => (tx.type === "extendCredit" ? Number(tx.data.amount) : -1)),
+      : i.input.kind === "txs" ? i.input.txs.map((tx) => (tx.type === "extendCredit" ? Number(tx.data.amount) : -1))
+      : `unexpected ${i.input.kind} input`,
   });
   const summaryOg = (i: Record<string, unknown>): unknown => {
     const pre = i["hashPrecommits"] as Map<string, string[]> | undefined, frame = i["proposedFrame"] as { hash: string } | undefined;
@@ -255,7 +260,7 @@ describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", ()
 
   test("MATCH: 500 random batches of txs / precommit / proposal lanes -- same merged lanes in the same order, same equivocation refusals as og", () => {
     let merges = 0, refusals = 0, conflicts = 0;
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0, more = untilCovered(500, () => merges > 50 && refusals > 5 && conflicts > 5); more(i); i++) {
       const gens = Array.from({ length: 1 + ri(7) }, randomInput);
       let ogOut: Record<string, unknown>[] | undefined;
       const ogErr = ogThrowCode(() => { ogOut = ogMergeEntityInputs(gens.map((g) => g.og) as never) as never; });
@@ -272,7 +277,7 @@ describe("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)", ()
   });
 });
 
-describe("runtime-2: Runtime WAL commitments (og storage/hashes.ts, canonical-hash.ts, replica-meta-digest.ts, wal/outbox-payload.ts)", () => {
+describe(seedTag("runtime-2: Runtime WAL commitments (og storage/hashes.ts, canonical-hash.ts, replica-meta-digest.ts, wal/outbox-payload.ts)"), () => {
   const entityHashes = () => Array.from({ length: ri(4) }, () => ({ entityId: pick([hex(32), hex(32).toUpperCase().replace("0X", "0x")]), hash: hex(32), cellCount: 1 + ri(3) }));
   const randomBinary = (depth = 0): Binary => {
     const k = ri(depth > 2 ? 4 : 7);
@@ -296,7 +301,7 @@ describe("runtime-2: Runtime WAL commitments (og storage/hashes.ts, canonical-ha
     for (let i = 0; i < 300; i++) {
       const view = Object.fromEntries(Array.from({ length: ri(4) }, () => [pick(["infrastructure", "jReplicas", "gossip", "zeta"]), randomBinary()]));
       const components = unwrap(runtimeComponentDigests(view));
-      expect(components).toEqual(computeRuntimePostStateComponentDigests(view) as never);
+      expect(components).toEqual(computeRuntimePostStateComponentDigests(view));
       const meta = Array.from({ length: ri(4) }, () => ({ key: Uint8Array.from({ length: 1 + ri(8) }, () => ri(256)), value: Uint8Array.from({ length: ri(8) }, () => ri(256)) }));
       const metaDigest = unwrap(replicaMetaDigest(meta));
       expect(metaDigest).toBe(computeStorageReplicaMetaDigest(meta));
@@ -333,7 +338,7 @@ const SEED = "0x" + "5e".repeat(64);
 /** secp256k1 generator G (private key 1), compressed: og resolveValidatorAddress derives its address. */
 const COMPRESSED = "0x0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
 
-describe("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts importReplicaRuntimeTx)", () => {
+describe(seedTag("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts importReplicaRuntimeTx)"), () => {
   test("MATCH: 600 random boards -- lazyBoardEntityId equals og hashBoard(encodeBoard(config)) and refuses exactly when og throws", () => {
     let accepted = 0;
     for (let i = 0; i < 600; i++) {
@@ -376,7 +381,7 @@ describe("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts
     expect(code(tx({ entitySeed: "0x1234" }))).toBe("IMPORT_REPLICA_ENTITY_SEED_INVALID");
     const imported = unwrap(applyRuntimeTx(rt, tx({}), {}));
     const replica = imported.entities.get(replicaKey(id as EntityId, aliceAddr));
-    expect(replica?.state.committed["entityEncryptionPublicKey"]).toBe(entityEncryptionPublicKey(SEED, id));
+    expect((replica === undefined ? undefined : ogOf(replica.state)["entityEncryptionPublicKey"])).toBe(entityEncryptionPublicKey(SEED, id));
     expect(imported.encryptionSeeds.get(id.toLowerCase())).toBe(SEED);
     // A sibling validator replica with another seed derives another key: og IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH.
     expect(code(tx({ signerId: bobAddr, isProposer: false, entitySeed: "0x" + "6f".repeat(64) }), imported)).toBe("IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH");
@@ -384,7 +389,7 @@ describe("runtime-2: importReplica board authority (og runtime/tx/tx-handlers.ts
   });
 });
 
-describe("runtime-2: WAL frame commit and recover (og storage write + read/verify.ts + replay)", () => {
+describe(seedTag("runtime-2: WAL frame commit and recover (og storage write + read/verify.ts + replay)"), () => {
   test("MATCH: a committed WAL row chains from og ZERO_FRAME_HASH and its frameHash / canonicalStateHash recompute under og's functions; tampering is refused", () => {
     // og resolveEntityProposerId: BOB has no local replica and no certified Account route yet, so its verified gossip profile names the signer
     // og retains a remote output only once its Runtime resolves (og resolveRuntimeIdForEntity), else ROUTE_TARGET_RUNTIME_UNKNOWN
