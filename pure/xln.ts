@@ -29695,9 +29695,12 @@ const sourcePullConsumer = (l: Lane): boolean =>
       tx.data.frame.txs.some((a) => a.type === "cross_pull_lock" && a.crossJurisdiction.leg === "source"),
   );
 const runtimeOutputOf = (l: Lane): EntityTx | undefined => l.txs?.find((tx) => tx.type === "runtimeOutput");
-/** og entityInputMergeKey: the lane key of one input. */
+/**
+ * og entityInputMergeKey (entity/consensus/input/merge.ts:145-146): the lane key of one input. og lowercases the Entity
+ * and signer without trimming, so a padded signer id is a merge group of its own.
+ */
 const mergeKey = (l: Lane): Result<string, RuntimeError> => {
-  const base = `${lower(l.entityId)}:${lower(l.signerId)}`;
+  const base = `${lowerText(l.entityId)}:${lowerText(l.signerId)}`;
   const output = runtimeOutputOf(l);
   if (output !== undefined) return ok(runtimeOutputKey(base, l, output));
   if (l.atomic !== undefined) return atomicKey(base, l.atomic, l.sourceRuntimeFrame);

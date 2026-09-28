@@ -18,11 +18,10 @@ const ENTITIES = [1, 2, 3].map((n) => `0x${n.toString(16).padStart(64, "0")}`);
 const SIGNERS = ["0x70997970c51812dc3a010c7d01b50e0d17dc79c8", "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"];
 const RUNTIMES = ["0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "0x90f79bf6eb2c4f870365e785982e1f101e93b906"];
 /**
- * A signer as some sender spells it. Only case varies: og entityInputMergeKey lowercases the signer without trimming
- * while the rewrite's mergeKey also trims, so a padded signer id splits merge groups differently (reported, not part
- * of this barrier).
+ * A signer as some sender spells it: the barrier's lane key trims and lowercases it (og laneKey), while the merge
+ * group only lowercases it (og entityInputMergeKey), so a padded signer shares the lane but not the group.
  */
-const spelled = (s: string): string => pick([s, s.toUpperCase().replace("0X", "0x")]);
+const spelled = (s: string): string => pick([s, s.toUpperCase().replace("0X", "0x"), ` ${s}`]);
 
 /** One drawn input, built on both sides from the same description. */
 type Drawn = { readonly og: Record<string, unknown>; readonly rw: RoutedEntityInput };
