@@ -20,7 +20,7 @@ import { projectCertifiedEntityFrameLinkIdentity } from "../../core/entity/conse
 import { createJAdapter } from "../../core/jurisdiction/adapter/index.ts";
 import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
-import { ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
+import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
 import { haltDeparture } from "./departures.ts";
 import {
@@ -57,7 +57,9 @@ export const T0 = 1_700_000_000_000;
 /** Anvil account #3: xln_run keys only #0-#2, so its signer signs through the scenario's own member signer. */
 const EXTRA_KEY = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
 const EXTRA_SIGNER = signerAddress(EXTRA_KEY);
-export const KEYS = [...ANVIL_KEYS, EXTRA_KEY];
+/** Anvil accounts #4 and #5: the numbered Entities' sole validators (xln_run's verifiers sign for #3-#9). */
+const NUMBERED_KEYS = MORE_ANVIL_KEYS.slice(1, 3);
+export const KEYS = [...ANVIL_KEYS, EXTRA_KEY, ...NUMBERED_KEYS];
 export const SIGNERS = KEYS.map((k) => signerAddress(k));
 const sign: typeof verifiers.sign = (h, addr) =>
   addr.toLowerCase() === EXTRA_SIGNER
@@ -145,7 +147,11 @@ export const leafDiffs = (a: unknown, b: unknown, at = "", out: string[] = []): 
   return out;
 };
 
-export type User = { readonly entity: number; readonly txs: readonly EntityTx[] };
+/**
+ * One user input: the Entity it goes to and, when a member of a multi-signer board authors it, that member's index
+ * into SIGNERS (og binds the command's signer as the author, e.g. vote.voter in entity/command/command-codec.ts).
+ */
+export type User = { readonly entity: number; readonly txs: readonly EntityTx[]; readonly signer?: number };
 export type Coverage = {
   frames: number;
   entityFrames: number;
@@ -212,8 +218,16 @@ const rowKey = (row: unknown): string => {
   return stableJson(plain(carried));
 };
 
-/** og's watcher input: an attestation lane, which no single-signer Entity routes to itself. */
-const watched = (i: { jPrefixAttestations?: Map<string, unknown> }): boolean => (i.jPrefixAttestations?.size ?? 0) > 0;
+/**
+ * og's watcher input: a validator's own J-prefix attestation, keyed by the input's own signer (og
+ * jurisdiction/adapter/events/history-ingress.ts). A board member's relay of it to the others (og
+ * rebroadcastLocalAttestation in entity/consensus/j-prefix/prefix-input.ts) is keyed by its author, another member,
+ * and is an Entity output like any other.
+ */
+const watched = (i: { signerId: string; jPrefixAttestations?: Map<string, unknown> }): boolean => {
+  const authors = [...(i.jPrefixAttestations?.keys() ?? [])];
+  return authors.length > 0 && authors.every((a) => a.toLowerCase() === i.signerId.toLowerCase());
+};
 
 export type LaneConfig = {
   /** Prefixes every difference (the seed, and the lane's name when there are several). */
@@ -231,6 +245,8 @@ export type LaneConfig = {
   readonly online: (entityId: string) => boolean;
   /** The rewrite's transport view of Entities hosted elsewhere (og verifiedProfileRoutes). */
   readonly routes?: RuntimeRoutes | undefined;
+  /** Each Entity's own signer, as an index into SIGNERS (the Entity's own index when absent). */
+  readonly signerOf?: (entity: number) => number;
 };
 export type Lane = {
   readonly env: OgEnv;
@@ -249,6 +265,8 @@ export type Lane = {
 
 export const createLane = (cfg: LaneConfig): Lane => {
   const { env, ids, names, coverage, tag } = cfg;
+  /** The signer a user input is submitted as: the chosen member, else the Entity's own signer. */
+  const userSigner = (u: User): string => SIGNERS[u.signer ?? cfg.signerOf?.(u.entity) ?? u.entity]!;
   let rt = cfg.runtime;
   let frame = 0;
   let pending: readonly RoutedEntityInput[] = [];
@@ -365,7 +383,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const known = profiles();
     const entityInputs = users.map((u) => ({
       entityId: ids[u.entity]!,
-      signerId: SIGNERS[u.entity]!,
+      signerId: userSigner(u),
       entityTxs: treeClone(u.txs.map(wireEntityTx)),
     }));
     const host = hostInputs([...pending, ...own.pings]);
@@ -387,7 +405,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const now = Number(rt.timestamp) + 100;
     const userIn: RoutedEntityInput[] = users.map((u) => ({
       entityId: ids[u.entity]!,
-      signerId: SIGNERS[u.entity]!,
+      signerId: userSigner(u),
       input: { kind: "txs", timestamp: BigInt(now), txs: u.txs },
     }));
     // og enqueueRuntimeInput appends after the local continuations the previous frame re-enqueued
