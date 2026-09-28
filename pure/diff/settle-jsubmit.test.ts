@@ -14,7 +14,7 @@ import {
   type Batch, type JBatch, type JSubmission, type JEntity, type JQueued, type QueuedBatch, type Result,
 } from "../xln.ts";
 import { ALICE, BOB, genesisAB, hankoVerify, unwrap } from "../xln_run.ts";
-import { jbOfOg } from "./og-state.ts";
+import { jbOfOg, ogOf } from "./og-state.ts";
 
 const prng = (base: number) => { let seed = seedOf(base); return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const rng = prng(0x5e77_1e);
@@ -294,7 +294,7 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
       const queued = [...after.mempool, ...(after._tag === "proposed" ? after.candidate.frame.txs : [])].filter((t: any) => t.type === "settle_transition" && !pendingTx.includes(t));
       // og routes a proposal's `🚀 Proposed frame` in proposePendingAccountFrames, after the tx and drain phases this og driver runs
       expect((d.events ?? []).filter((e: any) => !String(e.message).startsWith("🚀 Proposed frame "))).toEqual(readEntityFrameEvents(og) as never);
-      const rwDeferred = d.state.committed.deferredAccountProposals;
+      const rwDeferred = ogOf(d.state)["deferredAccountProposals"] as ReadonlyMap<string, string> | undefined;
       if (ogDeferred.length > 0 && (rwDeferred === undefined || rwDeferred.size === 0)) {
         // the idle Account's deferred approval was materialized in the same frame: exactly one own hanko transition for og's approved workspace
         expect(ogOut.accountTxs).toEqual([]);
@@ -305,7 +305,7 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
       }
       expect(queued.map((t: any) => ownWire(wireOf(t)))).toEqual(ogOut.accountTxs.map((a: any) => a.tx));
       expect(rwDeferred === undefined ? [] : [...rwDeferred]).toEqual(ogDeferred);
-      if (ogDeferred.length > 0) { counts.deferred++; expect(unwrap(entityCollectionCommitment(rwDeferred) as any)).toEqual(ogCollectionCommitment(og.deferredAccountProposals) as never); }
+      if (ogDeferred.length > 0) { counts.deferred++; expect(unwrap(entityCollectionCommitment(rwDeferred ?? new Map()) as any)).toEqual(ogCollectionCommitment(og.deferredAccountProposals) as never); }
       if (ogOut.accountTxs.length > 0) counts.queued++; else counts.skipped++;
     }
     expect(counts.refused).toBeGreaterThan(100);

@@ -11357,6 +11357,10 @@ export type EntityState = {
   readonly jFinality: JFinality;
   /** og entityCommandNonces: the replay fence over signed Entity commands. */
   readonly commandFence: CommandFence;
+  /** og deferredAccountProposals: approved settlement workspaces waiting for their Account to go quiet, by peer. */
+  readonly deferredApprovals: LazyMap<string>;
+  /** og settlementContinuations: reserve moves pinned to a settlement workspace, run once it executes, by peer. */
+  readonly continuations: LazyMap<PendingContinuation>;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12248,6 +12252,8 @@ export const encodeEntityState = (s: EntityState): string => canon({
   providerActions: s.providerActions,
   jFinality: s.jFinality,
   commandFence: s.commandFence,
+  deferredApprovals: s.deferredApprovals,
+  continuations: s.continuations,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12885,7 +12891,14 @@ const authorityOf = (p: EntitySeed): Authority => {
 /** One validator replica (og `eReplicas` key `entityId:signerId`); `signerId` defaults to the proposer. */
 type TypedSections = Pick<
   EntityState,
-  "committed" | "jBatch" | "hub" | "providerActions" | "jFinality" | "commandFence"
+  | "committed"
+  | "jBatch"
+  | "hub"
+  | "providerActions"
+  | "jFinality"
+  | "commandFence"
+  | "deferredApprovals"
+  | "continuations"
 >;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (
@@ -12893,7 +12906,8 @@ const importSections = (
   config: JurisdictionConfig | undefined,
 ): Result<TypedSections, EntityError> => {
   const { jBatchState, entityProviderActionState, ...sectioned } = og;
-  const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, entityCommandNonces, ...seeded } = sectioned;
+  const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, entityCommandNonces, ...rest } = sectioned;
+  const { deferredAccountProposals, settlementContinuations, ...seeded } = rest;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
   const actions = entityProviderActionState as EntityProviderActionState | undefined;
@@ -12903,6 +12917,14 @@ const importSections = (
     providerActions: mapErr(importProviderActions(actions), unreachable("ENTITY_PROVIDER_ACTION")),
     jFinality: mapErr(importJFinality(og, config), unreachable("J_FINALITY")),
     commandFence: mapErr(importCommandFence(entityCommandNonces), unreachable("ENTITY_COMMAND_NONCE")),
+    deferredApprovals: mapErr(
+      importLazyMap<string>(deferredAccountProposals, deferredProblem),
+      unreachable("DEFERRED"),
+    ),
+    continuations: mapErr(
+      importLazyMap<PendingContinuation>(settlementContinuations, continuationProblem),
+      unreachable("CONTINUATION"),
+    ),
   });
   return map(imported, ({ hubbed: { hub, committed }, ...sections }) => ({ ...sections, committed, hub }));
 };
@@ -23174,18 +23196,39 @@ const bodyInvariant = <X,>(r: Result<X, BodyError>): Result<X, EntityError> =>
   mapErr(r, (e): EntityError => ({ _tag: "entity_invariant", reason: bodyReason(e) }));
 const settleSay = (d: Draft, message: string): Draft => ({ ...d, events: [...(d.events ?? []), status(message)] });
 const noAccount = (peer: EntityId): Result<never, EntityError> => invariant(`No account with ${peer.slice(-4)}`);
-/**
- * og EntityState.deferredAccountProposals / settlementContinuations: live maps in `committed`; the root commits them as
- * entity collections (entityRootOf).
- */
-const liveMap = <V,>(v: Binary | undefined): ReadonlyMap<string, V> =>
-  v instanceof Map ? (v as ReadonlyMap<string, V>) : new Map();
-const deferredOf = (state: EntityState): ReadonlyMap<string, string> =>
-  liveMap(state.committed["deferredAccountProposals"]);
-const withDeferred = (state: EntityState, m: ReadonlyMap<string, string>): EntityState => ({
-  ...state,
-  committed: { ...state.committed, deferredAccountProposals: m as unknown as Binary },
-});
+// ---- og's lazily created Entity maps: deferred settlement approvals and settlement continuations ----
+/** Absent until its first entry; from then on committed, even when emptied again. */
+export type LazyMap<V> = Readonly<{ _tag: "absent" }> | Readonly<{ _tag: "kept"; entries: ReadonlyMap<string, V> }>;
+export const ABSENT_MAP: LazyMap<never> = { _tag: "absent" };
+const keptMap = <V,>(entries: ReadonlyMap<string, V>): LazyMap<V> => ({ _tag: "kept", entries });
+const entriesOf = <V,>(m: LazyMap<V>): ReadonlyMap<string, V> => (m._tag === "kept" ? m.entries : new Map());
+const ogLazyMap = <V,>(field: string, m: LazyMap<V>): EntityCommitted =>
+  m._tag === "kept" ? { [field]: m.entries as unknown as Binary } : {};
+/** og validateAccountMetadata: a lowercase bytes32 peer, and an approved lowercase workspace hash. */
+const deferredProblem = (peer: string, hash: unknown): string | undefined =>
+  WORD32.test(peer) && typeof hash === "string" && WORD32.test(hash) ? undefined : `a malformed approval for ${peer}`;
+const CONTINUATION_KEYS = "actions,broadcast,workspaceHash";
+/** og validateSettlementContinuationValue: one well-formed plan pinned to a workspace hash. */
+const continuationProblem = (peer: string, value: unknown): string | undefined => {
+  const c = recOf(value);
+  const pinned = c !== null && Object.keys(c).toSorted().join(",") === CONTINUATION_KEYS;
+  return WORD32.test(peer) && pinned && WORD32.test(String(c["workspaceHash"]))
+    ? continuationIssue(c as unknown as SettlementContinuationPlan)
+    : `a malformed continuation for ${peer}`;
+};
+const importLazyMap = <V,>(
+  og: Binary | undefined,
+  problem: (key: string, value: unknown) => string | undefined,
+): Result<LazyMap<V>, string> => {
+  if (og === undefined) return ok(ABSENT_MAP);
+  if (!(og instanceof Map)) return err("a non-map collection");
+  const problems = [...og].map(([k, v]) => (typeof k === "string" ? problem(k, v) : `a non-text key ${String(k)}`));
+  const first = problems.find((p) => p !== undefined);
+  return first === undefined ? ok(keptMap(og as unknown as ReadonlyMap<string, V>)) : err(first);
+};
+const deferredOf = (state: EntityState): ReadonlyMap<string, string> => entriesOf(state.deferredApprovals);
+const withDeferred = (state: EntityState, m: ReadonlyMap<string, string>): EntityState =>
+  ({ ...state, deferredApprovals: keptMap(m) });
 const forgetDeferred = (state: EntityState, peer: string): EntityState =>
   withDeferred(state, mapDelete(deferredOf(state), peer));
 /** og deferredAccountProposals.set with the conflicting-hash guard. */
@@ -23215,13 +23258,11 @@ export type SettlementContinuationPlan = {
   readonly actions: readonly SettlementContinuationAction[];
   readonly broadcast: boolean;
 };
-type PendingContinuation = SettlementContinuationPlan & { readonly workspaceHash: string };
+export type PendingContinuation = SettlementContinuationPlan & { readonly workspaceHash: string };
 const continuationsOf = (state: EntityState): ReadonlyMap<string, PendingContinuation> =>
-  liveMap(state.committed["settlementContinuations"]);
-const withContinuations = (state: EntityState, m: ReadonlyMap<string, PendingContinuation>): EntityState => ({
-  ...state,
-  committed: { ...state.committed, settlementContinuations: m as unknown as Binary },
-});
+  entriesOf(state.continuations);
+const withContinuations = (state: EntityState, m: ReadonlyMap<string, PendingContinuation>): EntityState =>
+  ({ ...state, continuations: keptMap(m) });
 const forgetContinuation = (d: Draft, peer: string): Draft => ({
   ...d,
   state: withContinuations(d.state, mapDelete(continuationsOf(d.state), peer)),
@@ -26706,6 +26747,8 @@ export const ogSections = (state: EntityState): EntityCommitted => {
     ...state.committed,
     ...ogJFinality(state.jFinality),
     ...(fence === undefined ? {} : { entityCommandNonces: fence }),
+    ...ogLazyMap("deferredAccountProposals", state.deferredApprovals),
+    ...ogLazyMap("settlementContinuations", state.continuations),
     ...(jBatch === undefined ? {} : { jBatchState: jBatch as unknown as Binary }),
     ...(actions === undefined ? {} : { entityProviderActionState: actions as unknown as Binary }),
   });

@@ -301,7 +301,7 @@ import { handleSettlePropose } from "../../core/entity/tx/handlers/payments/sett
 import { selectSettlementContinuation } from "../../core/entity/consensus/account/settlement-continuation.ts";
 import { applyEntityTx as ogApplyEntityTx } from "../../core/entity/tx/apply.ts";
 import { type SettlementContinuationAction, type SettlementContinuationPlan } from "../xln.ts";
-import { ogJb, ogSentBatch, withOgJb } from "./og-state.ts";
+import { ogJb, ogSentBatch, withOg, withOgJb } from "./og-state.ts";
 
 type OgTx = Parameters<typeof ogApplyEntityTx>[2];
 const ENTITY_IDS = [W("77"), W("0c"), BOB] as const;
@@ -321,10 +321,8 @@ const randomPlan = (): SettlementContinuationPlan => ({
   broadcast: pick<boolean>([true, false, false]),
 });
 const continuationsOfOg = (og: OgEntity): unknown => [...(og.settlementContinuations?.entries() ?? [])];
-const continuationsOfRw = (state: EntityState): unknown => {
-  const m = state.committed["settlementContinuations"];
-  return m instanceof Map ? [...m.entries()] : [];
-};
+const continuationsOfRw = (state: EntityState): unknown =>
+  state.continuations._tag === "kept" ? [...state.continuations.entries.entries()] : [];
 
 describe("coverage-settlement: continuations (og settle_propose pin + materializeSettlementContinuation)", () => {
   test("MATCH: 200 random settle_propose continuations -- same refusal (og assertSettlementContinuation order), same pinned workspace hash, actions and broadcast flag as og", async () => {
@@ -347,7 +345,7 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       const ogState = asOg<OgEntity>({ ...og, ...(already ? { settlementContinuations: new Map(pinned) } : {}) });
       const ogRun = await handleSettlePropose(ogState, asOg({ type: "settle_propose", data: structuredClone(data) }), ogEnv(), true)
         .then(() => null, (e: unknown) => String((e as Error).message));
-      const state: EntityState = already ? { ...BASE.state, committed: { ...BASE.state.committed, settlementContinuations: asOg<Binary>(pinned) } } : BASE.state;
+      const state: EntityState = already ? withOg(BASE.state, { settlementContinuations: asOg<Binary>(pinned) }) : BASE.state;
       const rw = foldTxs(state, BASE.accountReplicas, signedTxs(state, aliceAddr, [asOg<EntityTx>({ type: "settle_propose", data })]), { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
       if (ogRun !== null) {
         same(tag(n, "refusal"), rw.ok ? "accepted" : reasonOf(rw.error), ogRun);
@@ -385,8 +383,8 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       const plan = { workspaceHash: rng() < 0.1 ? W("02") : ready.workspaceHash, actions: rng() < 0.2 ? [] : [action], broadcast: rng() < 0.4 };
       const reserves = new Map([[1, 500n], [2, 500n]]);
       const replicas = mapSet(BASE.accountReplicas, peer, { ...child, state: { ...child.state, settlement: ready } } as AccountReplica);
-      const committed = { ...BASE.state.committed, reserves: asOg<Binary>(reserves), settlementContinuations: asOg<Binary>(new Map([[peer as string, plan]])) };
-      const rw = foldTxs({ ...BASE.state, committed }, replicas, [], { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
+      const seeded = withOg(BASE.state, { reserves: asOg<Binary>(reserves), settlementContinuations: asOg<Binary>(new Map([[peer as string, plan]])) });
+      const rw = foldTxs(seeded, replicas, [], { verify: hankoVerify, timestamp: NOW + 1n, jReplicas: JREPLICAS });
 
       const og = asOg<OgEntity>({ ...ogEntityOf(replicas, undefined, true), reserves: new Map(reserves), settlementContinuations: new Map([[peer, structuredClone(plan)]]) });
       const disposition = selectSettlementContinuation(og);

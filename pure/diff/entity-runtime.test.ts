@@ -136,7 +136,7 @@ const committedPair = (i: number): { og: Record<string, unknown>; rw: EntityComm
   const feesEarned = BigInt(ri(50));
   return {
     og: { ...shared, paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned }, crontabState: initCrontab(), deferredAccountProposals: PersistentEntityCollectionMap.empty(), crossJurisdictionBookAdmissions: PersistentEntityCollectionMap.empty() },
-    rw: { ...shared, paybook: { entries: EMPTY, feesEarned }, crontabState: { tasks: initCrontab().tasks as never, hooks: EMPTY }, deferredAccountProposals: EMPTY, crossJurisdictionBookAdmissions: EMPTY },
+    rw: { ...shared, paybook: { entries: EMPTY, feesEarned }, crontabState: { tasks: initCrontab().tasks as never, hooks: EMPTY }, deferredAccountProposals: new Map(), crossJurisdictionBookAdmissions: EMPTY },
   };
 };
 const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jurisdiction?: unknown): any => {
