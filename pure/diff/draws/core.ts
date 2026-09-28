@@ -2,14 +2,22 @@
 // and hub config). Owner: thread "Independent review of main".
 import { drawn, arises, pending, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { PARTIES, activePairs, pick, amount, one, tx, sealed, queued } from "./world-view.ts";
-import { HUB, SPOKES, TOKEN } from "../world.ts";
+import { HUB, SPOKES, TOKEN, type World } from "../world.ts";
 import { SIGNERS } from "../lane.ts";
+
+/**
+ * Spoke pairs neither side has opened. og handleOpenAccount (open-account.ts:228) throws OPEN_ACCOUNT_ALREADY_EXISTS,
+ * a halt, when the target's own open already reached the opener, so the draw reads both sides.
+ */
+const unopened = (w: World): readonly (readonly [number, number])[] =>
+  SPOKES.flatMap((s) =>
+    SPOKES.filter((t) => s !== t && !w.hasAccount(s, t) && !w.hasAccount(t, s)).map((t) => [s, t] as const));
 
 export const CORE: Moves<"core"> = {
   openAccount: drawn(
-    (w) => SPOKES.some((s) => SPOKES.some((t) => s !== t && !w.hasAccount(s, t))),
+    (w) => unopened(w).length > 0,
     (w) => {
-      const [s, t] = pick(w, SPOKES.flatMap((s) => SPOKES.filter((t) => s !== t && !w.hasAccount(s, t)).map((t) => [s, t] as const)));
+      const [s, t] = pick(w, unopened(w));
       return one(w, s, [w.open(s, t, amount(w, 5_000))]);
     },
   ),
