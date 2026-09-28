@@ -12112,7 +12112,6 @@ export type EntityError =
   | EntityRootError
   | EntityFrameHashError
   | Tagged<
-      | "account_exists"
       | "no_such_account"
       | "create_ack_required"
       | "account_envelope"
@@ -13935,9 +13934,6 @@ const seedAccount = (
 ): Result<Draft, EntityError> => {
   const credit = data.tokenId ?? "1", requested = data.rebalancePolicy, hub = hubConfigOf(state);
   const tokens = [...new Set([credit, ...DEFAULT_ACCOUNT_TOKEN_IDS])].filter((t) => Number(t) > 0) as TokenId[];
-  if (requested !== undefined && !policySane(requested)) {
-    return invariant(`REBALANCE_POLICY_INVALID:token=${Number(credit)}`);
-  }
   const policyOf = (t: TokenId): Result<RebalancePolicy, EntityError> =>
     (requested !== undefined && t === credit ? ok(requested) : rebalanceDefaults(state.jurisdictionConfig, Number(t)));
   const parts = all({
@@ -13963,24 +13959,61 @@ const seedAccount = (
       ({ ...putChild(state, replicas, data.targetEntityId, admitted), outputs: [] }));
   });
 };
+/** og isValidEntityId: a bytes32 hex id in either case (og keys the Account by its lowercase form). */
+const OG_ENTITY_ID = /^0x[0-9a-fA-F]{64}$/;
+/** og handleOpenAccountEntityTx: the Account domain is present, well formed, and the Entity's own jurisdiction. */
+const openDomainIssue = (state: EntityState, asked: Domain | undefined): string | undefined => {
+  if (asked === undefined) return "OPEN_ACCOUNT_DOMAIN_REQUIRED";
+  const domain = accountStateDomainText(asked, "OPEN_ACCOUNT_DOMAIN");
+  if (!domain.ok) return domain.error;
+  return sameDomain(domain.value, state.jurisdiction) ? undefined : "OPEN_ACCOUNT_DOMAIN_MISMATCH";
+};
+/**
+ * og handleOpenAccountEntityTx's refusals, in og's order and with og's text: each is a plain Error, which halts og's
+ * Runtime, so the text is the halt the frame is refused with. A self Account passes every handler check and fails in
+ * og's Account worker when it hydrates the new Account (left must sort before right), after the requested policy.
+ */
+const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountData): string | undefined => {
+  const target = String(data.targetEntityId), peer = lowerText(target);
+  const clockIssue = disputeConfigIssue(data.disputeConfig);
+  const domainIssue = openDomainIssue(state, data.accountDomain);
+  const requested = data.rebalancePolicy;
+  switch (true) {
+    case !OG_ENTITY_ID.test(target):
+      return `INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${target}"`;
+    case data.watchSeed === undefined:
+      return "OPEN_ACCOUNT_WATCH_SEED_REQUIRED";
+    case !isWatchSeed(data.watchSeed):
+      return "OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID";
+    case clockIssue !== undefined:
+      return clockIssue;
+    case domainIssue !== undefined:
+      return domainIssue;
+    case replicas.has(peer as EntityId):
+      return `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${state.id} counterparty=${peer}`;
+    case requested !== undefined && !policySane(requested):
+      return `REBALANCE_POLICY_INVALID:token=${Number(data.tokenId ?? "1")}`;
+    case sameId(peer, state.id):
+      return safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity");
+    default:
+      return undefined;
+  }
+};
 /**
  * og handleOpenAccountEntityTx: no output (the peer learns from the first Account frame); seeds add_delta for tokenId
- * + defaults and an optional credit line.
+ * + defaults and an optional credit line, on the Account keyed by the target's lowercase id.
  */
 const openChild = (
   state: EntityState, replicas: Replicas, tx: Extract<EntityTx, { type: "openAccount" }>, now: bigint,
 ): Result<Draft, EntityError> => {
-  const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = tx.data;
+  const refusal = openRefusal(state, replicas, tx.data);
+  if (refusal !== undefined) return invariant(refusal);
+  const data = { ...tx.data, targetEntityId: lowerText(tx.data.targetEntityId) as EntityId };
+  const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = data;
   const id = accountId(state.id, target);
   if (!id.ok) return err({ _tag: "self_account" });
   const opening = genesisReplica(id.value, { domain: accountDomain, watchSeed, disputeConfig });
-  return chain(opening, (opened): Result<Draft, EntityError> => {
-    switch (true) {
-      case !sameDomain(opened.state.terms.domain, state.jurisdiction): return err({ _tag: "domain_mismatch" });
-      case replicas.has(target): return err({ _tag: "account_exists", target });
-      default: return seedAccount(state, replicas, tx.data, opened, now);
-    }
-  });
+  return chain(opening, (opened) => seedAccount(state, replicas, data, opened, now));
 };
 /** og createInboundAccountState: an unknown peer's first proposal (height 1) opens the Account from its envelope. */
 const inboundChild = (
@@ -21593,12 +21626,14 @@ const committedRoute = (
       return ok(hops);
   }
 };
-/** og normalizeAccountStateDomain: a positive chain id and a checksum-valid depository, lowercased. */
-const accountStateDomain = (d: Domain): Result<Domain, EntityError> => {
+/** og normalizeAccountStateDomain(domain, code): a positive chain id and a checksum-valid depository, lowercased. */
+const accountStateDomainText = (d: Domain, code: string): Result<Domain, string> => {
   const shown = String(d.depositoryAddress || "") || "missing";
-  const refusal = `ACCOUNT_STATE_DOMAIN_INVALID: chainId=${String(d.chainId)} depository=${shown}`;
-  return mapErr(domainOf(d), (): EntityError => ({ _tag: "entity_invariant", reason: refusal }));
+  return mapErr(domainOf(d), () => `${code}_INVALID: chainId=${String(d.chainId)} depository=${shown}`);
 };
+const accountStateDomain = (d: Domain): Result<Domain, EntityError> =>
+  mapErr(accountStateDomainText(d, "ACCOUNT_STATE_DOMAIN"), (reason): EntityError =>
+    ({ _tag: "entity_invariant", reason }));
 /**
  * og materializeLocallyAuthoredEntityTx for openAccount: the Entity's jurisdiction commits the Account domain; the
  * dispute clock is canonical and the watch seed lowercase.
