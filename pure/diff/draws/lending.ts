@@ -7,8 +7,11 @@
 //   - the hub's committed-frame followup (og committed-lending-followup.ts, committed-lending-close.ts) throws when
 //     the book no longer admits the tx: no pool for the borrow, a repay that is not the exact remainder of an
 //     active loan, a close of a pool with loans out or more cash than the hub can pay back.
-// The followup checks the book when the hub commits, a frame or two after the draw, so a draw waits until no lending
-// tx is in flight on any hub Account: otherwise two borrows could each see the same liquidity.
+// The followup checks the book when the hub commits, a frame or two after the draw, so a draw must not race a tx that
+// changes what it reads. Borrow and close contend for a pool's cash: each waits until no borrow or close request is in
+// flight (two borrows could each see the same liquidity). Close also checks the hub's capacity to pay the lender, so it
+// waits until every hub Account is quiet: og proposes Account frames only after an Entity frame's inputs, so nothing
+// drawn next can cross it. Offer and repay touch only their own pool or loan, and wait only for their own Account.
 // Refusal the walk does draw: a pool funded beyond the lender's own balance, which the Account handler rejects
 // (LENDING_FUND_OWNED_BALANCE_INSUFFICIENT) without a throw.
 import { deriveDelta } from "../../../core/account/utils.ts";
@@ -16,7 +19,7 @@ import { getAccountOutCapacity } from "../../../core/extensions/lending.ts";
 import { HUB, SPOKES, TOKEN, type World } from "../world.ts";
 import type { EntityTx } from "../../xln.ts";
 import { drawn, type Moves, type Step, type WorldMoves } from "./areas.ts";
-import { one, pick } from "./world-view.ts";
+import { one, pick, quiet } from "./world-view.ts";
 
 // ---- the lending book as og's hub commits it ----
 
@@ -73,23 +76,25 @@ const inFlight = (account: HubAccount | undefined): readonly AccountTxRef[] => [
   ...(account?.mempool ?? []),
   ...(account?.pendingFrame?.accountTxs ?? []),
 ];
-/** Neither side of the spoke's hub Account has a frame proposed or txs queued. */
-const quiet = (w: World, spoke: number): boolean => sides(w, spoke).every((a) => inFlight(a).length === 0);
-const isLending = (tx: AccountTxRef): boolean => tx.type.startsWith("lending_");
-/** No lending tx is queued or proposed on any hub Account, from either side. */
-const lendingQuiet = (w: World): boolean =>
-  SPOKES.every((s) => sides(w, s).every((a) => !inFlight(a).some(isLending)));
+/** The txs that move a pool's cash when the hub commits them. */
+const contendsForCash = (tx: AccountTxRef): boolean =>
+  tx.type === "lending_borrow_request" || tx.type === "lending_close_request";
+/** No borrow or close request is queued or proposed on any hub Account, from either side. */
+const cashSettled = (w: World): boolean =>
+  SPOKES.every((s) => sides(w, s).every((a) => !inFlight(a).some(contendsForCash)));
+/** Every hub Account is quiet on both sides, so the hub's capacities are the ones it will commit against. */
+const hubQuiet = (w: World): boolean => SPOKES.every((s) => quiet(w, s, HUB));
 /**
  * A spoke that trades with the hub: both sides hold the Account, neither is frozen by a dispute, and no settlement
  * workspace is open on it. og freezes an Account's ordinary txs once its workspace is signed
  * (getSignedSettlementWorkspaceTxError, SETTLEMENT_SIGNED_ACCOUNT_FROZEN), so a lending tx queued beside a workspace
- * can wait there for the rest of the run and keep every other lending draw off.
+ * can wait there for the rest of the run, and a queued borrow or close would keep the other off with it.
  */
 const trading = (w: World, spoke: number): boolean =>
   sides(w, spoke).every((a) =>
     a !== undefined && (a.status ?? "active") === "active" && a.state?.settlementWorkspace === undefined);
 const tradingSpokes = (w: World): readonly number[] => SPOKES.filter((s) => trading(w, s));
-const idleSpokes = (w: World): readonly number[] => SPOKES.filter((s) => trading(w, s) && quiet(w, s));
+const idleSpokes = (w: World): readonly number[] => SPOKES.filter((s) => trading(w, s) && quiet(w, s, HUB));
 const spokeOf = (w: World, entityId: string): number => w.ids.findIndex((id) => id === entityId.toLowerCase());
 
 /**
@@ -183,14 +188,14 @@ const close = (w: World): Step => {
   });
 };
 
-/** Every draw needs a hub, and none may race a lending tx the hub has not committed yet. */
-const when = (ready: (w: World) => boolean) => (w: World): boolean => hubOpen(w) && lendingQuiet(w) && ready(w);
+/** Every draw needs a hub. */
+const when = (ready: (w: World) => boolean) => (w: World): boolean => hubOpen(w) && ready(w);
 
 export const LENDING: Moves<"lending"> = {
   lendingOffer: drawn(when((w) => idleSpokes(w).some((s) => ownFunds(w, s) > 0n)), offer),
-  lendingBorrow: drawn(when((w) => lendable(w).length > 0 && tradingSpokes(w).length > 0), borrow),
+  lendingBorrow: drawn(when((w) => cashSettled(w) && lendable(w).length > 0 && tradingSpokes(w).length > 0), borrow),
   lendingRepay: drawn(when((w) => repayable(w).length > 0), repay),
-  lendingClosePosition: drawn(when((w) => closable(w).length > 0), close),
+  lendingClosePosition: drawn(when((w) => hubQuiet(w) && closable(w).length > 0), close),
 };
 
 /** World moves: none; the lending book is built from Entity txs alone. */
