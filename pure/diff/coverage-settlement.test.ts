@@ -301,7 +301,7 @@ import { handleSettlePropose } from "../../core/entity/tx/handlers/payments/sett
 import { selectSettlementContinuation } from "../../core/entity/consensus/account/settlement-continuation.ts";
 import { applyEntityTx as ogApplyEntityTx } from "../../core/entity/tx/apply.ts";
 import { type SettlementContinuationAction, type SettlementContinuationPlan } from "../xln.ts";
-import { ogJb, ogSentBatch, withOg, withOgJb } from "./og-state.ts";
+import { ogJb, ogOf, ogSentBatch, withOg, withOgJb } from "./og-state.ts";
 
 type OgTx = Parameters<typeof ogApplyEntityTx>[2];
 const ENTITY_IDS = [W("77"), W("0c"), BOB] as const;
@@ -400,7 +400,7 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       const messages = (d.events ?? []).map((e) => e.message).filter((m) => !m.startsWith("🚀 Proposed frame "));
       same(tag(n, "messages"), messages, readEntityFrameEvents(og).map((e) => e.message));
       same(tag(n, "continuations"), continuationsOfRw(d.state), continuationsOfOg(og));
-      same(tag(n, "reserves"), d.state.committed["reserves"] ?? null, og.reserves ?? null);
+      same(tag(n, "reserves"), ogOf(d.state)["reserves"] ?? null, og.reserves ?? null);
       same(tag(n, "jBatch"), sealedView(ogJb(d.state)), sealedView(og.jBatchState));
       bump(`${disposition.kind}${plan.broadcast ? "+broadcast" : ""}`);
     }

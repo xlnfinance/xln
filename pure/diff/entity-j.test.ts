@@ -66,7 +66,7 @@ const ogState = (s: EntityState, replicas: ReadonlyMap<EntityId, AccountReplica>
   const jb = ogJb(s);
   return {
     entityId: s.id, timestamp, config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr.toLowerCase()], shares: { [aliceAddr.toLowerCase()]: 1n }, jurisdiction: s.jurisdictionConfig?.name === undefined ? { ...OG_J, name: undefined } : OG_J },
-    reserves: new Map(s.committed["reserves"] as never), accounts: shell, ...(jb === undefined ? {} : { jBatchState: structuredClone(jb) }),
+    reserves: new Map(s.treasury.reserves), accounts: shell, ...(jb === undefined ? {} : { jBatchState: structuredClone(jb) }),
   };
 };
 const messages = (state: any): string[] => readEntityFrameEvents(state).map((e: any) => e.message);

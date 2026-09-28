@@ -144,7 +144,7 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
   return {
     entityId: r.state.id, height: Number(r.state.height), timestamp: Number(r.state.timestamp),
     config: { mode: "proposer-based", threshold: r.state.quorum._tag === "teaching" ? r.state.quorum.threshold : 0n, validators: members.map(([a]) => a), shares: Object.fromEntries(members.map(([a, m]) => [a, m.shares])), ...(jurisdiction === undefined ? {} : { jurisdiction }) },
-    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, ...committed,
+    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), ...committed,
   };
 };
 

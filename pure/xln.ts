@@ -1955,6 +1955,49 @@ type DebtBook = ReadonlyMap<number, ReadonlyMap<string, DebtEntry>>;
 /** og EntityState outDebtsByToken / inDebtsByToken. */
 export type DebtLedger = { readonly out: DebtBook; readonly in: DebtBook };
 export const EMPTY_DEBTS: DebtLedger = { out: new Map(), in: new Map() };
+/** og reserves, outDebtsByToken and inDebtsByToken: what the Entity holds on its J, and what it owes or is owed. */
+export type Treasury = Readonly<{ reserves: ReadonlyMap<number, bigint>; debts: DebtLedger }>;
+export const EMPTY_TREASURY: Treasury = { reserves: new Map(), debts: EMPTY_DEBTS };
+/**
+ * A debt direction is committed only while it holds a debt: og creates it on its first debt and deletes it once
+ * emptied, and an empty ledger would commit a root section that an absent one does not.
+ */
+const ogTreasury = (t: Treasury): EntityCommitted => {
+  const ledger = (field: string, book: DebtBook): EntityCommitted =>
+    (book.size === 0 ? {} : { [field]: book as unknown as Binary });
+  return {
+    reserves: t.reserves as unknown as Binary,
+    ...ledger("outDebtsByToken", t.debts.out),
+    ...ledger("inDebtsByToken", t.debts.in),
+  };
+};
+const reserveProblem = ([token, amount]: readonly [unknown, unknown]): string | undefined =>
+  naturalSafeInt(token) && typeof amount === "bigint" && amount >= 0n
+    ? undefined
+    : `a malformed reserve ${String(token)}`;
+/** og keeps a direction only while one of its tokens holds a debt. */
+const debtBookProblem = (field: string, book: Binary | undefined): string | undefined => {
+  if (book === undefined) return undefined;
+  if (!(book instanceof Map) || book.size === 0) return `an empty or non-map ${field}`;
+  const buckets = [...book.values()];
+  return buckets.every((b) => b instanceof Map && b.size > 0) ? undefined : `an empty token bucket in ${field}`;
+};
+/** og's record; reserves a fresh Entity lacks read as none held. */
+const importTreasury = (og: EntityCommitted): Result<Treasury, string> => {
+  const reserves = og["reserves"] ?? new Map();
+  const problems = [
+    reserves instanceof Map ? undefined : "a non-map reserves",
+    ...(reserves instanceof Map ? [...reserves].map(reserveProblem) : []),
+    debtBookProblem("outDebtsByToken", og["outDebtsByToken"]),
+    debtBookProblem("inDebtsByToken", og["inDebtsByToken"]),
+  ].filter((p) => p !== undefined);
+  if (problems.length > 0) return err(problems.join(", "));
+  const book = (v: Binary | undefined): DebtBook => (v === undefined ? new Map() : (v as unknown as DebtBook));
+  return ok({
+    reserves: reserves as unknown as ReadonlyMap<number, bigint>,
+    debts: { out: book(og["outDebtsByToken"]), in: book(og["inDebtsByToken"]) },
+  });
+};
 export type JObserveError = Tagged<"j_observe", { reason: string }>;
 const observeErr = (reason: string): Result<never, JObserveError> => err({ _tag: "j_observe", reason });
 type DebtEvent = Extract<JEvent, { readonly type: "DebtCreated" | "DebtEnforced" | "DebtForgiven" }>;
@@ -11361,6 +11404,8 @@ export type EntityState = {
   readonly deferredApprovals: LazyMap<string>;
   /** og settlementContinuations: reserve moves pinned to a settlement workspace, run once it executes, by peer. */
   readonly continuations: LazyMap<PendingContinuation>;
+  /** og reserves and debt ledgers. */
+  readonly treasury: Treasury;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12254,6 +12299,7 @@ export const encodeEntityState = (s: EntityState): string => canon({
   commandFence: s.commandFence,
   deferredApprovals: s.deferredApprovals,
   continuations: s.continuations,
+  treasury: s.treasury,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12899,6 +12945,7 @@ type TypedSections = Pick<
   | "commandFence"
   | "deferredApprovals"
   | "continuations"
+  | "treasury"
 >;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
 const importSections = (
@@ -12907,7 +12954,8 @@ const importSections = (
 ): Result<TypedSections, EntityError> => {
   const { jBatchState, entityProviderActionState, ...sectioned } = og;
   const { lastFinalizedJHeight, jHistoryFinality, certifiedBoardState, entityCommandNonces, ...rest } = sectioned;
-  const { deferredAccountProposals, settlementContinuations, ...seeded } = rest;
+  const { deferredAccountProposals, settlementContinuations, ...unsettled } = rest;
+  const { reserves, outDebtsByToken, inDebtsByToken, ...seeded } = unsettled;
   const unreachable = (section: string) => (reason: string): EntityError =>
     ({ _tag: "entity_invariant", reason: `${section}_STATE_UNREACHABLE: ${reason}` });
   const actions = entityProviderActionState as EntityProviderActionState | undefined;
@@ -12925,6 +12973,7 @@ const importSections = (
       importLazyMap<PendingContinuation>(settlementContinuations, continuationProblem),
       unreachable("CONTINUATION"),
     ),
+    treasury: mapErr(importTreasury(og), unreachable("TREASURY")),
   });
   return map(imported, ({ hubbed: { hub, committed }, ...sections }) => ({ ...sections, committed, hub }));
 };
@@ -17691,10 +17740,9 @@ export const rebalanceAccountIds = (
   return map(flagged, (xs) => xs.flat());
 };
 /** og EntityState.reserves as committed (tokenId to amount). */
-const committedReserves = (state: EntityState): ReadonlyMap<number, bigint> => {
-  const r = state.committed["reserves"];
-  return r instanceof Map ? (r as ReadonlyMap<number, bigint>) : new Map();
-};
+const committedReserves = (state: EntityState): ReadonlyMap<number, bigint> => state.treasury.reserves;
+const withReserves = (state: EntityState, reserves: ReadonlyMap<number, bigint>): EntityState =>
+  ({ ...state, treasury: { ...state.treasury, reserves } });
 /** A peer's funded-or-fundable R→C request: which token, how much, and what ranks it. */
 type R2CTarget = {
   readonly counterpartyId: EntityId;
@@ -18033,10 +18081,7 @@ export const encodeJBatch = (q: QueuedBatch): Result<string, JBatchError> => {
     : ok(encoded);
 };
 /** og EntityState outDebtsByToken / inDebtsByToken as the reserve simulation reads them. */
-const committedDebts = (state: EntityState): DebtLedger => {
-  const book = (v: Binary | undefined): DebtBook => (v instanceof Map ? (v as unknown as DebtBook) : new Map());
-  return { out: book(state.committed["outDebtsByToken"]), in: book(state.committed["inDebtsByToken"]) };
-};
+const committedDebts = (state: EntityState): DebtLedger => state.treasury.debts;
 /** The Entity as og's j-batch handlers read it: committed reserves and debts, its Accounts and its J batch. */
 const jEntityView = (d: Draft): JEntity => ({
   entityId: d.state.id,
@@ -26746,6 +26791,7 @@ export const ogSections = (state: EntityState): EntityCommitted => {
   return hubSections(state.hub, {
     ...state.committed,
     ...ogJFinality(state.jFinality),
+    ...ogTreasury(state.treasury),
     ...(fence === undefined ? {} : { entityCommandNonces: fence }),
     ...ogLazyMap("deferredAccountProposals", state.deferredApprovals),
     ...ogLazyMap("settlementContinuations", state.continuations),
@@ -33578,8 +33624,7 @@ type JEventStep = {
 /** og: the settled row's reserve for this Entity, when the row carries one. */
 const withOwnReserve = (state: EntityState, tokenId: number, own: unknown): EntityState => {
   if (own === undefined || own === null) return state;
-  const reserves = mapSet(committedReserves(state), tokenId, BigInt(String(own)));
-  return { ...state, committed: { ...state.committed, reserves: reserves as unknown as Binary } };
+  return withReserves(state, mapSet(committedReserves(state), tokenId, BigInt(String(own))));
 };
 /** og: the j_event_claim an AccountSettled row becomes for the bilateral Account. */
 const settlementClaim = (
@@ -34827,7 +34872,7 @@ const reserveUpdatedJEvent = (step: JEventStep, e: WireJEvent, blockNumber: numb
   const tokenId = Number(d["tokenId"]);
   const mine = lower(d["entity"]) === lower(state.id);
   const reserves = mapSet(committedReserves(state), tokenId, BigInt(String(d["newBalance"])));
-  const next = mine ? { ...state, committed: { ...state.committed, reserves: reserves as unknown as Binary } } : state;
+  const next = mine ? withReserves(state, reserves) : state;
   const balance = rawUnits(tokenId, d["newBalance"]);
   const said = `📊 RESERVE: ${balance} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`;
   return { ...step, draft: jSay({ ...step.draft, state: next }, said) };
@@ -34851,16 +34896,7 @@ const debtMessage = (e: WireJEvent, blockNumber: number): string => {
       return `🩶 DEBT FORGIVEN: ${units("amountForgiven")} between ${debtor} and ${creditor} | ${block} · debt #${index}`;
   }
 };
-/**
- * A debt ledger is committed only while it holds a debt: og creates a direction on its first debt and deletes it once
- * emptied, and an empty ledger would commit a root section that an absent one does not.
- */
-const withDebts = (committed: EntityCommitted, debts: DebtLedger): EntityCommitted => {
-  const { outDebtsByToken: _out, inDebtsByToken: _in, ...rest } = committed;
-  const ledger = (field: string, book: DebtLedger["out"]): EntityCommitted =>
-    (book.size === 0 ? {} : { [field]: book as unknown as Binary });
-  return { ...rest, ...ledger("outDebtsByToken", debts.out), ...ledger("inDebtsByToken", debts.in) };
-};
+
 /** og: a debt event updates this Entity's debt ledgers when it is a party; every one is said. */
 const debtJEvent = (
   step: JEventStep,
@@ -34871,7 +34907,7 @@ const debtJEvent = (
   const state = step.draft.state;
   const held = committedDebts(state);
   return map(mapErr(applyDebtEvent(held, state.id, typed), asInvariant), (debts) => {
-    const next = debts === held ? state : { ...state, committed: withDebts(state.committed, debts) };
+    const next = debts === held ? state : { ...state, treasury: { ...state.treasury, debts } };
     return { ...step, draft: jSay({ ...step.draft, state: next }, debtMessage(e, blockNumber)) };
   });
 };
