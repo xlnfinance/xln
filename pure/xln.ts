@@ -24051,7 +24051,10 @@ const materializeDeferred =
     const id = peer as EntityId;
     const child = d.accountReplicas.get(id);
     if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    const visible = arrived.get(id) ?? child;
+    // og refreshStaleUncommittedSettlementHankos drops a stale hanko from the very mempool this check reads
+    const seen = arrived.get(id) ?? child;
+    const held = new Set(child.mempool.map(canon));
+    const visible = { ...seen, mempool: seen.mempool.filter((tx) => held.has(canon(tx))) } as AccountReplica;
     if (child._tag === "proposed" || settlePending(visible)) return ok(d);
     const w = child.state.settlement;
     const expired = settleSay(
