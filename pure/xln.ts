@@ -13687,31 +13687,6 @@ const proposeAccountsNowOk = (state: EntityState, d: ProposeAccountsNow): Result
   }
   return foldResult(cps, undefined as void, (_, cp: unknown, i) => counterpartyIssue(cp, cps[i - 1]));
 };
-/**
- * Peer Account txs an Entity takes into a received frame beyond L0: the HTLC and swap flows, the collateral request,
- * og lending (the hub's committed lending followup consumes them, committed-lending-followup.ts) and the rebalance
- * policy a hub proposes on an inbound Account right after genesis (og queueInitialHubPolicies), and the peer's
- * J-event claim (a bilateral finality co-sign both sides propose).
- */
-const ENTITY_PEER_TX_TYPES: ReadonlySet<WireAccountTx["type"]> = new Set([
-  "htlc_lock",
-  "htlc_resolve",
-  "request_collateral",
-  "swap_offer",
-  "swap_cancel_request",
-  "swap_resolve",
-  "cross_pull_lock",
-  "cross_pull_close",
-  "lending_fund",
-  "lending_borrow_request",
-  "lending_repay",
-  "lending_credit",
-  "lending_close_request",
-  "lending_close_payout",
-  "rebalance_policy",
-  "j_event_claim",
-]);
-const entityAcceptsPeerTx = (tx: WireAccountTx): boolean => isL0Tx(tx) || ENTITY_PEER_TX_TYPES.has(tx.type);
 /** og DEFAULT_ACCOUNT_TOKEN_IDS (account/config/defaults.ts). */
 const DEFAULT_ACCOUNT_TOKEN_IDS = ["1", "3", "2"] as const;
 /**
@@ -18856,12 +18831,14 @@ const proposeOne =
       if (selected === null) return ok(acc);
       const dt = accountDt(ctx, child);
       const party = partyOf(replicaId(child), self);
-      const plan = planAccountProposal(child, self, clock, ctx.verify, selected, dt, ctx.boardAuthority);
+      // the plan folds our own pending Hankos (a settlement hanko intent) the same way the proposal does
+      const verify = pendingVerify(ctx.verify, self);
+      const plan = planAccountProposal(child, self, clock, verify, selected, dt, ctx.boardAuthority);
       if (!plan.ok) return accountThrew(plan.error) ? err(plan.error) : ok(acc);
       if (!party.ok) return ok(acc);
       const input = proposalInput(plan.value, clock, selected) as Propose;
       const proposed = propose(child, input, {
-        verify: pendingVerify(ctx.verify, self),
+        verify,
         party: party.value,
         deltaTransformer: dt,
       });
@@ -26030,8 +26007,8 @@ const signReceived = (
   });
 };
 /**
- * A peer frame (with its ACK of ours): only L0 txs a peer may send; an unknown peer's genesis frame opens the inbound
- * Account.
+ * A peer frame (with its ACK of ours): og takes any Account tx a peer proposes, its handlers decide; an unknown peer's
+ * genesis frame opens the inbound Account.
  */
 const receivedFrame = (
   run: AccountInputRun,
@@ -26040,11 +26017,7 @@ const receivedFrame = (
 ): Result<Draft, EntityError> => {
   const { state, replicas } = run.scope;
   const created = !replicas.has(from);
-  const at: Result<Folded, EntityError> = !i.frame.txs.every(entityAcceptsPeerTx)
-    ? err({ _tag: "not_l0" })
-    : created
-      ? inboundChild(state, replicas, from, i)
-      : ok(run.held);
+  const at: Result<Folded, EntityError> = created ? inboundChild(state, replicas, from, i) : ok(run.held);
   return chain(at, (a) =>
     applyRaw(run, a, ({ draft, effects }) => signReceived(run, draft, effects, i, from, created), created),
   );
