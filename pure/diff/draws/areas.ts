@@ -91,6 +91,14 @@ export type Move =
   | { readonly _tag: "drawn"; readonly enabled: (w: World) => boolean; readonly draw: (w: World) => Step }
   | { readonly _tag: "arises"; readonly via: string }
   | { readonly _tag: "pending"; readonly needs: string };
+/**
+ * A move on the world itself, not an Entity tx (the chain funds a reserve, the clock jumps to a deadline). The walk
+ * takes one when it draws no Entity tx.
+ */
+export type WorldMove = {
+  readonly enabled: (w: World) => boolean;
+  readonly draw: (w: World) => Step | Promise<Step>;
+};
 /** One area's rows: exactly its kinds. */
 export type Moves<A extends Area> = { readonly [K in KindsOf<A>]: Move };
 
