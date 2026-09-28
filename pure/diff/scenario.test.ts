@@ -17,51 +17,17 @@ import { describe, expect, test } from "bun:test";
 // is a no-op. An HTLC is only sent over lanes the gossip profiles advertise: og's quote throws (a Runtime halt, not a
 // refusal) on an unadvertised lane.
 // Admission signs local txs into Entity commands (og prepareLocallyAuthoredEntityTxs), so the harness uses real keys.
-process.env["XLN_LOG_LEVEL"] = process.env["XLN_LOG_LEVEL"] ?? "error";
-import { rmSync } from "fs";
-import { join } from "path";
-import { closeInfraDb, closeRuntimeDb, createEmptyEnv } from "../../core/runtime.ts";
-import { registerSignerKey } from "../../core/account/crypto.ts";
-import { dbRootPath } from "../../core/runtime/replica/platform.ts";
-import { withDeterministicHtlcTestSecret } from "../../core/protocol/htlc/test-secret-capability.ts";
-import { getTokenCapacity } from "../../core/pathfinding/capacity.ts";
-import { attachLiveJAdapter } from "../../core/runtime/j-submit/live-jadapters.ts";
-import { unwrap } from "../xln_run.ts";
 import { tracing } from "./scenario-trace.ts";
-import {
-  bootChain,
-  createLane,
-  emptyCoverage,
-  jurisdictionOf,
-  KEYS,
-  prng,
-  SIGNERS,
-  T0,
-  treeClone,
-  type Coverage,
-  type User,
-} from "./lane.ts";
-import {
-  createRuntime,
-  htlcPaymentTxHash,
-  lazyBoardEntityId,
-  stableJson,
-  tokenId,
-  type EntityId,
-  type EntityTx,
-  type ImportConfig,
-  type RuntimeTx,
-} from "../xln.ts";
+import { stableJson } from "../xln.ts";
+import type { EntityTx, RuntimeTx } from "../xln.ts";
+import type { Coverage, User } from "./lane.ts";
+import { HUB, openWorld, SPOKES } from "./world.ts";
 
 const DEFAULT_SEED = 0x5ce7a1;
 const SEED = Number(process.env["SEEDX"] ?? DEFAULT_SEED);
 const SEEDS = [SEED, SEED + 1, SEED + 2];
 /** Committed Runtime frames per seed (idle ticks that commit nothing do not count). */
 const FRAMES = 20;
-const TOKEN = unwrap(tokenId("1"));
-const HUB = 1;
-const SPOKES = [0, 2, 3];
-const NAMES = ["A", "H", "C", "D"];
 /** A scenario's steps: the script it works through in order (each step when its preconditions hold), and the mix. */
 type Plan = {
   readonly name: string;
@@ -92,121 +58,13 @@ const DISPUTE_PLAN: Plan = {
 };
 
 const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
-  const rand = prng(seed);
-  const ri = (n: number): number => Math.floor(rand() * n);
-  const tag = `SEEDX=0x${seed.toString(16)}`;
-  const chain = await bootChain();
-  const { J, JREPLICA } = jurisdictionOf(chain);
-  const ns = `scn-diff-${process.pid}-${plan.name}-${seed.toString(16)}`;
-  const env = createEmptyEnv(ns);
-  env.scenarioMode = true;
-  env.quietRuntimeLogs = true;
-  env.state.timestamp = T0;
-  env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } } as never;
-  env.activeJurisdiction = J.name;
-  env.state.jReplicas.set(J.name, treeClone(JREPLICA) as never);
-  // og submits a sealed batch through its live adapter after the frame commits, and og's own watcher turns every
-  // chain emission into its runtime mempool (observeJRange, the cursor, each validator's J-prefix attestation)
-  attachLiveJAdapter(env, J.name, chain);
-  chain.startWatching(env);
-  KEYS.forEach((k, i) => registerSignerKey(env, SIGNERS[i]!, Buffer.from(k.slice(2), "hex")));
-  const config = (s: string): ImportConfig =>
-    ({ mode: "proposer-based", threshold: 1n, validators: [s], shares: { [s]: 1n }, jurisdiction: J }) as ImportConfig;
-  const ids = SIGNERS.map((s) => unwrap(lazyBoardEntityId(config(s))).toLowerCase() as EntityId);
-  const secrets = new Map<string, string>();
-  const gossip = (env as unknown as { gossip?: { getProfile?: (id: string) => unknown } }).gossip;
-  const coverage = emptyCoverage();
+  const w = await openWorld(seed, plan.name);
+  const { lane, chain, coverage, ids, rand, ri, user, open, extend, direct, htlc, routable, ogState, ogAccount } = w;
+  const { hasAccount, reserveOf, batchOf } = w;
+  const tick = lane.tick;
   const count = (kind: string): void => {
     coverage.actions[kind] = (coverage.actions[kind] ?? 0) + 1;
   };
-  // og's deterministic scenario harness (scenarios/harness/helpers.ts): every simulated peer is hosted here, so an
-  // Entity is online exactly when this Runtime holds a replica of it
-  const online = (x: string): boolean =>
-    [...env.state.eReplicas.values()].some((r) => r.entityId.toLowerCase() === x.toLowerCase());
-  const lane = createLane({
-    tag,
-    env,
-    runtime: { ...createRuntime([JREPLICA], env.runtimeId), activeJurisdiction: J.name, timestamp: BigInt(T0) },
-    ids,
-    names: NAMES,
-    coverage,
-    keyed: new Set(SIGNERS),
-    secrets,
-    online,
-  });
-  const tick = lane.tick;
-
-  // ---- actions ----
-  const user = (entity: number, txs: readonly EntityTx[]): User => ({ entity, txs });
-  const open = (from: number, to: number, credit: bigint): EntityTx =>
-    ({
-      type: "openAccount",
-      data: {
-        targetEntityId: ids[to]!,
-        creditAmount: credit,
-        tokenId: TOKEN,
-        disputeConfig: { leftResponseSeconds: 60, rightResponseSeconds: 60 },
-        accountDomain: { chainId: J.chainId, depositoryAddress: J.depositoryAddress },
-        watchSeed: `0x${(from * 16 + to + 1).toString(16).padStart(2, "0").repeat(32)}`,
-      },
-    }) as EntityTx;
-  const extend = (from: number, to: number, amount: bigint): EntityTx => ({
-    type: "extendCredit",
-    data: { counterpartyEntityId: ids[to]!, tokenId: TOKEN, amount },
-  });
-  const direct = (from: number, to: number, amount: bigint): EntityTx => ({
-    type: "directPayment",
-    data: { targetEntityId: ids[to]!, tokenId: TOKEN, amount, route: [ids[from]!, ids[to]!], deliveryMode: "direct" },
-  });
-  const htlc = (from: number, to: number, amount: bigint): EntityTx => {
-    const secret = `0x${Array.from({ length: 8 }, () =>
-      ri(2 ** 32)
-        .toString(16)
-        .padStart(8, "0"),
-    ).join("")}`;
-    const raw = {
-      type: "htlcPayment" as const,
-      data: {
-        targetEntityId: ids[to]!,
-        tokenId: 1,
-        amount,
-        maxSenderDebit: amount * 2n + 10n,
-        route: [ids[from]!, ids[HUB]!, ids[to]!],
-        deliveryMode: "instant" as const,
-      },
-    };
-    const tx = withDeterministicHtlcTestSecret(raw as never, secret) as unknown as Extract<
-      EntityTx,
-      { type: "htlcPayment" }
-    >;
-    secrets.set(unwrap(htlcPaymentTxHash(tx)), secret);
-    return tx;
-  };
-  type ProfileRow = { counterpartyId: string; tokenCapacities: unknown };
-  const rowsOf = (x: number): ProfileRow[] =>
-    (gossip?.getProfile?.(ids[x]!) as { accounts?: ProfileRow[] } | undefined)?.accounts ?? [];
-  const row = (x: number, y: number): ProfileRow | undefined =>
-    rowsOf(x).find((r) => r.counterpartyId.toLowerCase() === ids[y]);
-  /** og hopCapacity: the lane's own row, else its mirror, advertising the token (og throws, halting, otherwise). */
-  const advertised = (x: number, y: number): boolean => {
-    const lane = row(x, y) ?? row(y, x);
-    return lane !== undefined && getTokenCapacity(lane.tokenCapacities as never, 1) !== null;
-  };
-  const routable = (from: number, to: number): boolean => advertised(from, HUB) && advertised(HUB, to);
-  const ogState = (x: number): { reserves?: Map<number, bigint>; accounts?: Map<string, unknown>; jBatchState?: unknown } | undefined =>
-    [...env.state.eReplicas.values()].find((r) => r.entityId === ids[x])?.state as never;
-  /** The token reserve og's Entity has observed on chain (the same state the rewrite holds: roots agree). */
-  const reserveOf = (x: number): bigint => ogState(x)?.reserves?.get(1) ?? 0n;
-  const hasAccount = (x: number, y: number): boolean => ogState(x)?.accounts?.has(ids[y]!) ?? false;
-  type OgAccount = {
-    status?: string;
-    counterpartyDisputeProofHanko?: string;
-    activeDispute?: { disputeTimeout: number };
-  };
-  const ogAccount = (x: number, y: number): OgAccount | undefined =>
-    ogState(x)?.accounts?.get(ids[y]!) as OgAccount | undefined;
-  const batchOf = (x: number): { batch?: { disputeStarts?: unknown[] }; sentBatch?: unknown } | undefined =>
-    ogState(x)?.jBatchState as never;
   /** The spoke that froze its hub Account (one dispute per run). */
   let disputing: number | undefined;
   const spoke = (): number => SPOKES[ri(SPOKES.length)]!;
@@ -283,7 +141,7 @@ const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
         // both clocks jump to the end of the challenge window (og advanceScenarioPastDisputeTimeout); og's live
         // submit stamps chain blocks with the Runtime clock, so the deadline hook's finalize lands after it
         const timeout = disputing === undefined ? undefined : ogAccount(disputing, HUB)?.activeDispute?.disputeTimeout;
-        if (timeout === undefined || env.state.timestamp >= Number(timeout) * 1000) return undefined;
+        if (timeout === undefined || lane.env.state.timestamp >= Number(timeout) * 1000) return undefined;
         lane.jumpClock(Number(timeout) * 1000);
         return { runtimeTxs: [], users: [] };
       }
@@ -297,23 +155,10 @@ const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
   };
 
   try {
-    const imports = SIGNERS.map(
-      (s, i): RuntimeTx =>
-        ({
-          type: "importReplica",
-          entityId: ids[i]!,
-          signerId: s,
-          data: { config: config(s), isProposer: true, entitySeed: `0x${String(i + 1).repeat(128)}` },
-        }) as RuntimeTx,
-    );
     const expectClean = (diffs: string[]): void => expect(diffs).toEqual([]);
+    const [imports, opens] = w.importAll();
     expectClean(await tick(imports, []));
-    expectClean(
-      await tick(
-        [],
-        SPOKES.map((s) => user(s, [open(s, HUB, amount(20_000))])),
-      ),
-    );
+    expectClean(await tick([], opens));
     const { random } = plan;
     const queue = [...plan.script];
     // a halted og Runtime refuses every later frame, so a halt ends the run
@@ -337,12 +182,7 @@ const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
     coverage.disputesFinalized = disputing !== undefined && closed(disputing, HUB) && closed(HUB, disputing) ? 1 : 0;
     return coverage;
   } finally {
-    await closeRuntimeDb(env);
-    await closeInfraDb(env);
-    await chain.close();
-    ["", "-storage-current", "-storage-previous", "-wal", "-history-views", "-events", "-infra"].forEach((suffix) =>
-      rmSync(join(dbRootPath, ns) + suffix, { recursive: true, force: true }),
-    );
+    await w.close();
   }
 };
 
