@@ -314,9 +314,10 @@ const walk = async (seed: number): Promise<Coverage> => {
     expectClean(await lane.tick([], []));
     const covered = () => DRAWN.every(([k]) => coverage.entityTxs.has(k));
     const more = untilCovered(FRAMES, covered, FRAMES * 6);
-    // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run
+    // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run; so does a departure
+    // (departures.ts), after which the two states differ
     const loop = async (i: number): Promise<void> => {
-      if (!more(i) || coverage.halts > 0) return;
+      if (!more(i) || coverage.halts > 0 || coverage.departures.length > 0) return;
       const enabled = DRAWN.filter(([, m]) => m._tag === "drawn" && m.enabled(w));
       // favour the kinds committed least: weight 1 / (1 + times tried)
       const weights = enabled.map(([k]) => 1 / (1 + (tried.get(k) ?? 0)));
@@ -345,7 +346,7 @@ describe("model: every drawn Entity tx kind, og processRuntime vs the rewrite, f
     test(`MATCH: model walk, seed 0x${seed.toString(16)}`, async () => {
       const c = await walk(seed);
       c.entityTxs.forEach((k) => seen.add(k));
-      console.log(`seed 0x${seed.toString(16)}: ${c.frames} Runtime frames, halts ${stableJson(c.haltTexts)}, moves ${stableJson(c.actions)}`);
+      console.log(`seed 0x${seed.toString(16)}: ${c.frames} Runtime frames, halts ${stableJson(c.haltTexts)}, departures ${stableJson(c.departures)}, moves ${stableJson(c.actions)}`);
       console.log(`  committed kinds ${[...c.entityTxs].sort().join(",")}; Account txs ${[...c.accountTxs].sort().join(",")}`);
     }, 900_000);
   });

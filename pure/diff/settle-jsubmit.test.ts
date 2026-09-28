@@ -178,6 +178,9 @@ describe(seedTag("settle-jsubmit: the J submit lifecycle (og entity/tx/handlers/
 });
 
 // ---- og entity/tx/handlers/payments/settle.ts: the settle_* Entity txs on top of the Account settle_transition workspace ----
+import { compileOps as ogCompileOps } from "../../core/protocol/settlement/operations.ts";
+import { projectSettlementDeltaOverrides } from "../../core/account/settlement/settlement-projection.ts";
+import { createDefaultDelta } from "../../core/account/state/delta.ts";
 import { handleSettleApprove, handleSettleExecute, handleSettlePropose, handleSettleReject, handleSettleUpdate, canAutoApproveWorkspace as ogCanAutoApprove } from "../../core/entity/tx/handlers/payments/settle.ts";
 import { entityCollectionCommitment as ogCollectionCommitment } from "../../core/entity/state/persistent-collection-map.ts";
 import { batchAddSettlement, initJBatch as ogInitJBatch } from "../../core/jurisdiction/machine/batch/index.ts";
@@ -315,6 +318,29 @@ describe(seedTag("settle-jsubmit: settle_propose / update / approve / reject (og
     // SJ-17: admission timing matches og (book-admission.md): an upsert og queues is queued here too, never evicted at enqueue
     expect(counts.admission).toBe(0);
   }, 60_000);
+
+  test("DEPARTS: approving a workspace og cannot sign (a c2r above the collateral) -> og's projection throws, a Runtime halt; the rewrite expires the approval", async () => {
+    const child = SETTLE_BASE.accountReplicas.get(BOB)!;
+    const bobLeft = !isLeft(ALICE, ACCOUNT_ID);
+    const ops: SettlementOp[] = [{ type: "c2r", tokenId: 1, amount: 1_001n }];
+    const w = workspaceOf("unsigned", ops, bobLeft, bobLeft, undefined)!;
+    const approve = { type: "settle_approve", data: { counterpartyEntityId: BOB, workspaceHash: w.workspaceHash } } as EntityTx;
+    // og defers the approval, then signing it projects the settled rows (buildPostSettlementDisputeProof), which throws
+    const og: any = { entityId: ALICE, accounts: new Map([[BOB, ogAccountOf(w, false)]]) };
+    await handleSettleApprove(og, structuredClone(approve) as never, {} as never, true);
+    expect([...og.deferredAccountProposals.entries()]).toEqual([[BOB, w.workspaceHash]]);
+    const { diffs, forgiveTokenIds } = ogCompileOps(ops as never, bobLeft);
+    const ogRows = { state: { deltas: new Map([[1, { ...createDefaultDelta(1), collateral: 1_000n }]]) } };
+    expect(() => projectSettlementDeltaOverrides(ogRows as never, diffs, forgiveTokenIds)).toThrow("SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1");
+    // the rewrite commits the frame: the approval is gone, nothing is signed, and the Entity says why
+    const replicas = mapSet(SETTLE_BASE.accountReplicas, BOB, { ...child, state: { ...child.state, settlement: w } } as AccountReplica);
+    const folded = unwrap(foldTxs(SETTLE_BASE.state, replicas, signedTxs(SETTLE_BASE.state, aliceAddr, [approve]), { verify: hankoVerify, timestamp: NOW + 1n }) as any) as any;
+    const d = folded.draft, after = d.accountReplicas.get(BOB)!;
+    const deferred = ogOf(d.state)["deferredAccountProposals"] as ReadonlyMap<string, string> | undefined;
+    expect([...(deferred ?? new Map())]).toEqual([]);
+    expect([...after.mempool, ...(after._tag === "proposed" ? after.candidate.frame.txs : [])].filter((t: any) => t.type === "settle_transition")).toEqual([]);
+    expect(JSON.stringify(d.events ?? [])).toContain("Settlement approval expired: the workspace cannot be signed (SETTLEMENT_PROJECTED_COLLATERAL_RANGE:token=1)");
+  });
 
   test("MATCH: 300 random workspaces auto-approve exactly when og canAutoApproveWorkspace does (no forgiveness / rawDiff; own reserve and collateral share never shrink)", () => {
     let yes = 0;

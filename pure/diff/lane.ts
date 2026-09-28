@@ -22,6 +22,7 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
+import { haltDeparture } from "./departures.ts";
 import {
   canonicalEntityHashes,
   commitRuntimeFrame,
@@ -152,6 +153,8 @@ export type Coverage = {
   halts: number;
   /** og's failure text for each of those halts, in order. */
   haltTexts: string[];
+  /** Frames og halted on where the rewrite departs on purpose (departures.ts); the two states differ from then on. */
+  departures: string[];
   /** Disputes both sides saw finalized on chain (the Account stays frozen, its active dispute cleared). */
   disputesFinalized: number;
   actions: Record<string, number>;
@@ -164,6 +167,7 @@ export const emptyCoverage = (): Coverage => ({
   entityFrames: 0,
   halts: 0,
   haltTexts: [],
+  departures: [],
   disputesFinalized: 0,
   actions: {},
   accountTxs: new Set(),
@@ -417,10 +421,18 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const runtimeSeed = (env as unknown as { runtimeSeed?: string }).runtimeSeed;
     // og admission signs every local tx into the replica's own Entity command (prepareLocallyAuthoredEntityTxs)
     const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, routes: cfg.routes, runtimeSeed });
-    if (ogHalt !== undefined) {
+    if (ogHalt !== undefined && committed.ok) {
+      // the rewrite may commit a frame og halts on only as a named departure, and only doing what it names
+      const departure = haltDeparture(ogHalt);
+      if (departure === undefined) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
+      const wrong = departure.instead(committed.value === null ? rt : committed.value.runtime);
+      if (wrong !== null) return [`${label} ${departure.name}: ${wrong}`];
+      coverage.departures.push(`${label} ${departure.name}`);
+      return [];
+    }
+    if (ogHalt !== undefined && !committed.ok) {
       coverage.halts += 1;
       coverage.haltTexts.push(ogHalt);
-      if (committed.ok) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
       // both refuse the frame, and for the same reason: the rewrite's refusal code is og's halt text, or the whole
       // failure message og's Account worker wrapped into it (`...TS_ACCOUNT_WORKER_FATAL:<n>:<text>\n<stack>`)
       const refusal = String((committed.error as { code?: unknown }).code ?? "");
