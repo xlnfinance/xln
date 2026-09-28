@@ -1,7 +1,7 @@
 // Behavioural diff: og Entity scheduler (core/entity/scheduler, runtime/mempool/scheduled-wake.ts), scheduledWake, disputeFinalize vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / reject, state and bytes.
 import { describe, expect, test } from "bun:test";
-import { lcg31, seedOf, seedTag } from "./seed.ts";
+import { lcg31, seedOf, seedTag, untilCovered } from "./seed.ts";
 import { ethers } from "ethers";
 import {
   createEntity, derivedDeadlines, sanitizeDisputeArgument, disputeFinalizedEffects, disputeStartedEffects, dueWakeJobs, entityRootOf, executeCrontab, foldTxs, initCrontab, prioritizeWake, scheduleHook, withCrontab, crontabOf, wireEntityTx, genesisHost, applyHost, localProof, committedView, ZERO_WORD,
@@ -130,7 +130,7 @@ const randomPaybook = (peers: readonly EntityId[]): Map<string, PaybookEntry> =>
 describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og scheduler/derived-deadlines.ts, runtime/mempool/scheduled-wake.ts)"), () => {
   test("MATCH: 300 random Entities (Account locks by status, paybook secret-ack entries, stored hooks, the hubRebalance task) -- og collectDerivedDeadlines and collectDueScheduledWakeJobs", () => {
     let deadlines = 0, jobs = 0;
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0, more = untilCovered(300, () => deadlines > 100 && jobs > 150); more(i); i++) {
       const peers = [BOB, CAROL].slice(0, 1 + ri(2)) as EntityId[];
       const specs: Spec[] = peers.map((peer) => ({ peer, tag: pick(["open", "open", "preparing", "disputed"] as const), locks: randomLocks() }));
       const entries = randomPaybook(peers), now = pick([undefined, 1_000 + ri(400)]);
