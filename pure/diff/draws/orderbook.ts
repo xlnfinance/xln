@@ -27,6 +27,10 @@
 //     - no such offer, or the caller is not its maker: rejected, dropped
 //     - a committed cancel request on a hub with no book: ORDERBOOK_EXTENSION_REQUIRED_FOR_CANCEL, a halt
 //       (orderbook/cancels.ts processOrderbookCancels)
+//     - a cancel request the hub commits in the same Entity frame as a partial fill of that offer: og cancels the
+//       offer (entity/consensus/frame/application.ts:1435), then the matcher re-admits the fill's upserted remainder
+//       (:1446) and resolves it again; the second resolve finds no offer: SWAP_RESOLVE_PROPOSAL_FAILED, a halt. The
+//       draw cancels only while no fill can race it: see `cancellable`.
 import { deriveDelta } from "../../../core/account/utils.ts";
 import { tokenId, type EntityTx, type TokenId } from "../../xln.ts";
 import { unwrap } from "../../xln_run.ts";
@@ -100,12 +104,17 @@ const restingOffers = (w: World, maker: number): readonly OgSwapOffer[] => {
   const offers = [...(swapState(w, maker, HUB)?.swapOffers?.values() ?? [])];
   return offers.filter((o) => o.makerIsLeft === isLeft(w, maker, HUB));
 };
-/** The maker's swap_offer txs not committed yet: in its Account mempool or in the frame it has in flight. */
-const inFlightOffers = (w: World, maker: number): readonly OgSwapOfferTx["data"][] => {
-  const r: OgAccountReplica | undefined = replica(w, maker, HUB);
-  const txs = [...(r?.mempool ?? []), ...(r?.pendingFrame?.accountTxs ?? [])] as readonly { type: string }[];
-  return txs.filter((t): t is OgSwapOfferTx => t.type === "swap_offer").map((t) => t.data);
+type OgAccountTx = { readonly type: string; readonly data?: { readonly offerId?: string } };
+/** One replica's Account txs not committed yet: in its mempool or in the frame it has in flight. */
+const inFlight = (w: World, x: number, y: number): readonly OgAccountTx[] => {
+  const r: OgAccountReplica | undefined = replica(w, x, y);
+  return [...(r?.mempool ?? []), ...(r?.pendingFrame?.accountTxs ?? [])] as readonly OgAccountTx[];
 };
+/** The maker's swap_offer txs not committed yet. */
+const inFlightOffers = (w: World, maker: number): readonly OgSwapOfferTx["data"][] =>
+  inFlight(w, maker, HUB)
+    .filter((t): t is OgSwapOfferTx => t.type === "swap_offer")
+    .map((t) => t.data);
 /** Everything the hub may owe the maker in `token` once its offers fill, at their own limit prices. */
 const wantsOn = (w: World, maker: number, token: TokenId): bigint =>
   [...restingOffers(w, maker), ...inFlightOffers(w, maker)]
@@ -222,14 +231,31 @@ const placeOffer = (w: World): Step => {
 };
 
 /**
- * Makers with a resting offer. A cancel reads nothing og can halt on once the Account exists: a fill that removes the
- * offer first makes og reject the request (swap/lifecycle/cancel.ts:37) and skip it on the hub (orderbook/cancels.ts:132).
+ * No trader has a swap_offer on its way to the hub: an offer the hub commits while a cancel travels is the only way a
+ * new fill of the cancelled offer can commit in the same hub frame as the cancel.
  */
-const cancellers = (w: World): readonly number[] => traders(w).filter((s) => restingOffers(w, s).length > 0);
+const noTakerInFlight = (w: World): boolean =>
+  traders(w).every((s) => [...inFlight(w, s, HUB), ...inFlight(w, HUB, s)].every((t) => t.type !== "swap_offer"));
+/**
+ * The maker's resting offers a cancel cannot race a fill on: no taker on its way to the hub, and no swap_resolve of the
+ * offer in flight on either side of the maker's hub Account. A fill that removes the offer before the cancel lands
+ * makes og reject the request (swap/lifecycle/cancel.ts:37) or skip it (orderbook/cancels.ts:132); a partial fill the
+ * hub commits together with the cancel halts og (see the header).
+ */
+const cancellable = (w: World, maker: number): readonly OgSwapOffer[] => {
+  if (!noTakerInFlight(w)) return [];
+  const resolving = new Set(
+    [...inFlight(w, maker, HUB), ...inFlight(w, HUB, maker)]
+      .filter((t) => t.type === "swap_resolve")
+      .map((t) => t.data?.offerId),
+  );
+  return restingOffers(w, maker).filter((o) => !resolving.has(o.offerId));
+};
+const cancellers = (w: World): readonly number[] => traders(w).filter((s) => cancellable(w, s).length > 0);
 
 const cancelOffer = (w: World): Step => {
   const maker = pick(w, cancellers(w));
-  const target = pick(w, restingOffers(w, maker));
+  const target = pick(w, cancellable(w, maker));
   const cancel: EntityTx = {
     type: "proposeCancelSwap",
     data: { counterpartyEntityId: w.ids[HUB]!, offerId: target.offerId },
