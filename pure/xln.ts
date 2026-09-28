@@ -29983,6 +29983,162 @@ export const mergeEntityInputs = (
     ),
   );
 
+// ---- og runtime/mempool/entity-height-barrier.ts ----
+/** og laneKey: `entity:signer`, trimmed and lowercased; an input missing either names no lane. */
+const heightLaneKey = (i: RoutedEntityInput): string | null => {
+  const entity = trimLower(i.entityId);
+  const signer = trimLower(i.signerId);
+  return entity !== "" && signer !== "" ? `${entity}:${signer}` : null;
+};
+/** og positiveHeight: a safe positive integer height, else none. */
+const positiveHeight = (h: bigint): bigint | null => (h > 0n && h <= BigInt(Number.MAX_SAFE_INTEGER) ? h : null);
+/**
+ * og carriesHeightCertificate (entity-height-barrier.ts:36): a proposal (a commit notification included) or a
+ * precommit with at least one bundle names an exact height.
+ */
+const carriesHeightCertificate = (i: RoutedEntityInput): boolean =>
+  i.input.kind === "proposal" || (i.input.kind === "precommit" && i.input.signatures.size > 0);
+/**
+ * og possibleCommittedHeight (entity-height-barrier.ts:39-59): a proposal or precommit may commit its own height; any
+ * other input may advance the replica one height from local work.
+ */
+const possibleCommittedHeight = (i: RoutedEntityInput, current: bigint): bigint | null => {
+  if (i.input.kind === "proposal") return positiveHeight(i.input.frame.height);
+  if (i.input.kind === "precommit" && i.input.signatures.size > 0) return positiveHeight(i.input.height);
+  return current + 1n;
+};
+/** og importingReplicaLanes (entity-height-barrier.ts:61-69): the lanes an importReplica of this frame creates. */
+const importingLanes = (txs: readonly RuntimeTx[]): ReadonlySet<string> =>
+  new Set(
+    txs.flatMap((tx) => {
+      if (tx.type !== "importReplica") return [];
+      const key = `${trimLower(tx.entityId)}:${trimLower(tx.signerId)}`;
+      return key === ":" ? [] : [key];
+    }),
+  );
+/** og findExactReplica + resolveLaneHeight (entity-height-barrier.ts:9-15, 71-81): the first replica on each lane. */
+const laneHeights = (
+  entities: ReadonlyMap<string, EntityReplica>,
+  importing: ReadonlySet<string>,
+): ((key: string) => bigint | null) => {
+  const replicas = [...entities.values()].map((r): readonly [string, EntityReplica] => [
+    `${trimLower(r.state.id)}:${trimLower(r.signerId)}`,
+    r,
+  ]);
+  // og [...].find: the first replica on a lane wins, so later ones are entered first and overwritten
+  const first = new Map<string, EntityReplica>(replicas.toReversed());
+  return (key) => first.get(key)?.state.height ?? (importing.has(key) ? 0n : null);
+};
+/** og LaneDurabilityState: the replica's height and the lowest height any input of this frame may commit. */
+type LaneDurability = { readonly current: bigint; readonly firstFuture: bigint };
+/** og collectLaneDurabilityState (entity-height-barrier.ts:88-107). */
+const laneDurability = (
+  inputs: readonly RoutedEntityInput[],
+  heightOf: (key: string) => bigint | null,
+): ReadonlyMap<string, LaneDurability> =>
+  inputs.reduce<ReadonlyMap<string, LaneDurability>>((lanes, i) => {
+    const key = heightLaneKey(i);
+    const current = key === null ? null : heightOf(key);
+    if (key === null || current === null) return lanes;
+    const candidate = possibleCommittedHeight(i, current);
+    if (candidate === null || candidate <= current) return lanes;
+    const prior = lanes.get(key);
+    const earlier = prior === undefined || candidate < prior.firstFuture;
+    return earlier ? mapSet(lanes, key, { current, firstFuture: candidate }) : lanes;
+  }, new Map());
+/** og createCommitBlocker's per-lane memory: the accepted merge group, its scheduled wake, and the closed lanes. */
+type BlockerMemory = {
+  readonly accepted: ReadonlyMap<string, string>;
+  readonly wakes: ReadonlyMap<string, string>;
+  readonly closed: ReadonlySet<string>;
+  readonly blocked: readonly boolean[];
+};
+const EMPTY_BLOCKER: BlockerMemory = { accepted: new Map(), wakes: new Map(), closed: new Set(), blocked: [] };
+/** og: the first scheduledWake an input carries, as its exact form. */
+const scheduledWakeKey = (i: RoutedEntityInput): string | null => {
+  const wake = i.input.kind === "txs" ? i.input.txs.find((tx) => tx.type === "scheduledWake") : undefined;
+  return wake === undefined ? null : canon(wake);
+};
+/**
+ * og createCommitBlocker (entity-height-barrier.ts:118-155), one input: the first merge group at the lane's first
+ * future height is accepted; a later input of another group on a certificate lane closes the lane, and every input
+ * after a close, or at a later height, is blocked. A same-group input with a different scheduled wake also closes the
+ * lane.
+ */
+const blockStep =
+  (lanes: ReadonlyMap<string, LaneDurability>, certificates: ReadonlySet<string>) =>
+  (m: BlockerMemory, i: RoutedEntityInput): Result<BlockerMemory, RuntimeError> => {
+    const pass = ok({ ...m, blocked: [...m.blocked, false] });
+    const block = ok({ ...m, blocked: [...m.blocked, true] });
+    const key = heightLaneKey(i);
+    const state = key === null ? undefined : lanes.get(key);
+    if (key === null || state === undefined) return pass;
+    if (m.closed.has(key)) return block;
+    const candidate = possibleCommittedHeight(i, state.current);
+    if (candidate === null || candidate <= state.current) return pass;
+    if (candidate > state.firstFuture) return block;
+    const close = ok({ ...m, closed: new Set([...m.closed, key]), blocked: [...m.blocked, true] });
+    return chain(mergeKey(laneOf(i)), (group) => {
+      const wake = scheduledWakeKey(i);
+      const accepted = m.accepted.get(key);
+      const acceptedWake = m.wakes.get(key);
+      const withWake = wake !== null && acceptedWake === undefined ? mapSet(m.wakes, key, wake) : m.wakes;
+      if (accepted === undefined) {
+        return ok({ ...m, accepted: mapSet(m.accepted, key, group), wakes: withWake, blocked: [...m.blocked, false] });
+      }
+      if (group !== accepted && !certificates.has(key)) return pass;
+      if (group !== accepted) return close;
+      if (wake !== null && acceptedWake !== undefined && wake !== acceptedWake) return close;
+      return ok({ ...m, wakes: withWake, blocked: [...m.blocked, false] });
+    });
+  };
+/** og atomicCrossJInputCohortKey (delivery/topology/entity-routing.ts:620-642): an atomic cross-j leg's cohort. */
+const atomicCohortKey = (i: RoutedEntityInput): string | null => {
+  const marker = i.atomicCrossJurisdictionPair;
+  const frame = i.sourceRuntimeFrame;
+  if (marker === undefined) return null;
+  const origin = transportOrigin(i);
+  return JSON.stringify([marker.phase, marker.pairKey, origin, frame?.height ?? null, frame?.timestamp ?? null]);
+};
+/** og applyEntityHeightDurabilityBarrier's split: the inputs this frame applies and the ones it requeues. */
+export type HeightBarrier = {
+  readonly selected: readonly RoutedEntityInput[];
+  readonly deferred: readonly RoutedEntityInput[];
+};
+/**
+ * og partitionDurableEntityInputs (entity-height-barrier.ts:157-179): a blocked input defers, and so does every leg of
+ * an atomic cross-j cohort one of whose legs is blocked. Both halves keep arrival order.
+ */
+const partitionDurable = (inputs: readonly RoutedEntityInput[], blocked: readonly boolean[]): HeightBarrier => {
+  const cohortOf = inputs.map(atomicCohortKey);
+  const blockedCohorts = new Set(cohortOf.filter((key, k): key is string => key !== null && blocked[k] === true));
+  const defers = cohortOf.map((key, k) => blocked[k] === true || (key !== null && blockedCohorts.has(key)));
+  return {
+    selected: inputs.filter((_, k) => !defers[k]),
+    deferred: inputs.filter((_, k) => defers[k]),
+  };
+};
+/**
+ * og applyEntityHeightDurabilityBarrier (runtime/mempool/entity-height-barrier.ts:186-208), run by og
+ * prepareRuntimeFrameInput (frame/lifecycle/prepare.ts:49-51) on the consensus-prioritized inputs: one Runtime frame
+ * makes at most one new certified Entity height durable per replica lane. Walking in arrival order, a lane that
+ * receives a proposal or precommit keeps only its first merge group (og entityInputMergeKey); every later input on it
+ * is deferred, and og puts the deferred inputs back at the front of the Runtime mempool for the next frame. Plain-input
+ * lanes defer only inputs for a later height. `runtimeTxs` are the frame's own (an importReplica lane starts at 0).
+ */
+export const entityHeightBarrier = (
+  entities: ReadonlyMap<string, EntityReplica>,
+  runtimeTxs: readonly RuntimeTx[],
+  inputs: readonly RoutedEntityInput[],
+): Result<HeightBarrier, RuntimeError> => {
+  const lanes = laneDurability(inputs, laneHeights(entities, importingLanes(runtimeTxs)));
+  if (lanes.size === 0) return ok({ selected: inputs, deferred: [] });
+  const certificateLanes = inputs.filter(carriesHeightCertificate).map(heightLaneKey);
+  const certificates = new Set(certificateLanes.filter((key): key is string => key !== null));
+  const blocking = foldResult(inputs, EMPTY_BLOCKER, blockStep(lanes, certificates));
+  return map(blocking, ({ blocked }) => partitionDurable(inputs, blocked));
+};
+
 // ---- og runtime/tx/tx-handlers.ts ----
 const COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/;
 const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
@@ -41152,7 +41308,7 @@ const voteBodyOf = (vote: WireRecord | undefined): Binary | undefined =>
  * og's tx fingerprints and leader-vote body hash are replaced by equality-equivalent content digests (the key is
  * compared, never stored).
  */
-const routeKeyOf = (o: NetworkOutput): Result<string, RuntimeError> => {
+export const routeKeyOf = (o: NetworkOutput): Result<string, RuntimeError> => {
   const identity = proposalIdentity(o);
   if (identity !== null) return ok(identity);
   const source = o["sourceRuntimeFrame"] as { readonly height: Binary; readonly timestamp: Binary } | undefined;
@@ -41825,6 +41981,33 @@ export const commitRuntimeFrame = (
   ctx: RuntimeCtx,
 ): Result<RuntimeFrameCommit | null, RuntimeError> =>
   chain(applyRuntime(rt, input, ctx), (step) => (step.advanced ? sealFrame(rt, step, ctx.routes) : ok(null)));
+/**
+ * One host Runtime frame: `commit` is the frame (null when it did no work) and `deferred` are the inputs og's
+ * entity-height barrier requeued, which the host carries at the front of its queue into the next frame (og puts them
+ * ahead of its mempool, entity-height-barrier.ts:205). They are returned even when the frame did no work: og's mempool
+ * keeps them either way.
+ */
+export type RuntimeFrameRun = {
+  readonly commit: RuntimeFrameCommit | null;
+  readonly deferred: readonly RoutedEntityInput[];
+};
+/**
+ * og prepareRuntimeFrameInput (frame/lifecycle/prepare.ts:49-51) then process: the queued inputs are consensus-
+ * prioritized against the frame-start replicas (og hasVerifiedEntityCommitPrecertificate), the entity-height barrier
+ * keeps one merge group per certificate lane, and the rest is committed as commitRuntimeFrame. Replay never runs this:
+ * a WAL row holds the input the barrier already selected.
+ */
+export const processRuntimeFrame = (
+  rt: Runtime,
+  input: RuntimeInput,
+  ctx: RuntimeCtx,
+): Result<RuntimeFrameRun, RuntimeError> => {
+  const prioritized = prioritizeConsensusInputs(input.entityInputs, verifiedCommit(rt.entities, ctx));
+  const barrier = entityHeightBarrier(rt.entities, input.runtimeTxs, prioritized);
+  return chain(barrier, ({ selected, deferred }) =>
+    map(commitRuntimeFrame(rt, { ...input, entityInputs: selected }, ctx), (commit) => ({ commit, deferred })),
+  );
+};
 
 
 // Replay: the WAL tail verified row by row and replayed to the same bytes.

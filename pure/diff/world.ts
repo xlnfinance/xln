@@ -60,9 +60,9 @@ const MEMBERS: readonly Member[] = [
 ];
 export const NAMES = MEMBERS.map((m) => m.name);
 /**
- * The 2-of-3 board is opt-in (WALK_BOARD=1): with it, og and the rewrite diverge on its first Entity frame. og's frame
- * preparation (runtime/mempool/entity-height-barrier.ts applyEntityHeightDurabilityBarrier) keeps one merge group per
- * certificate-carrying replica lane in a Runtime frame and requeues the rest; the rewrite has no such barrier.
+ * The 2-of-3 board is opt-in (WALK_BOARD=1). Its first Entity frame needs og's frame preparation
+ * (runtime/mempool/entity-height-barrier.ts applyEntityHeightDurabilityBarrier: one merge group per certificate-carrying
+ * replica lane in a Runtime frame, the rest requeued), which the rewrite runs as processRuntimeFrame.
  */
 const boardJoins = (): boolean => process.env["WALK_BOARD"] === "1";
 
