@@ -50,7 +50,7 @@ export const ogCommandState = (s: EntityState, extra: Record<string, unknown> = 
       ...jurisdiction,
     },
     ...(nonces === undefined ? {} : { entityCommandNonces: nonces }),
-    proposals: s.committed["proposals"] ?? new Map(),
+    proposals: s.proposals ?? new Map(),
     ...extra,
   };
 };

@@ -232,7 +232,7 @@ describe(seedTag("certifiedBoardState in the Entity root (og state-root.ts ENTIT
     const base = unwrap(createEntity({ id, jurisdiction: DOMAIN, threshold: 1n, members, jurisdictionConfig: JCONF }));
     const { state, ogRegistry } = observe(base.state, [foundation, registered(id, word(77))]);
     const ogOf = (extra: Record<string, unknown>): any => ({
-      entityId: id, height: 0, timestamp: 0, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(id), accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
+      entityId: id, height: 0, timestamp: 0, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(id), accounts: PersistentEntityAccountMap.fromEntries([], id, computeEntityAccountValueHash),
       config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n }, jurisdiction: { address: "", ...OG_J } },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, ...extra,
     });
@@ -365,7 +365,7 @@ describe(seedTag("EntityProvider actions (og entity/tx/handlers/entity-provider-
     const folded = unwrap(handlerRun(state, tx, 5n)).draft.state;
     const rootOf = (s: EntityState) => unwrap(entityRootOf({ ...s, timestamp: 5n }, new Map()));
     const ogRoot = (extra: Record<string, unknown>) => computeCanonicalEntityConsensusStateHash({
-      entityId: state.id, height: 0, timestamp: 5, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(state.id), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
+      entityId: state.id, height: 0, timestamp: 5, lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(state.id), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
       config: { mode: "proposer-based", threshold: 1n, validators: [bobAddr.toLowerCase()], shares: { [bobAddr.toLowerCase()]: 1n }, jurisdiction: OG_J },
       paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, certifiedBoardState: ogRegistry, ...extra,
     } as any);

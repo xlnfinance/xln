@@ -127,7 +127,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
         const timestamp = NOW + BigInt(step);
         og = { ...og, timestamp: Number(timestamp) };
         const [author] = pick(members), who = author.toLowerCase();
-        const proposals = [...((r.state.committed["proposals"] as ReadonlyMap<string, unknown> | undefined) ?? new Map()).keys()];
+        const proposals = [...((r.state.proposals as ReadonlyMap<string, unknown> | undefined) ?? new Map()).keys()];
         const collective: EntityTx[] = Array.from({ length: 1 + ri(2) }, () => pick<EntityTx>([
           { type: "chatMessage", data: { message: `c${ri(9)}`, timestamp: ri(9) } },
           { type: "profile-update", data: { profile: { entityId: r.state.id, name: `N${ri(9)}`, ...(rng() < 0.3 ? { sectors: ["finance"] } : {}) } } },
@@ -161,7 +161,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
         if (!rw.ok) throw new Error(`rewrite refused what og accepted: ${JSON.stringify(rw.error)} / ${JSON.stringify(txs.map((t) => t.type))}`);
         accepted++;
         const d = rw.value.draft;
-        expect(bytes(d.state.committed["proposals"] ?? new Map())).toBe(bytes(ogOut.state.proposals));
+        expect(bytes(d.state.proposals ?? new Map())).toBe(bytes(ogOut.state.proposals));
         expect(bytes(ogOf(d.state)["entityCommandNonces"] ?? null)).toBe(bytes(ogOut.state.entityCommandNonces ?? null));
         expect(d.events ?? []).toEqual(readEntityFrameEvents(ogOut.state));
         if ((d.events ?? []).length > 0 && txs[0]?.type !== "chat") executed++;
@@ -189,13 +189,13 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     if ("error" in ogAfterFirst) throw new Error(ogAfterFirst.message);
     expect(() => assertSignedEntityCommand(env, ogAfterFirst.state, wire(second).data)).not.toThrow();
     const folded = unwrap(foldTxs(r.state, r.accountReplicas, authored, { verify: hankoVerify, timestamp: NOW })).draft;
-    const pending = [...(folded.state.committed["proposals"] as ReadonlyMap<string, unknown>).keys()];
+    const pending = [...(folded.state.proposals as ReadonlyMap<string, unknown>).keys()];
     expect(pending.length).toBe(1);
     expect(ogOf(folded.state)["profile"]).toEqual(ogOf(r.state)["profile"]);
     expect(folded.events).toEqual([{ type: "text", validatorId: aliceAddr.toLowerCase(), message: "hello" }]);
     const vote = unwrap(authorEntityTxs(folded.state, bobAddr, [{ type: "vote", data: { proposalId: pending[0] as string, voter: bobAddr, choice: "yes" } }], signAs(bobAddr)));
     const voted = unwrap(foldTxs(folded.state, folded.accountReplicas, vote, { verify: hankoVerify, timestamp: NOW + 1n })).draft;
-    expect((voted.state.committed["proposals"] as ReadonlyMap<string, unknown>).size).toBe(0);
+    expect((voted.state.proposals as ReadonlyMap<string, unknown>).size).toBe(0);
     expect(ogOf(voted.state)["profile"]).toMatchObject({ name: "Board" });
   });
   test("MATCH (og createEntityFrameHashFromStateRoot): a frame carrying a signed collective command hashes like og, its events included", () => {

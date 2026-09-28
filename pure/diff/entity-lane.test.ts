@@ -111,7 +111,7 @@ const baseProfiles = (): Binary[] => [
   profile(ALICE, []), profile(BOB, [{ counterpartyId: ALICE, domain: TERMS.domain, tokenCapacities: caps(1000n, 0n) }, { counterpartyId: CAROL, domain: TERMS.domain, tokenCapacities: caps(0n, 1000n) }], { routingFeePPM: 5000, baseFee: 1n, isHub: true }), profile(CAROL, []),
 ];
 const ogStateOf = (r: EntityReplica, timestamp: number) => ({
-  entityId: r.state.id, timestamp, lastFinalizedJHeight: 0, entityEncryptionPublicKey: String(r.state.committed["entityEncryptionPublicKey"]), paybook: { entries: new Map(), feesEarned: 0n },
+  entityId: r.state.id, timestamp, lastFinalizedJHeight: 0, entityEncryptionPublicKey: String(ogOf(r.state)["entityEncryptionPublicKey"]), paybook: { entries: new Map(), feesEarned: 0n },
   accounts: new Map([...r.accountReplicas].map(([peer, c]) => { const id = replicaId(c); return [peer, { status: "active", state: { domain: c.state.terms.domain, leftEntity: id.left, rightEntity: id.right, deltas: new Map() } }]; })),
 });
 /** og gossip getNetworkGraph().findPaths over the same profile map, as infra-context.ts resolveRoute calls it. */
@@ -386,6 +386,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
 
 // ---- og certified Entity -> Entity lane: publication, runtimeOutput authorization, default-proposer materialization ----
 import { selectCommitPhaseTxs, stackIdOf, type EntityOutput } from "../xln.ts";
+import { ogOf } from "./og-state.ts";
 
 /** An og EntityState for a live og call, read from a rewrite replica at a frame timestamp. */
 const ogEntityState = (r: EntityReplica, timestamp: number): any => {

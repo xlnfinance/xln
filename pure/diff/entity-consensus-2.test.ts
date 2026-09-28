@@ -138,7 +138,7 @@ describe(seedTag("entity-consensus-2: timeout certificate and certified view cha
     const ogTxs = ogAuthored(teaching(members, 2n, B).state, B, [openBob]);
     expect(wired(b.frame.txs)).toEqual(ogTxs);
     const governance = ogAfterCommands(ogCommandState(teaching(members, 2n, B).state, { timestamp: Number(b.frame.timestamp) }), ogTxs);
-    expect(consensusBytes(bCommitted.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
+    expect(consensusBytes(bCommitted.replica.state.proposals)).toBe(consensusBytes(governance.proposals));
     expect(bCommitted.replica.state.accounts.has(BOB)).toBe(false);
     // C's signed yes reaches B (the view-1 leader) and executes the open in frame 2; og account work at H+1 then proposes
     // the Account frame, which frame 3's manifest signs

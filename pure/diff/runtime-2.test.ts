@@ -128,6 +128,7 @@ import {
   type StorageFrame,
 } from "../xln.ts";
 import { bobAddr, carolAddr } from "../xln_run.ts";
+import { ogOf } from "./og-state.ts";
 
 const ogThrowCode = (f: () => unknown): string | null => { try { f(); return null; } catch (e) { return String((e as Error).message).split(":")[0] ?? ""; } };
 const rwCode = (r: { readonly ok: boolean; readonly error?: unknown }): string | null => {
@@ -380,7 +381,7 @@ describe(seedTag("runtime-2: importReplica board authority (og runtime/tx/tx-han
     expect(code(tx({ entitySeed: "0x1234" }))).toBe("IMPORT_REPLICA_ENTITY_SEED_INVALID");
     const imported = unwrap(applyRuntimeTx(rt, tx({}), {}));
     const replica = imported.entities.get(replicaKey(id as EntityId, aliceAddr));
-    expect(replica?.state.committed["entityEncryptionPublicKey"]).toBe(entityEncryptionPublicKey(SEED, id));
+    expect((replica === undefined ? undefined : ogOf(replica.state)["entityEncryptionPublicKey"])).toBe(entityEncryptionPublicKey(SEED, id));
     expect(imported.encryptionSeeds.get(id.toLowerCase())).toBe(SEED);
     // A sibling validator replica with another seed derives another key: og IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH.
     expect(code(tx({ signerId: bobAddr, isProposer: false, entitySeed: "0x" + "6f".repeat(64) }), imported)).toBe("IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH");

@@ -144,7 +144,7 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
   return {
     entityId: r.state.id, height: Number(r.state.height), timestamp: Number(r.state.timestamp),
     config: { mode: "proposer-based", threshold: r.state.quorum._tag === "teaching" ? r.state.quorum.threshold : 0n, validators: members.map(([a]) => a), shares: Object.fromEntries(members.map(([a, m]) => [a, m.shares])), ...(jurisdiction === undefined ? {} : { jurisdiction }) },
-    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(r.state.id), ...committed,
+    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(r.state.id), ...committed,
   };
 };
 
@@ -216,7 +216,7 @@ describe(seedTag("entity-runtime: quorum, precommits and commit (ER-4, ER-5, ER-
     const ogTxs = ogAuthored(base.state, A, [open]);
     expect(wired(r.frame.txs)).toEqual(ogTxs);
     const governance = ogAfterCommands(ogCommandState(base.state, { timestamp: Number(r.frame.timestamp) }), ogTxs);
-    expect(consensusBytes(two.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
+    expect(consensusBytes(two.replica.state.proposals)).toBe(consensusBytes(governance.proposals));
     expect(consensusBytes(ogOf(two.replica.state)["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
     expect(two.replica.state.accounts.has(BOB)).toBe(false);
     expect(consensusFor(two.outputs, B)[0]?.kind).toBe("proposal"); // og broadcastCommit

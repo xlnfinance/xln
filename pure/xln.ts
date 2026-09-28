@@ -11410,6 +11410,16 @@ export type EntityState = {
   readonly schedule: Schedule;
   /** og profile, whose isHub flag the hub section carries. */
   readonly profile: EntityProfile;
+  /** og nonces: the legacy per-signer tx nonces, committed as og holds them. */
+  readonly nonces: ReadonlyMap<string, number>;
+  /** og proposals: collective proposals under vote, by id. */
+  readonly proposals: ReadonlyMap<string, StoredProposal>;
+  /** og entityEncryptionPublicKey. */
+  readonly encryptionKey: EncryptionKey;
+  /** og swapTradingPairs. */
+  readonly swapPairs: SwapPairs;
+  /** og externalWallet. */
+  readonly wallet: ExternalWallet;
   readonly leaderState?: LeaderState | undefined;
   /**
    * og EntityState.paybook: absent until the first HTLC entry; the root then commits it instead of `committed.paybook`.
@@ -12306,6 +12316,11 @@ export const encodeEntityState = (s: EntityState): string => canon({
   treasury: s.treasury,
   schedule: s.schedule,
   profile: s.profile,
+  nonces: s.nonces,
+  proposals: s.proposals,
+  encryptionKey: s.encryptionKey,
+  swapPairs: s.swapPairs,
+  wallet: s.wallet,
   leaderState: s.leaderState,
   paybook: s.paybook,
   boardNodes: s.boardNodes,
@@ -12954,8 +12969,51 @@ type TypedSections = Pick<
   | "treasury"
   | "schedule"
   | "profile"
+  | "nonces"
+  | "proposals"
+  | "encryptionKey"
+  | "swapPairs"
+  | "wallet"
 >;
 /** og's committed sections as the rewrite holds them; a section og cannot reach is refused, naming what is wrong. */
+// ---- og's smaller sections: the key, the swap pairs, proposals and the legacy nonces ----
+/** og entityEncryptionPublicKey: registration provisions one; only an Entity made without an import is keyless. */
+export type EncryptionKey = Readonly<{ _tag: "keyless" }> | Readonly<{ _tag: "key"; publicKey: string }>;
+export const KEYLESS: EncryptionKey = { _tag: "keyless" };
+const publicKeyOf = (state: EntityState): string =>
+  state.encryptionKey._tag === "key" ? state.encryptionKey.publicKey : "";
+const importKey = (og: Binary | undefined): Result<EncryptionKey, string> => {
+  if (og === undefined) return ok(KEYLESS);
+  return typeof og === "string" ? ok({ _tag: "key", publicKey: og }) : err("a non-text entityEncryptionPublicKey");
+};
+/** og swapTradingPairs: the pairs the Entity trades, named at genesis from its jurisdiction. */
+export type SwapPairs =
+  | Readonly<{ _tag: "unnamed" }>
+  | Readonly<{ _tag: "pairs"; pairs: readonly DefaultSwapPair[] }>;
+export const UNNAMED_PAIRS: SwapPairs = { _tag: "unnamed" };
+const pairShaped = (p: unknown): boolean => {
+  const r = recOf(p);
+  const ids = r !== null && naturalSafeInt(r["baseTokenId"]) && naturalSafeInt(r["quoteTokenId"]);
+  return ids && typeof r["pairId"] === "string";
+};
+const importPairs = (og: Binary | undefined): Result<SwapPairs, string> => {
+  if (og === undefined) return ok(UNNAMED_PAIRS);
+  return Array.isArray(og) && og.every(pairShaped)
+    ? ok({ _tag: "pairs", pairs: og as unknown as readonly DefaultSwapPair[] })
+    : err("malformed swapTradingPairs");
+};
+/** og proposals (every Entity has the map) and og's legacy per-signer nonces, which nothing in og still moves. */
+const importMap = <V,>(og: Binary | undefined, field: string): Result<ReadonlyMap<string, V>, string> => {
+  if (og === undefined) return ok(new Map());
+  return og instanceof Map ? ok(og as unknown as ReadonlyMap<string, V>) : err(`a non-map ${field}`);
+};
+const ogSmallSections = (state: EntityState): EntityCommitted => ({
+  nonces: state.nonces as unknown as Binary,
+  proposals: state.proposals as unknown as Binary,
+  ...(state.encryptionKey._tag === "key" ? { entityEncryptionPublicKey: state.encryptionKey.publicKey } : {}),
+  ...(state.swapPairs._tag === "pairs" ? { swapTradingPairs: state.swapPairs.pairs as unknown as Binary } : {}),
+  ...ogWallet(state.wallet),
+});
 /** og's root fields the typed sections own; whatever else og commits still rides in `committed`. */
 const SECTION_FIELDS: ReadonlySet<string> = new Set([
   "jBatchState",
@@ -12973,6 +13031,11 @@ const SECTION_FIELDS: ReadonlySet<string> = new Set([
   "outDebtsByToken",
   "inDebtsByToken",
   "crontabState",
+  "nonces",
+  "proposals",
+  "entityEncryptionPublicKey",
+  "swapTradingPairs",
+  "externalWallet",
 ]);
 const importSections = (
   og: EntityCommitted,
@@ -13000,6 +13063,11 @@ const importSections = (
     ),
     treasury: mapErr(importTreasury(og), unreachable("TREASURY")),
     schedule: mapErr(importSchedule(og["crontabState"]), unreachable("CRONTAB")),
+    nonces: mapErr(importMap<number>(og["nonces"], "nonces"), unreachable("NONCES")),
+    proposals: mapErr(importMap<StoredProposal>(og["proposals"], "proposals"), unreachable("PROPOSALS")),
+    encryptionKey: mapErr(importKey(og["entityEncryptionPublicKey"]), unreachable("ENCRYPTION_KEY")),
+    swapPairs: mapErr(importPairs(og["swapTradingPairs"]), unreachable("SWAP_PAIRS")),
+    wallet: mapErr(importWallet(og["externalWallet"]), unreachable("EXTERNAL_WALLET")),
   });
   const committed = Object.fromEntries(Object.entries(og).filter(([field]) => !SECTION_FIELDS.has(field)));
   return map(imported, (sections) => ({ ...sections, committed }));
@@ -21316,7 +21384,7 @@ const boardShares = (
 };
 type VoteChoice = "yes" | "no";
 type StoredVote = VoteChoice | { readonly choice: VoteChoice; readonly comment: string };
-type StoredProposal = {
+export type StoredProposal = {
   readonly id: string;
   readonly proposer: string;
   readonly boardHash: string;
@@ -21326,12 +21394,9 @@ type StoredProposal = {
   readonly votes: ReadonlyMap<string, StoredVote>;
   readonly created: number;
 };
-const proposalsOf = (state: EntityState): ReadonlyMap<string, StoredProposal> =>
-  (state.committed["proposals"] as ReadonlyMap<string, StoredProposal> | undefined) ?? new Map();
-const withProposals = (state: EntityState, proposals: ReadonlyMap<string, StoredProposal>): EntityState => ({
-  ...state,
-  committed: { ...state.committed, proposals: proposals as unknown as Binary },
-});
+const proposalsOf = (state: EntityState): ReadonlyMap<string, StoredProposal> => state.proposals;
+const withProposals = (state: EntityState, proposals: ReadonlyMap<string, StoredProposal>): EntityState =>
+  ({ ...state, proposals });
 /**
  * og generateProposalId: sha256 of safeStringify({actionHash, proposer, boardHash, boardEpoch, commandNonce}) with og's
  * sorted keys and tagged bigint.
@@ -22794,12 +22859,12 @@ export const inboundHtlcEntries = (
  * Entity with no committed public key never exists in og (registration always provisions one).
  */
 const entityKeypair = (state: EntityState, ctx: EntityContext): Result<void, EntityError> => {
-  const publicKey = state.committed["entityEncryptionPublicKey"];
-  if (publicKey === undefined) return ok(undefined);
+  if (state.encryptionKey._tag === "keyless") return ok(undefined);
+  const publicKey = state.encryptionKey.publicKey;
   const privateKey = ctx.htlc?.encryptionPrivateKey;
   if (privateKey === undefined || privateKey === "")
     return invariant(`ENTITY_ENCRYPTION_PRIVATE_KEY_UNAVAILABLE:entity=${state.id}`);
-  const checked = chain(x25519KeyBytes(String(publicKey), "HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID"), (pub) =>
+  const checked = chain(x25519KeyBytes(publicKey, "HTLC_ENTITY_ENCRYPTION_PUBLIC_KEY_INVALID"), (pub) =>
     chain(x25519KeyBytes(privateKey, "HTLC_ENTITY_ENCRYPTION_PRIVATE_KEY_INVALID"), (priv): Result<void, OnionError> =>
       bytesToHex(x25519.getPublicKey(priv)) === bytesToHex(pub)
         ? ok(undefined)
@@ -24492,7 +24557,7 @@ const originView = (state: EntityState, replicas: Replicas, timestamp: bigint): 
   id: state.id,
   timestamp: Number(timestamp),
   jHeight: Number(entityJHeight(state)),
-  encryptionKey: String(state.committed["entityEncryptionPublicKey"] ?? ""),
+  encryptionKey: publicKeyOf(state),
   paybook: state.paybook ?? EMPTY_PAYBOOK,
   replicas,
 });
@@ -26636,10 +26701,9 @@ const profileDescriptor = (
   accounts: readonly ProfileRow[],
 ): ProfileDescriptor => {
   const { name, avatar, bio, website } = state.profile;
-  const key = state.committed["entityEncryptionPublicKey"];
   return {
     entityId: lower(state.id),
-    entityEncryptionPublicKey: key === undefined ? "" : String(key),
+    entityEncryptionPublicKey: publicKeyOf(state),
     name: name.trim(),
     avatar,
     bio,
@@ -26867,6 +26931,7 @@ export const ogSections = (state: EntityState): EntityCommitted => {
     ...state.committed,
     ...ogHub(state.hub),
     profile: ogProfile(state.profile, state.hub._tag === "hub"),
+    ...ogSmallSections(state),
     ...ogJFinality(state.jFinality),
     ...ogTreasury(state.treasury),
     ...ogSchedule(state.schedule),
@@ -27532,7 +27597,7 @@ const inboundView = (r: EntityEnv, timestamp: bigint, ctx: EntityContext): Omit<
   state: r.state,
   replicas: r.accountReplicas,
   timestamp: Number(timestamp),
-  publicKey: String(r.state.committed["entityEncryptionPublicKey"] ?? ""),
+  publicKey: publicKeyOf(r.state),
   privateKey: ctx.htlc?.encryptionPrivateKey,
 });
 /**
@@ -30083,7 +30148,7 @@ const importedEntityKey = (
 ): Result<string, RuntimeError> => {
   if (!/^0x[0-9a-f]{128}$/.test(seed)) return txErr("IMPORT_REPLICA_ENTITY_SEED_INVALID");
   const publicKey = entityEncryptionPublicKey(seed, entity);
-  if (siblings.some((r) => r.state.committed["entityEncryptionPublicKey"] !== publicKey))
+  if (siblings.some((r) => publicKeyOf(r.state) !== publicKey))
     return txErr("IMPORT_REPLICA_ENTITY_ENCRYPTION_PUBLIC_KEY_MISMATCH");
   const retained = rt.encryptionSeeds.get(entity);
   return retained !== undefined && retained !== seed ? txErr("ENTITY_ENCRYPTION_SEED_CONFLICT") : ok(publicKey);
@@ -37122,14 +37187,24 @@ const walletDeltaMove = (w: WalletEvent): Result<WalletMove, EntityError> =>
       map(allowanceDelta(w, token, who), (allowances) => ({ balances, allowances, kind: "delta" as const })),
     );
   });
+/** og externalWallet: owner EOAs' balances and allowances from finalized J snapshots, absent until the first. */
+export type ExternalWallet =
+  | Readonly<{ _tag: "unobserved" }>
+  | Readonly<{ _tag: "observed"; balances: WalletBook; allowances: WalletBook }>;
+export const UNOBSERVED_WALLET: ExternalWallet = { _tag: "unobserved" };
 /** The committed external wallet's two books. */
-const walletBooks = (state: EntityState): { readonly balances: WalletBook; readonly allowances: WalletBook } => {
-  const held = recOf(state.committed["externalWallet"]);
-  const book = (k: string): WalletBook => {
-    const v = held?.[k];
-    return v instanceof Map ? (v as WalletBook) : new Map();
-  };
-  return { balances: book("balances"), allowances: book("allowances") };
+const walletBooks = (state: EntityState): { readonly balances: WalletBook; readonly allowances: WalletBook } =>
+  state.wallet._tag === "observed" ? state.wallet : { balances: new Map(), allowances: new Map() };
+const ogWallet = (w: ExternalWallet): EntityCommitted =>
+  w._tag === "unobserved" ? {} : { externalWallet: { balances: w.balances, allowances: w.allowances } as Binary };
+const importWallet = (og: Binary | undefined): Result<ExternalWallet, string> => {
+  if (og === undefined) return ok(UNOBSERVED_WALLET);
+  const w = recOf(og);
+  const balances = w?.["balances"];
+  const allowances = w?.["allowances"];
+  return balances instanceof Map && allowances instanceof Map
+    ? ok({ _tag: "observed", balances: balances as WalletBook, allowances: allowances as WalletBook })
+    : err("a wallet without balance and allowance books");
 };
 /**
  * og applyExternalWalletJEvent: a signer-Entity validator's on-chain wallet snapshot (baseline) or delta (on an
@@ -37156,8 +37231,8 @@ const externalWalletJEvent = (
     const move = e.type === "ExternalWalletSnapshot" ? walletSnapshotMove(w) : walletDeltaMove(w);
     return map(move, (m) => {
       const changed = m.balances !== books.balances || m.allowances !== books.allowances;
-      const wallet = { balances: m.balances, allowances: m.allowances } as unknown as Binary;
-      const next = changed ? { ...state, committed: { ...state.committed, externalWallet: wallet } } : state;
+      const wallet: ExternalWallet = { _tag: "observed", balances: m.balances, allowances: m.allowances };
+      const next = changed ? { ...state, wallet } : state;
       const said = `💼 EXTERNAL: ${owner.slice(0, 10)} ${m.kind} | Block ${blockNumber} | Tx ${txHash.slice(0, 10)}...`;
       return { ...step, draft: jSay({ ...step.draft, state: next }, said) };
     });

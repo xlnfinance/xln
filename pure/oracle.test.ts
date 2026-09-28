@@ -593,7 +593,7 @@ describe("oracle", () => {
     expect(two.replica._tag).toBe("open");
     // the installed frame commits og's pending proposal (and the proposer's nonce), not yet the Account
     const governance = ogAfterCommands(ogCommandState(entity.state, { timestamp: Number(frame.timestamp) }), ogTxs);
-    expect(consensusBytes(two.replica.state.committed["proposals"])).toBe(consensusBytes(governance.proposals));
+    expect(consensusBytes(two.replica.state.proposals)).toBe(consensusBytes(governance.proposals));
     expect(consensusBytes(ogOf(two.replica.state)["entityCommandNonces"])).toBe(consensusBytes(governance.entityCommandNonces));
     expect(two.replica.state.accounts.size).toBe(0);
   });

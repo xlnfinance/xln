@@ -248,7 +248,7 @@ describe(seedTag("runtime-final: RuntimeStep.events (og observability/env-events
     // executes both opens in frame 2
     for (let n = 0, voted = false; (queue.length > 0 || !voted) && n < 20; n++) {
       if (queue.length === 0) {
-        const proposals = rt.entities.get(replicaKey(id, bobAddr))?.state.committed["proposals"] as Map<string, unknown>;
+        const proposals = rt.entities.get(replicaKey(id, bobAddr))?.state.proposals as Map<string, unknown>;
         const [proposalId] = [...proposals.keys()];
         const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: bobAddr, choice: "yes" } };
         queue.push({ entityId: id, signerId: bobAddr, input: { kind: "txs", timestamp: NOW, txs: [vote] } });

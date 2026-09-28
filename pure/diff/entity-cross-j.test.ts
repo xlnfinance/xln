@@ -16,7 +16,7 @@ import {
   createOnionEnvelopes, decodeOnionLayer, decryptOpaqueHtlc, directionalFeePpm, encodeOnionLayer, encryptOpaqueHtlc, htlcEnvelopeContextHash, hopRevealHeight, hopTimelock,
   paymentDeadlineWindow, quoteHtlcRoute, requiredInbound, routingIndex, stableJson, type HtlcEnvelope, type OnionLayer, type RoutingProfile,
 } from "../xln.ts";
-import { asHub, withOg } from "./og-state.ts";
+import { asHub, ogOf, withOg } from "./og-state.ts";
 
 export const rng = (base: number) => {
   let seed = seedOf(base);
@@ -219,7 +219,7 @@ const ogAccount = (c: AccountReplica, status?: string) => {
   };
 };
 const ogStateOf = (r: EntityReplica, timestamp: number, paybook = new Map<string, unknown>()) => ({
-  entityId: r.state.id, timestamp, lastFinalizedJHeight: 0, entityEncryptionPublicKey: String(r.state.committed["entityEncryptionPublicKey"]),
+  entityId: r.state.id, timestamp, lastFinalizedJHeight: 0, entityEncryptionPublicKey: String(ogOf(r.state)["entityEncryptionPublicKey"]),
   paybook: { entries: paybook, feesEarned: 0n }, accounts: new Map([...r.accountReplicas].map(([peer, c]) => [peer, ogAccount(c)])),
 });
 const profile = (id: EntityId, accounts: readonly { counterpartyId: string; domain: unknown; tokenCapacities: Map<number, { inCapacity: bigint; outCapacity: bigint }> }[], meta: object = {}): Binary =>
@@ -535,7 +535,7 @@ describe(seedTag("entity-cross-j: inbound HTLC on a 2-of-2 hub (og assertHtlcPre
     const hubOnly = { ...verifiers, htlcInfra: (id: EntityId) => (id === HUB ? { profiles: [], encryptionPrivateKey: hubKey.priv } : undefined) };
     rt = quiet(rt, [hubInput([open(ALICE, 1000n), open(CAROL)], NOW)], hubOnly);
     // og admission signed Bob's collective opens into his propose; Carol's signed yes executes them
-    const proposals = rt.entities.get(replicaKey(HUB, carolAddr))!.state.committed["proposals"] as Map<string, unknown>;
+    const proposals = rt.entities.get(replicaKey(HUB, carolAddr))!.state.proposals as Map<string, unknown>;
     const [proposalId] = [...proposals.keys()];
     const vote: EntityTx = { type: "vote", data: { proposalId: proposalId ?? "", voter: carolAddr, choice: "yes" } };
     rt = quiet(rt, [{ entityId: HUB, signerId: carolAddr, input: { kind: "txs", timestamp: NOW, txs: [vote] } }], hubOnly);

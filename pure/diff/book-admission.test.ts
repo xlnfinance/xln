@@ -246,7 +246,7 @@ describe(seedTag("book-admission: orderbookExt state, init and root projection")
 
   test("MATCH: 40 random orderbookExt states (books driven by random commands, pairDimensions, hubProfile) == og computeCanonicalEntityConsensusStateHash", () => {
     const r = alone();
-    const og0 = { entityId: r.state.id, height: 0, timestamp: Number(r.state.timestamp), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(r.state.id), config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n } },
+    const og0 = { entityId: r.state.id, height: 0, timestamp: Number(r.state.timestamp), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), nonces: new Map(), proposals: new Map(), profile: ogGenesisProfile(r.state.id), config: { mode: "proposer-based", threshold: 1n, validators: [aliceAddr], shares: { [aliceAddr]: 1n } },
       accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } };
     expect(unwrap(entityRootOf(r.state, r.accountReplicas))).toBe(computeCanonicalEntityConsensusStateHash(og0 as never));
     const roots = new Set<string>();
