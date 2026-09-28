@@ -10790,7 +10790,7 @@ const frozenDropNote = (input: AccountInput, peer: EntityId): string => {
     }
   })();
   const height = seen.height === undefined ? "n/a" : String(seen.height);
-  const txs = seen.txs.map((tx) => tx.type).join(",");
+  const txs = seen.txs.map(ogTxType).join(",");
   return `🛑 Frozen account input dropped for ${peer.slice(-4)} (height=${height}, txs=[${txs}], ack=${seen.acked})`;
 };
 /**
@@ -38814,6 +38814,45 @@ export const runtimeWake = (
   const runtimeTxs = [...replicas.flatMap(batchRetryDue(w)), ...replicas.flatMap(actionRetryDue(w))];
   const local = new Set<RuntimeTx | EntityTx>([...runtimeTxs, ...entityInputs.flatMap(queuedTxs)]);
   return { input: { runtimeTxs, entityInputs, timestamp: at }, local };
+};
+/**
+ * og entityJPrefixReadyForWake: a leader that owes a J prefix wakes once it holds the round's certificate, or while it
+ * can still sign its own head for the round.
+ */
+const jPrefixReadyForWake = (r: EntityReplica, h: ValidatorJHistory | undefined): boolean => {
+  const v = jpView(r);
+  const owed = entityRequiresJPrefixCertificate(r.state) || hasPendingLocalJEvent(v, h);
+  if (!owed || r.jPrefixRound?.certificate !== undefined) return true;
+  const signed = unwrapOr(hasCurrentRoundJPrefixAttestation(v, r.signerId, r.jPrefixRound, h), () => false);
+  if (signed || h === undefined) return false;
+  return unwrapOr(localJPrefixAttestableHeight(v, h), () => null) !== null;
+};
+/**
+ * og entityMempoolNeedsWake: an open active leader with queued txs or J-prefix work it is ready to propose.
+ */
+const entityWakeDue = (r: EntityReplica, h: ValidatorJHistory | undefined): boolean =>
+  isActiveLeader(r) && (r.mempool.length > 0 || jPrefixLeaderWork(r, h)) && jPrefixReadyForWake(r, h) &&
+  r._tag === "open";
+/**
+ * og collectReplicaMempoolWakeInputs + buildRuntimeFrameInput: after the queued inputs, a frame carries one empty
+ * input per replica that should propose (Entity wakes first, then replicas with a proposable Account), each (Entity,
+ * signer) once and never one the queue already names.
+ */
+export const replicaWakes = (
+  rt: Runtime,
+  now: number,
+  queued: readonly RoutedEntityInput[],
+): readonly RoutedEntityInput[] => {
+  const replicas = [...rt.entities];
+  const entityWakes = replicas.filter(([key, r]) => entityWakeDue(r, rt.replicaLocal.get(key)?.jHistory));
+  const accountWakes = replicas.filter(([, r]) => hasProposableAccount(r));
+  const named = new Set(queued.map((i) => replicaKey(i.entityId, i.signerId)));
+  const fresh = firstBy([...entityWakes, ...accountWakes], ([key]) => key, [...named]);
+  return fresh.map(([, r]) => ({
+    entityId: r.state.id,
+    signerId: r.signerId,
+    input: { kind: "txs", timestamp: BigInt(now), txs: [] },
+  }));
 };
 /** og: a wake or an accounts-now nudge enters only as this Runtime's own marked tx. */
 const forgeryOf = (tx: EntityTx, ctx: RuntimeCtx): string | undefined => {
