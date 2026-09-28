@@ -257,6 +257,20 @@ describe(seedTag("account-consensus: driven scenarios"), () => {
     expect([idle._tag, idle.mempool.length]).toEqual(["open", 0]);
   });
 
+  test("DEPARTS: a settlement transition whose workspace is gone -> og halts the proposal, the rewrite drops it and proposes the rest", async () => {
+    const pctx = { runtimeTimestamp: 1_000, quietLogs: true, jReplicas: new Map(), jClaimNodeStore: new Map(), verifyHanko: async () => ({ valid: true, entityId: null }), resolveSettlementBoardAuthority: async () => undefined } as unknown as AccountConsensusContext;
+    const validate = (txs: OgTx[]) => validateProposalTransactions({ consensusContext: pctx, account: makeAccount(L, R), proposalWindow: txs, frameTimestamp: 1_000, frameJHeight: 0, jClaimNodeStore: new Map() });
+    // an update queued against a workspace that settled on chain (or was cleared) before the proposal
+    const ops = [{ type: "r2c", tokenId: 1, amount: 1n }];
+    const stale = { type: "settle_transition", data: { kind: "upsert", revision: 2, previousWorkspaceHash: W("61"), ops, executorIsLeft: true } } as unknown as OgTx;
+    const ogHalt = await validate([scl(1, 5n), stale]).then(() => "og accepted", (e: Error) => e.message);
+    expect(ogHalt).toBe("SETTLEMENT_TRANSITION_PROPOSAL_FAILED:upsert:SETTLEMENT_WORKSPACE_PREVIOUS_MISSING");
+    const tx = { type: "settle_transition", kind: "upsert", revision: 2, previousWorkspaceHash: W("61"), ops, executorIsLeft: true } as WireAccountTx;
+    const proposed = proposeFrom(genesisAB(), ALICE, [TX, tx]).replica;
+    if (proposed._tag !== "proposed") throw new Error(proposed._tag);
+    expect([proposed.candidate.frame.txs, proposed.mempool.length]).toEqual([[TX], 0]);
+  });
+
   test("MATCH: standalone peer 'dispute' witness — unexpected without a local draft, nonce ladder against the stored witness, stored on accept", async () => {
     // og
     const ogVerdict = async (setup: (a: OgReplica, body: string) => void, nonce: number) => {

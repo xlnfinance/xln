@@ -8278,6 +8278,14 @@ const projectionText = (a: AccountBody, diffs: readonly WorkspaceDiff[], forgive
   const projected = chain(foldResult(diffs, start, applyDiff), (m) => foldResult(forgive, m, touch));
   return projected.ok ? null : projected.error;
 };
+/**
+ * og buildPostSettlementDisputeProof's projection when signing this workspace: og's text where it throws, else null. A
+ * workspace whose ops do not compile is left to the hanko path, which refuses it with og's text.
+ */
+export const unsignableWorkspace = (a: AccountBody, w: SettlementWorkspace): string | null => {
+  const compiled = compileOps(w.ops, w.lastModifiedByLeft);
+  return compiled.ok ? projectionText(a, compiled.value.diffs, compiled.value.forgive) : null;
+};
 /** og assertCurrentWorkspace: version, presence, the requested hash's shape, then revision and hash equality. */
 const currentWorkspaceText = (a: AccountBody, revision: number, hash: string): string | null => {
   if (!Number.isSafeInteger(revision) || revision < 1) {
@@ -9840,10 +9848,17 @@ export type ProposalPlan =
 /**
  * og proposal/transactions.ts throwCriticalProposalFailure: a refused matcher/settlement/cross-j-owned tx halts with
  * og's text; others are dropped.
+ *
+ * Departs from og (review/og-issues-halts-2026-09-28.md, issue 3): a settlement transition whose workspace is gone
+ * (settled on chain, or cleared, while it waited in the mempool) is stale, not a broken invariant. og halts the Runtime
+ * on it; the rewrite drops it like any other refused tx.
  */
+const STALE_WORKSPACE = ["SETTLEMENT_WORKSPACE_PREVIOUS_MISSING", "SETTLEMENT_WORKSPACE_MISSING"];
 const proposalHaltText = (tx: WireAccountTx, reason: string): string | null => {
   switch (tx.type) {
-    case "settle_transition": return `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.kind}:${reason}`;
+    case "settle_transition": return STALE_WORKSPACE.includes(reason)
+      ? null
+      : `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.kind}:${reason}`;
     case "swap_resolve": return `SWAP_RESOLVE_PROPOSAL_FAILED: offer=${tx.offerId} error=${reason}`;
     case "cross_pull_lock":
       return `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.pullId} order=${String(tx.crossJurisdiction.orderId)}`
@@ -24062,6 +24077,13 @@ const materializeDeferred =
       // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
       // them
       if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+      // Departs from og (review/og-issues-halts-2026-09-28.md, issue 1): og's projection throws here and halts the
+      // Runtime; a peer reaches it with one out-of-range settle_update we auto-approve. The approval expires instead.
+      const unsignable = unsignableWorkspace(child.state, w);
+      if (unsignable !== null) {
+        const expiry = `⚠️ Settlement approval expired: the workspace cannot be signed (${unsignable})`;
+        return ok(settleSay({ ...d, state: forgetDeferred(d.state, peer) }, expiry));
+      }
       const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
       return chain(built, admit);
     });
