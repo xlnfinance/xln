@@ -39915,7 +39915,7 @@ const pairLegRefusal = (
   if (INGRESS_REJECTIONS.has(error._tag)) return ok("CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED");
   const transported = String(leg.from ?? "").trim() !== "";
   const broken = haltsRuntime(error) || error._tag === "no_such_entity";
-  if (broken || !transported || replay) return frameErr(runtimeErrorText(error));
+  if (broken || !transported || replay) return frameErr(haltText(error));
   return ok("CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED");
 };
 /**
@@ -39926,7 +39926,19 @@ const haltsRuntime = (error: RuntimeError): boolean =>
   error._tag === "entity_invariant" || accountThrew(error as EntityError);
 /** A refused input: rejected at its position, or the whole frame refused when og would halt on it. */
 const refuseInput = (b: InputBatch, error: RuntimeError): Result<InputBatch, RuntimeError> =>
-  haltsRuntime(error) ? frameErr(runtimeErrorText(error)) : ok(rejectOut(b, error));
+  haltsRuntime(error) ? frameErr(haltText(error)) : ok(rejectOut(b, error));
+/** What a halted frame is refused with: og's failure text for a thrown or critical Account tx, else its code. */
+const haltText = (error: RuntimeError): string => {
+  switch (error._tag) {
+    case "account_tx_thrown":
+    case "proposal_halt":
+      return error.message;
+    case "rejected_after_ack":
+      return haltText(error.cause);
+    default:
+      return runtimeErrorText(error);
+  }
+};
 /** The Runtime frame every Entity input applies under: the Runtime after its txs, the frame clock, the host context. */
 type FrameScope = { readonly rt: Runtime; readonly timestamp: bigint; readonly ctx: RuntimeCtx };
 /** og: a `txs` or J-prefix input takes the frame's timestamp. */
