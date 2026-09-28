@@ -12112,7 +12112,6 @@ export type EntityError =
   | EntityRootError
   | EntityFrameHashError
   | Tagged<
-      | "account_exists"
       | "no_such_account"
       | "create_ack_required"
       | "account_envelope"
@@ -12767,6 +12766,8 @@ const wireData = (tx: EntityTx): unknown => {
       ...(tx.data.feeTokenId === undefined ? {} : { feeTokenId: Number(tx.data.feeTokenId) }),
     };
     case "accountInput": return wireAccountInput(tx.data);
+    // og types this token id as a bigint (types/entity-tx.ts:479); a number here changes the command and action hashes
+    case "entityProviderTransfer": return tx.data;
     default:
       return "tokenId" in tx.data && tx.data.tokenId !== undefined
         ? { ...tx.data, tokenId: Number(tx.data.tokenId) }
@@ -13933,9 +13934,6 @@ const seedAccount = (
 ): Result<Draft, EntityError> => {
   const credit = data.tokenId ?? "1", requested = data.rebalancePolicy, hub = hubConfigOf(state);
   const tokens = [...new Set([credit, ...DEFAULT_ACCOUNT_TOKEN_IDS])].filter((t) => Number(t) > 0) as TokenId[];
-  if (requested !== undefined && !policySane(requested)) {
-    return invariant(`REBALANCE_POLICY_INVALID:token=${Number(credit)}`);
-  }
   const policyOf = (t: TokenId): Result<RebalancePolicy, EntityError> =>
     (requested !== undefined && t === credit ? ok(requested) : rebalanceDefaults(state.jurisdictionConfig, Number(t)));
   const parts = all({
@@ -13961,24 +13959,61 @@ const seedAccount = (
       ({ ...putChild(state, replicas, data.targetEntityId, admitted), outputs: [] }));
   });
 };
+/** og isValidEntityId: a bytes32 hex id in either case (og keys the Account by its lowercase form). */
+const OG_ENTITY_ID = /^0x[0-9a-fA-F]{64}$/;
+/** og handleOpenAccountEntityTx: the Account domain is present, well formed, and the Entity's own jurisdiction. */
+const openDomainIssue = (state: EntityState, asked: Domain | undefined): string | undefined => {
+  if (asked === undefined) return "OPEN_ACCOUNT_DOMAIN_REQUIRED";
+  const domain = accountStateDomainText(asked, "OPEN_ACCOUNT_DOMAIN");
+  if (!domain.ok) return domain.error;
+  return sameDomain(domain.value, state.jurisdiction) ? undefined : "OPEN_ACCOUNT_DOMAIN_MISMATCH";
+};
+/**
+ * og handleOpenAccountEntityTx's refusals, in og's order and with og's text: each is a plain Error, which halts og's
+ * Runtime, so the text is the halt the frame is refused with. A self Account passes every handler check and fails in
+ * og's Account worker when it hydrates the new Account (left must sort before right), after the requested policy.
+ */
+const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountData): string | undefined => {
+  const target = String(data.targetEntityId), peer = lowerText(target);
+  const clockIssue = disputeConfigIssue(data.disputeConfig);
+  const domainIssue = openDomainIssue(state, data.accountDomain);
+  const requested = data.rebalancePolicy;
+  switch (true) {
+    case !OG_ENTITY_ID.test(target):
+      return `INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${target}"`;
+    case data.watchSeed === undefined:
+      return "OPEN_ACCOUNT_WATCH_SEED_REQUIRED";
+    case !isWatchSeed(data.watchSeed):
+      return "OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID";
+    case clockIssue !== undefined:
+      return clockIssue;
+    case domainIssue !== undefined:
+      return domainIssue;
+    case replicas.has(peer as EntityId):
+      return `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${state.id} counterparty=${peer}`;
+    case requested !== undefined && !policySane(requested):
+      return `REBALANCE_POLICY_INVALID:token=${Number(data.tokenId ?? "1")}`;
+    case sameId(peer, state.id):
+      return safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity");
+    default:
+      return undefined;
+  }
+};
 /**
  * og handleOpenAccountEntityTx: no output (the peer learns from the first Account frame); seeds add_delta for tokenId
- * + defaults and an optional credit line.
+ * + defaults and an optional credit line, on the Account keyed by the target's lowercase id.
  */
 const openChild = (
   state: EntityState, replicas: Replicas, tx: Extract<EntityTx, { type: "openAccount" }>, now: bigint,
 ): Result<Draft, EntityError> => {
-  const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = tx.data;
+  const refusal = openRefusal(state, replicas, tx.data);
+  if (refusal !== undefined) return invariant(refusal);
+  const data = { ...tx.data, targetEntityId: lowerText(tx.data.targetEntityId) as EntityId };
+  const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = data;
   const id = accountId(state.id, target);
   if (!id.ok) return err({ _tag: "self_account" });
   const opening = genesisReplica(id.value, { domain: accountDomain, watchSeed, disputeConfig });
-  return chain(opening, (opened): Result<Draft, EntityError> => {
-    switch (true) {
-      case !sameDomain(opened.state.terms.domain, state.jurisdiction): return err({ _tag: "domain_mismatch" });
-      case replicas.has(target): return err({ _tag: "account_exists", target });
-      default: return seedAccount(state, replicas, tx.data, opened, now);
-    }
-  });
+  return chain(opening, (opened) => seedAccount(state, replicas, data, opened, now));
 };
 /** og createInboundAccountState: an unknown peer's first proposal (height 1) opens the Account from its envelope. */
 const inboundChild = (
@@ -21591,12 +21626,14 @@ const committedRoute = (
       return ok(hops);
   }
 };
-/** og normalizeAccountStateDomain: a positive chain id and a checksum-valid depository, lowercased. */
-const accountStateDomain = (d: Domain): Result<Domain, EntityError> => {
+/** og normalizeAccountStateDomain(domain, code): a positive chain id and a checksum-valid depository, lowercased. */
+const accountStateDomainText = (d: Domain, code: string): Result<Domain, string> => {
   const shown = String(d.depositoryAddress || "") || "missing";
-  const refusal = `ACCOUNT_STATE_DOMAIN_INVALID: chainId=${String(d.chainId)} depository=${shown}`;
-  return mapErr(domainOf(d), (): EntityError => ({ _tag: "entity_invariant", reason: refusal }));
+  return mapErr(domainOf(d), () => `${code}_INVALID: chainId=${String(d.chainId)} depository=${shown}`);
 };
+const accountStateDomain = (d: Domain): Result<Domain, EntityError> =>
+  mapErr(accountStateDomainText(d, "ACCOUNT_STATE_DOMAIN"), (reason): EntityError =>
+    ({ _tag: "entity_invariant", reason }));
 /**
  * og materializeLocallyAuthoredEntityTx for openAccount: the Entity's jurisdiction commits the Account domain; the
  * dispute clock is canonical and the watch seed lowercase.
@@ -24010,29 +24047,41 @@ const settlementHankoDraft = (
     });
   });
 };
+/** A queued hanko intent for the current workspace signed at a stale nonce, and that workspace's hash. */
+type StaleHankoIntent = { readonly hash: string; readonly stale: (tx: WireAccountTx) => boolean };
 /**
- * og refreshStaleUncommittedSettlementHankos for one idle, unsigned Account: a queued hanko intent signed at a stale
- * nonce is dropped and its approval deferred again.
+ * og isStaleUncommittedSettlementHanko on one idle, unsigned Account (application.ts:510-519, :524-529): the stale
+ * hanko intents og refreshStaleUncommittedSettlementHankos finds, or undefined when the refresh does not apply.
  */
-const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
-  const child = d.accountReplicas.get(peer);
-  const w = child?.state.settlement;
-  if (child === undefined || child.mempool.length === 0 || w === undefined) return ok(d);
-  if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(d);
-  const refresh = (hash: string): Result<Draft, EntityError> => {
-    const expected = nextSettlementNonce(child);
+const staleHankoIntent = (child: AccountReplica): Result<StaleHankoIntent | undefined, EntityError> => {
+  const w = child.state.settlement;
+  if (child.mempool.length === 0 || w === undefined) return ok(undefined);
+  if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(undefined);
+  const expected = nextSettlementNonce(child);
+  return map(bodyInvariant(canonicalWorkspaceHash(child.state, w)), (hash) => {
     const stale = (tx: WireAccountTx): boolean =>
       tx.type === "settle_transition" &&
       tx.kind === "hanko" &&
       tx.revision === w.revision &&
       tx.workspaceHash.toLowerCase() === hash &&
       tx.settlementNonce !== expected;
-    if (!child.mempool.some(stale)) return ok(d);
-    const fresh = { ...child, mempool: child.mempool.filter((tx) => !stale(tx)) } as AccountReplica;
-    const deferred = deferApproval(d.state, peer, hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
-    return map(deferred, (state) => ({ ...d, ...putChild(state, d.accountReplicas, peer, fresh) }));
-  };
-  return chain(bodyInvariant(canonicalWorkspaceHash(child.state, w)), refresh);
+    return child.mempool.some(stale) ? { hash, stale } : undefined;
+  });
+};
+/**
+ * og refreshStaleUncommittedSettlementHankos for one Account: a stale hanko intent re-defers its approval
+ * (application.ts:546-556). og's filter of the mempool (:541-545) reaches only the Entity's TypeScript view: the
+ * Account worker never receives it, and rscore/ts-worker/provider.ts #executeOutbound (materializeOutboundAccounts)
+ * then replaces that view with the worker's post-account. So the committed Account keeps the stale hanko queued.
+ */
+const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
+  const child = d.accountReplicas.get(peer);
+  if (child === undefined) return ok(d);
+  return chain(staleHankoIntent(child), (intent) => {
+    if (intent === undefined) return ok(d);
+    const deferred = deferApproval(d.state, peer, intent.hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
+    return map(deferred, (state) => ({ ...d, state }));
+  });
 };
 /**
  * og materializeDeferredSettlementApprovals for one Account: an idle Account's still-current approval becomes its hanko
@@ -24047,47 +24096,61 @@ const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError>
 const materializeDeferred =
   (ctx: FoldContext, arrived: Replicas) =>
   (d: Draft, [peer, approved]: readonly [string, string]): Result<Draft, EntityError> => {
-    const self = d.state.id;
     const id = peer as EntityId;
     const child = d.accountReplicas.get(id);
     if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
-    const visible = arrived.get(id) ?? child;
-    if (child._tag === "proposed" || settlePending(visible)) return ok(d);
-    const w = child.state.settlement;
-    const expired = settleSay(
-      { ...d, state: forgetDeferred(d.state, peer) },
-      "⚠️ Settlement approval expired because the workspace changed",
-    );
-    const admit = (built: HankoDraft): Result<Draft, EntityError> => {
-      const clock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
-      const admitted = admitAt(child, [built.tx], self, clock, pendingVerify(ctx.verify, self));
-      if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) {
-        return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
-      }
-      return ok({
-        ...d,
-        ...putChild(forgetDeferred(d.state, peer), d.accountReplicas, id, admitted.value),
-        hashes: [...(d.hashes ?? []), ...built.hashes],
-        touched: [...(d.touched ?? []), id],
-      });
-    };
-    const current = whenDefined(w, (ws) => bodyInvariant(canonicalWorkspaceHash(child.state, ws)));
-    return chain(current, (hash) => {
-      if (w === undefined || hash !== approved) return ok(expired);
-      // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
-      // them
-      if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
-      // Departs from og (review/og-issues-halts-2026-09-28.md, issue 1): og's projection throws here and halts the
-      // Runtime; a peer reaches it with one out-of-range settle_update we auto-approve. The approval expires instead.
-      const unsignable = unsignableWorkspace(child.state, w);
-      if (unsignable !== null) {
-        const expiry = `⚠️ Settlement approval expired: the workspace cannot be signed (${unsignable})`;
-        return ok(settleSay({ ...d, state: forgetDeferred(d.state, peer) }, expiry));
-      }
-      const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
-      return chain(built, admit);
+    const seen = arrived.get(id) ?? child;
+    return chain(staleHankoIntent(child), (intent) => {
+      // og's idle check (application.ts:463) reads the Entity view the refresh filtered (:541-545), without the
+      // stale hanko the committed Account still queues
+      const mempool = intent === undefined ? seen.mempool : seen.mempool.filter((tx) => !intent.stale(tx));
+      return materializeVisible(ctx, d, peer, approved, { ...seen, mempool } as AccountReplica);
     });
   };
+/** og materializeDeferredSettlementApprovals past the refresh, with the Account as its idle check sees it. */
+const materializeVisible = (
+  ctx: FoldContext, d: Draft, peer: string, approved: string, visible: AccountReplica,
+): Result<Draft, EntityError> => {
+  const self = d.state.id;
+  const id = peer as EntityId;
+  const child = d.accountReplicas.get(id);
+  if (child === undefined) return invariant(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${peer}`);
+  if (child._tag === "proposed" || settlePending(visible)) return ok(d);
+  const w = child.state.settlement;
+  const expired = settleSay(
+    { ...d, state: forgetDeferred(d.state, peer) },
+    "⚠️ Settlement approval expired because the workspace changed",
+  );
+  const admit = (built: HankoDraft): Result<Draft, EntityError> => {
+    const clock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
+    const admitted = admitAt(child, [built.tx], self, clock, pendingVerify(ctx.verify, self));
+    if (!admitted.ok || admitted.value.mempool.length !== child.mempool.length + 1) {
+      return invariant(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${peer}`);
+    }
+    return ok({
+      ...d,
+      ...putChild(forgetDeferred(d.state, peer), d.accountReplicas, id, admitted.value),
+      hashes: [...(d.hashes ?? []), ...built.hashes],
+      touched: [...(d.touched ?? []), id],
+    });
+  };
+  const current = whenDefined(w, (ws) => bodyInvariant(canonicalWorkspaceHash(child.state, ws)));
+  return chain(current, (hash) => {
+    if (w === undefined || hash !== approved) return ok(expired);
+    // og: once a peer Hanko pins the proof, ordinary txs are frozen and cannot drain; the counter-Hanko goes ahead of
+    // them
+    if (visible.mempool.length > 0 && !workspaceSigned(w)) return ok(d);
+    // Departs from og (review/og-issues-halts-2026-09-28.md, issue 1): og's projection throws here and halts the
+    // Runtime; a peer reaches it with one out-of-range settle_update we auto-approve. The approval expires instead.
+    const unsignable = unsignableWorkspace(child.state, w);
+    if (unsignable !== null) {
+      const expiry = `⚠️ Settlement approval expired: the workspace cannot be signed (${unsignable})`;
+      return ok(settleSay({ ...d, state: forgetDeferred(d.state, peer) }, expiry));
+    }
+    const built = settlementHankoDraft(child, isLeft(self, replicaId(child)), id, accountDt(ctx, child));
+    return chain(built, admit);
+  });
+};
 /**
  * og drainPostOrderbookAccountWork before proposePendingAccountFrames: refresh every stale uncommitted hanko intent,
  * then materialize each deferred approval, both in ascending counterparty order.
@@ -25196,13 +25259,19 @@ const semanticRoute = (
 const authBookOwner = (route: CrossRoute): string =>
   trimLower(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
 /**
- * og selfRuntimeContinuationTxTypes this port carries: exact next-frame work a certified frame emitted back to its own
- * Entity.
+ * og selfRuntimeContinuationTxTypes: the work a certified frame emits back to its own Entity, applied in the same
+ * Runtime frame.
  */
 const SELF_CONTINUATIONS: ReadonlySet<string> = new Set([
+  "disputeFinalize",
+  "j_abort_sent_batch",
+  "j_broadcast",
   "orderbookSweepCrossJurisdiction",
   "prepareDispute",
+  "processHtlcTimeouts",
   "requestCrossJurisdictionClear",
+  "settle_execute",
+  "settle_propose",
 ]);
 /**
  * One certified runtime output's edge, normalized: who sent it, under which signer, to whom, and the receiver's state.
@@ -25552,19 +25621,40 @@ const hostDraft = (d: Draft, s: BookHostStep, timestamp: bigint): Draft => {
  */
 const clearDraft = (d: Draft, s: CrossHostStep, timestamp: bigint): Draft =>
   s.accountTxs.reduce(queueTouching, hostDraft(d, s, timestamp));
+/** Who publishes a committed frame's outputs: the Entity, this replica's signer, and the frame's emitter. */
+export type Publisher = { readonly entity: EntityId; readonly self: Address; readonly emitter: string };
+/** og getAccountOnlyEntityTx: a raw Account message is exactly one accountInput. */
+const accountOnly = (txs: readonly EntityTx[]): boolean => txs.length === 1 && txs[0]?.type === "accountInput";
 /**
- * og materializeCommittedEntityOutputs: a cross-j command leaves only from the frame's emitter, stamped with its
- * signer; wakes pass on every replica.
+ * og materializeCommittedEntityOutputs' canonical Runtime output for one mutating output, signed by the emitter: a
+ * command this Entity's handlers already wrapped unsigned (crossOutputInput) is stamped, any other txs are wrapped.
  */
-const publishCommitted = (outputs: readonly EntityOutput[], self: Address, emitter: string): readonly EntityOutput[] =>
+const runtimeCommand = (p: Publisher, to: EntityId, txs: readonly EntityTx[]): EntityTx => {
+  const only = txs.length === 1 ? txs[0] : undefined;
+  if (only?.type === "runtimeOutput" && only.data.sourceSignerId === "") {
+    return { ...only, data: { ...only.data, sourceSignerId: signerId(p.self) } };
+  }
+  const data: RuntimeOutputData = {
+    protocol: "cross-j",
+    sourceEntityId: lower(p.entity),
+    sourceSignerId: signerId(p.self),
+    targetEntityId: lower(to),
+    entityTxs: txs,
+  };
+  return { type: "runtimeOutput", data };
+};
+/**
+ * og materializeCommittedEntityOutputs: a wake (no txs) and a raw Account message pass on every replica; every other
+ * mutating output is one canonical cross-j runtimeOutput, left only by the frame's emitter. A local target applies it
+ * in this same Runtime frame (og routeCommittedEntityOutputs, drainImmediateCrossJurisdictionOutputs).
+ */
+export const publishCommitted = (outputs: readonly EntityOutput[], p: Publisher): readonly EntityOutput[] =>
   outputs.flatMap((o): readonly EntityOutput[] => {
     if (!("input" in o) || o.input.kind !== "txs") return [o];
     const input = o.input;
-    const tx = input.txs.length === 1 ? input.txs[0] : undefined;
-    if (tx?.type !== "runtimeOutput" || tx.data.sourceSignerId !== "") return [o];
-    if (signerId(self) !== signerId(emitter)) return [];
-    const stamped: EntityTx = { ...tx, data: { ...tx.data, sourceSignerId: signerId(self) } };
-    return [{ ...o, input: { ...input, txs: [stamped] } }];
+    if (input.txs.length === 0 || accountOnly(input.txs)) return [o];
+    if (signerId(p.self) !== signerId(p.emitter)) return [];
+    return [{ ...o, input: { ...input, txs: [runtimeCommand(p, o.to, input.txs)] } }];
   });
 const byOrderId = (a: CrossRoute, b: CrossRoute): number => a.orderId.localeCompare(b.orderId);
 /** The materialization a mempool or frame tx already carries for an order: its setup, or its clear. */
@@ -27447,7 +27537,11 @@ const publishFrame = (
     };
     const certified: EntityInput = { kind: "proposal", frame: r.frame, signatures, hankos: [hanko] };
     return done(opened, [
-      ...publishCommitted(draft.outputs, r.signerId, frameEmitter(r.frame, frameHash)),
+      ...publishCommitted(draft.outputs, {
+        entity: draft.state.id,
+        self: r.signerId,
+        emitter: frameEmitter(r.frame, frameHash),
+      }),
       ...toOtherValidators(r.state.id, broadcastBoard(broadcast, draft.state.quorum), r.signerId, certified),
     ]);
   });

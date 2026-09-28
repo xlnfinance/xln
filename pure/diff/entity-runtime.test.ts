@@ -412,7 +412,9 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
   });
   test("MATCH (og OPEN_ACCOUNT_ALREADY_EXISTS, a plain Error): a duplicate openAccount refuses the whole input", () => {
     // og admission joins both opens into one propose; the approved second open throws inside it
-    expect(unwrapErr(propose(teaching([[A, 1n]], 1n), A, [open, open]))).toEqual({ _tag: "entity_invariant", reason: "openAccount:account_exists" });
+    const r = teaching([[A, 1n]], 1n);
+    const reason = `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${r.state.id} counterparty=${BOB.toLowerCase()}`;
+    expect(unwrapErr(propose(r, A, [open, open]))).toEqual({ _tag: "entity_invariant", reason });
   });
   test("MATCH (og open-account.ts:262 + proposePendingAccountFrames): openAccount seeds add_delta for tokenId + [1,3,2] and the credit line; Runtime account work proposes them as the first Account frame", () => {
     const p = unwrap(propose(teaching([[A, 1n]], 1n), A, [openTo(BOB, { tokenId: unwrap(tokenId("5")), creditAmount: 9n })]));
@@ -487,7 +489,7 @@ describe(seedTag("entity-runtime: entity tx fold (ER-7, ER-12, ER-13, ER-14)"), 
     // og admission joins the opens into one signed propose; its approved duplicate open throws a plain Error inside
     // it (OPEN_ACCOUNT_ALREADY_EXISTS), a local bug by og's failure taxonomy, so the Runtime halts and nothing commits.
     // Two local lanes merge into one input; a lane from another origin stays apart but only fills the same mempool.
-    const halted = { _tag: "runtime_frame" as const, code: "openAccount:account_exists" };
+    const halted = { _tag: "runtime_frame" as const, code: `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${ALICE} counterparty=${BOB.toLowerCase()}` };
     const merged = applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, input: txs([open]) }] }, verifiers);
     expect(unwrapErr(merged)).toEqual(halted);
     const out = applyRuntime(rt, { runtimeTxs: [], entityInputs: [{ entityId: ALICE, signerId: A, input: txs([open, open]) }, { entityId: ALICE, signerId: A, from: "0x" + "77".repeat(20), input: txs([open]) }] }, verifiers);

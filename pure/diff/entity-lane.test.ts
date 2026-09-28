@@ -385,7 +385,7 @@ describe(seedTag("entity-lane: cross-j setup handlers (og entity/tx/handlers/cro
 });
 
 // ---- og certified Entity -> Entity lane: publication, runtimeOutput authorization, default-proposer materialization ----
-import { selectCommitPhaseTxs, stackIdOf, type EntityOutput } from "../xln.ts";
+import { publishCommitted, selectCommitPhaseTxs, stackIdOf, type EntityOutput } from "../xln.ts";
 import { ogOf } from "./og-state.ts";
 
 /** An og EntityState for a live og call, read from a rewrite replica at a frame timestamp. */
@@ -506,6 +506,57 @@ describe(seedTag("entity-lane: certified Entity -> Entity lane (og consensus/out
     }
     expect(outcomes.has("ok")).toBe(true);
     expect(outcomes.size).toBeGreaterThan(6);
+  });
+
+  test("MATCH: materializeCommittedEntityOutputs on 300 random committed outputs -- wakes and raw Account messages pass on every replica, a self j_broadcast and a cross command become one runtimeOutput left only by the emitter", () => {
+    // og finalizePendingBatch's self j_broadcast is one such output: published as a runtimeOutput, a local target applies it in the same
+    // Runtime frame (og drainImmediateCrossJurisdictionOutputs), never in the next one
+    const r = rng(62), seen = new Set<string>();
+    const inner = { type: "prepareCrossJurisdictionSwap", data: { route: { orderId: "o" } } } as unknown as EntityTx;
+    const lowerOut = (entityId: string, signerId: string | undefined, entityTxs: readonly unknown[]) =>
+      ({ entityId: entityId.toLowerCase(), ...(signerId === undefined ? {} : { signerId: signerId.toLowerCase() }), entityTxs });
+    /** One raw output of a committed ALICE frame: the rewrite's, and og's execution.outputs row. */
+    const rawOutput = (): { kind: string; rw: EntityOutput; og: { entityId: string; signerId?: string; entityTxs: unknown[] } } => {
+      const to = pick(r, [ALICE, BOB]), signer = SIGNERS.get(to)!;
+      switch (int(r, 4)) {
+        case 0:
+          return { kind: "wake", rw: { to, signerId: signer, input: { kind: "txs", timestamp: NOW, txs: [] } }, og: { entityId: to, signerId: signer, entityTxs: [] } };
+        case 1: {
+          const broadcast = { type: "j_broadcast", data: {} } as EntityTx;
+          return { kind: "j_broadcast", rw: { to: ALICE, signerId: aliceAddr, input: { kind: "txs", timestamp: NOW, txs: [broadcast] } }, og: { entityId: ALICE, signerId: aliceAddr, entityTxs: [broadcast] } };
+        }
+        case 2: {
+          const tx = { type: "accountInput", data: { fromEntityId: ALICE, toEntityId: BOB, height: 1 } } as unknown as EntityTx;
+          return { kind: "account", rw: { to: BOB, tx } as EntityOutput, og: { entityId: BOB, entityTxs: [tx] } };
+        }
+        default: {
+          const data = { protocol: "cross-j" as const, sourceEntityId: ALICE.toLowerCase(), sourceSignerId: "", targetEntityId: to.toLowerCase(), entityTxs: [inner] };
+          return { kind: "cross", rw: { to, signerId: signer, input: { kind: "txs", timestamp: NOW, txs: [{ type: "runtimeOutput", data }] } }, og: { entityId: to, signerId: signer, entityTxs: [inner] } };
+        }
+      }
+    };
+    for (let i = 0; i < 300; i++) {
+      const outputs = Array.from({ length: 1 + int(r, 4) }, rawOutput), emitter = r() < 0.75 ? aliceAddr : bobAddr;
+      const og = materializeCommittedEntityOutputs(outputs.map((o) => o.og) as never, ALICE, aliceAddr.toLowerCase(), emitter === aliceAddr) as unknown as { entityId: string; signerId?: string; entityTxs: unknown[] }[];
+      const rw = publishCommitted(outputs.map((o) => o.rw), { entity: ALICE, self: aliceAddr, emitter });
+      const rwRows = rw.map((o) => ("tx" in o ? lowerOut(o.to, undefined, [o.tx]) : lowerOut(o.to, o.signerId, o.input.kind === "txs" ? o.input.txs : [])));
+      expect(`${i}:${stableJson(rwRows)}`).toBe(`${i}:${stableJson(og.map((o) => lowerOut(o.entityId, o.signerId, o.entityTxs)))}`);
+      outputs.forEach((o) => seen.add(`${o.kind}:${emitter === aliceAddr}`));
+    }
+    expect(seen.size).toBe(8);
+  });
+
+  test("MATCH: an Entity's own continuations (og selfRuntimeContinuationTxTypes) are authorized to itself; any other self edge is refused", () => {
+    const alice = replicaOf(network(), ALICE), ogAlice = ogEntityState(alice, T0);
+    const kinds = ["disputeFinalize", "j_abort_sent_batch", "j_broadcast", "orderbookSweepCrossJurisdiction", "prepareDispute", "processHtlcTimeouts",
+      "settle_execute", "settle_propose", "chat", "directPayment", "entityCommand"];
+    for (const type of kinds) {
+      for (const signer of [aliceAddr.toLowerCase(), bobAddr.toLowerCase()]) {
+        const data = { protocol: "cross-j" as const, sourceEntityId: ALICE, sourceSignerId: signer, targetEntityId: ALICE, entityTxs: [{ type, data: {} } as unknown as EntityTx] };
+        const og = (() => { try { assertRuntimeOutputAuthorization(data.sourceEntityId, data.sourceSignerId, data.targetEntityId, data.entityTxs as never, ogAlice); return null; } catch (e) { return (e as Error).message; } })();
+        expect(`${type}:${runtimeOutputAuthError(alice.state, data)}`).toBe(`${type}:${og}`);
+      }
+    }
   });
 
   test("MATCH: selectCrossJCommitPhaseTxs defers cross-j setup beside an Account transition", () => {

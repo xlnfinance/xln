@@ -35,7 +35,7 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
   const tried = new Map<string, number>();
   try {
     const [imports, opens] = w.importAll();
-    const setup = [...(await lane.tick(imports, [])), ...(await lane.tick([], opens))];
+    const setup = [...w.evidence, ...(await lane.tick(imports, [])), ...(await lane.tick([], opens))];
     if (setup.length > 0) return { coverage, diffs: setup };
     await w.chain.debugFundReservesBatch(w.ids.map((entityId) => ({ entityId, tokenId: 1, amount: 10n ** 9n })));
     const funded = await lane.tick([], []);
