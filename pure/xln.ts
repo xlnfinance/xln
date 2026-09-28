@@ -8286,6 +8286,12 @@ export const unsignableWorkspace = (a: AccountBody, w: SettlementWorkspace): str
   const compiled = compileOps(w.ops, w.lastModifiedByLeft);
   return compiled.ok ? projectionText(a, compiled.value.diffs, compiled.value.forgive) : null;
 };
+/** The post-settlement proof body a hanko for this workspace would sign on this state; null when none projects. */
+const currentProofBody = (a: AccountBody, w: SettlementWorkspace, dt: DeltaTransformerRef): string | null => {
+  const compiled = compileOps(w.ops, w.lastModifiedByLeft);
+  const hash = compiled.ok ? projectedProofHash(a, compiled.value.diffs, compiled.value.forgive, dt) : compiled;
+  return hash.ok ? hash.value : null;
+};
 /** og assertCurrentWorkspace: version, presence, the requested hash's shape, then revision and hash equality. */
 const currentWorkspaceText = (a: AccountBody, revision: number, hash: string): string | null => {
   if (!Number.isSafeInteger(revision) || revision < 1) {
@@ -9972,6 +9978,15 @@ const refreshableHanko = (r: OpenAccount): RetryRule => {
     return n !== undefined && n.required === required && n.supplied !== required;
   };
 };
+/**
+ * Departs from og (review/og-issues-halts-2026-09-28.md, issue 2): when txs ahead of a settle hanko in the same frame
+ * change its post-settlement proof (a payment staged beside the deferred approval), the hanko stays queued instead of
+ * halting the Runtime in og throwCriticalProposalFailure, and the Entity's hanko refresh re-signs it once the Account
+ * is idle.
+ */
+const outdatedHanko: RetryRule = (tx, e) =>
+  tx.type === "settle_transition" && tx.kind === "hanko"
+  && e._tag === "settlement" && e.reason === "POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH";
 /** The frame a proposal's included txs make, with its proof and the dispute Hanko plan it needs. */
 const framePlan = (
   r: OpenAccount, party: Party, dt: DeltaTransformerRef | undefined,
@@ -10007,7 +10022,8 @@ const planWindow = (
   const folded = proposalFold(r.state, window, ctx);
   const failure: FailureText = (index, e) =>
     accountTxFailure(lenientBefore(r.state, window, index, ctx), txAt(window, index), ctx, e, party.self, r.dispute);
-  const deferred = map(proposalRefusals(window, folded.refused, refreshableHanko(r), failure), (retried) =>
+  const retry: RetryRule = (tx, e) => refreshableHanko(r)(tx, e) || outdatedHanko(tx, e);
+  const deferred = map(proposalRefusals(window, folded.refused, retry, failure), (retried) =>
     withoutAccountTxs(r.mempool, withoutAccountTxs(window, retried)));
   return chain(deferred, (kept) => {
     const [firstRefusal] = folded.refused;
@@ -24012,21 +24028,23 @@ const settlementHankoDraft = (
 };
 /**
  * og refreshStaleUncommittedSettlementHankos for one idle, unsigned Account: a queued hanko intent signed at a stale
- * nonce is dropped and its approval deferred again.
+ * nonce is dropped and its approval deferred again. So is one whose post-settlement proof no longer matches the
+ * Account; og has no such hanko, since proposing it halted the Runtime (outdatedHanko).
  */
-const refreshStaleHanko = (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
+const refreshStaleHanko = (ctx: FoldContext) => (d: Draft, peer: EntityId): Result<Draft, EntityError> => {
   const child = d.accountReplicas.get(peer);
   const w = child?.state.settlement;
   if (child === undefined || child.mempool.length === 0 || w === undefined) return ok(d);
   if (w.nonceAtSign !== undefined || child._tag === "proposed") return ok(d);
   const refresh = (hash: string): Result<Draft, EntityError> => {
     const expected = nextSettlementNonce(child);
+    const body = currentProofBody(child.state, w, accountDt(ctx, child));
     const stale = (tx: WireAccountTx): boolean =>
       tx.type === "settle_transition" &&
       tx.kind === "hanko" &&
       tx.revision === w.revision &&
       tx.workspaceHash.toLowerCase() === hash &&
-      tx.settlementNonce !== expected;
+      (tx.settlementNonce !== expected || (body !== null && !sameHex(tx.postProof.proofBodyHash, body)));
     if (!child.mempool.some(stale)) return ok(d);
     const fresh = { ...child, mempool: child.mempool.filter((tx) => !stale(tx)) } as AccountReplica;
     const deferred = deferApproval(d.state, peer, hash, `SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${peer}`);
@@ -24097,7 +24115,7 @@ const materializeDeferred =
  */
 const materializeSettlements = (d: Draft, ctx: FoldContext, arrived: Replicas): Result<Draft, EntityError> => {
   const peers = [...d.accountReplicas.keys()].toSorted(asc);
-  return chain(foldResult(peers, d, refreshStaleHanko), (refreshed) => {
+  return chain(foldResult(peers, d, refreshStaleHanko(ctx)), (refreshed) => {
     const deferred = [...deferredOf(refreshed.state)].toSorted(([a], [b]) => asc(a, b));
     return foldResult(deferred, refreshed, materializeDeferred(ctx, arrived));
   });
