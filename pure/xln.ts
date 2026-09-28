@@ -17,7 +17,6 @@ export type Tagged<Tag extends string, Extra extends object = {}> =
   Tag extends unknown ? Flat<{ readonly _tag: Tag } & Extra> : never;
 export type Of<T extends { readonly _tag: string }, K extends T["_tag"]> =
   Extract<T, { readonly _tag: K }>;
-export type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** A tagged value: the payload is required (`{}` for none) and cannot carry a `_tag` of its own. */
 export const tag = <T extends string>(_tag: T) =>
   <X extends object & { readonly _tag?: never }>(x: X): Tagged<T, X> => ({ _tag, ...x }) as Tagged<T, X>;
@@ -510,7 +509,6 @@ export type TokenId = Brand<string, "TokenId">;
 export type Address = Brand<string, "Address">;
 export type Hash = Brand<string, "Hash">;
 export type Signature = Brand<string, "Signature">;
-export type HostRoot = Brand<Hash, "HostRoot">;
 export type RuntimeFrameHash = Brand<Hash, "RuntimeFrameHash">;
 export type EntityStateHash = Brand<Hash, "EntityStateHash">;
 export type EntityFrameHash = Brand<Hash, "EntityFrameHash">;
@@ -9759,8 +9757,6 @@ export type AccountGrammar = {
   readonly output: AccountOutput;
   readonly error: AccountReplicaError;
 };
-export type NextAccountPhase<S extends AccountPhase, E extends AccountEvent> = Next<AccountGrammar, S, E>;
-export type AccountCases<E extends AccountEvent> = Cases<AccountGrammar, E>;
 export type AccountApply<R extends AccountReplica = AccountReplica> = Apply<R, AccountOutput>;
 export interface DisputeRequired extends Tagged<"dispute_required", FrameEvidence> {}
 /**
@@ -12155,7 +12151,6 @@ export type EntityGrammar = {
   readonly output: EntityOutput;
   readonly error: EntityError;
 };
-export type NextEntityPhase<S extends EntityPhase, E extends EntityEvent> = Next<EntityGrammar, S, E>;
 /**
  * og HankoWitnessEntry: the quorum Hanko of one secondary `hashesToSign` entry, kept validator-locally for crash-safe
  * external writes.
@@ -41883,7 +41878,6 @@ export type Host = {
   readonly outbox: readonly OutboxEntry[];
   readonly deltaTransformer?: DeltaTransformerRef | undefined;
 };
-export type Stamped = { readonly tx: HostTx; readonly ctx: HostCtx };
 export type HostError =
   | BodyError
   | Tagged<"unsigned" | "chain" | "root" | "version" | "reserve" | "status" | "recipient">
