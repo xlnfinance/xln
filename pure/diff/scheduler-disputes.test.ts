@@ -30,7 +30,7 @@ import { sentBatchOwnsDisputeFinalityAck } from "../../core/entity/tx/j-events.t
 import { handleOpenAccountEntityTx } from "../../core/entity/tx/handlers/account/lifecycle/open-account.ts";
 import { createEmptyEnv } from "../../core/runtime.ts";
 import { createAccountConsensusContext } from "../../core/entity/account/account-consensus-context.ts";
-import { jbOfOg, ogJb, ogReach } from "./og-state.ts";
+import { jbOfOg, ogGenesisProfile, ogJb, ogReach } from "./og-state.ts";
 
 let seed = seedOf(11);
 const rng = (): number => { seed = lcg31(seed); return seed / 0x7fffffff; };
@@ -162,7 +162,7 @@ describe(seedTag("scheduler-disputes: derived deadlines and due wake jobs (og sc
       const tasks = new Map([["hubRebalance", { method: "hubRebalance", intervalMs: 1000, lastRun, enabled: true, params: {} }]]) as Crontab["tasks"];
       const state = withCrontab(entity([aliceAddr]), { ...crontab, tasks });
       const ogHooks = hooks.reduce((m, h) => m.updated(h.id, h), PersistentEntityCollectionMap.empty<unknown>());
-      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
+      const og = { entityId: state.id, height: Number(state.height), timestamp: Number(state.timestamp), lastFinalizedJHeight: state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(state.id), config: ogConfig(state), accounts: PersistentEntityAccountMap.fromEntries([], state.id, computeEntityAccountValueHash),
         paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n }, crontabState: { tasks, hooks: ogHooks } };
       expect(unwrap(entityRootOf(state, new Map()))).toBe(computeCanonicalEntityConsensusStateHash(og as never));
     }

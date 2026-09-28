@@ -19,7 +19,7 @@ import {
 } from "../xln.ts";
 import { ALICE, ANVIL_KEYS, BOB, CAROL, MORE_ANVIL_KEYS, NOW, TERMS, TOKEN, ackInput, aliceAddr, genesisAB, bobAddr, carolAddr, proposeInput, signEntityFrame, signManifestAs, signerAddress, unwrap, unwrapErr, verifiers } from "../xln_run.ts";
 import { consensusBytes, ogAfterCommands, ogApplyCommand, ogAuthored, ogAuthorVerdict, ogCommandState, ogFenceAfter, wired } from "./og-author.ts";
-import { ogOf, withOg } from "./og-state.ts";
+import { ogGenesisProfile, ogOf, withOg } from "./og-state.ts";
 
 const A = aliceAddr; // lexicographically lower (anvil-keyed: og quorum Hankos need real signatures)
 const B = bobAddr; // lexicographically higher
@@ -144,7 +144,7 @@ const ogEntityState = (r: EntityReplica, committed: Record<string, unknown>, jur
   return {
     entityId: r.state.id, height: Number(r.state.height), timestamp: Number(r.state.timestamp),
     config: { mode: "proposer-based", threshold: r.state.quorum._tag === "teaching" ? r.state.quorum.threshold : 0n, validators: members.map(([a]) => a), shares: Object.fromEntries(members.map(([a, m]) => [a, m.shares])), ...(jurisdiction === undefined ? {} : { jurisdiction }) },
-    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), ...committed,
+    accounts: PersistentEntityAccountMap.fromEntries([], r.state.id, computeEntityAccountValueHash), lastFinalizedJHeight: r.state.jFinality.height, reserves: new Map(), profile: ogGenesisProfile(r.state.id), ...committed,
   };
 };
 
@@ -162,7 +162,7 @@ describe(seedTag("entity-runtime: entity state root commits every og field (H6)"
     const r = teaching([[A, 1n]], 1n), og = ogEntityState(r, { paybook: { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 0n } }, OG_UNREGISTERED_J);
     const rootRw = (committed: EntityCommitted) => unwrap(entityRootOf(withOg(r.state, committed), r.accountReplicas));
     expect(rootRw({})).toBe(computeCanonicalEntityConsensusStateHash(og));
-    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x", isHub: false }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
+    for (const [field, value] of [["reserves", new Map([[1, 5n]])], ["lastFinalizedJHeight", 42], ["profile", { name: "x", isHub: false, avatar: "", bio: "", website: "" }], ["paybook", { entries: EMPTY, feesEarned: 12n }]] as const) {
       const ogValue = field === "paybook" ? { entries: PersistentEntityCollectionMap.empty("paybookHashlock"), feesEarned: 12n } : value;
       expect(rootRw({ [field]: value })).toBe(computeCanonicalEntityConsensusStateHash({ ...og, [field]: ogValue }));
       expect(rootRw({ [field]: value })).not.toBe(rootRw({}));

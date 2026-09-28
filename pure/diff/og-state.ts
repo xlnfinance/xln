@@ -1,5 +1,5 @@
 // The Entity's typed sections cross the og boundary here. og hands in its records (jBatchState, hubRebalanceConfig,
-// lending, profile.isHub), the rewrite holds typed sections, and the root commits og's records back. A test that seeds
+// lending, profile, reserves, ...), the rewrite holds typed sections, and the root commits og's records back. A test that seeds
 // or compares og-named sections goes through these.
 import {
   importJBatchState, ogJBatchOf, ogSections, withOgSections,
@@ -7,6 +7,9 @@ import {
 } from "../xln.ts";
 import { unwrap } from "../xln_run.ts";
 
+/** og buildGenesisReplica's profile, which the rewrite also reads a profile-less record as. */
+export const ogGenesisProfile = (id: string, isHub = false): Record<string, unknown> =>
+  ({ name: `Entity ${id.slice(-4)}`, isHub, avatar: "", bio: "", website: "" });
 /** The committed sections under og's names. */
 export const ogOf = (s: EntityState): EntityCommitted => ogSections(s);
 /** The state with some og-named sections replaced; a section og cannot reach fails the test. */

@@ -126,9 +126,9 @@ describe(seedTag("lending-hub: committed lending followup (og committed-lending-
       });
       const withAccount = rng() < 0.95;
       const replicas = new Map(withAccount ? [[peer, rwReplica(hub, peer, rows, mempool)]] : []);
-      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { isHub: true }, hubRebalanceConfig: HUB_CONFIG } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } })).state;
+      const state0 = unwrap(createEntity({ id: hub, jurisdiction: JUR, threshold: 1n, members: new Map([[aliceAddr, { shares: 1n }]]), committed: { ...(isHub ? { profile: { name: "Hub", isHub: true, avatar: "", bio: "", website: "" }, hubRebalanceConfig: HUB_CONFIG } : {}), ...(book === undefined ? {} : { lending: cloneBook(book) }) } })).state;
       const rw = lendingFollowups(state0, replicas, peer, frames, BigInt(ts));
-      const og: any = { entityId: hub, timestamp: ts, ...(isHub ? { profile: { isHub: true }, hubRebalanceConfig: HUB_CONFIG } : {}), accounts: new Map(withAccount ? [[peer, ogReplica(hub, peer, rows, mempool)]] : []), ...(book === undefined ? {} : { lending: cloneBook(book) }) };
+      const og: any = { entityId: hub, timestamp: ts, ...(isHub ? { profile: { name: "Hub", isHub: true, avatar: "", bio: "", website: "" }, hubRebalanceConfig: HUB_CONFIG } : {}), accounts: new Map(withAccount ? [[peer, ogReplica(hub, peer, rows, mempool)]] : []), ...(book === undefined ? {} : { lending: cloneBook(book) }) };
       const accountTxs: any[] = [];
       let refused: string | undefined;
       try {

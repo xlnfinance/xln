@@ -191,7 +191,7 @@ describe(seedTag("entity-txs-3: signed commands, propose and vote (og command/in
     const folded = unwrap(foldTxs(r.state, r.accountReplicas, authored, { verify: hankoVerify, timestamp: NOW })).draft;
     const pending = [...(folded.state.committed["proposals"] as ReadonlyMap<string, unknown>).keys()];
     expect(pending.length).toBe(1);
-    expect(ogOf(folded.state)["profile"]).toBeUndefined();
+    expect(ogOf(folded.state)["profile"]).toEqual(ogOf(r.state)["profile"]);
     expect(folded.events).toEqual([{ type: "text", validatorId: aliceAddr.toLowerCase(), message: "hello" }]);
     const vote = unwrap(authorEntityTxs(folded.state, bobAddr, [{ type: "vote", data: { proposalId: pending[0] as string, voter: bobAddr, choice: "yes" } }], signAs(bobAddr)));
     const voted = unwrap(foldTxs(folded.state, folded.accountReplicas, vote, { verify: hankoVerify, timestamp: NOW + 1n })).draft;

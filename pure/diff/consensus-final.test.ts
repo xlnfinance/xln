@@ -63,7 +63,7 @@ describe(seedTag("consensus-final: the profile descriptor is re-certified by the
       const id = hex32(), many = i % 25 === 0, count = many ? 101 + ri(6) : ri(6);
       const jc = pick([undefined, { name: "  Anvil ", entityProviderAddress: "0xAbCdEf0000000000000000000000000000000001" }, { name: "", entityProviderAddress: "0x" + "22".repeat(20) }]);
       const hub = pick([undefined, { routingFeePPM: ri(500), baseFee: BigInt(ri(9)), policyVersion: 1, rebalanceLiquidityFeeBps: BigInt(ri(50)), rebalanceGasFee: 7n, hubName: pick(["", "H1"]), ...(rng() < 0.5 ? { swapTakerFeeBps: ri(30), rebalanceBaseFee: 3n, rebalanceTimeoutMs: 60_000 } : {}) }]);
-      const profile = { name: pick(["", " Hub A ", "b"]), isHub: hub !== undefined, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "business", sectors: pick([[], ["finance"]]) } : {}) };
+      const profile = { name: pick(["", " Hub A ", "b"]), isHub: hub !== undefined, avatar: pick(["", "a.png"]), bio: "", website: pick(["", "https://x"]), ...(rng() < 0.3 ? { entityKind: "company", ...(rng() < 0.5 ? {} : { sectors: ["finance"] }) } : {}) };
       const key = pick([undefined, pubOf(hex32())]);
       const replicas = new Map<string, unknown>(), ogAccounts = new Map<string, unknown>();
       for (let a = 0; a < count; a++) {
