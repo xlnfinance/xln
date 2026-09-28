@@ -14,7 +14,7 @@ import { beginAccountTransition, accountTransitionView, commitAccountTransition,
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
 import {
   accountId, accountRuntimeEvents, accountTxMessages, accountTerms, applyAccountBody, applyRuntime, applyRuntimeTx, committed, convertOutput, createEntity, createRuntime, lazyBoardEntityId, spawn, entityId as rwEntityId, entityRootOf, genesisAccount, genesisAccountBody, replicaKey,
-  type AccountBody, type Address, type EntityId, type EntityTx, type FoldCtx, type RoutedEntityInput, type ImportConfig, type JReplica, type Runtime, type RuntimeTx,
+  UNNAMED_PAIRS, type AccountBody, type Address, type EntityId, type EntityTx, type FoldCtx, type RoutedEntityInput, type ImportConfig, type JReplica, type Runtime, type RuntimeTx,
 } from "../xln.ts";
 import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, unwrap, verifiers, genesisAB, proposeInput, offerOf, ackInput, hankoVerify } from "../xln_run.ts";
 import { admit, applyAccountInput, type AccountReplica, type AccountInput, type OpenAccount, type WireAccountTx } from "../xln.ts";
@@ -117,6 +117,13 @@ describe(seedTag("runtime-final: importReplica genesis (og tx-handlers.ts buildG
       if (bob === undefined) throw new Error("replica missing");
       expect(unwrap(entityRootOf(bob.state, bob.accountReplicas))).toBe(computeCanonicalEntityConsensusStateHash(ogBob.state as never));
       expect(rt.replicaLocal.get(replicaKey(entityId as EntityId, bobAddr))?.position ?? null).toEqual((ogBob.position ?? null) as never);
+      // og reuseExistingReplica: re-importing the uncertified Entity normalizes its swap pairs, here from a snapshot restored without them
+      const aliceKey = replicaKey(entityId as EntityId, aliceAddr), ogAlice = env.state.eReplicas.get(`${entityId}:${aliceAddr.toLowerCase()}`) as { state: Record<string, unknown> };
+      delete ogAlice.state["swapTradingPairs"];
+      const erased = { ...rt, entities: new Map([...rt.entities].map(([k, r]) => [k, k === aliceKey ? { ...r, state: { ...r.state, swapPairs: UNNAMED_PAIRS } } : r])) } as Runtime;
+      expect(rwCode(applyRuntimeTx(erased, tx, { replay: true }))).toBe(await runOg(env, tx));
+      const again = unwrap(applyRuntimeTx(erased, tx, { replay: true })).entities.get(aliceKey)!;
+      expect(unwrap(entityRootOf(again.state, again.accountReplicas))).toBe(computeCanonicalEntityConsensusStateHash(ogAlice.state as never));
     }
     expect(imported).toBeGreaterThan(20);
   });

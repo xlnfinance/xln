@@ -12998,11 +12998,13 @@ const importMap = <V,>(og: Binary | undefined, field: string): Result<ReadonlyMa
   if (og === undefined) return ok(new Map());
   return og instanceof Map ? ok(og as unknown as ReadonlyMap<string, V>) : err(`a non-map ${field}`);
 };
+const ogSwapPairs = (p: SwapPairs): EntityCommitted =>
+  (p._tag === "pairs" ? { swapTradingPairs: p.pairs as unknown as Binary } : {});
 const ogSmallSections = (state: EntityState): EntityCommitted => ({
   nonces: state.nonces as unknown as Binary,
   proposals: state.proposals as unknown as Binary,
   ...(state.encryptionKey._tag === "key" ? { entityEncryptionPublicKey: state.encryptionKey.publicKey } : {}),
-  ...(state.swapPairs._tag === "pairs" ? { swapTradingPairs: state.swapPairs.pairs as unknown as Binary } : {}),
+  ...ogSwapPairs(state.swapPairs),
   ...ogWallet(state.wallet),
 });
 /** og's root fields the typed sections own. */
@@ -30195,6 +30197,12 @@ const importedReplica = (
     from.accountReplicas,
   );
 /**
+ * og normalizeEntitySwapTradingPairs: it keeps only the jurisdiction's default pairs, then adds every missing default
+ * and sorts them as the defaults are sorted, so whatever the Entity held, it ends with exactly the defaults.
+ */
+const jurisdictionPairs = (im: Importing): SwapPairs =>
+  ({ _tag: "pairs", pairs: defaultEntitySwapPairs(im.jurisdictionConfig.name, im.domain.chainId) });
+/**
  * og reuseExistingReplica: a certified Entity keeps its state (re-import changes validator-local routing only); an
  * uncertified one takes the supplied board and jurisdiction.
  */
@@ -30211,6 +30219,7 @@ const reimport = (
     jurisdiction: im.domain,
     jurisdictionConfig: im.jurisdictionConfig,
     jFinality: rebasedJFinality(replica.state.jFinality, im.jurisdictionConfig),
+    swapPairs: jurisdictionPairs(im),
   };
   return ok(installImported(im, importedReplica(im, replica, state, replica.mempool), drop));
 };
@@ -30247,7 +30256,7 @@ const genesisCommitted = (im: Importing): EntityCommitted => {
       website: "",
     },
     crontabState: { tasks: initCrontab().tasks, hooks: new Map() } as unknown as Binary,
-    swapTradingPairs: defaultEntitySwapPairs(im.jurisdictionConfig.name, im.domain.chainId) as unknown as Binary,
+    ...ogSwapPairs(jurisdictionPairs(im)),
   };
 };
 /** og importReplica genesis: the Entity's first replica. */
