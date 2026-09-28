@@ -4862,6 +4862,8 @@ export type BodyError =
   | Tagged<"rebalance", { reason: string }>
   | Tagged<"lending", { reason: string }>
   | Tagged<"payment_route", { reason: string }>
+  /** og's handler refused the tx before the rewrite's own apply ran: og's text and whether og threw it. */
+  | Tagged<"refused", { failure: AccountTxFailure }>
   | CrossError;
 /**
  * The replica's settlement authority, which og passes through AccountConsensusContext: its Hanko verifier and the
@@ -7617,6 +7619,10 @@ const commits = (before: AccountBody, tx: WireAccountTx, next: AccountStep): Bod
 export const applyAccountBody: Layer<AccountBody, WireAccountTx, FoldCtx, Effect, BodyError> = (a, tx, ctx) => {
   const frozen = settlementFreeze(a, tx);
   if (!frozen.ok) return frozen;
+  // og's handler checks come first, in og's order, and their text is what og hashes
+  // (an empty text is og's early accept: og's handler lets the tx through and the rewrite's own apply decides)
+  const refused = ogHandlerChecks(a, tx, ctx);
+  if (refused !== null && refused.message !== "") return err({ _tag: "refused", failure: refused });
   const unfit = namedTokens(tx).find((n) => !tokenId(n).ok);
   if (unfit !== undefined) return err({ _tag: "token_id", tokenId: unfit });
   return chain(applyArm(a, tx, ctx), (next) =>
@@ -7783,9 +7789,11 @@ export const frameTxMessages = (
     }));
   return unwrapOr(map(foldResult(f.txs, { body: s, messages: [] }, replay), (r) => r.messages), () => []);
 };
-// ---- og per-tx failure text: the rejection or thrown Error og's handler produces for a tx this body refuses ----
-// The handlers above answer with typed refusals. og answers with text, and some of its handlers throw instead,
-// which aborts the whole Entity input. This section walks og's checks in og's order to reproduce that text.
+// ---- the Account tx validator: og's handler checks, in og's order, with og's text ----
+// Every tx passes these checks before the handlers above apply it (applyAccountBody). og answers a refusal with text,
+// and that text is consensus: a peer's refused frame lands in the Entity frame's events ("Rejected account frame:
+// Frame application failed: <text>"), which the frame hash covers. Some og handlers throw instead, which aborts the
+// whole Entity input. Claims and settlement are the exception: og words them from where the apply itself failed.
 /**
  * og ApplyAccountTxResult rejection / thrown Error of one Account tx: og's own message text, and whether og's
  * handler throws (a thrown handler error aborts the whole Entity input; a rejection becomes
@@ -8651,10 +8659,8 @@ const policyFailure = (a: AccountBody, x: TxOf<"rebalance_policy">, ctx: FoldCtx
 };
 
 // ---- og failure text: the whole tx ----
-/** og's handler checks for `tx`, walked in og's order; null when og's handler would not refuse it. */
-const ogHandlerFailure = (
-  a: AccountBody, tx: WireAccountTx, ctx: FoldCtx, e: BodyError, self?: string, witnesses?: DisputeWitnesses,
-): AccountTxFailure | null => {
+/** og's handler checks for `tx`, in og's order: the first refusal, or null when og's handler lets it through. */
+const ogHandlerChecks = (a: AccountBody, tx: WireAccountTx, ctx: FoldCtx): AccountTxFailure | null => {
   switch (tx.type) {
     case "add_delta": return refuseIssue(deltaDraftError(a, tx.tokenId) ?? undefined);
     case "set_credit_limit": return creditLimitFailure(a, tx.tokenId, tx.limit);
@@ -8676,23 +8682,26 @@ const ogHandlerFailure = (
       return firstFailure(draftThrow(a, tx.tokenId), holdOverflowText(a, tx.tokenId, payerIsLeft, absBig(tx.amount)));
     }
     case "cross_pull_close": return crossPullCloseFailure(a, tx, ctx);
-    case "j_event_claim": return claimFailure(a, tx, ctx, e, self);
-    case "settle_transition": return settleFailure(a, tx, ctx, e, witnesses);
+    // og's claim and settlement text depends on where the rewrite's own apply failed
+    case "j_event_claim": case "settle_transition": return null;
   }
 };
 /**
- * og's failure for `tx` refused by this body with `e` under `ctx` (og byLeft = the frame proposer's side): og's
- * handler checks walked in og's order, rendered with og's message text. `self` is the local Entity (og
+ * og's failure for `tx` refused by this body with `e` under `ctx` (og byLeft = the frame proposer's side): the
+ * validator's refusal as it stands, claim and settlement text from where the apply failed, else the rewrite's own
+ * code for a refusal past og's handler. `self` is the local Entity (og
  * proofHeader.fromEntity); `witnesses` are the dispute nonce cursors og names in an account-basis settlement nonce
  * mismatch.
  */
 export const accountTxFailure = (
   a: AccountBody, tx: WireAccountTx, ctx: FoldCtx, e: BodyError, self?: string, witnesses?: DisputeWitnesses,
 ): AccountTxFailure => {
-  if (e._tag === "settlement_frozen") return refusedTx(`SETTLEMENT_SIGNED_ACCOUNT_FROZEN:${ogTxType(tx)}`);
-  const found = ogHandlerFailure(a, tx, ctx, e, self, witnesses);
-  // og's early accepts render as "": the refusal lies past og's handler, in the rewrite's commit step.
-  if (found !== null && found.message !== "") return found;
+  switch (true) {
+    case e._tag === "settlement_frozen": return refusedTx(`SETTLEMENT_SIGNED_ACCOUNT_FROZEN:${ogTxType(tx)}`);
+    case e._tag === "refused": return e.failure;
+    case tx.type === "j_event_claim": return claimFailure(a, tx, ctx, e, self);
+    case tx.type === "settle_transition": return settleFailure(a, tx, ctx, e, witnesses);
+  }
   const code = bodyErrorCode(e);
   return e._tag === "uncommitted" || e._tag === "too_many_rows" ? threwTx(code) : refusedTx(code);
 };

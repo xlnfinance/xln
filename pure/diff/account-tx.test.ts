@@ -311,12 +311,13 @@ describe(seedTag("account-tx: htlc"), () => {
   test("MATCH: 33rd live lock refused by both (MAX_ACCOUNT_HTLC_LOCKS=32)", async () => {
     const s = ogState([ogDelta(1, { leftCreditLimit: 1000n })]);
     for (let i = 0; i < 32; i++) s.locks.put(`x${i}`, { tokenId: 2, amount: 1n, senderIsLeft: true });
-    expect((await handleHtlcLock(ogAccount(s), ogLockTx({ amount: 1n }), true, ogClock())).ok).toBe(false);
+    const og = await handleHtlcLock(ogAccount(s), ogLockTx({ amount: 1n }), true, ogClock());
+    expect(og.ok).toBe(false);
     let { body, ctx } = open(null, 1000n);
     for (let i = 0; i < 32; i++) body = unwrap(apply(body, rwLock(secretOf(100 + i), { amount: 1n }), ctx)).state;
     const r = apply(body, rwLock(secretOf(200), { amount: 1n }), ctx);
     expect(r.ok).toBe(false);
-    expect((r as any).error._tag).toBe("htlc_lock_capacity");
+    expect((r as any).error.failure.message).toBe((og as any).rejection.message);
   });
 
   test("MATCH: htlc_resolve secret/error authority and expiry (payer/beneficiary x timestamp x jHeight x reason) on 400 random resolves", async () => {
