@@ -413,10 +413,11 @@ export const createLane = (cfg: LaneConfig): Lane => {
     if (ogHalt !== undefined) {
       coverage.halts += 1;
       if (committed.ok) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
-      // both refuse the frame, and for the same reason: the rewrite's refusal code is og's halt text, or the failure
-      // og's Account worker wrapped into it
+      // both refuse the frame, and for the same reason: the rewrite's refusal code is og's halt text, or the whole
+      // failure message og's Account worker wrapped into it (`...TS_ACCOUNT_WORKER_FATAL:<n>:<text>\n<stack>`)
       const refusal = String((committed.error as { code?: unknown }).code ?? "");
-      const same = refusal === ogHalt || (refusal !== "" && ogHalt.includes(refusal));
+      const wrapped = [`:${refusal}\\n`, `:${refusal}\n`].some((w) => ogHalt.includes(w));
+      const same = refusal === ogHalt || (refusal !== "" && wrapped);
       return same ? [] : [`${label} og halted (${ogHalt}) but the rewrite refused ${stableJson(committed.error)}`];
     }
     if (!committed.ok) return [`${label} rewrite refused the frame: ${stableJson(committed.error)}`];
