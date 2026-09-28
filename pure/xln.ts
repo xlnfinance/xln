@@ -7664,16 +7664,21 @@ export const accountTxMessages = (
  * og proposal/transactions.ts + incoming replay: every tx's handler messages across a frame folded from `s`; [] if
  * the frame does not fold.
  */
+/**
+ * The handler messages of a frame that already folded once, replayed in order. A replay that fails means the context
+ * differs from the one the frame folded with, so the failure surfaces (it once silently dropped a settlement message
+ * og's frame hash covers).
+ */
 export const frameTxMessages = (
   s: AccountBody, f: AccountFrame, byLeft: boolean, self: string, settlement?: SettlementCtx,
-): readonly string[] => {
+): Result<readonly string[], BodyError> => {
   const ctx = foldCtx(f, byLeft, settlement);
   type Replay = Readonly<{ body: AccountBody; messages: readonly string[] }>;
   const replay = (r: Replay, tx: WireAccountTx): Result<Replay, BodyError> =>
     map(applyAccountBody(r.body, tx, ctx), (next) => ({
       body: next.state, messages: [...r.messages, ...accountTxMessages(r.body, tx, ctx, next.state, self)],
     }));
-  return unwrapOr(map(foldResult(f.txs, { body: s, messages: [] }, replay), (r) => r.messages), () => []);
+  return map(foldResult(f.txs, { body: s, messages: [] }, replay), (r) => r.messages);
 };
 // ---- the Account tx validator: og's handler checks, in og's order, with og's text ----
 // Every tx passes these checks before the handlers above apply it (applyAccountBody). og answers a refusal with text,
@@ -10366,10 +10371,15 @@ const ownAck = <R extends ProposedAccount | ReceivedAccount>(r: R, input: Ack, c
     default: return proceedIf(certifies(ctx.verify, frame.stateHash, input.frameHanko, ctx.party.self));
   }
 };
-/** og replays the received frame's handler messages under the settlement context it folded with. */
+/**
+ * og replays the received frame's handler messages under the settlement context it folded with: og
+ * replayIncomingFrameOnClone collects `processEvents` from the one validating replay, so the context is
+ * peerFrameSettlement's, DeltaTransformer included (a settlement hanko's post-proof body needs it).
+ */
 const receivedFrameSettlement = (r: ReceivedAccount, ctx: AccountContext): SettlementCtx => ({
   verify: ctx.verify,
   proofNonceFloor: r.candidate.floor,
+  ...opt("deltaTransformer", ctx.deltaTransformer),
   ...opt("registeredBoardHash", ctx.counterpartyBoard?.boardHash),
   ...opt("boardAuthority", ctx.boardAuthority),
 });
@@ -10380,25 +10390,25 @@ const acceptReceived = (r: ReceivedAccount, input: Ack, ctx: AccountContext): Re
   const byLeft = proposerIsLeft(r, ctx.party);
   const settled = chain(ackPlan(r, byLeft), (plan) =>
     settleLocal(plan, input.disputeHanko, r.dispute, ctx.party.self, ctx.verify));
-  return map(settled, ({ carried, witnesses }) => {
+  // og consensus/index.ts commit: the frame's handler messages (replayed from the proposer's side),
+  // `🤝 Accepted frame`, then the post-commit rebalance
+  const said = frameTxMessages(r.state, frame, byLeft, ctx.party.self, receivedFrameSettlement(r, ctx));
+  return chain(settled, ({ carried, witnesses }) => map(said, (messages) => {
     const ackOut: AccountAck = {
       height: frame.height, frameHash: frame.stateHash, frameHanko: input.frameHanko, ...opt("disputeHanko", carried),
     };
     const signed = signedBy(ctx.party, input.frameHanko, frameHanko);
     const dispute = storeCounterparty(witnesses, r.disputeHanko);
     const installed = install(r, signed, { dispute, acknowledged: ackOut });
-    // og consensus/index.ts commit: the frame's handler messages (replayed from the proposer's side),
-    // `🤝 Accepted frame`, then the post-commit rebalance
-    const said = frameTxMessages(r.state, frame, byLeft, ctx.party.self, receivedFrameSettlement(r, ctx));
     const post = postCommitRebalance(installed.state, ctx, "frame commit");
     return done<OpenAccount | ReceivedAccount, AccountOutput>(post.replica, [
       { kind: "ack", ...sentBy(r, ctx.party), ...ackOut },
-      ...said.map(accountSay),
+      ...messages.map(accountSay),
       accountSay(`🤝 Accepted frame ${frame.height} from Entity ${ctx.party.peer.slice(-4)}`),
       ...post.outputs,
       ...effectsOut(installed.effects),
     ]);
-  });
+  }));
 };
 const createAck = (r: ReceivedAccount, input: Ack, ctx: AccountContext): ReceivedAckResult =>
   match(ownAck(r, input, ctx), {
