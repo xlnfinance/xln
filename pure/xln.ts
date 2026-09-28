@@ -18564,11 +18564,28 @@ const pendingDispute = (plan: DisputePlan): DisputeHanko | undefined =>
     none: () => undefined,
   });
 /**
- * og accountHasProposableMempool (without the settlement-freeze and HTLC-cap refinements): an active Account with no
- * frame in flight and queued txs.
+ * og accountTxAwaitsPostCommitHanko: our settlement hanko intent is admitted while this Entity frame folds, but its
+ * Hankos are this frame's own manifest entries, still the `pendingHanko` placeholders `installFrame` fills after
+ * quorum. og routes only the forced ACK and proposes the intent on the next Entity frame (the Account wake).
  */
-const proposableChild = (c: AccountReplica | undefined): c is OpenAccount =>
-  c !== undefined && c._tag === "open" && c.mempool.length > 0;
+const awaitsPostCommitHanko = (tx: AccountTx): boolean =>
+  tx.type === "settle_transition" &&
+  tx.kind === "hanko" &&
+  (tx.postProof.hanko === undefined ||
+    tx.postProof.hanko === pendingHanko(tx.postProof.disputeHash) ||
+    tx.settlementHanko === pendingHanko(tx.settlementHash));
+/**
+ * og accountHasProposableMempool: an active Account with no frame in flight and no settlement hanko still waiting for
+ * this Entity frame's quorum, holding a tx a frame could carry: neither an HTLC lock past the lock cap nor a tx a
+ * signed settlement workspace freezes.
+ */
+const proposableChild = (c: AccountReplica | undefined): c is OpenAccount => {
+  if (c === undefined || c._tag !== "open" || c.mempool.some(awaitsPostCommitHanko)) return false;
+  const locksFull = c.state.locks.size >= MAX_ACCOUNT_HTLC_LOCKS;
+  const carried = (tx: WireAccountTx): boolean =>
+    !(locksFull && tx.type === "htlc_lock") && settlementFreeze(c.state, tx).ok;
+  return c.mempool.some(carried);
+};
 const hasProposableAccount = (r: Folded): boolean => [...r.accountReplicas.values()].some(proposableChild);
 /**
  * The Entity draft after an Account answer: the answer's state, both drafts' outputs and events, and the cross-j swaps

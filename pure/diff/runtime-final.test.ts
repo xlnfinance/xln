@@ -793,7 +793,7 @@ describe(seedTag("runtime-final: local Account work (og entity-input-output.ts c
           if (rng() < 0.3) continue;
           const queued = rng() < 0.5 ? 1 + ri(2) : 0, pending = rng() < 0.3;
           const txs = Array.from({ length: queued }, () => ({ type: "add_delta", tokenId: "1" }));
-          rwAccounts.set(peer, { _tag: pending ? "proposed" : "open", mempool: txs });
+          rwAccounts.set(peer, { _tag: pending ? "proposed" : "open", mempool: txs, state: { locks: new Map() } });
           ogAccounts.set(peer.toLowerCase(), { status: "active", mempool: txs.map(() => ({ type: "add_delta", data: { tokenId: 1 } })), state: { locks: new Map() }, ...(pending ? { pendingFrame: { height: 1 } } : {}) });
         }
         const leaderState = active === undefined ? undefined : { activeValidatorId: active, view: 1, changedAtHeight: 0 };
