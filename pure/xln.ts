@@ -26296,22 +26296,14 @@ const applyCommittedCancels = (
     })),
   );
 };
-/**
- * Each cancel's resolve admitted alone; an Account that is missing or refuses it keeps its state, and one that admits
- * it joins the proposal worklist in cancel order (og applySwapCancelRequests,
- * entity/consensus/frame/application.ts:1102).
- */
+/** Each cancel's resolve admitted alone; an Account that is missing or refuses it keeps its state. */
 const admitCancelResolves = (d: Draft, txs: readonly BookTx[]): Draft =>
   txs.reduce((acc, { accountId, tx }) => {
     const id = accountId as EntityId;
     const child = acc.accountReplicas.get(id);
     const admitted = child === undefined ? undefined : admit(child, [tx], acc.state.id);
     return admitted !== undefined && admitted.ok
-      ? {
-          ...acc,
-          ...putChild(acc.state, acc.accountReplicas, id, admitted.value),
-          touched: [...(acc.touched ?? []), id],
-        }
+      ? { ...acc, ...putChild(acc.state, acc.accountReplicas, id, admitted.value) }
       : acc;
   }, d);
 /**
@@ -26387,9 +26379,7 @@ const admitMatcherBatch = (
 };
 /**
  * og commitOrderbookMatchResult: the matcher's Account txs are admitted per Account, its books and pair dimensions
- * installed, then its cross-j fills applied; a frame with new trades reports SwapMatched. Each admitted Account joins
- * the proposal worklist in the matcher's first-seen order, so the fills go out maker, taker, next maker as the trades
- * ran (og applyOrderbookAccountTxs, entity/consensus/frame/application.ts:953).
+ * installed, then its cross-j fills applied; a frame with new trades reports SwapMatched.
  */
 const installMatch = (
   d: Draft,
@@ -26402,21 +26392,16 @@ const installMatch = (
   const sameJ = offers.filter((o) => o.crossJurisdiction === undefined);
   const verified = new Set(sameJ.map((o) => `${o.accountId}:${o.offerId}`));
   const start: Folded = { state: d.state, accountReplicas: d.accountReplicas };
-  const batches = matcherBatches(hub, match.accountTxs, verified, d.state.id);
-  const admitted = chain(batches, (bs) =>
-    map(foldResult(bs, start, admitMatcherBatch), (installed) => ({
-      installed,
-      batchOrder: [...bs.keys()] as EntityId[],
-    })),
+  const admitted = chain(matcherBatches(hub, match.accountTxs, verified, d.state.id), (batches) =>
+    foldResult(batches, start, admitMatcherBatch),
   );
-  return chain(admitted, ({ installed, batchOrder }) =>
+  return chain(admitted, (installed) =>
     chain(tradesMatched(ext, match.books), (matched) => {
       const orderbookExt = { ...withBooks(ext, match.books), pairDimensions: match.pairDimensions };
       const booked: Draft = {
         ...d,
         state: { ...installed.state, orderbookExt },
         accountReplicas: installed.accountReplicas,
-        touched: [...(d.touched ?? []), ...batchOrder],
       };
       const reported: EntityRuntimeEvent = {
         eventName: "SwapMatched",
