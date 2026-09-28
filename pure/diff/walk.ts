@@ -4,7 +4,9 @@
 // committed frame (seed.ts untilCovered), so the floor is the model, not a count tuned to a seed.
 //
 // Guards come from og's handlers (ast-grep `if ($C) throw $E` over core/entity/tx/handlers): a plain Error there
-// halts og's Runtime, so a draw only offers inputs whose guards hold, and refusal branches are drawn on purpose.
+// halts og's Runtime, so a draw only offers inputs whose guards hold, and refusal branches are drawn on purpose. An og
+// halt a walk reaches fails it, even when the rewrite halts too, unless it is a known og bug (departures.ts
+// KNOWN_OG_HALTS): otherwise it is a draw whose guard is weaker than og's.
 //
 // One area, one walk per process (og worker fatals in one Bun process can crash it):
 //   bun diff/walk.ts --area orderbook --seeds 3      the core draws plus one area's, on the first 3 walk seeds
@@ -15,6 +17,7 @@ import type { Coverage } from "./lane.ts";
 import { openWorld } from "./world.ts";
 import { AREAS, type Area } from "./draws/areas.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
+import { knownHalt } from "./departures.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -64,7 +67,12 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
       const diffs = await lane.tick(step.runtimeTxs, step.users);
       return diffs.length > 0 ? diffs : loop(i + 1);
     };
-    return { coverage, diffs: await loop(0) };
+    const diffs = await loop(0);
+    // an agreed halt ends the walk; one that is not a known og bug is a draw og refuses
+    const unguarded = coverage.haltTexts
+      .filter((h) => knownHalt(h) === undefined)
+      .map((h) => `${w.tag} og halted on a drawn input, not a known og halt: ${h}`);
+    return { coverage, diffs: [...diffs, ...unguarded] };
   } finally {
     await w.close();
   }

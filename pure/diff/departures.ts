@@ -61,3 +61,17 @@ const staleTransition: HaltDeparture = {
 
 export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval, staleTransition];
 export const haltDeparture = (ogHalt: string): HaltDeparture | undefined => HALT_DEPARTURES.find((d) => d.halts(ogHalt));
+
+/**
+ * og halts the rewrite still halts on too: og liveness bugs reported upstream, with no departure yet. A walk may end on
+ * one of these; any other og halt a drawn move reaches is a draw whose guard is weaker than og's, and fails the walk.
+ */
+export type KnownHalt = { readonly name: string; readonly issue: string; readonly halts: (ogHalt: string) => boolean };
+export const KNOWN_OG_HALTS: readonly KnownHalt[] = [
+  {
+    name: "a payment staged beside a deferred settlement approval outdates its hanko",
+    issue: "review/og-issues-halts-2026-09-28.md, issue 2",
+    halts: (ogHalt) => /SETTLEMENT_TRANSITION_PROPOSAL_FAILED:hanko:POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:0x/.test(ogHalt),
+  },
+];
+export const knownHalt = (ogHalt: string): KnownHalt | undefined => KNOWN_OG_HALTS.find((k) => k.halts(ogHalt));
