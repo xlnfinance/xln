@@ -17,6 +17,19 @@ export const one = (w: World, entity: number, txs: readonly EntityTx[]): Step =>
 export const tx = (type: string, data: unknown): EntityTx => ({ type, data }) as unknown as EntityTx;
 /** og isLeftEntity: the lexicographically smaller Entity id is left. */
 export const isLeft = (w: World, x: number, y: number): boolean => w.ids[x]! < w.ids[y]!;
+/** og's Account replica as draws read it: the mempool, the frame in flight, and the state an area narrows. */
+export type OgAccountReplica = {
+  mempool?: { type: string }[];
+  pendingFrame?: { accountTxs: { type: string }[] };
+  state?: unknown;
+};
+export const replica = (w: World, x: number, y: number): OgAccountReplica | undefined => w.ogAccount(x, y) as never;
+/**
+ * Neither side has Account work in flight: a draw reads committed state, and a frame applies routed Account inputs
+ * before user txs, so an in-flight frame could sign or replace what the tx reads (og then throws, a halt).
+ */
+export const quiet = (w: World, x: number, y: number): boolean =>
+  [replica(w, x, y), replica(w, y, x)].every((r) => r?.pendingFrame == null && (r?.mempool ?? []).length === 0);
 export const sealed = (w: World, x: number): boolean => w.batchOf(x)?.sentBatch !== undefined;
 export const queued = (w: World, x: number): boolean => {
   const batch = w.batchOf(x)?.batch;

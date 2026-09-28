@@ -12,10 +12,9 @@
 import { seedOf, untilCovered } from "./seed.ts";
 import { tracing } from "./scenario-trace.ts";
 import type { Coverage } from "./lane.ts";
-import { openWorld, type World } from "./world.ts";
+import { openWorld } from "./world.ts";
 import { AREAS, type Area } from "./draws/areas.ts";
-import type { Step } from "./draws/areas.ts";
-import { drawnIn, type Drawn } from "./draws/index.ts";
+import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -26,14 +25,11 @@ const FRAMES = 30;
 /** The lane's first disagreement, or none. */
 export type Walked = { readonly coverage: Coverage; readonly diffs: readonly string[] };
 
-/** Chain-side moves that are not Entity txs: new reserves the watcher reports. */
-const fund = async (w: World): Promise<Step> => {
-  await w.chain.debugFundReserves(w.ids[w.ri(4)]!, 1, BigInt(1 + w.ri(1_000_000)));
-  return { runtimeTxs: [], users: [] };
-};
-
-/** One walk over the given drawn rows; it stops at the first diff, an og halt both sides agree on, or a departure. */
-export const walk = async (seed: number, moves: readonly Drawn[]): Promise<Walked> => {
+/**
+ * One walk over the given drawn rows and world moves; it stops at the first diff, an og halt both sides agree on, or a
+ * departure.
+ */
+export const walk = async (seed: number, moves: readonly Drawn[], world: readonly NamedWorldMove[]): Promise<Walked> => {
   const w = await openWorld(seed, "model");
   const { lane, coverage } = w;
   const tried = new Map<string, number>();
@@ -57,8 +53,11 @@ export const walk = async (seed: number, moves: readonly Drawn[]): Promise<Walke
       const r = w.rand() * (total + 0.5);
       const at = weights.findIndex((_, j) => weights.slice(0, j + 1).reduce((a, b) => a + b, 0) > r);
       const chosen = at < 0 ? undefined : enabled[at];
-      const step = chosen === undefined ? (w.rand() < 0.5 ? await fund(w) : { runtimeTxs: [], users: [] }) : chosen[1].draw(w);
-      const name = chosen?.[0] ?? "world";
+      // no Entity tx drawn: one of the enabled world moves, uniformly
+      const open = world.filter(([, m]) => m.enabled(w));
+      const around = chosen === undefined ? open[w.ri(open.length)] : undefined;
+      const step = chosen !== undefined ? chosen[1].draw(w) : await (around?.[1].draw(w) ?? { runtimeTxs: [], users: [] });
+      const name = chosen?.[0] ?? around?.[0] ?? "world";
       tried.set(name, (tried.get(name) ?? 0) + 1);
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
@@ -96,13 +95,14 @@ const parseArgs = (argv: readonly string[]): Args | string => {
   if (seed !== undefined && !Number.isSafeInteger(Number(seed))) return `bad --seed ${seed}`;
   return { area: area as Area | undefined, seeds, seed: seed === undefined ? undefined : Number(seed) };
 };
-/** The rows an area's walk draws: the core world plus the area's own (every area when none is named). */
-const rowsFor = (area: Area | undefined): readonly Drawn[] =>
-  drawnIn(area === undefined ? [] : area === "core" ? ["core"] : ["core", area]);
+/** The areas an area's walk draws from: the core world plus the area's own (every area when none is named). */
+const scopeOf = (area: Area | undefined): Scope =>
+  area === undefined ? "all" : area === "core" ? ["core"] : ["core", area];
+const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(scopeOf(area));
 
 /** One walk in this process: 0 when the lane agreed on every frame. */
 const one = async (area: Area | undefined, seed: number): Promise<number> => {
-  const { coverage, diffs } = await walk(seed, rowsFor(area));
+  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)));
   console.log(walkLine(seed, coverage));
   diffs.forEach((d) => console.log(`  DIFF ${d}`));
   console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs] })}`);
