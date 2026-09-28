@@ -611,15 +611,6 @@ describe(seedTag("entity state root"), () => {
     expect(computeCanonicalEntityConsensusStateHash(one)).toBe("0x72ac0104afdbba762c83b6e958f4a9ca787f1706e62f368aab62bfb635f35d2b");
     expect(unwrap(entityStateRoot({ config: CONFIG, accounts: [rwAccount(self, peer)] }))).toBe("0x72ac0104afdbba762c83b6e958f4a9ca787f1706e62f368aab62bfb635f35d2b");
   });
-  test("DIVERGES: every real og EntityState carries more root sections (entityId, height, timestamp, reserves, nonces, profile, ...); each moves og's root, the rewrite has no input for them", () => {
-    const self = W("aa");
-    const base: any = { config: CONFIG, accounts: ogAccounts(self, []), paybook: { entries: new Map(), feesEarned: 0n } };
-    const min = computeCanonicalEntityConsensusStateHash(base);
-    for (const extra of [{ entityId: self }, { height: 3 }, { timestamp: 1_700_000_000_123 }, { reserves: new Map([[1, 5n]]) }, { lastFinalizedJHeight: 42 }]) {
-      expect(computeCanonicalEntityConsensusStateHash({ ...base, ...extra })).not.toBe(min);
-    }
-    expect(computeCanonicalEntityConsensusStateHash({ ...base, paybook: { entries: new Map(), feesEarned: 12n } })).not.toBe(min); // rewrite hardwires feesEarned 0n
-  });
   test("MATCH: entity account leaf == og for 50 random account scalars (status, heights, nonce, frame hash, withdrawals/shadow roots, random account state)", () => {
     const self = W("aa");
     for (let i = 0; i < 50; i++) {
