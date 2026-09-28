@@ -18584,17 +18584,19 @@ const awaitsPostCommitHanko = (tx: AccountTx): boolean =>
     tx.postProof.hanko === pendingHanko(tx.postProof.disputeHash) ||
     tx.settlementHanko === pendingHanko(tx.settlementHash));
 /**
- * og accountHasProposableMempool: an active Account with no frame in flight and no settlement hanko still waiting for
- * this Entity frame's quorum, holding a tx a frame could carry: neither an HTLC lock past the lock cap nor a tx a
- * signed settlement workspace freezes.
+ * og accountHasProposableMempool's mempool terms: no settlement hanko still waiting for this Entity frame's quorum,
+ * and a tx a frame could carry: neither an HTLC lock past the lock cap nor a tx a signed settlement workspace freezes.
  */
-const proposableChild = (c: AccountReplica | undefined): c is OpenAccount => {
-  if (c === undefined || c._tag !== "open" || c.mempool.some(awaitsPostCommitHanko)) return false;
+const mempoolProposable = (c: { readonly state: AccountBody; readonly mempool: readonly WireAccountTx[] }): boolean => {
+  if (c.mempool.some(awaitsPostCommitHanko)) return false;
   const locksFull = c.state.locks.size >= MAX_ACCOUNT_HTLC_LOCKS;
   const carried = (tx: WireAccountTx): boolean =>
     !(locksFull && tx.type === "htlc_lock") && settlementFreeze(c.state, tx).ok;
   return c.mempool.some(carried);
 };
+/** og accountHasProposableMempool: an active Account with no frame in flight and a proposable mempool. */
+const proposableChild = (c: AccountReplica | undefined): c is OpenAccount =>
+  c !== undefined && c._tag === "open" && mempoolProposable(c);
 const hasProposableAccount = (r: Folded): boolean => [...r.accountReplicas.values()].some(proposableChild);
 /**
  * The Entity draft after an Account answer: the answer's state, both drafts' outputs and events, and the cross-j swaps
@@ -26465,9 +26467,15 @@ const proposableAccounts = (replicas: Replicas): readonly EntityId[] =>
     .filter(([, c]) => proposableChild(c))
     .map(([peer]) => peer)
     .toSorted(asc);
-/** A peer frame the input left received commits once answered, so its Account holds no pending frame either. */
-const arrivedProposable = (c: AccountReplica | undefined): boolean =>
-  c !== undefined && (c._tag === "open" || c._tag === "received") && c.mempool.length > 0;
+/**
+ * A peer frame the input left received commits once answered, so its Account holds no pending frame either and og reads
+ * the work index (accountHasProposableMempool) on the state that frame commits.
+ */
+const arrivedProposable = (c: AccountReplica | undefined): boolean => {
+  if (c === undefined) return false;
+  if (c._tag === "received") return mempoolProposable({ state: c.candidate.draft.state, mempool: c.mempool });
+  return c._tag === "open" && mempoolProposable(c);
+};
 /**
  * og's cutover Account authority (rscore entity-stage beginEntityAccountFrame) runs every peer ack and ack_frame of
  * the frame on its Account before primeEntityFrameAccountWork reads the work index. An Account whose pending frame
@@ -33754,11 +33762,10 @@ const tokenAmountText = (tokenId: number, amount: bigint): Result<string, Entity
   });
 const rawUnits = (tokenId: number, amount: unknown): string =>
   `${BigInt(String(amount ?? "0")).toString()} raw units of token #${tokenId}`;
-/** One finalized event's Entity effects: the Draft so far, the Account claims it queued, the Accounts it touched. */
+/** One finalized event's Entity effects: the Draft so far and the Account claims it queued. */
 type JEventStep = {
   readonly draft: Draft;
   readonly claims: readonly AccountTxTarget[];
-  readonly dirty: readonly string[];
 };
 /** og: the settled row's reserve for this Entity, when the row carries one. */
 const withOwnReserve = (state: EntityState, tokenId: number, own: unknown): EntityState => {
@@ -33819,7 +33826,6 @@ const settledJEvent = (step: JEventStep, e: WireJEvent, blockNumber: number): Re
   return map(tokenAmountText(tokenId, token.collateral), (coll) => ({
     draft: jSay(draft, `⚖️ OBSERVED: ${who} | coll=${coll} | j-block ${blockNumber} (awaiting 2-of-2)`),
     claims: [...step.claims, { accountId: counterparty, tx: settlementClaim(e, left, right, token, blockNumber) }],
-    dirty: [...step.dirty, counterparty],
   }));
 };
 /**
@@ -33890,24 +33896,21 @@ const batchProcessedJEvent = (
 // j-events-htlc applyKnownHtlcSecret
 /**
  * One finalized event's working set: the Draft (Accounts, paybook, crontab), the og helper view (routes, jBatchState,
- * messages, this event's outputs), queued Account txs, dirty Accounts.
+ * messages, this event's outputs), queued Account txs.
  */
 type JEv = {
   readonly draft: Draft;
   readonly cj: Cj;
   readonly ops: readonly AccountTxTarget[];
-  readonly dirty: readonly string[];
 };
 const jevOf = (step: JEventStep, ctx: FoldContext): JEv => ({
   draft: step.draft,
   cj: cjOf(step.draft, ctx.timestamp, ctx.runtimeSeed),
   ops: step.claims,
-  dirty: step.dirty,
 });
 const jevDone = (x: JEv, ctx: FoldContext): JEventStep => ({
   draft: cjInto(x.draft, x.cj, ctx.timestamp),
   claims: x.ops,
-  dirty: x.dirty,
 });
 const jevSay = (x: JEv, ...messages: readonly string[]): JEv => ({ ...x, cj: cjSay(x.cj, ...messages) });
 const jevBroadcast = (x: JEv): Result<JEv, EntityError> => map(localJBroadcast(x.cj), (b) => ({ ...x, cj: b.cj }));
@@ -34360,12 +34363,12 @@ const retiredOps = (x: JEv, retired: RetiredJBatch, ops: string, peer: string): 
     sayWhen(retired.removed > 0, `🧹 Removed ${retired.removed} stale ${ops} op(s) for ${peer.slice(-4)}`),
   );
 /**
- * og: stashed reveals flush into the host (the Account is dirty now), and the jBatch wakes when `wake` says so for
+ * og: stashed reveals flush into the host, and the jBatch wakes when `wake` says so for
  * the flushed count.
  */
-const flushedReveals = (x: JEv, peer: string, wake: (flushed: number) => boolean): Result<JEv, EntityError> =>
+const flushedReveals = (x: JEv, wake: (flushed: number) => boolean): Result<JEv, EntityError> =>
   chain(flushDeferredReveals(x.cj.host), ({ host, flushed }) =>
-    broadcastWhen(wake(flushed))({ ...x, cj: cjHost(x.cj, host), dirty: [...x.dirty, peer] }),
+    broadcastWhen(wake(flushed))({ ...x, cj: cjHost(x.cj, host) }),
   );
 const withActiveDispute = (x: JEv, peer: string, child: AccountReplica, active: ActiveDispute): JEv => ({
   ...x,
@@ -34452,7 +34455,7 @@ const disputeStartedJEvent = (
           return chain(retiredOps(x, retired, "dispute-start", peer), (retiredX) =>
             chain(lockPullCounter(retiredX, peer, ctx), ({ x: locked, queued }) => {
               const wake = (flushed: number): boolean => (flushed > 0 || queued) && retired.removed === 0;
-              return chain(flushedReveals(locked, peer, wake), (woke) =>
+              return chain(flushedReveals(locked, wake), (woke) =>
                 chain(requireDt(ctx, child), (dt) => {
                   const followed = jevPipe(
                     woke,
@@ -34585,7 +34588,7 @@ const counterRegisteredJEvent = (
       const locked = `🛡️ Counter-proof N${c.nonce} locked for ${peer.slice(-4)}`;
       return chain(requireDt(ctx, child), (dt) =>
         chain(eventSourceClaims(x1, peer, body, dt), (claimed) =>
-          map(retiredCounters(claimed, c), (x) => jevDone(jevSay({ ...x, dirty: [...x.dirty, peer] }, locked), ctx)),
+          map(retiredCounters(claimed, c), (x) => jevDone(jevSay(x, locked), ctx)),
         ),
       );
     });
@@ -34808,7 +34811,7 @@ const disputeFinalizedJEvent = (
       chain(finalizedNonceOf(child, data, evidence, finalHash), ({ finalizedJNonce, initialNonce }) => {
         const x0 = jevOf(step, ctx);
         const synced = syncBatchNonce(x0.cj.host.jb, sender, self, batchNonce);
-        const base: JEv = { ...withRetiredJb(x0, synced.jb), dirty: [...x0.dirty, peer] };
+        const base: JEv = withRetiredJb(x0, synced.jb);
         const x = synced.message === undefined ? base : jevSay(base, synced.message);
         return chain(requireDt(ctx, child), (dt) => {
           const scope: SettlementScope = {
@@ -34979,7 +34982,7 @@ const recoveryLearned = (x: JEv, data: LadderRevealEvent, fillRatio: string): JE
     ...active,
     crossJurisdictionRecovery: { ...recovery, resultsByPullId },
   });
-  return { ...withRecovery, dirty: [...x.dirty, accountId] };
+  return withRecovery;
 };
 const ladderRegisteredJEvent = (
   step: JEventStep,
@@ -35158,15 +35161,21 @@ const appliedJBlock =
     const applied = foldResult(block.events, atBlock, (step, e) => finalizedJEvent(step, e, ctx, evidence));
     return map(applied, (step) => ({ step, root: folded.value }));
   };
-/** og applyLocalAccountEffects: a claim for a missing or non-active Account, or one the Account refuses, is skipped. */
+/**
+ * og applyLocalAccountEffects: each claim enters its live Account's mempool in order, and an Account that admitted one
+ * joins the proposal worklist (markProposableAccount, a set: first admission wins), in that order. A claim for a
+ * missing or non-active Account, or one the Account refuses, is skipped.
+ */
 const admitClaims = (draft: Draft, claims: readonly AccountTxTarget[], self: EntityId, ctx: FoldContext): Draft =>
   claims.reduce((d, op) => {
-    const child = d.accountReplicas.get(op.accountId as EntityId);
+    const peer = op.accountId as EntityId;
+    const child = d.accountReplicas.get(peer);
     if (child === undefined || !liveAccount(child)) return d;
     const admitted = admitAt(child, [op.tx], self, L0_CLOCK, ctx.verify);
-    return admitted.ok
-      ? { ...d, ...putChild(d.state, d.accountReplicas, op.accountId as EntityId, admitted.value) }
-      : d;
+    if (!admitted.ok) return d;
+    const touched = d.touched ?? [];
+    const marked = touched.includes(peer) ? touched : [...touched, peer];
+    return { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value), touched: marked };
   }, draft);
 /**
  * og handleJEventEntityTx + applyJEvent: the active proposer's signed range is validated before anything else, a
@@ -35191,7 +35200,7 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
   return chain(reconciled, (suffix): Result<Draft, EntityError> => {
     if (suffix === null) return ok({ ...d, runtimeEvents, touched: [] });
     const start: AppliedJBlock = {
-      step: { draft: { ...d, runtimeEvents }, claims: [], dirty: [] },
+      step: { draft: { ...d, runtimeEvents }, claims: [] },
       root: anchorRoot(state),
     };
     return chain(foldResult(suffix.blocks, start, appliedJBlock(r.jurisdictionRef, ctx)), ({ step, root }) => {
@@ -35224,8 +35233,7 @@ const entityJEvent = (d: Draft, data: JRec, ctx: FoldContext): Result<Draft, Ent
             head: certifiedHead(anchor),
             boards: knownBoards({ ...board }),
           };
-          const draft = admitClaims({ ...step.draft, state: { ...applied, jFinality } }, claims, state.id, ctx);
-          return { ...draft, touched: [...new Set(step.dirty)] as EntityId[] };
+          return admitClaims({ ...step.draft, state: { ...applied, jFinality }, touched: [] }, claims, state.id, ctx);
         }),
       );
     });
