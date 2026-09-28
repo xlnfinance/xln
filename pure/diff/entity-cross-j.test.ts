@@ -402,7 +402,8 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
       if (k === 5) { const { envelope: _e, ...bare } = lock; lock = bare; }
       const frame = { ...msg.frame, txs: msg.frame.txs.map((t: any) => (t.type === "htlc_lock" ? lock : t)) };
       const m = { ...msg, frame };
-      const ts = k === 6 ? Number(lock0.timelock) - 30_000 + int(r, 20_000) : Number(NOW) + 2000;
+      // the onward deadline boundary sits at timelock - 30s (og: timelock - 10s delta <= now + 20s minimum is unsafe)
+      const ts = k === 6 ? Number(lock0.timelock) - 30_000 + pick(r, [-1, 0, 1, int(r, 20_000)]) : Number(NOW) + 2000;
       const jHeight = k === 7 ? Number(lock0.revealBeforeHeight) - int(r, 6) : 0;
       const hub = k === 8 ? { routingFeePPM: pick(r, [1, 20_000, 999_999]), baseFee: pick(r, [0n, 1n, 3n, 50n]) } : undefined;
       const known = new Set<string>(k === 10 ? [ALICE, BOB] : [ALICE, BOB, CAROL]), up = (id: string) => known.has(id) && !(k === 9 && id === CAROL);
