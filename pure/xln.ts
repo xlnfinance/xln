@@ -9176,10 +9176,15 @@ const draftPlan = (
 ): Result<DisputePlan, DisputeError> =>
   map(asProof(accountDisputeHash(view, bodyHash, proofNonce, proposerIsLeft)), (hash): DisputePlan =>
     ({ _tag: "sign", draft: { hash, proofBodyHash: bodyHash, proofNonce, proposerIsLeft } }));
+/**
+ * og prepareProposalProof: the witness the Account held before this frame decides whether the frame's proof needs a
+ * fresh signature; its nonce comes from the frame's witnesses, which a finalized settlement may have promoted past it.
+ */
 export const proposalPlan = (
-  view: CommittedAccountState, proof: LocalProof, witnesses: DisputeWitnesses, proposerIsLeft: boolean,
+  view: CommittedAccountState, proof: LocalProof, held: DisputeWitnesses, witnesses: DisputeWitnesses,
+  proposerIsLeft: boolean,
 ): Result<DisputePlan, DisputeError> => {
-  const { current } = witnesses;
+  const { current } = held;
   if (staleWitness(current, proof)) {
     return draftPlan(view, proof.bodyHash, freshNonce(witnesses, proof.jNonce), proposerIsLeft);
   }
@@ -9826,7 +9831,7 @@ const frozenError = (phase: FrozenAccount["_tag"]): AccountReplicaError => ({ _t
 export type Preview = {
   readonly frame: AccountFrame; readonly draft: FrameFold;
   readonly frameProof: LocalProof; readonly dispute: DisputePlan;
-  readonly deferred: readonly WireAccountTx[]; readonly witnesses: DisputeWitnesses; readonly floor: number;
+  readonly deferred: readonly WireAccountTx[]; readonly floor: number;
 };
 export type ProposalPlan =
   | Tagged<"frame", { preview: Preview }>
@@ -9968,11 +9973,11 @@ const framePlan = (
       witnesses: promoteSettled(r.dispute, r.state, folded.state, party.left, stamped.finalized),
     });
     return chain(sealed, ({ stateHash, frameProof, witnesses }) =>
-      map(proposalPlan(view, frameProof, witnesses, party.left), (dispute): ProposalPlan => ({
+      map(proposalPlan(view, frameProof, r.dispute, witnesses, party.left), (dispute): ProposalPlan => ({
         _tag: "frame",
         preview: {
           frame: { ...unhashed, stateHash }, draft: { state: folded.state, effects: folded.effects },
-          frameProof, dispute, deferred, witnesses, floor,
+          frameProof, dispute, deferred, floor,
         },
       })));
   });
@@ -10216,13 +10221,17 @@ const install = (
 const residentAck = (r: OpenAccount): AccountAck | null =>
   (r.acknowledged !== undefined && r.acknowledged.height === r.head.height ? r.acknowledged : null);
 type ProposeResult = Verb<OpenAccount | ProposedAccount>;
-/** Our own frame goes out only with our frame Hanko on it and the dispute Hanko its plan asks for. */
+/**
+ * Our own frame goes out only with our frame Hanko on it and the dispute Hanko its plan asks for. The witnesses stay
+ * the pre-frame ones plus that signature: og's prepared commit replays only the bilateral state, so a settlement the
+ * frame finalizes never promotes the proposer's witnesses (og ack-commit.ts applyPendingFrameTransactions).
+ */
 const proposeFrame = (r: OpenAccount, input: Propose, ctx: AccountContext, preview: Preview): ProposeResult => {
-  const { frame, draft, frameProof, dispute, deferred, witnesses: promoted, floor } = preview;
+  const { frame, draft, frameProof, dispute, deferred, floor } = preview;
   const frameHanko = input.frameHanko;
   if (frameHanko === undefined) return err({ _tag: "invalid_hanko", entity: ctx.party.self });
   const sealed = checks(frameStructure(frame), certifies(ctx.verify, frame.stateHash, frameHanko, ctx.party.self));
-  const settled = chain(sealed, () => settleLocal(dispute, input.disputeHanko, promoted, ctx.party.self, ctx.verify));
+  const settled = chain(sealed, () => settleLocal(dispute, input.disputeHanko, r.dispute, ctx.party.self, ctx.verify));
   return map(settled, ({ carried, witnesses }) => {
     const ack = residentAck(r), sent: SentProposal = { ack, ...opt("disputeHanko", carried) };
     const candidate = establish({ frame, frameHanko, frameProof, draft, floor, sent });
