@@ -1,8 +1,12 @@
 // Contract holes the 2026-09-28 Codex review of pure/xln.ts found (docs/reviews/pure-xln-2026-09-28 on its branch),
 // each pinned by the negative case it reproduced.
 import { describe, expect, test } from "bun:test";
-import { createEntity, foldResult, ogSections, ok, err, tag, withOgSections, type EntityCommitted } from "../xln.ts";
-import { ALICE, TERMS, UNREGISTERED_J, aliceAddr, unwrap } from "../xln_run.ts";
+import {
+  admit, applyAccountInput, createEntity, foldResult, ogSections, ok, err, tag, withOgSections, type EntityCommitted,
+} from "../xln.ts";
+import {
+  ALICE, BOB, CLOCK, NOW, TERMS, TOKEN, UNREGISTERED_J, aliceAddr, genesisAB, hankoVerify, offerOf, proposeInput, unwrap,
+} from "../xln_run.ts";
 
 const entity = () =>
   unwrap(createEntity({
@@ -62,5 +66,29 @@ describe("contracts: og section import", () => {
     };
     const out = unwrap(patched({ proposals: new Map([["p1", proposal]]) }));
     expect(out.proposals.get("p1")).toEqual(proposal as never);
+  });
+});
+
+describe("contracts: a held Account frame", () => {
+  const door = (self: typeof ALICE) => ({ verify: hankoVerify, self, now: NOW });
+  const heldOffer = () => {
+    const admitted = unwrap(admit(genesisAB(), [{ type: "set_credit_limit", tokenId: TOKEN, limit: 7n }]));
+    const proposed = unwrap(applyAccountInput(admitted, proposeInput(admitted, ALICE, CLOCK), door(ALICE))).replica;
+    if (proposed._tag !== "proposed") throw Error("fixture: ALICE did not propose");
+    const offer = offerOf(proposed, ALICE);
+    const received = unwrap(applyAccountInput(genesisAB(), offer, door(BOB))).replica;
+    return { offer, received };
+  };
+
+  test("a retry of the held frame is answered with the same replica", () => {
+    const { offer, received } = heldOffer();
+    expect(unwrap(applyAccountInput(received, offer, door(BOB))).replica).toBe(received);
+  });
+
+  test("a retry with altered txs under the held frame's signed hash is refused", () => {
+    const { offer, received } = heldOffer();
+    const altered = { ...offer, frame: { ...offer.frame, txs: [{ type: "set_credit_limit" as const, tokenId: TOKEN, limit: 999n }] } };
+    const retry = applyAccountInput(received, altered, door(BOB));
+    expect(retry.ok ? "accepted" : retry.error._tag).toBe("frame_hash_mismatch");
   });
 });

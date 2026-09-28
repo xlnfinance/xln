@@ -10639,8 +10639,13 @@ const proposalOnProposed = (r: ProposedAccount, input: AckFrame, ctx: InboundAcc
 const proposalOnReceived = (r: ReceivedAccount, input: AckFrame, ctx: InboundAccountContext): Verb<ReceivedAccount> =>
   match(receipt(r, input, ctx), {
     answered: ({ result }): Verb<ReceivedAccount> => result,
-    continue: (): Verb<ReceivedAccount> =>
-      (sameHex(input.frame.stateHash, r.candidate.frame.stateHash) ? ok(done(r)) : err({ _tag: "already_proposed" })),
+    // a retry of the held frame is answered from the held replica, but only once its body hashes to the hash it
+    // claims: an altered body under the original hash is refused, as the Entity path refuses it
+    continue: (): Verb<ReceivedAccount> => {
+      const held = sameHex(input.frame.stateHash, r.candidate.frame.stateHash);
+      const answer: Verb<ReceivedAccount> = held ? ok(done(r)) : err({ _tag: "already_proposed" });
+      return chain(acceptFrame(input.frame, replicaId(r), other(ctx.party.left)), () => answer);
+    },
   });
 /** What a peer input names, as og rejectFrozenAccountInput reports it: its reference height, its txs, its ACK. */
 const frozenDropNote = (input: AccountInput, peer: EntityId): string => {
