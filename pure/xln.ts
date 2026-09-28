@@ -9852,10 +9852,17 @@ export type ProposalPlan =
 /**
  * og proposal/transactions.ts throwCriticalProposalFailure: a refused matcher/settlement/cross-j-owned tx halts with
  * og's text; others are dropped.
+ *
+ * Departs from og (review/og-issues-halts-2026-09-28.md, issue 3): a settlement transition whose workspace is gone
+ * (settled on chain, or cleared, while it waited in the mempool) is stale, not a broken invariant. og halts the Runtime
+ * on it; the rewrite drops it like any other refused tx.
  */
+const STALE_WORKSPACE = ["SETTLEMENT_WORKSPACE_PREVIOUS_MISSING", "SETTLEMENT_WORKSPACE_MISSING"];
 const proposalHaltText = (tx: WireAccountTx, reason: string): string | null => {
   switch (tx.type) {
-    case "settle_transition": return `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.kind}:${reason}`;
+    case "settle_transition": return STALE_WORKSPACE.includes(reason)
+      ? null
+      : `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${tx.kind}:${reason}`;
     case "swap_resolve": return `SWAP_RESOLVE_PROPOSAL_FAILED: offer=${tx.offerId} error=${reason}`;
     case "cross_pull_lock":
       return `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${tx.pullId} order=${String(tx.crossJurisdiction.orderId)}`

@@ -15,6 +15,11 @@ export type HaltDeparture = {
 type Account = NonNullable<ReturnType<Runtime["entities"]["get"]>>["accountReplicas"] extends ReadonlyMap<EntityId, infer A>
   ? A
   : never;
+const accounts = (r: Runtime): readonly Account[] =>
+  [...r.entities.values()].flatMap((e) => [...e.accountReplicas.values()]);
+const queuedTxs = (a: Account): readonly { readonly type: string; readonly kind?: string; readonly revision?: number }[] =>
+  [...a.mempool, ...(a._tag === "proposed" ? a.candidate.frame.txs : [])] as never;
+
 /**
  * og halts signing a settlement approval whose workspace its own projection refuses (review/og-issues-halts-2026-09-28.md,
  * issue 1): settled rows out of the collateral or ondelta range, or past the Account's row cap. A peer reaches it with
@@ -38,5 +43,21 @@ const unsignableApproval: HaltDeparture = {
   },
 };
 
-export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval];
+/**
+ * og halts proposing a settlement transition whose workspace is gone (review/og-issues-halts-2026-09-28.md, issue 3):
+ * it settled on chain, or was cleared, while the transition waited in the mempool. The rewrite drops the transition, so
+ * no Account on a workspace-less state still queues or proposes one that needs a workspace.
+ */
+const staleTransition: HaltDeparture = {
+  name: "stale settlement transition dropped",
+  halts: (ogHalt) => /SETTLEMENT_TRANSITION_PROPOSAL_FAILED:[a-z]+:SETTLEMENT_WORKSPACE_(PREVIOUS_)?MISSING(\\n|"|$)/.test(ogHalt),
+  instead: (after) => {
+    const needsWorkspace = (tx: { type: string; kind?: string; revision?: number }): boolean =>
+      tx.type === "settle_transition" && !(tx.kind === "upsert" && tx.revision === 1);
+    const stale = accounts(after).filter((a) => a.state.settlement === undefined && queuedTxs(a).some(needsWorkspace));
+    return stale.length === 0 ? null : "an Account without a workspace still carries a settlement transition";
+  },
+};
+
+export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval, staleTransition];
 export const haltDeparture = (ogHalt: string): HaltDeparture | undefined => HALT_DEPARTURES.find((d) => d.halts(ogHalt));
