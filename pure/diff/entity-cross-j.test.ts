@@ -1,7 +1,7 @@
 // Differential tests: og Entity-side HTLC onion routing and cross-j Entity handlers vs pure/xln.ts.
 // Every test is "MATCH:" and runs og live on the same (seeded random) input.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import { x25519 } from "@noble/curves/ed25519";
 import * as ogMr from "../../core/protocol/htlc/multi-recipient.ts";
 import * as ogOnion from "../../core/protocol/htlc/codec/onion.ts";
@@ -237,7 +237,7 @@ describe(seedTag("entity-cross-j: Entity htlcPayment origination (og payment-adm
   test("MATCH: hashRawHtlcPaymentTx, materializeOriginatedHtlcPayments, assertOriginatedHtlcPayments and validatePreparedHtlcPayment on 250 random payments, profiles and paybooks", async () => {
     const r = rng(21);
     let accepted = 0;
-    for (let i = 0; i < 250; i++) {
+    for (let i = 0, more = untilCovered(250, () => accepted > 50); more(i); i++) {
       const profiles = baseProfiles() as any[];
       const mut = int(r, 14);
       if (mut === 1) profiles[1] = { ...profiles[1], metadata: { ...profiles[1].metadata, routingFeePPM: pick(r, [0, 1, 999_999]), baseFee: BigInt(int(r, 50)) } };
@@ -402,7 +402,8 @@ describe(seedTag("entity-cross-j: inbound HTLC MATCH vs og (materialize-context.
       if (k === 5) { const { envelope: _e, ...bare } = lock; lock = bare; }
       const frame = { ...msg.frame, txs: msg.frame.txs.map((t: any) => (t.type === "htlc_lock" ? lock : t)) };
       const m = { ...msg, frame };
-      const ts = k === 6 ? Number(lock0.timelock) - 30_000 + int(r, 20_000) : Number(NOW) + 2000;
+      // the onward deadline boundary sits at timelock - 30s (og: timelock - 10s delta <= now + 20s minimum is unsafe)
+      const ts = k === 6 ? Number(lock0.timelock) - 30_000 + pick(r, [-1, 0, 1, int(r, 20_000)]) : Number(NOW) + 2000;
       const jHeight = k === 7 ? Number(lock0.revealBeforeHeight) - int(r, 6) : 0;
       const hub = k === 8 ? { routingFeePPM: pick(r, [1, 20_000, 999_999]), baseFee: pick(r, [0n, 1n, 3n, 50n]) } : undefined;
       const known = new Set<string>(k === 10 ? [ALICE, BOB] : [ALICE, BOB, CAROL]), up = (id: string) => known.has(id) && !(k === 9 && id === CAROL);

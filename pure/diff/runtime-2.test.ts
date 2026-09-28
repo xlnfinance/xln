@@ -208,6 +208,25 @@ describe(seedTag("runtime-2: recordRuntimeAdapterCommand frontier (og runtime/co
     }
     expect(accepted).toBeGreaterThan(10);
   });
+
+  test("MATCH: a lane whose expiry equals the Runtime clock is pruned; one expiring a millisecond later stays", () => {
+    const [a, b, c] = [hex(32), hex(32), hex(32)];
+    const marker = (laneId: string, expiresAtMs: number | null) =>
+      ({ laneId, sequence: 1, commandId: "cmd-0123456789abcdef", inputHash: hex(32), expiresAtMs });
+    const runAt = (timestamp: number, frontiers: Map<string, unknown>, rt: Runtime, data: ReturnType<typeof marker>) => {
+      const env = { state: { timestamp, height: Number(rt.height) }, infrastructure: { runtimeAdapterCommandFrontiers: new Map(frontiers) } };
+      const og = ogThrowCode(() => applyRuntimeAdapterCommandMarker(env as never, data as never));
+      const rw = applyRuntimeTx({ ...rt, timestamp: BigInt(timestamp) }, { type: "recordRuntimeAdapterCommand", data }, { replay: true });
+      expect(rwCode(rw)).toBe(og);
+      const next = unwrap(rw);
+      expect(Object.fromEntries(next.adapterFrontiers)).toEqual(Object.fromEntries(env.infrastructure.runtimeAdapterCommandFrontiers) as never);
+      return { rt: next, frontiers: env.infrastructure.runtimeAdapterCommandFrontiers };
+    };
+    const first = runAt(1_000, new Map(), createRuntime(), marker(a, 2_000));
+    const second = runAt(1_000, first.frontiers, first.rt, marker(b, 2_001));
+    const third = runAt(2_000, second.frontiers, second.rt, marker(c, null));
+    expect([...third.rt.adapterFrontiers.keys()].sort()).toEqual([b, c].sort());
+  });
 });
 
 describe(seedTag("runtime-2: mergeEntityInputs (og entity/consensus/input/merge.ts)"), () => {

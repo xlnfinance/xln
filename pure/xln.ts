@@ -18,8 +18,9 @@ export type Tagged<Tag extends string, Extra extends object = {}> =
 export type Of<T extends { readonly _tag: string }, K extends T["_tag"]> =
   Extract<T, { readonly _tag: K }>;
 export type Eq<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** A tagged value: the payload is required (`{}` for none) and cannot carry a `_tag` of its own. */
 export const tag = <T extends string>(_tag: T) =>
-  <X extends object = {}>(x: X = {} as X): Tagged<T, X> => ({ _tag, ...x }) as Tagged<T, X>;
+  <X extends object & { readonly _tag?: never }>(x: X): Tagged<T, X> => ({ _tag, ...x }) as Tagged<T, X>;
 /** `{k: v}` when defined, `{}` otherwise — absence and undefined are one value (§4.2). */
 export const opt = <K extends string, V>(k: K, v: V | undefined): { readonly [P in K]?: V } =>
   (v === undefined ? {} : { [k]: v }) as { readonly [P in K]?: V };
@@ -39,7 +40,7 @@ export const mapErr = <T, E, F>(r: Result<T, E>, f: (e: E) => F): Result<T, F> =
   (r.ok ? r : err(f(r.error)));
 export const guard = <E>(pass: boolean, e: E): Result<void, E> => (pass ? ok(undefined) : err(e));
 export const unwrapOr = <T, E>(r: Result<T, E>, f: (e: E) => T): T => (r.ok ? r.value : f(r.error));
-/** Folds left to right; the first refusal is the answer and later items are not visited. */
+/** Snapshots the iterable, then folds left to right; the first refusal is the answer and `f` sees no later item. */
 export const foldResult = <S, X, E>(
   xs: Iterable<X>, init: S, f: (s: S, x: X, i: number) => Result<S, E>,
 ): Result<S, E> =>
@@ -192,17 +193,6 @@ export const EntityTransition = {
 } as const;
 
 
-export const AccountTxNames = [
-  "add_delta", "set_credit_limit", "payment", "htlc_lock", "htlc_resolve",
-  "swap_offer", "swap_cancel_request", "swap_resolve", "settle_transition", "j_event_claim",
-  "cross_pull_lock", "cross_pull_close", "request_collateral", "rebalance_refund", "rebalance_policy",
-  "lending_fund", "lending_borrow_request", "lending_repay", "lending_credit",
-  "lending_close_request", "lending_close_payout",
-] as const;
-export const LendingTxNames = ["lendingOffer", "lendingBorrow", "lendingRepay", "lendingClosePosition"] as const;
-export const EntityTxNames = ["directPayment", "placeSwapOffer"] as const;
-export const AccountInputKinds = ["dispute", "board_hanko_refresh"] as const;
-export const EntityInputKinds = ["leaderTimeoutVote", "jPrefixAttestations"] as const;
 
 
 // ---- layers: one step of a state machine, folded strictly or leniently ----
@@ -937,16 +927,6 @@ export const accountFrameHash = (f: AccountFrameInputs): Result<string, FrameHas
     ["accountStateRoot", f.accountStateRoot],
   ]));
 };
-type AmountTx = { readonly type: string; readonly data: { readonly tokenId: number; readonly amount: string } };
-export const encodeFrameHash = (
-  f: Omit<AccountFrameInputs, "accountTxs"> & { readonly accountTxs: readonly AmountTx[] },
-): string => {
-  const accountTxs = f.accountTxs.map((tx) =>
-    ({ type: tx.type, data: { tokenId: tx.data.tokenId, amount: BigInt(tx.data.amount) } }));
-  return unwrapOr(accountFrameHash({ ...f, accountTxs }), (e) => {
-    throw new Error(`frame hash cannot encode: ${e._tag}`);
-  });
-};
 
 
 // ---- Depository batch: the calldata an Entity submits to its jurisdiction ----
@@ -1546,10 +1526,6 @@ export const readJEvents = (logs: readonly ChainLog[]): readonly JEvent[] =>
     const meta = logMeta(log);
     return [meta === undefined ? body : { ...body, meta }];
   });
-export const readJEventVector = (inputs: { readonly logs: readonly ChainLog[] }): unknown => {
-  const bigintsAsText = (_k: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
-  return JSON.parse(JSON.stringify(readJEvents(inputs.logs), bigintsAsText));
-};
 export const encodeAccountSettledData = (settled: readonly AccountSettlement[]): string => {
   const tokenAbi = (x: TokenSettlement): Abi => t([
     A.uint(x.tokenId), A.uint(x.leftReserve), A.uint(x.rightReserve), A.uint(x.collateral),
@@ -1957,7 +1933,6 @@ export type DebtLedger = { readonly out: DebtBook; readonly in: DebtBook };
 export const EMPTY_DEBTS: DebtLedger = { out: new Map(), in: new Map() };
 /** og reserves, outDebtsByToken and inDebtsByToken: what the Entity holds on its J, and what it owes or is owed. */
 export type Treasury = Readonly<{ reserves: ReadonlyMap<number, bigint>; debts: DebtLedger }>;
-export const EMPTY_TREASURY: Treasury = { reserves: new Map(), debts: EMPTY_DEBTS };
 /**
  * A debt direction is committed only while it holds a debt: og creates it on its first debt and deletes it once
  * emptied, and an empty ledger would commit a root section that an absent one does not.
@@ -3133,32 +3108,6 @@ export const encodeAccountKey = (
   const [lesser, greater] = a < b ? [a, b] : [b, a];
   return { lesserThenGreater: joinHex([lesser, greater]), greaterThenLesser: joinHex([greater, lesser]) };
 };
-type AllowanceText = { readonly deltaIndex: string; readonly rightAllowance: string; readonly leftAllowance: string };
-type ProofBodyText = Readonly<{
-  watchSeed: Word; leftResponseSeconds: number; rightResponseSeconds: number; offdeltas: readonly string[];
-  tokenIds: readonly string[];
-  transformers: readonly Readonly<{
-    transformerAddress: string; encodedBatch: string; allowances: readonly AllowanceText[];
-  }>[];
-}>;
-const proofBodyOfText = (b: ProofBodyText): ProofBody => ({
-  watchSeed: b.watchSeed,
-  leftResponseSeconds: BigInt(b.leftResponseSeconds),
-  rightResponseSeconds: BigInt(b.rightResponseSeconds),
-  offdeltas: b.offdeltas.map((x) => BigInt(x)),
-  tokenIds: b.tokenIds.map((x) => BigInt(x)),
-  transformers: b.transformers.map((c) => ({
-    transformerAddress: c.transformerAddress,
-    encodedBatch: c.encodedBatch,
-    allowances: c.allowances.map((a) => ({
-      deltaIndex: BigInt(a.deltaIndex),
-      rightAllowance: BigInt(a.rightAllowance),
-      leftAllowance: BigInt(a.leftAllowance),
-    })),
-  })),
-});
-export const encodeProofBody = (inputs: { readonly proofBody: ProofBodyText }): string =>
-  keccak256Hex(hexToBytes(encodeProofBodyBytes(proofBodyOfText(inputs.proofBody))));
 /** og requireDepositoryDomain (onchain-domain.ts:139): chainId > 0 and a real depository, or no digest. */
 const depositoryDomain = (chainId: number, depository: string): bigint => {
   const usable = domainOf({ chainId, depositoryAddress: depository }).ok && !/^0x0{40}$/.test(depository);
@@ -3386,47 +3335,6 @@ export const verifyHankoLocal = (
   const boardHash = encodedBoard === null ? undefined : keccak256Hex(encodedBoard);
   const verified = verifyAccountHanko(hankoHex, hashHex, registration?.entityId ?? "", boardHash);
   return ok(verified.ok ? { entityId: verified.value.entityId, valid: true } : INVALID);
-};
-const verdictOf = (r: Result<Verdict, HankoError>): Verdict => unwrapOr(r, () => INVALID);
-export const encodeHankoBytes = (
-  i: Readonly<{ encodedBoard: string; entityId: string; hash: string; twoOfThree: string; oneOfThree: string }>,
-): { readonly twoOfThree: Verdict; readonly oneOfThree: Verdict } => ({
-  twoOfThree: verdictOf(verifyHankoLocal(i.twoOfThree, i.hash, i)),
-  oneOfThree: verdictOf(verifyHankoLocal(i.oneOfThree, i.hash, i)),
-});
-/** The canonical signature a board member gave, if any; of two spellings of one signer, the last wins. */
-const signatureFor = (signedBy: ReadonlyMap<string, string>, entityWord: string): RawSig | null => {
-  const addr = bytesToHex(hexToBytes(entityWord).subarray(12));
-  const found = [...signedBy].findLast(([signer]) => sameHex(signer, addr))?.[1];
-  if (found === undefined) return null;
-  const raw = hexToBytes(found.startsWith("0x") ? found : `0x${found}`);
-  if (raw.length !== 65) return null;
-  const sig = { r: raw.subarray(0, 32), s: raw.subarray(32, 64), v: chainV(raw[64] ?? 0) };
-  return canonicalSig(sig) ? sig : null;
-};
-/** A single-claim Hanko over the board: members who signed go in the packed signatures, the rest are placeholders. */
-export const encodeBoardHanko = (
-  board: Board & { readonly entityId: string }, signedBy: ReadonlyMap<string, string>,
-): string => {
-  const slots = board.entityIds.map((id) => ({ id, sig: signatureFor(signedBy, id) }));
-  const placeholders = slots.flatMap((s) => (s.sig === null ? [s.id] : []));
-  const sigs = slots.flatMap((s) => (s.sig === null ? [] : [s.sig]));
-  const indexOf = (slot: (typeof slots)[number], i: number): number => {
-    const sameKindBefore = slots.slice(0, i).filter((b) => (b.sig === null) === (slot.sig === null)).length;
-    return slot.sig === null ? sameKindBefore : placeholders.length + sameKindBefore;
-  };
-  const claim = {
-    entityId: board.entityId, entityIndexes: slots.map(indexOf), weights: board.votingPowers,
-    threshold: board.votingThreshold, boardChangeDelay: board.boardChangeDelay,
-    controlChangeDelay: board.controlChangeDelay, dividendChangeDelay: board.dividendChangeDelay,
-  };
-  const packedSignatures = packSignatures(sigs);
-  return encodeHankoEnvelope({ placeholders, packedSignatures, memberSignatures: [], claims: [claim] });
-};
-export const boardVotingPower = (board: Board, signedBy: ReadonlyMap<string, string>): number => {
-  const powerOf = (id: string, i: number): number =>
-    (signatureFor(signedBy, id) === null ? 0 : board.votingPowers[i] ?? 0);
-  return board.entityIds.reduce((sum, id, i) => sum + powerOf(id, i), 0);
 };
 const listOf = <X>(buf: Uint8Array, at: AbiLength, read: (i: number) => X): Result<X[], HankoError> => {
   const count = abiLengthWord(buf, at);
@@ -3697,16 +3605,6 @@ export const MAX_FILL = 65535;
 export type RatioError = Tagged<"bad_ratio" | "e12" | "ratio_mismatch" | "leg_mismatch" | "hub_authorship">;
 export type RatioRecord = { readonly fillRatio: number; readonly revealedAt: bigint };
 export const validRatio = (r: number): boolean => Number.isInteger(r) && r >= 0 && r <= MAX_FILL;
-export const floorRatio = (amount: bigint, r: number): Result<bigint, RatioError> =>
-  (validRatio(r) ? ok((amount * BigInt(r)) / BigInt(MAX_FILL)) : err({ _tag: "bad_ratio" }));
-export const inRevealWindow = (revealedAt: bigint, s: bigint, w: bigint): boolean =>
-  revealedAt >= s && revealedAt <= s + w;
-export const timelyRatio = (record: RatioRecord | undefined, s: bigint, w: bigint): number =>
-  (record !== undefined && inRevealWindow(record.revealedAt, s, w) ? record.fillRatio : 0);
-export const effectiveRatio = (claimed: number, timely: number): Result<number, RatioError> =>
-  (validRatio(claimed) && validRatio(timely) ? ok(Math.max(claimed, timely)) : err({ _tag: "bad_ratio" }));
-export const deltaMove = (amount: bigint, effective: number, already: bigint): Result<bigint, RatioError> =>
-  map(floorRatio(amount, effective), (filled) => filled - already);
 /**
  * A source-role reveal is fixed once made (a different ratio is e12); a target-role reveal may only
  * raise the ratio.
@@ -3721,8 +3619,6 @@ export const revealSlot = (
   if (!next.targetRole) return prev.fillRatio === next.fillRatio ? ok(prev) : err({ _tag: "e12" });
   return next.fillRatio < prev.fillRatio ? err({ _tag: "e12" }) : ok(fresh);
 };
-export const uncollateralizedCredit = (hubDebtToUser: bigint, collateral: bigint): bigint =>
-  (hubDebtToUser > collateral ? hubDebtToUser - collateral : 0n);
 
 
 // ---- the cross-jurisdiction kernel ----
@@ -4358,8 +4254,6 @@ export const crossFillAmounts = (r: CrossRoute): Result<CrossFillAmounts, CrossE
       return ok({ sourceTotal, targetTotal, filledSourceAmount, filledTargetAmount, fillRatio });
     });
   });
-export const hasCrossCommittedFill = (r: CrossRoute): Result<boolean, CrossError> =>
-  map(crossFillAmounts(r), (c) => c.fillRatio > 0 || c.filledSourceAmount > 0n || c.filledTargetAmount > 0n);
 export const isCrossFillTerminal = (
   r: CrossRoute, x: Readonly<{ nextRatio: number; cancelRemainder?: boolean | undefined }>,
 ): Result<boolean, CrossError> =>
@@ -4747,12 +4641,6 @@ export const setCreditLimit = (d: Delta, limit: bigint, byLeft: boolean): Result
     default: return ok({ ...d, rightCreditLimit: limit });
   }
 };
-export const addCollateral = (d: Delta, amount: bigint): Result<Delta, AccountError> =>
-  (amount < 0n ? err({ _tag: "negative_collateral" }) : ok(settle(d, d.collateral + amount, d.ondelta)));
-export const applyCollateralFixture = (
-  s: AccountState, tk: TokenId, amount: bigint,
-): Result<AccountState, AccountError> =>
-  updateDelta(s, tk, (d) => addCollateral(d, amount));
 type SignableDelta = Pick<Delta, "tokenId" | "offdelta" | "leftCreditLimit" | "rightCreditLimit">;
 const signableDelta = (d: Delta): SignableDelta => ({
   tokenId: d.tokenId, offdelta: d.offdelta, leftCreditLimit: d.leftCreditLimit, rightCreditLimit: d.rightCreditLimit,
@@ -5874,10 +5762,10 @@ export const genesisAccountBody = (account: AccountState, terms: AccountTerms): 
 
 // ---- spending room ----
 const putState = (a: AccountBody, account: AccountState): AccountBody => ({ ...a, account });
-/** Everything a side has held back on a token: its lock holds plus its allowances. */
+/** Everything a side has held back on a token and not yet paid. */
 export const holds = (a: AccountBody, tk: TokenId, byLeft: boolean): bigint => {
   const s = sideTotals(a, tk);
-  return at(s.leftHold + s.leftAllowance, s.rightHold + s.rightAllowance, byLeft);
+  return at(s.leftHold, s.rightHold, byLeft);
 };
 const ensureRoom = (a: AccountBody, tk: TokenId, amount: bigint, byLeft: boolean): Result<void, BodyError> => {
   const available = outCapacity(getDelta(a.account, tk), byLeft, holds(a, tk, byLeft));
@@ -5885,8 +5773,7 @@ const ensureRoom = (a: AccountBody, tk: TokenId, amount: bigint, byLeft: boolean
 };
 /** A side's total hold on one token stays within one payment (og's uint256 hold). */
 const holdRoom = (a: AccountBody, tk: TokenId, amount: bigint, onLeft: boolean): Result<void, BodyError> => {
-  const totals = sideTotals(a, tk);
-  const held = at(totals.leftHold, totals.rightHold, onLeft);
+  const held = holds(a, tk, onLeft);
   return held + amount > MAX_PAYMENT_AMOUNT ? err({ _tag: "hold_overflow" }) : ok(undefined);
 };
 const positive = (amount: bigint): Result<void, BodyError> => guard(amount > 0n, { _tag: "non_positive_payment" });
@@ -6259,10 +6146,9 @@ const workspaceRoom = (a: AccountBody, diffs: readonly WorkspaceDiff[]): Result<
     const tk = String(diff.tokenId) as TokenId;
     const d = a.account.deltas.get(tk);
     if (d === undefined) return settleErr("SETTLEMENT_HOLD_DELTA_MISSING");
-    const t = sideTotals(a, tk);
     const held = { left: holds(a, tk, true), right: holds(a, tk, false) };
     return chain(chargeSettlement(d, diff, held), (plan) => {
-      const overflows = t.leftHold + plan.left > MAX_PAYMENT_AMOUNT || t.rightHold + plan.right > MAX_PAYMENT_AMOUNT;
+      const overflows = held.left + plan.left > MAX_PAYMENT_AMOUNT || held.right + plan.right > MAX_PAYMENT_AMOUNT;
       return overflows ? settleErr("HOLD_ADD_OVERFLOW") : ok(undefined);
     });
   });
@@ -7851,8 +7737,7 @@ const paidRowText = (a: AccountBody, tk: TokenId, payerIsLeft: boolean, amount: 
 const holdOverflowText = (
   a: AccountBody, tk: TokenId | number, isLeft: boolean, amount: bigint,
 ): FailureCheck => () => {
-  const totals = sideTotals(a, tokenKey(tk));
-  const held = at(totals.leftHold, totals.rightHold, isLeft);
+  const held = holds(a, tokenKey(tk), isLeft);
   const text = `HOLD_ADD_OVERFLOW:${sideName(isLeft)} hold=${held} amount=${amount}`;
   return refuse(held + amount > MAX_PAYMENT_AMOUNT, text);
 };
@@ -8705,12 +8590,6 @@ export const accountTxFailure = (
   const code = bodyErrorCode(e);
   return e._tag === "uncommitted" || e._tag === "too_many_rows" ? threwTx(code) : refusedTx(code);
 };
-export const accountSnapshot = (a: AccountBody): Required<Omit<AccountBody, "account">> & { readonly state: Hash } => ({
-  state: hashAccountState(a.account), terms: a.terms, locks: a.locks, offers: a.offers, requested: a.requested,
-  requestFees: a.requestFees, feePolicies: a.feePolicies, lendingIntents: a.lendingIntents, claimRows: a.claimRows,
-  jNonce: a.jNonce, settlement: a.settlement, finalizedJHeight: a.finalizedJHeight, pulls: a.pulls,
-  submittedAt: a.submittedAt,
-});
 
 // ---- committed view: og's CommittedAccountState of a body, its pending J-claim tries, and the commitment root ----
 export type ViewError = CommitmentError | Tagged<"token_id", { tokenId: TokenId }> | ClaimError;
@@ -8719,8 +8598,6 @@ export type Uncommitted = Tagged<"uncommitted", { reason: UncommittedReason }>;
 export const uncommitted = (reason: UncommittedReason): Uncommitted => ({ _tag: "uncommitted", reason });
 export const tokenNumber = (id: TokenId): Result<number, ViewError> =>
   tokenId(id).ok ? ok(Number(id)) : err({ _tag: "token_id", tokenId: id });
-export const tokenOrder = (b: AccountBody): readonly TokenId[] =>
-  [...b.account.deltas.keys()].toSorted((x, y) => Number(x) - Number(y));
 
 // Each side's pending J-claims commit as og's crit-bit Patricia trie: leaves keyed by (account, side, jHeight),
 // branches splitting on the first bit where two keys differ.
@@ -8821,12 +8698,11 @@ const pendingOn = (b: AccountBody, onLeft: boolean): Result<JClaimAccumulator, V
   return chain(claimKeyOf(b), (accountKey) => claimAccumulator(accountKey, rows));
 };
 
-// Holds: what each side has committed but not yet paid, per token. Allowances are always zero here.
-export type SideTotals = {
-  readonly leftHold: bigint; readonly rightHold: bigint;
-  readonly leftAllowance: bigint; readonly rightAllowance: bigint;
-};
-const NO_TOTALS: SideTotals = { leftHold: 0n, rightHold: 0n, leftAllowance: 0n, rightAllowance: 0n };
+// Holds: what each side has committed but not yet paid, per token.
+// og's Delta also carries left/rightAllowance, but og only ever writes them as 0n (createDefaultDelta in
+// account/state/delta.ts, the finality reset in account/settlement/j-finality.ts), so the committed view emits 0n.
+export type SideTotals = { readonly leftHold: bigint; readonly rightHold: bigint };
+const NO_TOTALS: SideTotals = { leftHold: 0n, rightHold: 0n };
 type Hold = Readonly<{ tokenId: TokenId; onLeft: boolean; amount: bigint }>;
 /** An unsubmitted workspace holds each side's outgoing diff until it lands. */
 const workspaceHolds = (w: SettlementWorkspace | undefined): readonly Hold[] => {
@@ -8868,7 +8744,7 @@ const committedDeltas = (b: AccountBody): ReadonlyMap<number, CommittedDelta> =>
     return [d.tokenId, {
       tokenId: Number(d.tokenId), collateral: d.collateral, ondelta: d.ondelta, offdelta: d.offdelta,
       leftCreditLimit: d.leftCreditLimit, rightCreditLimit: d.rightCreditLimit,
-      leftAllowance: s.leftAllowance, rightAllowance: s.rightAllowance, leftHold: s.leftHold, rightHold: s.rightHold,
+      leftAllowance: 0n, rightAllowance: 0n, leftHold: s.leftHold, rightHold: s.rightHold,
     }];
   }));
 };
@@ -8897,6 +8773,9 @@ const project = (b: AccountBody): Result<CommittedAccountState, ViewError> => {
 };
 // Projection and preparation are pure but costly, so each body's view is computed once and the bodies whose
 // commitment was already prepared are remembered; preparing a successor then only hashes what changed.
+// The caches key on identity, so they rely on a body never changing after it is built: every transition here makes
+// a new body. A caller that keeps a mutable Map it put into a body and mutates it later gets the stale root; copy
+// such containers before building the body.
 const views = new WeakMap<AccountBody, Result<CommittedAccountState, ViewError>>();
 const preparedBodies = new WeakSet<AccountBody>();
 export const committedView = (b: AccountBody): Result<CommittedAccountState, ViewError> => {
@@ -8922,7 +8801,6 @@ export const prepareStep = (before: AccountBody, after: AccountBody): Result<voi
 export type Committed = { readonly view: CommittedAccountState; readonly root: string };
 export const committed = (b: AccountBody): Result<Committed, ViewError> =>
   chain(prepareCommitment(b), (p) => map(preparedRoot(p), (root) => ({ view: p.state, root })));
-export const committedRoot = (b: AccountBody): Result<string, ViewError> => map(committed(b), (c) => c.root);
 
 
 export type ProofError =
@@ -9228,8 +9106,6 @@ export const genesisWitnesses = (): DisputeWitnesses => ({ nextProofNonce: 1 });
  */
 export const proofNonceFloor = (w: DisputeWitnesses): number =>
   Math.max(w.nextProofNonce, (w.current?.proofNonce ?? 0) + 1, (w.counterparty?.proofNonce ?? 0) + 1);
-export const settlementOf = (w: DisputeWitnesses, verify: Verify): SettlementCtx =>
-  ({ verify, proofNonceFloor: proofNonceFloor(w) });
 export type DisputePlan =
   | Tagged<"sign", { draft: DisputeDraft }>
   | Tagged<"resend", { disputeHanko: DisputeHanko }>
@@ -10134,15 +10010,9 @@ const previewOf = (planned: PlanResult): Result<Preview, AccountReplicaError> =>
   frame: ({ preview }): Result<Preview, AccountReplicaError> => ok(preview),
   idle: ({ refused }): Result<Preview, AccountReplicaError> => err(refused),
 }));
-export const previewOpen = (
-  r: OpenAccount, self: EntityId, clock: FrameClock, verify?: Verify,
-): Result<Preview, AccountReplicaError> => previewOf(planAccountProposal(r, self, clock, verify));
 export const previewAccountProposal = (
   r: AccountReplica, self: EntityId, clock: FrameClock, verify?: Verify,
 ): Result<Preview, AccountReplicaError> => previewOf(planAccountProposal(r, self, clock, verify));
-export const previewAccountFrame = (
-  r: AccountReplica, self: EntityId, clock: FrameClock, verify?: Verify,
-): Result<AccountFrame, AccountReplicaError> => map(previewAccountProposal(r, self, clock, verify), (p) => p.frame);
 export type AckPreview = { readonly height: bigint; readonly frameHash: string; readonly dispute: DisputePlan };
 type AckPreviewResult = Result<AckPreview, AccountReplicaError>;
 export const previewAck = (r: AccountReplica, self: EntityId): AckPreviewResult =>
@@ -10769,23 +10639,14 @@ const proposalOnProposed = (r: ProposedAccount, input: AckFrame, ctx: InboundAcc
 const proposalOnReceived = (r: ReceivedAccount, input: AckFrame, ctx: InboundAccountContext): Verb<ReceivedAccount> =>
   match(receipt(r, input, ctx), {
     answered: ({ result }): Verb<ReceivedAccount> => result,
-    continue: (): Verb<ReceivedAccount> =>
-      (sameHex(input.frame.stateHash, r.candidate.frame.stateHash) ? ok(done(r)) : err({ _tag: "already_proposed" })),
+    // a retry of the held frame is answered from the held replica, but only once its body hashes to the hash it
+    // claims: an altered body under the original hash is refused, as the Entity path refuses it
+    continue: (): Verb<ReceivedAccount> => {
+      const held = sameHex(input.frame.stateHash, r.candidate.frame.stateHash);
+      const answer: Verb<ReceivedAccount> = held ? ok(done(r)) : err({ _tag: "already_proposed" });
+      return chain(acceptFrame(input.frame, replicaId(r), other(ctx.party.left)), () => answer);
+    },
   });
-/** A held frame re-verified from scratch (after a restart): its hash, its proposer's Hanko, and its replay. */
-export const restoreCandidate = (
-  held: ProposedAccount | ReceivedAccount, party: Party, verify: Verify, dt?: DeltaTransformerRef,
-): Result<Candidate, AccountReplicaError> => {
-  const { frame, frameHanko, floor, sent } = held.candidate, byLeft = proposerIsLeft(held, party);
-  const proposer = at(party.self, party.peer, byLeft === party.left);
-  const settlement: SettlementCtx = { verify, proofNonceFloor: floor, ...opt("deltaTransformer", dt) };
-  const verified = lazyChecks<AccountReplicaError>(
-    () => acceptFrame(frame, replicaId(held), byLeft),
-    () => certifies(verify, frame.stateHash, frameHanko, proposer, { allowPreviousBoard: true }),
-  );
-  return chain(verified, () => chain(replay(held.state, frame, byLeft, settlement), ({ draft, view }) =>
-    map(localProof(view, dt), (frameProof) => establish({ frame, frameHanko, frameProof, draft, floor, sent }))));
-};
 /** What a peer input names, as og rejectFrozenAccountInput reports it: its reference height, its txs, its ACK. */
 const frozenDropNote = (input: AccountInput, peer: EntityId): string => {
   const seen = ((): { readonly height?: bigint; readonly txs: readonly WireAccountTx[]; readonly acked: boolean } => {
@@ -11371,15 +11232,6 @@ export const disputeUnsafe = (r: AccountReplica, applied: Applied, ctx: DoorCont
   const frozen = applyAccountInput(after?.committed.replica ?? r, { kind: "freeze", evidence }, ctx);
   return map(frozen, (d) => ({ replica: d.replica, outputs: [...(after?.committed.outputs ?? []), ...d.outputs] }));
 };
-export const restoreAccount = (
-  r: AccountReplica, self: EntityId, verify: Verify, dt?: DeltaTransformerRef,
-): Result<AccountReplica, AccountReplicaError> => chain(partyOf(replicaId(r), self), (party) => {
-  type Restored = Result<AccountReplica, AccountReplicaError>;
-  const restored = <R extends ProposedAccount | ReceivedAccount>(held: R): Restored =>
-    map(restoreCandidate(held, party, verify, dt), (candidate) => ({ ...held, candidate }));
-  const kept = (x: AccountReplica): Restored => ok(x);
-  return match(r, { open: kept, proposed: restored, received: restored, preparing: kept, disputed: kept });
-});
 
 export type Head = { readonly height: bigint; readonly prevFrameHash: EntityFrameHash };
 export const genesisHead = (): Head => ({ height: 0n, prevFrameHash: ZERO_HASH as EntityFrameHash });
@@ -13035,10 +12887,42 @@ const importPairs = (og: Binary | undefined): Result<SwapPairs, string> => {
     ? ok({ _tag: "pairs", pairs: og as unknown as readonly DefaultSwapPair[] })
     : err("malformed swapTradingPairs");
 };
-/** og proposals (every Entity has the map) and og's legacy per-signer nonces, which nothing in og still moves. */
-const importMap = <V,>(og: Binary | undefined, field: string): Result<ReadonlyMap<string, V>, string> => {
+/**
+ * og proposals (every Entity has the map) and og's legacy per-signer nonces, which nothing in og still moves. Every
+ * entry is checked before the map is trusted as `V`: a record og cannot produce is refused, naming the entry.
+ */
+const importMap = <V,>(
+  og: Binary | undefined,
+  field: string,
+  problem: (key: string, value: unknown) => string | undefined,
+): Result<ReadonlyMap<string, V>, string> => {
   if (og === undefined) return ok(new Map());
-  return og instanceof Map ? ok(og as unknown as ReadonlyMap<string, V>) : err(`a non-map ${field}`);
+  if (!(og instanceof Map)) return err(`a non-map ${field}`);
+  const problems = [...og].map(([k, v]) => (typeof k === "string" ? problem(k, v) : `a non-text ${field} key`));
+  const first = problems.find((p) => p !== undefined);
+  return first === undefined ? ok(og as unknown as ReadonlyMap<string, V>) : err(first);
+};
+const nonceProblem = (signer: string, nonce: unknown): string | undefined => {
+  const counted = typeof nonce === "number" && Number.isSafeInteger(nonce) && nonce >= 0;
+  return counted ? undefined : `a malformed nonce for ${signer}`;
+};
+/** og system/basic.ts only ever stores 'yes' or 'no', bare or with a comment. */
+const storedVote = (vote: unknown): boolean => {
+  const choice = (c: unknown): boolean => c === "yes" || c === "no";
+  const commented = recOf(vote);
+  const withComment = commented !== null && choice(commented["choice"]) && typeof commented["comment"] === "string";
+  return choice(vote) || withComment;
+};
+/** og Proposal (entity/types.ts), keyed by its own id. */
+const proposalProblem = (id: string, value: unknown): string | undefined => {
+  const p = recOf(value);
+  const text = (k: string): boolean => p !== null && typeof p[k] === "string";
+  const count = (k: string): boolean => p !== null && typeof p[k] === "number" && Number.isSafeInteger(p[k]);
+  const votes = p?.["votes"];
+  const wellFormed = p !== null && p["id"] === id && text("proposer") && text("boardHash") && text("actionHash")
+    && count("boardEpoch") && count("created") && recOf(p["action"]) !== null
+    && votes instanceof Map && [...votes].every(([voter, vote]) => typeof voter === "string" && storedVote(vote));
+  return wellFormed ? undefined : `a malformed proposal ${id}`;
 };
 const ogSwapPairs = (p: SwapPairs): EntityCommitted =>
   (p._tag === "pairs" ? { swapTradingPairs: p.pairs as unknown as Binary } : {});
@@ -13106,8 +12990,11 @@ const importSections = (
     ),
     treasury: mapErr(importTreasury(og), unreachable("TREASURY")),
     schedule: mapErr(importSchedule(og["crontabState"]), unreachable("CRONTAB")),
-    nonces: mapErr(importMap<number>(og["nonces"], "nonces"), unreachable("NONCES")),
-    proposals: mapErr(importMap<StoredProposal>(og["proposals"], "proposals"), unreachable("PROPOSALS")),
+    nonces: mapErr(importMap<number>(og["nonces"], "nonces", nonceProblem), unreachable("NONCES")),
+    proposals: mapErr(
+      importMap<StoredProposal>(og["proposals"], "proposals", proposalProblem),
+      unreachable("PROPOSALS"),
+    ),
     encryptionKey: mapErr(importKey(og["entityEncryptionPublicKey"]), unreachable("ENCRYPTION_KEY")),
     swapPairs: mapErr(importPairs(og["swapTradingPairs"]), unreachable("SWAP_PAIRS")),
     wallet: mapErr(importWallet(og["externalWallet"]), unreachable("EXTERNAL_WALLET")),
@@ -21419,9 +21306,6 @@ const foldCommand = (
       state: withNonceSlot(applied.state, board, command.authorSignerId, { nonce: command.nonce, commandHash }),
     }));
   });
-/** og nextEntityCommandNonce. */
-export const nextCommandNonce = (state: EntityState, author: string): Result<bigint, EntityError> =>
-  map(commandBoard(state), (board) => nextNonce(state, board, lower(author)));
 /** og board shares keyed by canonical signer id. */
 const boardShares = (
   state: EntityState,
@@ -28246,10 +28130,16 @@ const certifiedSelfWake = (r: OpenEntity, s: Attested<OpenEntity>): readonly Ent
  * og finalizeCommitNotification tail: pruneReplicaFinalizedJHistory, then advanceLocalJPrefixRoundAfterCommit (the
  * committed round was cleared by publishFrame): due J work re-signs for the next height.
  */
+/** og pruneReplicaFinalizedJHistory throws a plain Error at commit, which halts the Runtime frame (an invariant). */
+const pruneAtCommit = (
+  h: ValidatorJHistory | undefined,
+  finalized: number,
+): Result<ValidatorJHistory | undefined, EntityError> =>
+  mapErr(pruneFinalizedJHistory(h, finalized), (f): EntityError => ({ _tag: "entity_invariant", reason: f.message }));
 const afterCommit = (a: EntityApply, ctx: EntityContext): Result<EntityApply, EntityError> => {
   const r = a.replica;
   if (r._tag !== "open") return ok(a);
-  return chain(jpE(pruneFinalizedJHistory(ctx.jHistory, jpFinalized(jpView(r)))), (history) =>
+  return chain(pruneAtCommit(ctx.jHistory, jpFinalized(jpView(r))), (history) =>
     chain(jpE(hasDueLocalJPrefixAdvance(jpView(r), history)), (due) =>
       due
         ? map(ensureLocalJPrefix(r, { ...ctx, jHistory: history }, false), (s): EntityApply => ({
@@ -40031,7 +39921,7 @@ const pairLegRefusal = (
   if (INGRESS_REJECTIONS.has(error._tag)) return ok("CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED");
   const transported = String(leg.from ?? "").trim() !== "";
   const broken = haltsRuntime(error) || error._tag === "no_such_entity";
-  if (broken || !transported || replay) return frameErr(runtimeErrorText(error));
+  if (broken || !transported || replay) return frameErr(haltText(error));
   return ok("CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED");
 };
 /**
@@ -40042,7 +39932,19 @@ const haltsRuntime = (error: RuntimeError): boolean =>
   error._tag === "entity_invariant" || accountThrew(error as EntityError);
 /** A refused input: rejected at its position, or the whole frame refused when og would halt on it. */
 const refuseInput = (b: InputBatch, error: RuntimeError): Result<InputBatch, RuntimeError> =>
-  haltsRuntime(error) ? frameErr(runtimeErrorText(error)) : ok(rejectOut(b, error));
+  haltsRuntime(error) ? frameErr(haltText(error)) : ok(rejectOut(b, error));
+/** What a halted frame is refused with: og's failure text for a thrown or critical Account tx, else its code. */
+const haltText = (error: RuntimeError): string => {
+  switch (error._tag) {
+    case "account_tx_thrown":
+    case "proposal_halt":
+      return error.message;
+    case "rejected_after_ack":
+      return haltText(error.cause);
+    default:
+      return runtimeErrorText(error);
+  }
+};
 /** The Runtime frame every Entity input applies under: the Runtime after its txs, the frame clock, the host context. */
 type FrameScope = { readonly rt: Runtime; readonly timestamp: bigint; readonly ctx: RuntimeCtx };
 /** og: a `txs` or J-prefix input takes the frame's timestamp. */

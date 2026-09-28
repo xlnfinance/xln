@@ -2,7 +2,7 @@
 // extensions/lending.ts) and the Htlc* runtime events' jurisdictionId (committed-frame-followups.ts, committed-htlc-followups.ts) vs pure/xln.ts.
 // "MATCH:" tests run og live on the same inputs and assert the same accept / refuse, lending book, returned Account txs and events.
 import { describe, expect, test } from "bun:test";
-import { seedOf, seedTag } from "./seed.ts";
+import { seedOf, seedTag, untilCovered } from "./seed.ts";
 import {
   accountId, applyRuntime, convertOutput, wireTx, createEntity, createRuntime, genesisReplica, lendingFollowups, lendingInterest, lendingLoanId, localScheduledWake, replicaKey, resolveFollowup, secretFollowup, spawn, tokenId,
   type AccountReplica, type AccountTx, type EntityId, type EntityOutput, type EntityState, type EntityTx, type LendingBook, type LendingFrame, type LendingLoan, type LendingPool, type Runtime, type RoutedEntityInput,
@@ -59,7 +59,9 @@ const HUB_CONFIG = { matchingStrategy: "amount", policyVersion: 1 } as never;
 describe(seedTag("lending-hub: committed lending followup (og committed-lending-followup.ts, committed-lending-close.ts)"), () => {
   test("MATCH: 3000 random hub lending books and committed frames -- og's accept / refuse message, lending book and returned lending_credit / lending_close_payout", () => {
     const seen = new Map<string, number>(), bump = (k: string) => seen.set(k, (seen.get(k) ?? 0) + 1);
-    for (let i = 0; i < 3000; i++) {
+    const floors = ["accepted", "loan-opened", "loan-active", "loan-closing", "loan-repaid", "lending_credit:grant", "lending_credit:revoke", "lending_close_payout:", "LENDING_FUND_PROPOSER_MISMATCH", "LENDING_LIQUIDITY_UNAVAILABLE", "LENDING_REPAYMENT_MISMATCH", "LENDING_CLOSE_PAYOUT_CAPACITY", "LENDING_CREDIT_PROPOSER_MISMATCH",
+      "LENDING_GRANT_STATUS_INVALID", "LENDING_REVOKE_STATUS_INVALID", "LENDING_PAYOUT_MISMATCH", "LENDING_CLOSE_ACTIVE_LOANS", "LENDING_ACCOUNT_MISSING", "LENDING_POSITION_ALREADY_EXISTS"];
+    for (let i = 0, more = untilCovered(3000, () => floors.every((k) => (seen.get(k) ?? 0) > 2)); more(i); i++) {
       const hub = pick([ALICE, BOB, CAROL]), peer = pick([ALICE, BOB, CAROL].filter((p) => p !== hub)) as EntityId, isHub = rng() < 0.92, ts = 5_000_000 + ri(1000);
       const lim = (): bigint => pick([0n, 50n, 100n, 1_000n]);
       const rows: Row[] = [1, 3].filter(() => rng() < 0.9).map((t) => ({ t, collateral: pick([0n, 100n, 1_000n]), ondelta: pick([0n, 300n, -300n]), offdelta: pick([0n, 40n, -40n, 900n]), left: lim(), right: lim(), hubHold: rng() < 0.15 ? pick([10n, 500n]) : 0n }));
@@ -145,8 +147,7 @@ describe(seedTag("lending-hub: committed lending followup (og committed-lending-
       for (const t of accountTxs) bump(`${t.tx.type}:${t.tx.data.action ?? ""}`);
       for (const l of og.lending?.loans.values() ?? []) if (!loans.has(l.loanId)) bump("loan-opened"); else if (l.status !== loans.get(l.loanId)?.status) bump(`loan-${l.status}`);
     }
-    for (const k of ["accepted", "loan-opened", "loan-active", "loan-closing", "loan-repaid", "lending_credit:grant", "lending_credit:revoke", "lending_close_payout:", "LENDING_FUND_PROPOSER_MISMATCH", "LENDING_LIQUIDITY_UNAVAILABLE", "LENDING_REPAYMENT_MISMATCH", "LENDING_CLOSE_PAYOUT_CAPACITY", "LENDING_CREDIT_PROPOSER_MISMATCH",
-      "LENDING_GRANT_STATUS_INVALID", "LENDING_REVOKE_STATUS_INVALID", "LENDING_PAYOUT_MISMATCH", "LENDING_CLOSE_ACTIVE_LOANS", "LENDING_ACCOUNT_MISSING", "LENDING_POSITION_ALREADY_EXISTS"]) expect([k, (seen.get(k) ?? 0) > 2]).toEqual([k, true]);
+    for (const k of floors) expect([k, (seen.get(k) ?? 0) > 2]).toEqual([k, true]);
   }, 60_000);
 
   test("MATCH: og buildLendingLoanId and computeLendingInterest", () => {

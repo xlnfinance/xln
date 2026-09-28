@@ -3,6 +3,7 @@
 // Every workspace here is signed with real lazy-Entity Hankos, so both engines go past the refusal gates and queue
 // the on-chain settlement row plus the Account submit.
 import { describe, expect, test } from "bun:test";
+import { untilCovered } from "./seed.ts";
 import { buildSettlementHankoDraft, handleSettleExecute } from "../../core/entity/tx/handlers/payments/settle.ts";
 import { addMessage as ogAddMessage, readEntityFrameEvents } from "../../core/entity/frame-events.ts";
 import { PersistentAccountStateMap } from "../../core/account/state/persistent-state-map.ts";
@@ -328,7 +329,9 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
   test("MATCH: 200 random settle_propose continuations -- same refusal (og assertSettlementContinuation order), same pinned workspace hash, actions and broadcast flag as og", async () => {
     const counts = new Map<string, number>();
     const bump = (k: string): void => { counts.set(k, (counts.get(k) ?? 0) + 1); };
-    for (let n = 0; n < 200; n++) {
+    const wanted = ["pinned", "SETTLEMENT_CONTINUATION_TOKEN_INVALID", "SETTLEMENT_CONTINUATION_AMOUNT_INVALID", "SETTLEMENT_CONTINUATION_ENTITY_INVALID",
+      "SETTLEMENT_CONTINUATION_ACTION_LIMIT_EXCEEDED", "SETTLEMENT_CONTINUATION_ACTIONS_INVALID", "SETTLEMENT_CONTINUATION_REQUIRES_LOCAL_EXECUTOR", "SETTLEMENT_CONTINUATION_ALREADY_PENDING"];
+    for (let n = 0, more = untilCovered(200, () => wanted.every((k) => counts.has(k))); more(n); n++) {
       const peer = pick([BOB, CAROL]);
       const child = BASE.accountReplicas.get(peer);
       if (child === undefined) throw new Error("fixture Account missing");
@@ -358,8 +361,7 @@ describe("coverage-settlement: continuations (og settle_propose pin + materializ
       bump("pinned");
     }
     const summary = `seed=${SEED} ${JSON.stringify([...counts])}`;
-    for (const k of ["pinned", "SETTLEMENT_CONTINUATION_TOKEN_INVALID", "SETTLEMENT_CONTINUATION_AMOUNT_INVALID", "SETTLEMENT_CONTINUATION_ENTITY_INVALID",
-      "SETTLEMENT_CONTINUATION_ACTION_LIMIT_EXCEEDED", "SETTLEMENT_CONTINUATION_ACTIONS_INVALID", "SETTLEMENT_CONTINUATION_REQUIRES_LOCAL_EXECUTOR", "SETTLEMENT_CONTINUATION_ALREADY_PENDING"]) {
+    for (const k of wanted) {
       same(`${summary} ${k}`, (counts.get(k) ?? 0) > 0, true);
     }
   }, 60_000);
