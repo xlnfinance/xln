@@ -71,40 +71,56 @@ describe("the gate is keyed by chain id", () => {
   });
 });
 
-describe("every deploy path goes through the gate", () => {
-  test("a script that deploys or broadcasts must reference the gate (a new script cannot skip it silently)", () => {
-    const sinks = /\.deploy\(|getContractFactory\(|broadcastTronTransaction\(|deployContract\(|sendTransaction\(/;
-    const scripts = readdirSync(path.join(contractsRoot, "scripts")).filter((name) => /\.(cjs|ts|js|mjs)$/.test(name) && name !== "deploy-gate.cjs");
-    const deployers = scripts.filter((name) => sinks.test(readFileSync(path.join(contractsRoot, "scripts", name), "utf8")));
-    expect(deployers.sort()).toEqual(["deploy-chain-matrix.cjs", "deploy-stack.cjs"]);
-    deployers.forEach((name) => expect(readFileSync(path.join(contractsRoot, "scripts", name), "utf8")).toContain("deploy-gate.cjs"));
-  });
-
+describe("every deploy path runs the gate", () => {
   const run = (args: string[], command = "bun") => spawnSync(command, args, {
     cwd: contractsRoot, encoding: "utf8", timeout: 240_000,
     env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
   });
+  const stack = (network: string) => () => run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", network], "bunx");
+  const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
 
-  test("deploy-chain-matrix.cjs refuses mainnet before any key or network use", () => {
-    const result = run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run"]);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Deploy gate: MIN_RESPONSE_SECONDS is 60s");
+  // Every script that can deploy needs at least one entry here that runs it against a chain id the gate must refuse.
+  // Importing the gate is not enough: a script that never calls it fails its entry, and a new deploy script fails the
+  // coverage test below until someone adds an entry for it.
+  const entries: Record<string, ReadonlyArray<readonly [string, () => ReturnType<typeof run>]>> = {
+    "deploy-chain-matrix.cjs": [
+      ["mainnet profile, all chains", matrix()],
+      ["mainnet profile, ethereum only", matrix("--chain=ethereum")],
+      ["mainnet profile, tron only", matrix("--chain=tron")],
+    ],
+    "deploy-stack.cjs": [
+      ["--network ethereum-mainnet (chain 1)", stack("ethereum-mainnet")],
+      ["--network base-mainnet (chain 8453)", stack("base-mainnet")],
+    ],
+  };
+
+  test("every script that deploys or broadcasts has an entry that exercises it", () => {
+    const sinks = /\.deploy\(|getContractFactory\(|broadcastTronTransaction\(|deployContract\(|sendTransaction\(/;
+    const scripts = readdirSync(path.join(contractsRoot, "scripts")).filter((name) => /\.(cjs|ts|js|mjs)$/.test(name) && name !== "deploy-gate.cjs");
+    const deployers = scripts.filter((name) => sinks.test(readFileSync(path.join(contractsRoot, "scripts", name), "utf8")));
+    expect(deployers.sort()).toEqual(Object.keys(entries).sort());
   });
 
+  for (const [script, cases] of Object.entries(entries)) {
+    test.each(cases.map(([label, go]) => [label, go] as const))(`${script} refuses: %s`, (_label, go) => {
+      const result = go();
+      const output = `${result.stdout}${result.stderr}`;
+      expect(result.status).not.toBe(0);
+      expect(output).toContain("Deploy gate: MIN_RESPONSE_SECONDS is 60s");
+      // Refused before any deployment step started.
+      expect(output).not.toContain("preflight");
+      expect(output).not.toContain("Deploying");
+    });
+  }
+
   test("deploy-chain-matrix.cjs refuses --skip-compile on a mainnet", () => {
-    const result = run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", "--skip-compile"]);
+    const result = matrix("--skip-compile")();
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("--skip-compile is refused");
   });
 
   test("deploy-stack.cjs lets a local network through the gate (it stops later, on the missing stablecoin address)", () => {
-    const result = run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", "hardhat"], "bunx");
+    const result = stack("hardhat")();
     expect(`${result.stdout}${result.stderr}`).not.toContain("Deploy gate");
-  });
-
-  test.each(["ethereum-mainnet", "base-mainnet"])("deploy-stack.cjs refuses --network %s before any RPC call", (network) => {
-    const result = run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", network], "bunx");
-    expect(result.status).not.toBe(0);
-    expect(`${result.stdout}${result.stderr}`).toContain("Deploy gate: MIN_RESPONSE_SECONDS is 60s");
   });
 });

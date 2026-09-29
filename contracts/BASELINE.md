@@ -90,3 +90,4 @@ the H1 wait and the H3 clamp. Until then `test/vm/` is the gate and CI runs only
 2. **Repoint the walk.** `bun diff/walk.ts` still deploys `jurisdictions/`. Pointing it at `contracts/` needs the pure encoders plus a shim for og's own signing, because og's signers and adapter use the old payloads and ABI.
 3. **Port the Foundry suites** (section above), together with the Hardhat port.
 4. H3 is no longer open: it is built in the follow-up branch, test `h3-retired-board-cap`.
+5. **Run the TRON deploy path end to end.** `deploy-chain-matrix.cjs` and `compile-tron.cjs` were copied from `jurisdictions/scripts/` and have never been run here; only the deploy gate in front of them is tested (it refuses the testnet floor on TRON mainnet). Run it against TRON Nile before relying on it.
