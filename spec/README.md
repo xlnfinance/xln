@@ -16,7 +16,9 @@ spec/
   account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
   account-frames.check.scm entry point: check the Account frames page
-  test.mjs                 runs the page and every bug variant, asserts the verdicts
+  test.mjs                 runs the page and every bug variant in parallel, asserts the verdicts
+  export-traces.mjs        complete runs as ITF JSON into traces/ (for the Quint replay)
+  QUESTIONS.md             every open point and the reading taken
   mcp/server.mjs           MCP server: lets an agent run and check Arrival programs here
 ```
 
@@ -28,8 +30,8 @@ Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
 cd spec
 npm install            # or: bun install    (MCP server dependencies)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
-npm run check          # {:ok #t :states 313 :transitions 557}
-npm test               # the page passes; each planted bug fails with its property
+npm run check          # about 2 minutes: {:ok #t :states 3651 :transitions 11335 :goals 16}
+npm test               # about 2 minutes (4 cores): the page passes; each planted bug fails with its property
 ```
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
@@ -64,7 +66,7 @@ Rules and properties are named data:
 - Model bounds are `define/overridable` with an `s/*` schema, so a run can widen them without editing
   the page. Put the override in a config file and pass it: `--config wide.json` with
   `{"capabilities":[{"module":"./arrival/packages/arrival/dist/env/overridable/overridable.js",
-  "config":{"params":{"right-txs":["x","y","z"]}}}]}` (2 + 3 txs: 888 states).
+  "config":{"params":{"right-txs":["x","y","z"]}}}]}` (a larger model takes minutes).
 - `arrival_check` and `arrival check` on a page file report false unbound names (`rule`, `check`),
   because a page relies on the entry file's `(require …)`. Check entry files (`*.check.scm`).
 - Numbers are exact and unbounded: `(- (expt 2 256) 1)` is exact. Use them for amounts.
@@ -133,7 +135,7 @@ If `node` is not on the app's PATH, put the absolute path of `node` in `command`
 ### Checking it works
 
 Ask the agent to call `arrival_run` with `file: "account-frames.check.scm"`; it should print
-`{:ok #t :states 313 :transitions 557}`. Without an MCP client:
+`{:ok #t :states 3651 :transitions 11335 :goals 16}`. Without an MCP client:
 
 ```sh
 npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
@@ -141,3 +143,13 @@ npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
 
 If the server fails to start, the usual cause is a missing build: `arrival/packages/arrival-cli/dist/cli.js`
 must exist (`npm run setup`), and `spec/node_modules` must exist (`npm install`).
+
+## Traces
+
+`node export-traces.mjs [page] [count]` writes complete runs of a page as ITF JSON (Quint's
+trace format) into `traces/<page>/`, shortest first. `mbt::actionTaken` names the rule of each
+step. A thread with the independent Quint spec replays them there.
+
+## Questions
+
+Every open point and the reading the spec took is in `QUESTIONS.md`.
