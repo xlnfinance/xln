@@ -239,7 +239,7 @@ describe(seedTag("account-consensus: driven scenarios"), () => {
     const ogHalt = await validate([{ type: "swap_resolve", data: { offerId: "missing", fillRatio: 1, cancelRemainder: true } } as unknown as OgTx]).then(() => "og accepted", (e: Error) => e.message);
     expect(ogHalt).toStartWith("SWAP_RESOLVE_PROPOSAL_FAILED");
     // og applyProposalTransaction rethrows a handler Error: the whole proposal (and Entity input) aborts with og's text
-    const ogThrown = await validate([scl(1, 5n), { type: "htlc_lock", data: { lockId: W("5a"), hashlock: W("5a"), timelock: 10n ** 15n, revealBeforeHeight: 50, amount: 1n, tokenId: 1, envelope: { version: 9, ciphertext: "x" } } } as unknown as OgTx]).then(() => "og accepted", (e: Error) => e.message);
+    const ogThrown = await validate([scl(1, 5n), { type: "htlc_lock", data: { lockId: W("5a"), hashlock: W("5a"), timelock: BigInt(CLOCK.timestamp) + 10n ** 8n, revealBeforeHeight: 50, amount: 1n, tokenId: 1, envelope: { version: 9, ciphertext: "x" } } } as unknown as OgTx]).then(() => "og accepted", (e: Error) => e.message);
     const bad = { type: "add_delta", data: { tokenId: 1 << 30 } } as unknown as OgTx;
     const og = await validate([scl(1, 5n), bad, scl(2, 5n)]);
     expect([og.validTxs.length, og.txsToRemove.length, og.deferredTxCount]).toEqual([2, 1, 0]);
@@ -247,7 +247,7 @@ describe(seedTag("account-consensus: driven scenarios"), () => {
     const resolve = { type: "swap_resolve", offerId: "missing", fillRatio: 1, cancelRemainder: true } as WireAccountTx;
     const halted = unwrap(admit(genesisAB(), [resolve]));
     expect(unwrapErr(applyAccountInput(halted, { kind: "propose", ...CLOCK }, DOOR(ALICE)))).toMatchObject({ _tag: "proposal_halt", txType: "swap_resolve", message: ogHalt });
-    const lock = { type: "htlc_lock", lockId: W("5a"), hashlock: W("5a"), timelock: 10n ** 15n, revealBeforeHeight: 50n, amount: 1n, tokenId: "1", envelope: { version: 9, ciphertext: "x" } } as unknown as WireAccountTx;
+    const lock = { type: "htlc_lock", lockId: W("5a"), hashlock: W("5a"), timelock: BigInt(CLOCK.timestamp) + 10n ** 8n, revealBeforeHeight: 50n, amount: 1n, tokenId: "1", envelope: { version: 9, ciphertext: "x" } } as unknown as WireAccountTx;
     expect(unwrapErr(applyAccountInput(unwrap(admit(genesisAB(), [{ ...TX, tokenId: TOK1 }, lock])), { kind: "propose", ...CLOCK }, DOOR(ALICE)))).toEqual({ _tag: "account_tx_thrown", message: ogThrown });
     const overdraw: WireAccountTx = { type: "payment", tokenId: TOKEN, amount: 10n ** 30n };
     const proposed = proposeFrom(genesisAB(), ALICE, [TX, overdraw, { ...TX2, tokenId: TOK1 }]).replica;

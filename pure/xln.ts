@@ -5122,14 +5122,31 @@ export const decodeOnionLayer = (bytes: Uint8Array): Result<OnionLayer, OnionErr
 // ---- deadlines: og config/constants.ts, payments/delivery.ts ----
 // The source's lock gets the whole window; each forward shortens the timelock by one delta and reveals one step
 // of blocks earlier, so every hop can still claim upstream after its downstream reveals.
-export const HTLC_TIMELOCK_DELTA_MS = 10_000;
-export const HTLC_REVEAL_DELTA_BLOCKS = 3;
+/**
+ * LAG, the deployment's lag: a J transaction is included, and its event read, within this long (spec: REACT = 2 * LAG,
+ * HOP >= REACT between a hub's inbound and onward deadlines, every dispute window above LAG). 5 s and 1.5 blocks are
+ * the defaults that reproduce og's deltas; the testnet value is set from a measured LAG before deploy.
+ */
+export const LAG_MS = 5_000;
+export const LAG_BLOCKS = 1.5;
+export const HTLC_TIMELOCK_DELTA_MS = 2 * LAG_MS;
+export const HTLC_REVEAL_DELTA_BLOCKS = Math.ceil(2 * LAG_BLOCKS);
 export const HTLC_MIN_FORWARD_TIMELOCK_MS = 20_000;
 export const HTLC_MAX_HOPS = 100;
 const INSTANT_PAYMENT_EXPIRY_MS = 120_000;
 const INSTANT_PAYMENT_EXPIRY_BLOCKS = 50;
 const ASYNC_PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / 5_000);
+/**
+ * N2: no deadline beyond a party's own tolerance. Under H1 an Account with an open HTLC cannot finalize before its
+ * deadline unless the secret shows up, so a lock signed for years holds the Account (and a forwarding hub's onward
+ * lane) open for years. A lock ends within this horizon of the frame that carries it, in time and in J height. Policy
+ * default: a week, above the 24 h async window, leaving room for a stuck route.
+ */
+export const MAX_LOCK_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
+export const MAX_LOCK_HORIZON_BLOCKS = Math.ceil(MAX_LOCK_HORIZON_MS / 5_000);
+/** The reject and refusal reason of a deadline beyond the horizon (a stricter-than-og departure, departures.ts). */
+const DEADLINE_TOO_FAR = "deadline_too_far";
 export type ConditionalMode = "instant" | "async";
 type DeadlineWindow = Readonly<{ baseTimelock: bigint; baseHeight: number }>;
 /** og resolvePaymentDeadlineWindow (callers validate their inputs with toJHeight / toUnixMs). */
@@ -8488,6 +8505,12 @@ const htlcLockFailure = (a: AccountBody, x: TxOf<"htlc_lock">, ctx: FoldCtx): Ac
   () => refuse(ctx.nowMs >= x.timelock, `Timelock ${x.timelock} already expired (timestamp)`),
   () => refuse(x.revealBeforeHeight <= ctx.jHeight,
     `revealBeforeHeight ${x.revealBeforeHeight} already passed (current J height: ${ctx.jHeight})`),
+  () => refuse(x.timelock > ctx.nowMs + BigInt(MAX_LOCK_HORIZON_MS),
+    `${DEADLINE_TOO_FAR}: timelock ${x.timelock} is beyond the lock horizon `
+    + `(timestamp ${ctx.nowMs} + ${MAX_LOCK_HORIZON_MS} ms)`),
+  () => refuse(x.revealBeforeHeight > ctx.jHeight + BigInt(MAX_LOCK_HORIZON_BLOCKS),
+    `${DEADLINE_TOO_FAR}: revealBeforeHeight ${x.revealBeforeHeight} is beyond the lock horizon `
+    + `(current J height: ${ctx.jHeight} + ${MAX_LOCK_HORIZON_BLOCKS} blocks)`),
   () => refuse(!inPaymentRange(x.amount), `Invalid amount: ${x.amount} (min 1, max ${U256})`),
   () => refuse(a.locks.size >= MAX_ACCOUNT_HTLC_LOCKS, `Too many active HTLC locks: max ${MAX_ACCOUNT_HTLC_LOCKS}`),
   draftThrow(a, x.tokenId),
@@ -22726,7 +22749,8 @@ export type HtlcRejectReason =
   | "next_hop_offline"
   | "insufficient_capacity"
   | "fee_below_policy"
-  | "deadline_unsafe";
+  | "deadline_unsafe"
+  | "deadline_too_far";
 export type PreparedHtlcOutcome =
   | {
       readonly kind: "forward";
@@ -22754,6 +22778,7 @@ const HTLC_REJECT_REASONS: ReadonlySet<string> = new Set<HtlcRejectReason>([
   "insufficient_capacity",
   "fee_below_policy",
   "deadline_unsafe",
+  "deadline_too_far",
 ]);
 const isFields = (v: unknown): v is Fields =>
   v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map);
@@ -22915,10 +22940,26 @@ const hubForwardFee = (state: EntityState, amount: bigint, out: bigint, inn: big
   const base = typeof baseFee === "bigint" && baseFee > 0n ? baseFee : 0n;
   return base + ((amount < 0n ? 0n : amount) * BigInt(sanitizeFeePpm(ppm, 1))) / 1_000_000n;
 };
-/** The onward lock must still expire, in time and in J height, safely after this frame. */
-const onwardDeadlineSafe = (v: HtlcInboundView, binding: PreparedHtlcBinding): boolean =>
-  binding.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) > BigInt(v.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS) &&
-  binding.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS > Number(entityJHeight(v.state));
+/**
+ * What a hub makes of an inbound lock's deadline: the onward lock must still expire, in time and in J height, safely
+ * after this frame ("unsafe" when it would not), and the inbound one must lie within the lock horizon ("too_far").
+ */
+export type OnwardDeadline = "safe" | "unsafe" | "too_far";
+export const onwardDeadline = (
+  now: { readonly timestamp: number; readonly jHeight: number },
+  lock: { readonly timelock: bigint; readonly revealBeforeHeight: number },
+): OnwardDeadline => {
+  switch (true) {
+    case lock.timelock > BigInt(now.timestamp) + BigInt(MAX_LOCK_HORIZON_MS)
+      || lock.revealBeforeHeight > now.jHeight + MAX_LOCK_HORIZON_BLOCKS:
+      return "too_far";
+    case lock.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) > BigInt(now.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS)
+      && lock.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS > now.jHeight:
+      return "safe";
+    default:
+      return "unsafe";
+  }
+};
 /**
  * og materializeForwardOutcome: the next hop's Account, liveness, committed capacity, the hub fee and a safe onward
  * deadline, in that order.
@@ -22941,13 +22982,18 @@ const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer:
       return preparedReject(binding, "insufficient_capacity");
     case binding.amount - forwardAmount < hubForwardFee(v.state, binding.amount, out, inn):
       return preparedReject(binding, "fee_below_policy");
-    case !onwardDeadlineSafe(v, binding):
-      return preparedReject(binding, "deadline_unsafe");
     default:
-      return {
-        binding,
-        outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope },
-      };
+      switch (onwardDeadline({ timestamp: v.timestamp, jHeight: Number(entityJHeight(v.state)) }, binding)) {
+        case "too_far":
+          return preparedReject(binding, DEADLINE_TOO_FAR);
+        case "unsafe":
+          return preparedReject(binding, "deadline_unsafe");
+        case "safe":
+          return {
+            binding,
+            outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope },
+          };
+      }
   }
 };
 /**

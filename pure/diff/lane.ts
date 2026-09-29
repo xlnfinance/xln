@@ -24,7 +24,7 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
-import { haltDeparture } from "./departures.ts";
+import { haltDeparture, stricterDeparture, type OgAccountTx, type OgFrameClock } from "./departures.ts";
 import {
   canonicalEntityHashes,
   convertOutput,
@@ -627,6 +627,15 @@ export const createLane = (cfg: LaneConfig): Lane => {
         proposal?.frame.accountTxs.forEach((a) => coverage.accountTxs.add(a.type));
       }),
     );
+    // og accepted a tx the rewrite refuses on purpose (departures.ts): the states differ from here, so the walk ends
+    const stricter = [...ogRouted, ...ogRemote]
+      .flatMap((routed) => routed.entityTxs ?? [])
+      .flatMap((tx) => {
+        const carried = tx.type === "accountInput"
+          ? (tx.data as { proposal?: { frame: OgFrameClock & { accountTxs: OgAccountTx[] } } }).proposal?.frame
+          : undefined;
+        return (carried?.accountTxs ?? []).flatMap((a) => stricterDeparture(a, carried!) ?? []);
+      })[0];
     if (rec !== undefined) coverage.frames += 1;
     if (c !== null) {
       input.entityInputs.forEach(({ input: i }) =>
@@ -679,7 +688,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
         });
       pending = slotted(continuations);
     }
-    return diffs;
+    if (stricter === undefined) return diffs;
+    coverage.departures.push(`${label} ${stricter.name}`);
+    return [];
   };
 
   const drain = (): Outgoing => {

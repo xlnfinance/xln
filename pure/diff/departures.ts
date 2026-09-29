@@ -1,7 +1,7 @@
 // Where the rewrite departs from og on purpose. A departure may only replace an og Runtime halt: og refuses the whole
 // frame and commits nothing, so no value og commits changes. Each departure names the halt by og's own text, and says
 // what the rewrite does instead, checked on the frame the rewrite committed.
-import { unsignableWorkspace } from "../xln.ts";
+import { MAX_LOCK_HORIZON_BLOCKS, MAX_LOCK_HORIZON_MS, unsignableWorkspace } from "../xln.ts";
 import type { EntityId, Runtime } from "../xln.ts";
 
 export type HaltDeparture = {
@@ -75,3 +75,31 @@ export const KNOWN_OG_HALTS: readonly KnownHalt[] = [
   },
 ];
 export const knownHalt = (ogHalt: string): KnownHalt | undefined => KNOWN_OG_HALTS.find((k) => k.halts(ogHalt));
+
+/**
+ * Where the rewrite is stricter than og: og accepts and commits what the rewrite refuses, for a reason the spec adds on
+ * purpose. Unlike a halt departure nothing of og's is replaced, so the two states differ from the refusal on and a walk
+ * ends there. One reason only, named by its refusal code.
+ */
+export type OgAccountTx = { readonly type: string; readonly data?: { readonly timelock?: bigint | number; readonly revealBeforeHeight?: number } };
+/** The frame an og Account tx rides in: its timestamp and J height. */
+export type OgFrameClock = { readonly timestamp: number; readonly jHeight: number };
+export type StricterDeparture = {
+  readonly name: string;
+  /** The rewrite's refusal code. */
+  readonly reason: string;
+  /** og carried this tx in a frame at `at`, and the rewrite refuses it. */
+  readonly refuses: (tx: OgAccountTx, at: OgFrameClock) => boolean;
+};
+/** N2: a lock ending beyond the lock horizon of its frame, in time or in J height (spec: refuse beyond tolerance). */
+const lockHorizon: StricterDeparture = {
+  name: "a lock beyond the lock horizon is refused",
+  reason: "deadline_too_far",
+  refuses: (tx, at) =>
+    tx.type === "htlc_lock" &&
+    (BigInt(tx.data?.timelock ?? 0) > BigInt(at.timestamp) + BigInt(MAX_LOCK_HORIZON_MS) ||
+      (tx.data?.revealBeforeHeight ?? 0) > at.jHeight + MAX_LOCK_HORIZON_BLOCKS),
+};
+export const STRICTER_DEPARTURES: readonly StricterDeparture[] = [lockHorizon];
+export const stricterDeparture = (tx: OgAccountTx, at: OgFrameClock): StricterDeparture | undefined =>
+  STRICTER_DEPARTURES.find((d) => d.refuses(tx, at));
