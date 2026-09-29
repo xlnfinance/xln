@@ -60,7 +60,11 @@ export interface CollectReferencesOptions {
   readonly macroPolicyOf?: (name: string) => MacroWalkAttribute | undefined;
 }
 
-const DEFINE_HEADS: ReadonlySet<string> = new Set(["define", "define-macro", "define-syntax"]);
+const DEFINE_HEADS: ReadonlySet<string> = new Set(["define", "define/overridable", "define-macro", "define-syntax"]);
+
+/** Heads that bind a VALUE (the rest bind macros). `define/overridable` binds its name
+ *  exactly like `define`; its type and default are ordinary expressions. */
+export const VALUE_DEFINE_HEADS: ReadonlySet<string> = new Set(["define", "define/overridable"]);
 
 /** Interned symbol's string name; null for a gensym (never a lexical variable). */
 function nameOf(s: ASymbol): string | null {
