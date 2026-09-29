@@ -28,21 +28,21 @@ contract BatchBoundsTest is XlnFixture {
   {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entity[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actor], encoded, nonce);
     bytes memory hanko = _hanko(actor, h);
-    calldataBytes = abi.encodeCall(dep.processBatch, (encoded, hanko, nonce)).length;
+    calldataBytes = abi.encodeCall(dep.processBatch, (entity[actor], encoded, hanko, nonce)).length;
 
     uint256 before = gasleft();
-    try dep.processBatch(encoded, hanko, nonce) { ok = true; } catch { ok = false; }
+    try dep.processBatch(entity[actor], encoded, hanko, nonce) { ok = true; } catch { ok = false; }
     gasUsed = before - gasleft();
   }
 
   function _expectBoundsRevert(uint256 actor, Batch memory batch) internal {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entity[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actor], encoded, nonce);
     vm.expectRevert(bytes4(keccak256("E10()")));
-    dep.processBatch(encoded, _hanko(actor, h), nonce);
+    dep.processBatch(entity[actor], encoded, _hanko(actor, h), nonce);
   }
 
   // ─────────── length caps ───────────
@@ -256,7 +256,7 @@ contract BatchBoundsTest is XlnFixture {
     bytes32 seed = keccak256("seed");
     ProofBody memory pb = _proofBody(seed, tokenCount, int256(0));
     bytes32 pbHash = keccak256(abi.encode(pb));
-    (uint256 accNonce, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(me, other));
+    (uint256 accNonce, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(me, other));
     uint256 nonce = accNonce + 1;
     bool proposerIsLeft = other < me;
 
