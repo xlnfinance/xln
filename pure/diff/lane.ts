@@ -18,6 +18,7 @@ import { buildReplayVerifiableRuntimePostStateView } from "../../core/storage/wa
 import { decodeBuffer } from "../../core/storage/codec/codec.ts";
 import { projectCertifiedEntityFrameLinkIdentity } from "../../core/entity/consensus/frame/lineage.ts";
 import { createJAdapter } from "../../core/jurisdiction/adapter/index.ts";
+import { canonicalTsAccountWorkerCount, TsAccountWorkerAuthority } from "../../core/rscore/ts-worker/provider.ts";
 import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
@@ -73,6 +74,27 @@ const verifyMember: typeof verifiers.verifyMember = (h, sig, addr) =>
 export const CRYPTO = { ...verifiers, sign, verifyMember };
 
 /** og's in-memory EVM with the real Depository stack: the chain both sides observe. */
+// Bun (1.3.11 and og CI's 1.4.0) segfaults when a Worker loads the native secp256k1 addon after an earlier Worker that
+// loaded it was terminated, and the harness terminates og's Account workers (holdAccountWorkers). An empty prebuild dir
+// makes node-gyp-build find no binary, so the secp256k1 package falls back to its own JS build (its index.js): the
+// same API and deterministic signatures. og's crypto.ts already treats the addon as optional
+process.env["SECP256K1_PREBUILD"] = process.env["SECP256K1_PREBUILD"] ?? "/nonexistent";
+
+/**
+ * og's Account worker pool for one Runtime, installed the way og installTsAccountWorkerAuthority
+ * (rscore/ts-worker/provider.ts) does on the first frame, which then returns early. og keeps no handle on env, so its
+ * own pool's threads (one per worker per Entity replica) live until the process exits; the harness closes this one
+ * when it closes the Runtime. The harness never sets XLN_TS_ACCOUNT_WORKERS=0, og's inline mode.
+ */
+export const holdAccountWorkers = (
+  env: ConstructorParameters<typeof TsAccountWorkerAuthority>[0],
+): TsAccountWorkerAuthority => {
+  const workers = new TsAccountWorkerAuthority(env, canonicalTsAccountWorkerCount());
+  env.accountAuthorityExecutionMode = "cutover";
+  env.accountAuthorityEntityStageProvider = workers.provider;
+  return workers;
+};
+
 export const bootChain = async (chainId = 31337): Promise<JAdapter> => {
   const chain = await createJAdapter({ mode: "browservm", chainId } as never);
   await chain.deployStack();

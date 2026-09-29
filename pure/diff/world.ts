@@ -20,7 +20,18 @@ import {
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
 import { registrationEvidenceKey } from "../../core/jurisdiction/machine/registration-evidence/index.ts";
 import { unwrap } from "../xln_run.ts";
-import { bootChain, createLane, emptyCoverage, jurisdictionOf, KEYS, prng, SIGNERS, T0, treeClone } from "./lane.ts";
+import {
+  bootChain,
+  createLane,
+  emptyCoverage,
+  holdAccountWorkers,
+  jurisdictionOf,
+  KEYS,
+  prng,
+  SIGNERS,
+  T0,
+  treeClone,
+} from "./lane.ts";
 import type { Coverage, Lane, User } from "./lane.ts";
 import { createRuntime, htlcPaymentTxHash, lazyBoardEntityId, tokenId } from "../xln.ts";
 import type { EntityId, EntityTx, ImportConfig, RuntimeTx } from "../xln.ts";
@@ -146,6 +157,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
   env.runtimeConfig = { ...env.runtimeConfig, storage: { ...env.runtimeConfig?.storage, enabled: true } } as never;
   env.activeJurisdiction = J.name;
   env.state.jReplicas.set(J.name, treeClone(JREPLICA) as never);
+  const accountWorkers = holdAccountWorkers(env);
   // og submits a sealed batch through its live adapter after the frame commits, and og's own watcher turns every
   // chain emission into its runtime mempool (observeJRange, the cursor, each validator's J-prefix attestation)
   attachLiveJAdapter(env, J.name, chain);
@@ -276,6 +288,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
     SPOKES.map((s) => user(s, [open(s, HUB, BigInt(1 + ri(20_000)))])),
   ];
   const close = async (): Promise<void> => {
+    await accountWorkers.close();
     await closeRuntimeDb(env);
     await closeInfraDb(env);
     await chain.close();

@@ -12067,6 +12067,8 @@ export type EntityContext = {
   readonly htlc?: HtlcProposerInfra | undefined;
   /** og env.runtimeSeed: the default proposer derives cross-j hash-ladder seeds from it (never committed). */
   readonly runtimeSeed?: string | undefined;
+  /** og env.runtimeId: with runtimeSeed, what a local openAccount's missing watch seed is derived from. */
+  readonly runtimeId?: string | undefined;
   /**
    * og EntityRuntimeContext.activeJurisdiction: the Runtime's active J name (never committed; the Htlc* event
    * jurisdictionId fallback).
@@ -13970,8 +13972,7 @@ const openDomainIssue = (state: EntityState, asked: Domain | undefined): string 
 };
 /**
  * og handleOpenAccountEntityTx's refusals, in og's order and with og's text: each is a plain Error, which halts og's
- * Runtime, so the text is the halt the frame is refused with. A self Account passes every handler check and fails in
- * og's Account worker when it hydrates the new Account (left must sort before right), after the requested policy.
+ * Runtime, so the text is the halt the frame is refused with. A self Account passes all of them (openChild refuses it).
  */
 const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountData): string | undefined => {
   const target = String(data.targetEntityId), peer = lowerText(target);
@@ -13993,12 +13994,18 @@ const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountDa
       return `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${state.id} counterparty=${peer}`;
     case requested !== undefined && !policySane(requested):
       return `REBALANCE_POLICY_INVALID:token=${Number(data.tokenId ?? "1")}`;
-    case sameId(peer, state.id):
-      return safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity");
     default:
       return undefined;
   }
 };
+/**
+ * og's Account worker refuses a self Account when it hydrates it (left must sort before right), after every handler
+ * check.
+ */
+const selfAccountRefusal = (): EntityError => ({
+  _tag: "entity_invariant",
+  reason: safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity"),
+});
 /**
  * og handleOpenAccountEntityTx: no output (the peer learns from the first Account frame); seeds add_delta for tokenId
  * + defaults and an optional credit line, on the Account keyed by the target's lowercase id.
@@ -14010,9 +14017,8 @@ const openChild = (
   if (refusal !== undefined) return invariant(refusal);
   const data = { ...tx.data, targetEntityId: lowerText(tx.data.targetEntityId) as EntityId };
   const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = data;
-  const id = accountId(state.id, target);
-  if (!id.ok) return err({ _tag: "self_account" });
-  const opening = genesisReplica(id.value, { domain: accountDomain, watchSeed, disputeConfig });
+  const id = mapErr(accountId(state.id, target), selfAccountRefusal);
+  const opening = chain(id, (account) => genesisReplica(account, { domain: accountDomain, watchSeed, disputeConfig }));
   return chain(opening, (opened) => seedAccount(state, replicas, data, opened, now));
 };
 /** og createInboundAccountState: an unknown peer's first proposal (height 1) opens the Account from its envelope. */
@@ -21634,11 +21640,37 @@ const accountStateDomainText = (d: Domain, code: string): Result<Domain, string>
 const accountStateDomain = (d: Domain): Result<Domain, EntityError> =>
   mapErr(accountStateDomainText(d, "ACCOUNT_STATE_DOMAIN"), (reason): EntityError =>
     ({ _tag: "entity_invariant", reason }));
+/** What og's Runtime derives a missing watch seed from (env.runtimeSeed, env.runtimeId); never committed. */
+export type WatchSeedOrigin = { readonly runtimeSeed?: string | undefined; readonly runtimeId?: string | undefined };
+const WATCH_SEED_DOMAIN = "xln:account-watch-seed:v1";
+/**
+ * og deriveAccountWatchSeed: the hash of the Runtime's seed and id and the Account's two Entities, so the same Account
+ * yields the same seed after any retry or restart.
+ */
+const derivedWatchSeed = (
+  origin: WatchSeedOrigin, entity: string, counterparty: string,
+): Result<string, EntityError> => {
+  const runtimeSeed = origin.runtimeSeed ?? "";
+  if (runtimeSeed === "") return invariant("ACCOUNT_WATCH_SEED_RUNTIME_SEED_MISSING");
+  const ids = [origin.runtimeId, entity, counterparty].map(lowerText);
+  const parts = [WATCH_SEED_DOMAIN, runtimeSeed, ...ids];
+  return ok(keccak256Hex(utf8(parts.join("|"))).toLowerCase());
+};
+/** og: a given watch seed is checked and lowercased; a missing one is derived for this Account. */
+const localWatchSeed = (
+  state: EntityState, data: OpenAccountData, origin: WatchSeedOrigin,
+): Result<string, EntityError> => {
+  const given: unknown = data.watchSeed;
+  if (given === undefined) return derivedWatchSeed(origin, state.id, trimLower(data.targetEntityId));
+  return isWatchSeed(given) ? ok(given.toLowerCase()) : invariant("OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID");
+};
 /**
  * og materializeLocallyAuthoredEntityTx for openAccount: the Entity's jurisdiction commits the Account domain; the
- * dispute clock is canonical and the watch seed lowercase.
+ * dispute clock is canonical and the watch seed lowercase, or derived when the open names none.
  */
-const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<OpenAccountData, EntityError> => {
+const localOpenAccount = (
+  state: EntityState, data: OpenAccountData, origin: WatchSeedOrigin,
+): Result<OpenAccountData, EntityError> => {
   if (state.jurisdictionConfig === undefined) return invariant(`OPEN_ACCOUNT_SOURCE_JURISDICTION_REQUIRED:${state.id}`);
   return chain(accountStateDomain(state.jurisdiction), (committed) => {
     const asked = data.accountDomain === undefined ? ok(committed) : accountStateDomain(data.accountDomain);
@@ -21651,18 +21683,16 @@ const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<Ope
           return invariant("OPEN_ACCOUNT_DOMAIN_MISMATCH");
         case clockIssue !== undefined:
           return invariant(clockIssue);
-        case !isWatchSeed(data.watchSeed):
-          return invariant("OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID");
         default:
-          return ok({
+          return map(localWatchSeed(state, data, origin), (watchSeed) => ({
             ...data,
             accountDomain: committed,
             disputeConfig: {
               leftResponseSeconds: Number(data.disputeConfig.leftResponseSeconds),
               rightResponseSeconds: Number(data.disputeConfig.rightResponseSeconds),
             },
-            watchSeed: data.watchSeed.toLowerCase(),
-          });
+            watchSeed,
+          }));
       }
     });
   });
@@ -21671,13 +21701,15 @@ const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<Ope
  * og materializeLocallyAuthoredEntityTx: before signing, a local directPayment carries its committed route and a local
  * openAccount its committed Account terms.
  */
-const materializeLocalTx = (state: EntityState, tx: EntityTx): Result<EntityTx, EntityError> => {
+const materializeLocalTx = (
+  state: EntityState, tx: EntityTx, origin: WatchSeedOrigin,
+): Result<EntityTx, EntityError> => {
   switch (tx.type) {
     case "directPayment":
       return map(committedRoute(state.id, tx.data.targetEntityId, tx.data.route), (route) =>
         ({ ...tx, data: { ...tx.data, route } }));
     case "openAccount":
-      return map(localOpenAccount(state, tx.data), (data) => ({ ...tx, data }));
+      return map(localOpenAccount(state, tx.data, origin), (data) => ({ ...tx, data }));
     default:
       return ok(tx);
   }
@@ -21692,12 +21724,13 @@ export const authorEntityTxs = (
   author: string,
   txs: readonly EntityTx[],
   sign: CommandSigner,
+  origin: WatchSeedOrigin = {},
 ): Result<readonly EntityTx[], EntityError> => {
   const by: CommandAuthor = { author, sign };
   const start: Authoring = { cursor: state, out: [], run: [], kind: undefined, seen: new Set() };
   const authored = (prepared: readonly EntityTx[]) =>
     chain(foldResult(prepared, start, (a, tx) => authorTx(a, tx, by)), (a) => map(flushRun(a, by), (done) => done.out));
-  return chain(traverse(txs, (tx) => materializeLocalTx(state, tx)), authored);
+  return chain(traverse(txs, (tx) => materializeLocalTx(state, tx, origin)), authored);
 };
 /** og buildSignedEntityCommand. */
 export const buildCommand = (
@@ -27579,7 +27612,7 @@ const admitTxs = <R extends EntityReplica>(
     const ordered: Result<readonly EntityTx[], EntityError> = txs.every((tx) => tx.type === "accountInput")
       ? ok(appended)
       : chain(
-          authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId)),
+          authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId), ctx),
           prioritizeWake,
         );
     return map(ordered, (mempool) => ({ ...r, mempool }));
@@ -40271,6 +40304,7 @@ const entityContextFor = (
     ...f.ctx,
     htlc: runtimeHtlcInfra(f.ctx, f.rt, routed.entityId),
     ...opt("activeJurisdiction", f.rt.activeJurisdiction),
+    ...opt("runtimeId", f.rt.runtimeId),
     ...opt(
       "jHistory",
       replicaJHistory({ ...f.rt, entities: b.store }, replicaKey(routed.entityId, routed.signerId), r),
