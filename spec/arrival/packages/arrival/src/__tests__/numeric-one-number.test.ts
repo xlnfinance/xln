@@ -13,7 +13,6 @@
 // divide-on-egress behavior and uses `exec()` on purpose.
 import { describe, expect, it } from "vitest";
 import { exec, execState } from "../eval/generator-exec.js";
-import { ParseError } from "../errors.js";
 
 async function run(src: string): Promise<string> {
   const { values: r } = await execState(src, {});
@@ -53,42 +52,19 @@ describe("ratio construction — AExact is a genuine (num, denom) rational", () 
   });
 });
 
-describe("overflow-throws — exact results whose components leave safe-integer range THROW", () => {
-  // Both operands are individually safe — 9007199254740991 IS Number.MAX_SAFE_INTEGER,
-  // itself a safe integer — deliberately NOT the plan's own literal example
-  // `(+ 9007199254740992 1)`, whose first operand (2^53) already exceeds
-  // Number.MAX_SAFE_INTEGER on its own and would conflate this row with the separate
-  // "over-safe source LITERAL" row below. Safe operands + unsafe RESULT isolates the
-  // arithmetic-overflow guarantee from the parser's literal gate.
+// xln fork: exact components are unbounded bigints, so these former overflow rows now
+// compute exactly. The rows keep their operands so the flip from the upstream law is visible.
+describe("unbounded exact — results past 2^53 stay exact (xln fork; upstream threw)", () => {
   it.each([
-    {
-      // Safe operands + unsafe result isolate op overflow from the parser's literal gate.
-      name: "(+ 9007199254740991 1) rejects — exact addition overflowing 2^53 THROWS, never silently widens",
-      input: "(+ 9007199254740991 1)",
-    },
-    {
-      // RED until the atom lands (same reason: unbounded bigint today). 94906266 is
-      // safe on its own (~9.5e7); its square (9007199326062756) exceeds
-      // Number.MAX_SAFE_INTEGER (9007199254740991) — confirmed by direct computation.
-      name: "(* 94906266 94906266) rejects — exact multiplication overflowing 2^53 THROWS",
-      input: "(* 94906266 94906266)",
-    },
-    {
-      // RED until the atom lands. The doc's own example (§3): a 3-arg `*` fold must
-      // catch the overflow at whichever step first leaves safe range, not just at the
-      // final accumulated result.
-      name: "(* 94906266 94906266 94906266) rejects — per-step overflow check in a variadic fold",
-      input: "(* 94906266 94906266 94906266)",
-    },
-  ])("$name", async ({ input }) => {
-    await expect(run(input)).rejects.toThrow(/exact overflow/i);
+    { input: "(+ 9007199254740991 1)", expected: 9007199254740992n },
+    { input: "(* 94906266 94906266)", expected: 94906266n * 94906266n },
+    { input: "(* 94906266 94906266 94906266)", expected: 94906266n ** 3n },
+  ])("$input", async ({ input, expected }) => {
+    expect((await exec(input)).at(-1)).toBe(expected);
   });
 
-  it("an over-safe source LITERAL (2^53+1) is a ParseError, not a silently-huge exact", async () => {
-    // RED until the atom lands: today's reader has no magnitude ceiling
-    // (reader/parsing.ts's parseBigInt has no isSafeInteger gate), so this parses fine
-    // into an unbounded exact bigint and evaluates without complaint.
-    await expect(run("9007199254740993")).rejects.toBeInstanceOf(ParseError);
+  it("an over-safe source LITERAL (2^53+1) reads exactly", async () => {
+    expect((await exec("9007199254740993")).at(-1)).toBe(9007199254740993n);
   });
 });
 

@@ -214,11 +214,7 @@ function egressUnknown(value: unknown, options: RosettaOptions): unknown {
     throw schemeToJsUnrecognizedDoor(value);
   }
 
-  // Host bigint never rides scheme space as a raw scalar — inbound twin door
-  // (NoLensError kind `"bigint"`). Convert before re-crossing.
-  if (typeof value === "bigint") {
-    throw new NoLensError("bigint");
-  }
+  // xln fork: a host bigint is a legitimate exact integer on the way out.
   return value;
 }
 
@@ -487,13 +483,11 @@ export const INCOMPATIBILITY_DOOR_CLAIMS: readonly InboundClaim[] = [
     },
   },
   {
-    // Host bigint: exact numbers are safe-integer ratios, not unbounded integers.
-    // Cure: bigintToNumber (this file) or encode to AExact before the membrane (z.bigint).
-    name: "bigint → door (no lens)",
+    // xln fork: exact numbers have unbounded bigint components, so a host bigint boxes
+    // as an exact integer (boxing.ts fromJs).
+    name: "bigint → exact integer",
     claims: (v) => typeof v === "bigint",
-    box: () => {
-      throw new NoLensError("bigint");
-    },
+    box: (ctx, v, p) => fromJs(ctx, v, p),
   },
   {
     // Residual exotics (Date/Map/Set/RegExp, unbranded class): no lens. Cures: brand

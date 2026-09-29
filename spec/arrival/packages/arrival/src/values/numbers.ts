@@ -14,7 +14,7 @@
 import invariant from "tiny-invariant";
 import { AExact } from "./primitives/AExact.js";
 import { AInexact } from "./primitives/AInexact.js";
-import { ComplexNumberError, ParseError } from "../errors.js";
+import { ComplexNumberError } from "../errors.js";
 
 /**
  * Complex tower omitted (R7RS §6.2.3). Door recognizes the omitted feature and
@@ -48,15 +48,29 @@ export function exactISqrt(n: number): number {
  */
 export function toReal(n: ANumeric): number {
   if (n instanceof AExact) {
-    return n.num / n.denom;
+    return n.valueOf();
   }
   return n.real;
 }
 
+/** The exact value of a finite double as `numerator / 2^k` — every finite double is a
+ *  dyadic rational, so this is exact (at most 1074 halvings). */
+function exactOfDouble(x: number): AExact {
+  if (Number.isInteger(x)) return new AExact(BigInt(x));
+  let scaled = x;
+  let denom = 1n;
+  while (!Number.isInteger(scaled)) {
+    scaled *= 2;
+    denom *= 2n;
+  }
+  return new AExact(BigInt(scaled), denom);
+}
+
 /**
  * Three-way comparison: -1 / 0 / 1, or NaN if incomparable (either operand NaN).
- * Exact/exact routes through `AExact.cmp` (safe-int cross-multiply, float fallback
- * on overflow). Inexact falls back to `toReal` where float comparison is correct.
+ * xln fork: exact components are unbounded, so a mixed exact/inexact compare converts the
+ * (finite) double to its exact value and compares exactly — a float compare would round a
+ * big exact and break transitivity (`(= 9007199254740992.0 9007199254740993)` must be #f).
  */
 export function schemeCompare(a: ANumeric, b: ANumeric): number {
   if (a instanceof AExact && b instanceof AExact) {
@@ -64,24 +78,17 @@ export function schemeCompare(a: ANumeric, b: ANumeric): number {
   }
   const ar = toReal(a);
   const br = toReal(b);
+  if (Number.isNaN(ar) || Number.isNaN(br)) return Number.NaN;
+  if (a instanceof AExact && Number.isFinite(br)) return a.cmp(exactOfDouble(br));
+  if (b instanceof AExact && Number.isFinite(ar)) return exactOfDouble(ar).cmp(b);
   if (ar < br) return -1;
   if (ar > br) return 1;
-  if (ar === br) return 0;
-  return Number.NaN;
+  return 0;
 }
 
-const PARSE_SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
-const PARSE_SAFE_MIN = BigInt(Number.MIN_SAFE_INTEGER);
-
-/** Parse magnitude via BigInt (exact digits past 2^53) then gate against safe-integer
- *  range: too large THROWS `ParseError` ("write it inexact"), never truncates. */
-function parseSafeIntLiteral(magnitude: bigint, original: string): number {
-  if (magnitude > PARSE_SAFE_MAX || magnitude < PARSE_SAFE_MIN) {
-    throw new ParseError(
-      `exact literal ${original} exceeds safe-integer range — write it inexact (e.g. append a decimal point, or use #i) if approximation is acceptable`,
-    );
-  }
-  return Number(magnitude);
+/** Parse magnitude via BigInt — exact at any size (xln fork: exact components are unbounded). */
+function parseSafeIntLiteral(magnitude: bigint, _original: string): bigint {
+  return magnitude;
 }
 
 // Host-facing string→number utility (re-exported off `index.ts`). Mints under CONSTANT_CTX;

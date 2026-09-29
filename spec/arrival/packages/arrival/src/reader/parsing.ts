@@ -49,8 +49,6 @@ function parseBigInt(str: string, radix: number = 10): bigint {
 // `parseNumber` (a deliberately separate, non-dual-use host utility) while
 // parse_rational/parse_integer/parse_float here are the reader's LIVE path (also called
 // by `string->number`, env/r7rs/strings.ts).
-const PARSE_SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
-const PARSE_SAFE_MIN = BigInt(Number.MIN_SAFE_INTEGER);
 
 function exactOverflowInLiteral(original: string): never {
   throw new ParseError(
@@ -60,14 +58,10 @@ function exactOverflowInLiteral(original: string): never {
   );
 }
 
-// Gates a magnitude read EXACTLY via `parseBigInt` (arbitrarily many source digits, no
-// per-digit float rounding) before it is ever narrowed to a `number` — sound because a
-// bigint magnitude outside [PARSE_SAFE_MIN, PARSE_SAFE_MAX] can never round back INTO
-// that range on conversion (same argument as AExact.cmp's overflow fallback: rounding
-// only ever lands on a representable neighbor of equal-or-greater distance from zero).
-function toSafeExactComponent(magnitude: bigint, original: string): number {
-  if (magnitude > PARSE_SAFE_MAX || magnitude < PARSE_SAFE_MIN) exactOverflowInLiteral(original);
-  return Number(magnitude);
+// xln fork: exact components are unbounded, so an exact literal of any size reads exactly.
+// Kept as the one narrowing point in case a caller ever needs the bound again.
+function toSafeExactComponent(magnitude: bigint, _original: string): bigint {
+  return magnitude;
 }
 
 // Gates a magnitude that is already a JS `number` (from Number.parseFloat/Math.round) —

@@ -93,8 +93,8 @@ describe("Wrapper Layer", () => {
       expect(jsToScheme(CONSTANT_CTX, Symbol.for("test"))).toBeInstanceOf(ASymbol);
     });
 
-    it("bigint DOORS — no lens for a host bigint (never boxed, never raw passthrough)", () => {
-      expect(() => jsToScheme(CONSTANT_CTX, 42n)).toThrow(/no lens for a host bigint/);
+    it("bigint enters as an exact integer (xln fork: unbounded exact)", () => {
+      expect(jsToScheme(CONSTANT_CTX, 42n)).toBeInstanceOf(AExact);
     });
 
     it("already-boxed AValue re-admits by identity", () => {

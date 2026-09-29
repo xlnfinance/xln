@@ -71,8 +71,9 @@ describe("AValue.fromJs — boxer dispatch produces the expected subtype per typ
   });
 
   // typeof 1n === "bigint" → NoLensError door (same spirit as unique-symbol).
-  it("bigint → door (NoLensError; never boxed; not a scheme number)", () => {
-    expect(() => fromJs(CONSTANT_CTX, 123n)).toThrow(/no lens for a host bigint/);
+  // xln fork: exact components are unbounded, so a host bigint is an exact integer.
+  it("bigint → AExact (xln fork)", () => {
+    expect((fromJs(CONSTANT_CTX, 123n) as AExact).numerator).toBe(123n);
   });
 
   // SchemeBool.ts:32-34 — empty-provenance fast path REUSES the schemeTrue/schemeFalse
@@ -311,8 +312,8 @@ describe("membrane jsToScheme / toJS — round-trip", () => {
     expect(toJS(jsToScheme(CONSTANT_CTX, 42))).toBe(42);
   });
 
-  it("bigint DOORS at the membrane (never boxed; never raw passthrough)", () => {
-    expect(() => jsToScheme(CONSTANT_CTX, 10n)).toThrow(/no lens for a host bigint/);
+  it("bigint enters as an exact integer; a raw bigint still cannot exit unboxed", () => {
+    expect(toJS(jsToScheme(CONSTANT_CTX, 10n))).toBe(10);
     expect(() => toJS(10n as never)).toThrow(/toJS: received a non-scheme value/);
   });
 

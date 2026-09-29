@@ -181,8 +181,8 @@ export function debugCrossCheckRational(
  * own "Division by zero" invariant (unrelated to overflow — not this function's door).
  */
 export function mintExact(
-  num: number,
-  denom: number,
+  num: number | bigint,
+  denom: number | bigint,
   provenance: ReadonlySet<number> = EMPTY_PROVENANCE,
   op?: string,
   /** Source span for a reader-minted literal — the parser's leaf-literal parsers
@@ -190,7 +190,9 @@ export function mintExact(
    *  omits it (a computed value has no source span of its own). */
   location?: SourceLocation,
 ): AExact {
-  if (!Number.isSafeInteger(num)) overflow(op, num);
-  if (!Number.isSafeInteger(denom)) overflow(op, denom);
+  // xln fork: bigint components are unbounded. A `number` component must still be a safe
+  // integer — an unsafe double has already lost exactness, so it stays the overflow door.
+  if (typeof num === "number" && !Number.isSafeInteger(num)) overflow(op, num);
+  if (typeof denom === "number" && !Number.isSafeInteger(denom)) overflow(op, denom);
   return new AExact(num, denom, provenance, location);
 }

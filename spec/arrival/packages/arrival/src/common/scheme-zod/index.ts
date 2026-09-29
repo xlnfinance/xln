@@ -427,18 +427,13 @@ export const bigint = named(
   z.union([
     z.codec(z.instanceof(AExact), z.bigint(), {
       decode: (n) => {
-        if (n.denom !== 1) {
+        if (!n.isInteger) {
           throw new CodecFidelityError("bigint", `exact rational ${n.toString()} has no integer bigint form`);
         }
-        return BigInt(n.num);
+        return n.numerator;
       },
       encode: (n) => {
-        const num = Number(n);
-        TypeError.invariant(
-          Number.isSafeInteger(num),
-          `bigint codec: ${n} exceeds safe-integer range — exact numbers are safe-integer-only post-rework`,
-        );
-        return new AExact(num);
+        return new AExact(n);
       },
     }),
     z.codec(z.instanceof(AInexact), z.bigint(), {
@@ -469,7 +464,7 @@ export const looseNumber = named(
     z.union([z.instanceof(AExact), z.instanceof(AInexact)]),
     z.custom<number>((v) => typeof v === "number"),
     {
-      decode: (n) => (n instanceof AExact ? n.num / n.denom : n.real),
+      decode: (n) => (n instanceof AExact ? n.valueOf() : n.real),
       encode: (n) => (Number.isSafeInteger(n) ? new AExact(n) : new AInexact(n)),
     },
   ),
@@ -485,7 +480,7 @@ export const looseAnyNumber = named(
     z.union([z.instanceof(AExact), z.instanceof(AInexact)]),
     z.union([z.custom<number>((v) => typeof v === "number"), z.bigint()]),
     {
-      decode: (n) => (n instanceof AExact ? n.num / n.denom : n.real),
+      decode: (n) => (n instanceof AExact ? n.valueOf() : n.real),
       encode: (v) => {
         if (typeof v === "bigint") {
           const num = Number(v);

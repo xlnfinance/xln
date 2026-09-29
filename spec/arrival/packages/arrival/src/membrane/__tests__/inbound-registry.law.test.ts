@@ -69,7 +69,7 @@ describe("inbound registry — the declared, ordered claim table IS the law", ()
       // PHASE 3 — the incompatibility door.
       "promise → door (settle first; container entries settle lazily)",
       "unique symbol → door (no lens)",
-      "bigint → door (no lens)",
+      "bigint → exact integer",
       "unbranded/exotic object → door (no lens)",
     ]);
   });

@@ -1,12 +1,11 @@
-// AExact — exact number (integers and rationals) over SAFE-INTEGER `number` components.
+// AExact — exact number (integers and rationals) over UNBOUNDED `bigint` components.
 //
-// SAFE-INTEGER EXACT: `num`/`denom` are plain JS `number`s, each always
-// `Number.isSafeInteger` — never `bigint`. Given safe operands, IEEE double
-// arithmetic on integers is exact whenever the true result is in safe range, and
-// a true result ≥ 2^53 can never round back INTO safe range — so a post-op
-// `Number.isSafeInteger` check is a sound exactness gate for the closed `+ − ×`
-// algebra. A result whose num or denom would leave safe range THROWS
-// (`ExactOverflowError` via `../mint-numeric.js`) — never silently coerces to inexact.
+// xln fork: the upstream one-number rework (dde9efb2) held num/denom to safe-integer
+// `number`s and threw on overflow. A money spec needs uint256 arithmetic, so the
+// components are `bigint` here and exact `+ − × /` never overflow. `num`/`denom` stay
+// as `number` getters for the call sites that genuinely need a machine number (char
+// codes, list indices, string radix): they read back exactly in the safe range and
+// throw ExactOverflowError outside it — the old door, now only at those edges.
 //
 // AExact↔numbers.ts and AExact↔AInexact edges are benign runtime cycles (method-body only).
 import invariant from "tiny-invariant";
@@ -14,53 +13,78 @@ import { AValue, EMPTY_PROVENANCE } from "./AValue.js";
 import { isComplex, schemeCompare } from "../numbers.js";
 import { AInexact } from "./AInexact.js";
 import type { SourceLocation } from "../../errors.js";
-import {
-  checkedAdd,
-  checkedMul,
-  checkedSub,
-  debugCrossCheckRational,
-  isNumericDebugEnabled,
-  mintExact,
-} from "../mint-numeric.js";
+import { ExactOverflowError, mintExact } from "../mint-numeric.js";
+
+/** A component as `bigint`: a `number` must already be a safe integer (an unsafe one is an
+ *  arrival bug upstream of here, not a program event). */
+function big(x: number | bigint, what: string): bigint {
+  if (typeof x === "bigint") return x;
+  invariant(Number.isSafeInteger(x), `AExact: ${what} ${x} is not a safe integer`);
+  return BigInt(x);
+}
+
+function bigAbs(x: bigint): bigint {
+  return x < 0n ? -x : x;
+}
+
+function bigGcd(a: bigint, b: bigint): bigint {
+  a = bigAbs(a);
+  b = bigAbs(b);
+  while (b !== 0n) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/** Read a component as a machine `number` — exact in the safe range, a door outside it. */
+function machine(x: bigint, op: string): number {
+  if (x > MAX_SAFE || x < -MAX_SAFE) throw new ExactOverflowError(op, x.toString());
+  return Number(x);
+}
 
 export class AExact extends AValue {
   readonly kind = "number" as const;
 
-  readonly num: number;
-  readonly denom: number;
+  /** Numerator, gcd-normalized; carries the sign. */
+  readonly numerator: bigint;
+  /** Denominator, gcd-normalized; always positive. */
+  readonly denominator: bigint;
 
   constructor(
-    num: number,
-    denom: number = 1,
+    num: number | bigint,
+    denom: number | bigint = 1,
     provenance: ReadonlySet<number> = EMPTY_PROVENANCE,
     location?: SourceLocation,
   ) {
     super(provenance, location);
-    invariant(denom !== 0, "Division by zero");
-    // Internal invariant, NOT the overflow door: callers must pre-check via
-    // checkedMul/checkedAdd/checkedSub or mintExact. Unsafe components here are an
-    // arrival bug (gate leak), not a program-level event — plain invariant, never ExactOverflowError.
-    invariant(
-      Number.isSafeInteger(num),
-      `AExact: num ${num} is not a safe integer — the caller must check via checkedMul/checkedAdd/checkedSub (or mintExact) before constructing`,
-    );
-    invariant(
-      Number.isSafeInteger(denom),
-      `AExact: denom ${denom} is not a safe integer — the caller must check via checkedMul/checkedAdd/checkedSub (or mintExact) before constructing`,
-    );
-    if (denom < 0) {
-      num = -num;
-      denom = -denom;
+    let n = big(num, "num");
+    let d = big(denom, "denom");
+    invariant(d !== 0n, "Division by zero");
+    if (d < 0n) {
+      n = -n;
+      d = -d;
     }
-    const g = AExact.gcd(num, denom);
-    const normNum = num / g;
-    // Exact -0 is unconstructible — normalize the -0 that `0 / g` can produce.
-    this.num = normNum === 0 ? 0 : normNum;
-    this.denom = denom / g;
+    const g = bigGcd(n, d);
+    this.numerator = g === 0n ? n : n / g;
+    this.denominator = g === 0n ? d : d / g;
+  }
+
+  /** Numerator as a machine number; throws ExactOverflowError outside the safe range. */
+  get num(): number {
+    return machine(this.numerator, "machine-number read");
+  }
+
+  /** Denominator as a machine number; throws ExactOverflowError outside the safe range. */
+  get denom(): number {
+    return machine(this.denominator, "machine-number read");
   }
 
   get isInteger(): boolean {
-    return this.denom === 1;
+    return this.denominator === 1n;
   }
 
   get isRational(): boolean {
@@ -80,15 +104,15 @@ export class AExact extends AValue {
   }
 
   get isZero(): boolean {
-    return this.num === 0;
+    return this.numerator === 0n;
   }
 
   get isPositive(): boolean {
-    return this.num > 0;
+    return this.numerator > 0n;
   }
 
   get isNegative(): boolean {
-    return this.num < 0;
+    return this.numerator < 0n;
   }
 
   get isNaN(): boolean {
@@ -99,69 +123,44 @@ export class AExact extends AValue {
     return true;
   }
 
-  /** Euclid over safe-int `number`s. `%` never grows magnitude past its larger operand. */
-  private static gcd(a: number, b: number): number {
-    a = a < 0 ? -a : a;
-    b = b < 0 ? -b : b;
-    while (b !== 0) {
-      const t = b;
-      b = a % b;
-      a = t;
-    }
-    return a;
-  }
-
+  /** The nearest double; exact in the safe range, rounded beyond it. */
   valueOf(): number {
-    return this.num / this.denom;
+    return this.denominator === 1n ? Number(this.numerator) : Number(this.numerator) / Number(this.denominator);
   }
 
-  /** Egress divides: integer arm is bare return; rational arm's float division is intentional
-   *  (`toJS(1/3)` = `0.333…`). */
-  ["arrival/toJS"](): number {
-    if (this.denom === 1) {
-      return this.num;
+  /** Egress: a safe integer leaves as `number`, a larger integer as `bigint`, a rational
+   *  as its nearest double (`toJS(1/3)` = `0.333…`). */
+  ["arrival/toJS"](): number | bigint {
+    if (this.denominator === 1n) {
+      return this.numerator > MAX_SAFE || this.numerator < -MAX_SAFE ? this.numerator : Number(this.numerator);
     }
     return this.valueOf();
   }
 
   withProvenance(p: ReadonlySet<number>): AExact {
-    return new AExact(this.num, this.denom, p, this.location);
+    return new AExact(this.numerator, this.denominator, p, this.location);
   }
 
   toString(): string {
-    if (this.denom === 1) {
-      return this.num.toString();
+    if (this.denominator === 1n) {
+      return this.numerator.toString();
     }
-    return `${this.num}/${this.denom}`;
+    return `${this.numerator}/${this.denominator}`;
   }
 
   ["arrival/print"](): string {
     return this.toString();
   }
 
-  // Same-type comparison. Cross-multiplies for exactness, but a comparison never
-  // crashes on overflow: if the intermediate would leave safe range, falls back to
-  // float (`valueOf()`) compare — a comparator only needs ORDER, never a reconstructed value.
   cmp(other: AExact): -1 | 0 | 1 {
-    const left = this.num * other.denom;
-    const right = other.num * this.denom;
-    if (Number.isSafeInteger(left) && Number.isSafeInteger(right)) {
-      const diff = left - right;
-      if (Number.isSafeInteger(diff)) {
-        if (diff < 0) return -1;
-        if (diff > 0) return 1;
-        return 0;
-      }
-    }
-    const lv = this.valueOf();
-    const rv = other.valueOf();
-    if (lv < rv) return -1;
-    if (lv > rv) return 1;
+    const diff = this.numerator * other.denominator - other.numerator * this.denominator;
+    if (diff < 0n) return -1;
+    if (diff > 0n) return 1;
     return 0;
   }
 
   equals(other: AExact): boolean {
-    return this.num === other.num && this.denom === other.denom;
+    return this.numerator === other.numerator && this.denominator === other.denominator;
   }
 
   // Setoid — exact ≡ exact ONLY, never equal to inexact (R7RS eqv?).
@@ -176,137 +175,85 @@ export class AExact extends AValue {
     return (other instanceof AExact || other instanceof AInexact) && schemeCompare(this, other) <= 0;
   }
 
-  // Same-type arithmetic. Each cross-multiplied intermediate is checked BEFORE the
-  // gcd-normalizing constructor — mintExact's re-check is defense in depth (a float
-  // product that already overflowed can round back to something that LOOKS safe).
-  // DEBUG belt (ARRIVAL_NUMERIC_DEBUG) cross-checks against BigInt when set.
   add(other: AExact): AExact {
-    const num = checkedAdd(
-      checkedMul(this.num, other.denom, "exact +"),
-      checkedMul(other.num, this.denom, "exact +"),
-      "exact +",
+    return mintExact(
+      this.numerator * other.denominator + other.numerator * this.denominator,
+      this.denominator * other.denominator,
     );
-    const denom = checkedMul(this.denom, other.denom, "exact +");
-    const result = mintExact(num, denom, undefined, "exact +");
-    if (isNumericDebugEnabled()) {
-      debugCrossCheckRational("add", this.num, this.denom, other.num, other.denom, result.num, result.denom);
-    }
-    return result;
   }
 
   sub(other: AExact): AExact {
-    const num = checkedSub(
-      checkedMul(this.num, other.denom, "exact -"),
-      checkedMul(other.num, this.denom, "exact -"),
-      "exact -",
+    return mintExact(
+      this.numerator * other.denominator - other.numerator * this.denominator,
+      this.denominator * other.denominator,
     );
-    const denom = checkedMul(this.denom, other.denom, "exact -");
-    const result = mintExact(num, denom, undefined, "exact -");
-    if (isNumericDebugEnabled()) {
-      debugCrossCheckRational("sub", this.num, this.denom, other.num, other.denom, result.num, result.denom);
-    }
-    return result;
   }
 
   mul(other: AExact): AExact {
-    const num = checkedMul(this.num, other.num, "exact *");
-    const denom = checkedMul(this.denom, other.denom, "exact *");
-    const result = mintExact(num, denom, undefined, "exact *");
-    if (isNumericDebugEnabled()) {
-      debugCrossCheckRational("mul", this.num, this.denom, other.num, other.denom, result.num, result.denom);
-    }
-    return result;
+    return mintExact(this.numerator * other.numerator, this.denominator * other.denominator);
   }
 
   div(other: AExact): AExact {
-    const num = checkedMul(this.num, other.denom, "exact /");
-    const denom = checkedMul(this.denom, other.num, "exact /");
-    // Zero-denominator still throws via AExact's "Division by zero" invariant inside mintExact.
-    // R7RS: exact `(/ x 0)` errors; only `0.0` division is IEEE `inf`/`nan`.
-    const result = mintExact(num, denom, undefined, "exact /");
-    if (isNumericDebugEnabled()) {
-      debugCrossCheckRational("div", this.num, this.denom, other.num, other.denom, result.num, result.denom);
-    }
-    return result;
+    // R7RS: exact `(/ x 0)` errors (the constructor's "Division by zero" invariant); only
+    // `0.0` division is IEEE `inf`/`nan`.
+    return mintExact(this.numerator * other.denominator, this.denominator * other.numerator);
   }
 
   neg(): AExact {
-    return mintExact(-this.num, this.denom, undefined, "exact negate");
+    return mintExact(-this.numerator, this.denominator);
   }
 
   abs(): AExact {
-    return mintExact(this.num < 0 ? -this.num : this.num, this.denom, undefined, "exact abs");
+    return mintExact(bigAbs(this.numerator), this.denominator);
   }
 
   inverse(): AExact {
-    return mintExact(this.denom, this.num, undefined, "exact inverse");
+    return mintExact(this.denominator, this.numerator);
   }
 
-  // Floor/ceiling/truncate/round return exact integers. Quotient via `%` then
-  // exact subtraction-then-division so the result is the TRUE truncated integer.
+  // Floor/ceiling/truncate/round return exact integers. bigint `/` truncates toward zero.
   floor(): AExact {
-    if (this.denom === 1) return this;
-    const r = this.num % this.denom;
-    const q = (this.num - r) / this.denom;
-    if (this.num < 0 && r !== 0) {
-      return mintExact(q - 1, 1, undefined, "exact floor");
-    }
-    return mintExact(q, 1, undefined, "exact floor");
+    if (this.isInteger) return this;
+    const q = this.numerator / this.denominator;
+    return mintExact(this.numerator < 0n ? q - 1n : q, 1n);
   }
 
   ceiling(): AExact {
-    if (this.denom === 1) return this;
-    const r = this.num % this.denom;
-    const q = (this.num - r) / this.denom;
-    if (this.num > 0 && r !== 0) {
-      return mintExact(q + 1, 1, undefined, "exact ceiling");
-    }
-    return mintExact(q, 1, undefined, "exact ceiling");
+    if (this.isInteger) return this;
+    const q = this.numerator / this.denominator;
+    return mintExact(this.numerator > 0n ? q + 1n : q, 1n);
   }
 
   truncate(): AExact {
-    if (this.denom === 1) return this;
-    const r = this.num % this.denom;
-    const q = (this.num - r) / this.denom;
-    return mintExact(q, 1, undefined, "exact truncate");
+    if (this.isInteger) return this;
+    return mintExact(this.numerator / this.denominator, 1n);
   }
 
   round(): AExact {
-    if (this.denom === 1) return this;
-    // Round to nearest, ties to even
-    const r = this.num % this.denom;
-    const q = (this.num - r) / this.denom;
-    const absR = r < 0 ? -r : r;
-    // Dividing a safe-int by 2 is always exact in a double (exponent shift).
-    const halfDenom = Math.trunc(this.denom / 2);
-
-    if (absR < halfDenom) {
-      return mintExact(q, 1, undefined, "exact round");
-    } else if (absR > halfDenom) {
-      return mintExact(this.num < 0 ? q - 1 : q + 1, 1, undefined, "exact round");
-    } else {
-      if (q % 2 === 0) {
-        return mintExact(q, 1, undefined, "exact round");
-      }
-      return mintExact(this.num < 0 ? q - 1 : q + 1, 1, undefined, "exact round");
-    }
+    if (this.isInteger) return this;
+    // Round to nearest, ties to even.
+    const q = this.numerator / this.denominator;
+    const r = this.numerator % this.denominator;
+    const twice = 2n * bigAbs(r);
+    const away = this.numerator < 0n ? q - 1n : q + 1n;
+    if (twice < this.denominator) return mintExact(q, 1n);
+    if (twice > this.denominator) return mintExact(away, 1n);
+    return mintExact(q % 2n === 0n ? q : away, 1n);
   }
 
   mod(other: AExact): AExact {
     invariant(this.isInteger && other.isInteger, "mod requires integers");
-    return mintExact(this.num % other.num, 1, undefined, "exact modulo");
+    return mintExact(this.numerator % other.numerator, 1n);
   }
 
   quotient(other: AExact): AExact {
     invariant(this.isInteger && other.isInteger, "quotient requires integers");
-    const r = this.num % other.num;
-    const q = (this.num - r) / other.num;
-    return mintExact(q, 1, undefined, "quotient");
+    return mintExact(this.numerator / other.numerator, 1n);
   }
 
   gcd(other: AExact): AExact {
     invariant(this.isInteger && other.isInteger, "gcd requires integers");
-    return mintExact(AExact.gcd(this.num, other.num), 1, undefined, "gcd");
+    return mintExact(bigGcd(this.numerator, other.numerator), 1n);
   }
 
   toInexact(): AInexact {

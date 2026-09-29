@@ -617,9 +617,9 @@ describe("scheme-zod number codec family — boundary cases (ported from v1's ow
       expect((out as AExact).num).toBe(42);
     });
 
-    it("DOORS encoding a bigint beyond safe-integer range (no more arbitrary precision)", () => {
+    it("encodes a bigint beyond safe-integer range exactly (xln fork: unbounded exact)", () => {
       const bigBeyondSafeRange = BigInt(Number.MAX_SAFE_INTEGER) + 100n;
-      expect(() => z.bigint.encode(bigBeyondSafeRange)).toThrow(/exceeds safe-integer range/);
+      expect((z.bigint.encode(bigBeyondSafeRange) as AExact).numerator).toBe(bigBeyondSafeRange);
     });
 
     it("doors an exact rational with no integer bigint form", () => {

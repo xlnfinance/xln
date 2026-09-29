@@ -62,7 +62,8 @@ export class AInexact extends AValue {
 
   private static floatToRational(x: number, _tolerance: number = 1e-10): AExact {
     if (Number.isInteger(x)) {
-      return mintExact(x, 1, undefined, "inexact->exact");
+      // xln fork: an integral double of any size has an exact bigint value.
+      return mintExact(BigInt(x), 1n, undefined, "inexact->exact");
     }
 
     // Decimal representation via mintExact so a wide expansion that leaves safe-integer

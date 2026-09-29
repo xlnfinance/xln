@@ -415,11 +415,8 @@ export const EXPECTED_FAILURES: readonly ExpectedFailure[] = [
   // already documents for `(real? -2.5+0i)`. Dropped rather than carried as a guaranteed-dead
   // rule — verified via `registryCoherenceFindings` (was reporting "dead ExpectedFailure rule").
   // -----------------------------------------------------------------------
-  {
-    match: { kind: "form", exact: "(test #t (if (and (= a b) (= b c)) (= a c) #t))" },
-    reason: "Numeric = non-transitivity across exact-bignum vs inexact (2^1000 ± 1) — IEEE/tower edge, known",
-    gate: "permanent — IEEE 754/tower edge, no fix planned",
-  },
+  // xln fork: the `(= a b) (= b c) → (= a c)` transitivity row (2^1000 ± 1) PASSES now —
+  // exact components are unbounded and exact-vs-inexact `=` compares exactly.
   // -----------------------------------------------------------------------
   // One-number rework (RATIO, docs/design-history/arrival-one-number-rework.md §0.3): a
   // genuinely NEW expected failure, not a stale carry-over. The CLtL 12.3 transitivity example

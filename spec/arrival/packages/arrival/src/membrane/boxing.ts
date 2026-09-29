@@ -54,8 +54,8 @@ export function fromJs(ctx: RunContext, v: unknown, provenance: ReadonlySet<numb
       // stays status-based).
       return Number.isSafeInteger(v) ? new AExact(v, 1, provenance) : new AInexact(v, provenance);
     case "bigint":
-      // No lens — exact numbers are safe-int ratios; raw bigint never enters scheme.
-      throw new NoLensError("bigint");
+      // xln fork: exact components are unbounded bigints, so a host bigint is an exact integer.
+      return new AExact(v, 1n, provenance);
     case "boolean":
       // Reuse singletons on the empty-provenance path; allocate only when stamped.
       return provenance === EMPTY_PROVENANCE ? (v ? schemeTrue : schemeFalse) : new ABool(v, provenance);

@@ -144,22 +144,19 @@ describe.each(CROSSINGS.map((r) => [r.type, r] as const))("crossing: %s", (_t, r
     }
 
     case "bigint": {
-      // Host bigint DOORS (NoLensError kind `"bigint"`) — same spirit as unique-symbol.
-      // Exact numbers are safe-int ratios; convert with Number/bigintToNumber in the
-      // safe range (or pass inexact/string) before re-crossing. Codecs that speak
-      // bigint on the host face (`z.bigint`) encode to AExact BEFORE the membrane.
+      // xln fork: exact components are unbounded, so a host bigint enters as an exact
+      // integer. It exits as a number when safe, as a bigint beyond 2^53.
       it(entryTitle, () => {
-        expect(() => enter(10n)).toThrow(/no lens for a host bigint/);
+        expect(enter(10n)).toBeInstanceOf(AExact);
       });
-      // exitForm: "n/a" — no exit cell (the crossing doors before any box exists).
       it(roundTripTitle, () => {
-        expect(() => enter(10n)).toThrow(/no lens for a host bigint/);
-        expect(() => jsToScheme(CONSTANT_CTX, 12345678901234567890n)).toThrow(/no lens for a host bigint/);
+        expect(exitJS(enter(10n))).toBe(10);
+        expect(exitJS(jsToScheme(CONSTANT_CTX, 12345678901234567890n))).toBe(12345678901234567890n);
       });
       it(provenanceTitle, () => {
-        // No carrier to stamp: the crossing doors BEFORE any box could carry a
-        // provenance set — loud at the crossing, never a stray degrade (P5).
-        expect(() => jsToScheme(CONSTANT_CTX, 10n, {}, PROV)).toThrow(/no lens for a host bigint/);
+        const stamped = jsToScheme(CONSTANT_CTX, 10n as unknown, {}, PROV) as AExact;
+        expect([...stamped.provenance]).toEqual([...PROV]);
+        expectNoProvenanceProperty(toJS(stamped));
       });
       break;
     }

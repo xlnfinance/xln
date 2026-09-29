@@ -90,50 +90,27 @@ describe("r7rs numbers — RATIO exactness (safe-int rationals, plan §2.0/§2.1
   });
 });
 
-describe("r7rs numbers — component overflow THROWS (plan §0.3, crash-on-overflow ruling)", () => {
-  it("(expt 2 1000) throws an exact-overflow error, never a silent float or bigint", async () => {
-    // The old implementation's headline "fix" (bigint expt) is now the
-    // wrong behavior under the ruling: exact results whose components
-    // leave safe-integer range THROW (mint-numeric.ts's checkedMul/checked,
-    // via numeric.ts's checkedPow — see the ExactOverflowError chain).
-    // Never silently promotes to bigint (bigint is an opaque host type
-    // now, not a scheme number, §2.3), never silently returns a lossy float.
-    await expect(evalScheme("(expt 2 1000)")).rejects.toThrow(/exact overflow/i);
+// xln fork: exact components are unbounded bigints (upstream threw here). Same operands,
+// flipped to the exact answers.
+describe("r7rs numbers — unbounded exact integers (xln fork)", () => {
+  it("(expt 2 1000) is exact", async () => {
+    expect(String(await evalScheme("(expt 2 1000)"))).toBe((2n ** 1000n).toString());
   });
 
-  it("(* 94906266 94906266) throws on op-level component overflow (both operands individually safe)", async () => {
-    // 94906266 is itself a safe integer; the PRODUCT (9007199326062756)
-    // exceeds Number.MAX_SAFE_INTEGER — this is the "op-level" overflow
-    // case (distinct from a literal that's already too big to parse,
-    // below), caught by checkedMul inside the `*` fold.
-    await expect(evalScheme("(* 94906266 94906266)")).rejects.toThrow(/exact overflow/i);
+  it("(* 94906266 94906266) is exact past 2^53", async () => {
+    expect(String(await evalScheme("(* 94906266 94906266)"))).toBe((94906266n * 94906266n).toString());
   });
 
-  it("(+ 9007199254740992 1) throws — 2^53 itself is already outside Number.isSafeInteger", async () => {
-    // Number.MAX_SAFE_INTEGER is 2^53 - 1; the literal 9007199254740992
-    // (== 2^53) is rejected at PARSE time (reader/parsing.ts's
-    // toSafeExactComponent/exactOverflowInLiteral), before the `+` even
-    // runs. A ParseError, not an ExactOverflowError — still a thrown,
-    // teaching error either way.
-    await expect(evalScheme("(+ 9007199254740992 1)")).rejects.toThrow(/exceeds safe-integer/i);
+  it("(+ 9007199254740992 1) is exact", async () => {
+    expect(String(await evalScheme("(+ 9007199254740992 1)"))).toBe("9007199254740993");
   });
 
-  it("a source literal beyond safe-integer range is a ParseError, not a silent bigint promotion", async () => {
-    // Was: `999999999999999998` parsed as an arbitrary-precision bigint
-    // exact. Now: the parser's safe-int gate (reader/parsing.ts) throws at
-    // read time — the author is told to write it inexact instead.
-    await expect(evalScheme("999999999999999998")).rejects.toThrow(/exceeds safe-integer range/i);
+  it("a source literal beyond 2^53 reads exactly", async () => {
+    expect(String(await evalScheme("999999999999999998"))).toBe("999999999999999998");
   });
 
-  it("the old huge-integer '<' comparison bug is moot — both literals now ParseError before compare runs", async () => {
-    // This row used to pin a bigint cross-multiplication compare fix
-    // ("(< 999999999999999998 999999999999999999)" → #t). Under the
-    // safe-int-only ruling neither literal can be constructed as exact at
-    // all, so the whole expression throws at parse time — there is no
-    // longer a comparison to get right or wrong for magnitudes this size.
-    await expect(evalScheme("(< 999999999999999998 999999999999999999)")).rejects.toThrow(
-      /exceeds safe-integer range/i,
-    );
+  it("huge-integer '<' compares exactly", async () => {
+    expect(truthy(await evalScheme("(< 999999999999999998 999999999999999999)"))).toBe(true);
   });
 });
 

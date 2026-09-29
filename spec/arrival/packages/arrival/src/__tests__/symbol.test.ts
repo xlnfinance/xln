@@ -188,15 +188,11 @@ describe("the number codec FAMILY — exactness + range + JS-type declared by th
   // headline case ("faithful beyond safe-integer range") — now the opposite is true and
   // pinned instead: round-trips SMALL bigints faithfully, DOORS on anything past safe-int.
   describe("z.bigint ↔ JS bigint (thin compat shim, safe-int only post-rework — §2.3)", () => {
-    it("DOORS encoding a bigint beyond safe-integer range (no more arbitrary precision)", async () => {
-      // The INPUT itself must stay a constructible (safe-int) AExact — a huge value can no
-      // longer exist as a live AExact at all (§0.2's construction invariant). Push it over
-      // the boundary via the impl's own arithmetic instead: MAX_SAFE_INTEGER + 1n === 2^53,
-      // which is NOT a safe integer (Number.isSafeInteger(2^53) is false) — the OUTPUT
-      // codec's encode arm is where this now doors, not construction of the input.
+    it("encodes a bigint beyond safe-integer range exactly (xln fork: unbounded exact)", async () => {
       const def = symbol.rosetta`bigid: identity bigint`({ input: [z.bigint], output: [z.bigint] }, (n) => n + 1n);
       const maxSafe = new AExact(Number.MAX_SAFE_INTEGER);
-      await expect(fire(def, testCallCtx(), maxSafe)).rejects.toThrow(/safe-integer/i);
+      const out = (await fire(def, testCallCtx(), maxSafe)) as AExact;
+      expect(out.numerator).toBe(BigInt(Number.MAX_SAFE_INTEGER) + 1n);
     });
 
     it("infers the impl arg as bigint", () => {

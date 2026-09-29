@@ -300,47 +300,73 @@ function boxInteger(exact: boolean, value: number): ANumeric {
   return exact ? new AExact(value) : new AInexact(value);
 }
 
-const quotientFn = (a: ANumeric, b: ANumeric): ANumeric => {
+/** xln fork: both operands exact integers → their unbounded components, else null (the
+ *  inexact path below keeps upstream's `number` arithmetic). */
+function exactIntegerPair(a: ANumeric, b: ANumeric, opName: string): [bigint, bigint] | null {
+  if (!(a instanceof AExact && b instanceof AExact)) return null;
+  TypeError.invariant(a.isInteger && b.isInteger, `${opName}: not an integer`);
+  invariant(b.numerator !== 0n, `${opName}: division by zero`);
+  return [a.numerator, b.numerator];
+}
+
+const bigTruncDiv = (a: bigint, b: bigint): bigint => a / b;
+const bigTruncRem = (a: bigint, b: bigint): bigint => a % b;
+const bigFloorDiv = (a: bigint, b: bigint): bigint => {
+  const q = a / b;
+  return a % b !== 0n && a < 0n !== b < 0n ? q - 1n : q;
+};
+const bigFloorRem = (a: bigint, b: bigint): bigint => ((a % b) + b) % b;
+
+/** Route an integer-division op: exact pairs through the bigint `exact` op, others through
+ *  upstream's `number` op (`inexact`). */
+const integerDivision =
+  (opName: string, exact: (a: bigint, b: bigint) => bigint, inexact: (a: ANumeric, b: ANumeric) => ANumeric) =>
+  (a: ANumeric, b: ANumeric): ANumeric => {
+    const pair = exactIntegerPair(a, b, opName);
+    return pair === null ? inexact(a, b) : mintExact(exact(pair[0], pair[1]), 1n);
+  };
+
+const quotientFn = integerDivision("quotient", bigTruncDiv, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "quotient");
   invariant(p.bv !== 0, "quotient: division by zero");
   return boxInteger(p.bothExact, truncDiv(p.av, p.bv));
-};
+});
 
-const remainderFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const remainderFn = integerDivision("remainder", bigTruncRem, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "remainder");
   invariant(p.bv !== 0, "remainder: division by zero");
   return boxInteger(p.bothExact, p.av % p.bv);
-};
+});
 
-const moduloFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const moduloFn = integerDivision("modulo", bigFloorRem, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "modulo");
   invariant(p.bv !== 0, "modulo: division by zero");
   return boxInteger(p.bothExact, ((p.av % p.bv) + p.bv) % p.bv);
-};
+});
 
-const floorQuotientFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const floorQuotientFn = integerDivision("floor-quotient", bigFloorDiv, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "floor-quotient");
   invariant(p.bv !== 0, "floor-quotient: division by zero");
   return boxInteger(p.bothExact, floorDiv(p.av, p.bv));
-};
+});
 
-const floorRemainderFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const floorRemainderFn = integerDivision("floor-remainder", bigFloorRem, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "floor-remainder");
   invariant(p.bv !== 0, "floor-remainder: division by zero");
   return boxInteger(p.bothExact, ((p.av % p.bv) + p.bv) % p.bv);
-};
+});
 
-const truncateQuotientFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const truncateQuotientFn = integerDivision("truncate-quotient", bigTruncDiv, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "truncate-quotient");
   invariant(p.bv !== 0, "truncate-quotient: division by zero");
   return boxInteger(p.bothExact, truncDiv(p.av, p.bv));
-};
+});
 
-const truncateRemainderFn = (a: ANumeric, b: ANumeric): ANumeric => {
+const truncateRemainderFn = integerDivision("truncate-remainder", bigTruncRem, (a: ANumeric, b: ANumeric): ANumeric => {
   const p = toIntegerPair(a, b, "truncate-remainder");
   invariant(p.bv !== 0, "truncate-remainder: division by zero");
   return boxInteger(p.bothExact, p.av % p.bv);
-};
+});
 
 // abs/zero?/positive?/negative? — box-native (§2.2 encode-edge law): operate on the
 // already-coerced ANumeric and return/answer directly off ITS OWN exactness, never
@@ -349,6 +375,18 @@ const truncateRemainderFn = (a: ANumeric, b: ANumeric): ANumeric => {
 // "was the operand exact" once the value is unboxed).
 function schemeAbs(x: ANumeric): ANumeric {
   return x instanceof AExact ? x.abs() : new AInexact(Math.abs(x.real));
+}
+
+/** floor(√n) for a non-negative bigint — Newton's method from above. */
+function bigISqrt(n: bigint): bigint {
+  if (n < 2n) return n;
+  let x = n;
+  let y = (x + 1n) / 2n;
+  while (y < x) {
+    x = y;
+    y = (x + n / x) / 2n;
+  }
+  return x;
 }
 
 // ── gcd / lcm ───────────────────────────────────────────────────────────────────
@@ -371,6 +409,9 @@ function gcd2(a: number, b: number): number {
  *  is intercepted by `marshalCall`'s `zeroArgIdentity` before `fn` is ever called, so
  *  `args` here always has ≥1 element. */
 const gcdFn = (...args: ANumeric[]): ANumeric => {
+  if (args.every((n) => n instanceof AExact)) {
+    return args.reduce((acc: AExact, n) => acc.gcd(n as AExact), new AExact(0));
+  }
   let acc = 0;
   let hasInexact = false;
   for (const n of args) {
@@ -386,6 +427,13 @@ const gcdFn = (...args: ANumeric[]): ANumeric => {
  *  intermediate that could overflow before the gcd ever reduces it (§2.1: "lcm (a/g*b,
  *  checked product)"). Zero-arg identity (R7RS: 1) via `marshalCall`, same as gcd. */
 const lcmFn = (...args: ANumeric[]): ANumeric => {
+  if (args.every((n) => n instanceof AExact)) {
+    return args.reduce((acc: AExact, n) => {
+      const x = (n as AExact).abs();
+      const g = acc.gcd(x);
+      return g.isZero ? g : acc.quotient(g).mul(x);
+    }, new AExact(1));
+  }
   let acc = 1;
   let hasInexact = false;
   for (const n of args) {
@@ -418,14 +466,16 @@ function checkedPow(base: number, exponent: number, op: string): number {
 }
 
 function schemeExpt(base: ANumeric, power: ANumeric): ANumeric {
-  if (base instanceof AExact && power instanceof AExact && power.denom === 1) {
-    const n = power.num;
-    if (n >= 0) {
-      return mintExact(checkedPow(base.num, n, "expt"), checkedPow(base.denom, n, "expt"), undefined, "expt");
+  if (base instanceof AExact && power instanceof AExact && power.isInteger) {
+    // xln fork: unbounded components. The exponent itself must be a machine number
+    // (`power.num` doors otherwise) — `2^(2^60)` is not a value anyone can hold.
+    const n = BigInt(power.num);
+    if (n >= 0n) {
+      return mintExact(base.numerator ** n, base.denominator ** n, undefined, "expt");
     }
-    invariant(base.num !== 0, "expt: division by zero (0 raised to a negative power)");
+    invariant(!base.isZero, "expt: division by zero (0 raised to a negative power)");
     const m = -n;
-    return mintExact(checkedPow(base.denom, m, "expt"), checkedPow(base.num, m, "expt"), undefined, "expt");
+    return mintExact(base.denominator ** m, base.numerator ** m, undefined, "expt");
   }
   return new AInexact(Math.pow(toReal(base), toReal(power)));
 }
@@ -433,10 +483,8 @@ function schemeExpt(base: ANumeric, power: ANumeric): ANumeric {
 // ── Comparison cores ─────────────────────────────────────────────────────────────
 
 function schemeNumEq(a: ANumeric, b: ANumeric): boolean {
-  if (a instanceof AExact && b instanceof AExact) {
-    return a.cmp(b) === 0;
-  }
-  return toReal(a) === toReal(b);
+  // xln fork: schemeCompare compares exact vs finite inexact exactly (NaN ≠ anything).
+  return schemeCompare(a, b) === 0;
 }
 
 const numEqFn = (first: ANumeric, ...rest: ANumeric[]): boolean => {
@@ -585,7 +633,7 @@ function floatToRational(x: number): { num: number; denom: number } {
 
 const numeratorFn = (x: ANumeric): ANumeric => {
   if (x instanceof AExact) {
-    return new AExact(x.num);
+    return new AExact(x.numerator);
   }
   invariant(x instanceof AInexact, "numerator requires a rational number");
   const { num } = floatToRational(x.real);
@@ -594,7 +642,7 @@ const numeratorFn = (x: ANumeric): ANumeric => {
 
 const denominatorFn = (x: ANumeric): ANumeric => {
   if (x instanceof AExact) {
-    return new AExact(x.denom);
+    return new AExact(x.denominator);
   }
   invariant(x instanceof AInexact, "denominator requires a rational number");
   const { denom } = floatToRational(x.real);
@@ -610,11 +658,10 @@ const squareFn = (x: ANumeric): ANumeric => schemeMul(x, x);
  *  is already a safe-int AExact field — no checked helper needed. */
 const exactIntegerSqrtFn = function (this: CallCtx, n: unknown): APair<AExact, AExact> {
   const a = coerceNumeric(n, this.runCtx);
-  invariant(a instanceof AExact && a.denom === 1, "exact-integer-sqrt: exact integer required");
-  invariant(a.num >= 0, "exact-integer-sqrt: non-negative integer required");
-  const s = exactISqrt(a.num);
-  const r = a.num - s * s;
-  return new APair(new AExact(s), new AExact(r));
+  invariant(a instanceof AExact && a.isInteger, "exact-integer-sqrt: exact integer required");
+  invariant(!a.isNegative, "exact-integer-sqrt: non-negative integer required");
+  const s = bigISqrt(a.numerator);
+  return new APair(new AExact(s), new AExact(a.numerator - s * s));
 };
 
 /** Simplest rational in [x, y] (x ≤ y). R7RS-style recursive invert of fractional parts. */
@@ -657,9 +704,9 @@ const sqrtFn = (x: ANumeric): ANumeric => {
   if (val < 0) {
     complexDoor();
   }
-  if (x instanceof AExact && x.denom === 1 && x.num >= 0) {
-    const r = exactISqrt(x.num);
-    if (r * r === x.num) {
+  if (x instanceof AExact && x.isInteger && !x.isNegative) {
+    const r = bigISqrt(x.numerator);
+    if (r * r === x.numerator) {
       return new AExact(r);
     }
   }
@@ -855,7 +902,7 @@ const oneMinusFn = function (this: CallCtx, n: unknown): ANumeric {
 const inexactFn = function (this: CallCtx, z: unknown): AInexact {
   const n = coerceNumeric(z, this.runCtx);
   if (n instanceof AInexact) return n;
-  return new AInexact(n.num / n.denom);
+  return new AInexact(n.valueOf());
 };
 
 const exactFn = function (this: CallCtx, z: unknown): AExact {
@@ -863,7 +910,8 @@ const exactFn = function (this: CallCtx, z: unknown): AExact {
   if (n instanceof AExact) return n;
   const real = n.real;
   TypeError.invariant(Number.isFinite(real), "Cannot convert infinity or NaN to exact");
-  if (Number.isInteger(real)) return mintExact(real, 1, undefined, "inexact->exact");
+  // xln fork: an integral double of any size has an exact bigint value.
+  if (Number.isInteger(real)) return mintExact(BigInt(real), 1n, undefined, "inexact->exact");
   const { num, denom } = floatToRational(real);
   return mintExact(num, denom, undefined, "inexact->exact");
 };
@@ -877,7 +925,9 @@ const numberToStringFn = function (this: CallCtx, z: unknown, radix?: unknown): 
   const base = radixArg === undefined ? 10 : Number(radixArg.valueOf());
   let s: string;
   if (n instanceof AExact) {
-    s = n.denom === 1 ? n.num.toString(base) : `${n.num.toString(base)}/${n.denom.toString(base)}`;
+    s = n.isInteger
+      ? n.numerator.toString(base)
+      : `${n.numerator.toString(base)}/${n.denominator.toString(base)}`;
   } else {
     // Inexact mark preservation (R7RS § 6.2): `(number->string 5.0)` must stay "5.0".
     s = base === 10 ? n.toString() : n.real.toString(base);
