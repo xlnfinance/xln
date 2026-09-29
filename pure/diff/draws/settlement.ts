@@ -3,6 +3,7 @@ import { drawn, type Moves, type WorldMoves } from "./areas.ts";
 import { activePairs, pick, one, tx, isLeft, sealed, replica, quiet } from "./world-view.ts";
 import type { World } from "../world.ts";
 import type { SettlementOp } from "../../xln.ts";
+import { getSignedSettlementWorkspaceTxError } from "../../../core/account/tx/handlers/settlement/transition.ts";
 
 // ---- settlement workspace (og entity/tx/handlers/payments/settle.ts) ----
 
@@ -44,10 +45,24 @@ const settleOps = (w: World, x: number, y: number): readonly SettlementOp[] => {
   const drawn = pick(w, choices);
   return drawn.length > 0 ? drawn : [{ type: "forgive", tokenId: 1 }];
 };
+/** Every tx in this side's Account mempool is one og getSignedSettlementWorkspaceTxError freezes. */
+const allFrozen = (w: World, x: number, y: number): boolean => {
+  const account = w.ogAccount(x, y);
+  const mempool = replica(w, x, y)?.mempool ?? [];
+  return mempool.every((t) => getSignedSettlementWorkspaceTxError(account as never, t as never) !== undefined);
+};
+/**
+ * quiet, except that txs og froze behind a signed workspace may wait in the mempools. og
+ * accountHasProposableMempoolForEntity never proposes them, so no frame is in flight and nothing can sign or replace
+ * the workspace; only settle_execute (its submit transition is exempt) and the J result unfreeze the Account. Asking
+ * for empty mempools here deadlocked the walk: any payment drawn after the workspace was signed parked forever.
+ */
+const settledQuiet = (w: World, x: number, y: number): boolean =>
+  [replica(w, x, y), replica(w, y, x)].every((r) => r?.pendingFrame == null) && allFrozen(w, x, y) && allFrozen(w, y, x);
 const withWorkspace = (w: World, pred: (x: number, y: number, ws: OgWorkspace) => boolean) =>
   activePairs(w).filter(([x, y]) => {
     const ws = workspace(w, x, y);
-    return ws !== undefined && quiet(w, x, y) && pred(x, y, ws);
+    return ws !== undefined && settledQuiet(w, x, y) && pred(x, y, ws);
   });
 
 /**
