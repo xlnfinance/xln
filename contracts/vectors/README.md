@@ -40,6 +40,8 @@ and finalized by timeout (epoch 2). For each batch it records the encoded batch,
 and the `batchHash` the contract emitted (they are equal), and the decoded events (`name`, `args`, `logIndex`; block and
 transaction ids are left out). The stored `disputeHash` equals `Account.encodeDisputeHash` of the same fields.
 
+`reopen` is the same account after the epoch-advancing finalize (a timeout finalize of a dispute started at nonce 7 leaves the stored nonce at 8, epoch 2). Attempts to reopen at the stored nonce, at the old baseline nonce, and to settle at the stored nonce all revert `E2()`; a dispute started at nonce 9 is accepted. So the reopened baseline proof needs a nonce strictly above the chain's stored nonce, whatever the off-chain frame height is.
+
 ## Not covered
 
 - `FinalDisputeProof` and `CooperativeDisputeProof` payloads exist in the library but nothing verifies them

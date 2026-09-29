@@ -337,7 +337,16 @@ const linkBytecode = (artifact, libraries) => {
   return linked;
 };
 
+/** The chain a TronWeb instance talks to, by its full host; a host no profile names is an unknown chain, never a testnet. */
+const tronChainOf = (tronWeb) => {
+  const host = String(tronWeb?.fullNode?.host || '').replace(/\/$/, '');
+  const known = Object.values(profiles).map((profile) => profile.tron).find((chain) => chain && tronFullHostFor(chain) === host);
+  return known || { id: `tron:${host || 'unknown-host'}`, chainId: Number.NaN };
+};
+
 const deployTronContract = async (tronWeb, contractName, parameters = [], libraries = {}, preparedTransaction) => {
+  // Exported and called directly by other scripts, so it gates on its own, before it builds or signs anything.
+  assertResponseFloor([tronChainOf(tronWeb)]);
   const artifact = loadTronArtifact(contractName);
   const bytecode = linkBytecode(artifact, libraries);
   const options = {

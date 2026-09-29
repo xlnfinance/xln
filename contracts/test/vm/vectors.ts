@@ -172,6 +172,21 @@ export const lifecycleVectors = async (rig: Rig) => {
   const evidence = ethers.keccak256(coder.encode(
     ["bytes32", "uint256", "bool", "bool", "bytes32", "bytes32", "bytes32"],
     [bodyHash(P7), 7, true, false, empty, empty, empty]));
+  const reservesAfter = json(await rig.reserves());
+
+  // Reopen after the epoch-advancing finalize. A timeout finalize consumed one nonce (7 -> 8), so the reopened baseline
+  // proof must carry a nonce strictly above the stored 8. Proof nonce and off-chain frame height are separate counters.
+  const epoch2 = await rig.epochOf();
+  const storedAfter = await rig.chain.getAccountInfo(L.id, R.id);
+  const P9 = rig.body(-10n);
+  const at = async (nonce: number, epoch: bigint) => rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9));
+  const reopen = {
+    storedNonce: storedAfter.nonce.toString(), epoch: epoch2.toString(),
+    startAtStoredNonce: await at(8, epoch2),
+    startAtOldBaselineNonce: await at(7, epoch1),
+    settleAtStoredNonce: await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs)),
+    startAboveStoredNonce: await at(9, epoch2),
+  };
   return {
     accountKey: rig.acctKey, left: L.id, right: R.id,
     depository: rig.domain.depository, chainId: rig.domain.chainId.toString(),
@@ -183,7 +198,8 @@ export const lifecycleVectors = async (rig: Rig) => {
       events: eventsJson(startEvents),
     },
     disputeFinalize: { ...finalizeBatch, finalizationEvidenceHashExpected: evidence, events: eventsJson(finalizeEvents) },
-    reservesAfter: json(await rig.reserves()),
+    reservesAfter,
+    reopen,
   };
 };
 

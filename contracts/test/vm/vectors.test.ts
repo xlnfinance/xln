@@ -39,6 +39,16 @@ describe("vectors", () => {
     }
   });
 
+  test("reopen: after the epoch-advancing finalize a proof needs a nonce strictly above the stored one (timeout finalize stored 7 + 1)", () => {
+    const { reopen } = committed("lifecycle");
+    expect(reopen.storedNonce).toBe("8");
+    expect(reopen.epoch).toBe("2");
+    expect(reopen.startAtStoredNonce).toBe("REVERT E2()");        // equal is not above
+    expect(reopen.startAtOldBaselineNonce).toBe("REVERT E2()");   // the old baseline nonce is below
+    expect(reopen.settleAtStoredNonce).toBe("REVERT E2()");       // cooperative updates too
+    expect(reopen.startAboveStoredNonce).toBe("ok");
+  });
+
   test("lifecycle: production's own hashes match ours, and the epoch advances on settle and finalize", () => {
     const l = committed("lifecycle");
     expect([l.deposit.result, l.settle.result, l.disputeStart.result, l.disputeFinalize.result]).toEqual(["ok", "ok", "ok", "ok"]);
