@@ -15,6 +15,7 @@ const pages = {
   frame: { files: ["entity/frame.scm"], spec: "entity-frame" },
   runtime: { files: ["runtime/tick.scm"], spec: "runtime" },
   j: { files: ["j/batch.scm"], spec: "j-batch" },
+  routing: { files: ["entity/routing.scm"], spec: "routing" },
 };
 const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra], `(check ${pages[page].spec})`);
 
@@ -65,6 +66,10 @@ const cases = [
   planted("j", "an event does not clear the draft", "trust-the-draft", "no op is applied twice on chain"),
   planted("j", "a full draft halts the Entity (og)", "full-halts", "a full batch is a refusal, never a halt"),
   planted("j", "the chain applies half a batch", "partial-apply", "the chain is atomic: every applied op came from a batch that succeeded"),
+  { page: "routing", name: "routing", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4698, transitions: 4932, goals: 0 }) },
+  planted("routing", "no hop margin between the locks (R1)", "no-hop-margin", "H never pays B without being paid by A: a diligent hub cannot lose"),
+  planted("routing", "fail-back before the chain fact can be seen (R2)", "early-failback", "H never pays B without being paid by A: a diligent hub cannot lose"),
+  planted("routing", "a dispute start leaves a known secret out (R3)", "dispute-omits-secret", "a dispute start publishes every secret H knows (R3)"),
   planted("money", "deposit from nowhere", "deposit-from-nowhere", "money is conserved: reserves + collateral never change"),
 ];
 

@@ -360,6 +360,48 @@ The entity-height durability barrier, atomic cross-j pairs, the bounded drain of
 detection), ingress limits (mempool_full, frame_timestamp_invalid), Runtime txs (`observeJRange` etc.),
 several Entities. Bounds: four inputs (good, bad, good, fatal), one crash. Capacity: 162 states.
 
+## Routing (`entity/routing.scm`)
+
+Rules R1..R3 were decided by the coordinator (2026-09-29 18:10). The page models one hub H between a
+payer A and a payee B, one lock each way. Each rule has a planted bug.
+
+**Q-RT-1. HOP and LAG.**
+LAG is the time for a chain fact to be seen and acted on; a chain fact is visible `lag` after it
+lands, and H's own on-chain action is effective `lag` after H takes it. HOP = 2 x LAG. Choice: HOP is
+a named policy parameter of the Entity (a rule that a peer can check at signing, like N2's deadline
+tolerance), not a protocol constant. The value of LAG on a real chain (blocks, reorg depth, the
+runtime's polling period) is not decided here. Planted bug `no-hop-margin`. Source: relay 18:10 R1;
+lessons R-P1.
+
+**Q-RT-2. Fail-back wait (R2).**
+H fails the route back to A no earlier than one LAG after the onward deadline, and never while a
+reveal by B is visible: the reveal may be in flight on chain. Choice: the page keeps `failback-wait`
+at one LAG. Planted bug `early-failback`. Source: relay 18:10 R2.
+
+**Q-RT-3. A dispute publishes the secrets (R3).**
+A dispute H starts on the inbound Account carries every secret H knows for the payee locks of the
+proof it presents (lesson from #37). Choice: the start action publishes them all; a start that leaves
+one out is a spec violation. Planted bug `dispute-omits-secret`. Source: relay 18:10 R3; lessons #37.
+
+**Q-RT-4. The diligent hub.**
+A hub that does not act in the tick where it first sees the secret can always lose (the payee reveals
+at the last moment and the hub misses the inbound deadline). Choice: the page ASSUMES a diligent hub
+(the clock does not advance while H has that duty) and states as an invariant that a diligent hub
+cannot lose. Option: model the duty as a bounded latency of its own (a second parameter). Not done:
+the runtime's tick period would be that bound, and it is not in this page.
+
+**Q-RT-5. xln.ts constants.**
+xln.ts has the HTLC deltas (`HTLC_TIMELOCK_DELTA_MS` and neighbours) but nothing ties them to LAG or
+to the dispute response windows. Open: a hub's onward lock must also end early enough that a dispute
+on the inbound Account can still be answered (window floor H2 and window N3), which this page does
+not model together with dispute/dispute.scm. Suggested reading: dIn - dOut >= HOP + the inbound
+Account's response window.
+
+**Q-RT-6. Not in the page.**
+More than one hop, several locks, amounts other than 1, a fee, a reserve margin for the hub, the
+payer's own fail-back, the onward Account also in dispute. Bounds: one hop, amounts 1, dIn 5, LAG 1,
+time 7. Capacity: 4698 states.
+
 ## Checker (`lib/check.scm`)
 
 **Q-C-1. What does "live" mean?**
@@ -370,6 +412,78 @@ schedule that never delivers still finishes; nothing can.
 **Q-C-2. State identity.**
 Choice: a world is identified by a string built from its dicts in insertion order. Worlds must be
 built from `init` by updating existing keys, so a page declares every key in `init`.
+
+## Open in xln.ts (points the pages do not settle)
+
+Found in the reading of xln.ts against the spec (line numbers are pure/xln.ts). Each is a point where
+xln.ts has no defined behavior or disagrees with the reading taken. Recommendation first; where a
+page already carries the rule, the page is named.
+
+**Q-X-1. Hop deadlines against dispute windows.** xln.ts has constants (5085-5112) not tied to the
+Account response windows (657); `onwardDeadlineSafe` (22787) is the only check. Recommendation: the
+incoming deadline is at least the outgoing one plus the larger response window plus HOP, computed per
+Account; refuse to forward otherwise. Page: entity/routing.scm carries HOP (Q-RT-5).
+
+**Q-X-2. When may an HTLC expire?** `htlcExpired` (5786) mixes the Account frame time and the J
+height. Recommendation: expire only after the deadline plus one LAG, on J height (chain time), never on
+the frame clock. Page: the fail-back wait R2 in entity/routing.scm.
+
+**Q-X-3. RCPAN at setCredit and at settlement holds.** `setCreditLimit` (4634) does not check the
+credit bound; the account-model document says it must (Q-L, money page). Settlement holds
+(`chargeSettlement` 4600) are stricter than the contract. Recommendation: refuse a setCredit that
+leaves the bound; keep the settlement hold as stated local policy, not protocol.
+
+**Q-X-4. Debt.** Does the Entity act on it (forgive, repay order, revoke credit)? Recommendation: pure
+observation, and a forgiveness only inside a cooperative update. Page: dispute/dispute.scm keeps the
+debt in the payout; the Entity side is not modelled.
+
+**Q-X-5. The Account after a dispute finalize.** `external_finality` (159-178) yields `disputed` from
+every phase; only preparing goes back to open. Recommendation: the Account closes to a fresh
+generation (N1: the new epoch needs a co-signed baseline) with clauses resolved by evidence. Page:
+dispute/dispute.scm ends at the epoch advance; the Account state after it is not modelled.
+
+**Q-X-6. entityCommand atomicity and nonce.** One command is all or nothing; the nonce is consumed on
+a refusal too (not verified in xln.ts 21362).
+
+**Q-X-7. openAccount.** It is fatal on error (20933) and a crossing open has no tie break.
+Recommendation: existing open is a refusal, a crossing open resolves Left-wins like the frames.
+
+**Q-X-8. Which clock judges timeouts.** Disputes: chain time. HTLC: J height. Entity frame time is
+for scheduling only (`submitTiming` 15208 uses frame time).
+
+**Q-X-9. Refusal cost and spam.** Which refusals are free? Recommendation: a bounded per-sender budget
+and eviction (`foldEvicting` 26595), mempool_full first.
+
+**Q-X-10. Reorg policy.** `rewindJHistory` (29438) exists; what a reorg does to a batch already
+counted as sent, and to an HTLC whose reveal was on the orphaned block, is not decided. LAG in
+entity/routing.scm is the only place time-to-see appears.
+
+**Q-X-11. The closed list of halts.** R-X1 holds in the Runtime page (peer input never halts) but many
+`invariant(...)` sites in xln.ts are peer-reachable (J-range rejections, runtimeOutputTx authority,
+SETTLEMENT_* checks). Recommendation: halt only on local corruption; each peer-reachable invariant
+becomes a refusal.
+
+**Q-X-12. Contract GAPs.** The contracts review (plan/contracts-review.md) lists points the contracts
+leave open; the ones the spec depends on are decided in "Decided by the coordinator" (N1-N3, H1-H4).
+The rest stay in that document.
+
+## v2 proposals for Arthur (not derived from og, not in any page)
+
+Marked as proposals: og has no settled design for these, and the spec does not describe them yet.
+Each line is what the first page would have to decide.
+
+- **Order book / swaps.** Where the book lives (Entity state, hub-only), whether an order is a lock
+  (a clause in the Account) or an Entity-side hold, and who settles a fill (a frame of both Accounts
+  or a J batch). Property to state first: a fill moves both legs or neither, and credit holds for
+  both. xln.ts has `swap_request_account_missing` and `ensureRoom` for swaps (5769), not a spec.
+- **Lending.** A loan is a credit line plus a due time; what happens at the due time (repay vs
+  default, Q-P4 in the lessons) and whether default is a dispute. Property: money conserved and the
+  debt after default equals what the payout ledger shows.
+- **Boards.** Entity boards (validators, threshold) exist in the consensus page as a fixed 2-of-3;
+  board change (add, remove, rotate) needs a rule for which frame is signed by which board and how
+  H3 (retired-board evidence capped at collateral) applies.
+- **Cross-J.** Atomic pairs across two chains are not modelled; the entity-height durability barrier
+  is listed in Q-R-6. Proposal: v1 has no cross-J move.
 
 ## Decided by the coordinator (rules the spec carries; not open)
 

@@ -25,6 +25,7 @@ spec/
   entity/bugs/*.scm        (also the frame's planted bugs)
   runtime/tick.scm         the Runtime tick: apply, commit, flush, crash, replay; what may halt
   runtime/bugs/*.scm       planted Runtime bugs
+  entity/routing.scm       a hub forwarding one HTLC: HOP margin (R1), fail-back wait (R2), a dispute publishes every known secret (R3)
   j/batch.scm              the J batch: atomic chain, sealing, abort, quarantine recovery, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
@@ -32,6 +33,7 @@ spec/
   runtime.check.scm        entry point: check the Runtime page
   j-batch.check.scm        entry point: check the J batch page
   entity-consensus.check.scm entry point: check the Entity consensus page
+  entity-routing.check.scm entry point: check the routing page
   dispute.check.scm        entry point: check the dispute page
   ledger.check.scm         entry point: check the ledger page
   test.mjs                 runs the page and every bug variant in parallel, asserts the verdicts
