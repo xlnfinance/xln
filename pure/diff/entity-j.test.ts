@@ -27,7 +27,7 @@ import { deriveSignerKeySync, registerSignerKey } from "../../core/account/crypt
 import { createEmptyEnv } from "../../core/runtime/composition.ts";
 import { buildReplayVerifiableRuntimePostStateView } from "../../core/storage/wal/snapshot.ts";
 import { computeRuntimePostStateComponentDigests } from "../../core/storage/hashes.ts";
-import { EntityProvider__factory } from "../../jurisdictions/typechain-types/index.ts";
+import { EntityProvider__factory } from "../../contracts/typechain-types/index.ts";
 import { applyRuntimeTx, createRuntime, numberedRegistrationCalldata, parseEvmTx, runtimeComponentDigests, runtimeView, stableJson, type JReplica, type Runtime, type RuntimeTx } from "../xln.ts";
 import { bobAddr } from "../xln_run.ts";
 import { normalizeJurisdictionEvent, compareCanonicalJurisdictionEvents } from "../../core/jurisdiction/machine/events/event-normalization.ts";

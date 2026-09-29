@@ -72,7 +72,8 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
     const unguarded = coverage.haltTexts
       .filter((h) => knownHalt(h) === undefined)
       .map((h) => `${w.tag} og halted on a drawn input, not a known og halt: ${h}`);
-    return { coverage, diffs: [...diffs, ...unguarded] };
+    const refused = w.refusals().map((r) => `${w.tag} the chain refused a batch og submitted: ${r}`);
+    return { coverage, diffs: [...diffs, ...unguarded, ...refused] };
   } finally {
     await w.close();
   }

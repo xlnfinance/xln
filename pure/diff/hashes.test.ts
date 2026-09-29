@@ -5,7 +5,7 @@ import { PersistentAccountStateMap } from "../../core/account/state/persistent-s
 import { computeAccountStateRoot } from "../../core/account/commitment/state-root.ts";
 import { computeFrameHash } from "../../core/account/consensus/frame/hash.ts";
 import { ethers, Interface } from "ethers";
-import { Depository__factory } from "../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory.ts";
+import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { encodeJBatch, computeBatchHankoHash, createEmptyBatch } from "../../core/jurisdiction/machine/batch/index.ts";
 import { hashProofBodyStruct, createDisputeProofHashWithNonce, createSettlementHashWithNonce } from "../../core/protocol/dispute/proof-builder.ts";
 import { encodeInt512, decodeInt512 } from "../../core/protocol/crypto/abi-money.ts";
