@@ -73,10 +73,10 @@ Ported to the C1/C2 interface (entity-first `processBatch`, V2 batch hash, epoch
 |---|---|---|---|---|
 | test/dispute/DebtForgiveness.test.ts | 0 | 2 | 2 | 0 |
 | test/dispute/DeltaTransformer.test.ts | 1 | 10 | 9 | 0 |
-| test/dispute/Depository-part-1.ts | 7 | 60 | 43 | 0 |
+| test/dispute/Depository-part-1.ts | 7 | 66 | 43 | 0 |
 | test/dispute/Depository-part-2.ts | 1 | 15 | 14 | 0 |
 | test/dispute/DisputeHashVector.test.ts | 1 | 1 | 0 | 0 |
-| test/dispute/DisputeOndeltaLiveness.test.ts | 0 | 9 | 8 | 0 |
+| test/dispute/DisputeOndeltaLiveness.test.ts | 0 | 16 | 8 | 0 |
 | test/dispute/SecretRevealLiveness.test.ts | 1 | 1 | 0 | 0 |
 | test/dispute/SettlementFinality.test.ts | 0 | 1 | 1 | 0 |
 | test/governance/BoardRotationAuthority.test.ts | 0 | 6 | 6 | 0 |
@@ -96,23 +96,37 @@ Rewritten for an intended change, with the reason:
 - `BoardRotationGrace` watchtower: the last-resort delay must be at least the response window now, so it uses the full window.
 - `OnchainHankoDomain`: og's frozen `core/hanko/onchain-domain.ts` still emits the old settlement, dispute and batch payloads, so those three comparisons use independent ethers encoders in the test, plus an assertion that the fork differs from og's. The golden vector is a fork copy (`test/fixtures/onchain-hanko-golden.ts`); og's `tests/` copy is CommonJS-linked by this loader and reports its exports missing.
 
-The 2^200 ceiling tests (Arthur approved the overflow-check approach on 2026-09-29): `docs/money-domain.md` (owner-approved 2026-09-06) removed the ceiling, and it names no replacement bound. The tests that expected `E8` above 2^200 now assert the two things that are true: amounts past 2^200 are accepted (reserve, R2C and settlement collateral, C2R refused by the signature rule and not a ceiling, allowance past the old band, and proof-body offdeltas from 2^200 up to the `Int512` edges start a dispute), and the real edges revert instead of wrapping (reserve and collateral at uint256 max revert with panic 0x11 and leave no partial diff). `DisputeOndeltaLiveness` and `DeltaTransformer` got the same treatment in the port. Nothing wraps: reading the contracts, every `unchecked` block in `WideMath` carries an explicit `RepresentationOverflow` check.
+The 2^200 ceiling tests, eight of them (Arthur approved the overflow-check approach on 2026-09-29). `docs/money-domain.md` (owner-approved 2026-09-06) removed the ceiling, which existed to keep the int256 intermediate `ondelta + offdelta` sums representable, and names no replacement bound. The tests that expected `E8` (or `E11`) above 2^200 now assert what is true: amounts past 2^200 are accepted, and the real edges revert instead of wrapping (reserve and collateral at uint256 max: panic 0x11, nothing changes). Reading the contracts, every `unchecked` block in `WideMath` carries an explicit `RepresentationOverflow` check. The eight, by title:
 
-## v2 input: the largest swap book that fits one `processBatch`
+`Depository-part-1.ts` (five):
+1. reserve: "reverts settlement with E8 when a reserve would exceed MAX_MONEY…" became "settles a reserve past the retired 2^200 ceiling and applies both diffs" and "reverts settlement at the uint256 reserve edge instead of wrapping, and leaves no partial diff".
+2. collateral: "reverts settlement and R2C with E8 when collateral would exceed MAX_MONEY" became "accepts R2C and settlement collateral past the retired 2^200 ceiling" and "reverts R2C and settlement at the uint256 collateral edge instead of wrapping".
+3. C2R: "rejects C2R amounts above MAX_MONEY before mutation" became "refuses an unsigned C2R above the retired 2^200 ceiling by the signature rule, not a ceiling, before mutation" (a weaker statement on its own; the signed C2R at the edges is the new "withdraws collateral A with a signed C2R at A = …" tests).
+4. allowance band: "clamps to the maximum legal allowance band (2^200) and rejects allowances above it" became "clamps at a 2^200 allowance band and accepts an allowance above the retired band".
+5. proof-body offdelta: "rejects a proof body with |offdelta| above MAX_MONEY at dispute start, accepts the exact bound" became eight cases "starts a dispute with a proof body whose offdelta is …" from 2^200 up to the `Int512` edges.
 
-The inherited test asserted that 1,000 swaps fit 4,000,000 gas in the transformer. That figure predates the `Int768` arithmetic, and the batch gas limit is ours to set, not og's (`core/config/constants.ts` has 5,000,000). Measured on the fork, one non-starter dispute finalize with N swaps in one transformer over two tokens (`Depository-part-1.ts`, gas used by the whole `processBatch`):
+`DisputeOndeltaLiveness.test.ts` (three):
+6. reserve cap: "accepts reserves above the retired 2^200 cap and stops only at the uint256 representation bound".
+7. offdelta bound: "settles an offdelta of exactly -MAX_MONEY" and "-(MAX_MONEY + 1), one unit past the retired cap".
+8. token supply (was `E11` above int256 max): "rejects a zero fixed supply at token registration and no longer caps the supply at int256".
 
-| swaps | gas |
-|---|---|
-| 250 | 1,959,220 |
-| 500 | 3,953,514 |
-| 600 | 4,857,147 |
-| 615 | 4,997,914 (fits under 5,000,000) |
-| 616 | 5,007,371 |
-| 750 | 6,326,119 |
-| 1000 | 9,077,106 |
+The edge probe (every path that turns a uint256 amount into a signed delta, at 2^255 - 1, 2^255 and 2^256 - 1, plus 2^200) is `DisputeOndeltaLiveness` "R2C then dispute finalize at …, offdelta +A / -A" (R2C, payout, debt up to 2^256 - 1), and in `Depository-part-1` "settles collateral A back to a reserve at A = …" (settlement) and "withdraws collateral A with a signed C2R at A = …" (C2R). All exact; nothing wraps or flips sign; there is no int256 conversion in the fork.
 
-`MAX_SWAP_BOOK = 615` and `PROCESS_BATCH_GAS_LIMIT = 5_000_000n` are named in `test/helpers/hanko.ts`; the tests assert that 615 fits and 616 does not, so a change to the contracts moves the number on purpose. Gas grows faster than linearly past about 500 swaps, and the margin at 615 is 2,086 gas, so treat 600 as the practical ceiling until the order book design fixes its own bound. It depends on the fixture (one Account, two tokens, one transformer).
+## v2 input: the largest swap book that finishes one `processBatch` at our batch gas limit
+
+The inherited test asserted that 1,000 swaps fit 4,000,000 gas in the transformer. That figure predates the `Int768` arithmetic, and the batch gas limit is ours to set, not og's (`core/config/constants.ts` has 5,000,000 and nothing reads it yet).
+
+`Account.sol` hands the transformer `gasleft() - 2,000,000` and holds the 2,000,000 back (`TRANSFORMER_POST_CALL_GAS_RESERVE`), so a transaction's limit must cover the transformer's use plus that reserve: gas used understates the limit to send. Measured on the fork, one non-starter dispute finalize with N swaps in one transformer over two tokens (`Depository-part-1.ts`):
+
+| swaps | gas used | needs a limit of |
+|---|---|---|
+| 382 | 2,965,056 | fits 5,000,000 (largest, by bisection) |
+| 383 | | reverts `TransformerExecutionFailed` at 5,000,000 |
+| 500 | 3,953,514 | about 6.0 M |
+| 615 | 4,997,914 | about 7.06 M |
+| 1000 | 9,077,106 | about 11.1 M |
+
+`MAX_SWAP_BOOK = 382`, `PROCESS_BATCH_GAS_LIMIT = 5_000_000n` and `TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000n` are named in `test/helpers/hanko.ts`. The tests send the finalize with the stated limit: 382 finalizes, 383 reverts. The exact boundary moves with any compiler, optimizer or contract change; that is intended, update the constant and this table when it does. The `DeltaTransformer` twin asserts the transformer's own estimate plus the 2M reserve fits the limit. Gas grows faster than linearly past about 500 swaps. It depends on the fixture (one Account, two tokens, one transformer). og's runtime caps a book at 50 offers (`MAX_ACCOUNT_SWAP_OFFERS`), so neither number binds in v1; it is an input to the v2 order-book design.
 
 ## Foundry suites (`test/foundry/`): stale, not run
 
