@@ -118,7 +118,7 @@ The inherited test asserted that 1,000 swaps fit 4,000,000 gas in the transforme
 
 `Account.sol` hands the transformer `gasleft() - 2,000,000` and holds the 2,000,000 back (`TRANSFORMER_POST_CALL_GAS_RESERVE`), so a transaction's limit must cover the transformer's use plus that reserve: gas used understates the limit to send. Measured on the fork, one non-starter dispute finalize with N swaps in one transformer over two tokens (`Depository-part-1.ts`):
 
-| swaps | gas used | needs a limit of |
+| swaps | gas used | limit needed (gas used + 2M reserve, except where measured) |
 |---|---|---|
 | 382 | 2,965,056 | fits 5,000,000 (largest, by bisection) |
 | 383 | | reverts `TransformerExecutionFailed` at 5,000,000 |
