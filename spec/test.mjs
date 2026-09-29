@@ -5,23 +5,33 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const page = [...lib, "account/frames.scm"];
-const check = (extra) => evaluate([...page, ...extra], "(check account-frames)");
+// A page is its file plus the dict `check` walks; a planted bug is a file loaded after the
+// page that redefines one of its functions.
+const pages = {
+  account: { files: ["account/frames.scm"], spec: "account-frames" },
+  money: { files: ["money/ledger.scm"], spec: "ledger" },
+};
+const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra], `(check ${pages[page].spec})`);
 
-const planted = (name, file, violated) => ({
+const planted = (page, name, file, violated) => ({
+  page,
   name: `planted: ${name}`,
-  extra: [`account/bugs/${file}.scm`],
+  extra: [`${page}/bugs/${file}.scm`],
   expect: (r) => assert.equal(r.violated, violated),
 });
 
 const cases = [
-  { name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3651, transitions: 11335, goals: 16 }) },
-  planted("drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused"),
-  planted("rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order"),
-  planted("no tie-break", "no-tie-break", "committed histories agree: one extends the other"),
-  planted("no re-ack of a duplicate", "no-reack", "can always still finish"),
-  planted("commit a frame that skips ahead", "commit-any-frame", "no tx is both committed and refused"),
-  planted("skip re-validation", "skip-revalidation", "can always still finish"),
+  { page: "account", name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3651, transitions: 11335, goals: 16 }) },
+  planted("account", "drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused"),
+  planted("account", "rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order"),
+  planted("account", "no tie-break", "no-tie-break", "committed histories agree: one extends the other"),
+  planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish"),
+  planted("account", "commit a frame that skips ahead", "commit-any-frame", "no tx is both committed and refused"),
+  planted("account", "skip re-validation", "skip-revalidation", "can always still finish"),
+  { page: "money", name: "money ledger", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 820, transitions: 7094, goals: 0 }) },
+  planted("money", "ignore open clauses in the guard", "ignore-clauses", "credit holds: RCPAN in the worst case over the open clauses"),
+  planted("money", "credit lowered below usage", "credit-below-usage", "credit holds: RCPAN in the worst case over the open clauses"),
+  planted("money", "deposit from nowhere", "deposit-from-nowhere", "money is conserved: reserves + collateral never change"),
 ];
 
 // One process per case (the interpreter is single-threaded): `node test.mjs` runs them all in
@@ -29,7 +39,7 @@ const cases = [
 const only = process.argv[2];
 if (only !== undefined) {
   const c = cases[Number(only)];
-  const result = await check(c.extra);
+  const result = await check(c.page, c.extra);
   c.expect(result);
   console.log(JSON.stringify({ name: c.name, result }));
 } else {
