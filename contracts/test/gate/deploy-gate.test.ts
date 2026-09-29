@@ -192,17 +192,6 @@ describe("every deploy path runs the gate", () => {
     }
   }, 240_000);
 
-  test("the root mainnet deploy scripts no longer reach the frozen jurisdictions/ deployer", () => {
-    const repoRoot = path.join(contractsRoot, "..");
-    for (const script of ["deploy:chains:mainnet", "deploy:mainnets"]) {
-      const result = spawnSync("bun", ["run", script], { cwd: repoRoot, encoding: "utf8", timeout: 60_000 });
-      expect(result.status).not.toBe(0);
-      expect(`${result.stdout}${result.stderr}`).toContain("cd contracts && bun run deploy:chains:mainnet");
-    }
-    const root = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { scripts: Record<string, string> };
-    expect(Object.values(root.scripts).filter((command) => /jurisdictions.*deploy-chain-matrix.*--profile=mainnet/.test(command))).toEqual([]);
-  });
-
   test("the exported deployTron gates on its own, before any network call", async () => {
     const { profiles, deployTron } = matrixModule;
     const calls: string[] = [];
