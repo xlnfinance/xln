@@ -1626,7 +1626,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(200n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
-  it('refuses an unsigned C2R above the retired 2^200 ceiling by the signature rule, not a ceiling, before mutation', async function () {
+  it('fails an unsigned C2R above the retired 2^200 ceiling soft (E4) by the signature rule, not a ceiling, before mutation', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
@@ -1645,11 +1645,10 @@ describe('Depository', () => {
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
     const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
 
-    // an empty revert reason is never reported as BatchFailed (an out-of-gas frame returns none): it reverts whole, no nonce
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithoutReason(ethers);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    // an empty counterparty signature is a bad counterparty signature like any other: the batch fails E4 (BatchFailed, nonce
+    // spent). Account gives it an explicit E4 so it never looks like the empty revert of an out-of-gas frame, which reverts whole.
+    await expectBatchFailed(depository, left.signer, signed, 'E4');
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
   });

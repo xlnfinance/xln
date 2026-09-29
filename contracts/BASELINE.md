@@ -235,13 +235,13 @@ J5 (decisions doc, coordinator 21:01, refined 22:31 after the #54 review) runs t
 hash-ladder or external-deposit op through an external self-call in try/catch. A failing batch applies nothing, keeps its
 entity nonce spent, and emits `BatchFailed(entityId, nonce, reason)` instead of reverting. What still reverts and takes no
 nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, an
-op that fails with an **empty revert reason** (an out-of-gas frame returns none), and any batch that carries a dispute, reveal,
+op that fails with an **empty revert reason** (an out-of-gas frame returns none; an empty or malformed C2R counterparty signature is given an explicit E4 in `Account.processC2R` so it is not one), and any batch that carries a dispute, reveal,
 hash-ladder or **deposit** op. A bad counterparty signature inside the ops (a settlement or C2R signed at an old account epoch)
 is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch-failed.test.ts` (13),
 `test/vm/j5-review-extra.test.ts` (8, the review's) and `test/foundry/J5Attacks.t.sol` (the review's 6, deposit tests flipped
 to the fixed behaviour).
 
-**Measured.** Depository 22772 bytes (J2: 22994), Account 24448 (unchanged; 128 bytes under 24576). The self-call wrapper costs
+**Measured.** Depository 22772 bytes (J2: 22994), Account 24455 (J2: 24448; 121 bytes under 24576, see the C2R follow-up below). The self-call wrapper costs
 gas, so `MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL` goes from 256 to 250: 256 pairs measured 15,059,370, over the 15M
 liveness budget. 250 pairs (4 entries of 63, 63, 62, 62) measure **14,763,601** execution gas
 (`BatchBounds.test_gas_maxReserveToCollateralProduct`, which also fails if the maximal batch stops landing);
@@ -259,14 +259,13 @@ spent, no `HankoBatchProcessed`, and the state unchanged (Foundry `_submitFailed
 tests, `ForkChanges` (three lines), `BoardRotationGrace` (old-board counterparty signatures; the same intent now goes at a fresh
 outer nonce, as F1 requires), `c1-epoch` and one vector cell (`settleAtStoredNonce`: "ok, batch failed (E2)"). The test named
 "reverts an underfunded R2C batch without consuming its nonce" is now "fails an underfunded R2C batch soft: the nonce is consumed
-and nothing moves". Two Hardhat tests went back to reverts (token-id allocation through a deposit batch; the empty-reason C2R).
+and nothing moves". One Hardhat test went back to a revert (token-id allocation through a deposit batch). Follow-up (coordinator, 22:59): a C2R with an empty or malformed counterparty signature is a `BatchFailed` E4 with the nonce spent (`Account.processC2R` catches the empty revert of the signature check and reverts E4, as the settlement path did); pinned by two `j5-batch-failed` tests and the Hardhat "fails an unsigned C2R above the retired 2^200 ceiling soft (E4)".
 The four invariant handlers count a `BatchFailed` batch as not landed. **`ConservationHandler`** hashes the whole state before
 each batch (every reserve, debt, collateral, offset, account nonce and dispute hash) and requires it equal after a failed or
 reverted batch; it also seeds debts (`seedDebt`, on the `DepositoryDebtHarness`) and checks that a batch whose R2R legs overspend
 a debtor never lands (`invariant_debtorNeverOverspendsThroughABatch`). The review's planted partial-apply mutant k27 (a failing R2R
 returns instead of reverting) survived the old handler and is killed by this one. Mutants checked at this head: k27 (handler),
-deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason guard deleted (Hardhat part-1 "refuses an
-unsigned C2R"). The two bare `expectRevert()` calls in the lifecycle and fault-mode control tests name their selectors (E2,
+deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason guard deleted (killed by the Hardhat C2R test until the follow-up below, which removed the last reachable op that failed with no reason; the guard is now defensive against out-of-gas frames only, the gas sweeps pass with or without it, and no test kills its deletion). The two bare `expectRevert()` calls in the lifecycle and fault-mode control tests name their selectors (E2,
 `TransformerExecutionFailed`).
 
 Results after J5 (local runs, sandbox with forge 1.7.1, one file or suite per process; the three E4-flip tests re-run after the

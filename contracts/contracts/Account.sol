@@ -1352,8 +1352,13 @@ library Account {
 
     // C2R authorizes a fresh movement of funds, not historical evidence. A
     // rotated-out board must never retain spending authority during its grace.
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash);
-    if (!valid || recoveredEntity != c2r.counterparty) revert E4();
+    // An empty or undecodable signature makes the check revert with no data; that is a bad counterparty signature (E4), the
+    // same as in a settlement, and must not look like the empty revert of a frame that ran out of gas (see Depository.processBatch).
+    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      if (!valid || recoveredEntity != c2r.counterparty) revert E4();
+    } catch {
+      revert E4();
+    }
 
     // Apply diffs
     uint tokenId = c2r.tokenId;

@@ -115,6 +115,26 @@ describe("J5 a bad counterparty signature inside the ops is a failure of the bat
   });
 });
 
+describe("J5 a C2R whose counterparty signature is empty or malformed is a BatchFailed E4 too", () => {
+  // The signature check reverts with no data on an empty or undecodable signature. That must not fall into the hard revert for an
+  // empty reason (which is meant for an out-of-gas frame): it is one more kind of bad counterparty signature, so E4, nonce spent.
+  const E4 = ethers.id("E4()").slice(0, 10);
+  for (const [label, sig] of [["empty", "0x"], ["malformed", "0x1234"]] as const) {
+    test(`an ${label} counterparty signature: BatchFailed E4, nonce spent, nothing moves`, async () => {
+      const { w, A, B, nonceOf, failed, events } = await world();
+      const acct = w.accountOf(A, B, `j5-c2r-${label}`);
+      await acct.fundedAccount();
+      const nonceBefore = await nonceOf();
+      const reserves = await acct.reserves();
+      expect(await w.submit(A, { collateralToReserve: [{ counterparty: B.id, tokenId: w.TOKEN, amount: 10n, nonce: 1, sig }] })).toBe("ok");
+      expect(await nonceOf()).toBe(nonceBefore + 1n);
+      expect(failed()).toEqual([{ entity: A.id, nonce: nonceBefore + 1n, reason: E4 }]);
+      expect(events("HankoBatchProcessed")).toHaveLength(0);
+      expect(await acct.reserves()).toEqual(reserves);
+    });
+  }
+});
+
 describe("J5 a failure of the batch's own hanko authorisation still reverts and takes no nonce", () => {
   test("a bad hanko reverts E4 and the nonce stays open", async () => {
     const { w, A, B, pay, nonceOf } = await world();
