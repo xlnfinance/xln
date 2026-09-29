@@ -248,7 +248,7 @@
     "epoch": "2",
     "startAtStoredNonce": "ok, skipped (reason 0)",
     "startAtOldBaselineNonce": "ok, skipped (reason 0)",
-    "settleAtStoredNonce": "REVERT E2()",
+    "settleAtStoredNonce": "ok, batch failed (E2)",
     "startAboveStoredNonce": "ok"
   }
 }

@@ -316,6 +316,11 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce);
+  /// @dev J5: an authenticated batch without dispute or reveal ops whose ops failed. None of them was applied; the entity
+  /// nonce is consumed. `reason` is the selector of the revert that stopped the batch (zero when it carried none).
+  event BatchFailed(bytes32 indexed entityId, uint256 indexed nonce, bytes4 reason);
+  /// @dev J5: the batch failed with almost no gas left, which a relayer could have arranged. It reverts and takes no nonce.
+  error BatchGasStarved();
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
     bytes32 indexed entityId,
@@ -353,8 +358,39 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (!hankoValid || entityId == bytes32(0) || recoveredEntity != entityId) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
-    _processBatch(entityId, batch);
+    if (_carriesDisputeOps(batch)) {
+      _processBatch(entityId, batch, msg.sender);
+    } else {
+      // J5: from here the batch is authenticated and its nonce is spent. When its ops fail, the failure is undone as one
+      // unit (the external self-call reverts its own writes) and reported, so the nonce does not stay open and stall
+      // every urgent batch above it. A batch with dispute or reveal ops keeps the J2 rule: a real error reverts it all.
+      uint256 gasBefore = gasleft();
+      try this.applyBatch(entityId, encodedBatch, msg.sender) {} catch (bytes memory reason) {
+        // a call that ran out of gas fails the same way; a relayer must not turn a good batch into a failed one by
+        // withholding gas, so a failure that left under 1/32 of the gas (the 63/64 rule leaves the caller about 1/64) reverts
+        if (gasleft() < gasBefore / 32) revert BatchGasStarved();
+        // a bad signature inside the ops (a counterparty's settlement signature) is an authentication failure: it is not
+        // state-dependent, so it cannot start to succeed later, and it reverts without taking the nonce
+        if (bytes4(reason) == E4.selector) {
+          assembly ("memory-safe") { revert(add(reason, 32), mload(reason)) }
+        }
+        emit BatchFailed(entityId, nonce, bytes4(reason));
+        return;
+      }
+    }
     emit HankoBatchProcessed(entityId, batchHash, nonce);
+  }
+
+  /// @dev J5: the ops of an already authenticated batch, callable only by this contract (see processBatch). `payer` is
+  ///      the outer caller: inside this self-call msg.sender is the Depository, and external deposits pull from the payer.
+  function applyBatch(bytes32 entityId, bytes calldata encodedBatch, address payer) external {
+    if (msg.sender != address(this)) revert E2();
+    _processBatch(entityId, abi.decode(encodedBatch, (Batch)), payer);
+  }
+
+  function _carriesDisputeOps(Batch memory batch) private pure returns (bool) {
+    return batch.disputeStarts.length + batch.counterDisputes.length + batch.disputeFinalizations.length
+      + batch.revealSecrets.length + batch.hashLadderRegistrations.length > 0;
   }
 
   /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.
@@ -451,7 +487,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     _increaseReserve(entity, tokenId, amount);
   }
 
-  function _processBatch(bytes32 entityId, Batch memory batch) private {
+  function _processBatch(bytes32 entityId, Batch memory batch, address payer) private {
     // Implicit flash credit for the initiator (see Types.BatchScratch). No
     // reserve is ever inflated; a debt-free initiator may spend ahead of
     // holding and must be whole again before this function returns.
@@ -469,7 +505,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       if (params.entity == bytes32(0)) {
         params.entity = entityId;
       }
-      _externalTokenToReserve(params);
+      _externalTokenToReserve(params, payer);
     }
 
     // Process reserveToReserve transfers (the core functionality we need)
@@ -647,12 +683,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       params.contractAddress,
       params.externalTokenId
     );
-    _externalTokenToReserve(params);
+    _externalTokenToReserve(params, msg.sender);
   }
 
   // Internal version for batch processing (already inside nonReentrant context)
-  function _externalTokenToReserve(ExternalTokenToReserve memory params) internal {
-    bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
+  function _externalTokenToReserve(ExternalTokenToReserve memory params, address payer) internal {
+    bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(payer))) : params.entity;
     if (params.amount == 0) revert E1();
 
     bytes32 packedToken = _packTokenReference(params.tokenType, params.contractAddress, params.externalTokenId);
@@ -669,15 +705,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     if (params.tokenType == TypeERC20) {
       uint256 balanceBefore = IERC20(params.contractAddress).balanceOf(address(this));
-      _safeERC20TransferFrom(params.contractAddress, msg.sender, address(this), params.amount);
+      _safeERC20TransferFrom(params.contractAddress, payer, address(this), params.amount);
       uint256 balanceAfter = IERC20(params.contractAddress).balanceOf(address(this));
       params.amount = balanceAfter - balanceBefore;
       if (params.amount == 0) revert E3();
     } else if (params.tokenType == TypeERC721) {
-      NftCustody.depositERC721(params.contractAddress, params.externalTokenId);
+      NftCustody.depositERC721(params.contractAddress, payer, params.externalTokenId);
       params.amount = 1;
     } else if (params.tokenType == TypeERC1155) {
-      NftCustody.depositERC1155(params.contractAddress, params.externalTokenId, params.amount);
+      NftCustody.depositERC1155(params.contractAddress, payer, params.externalTokenId, params.amount);
     }
 
     _increaseReserve(targetEntity, params.internalTokenId, params.amount);

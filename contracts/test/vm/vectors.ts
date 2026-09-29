@@ -7,17 +7,25 @@
 //   lifecycle.json  one account lifecycle run through the real Depository: the values production stores and emits.
 import { ethers } from "ethers";
 import { createAddressFromString } from "@ethereumjs/util";
-import { Account__factory, DeltaTransformer__factory, EntityProvider__factory, HankoCodec__factory } from "../../typechain-types/index.ts";
+import { Account__factory, Depository__factory, DeltaTransformer__factory, EntityProvider__factory, HankoCodec__factory } from "../../typechain-types/index.ts";
 import { boot, claimsHanko, rawHanko, bodyHash, type Rig } from "./rig.ts";
 import { encodeInt512, encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
 
 /**
- * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. The cell says
- * so, which keeps "ok" meaning that a dispute opened; a revert stays as the rig reports it.
+ * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. J5: a batch of
+ * payment, settlement or reserve ops that cannot apply lands ("ok") but is a BatchFailed, its nonce spent. The cell says so,
+ * which keeps "ok" meaning that the ops applied; a revert stays as the rig reports it.
  */
+const depositoryErrors = Depository__factory.createInterface();
 const outcome = (rig: Rig, result: string): string => {
-  const skipped = (rig.last.events as { name: string; args: { reason: bigint } }[]).find((e) => e.name === "DisputeOpSkipped");
-  return result === "ok" && skipped !== undefined ? `ok, skipped (reason ${skipped.args.reason})` : result;
+  if (result !== "ok") return result;
+  const events = rig.last.events as { name: string; args: { reason: bigint | string } }[];
+  const skipped = events.find((e) => e.name === "DisputeOpSkipped");
+  if (skipped !== undefined) return `ok, skipped (reason ${skipped.args.reason})`;
+  const failed = events.find((e) => e.name === "BatchFailed");
+  if (failed === undefined) return result;
+  const error = depositoryErrors.parseError(String(failed.args.reason));
+  return `ok, batch failed (${error?.name ?? failed.args.reason})`;
 };
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
@@ -205,7 +213,7 @@ export const lifecycleVectors = async (rig: Rig) => {
     storedNonce: storedAfter.nonce.toString(), epoch: epoch2.toString(),
     startAtStoredNonce: await at(8, epoch2),
     startAtOldBaselineNonce: await at(7, epoch1),
-    settleAtStoredNonce: await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs)),
+    settleAtStoredNonce: outcome(rig, await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs))),
     startAboveStoredNonce: await at(9, epoch2),
   };
   return {

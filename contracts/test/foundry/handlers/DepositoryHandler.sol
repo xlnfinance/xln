@@ -136,13 +136,15 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
   }
 
   /// @dev Submits with the correct next nonce. Returns false when the
-  ///      Depository rejected the whole batch.
+  ///      Depository rejected the whole batch or the batch failed soft (BatchFailed).
   function _submit(uint256 actor, Batch memory batch) internal returns (bool ok) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    vm.recordLogs();
     try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
-      return true;
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      return !XlnHanko.batchFailed(vm.getRecordedLogs());
     } catch {
       return false;
     }
@@ -470,12 +472,18 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
+    vm.recordLogs();
     vm.prank(caller);
     try dep.processBatch(entityOf[a], encoded, _hanko(a, h), nonce) {
-      _bump("flashDepositOverdrawWithdraw");
-      if (pull < overdraw) flashViolations++;
-      else if (withdrawAmount > pull - overdraw) flashViolations++;
-      else if (_reserve(a, t) != pull - overdraw - withdrawAmount) flashViolations++;
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      if (XlnHanko.batchFailed(vm.getRecordedLogs())) {
+        if (_reserve(a, t) != pre) flashViolations++;
+      } else {
+        _bump("flashDepositOverdrawWithdraw");
+        if (pull < overdraw) flashViolations++;
+        else if (withdrawAmount > pull - overdraw) flashViolations++;
+        else if (_reserve(a, t) != pull - overdraw - withdrawAmount) flashViolations++;
+      }
     } catch {
       if (_reserve(a, t) != pre) flashViolations++;
     }
@@ -531,8 +539,11 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
+    vm.recordLogs();
     vm.prank(caller); // transferFrom pulls from msg.sender
-    try dep.processBatch(entityOf[a], encoded, _hanko(a, h), nonce) { _bump("depositExternal"); } catch {}
+    try dep.processBatch(entityOf[a], encoded, _hanko(a, h), nonce) {
+      if (!XlnHanko.batchFailed(vm.getRecordedLogs())) _bump("depositExternal");
+    } catch {}
   }
 
   function withdrawExternal(uint256 actorSeed, bool useA, uint256 amount) external {

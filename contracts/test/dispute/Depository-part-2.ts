@@ -33,6 +33,7 @@ import {
   singleSignerLazyEntityId,
   toForkSettlementDiffs,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
 
@@ -926,8 +927,7 @@ describe('Depository', () => {
       ],
     });
     const blocked = await signDepositoryBatch(depository, left.entityId, left.privateKey, blockedBatch);
-    await expect(depository.connect(left.signer).processBatch(blocked.entityId, blocked.encodedBatch, blocked.hankoData, blocked.nonce))
-      .to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, left.signer, blocked, 'E3');
 
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
@@ -993,12 +993,7 @@ describe('Depository', () => {
       left.privateKey,
       blockedSettlementBatch,
     );
-    await expect(
-      depository
-        .connect(left.signer)
-        .processBatch(blockedSettlement.entityId, blockedSettlement.encodedBatch, blockedSettlement.hankoData, blockedSettlement.nonce),
-    )
-      .to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, left.signer, blockedSettlement, 'E3');
 
     expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
@@ -1248,7 +1243,7 @@ describe('Depository', () => {
     expect(await depository.entityNonces(initiator.entityId)).to.equal(2n);
   });
 
-  it('implicit flash (b): reverts E3 when the deficit is not repaid inside the batch', async function () {
+  it('implicit flash (b): the batch fails E3 (BatchFailed) when the deficit is not repaid inside the batch', async function () {
     const { depository } = await loadFixture(deployFixture);
     const initiator = lazyActor(user0, 0);
     const counterparty = lazyActor(user1, 1);
@@ -1260,20 +1255,17 @@ describe('Depository', () => {
     const unpaid = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 500n }],
     }));
-    await expect(
-      depository.connect(initiator.signer).processBatch(unpaid.entityId, unpaid.encodedBatch, unpaid.hankoData, unpaid.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, initiator.signer, unpaid, 'E3');
 
     // A partial repayment is not enough either: deficit 400, inflow 300.
     const partial = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
       reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 500n }],
       collateralToReserve: [await c2rLeg(depository, initiator, counterparty, tokenId, 300n)],
     }));
-    await expect(
-      depository.connect(initiator.signer).processBatch(partial.entityId, partial.encodedBatch, partial.hankoData, partial.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, initiator.signer, partial, 'E3');
 
-    expect(await depository.entityNonces(initiator.entityId)).to.equal(1n);
+    // funding took nonce 1; both failed batches spent one each
+    expect(await depository.entityNonces(initiator.entityId)).to.equal(3n);
     expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
   });
@@ -1357,9 +1349,7 @@ describe('Depository', () => {
       settlements: [await paySettlement(depository, funder, left, tokenId, 50n, funder)],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, left.signer, signed, 'E3');
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
     expect(await depository._reserves(funder.entityId, tokenId)).to.equal(1_000n);
   });
@@ -1377,9 +1367,7 @@ describe('Depository', () => {
       settlements: [await paySettlement(depository, counterparty, initiator, tokenId, 100n, counterparty)],
     });
     const signed = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, batch);
-    await expect(
-      depository.connect(initiator.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, initiator.signer, signed, 'E3');
     expect(await depository._reserves(counterparty.entityId, tokenId)).to.equal(50n);
     expect(await depository._reserves(initiator.entityId, tokenId)).to.equal(1_000n);
   });
@@ -1425,11 +1413,7 @@ describe('Depository', () => {
     const overdrawWithdrawal = await signDepositoryBatch(depository, initiator.entityId, initiator.privateKey, emptyBatch({
       reserveToExternalToken: [{ receivingEntity: addressEntityId(user0.address), tokenId, amount: 1n }],
     }));
-    await expect(
-      depository.connect(initiator.signer).processBatch(
-        overdrawWithdrawal.entityId, overdrawWithdrawal.encodedBatch, overdrawWithdrawal.hankoData, overdrawWithdrawal.nonce,
-      ),
-    ).to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, initiator.signer, overdrawWithdrawal, 'E3');
   });
 
   it('rejects non-admin use of local dev bootstrap helpers', async function () {

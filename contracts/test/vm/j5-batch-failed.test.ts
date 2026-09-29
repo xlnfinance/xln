@@ -107,11 +107,35 @@ describe("J5 authentication failures still revert and take no nonce", () => {
     expect(await nonceOf(B)).toBe(0n);
   });
 
+  test("a settlement whose counterparty signature is bad reverts E4 (a bad signature is not state-dependent) and the nonce stays open", async () => {
+    const { w, A, B, nonceOf } = await world();
+    const acct = w.accountOf(A, B, "j5-badsig");
+    await acct.fundedAccount();
+    const nonceBefore = await nonceOf();
+    const diffs = [{ tokenId: w.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+    // signed by A itself, not by the counterparty B
+    expect(await w.settle(A, B, 5, diffs, acct.coopSig(A, await acct.epochOf(), 5, diffs))).toBe("REVERT E4()");
+    expect(await nonceOf()).toBe(nonceBefore);
+  });
+
   test("a wrong nonce reverts E2 and the entity nonce is unchanged", async () => {
     const { w, A, pay, nonceOf } = await world();
     const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), reserveToReserve: [pay(5000n)] } as never);
     expect(await w.sendRaw(A.id, encoded, signWith(A, w.batchHash(A.id, encoded, 2n)), 2n)).toBe("REVERT E2()");
     expect(await nonceOf()).toBe(0n);
+  });
+});
+
+describe("J5 the inner entry point is not a public door", () => {
+  test("applyBatch called from outside reverts E2: it would run any batch without a hanko", async () => {
+    const { w, A, pay } = await world();
+    const iface = forkDepository.createInterface();
+    const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), reserveToReserve: [pay(1n)] } as never);
+    const data = iface.encodeFunctionData("applyBatch", [A.id, encoded, ethers.ZeroAddress]);
+    const r = await w.vm.runReadOnlyCall({ to: w.vm.depositoryAddress, caller: w.vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 5_000_000n });
+    expect(r.execResult.exceptionError?.error).toBe("revert");
+    expect(iface.parseError(ethers.hexlify(r.execResult.returnValue))?.name).toBe("E2");
+    expect(await w.chain.getReserves(A.id, w.TOKEN)).toBe(1000n);
   });
 });
 
@@ -121,6 +145,34 @@ describe("J5 a batch that carries a dispute or reveal op keeps the J2 rule: a re
     expect(await w.submit(A, { revealSecrets: [reveal], reserveToReserve: [pay(5000n)] })).toBe("REVERT E3()");
     expect(await revealedAt()).toBe(0n);
     expect(await nonceOf()).toBe(0n);
+    expect(events("BatchFailed")).toHaveLength(0);
+  });
+});
+
+describe("J5 a stale dispute op is a dispute op: it shares no batch with a payment", () => {
+  const staleFinalize = async () => {
+    const world_ = await world();
+    const { w, A, B } = world_;
+    const acct = w.accountOf(A, B, "j5-acct");
+    await acct.fundedAccount();
+    const aIsLeft = acct.L.id === A.id;
+    const body = acct.body(0n, 60);
+    // no dispute is open on this Account, so this finalize is stale: alone it is skipped (J2)
+    const op = w.finalizeOp(B, { nonce: 1, body, startedByLeft: aIsLeft }, { nonce: 1, proposerIsLeft: aIsLeft, body, sig: "0x" });
+    return { ...world_, op };
+  };
+
+  test("alone it lands as a skip and spends the nonce; beside a failing payment the whole batch reverts E3, the skip rolled back", async () => {
+    const { w, A, op, pay, nonceOf, events } = await staleFinalize();
+    const before = await nonceOf();
+    expect(await w.submit(A, { disputeFinalizations: [op], reserveToReserve: [pay(5000n)] })).toBe("REVERT E3()");
+    expect(await nonceOf()).toBe(before);
+    expect(events("DisputeOpSkipped")).toHaveLength(0);
+    expect(events("BatchFailed")).toHaveLength(0);
+    // the same op in its own batch is a skip (J2) and takes the next nonce; it is not a BatchFailed
+    expect(await w.submit(A, { disputeFinalizations: [op] })).toBe("ok");
+    expect(await nonceOf()).toBe(before + 1n);
+    expect(events("DisputeOpSkipped")).toHaveLength(1);
     expect(events("BatchFailed")).toHaveLength(0);
   });
 });

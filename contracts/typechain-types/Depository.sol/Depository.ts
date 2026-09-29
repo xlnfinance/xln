@@ -222,6 +222,7 @@ export interface DepositoryInterface extends Interface {
       | "_tokens"
       | "activeDebts"
       | "adminRegisterExternalToken"
+      | "applyBatch"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
       | "deltaTransformer"
@@ -242,6 +243,7 @@ export interface DepositoryInterface extends Interface {
     nameOrSignatureOrTopic:
       | "AccountEpochAdvanced"
       | "AccountSettled"
+      | "BatchFailed"
       | "CooperativeClose"
       | "CounterDisputeRegistered"
       | "DebtCreated"
@@ -299,6 +301,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "applyBatch",
+    values: [BytesLike, BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "computeWatchtowerCounterDisputeHash",
@@ -397,6 +403,7 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "adminRegisterExternalToken",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "computeWatchtowerCounterDisputeHash",
     data: BytesLike
@@ -478,6 +485,24 @@ export namespace AccountSettledEvent {
   export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
     settled: AccountSettlementStructOutput[];
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace BatchFailedEvent {
+  export type InputTuple = [
+    entityId: BytesLike,
+    nonce: BigNumberish,
+    reason: BytesLike
+  ];
+  export type OutputTuple = [entityId: string, nonce: bigint, reason: string];
+  export interface OutputObject {
+    entityId: string;
+    nonce: bigint;
+    reason: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1068,6 +1093,12 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  applyBatch: TypedContractMethod<
+    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   computeWatchtowerCounterDisputeHash: TypedContractMethod<
     [
       tower: AddressLike,
@@ -1290,6 +1321,13 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "applyBatch"
+  ): TypedContractMethod<
+    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "computeWatchtowerCounterDisputeHash"
   ): TypedContractMethod<
     [
@@ -1415,6 +1453,13 @@ export interface Depository extends BaseContract {
     AccountSettledEvent.InputTuple,
     AccountSettledEvent.OutputTuple,
     AccountSettledEvent.OutputObject
+  >;
+  getEvent(
+    key: "BatchFailed"
+  ): TypedContractEvent<
+    BatchFailedEvent.InputTuple,
+    BatchFailedEvent.OutputTuple,
+    BatchFailedEvent.OutputObject
   >;
   getEvent(
     key: "CooperativeClose"
@@ -1543,6 +1588,17 @@ export interface Depository extends BaseContract {
       AccountSettledEvent.InputTuple,
       AccountSettledEvent.OutputTuple,
       AccountSettledEvent.OutputObject
+    >;
+
+    "BatchFailed(bytes32,uint256,bytes4)": TypedContractEvent<
+      BatchFailedEvent.InputTuple,
+      BatchFailedEvent.OutputTuple,
+      BatchFailedEvent.OutputObject
+    >;
+    BatchFailed: TypedContractEvent<
+      BatchFailedEvent.InputTuple,
+      BatchFailedEvent.OutputTuple,
+      BatchFailedEvent.OutputObject
     >;
 
     "CooperativeClose(bytes32,bytes32,uint256)": TypedContractEvent<

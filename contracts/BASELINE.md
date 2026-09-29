@@ -228,3 +228,39 @@ finalize with the starter as its own counterentity, so it reverted for the wrong
 3. ~~Port the Foundry suites~~ Done, see "Foundry suites" above.
 4. H3 is no longer open: it is built in the follow-up branch, test `h3-retired-board-cap`.
 5. **Run the TRON deploy path end to end.** `deploy-chain-matrix.cjs` and `compile-tron.cjs` were copied from `jurisdictions/scripts/` and have never been run here; only the deploy gate in front of them is tested (it refuses the testnet floor on TRON mainnet). Run it against TRON Nile before relying on it.
+
+## After J5 (a batch that cannot apply fails soft: nonce spent, `BatchFailed`; one file or suite per process)
+
+J5 (decisions doc, coordinator 21:01) runs the ops of a batch with no dispute, reveal or hash-ladder op through an
+external self-call in try/catch. A failing batch applies nothing, keeps its entity nonce spent, and emits
+`BatchFailed(entityId, nonce, reason)` instead of reverting. Authentication failures (E4), a wrong nonce, malformed or oversize
+batches, the bounds and any batch that carries a dispute, reveal or hash-ladder op still revert. Pinned by
+`test/vm/j5-batch-failed.test.ts` (13, test first).
+
+**Measured.** Depository 22791 bytes (J2: 22994), Account 24448 (unchanged; 128 bytes under 24576). The self-call wrapper costs
+gas, so `MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL` goes from 256 to 250: 256 pairs measured 15,059,370, over the 15M
+liveness budget. 250 pairs (4 entries of 63, 63, 62, 62) measure **14,763,601** execution gas
+(`BatchBounds.test_gas_maxReserveToCollateralProduct`, which now also fails if the maximal batch stops landing or fits no more);
+`test_reserveToCollateralAggregatePairCapRejectsTwoHundredFiftyOne` pins 251 rejected.
+
+**A bug the ripple found.** Inside the self-call msg.sender is the Depository, so an external deposit pulled tokens from the
+Depository itself. `applyBatch` now takes the outer caller as `payer` (ERC20 pull, ERC721 and ERC1155 custody, and the default
+deposit target). Caught by Foundry `Lifecycle` (4 full-uint256 tests) and Hardhat NFT deposit tests; pinned by them.
+
+**Tests rewritten.** Every plain-batch revert assertion became a `BatchFailed` assertion: the reason selector, the entity nonce
+spent, no `HankoBatchProcessed`, and the state unchanged (Foundry `_submitFailed`, `_submitFailedUnmoved`; Hardhat
+`test/helpers/batch-failed.ts`). 23 Hardhat tests (Depository-part-1 17, part-2 5, DebtForgiveness 1), 5 Foundry `Lifecycle`
+tests, 1 `ForkChanges` (two lines) and one vector cell (`settleAtStoredNonce`: "ok, batch failed (E2)"). The test named "reverts
+an underfunded R2C batch without consuming its nonce" is now "fails an underfunded R2C batch soft: the nonce is consumed and
+nothing moves". The four invariant handlers (`DebtLifecycle`, `Depository`, `TransformerAllowance`, `HashLadder`) and
+`ConservationHandler` count a `BatchFailed` batch as not landed; the conservation handler also checks that it moved no value and
+that the nonce ghost advanced by one (`failedBatches`). Two bare `expectRevert()` in the Foundry lifecycle and fault-mode
+control tests now name their selectors (E2, `TransformerExecutionFailed`).
+
+Results after J5 (local runs, sandbox with forge 1.7.1, on top of J2 at 5404483, uncommitted at the time of the run):
+
+- Foundry, one suite per process, 0 failures in all 16: same counts as after J2.
+- Hardhat, one file per process, 0 failures: same counts as after J2 (Depository-part-1 66, part-2 15, DebtForgiveness 2).
+- `test/vm/`: j5-batch-failed 13, j2-skip-stale-dispute-ops 12, j2-review-extra 16, c1-epoch 5, c2-batch-entity 3,
+  h1-htlc-deadline 5, h2-window-floor 3, h3-retired-board-cap 11, h4-deposit-during-dispute 4, vectors 8; `test/gate/`:
+  contract-size 5, deploy-gate 23.

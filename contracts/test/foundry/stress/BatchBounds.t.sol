@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import {console} from "forge-std/Test.sol";
+import {console, Vm} from "forge-std/Test.sol";
 import {XlnFixture} from "../helpers/XlnFixture.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 import "../../../contracts/Types.sol";
@@ -32,9 +32,14 @@ contract BatchBoundsTest is XlnFixture {
     bytes memory hanko = _hanko(actor, h);
     calldataBytes = abi.encodeCall(dep.processBatch, (entity[actor], encoded, hanko, nonce)).length;
 
+    vm.recordLogs();
     uint256 before = gasleft();
     try dep.processBatch(entity[actor], encoded, hanko, nonce) { ok = true; } catch { ok = false; }
     gasUsed = before - gasleft();
+    // J5: a batch that cannot apply still returns normally, with BatchFailed instead of HankoBatchProcessed.
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    bytes32 failed = keccak256("BatchFailed(bytes32,uint256,bytes4)");
+    for (uint256 i = 0; i < logs.length; i++) if (logs[i].topics[0] == failed) ok = false;
   }
 
   function _expectBoundsRevert(uint256 actor, Batch memory batch) internal {
@@ -113,14 +118,15 @@ contract BatchBoundsTest is XlnFixture {
   ///         worst valid R2C product inside the 15M protocol liveness budget.
   function test_gas_maxReserveToCollateralProduct() public {
     uint256 entries = 4;
-    uint256 pairsPer = 64;
-    dep.mintToReserve(entity[0], T, entries * pairsPer);
+    // 250 pairs in total (the aggregate cap): 63 + 63 + 62 + 62
+    uint256[4] memory pairsIn = [uint256(63), 63, 62, 62];
+    dep.mintToReserve(entity[0], T, 250);
 
     Batch memory b = XlnHanko.emptyBatch();
     b.reserveToCollateral = new ReserveToCollateral[](entries);
     for (uint256 i = 0; i < entries; i++) {
-      EntityAmount[] memory pairs = new EntityAmount[](pairsPer);
-      for (uint256 j = 0; j < pairsPer; j++) {
+      EntityAmount[] memory pairs = new EntityAmount[](pairsIn[i]);
+      for (uint256 j = 0; j < pairsIn[i]; j++) {
         // distinct counterparties keep every write a cold SSTORE
         pairs[j] = EntityAmount({
           entity: keccak256(abi.encodePacked("cp", i, j)),
@@ -133,18 +139,19 @@ contract BatchBoundsTest is XlnFixture {
     }
 
     (bool ok, uint256 gasUsed, uint256 cd) = _rawSubmit(0, b);
-    console.log("R2C 4x64  ok:", ok);
-    console.log("R2C 4x64  execution gas:", gasUsed);
-    console.log("R2C 4x64  calldata bytes:", cd);
-    assertTrue(ok, "256 R2C pairs must be accepted");
+    console.log("R2C 250 pairs  ok:", ok);
+    console.log("R2C 250 pairs  execution gas:", gasUsed);
+    console.log("R2C 250 pairs  calldata bytes:", cd);
+    assertTrue(ok, "250 R2C pairs must be accepted and applied");
     assertLt(gasUsed, LIVENESS_BUDGET, "max R2C batch exceeds the 15M liveness budget");
   }
 
-  function test_reserveToCollateralAggregatePairCapRejectsTwoHundredFiftySeven() public {
+  function test_reserveToCollateralAggregatePairCapRejectsTwoHundredFiftyOne() public {
     Batch memory b = XlnHanko.emptyBatch();
     b.reserveToCollateral = new ReserveToCollateral[](5);
     for (uint256 i = 0; i < 5; i++) {
-      uint256 pairCount = i == 4 ? 1 : 64;
+      // 64 + 64 + 64 + 58 + 1 = 251
+      uint256 pairCount = i == 4 ? 1 : i == 3 ? 58 : 64;
       EntityAmount[] memory pairs = new EntityAmount[](pairCount);
       for (uint256 j = 0; j < pairCount; j++) {
         pairs[j] = EntityAmount({ entity: keccak256(abi.encodePacked("cp", i, j)), amount: 1 });

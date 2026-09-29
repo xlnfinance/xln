@@ -37,7 +37,7 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
 
   // ── ghost accounting ──
   mapping(uint256 => uint256) public ghostMinted; // tokenId => admin-minted total
-  mapping(uint256 => uint256) public ghostEntityNonce; // actorIndex => accepted entity nonce
+  mapping(uint256 => uint256) public ghostEntityNonce; // actorIndex => consumed entity nonce (accepted or failed soft)
 
   // ── handler-side oracles ──
   /// @dev Per accepted batch: Δ(Σreserves+Σcollateral) per token must equal the
@@ -53,6 +53,8 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
   // coverage counters
   uint256 public acceptedBatches;
   uint256 public rejectedBatches;
+  /// @dev J5: returned normally with BatchFailed. The nonce is spent and nothing else moved.
+  uint256 public failedBatches;
   mapping(bytes32 => uint256) public calls;
 
   // last accepted submission per actor, for replay
@@ -349,10 +351,19 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
     bytes memory hanko = _hanko(a, h);
+    vm.recordLogs();
     vm.prank(caller); // deposit legs pull transferFrom(msg.sender, ...)
     try dep.processBatch(entityOf[a], encoded, hanko, nonce) {
-      acceptedBatches++;
-      _bump("mixedBatch");
+      // J5: a batch whose ops fail returns normally with BatchFailed. It is not accepted, and the conservation
+      // oracle below then checks the stronger claim that it moved no value at all.
+      if (XlnHanko.batchFailed(vm.getRecordedLogs())) {
+        failedBatches++;
+        _bump("mixedBatchFailedSoft");
+      } else {
+        acceptedBatches++;
+        _bump("mixedBatch");
+      }
+      // either way the nonce moved by exactly +1, and the same triple must never replay
       _recordSubmitOutcome(a, nonce, encoded, hanko);
       for (uint256 k = 0; k < 3; k++) {
         uint256 internalAfter = _totalInternal(TOKENS[k]);

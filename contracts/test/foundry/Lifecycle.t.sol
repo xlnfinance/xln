@@ -119,7 +119,7 @@ contract LifecycleTest is XlnFixture {
   //
   // Batch has no Flashloan[] any more. The batch initiator, on a token where it
   // owes nothing, may spend ahead of holding; the shortfall is a deficit that
-  // later same-batch inflows repay first, and processBatch reverts E3 unless
+  // later same-batch inflows repay first, and processBatch fails E3 unless
   // every deficit is zero at the end. Batch order is fixed (deposits, R2R, C2R,
   // settlements, ..., R2C, external withdrawals), so a deficit opened by R2R can
   // be repaid by C2R/settlement, while one opened by an external withdrawal
@@ -172,12 +172,9 @@ contract LifecycleTest is XlnFixture {
     });
   }
 
-  function _expectE3(uint256 actor, Batch memory b) internal {
-    bytes memory encoded = abi.encode(b);
-    uint256 nonce = dep.entityNonces(entity[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actor], encoded, nonce);
-    vm.expectRevert(bytes4(keccak256("E3()")));
-    dep.processBatch(entity[actor], encoded, _hanko(actor, h), nonce);
+  /// @dev The batch fails soft with E3 (BatchFailed): it returns, spends the nonce, and moves nothing.
+  function _submitFailedE3(uint256 actor, Batch memory b) internal {
+    _submitFailed(actor, b, bytes4(keccak256("E3()")));
   }
 
   /// @notice (a) R2R more than held, repaid by a same-batch collateral withdrawal.
@@ -204,19 +201,19 @@ contract LifecycleTest is XlnFixture {
     );
   }
 
-  /// @notice (b) Same overdraw with no repayment reverts E3 and leaves no trace.
+  /// @notice (b) Same overdraw with no repayment fails E3 (BatchFailed) and moves nothing.
   function test_implicitFlashUnrepaidReverts() public {
     dep.mintToReserve(entity[0], T, 100);
     Batch memory b = XlnHanko.emptyBatch();
     b.reserveToReserve = new ReserveToReserve[](1);
     b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[2], tokenId: T, amount: 500 });
-    _expectE3(0, b);
+    _submitFailedE3(0, b);
     assertEq(dep._reserves(entity[0], T), 100);
     assertEq(dep._reserves(entity[2], T), 0);
-    assertEq(dep.entityNonces(entity[0]), 0);
+    assertEq(dep.entityNonces(entity[0]), 1, "the failed batch spent nonce 1");
   }
 
-  /// @notice (b') A partial repayment is not enough: deficit 600, inflow 500 -> E3.
+  /// @notice (b') A partial repayment is not enough: deficit 600, inflow 500 -> E3 (BatchFailed).
   function test_implicitFlashPartialRepaymentReverts() public {
     _fundCollateral(1_000);
     Batch memory b = XlnHanko.emptyBatch();
@@ -224,7 +221,7 @@ contract LifecycleTest is XlnFixture {
     b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[2], tokenId: T, amount: 600 });
     b.collateralToReserve = new CollateralToReserve[](1);
     b.collateralToReserve[0] = _c2rLeg(0, 1, 500);
-    _expectE3(0, b);
+    _submitFailedE3(0, b);
     assertEq(_collateralOf(entity[0], entity[1], T), 1_000);
   }
 
@@ -255,20 +252,20 @@ contract LifecycleTest is XlnFixture {
     b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[3], tokenId: T, amount: 300 });
     b.collateralToReserve = new CollateralToReserve[](1);
     b.collateralToReserve[0] = _c2rLeg(debtor, 2, 300);
-    _expectE3(debtor, b);
+    _submitFailedE3(debtor, b);
     assertEq(_collateralOf(entity[debtor], entity[2], T), 1_000);
     assertEq(dep._reserves(entity[3], T), 0);
   }
 
   /// @notice (d) A non-initiator reserve can never go negative: a settlement in
-  ///         which the counterparty pays more than it holds reverts E3 even
+  ///         which the counterparty pays more than it holds fails E3 even
   ///         though the counterparty signed it.
   function test_nonInitiatorNeverOverdraws() public {
     dep.mintToReserve(entity[1], T, 50);
     Batch memory b = XlnHanko.emptyBatch();
     b.settlements = new Settlement[](1);
     b.settlements[0] = _paySettlement(1, 0, 100, 1); // entity1 pays 100, holds 50
-    _expectE3(0, b);
+    _submitFailedE3(0, b);
     assertEq(dep._reserves(entity[1], T), 50);
     assertEq(dep._reserves(entity[0], T), 0);
   }
@@ -341,7 +338,7 @@ contract LifecycleTest is XlnFixture {
   }
 
   /// @notice (f) An external withdrawal runs last, so a deficit it opens can
-  ///         never be repaid: overdrawing there always reverts E3.
+  ///         never be repaid: overdrawing there always fails E3.
   function test_implicitFlashExternalWithdrawalCannotBeRepaid() public {
     dep.mintToReserve(entity[0], T, 10);
     Batch memory b = XlnHanko.emptyBatch();
@@ -349,7 +346,7 @@ contract LifecycleTest is XlnFixture {
     b.reserveToExternalToken[0] = ReserveToExternalToken({
       receivingEntity: bytes32(uint256(uint160(signer[0]))), tokenId: T, amount: 11
     });
-    _expectE3(0, b);
+    _submitFailedE3(0, b);
     assertEq(dep._reserves(entity[0], T), 10);
   }
 
@@ -758,7 +755,7 @@ contract LifecycleTest is XlnFixture {
     bytes memory encoded = abi.encode(fin);
     uint256 bn = dep.entityNonces(entity[0]) + 1;
     bytes32 bh = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[0], encoded, bn);
-    vm.expectRevert();
+    vm.expectRevert(bytes4(keccak256("E2()")));
     dep.processBatch(entity[0], encoded, _hanko(0, bh), bn);
 
     vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);

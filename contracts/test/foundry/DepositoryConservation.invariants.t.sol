@@ -104,15 +104,14 @@ contract DepositoryConservationInvariants is XlnFixture {
 
   // ═══════════════ invariant 3: entity nonce ═══════════════
 
-  /// @notice INVARIANT 3a (Depository.sol:339). entityNonces[e] equals exactly
-  ///         the number of batches accepted for e, i.e. it advanced by +1 on
-  ///         every accepted batch and never moved otherwise.
+  /// @notice INVARIANT 3a (Depository.sol:339). entityNonces[e] equals exactly the number of batches that consumed a
+  ///         nonce for e: accepted ones, and (J5) ones that failed soft. It advanced by +1 on each, never otherwise.
   function invariant_entityNonceMatchesAcceptedCount() public view {
     for (uint256 i = 0; i < ACTORS; i++) {
       assertEq(
         dep.entityNonces(entity[i]),
         handler.ghostEntityNonce(i),
-        "entityNonces desynced from accepted-batch ghost"
+        "entityNonces desynced from consumed-nonce ghost"
       );
     }
   }
@@ -173,6 +172,7 @@ contract DepositoryConservationInvariants is XlnFixture {
     console.log("mint              ", handler.callCount("mint"));
     console.log("mixedBatch        ", handler.callCount("mixedBatch"));
     console.log("-- accepted batches ", handler.acceptedBatches());
+    console.log("-- failed soft batches", handler.failedBatches());
     console.log("-- rejected batches ", handler.rejectedBatches());
     console.log("-- replay attempts  ", handler.replayAttempts());
     console.log("-- minted t1/t2/t3  ", handler.ghostMinted(1), handler.ghostMinted(3));

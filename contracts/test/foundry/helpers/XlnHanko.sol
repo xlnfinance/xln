@@ -6,6 +6,7 @@ import "../../../contracts/HankoVerifier.sol";
 import "../../../contracts/HankoEncoding.sol";
 import "../../../contracts/Types.sol";
 import {Depository} from "../../../contracts/Depository.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Solidity mirror of test/helpers/hanko.ts.
 /// @dev Lazy ("unregistered") entities are the cheapest authorization surface:
@@ -13,6 +14,13 @@ import {Depository} from "../../../contracts/Depository.sol";
 ///      EntityProvider has no record for the id, so a single EOA key is a full
 ///      entity without any registration transaction.
 library XlnHanko {
+  /// @notice J5: a processBatch that returned may still have applied nothing. True when the recorded logs hold BatchFailed.
+  function batchFailed(Vm.Log[] memory logs) internal pure returns (bool) {
+    bytes32 topic = keccak256("BatchFailed(bytes32,uint256,bytes4)");
+    for (uint256 i = 0; i < logs.length; i++) if (logs[i].topics[0] == topic) return true;
+    return false;
+  }
+
   /// @dev keccak256 of the canonical 1-of-1 board. This IS the entity id.
   function lazyEntityId(address signer) internal pure returns (bytes32) {
     bytes32[] memory members = new bytes32[](1);

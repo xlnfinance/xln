@@ -20,7 +20,7 @@ library DepositoryBounds {
   uint256 private constant MAX_BATCH_HASH_LADDER_REGISTRATIONS = 32;
   uint256 private constant MAX_BATCH_TOTAL_OPS = 50;
   uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
-  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 256;
+  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 250;
 
   function assertBatch(Batch memory batch) external pure {
     if (
