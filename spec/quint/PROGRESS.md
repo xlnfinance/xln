@@ -34,7 +34,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 - `MODULES=jbatch ./check.sh`: typecheck, 10 scenario tests, `safe` (urgent_lands, dropped_only_dead, skip_read, failed_read, nonce_final, pay_once, urgent_once, nonce_sequential,
   reserve_sound) over 500 traces of 25 steps, 6 witnesses reached; also 20000 traces of 30 steps, seed 3 (after F1 and the skip event), no violation.
   `MUTANT_STEPS=25 MUTANT_SAMPLES=3000 python3 mutants/run.py jbatch`: 10 of 10 killed.
-  Apalache, `quint verify jbatch.qnt --init init --step step --invariant safe --max-steps 4`: no violation in 585 s (before the skip event was added).
+  Apalache, `quint verify jbatch.qnt --init init --step step --invariant safe --max-steps 4`: no violation in 585 s on the first version; again on the current one (skip event, F1, J5, `failed_read`): no violation in 284 s, all 9 properties. A run to 6 steps is not recorded yet.
   Found while writing it: an older, smaller batch signed for one nonce burns the nonce of the fresher batch (J3), which F1 now rules out by signing every replacement at a fresh nonce; and F1 in turn makes a reverting payment hold every urgent op behind it, which J5 (a failed batch takes its nonce) removes: with `NONCE_ON_FAIL = false` (the contract today) `urgent_lands` is violated within a second of simulation.
 - `MODULES=runtime ./check.sh`: typecheck, 8 scenario tests, `safe` (no_equivocation, exactly_once_j, acked_durable, canonical_frames) over 500 traces
   of 30 steps, 6 witnesses reached. `python3 mutants/run.py runtime`: 8 of 8 killed (7 by invariant, 1 by scenario test).
