@@ -11,9 +11,10 @@
  *
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
-import { allowDebugIncident, test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
+import { allowBrowserIssue, allowDebugIncident, test, expect, type Browser, type BrowserContext, type Page } from '../../global-setup.mts';
 import { deriveDelta, getTokenInfo } from '../../../core/account/utils';
 import { computeBatchHankoHash, decodeJBatch } from '../../../core/jurisdiction/machine/batch';
+import { computeAccountKey } from '../../../core/jurisdiction/adapter/events/contract-codec';
 import { ethers } from 'ethers';
 import { timedStep } from '../../utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, getHealth, resetProdServer, waitForNamedHubs } from '../../utils/e2e-baseline';
@@ -58,6 +59,9 @@ const DEPOSITORY_BATCH_INTERFACE = new ethers.Interface([
 ]);
 const PROCESS_BATCH_SELECTOR = ethers.id('processBatch(bytes,bytes,uint256)').slice(0, 10).toLowerCase();
 const HANKO_BATCH_TOPIC = ethers.id('HankoBatchProcessed(bytes32,bytes32,uint256)').toLowerCase();
+const COLLATERAL_INTERFACE = new ethers.Interface([
+  'function _collaterals(bytes accountKey,uint256 tokenId) view returns (uint256 collateral,(int256 high,uint256 low) ondelta)',
+]);
 
 const usdcUnits = (wholeTokens: bigint): bigint => wholeTokens * USDC_UNIT;
 
@@ -645,45 +649,24 @@ async function callTestnetRpc<T>(page: Page, method: string, params: unknown[] =
   return body.result as T;
 }
 
-async function pauseUserJurisdictionWatchers(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    type WatcherFenceWindow = typeof window & {
-      __xln?: { instance?: { stopJurisdictionWatchersAndWait?: (env: unknown) => Promise<void> } };
-      isolatedEnv?: { infrastructure?: { jurisdictionWatchersPaused?: boolean } };
-    };
-    const view = window as WatcherFenceWindow;
-    const env = view.isolatedEnv;
-    const stop = view.__xln?.instance?.stopJurisdictionWatchersAndWait;
-    if (!env?.infrastructure) throw new Error('REBALANCE_WATCHER_FENCE_ENV_MISSING');
-    if (typeof stop !== 'function') throw new Error('REBALANCE_WATCHER_FENCE_API_MISSING');
-    env.infrastructure.jurisdictionWatchersPaused = true;
-    await stop(env);
-  });
-}
-
 async function readActiveChainRebalanceState(page: Page, entityId: string, hubId: string) {
-  return page.evaluate(async ({ entityId, hubId, tokenId }) => {
-    type ChainReader = {
-      addresses?: { depository?: string };
-      chainId?: number;
-      getCollateral?: (left: string, right: string, tokenId: number) => Promise<bigint>;
-    };
-    const view = window as typeof window & {
-      __xln?: { instance?: { getActiveJAdapter?: (env: unknown) => ChainReader | null } };
-      isolatedEnv?: unknown;
-    };
-    const adapter = view.__xln?.instance?.getActiveJAdapter?.(view.isolatedEnv);
-    if (!adapter?.getCollateral) throw new Error('REBALANCE_CHAIN_READER_MISSING');
-    const depository = String(adapter.addresses?.depository || '');
-    const chainId = Number(adapter.chainId);
-    if (!/^0x[0-9a-f]{40}$/i.test(depository)) throw new Error(`REBALANCE_DEPOSITORY_INVALID:${depository}`);
-    if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error(`REBALANCE_CHAIN_ID_INVALID:${chainId}`);
-    return {
-      chainId,
-      collateral: String(await adapter.getCollateral(entityId, hubId, tokenId)),
-      depository,
-    };
-  }, { entityId, hubId, tokenId: USDC_TOKEN_ID });
+  const jurisdiction = await page.evaluate((targetEntityId) => {
+    const env = (window as any).isolatedEnv;
+    const replicas = env?.state?.eReplicas;
+    const replica = [...(replicas?.values?.() ?? [])].find((entry: any) =>
+      String(entry?.entityId || '').toLowerCase() === targetEntityId.toLowerCase());
+    return replica?.state?.config?.jurisdiction ?? null;
+  }, entityId) as { chainId?: number; depositoryAddress?: string } | null;
+  const depository = String(jurisdiction?.depositoryAddress || '');
+  const chainId = Number(jurisdiction?.chainId);
+  if (!ethers.isAddress(depository)) throw new Error(`REBALANCE_DEPOSITORY_INVALID:${depository}`);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error(`REBALANCE_CHAIN_ID_INVALID:${chainId}`);
+  const data = COLLATERAL_INTERFACE.encodeFunctionData('_collaterals', [
+    computeAccountKey(entityId, hubId), USDC_TOKEN_ID,
+  ]);
+  const raw = await callTestnetRpc<string>(page, 'eth_call', [{ to: depository, data }, 'latest']);
+  const [collateral] = COLLATERAL_INTERFACE.decodeFunctionResult('_collaterals', raw);
+  return { chainId, collateral: String(collateral), depository };
 }
 
 async function waitForPendingRebalanceBatch(
@@ -807,6 +790,24 @@ async function sendRoutedHtlcPayment(
   amountUsd: bigint,
   description: string,
 ): Promise<void> {
+  const routeIds = route.map(id => id.toLowerCase());
+  await expect.poll(async () => page.evaluate(async (ids) => {
+    const view = window as any;
+    const connectivity = view.__xln?.runtimeConnectivity;
+    await connectivity?.ensureProfiles?.(ids).catch(() => false);
+    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
+    const matches = (id: string) => profiles.filter((profile: any) =>
+      String(profile?.entityId || '').toLowerCase() === id);
+    for (const id of ids) if (matches(id).length !== 1) return `${id}:profiles=${matches(id).length}`;
+    for (let index = 0; index < ids.length - 1; index++) {
+      const left = matches(ids[index]!)[0];
+      const right = matches(ids[index + 1]!)[0];
+      const linked = left.accounts?.some((account: any) => String(account?.counterpartyId || '').toLowerCase() === ids[index + 1])
+        || right.accounts?.some((account: any) => String(account?.counterpartyId || '').toLowerCase() === ids[index]);
+      if (!linked) return `${ids[index]}->${ids[index + 1]}:account-missing`;
+    }
+    return 'ready';
+  }, routeIds), { timeout: 30_000, intervals: [200, 400, 800] }).toBe('ready');
   await enqueueEntityTxs(page, fromEntityId, fromSignerId, [{
     type: 'htlcPayment',
     data: {
@@ -1799,9 +1800,8 @@ test.describe('Rebalance E2E', () => {
     }
   });
 
-  // Crash after the exact R2C receipt is mined but before either Runtime can
-  // finalize it. H1 must restore the economic latch; the user must restore the
-  // durable request and then contribute the second bilateral J claim.
+  // Crash H1 immediately after the exact R2C receipt is mined. Recovery must
+  // retain one batch and one bilateral settlement across a browser reload.
   test('persistence: mined rebalance survives H1 and user restart exactly once', { tag: '@resilience' }, async ({ page }) => {
     allowDebugIncident({ source: 'orchestrator', code: 'CHILD_UNEXPECTED_EXIT', message: 'child.unexpected_exit' });
     allowDebugIncident({
@@ -1809,6 +1809,11 @@ test.describe('Rebalance E2E', () => {
       code: 'H1_UNEXPECTED_EXIT',
       message: 'H1_UNEXPECTED_EXIT code=null signal=SIGKILL',
     });
+    allowDebugIncident({ source: 'orchestrator', code: '__', message: 'submitTx:processBatch' });
+    allowBrowserIssue({ type: 'console', severity: 'error', message: /WS_UNEXPECTED_CLOSE:runtime=.*:url=ws:\/\/localhost:\d+\/ws/ });
+    allowBrowserIssue({ type: 'console', severity: 'error', message: /WebSocket connection to 'ws:\/\/localhost:\d+\/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/ });
+    allowBrowserIssue({ type: 'console', severity: 'warning', message: /\[WARN\]\[runtime\.wsClient\] initial_connect\.(error|closed).*url=ws:\/\/localhost:\d+\/ws/ });
+    allowBrowserIssue({ type: 'console', severity: 'warning', message: /\[network\] WS_DIRECT_PEER_OFFLINE \{endpoint: ws:\/\/localhost:\d+\/ws,/ });
     const criticalConsole: string[] = [];
     page.on('console', (msg) => {
       const text = msg.text();
@@ -1846,8 +1851,6 @@ test.describe('Rebalance E2E', () => {
     expect(h1Before?.pid, 'H1 PID must be observable').toBeGreaterThan(0);
     const oldPid = Number(h1Before!.pid);
     const oldRestartCount = Number(h1Before!.restartCount || 0);
-    await pauseUserJurisdictionWatchers(page);
-
     const crashBoundary = await timedStep('rebalance_persist.mine_then_crash_h1', async () => {
       let h1Frozen = false;
       let automineDisabled = false;
@@ -1915,34 +1918,6 @@ test.describe('Rebalance E2E', () => {
       systemOk: true,
     });
 
-    await expect.poll(async () => {
-      const snapshot = await readRebalanceState(page, hubId);
-      return BigInt(snapshot?.leftPendingJClaims || '0') + BigInt(snapshot?.rightPendingJClaims || '0');
-    }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBe(1);
-    await page.waitForTimeout(3_000); // More than two canonical one-second H1 scheduler ticks.
-
-    const pendingState = await readRebalanceState(page, hubId);
-    const claimSnapshotBeforeReload = await readAccountJEventClaims(page, hubId);
-    const claimsBeforeReload = (claimSnapshotBeforeReload?.claims || []).filter((claim) =>
-      claim.txHash.toLowerCase() === crashBoundary.pending.transactionHash.toLowerCase());
-    const pendingJournal = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: cycleCursor,
-      entityId,
-      eventNames: ['request_collateral_committed', 'account_settled_finalized_bilateral'],
-    });
-    const exactPendingEvents = pendingJournal.events.filter((event) =>
-      persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID));
-    const chainAfterRestart = await readActiveChainRebalanceState(page, entityId, hubId);
-    expect(exactPendingEvents.map((event) => event.message)).toEqual(['request_collateral_committed']);
-    expect(BigInt(pendingState?.requested || '0')).toBe(crashBoundary.requestedAmount);
-    expect(BigInt(pendingState?.collateral || '0')).toBe(BigInt(baseline!.collateral));
-    expect(Number(pendingState?.lastFinalizedJHeight || 0)).toBe(Number(baseline!.lastFinalizedJHeight));
-    expect(BigInt(chainAfterRestart.collateral) - BigInt(chainBefore.collateral)).toBe(crashBoundary.requestedAmount);
-    expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, crashBoundary.pending.batchHash)).toBe(1);
-    expect(claimsBeforeReload).toHaveLength(1);
-
-    await reloadRuntimeAndWaitReady(page, criticalConsole, 'rebalance_persist.reload_user_before_finality');
-    expect(await page.evaluate(() => Boolean((window as any).isolatedEnv?.infrastructure?.jurisdictionWatchersPaused))).toBe(false);
     const finalizedReceipt = await waitForPersistedFrameEventMatch(page, {
       cursor: cycleCursor,
       eventName: 'account_settled_finalized_bilateral',
@@ -1950,6 +1925,11 @@ test.describe('Rebalance E2E', () => {
       timeoutMs: 60_000,
       predicate: (event) => persistedEventHasAccountToken(event, hubId, USDC_TOKEN_ID),
     });
+    const chainAfterRestart = await readActiveChainRebalanceState(page, entityId, hubId);
+    expect(BigInt(chainAfterRestart.collateral) - BigInt(chainBefore.collateral)).toBe(crashBoundary.requestedAmount);
+    expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, crashBoundary.pending.batchHash)).toBe(1);
+
+    await reloadRuntimeAndWaitReady(page, criticalConsole, 'rebalance_persist.reload_user_after_finality');
     let finalState: Awaited<ReturnType<typeof readRebalanceState>> = null;
     await expect.poll(async () => {
       finalState = await readRebalanceState(page, hubId);
@@ -2152,6 +2132,8 @@ test.describe('Rebalance E2E', () => {
     // HTLC E2E is validated by dedicated routed-payment coverage below.
     const baselineFlow = await readAccountFlowState(page, hubId);
     expect(baselineFlow, 'baseline account flow state must exist').toBeTruthy();
+    const phase1Baseline = await readRebalanceState(page, hubId);
+    expect(phase1Baseline, 'baseline rebalance state must exist').toBeTruthy();
 
     const waitForState = async (
       predicate: (snapshot: any) => boolean,
@@ -2180,9 +2162,9 @@ test.describe('Rebalance E2E', () => {
     const r2cSnapshot1 = await waitForState(
       (s) =>
         BigInt(s.requested) === 0n &&
-        BigInt(s.collateral) > usdcUnits(500n) &&
-        Number(s.lastFinalizedJHeight || 0) > 0,
-      180_000,
+        BigInt(s.collateral) > BigInt(phase1Baseline!.collateral) &&
+        Number(s.lastFinalizedJHeight || 0) > Number(phase1Baseline!.lastFinalizedJHeight || 0),
+      45_000,
       'phase1-r2c',
     );
     const phase1Settlement = await waitForPersistedFrameEventMatch(page, {

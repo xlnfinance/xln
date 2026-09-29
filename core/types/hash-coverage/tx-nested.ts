@@ -34,7 +34,7 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
     'pullId', 'tokenId', 'amount', 'fullHash', 'partialRoot',
     'crossJurisdiction', 'crossJurisdictionRoute',
   ],
-  cross_pull_close: ['pullId', 'binary', 'proof'],
+  cross_pull_close: ['pullId', 'binary', 'proof', 'executionAmount'],
   swap_offer: [
     'offerId', 'giveTokenId', 'giveTokenDecimals', 'giveAmount',
     'wantTokenId', 'wantTokenDecimals', 'wantAmount', 'maxFee',

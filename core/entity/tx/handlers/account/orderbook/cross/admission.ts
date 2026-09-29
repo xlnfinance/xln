@@ -52,7 +52,7 @@ export const prepareCrossOrderbookOffer = (
     pass.rejectInvalidCrossOffer(accountId, rawOffer.offerId, 'invalid-cross-j-route');
     return null;
   }
-  const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.baseAmount);
+  const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.quoteTokenId, marketOffer.baseAmount, marketOffer.quoteAmount, marketOffer.priceTicks);
   if (qtyLots <= 0n) {
     pass.rejectInvalidCrossOffer(
       accountId,

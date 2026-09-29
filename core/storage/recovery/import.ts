@@ -27,6 +27,7 @@ import { replaceRestoredStorageBase } from '../index';
 import { type StorageDbRole, withStorageWriterLock } from '../runtime-dbs';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from '../types';
 import { buildStorageRuntimeMachineSnapshot } from '../wal/snapshot';
+import { resetRuntimeActivityViewAtFloor } from '../history/runtime-activity-view';
 
 export interface PersistRestoredRuntimeDeps {
   getStorageDb(env: RuntimeReplica, role?: StorageDbRole): Level<Buffer, Buffer>;
@@ -158,6 +159,9 @@ const persistRestoredRuntimeStateUnlocked = async (
   }
   const state = ensureRuntimeInfrastructure(env);
   state.currentStorageOverlayMarks = new Map();
+  // Recovery replaces the authoritative WAL base. The disposable view has no
+  // earlier local frames, so its next append must begin at the restored H+1.
+  await resetRuntimeActivityViewAtFloor(env, coordinates.height);
 };
 
 // Import replaces the entire local persistence base. It is never appended to the

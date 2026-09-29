@@ -866,12 +866,12 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const b0 = await outCap(page, bob!.entityId, hubId);
     const bobForwardRendered = await getRenderedOutboundForAccount(page, hubId);
     const bobForwardCursor = await getPersistedReceiptCursor(page);
-    const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-reverse-recv');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
     await waitForAccountIdle(page, alice!.entityId, hubId);
+    const aliceForwardFinalizeCursor = await getPersistedReceiptCursor(page);
     const hubRuntimeId = await getEntityRuntimeId(page, hubId);
     expect(hubRuntimeId, `hub runtimeId missing for hub=${hubId.slice(0, 12)}`).toBeTruthy();
     const runtimeIdSet = new Set([
@@ -896,14 +896,6 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       a1,
       aliceMinSpend,
     );
-    const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(page, {
-      cursor: aliceForwardFinalizeCursor,
-      eventName: 'HtlcFinalized',
-      entityId: alice!.entityId,
-      timeoutMs: 20_000,
-      predicate: (event) => String(event.data?.amount || '') === payAmount.toString(),
-    });
-    assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice!.entityId, hubId, payAmount);
     console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
     expect(alicePaid, 'Alice should pay at least quoted sender amount').toBeGreaterThanOrEqual(aliceMinSpend);
     await screenshot(page, '06a-alice-after-send');
@@ -933,6 +925,17 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     // Bob's UI shows the received funds (data already verified via outCap above)
     await screenshot(page, '06b-bob-after-receive');
 
+    await switchToRuntime(page, 'alice');
+    await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-forward-finalize');
+    const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(page, {
+      cursor: aliceForwardFinalizeCursor,
+      eventName: 'HtlcFinalized',
+      entityId: alice!.entityId,
+      timeoutMs: 20_000,
+      predicate: (event) => String(event.data?.amount || '') === payAmount.toString(),
+    });
+    assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice!.entityId, hubId, payAmount);
+
     console.log('[E2E] ✅ Forward HTLC verified (fee on sender)');
 
     if (FAST_E2E && !LONG_E2E) {
@@ -947,6 +950,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
     console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, USDC_DECIMALS)} USDC, fee: ${ethers.formatUnits(reverseFee, USDC_DECIMALS)} USDC`);
 
+    await switchToRuntime(page, 'bob');
+    await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-before-reverse-probe');
     // Bob already received funds in step 6, so reverse payment should not depend on a second faucet call.
     const b2 = b1;
     expect(b2, 'Bob must have enough OUT capacity for reverse payment').toBeGreaterThanOrEqual(reverseSenderSpend);

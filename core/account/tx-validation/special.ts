@@ -182,7 +182,7 @@ export const validateSpecialAccountTxData = (
   else if (type === 'cross_pull_close') {
     const data = validateAccountTxDataFields(
       value,
-      { required: { pullId: 'string', binary: 'string', proof: 'record' } },
+      { required: { pullId: 'string', binary: 'string', proof: 'record' }, optional: { executionAmount: 'bigint' } },
       code,
     );
     validateCloseProof(data['proof'], `${code}_PROOF`);

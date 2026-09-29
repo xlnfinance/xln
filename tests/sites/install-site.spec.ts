@@ -32,9 +32,7 @@ const assertInstallContent = async (page: Page): Promise<void> => {
   await expect(page.locator('[data-testid^="install-channel-"]')).toHaveCount(5);
   await expect(page.getByTestId('install-channel-web')).toContainText('fundamental');
   await expect(page.getByTestId('install-channel-cli')).toContainText('Recommended');
-  await expect(page.getByTestId('install-channel-cli').locator('code')).toHaveText(
-    /bunx --bun xlnfinance@https:\/\/github\.com\/xlnfinance\/xln\/releases\/download\/v/,
-  );
+  await expect(page.getByTestId('install-channel-cli').locator('code')).toHaveText('bunx --bun xlnfinance');
   await expect(page.getByTestId('install-channel-desktop')).toContainText('signed installers');
   await expect(page.getByTestId('install-channel-mobile')).toContainText('TestFlight');
   await expect(page.getByTestId('install-channel-extension')).toContainText('Developer mode');

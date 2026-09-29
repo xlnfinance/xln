@@ -518,13 +518,15 @@ test.describe('E2E User Journey', () => {
     const beforeInitialJCatchup = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
     await mineEmptyJurisdictionBlock(page);
     await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).finalizedJHeight,
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).watcherScannedJHeight,
       {
         timeout: 10_000,
         intervals: [100, 250, 500, 1000],
-        message: 'the new Entity must certify pre-existing jurisdiction bootstrap evidence before the idle check',
+        message: 'the jurisdiction watcher must scan the new empty block before the idle check',
       },
-    ).toBeGreaterThan(beforeInitialJCatchup.finalizedJHeight);
+    ).toBeGreaterThan(beforeInitialJCatchup.watcherScannedJHeight);
+    expect((await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).finalizedJHeight)
+      .toBeGreaterThanOrEqual(beforeInitialJCatchup.finalizedJHeight);
     await expect.poll(
       async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
       { timeout: 10_000, intervals: [100, 250, 500], message: 'Entity must settle after initial J catch-up' },

@@ -46,7 +46,7 @@ const openAddRuntimePanel = async (page: Page): Promise<void> => {
 test.setTimeout(5 * 60_000);
 
 test(
-  'remote BrainVault keeps the mnemonic on the node until explicit admin reveal',
+  'remote BrainVault keeps the mnemonic on the node and opens account setup without browser export',
   { tag: '@functional' },
   async ({ page }) => {
     await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
@@ -86,12 +86,9 @@ test(
     await expect(receipt).toContainText('Native benchmark');
     await expect(receipt.locator('#node-mnemonic-export')).toHaveCount(0);
     const publicReceipt = await receipt.textContent();
-
-    await receipt.getByRole('button', { name: 'Show mnemonic', exact: true }).click();
-    const mnemonicField = receipt.locator('#node-mnemonic-export');
-    await expect(mnemonicField).toBeVisible({ timeout: 15_000 });
-    const mnemonic = String(await mnemonicField.inputValue()).trim();
-    expect(mnemonic.split(/\s+/)).toHaveLength(24);
-    expect(publicReceipt).not.toContain(mnemonic);
+    expect(publicReceipt).toContain('never delivered to this browser');
+    await expect(receipt.getByRole('button', { name: 'Show mnemonic', exact: true })).toHaveCount(0);
+    await receipt.getByRole('button', { name: 'Open node wallet', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Configure account', exact: true })).toBeVisible({ timeout: 30_000 });
   },
 );

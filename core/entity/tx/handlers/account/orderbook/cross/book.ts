@@ -3,7 +3,7 @@ import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-ta
 import {
   applyCommand,
   commitBookOverlay,
-  crossJurisdictionBookQtyLots,
+  crossJurisdictionExecutableQtyLots,
   getBookOrder,
   type BookOrderState,
   type BookState,
@@ -19,7 +19,7 @@ import type { CrossOrderbookPass } from './types';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
-export const crossBookQtyLots = crossJurisdictionBookQtyLots;
+export const crossBookQtyLots = crossJurisdictionExecutableQtyLots;
 
 const isWorkingCrossRouteStatus = (status: string | undefined): boolean =>
   status === 'resting' || status === 'partially_filled';
@@ -106,7 +106,7 @@ export const classifyCrossBookMaker = (
     return 'cancel';
   }
   if (pass.suspendedOrderIds.has(orderId)) return 'suspended';
-  const canonicalQty = crossBookQtyLots(meta.baseTokenId, meta.baseAmount);
+  const canonicalQty = crossBookQtyLots(meta.baseTokenId, meta.quoteTokenId, meta.baseAmount, meta.quoteAmount, meta.priceTicks);
   if (
     meta.pairId !== pairId ||
     order.priceTicks !== meta.priceTicks ||

@@ -144,5 +144,8 @@ export const restoreRuntimeFromRecording = async (
   // Resuming the detached tip directly would lose changes at materialization.
   const restored = await deps.loadEnvFromDB(recording.runtimeId, runtimeSeed);
   if (!restored || restored.state.height !== recording.targetHeight) throw new Error('RECOVERY_IMPORT_REOPEN_TIP_MISMATCH');
+  // The disposable activity view is absent on a fresh device. Start it at the
+  // imported WAL tip so the first live frame appends at H+1 without a gap.
+  await resetRuntimeActivityViewAtFloor(restored, recording.targetHeight);
   return restored;
 };

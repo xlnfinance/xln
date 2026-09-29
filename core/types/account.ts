@@ -808,6 +808,8 @@ export type AccountTx =
         pullId: string;
         binary: string;
         proof: CrossJurisdictionCloseProof;
+        /** Cooperative source-leg spend; dispute still uses the signed proof ratio. */
+        executionAmount?: bigint;
       };
     }
   // === SWAP TRANSACTION TYPES ===

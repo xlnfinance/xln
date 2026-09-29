@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '../../global-setup.mts';
+import { allowBrowserIssue, expect, test, type Page } from '../../global-setup.mts';
 
 import { deriveBrainvaultOracle } from '../../utils/runtime/e2e-brainvault';
 
@@ -203,7 +203,10 @@ async function waitForCanonicalProfile(page: Page, expectedProfileName: string):
       };
     }
     return null;
-  }, expectedProfileName, { timeout: 90_000 });
+  }, expectedProfileName, { timeout: 30_000 }).catch(async (error) => {
+    const diagnostic = await readOnboardingRuntimeDiagnostics(page);
+    throw new Error(`BRAINVAULT_PROFILE_TIMEOUT:${expectedProfileName}:${JSON.stringify(diagnostic)}`, { cause: error });
+  });
   return await handle.jsonValue() as CanonicalEntityProbe;
 }
 
@@ -400,7 +403,17 @@ test.describe('brainvault parity', () => {
     expect(canonicalEntity.accountIds.every(accountId => visibleHubIds.includes(accountId))).toBe(true);
     expect(canonicalEntity.accountIds.every(accountId => advertisedHubIds.includes(accountId))).toBe(true);
 
+    // Reload temporarily disconnects the wallet from hubs; routing retains
+    // undeliverable outputs until the saved wallet is unlocked and reconnects.
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'warning',
+      message: new RegExp(`\\[WARN\\]\\[network\\.route\\] output\\.retained .*"runtimeId":"${expectedRuntimeId}"`),
+    });
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.locator('button.wallet').filter({ hasText: 'standalone vault' }).click();
+    await page.getByLabel('Password', { exact: true }).fill('ced-export-42');
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     const restoredEntity = await waitForCanonicalProfile(page, 'standalone live profile');
     expect(restoredEntity.runtimeId).toBe(expectedRuntimeId);
     expect(restoredEntity.entityId).toBe(canonicalEntity.entityId);

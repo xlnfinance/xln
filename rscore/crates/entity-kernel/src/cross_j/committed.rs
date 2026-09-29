@@ -593,6 +593,43 @@ pub(super) fn with_fill_progress(
     Ok(())
 }
 
+pub(super) fn apply_execution_progress(
+    route: &mut CanonicalValue,
+    data: &CanonicalValue,
+    kind: EntityTxKind,
+) -> Result<(), EntityKernelError> {
+    let source = required_bigint(data, "cumulativeExecutionSourceAmount", kind)?;
+    let target = required_bigint(data, "cumulativeExecutionTargetAmount", kind)?;
+    let source_total = required_bigint(
+        required_field(route, "source", "cross_j_execution")?,
+        "amount",
+        kind,
+    )?;
+    let target_total = required_bigint(
+        required_field(route, "target", "cross_j_execution")?,
+        "amount",
+        kind,
+    )?;
+    if source < bigint(route, "executionSourceAmount").unwrap_or_default()
+        || target < bigint(route, "executionTargetAmount").unwrap_or_default()
+        || source > source_total
+        || target > target_total
+    {
+        return Err(committed_invalid("cross_j_execution", "PROGRESS_INVALID"));
+    }
+    set(
+        route,
+        "executionSourceAmount",
+        CanonicalValue::BigInt(source),
+    )?;
+    set(
+        route,
+        "executionTargetAmount",
+        CanonicalValue::BigInt(target),
+    )?;
+    Ok(())
+}
+
 /// Source-Hub view of Hub-internal fill progress (TS
 /// `applySourceHubCrossJurisdictionFillProgress`). The route mirror is what
 /// the proposer reveals against; a terminal fill or cancel requests the clear.
@@ -670,6 +707,7 @@ pub(super) fn apply_source_hub_fill_progress(
             kind,
             "CROSS_J_FILL_PROGRESS_INVALID",
         )?;
+        apply_execution_progress(&mut route, data, kind)?;
         let (_, filled_source, filled_target) = committed_fill(&route, kind)?;
         let source_total =
             required_bigint(required_field(&route, "source", prefix)?, "amount", kind)?;

@@ -78,6 +78,8 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     ...(currentRoute.routeHash ? { routeHash: currentRoute.routeHash } : {}),
     fillSeq: carriedSeq > currentSeq ? currentSeq + 1 : currentSeq,
     cumulativeFillRatio: getCrossJurisdictionCommittedProofRatio(progress),
+    cumulativeExecutionSourceAmount: progress.executionSourceAmount ?? 0n,
+    cumulativeExecutionTargetAmount: progress.executionTargetAmount ?? 0n,
     cancelRemainder: true,
   }, outputs, options?.storageChanges ?? []);
   addMessage(

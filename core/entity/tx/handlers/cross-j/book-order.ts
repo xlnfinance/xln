@@ -31,7 +31,7 @@ import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../../types/account';
 import { getEntityCollectionValueForWrite, ensureEntityCollectionCandidate } from '../../../state/persistent-collection-map';
-import { crossJurisdictionBookQtyLots } from '../../../../orderbook';
+import { crossJurisdictionExecutableQtyLots } from '../../../../orderbook';
 import {
   materializeCrossJurisdictionBookRemainder,
   removeCrossJurisdictionBookOrderByRouteId,
@@ -51,6 +51,7 @@ import {
   crossJurisdictionRouteSignerHint,
 } from '../../j-events-htlc/cross-j-outputs';
 import type { CrossJurisdictionFillProgressData } from '../../../../extensions/cross-j/fill-notice';
+import { applyCrossJurisdictionExecutionProgress } from '../../../../extensions/cross-j/fill-notice';
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
@@ -62,7 +63,9 @@ const isSameCommittedBookProgress = (
   data: CrossJurisdictionBookProgressData,
 ): boolean => (
   Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
-  getCrossJurisdictionCommittedProofRatio(route) === Math.floor(Number(data.cumulativeFillRatio))
+  getCrossJurisdictionCommittedProofRatio(route) === Math.floor(Number(data.cumulativeFillRatio)) &&
+  (route.executionSourceAmount ?? 0n) === data.cumulativeExecutionSourceAmount &&
+  (route.executionTargetAmount ?? 0n) === data.cumulativeExecutionTargetAmount
 );
 
 const buildCommittedCrossJurisdictionOfferEvent = (
@@ -130,6 +133,7 @@ const applyNewBookProgress = (
     fillNumerator: BigInt(ratio),
     fillDenominator: BigInt(CROSS_J_MAX_FILL_RATIO),
   }, now, 'CROSS_J_BOOK_PROGRESS_INVALID');
+  applyCrossJurisdictionExecutionProgress(next, data);
   if (data.cancelRemainder) {
     transitionCrossJurisdictionRouteStatus(next, 'clear_requested', now);
     next.clearingPolicy = 'cancel_and_clear';
@@ -150,7 +154,7 @@ const updateBookOrderForProgress = (
       state.entityId,
     );
     if (!market) throw haltRuntimeFailure("CROSS_J_BOOK_PROGRESS_MARKET_INVALID", `CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
-    const qtyLots = crossJurisdictionBookQtyLots(market.baseTokenId, market.baseAmount);
+    const qtyLots = crossJurisdictionExecutableQtyLots(market.baseTokenId, market.quoteTokenId, market.baseAmount, market.quoteAmount, market.priceTicks);
     if (resizeCrossJurisdictionBookOrderByRouteId(
       state,
       route.source.entityId,

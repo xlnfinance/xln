@@ -59,7 +59,8 @@ test('settings theme select updates document theme and persists selected option'
 test('settings toggles the xln guide without leaving the workspace', { tag: '@functional' }, async ({ page }, testInfo) => {
   await gotoApp(page);
   await dismissOnboardingIfVisible(page);
-  await createSharedRuntime(page, `guide-${Date.now()}`, randomMnemonic());
+  const runtimeLabel = `guide-${Date.now()}`;
+  await createSharedRuntime(page, runtimeLabel, randomMnemonic());
 
   await page.goto(`${APP_BASE_URL}/app#settings/display`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('tab-settings')).toBeVisible({ timeout: INIT_TIMEOUT });
@@ -81,6 +82,18 @@ test('settings toggles the xln guide without leaving the workspace', { tag: '@fu
   });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('button.wallet').filter({ hasText: runtimeLabel }).click();
+  const setup = page.getByRole('heading', { name: 'Set a local password', exact: true });
+  const unlock = page.getByRole('heading', { name: 'Unlock wallet', exact: true });
+  await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Password', { exact: true }).fill('e2e-demo-switch-password');
+  if (await setup.isVisible()) {
+    await page.getByLabel('Confirm password', { exact: true }).fill('e2e-demo-switch-password');
+    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  }
+  await page.goto(`${APP_BASE_URL}/app#settings/display`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('settings-xln-mascot-toggle')).toBeChecked({ timeout: 20_000 });
   await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
   await page.setViewportSize({ width: 393, height: 852 });

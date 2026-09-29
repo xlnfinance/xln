@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/core/api/public/runtime-module';
   import EntityInput from '../shared/EntityInput.svelte';
-  import type { MoveEndpoint } from './move-routes';
+  import { canAddMoveRouteToDraft, type MoveEndpoint } from './move-routes';
 
   type MoveEntityInputEvent = CustomEvent<{ value?: string }>;
   type MoveDisplayBalances = Record<MoveEndpoint, bigint>;
@@ -57,7 +57,6 @@
     end: { x: number; y: number } | null,
   ) => string;
   export let moveRouteSteps: (from: MoveEndpoint, to: MoveEndpoint) => string[];
-  export let canAddMoveToExistingBatch: () => boolean;
   export let submitMovePrimaryAction: () => Promise<void>;
   export let approveMoveAllowanceAmount: () => Promise<void>;
   export let approveMoveAllowanceMax: () => Promise<void>;
@@ -99,8 +98,8 @@
     || moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint)
     || moveToEndpoint === 'account'
     || moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint);
-  $: movePrimaryActionDisabled = canAddMoveToExistingBatch() ? !!moveDraftError : !!moveBroadcastError;
-  $: moveUsesDraftAction = canAddMoveToExistingBatch();
+  $: moveUsesDraftAction = canAddMoveRouteToDraft(moveFromEndpoint, moveToEndpoint);
+  $: movePrimaryActionDisabled = moveUsesDraftAction ? !!moveDraftError : !!moveBroadcastError;
   $: moveVisibleActionError = moveUsesDraftAction ? moveDraftError : moveBroadcastError;
   $: moveSourceBalanceLabel = formatAmount(moveSourceAvailableBalance, moveDisplayDecimals);
   $: void moveRouteSteps;

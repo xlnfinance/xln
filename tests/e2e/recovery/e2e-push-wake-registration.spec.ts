@@ -448,7 +448,7 @@ async function readJBatchSnapshot(
   page: Page,
   entityId: string,
   signerId: string,
-): Promise<{ pendingDisputeStarts: number; batchHistoryCount: number; lastBatchStatus: string }> {
+): Promise<{ pendingDisputeStarts: number; entityNonce: number; batchStatus: string; sentBatch: boolean }> {
   return await page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
     const key = Array.from(env?.state?.eReplicas?.keys?.() || []).find((k: string) => {
@@ -458,15 +458,11 @@ async function readJBatchSnapshot(
     });
     const rep = key ? env.state.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
-    const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
-      Array.from(block?.events || []).filter((event: any) =>
-        event?.type === 'HankoBatchProcessed'
-        && String(event?.data?.entityId || '').toLowerCase() === String(entityId).toLowerCase()));
-    const last = history.length > 0 ? history[history.length - 1] : null;
     return {
       pendingDisputeStarts: Number(pending?.disputeStarts?.length || 0),
-      batchHistoryCount: Number(history.length || 0),
-      lastBatchStatus: last ? 'confirmed' : '',
+      entityNonce: Number(rep?.state?.jBatchState?.entityNonce || 0),
+      batchStatus: String(rep?.state?.jBatchState?.status || ''),
+      sentBatch: Boolean(rep?.state?.jBatchState?.sentBatch),
     };
   }, { entityId, signerId });
 }
@@ -669,22 +665,23 @@ test('settings registers and revokes signed push wake token through browser UI',
       return snap.pendingDisputeStarts;
     }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(batchBeforeDispute.pendingDisputeStarts);
 
-    const disputeHistoryBeforeBroadcast = (await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId)).batchHistoryCount;
     await broadcastPendingBatchViaUi(page);
     await expect.poll(async () => {
       const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
       return {
-        batchHistoryCount: snap.batchHistoryCount,
-        lastBatchStatus: snap.lastBatchStatus,
+        entityNonce: snap.entityNonce,
+        batchStatus: snap.batchStatus,
+        sentBatch: snap.sentBatch,
+        pendingDisputeStarts: snap.pendingDisputeStarts,
       };
-    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toMatchObject({
-      batchHistoryCount: expect.any(Number),
-      lastBatchStatus: 'confirmed',
+    }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toMatchObject({
+      entityNonce: expect.any(Number),
+      batchStatus: 'empty',
+      sentBatch: false,
+      pendingDisputeStarts: 0,
     });
-    await expect.poll(async () => {
-      const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-      return snap.batchHistoryCount;
-    }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(disputeHistoryBeforeBroadcast);
+    expect((await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId)).entityNonce)
+      .toBeGreaterThan(batchBeforeDispute.entityNonce);
 
     await confirmDisputeForWatchtower(watchtowerRpcUrl);
     await expect.poll(() => capture.notifications.length, { timeout: 20_000, intervals: [500, 1000, 2000] }).toBe(1);

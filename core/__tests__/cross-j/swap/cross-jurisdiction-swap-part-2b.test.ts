@@ -61,6 +61,7 @@ import { cloneEntityReplica } from '../../../entity/replica/replica-clone';
 import { projectAccountDoc, projectEntityCoreDoc } from '../../../storage/read/projections';
 
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../../../entity/tx/handlers/account-cross-j-followups';
+import { classifyCommittedSwapCancels } from '../../../entity/tx/handlers/account/committed-input';
 
 import {
   buildCrossJurisdictionCloseProof,
@@ -505,6 +506,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     expect(resolveResult.ok, resolveResult.ok ? undefined : resolveResult.rejection.message).toBe(true);
     expect(accountAfterClear.state.pulls?.has(route.sourcePull!.pullId)).toBe(false);
+    expect(classifyCommittedSwapCancels(accountAfterClear, [
+      { type: 'swap_cancel_request', data: { offerId: route.orderId } },
+      validClose,
+    ])).toEqual([false, undefined]);
     const releasedDelta = accountAfterClear.state.deltas.get(route.sourcePull!.tokenId)!;
     expect(sourcePullPayerIsLeft ? releasedDelta.leftHold : releasedDelta.rightHold).toBe(0n);
   });

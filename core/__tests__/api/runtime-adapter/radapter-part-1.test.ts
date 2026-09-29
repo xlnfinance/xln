@@ -9,6 +9,7 @@ import { createHmac } from 'crypto';
 import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 
 import {
   deriveRuntimeAdapterCapabilityToken,
@@ -779,6 +780,7 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
   env.gossip.announce(makeHubProfile(counterpartyId, 'H2'));
   const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(counterpartyId)!;
   account.state.deltas.set(1, makeTestDelta(1, 25n));
+  account.state.deltas = PersistentAccountStateMap.fromEntries('deltas', account.state.deltas);
   const activityTxs: AccountTx[] = [10n, 20n, 30n].map(amount => ({
     type: 'direct_payment',
     data: {
@@ -821,6 +823,13 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
   expect(local?.accounts.items).toHaveLength(1);
   expect(local?.accounts.items[0]).toMatchObject({ leftEntity: entityId, rightEntity: counterpartyId });
   expect(local?.accounts.items[0]?.deltas.get(1)?.ondelta).toBe(25n);
+  expect(local?.accounts.items[0]?.deltas).toBeInstanceOf(Map);
+  expect(() => encodeRuntimeAdapterMessage({
+    v: XLN_PROTOCOL_VERSION,
+    inReplyTo: 'graph-frame',
+    ok: true,
+    payload: frame,
+  })).not.toThrow();
   expect(local?.accounts.items[0]?.currentFrame.accountStateRoot).toBe(`0x${'01'.repeat(32)}`);
   expect(local?.accounts.items[0]?.mempoolCount).toBe(3);
   expect(local?.accounts.items[0]?.mempool.map(activity => activity.amount)).toEqual([20n, 30n]);

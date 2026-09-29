@@ -19,5 +19,11 @@ test('cross-j Account lock, offer retirement, and close match the shared semanti
     'cross_pull_lock',
     'cross_pull_close',
     'cross_pull_lock',
+    'cross_pull_lock',
+    'swap_offer',
+    'cross_pull_close',
   ]);
+  const buyer = actual.cases.find(testCase => testCase.name === 'source-buyer-price-improvement');
+  expect(buyer?.steps.at(-1)?.offdelta).toBe('-75000000');
+  expect(buyer?.steps.at(-1)?.leftHold).toBe('0');
 });

@@ -134,6 +134,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
                       entityStateHash: null,
                       hubUpdatedAt: now,
                       snapshotUpdatedAt: now,
+                      minTradeSize: null,
                       tradeCount: 0,
                       lastTradePrice: null,
                     }],

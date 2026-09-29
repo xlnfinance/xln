@@ -59,8 +59,8 @@ test.describe('Docs site', () => {
     await page.goto('/docs', { waitUntil: 'networkidle' });
 
     await page.waitForURL(/\/docs(?:\?|$)/);
-    await expect(page.getByRole('heading', { name: 'Full XLN Project Docs' })).toBeVisible();
-    await expect(page.locator('.metric-label').filter({ hasText: 'Current source of truth' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'xln documentation' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Markdown' })).toBeVisible();
 
     const search = page.getByTestId('docs-search');
     await search.fill('payment');
@@ -76,8 +76,7 @@ test.describe('Docs site', () => {
     await page.waitForURL(/doc=status/);
     await expect(page.locator('.doc-title')).toHaveText('XLN Status');
 
-    await page.getByTestId('archive-toggle').click();
-    await expect(page.getByTestId('section-archive-guide')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Markdown' })).toHaveAttribute('href', '/docs-catalog/status.md');
 
     await page.screenshot({ path: testInfo.outputPath('docs-desktop.png'), fullPage: true });
     await assertNoDocsFailures(failures);

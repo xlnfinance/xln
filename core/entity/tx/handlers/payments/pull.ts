@@ -6,6 +6,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
   cloneCrossJurisdictionCloseProof,
   withCrossJurisdictionCloseProofProgress,
+  cooperativeCrossJurisdictionSourceSpend,
 } from '../../../../extensions/cross-j/index';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
@@ -172,7 +173,12 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
     transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.state.timestamp);
   }
   routes.set(route.orderId, route);
-  result.accountTxs.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });
+  const executionAmount = leg === 'source'
+    ? cooperativeCrossJurisdictionSourceSpend(route, proof.cumulativeSourceAmount)
+    : undefined;
+  result.accountTxs.push({ accountId, tx: { type: 'cross_pull_close', data: {
+    pullId, binary, proof, ...(executionAmount !== undefined ? { executionAmount } : {}),
+  } } });
   requestFrame(state, result.outputs);
   return result;
 };

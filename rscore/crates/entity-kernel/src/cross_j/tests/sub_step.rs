@@ -82,19 +82,39 @@ fn partial_route() -> (CanonicalValue, CanonicalValue) {
         number(1, EntityTxKind::AdmitCrossJurisdictionBookOrder, "TOKEN").unwrap(),
     )
     .unwrap();
-    set(&mut source, "amount", CanonicalValue::BigInt(3_u64.into())).unwrap();
+    set(
+        &mut source,
+        "amount",
+        CanonicalValue::BigInt(300_000_u64.into()),
+    )
+    .unwrap();
     set(
         &mut target,
         "tokenId",
         number(1, EntityTxKind::AdmitCrossJurisdictionBookOrder, "TOKEN").unwrap(),
     )
     .unwrap();
-    set(&mut target, "amount", CanonicalValue::BigInt(5_u64.into())).unwrap();
+    set(
+        &mut target,
+        "amount",
+        CanonicalValue::BigInt(600_000_u64.into()),
+    )
+    .unwrap();
     set(&mut ask, "source", source.clone()).unwrap();
     set(&mut ask, "target", target.clone()).unwrap();
     let mut remaining = ask.clone();
-    set(&mut source, "amount", CanonicalValue::BigInt(2_u64.into())).unwrap();
-    set(&mut target, "amount", CanonicalValue::BigInt(4_u64.into())).unwrap();
+    set(
+        &mut source,
+        "amount",
+        CanonicalValue::BigInt(200_000_u64.into()),
+    )
+    .unwrap();
+    set(
+        &mut target,
+        "amount",
+        CanonicalValue::BigInt(400_000_u64.into()),
+    )
+    .unwrap();
     set(&mut remaining, "source", source).unwrap();
     set(&mut remaining, "target", target).unwrap();
     set(&mut remaining, "status", string("resting")).unwrap();
@@ -121,9 +141,9 @@ fn partial_route() -> (CanonicalValue, CanonicalValue) {
 }
 
 #[test]
-fn cross_j_sub_step_maker_remains_matchable_until_full_close() {
+fn cross_j_sub_step_maker_remains_matchable_after_second_fill() {
     let (ask, remaining) = partial_route();
-    let tiny = reciprocal(&remaining, "tiny", 2);
+    let tiny = reciprocal(&remaining, "tiny", 100_000);
     let next = reciprocal(&remaining, "next", 1);
     let mut owner = EntityStateSlice::empty("source-hub", 2_000);
     owner.orderbook = Some(crate::OrderbookState::empty(10_000));
@@ -131,8 +151,8 @@ fn cross_j_sub_step_maker_remains_matchable_until_full_close() {
     let tiny_effects = match_routes(&mut owner, vec![tiny]);
     assert_eq!(
         tiny_effects.len(),
-        1,
-        "only tiny taker reaches a ladder step"
+        2,
+        "the exact maker price advances both ladder routes"
     );
     commit_fills(&mut owner, tiny_effects);
     let key = ("source-user".to_string(), "order-1".to_string());
@@ -146,16 +166,29 @@ fn cross_j_sub_step_maker_remains_matchable_until_full_close() {
         "no progress instruction exists to release an absorbed maker's resolving lock"
     );
     let next_effects = match_routes(&mut owner, vec![next]);
-    assert_eq!(next_effects.len(), 2, "next match advances both routes");
+    assert_eq!(
+        next_effects.len(),
+        2,
+        "both matched routes record exact progress"
+    );
+    let maker_fill = next_effects
+        .iter()
+        .find(|fill| text(&fill.data, "orderId") == Some("order-1"))
+        .expect("maker progress");
+    assert_eq!(
+        field(&maker_fill.data, "cancelRemainder"),
+        Some(&CanonicalValue::Bool(true)),
+        "unmatchable one-unit quote dust closes the maker without spending Hub funds"
+    );
     commit_fills(&mut owner, next_effects);
     let book = owner.orderbook.as_ref().unwrap();
     assert!(!book.offers.contains_key(&key));
     assert!(book.resolving_offers.is_empty());
-    assert!(book.books.values().all(|book| book.orders.is_empty()));
+    assert!(book.books.values().any(|book| !book.orders.is_empty()));
 }
 
 #[test]
-fn cross_j_sub_step_stays_suspended_inside_the_same_pair_job() {
+fn cross_j_sub_step_does_not_reuse_stale_remainder_inside_pair_job() {
     let (ask, remaining) = partial_route();
     let mut owner = EntityStateSlice::empty("source-hub", 2_000);
     owner.orderbook = Some(crate::OrderbookState::empty(10_000));
@@ -163,16 +196,21 @@ fn cross_j_sub_step_stays_suspended_inside_the_same_pair_job() {
     let fills = match_routes(
         &mut owner,
         vec![
-            reciprocal(&remaining, "tiny-1", 2),
-            reciprocal(&remaining, "tiny-2", 2),
+            reciprocal(&remaining, "tiny-1", 100_000),
+            reciprocal(&remaining, "tiny-2", 100_000),
         ],
     );
     assert_eq!(
         fills.len(),
-        1,
-        "second taker must not reuse the absorbed maker's stale remainder"
+        2,
+        "second taker must not reuse the first match's stale remainder"
     );
-    assert_eq!(text(&fills[0].data, "orderId"), Some("tiny-1"));
+    assert_eq!(text(&fills[0].data, "orderId"), Some("order-1"));
+    assert_eq!(text(&fills[1].data, "orderId"), Some("tiny-1"));
+    assert_eq!(
+        unsigned(&fills[1].data, "cumulativeFillRatio"),
+        Some(65_535)
+    );
     commit_fills(&mut owner, fills);
     assert!(
         owner
@@ -190,7 +228,7 @@ fn cross_j_sub_step_cancel_preserves_prior_claims_and_retires_the_book() {
     let mut owner = EntityStateSlice::empty("source-hub", 2_000);
     owner.orderbook = Some(crate::OrderbookState::empty(10_000));
     assert!(match_routes(&mut owner, vec![ask]).is_empty());
-    let fills = match_routes(&mut owner, vec![reciprocal(&remaining, "tiny", 2)]);
+    let fills = match_routes(&mut owner, vec![reciprocal(&remaining, "tiny", 100_000)]);
     commit_fills(&mut owner, fills);
     let current = owner
         .cross_jurisdiction_swaps
@@ -200,8 +238,8 @@ fn cross_j_sub_step_cancel_preserves_prior_claims_and_retires_the_book() {
         .unwrap()
         .clone();
     let cancel = build_cross_jurisdiction_cancel_fill("order-1", current).unwrap();
-    assert_eq!(unsigned(&cancel.data, "cumulativeFillRatio"), Some(21_845));
-    assert_eq!(unsigned(&cancel.data, "fillSeq"), Some(1));
+    assert_eq!(unsigned(&cancel.data, "cumulativeFillRatio"), Some(21_846));
+    assert_eq!(unsigned(&cancel.data, "fillSeq"), Some(2));
     commit_fills(&mut owner, vec![cancel]);
     let book = owner.orderbook.as_ref().unwrap();
     assert!(book.resolving_offers.is_empty());
@@ -214,7 +252,7 @@ fn cross_j_sub_step_cancel_preserves_prior_claims_and_retires_the_book() {
         .unwrap();
     assert_eq!(
         committed_fill(terminal, EntityTxKind::CrossJurisdictionFillNotice).unwrap(),
-        (21_845, BigInt::from(1), BigInt::from(1))
+        (21_846, BigInt::from(100_004), BigInt::from(200_009))
     );
 }
 

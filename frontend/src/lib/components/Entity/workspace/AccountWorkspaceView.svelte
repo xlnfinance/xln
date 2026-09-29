@@ -16,6 +16,7 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
   import { isAccountTxKindAvailable } from '@xln/core/account/tx/admission-policy';
   import LiveRequiredState from './shell/LiveRequiredState.svelte';
   import MoveWorkspace from '../MoveWorkspace.svelte';
+  import { getMovePrimaryActionLabel as routeMovePrimaryActionLabel } from '../move-routes';
   import PaymentPanel from '../payments/PaymentPanel.svelte';
   import PendingBatchNotice from '../payments/PendingBatchNotice.svelte';
   import ReceivePanel from '../payments/ReceivePanel.svelte';
@@ -144,7 +145,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
     end: { x: number; y: number } | null,
   ) => string;
   export let moveRouteSteps: (from: MoveEndpoint, to: MoveEndpoint) => string[];
-  export let canAddMoveToExistingBatch: () => boolean;
   export let submitMovePrimaryAction: () => Promise<void>;
   export let approveMoveExternalAllowance: (mode: 'amount' | 'max') => Promise<void>;
   export let handleMoveAllowanceAmountInput: (value: string) => void;
@@ -190,7 +190,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
   export let resolveSelfEntityId: () => string;
   export let formatAmount: (amount: bigint, decimals: number) => string;
   export let formatApproxUsd: (value: number) => string;
-  export let getMovePrimaryActionLabel: () => string;
   export let onMoveVisualRoot: (node: HTMLDivElement | null) => void;
   export let handleMoveWorkspaceError: (error: unknown) => void;
 
@@ -358,7 +357,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
       {getMoveNodeAnchor}
       {buildMoveArrowPath}
       {moveRouteSteps}
-      {canAddMoveToExistingBatch}
       {submitMovePrimaryAction}
       approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
       approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
@@ -379,7 +377,7 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
       {moveEndpointLabels}
       {moveEndpoints}
       {formatAmount}
-      movePrimaryActionLabel={getMovePrimaryActionLabel()}
+      movePrimaryActionLabel={routeMovePrimaryActionLabel(moveFromEndpoint, moveToEndpoint)}
       {onMoveVisualRoot}
       toastMoveError={handleMoveWorkspaceError}
     />

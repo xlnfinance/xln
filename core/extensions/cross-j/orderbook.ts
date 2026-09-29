@@ -1,4 +1,5 @@
 import { normalizeEntityRef } from '../../entity/tx/account-key';
+import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionBookAdmission,
@@ -16,6 +17,7 @@ import {
 import {
   baseAmountFromLots,
   computePriceTicksForBaseQuote,
+  crossJurisdictionExecutableQtyLots,
   ORDERBOOK_PRICE_SCALE,
   quoteAmountFromWeightedLots,
 } from '../../orderbook';
@@ -492,15 +494,14 @@ export const buildCrossJurisdictionMarketOffer = (
   const quoteTokenId = Number(market.sourceIsBase ? route.target.tokenId : route.source.tokenId);
   const baseAmount = market.sourceIsBase ? remaining.sourceRemaining : remaining.targetRemaining;
   const quoteAmount = market.sourceIsBase ? remaining.targetRemaining : remaining.sourceRemaining;
-  // Cross-j books are keyed by jurisdiction+token assets, not by token id alone.
-  // Route amounts are the committed economic intent, so derive book price from
-  // the committed route remainder instead of trusting the account offer view.
+  // A uint16 fill rounds each leg separately. Repricing their remainder can
+  // move the limit by one tick; the original committed terms own the price.
   const priceTicks = computeCrossJurisdictionPriceTicks(
     side,
     baseTokenId,
     quoteTokenId,
-    baseAmount,
-    quoteAmount,
+    market.sourceIsBase ? route.source.amount : route.target.amount,
+    market.sourceIsBase ? route.target.amount : route.source.amount,
   );
   if (baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n) return null;
   return {
@@ -560,7 +561,12 @@ export const buildCrossJurisdictionFillInstruction = (
   if (
     previousSourceClaimed + executionSourceAmount > sourceTotal ||
     previousTargetClaimed + executionTargetAmount > targetTotal
-  ) return null;
+  ) throw haltRuntimeFailure(
+    'CROSS_J_EXECUTION_EXCEEDS_ROUTE',
+    `CROSS_J_EXECUTION_EXCEEDS_ROUTE:order=${meta.route.orderId}:` +
+      `source=${previousSourceClaimed}+${executionSourceAmount}/${sourceTotal}:` +
+      `target=${previousTargetClaimed}+${executionTargetAmount}/${targetTotal}`,
+  );
   // Order progress is the target-side fill as one uint16 ratio: the single
   // representation shared by the cooperative close, the ladder reveal and the
   // on-chain dispute. Both legs claim exactly floor(total * ratio / 65535);
@@ -576,6 +582,13 @@ export const buildCrossJurisdictionFillInstruction = (
   const max = BigInt(CROSS_J_MAX_FILL_RATIO);
   const project = (total: bigint): bigint => (ratioBig >= max ? total : (total * ratioBig) / max);
   if (project(sourceTotal) <= previousSourceClaimed || project(targetTotal) <= previousTargetClaimed) return null;
+  const sourceRemaining = sourceTotal - previousSourceClaimed - executionSourceAmount;
+  const targetRemaining = targetTotal - previousTargetClaimed - executionTargetAmount;
+  const baseRemaining = meta.side === 1 ? sourceRemaining : targetRemaining;
+  const quoteRemaining = meta.side === 1 ? targetRemaining : sourceRemaining;
+  const unmatchableRemainder = crossJurisdictionExecutableQtyLots(
+    meta.baseTokenId, meta.quoteTokenId, baseRemaining, quoteRemaining, meta.priceTicks,
+  ) === 0n;
   // A full fill is terminal through the ratio itself; `cancelRemainder` is
   // only the matcher's explicit cancel of an unfilled remainder.
   return {
@@ -585,7 +598,7 @@ export const buildCrossJurisdictionFillInstruction = (
     route: meta.route,
     fillSeq: currentFillSeq(meta.route) + 1,
     fillRatio,
-    cancelRemainder: fill.cancelRemainder === true,
+    cancelRemainder: fill.cancelRemainder === true || (fillRatio < CROSS_J_MAX_FILL_RATIO && unmatchableRemainder),
     executionSourceAmount,
     executionTargetAmount,
   };

@@ -11,7 +11,7 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
   import PendingBatchNotice from '../payments/PendingBatchNotice.svelte';
   import SettlementPanel from '../payments/SettlementPanel.svelte';
   import type { AssetLedgerRow, AssetLedgerTotals, ExternalWalletSnapshotSource } from '../asset-ledger';
-  import type { MoveEndpoint } from '../move-routes';
+  import { getMovePrimaryActionLabel as routeMovePrimaryActionLabel, type MoveEndpoint } from '../move-routes';
 
   export let replica: EntityReadView;
   export let tab: Tab;
@@ -88,7 +88,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
     end: { x: number; y: number } | null,
   ) => string;
   export let moveRouteSteps: (from: MoveEndpoint, to: MoveEndpoint) => string[];
-  export let canAddMoveToExistingBatch: () => boolean;
   export let submitMovePrimaryAction: () => Promise<void>;
   export let approveMoveExternalAllowance: (mode: 'amount' | 'max') => Promise<void>;
   export let handleMoveAllowanceAmountInput: (nextValue: string) => void;
@@ -106,7 +105,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
   export let moveEndpoints: MoveEndpoint[] = [];
   export let formatAmount: (amount: bigint, decimals: number) => string;
   export let formatApproxUsd: (value: number) => string;
-  export let getMovePrimaryActionLabel: () => string;
   export let setMoveVisualRoot: (node: HTMLDivElement | null) => void;
   export let handleMoveWorkspaceError: (error: unknown) => void;
   export let refreshBalances: () => void | Promise<void>;
@@ -244,7 +242,6 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
       {getMoveNodeAnchor}
       {buildMoveArrowPath}
       {moveRouteSteps}
-      {canAddMoveToExistingBatch}
       {submitMovePrimaryAction}
       approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
       approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
@@ -265,7 +262,7 @@ import type { EntityReadView } from '$lib/components/Entity/core/entity-panel-ty
       {moveEndpointLabels}
       {moveEndpoints}
       {formatAmount}
-      movePrimaryActionLabel={getMovePrimaryActionLabel()}
+      movePrimaryActionLabel={routeMovePrimaryActionLabel(moveFromEndpoint, moveToEndpoint)}
       onMoveVisualRoot={setMoveVisualRoot}
       toastMoveError={handleMoveWorkspaceError}
     />

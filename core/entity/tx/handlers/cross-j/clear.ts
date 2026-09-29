@@ -11,6 +11,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
   cloneCrossJurisdictionCloseProof,
+  cooperativeCrossJurisdictionSourceSpend,
 } from '../../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
 import { removeBookOrderById } from '../../../../orderbook/cross-j';
@@ -317,11 +318,14 @@ const buildSourceCloseAccountTxs = (
 ): AccountTxTarget[] => {
   const sourcePull = route.sourcePull;
   if (!sourcePull) throw haltRuntimeFailure("CROSS_J_CLEAR_SOURCE_PULL_MISSING", `CROSS_J_CLEAR_SOURCE_PULL_MISSING:${route.orderId}`);
+  const executionAmount = cooperativeCrossJurisdictionSourceSpend(route, proof.cumulativeSourceAmount);
   return [{
     accountId,
     tx: {
       type: 'cross_pull_close',
-      data: { pullId: sourcePull.pullId, binary, proof },
+      data: { pullId: sourcePull.pullId, binary, proof,
+        ...(executionAmount !== undefined ? { executionAmount } : {}),
+      },
     },
   }];
 };

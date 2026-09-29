@@ -11,6 +11,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../../extensions/cross-j/index';
 import { getJurisdictionStackId } from '../../../../jurisdiction/machine/jurisdiction-stack';
+import { deriveCanonicalCrossJurisdictionMarket } from '../../../../extensions/cross-j/market';
 import { safeStringify } from '../../../../protocol/serialization';
 import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../../hold-utils';
@@ -38,14 +39,9 @@ const crossProofMatchesBinding = (
   }
   const expectedPullId = binding.leg === 'source' ? proof.sourcePullId : proof.targetPullId;
   if (expectedPullId !== pullId) return `${binding.leg} pull ${expectedPullId} != ${pullId}`;
-  // CANON (owner, 2026-08-07): off-chain fill progress is INFORMATIONAL only
-  // and never reaches this binding. The settlement authority is the hash-ladder
-  // reveal, which validateCrossPullCloseEvidence verifies against
-  // fullHash/partialRoot at exactly proof.fillRatio; the close amounts are
-  // validated exactly as the chain settles a dispute at this ratio:
-  // proportional amount*ratio/65535 on this leg. (The hub holding every secret
-  // can always choose the final ratio up to 100% until reveal time - inherent
-  // to any matcher-holds-the-proof design and accepted.)
+  // The ladder binds the dispute ceiling on both legs. A cooperative source
+  // buyer close can spend less at the exact book price; the target and dispute
+  // still use this ratio. No fill notice authorizes a bilateral Account close.
   const chainProportional = (total: bigint): bigint =>
     proof.fillRatio >= HASHLADDER_MAX_FILL_RATIO
       ? total
@@ -127,6 +123,8 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     route.fillDenominator !== undefined ||
     route.filledSourceAmount !== undefined ||
     route.filledTargetAmount !== undefined ||
+    route.executionSourceAmount !== undefined ||
+    route.executionTargetAmount !== undefined ||
     route.pendingClearRequestedAt !== undefined ||
     route.claimedRatio !== undefined ||
     route.sourceClaimed !== undefined ||
@@ -288,6 +286,20 @@ export async function handleCrossPullClose(
   if (!evidence.ok) return accountTxValidationRejected(evidence.error, events);
   const ratio = evidence.ratio;
 
+  const executionAmount = accountTx.data.executionAmount;
+  if (executionAmount !== undefined) {
+    const offer = account.swapOffers?.get(binding.orderId);
+    if (
+      binding.leg !== 'source' ||
+      !offer?.crossJurisdiction ||
+      deriveCanonicalCrossJurisdictionMarket(offer.crossJurisdiction).sourceIsBase ||
+      executionAmount <= 0n ||
+      executionAmount > proof.cumulativeSourceAmount
+    ) {
+      return accountTxValidationRejected('Cross-j cooperative execution amount invalid', events);
+    }
+  }
+
   const beneficiaryIsLeft = pull.amount > 0n;
   // Cross-j close economics are authored by the Hub Runtime as one exact
   // source+target cohort. The source Hub is the source-pull beneficiary; the
@@ -302,9 +314,9 @@ export async function handleCrossPullClose(
   const delta = createDeltaDraft(account, pull.tokenId);
 
   const absAmount = absBigInt(pull.amount);
-  // validateCrossPullCloseEvidence proved this leg == floor(|amount|·r/65535);
-  // the whole hold is released and the claimed part moves.
-  const applied = binding.leg === 'source' ? proof.cumulativeSourceAmount : proof.cumulativeTargetAmount;
+  // Release the full hold; transfer the exact buyer spend when supplied,
+  // otherwise the ladder amount. The hub can only reduce its own source claim.
+  const applied = executionAmount ?? (binding.leg === 'source' ? proof.cumulativeSourceAmount : proof.cumulativeTargetAmount);
   const payerIsLeft = !beneficiaryIsLeft;
   const holdError = releaseHold(
     delta,

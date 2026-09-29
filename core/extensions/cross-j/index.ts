@@ -11,6 +11,7 @@ import {
 } from '../../protocol/htlc/hash-ladder';
 import {
   deriveCanonicalCrossJurisdictionBookOwner,
+  deriveCanonicalCrossJurisdictionMarket,
   deriveCanonicalCrossJurisdictionVenueId,
 } from './market';
 import { exactFillRatioToUint16 } from '../../orderbook/swap-execution';
@@ -30,6 +31,19 @@ export {
 /** Book TTL default only — not a sealed pull/settlement reveal window. */
 const CROSS_J_DEFAULT_BOOK_TTL_MS = 60_000;
 export const CROSS_J_MAX_FILL_RATIO = 65_535;
+
+export function cooperativeCrossJurisdictionSourceSpend(
+  route: CrossJurisdictionSwapRoute,
+  grossSourceAmount: bigint,
+): bigint | undefined {
+  if (deriveCanonicalCrossJurisdictionMarket(route).sourceIsBase || grossSourceAmount === 0n) return undefined;
+  const exact = route.executionSourceAmount;
+  if (exact === undefined || exact <= 0n || exact > grossSourceAmount) {
+    throw haltRuntimeFailure('CROSS_J_SOURCE_EXECUTION_INVALID',
+      `CROSS_J_SOURCE_EXECUTION_INVALID:${route.orderId}:exact=${String(exact)}:gross=${grossSourceAmount}`);
+  }
+  return exact;
+}
 
 const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
   intent: 10,
@@ -722,6 +736,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const fillDenominator = optionalBigInt(route.fillDenominator);
   const filledSourceAmount = optionalBigInt(route.filledSourceAmount);
   const filledTargetAmount = optionalBigInt(route.filledTargetAmount);
+  const executionSourceAmount = optionalBigInt(route.executionSourceAmount);
+  const executionTargetAmount = optionalBigInt(route.executionTargetAmount);
   const pendingClearRequestedAt = optionalNumber(route.pendingClearRequestedAt);
   const domain = cloneCrossJurisdictionRouteDomain(route.domain);
   const timePolicy = cloneCrossJurisdictionTimePolicy(route.timePolicy);
@@ -754,6 +770,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (fillDenominator !== undefined) clone.fillDenominator = fillDenominator;
   if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
   if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
+  if (executionSourceAmount !== undefined) clone.executionSourceAmount = executionSourceAmount;
+  if (executionTargetAmount !== undefined) clone.executionTargetAmount = executionTargetAmount;
   if (pendingClearRequestedAt !== undefined) clone.pendingClearRequestedAt = pendingClearRequestedAt;
   if (domain) clone.domain = domain;
   if (timePolicy) clone.timePolicy = timePolicy;

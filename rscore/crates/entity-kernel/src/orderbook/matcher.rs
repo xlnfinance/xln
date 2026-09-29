@@ -13,8 +13,8 @@ use super::book::{
     cancel_order, record_accepted_usd_ask_price, resume_crossed,
 };
 use super::math::{
-    base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale, pair_dimensions,
-    quote_amount_from_weighted_lots, side_for,
+    PRICE_SCALE, base_amount_from_lots, canonical_pair, exact_quote_lot_multiple, lot_scale,
+    pair_dimensions, quote_amount_from_weighted_lots, side_for, ten_pow,
 };
 use super::page::{BookPricePageLocation, page_tree_mut};
 use super::resolve::{ResolvePlan, build_resolve_plans};
@@ -209,12 +209,28 @@ fn split_order_id(value: &str) -> Result<(String, String), EntityKernelError> {
     Ok((account.to_string(), offer.to_string()))
 }
 
+fn cross_executable_qty_lots(
+    market: &crate::cross_j::CrossJurisdictionMarket,
+    base_amount: &BigInt,
+    quote_amount: &BigInt,
+) -> Result<BigInt, EntityKernelError> {
+    let base_scale = lot_scale(market.dimensions.base_token_decimals);
+    let numerator =
+        &base_scale * &market.price_ticks * ten_pow(market.dimensions.quote_token_decimals);
+    let denominator = BigInt::from(PRICE_SCALE) * ten_pow(market.dimensions.base_token_decimals);
+    let base_lots = base_amount / &base_scale;
+    let quote_lots = ((quote_amount + 1u32) * denominator - 1u32) / numerator;
+    let bounded = base_lots.min(quote_lots);
+    let exact = exact_quote_lot_multiple(market.dimensions, &market.price_ticks)?;
+    Ok(&bounded - (&bounded % exact))
+}
+
 fn project_cross_remainder(
     account_id: &str,
     offer: &SameJOffer,
     market: &crate::cross_j::CrossJurisdictionMarket,
 ) -> Result<MaterializedOffer, EntityKernelError> {
-    let qty_lots = &market.base_amount / lot_scale(market.dimensions.base_token_decimals);
+    let qty_lots = cross_executable_qty_lots(market, &market.base_amount, &market.quote_amount)?;
     if qty_lots <= BigInt::from(0) {
         return Err(EntityKernelError::SwapRejected {
             code: "cross-dust-remainder",
@@ -768,6 +784,11 @@ fn process_cross_jurisdiction_events(
         let execution_base =
             base_amount_from_lots(market.dimensions.base_token_decimals, &filled_lots);
         let execution_quote = quote_amount_from_weighted_lots(market.dimensions, &weighted_cost);
+        let remaining_base = &market.base_amount - &execution_base;
+        let remaining_quote = &market.quote_amount - &execution_quote;
+        let unmatchable_remainder =
+            cross_executable_qty_lots(&market, &remaining_base, &remaining_quote)?
+                == BigInt::from(0);
         let (execution_source, execution_target) = if market.side == Side::Ask {
             (execution_base, execution_quote)
         } else {
@@ -780,7 +801,13 @@ fn process_cross_jurisdiction_events(
             .entry(market.target_asset_key)
             .or_insert_with(|| BigInt::from(0)) += &execution_target;
         // TS `aggregateCrossTrades`: an IOC/FOK taker cancels its remainder.
-        let cancel_remainder = order_id == taker_order_id && cancel_taker_remainder;
+        let target_remaining = if market.side == Side::Ask {
+            &remaining_quote
+        } else {
+            &remaining_base
+        };
+        let cancel_remainder = (order_id == taker_order_id && cancel_taker_remainder)
+            || (unmatchable_remainder && target_remaining > &BigInt::from(0));
         match crate::cross_j::build_cross_jurisdiction_book_fill(
             &offer_id,
             route.clone(),

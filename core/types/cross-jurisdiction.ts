@@ -126,6 +126,9 @@ export interface CrossJurisdictionSwapRoute {
   fillDenominator?: bigint;
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
+  /** Cumulative book execution amounts; cooperative close uses source spend. */
+  executionSourceAmount?: bigint;
+  executionTargetAmount?: bigint;
   pendingClearRequestedAt?: number;
   domain?: CrossJurisdictionRouteDomain;
   timePolicy?: CrossJurisdictionTimePolicy;

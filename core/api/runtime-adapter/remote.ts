@@ -60,7 +60,7 @@ type RuntimeAdapterRequestBody =
 
 const BRAINVAULT_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
 const NUMBERED_REGISTRATION_REQUEST_TIMEOUT_MS = 15 * 60 * 1_000;
-const HISTORICAL_READ_REQUEST_TIMEOUT_MS = 15_000;
+const HISTORICAL_READ_REQUEST_TIMEOUT_MS = 30_000;
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));

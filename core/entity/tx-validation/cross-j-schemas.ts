@@ -6,7 +6,7 @@ export const ENTITY_TX_CROSS_J_SCHEMAS = {
   registerCrossJurisdictionSwap: ROUTE,
   prepareCrossJurisdictionSwap: ROUTE,
   crossJurisdictionFillNotice: {
-    required: { orderId: 'string', fillSeq: 'integer', cumulativeFillRatio: 'integer' },
+    required: { orderId: 'string', fillSeq: 'integer', cumulativeFillRatio: 'integer', cumulativeExecutionSourceAmount: 'bigint', cumulativeExecutionTargetAmount: 'bigint' },
     optional: { routeHash: 'string', cancelRemainder: 'boolean' },
   },
   requestCrossJurisdictionClear: {

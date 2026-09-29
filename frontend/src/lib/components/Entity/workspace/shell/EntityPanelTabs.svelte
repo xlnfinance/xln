@@ -39,7 +39,7 @@ import OwnershipWorkspacePanel from "../../ownership/OwnershipWorkspacePanel.sve
 import { buildEntityConsensusSettingsView } from "../entity-consensus-settings";
 import { importJMachineViaRuntime, type JMachineCreateDetail } from "$lib/components/Jurisdiction/import-jmachine-runtime";
 import { OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS, faucetPendingKey, type FaucetApiResult, type PendingReserveFaucet, readFaucetApiResult, reconcilePendingReserveFaucets } from "../../account/account-faucet";
-import { buildMoveArrowPath, buildMoveRouteSteps, canAddMoveRouteToDraft, getMovePrimaryActionLabel, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
+import { buildMoveArrowPath, buildMoveRouteSteps, getMoveRouteKey, isImmediateMoveExecutionRoute, isMoveRouteSupported, moveNeedsExternalRecipient, moveNeedsReserveRecipient, routeRequiresExplicitExternalAllowance, MOVE_ENDPOINT_LABEL, MOVE_ENDPOINTS, type MoveEndpoint } from "../../move-routes";
 import { buildMoveAllowanceContextSignature, buildMoveAllowanceStatusLabel, getMoveRequiredAllowanceAmount, isMoveAllowanceSatisfied } from "../../move/move-allowance";
 import { choosePreferredMoveAssetSymbol, computeMoveSourceAvailableBalanceForEndpoint, getMoveMaxAmountForEndpoint, getPreferredMoveSourceAccountId } from "../../move/move-balance";
 import { getMoveValidationErrorForContext, type MoveValidationMode } from "../../move/move-validation";
@@ -1462,6 +1462,8 @@ $: ({ rows: assetLedgerRows, totals: assetLedgerTotals } = buildAssetLedger({
 $: assetLedgerGrandTotal = assetLedgerTotals.externalUsd + assetLedgerTotals.reserveUsd + assetLedgerTotals.accountUsd;
 $: {
   envRevision;
+  assetLedgerRows;
+  moveFromEndpoint;
   const symbol = String(moveAssetSymbol || "")
     .trim()
     .toUpperCase();
@@ -1826,9 +1828,6 @@ async function waitForMoveCondition(predicate: () => boolean, label: string, tim
   }
   throw new Error(`${label} did not complete in time`);
 }
-function canAddMoveToExistingBatch(): boolean {
-  return canAddMoveRouteToDraft(moveFromEndpoint, moveToEndpoint);
-}
 async function queueReserveToReserveDraft(tokenId: number, amount: bigint, recipientEntityIdOverride?: string): Promise<void> {
   const entityId = String(replica?.state?.entityId || tab.entityId || "")
     .trim()
@@ -2022,9 +2021,6 @@ async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
     toasts.info("Queued for counterparty signature, then added to draft batch");
     return;
   }
-}
-function getPanelMovePrimaryActionLabel(): string {
-  return getMovePrimaryActionLabel(moveFromEndpoint, moveToEndpoint);
 }
 function handleMoveAllowanceAmountInput(nextValue: string): void {
   moveAllowanceAmountDirty = true;
@@ -2816,13 +2812,13 @@ $: if (typeof window !== "undefined") {
             {moveNeedsExternalRecipient} {isMoveRouteSupported} {moveUiState}
             {setMoveSource} {setMoveTarget} {beginMoveDrag}
             {getMoveNodeAnchor} {buildMoveArrowPath} {moveRouteSteps}
-            {canAddMoveToExistingBatch} {submitMovePrimaryAction} {approveMoveExternalAllowance}
+            {submitMovePrimaryAction} {approveMoveExternalAllowance}
             {handleMoveAllowanceAmountInput} {handleMoveSourceAccountChange} {handleMoveReserveRecipientChange}
             {handleMoveTargetEntityChange} {handleMoveTargetHubChange} {moveNodeAction}
             {moveEntityOptions} {moveHubEntityOptions} {moveSourceAccountOptions}
             {resolveSelfEntityId} {moveAssetOptions}
             moveEndpointLabels={MOVE_ENDPOINT_LABEL} moveEndpoints={MOVE_ENDPOINTS}
-            {formatAmount} {formatApproxUsd} getMovePrimaryActionLabel={getPanelMovePrimaryActionLabel}
+            {formatAmount} {formatApproxUsd}
             setMoveVisualRoot={moveVisualController.setRoot}
             {handleMoveWorkspaceError} {refreshBalances} {submitAssetFaucet}
             {copyMetaValue} {shortHash} {enforceOutstandingDebt}
@@ -2857,7 +2853,7 @@ $: if (typeof window !== "undefined") {
             {moveNeedsExternalRecipient} {isMoveRouteSupported} {moveUiState}
             {setMoveSource} {setMoveTarget} {beginMoveDrag}
             {getMoveNodeAnchor} {buildMoveArrowPath} {moveRouteSteps}
-            {canAddMoveToExistingBatch} {submitMovePrimaryAction} {approveMoveExternalAllowance}
+            {submitMovePrimaryAction} {approveMoveExternalAllowance}
             {handleMoveAllowanceAmountInput} {handleMoveSourceAccountChange} {handleMoveReserveRecipientChange}
             {handleMoveTargetEntityChange} {handleMoveTargetHubChange} {moveNodeAction}
             {moveEntityOptions} {moveHubEntityOptions} {moveSourceAccountOptions}
@@ -2873,7 +2869,6 @@ $: if (typeof window !== "undefined") {
             {confirmAndQueueDisputePrepare} {addTokenToAccount} {handleOpenAccountTargetChange}
             {openAccountWithFullId} {openDisputedAccount}
             {resolveSelfEntityId} {formatAmount} {formatApproxUsd}
-            getMovePrimaryActionLabel={getPanelMovePrimaryActionLabel}
             onMoveVisualRoot={moveVisualController.setRoot}
             {handleMoveWorkspaceError}
           />

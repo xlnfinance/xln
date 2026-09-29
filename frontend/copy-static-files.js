@@ -409,13 +409,7 @@ function copyDocsAndManifest() {
 
 function generateLlmsStaticFiles() {
   const llmsPath = fromStatic('llms.txt');
-  const rebuildRequested = process.env.XLN_REBUILD_LLMS === '1' || process.argv.includes('--rebuild-llms');
   const llmsVerbose = process.env.XLN_STATIC_VERBOSE === '1' || process.argv.includes('--verbose');
-  const llmsContextPresent = existsSync(llmsPath) && statSync(llmsPath).size > 0;
-  if (!rebuildRequested && llmsContextPresent) {
-    console.log('[static] llms static context present; skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
-    return;
-  }
 
   const generatorPath = resolve(REPO_ROOT, 'scripts/debug/gpt.cjs');
   if (!existsSync(generatorPath)) {

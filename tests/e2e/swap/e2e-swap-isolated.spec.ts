@@ -408,6 +408,21 @@ async function openSwapWorkspace(page: Page): Promise<void> {
   await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
 }
 
+async function unlockSavedWalletAfterReload(page: Page): Promise<void> {
+  await page.locator('button.wallet').first().click();
+  const setup = page.getByRole('heading', { name: 'Set a local password', exact: true });
+  const unlock = page.getByRole('heading', { name: 'Unlock wallet', exact: true });
+  await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Password', { exact: true }).fill('swap-reload-password');
+  if (await setup.isVisible()) {
+    await page.getByLabel('Confirm password', { exact: true }).fill('swap-reload-password');
+    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  }
+  await expect(page.getByTestId('tab-accounts').first()).toBeVisible({ timeout: 20_000 });
+}
+
 async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
   const select = page.getByTestId('swap-ticket-hub-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
@@ -891,6 +906,7 @@ async function expectClosedOrderRowStatus(
     await waitForClosedRows();
   } catch {
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await unlockSavedWalletAfterReload(page);
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
     await openSwapWorkspace(page);
     await selectCounterpartyInSwap(page);
@@ -946,36 +962,15 @@ async function readSwapHistoryCount(
   signerId: string,
   counterpartyId: string,
 ): Promise<number> {
-  return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+  void signerId;
+  return await page.evaluate(async ({ entityId, counterpartyId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.state.eReplicas) return 0;
-    const key = Array.from(env.state.eReplicas.keys()).find((replicaKey: string) => {
-      const [replicaEntityId, replicaSignerId] = String(replicaKey || '').split(':');
-      return String(replicaEntityId || '').toLowerCase() === String(entityId || '').toLowerCase()
-        && String(replicaSignerId || '').toLowerCase() === String(signerId || '').toLowerCase();
-    });
-    const replica = key ? env.state.eReplicas.get(key) : null;
-    if (!replica?.state?.accounts) return 0;
-    const owner = String(entityId || '').toLowerCase();
-    const cp = String(counterpartyId || '').toLowerCase();
-    for (const [accountKey, account] of replica.state.accounts.entries()) {
-      const left = typeof account?.state?.leftEntity === 'string' ? String(account.state.leftEntity).toLowerCase() : '';
-      const right = typeof account?.state?.rightEntity === 'string' ? String(account.state.rightEntity).toLowerCase() : '';
-      const canonicalCp = typeof account?.counterpartyEntityId === 'string'
-        ? String(account.counterpartyEntityId).toLowerCase()
-        : '';
-      if (
-        String(accountKey || '').toLowerCase() !== cp
-        && canonicalCp !== cp
-        && !(left && right && ((left === owner && right === cp) || (right === owner && left === cp)))
-      ) {
-        continue;
-      }
-      return Number(account?.swapOrderHistory?.size || 0);
-    }
-    return 0;
-  }, { entityId, signerId, counterpartyId });
+    const reader = view.__xln?.instance?.readPersistedAccountSwapHistoryPage;
+    if (!env || !reader) throw new Error('SWAP_HISTORY_PERSISTED_READER_UNAVAILABLE');
+    const history = await reader(env, entityId, counterpartyId, { limit: 100 });
+    return Number(history.items?.length || 0);
+  }, { entityId, counterpartyId });
 }
 
 test.describe('E2E Swap Isolated Flow', () => {
@@ -1430,6 +1425,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       expect(remainingText.includes('0.02'), `expected remaining UI amount around 0.02 WETH, got ${remainingText}`).toBe(true);
 
       await alicePage.reload({ waitUntil: 'domcontentloaded' });
+      await unlockSavedWalletAfterReload(alicePage);
       await waitForRestoredRuntime(alicePage, alice.runtimeId);
       await openSwapWorkspace(alicePage);
       await selectCounterpartyInSwap(alicePage, hubId);
@@ -1593,6 +1589,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       const closedVisible = await closedRow.isVisible({ timeout: 10_000 }).catch(() => false);
       if (!closedVisible) {
         await alicePage.reload({ waitUntil: 'domcontentloaded' });
+        await unlockSavedWalletAfterReload(alicePage);
         await gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
         await openSwapWorkspace(alicePage);
         await selectCounterpartyInSwap(alicePage, hubId);
@@ -1804,8 +1801,8 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       await Promise.all([
-        closeExpectedSwapCompletionModal(alicePage),
-        closeExpectedSwapCompletionModal(bobPage),
+        dismissSwapCompletionModalIfVisible(alicePage),
+        dismissSwapCompletionModalIfVisible(bobPage),
       ]);
 
       await placeAliceSellOffer(bobPage, '0.0095', '2600');
@@ -1831,8 +1828,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         .toBeGreaterThanOrEqual(2);
 
       await Promise.all([
-        closeExpectedSwapCompletionModal(alicePage),
-        closeExpectedSwapCompletionModal(bobPage),
+        dismissSwapCompletionModalIfVisible(alicePage),
+        dismissSwapCompletionModalIfVisible(bobPage),
       ]);
 
       await Promise.all([

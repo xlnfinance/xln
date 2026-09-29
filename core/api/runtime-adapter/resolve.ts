@@ -257,7 +257,7 @@ type RuntimeAdapterGraphAccount = {
   mempool: RuntimeAdapterGraphAccountActivity[];
   mempoolCount: number;
   currentFrame: RuntimeAdapterGraphAccountFrame;
-  deltas: StorageAccountDoc['state']['deltas'];
+  deltas: NativeMapView<StorageAccountDoc['state']['deltas']>;
   currentHeight: number;
   pendingFrame?: RuntimeAdapterGraphAccountFrame;
   rollbackCount: number;
@@ -1558,7 +1558,7 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
   mempool: projectGraphAccountActivities(doc.mempool),
   mempoolCount: doc.mempool.length,
   currentFrame: projectGraphAccountFrame(doc.currentFrame),
-  deltas: doc.state.deltas,
+  deltas: new Map(doc.state.deltas),
   currentHeight: doc.currentHeight,
   ...(doc.pendingFrame ? { pendingFrame: projectGraphAccountFrame(doc.pendingFrame) } : {}),
   rollbackCount: doc.rollbackCount,

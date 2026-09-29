@@ -836,6 +836,14 @@
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
                   },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
+                  },
                   "expiresAt": 70000,
                   "fillDenominator": {
                     "__xlnType": "BigInt",
@@ -945,7 +953,7 @@
               }
             ]
           ],
-          "root": "0xa932d5183c247c15c13b4bdd5817fdb2685c1d7fa6146155c8f4dfde42b630e7"
+          "root": "0x2d7f52aa90db65be74a99c565d27a8b22c014b6af0c3af4d7a23bde46600ba44"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -964,6 +972,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -1069,7 +1085,7 @@
               }
             ]
           ],
-          "root": "0xb97c179c348ff11d26b3435fe1d572f3d400a95309da0e583a190e0d37edd932"
+          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -1121,6 +1137,14 @@
                     "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                  },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
                   },
                   "expiresAt": 70000,
                   "fillDenominator": {
@@ -1231,7 +1255,7 @@
               }
             ]
           ],
-          "root": "0xd4d85749d6a11aaaf673b540a80b9e99c1d4b8d5e7d35515d6a23c8d6bc235b1"
+          "root": "0x40cd39dc7e556892bd3a627ea76ae666c8a5517be1b8b7206dc66b351620d7bc"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -1250,6 +1274,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -1355,7 +1387,7 @@
               }
             ]
           ],
-          "root": "0xb97c179c348ff11d26b3435fe1d572f3d400a95309da0e583a190e0d37edd932"
+          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -1366,7 +1398,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x5afa7a2c2ac8f9cb41173b098e3b1b5e7ce8e738d16e4e1673812c7e08e2543c",
-        "outbox": "0xaf41f255deb8773f886d48a3b271273fc57af1e8374a592400aa8c29d49774e6"
+        "outbox": "0xe1370b491fa490c56bb847a5dc6f9f8e10c1ab76a695cde7683c411ae5e04a81"
       },
       "effects": {
         "candidateEffects": [],
@@ -1405,6 +1437,14 @@
                         "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                         "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                         "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                      },
+                      "executionSourceAmount": {
+                        "__xlnType": "BigInt",
+                        "value": "500"
+                      },
+                      "executionTargetAmount": {
+                        "__xlnType": "BigInt",
+                        "value": "450"
                       },
                       "expiresAt": 70000,
                       "fillDenominator": {
@@ -1513,7 +1553,7 @@
                   },
                   "type": "crossJurisdictionBookOrderRemoved"
                 },
-                "txDigest": "0x1476a94d07b3bd3e6f62dfc0893a1ebe5eb6fdbe9a76426489378bb38d4b438a"
+                "txDigest": "0xb9c5c2856dc4ff279a8d8439384612d35007717a9e1fd14242924739d074ff28"
               }
             ],
             "signerId": "0x6161616161616161616161616161616161616161"
@@ -1538,6 +1578,14 @@
               "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
               "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
               "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+            },
+            "executionSourceAmount": {
+              "__xlnType": "BigInt",
+              "value": "500"
+            },
+            "executionTargetAmount": {
+              "__xlnType": "BigInt",
+              "value": "450"
             },
             "expiresAt": 70000,
             "fillDenominator": {
@@ -1652,10 +1700,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x7b4665c1c9abca60d671b0cc827ed2a6c5a74f08940797bcde036fed4c3f2afe",
+            "accountStateRoot": "0x59e348ef32151cbc09a751c6625a794b70c5fcc3ccae1b29756e68cd35f4df6c",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x195273d81deeffa7a28703407fd2c73a15875e1eec16bc129cba7ec92813b96d",
+            "entityLeaf": "0x03500927c3982e723f3ba5cc188b3b159b8f926a357c93606ce31f9f641ad43e",
             "status": "active"
           }
         ],
@@ -1686,6 +1734,14 @@
                     "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                  },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
                   },
                   "expiresAt": 70000,
                   "fillDenominator": {
@@ -1796,7 +1852,7 @@
               }
             ]
           ],
-          "root": "0xa932d5183c247c15c13b4bdd5817fdb2685c1d7fa6146155c8f4dfde42b630e7"
+          "root": "0x2d7f52aa90db65be74a99c565d27a8b22c014b6af0c3af4d7a23bde46600ba44"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -1816,6 +1872,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -1921,7 +1985,7 @@
               }
             ]
           ],
-          "root": "0x4efa95a144303b0745c751d467b0eaa0da59d0892cec09dda70d7cd041143e56"
+          "root": "0x63bae4b2f4651bdc34b183ff691583f94d58a1a87a382da5f63fcfadd5966256"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -1941,10 +2005,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x7b4665c1c9abca60d671b0cc827ed2a6c5a74f08940797bcde036fed4c3f2afe",
+            "accountStateRoot": "0x59e348ef32151cbc09a751c6625a794b70c5fcc3ccae1b29756e68cd35f4df6c",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x195273d81deeffa7a28703407fd2c73a15875e1eec16bc129cba7ec92813b96d",
+            "entityLeaf": "0x03500927c3982e723f3ba5cc188b3b159b8f926a357c93606ce31f9f641ad43e",
             "status": "active"
           }
         ],
@@ -1973,6 +2037,14 @@
                     "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                  },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
                   },
                   "expiresAt": 70000,
                   "fillDenominator": {
@@ -2083,7 +2155,7 @@
               }
             ]
           ],
-          "root": "0xd4d85749d6a11aaaf673b540a80b9e99c1d4b8d5e7d35515d6a23c8d6bc235b1"
+          "root": "0x40cd39dc7e556892bd3a627ea76ae666c8a5517be1b8b7206dc66b351620d7bc"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2102,6 +2174,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -2207,7 +2287,7 @@
               }
             ]
           ],
-          "root": "0xb97c179c348ff11d26b3435fe1d572f3d400a95309da0e583a190e0d37edd932"
+          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2272,6 +2352,14 @@
               "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
               "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
               "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+            },
+            "executionSourceAmount": {
+              "__xlnType": "BigInt",
+              "value": "500"
+            },
+            "executionTargetAmount": {
+              "__xlnType": "BigInt",
+              "value": "450"
             },
             "expiresAt": 70000,
             "fillDenominator": {
@@ -2421,6 +2509,14 @@
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
                   },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
+                  },
                   "expiresAt": 70000,
                   "fillDenominator": {
                     "__xlnType": "BigInt",
@@ -2530,7 +2626,7 @@
               }
             ]
           ],
-          "root": "0xf51ab845c4aa259214d2ae6c2fd6b97fdb6d49e514f9e899d48d33f308236a0e"
+          "root": "0x5a8871661db50614aef78a35bfabbf6d2f6f108aa467108f6a498a16c00a0730"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2549,6 +2645,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -2654,7 +2758,7 @@
               }
             ]
           ],
-          "root": "0x002dcdc6ccf17b174ccf0ec158c58d71c0ed530eb79980cba08a7667f0f78027"
+          "root": "0xd1110846be618c505a09840acf21ae841bda6dd5578fff5fa3be735ab5a4e447"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2709,6 +2813,14 @@
                     "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                     "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
                   },
+                  "executionSourceAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "500"
+                  },
+                  "executionTargetAmount": {
+                    "__xlnType": "BigInt",
+                    "value": "450"
+                  },
                   "expiresAt": 70000,
                   "fillDenominator": {
                     "__xlnType": "BigInt",
@@ -2818,7 +2930,7 @@
               }
             ]
           ],
-          "root": "0xf51ab845c4aa259214d2ae6c2fd6b97fdb6d49e514f9e899d48d33f308236a0e"
+          "root": "0x5a8871661db50614aef78a35bfabbf6d2f6f108aa467108f6a498a16c00a0730"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2837,6 +2949,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -2942,7 +3062,7 @@
               }
             ]
           ],
-          "root": "0x002dcdc6ccf17b174ccf0ec158c58d71c0ed530eb79980cba08a7667f0f78027"
+          "root": "0xd1110846be618c505a09840acf21ae841bda6dd5578fff5fa3be735ab5a4e447"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2985,6 +3105,14 @@
               "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
               "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
               "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+            },
+            "executionSourceAmount": {
+              "__xlnType": "BigInt",
+              "value": "500"
+            },
+            "executionTargetAmount": {
+              "__xlnType": "BigInt",
+              "value": "450"
             },
             "expiresAt": 70000,
             "fillDenominator": {
@@ -3133,6 +3261,14 @@
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
                 },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "1000"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "900"
+                },
                 "expiresAt": 70000,
                 "fillDenominator": {
                   "__xlnType": "BigInt",
@@ -3237,7 +3373,7 @@
               }
             ]
           ],
-          "root": "0xf35e33d1d740df39d008038ae28f4a01589d49077a0b847b7c7a2cfa2800de46"
+          "root": "0x813523d9cd0a48fd7f5a39a08d30dc57fd4ef38b8e3d92a55d01630c316d673f"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3289,6 +3425,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -3394,7 +3538,7 @@
               }
             ]
           ],
-          "root": "0x591c74b7e4c5bb39a727967791d58d57c66c5deb71ccd8bccbdc641f9b6ac0e4"
+          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3443,6 +3587,14 @@
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
         "data": {
+          "cumulativeExecutionSourceAmount": {
+            "__xlnType": "BigInt",
+            "value": "1000"
+          },
+          "cumulativeExecutionTargetAmount": {
+            "__xlnType": "BigInt",
+            "value": "900"
+          },
           "cumulativeFillRatio": 65535,
           "fillSeq": 2,
           "orderId": "cross-j-group-d-order",
@@ -3489,6 +3641,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -3595,7 +3755,7 @@
               }
             ]
           ],
-          "root": "0xe6e75f335fb37c0b4afd4404d938140de1f142648a174953b041bb50d7e129dd"
+          "root": "0xe5f266f5903f224fb90f387158e9e326817364ad83c7d3d5b33ccd20d7a7b737"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3647,6 +3807,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -3752,7 +3920,7 @@
               }
             ]
           ],
-          "root": "0x591c74b7e4c5bb39a727967791d58d57c66c5deb71ccd8bccbdc641f9b6ac0e4"
+          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3834,6 +4002,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -3957,7 +4133,7 @@
               }
             ]
           ],
-          "root": "0xb85cd3eff5cc8a5f3a2ad316fd85f41fe1d004f0649d946cd50a037304cb47ef"
+          "root": "0x2ac0218d9759ae6701416e253d942b9d2c84edf8a83151448d2b552e476ce99c"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -4010,6 +4186,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -4116,7 +4300,7 @@
               }
             ]
           ],
-          "root": "0xe6e75f335fb37c0b4afd4404d938140de1f142648a174953b041bb50d7e129dd"
+          "root": "0xe5f266f5903f224fb90f387158e9e326817364ad83c7d3d5b33ccd20d7a7b737"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -4127,7 +4311,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x9a789c369a975670236cf31f743e587397258692cb967ea23df718595b9a1299",
-        "outbox": "0x42c279660bbbde6dbd2b13d447368dbc26112af158c4c3e2374adc6d24b45c62"
+        "outbox": "0x0128faa8e37aae15e4c5b64731bc258a422026050d7c712bde324218a1a9cbbf"
       },
       "effects": {
         "candidateEffects": [],
@@ -4214,6 +4398,14 @@
                         "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                         "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                         "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                      },
+                      "executionSourceAmount": {
+                        "__xlnType": "BigInt",
+                        "value": "500"
+                      },
+                      "executionTargetAmount": {
+                        "__xlnType": "BigInt",
+                        "value": "450"
                       },
                       "expiresAt": 70000,
                       "fillDenominator": {
@@ -4338,7 +4530,7 @@
                   },
                   "type": "crossPullClose"
                 },
-                "txDigest": "0x24811c74ad55dc09bb76529b0faa415c501d7f6fba7646594f1cc125ac2d3b04"
+                "txDigest": "0x0b1970c8034283cf4a16c82b2da953ecb600258f51617caf0aa3f3d327a992cb"
               }
             ],
             "signerId": "0x6262626262626262626262626262626262626262"
@@ -4415,6 +4607,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -4538,7 +4738,7 @@
               }
             ]
           ],
-          "root": "0x74d6a9ed17a949006c5b6333027b910da0917176a8628953b317c0aec4f05654"
+          "root": "0xa8f0f51fd6ed03612aefcfc150544e6e42fb8d70fb2be1730b8a9402a887558a"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -4591,6 +4791,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -4714,7 +4922,7 @@
               }
             ]
           ],
-          "root": "0xb85cd3eff5cc8a5f3a2ad316fd85f41fe1d004f0649d946cd50a037304cb47ef"
+          "root": "0x2ac0218d9759ae6701416e253d942b9d2c84edf8a83151448d2b552e476ce99c"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -4811,6 +5019,14 @@
               "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
               "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
               "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+            },
+            "executionSourceAmount": {
+              "__xlnType": "BigInt",
+              "value": "500"
+            },
+            "executionTargetAmount": {
+              "__xlnType": "BigInt",
+              "value": "450"
             },
             "expiresAt": 70000,
             "fillDenominator": {
@@ -5455,6 +5671,14 @@
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
                 },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
+                },
                 "expiresAt": 70000,
                 "fillDenominator": {
                   "__xlnType": "BigInt",
@@ -5569,7 +5793,7 @@
               }
             ]
           ],
-          "root": "0x4cc281d0fbc0e8e43ea8ade6f3aa29040778b29ce0eb9724414ccd9977441867"
+          "root": "0x44a92fbf66466a8a95b23fba25f9a07f16f1a3a4d08f334bda516264f2a0a076"
         },
         "entityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
         "knownAccounts": [
@@ -5621,6 +5845,14 @@
                   "sourceStackId": "stack:1:0x1111111111111111111111111111111111111111",
                   "targetAssetRef": "stack:8453:0x2121212121212121212121212121212121212121:1",
                   "targetStackId": "stack:8453:0x2121212121212121212121212121212121212121"
+                },
+                "executionSourceAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "500"
+                },
+                "executionTargetAmount": {
+                  "__xlnType": "BigInt",
+                  "value": "450"
                 },
                 "expiresAt": 70000,
                 "fillDenominator": {
@@ -5726,7 +5958,7 @@
               }
             ]
           ],
-          "root": "0x591c74b7e4c5bb39a727967791d58d57c66c5deb71ccd8bccbdc641f9b6ac0e4"
+          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
         },
         "entityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
         "knownAccounts": [

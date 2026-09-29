@@ -818,6 +818,7 @@ test.describe('watchtower runtime recovery', () => {
         deriveSignerAddressFromMnemonic(brainvault.mnemonic24),
       );
       await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);
+      await connectRuntimeToHub(page, runtime, baselineHubId, { requireOnline: false });
       const runtimeSeed = brainvault.mnemonic24;
 
       const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
@@ -952,6 +953,11 @@ test.describe('watchtower runtime recovery', () => {
 
       await closeRuntimePage(page);
       const reopenedSenderPage = await context.newPage();
+      await reopenedSenderPage.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+      await reopenedSenderPage.locator('button.wallet').first().click();
+      await expect(reopenedSenderPage.getByRole('heading', { name: 'Unlock wallet', exact: true })).toBeVisible();
+      await reopenedSenderPage.getByLabel('Password', { exact: true }).fill(passphrase);
+      await reopenedSenderPage.getByRole('button', { name: 'Unlock', exact: true }).click();
       await gotoApp(reopenedSenderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       await waitForRuntimeOnline(reopenedSenderPage, 'reopened restored sender');
       await connectRuntimeToHub(reopenedSenderPage, restored, hubId, { requireOnline: false });

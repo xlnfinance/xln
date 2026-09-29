@@ -72,6 +72,23 @@ test('htlcPayment uses preceding certified catch-up height for preparation and v
     return { input, originated };
   };
   const before = await prepare([payment]);
+  const missingIntermediary = entity('77');
+  const unroutablePayment: EntityTx = {
+    ...payment,
+    data: { ...payment.data, route: [source, missingIntermediary, target] },
+  };
+  await expect(materializeOriginatedHtlcPayments({
+    state,
+    proposalTxs: [unroutablePayment],
+    profiles,
+    height: 1,
+    resolveRoute: async () => [source, target],
+  })).rejects.toMatchObject({
+    disposition: 'reject',
+    txType: 'htlcPayment',
+    frameTx: unroutablePayment,
+    rejection: `HTLC_PAYMENT_PROFILE_MATCH_COUNT:${missingIntermediary}:0`,
+  });
   const caughtUp = await prepare([range, payment]);
   expect(caughtUp.originated[0]!.revealBeforeHeight).toBe(before.originated[0]!.revealBeforeHeight + 100);
   expect(caughtUp.originated[0]!.revealBeforeHeight).toBeGreaterThan(200);

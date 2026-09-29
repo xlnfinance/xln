@@ -793,36 +793,6 @@ export async function readCrossState(
   );
 }
 
-export async function readCommittedAccountRebalanceFee(
-  page: Page,
-  identity: RuntimeIdentity,
-  counterpartyId: string,
-  tokenId: number,
-  afterHeight: number,
-  throughHeight: number,
-): Promise<bigint> {
-  const fees = await page.evaluate(async input => {
-    const persistence = (window as CrossRuntimeWindow & {
-      __xln?: CrossRuntimeWindow['__xln'] & {
-        runtimePersistence?: {
-          readAccountRebalanceFees?: (query: typeof input) => Promise<Array<{ feeAmount: string }>>;
-        };
-      };
-    }).__xln?.runtimePersistence;
-    if (typeof persistence?.readAccountRebalanceFees !== 'function') {
-      throw new Error('RUNTIME_ACCOUNT_FEE_HISTORY_UNAVAILABLE');
-    }
-    return persistence.readAccountRebalanceFees(input);
-  }, {
-    entityId: identity.entityId,
-    counterpartyId,
-    tokenId,
-    afterHeight,
-    throughHeight,
-  });
-  return fees.reduce((sum, fee) => sum + BigInt(fee.feeAmount), 0n);
-}
-
 export async function readHubCrossDeltas(
   page: Page,
   hubEntityId: string,

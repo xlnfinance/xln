@@ -11,7 +11,7 @@ import { HLT_AUTHORITY_MIN_RUNTIME_FRAMES } from '../authority-evidence-policy';
 // frames, so exactness is measured in admitted bilateral Account inputs. The
 // real-frame floor exercises a long dirty WAL tail after the explicit
 // parity base checkpoint without replacing production checkpoint cadence.
-const MIN_EXACT_REPLAY_ACCOUNT_INPUTS = 10_000;
+const MAX_MIN_EXACT_REPLAY_ACCOUNT_INPUTS = 10_000;
 
 export type HltAuthorityExpectations = Readonly<{
   runtimeFrames: readonly Readonly<{
@@ -228,9 +228,12 @@ export const assertCanonicalMixedCoverage = (frames: readonly PersistedFrameJour
   for (const [field, count] of Object.entries(coverage)) {
     if (count < 1) throw new Error(`HLT_AUTHORITY_EVIDENCE_MIXED_COVERAGE_MISSING:${field}`);
   }
-  if (coverage.accountInputs < MIN_EXACT_REPLAY_ACCOUNT_INPUTS) {
+  // A scaled recorder still needs at least one admitted Account input per
+  // recorded payment. Large release runs retain the original 10k floor.
+  const minimumAccountInputs = Math.min(MAX_MIN_EXACT_REPLAY_ACCOUNT_INPUTS, coverage.payments);
+  if (coverage.accountInputs < minimumAccountInputs) {
     throw new Error(
-      `HLT_AUTHORITY_EVIDENCE_ACCOUNT_INPUTS_MINIMUM:${coverage.accountInputs}:${MIN_EXACT_REPLAY_ACCOUNT_INPUTS}`,
+      `HLT_AUTHORITY_EVIDENCE_ACCOUNT_INPUTS_MINIMUM:${coverage.accountInputs}:${minimumAccountInputs}`,
     );
   }
 };

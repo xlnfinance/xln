@@ -257,9 +257,324 @@
           "txType": "cross_pull_lock"
         }
       ]
+    },
+    {
+      "name": "source-buyer-price-improvement",
+      "steps": [
+        {
+          "accountStateRoot": "0x0ac2215a9c9c82ebda7cc7022692c5868802a768e6edddb1d9704f1d33b70add",
+          "byLeft": false,
+          "deltasRoot": "0x113801f89e2a0a44d3d69e2cb70d6f161fd58b14ff4143efdfef9e3f6d79751c",
+          "events": [
+            "🪝 Pull locked: 0xaeced5... amount -78000000 token1"
+          ],
+          "height": 10,
+          "input": "buyerSourceLock",
+          "leftHold": "78000000",
+          "offdelta": "0",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0xabdb674be4b52d63a7e38f45f9b37d7d61f6d8a8f6288757359ee74c808d6c87",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 1000,
+          "txType": "cross_pull_lock"
+        },
+        {
+          "accountStateRoot": "0x5b4347fda971090d24c738bc2479fc683b7b4ee42ab7fd70bcfc73bc3f185eb4",
+          "byLeft": true,
+          "deltasRoot": "0x113801f89e2a0a44d3d69e2cb70d6f161fd58b14ff4143efdfef9e3f6d79751c",
+          "events": [
+            "📊 Swap offer created: buyer-or... give 78000000 token1 for 30000000000000000 token2"
+          ],
+          "height": 10,
+          "input": "buyerSwapOffer",
+          "leftHold": "78000000",
+          "offdelta": "0",
+          "offerCount": 1,
+          "outputCount": 0,
+          "pullCount": 1,
+          "pullsRoot": "0xabdb674be4b52d63a7e38f45f9b37d7d61f6d8a8f6288757359ee74c808d6c87",
+          "rightHold": "0",
+          "swapOffersRoot": "0x1efcab4dc58391cdf1d74c9d4b61b2c541270c5f60f517bf90acec3bcfdc981a",
+          "timestamp": 1000,
+          "txType": "swap_offer"
+        },
+        {
+          "accountStateRoot": "0x6408f6d99ec56567174d6bad3107bc55d4012a2015d66576f52ede5741547fac",
+          "byLeft": false,
+          "deltasRoot": "0xc26d1364852dfc5e39a9762391ec2d76c5394cdc5b02c877feb55ac656a2b4e4",
+          "events": [
+            "🪝 Cross-j pull closed: 0xaeced5... ratio 65535/65535 claimed 75000000 released 3000000",
+            "🌉 Cross-j offer buyer-or closed with pull"
+          ],
+          "height": 20,
+          "input": "buyerSourceClose",
+          "leftHold": "0",
+          "offdelta": "-75000000",
+          "offerCount": 0,
+          "outputCount": 0,
+          "pullCount": 0,
+          "pullsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "rightHold": "0",
+          "swapOffersRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "timestamp": 2000,
+          "txType": "cross_pull_close"
+        }
+      ]
     }
   ],
   "inputs": {
+    "buyerSourceClose": {
+      "data": {
+        "binary": "0x00516a8ce2c3bb046814ab1209eb30ddcb2dec110b90516e3230809ac162fcbc",
+        "executionAmount": {
+          "__xlnType": "BigInt",
+          "value": "75000000"
+        },
+        "proof": {
+          "binaryHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+          "closeMode": "full",
+          "cumulativeSourceAmount": {
+            "__xlnType": "BigInt",
+            "value": "78000000"
+          },
+          "cumulativeTargetAmount": {
+            "__xlnType": "BigInt",
+            "value": "30000000000000000"
+          },
+          "fillRatio": 65535,
+          "orderId": "buyer-order",
+          "routeHash": "0x81961cd659d5de0b00610c6a6e6e826629fad85319cd674b5f8029111d1216b4",
+          "sourcePullId": "0xaeced51bfb46da2172241be8edb3ca802b970ec408501babf21d95747231d323",
+          "targetPullId": "0x18a42418233cf71fb3e5deaabcd032c3a05d2042c9d57b77739faf2f4dd47663"
+        },
+        "pullId": "0xaeced51bfb46da2172241be8edb3ca802b970ec408501babf21d95747231d323"
+      },
+      "type": "cross_pull_close"
+    },
+    "buyerSourceLock": {
+      "data": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "-78000000"
+        },
+        "crossJurisdiction": {
+          "leg": "source",
+          "orderId": "buyer-order",
+          "routeHash": "0x81961cd659d5de0b00610c6a6e6e826629fad85319cd674b5f8029111d1216b4",
+          "status": "resting"
+        },
+        "crossJurisdictionRoute": {
+          "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "createdAt": 1000,
+          "domain": {
+            "hashSchema": "route-domain",
+            "protocol": "xln-cross-j",
+            "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+            "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+            "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+            "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+          },
+          "expiresAt": 61000,
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "orderId": "buyer-order",
+          "riskMode": "fully_collateralized",
+          "routeHash": "0x81961cd659d5de0b00610c6a6e6e826629fad85319cd674b5f8029111d1216b4",
+          "source": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "78000000"
+            },
+            "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+            "tokenId": 1
+          },
+          "sourceDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "sourcePull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "78000000"
+            },
+            "fullHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+            "partialRoot": "0x3a3a304cd250668c0d9fcdf2c9f0ed79e5efdfed76e4f8f52fe1fe69967fb39d",
+            "pullId": "0xaeced51bfb46da2172241be8edb3ca802b970ec408501babf21d95747231d323",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-78000000"
+            },
+            "tokenId": 1
+          },
+          "status": "resting",
+          "target": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "30000000000000000"
+            },
+            "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+            "tokenId": 2
+          },
+          "targetDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "targetPull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "30000000000000000"
+            },
+            "fullHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+            "partialRoot": "0x3a3a304cd250668c0d9fcdf2c9f0ed79e5efdfed76e4f8f52fe1fe69967fb39d",
+            "pullId": "0x18a42418233cf71fb3e5deaabcd032c3a05d2042c9d57b77739faf2f4dd47663",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-30000000000000000"
+            },
+            "tokenId": 2
+          },
+          "timePolicy": {
+            "deadlineConversion": "floor_ms_to_unix_seconds",
+            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "runtimeClock": "unix_ms",
+            "runtimeExpiresAtMs": 61000,
+            "settlementClock": "unix_seconds"
+          },
+          "updatedAt": 1000,
+          "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+        },
+        "fullHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+        "partialRoot": "0x3a3a304cd250668c0d9fcdf2c9f0ed79e5efdfed76e4f8f52fe1fe69967fb39d",
+        "pullId": "0xaeced51bfb46da2172241be8edb3ca802b970ec408501babf21d95747231d323",
+        "signedAmount": {
+          "__xlnType": "BigInt",
+          "value": "-78000000"
+        },
+        "tokenId": 1
+      },
+      "type": "cross_pull_lock"
+    },
+    "buyerSwapOffer": {
+      "data": {
+        "crossJurisdiction": {
+          "bookOwnerEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "createdAt": 1000,
+          "domain": {
+            "hashSchema": "route-domain",
+            "protocol": "xln-cross-j",
+            "sourceAssetRef": "stack:31337:0x8888888888888888888888888888888888888888:1",
+            "sourceStackId": "stack:31337:0x8888888888888888888888888888888888888888",
+            "targetAssetRef": "stack:31338:0x7777777777777777777777777777777777777777:2",
+            "targetStackId": "stack:31338:0x7777777777777777777777777777777777777777"
+          },
+          "expiresAt": 61000,
+          "hubEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+          "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+          "orderId": "buyer-order",
+          "riskMode": "fully_collateralized",
+          "routeHash": "0x81961cd659d5de0b00610c6a6e6e826629fad85319cd674b5f8029111d1216b4",
+          "source": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "78000000"
+            },
+            "counterpartyEntityId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "entityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "jurisdiction": "stack:31337:0x8888888888888888888888888888888888888888",
+            "tokenId": 1
+          },
+          "sourceDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "sourcePull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "78000000"
+            },
+            "fullHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+            "partialRoot": "0x3a3a304cd250668c0d9fcdf2c9f0ed79e5efdfed76e4f8f52fe1fe69967fb39d",
+            "pullId": "0xaeced51bfb46da2172241be8edb3ca802b970ec408501babf21d95747231d323",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-78000000"
+            },
+            "tokenId": 1
+          },
+          "status": "resting",
+          "target": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "30000000000000000"
+            },
+            "counterpartyEntityId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "entityId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "jurisdiction": "stack:31338:0x7777777777777777777777777777777777777777",
+            "tokenId": 2
+          },
+          "targetDisputeConfig": {
+            "leftResponseSeconds": 10,
+            "rightResponseSeconds": 10
+          },
+          "targetPull": {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "30000000000000000"
+            },
+            "fullHash": "0xad1e84f19b518d43de4959993c01bf3c9c9a4ae7eb869ee572e749601d0249bb",
+            "partialRoot": "0x3a3a304cd250668c0d9fcdf2c9f0ed79e5efdfed76e4f8f52fe1fe69967fb39d",
+            "pullId": "0x18a42418233cf71fb3e5deaabcd032c3a05d2042c9d57b77739faf2f4dd47663",
+            "signedAmount": {
+              "__xlnType": "BigInt",
+              "value": "-30000000000000000"
+            },
+            "tokenId": 2
+          },
+          "timePolicy": {
+            "deadlineConversion": "floor_ms_to_unix_seconds",
+            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "runtimeClock": "unix_ms",
+            "runtimeExpiresAtMs": 61000,
+            "settlementClock": "unix_seconds"
+          },
+          "updatedAt": 1000,
+          "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
+        },
+        "giveAmount": {
+          "__xlnType": "BigInt",
+          "value": "78000000"
+        },
+        "giveTokenDecimals": 6,
+        "giveTokenId": 1,
+        "maxFee": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "minNetReceive": {
+          "__xlnType": "BigInt",
+          "value": "30000000000000000"
+        },
+        "offerId": "buyer-order",
+        "priceTicks": {
+          "__xlnType": "BigInt",
+          "value": "26000000"
+        },
+        "wantAmount": {
+          "__xlnType": "BigInt",
+          "value": "30000000000000000"
+        },
+        "wantTokenDecimals": 18,
+        "wantTokenId": 2
+      },
+      "type": "swap_offer"
+    },
     "sourceClose": {
       "data": {
         "binary": "0x",

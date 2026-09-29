@@ -99,6 +99,27 @@ test('direct peer close during an established quiesce is visible but non-fatal',
   expect(env.infrastructure.operatorStatus).toBeUndefined();
 });
 
+test('authenticated direct peer outage retires its session without halting the Runtime', () => {
+  const env = createEmptyEnv('p2p-direct-peer-outage');
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  let closed = 0;
+  env.error = (_category, message) => { errors.push(message); };
+  env.warn = (_category, message) => { warnings.push(message); };
+
+  reportDirectClientError(
+    env,
+    'ws://peer/ws',
+    `0x${'22'.repeat(20)}`,
+    new Error('WS_UNEXPECTED_CLOSE:code=1006:helloAcknowledged=1'),
+    () => { closed += 1; },
+  );
+  expect(closed).toBe(1);
+  expect(warnings).toEqual(['WS_DIRECT_PEER_OFFLINE']);
+  expect(errors).toEqual([]);
+  expect(env.infrastructure?.operatorStatus).toBeUndefined();
+});
+
 test('node websocket async send failures retain exact envelope correlation', () => {
   const errors: string[] = [];
   const client = new RuntimeWsClient({

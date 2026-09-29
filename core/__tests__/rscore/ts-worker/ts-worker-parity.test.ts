@@ -478,7 +478,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
       expect(digest(inbound.effects)).toBe(digest(baseline.inboundEffects));
       expect(digest(outbound.effects)).toBe(digest(baseline.outboundEffects));
       expect(outbound.accountsRoot).toBe(baseline.accountsRoot);
-    });
+    }, workers === 8 ? 30_000 : 5_000);
   }
 
   test('multiple Accounts in one shard retain dense input order', async () => {

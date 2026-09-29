@@ -648,6 +648,7 @@ async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string
     await accountList.isVisible({ timeout: 500 }).catch(() => false)
       || await workspaceTabs.isVisible({ timeout: 500 }).catch(() => false);
 
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await isAccountsWorkspaceVisible()) break;
     if (await accountsTab.isVisible({ timeout: 500 }).catch(() => false)) {
@@ -1575,6 +1576,11 @@ test.describe('E2E Dispute Flow', () => {
     // Reload hard-assert: WAL restore keeps finalized dispute + batch history.
     await timedStep('dispute.reload_page', async () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('button.wallet').first().click();
+      await expect(page.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible({ timeout: 10_000 });
+      await page.getByLabel('Password', { exact: true }).fill('dispute-reload-password');
+      await page.getByLabel('Confirm password', { exact: true }).fill('dispute-reload-password');
+      await page.getByRole('button', { name: 'Save and open', exact: true }).click();
       await page.waitForFunction(() => {
         const env = (window as any).isolatedEnv;
         return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
@@ -1674,18 +1680,17 @@ test.describe('E2E Dispute Flow', () => {
     });
 
     await timedStep('dispute_broadcast.wait_hidden_disputed_entry', async () => {
-      await expect.poll(async () => {
-        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(0);
-
       await page.getByRole('button', { name: /^Open Account$/ }).click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
       await expect(disputedRow).toContainText(/Active dispute in progress|Permanently closed after finalized dispute/);
       const disputedText = await disputedRow.textContent();
+      const preview = page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId });
       if (disputedText?.includes('Permanently closed after finalized dispute')) {
+        await expect(preview).toHaveCount(0);
         await expect(disputedRow.getByRole('button')).toHaveCount(0);
       } else {
+        await expect(preview).toHaveCount(1);
         await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toBeVisible({ timeout: 60_000 });
       }
     });

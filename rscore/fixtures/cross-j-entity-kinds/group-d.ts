@@ -105,6 +105,8 @@ const filledRoute = (): CrossJurisdictionSwapRoute => ({
   fillDenominator: 2n,
   filledSourceAmount: 500n,
   filledTargetAmount: 450n,
+  executionSourceAmount: 500n,
+  executionTargetAmount: 450n,
   sourceClaimed: 500n,
   targetClaimed: 450n,
 });
@@ -214,6 +216,8 @@ const noticeData = (route: CrossJurisdictionSwapRoute) => ({
   routeHash: route.routeHash!,
   fillSeq: Math.floor(Number(route.fillSeq ?? 0)) + 1,
   cumulativeFillRatio: 65_535,
+  cumulativeExecutionSourceAmount: route.source.amount,
+  cumulativeExecutionTargetAmount: route.target.amount,
 });
 
 const addPull = (value: EntityState, peer: string, route: CrossJurisdictionSwapRoute, role: 'source' | 'target') => {

@@ -346,6 +346,8 @@ pub(crate) fn apply_pull_lock(
             "fillDenominator",
             "filledSourceAmount",
             "filledTargetAmount",
+            "executionSourceAmount",
+            "executionTargetAmount",
             "pendingClearRequestedAt",
             "claimedRatio",
             "sourceClaimed",
@@ -657,9 +659,27 @@ pub(crate) fn apply_pull_close(
         if proposer != hub {
             return Err(format!("Only the {leg} Hub can close cross-j pull"));
         }
-        // The chain-proportional check above proved cumulative == floor(|amount|·r/65535).
-        let applied = cumulative.clone();
-        let remaining = &absolute - &cumulative;
+        // The ratio remains the dispute ceiling. A cooperative buyer close may
+        // spend less at the book execution price, like same-J swap_resolve.
+        let execution = get(data, "executionAmount")
+            .map(|_| bigint(data, "executionAmount"))
+            .transpose()?;
+        if let Some(executed) = &execution {
+            let offer = account
+                .state()
+                .swap_offer(&order_id)
+                .and_then(|offer| offer.cross_jurisdiction())
+                .ok_or("Cross-j cooperative execution offer missing")?;
+            if leg != "source"
+                || crate::cross_j_route::canonical_source_is_base(offer)?
+                || executed <= &BigInt::from(0)
+                || executed > &cumulative
+            {
+                return Err("Cross-j cooperative execution amount invalid".into());
+            }
+        }
+        let applied = execution.unwrap_or_else(|| cumulative.clone());
+        let remaining = &absolute - &applied;
         let payer = beneficiary.opposite();
         let token_id = TokenId::new(
             u32::try_from(uint(pull, "tokenId")?).map_err(|_| "Invalid pull tokenId")?,

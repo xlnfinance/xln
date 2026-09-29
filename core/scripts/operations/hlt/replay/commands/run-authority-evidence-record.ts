@@ -27,20 +27,23 @@ const env: NodeJS.ProcessEnv = {
   XLN_LOCAL_PROD_SMOKE_DIR: workDir,
   XLN_HLT_RECORDING_OUTPUT: output,
   XLN_LOCAL_PROD_SMOKE_SWAP_LOAD_MODE: 'mixed',
-  // Parity evidence is the production load itself: the canonical 1,000
-  // sovereign Runtimes at the production rate (1 payment + 1 swap action
-  // per user per second) with production frame coalescing. Twenty offers per
-  // Account stay below the protocol's 32-live-offer bound while still
-  // supplying 20,000 payments and 20,000 swap actions to the parity gate. A selective
+  // Parity evidence is a scaled production load: 130 sovereign Runtimes at
+  // 1 payment + 1 swap action per user per second. This keeps the mixed
+  // protocol path and production frame coalescing while fitting a laptop.
+  // Twenty offers per Account stay below the 32-live-offer bound. A selective
   // one-input-per-frame transcript would prove parity on a shape the hub
   // never runs; the 110-frame gate is met by real economic frame cadence.
-  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '1000',
+  XLN_HLT_USERS: process.env['XLN_HLT_USERS'] || '130',
   XLN_HLT_RATE_PER_USER: process.env['XLN_HLT_RATE_PER_USER'] || '1',
   XLN_HLT_DURATION_S: process.env['XLN_HLT_DURATION_S'] || '20',
   XLN_HLT_MIX: '1:1',
   XLN_HLT_HUBS: 'H1',
   XLN_HLT_MARKET_MAKERS: 'MM',
   XLN_HLT_AUTHORITY_EVIDENCE: '1',
+  // Payment settlement follows the 20-second offered window. On a busy
+  // laptop the Account ACK drain can take longer than the generic 20s smoke
+  // timeout; the enclosing recorder still has its 180s wall budget.
+  XLN_HLT_DELIVERY_TIMEOUT_MS: process.env['XLN_HLT_DELIVERY_TIMEOUT_MS'] || '90000',
   XLN_STORAGE_MATERIALIZE_PERIOD_FRAMES: '100',
   XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES: '1',
   XLN_RUNTIME_MIN_FRAME_DELAY_MS: '0',

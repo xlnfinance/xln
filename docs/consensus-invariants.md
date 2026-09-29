@@ -63,7 +63,7 @@ be added: a Hanko-signed receipt path was explicitly rejected because ladder
 reveals are far cheaper in gas, and two authorities is how conservation broke.
 
 **rule:** off-chain fill progress is Hub-internal and INFORMATIONAL only —
-one uint16 ratio per order carried between the book owner and the source Hub
+one uint16 ratio and the cumulative exact book execution carried between the book owner and the source Hub
 (`crossJurisdictionFillNotice`), never an Account transaction and never signed
 by a user. It is bookkeeping, never authorization, and must never gate a close
 or a dispute; users learn the outcome from the pull close. Revealing ladder secrets off-chain is forbidden: the ladder
@@ -82,6 +82,14 @@ dispute-candidate filter), the two jurisdictions settle different ratios and
 cross-j conservation breaks — by the guard, not by the reveal. A verified
 reveal above the last informational update is NORMAL: the hub's actual fill
 legally runs ahead of its last "matched X%" message.
+
+**cooperative price improvement (owner decision 2026-09-26):** the source
+buyer's `cross_pull_close` transfers the exact matched quote amount and
+releases the unused source hold in that same Account transition, as same-J
+`swap_resolve` does. The ladder ratio remains the maximum signed source claim
+and the target claim. If cooperation fails, dispute uses the ladder ratio and
+does not promise price improvement. Exact execution is Hub-authored progress,
+not a second settlement authority or a signed fill receipt.
 
 **bug caught 2026-08-06:** dispute salvage rejected a cryptographically
 verified reveal because it exceeded the informational ratio; source J had

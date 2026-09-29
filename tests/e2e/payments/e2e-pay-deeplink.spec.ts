@@ -61,6 +61,18 @@ test.describe('Canonical /app#pay deep link', () => {
       const payUrl = `${APP_BASE_URL}/app#pay/${encodeURIComponent(`${bob.entityId}?${invoiceParams.toString()}`)}`;
       await payPage.goto(payUrl, { waitUntil: 'domcontentloaded' });
 
+      await payPage.locator('button.wallet').first().click();
+      const setup = payPage.getByRole('heading', { name: 'Set a local password', exact: true });
+      const unlock = payPage.getByRole('heading', { name: 'Unlock wallet', exact: true });
+      await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
+      await payPage.getByLabel('Password', { exact: true }).fill('pay-deeplink-password');
+      if (await setup.isVisible()) {
+        await payPage.getByLabel('Confirm password', { exact: true }).fill('pay-deeplink-password');
+        await payPage.getByRole('button', { name: 'Save and open', exact: true }).click();
+      } else {
+        await payPage.getByRole('button', { name: 'Unlock', exact: true }).click();
+      }
+
       await expect(payPage.locator('.payment-panel')).toBeVisible({ timeout: 60_000 });
       await expect(payPage.locator('#payment-amount-input')).toHaveValue('5');
 

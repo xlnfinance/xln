@@ -610,9 +610,21 @@ async function reloadAppForProject(
 ): Promise<void> {
   if (projectName === 'webkit-mobile') {
     await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
-    return;
+  } else {
+    await page.reload({ waitUntil: 'domcontentloaded' });
   }
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('button.wallet').first().click();
+  const setup = page.getByRole('heading', { name: 'Set a local password', exact: true });
+  const unlock = page.getByRole('heading', { name: 'Unlock wallet', exact: true });
+  await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Password', { exact: true }).fill('ahb-reload-password');
+  if (await setup.isVisible()) {
+    await page.getByLabel('Confirm password', { exact: true }).fill('ahb-reload-password');
+    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  }
+  await expect(page.getByTestId('tab-accounts').first()).toBeVisible({ timeout: 20_000 });
 }
 
 async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {

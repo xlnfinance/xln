@@ -270,7 +270,7 @@ const finalSwapCancelScope = (
   return !offer.crossJurisdiction;
 };
 
-const classifyCommittedSwapCancels = (
+export const classifyCommittedSwapCancels = (
   account: AccountReplica,
   accountTxs: readonly AccountTx[],
 ): readonly (boolean | undefined)[] => {
@@ -290,6 +290,9 @@ const classifyCommittedSwapCancels = (
         finalSwapCancelScope(account, tx.data.offerId);
     } else if (tx.type === 'swap_resolve') {
       futureScopeByOffer.set(tx.data.offerId, true);
+    } else if (tx.type === 'cross_pull_close') {
+      // A same-frame close retires the cross-j offer after its cancel request.
+      futureScopeByOffer.set(tx.data.proof.orderId, false);
     } else if (tx.type === 'swap_offer') {
       futureScopeByOffer.set(tx.data.offerId, !tx.data.crossJurisdiction);
     }

@@ -108,6 +108,17 @@ export const reportDirectClientError = (
     });
     return 'transport-error';
   }
+  if (error.message.startsWith('WS_UNEXPECTED_CLOSE:')) {
+    // A peer process can disappear after authentication. Retire only this
+    // session; the committed outbox and Account duplicate rules own replay.
+    env.warn?.('network', 'WS_DIRECT_PEER_OFFLINE', {
+      endpoint,
+      targetRuntimeId,
+      error: error.message,
+    });
+    closeSession();
+    return 'transport-error';
+  }
   applyTransportPeerFailurePolicy(
     env,
     'WS_DIRECT_FATAL',

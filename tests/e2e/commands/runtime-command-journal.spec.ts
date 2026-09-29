@@ -54,7 +54,22 @@ test('remote command journal survives reload with encrypted exact payload and th
   await deleteJournal(page);
   await unlockJournal(page);
   const input = {
-    runtimeTxs: [{ type: 'importReplica', entityId: 'sensitive-journal-payload', amount: 17n }],
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId: `0x${'ab'.repeat(32)}`,
+      signerId: RUNTIME_ID,
+      data: {
+        config: {
+          mode: 'proposer-based',
+          threshold: 17n,
+          validators: [RUNTIME_ID],
+          shares: { [RUNTIME_ID]: 17n },
+        },
+        isProposer: true,
+        entitySeed: `0x${'cd'.repeat(64)}`,
+        profileName: 'sensitive-journal-payload',
+      },
+    }],
     entityInputs: [],
     jInputs: [],
   };
@@ -150,25 +165,24 @@ test('remote command journal survives reload with encrypted exact payload and th
     exactInput: input,
   });
   expect(retriedCommandId).toBe(commandIds[0]);
-  await expect(page.evaluate(async ({ commandId, runtimeId, serverFingerprint }) => {
+  const changedInput = structuredClone(input);
+  changedInput.runtimeTxs[0]!.data.profileName = 'changed-payload';
+  await expect(page.evaluate(async ({ commandId, runtimeId, serverFingerprint, changedInput }) => {
     const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
     if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
     return journal.resolveId({
       commandId,
       runtimeId,
       serverFingerprint,
-      input: { runtimeTxs: [{ type: 'changed-payload' }], entityInputs: [], jInputs: [] } as never,
+      input: changedInput as never,
     });
-  }, { commandId: commandIds[0], runtimeId: RUNTIME_ID, serverFingerprint: SERVER_FINGERPRINT }))
+  }, { commandId: commandIds[0], runtimeId: RUNTIME_ID, serverFingerprint: SERVER_FINGERPRINT, changedInput }))
     .rejects.toThrow('RUNTIME_COMMAND_ID_PAYLOAD_MISMATCH');
 
   await page.evaluate(async (commandId) => {
-    const journal = (window as never as { __xln?: { commandJournal?: { markAccepted: (id: string, upstream: unknown) => Promise<void> } } }).__xln?.commandJournal;
+    const journal = (window as never as { __xln?: { commandJournal?: { markAccepted: (id: string) => Promise<void> } } }).__xln?.commandJournal;
     if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
-    await journal.markAccepted(commandId, {
-      receiptId: 'browser-receipt',
-      statusUrl: '/receipt/browser-receipt',
-    });
+    await journal.markAccepted(commandId);
   }, commandIds[0]);
   await page.reload();
   await expect(loadJournal(page)).rejects.toThrow(`RUNTIME_COMMAND_JOURNAL_LOCKED:${RUNTIME_ID}`);
@@ -177,8 +191,6 @@ test('remote command journal survives reload with encrypted exact payload and th
     {
       commandId: commandIds[0],
       status: 'accepted',
-      upstreamReceiptId: 'browser-receipt',
-      statusUrl: '/receipt/browser-receipt',
       input,
     },
     { commandId: commandIds[1], status: 'pending', input },

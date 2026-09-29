@@ -22,6 +22,7 @@ import {
 import {
   buildCrossJurisdictionCancelInstruction,
   buildCrossJurisdictionFillInstruction,
+  buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,
   mergeCrossJurisdictionBookAdmission,
   type CrossJurisdictionFillInstruction,
@@ -33,9 +34,9 @@ import {
 import { buildCrossMarketOfferFromBookOrder } from '../../../../entity/tx/handlers/account/orderbook/helpers';
 import { createBook, getBookOrder } from '../../../../orderbook';
 import { replaceOrderbookPair } from '../../../../orderbook/order-index';
-import { crossJurisdictionBookQtyLots } from '../../../../orderbook/cross-j/quantity';
+import { crossJurisdictionBookQtyLots, crossJurisdictionExecutableQtyLots } from '../../../../orderbook/cross-j/quantity';
 import { createOrderbookExtState, getStaticSwapTokenDimensions, ORDERBOOK_PRICE_SCALE } from '../../../../orderbook/types';
-import { swapKey } from '../../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook, swapKey } from '../../../../orderbook/swap-execution';
 import type { EntityInput, EntityState } from '../../../../entity/types';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
 import {
@@ -158,11 +159,38 @@ const bookRow = (state: EntityState, pairId: string, namespacedOrderId: string) 
 };
 
 describe('cross-j ratio-only fill progress', () => {
+  test('partial WETH/USDC remainder retains the original ask price across ratio rounding', () => {
+    const route = prepareRoute('price-rounding', sourceHub);
+    const { state } = bookOwnerState(route, sourceHub, sourceHubSigner);
+    const offer = state.accounts.get(sourceUser)?.state.swapOffers.get(route.orderId);
+    if (!offer) throw new Error('TEST_CROSS_OFFER_MISSING');
+    const normalized = normalizeSwapOfferForOrderbook(offer, sourceUser);
+    const intent = {
+      ...route,
+      source: { ...route.source, tokenId: 2, amount: 40_000_000_000_000_000n },
+      target: { ...route.target, tokenId: 1, amount: 100_000_000n },
+    };
+    const initial = buildCrossJurisdictionMarketOffer({ ...normalized, crossJurisdiction: intent }, sourceHub);
+    const partial = buildCrossJurisdictionMarketOffer({
+      ...normalized,
+      crossJurisdiction: {
+        ...intent,
+        status: 'partially_filled',
+        fillNumerator: 16_383n,
+        fillDenominator: 65_535n,
+        cumulativeFillRatio: 16_383,
+      },
+    }, sourceHub);
+    expect(initial?.priceTicks).toBe(25_000_000n);
+    expect(partial?.priceTicks).toBe(initial?.priceTicks);
+  });
+
   test('partial fill on the source Hub book owner advances route and row without an Account tx or output', () => {
     const env = createEmptyEnv('fill-progress-partial');
     const route = prepareRoute('fill-partial', sourceHub);
     const { state, namespacedOrderId } = bookOwnerState(route, sourceHub, sourceHubSigner);
-    const instruction = fillInstruction(state, route, namespacedOrderId, lots => lots / 2n);
+    const initialPrice = buildCrossMarketOfferFromBookOrder(state, namespacedOrderId)?.priceTicks;
+    const instruction = fillInstruction(state, route, namespacedOrderId, lots => lots / 4n);
     expect(instruction.cancelRemainder).toBe(false);
     expect(instruction.fillRatio).toBeGreaterThan(0);
     expect(instruction.fillRatio).toBeLessThan(65_535);
@@ -183,8 +211,11 @@ describe('cross-j ratio-only fill progress', () => {
     expect(admission?.status).toBe('admitted');
     expect(admission?.route.cumulativeFillRatio).toBe(instruction.fillRatio);
     const meta = buildCrossMarketOfferFromBookOrder(state, namespacedOrderId);
+    expect(meta?.priceTicks, 'partial fill must preserve the signed limit price').toBe(initialPrice);
     const row = bookRow(state, meta!.pairId, `${sourceUser}:${route.orderId}`);
-    expect(row?.qtyLots).toBe(crossJurisdictionBookQtyLots(meta!.baseTokenId, meta!.baseAmount));
+    expect(row?.qtyLots).toBe(crossJurisdictionExecutableQtyLots(
+      meta!.baseTokenId, meta!.quoteTokenId, meta!.baseAmount, meta!.quoteAmount, meta!.priceTicks,
+    ));
     expect(state.accounts.get(sourceUser)?.mempool).toHaveLength(0);
     expect(state.accounts.get(sourceUser)?.state.swapOffers.has(route.orderId)).toBe(true);
   });
@@ -236,6 +267,8 @@ describe('cross-j ratio-only fill progress', () => {
         routeHash: route.routeHash,
         fillSeq: 1,
         cumulativeFillRatio: instruction.fillRatio,
+        cumulativeExecutionSourceAmount: instruction.executionSourceAmount,
+        cumulativeExecutionTargetAmount: instruction.executionTargetAmount,
         cancelRemainder: false,
       },
     }]);

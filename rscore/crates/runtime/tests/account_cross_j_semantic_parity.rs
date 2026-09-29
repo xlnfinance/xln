@@ -52,7 +52,7 @@ fn entity(byte: u8) -> EntityId {
     EntityId::parse(&format!("0x{}", format!("{byte:02x}").repeat(32))).expect("fixture Entity")
 }
 
-fn account(source: bool) -> AccountReplica {
+fn account(source: bool, high_capacity: bool) -> AccountReplica {
     let (left, right, token, chain, depository) = if source {
         (entity(0x11), entity(0x22), 1, 31_337, 0x88)
     } else {
@@ -72,11 +72,21 @@ fn account(source: bool) -> AccountReplica {
     .expect("fixture identity");
     let delta = Delta::new(
         TokenId::new(token).expect("fixture token"),
-        100.into(),
+        (if high_capacity { 100_000_000 } else { 100 }).into(),
         0.into(),
         0.into(),
-        1_000.into(),
-        1_000.into(),
+        (if high_capacity {
+            100_000_000_000_000_000i64
+        } else {
+            1_000
+        })
+        .into(),
+        (if high_capacity {
+            100_000_000_000_000_000i64
+        } else {
+            1_000
+        })
+        .into(),
         0.into(),
         0.into(),
         0.into(),
@@ -222,7 +232,7 @@ fn cross_j_account_transitions_match_the_shared_typescript_vector() {
     for test_case in fixture.cases {
         let source = test_case.name.starts_with("source");
         let token = if source { 1 } else { 2 };
-        let mut replica = account(source);
+        let mut replica = account(source, test_case.name == "source-buyer-price-improvement");
         for expected in test_case.steps {
             let input = &fixture.inputs[&expected.input];
             assert_step(&mut replica, input, &expected, token);

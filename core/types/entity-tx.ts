@@ -336,6 +336,8 @@ type EntityTxPayload =
         routeHash?: string;
         fillSeq: number;
         cumulativeFillRatio: number; // Coarse 0-65535 ratio; this is the on-chain uint16 dispute form.
+        cumulativeExecutionSourceAmount: bigint;
+        cumulativeExecutionTargetAmount: bigint;
         cancelRemainder?: boolean;
       };
     }

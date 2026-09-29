@@ -23,6 +23,7 @@ import {
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
   buildCrossJurisdictionFillProgressData,
+  applyCrossJurisdictionExecutionProgress,
   type CrossJurisdictionFillProgressData,
 } from '../../../extensions/cross-j/fill-notice';
 import {
@@ -547,6 +548,7 @@ const applyCommittedFillProgress = (
     fillNumerator: BigInt(ratio),
     fillDenominator: BigInt(CROSS_J_MAX_FILL_RATIO),
   }, state.timestamp, 'CROSS_J_FILL_PROGRESS_INVALID');
+  applyCrossJurisdictionExecutionProgress(nextRoute, fill);
   transitionCrossJurisdictionRouteStatus(route, nextRoute.status, state.timestamp);
   Object.assign(route, nextRoute);
   if (isCrossJurisdictionFillTerminal(route, { nextRatio: ratio, cancelRemainder: fill.cancelRemainder })) {
@@ -621,6 +623,13 @@ export const applySourceHubCrossJurisdictionFillProgress = (
   const isCancel = Boolean(fill.cancelRemainder) && incomingSeq === currentSeq;
   if (incomingSeq === currentSeq && ratio !== committedCrossJurisdictionRatio(route)) {
     throw haltRuntimeFailure("CROSS_J_FILL_NOTICE_STALE_CONFLICT", `CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${fill.orderId} seq=${incomingSeq} ratio=${ratio}`);
+  }
+  if (
+    incomingSeq === currentSeq &&
+    ((route.executionSourceAmount ?? 0n) !== fill.cumulativeExecutionSourceAmount ||
+      (route.executionTargetAmount ?? 0n) !== fill.cumulativeExecutionTargetAmount)
+  ) {
+    throw haltRuntimeFailure('CROSS_J_EXECUTION_NOTICE_CONFLICT', `CROSS_J_EXECUTION_NOTICE_CONFLICT:${fill.orderId}:${incomingSeq}`);
   }
   if (!isCancel && incomingSeq <= currentSeq) return false;
 

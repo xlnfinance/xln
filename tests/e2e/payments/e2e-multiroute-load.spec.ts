@@ -249,7 +249,33 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
   throw new Error(`Faucet failed for ${entityId.slice(0, 10)} after 6 attempts`);
 }
 
+async function waitForRouteProfiles(page: Page, route: string[]): Promise<void> {
+  const ids = route.map(id => id.toLowerCase());
+  await expect.poll(async () => page.evaluate(async (targets) => {
+    const view = window as any;
+    const connectivity = view.__xln?.runtimeConnectivity;
+    await connectivity?.ensureProfiles?.(targets).catch(() => false);
+    const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? connectivity?.profiles ?? [];
+    const matches = (id: string) => profiles.filter((profile: any) =>
+      String(profile?.entityId || '').toLowerCase() === id);
+    for (const id of targets) {
+      if (matches(id).length !== 1) return `${id}:profiles=${matches(id).length}`;
+    }
+    for (let i = 0; i < targets.length - 1; i++) {
+      const from = targets[i]!;
+      const to = targets[i + 1]!;
+      const linked = matches(from)[0].accounts?.some((account: any) =>
+        String(account?.counterpartyId || '').toLowerCase() === to)
+        || matches(to)[0].accounts?.some((account: any) =>
+          String(account?.counterpartyId || '').toLowerCase() === from);
+      if (!linked) return `${from}->${to}:account-missing`;
+    }
+    return 'ready';
+  }, ids), { timeout: 30_000, intervals: [200, 400, 800] }).toBe('ready');
+}
+
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
+  await waitForRouteProfiles(page, route);
   await enqueueEntityTxs(page, from, signerId, [{
     type: 'htlcPayment',
     data: {

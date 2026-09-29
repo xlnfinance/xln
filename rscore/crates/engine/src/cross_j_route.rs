@@ -162,6 +162,26 @@ fn optional_address(value: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
+pub fn canonical_source_is_base(route: &CanonicalValue) -> Result<bool, String> {
+    let source = field(route, "source").ok_or_else(|| "SOURCE_MISSING".to_string())?;
+    let target = field(route, "target").ok_or_else(|| "TARGET_MISSING".to_string())?;
+    let source_j = text(source, "jurisdiction").ok_or_else(|| "SOURCE_JURISDICTION".to_string())?;
+    let target_j = text(target, "jurisdiction").ok_or_else(|| "TARGET_JURISDICTION".to_string())?;
+    let source_stack = parse_stack(source_j)?;
+    let target_stack = parse_stack(target_j)?;
+    let source_token = required_u32(source, "tokenId")?;
+    let target_token = required_u32(target, "tokenId")?;
+    let source_key = format!("stack:{}:{}:{source_token}", source_stack.0, source_stack.1);
+    let target_key = format!("stack:{}:{}:{target_token}", target_stack.0, target_stack.1);
+    let source_liquid = is_canonical_liquid_token(source_token);
+    let target_liquid = is_canonical_liquid_token(target_token);
+    Ok(if source_liquid != target_liquid {
+        !source_liquid
+    } else {
+        source_key <= target_key
+    })
+}
+
 pub fn canonical_book_and_venue(route: &CanonicalValue) -> Result<(String, String), String> {
     let source = field(route, "source").ok_or_else(|| "SOURCE_MISSING".to_string())?;
     let target = field(route, "target").ok_or_else(|| "TARGET_MISSING".to_string())?;
@@ -187,13 +207,7 @@ pub fn canonical_book_and_venue(route: &CanonicalValue) -> Result<(String, Strin
     let target_token = required_u32(target, "tokenId")?;
     let source_key = format!("stack:{}:{}:{source_token}", source_stack.0, source_stack.1);
     let target_key = format!("stack:{}:{}:{target_token}", target_stack.0, target_stack.1);
-    let source_liquid = is_canonical_liquid_token(source_token);
-    let target_liquid = is_canonical_liquid_token(target_token);
-    let source_is_base = if source_liquid != target_liquid {
-        !source_liquid
-    } else {
-        source_key <= target_key
-    };
+    let source_is_base = canonical_source_is_base(route)?;
     let (base, quote) = if source_is_base {
         (source_key, target_key)
     } else {

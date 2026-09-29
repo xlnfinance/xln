@@ -244,8 +244,13 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   );
   if (await auditCanonicalStateWhenDue(request, currentBlock, fromBlock, safeToBlock)) return;
   if (waitForPendingHistory(request)) return;
-  commitScannedWatcherCursor(session, services);
-  if (fromBlock > safeToBlock) return;
+  const committedCursor = commitScannedWatcherCursor(session, services);
+  if (fromBlock > safeToBlock) {
+    // Recovery can restore a certified cursor beyond the volatile scan counter.
+    // The canonical audit above checked its chain evidence; no new range is due.
+    rememberScanProgress(session, services, Math.min(committedCursor, safeToBlock));
+    return;
+  }
   const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock);
   request.trace.fromBlock = fromBlock;
   request.trace.toBlock = toBlock;

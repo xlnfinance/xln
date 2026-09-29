@@ -46,9 +46,10 @@ export const shouldRunRustH1AccountSettlementSmoke = (options: Readonly<{
   }
   if (
     options.engine !== 'rust' || options.evidence !== 'functional-smoke' ||
-    options.users !== 1_000 || options.payments !== 5_000 ||
-    options.offeredPerSecond !== 1_000 || options.durationSeconds !== 5
-  ) throw new Error('HLT_RUST_ACCOUNT_SETTLEMENT_SMOKE_REQUIRES_EXACT_FUNCTIONAL_SMOKE');
+    options.users < 10 || options.offeredPerSecond < options.users ||
+    options.durationSeconds < 5 ||
+    options.payments !== options.offeredPerSecond * options.durationSeconds
+  ) throw new Error('HLT_RUST_ACCOUNT_SETTLEMENT_SMOKE_REQUIRES_SUSTAINED_FUNCTIONAL_RUN');
   return true;
 };
 

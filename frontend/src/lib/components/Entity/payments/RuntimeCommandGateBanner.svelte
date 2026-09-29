@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { optionalString, readJsonUnknown, rejectExtraKeys, requireUnknownRecord } from '$lib/utils/boundary';
+  import { readJsonUnknown, rejectExtraKeys, requireString, requireUnknownRecord } from '$lib/utils/boundary';
 
   export let ready = false;
   export let reason: string | null = null;
@@ -14,17 +14,18 @@
 
   function decodeIncidentPayload(value: unknown): Incident[] {
     const record = requireUnknownRecord(value, 'DEBUG_INCIDENT_RESPONSE_INVALID');
-    rejectExtraKeys(record, ['ok', 'incidents'], 'DEBUG_INCIDENT_RESPONSE_EXTRA_FIELD');
+    rejectExtraKeys(record, ['ok', 'total', 'returned', 'highestEventId', 'incidents'], 'DEBUG_INCIDENT_RESPONSE_EXTRA_FIELD');
     if (record['ok'] !== true || !Array.isArray(record['incidents'])) throw new Error('DEBUG_INCIDENT_RESPONSE_INVALID');
     return record['incidents'].map((entry) => {
       const incident = requireUnknownRecord(entry, 'DEBUG_INCIDENT_INVALID');
-      rejectExtraKeys(incident, ['fingerprint', 'code'], 'DEBUG_INCIDENT_EXTRA_FIELD');
-      const fingerprint = optionalString(incident['fingerprint'], 'DEBUG_INCIDENT_FINGERPRINT_INVALID');
-      const code = optionalString(incident['code'], 'DEBUG_INCIDENT_CODE_INVALID');
-      const result: Incident = {};
-      if (fingerprint !== undefined) result.fingerprint = fingerprint;
-      if (code !== undefined) result.code = code;
-      return result;
+      rejectExtraKeys(incident, [
+        'fingerprint', 'state', 'source', 'code', 'message', 'runtimeId',
+        'firstSeen', 'lastSeen', 'count', 'firstEventId', 'lastEventId',
+      ], 'DEBUG_INCIDENT_EXTRA_FIELD');
+      return {
+        fingerprint: requireString(incident['fingerprint'], 'DEBUG_INCIDENT_FINGERPRINT_INVALID'),
+        code: requireString(incident['code'], 'DEBUG_INCIDENT_CODE_INVALID'),
+      };
     });
   }
 

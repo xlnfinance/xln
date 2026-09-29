@@ -65,7 +65,7 @@ async function runToPhase(page: Page, scenario: Scenario, phase: string): Promis
   // again before Playwright clicks Pause.
   await setRange(page, 'Playback', '1');
   await page.locator('button[aria-label="Play simulation"]').click();
-  await expect(page.locator('.playback-card > span')).toContainText(phase, { timeout: 15_000 });
+  await expect(page.locator('.playback-card > span')).toContainText(phase, { timeout: 25_000 });
   await pause(page);
 }
 

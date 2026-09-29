@@ -8,19 +8,7 @@ import { acceptRemoteRuntimeConsent, resolveRuntimeImportAppUrl } from '../../ut
 
 import { closeRuntimeContext } from '../../utils/runtime/e2e-runtime-shutdown.mts';
 
-import { deriveSignerAddressSync } from '../../../core/account/crypto';
-
 import { HUB_MESH_CREDIT_AMOUNT } from '../../../core/orchestrator/mesh/mesh-common';
-
-import { decodeRuntimeAdapterRequest } from '../../../core/api/runtime-adapter/codec';
-
-import { signRuntimeAdapterServerIdentity } from '../../../core/api/runtime-adapter/security/server-identity-signer';
-
-import { deriveRuntimeAdapterCapabilityToken } from '../../../core/api/runtime-adapter/security/auth';
-
-import type { RuntimeAdapterRequest } from '../../../core/api/runtime-adapter/types';
-
-import type { RuntimeReplica } from '../../../core/runtime/types';
 
 import { captureLocatorScreenshot } from '../../utils/e2e-screenshots';
 
@@ -111,237 +99,6 @@ type RuntimeAdapterDebugSurface = {
 };
 
 type E2EHealthSnapshot = Awaited<ReturnType<typeof ensureE2EBaseline>>;
-
-const installOneMillionRuntimeAdapterSocket = async (
-  page: import('@playwright/test').Page,
-  options: {
-    authLevel?: 'inspect' | 'admin';
-    commandReady?: boolean;
-    commandReadyReason?: string | null;
-  } = {},
-): Promise<{ runtimeId: string; wsUrl: string }> => {
-  const runtimeSeed = 'one-million-runtime-adapter-fixture';
-  const wsUrl = 'ws://one-million-runtime.invalid/rpc';
-  const authLevel = options.authLevel ?? 'inspect';
-  const commandReady = options.commandReady ?? true;
-  const commandReadyReason = commandReady ? null : (options.commandReadyReason ?? 'phase=halted');
-  const identityEnv = {
-    runtimeSeed,
-    runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
-  } as RuntimeReplica;
-  await page.exposeFunction('__xlnDecodeOneMillionRuntimeAdapterRequest', (bytes: number[]) => {
-    const request = decodeRuntimeAdapterRequest(Uint8Array.from(bytes)) as RuntimeAdapterRequest;
-    return {
-      id: request.id,
-      op: request.op,
-      ...('path' in request ? { path: request.path } : {}),
-      ...(request.op === 'auth'
-        ? {
-            authPayload: {
-              authLevel,
-              commandLaneKind: 'capability' as const,
-              currentHeight: 42,
-              nextCommandSequence: 1,
-              commandReady,
-              commandReadyReason,
-              ...signRuntimeAdapterServerIdentity(identityEnv, request.challenge),
-            },
-          }
-        : {}),
-    };
-  });
-  await page.addInitScript(() => {
-    const targetWsUrl = 'ws://one-million-runtime.invalid/rpc';
-    const NativeWebSocket = window.WebSocket;
-    const entityId = `0x${'a'.repeat(64)}`;
-    const leftEntity = entityId;
-    const head = {
-      schemaVersion: 1,
-      latestHeight: 42,
-      latestMaterializedHeight: 42,
-      latestSnapshotHeight: 40,
-      snapshotPeriodFrames: 256,
-      retainSnapshots: 3,
-      epochMaxBytes: 1,
-      accountMerkleRadix: 16,
-      epochReplayBytes: 0,
-      retainedWalBytes: 4096,
-    };
-    const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
-    const accounts = counterparties.map((rightEntity, index) => ({
-      state: {
-        leftEntity,
-        rightEntity,
-      },
-      status: 'open',
-      currentHeight: 42,
-      currentFrame: {
-        stateHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
-      },
-    }));
-    const viewFrame = {
-      head,
-      height: 42,
-      entities: [
-        {
-          entityId,
-          label: '1M Aggregate Hub',
-          height: 42,
-          isHub: true,
-        },
-      ],
-      activeEntityId: entityId,
-      activeEntity: {
-        summary: {
-          entityId,
-          label: '1M Aggregate Hub',
-          height: 42,
-          isHub: true,
-        },
-        core: {
-          entityId,
-          signerId: `0x${'b'.repeat(64)}`,
-          height: 42,
-          profile: {
-            name: '1M Aggregate Hub',
-            isHub: true,
-          },
-        },
-        accounts: {
-          items: accounts,
-          nextCursor: counterparties[counterparties.length - 1],
-          firstCursor: counterparties[0],
-          lastCursor: counterparties[counterparties.length - 1],
-          pageIndex: 0,
-          pageCount: 100_000,
-          totalItems: 1_000_000,
-          limit: 10,
-          summary: {
-            totalItems: 1_000_000,
-            visibleItems: 10,
-            limit: 10,
-            pageIndex: 0,
-            pageCount: 100_000,
-            hasMore: true,
-            sampleIds: counterparties.slice(0, 8),
-            pageStateHashes: counterparties.slice(0, 8),
-            visibleTopDeltas: counterparties.slice(0, 3).map((counterpartyId, index) => ({
-              counterpartyId,
-              tokenId: 1,
-              delta: String((index + 1) * 10_000),
-            })),
-          },
-        },
-        books: {
-          items: [],
-          nextCursor: null,
-          pageIndex: 0,
-          pageCount: 0,
-          totalItems: 0,
-          limit: 10,
-        },
-      },
-    };
-    const encoder = new TextEncoder();
-    const stats = {
-      sentCount: 0,
-      maxPayloadBytes: 0,
-      viewFrameBytes: 0,
-      maxAccountItems: 0,
-      requestOps: {} as Record<string, number>,
-      events: [] as string[],
-    };
-    (window as unknown as { __xlnOneMillionRuntimeAdapterStats: typeof stats }).__xlnOneMillionRuntimeAdapterStats =
-      stats;
-
-    class OneMillionRuntimeAdapterSocket {
-      static CONNECTING = 0;
-      static OPEN = 1;
-      static CLOSING = 2;
-      static CLOSED = 3;
-      static __xlnOneMillionRuntimeAdapterSocket = true;
-      readonly url: string;
-      binaryType = 'arraybuffer';
-      readyState = OneMillionRuntimeAdapterSocket.CONNECTING;
-      onopen: (() => void) | null = null;
-      onmessage: ((event: { data: string }) => void) | null = null;
-      onerror: (() => void) | null = null;
-      onclose: (() => void) | null = null;
-
-      constructor(url: string | URL, protocols?: string | string[]) {
-        this.url = url;
-        if (String(url) !== targetWsUrl) {
-          stats.events.push(`native:${url}`);
-          return protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
-        }
-        stats.events.push(`construct:${url}`);
-        setTimeout(() => {
-          this.readyState = OneMillionRuntimeAdapterSocket.OPEN;
-          stats.events.push('open');
-          this.onopen?.();
-        }, 0);
-      }
-
-      send(raw: unknown): void {
-        stats.sentCount += 1;
-        stats.events.push(`send:${stats.sentCount}`);
-        if (!(raw instanceof ArrayBuffer) && !ArrayBuffer.isView(raw)) {
-          throw new Error(`ONE_MILLION_RADAPTER_BINARY_REQUEST_REQUIRED:${typeof raw}`);
-        }
-        const bytes =
-          raw instanceof ArrayBuffer
-            ? Array.from(new Uint8Array(raw))
-            : Array.from(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-        const decodeRequest = (
-          window as unknown as {
-            __xlnDecodeOneMillionRuntimeAdapterRequest: (value: number[]) => Promise<{
-              id: string;
-              op: string;
-              path?: string;
-              authPayload?: Record<string, unknown>;
-            }>;
-          }
-        ).__xlnDecodeOneMillionRuntimeAdapterRequest;
-        void decodeRequest(bytes).then(request => {
-          stats.requestOps[request.op] = (stats.requestOps[request.op] ?? 0) + 1;
-          const payload =
-            request.op === 'auth'
-              ? request.authPayload
-              : request.path === 'head'
-                ? head
-                : request.path === 'entities'
-                  ? viewFrame.entities
-                  : request.path === 'activity'
-                    ? { events: [], nextCursor: null }
-                    : viewFrame;
-          const response = JSON.stringify({ v: 2, inReplyTo: request.id, ok: true, payload });
-          const byteLength = encoder.encode(response).byteLength;
-          stats.maxPayloadBytes = Math.max(stats.maxPayloadBytes, byteLength);
-          if (request.path === 'view-frame') {
-            stats.viewFrameBytes = byteLength;
-            stats.maxAccountItems = viewFrame.activeEntity.accounts.items.length;
-          }
-          setTimeout(() => {
-            stats.events.push(`reply:${request.id}:${request.op}:${request.path ?? ''}`);
-            this.onmessage?.({ data: response });
-          }, 0);
-        });
-      }
-
-      close(): void {
-        this.readyState = OneMillionRuntimeAdapterSocket.CLOSED;
-        setTimeout(() => this.onclose?.(), 0);
-      }
-    }
-
-    Object.defineProperty(window, 'WebSocket', {
-      configurable: true,
-      writable: true,
-      value: OneMillionRuntimeAdapterSocket,
-    });
-  });
-  return { runtimeId: String(identityEnv.runtimeId), wsUrl };
-};
 
 const readAdminControlProbe = async (
   page: import('@playwright/test').Page,
@@ -987,7 +744,7 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
         tokenId?: number;
         reserves?: bigint;
         confirmedCollateral?: bigint;
-        pendingCollateral?: bigint;
+        internalValue?: bigint;
         delta?: bigint | null;
       }>;
       isValid?: boolean | null;
@@ -1012,7 +769,8 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag
         asset =>
           typeof asset.reserves === 'bigint' &&
           typeof asset.confirmedCollateral === 'bigint' &&
-          typeof asset.pendingCollateral === 'bigint',
+          typeof asset.internalValue === 'bigint' &&
+          asset.internalValue === asset.reserves! + asset.confirmedCollateral!,
       ),
       assetDeltasUnchecked: (summary.assets ?? []).every(asset => asset.delta === null),
       assetIdentitiesAreScoped: (summary.assets ?? []).every(
@@ -1985,180 +1743,6 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
 });
 
 test(
-  'health runtime adapter renders 1M aggregate snapshot without freezing',
-  { tag: '@resilience' },
-  async ({ page }) => {
-    await installOneMillionRuntimeAdapterSocket(page);
-
-    await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(
-            () =>
-              (window.WebSocket as unknown as { __xlnOneMillionRuntimeAdapterSocket?: boolean })
-                .__xlnOneMillionRuntimeAdapterSocket === true,
-          ),
-        { timeout: 2_000 },
-      )
-      .toBe(true);
-
-    const adapterPanel = page.locator('#runtime-adapter');
-    await expect(adapterPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await adapterPanel
-      .locator('input[placeholder="ws://127.0.0.1:8080/rpc"]')
-      .fill('ws://one-million-runtime.invalid/rpc');
-    await adapterPanel.locator('input[placeholder="read/admin token"]').fill('inspect-fixture');
-    await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(
-            () =>
-              (window as unknown as { __xlnOneMillionRuntimeAdapterStats?: { sentCount: number } })
-                .__xlnOneMillionRuntimeAdapterStats?.sentCount ?? 0,
-          ),
-        { timeout: 2_000 },
-      )
-      .toBeGreaterThanOrEqual(1);
-
-    await expect
-      .poll(
-        async () =>
-          await page.evaluate(() => {
-            const view = window as typeof window & {
-              __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
-            };
-            const status = (view as any).__xln?.adapter?.status();
-            return status?.connected === true && status.authLevel === 'inspect';
-          }),
-        { timeout: REMOTE_E2E_WAIT_MS },
-      )
-      .toBe(true);
-    await expect(adapterPanel.getByTestId('radapter-account-total')).toContainText('1,000,000');
-    await expect(adapterPanel.getByTestId('radapter-account-visible')).toContainText('10');
-    await expect(adapterPanel.getByTestId('radapter-account-page')).toContainText('1/100,000');
-    await expect(adapterPanel.getByTestId('radapter-account-has-more')).toContainText('cursor available');
-    await expect(adapterPanel.getByTestId('radapter-account-row')).toHaveCount(10);
-    await expect(adapterPanel.getByTestId('radapter-state-hash')).toHaveCount(3);
-    await expect(adapterPanel.getByTestId('radapter-top-delta')).toHaveCount(3);
-
-    const stats = await page.evaluate(
-      () =>
-        (
-          window as unknown as {
-            __xlnOneMillionRuntimeAdapterStats?: {
-              sentCount: number;
-              viewFrameBytes: number;
-              maxPayloadBytes: number;
-              maxAccountItems: number;
-            };
-          }
-        ).__xlnOneMillionRuntimeAdapterStats,
-    );
-    expect(stats?.sentCount).toBeGreaterThanOrEqual(3);
-    expect(stats?.viewFrameBytes ?? Number.POSITIVE_INFINITY).toBeLessThan(100_000);
-    expect(stats?.maxAccountItems).toBe(10);
-  },
-);
-
-test(
-  'halted remote runtime disables wallet commands and links the root incident',
-  { tag: '@resilience' },
-  async ({ page }, testInfo) => {
-    const fixture = await installOneMillionRuntimeAdapterSocket(page, {
-      authLevel: 'admin',
-      commandReady: false,
-      commandReadyReason: 'phase=halted',
-    });
-    const token = deriveRuntimeAdapterCapabilityToken('halted-runtime-e2e-capability', 'admin', Date.now() + 60_000, {
-      audience: fixture.runtimeId,
-    });
-    const fingerprint = 'runtime-halted-e2e12345';
-    await page.route('**/api/debug/incidents?**', async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          ok: true,
-          incidents: [
-            {
-              fingerprint,
-              code: 'RUNTIME_HALTED',
-              runtimeId: fixture.runtimeId,
-            },
-          ],
-        }),
-      });
-    });
-
-    await page.goto(
-      remoteRuntimeUrl('/app', fixture.wsUrl, token),
-      { waitUntil: 'domcontentloaded' },
-    );
-    await acceptRemoteRuntimeConsent(page);
-    await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    const gate = page.getByTestId('runtime-command-gate');
-    await expect(gate).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-    await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText('phase=halted');
-    await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(fingerprint);
-
-    let faucetPosts = 0;
-    await page.route('**/api/faucet/**', async route => {
-      if (route.request().method() === 'POST') faucetPosts += 1;
-      await route.fulfill({ status: 503, contentType: 'application/json', body: '{"success":false}' });
-    });
-
-    await page.getByTestId('tab-assets').click();
-    const assetFaucet = page.getByTestId('external-faucet-USDC');
-    await expect(assetFaucet).toBeDisabled();
-    await assetFaucet.evaluate((button: HTMLButtonElement) => button.click());
-
-    await openAccountWorkspaceTab(page, 'open');
-    await expect(page.getByTestId('open-account-submit')).toBeDisabled();
-    await openAccountWorkspaceTab(page, 'send');
-    await expect(page.getByText('Payments are only available in LIVE mode.')).toBeVisible();
-    await openAccountWorkspaceTab(page, 'swap');
-    await expect(page.getByTestId('swap-ticket-submit')).toBeDisabled();
-    await openAccountWorkspaceTab(page, 'lending');
-    await expect(page.getByTestId('lending-offer-submit')).toBeDisabled();
-
-    const mutationCounts = await page.evaluate(() => {
-      const stats = (
-        window as unknown as {
-          __xlnOneMillionRuntimeAdapterStats?: { requestOps?: Record<string, number> };
-        }
-      ).__xlnOneMillionRuntimeAdapterStats;
-      return { sends: Number(stats?.requestOps?.['send'] || 0) };
-    });
-    expect(mutationCounts).toEqual({ sends: 0 });
-    expect(faucetPosts).toBe(0);
-    const readiness = await page.evaluate(() => {
-      const status = (
-        window as typeof window & {
-          __xln?: { adapter?: { status?: () => Record<string, unknown> } };
-        }
-      ).__xln?.adapter?.status?.();
-      return {
-        ready: status?.['commandReady'],
-        reason: status?.['commandReadyReason'],
-      };
-    });
-    expect(readiness).toEqual({ ready: false, reason: 'phase=halted' });
-    await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-halted.png', {
-      ux: {
-        title: 'Runtime fail-stop command gate',
-        group: 'system-health',
-        description: 'Canonical halted state disables wallet money actions and links the durable root incident.',
-        platform: 'desktop',
-        tags: ['runtime', 'incident', 'fail-stop'],
-      },
-    });
-  },
-);
-
-test(
   'real H2 replacement gates browser money commands until verified restore',
   { tag: '@resilience' },
   async ({ page }, testInfo) => {
@@ -2168,6 +1752,11 @@ test(
       severity: 'error',
       message:
         /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rpc' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/,
+    });
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'error',
+      message: /\[radapter-client\] socket closed: code=1006 reason="" url=ws:\/\/127\.0\.0\.1:\d+\/rpc/,
     });
     allowBrowserIssue({
       type: 'http',

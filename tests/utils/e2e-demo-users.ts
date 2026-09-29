@@ -1262,6 +1262,29 @@ export async function switchToRuntime(page: Page, label: string): Promise<void> 
   await switchToRuntimeId(page, runtimeId);
 }
 
+const unlockSavedRuntimeAfterSwitch = async (page: Page, runtimeId: string): Promise<void> => {
+  const selected = page.getByTestId('context-current').first();
+  const welcome = page.getByRole('heading', { name: 'Welcome to xln' });
+  await expect(selected.or(welcome)).toBeVisible({ timeout: 20_000 });
+  if (!(await welcome.isVisible())) return;
+
+  const wallet = page.locator('button.wallet').filter({ hasText: runtimeId.slice(-8) });
+  await expect(wallet).toHaveCount(1);
+  await wallet.click();
+  const setup = page.getByRole('heading', { name: 'Set a local password', exact: true });
+  const unlock = page.getByRole('heading', { name: 'Unlock wallet', exact: true });
+  await expect(setup.or(unlock)).toBeVisible({ timeout: 20_000 });
+  const password = 'e2e-demo-switch-password';
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  if (await setup.isVisible()) {
+    await page.getByLabel('Confirm password', { exact: true }).fill(password);
+    await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  } else {
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+  }
+  await expect(selected).toBeVisible({ timeout: 20_000 });
+};
+
 export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<void> {
   const normalizedRuntimeId = runtimeId.toLowerCase();
   const currentRuntimeId = await page.evaluate(() => {
@@ -1306,6 +1329,7 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
   } finally {
     resetRuntimePageQuiescence(page);
   }
+  await unlockSavedRuntimeAfterSwitch(page, normalizedRuntimeId);
   await waitForActiveRuntimeId(page, normalizedRuntimeId);
   await waitForRuntimeReady(page, normalizedRuntimeId);
   await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);

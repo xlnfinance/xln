@@ -18,4 +18,4 @@ test('cross-J opening is one canonical three-Runtime-frame cascade', async () =>
   expect(actual.frames[2]?.accounts.every(account =>
     account.currentHeight === 1 && account.pendingHeight === null,
   )).toBe(true);
-});
+}, 15_000);

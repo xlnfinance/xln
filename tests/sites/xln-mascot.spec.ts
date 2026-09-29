@@ -207,7 +207,7 @@ test.describe('xln mascot assistant', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await expect(page.locator('.loading-screen')).toHaveCount(0, { timeout: 30_000 });
-    await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('xln-mascot-root')).toBeVisible({ timeout: 30_000 });
     const lightToggle = page.getByTestId('xln-mascot-toggle');
     await expect(lightToggle).toBeVisible();
     await lightToggle.focus();

@@ -18,7 +18,7 @@ import {
 } from '../../../runtime';
 import { computeCanonicalStateHashFromEnv } from '../../../storage/canonical-hash';
 import { createCheckpointBarrierRuntimeTx } from '../../../runtime/checkpoint/barrier';
-import { resetRuntimeActivityViewAtFloor } from '../../../storage/history/runtime-activity-view';
+import { readRuntimeActivityViewStatus, resetRuntimeActivityViewAtFloor } from '../../../storage/history/runtime-activity-view';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -165,6 +165,10 @@ describe('restored checkpoint conflict policy', () => {
     cleanupPaths.push(resolveDbPath(restored, 'core'));
     try {
       expect(computeCanonicalStateHashFromEnv(restored)).toBe(expectedHash);
+      expect(await readRuntimeActivityViewStatus(restored)).toMatchObject({
+        latestHeight: recording.targetHeight,
+        unavailableThroughHeight: recording.targetHeight,
+      });
     } finally {
       await closeRecoveryEnv(restored);
       await closeRecoveryEnv(source.env);
@@ -237,6 +241,10 @@ describe('restored checkpoint conflict policy', () => {
     base.env.state.timestamp = 1_000;
     base.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(base.env);
+    expect(await readRuntimeActivityViewStatus(base.env)).toMatchObject({
+      latestHeight: 1,
+      unavailableThroughHeight: 1,
+    });
     await expect(readPersistedRuntimeActivityJournal(base.env, 1)).rejects.toThrow(
       'RUNTIME_ACTIVITY_VIEW_UNAVAILABLE:height=1:through=1',
     );

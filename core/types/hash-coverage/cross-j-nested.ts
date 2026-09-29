@@ -135,6 +135,8 @@ export const HASHABLE_CROSS_J_SWAP_ROUTE_FIELDS = [
   'fillDenominator',
   'filledSourceAmount',
   'filledTargetAmount',
+  'executionSourceAmount',
+  'executionTargetAmount',
   'pendingClearRequestedAt',
   'domain',
   'timePolicy',

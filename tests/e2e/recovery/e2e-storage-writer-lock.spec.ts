@@ -37,7 +37,7 @@ test.describe('Browser storage writer serialization', () => {
 
     // A static same-origin document avoids booting the wallet's own runtime.
     // The test imports the exact browser bundle that production loads.
-    await page.goto('/llms.txt', { waitUntil: 'domcontentloaded' });
+    await page.goto('/install.sh', { waitUntil: 'domcontentloaded' });
     const namespace = `xln-browser-storage-writer-${process.pid}-${testInfo.workerIndex}`;
     const runtimeId = `0x${(process.pid + testInfo.workerIndex + 1).toString(16).padStart(40, '0')}`;
 

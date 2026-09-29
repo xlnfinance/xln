@@ -1,15 +1,11 @@
 import type { EntityTx } from '../../types/entity-tx';
 import type { CrossJurisdictionFillInstruction } from './orderbook';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 
 export type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
 export type CrossJurisdictionFillProgressData = CrossJurisdictionFillNoticeTx['data'];
 
-/**
- * Hub-internal fill progress: one uint16 ratio per order. The book owner
- * matched (or cancelled) the order; the source Hub needs the same ratio to
- * request the clear and to build the ladder reveal. It never enters bilateral
- * Account consensus: the reveal is the only settlement authority for both legs.
- */
+/** Hub-internal ratio and exact book execution; only the reveal authorizes a close. */
 export const buildCrossJurisdictionFillProgressData = (
   instruction: CrossJurisdictionFillInstruction,
 ): CrossJurisdictionFillProgressData => ({
@@ -17,6 +13,8 @@ export const buildCrossJurisdictionFillProgressData = (
   ...(instruction.route.routeHash ? { routeHash: instruction.route.routeHash } : {}),
   fillSeq: instruction.fillSeq,
   cumulativeFillRatio: instruction.fillRatio,
+  cumulativeExecutionSourceAmount: (instruction.route.executionSourceAmount ?? 0n) + instruction.executionSourceAmount,
+  cumulativeExecutionTargetAmount: (instruction.route.executionTargetAmount ?? 0n) + instruction.executionTargetAmount,
   cancelRemainder: instruction.cancelRemainder,
 });
 
@@ -26,3 +24,19 @@ export const buildCrossJurisdictionFillNoticeTx = (
   type: 'crossJurisdictionFillNotice',
   data: buildCrossJurisdictionFillProgressData(instruction),
 });
+
+export const applyCrossJurisdictionExecutionProgress = (
+  route: CrossJurisdictionSwapRoute,
+  data: CrossJurisdictionFillProgressData,
+): void => {
+  const source = data.cumulativeExecutionSourceAmount;
+  const target = data.cumulativeExecutionTargetAmount;
+  if (
+    source < (route.executionSourceAmount ?? 0n) ||
+    target < (route.executionTargetAmount ?? 0n) ||
+    source > route.source.amount ||
+    target > route.target.amount
+  ) throw new Error(`CROSS_J_EXECUTION_PROGRESS_INVALID:${route.orderId}`);
+  route.executionSourceAmount = source;
+  route.executionTargetAmount = target;
+};

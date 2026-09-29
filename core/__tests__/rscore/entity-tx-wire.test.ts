@@ -54,7 +54,7 @@ const CASES = [
   { type: 'chat', data: { from: 'owner', message: 'hello' } },
   { type: 'chatMessage', data: { message: 'hello', timestamp: 100, metadata: { type: 'test', counterpartyId: B } } },
   { type: 'crossJurisdictionBookOrderRemoved', data: { orderId: 'order-1', sourceEntityId: A, sourceAccountId: B, route, removedAt: 100, reason: 'done' } },
-  { type: 'crossJurisdictionFillNotice', data: { orderId: 'order-1', routeHash: H, fillSeq: 1, cumulativeFillRatio: 65_535, cancelRemainder: false } },
+  { type: 'crossJurisdictionFillNotice', data: { orderId: 'order-1', routeHash: H, fillSeq: 1, cumulativeFillRatio: 65_535, cumulativeExecutionSourceAmount: 5n, cumulativeExecutionTargetAmount: 7n, cancelRemainder: false } },
   { type: 'crossJurisdictionForceSiblingDispute', data: { routeId: 'route-1', observedCounterpartyEntityId: B, observedAt: 100 } },
   { type: 'crossJurisdictionSalvage', data: { routeId: 'route-1', binary: '0x01', fillRatio: 1, sourceEntityId: A, sourceCounterpartyEntityId: B, observedAt: 100 } },
   { type: 'crossPullClose', data: { counterpartyEntityId: B, pullId: 'pull-1', binary: '0x01', proof, route, description: 'close' } },

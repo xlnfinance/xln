@@ -104,6 +104,47 @@ fn invalid(kind: EntityTxKind, detail: impl Into<String>) -> EntityKernelError {
     }
 }
 
+fn cooperative_source_spend(
+    route: &CanonicalValue,
+    proof: &CanonicalValue,
+    kind: EntityTxKind,
+) -> Result<Option<CanonicalValue>, EntityKernelError> {
+    let gross = required_bigint(proof, "cumulativeSourceAmount", kind)?;
+    if xln_rscore_engine::cross_j_route::canonical_source_is_base(route)
+        .map_err(|detail| invalid(kind, detail))?
+        || gross == BigInt::from(0)
+    {
+        return Ok(None);
+    }
+    let exact = required_bigint(route, "executionSourceAmount", kind)?;
+    if exact <= BigInt::from(0) || exact > gross {
+        return Err(invalid(
+            kind,
+            format!("SOURCE_EXECUTION_INVALID:exact={exact}:gross={gross}"),
+        ));
+    }
+    Ok(Some(CanonicalValue::BigInt(exact)))
+}
+
+fn source_close_data(
+    route: &CanonicalValue,
+    pull_id: &str,
+    binary: &str,
+    proof: CanonicalValue,
+    kind: EntityTxKind,
+) -> Result<CanonicalValue, EntityKernelError> {
+    let exact = cooperative_source_spend(route, &proof, kind)?;
+    let mut fields = vec![
+        ("pullId".into(), string(pull_id)),
+        ("binary".into(), string(binary)),
+        ("proof".into(), proof),
+    ];
+    if let Some(exact) = exact {
+        fields.push(("executionAmount".into(), exact));
+    }
+    Ok(CanonicalValue::Object(fields))
+}
+
 /// TS `MalformedEntityFrameInputError`: the command is wrong, not the runtime.
 fn rejected(kind: EntityTxKind, detail: impl Into<String>) -> EntityKernelError {
     EntityKernelError::rejected(kind.as_str(), detail)
@@ -1643,11 +1684,7 @@ fn apply_materialize_clear(
         tx.kind,
     )?;
     let account_txs = vec![AccountTx::CrossPullClose {
-        data: CanonicalValue::Object(vec![
-            ("pullId".into(), string(&source_pull_id)),
-            ("binary".into(), string(binary)),
-            ("proof".into(), expected_proof),
-        ]),
+        data: source_close_data(&route, &source_pull_id, binary, expected_proof, tx.kind)?,
     }];
     collection(&mut state.cross_jurisdiction_swaps).insert(order_id.clone(), route)?;
     Ok(CrossJurisdictionApplyResult {
@@ -2251,6 +2288,7 @@ fn apply_book_fill_to_state(
         kind,
         "CROSS_J_BOOK_PROGRESS_INVALID",
     )?;
+    committed::apply_execution_progress(&mut route, data, kind)?;
     if cancel {
         set(&mut route, "status", string("clear_requested"))?;
         set(&mut route, "updatedAt", now.clone())?;
@@ -3497,17 +3535,22 @@ fn apply_cross_pull_close(
             number(state.timestamp, tx.kind, "TIMESTAMP")?,
         )?;
     }
+    let account_close_data = if source_role {
+        source_close_data(&route, pull_id, binary, proof.clone(), tx.kind)?
+    } else {
+        CanonicalValue::Object(vec![
+            ("pullId".into(), string(pull_id)),
+            ("binary".into(), string(binary)),
+            ("proof".into(), proof.clone()),
+        ])
+    };
     collection(&mut state.cross_jurisdiction_swaps).insert(order_id, route)?;
     Ok(CrossJurisdictionApplyResult {
         outputs: vec![LocalEntityOutput::non_mutating_wake(local)],
         proposal_work: vec![AccountProposalWork {
             account_id: counterparty,
             txs: vec![AccountTx::CrossPullClose {
-                data: CanonicalValue::Object(vec![
-                    ("pullId".into(), string(pull_id)),
-                    ("binary".into(), string(binary)),
-                    ("proof".into(), proof.clone()),
-                ]),
+                data: account_close_data,
             }],
         }],
         ..CrossJurisdictionApplyResult::default()
@@ -4901,7 +4944,18 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
     if &market.filled_source + &execution_source_amount > market.source_total
         || &market.filled_target + &execution_target_amount > market.target_total
     {
-        return Ok(None);
+        return Err(invalid(
+            kind,
+            format!(
+                "CROSS_J_EXECUTION_EXCEEDS_ROUTE:order={offer_id}:source={}+{}/{}:target={}+{}/{}",
+                market.filled_source,
+                execution_source_amount,
+                market.source_total,
+                market.filled_target,
+                execution_target_amount,
+                market.target_total,
+            ),
+        ));
     }
     let fill_ratio = exact_fill_ratio_to_u16(
         &(&market.filled_target + &execution_target_amount),
@@ -4937,6 +4991,20 @@ pub(crate) fn build_cross_jurisdiction_book_fill(
         (
             "cancelRemainder".into(),
             CanonicalValue::Bool(cancel_remainder),
+        ),
+        (
+            "cumulativeExecutionSourceAmount".into(),
+            CanonicalValue::BigInt(
+                bigint(&route, "executionSourceAmount").unwrap_or_default()
+                    + execution_source_amount,
+            ),
+        ),
+        (
+            "cumulativeExecutionTargetAmount".into(),
+            CanonicalValue::BigInt(
+                bigint(&route, "executionTargetAmount").unwrap_or_default()
+                    + execution_target_amount,
+            ),
         ),
     ]);
     Ok(Some(CrossJurisdictionBookFill {
@@ -5054,9 +5122,20 @@ pub(crate) fn cross_jurisdiction_market(
     };
     let (policy, _) = crate::canonical_pair_policy(base_token_id, quote_token_id, dimensions);
     let step = BigInt::from(policy.price_step_ticks.max(1));
+    // Separately rounded partial claims must not change the original limit price.
+    let price_base = if source_is_base {
+        &source_total
+    } else {
+        &target_total
+    };
+    let price_quote = if source_is_base {
+        &target_total
+    } else {
+        &source_total
+    };
     let numerator =
-        &quote_amount * ten_pow(dimensions.base_token_decimals) * BigInt::from(10_000_u32);
-    let denominator = &base_amount * ten_pow(dimensions.quote_token_decimals);
+        price_quote * ten_pow(dimensions.base_token_decimals) * BigInt::from(10_000_u32);
+    let denominator = price_base * ten_pow(dimensions.quote_token_decimals);
     let mut price_ticks = &numerator / &denominator;
     if side == Side::Ask {
         if &numerator % &denominator != BigInt::from(0) {
@@ -5442,6 +5521,51 @@ mod tests {
                 changed_at_height: 0,
             },
         }
+    }
+
+    #[test]
+    fn partial_cross_j_remainder_preserves_original_limit_price() {
+        let kind = EntityTxKind::AdmitCrossJurisdictionBookOrder;
+        let mut raw = route("resting", true);
+        let mut source = field(&raw, "source").unwrap().clone();
+        let mut target = field(&raw, "target").unwrap().clone();
+        set(
+            &mut source,
+            "amount",
+            CanonicalValue::BigInt(BigInt::from(40_000_000_000_000_000u64)),
+        )
+        .unwrap();
+        set(
+            &mut target,
+            "amount",
+            CanonicalValue::BigInt(BigInt::from(100_000_000u64)),
+        )
+        .unwrap();
+        set(&mut raw, "source", source).unwrap();
+        set(&mut raw, "target", target).unwrap();
+        let initial = cross_jurisdiction_market(&raw).expect("initial market");
+        set(&mut raw, "status", string("partially_filled")).unwrap();
+        set(
+            &mut raw,
+            "fillNumerator",
+            CanonicalValue::BigInt(BigInt::from(16_383)),
+        )
+        .unwrap();
+        set(
+            &mut raw,
+            "fillDenominator",
+            CanonicalValue::BigInt(BigInt::from(65_535)),
+        )
+        .unwrap();
+        set(
+            &mut raw,
+            "cumulativeFillRatio",
+            number(16_383, kind, "RATIO").unwrap(),
+        )
+        .unwrap();
+        let partial = cross_jurisdiction_market(&raw).expect("partial market");
+        assert_eq!(initial.price_ticks, BigInt::from(25_000_000));
+        assert_eq!(partial.price_ticks, initial.price_ticks);
     }
 
     #[test]

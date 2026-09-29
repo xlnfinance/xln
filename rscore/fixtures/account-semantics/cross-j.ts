@@ -6,7 +6,9 @@ import { applyAccountTxToMutableReplica } from '../../../core/account/tx/apply';
 import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
+  buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
+  deriveCrossJurisdictionPrivateSeed,
 } from '../../../core/extensions/cross-j';
 import type { AccountReplica, AccountTx } from '../../../core/types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../core/types/cross-jurisdiction';
@@ -44,11 +46,14 @@ type CrossJInputs = Readonly<{
   targetLock: Extract<AccountTx, { type: 'cross_pull_lock' }>;
   swapOffer: Extract<AccountTx, { type: 'swap_offer' }>;
   sourceClose: Extract<AccountTx, { type: 'cross_pull_close' }>;
+  buyerSourceLock: Extract<AccountTx, { type: 'cross_pull_lock' }>;
+  buyerSwapOffer: Extract<AccountTx, { type: 'swap_offer' }>;
+  buyerSourceClose: Extract<AccountTx, { type: 'cross_pull_close' }>;
 }>;
 
-const route = (): CrossJurisdictionSwapRoute => {
+const route = (buyer = false): CrossJurisdictionSwapRoute => {
   const prepared = buildPreparedCrossJurisdictionRoute({
-    orderId: 'order-1',
+    orderId: buyer ? 'buyer-order' : 'order-1',
     makerEntityId: SOURCE_USER,
     hubEntityId: SOURCE_HUB,
     sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
@@ -58,14 +63,14 @@ const route = (): CrossJurisdictionSwapRoute => {
       entityId: SOURCE_USER,
       counterpartyEntityId: SOURCE_HUB,
       tokenId: 1,
-      amount: 100n,
+      amount: buyer ? 78_000_000n : 100n,
     },
     target: {
       jurisdiction: `stack:31338:${address('77')}`,
       entityId: TARGET_HUB,
       counterpartyEntityId: TARGET_USER,
       tokenId: 2,
-      amount: 200n,
+      amount: buyer ? 30_000_000_000_000_000n : 200n,
     },
     status: 'resting',
     createdAt: 1_000,
@@ -75,7 +80,7 @@ const route = (): CrossJurisdictionSwapRoute => {
   return { ...prepared, status: 'resting' };
 };
 
-const inputs = (prepared: CrossJurisdictionSwapRoute): CrossJInputs => {
+const inputs = (prepared: CrossJurisdictionSwapRoute): Pick<CrossJInputs, 'sourceLock' | 'targetLock' | 'swapOffer' | 'sourceClose'> => {
   const sourcePull = prepared.sourcePull;
   const targetPull = prepared.targetPull;
   if (!sourcePull || !targetPull) throw new Error('CROSS_J_VECTOR_PULLS_MISSING');
@@ -133,11 +138,12 @@ const makeAccount = (
   tokenId: number,
   chainId: number,
   depositoryAddress: string,
+  highCapacity = false,
 ): AccountReplica => {
   const delta = createDefaultDelta(tokenId);
-  delta.collateral = 100n;
-  delta.leftCreditLimit = 1_000n;
-  delta.rightCreditLimit = 1_000n;
+  delta.collateral = highCapacity ? 100_000_000n : 100n;
+  delta.leftCreditLimit = highCapacity ? 100_000_000_000_000_000n : 1_000n;
+  delta.rightCreditLimit = highCapacity ? 100_000_000_000_000_000n : 1_000n;
   return {
     state: {
       leftEntity,
@@ -206,10 +212,31 @@ const applyStep = async (
 
 export const executeCrossJAccountSemanticVector = async () => {
   const prepared = route();
-  const txs = inputs(prepared);
+  const buyer = route(true);
+  const buyerBase = inputs(buyer);
+  const buyerSeed = deriveCrossJurisdictionPrivateSeed('cross-j-account-semantic-v1', buyer);
+  const buyerBinary = buildCrossJurisdictionPullReveal(buyer, 65_535, buyerSeed).binary;
+  const buyerProof = buildCrossJurisdictionCloseProof({
+    ...buyer, status: 'clearing', fillNumerator: 65_535n,
+    fillDenominator: 65_535n, cumulativeFillRatio: 65_535, claimedRatio: 65_535,
+  }, buyerBinary);
+  const txs: CrossJInputs = {
+    ...inputs(prepared),
+    buyerSourceLock: buyerBase.sourceLock,
+    buyerSwapOffer: { ...buyerBase.swapOffer, data: {
+      ...buyerBase.swapOffer.data, offerId: buyer.orderId,
+      giveAmount: 78_000_000n, wantAmount: 30_000_000_000_000_000n, wantTokenDecimals: 18,
+      minNetReceive: 30_000_000_000_000_000n, priceTicks: 26_000_000n,
+    } },
+    buyerSourceClose: { type: 'cross_pull_close', data: {
+      pullId: buyer.sourcePull!.pullId, binary: buyerBinary,
+      proof: buyerProof, executionAmount: 75_000_000n,
+    } },
+  };
   const sourceOffer = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'));
   const sourceClose = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'));
   const targetLock = makeAccount(TARGET_HUB, TARGET_USER, 2, 31_338, address('77'));
+  const buyerAccount = makeAccount(SOURCE_USER, SOURCE_HUB, 1, 31_337, address('88'), true);
   return {
     version: 1,
     canonicalSource: 'TypeScript applyAccountTxToMutableReplica',
@@ -226,6 +253,11 @@ export const executeCrossJAccountSemanticVector = async () => {
       ] },
       { name: 'target-lock', steps: [
         await applyStep(targetLock, 'targetLock', txs.targetLock, true, 2, 1_000, 10),
+      ] },
+      { name: 'source-buyer-price-improvement', steps: [
+        await applyStep(buyerAccount, 'buyerSourceLock', txs.buyerSourceLock, false, 1, 1_000, 10),
+        await applyStep(buyerAccount, 'buyerSwapOffer', txs.buyerSwapOffer, true, 1, 1_000, 10),
+        await applyStep(buyerAccount, 'buyerSourceClose', txs.buyerSourceClose, false, 1, 2_000, 20),
       ] },
     ],
   };

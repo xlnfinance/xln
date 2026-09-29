@@ -2,7 +2,7 @@ import { allowBrowserIssue, expect, test } from '../../global-setup.mts';
 import { API_BASE_URL, APP_BASE_URL } from '../../utils/e2e-baseline';
 
 test('browser console errors enter the shared unread incident service', { tag: '@functional' }, async ({ page }) => {
-  await page.goto(APP_BASE_URL, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'load' });
   allowBrowserIssue({
     type: 'console',
     severity: 'error',

@@ -53,6 +53,15 @@ async function gotoApp(page: Page): Promise<void> {
   });
 }
 
+async function unlockSavedWalletAfterReload(page: Page): Promise<void> {
+  await page.locator('button.wallet').first().click();
+  await expect(page.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.getByLabel('Password', { exact: true }).fill('swap-reload-password');
+  await page.getByLabel('Confirm password', { exact: true }).fill('swap-reload-password');
+  await page.getByRole('button', { name: 'Save and open', exact: true }).click();
+  await expect(page.getByTestId('tab-accounts').first()).toBeVisible({ timeout: 20_000 });
+}
+
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   const checkbox = page.locator('text=I understand and accept the risks of using this software').first();
   if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -1493,7 +1502,6 @@ async function executeOrderbookClickFill(
     expect(fillTokenIds.every(tokenId => Number.isInteger(tokenId) && tokenId > 0)).toBe(true);
     expect(new Set(fillTokenIds).size).toBe(2);
     const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
-    const closedCountBefore = await readClosedOrderTabCount(page);
     await page.evaluate(({ entityId, signerId, counterpartyId }) => {
       const runtimeProcess = (globalThis as any).process;
       if (runtimeProcess?.env) {
@@ -1581,14 +1589,23 @@ async function executeOrderbookClickFill(
         async () => {
           const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
           return (
-            state.accountHistoryResolveCount > swapStateBefore.accountHistoryResolveCount
-            || (await readClosedOrderTabCount(page)) > closedCountBefore
+            state.accountCurrentHeight > swapStateBefore.accountCurrentHeight
+            && state.accountSwapOffersSize === 0
+            && !state.accountHasSwapOfferInMempool
+            && !state.accountHasSwapOfferInPendingFrame
           );
         },
         { timeout: 30_000, intervals: [100, 250, 500, 1000] },
       )
       .toBe(true);
     const clickToClosedStateMs = Date.now() - swapClickStartedAt;
+    const closedTab = page.getByTestId('swap-orders-tab-closed').first();
+    await expect(closedTab).toBeVisible({ timeout: 10_000 });
+    await closedTab.click();
+    await expect.poll(async () => await readClosedOrderTabCount(page), {
+      timeout: 30_000,
+      intervals: [100, 250, 500, 1000],
+    }).toBeGreaterThan(0);
     // Account consensus can expose the closed order before the async click
     // handler publishes its terminal UI receipt. Keep the observer alive
     // until that receipt exists; stopping it at the state transition races
@@ -1683,7 +1700,6 @@ async function executeOrderbookClickFill(
         intervals: [100, 250, 500],
       })
       .toBe(0);
-    const closedTab = page.getByTestId('swap-orders-tab-closed').first();
     await expect(closedTab).toBeVisible({ timeout: 10_000 });
     const fillModal = page.locator('.swap-modal').first();
     const fillModalVisible = await fillModal
@@ -2179,6 +2195,7 @@ test.describe('E2E Swap Flow', () => {
         const env = (window as any).isolatedEnv;
         return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
+      await unlockSavedWalletAfterReload(page);
       await openSwapWorkspace(page);
       await selectCounterpartyInSwap(page, accountRef.counterpartyId);
       const accountSelectAfterReload = page.getByTestId('swap-ticket-hub-select').first();
@@ -2264,6 +2281,7 @@ test.describe('E2E Swap Flow', () => {
       await expectSelectedUiRuntimeIdentity(page, accountRef);
       const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       expect(state.accountSwapOffersSize).toBe(0);
+      await page.getByTestId('swap-orders-tab-closed').first().click();
       await expect
         .poll(async () => await readClosedOrderTabCount(page), { timeout: 20_000 })
         .toBeGreaterThan(0);
@@ -2284,6 +2302,7 @@ test.describe('E2E Swap Flow', () => {
         const env = (window as any).isolatedEnv;
         return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
+      await unlockSavedWalletAfterReload(page);
     });
     await timedStep('swap.reload_assert_no_open_offer', async () => {
       await expectSelectedUiRuntimeIdentity(page, accountRef);

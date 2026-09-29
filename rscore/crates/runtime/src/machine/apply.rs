@@ -269,7 +269,7 @@ pub(crate) fn build_local_j_prefix_entity_input(
     {
         return Ok(None);
     }
-    let complete = complete_local_j_prefix_observation(state, live, Some(observation))?
+    let complete = complete_local_j_prefix_observation(state, live, Some(observation), false)?
         .ok_or_else(|| j_range_error("LOCAL_HISTORY_MISSING"))?;
     let prepared = prepare_j_prefix_range_from_parts(state, live, &complete)?;
     let Some(certificate) = build_required_j_prefix_certificate(
@@ -320,7 +320,7 @@ pub(crate) fn build_pending_local_j_prefix_entity_input(
     let (state, live) = replica
         .entity_slot(entity_id, signer_id)
         .ok_or(RuntimeMachineError::EntityOwnerMismatch)?;
-    let Some(observation) = complete_local_j_prefix_observation(state, live, None)? else {
+    let Some(observation) = complete_local_j_prefix_observation(state, live, None, false)? else {
         return Ok(None);
     };
     build_local_j_prefix_entity_input(replica, &observation)
@@ -330,6 +330,7 @@ fn complete_local_j_prefix_observation(
     state: &RuntimeEntityState,
     live: &RuntimeEntityReplica,
     suffix: Option<&crate::j_watcher::ObserveJRange>,
+    include_header_only: bool,
 ) -> Result<Option<crate::j_watcher::ObserveJRange>, RuntimeMachineError> {
     let base_height = state.entity.last_finalized_j_height;
     let history = live
@@ -402,7 +403,7 @@ fn complete_local_j_prefix_observation(
         .into_iter()
         .filter_map(|(height, block)| (height > base_height && height <= target).then_some(block))
         .collect::<Vec<_>>();
-    if suffix.is_none() && blocks.is_empty() {
+    if suffix.is_none() && blocks.is_empty() && !include_header_only {
         return Ok(None);
     }
     let value = serde_json::json!({
@@ -2718,7 +2719,7 @@ fn apply_runtime_inner(
     };
     frame.receipt.wakes = wakes.clone();
     frame.entity_inputs = merge_runtime_output_inputs(std::mem::take(&mut frame.entity_inputs))?;
-    let mut post_commit_j_attempts =
+    let (mut post_commit_j_attempts, runtime_tx_touched_entities) =
         apply_runtime_txs(&mut replica, &frame.runtime_txs, frame.frame.timestamp)?;
     let next_height = replica
         .state
@@ -2949,7 +2950,10 @@ fn apply_runtime_inner(
             }),
             outputs: RuntimeOutputs {
                 entities: Vec::new(),
-                touches: RuntimeFrameTouches::default(),
+                touches: RuntimeFrameTouches {
+                    entity_ids: runtime_tx_touched_entities,
+                    ..RuntimeFrameTouches::default()
+                },
             },
             account_commits: Vec::new(),
             post_commit_j_attempts,
@@ -2993,7 +2997,10 @@ fn apply_runtime_inner(
     let mut evicted_contexts = BTreeMap::new();
     let mut outputs = RuntimeOutputs {
         entities: Vec::with_capacity(group_count),
-        touches: RuntimeFrameTouches::default(),
+        touches: RuntimeFrameTouches {
+            entity_ids: runtime_tx_touched_entities,
+            ..RuntimeFrameTouches::default()
+        },
     };
     let mut account_commits = Vec::new();
     let mut synthetic_inputs = Vec::new();
@@ -3492,6 +3499,35 @@ fn apply_entity_group(
     })?;
     let j_prefix_pending_local_event =
         j_prefix_attestable_height != Some(slot.state.entity.last_finalized_j_height);
+    // A prior header-only watcher input advances the authenticated local
+    // head. Its first subsequent Entity frame must include the signed j_event
+    // before Account work, even when that J range contains no events.
+    let cached_header_range = if prepared_j_range.is_none()
+        && j_prefix_attestable_height
+            .is_some_and(|height| height > slot.state.entity.last_finalized_j_height)
+    {
+        match complete_local_j_prefix_observation(&slot.state, &slot.replica, None, true)? {
+            Some(observation) if observation.batches.is_empty() => {
+                let prepared = prepare_j_prefix_range(&slot, &observation)?;
+                Some((observation, prepared))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some((_, prepared)) = cached_header_range.as_ref() {
+        let position = usize::from(
+            slot.replica
+                .entity_mempool
+                .front()
+                .and_then(EntityPendingWork::scheduled_wake)
+                .is_some(),
+        );
+        slot.replica
+            .entity_mempool
+            .insert(position, EntityPendingWork::Projected(prepared.tx.clone()));
+    }
     let parent_frame_hash = slot
         .replica
         .entity_consensus
@@ -3504,11 +3540,19 @@ fn apply_entity_group(
         &slot.state.entity,
         next_entity_height,
         parent_frame_hash,
-        prepared_j_range.as_ref().map(|prepared| &prepared.claim),
+        prepared_j_range
+            .as_ref()
+            .map(|prepared| &prepared.claim)
+            .or_else(|| {
+                cached_header_range
+                    .as_ref()
+                    .map(|(_, prepared)| &prepared.claim)
+            }),
     )
     .map_err(EntityTransitionError::from)?;
     if j_prefix_pending_local_event
         && prepared_j_range.is_none()
+        && cached_header_range.is_none()
         && fit_j_prefix_certificate.is_some()
     {
         return Err(RuntimeMachineError::ReplicaMetadata(format!(
@@ -3702,6 +3746,11 @@ fn apply_entity_group(
             .j_observation
             .as_ref()
             .zip(prepared_j_range.as_ref())
+            .or_else(|| {
+                cached_header_range
+                    .as_ref()
+                    .map(|(observation, prepared)| (observation, prepared))
+            })
             .map(
                 |(observation, prepared)| xln_rscore_entity_kernel::ResidentJEventProjection {
                     scanned_through: observation.scanned_through_height,
@@ -4225,8 +4274,9 @@ fn apply_runtime_txs(
     replica: &mut crate::RuntimeReplica,
     txs: &[super::RuntimeTx],
     current_timestamp: u64,
-) -> Result<Vec<crate::j_submit::DurableJAttempt>, RuntimeMachineError> {
+) -> Result<(Vec<crate::j_submit::DurableJAttempt>, Vec<String>), RuntimeMachineError> {
     let mut attempts = Vec::new();
+    let mut touched_entities = Vec::new();
     for tx in txs {
         match tx {
             super::RuntimeTx::CheckpointBarrier => {}
@@ -4253,7 +4303,9 @@ fn apply_runtime_txs(
                             "J_HISTORY_LOCAL_REPLICA_MISSING".into(),
                         )
                     })?;
-                record_j_observation(state, live, value)?;
+                if record_j_observation(state, live, value)? {
+                    touched_entities.push(render_word(value.entity_id.as_bytes()));
+                }
             }
             super::RuntimeTx::AdvanceJWatcherCursor {
                 depository_address,
@@ -4273,6 +4325,7 @@ fn apply_runtime_txs(
                         )
                     })?;
                 record_j_rewind(state, live, value)?;
+                touched_entities.push(render_word(&value.entity_id));
             }
             super::RuntimeTx::RetryJSubmit(retry) => {
                 if let Some(attempt) =
@@ -4314,7 +4367,7 @@ fn apply_runtime_txs(
             }
         }
     }
-    Ok(attempts)
+    Ok((attempts, touched_entities))
 }
 
 const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES: usize = 1_024;
@@ -4617,7 +4670,7 @@ fn record_j_observation(
     state: &mut crate::RuntimeEntityState,
     replica: &mut crate::RuntimeEntityReplica,
     observation: &crate::j_watcher::ObserveJRange,
-) -> Result<(), RuntimeMachineError> {
+) -> Result<bool, RuntimeMachineError> {
     let jurisdiction = replica
         .entity_consensus
         .state
@@ -4661,7 +4714,7 @@ fn record_j_observation(
         && observation.scanned_through_height < height
     {
         assert_local_j_history_anchor(&replica.replica_metadata, height, hash, &jurisdiction_ref)?;
-        return Ok(());
+        return Ok(false);
     }
     let source = replica
         .replica_metadata
@@ -4758,7 +4811,7 @@ fn record_j_observation(
         "eventBlocks": {"__xlnType":"Map","value": blocks.into_iter().map(|(height,value)|serde_json::json!([height,value])).collect::<Vec<_>>()},
         "blockHashes": {"__xlnType":"Map","value": hashes.into_iter().map(|(height,value)|serde_json::json!([height,value])).collect::<Vec<_>>()},
     }));
-    Ok(())
+    Ok(true)
 }
 
 fn assert_local_j_history_anchor(
@@ -5658,14 +5711,41 @@ mod tests {
     }
 
     #[test]
-    fn unregistered_j_watcher_scan_has_no_entity_prefix_input() {
-        let runtime =
+    fn header_only_j_watcher_scan_is_certified_in_next_entity_frame() {
+        let mut runtime =
             crate::machine::tests::replica(crate::RuntimeLimits::hlt()).expect("runtime replica");
         let entity_id = crate::machine::tests::owner_bytes();
+        let signer_id = crate::machine::tests::entity_signer_id();
+        let jurisdiction_ref = format!("stack:31337:0x{}", "88".repeat(20));
+        runtime
+            .entity_slot_mut(&entity_id, &signer_id)
+            .expect("entity slot")
+            .1
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction = Some(CanonicalValue::Object(vec![
+            (
+                "chainId".into(),
+                CanonicalValue::Number(
+                    xln_rscore_protocol::CanonicalNumber::try_from_u64(31_337)
+                        .expect("safe chain id"),
+                ),
+            ),
+            (
+                "depositoryAddress".into(),
+                CanonicalValue::String(format!("0x{}", "88".repeat(20))),
+            ),
+            (
+                "entityProviderAddress".into(),
+                CanonicalValue::String(format!("0x{}", "99".repeat(20))),
+            ),
+        ]));
         let observation = ObserveJRange {
             entity_id: EntityId::parse(&super::render_word(&entity_id)).expect("entity id"),
-            signer_id: crate::machine::tests::entity_signer_id(),
-            jurisdiction_ref: format!("stack:31337:0x{}", "88".repeat(20)),
+            signer_id,
+            jurisdiction_ref,
             scanned_through_height: 1,
             tip_block_hash: [0x44; 32],
             headers_present: true,
@@ -5680,6 +5760,60 @@ mod tests {
                 .expect("optional prefix")
                 .is_none()
         );
+        let result = super::apply_runtime(
+            runtime,
+            RuntimeInput {
+                runtime_txs: vec![RuntimeTx::ObserveJRange(observation)],
+                entity_inputs: Vec::new(),
+                frame: RuntimeFrameContext {
+                    timestamp: 100,
+                    finalized_j_height: 0,
+                    entity_contexts: std::collections::BTreeMap::new(),
+                },
+            },
+        )
+        .expect("header-only Runtime frame");
+        assert!(result.outputs.entities.is_empty());
+        assert_eq!(
+            result.outputs.touches.entity_ids,
+            vec![super::render_word(&entity_id)]
+        );
+        let (state, live) = result
+            .replica
+            .entity_slot(&entity_id, &crate::machine::tests::entity_signer_id())
+            .expect("observed entity slot");
+        let cached = super::complete_local_j_prefix_observation(state, live, None, true)
+            .expect("cached header claim")
+            .expect("contiguous header range");
+        assert_eq!(cached.scanned_through_height, 1);
+        assert!(cached.batches.is_empty());
+        let next_input = RuntimeEntityInput::decode(serde_json::json!({
+            "entityId": super::render_word(&entity_id),
+            "signerId": crate::machine::tests::entity_signer_id(),
+            "entityTxs": [{"type": "extendCredit", "data": {
+                "counterpartyEntityId": format!("0x{}", "ff".repeat(32)),
+                "tokenId": 1, "amount": {"__xlnType": "BigInt", "value": "7"}
+            }}],
+        }))
+        .expect("next entity work");
+        let next = super::apply_runtime(
+            result.replica,
+            crate::machine::tests::frame_for_test(101, vec![next_input]),
+        )
+        .expect("next Entity frame certifies cached header range");
+        let (state, live) = next
+            .replica
+            .entity_slot(&entity_id, &crate::machine::tests::entity_signer_id())
+            .expect("certified entity slot");
+        assert_eq!(state.entity.last_finalized_j_height, 1);
+        let head = &live
+            .entity_consensus
+            .certified_frame_head
+            .as_ref()
+            .expect("certified frame")
+            .frame;
+        assert_eq!(head.txs[0].kind, EntityTxKind::JEvent);
+        assert_eq!(head.txs.len(), 2);
     }
 
     #[test]

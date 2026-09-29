@@ -1,4 +1,5 @@
-import { getSwapLotScale } from '../types';
+import { getTokenInfo } from '../../account/utils';
+import { getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE } from '../types';
 
 /**
  * Canonical executable cross-j book quantity.
@@ -15,4 +16,24 @@ export const crossJurisdictionBookQtyLots = (
 ): bigint => {
   if (baseAmount <= 0n) return 0n;
   return baseAmount / getSwapLotScale(baseTokenId);
+};
+
+/** Cap a resting route by both signed legs at its committed limit price. */
+export const crossJurisdictionExecutableQtyLots = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  baseAmount: bigint,
+  quoteAmount: bigint,
+  priceTicks: bigint,
+): bigint => {
+  const baseDecimals = getTokenInfo(baseTokenId).decimals;
+  const quoteDecimals = getTokenInfo(quoteTokenId).decimals;
+  const numerator = getSwapLotScale(baseTokenId) * priceTicks * 10n ** BigInt(quoteDecimals);
+  if (numerator <= 0n || quoteAmount <= 0n) return 0n;
+  const denominator = ORDERBOOK_PRICE_SCALE * 10n ** BigInt(baseDecimals);
+  const quoteBound = ((quoteAmount + 1n) * denominator - 1n) / numerator;
+  const lots = crossJurisdictionBookQtyLots(baseTokenId, baseAmount);
+  const bounded = lots < quoteBound ? lots : quoteBound;
+  const exact = getSwapExactQuoteLotMultipleAtPriceForDimensions(baseDecimals, quoteDecimals, priceTicks);
+  return bounded - bounded % exact;
 };

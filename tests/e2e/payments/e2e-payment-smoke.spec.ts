@@ -609,6 +609,17 @@ test.describe('Payment Smoke', () => {
         senderPage.reload({ waitUntil: 'domcontentloaded' }),
         recipientPage.reload({ waitUntil: 'domcontentloaded' }),
       ]);
+      const unlockAfterReload = async (reloadedPage: Page): Promise<void> => {
+        await reloadedPage.locator('button.wallet').first().click();
+        await expect(reloadedPage.getByRole('heading', { name: 'Set a local password', exact: true })).toBeVisible();
+        await reloadedPage.getByLabel('Password', { exact: true }).fill('payment-reload-password');
+        await reloadedPage.getByLabel('Confirm password', { exact: true }).fill('payment-reload-password');
+        await reloadedPage.getByRole('button', { name: 'Save and open', exact: true }).click();
+      };
+      await Promise.all([
+        unlockAfterReload(senderPage),
+        unlockAfterReload(recipientPage),
+      ]);
       await Promise.all([
         gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
         gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
