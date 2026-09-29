@@ -95,6 +95,97 @@ same way (a Left deposit raises ondelta and collateral by the amount, so Left's 
 put in; a Right deposit raises collateral only, so Right's share, collateral minus Δ, grows). Conservation is "reserves + collateral never change" for a single Account.
 Source: Account.sol cooperative update (leftDiff + rightDiff + collateralDiff = 0, line 1559).
 
+## Dispute (`dispute/dispute.scm`)
+
+Contract refs: A = Account.sol, D = Depository.sol, X = DeltaTransformer.sol on branch
+claude/project-thread-xkty13 (fixed contracts, PR #40 head 77df511).
+
+**Q-D-1. Who is assumed to act inside its window?**
+Choice: the NON-starter. The clock may not reach T while the non-starter holds a proof that
+outranks the selected one and has not answered; it also never closes on a proof worse than its best.
+Every safety property is conditional on that, and the planted bug `no-floor` (windows of zero)
+shows what happens without it. The starter's honesty is the other assumption: a starter that starts
+with a stale proof is not protected (see Q-D-2).
+Source: A:1466 (counter only before T), A:1476 (only the non-starter), design/account-model.md P5.
+
+**Q-D-2. A proposal that lost a cross-open stays presentable (finding).**
+When both sides propose at one height, Left's frame wins (R-A1), but Right has already signed its
+own, and Left holds that signature: the chain accepts it as a proof. The tie-break at equal nonce
+(Left-proposed outranks Right-proposed, A:1478-1483) is what protects the committed state. The
+checker finds the consequence: if Right starts a dispute with an OLDER proof, Left can close at
+once (5b) on the losing proposal and be paid more than the committed state gives it (trace:
+propose n1, ack, collide n2, start n1R, finalize with n2R'). Options: (a) accept it, since the
+starter chose a stale proof; (b) make a proof carry the proposer's own commitment that the
+committed state supersedes it. Choice: (a) for now, stated as the property "an honest starter never
+ends on a losing proposal". Runtime rule that follows: a starter starts with the NEWEST proof it
+holds, always; and a party that loses a cross-open keeps its own losing signature in mind.
+Source: A:1478-1483, Types.sol:150, lessons R-A1.
+
+**Q-D-3. Late ack: the proposer's newest proof can be one behind (finding).**
+A frame commits when the receiver signs, so the proposer holds the receiver's signature one message
+later. A counterparty that starts a dispute with the previous state in that gap leaves the proposer
+holding only the older proof; if the ack arrives after T it is of no use. The safety properties
+freeze the responder's holdings at T (a late ack is not one it could have used). This is a real
+exposure bounded by the response window against message delay, not a contract defect: the window
+floor (H2, 60 s on testnet) has to be far above the worst message delay, and a proposer should
+treat its unacked frame as enforceable by the peer only.
+Source: A:1466, design/account-model.md P5.
+
+**Q-D-4. Epoch pause (coordinator N1).**
+A party signs a proof only for the current ondeltaEpoch; finalize advances it, so every older proof
+dies (A:872). Off-chain payments pause until a new baseline is co-signed: modelled as `paused?`
+(no proposal while the baseline epoch differs) and the rule `rebaseline`. The planted bug
+`no-epoch` (a second dispute with an old proof) shows the exposure.
+Source: coordinator decision N1; A:872, A:1315.
+
+**Q-D-5. Response windows (coordinator N3, floor H2).**
+The windows are constants of the Account, fixed at open; every proof carries the same values (A:1471-1474,
+GAP-5). The model has one pair of values and the floor check `window-floor-ok?`. The contract uses
+the windows only as a sum T = S + left + right (GAP-4): there is no per-side sub-window, and the
+non-starter may counter anywhere in [S, T). Options: (a) keep the sum; (b) give each side its own
+interval. Choice: (a), it is what the fixed contracts do.
+Source: A:1802-1805, A:1466, GAP-4, GAP-5.
+
+**Q-D-6. Time.**
+An abstract integer clock, `tick` by one, bounded by `max-time` (default 3). A dispute may only
+start if T fits in the horizon, so the liveness goal is "a dispute settles, or the clock ran out".
+Real windows are seconds; only the order of S, T, deadlines and reveal times matters.
+
+**Q-D-7. What finalize pays, and in what order.**
+Choice: Δ = ondelta + offdelta, then the HTLC (paid if the secret was public by its deadline);
+payout by the three-way rule; a shortfall from the debtor's reserve first, the rest as debt. No
+credit check on chain (D:960-967): "credit holds" is checked as "what a side owes after finalize
+never exceeds the credit extended to it".
+Source: D:949-991, A:1085-1130, X:260-298.
+
+**Q-D-8. The three finalize paths (A:751-822).**
+5a (counter selected, at or after T), 5c (initial state: at or after T anyone, before T only the
+non-starter), 5b (no counter, the non-starter brings a higher-ranking proof and closes at once).
+GAP-2: the non-starter can close a stale start immediately, so the "response window" is not a
+guaranteed wait; it only ever hurts the non-starter, and the model lets an honest one close only
+on its best proof. Rank = nonce, then Left's proposal over Right's at an equal nonce.
+
+**Q-D-9. HTLC deadline, H1 (coordinator decision).**
+An unrevealed HTLC blocks finalize until its deadline, unless the secret is public; a secret
+public after the deadline does not pay. Planted bug `no-h1`. Coordinator N2 (one open deadline
+reverts a whole batch, so finalize is submitted per Account) belongs to the J page.
+Source: X:292, D coordinator decision H1.
+
+**Q-D-10. Contract gaps the spec does not model (recorded, not chosen).**
+GAP-3 ondeltaDiff in a settlement is unconstrained; GAP-6 R2C is allowed during a dispute and
+changes collateral and Left's ondelta between start and finalize; GAP-7 finalize settles only the
+tokens listed in the proof body; GAP-9 a zero-amount C2R is a signed no-op that bumps nonce and
+epoch; GAP-11 a near-max signed nonce blocks counters. The page is one token and no cooperative
+settlement, so 6 and 7 need the multi-token widening.
+Source: scratchpad contracts-disputes.md section 8.
+
+**Q-D-11. Not in the page.**
+Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
+register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
+tokens. Model bounds: 3 script states, one rival, one HTLC, two windows of 1, `max-disputes` 1.
+Capacity: 5220 states, 9062 transitions, about 2 minutes; the same page with max-time 4 has 9814
+states and takes 5 minutes.
+
 ## Checker (`lib/check.scm`)
 
 **Q-C-1. What does "live" mean?**

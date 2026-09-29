@@ -17,7 +17,10 @@ spec/
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
+  dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, H1/H2
+  dispute/bugs/*.scm       planted dispute bugs
   account-frames.check.scm entry point: check the Account frames page
+  dispute.check.scm        entry point: check the dispute page
   ledger.check.scm         entry point: check the ledger page
   test.mjs                 runs the page and every bug variant in parallel, asserts the verdicts
   export-traces.mjs        complete runs as ITF JSON into traces/ (for the Quint replay)
