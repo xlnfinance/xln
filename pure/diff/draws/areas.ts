@@ -93,10 +93,15 @@ export type Move =
 /**
  * A move on the world itself, not an Entity tx (the chain funds a reserve, the clock jumps to a deadline). The walk
  * takes one when it draws no Entity tx.
+ *
+ * `owed` marks a move that closes a lifecycle the area's draws opened (a dispute waits for its deadline): while it holds
+ * the walk does not stop at its frame floor, takes the move as soon as it is enabled, and fails if the lifecycle is
+ * still open when the walk's frame cap ends it.
  */
 export type WorldMove = {
   readonly enabled: (w: World) => boolean;
   readonly draw: (w: World) => Step | Promise<Step>;
+  readonly owed?: (w: World) => boolean;
 };
 /** One area's world moves, by name (`{}` when it has none). */
 export type WorldMoves = Readonly<Record<string, WorldMove>>;
