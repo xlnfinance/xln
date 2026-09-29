@@ -1,0 +1,155 @@
+{
+  "files": [
+    "chain.qnt",
+    "settle.qnt",
+    "settle_test.qnt"
+  ],
+  "test": "settle_test.qnt",
+  "init": "winit",
+  "step": "wstep",
+  "testSamples": 10,
+  "mutants": [
+    {
+      "id": "no-pause-while-locked",
+      "why": "N1: payments continue after an update is locked",
+      "file": "settle.qnt",
+      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "new": "sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "killedBy": "test:paymentsPauseWhileLockedTest"
+    },
+    {
+      "id": "no-pause-while-locked-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "new": "sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "killedBy": "invariant:no_lost_pay",
+      "step": "wfocus"
+    },
+    {
+      "id": "payment-at-dead-epoch",
+      "why": "N1: a payment is acked although the side has read that the chain left the proof's epoch",
+      "file": "settle.qnt",
+      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "new": "a.locked == 0, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "killedBy": "test:deadEpochPaymentIsRefusedTest"
+    },
+    {
+      "id": "payment-at-dead-epoch-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "new": "a.locked == 0, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "killedBy": "invariant:no_dead_commit"
+    },
+    {
+      "id": "forged-baseline-accepted",
+      "why": "a Rebase is acked whatever offdelta it carries",
+      "file": "settle.qnt",
+      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
+      "new": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1",
+      "killedBy": "test:forgedBaselineIsRefusedTest"
+    },
+    {
+      "id": "forged-baseline-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
+      "new": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1",
+      "killedBy": "invariant:book_enforceable",
+      "step": "wfocus",
+      "samples": 20000,
+      "steps": 30
+    },
+    {
+      "id": "baseline-nonce-at-frame-height",
+      "why": "decision N1 addendum: the baseline nonce follows the Account's own counter, not the chain's",
+      "file": "settle.qnt",
+      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
+      "new": "p.epoch == sv.epoch, p.nonce == tp.nonce + 1, p.offdelta == bk",
+      "killedBy": "test:rebaseClosesTheWindowTest",
+      "also": [
+        {
+          "file": "settle.qnt",
+          "old": "| KRebase(r) => mkProof(true, sv.nonce + 1, sv.epoch, la, r.off, NO_CLAUSE, la, not(la))",
+          "new": "| KRebase(r) => mkProof(true, tp.nonce + 1, sv.epoch, la, r.off, NO_CLAUSE, la, not(la))"
+        }
+      ]
+    },
+    {
+      "id": "presign-without-fold",
+      "why": "the update does not fold offdelta into ondelta, so the pre-signed baseline (offdelta 0) is wrong",
+      "file": "settle.qnt",
+      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
+      "new": "val dOn = -u.dl",
+      "killedBy": "test:presignSettlementOpensNextEpochTest"
+    },
+    {
+      "id": "presign-without-fold-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
+      "new": "val dOn = -u.dl",
+      "killedBy": "invariant:claims_conserved",
+      "step": "wfocus"
+    },
+    {
+      "id": "fold-wrong-sign",
+      "why": "the folded offdelta is subtracted",
+      "file": "settle.qnt",
+      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
+      "new": "val dOn = -u.dl - (if (mode) u.fold else 0)",
+      "killedBy": "invariant:claims_conserved",
+      "step": "wfocus"
+    },
+    {
+      "id": "presign-baseline-missing",
+      "why": "the Lock frame does not co-sign the next epoch's baseline",
+      "file": "settle.qnt",
+      "old": "arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true }).set(np, baseline)",
+      "new": "arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true })",
+      "killedBy": "invariant:hostage_free",
+      "step": "wfocus"
+    },
+    {
+      "id": "update-ignores-epoch",
+      "why": "C1 for updates: an update signed for an older epoch still executes",
+      "file": "settle.qnt",
+      "old": "      u.epoch == acct.epoch,                          // C1: an update signed for another epoch is dead\n",
+      "new": "",
+      "killedBy": "test:updateDiesAfterFinalizeTest"
+    },
+    {
+      "id": "update-during-dispute",
+      "why": "an update executes while a dispute is running",
+      "file": "settle.qnt",
+      "old": "      not(dispute.on),\n      u.epoch == acct.epoch,",
+      "new": "      u.epoch == acct.epoch,",
+      "killedBy": "test:updateDiesWithFinalizeTest"
+    },
+    {
+      "id": "starter-keeps-signing",
+      "why": "a side that has seen (or made) a dispute keeps acking payments",
+      "file": "settle.qnt",
+      "old": "    not(sv.dispute),                           // a side",
+      "new": "    // a side",
+      "killedBy": "test:disputeStarterStopsSigningTest"
+    },
+    {
+      "id": "finalize-keeps-book",
+      "why": "the agreed offdelta survives a finalize that paid everything out",
+      "file": "settle.qnt",
+      "old": "    book' = 0,\n    seen' = seen, acc' = acc, prop' = prop,",
+      "new": "    book' = book,\n    seen' = seen, acc' = acc, prop' = prop,",
+      "killedBy": "test:presignBaselineAfterFinalizeIsHarmlessTest"
+    },
+    {
+      "id": "lock-proof-nonce-reused",
+      "why": "the locked state's proof reuses the tip's nonce",
+      "file": "settle.qnt",
+      "old": "| KLock(_) => mkProof(true, tp.nonce + 1, tp.epoch, la, tp.offdelta, NO_CLAUSE, la, not(la))",
+      "new": "| KLock(_) => mkProof(true, tp.nonce, tp.epoch, la, tp.offdelta, NO_CLAUSE, la, not(la))",
+      "killedBy": "test:presignSettlementOpensNextEpochTest"
+    }
+  ]
+}

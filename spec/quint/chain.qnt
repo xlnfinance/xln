@@ -71,7 +71,8 @@ module chain {
     counterArgs: bool
   }
 
-  type Acct = { nonce: int, epoch: int, coll: int, ondelta: int }
+  // via: the cooperative update that opened the current epoch (0 = none: the epoch was opened by a finalize, or is the first).
+  type Acct = { nonce: int, epoch: int, coll: int, ondelta: int, via: int }
 
   // Ghost flags: set at the moment a rule is broken, so each property is one boolean.
   type Ghost = {
@@ -169,7 +170,7 @@ module chain {
   var applied: int -> bool           // arena records that have settled
   var ghost: Ghost
 
-  pure val NREC = 7
+  pure val NREC = 12
   pure val RECS = 1.to(NREC)
   pure val SLOTS = 0.to(NREC)     // slot 0 is the empty proof: "no proof" is a valid lookup
 
@@ -229,10 +230,10 @@ module chain {
 
   // The state before anything happened, for a given arena: scenario tests start here with a hand-made history.
   action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = all {
-    arena' = ar,
+    arena' = SLOTS.mapBy(i => if (ar.keys().contains(i)) ar.get(i) else NO_PROOF),      // slots a history does not use stay empty
     honest' = hon,
     now' = 1,
-    acct' = { nonce: 0, epoch: 0, coll: coll, ondelta: 0 },
+    acct' = { nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 },
     money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0) },
     total' = resL + resR + coll,
     dispute' = NO_DISPUTE,
@@ -468,7 +469,7 @@ module chain {
       // H1: an unrevealed clause whose deadline is still open makes finalize revert
       not(r.clause.on and not(revealed) and now <= r.clause.deadline),
       money' = m2,
-      acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0 },     // C1: finalize advances the epoch
+      acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0, via: 0 },     // C1: finalize advances the epoch
       dispute' = NO_DISPUTE,
       applied' = applied.set(useId, true),
       ghost' = {

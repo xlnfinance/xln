@@ -92,14 +92,14 @@ its own proposal is an enforceable dispute proof, so an adversary that presents 
 every settled proof is of the current epoch and is either the highest both-signed proof, or newer and signed by the honest
 party. The honest party can lose only if it is offline while a response is due (C7).
 
-**C3. Nonce after finalize.**
+**C3. Nonce after finalize. CLOSED (coordinator, N1 addendum).**
 Contracts: a finalize of the initial proof stores nonce n0+1; adopting a counter-proof or newer proof stores that nonce.
 Both are followed. Consequence, not written anywhere in the sources: the stored nonce after a finalize can exceed the
 height of the next off-chain frame, and `disputeStart` requires proof nonce > stored nonce. So the first proof of a new
-epoch must carry a nonce above the chain's (a baseline), not the frame height. Proposal for settle.qnt (N1): the Account
-tracks a `proofNonce` decoupled from frame height, and its first value in an epoch is `chainNonce + 1`.
+epoch must carry a nonce above the chain's (a baseline), not the frame height. Decision: off-chain frame height and proof nonce are separate counters, and the baseline proof that reopens an Account
+after an epoch-advancing event carries a nonce strictly above the chain's stored nonce for that Account.
 
-**C4. R2C is allowed during a dispute.**
+**C4. R2C is allowed during a dispute. CLOSED (coordinator: accepted as is, recorded as H4 in contracts-decisions.md).**
 Account.sol `processR2C` has no dispute check. The model follows the contract: a deposit made during a dispute changes
 the collateral and (crediting Left) ondelta, and finalize pays from the values at finalize time. A proof fixes only
 offdelta. Neither side can lose by this: each deposit raises only its beneficiary's allocation. R2C does not advance the
@@ -141,3 +141,56 @@ before the shorter deadline. Source: contracts-decisions H1.
 board rotation, so it belongs in entity.qnt), cooperative settlement and C2R (they advance the epoch too; settle.qnt),
 several tokens, C2 (batch authority is per entity; nothing visible in a one-Account model), per-batch atomicity across
 Accounts (N2: finalizes are submitted per Account, so one action is one batch).
+
+---
+
+# Settlement and epochs (settle.qnt)
+
+**S1. The Account state machine gains a lock.**
+A cooperative update is agreed in an ordinary frame (the "Lock" frame: the diffs, `dl`, `dr`, and the nonce of the update).
+From the moment it commits, the Account accepts no payment until the epoch that update opens is read from the chain (or a
+dispute replaces it). This is N1. Three rules make it hold, each killed by a mutant:
+(a) the honest side re-applies its signing rules when an ack arrives, not only when it offers: an offer signed before the
+chain moved is dropped; (b) a side that starts (or answers) a dispute stops signing at that moment, before it has read the block;
+(c) a payment signed for an epoch the chain has left is never committed by a payee.
+
+**S2. The update is signed by the side that does not submit it.**
+Depository `_settleDiffs` verifies the counterparty's current-board hanko over `(epoch, nonce, diffs, forgive)`; the submitter
+is authorised by its own batch. So one signature is enough to execute, and whoever holds the other side's signature can execute at
+any time until the epoch or nonce moves. The update dies with any other epoch event (finalize, another update); it cannot
+execute during a dispute. Source: `Account.sol:1540-1650`.
+
+**S3. FINDING. N1 as decided leaves a window in which the honest side has no proof for the epoch.**
+After an update executes, every earlier proof is dead (C1) and the baseline of the new epoch is co-signed only after the
+event is read. Until then the honest side cannot start a dispute (no proof), and the counterparty can extend the window for as
+long as it declines to co-sign. It is a hostage situation, not theft: the counterparty's own share is frozen too. Reachable in
+the model (`rebaseLeavesAWindowWithoutAProofTest`; property `hostage_free` fails when `presign = false`).
+Options:
+ (a) accept it and bound it by policy (settle only what you can afford to have frozen);
+ (b) pre-sign the baseline of epoch+1 in the Lock frame, and make the update fold the Account's offdelta into ondelta
+     (`ondeltaDiff = -dl + offdelta`). Then every epoch starts from "offdelta 0, no clauses". That baseline is correct whichever
+     event opens the epoch: an update (offdelta folded) or a finalize (everything paid out, so it pays nothing). Checked:
+     `hostage_free` holds, custody moves without moving anyone's claim (`claims_conserved`), and the pre-signed proof is
+     harmless after a finalize (`presignBaselineAfterFinalizeIsHarmlessTest`). No contract change: the contract's
+     `ondeltaDiff` is an independent signed field.
+ (c) a contract change: every epoch starts with an implicit both-signed baseline (offdelta 0, no clauses, at the stored nonce).
+     Not modelled: (b) reaches the same end with no contract change, and the spec would have to carry a rule the chain does
+     not have today.
+Cost of (b): one exception to "sign only for the current epoch", and a settlement may carry no open clause (a clause would
+be dropped by the fold; R-A3 already forbids settling over queued work).
+Choice: (b); the model has both (`presign`), the coordinator decides. If (a), the nonce floor of C3 still applies.
+
+**S4. Fund only into an Account you hold a proof for.**
+Found by simulation: after a finalize opened epoch 1 the Account has no proof; a deposit into it is a stake nobody can
+enforce. Rule: a side runs R2C only when it holds a both-signed proof of the current epoch that a dispute could start with.
+This is the "open" protocol of Q-A1 stated as an order of operations: co-sign the baseline, then fund.
+
+**S5. Lag between the chain and a side.**
+Each side reads the chain with a delay. The model lets it act on a stale view but requires the honest side to read the chain
+before time passes (a tick). That is the bound "J event lag + processing < response window". H2's floor (60 s) is the number
+that has to exceed it; the protocol cannot enforce it, so it is a deployment parameter to be written next to the floor.
+
+**S6. Not modelled here.** Open clauses in a settlement (fold kills them; the spec only says refuse), several tokens, debt
+forgiveness (`forgiveDebtsInTokenIds`), an `ondeltaDiff` that changes what a side is owed (a settlement paying an off-chain
+balance out of reserves; the two shapes covered are custody-only and fold), credit limits across epochs, and the Entity's
+choice of when to settle.

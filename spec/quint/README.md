@@ -24,6 +24,8 @@ H3 clamp). og is a reference, never the oracle.
 | `account_test.qnt` | scenario tests: exact schedules with exact expected results |
 | `chain.qnt` | J layer for one Account: reserves, collateral, epoch, debt, the dispute game (start, counter, three finalize paths), payout |
 | `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, H1 wait, H2 floor, debt, deposits, absent party |
+| `settle.qnt` | off-chain epoch lifecycle over `chain.qnt`: Pay, Lock and Rebase frames, the N1 pause, the cooperative update, baseline nonce floor |
+| `settle_test.qnt` | scenario tests: pause while locked, presign vs rebase, forged baseline, dead-epoch payment, update dies with a finalize |
 | `mutants/` | deliberately broken copies of the spec; every property must kill its mutants (`mutants/run.py <module>`) |
 | `traces/` | ITF traces (Quint's JSON trace format) for replay against another spec |
 | `QUESTIONS.md` | every unclear point, the options, the choice made, the source |

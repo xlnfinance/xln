@@ -10,7 +10,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 | J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 19 scenario tests, P1 P3 by simulation, 20 mutants killed. Apalache: see Evidence |
 | Entity frame | `entity.qnt` | not started |
 | Runtime | `runtime.qnt` | not started |
-| Settlement, epoch | `settle.qnt` | not started (relay N1) |
+| Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 12 scenario tests, 5 properties by simulation, 16 mutants killed. Finding S3 (hostage window) awaits a decision |
 
 ## Evidence
 
@@ -21,6 +21,10 @@ Handoff format: what is done per layer, what is next, how to pick up.
   reach a collision, so it is checked by simulation, not by Apalache. Apalache is for the smaller models that follow.
 - `MODULES=chain ./check.sh`: typecheck, 19 scenario tests, `safe` over 1500 traces of 16 steps (~22 s), 7 witnesses reached.
   `MUTANT_STEPS=14 MUTANT_SAMPLES=2000 python3 mutants/run.py chain`: 20 of 20 killed (6 by invariant, 14 by scenario test).
+- `MODULES=settle ./check.sh`: typecheck, 12 scenario tests, `wsafe` (chain's `safe` plus `no_dead_commit`, `no_lost_pay`,
+  `claims_conserved`, `book_enforceable`, `hostage_free`) over simulated traces of 25 steps, all settle witnesses reached.
+  `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 16 of 16 killed (7 by invariant, 9 by scenario test).
+  One invariant hunt (`forged-baseline-invariant`) needs 20000 traces of 30 steps: the schedule that reaches it is long.
 - Tools: `@informalsystems/quint` 0.33.0, Apalache 0.62.1 (fetched by `quint verify`), Java 21. The rust
   simulator backend cannot be fetched (`Release v0.7.0 not found: Failed to fetch from GitHub: Forbidden`); use
   `--backend typescript`.
@@ -40,13 +44,12 @@ Neither spec reads the other. Three leaks, all harmless but recorded:
 
 ## Next
 
-1. Apalache on `chain.qnt` (running; see Evidence), then compose account + chain: real Account histories instead of
-   the arena, so P1 is checked against what the frame protocol can produce.
-2. `settle.qnt` first, before Entity: cooperative settlement, C2R, N1 epoch pause, the nonce floor of a new epoch (C3
-   in QUESTIONS.md). The chain's epoch bump is only half of C1 until the Account side stops signing for a dead epoch.
-3. `entity.qnt`: the frame pipeline (receive, hooks, fold, propose), J batch lifecycle and failure.
-4. `runtime.qnt`: delivery, clock, halt taxonomy, J watching.
-5. `settle.qnt`: N1 (epoch pause), Q-A1 account open, N3 windows.
+1. Apalache on `chain.qnt` (one job at a time: `quint verify` uses one shared server), then compose account + chain:
+   real Account histories instead of the arena, so P1 is checked against what the frame protocol can produce.
+2. `entity.qnt`: the frame pipeline (arrivals, J events, hooks, local commands, propose), one Account state per peer.
+3. `jbatch` (J batch lifecycle and failure), `runtime.qnt` (delivery, clock, halt taxonomy, J watching).
+4. Hub route model: the deadline chain across two Accounts (P5).
+5. v2 proposals: order book, lending, boards.
 
 ## Pick-up command
 
