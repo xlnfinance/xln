@@ -12067,6 +12067,8 @@ export type EntityContext = {
   readonly htlc?: HtlcProposerInfra | undefined;
   /** og env.runtimeSeed: the default proposer derives cross-j hash-ladder seeds from it (never committed). */
   readonly runtimeSeed?: string | undefined;
+  /** og env.runtimeId: with runtimeSeed, what a local openAccount's missing watch seed is derived from. */
+  readonly runtimeId?: string | undefined;
   /**
    * og EntityRuntimeContext.activeJurisdiction: the Runtime's active J name (never committed; the Htlc* event
    * jurisdictionId fallback).
@@ -13970,8 +13972,7 @@ const openDomainIssue = (state: EntityState, asked: Domain | undefined): string 
 };
 /**
  * og handleOpenAccountEntityTx's refusals, in og's order and with og's text: each is a plain Error, which halts og's
- * Runtime, so the text is the halt the frame is refused with. A self Account passes every handler check and fails in
- * og's Account worker when it hydrates the new Account (left must sort before right), after the requested policy.
+ * Runtime, so the text is the halt the frame is refused with. A self Account passes all of them (openChild refuses it).
  */
 const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountData): string | undefined => {
   const target = String(data.targetEntityId), peer = lowerText(target);
@@ -13993,12 +13994,18 @@ const openRefusal = (state: EntityState, replicas: Replicas, data: OpenAccountDa
       return `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${state.id} counterparty=${peer}`;
     case requested !== undefined && !policySane(requested):
       return `REBALANCE_POLICY_INVALID:token=${Number(data.tokenId ?? "1")}`;
-    case sameId(peer, state.id):
-      return safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity");
     default:
       return undefined;
   }
 };
+/**
+ * og's Account worker refuses a self Account when it hydrates it (left must sort before right), after every handler
+ * check.
+ */
+const selfAccountRefusal = (): EntityError => ({
+  _tag: "entity_invariant",
+  reason: safetyText("STORAGE_ACCOUNT_DOC_INVALID canonical order violated: leftEntity must be < rightEntity"),
+});
 /**
  * og handleOpenAccountEntityTx: no output (the peer learns from the first Account frame); seeds add_delta for tokenId
  * + defaults and an optional credit line, on the Account keyed by the target's lowercase id.
@@ -14010,9 +14017,8 @@ const openChild = (
   if (refusal !== undefined) return invariant(refusal);
   const data = { ...tx.data, targetEntityId: lowerText(tx.data.targetEntityId) as EntityId };
   const { targetEntityId: target, accountDomain, watchSeed, disputeConfig } = data;
-  const id = accountId(state.id, target);
-  if (!id.ok) return err({ _tag: "self_account" });
-  const opening = genesisReplica(id.value, { domain: accountDomain, watchSeed, disputeConfig });
+  const id = mapErr(accountId(state.id, target), selfAccountRefusal);
+  const opening = chain(id, (account) => genesisReplica(account, { domain: accountDomain, watchSeed, disputeConfig }));
   return chain(opening, (opened) => seedAccount(state, replicas, data, opened, now));
 };
 /** og createInboundAccountState: an unknown peer's first proposal (height 1) opens the Account from its envelope. */
@@ -21634,11 +21640,37 @@ const accountStateDomainText = (d: Domain, code: string): Result<Domain, string>
 const accountStateDomain = (d: Domain): Result<Domain, EntityError> =>
   mapErr(accountStateDomainText(d, "ACCOUNT_STATE_DOMAIN"), (reason): EntityError =>
     ({ _tag: "entity_invariant", reason }));
+/** What og's Runtime derives a missing watch seed from (env.runtimeSeed, env.runtimeId); never committed. */
+export type WatchSeedOrigin = { readonly runtimeSeed?: string | undefined; readonly runtimeId?: string | undefined };
+const WATCH_SEED_DOMAIN = "xln:account-watch-seed:v1";
+/**
+ * og deriveAccountWatchSeed: the hash of the Runtime's seed and id and the Account's two Entities, so the same Account
+ * yields the same seed after any retry or restart.
+ */
+const derivedWatchSeed = (
+  origin: WatchSeedOrigin, entity: string, counterparty: string,
+): Result<string, EntityError> => {
+  const runtimeSeed = origin.runtimeSeed ?? "";
+  if (runtimeSeed === "") return invariant("ACCOUNT_WATCH_SEED_RUNTIME_SEED_MISSING");
+  const ids = [origin.runtimeId, entity, counterparty].map(lowerText);
+  const parts = [WATCH_SEED_DOMAIN, runtimeSeed, ...ids];
+  return ok(keccak256Hex(utf8(parts.join("|"))).toLowerCase());
+};
+/** og: a given watch seed is checked and lowercased; a missing one is derived for this Account. */
+const localWatchSeed = (
+  state: EntityState, data: OpenAccountData, origin: WatchSeedOrigin,
+): Result<string, EntityError> => {
+  const given: unknown = data.watchSeed;
+  if (given === undefined) return derivedWatchSeed(origin, state.id, trimLower(data.targetEntityId));
+  return isWatchSeed(given) ? ok(given.toLowerCase()) : invariant("OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID");
+};
 /**
  * og materializeLocallyAuthoredEntityTx for openAccount: the Entity's jurisdiction commits the Account domain; the
- * dispute clock is canonical and the watch seed lowercase.
+ * dispute clock is canonical and the watch seed lowercase, or derived when the open names none.
  */
-const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<OpenAccountData, EntityError> => {
+const localOpenAccount = (
+  state: EntityState, data: OpenAccountData, origin: WatchSeedOrigin,
+): Result<OpenAccountData, EntityError> => {
   if (state.jurisdictionConfig === undefined) return invariant(`OPEN_ACCOUNT_SOURCE_JURISDICTION_REQUIRED:${state.id}`);
   return chain(accountStateDomain(state.jurisdiction), (committed) => {
     const asked = data.accountDomain === undefined ? ok(committed) : accountStateDomain(data.accountDomain);
@@ -21651,18 +21683,16 @@ const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<Ope
           return invariant("OPEN_ACCOUNT_DOMAIN_MISMATCH");
         case clockIssue !== undefined:
           return invariant(clockIssue);
-        case !isWatchSeed(data.watchSeed):
-          return invariant("OPEN_ACCOUNT:ACCOUNT_WATCH_SEED_INVALID");
         default:
-          return ok({
+          return map(localWatchSeed(state, data, origin), (watchSeed) => ({
             ...data,
             accountDomain: committed,
             disputeConfig: {
               leftResponseSeconds: Number(data.disputeConfig.leftResponseSeconds),
               rightResponseSeconds: Number(data.disputeConfig.rightResponseSeconds),
             },
-            watchSeed: data.watchSeed.toLowerCase(),
-          });
+            watchSeed,
+          }));
       }
     });
   });
@@ -21671,13 +21701,15 @@ const localOpenAccount = (state: EntityState, data: OpenAccountData): Result<Ope
  * og materializeLocallyAuthoredEntityTx: before signing, a local directPayment carries its committed route and a local
  * openAccount its committed Account terms.
  */
-const materializeLocalTx = (state: EntityState, tx: EntityTx): Result<EntityTx, EntityError> => {
+const materializeLocalTx = (
+  state: EntityState, tx: EntityTx, origin: WatchSeedOrigin,
+): Result<EntityTx, EntityError> => {
   switch (tx.type) {
     case "directPayment":
       return map(committedRoute(state.id, tx.data.targetEntityId, tx.data.route), (route) =>
         ({ ...tx, data: { ...tx.data, route } }));
     case "openAccount":
-      return map(localOpenAccount(state, tx.data), (data) => ({ ...tx, data }));
+      return map(localOpenAccount(state, tx.data, origin), (data) => ({ ...tx, data }));
     default:
       return ok(tx);
   }
@@ -21692,12 +21724,13 @@ export const authorEntityTxs = (
   author: string,
   txs: readonly EntityTx[],
   sign: CommandSigner,
+  origin: WatchSeedOrigin = {},
 ): Result<readonly EntityTx[], EntityError> => {
   const by: CommandAuthor = { author, sign };
   const start: Authoring = { cursor: state, out: [], run: [], kind: undefined, seen: new Set() };
   const authored = (prepared: readonly EntityTx[]) =>
     chain(foldResult(prepared, start, (a, tx) => authorTx(a, tx, by)), (a) => map(flushRun(a, by), (done) => done.out));
-  return chain(traverse(txs, (tx) => materializeLocalTx(state, tx)), authored);
+  return chain(traverse(txs, (tx) => materializeLocalTx(state, tx, origin)), authored);
 };
 /** og buildSignedEntityCommand. */
 export const buildCommand = (
@@ -27579,7 +27612,7 @@ const admitTxs = <R extends EntityReplica>(
     const ordered: Result<readonly EntityTx[], EntityError> = txs.every((tx) => tx.type === "accountInput")
       ? ok(appended)
       : chain(
-          authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId)),
+          authorEntityTxs(r.state, r.signerId, appended, (h) => ctx.sign(h, r.signerId), ctx),
           prioritizeWake,
         );
     return map(ordered, (mempool) => ({ ...r, mempool }));
@@ -29695,9 +29728,12 @@ const sourcePullConsumer = (l: Lane): boolean =>
       tx.data.frame.txs.some((a) => a.type === "cross_pull_lock" && a.crossJurisdiction.leg === "source"),
   );
 const runtimeOutputOf = (l: Lane): EntityTx | undefined => l.txs?.find((tx) => tx.type === "runtimeOutput");
-/** og entityInputMergeKey: the lane key of one input. */
+/**
+ * og entityInputMergeKey (entity/consensus/input/merge.ts:145-146): the lane key of one input. og lowercases the Entity
+ * and signer without trimming, so a padded signer id is a merge group of its own.
+ */
 const mergeKey = (l: Lane): Result<string, RuntimeError> => {
-  const base = `${lower(l.entityId)}:${lower(l.signerId)}`;
+  const base = `${lowerText(l.entityId)}:${lowerText(l.signerId)}`;
   const output = runtimeOutputOf(l);
   if (output !== undefined) return ok(runtimeOutputKey(base, l, output));
   if (l.atomic !== undefined) return atomicKey(base, l.atomic, l.sourceRuntimeFrame);
@@ -29982,6 +30018,162 @@ export const mergeEntityInputs = (
       ),
     ),
   );
+
+// ---- og runtime/mempool/entity-height-barrier.ts ----
+/** og laneKey: `entity:signer`, trimmed and lowercased; an input missing either names no lane. */
+const heightLaneKey = (i: RoutedEntityInput): string | null => {
+  const entity = trimLower(i.entityId);
+  const signer = trimLower(i.signerId);
+  return entity !== "" && signer !== "" ? `${entity}:${signer}` : null;
+};
+/** og positiveHeight: a safe positive integer height, else none. */
+const positiveHeight = (h: bigint): bigint | null => (h > 0n && h <= BigInt(Number.MAX_SAFE_INTEGER) ? h : null);
+/**
+ * og carriesHeightCertificate (entity-height-barrier.ts:36): a proposal (a commit notification included) or a
+ * precommit with at least one bundle names an exact height.
+ */
+const carriesHeightCertificate = (i: RoutedEntityInput): boolean =>
+  i.input.kind === "proposal" || (i.input.kind === "precommit" && i.input.signatures.size > 0);
+/**
+ * og possibleCommittedHeight (entity-height-barrier.ts:39-59): a proposal or precommit may commit its own height; any
+ * other input may advance the replica one height from local work.
+ */
+const possibleCommittedHeight = (i: RoutedEntityInput, current: bigint): bigint | null => {
+  if (i.input.kind === "proposal") return positiveHeight(i.input.frame.height);
+  if (i.input.kind === "precommit" && i.input.signatures.size > 0) return positiveHeight(i.input.height);
+  return current + 1n;
+};
+/** og importingReplicaLanes (entity-height-barrier.ts:61-69): the lanes an importReplica of this frame creates. */
+const importingLanes = (txs: readonly RuntimeTx[]): ReadonlySet<string> =>
+  new Set(
+    txs.flatMap((tx) => {
+      if (tx.type !== "importReplica") return [];
+      const key = `${trimLower(tx.entityId)}:${trimLower(tx.signerId)}`;
+      return key === ":" ? [] : [key];
+    }),
+  );
+/** og findExactReplica + resolveLaneHeight (entity-height-barrier.ts:9-15, 71-81): the first replica on each lane. */
+const laneHeights = (
+  entities: ReadonlyMap<string, EntityReplica>,
+  importing: ReadonlySet<string>,
+): ((key: string) => bigint | null) => {
+  const replicas = [...entities.values()].map((r): readonly [string, EntityReplica] => [
+    `${trimLower(r.state.id)}:${trimLower(r.signerId)}`,
+    r,
+  ]);
+  // og [...].find: the first replica on a lane wins, so later ones are entered first and overwritten
+  const first = new Map<string, EntityReplica>(replicas.toReversed());
+  return (key) => first.get(key)?.state.height ?? (importing.has(key) ? 0n : null);
+};
+/** og LaneDurabilityState: the replica's height and the lowest height any input of this frame may commit. */
+type LaneDurability = { readonly current: bigint; readonly firstFuture: bigint };
+/** og collectLaneDurabilityState (entity-height-barrier.ts:88-107). */
+const laneDurability = (
+  inputs: readonly RoutedEntityInput[],
+  heightOf: (key: string) => bigint | null,
+): ReadonlyMap<string, LaneDurability> =>
+  inputs.reduce<ReadonlyMap<string, LaneDurability>>((lanes, i) => {
+    const key = heightLaneKey(i);
+    const current = key === null ? null : heightOf(key);
+    if (key === null || current === null) return lanes;
+    const candidate = possibleCommittedHeight(i, current);
+    if (candidate === null || candidate <= current) return lanes;
+    const prior = lanes.get(key);
+    const earlier = prior === undefined || candidate < prior.firstFuture;
+    return earlier ? mapSet(lanes, key, { current, firstFuture: candidate }) : lanes;
+  }, new Map());
+/** og createCommitBlocker's per-lane memory: the accepted merge group, its scheduled wake, and the closed lanes. */
+type BlockerMemory = {
+  readonly accepted: ReadonlyMap<string, string>;
+  readonly wakes: ReadonlyMap<string, string>;
+  readonly closed: ReadonlySet<string>;
+  readonly blocked: readonly boolean[];
+};
+const EMPTY_BLOCKER: BlockerMemory = { accepted: new Map(), wakes: new Map(), closed: new Set(), blocked: [] };
+/** og: the first scheduledWake an input carries, as its exact form. */
+const scheduledWakeKey = (i: RoutedEntityInput): string | null => {
+  const wake = i.input.kind === "txs" ? i.input.txs.find((tx) => tx.type === "scheduledWake") : undefined;
+  return wake === undefined ? null : canon(wake);
+};
+/**
+ * og createCommitBlocker (entity-height-barrier.ts:118-155), one input: the first merge group at the lane's first
+ * future height is accepted; a later input of another group on a certificate lane closes the lane, and every input
+ * after a close, or at a later height, is blocked. A same-group input with a different scheduled wake also closes the
+ * lane.
+ */
+const blockStep =
+  (lanes: ReadonlyMap<string, LaneDurability>, certificates: ReadonlySet<string>) =>
+  (m: BlockerMemory, i: RoutedEntityInput): Result<BlockerMemory, RuntimeError> => {
+    const pass = ok({ ...m, blocked: [...m.blocked, false] });
+    const block = ok({ ...m, blocked: [...m.blocked, true] });
+    const key = heightLaneKey(i);
+    const state = key === null ? undefined : lanes.get(key);
+    if (key === null || state === undefined) return pass;
+    if (m.closed.has(key)) return block;
+    const candidate = possibleCommittedHeight(i, state.current);
+    if (candidate === null || candidate <= state.current) return pass;
+    if (candidate > state.firstFuture) return block;
+    const close = ok({ ...m, closed: new Set([...m.closed, key]), blocked: [...m.blocked, true] });
+    return chain(mergeKey(laneOf(i)), (group) => {
+      const wake = scheduledWakeKey(i);
+      const accepted = m.accepted.get(key);
+      const acceptedWake = m.wakes.get(key);
+      const withWake = wake !== null && acceptedWake === undefined ? mapSet(m.wakes, key, wake) : m.wakes;
+      if (accepted === undefined) {
+        return ok({ ...m, accepted: mapSet(m.accepted, key, group), wakes: withWake, blocked: [...m.blocked, false] });
+      }
+      if (group !== accepted && !certificates.has(key)) return pass;
+      if (group !== accepted) return close;
+      if (wake !== null && acceptedWake !== undefined && wake !== acceptedWake) return close;
+      return ok({ ...m, wakes: withWake, blocked: [...m.blocked, false] });
+    });
+  };
+/** og atomicCrossJInputCohortKey (delivery/topology/entity-routing.ts:620-642): an atomic cross-j leg's cohort. */
+const atomicCohortKey = (i: RoutedEntityInput): string | null => {
+  const marker = i.atomicCrossJurisdictionPair;
+  const frame = i.sourceRuntimeFrame;
+  if (marker === undefined) return null;
+  const origin = transportOrigin(i);
+  return JSON.stringify([marker.phase, marker.pairKey, origin, frame?.height ?? null, frame?.timestamp ?? null]);
+};
+/** og applyEntityHeightDurabilityBarrier's split: the inputs this frame applies and the ones it requeues. */
+export type HeightBarrier = {
+  readonly selected: readonly RoutedEntityInput[];
+  readonly deferred: readonly RoutedEntityInput[];
+};
+/**
+ * og partitionDurableEntityInputs (entity-height-barrier.ts:157-179): a blocked input defers, and so does every leg of
+ * an atomic cross-j cohort one of whose legs is blocked. Both halves keep arrival order.
+ */
+const partitionDurable = (inputs: readonly RoutedEntityInput[], blocked: readonly boolean[]): HeightBarrier => {
+  const cohortOf = inputs.map(atomicCohortKey);
+  const blockedCohorts = new Set(cohortOf.filter((key, k): key is string => key !== null && blocked[k] === true));
+  const defers = cohortOf.map((key, k) => blocked[k] === true || (key !== null && blockedCohorts.has(key)));
+  return {
+    selected: inputs.filter((_, k) => !defers[k]),
+    deferred: inputs.filter((_, k) => defers[k]),
+  };
+};
+/**
+ * og applyEntityHeightDurabilityBarrier (runtime/mempool/entity-height-barrier.ts:186-208), run by og
+ * prepareRuntimeFrameInput (frame/lifecycle/prepare.ts:49-51) on the consensus-prioritized inputs: one Runtime frame
+ * makes at most one new certified Entity height durable per replica lane. Walking in arrival order, a lane that
+ * receives a proposal or precommit keeps only its first merge group (og entityInputMergeKey); every later input on it
+ * is deferred, and og puts the deferred inputs back at the front of the Runtime mempool for the next frame. Plain-input
+ * lanes defer only inputs for a later height. `runtimeTxs` are the frame's own (an importReplica lane starts at 0).
+ */
+export const entityHeightBarrier = (
+  entities: ReadonlyMap<string, EntityReplica>,
+  runtimeTxs: readonly RuntimeTx[],
+  inputs: readonly RoutedEntityInput[],
+): Result<HeightBarrier, RuntimeError> => {
+  const lanes = laneDurability(inputs, laneHeights(entities, importingLanes(runtimeTxs)));
+  if (lanes.size === 0) return ok({ selected: inputs, deferred: [] });
+  const certificateLanes = inputs.filter(carriesHeightCertificate).map(heightLaneKey);
+  const certificates = new Set(certificateLanes.filter((key): key is string => key !== null));
+  const blocking = foldResult(inputs, EMPTY_BLOCKER, blockStep(lanes, certificates));
+  return map(blocking, ({ blocked }) => partitionDurable(inputs, blocked));
+};
 
 // ---- og runtime/tx/tx-handlers.ts ----
 const COMMAND_ID = /^[A-Za-z0-9._:-]{16,128}$/;
@@ -40112,6 +40304,7 @@ const entityContextFor = (
     ...f.ctx,
     htlc: runtimeHtlcInfra(f.ctx, f.rt, routed.entityId),
     ...opt("activeJurisdiction", f.rt.activeJurisdiction),
+    ...opt("runtimeId", f.rt.runtimeId),
     ...opt(
       "jHistory",
       replicaJHistory({ ...f.rt, entities: b.store }, replicaKey(routed.entityId, routed.signerId), r),
@@ -41152,7 +41345,7 @@ const voteBodyOf = (vote: WireRecord | undefined): Binary | undefined =>
  * og's tx fingerprints and leader-vote body hash are replaced by equality-equivalent content digests (the key is
  * compared, never stored).
  */
-const routeKeyOf = (o: NetworkOutput): Result<string, RuntimeError> => {
+export const routeKeyOf = (o: NetworkOutput): Result<string, RuntimeError> => {
   const identity = proposalIdentity(o);
   if (identity !== null) return ok(identity);
   const source = o["sourceRuntimeFrame"] as { readonly height: Binary; readonly timestamp: Binary } | undefined;
@@ -41825,6 +42018,33 @@ export const commitRuntimeFrame = (
   ctx: RuntimeCtx,
 ): Result<RuntimeFrameCommit | null, RuntimeError> =>
   chain(applyRuntime(rt, input, ctx), (step) => (step.advanced ? sealFrame(rt, step, ctx.routes) : ok(null)));
+/**
+ * One host Runtime frame: `commit` is the frame (null when it did no work) and `deferred` are the inputs og's
+ * entity-height barrier requeued, which the host carries at the front of its queue into the next frame (og puts them
+ * ahead of its mempool, entity-height-barrier.ts:205). They are returned even when the frame did no work: og's mempool
+ * keeps them either way.
+ */
+export type RuntimeFrameRun = {
+  readonly commit: RuntimeFrameCommit | null;
+  readonly deferred: readonly RoutedEntityInput[];
+};
+/**
+ * og prepareRuntimeFrameInput (frame/lifecycle/prepare.ts:49-51) then process: the queued inputs are consensus-
+ * prioritized against the frame-start replicas (og hasVerifiedEntityCommitPrecertificate), the entity-height barrier
+ * keeps one merge group per certificate lane, and the rest is committed as commitRuntimeFrame. Replay never runs this:
+ * a WAL row holds the input the barrier already selected.
+ */
+export const processRuntimeFrame = (
+  rt: Runtime,
+  input: RuntimeInput,
+  ctx: RuntimeCtx,
+): Result<RuntimeFrameRun, RuntimeError> => {
+  const prioritized = prioritizeConsensusInputs(input.entityInputs, verifiedCommit(rt.entities, ctx));
+  const barrier = entityHeightBarrier(rt.entities, input.runtimeTxs, prioritized);
+  return chain(barrier, ({ selected, deferred }) =>
+    map(commitRuntimeFrame(rt, { ...input, entityInputs: selected }, ctx), (commit) => ({ commit, deferred })),
+  );
+};
 
 
 // Replay: the WAL tail verified row by row and replayed to the same bytes.
