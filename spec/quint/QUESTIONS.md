@@ -326,6 +326,20 @@ start (rejected: it would swallow the peer's dispute; the starter is in the even
 it only on some seeds (seed 1 kills `skip-outcome-not-read` by the invariant, seed 7 does not reach it in 3000 traces), so the witness
 `w_no_outcome` covers the landed start and the scenario tests cover the skip.
 
+**C12. Several clauses in one Account: what the single-clause chain model leaves out. CLOSED by a check.**
+The Account layer allows up to LOCK_SLOTS open clauses, `chain.qnt` holds one per proof. The contract (`DeltaTransformer._applyBatch`) settles
+the payments one by one, each adds its amount to the delta when its secret is on the chain by its deadline, independently of the others; a
+clause that is still open and unrevealed makes the whole finalize revert until its deadline has passed (H1), so a finalize waits for the
+latest unrevealed deadline. So the clauses interact in two places only: the wait (the maximum, not each) and the sum, which the payout then
+clamps to the collateral with the rest as debt. The sum is the risk: two clauses that are each fine alone can together push a side
+outside its credit. `compose.qnt` checks it exhaustively over a small domain (offdelta -4..6, limits 0..2, two slots each empty or a
+clause of either payer with amount 1..3): for every Body that satisfies RCPAN and every subset of resolved clauses, the chain's `payout`
+leaves no side owing more than the credit it was granted and pays out exactly the collateral. Non-vacuous: the domain has Bodies with two
+open clauses and with debt, and RCPAN without the open clauses (`weakRcpan`) is violated. Mutants: `rcpan-ignores-open-clauses`,
+`payout-forgets-the-debt`, `payout-pays-the-collateral-twice`. Not covered: a wait that differs per clause in the chain model itself (the
+single clause has one deadline); the maximum-of-deadlines is the contract's line, stated here and checked by `finalizeWaitsForDeadlineTest`
+for one clause.
+
 **E11. Found while writing it.**
 (a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`
 (E7). (b) A secret on the chain pays nobody without a dispute holding the clause; the first `route_safe` treated it as payment and

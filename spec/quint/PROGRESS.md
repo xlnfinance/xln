@@ -11,6 +11,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 | Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 20 scenario tests, 11 properties by simulation, 20 mutants killed. Several inputs per frame (E1); own start and the peer's beside it (E12). Simulation only (one state record) |
 | J batch | `jbatch.qnt` | v1 done: the Entity's batch over the chain's strict nonce and atomic revert; urgent ops, forks, nonce burning, what a lost batch holds. 11 scenario tests, 10 properties by simulation, 11 mutants killed. J2 accepted (tolerant dispute ops, with the `DisputeOpSkipped` event the Entity reads); F1 (a signed batch is final at its nonce) is the Entity's rule; J5 accepted (a failed batch takes its nonce and emits `BatchFailed`, which the Entity reads) |
 | Runtime | `runtime.qnt` | v1 done: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart, the halt taxonomy. 8 scenario tests, 4 properties by simulation, 8 mutants killed; every event kind is read (R7) |
+| Account to chain | `compose.qnt` | every RCPAN Body in a small domain and every outcome of its open clauses, settled by the chain's `payout`: credit holds on the chain, collateral conserved (C12). 3 tests, 3 mutants |
 | Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 15 scenario tests, 6 properties by simulation, 20 mutants killed. S3 closed: presign+fold, the baseline rides every frame at nonce + 3 |
 
 ## Evidence
@@ -66,8 +67,7 @@ Neither spec reads the other. Four leaks, all harmless but recorded:
 
 ## Next
 
-1. Account + chain with real Account histories instead of the arena (the joint state of the hub's two Accounts and the chain, beyond the
-   interface and the shared numbers of `params_test.qnt`).
+1. Account + chain: the link is checked as a predicate over Bodies (`compose.qnt`, C12); a joint state machine of the hub's two Accounts and the chain is still not built.
 2. Entity: several routes per slot and a free-slot rule (E7), an offline Entity.
 3. Apalache on the J modules (`jbatch`, `runtime`, `settle`) where it finishes; v2 models (proposals are in V2.md).
 4. Contract-side items: J5 (a failed batch takes its nonce, `BatchFailed`), C11 (window floor above LAG) and J2 (tolerant dispute ops in a batch) accepted by the coordinator 2026-09-29; the contracts thread changes J2 test-first. The chain fact E6 is pinned on the real contracts (#47).

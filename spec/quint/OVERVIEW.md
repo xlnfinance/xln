@@ -113,5 +113,5 @@ Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_fra
 
 ## What is not in it yet
 
-Several tokens and swaps (v2), the order book, lending, boards (v2), the joint state of the hub's two Accounts and the chain with
-real Account histories, several routes per slot, an offline Entity. See PROGRESS.md "Next".
+Several tokens and swaps (v2), the order book, lending, boards (v2), the joint state of the hub's two Accounts and the chain (the
+Account-to-chain link is checked as a predicate over Bodies, C12), several routes per slot, an offline Entity. See PROGRESS.md "Next".

@@ -1,0 +1,36 @@
+{
+  "files": [
+    "account_core.qnt",
+    "chain.qnt",
+    "compose.qnt"
+  ],
+  "mutants": [
+    {
+      "id": "rcpan-ignores-open-clauses",
+      "why": "P2: RCPAN checks the allocation only, not the worst case over the open clauses: a resolved clause pushes a side beyond the credit it was granted, and the chain books debt above the limit",
+      "file": "account_core.qnt",
+      "old": "    delta(b) - holds(b, Left) >= -b.limitLeft,\n    delta(b) + holds(b, Right) <= COLLATERAL + b.limitRight\n",
+      "new": "    true,\n    true\n",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "payout-forgets-the-debt",
+      "why": "P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
+      "file": "chain.qnt",
+      "old": "      if (d == 0) m1 else shortfall(m1, Left, -d)",
+      "new": "      m1",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "payout-pays-the-collateral-twice",
+      "why": "P3: the collateral is released to the winner and again to the other side",
+      "file": "chain.qnt",
+      "old": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }",
+      "new": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + coll), debt: m.debt }",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    }
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "compose.qnt"
+}

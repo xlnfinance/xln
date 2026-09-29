@@ -14,6 +14,9 @@ MODULES=${MODULES:-account chain settle entity jbatch runtime}
 echo "== params: the numbers the layers share"
 $Q test params_test.qnt --backend typescript
 
+echo "== compose: what the Account layer co-signs, settled by the chain's payout"
+$Q test compose.qnt --backend typescript --max-samples 10
+
 for m in $MODULES; do
   echo "== $m: typecheck"
   # per-module entry points: action names, the invariant that bundles the properties, trace length

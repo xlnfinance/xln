@@ -35,6 +35,7 @@ dispute ops in a batch (J2). og is a reference, never the oracle.
 | `runtime.qnt` | Runtime layer: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart |
 | `runtime_test.qnt` | scenario tests: three-step frame, crash before and after durable, chain event across a crash, canonical order |
 | `params_test.qnt` | the numbers the layers share (LAG, REACT, windows, HOP, ESC) and the entity's deadline arithmetic played on the real dispute game |
+| `compose.qnt` | the Account layer meets the chain: every RCPAN Body in a small domain and every outcome of its open clauses, settled by the chain's own `payout` (credit holds on the chain, collateral conserved) |
 | `mutants/` | deliberately broken copies of the spec; every property must kill its mutants (`mutants/run.py <module>`) |
 | `traces/` | ITF traces (Quint's JSON trace format) for replay against another spec |
 | `OVERVIEW.md` | the spec in one read: layers, data flow, state machines, properties, what it asks of the contracts |
