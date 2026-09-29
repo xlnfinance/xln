@@ -392,3 +392,88 @@ export const entityTransferFromTreasury = async (
     entityNumber, to, tokenId, amount, buildSingleSignerHanko(entityId, hash, privateKey),
   )).wait();
 };
+
+// ── wide money (Int512 / SignedAmount) batch encoding ──
+//
+// The fork's money is not int256: ProofBody.offdeltas is Int512[] {int256 high, uint256 low} and SettlementDiff carries
+// SignedAmount {bool negative, uint256 magnitude} in each of its four amount fields. BATCH_ABI above keeps the retired
+// int256 shape (it is byte-identical for every batch without diffs and proof bodies), so a batch with a non-empty settlement
+// diff or a proof body must be encoded with the wide shape below. Callers keep passing plain bigints; this converts them.
+
+const INT256_WORD_MASK = (1n << 256n) - 1n;
+const toSignedAmount = (value: unknown) =>
+  typeof value === 'bigint'
+    ? { negative: value < 0n, magnitude: value < 0n ? -value : value }
+    : value;
+const toInt512 = (value: unknown) =>
+  typeof value === 'bigint' ? { high: value >> 256n, low: value & INT256_WORD_MASK } : value;
+
+/** BATCH_ABI with the fork's wide money shapes for settlement diffs and proof-body offdeltas. */
+export const FORK_BATCH_ABI = [
+  BATCH_ABI[0]
+    .replace(
+      'int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff',
+      'tuple(bool negative,uint256 magnitude) leftDiff,tuple(bool negative,uint256 magnitude) rightDiff,'
+        + 'tuple(bool negative,uint256 magnitude) collateralDiff,tuple(bool negative,uint256 magnitude) ondeltaDiff',
+    )
+    .replaceAll('int256[] offdeltas', 'tuple(int256 high,uint256 low)[] offdeltas'),
+];
+if (FORK_BATCH_ABI[0].includes('int256 leftDiff') || FORK_BATCH_ABI[0].includes('int256[] offdeltas')) {
+  throw new Error('FORK_BATCH_ABI: BATCH_ABI money fields were not widened');
+}
+
+type MoneyBatchRecord = Record<string, any>;
+const widenProofbody = (body: MoneyBatchRecord): MoneyBatchRecord =>
+  ({ ...body, offdeltas: (body['offdeltas'] as unknown[]).map(toInt512) });
+
+/** encodeBatch for the fork: bigint diffs and offdeltas become SignedAmount / Int512 structs. */
+export const encodeForkBatch = (batch: MoneyBatchRecord): string => {
+  const wide: MoneyBatchRecord = {
+    ...batch,
+    settlements: (batch['settlements'] as MoneyBatchRecord[]).map((settlement) => ({
+      ...settlement,
+      diffs: (settlement['diffs'] as MoneyBatchRecord[]).map((diff) => ({
+        ...diff,
+        leftDiff: toSignedAmount(diff['leftDiff']),
+        rightDiff: toSignedAmount(diff['rightDiff']),
+        collateralDiff: toSignedAmount(diff['collateralDiff']),
+        ondeltaDiff: toSignedAmount(diff['ondeltaDiff']),
+      })),
+    })),
+    disputeStarts: (batch['disputeStarts'] as MoneyBatchRecord[]).map((start) => ({
+      ...start,
+      initialProofbody: widenProofbody(start['initialProofbody']),
+    })),
+    counterDisputes: (batch['counterDisputes'] as MoneyBatchRecord[]).map((counter) => ({
+      ...counter,
+      counterProofbody: widenProofbody(counter['counterProofbody']),
+    })),
+    disputeFinalizations: (batch['disputeFinalizations'] as MoneyBatchRecord[]).map((finalization) => ({
+      ...finalization,
+      finalProofbody: widenProofbody(finalization['finalProofbody']),
+    })),
+  };
+  return ethers.AbiCoder.defaultAbiCoder().encode(FORK_BATCH_ABI, [wide]);
+};
+
+/** Wide-money settlement diff list ABI for computeCooperativeUpdateHash (pair with toForkSettlementDiffs). */
+export const FORK_SETTLEMENT_DIFFS_ABI =
+  'tuple(uint256 tokenId,tuple(bool negative,uint256 magnitude) leftDiff,tuple(bool negative,uint256 magnitude) rightDiff,'
+  + 'tuple(bool negative,uint256 magnitude) collateralDiff,tuple(bool negative,uint256 magnitude) ondeltaDiff)[]';
+
+/** bigint diff amounts -> SignedAmount structs, for the cooperative-update hash payload. */
+export const toForkSettlementDiffs = (diffs: MoneyBatchRecord[]): MoneyBatchRecord[] =>
+  diffs.map((diff) => ({
+    ...diff,
+    leftDiff: toSignedAmount(diff['leftDiff']),
+    rightDiff: toSignedAmount(diff['rightDiff']),
+    collateralDiff: toSignedAmount(diff['collateralDiff']),
+    ondeltaDiff: toSignedAmount(diff['ondeltaDiff']),
+  }));
+
+/** ProofBody ABI type with Int512[] offdeltas, for hashing a proof body the way Account does. */
+export const FORK_PROOF_BODY_ABI =
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,tuple(int256 high,uint256 low)[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+
+/** bigint offdeltas -> Int512 structs. */
+export const toForkProofBody = (body: MoneyBatchRecord): MoneyBatchRecord => widenProofbody(body);
