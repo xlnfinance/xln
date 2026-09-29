@@ -30,6 +30,9 @@ library Account {
    */
   event AccountSettled(AccountSettlement[] settled);
 
+  /// @notice The Account's ondelta baseline was rebased; proofs signed for `ondeltaEpoch - 1` and earlier are void.
+  event AccountEpochAdvanced(bytes32 indexed left, bytes32 indexed right, uint256 ondeltaEpoch);
+
   /**
    * @notice Emitted when reserves change during settlement.
    * @dev Mirror of Depository.sol ReserveUpdated - emitted here via DELEGATECALL.
@@ -358,6 +361,17 @@ library Account {
 
   // ========== PURE HELPERS ==========
 
+  function _advanceOndeltaEpoch(
+    mapping(bytes => AccountInfo) storage _accounts,
+    bytes32 e1,
+    bytes32 e2
+  ) private {
+    (bytes32 left, bytes32 right) = e1 < e2 ? (e1, e2) : (e2, e1);
+    AccountInfo storage account = _accounts[_accountKey(left, right)];
+    account.ondeltaEpoch += 1;
+    emit AccountEpochAdvanced(left, right, account.ondeltaEpoch);
+  }
+
   function _accountKey(bytes32 e1, bytes32 e2) internal pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
@@ -547,6 +561,7 @@ library Account {
   // accept a signature for a different jurisdiction.
   function _encodeCooperativeUpdateHankoPayload(
     bytes memory acct_key,
+    uint256 ondeltaEpoch,
     uint nonce,
     SettlementDiff[] memory diffs,
     uint[] memory forgiveDebtsInTokenIds
@@ -555,6 +570,7 @@ library Account {
       block.chainid,
       address(this),
       acct_key,
+      ondeltaEpoch,
       nonce,
       diffs,
       forgiveDebtsInTokenIds
@@ -563,15 +579,17 @@ library Account {
 
   function _cooperativeUpdateHankoHash(
     bytes memory acct_key,
+    uint256 ondeltaEpoch,
     uint nonce,
     SettlementDiff[] memory diffs,
     uint[] memory forgiveDebtsInTokenIds
   ) private view returns (bytes32) {
-    return keccak256(_encodeCooperativeUpdateHankoPayload(acct_key, nonce, diffs, forgiveDebtsInTokenIds));
+    return keccak256(_encodeCooperativeUpdateHankoPayload(acct_key, ondeltaEpoch, nonce, diffs, forgiveDebtsInTokenIds));
   }
 
   function _encodeDisputeProofHankoPayload(
     bytes memory acct_key,
+    uint256 ondeltaEpoch,
     uint nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
@@ -581,6 +599,7 @@ library Account {
       block.chainid,
       address(this),
       acct_key,
+      ondeltaEpoch,
       nonce,
       proposerIsLeft,
       proofbodyHash,
@@ -590,6 +609,7 @@ library Account {
 
   function _disputeProofHankoHash(
     bytes memory acct_key,
+    uint256 ondeltaEpoch,
     uint nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
@@ -597,6 +617,7 @@ library Account {
   ) private view returns (bytes32) {
     return keccak256(_encodeDisputeProofHankoPayload(
       acct_key,
+      ondeltaEpoch,
       nonce,
       proposerIsLeft,
       proofbodyHash,
@@ -610,6 +631,7 @@ library Account {
   function verifyDisputeProofHanko(
     address entityProvider,
     bytes memory acct_key,
+    uint256 ondeltaEpoch,
     uint nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
@@ -619,6 +641,7 @@ library Account {
   ) private view returns (bool success) {
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
+      ondeltaEpoch,
       nonce,
       proposerIsLeft,
       proofbodyHash,
@@ -751,6 +774,7 @@ library Account {
         if (!verifyDisputeProofHanko(
           entityProvider,
           acct_key,
+          account.ondeltaEpoch,
           params.finalNonce,
           params.proposerIsLeft,
           finalProofbodyHash,
@@ -833,6 +857,8 @@ library Account {
     account.starterCounterArgumentsCommitment = bytes32(0);
     account.starterCounterProofCommitment = bytes32(0);
     account.disputeStartedByLeft = false;
+    // Finalization pays the Account out (collateral and ondelta reset), so every proof signed for the old baseline dies.
+    _advanceOndeltaEpoch(_accounts, entityId, params.counterentity);
   }
 
   /// @dev Pull is a protocol semantic of the immutable canonical
@@ -1274,7 +1300,7 @@ library Account {
     });
 
     // Verify counterparty signature (hash includes signedNonce, not storedNonce)
-    bytes32 hash = _cooperativeUpdateHankoHash(acct_key, c2r.nonce, diffs, new uint[](0));
+    bytes32 hash = _cooperativeUpdateHankoHash(acct_key, _accounts[acct_key].ondeltaEpoch, c2r.nonce, diffs, new uint[](0));
 
     // C2R authorizes a fresh movement of funds, not historical evidence. A
     // rotated-out board must never retain spending authority during its grace.
@@ -1294,6 +1320,7 @@ library Account {
 
     // SET nonce (not increment)
     _accounts[acct_key].nonce = c2r.nonce;
+    _advanceOndeltaEpoch(_accounts, leftEntity, rightEntity);
 
     // Emit unionified AccountSettled
     TokenSettlement[] memory tokens = new TokenSettlement[](1);
@@ -1445,6 +1472,7 @@ library Account {
     if (!verifyDisputeProofHanko(
       entityProvider,
       acctKey,
+      account.ondeltaEpoch,
       params.counterNonce,
       params.proposerIsLeft,
       bodyHash,
@@ -1542,6 +1570,7 @@ library Account {
     // Hash includes signedNonce (from settlement struct), not storedNonce
     bytes32 hash = _cooperativeUpdateHankoHash(
       acct_key,
+      _accounts[acct_key].ondeltaEpoch,
       s.nonce,
       s.diffs,
       s.forgiveDebtsInTokenIds
@@ -1612,6 +1641,7 @@ library Account {
 
     // SET nonce = signedNonce (not +1)
     _accounts[acct_key].nonce = s.nonce;
+    _advanceOndeltaEpoch(_accounts, leftEntity, rightEntity);
 
     // Every successful nonce transition must be observable. A pure debt
     // forgiveness has no diffs, but it still invalidates old proofs and must
@@ -1713,6 +1743,7 @@ library Account {
 
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
+      _accounts[acct_key].ondeltaEpoch,
       params.nonce,
       params.proposerIsLeft,
       params.proofbodyHash,

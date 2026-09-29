@@ -18,6 +18,7 @@ library HankoEncoding {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     SettlementDiff[] memory diffs,
     uint256[] memory forgiveDebtsInTokenIds
@@ -27,6 +28,7 @@ library HankoEncoding {
       chainId,
       contractAddress,
       accountKey,
+      ondeltaEpoch,
       nonce,
       diffs,
       forgiveDebtsInTokenIds
@@ -37,6 +39,7 @@ library HankoEncoding {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
@@ -47,6 +50,7 @@ library HankoEncoding {
       chainId,
       contractAddress,
       accountKey,
+      ondeltaEpoch,
       nonce,
       proposerIsLeft,
       proofbodyHash,

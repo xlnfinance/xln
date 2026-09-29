@@ -75,6 +75,11 @@ struct AccountInfo {
   // non-starter could pair those arguments with a different historical proof.
   bytes32 starterCounterProofCommitment;
   bool disputeStartedByLeft;
+  // Incarnation of the Account's on-chain baseline. Every event that rebases ondelta or collateral against the
+  // off-chain offdelta (cooperative settlement, C2R, dispute finalization) advances it by one. Signed dispute proofs
+  // and cooperative updates commit to it, so a proof signed for an earlier baseline can never be applied to a later one.
+  // R2C does not advance it: it needs no counterparty signature, so anyone could otherwise void every signed proof.
+  uint256 ondeltaEpoch;
 }
 
 struct AccountCollateral {

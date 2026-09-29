@@ -35,6 +35,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   // Account emits this shared tuple through DELEGATECALL, at this address.
   // Keep the event in Depository's public ABI for its canonical watcher.
   event AccountSettled(AccountSettlement[] settled);
+  event AccountEpochAdvanced(bytes32 indexed left, bytes32 indexed right, uint256 ondeltaEpoch);
   struct ReserveMint {
     bytes32 entity;
     uint tokenId;
@@ -742,6 +743,11 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
   function _accountKey(bytes32 e1, bytes32 e2) private pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
+  }
+
+  /// @notice Baseline incarnation of the Account between two entities (see AccountInfo.ondeltaEpoch).
+  function ondeltaEpoch(bytes32 e1, bytes32 e2) external view returns (uint256) {
+    return _accounts[_accountKey(e1, e2)].ondeltaEpoch;
   }
 
   function _reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {

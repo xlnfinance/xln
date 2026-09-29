@@ -259,6 +259,7 @@ export interface AccountInterface extends Interface {
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "AccountEpochAdvanced"
       | "AccountSettled"
       | "CounterDisputeRegistered"
       | "DebtCreated"
@@ -317,6 +318,24 @@ export interface AccountInterface extends Interface {
     functionFragment: "validateDisputeProofs",
     data: BytesLike
   ): Result;
+}
+
+export namespace AccountEpochAdvancedEvent {
+  export type InputTuple = [
+    left: BytesLike,
+    right: BytesLike,
+    ondeltaEpoch: BigNumberish
+  ];
+  export type OutputTuple = [left: string, right: string, ondeltaEpoch: bigint];
+  export interface OutputObject {
+    left: string;
+    right: string;
+    ondeltaEpoch: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace AccountSettledEvent {
@@ -666,6 +685,13 @@ export interface Account extends BaseContract {
   >;
 
   getEvent(
+    key: "AccountEpochAdvanced"
+  ): TypedContractEvent<
+    AccountEpochAdvancedEvent.InputTuple,
+    AccountEpochAdvancedEvent.OutputTuple,
+    AccountEpochAdvancedEvent.OutputObject
+  >;
+  getEvent(
     key: "AccountSettled"
   ): TypedContractEvent<
     AccountSettledEvent.InputTuple,
@@ -716,6 +742,17 @@ export interface Account extends BaseContract {
   >;
 
   filters: {
+    "AccountEpochAdvanced(bytes32,bytes32,uint256)": TypedContractEvent<
+      AccountEpochAdvancedEvent.InputTuple,
+      AccountEpochAdvancedEvent.OutputTuple,
+      AccountEpochAdvancedEvent.OutputObject
+    >;
+    AccountEpochAdvanced: TypedContractEvent<
+      AccountEpochAdvancedEvent.InputTuple,
+      AccountEpochAdvancedEvent.OutputTuple,
+      AccountEpochAdvancedEvent.OutputObject
+    >;
+
     "AccountSettled(tuple[])": TypedContractEvent<
       AccountSettledEvent.InputTuple,
       AccountSettledEvent.OutputTuple,

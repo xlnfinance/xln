@@ -232,6 +232,7 @@ export interface DepositoryInterface extends Interface {
       | "getTokensLength"
       | "mintToReserve"
       | "onERC1155Received"
+      | "ondeltaEpoch"
       | "processBatch"
       | "registerExternalToken"
       | "watchtowerCounterDispute"
@@ -239,6 +240,7 @@ export interface DepositoryInterface extends Interface {
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "AccountEpochAdvanced"
       | "AccountSettled"
       | "CooperativeClose"
       | "CounterDisputeRegistered"
@@ -346,6 +348,10 @@ export interface DepositoryInterface extends Interface {
     values: [AddressLike, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "ondeltaEpoch",
+    values: [BytesLike, BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "processBatch",
     values: [BytesLike, BytesLike, BigNumberish]
   ): string;
@@ -431,6 +437,10 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "ondeltaEpoch",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "processBatch",
     data: BytesLike
   ): Result;
@@ -442,6 +452,24 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "watchtowerCounterDispute",
     data: BytesLike
   ): Result;
+}
+
+export namespace AccountEpochAdvancedEvent {
+  export type InputTuple = [
+    left: BytesLike,
+    right: BytesLike,
+    ondeltaEpoch: BigNumberish
+  ];
+  export type OutputTuple = [left: string, right: string, ondeltaEpoch: bigint];
+  export interface OutputObject {
+    left: string;
+    right: string;
+    ondeltaEpoch: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace AccountSettledEvent {
@@ -929,7 +957,8 @@ export interface Depository extends BaseContract {
         string,
         string,
         string,
-        boolean
+        boolean,
+        bigint
       ] & {
         nonce: bigint;
         disputeHash: string;
@@ -946,6 +975,7 @@ export interface Depository extends BaseContract {
         starterCounterArgumentsCommitment: string;
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
+        ondeltaEpoch: bigint;
       }
     ],
     "view"
@@ -1070,6 +1100,12 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  ondeltaEpoch: TypedContractMethod<
+    [e1: BytesLike, e2: BytesLike],
+    [bigint],
+    "view"
+  >;
+
   processBatch: TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [void],
@@ -1128,7 +1164,8 @@ export interface Depository extends BaseContract {
         string,
         string,
         string,
-        boolean
+        boolean,
+        bigint
       ] & {
         nonce: bigint;
         disputeHash: string;
@@ -1145,6 +1182,7 @@ export interface Depository extends BaseContract {
         starterCounterArgumentsCommitment: string;
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
+        ondeltaEpoch: bigint;
       }
     ],
     "view"
@@ -1287,6 +1325,9 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "ondeltaEpoch"
+  ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [bigint], "view">;
+  getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
@@ -1318,6 +1359,13 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  getEvent(
+    key: "AccountEpochAdvanced"
+  ): TypedContractEvent<
+    AccountEpochAdvancedEvent.InputTuple,
+    AccountEpochAdvancedEvent.OutputTuple,
+    AccountEpochAdvancedEvent.OutputObject
+  >;
   getEvent(
     key: "AccountSettled"
   ): TypedContractEvent<
@@ -1425,6 +1473,17 @@ export interface Depository extends BaseContract {
   >;
 
   filters: {
+    "AccountEpochAdvanced(bytes32,bytes32,uint256)": TypedContractEvent<
+      AccountEpochAdvancedEvent.InputTuple,
+      AccountEpochAdvancedEvent.OutputTuple,
+      AccountEpochAdvancedEvent.OutputObject
+    >;
+    AccountEpochAdvanced: TypedContractEvent<
+      AccountEpochAdvancedEvent.InputTuple,
+      AccountEpochAdvancedEvent.OutputTuple,
+      AccountEpochAdvancedEvent.OutputObject
+    >;
+
     "AccountSettled(tuple[])": TypedContractEvent<
       AccountSettledEvent.InputTuple,
       AccountSettledEvent.OutputTuple,

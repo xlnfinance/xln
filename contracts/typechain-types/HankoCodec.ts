@@ -138,6 +138,7 @@ export interface HankoCodecInterface extends Interface {
       AddressLike,
       BytesLike,
       BigNumberish,
+      BigNumberish,
       SettlementDiffStruct[],
       BigNumberish[]
     ]
@@ -148,6 +149,7 @@ export interface HankoCodecInterface extends Interface {
       BigNumberish,
       AddressLike,
       BytesLike,
+      BigNumberish,
       BigNumberish,
       boolean,
       BytesLike,
@@ -261,6 +263,7 @@ export interface HankoCodecInterface extends Interface {
       AddressLike,
       BytesLike,
       BigNumberish,
+      BigNumberish,
       SettlementDiffStruct[],
       BigNumberish[]
     ]
@@ -271,6 +274,7 @@ export interface HankoCodecInterface extends Interface {
       BigNumberish,
       AddressLike,
       BytesLike,
+      BigNumberish,
       BigNumberish,
       boolean,
       BytesLike,
@@ -532,6 +536,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[]
@@ -545,6 +550,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
@@ -688,6 +694,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[]
@@ -701,6 +708,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
@@ -855,6 +863,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[]
@@ -869,6 +878,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       proposerIsLeft: boolean,
       proofbodyHash: BytesLike,
@@ -1022,6 +1032,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       diffs: SettlementDiffStruct[],
       forgiveDebtsInTokenIds: BigNumberish[]
@@ -1036,6 +1047,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       accountKey: BytesLike,
+      ondeltaEpoch: BigNumberish,
       nonce: BigNumberish,
       proposerIsLeft: boolean,
       proofbodyHash: BytesLike,

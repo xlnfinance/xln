@@ -31,12 +31,13 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     SettlementDiff[] memory diffs,
     uint256[] memory forgiveDebtsInTokenIds
   ) external pure returns (bytes memory) {
     return HankoEncoding.encodeCooperativeUpdate(
-      chainId, contractAddress, accountKey, nonce, diffs, forgiveDebtsInTokenIds
+      chainId, contractAddress, accountKey, ondeltaEpoch, nonce, diffs, forgiveDebtsInTokenIds
     );
   }
 
@@ -44,12 +45,13 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     SettlementDiff[] memory diffs,
     uint256[] memory forgiveDebtsInTokenIds
   ) external pure returns (bytes32) {
     return keccak256(HankoEncoding.encodeCooperativeUpdate(
-      chainId, contractAddress, accountKey, nonce, diffs, forgiveDebtsInTokenIds
+      chainId, contractAddress, accountKey, ondeltaEpoch, nonce, diffs, forgiveDebtsInTokenIds
     ));
   }
 
@@ -57,13 +59,14 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) external pure returns (bytes memory) {
     return HankoEncoding.encodeDisputeProof(
-      chainId, contractAddress, accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
+      chainId, contractAddress, accountKey, ondeltaEpoch, nonce, proposerIsLeft, proofbodyHash, watchSeed
     );
   }
 
@@ -71,13 +74,14 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     bytes memory accountKey,
+    uint256 ondeltaEpoch,
     uint256 nonce,
     bool proposerIsLeft,
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) external pure returns (bytes32) {
     return keccak256(HankoEncoding.encodeDisputeProof(
-      chainId, contractAddress, accountKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
+      chainId, contractAddress, accountKey, ondeltaEpoch, nonce, proposerIsLeft, proofbodyHash, watchSeed
     ));
   }
 
