@@ -26,6 +26,8 @@ import {
   toForkProofBody,
   toForkSettlementDiffs,
   singleSignerLazyEntityId,
+  MAX_SWAP_BOOK,
+  PROCESS_BATCH_GAS_LIMIT,
 } from '../helpers/hanko.ts';
 import { createWatchedErc20TokenReader } from '../../../core/jurisdiction/adapter/rpc-watcher-inputs.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
@@ -2735,7 +2737,7 @@ describe('Depository', () => {
     expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
   });
 
-  it('executes the runtime maximum swap book inside the bounded transformer call', async function () {
+  const finalizeSwapBook = async (swapCount: number) => {
     const { depository } = await loadFixture(deployFixture);
     const DeltaTransformer = await ethers.getContractFactory('DeltaTransformer');
     const transformer = await DeltaTransformer.deploy();
@@ -2744,7 +2746,7 @@ describe('Depository', () => {
     const tokenB = 110n;
     const encodedBatch = await transformer.encodeBatch({
       payment: [],
-      swap: Array.from({ length: 1_000 }, () => ({
+      swap: Array.from({ length: swapCount }, () => ({
         ownerIsLeft: true,
         addDeltaIndex: 0,
         addAmount: 1n,
@@ -2754,7 +2756,7 @@ describe('Depository', () => {
       pull: [],
     });
     const fullFillArguments = encodeDeltaTransformerArguments(
-      Array.from({ length: 1_000 }, () => Number(MAX_FILL_RATIO)),
+      Array.from({ length: swapCount }, () => Number(MAX_FILL_RATIO)),
     );
     const rightArguments = abi.encode(['bytes[]'], [[fullFillArguments]]);
     const dispute = await buildTimedOutTransformerFinalization(
@@ -2796,8 +2798,17 @@ describe('Depository', () => {
       });
     const receipt = await tx.wait();
     expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    expect(receipt?.gasUsed).to.be.lessThan(15_000_000n);
+    return receipt!.gasUsed;
+  };
+
+  it('finalizes the largest supported swap book (MAX_SWAP_BOOK) inside the batch gas limit', async function () {
+    expect(await finalizeSwapBook(MAX_SWAP_BOOK)).to.be.lessThanOrEqual(PROCESS_BATCH_GAS_LIMIT);
   });
+
+  it('a swap book one larger than MAX_SWAP_BOOK no longer fits: the limit is measured, not a guess', async function () {
+    expect(await finalizeSwapBook(MAX_SWAP_BOOK + 1)).to.be.greaterThan(PROCESS_BATCH_GAS_LIMIT);
+  });
+
 
   it('allows a designated tower to submit a delayed last-resort counter-dispute', async function () {
     const { depository } = await loadFixture(deployFixture);

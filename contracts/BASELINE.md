@@ -96,10 +96,25 @@ Rewritten for an intended change, with the reason:
 - `BoardRotationGrace` watchtower: the last-resort delay must be at least the response window now, so it uses the full window.
 - `OnchainHankoDomain`: og's frozen `core/hanko/onchain-domain.ts` still emits the old settlement, dispute and batch payloads, so those three comparisons use independent ethers encoders in the test, plus an assertion that the fork differs from og's. The golden vector is a fork copy (`test/fixtures/onchain-hanko-golden.ts`); og's `tests/` copy is CommonJS-linked by this loader and reports its exports missing.
 
-Still red, both stale expectations and not contract bugs:
+Still red, a stale expectation and not a contract bug:
 
 - **The 2^200 ceiling (5 tests in `Depository-part-1`).** `docs/money-domain.md` (owner-approved 2026-09-06) removed the ceiling; these tests still expect `E8` above 2^200. The same class in `DisputeOndeltaLiveness` and `DeltaTransformer` was rewritten to the no-ceiling behavior by the port; the five in part-1 were held back pending a decision. Wide overflow still reverts; nothing wraps.
-- **`DeltaTransformer` "fits the runtime maximum swap book inside the canonical transformer gas budget"**: expects at most 4,000,000 gas for 1,000 swaps and measures 6,411,482. The 4 M figure predates the `Int768` arithmetic; `DeltaTransformer.sol` differs from og only by the H1 payment revert. Real finding for the spec: og's `BLOCKCHAIN.PROCESS_BATCH_GAS_LIMIT` is 5,000,000 (`core/config/constants.ts`), so a maximum swap book no longer fits one og-sized `processBatch`. The sibling part-1 test runs the same book with a 15 M limit and passes.
+
+## v2 input: the largest swap book that fits one `processBatch`
+
+The inherited test asserted that 1,000 swaps fit 4,000,000 gas in the transformer. That figure predates the `Int768` arithmetic, and the batch gas limit is ours to set, not og's (`core/config/constants.ts` has 5,000,000). Measured on the fork, one non-starter dispute finalize with N swaps in one transformer over two tokens (`Depository-part-1.ts`, gas used by the whole `processBatch`):
+
+| swaps | gas |
+|---|---|
+| 250 | 1,959,220 |
+| 500 | 3,953,514 |
+| 600 | 4,857,147 |
+| 615 | 4,997,914 (fits under 5,000,000) |
+| 616 | 5,007,371 |
+| 750 | 6,326,119 |
+| 1000 | 9,077,106 |
+
+`MAX_SWAP_BOOK = 615` and `PROCESS_BATCH_GAS_LIMIT = 5_000_000n` are named in `test/helpers/hanko.ts`; the tests assert that 615 fits and 616 does not, so a change to the contracts moves the number on purpose. Gas grows faster than linearly past about 500 swaps, and the margin at 615 is 2,086 gas, so treat 600 as the practical ceiling until the order book design fixes its own bound. It depends on the fixture (one Account, two tokens, one transformer).
 
 ## Foundry suites (`test/foundry/`): stale, not run
 

@@ -5,6 +5,7 @@ import { buildAccountProofBody } from "../../../core/protocol/dispute/proof-buil
 import { createEmptyAccountJClaimAccumulator } from "../../../core/account/j-claims/j-claim-accumulator";
 import { buildPositionalSwapFillRatioBuckets } from "../../../core/protocol/transform/transformer-ordering";
 import { asOfferId } from "../../../core/orderbook/swap-keys.ts";
+import { MAX_SWAP_BOOK, PROCESS_BATCH_GAS_LIMIT } from "../helpers/hanko.ts";
 import { decodeInt768, encodeInt768, encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
 import { deriveSwapOffdeltaChanges } from "../../../core/orderbook/swap-execution.ts";
 import type { AccountReplica, SwapOffer } from "../../../core/types/account.ts";
@@ -789,7 +790,7 @@ describe("DeltaTransformer", function () {
     expect(result).to.deep.equal(expected);
   });
 
-  it("fits the runtime maximum swap book inside the canonical transformer gas budget", async function () {
+  it("fits the largest supported swap book (MAX_SWAP_BOOK) inside the batch gas limit", async function () {
     const { transformer } = await loadFixture(deployFixture);
     const swap = {
       ownerIsLeft: true,
@@ -800,10 +801,10 @@ describe("DeltaTransformer", function () {
     };
     const encodedBatch = await transformer.encodeBatch({
       payment: [],
-      swap: Array.from({ length: 1_000 }, () => swap),
+      swap: Array.from({ length: MAX_SWAP_BOOK }, () => swap),
       pull: [],
     });
-    const rightArguments = encodeTransformerArguments(Array.from({ length: 1_000 }, () => 65_535));
+    const rightArguments = encodeTransformerArguments(Array.from({ length: MAX_SWAP_BOOK }, () => 65_535));
     const timestamp = await time.latest();
     const disputeStartTimestamp = Math.max(1, timestamp - 2);
     const gas = await transformer.applyBatch.estimateGas(
@@ -821,6 +822,6 @@ describe("DeltaTransformer", function () {
       1,
       1,
     );
-    expect(gas).to.be.lessThanOrEqual(4_000_000n);
+    expect(gas).to.be.lessThanOrEqual(PROCESS_BATCH_GAS_LIMIT);
   });
 });

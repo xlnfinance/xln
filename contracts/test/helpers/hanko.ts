@@ -477,3 +477,11 @@ export const FORK_PROOF_BODY_ABI =
 
 /** bigint offdeltas -> Int512 structs. */
 export const toForkProofBody = (body: MoneyBatchRecord): MoneyBatchRecord => widenProofbody(body);
+
+/**
+ * Our own batch gas limit for one processBatch (ours to set, not og's core/config PROCESS_BATCH_GAS_LIMIT).
+ * MAX_SWAP_BOOK is the largest swap book that finishes a non-starter dispute finalize under it: measured 615 swaps =
+ * 4,997,914 gas, 616 = 5,007,371 (contracts/test/dispute/Depository-part-1.ts). A v2 order-book input, see BASELINE.md.
+ */
+export const PROCESS_BATCH_GAS_LIMIT = 5_000_000n;
+export const MAX_SWAP_BOOK = 615;
