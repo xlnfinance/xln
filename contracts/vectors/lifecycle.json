@@ -242,5 +242,13 @@
     "R": "1010",
     "collateral": "0",
     "nonce": "8"
+  },
+  "reopen": {
+    "storedNonce": "8",
+    "epoch": "2",
+    "startAtStoredNonce": "REVERT E2()",
+    "startAtOldBaselineNonce": "REVERT E2()",
+    "settleAtStoredNonce": "REVERT E2()",
+    "startAboveStoredNonce": "ok"
   }
 }

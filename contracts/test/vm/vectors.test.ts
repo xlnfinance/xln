@@ -15,7 +15,7 @@ const word = (returnData: string): string => ethers.hexlify(coder.decode(["bytes
 describe("vectors", () => {
   test("committed files equal a fresh run against the deployed bytecode", async () => {
     const fresh = JSON.parse(JSON.stringify(await allVectors()));
-    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle") });
+    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline") });
   }, 120_000);
 
   test("batch payload: packed(domain, chainId, depository, entityId, encodedBatch, nonce)", () => {
@@ -37,6 +37,33 @@ describe("vectors", () => {
       const [chainId, depository, accountKey, epoch, nonce, diffs, forgive] = v.args;
       expect(word(v.returnData)).toBe(coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM_FOR_TEST, "uint256[]"], [0, chainId, depository, accountKey, epoch, nonce, diffs, forgive]));
     }
+  });
+
+  test("reopen: after the epoch-advancing finalize a proof needs a nonce strictly above the stored one (timeout finalize stored 7 + 1)", () => {
+    const { reopen } = committed("lifecycle");
+    expect(reopen.storedNonce).toBe("8");
+    expect(reopen.epoch).toBe("2");
+    expect(reopen.startAtStoredNonce).toBe("REVERT E2()");        // equal is not above
+    expect(reopen.startAtOldBaselineNonce).toBe("REVERT E2()");   // the old baseline nonce is below
+    expect(reopen.settleAtStoredNonce).toBe("REVERT E2()");       // cooperative updates too
+    expect(reopen.startAboveStoredNonce).toBe("ok");
+  });
+
+  test("baseline: a proof signed for epoch + 1 before the settlement or finalize starts a dispute after it", () => {
+    const { afterSettlement: s, afterTimeoutFinalize: f, foldedOffdelta: o } = committed("baseline");
+    expect([s.baseline.epoch, s.settle, s.epoch, s.storedNonce, s.start]).toEqual(["1", "ok", "1", "5", "ok"]);
+    expect([f.firstDisputeStart, f.finalize, f.epoch, f.storedNonce]).toEqual(["ok", "ok", "1", "8"]);
+    expect([f.baseline.epoch, f.startAtStoredNonce, f.startAboveStoredNonce]).toEqual(["1", "REVERT E2()", "ok"]);
+    const payout = (r: { L: string; R: string; collateral: string }) => [r.L, r.R, r.collateral];
+    expect(payout(o.folded)).toEqual(payout(o.unfolded));
+    expect(payout(o.folded)).toEqual(["970", "1030", "0"]);
+  });
+
+  test("baseline offsets: after a settlement F+1..F+3 all start a dispute; after a timeout finalize of the in-flight frame F+1 only F+3 does", () => {
+    const { baselineOffsets: o } = committed("baseline");
+    expect(o.frameNonce).toBe(7);
+    expect(Object.values(o.settlement).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["7", "1", "ok"], ["7", "1", "ok"], ["7", "1", "ok"]]);
+    expect(Object.values(o.timeoutFinalize).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["9", "1", "REVERT E2()"], ["9", "1", "REVERT E2()"], ["9", "1", "ok"]]);
   });
 
   test("lifecycle: production's own hashes match ours, and the epoch advances on settle and finalize", () => {

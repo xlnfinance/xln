@@ -57,8 +57,8 @@ contract HashLadderInvariants is XlnFixture {
   /// @notice INVARIANT 5d (Source window, ASYMMETRIC windows). A FIRST Source
   ///         write was never accepted outside its signed account window
   ///         [disputeStart, disputeStart + ownerResponseSeconds] with a live
-  ///         dispute — inside the model where LEFT owns 50s and RIGHT owns
-  ///         70s, so a window side-selection swap (reading the
+  ///         dispute — inside the model where LEFT owns 60s and RIGHT owns
+  ///         90s, so a window side-selection swap (reading the
   ///         counterparty's window) is observable, not neutered (audit A5).
   function invariant_sourceFirstWriteNeedsWindow() public view {
     assertEq(handler.sourceOutsideWindowAccepted(), 0, "first Source write outside its window");
@@ -109,7 +109,7 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(ratio, 0, "Source wrote without a live dispute window");
     assertEq(ts, 0, "Source wrote without a live dispute window");
 
-    // Open the dispute (starts the 50s owner window), then write inside it.
+    // Open the dispute (starts the 60s owner window), then write inside it.
     handler.openDispute(0, 1, 7);
     handler.registerReveal(0, 1, 1 /*source*/, 0x1234, 1, 5 /*no warp*/);
     (ratio, ts) = dep.getHashLadderReveal(handler.entityOf(0), handler.entityOf(1), _ladderOf(1, 0x1234), false);
@@ -130,7 +130,7 @@ contract HashLadderInvariants is XlnFixture {
   }
 
   /// @notice CONTROL (C4-hardening A5, asymmetric window sides + close→E12):
-  ///         at t = S+60 (inside RIGHT's 70s owner window, past LEFT's 50s),
+  ///         at t = S+75 (inside RIGHT's 90s owner window, past LEFT's 60s),
   ///         the RIGHT-side writer's first Source write is accepted while the
   ///         LEFT-side writer's is not — then closing the dispute makes any
   ///         further first Source write E12-rejected. A registry reading the
@@ -143,16 +143,16 @@ contract HashLadderInvariants is XlnFixture {
     assertTrue(handler.disputesStarted() == 1, "control: dispute did not start");
     assertEq(handler.checkWindowSides(), 0, "control: windows on wrong sides");
 
-    // t = S+60: inside RIGHT's 70s window, outside LEFT's 50s window.
-    handler.advance(1, 60);
+    // t = S+75: inside RIGHT's 90s window, outside LEFT's 60s window.
+    handler.advance(1, 75);
 
-    // RIGHT-side writer (owner window 70): accepted.
+    // RIGHT-side writer (owner window 90): accepted.
     handler.registerReveal(right, left, 1 /*source*/, 0x1111, 0 /*bucket*/, 1 /*no warp*/);
     (uint16 rightRatio, ) =
       dep.getHashLadderReveal(handler.entityOf(right), handler.entityOf(left), _ladderOf(0, 0x1111), false);
     assertEq(rightRatio, 0x1111, "RIGHT-side in-window write was rejected");
 
-    // LEFT-side writer (owner window 50): the same t=S+60 is OUT of window.
+    // LEFT-side writer (owner window 60): the same t=S+75 is OUT of window.
     handler.registerReveal(left, right, 1 /*source*/, 0x2222, 1 /*bucket*/, 1 /*no warp*/);
     (uint16 leftRatio, ) =
       dep.getHashLadderReveal(handler.entityOf(left), handler.entityOf(right), _ladderOf(1, 0x2222), false);

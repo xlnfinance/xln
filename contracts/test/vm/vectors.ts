@@ -3,7 +3,7 @@
 //
 // Two kinds:
 //   functions.json  every audit-surface and pure encoder the contracts expose, called on the deployed bytecode with
-//                   deterministic sample arguments (small and wide values), as calldata and return data.
+//                   deterministic sample arguments (small, wide and mixed values), as calldata and return data.
 //   lifecycle.json  one account lifecycle run through the real Depository: the values production stores and emits.
 import { ethers } from "ethers";
 import { createAddressFromString } from "@ethereumjs/util";
@@ -17,17 +17,29 @@ const coder = ethers.AbiCoder.defaultAbiCoder();
 
 const digest = (path: string): string => ethers.keccak256(ethers.toUtf8Bytes(path));
 
-const sample = (param: ethers.ParamType, path: string, wide: boolean): unknown => {
+/** small: every slot 7 / false; wide: every slot at its type's limit; mixed: a different small value in every slot, so a swap of two slots changes the output. */
+type Mode = boolean | "mixed";
+const modeLabel = (mode: Mode): string => (mode === "mixed" ? "mixed" : mode ? "wide" : "small");
+const distinct = (path: string, bits: number): bigint => (BigInt(digest(path)) % (1n << BigInt(Math.min(bits, 20)))) + 1n;
+
+const sample = (param: ethers.ParamType, path: string, mode: Mode): unknown => {
+  const wide = mode === true;
   if (param.baseType === "array") {
-    const length = wide ? 2 : 1;
-    return Array.from({ length }, (_, i) => sample(param.arrayChildren!, `${path}[${i}]`, wide));
+    const length = wide || mode === "mixed" ? 2 : 1;
+    return Array.from({ length }, (_, i) => sample(param.arrayChildren!, `${path}[${i}]`, mode));
   }
-  if (param.baseType === "tuple") return Object.fromEntries(param.components!.map((c, i) => [c.name || `f${i}`, sample(c, `${path}.${c.name || i}`, wide)]));
-  if (param.baseType === "bool") return wide;
+  if (param.baseType === "tuple") return Object.fromEntries(param.components!.map((c, i) => [c.name || `f${i}`, sample(c, `${path}.${c.name || i}`, mode)]));
+  if (param.baseType === "bool") return mode === "mixed" ? BigInt(digest(path)) % 2n === 0n : wide;
+  if (mode === "mixed") {
+    const uintBits = /^uint(\d*)$/.exec(param.baseType);
+    if (uintBits) return distinct(path, uintBits[1] ? Number(uintBits[1]) : 256);
+    const intBits = /^int(\d*)$/.exec(param.baseType);
+    if (intBits) return -distinct(path, intBits[1] ? Number(intBits[1]) - 1 : 255);
+  }
   if (param.baseType === "address") return ethers.getAddress(`0x${digest(path).slice(26)}`);
   if (param.baseType === "bytes32") return digest(path);
-  if (param.baseType === "bytes") return wide ? `0x${digest(path).slice(2, 76)}` : "0x";
-  if (param.baseType === "string") return wide ? path : "";
+  if (param.baseType === "bytes") return wide || mode === "mixed" ? `0x${digest(path).slice(2, 76)}` : "0x";
+  if (param.baseType === "string") return wide || mode === "mixed" ? path : "";
   const uint = /^uint(\d*)$/.exec(param.baseType);
   if (uint) return wide ? (1n << BigInt(uint[1] ? Number(uint[1]) : 256)) - 1n : 7n;
   const int = /^int(\d*)$/.exec(param.baseType);
@@ -97,9 +109,9 @@ export const functionVectors = async (rig: Rig) => {
 
   const codec = HankoCodec__factory.createInterface();
   for (const fragment of codec.fragments.filter((f): f is ethers.FunctionFragment => f.type === "function")) {
-    for (const wide of [false, true]) {
-      const args = fragment.inputs.map((p, i) => sample(p, `${fragment.name}.${p.name || i}`, wide));
-      await record("HankoCodec", codecAddress, codec, fragment.name, args, wide ? "wide" : "small");
+    for (const mode of [false, true, "mixed"] as const) {
+      const args = fragment.inputs.map((p, i) => sample(p, `${fragment.name}.${p.name || i}`, mode));
+      await record("HankoCodec", codecAddress, codec, fragment.name, args, modeLabel(mode));
     }
   }
 
@@ -172,6 +184,21 @@ export const lifecycleVectors = async (rig: Rig) => {
   const evidence = ethers.keccak256(coder.encode(
     ["bytes32", "uint256", "bool", "bool", "bytes32", "bytes32", "bytes32"],
     [bodyHash(P7), 7, true, false, empty, empty, empty]));
+  const reservesAfter = json(await rig.reserves());
+
+  // Reopen after the epoch-advancing finalize. A timeout finalize consumed one nonce (7 -> 8), so the reopened baseline
+  // proof must carry a nonce strictly above the stored 8. Proof nonce and off-chain frame height are separate counters.
+  const epoch2 = await rig.epochOf();
+  const storedAfter = await rig.chain.getAccountInfo(L.id, R.id);
+  const P9 = rig.body(-10n);
+  const at = async (nonce: number, epoch: bigint) => rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9));
+  const reopen = {
+    storedNonce: storedAfter.nonce.toString(), epoch: epoch2.toString(),
+    startAtStoredNonce: await at(8, epoch2),
+    startAtOldBaselineNonce: await at(7, epoch1),
+    settleAtStoredNonce: await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs)),
+    startAboveStoredNonce: await at(9, epoch2),
+  };
   return {
     accountKey: rig.acctKey, left: L.id, right: R.id,
     depository: rig.domain.depository, chainId: rig.domain.chainId.toString(),
@@ -183,12 +210,117 @@ export const lifecycleVectors = async (rig: Rig) => {
       events: eventsJson(startEvents),
     },
     disputeFinalize: { ...finalizeBatch, finalizationEvidenceHashExpected: evidence, events: eventsJson(finalizeEvents) },
-    reservesAfter: json(await rig.reserves()),
+    reservesAfter,
+    reopen,
+  };
+};
+
+/**
+ * The spec's baseline rule: a settlement's Lock frame carries a co-signed baseline proof for epoch + 1 (offdelta 0, no
+ * clauses, a nonce above the chain's), signed BEFORE the settlement executes, so the honest side always holds a proof it
+ * can start a dispute with. Each scenario signs the baseline first, advances the epoch, then starts with it.
+ */
+export const baselineVectors = async () => {
+  const at = (rig: Rig, nonce: number, epoch: bigint, offdelta = 0n) => {
+    const body = rig.body(offdelta);
+    return { body, nonce, epoch, hash: rig.proofHash(epoch, nonce, true, body), sig: rig.proofSig(rig.L, epoch, nonce, true, body) };
+  };
+  const startWith = (rig: Rig, b: ReturnType<typeof at>) => rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig);
+  const timeout = (rig: Rig, nonce: number, body: ReturnType<Rig["body"]>) =>
+    rig.finalize(rig.R, rig.L, { nonce, body, startedByLeft: false }, { nonce, proposerIsLeft: true, body, sig: "0x" });
+  const record = (b: ReturnType<typeof at>) => ({ epoch: b.epoch.toString(), nonce: b.nonce, proofBodyHash: bodyHash(b.body), proofHash: b.hash });
+
+  // 1. After a cooperative settlement (the epoch advances 0 -> 1; the chain's nonce becomes the settlement's, 5).
+  const a = await boot("baseline-settle");
+  await a.fundedAccount();
+  const diffs = [{ tokenId: a.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+  const baselineA = at(a, 6, (await a.epochOf()) + 1n);
+  const settleA = await a.settle(a.L, a.R, 5, diffs, a.coopSig(a.R, await a.epochOf(), 5, diffs));
+  a.at(10);
+  const afterSettle = { epoch: (await a.epochOf()).toString(), storedNonce: (await a.chain.getAccountInfo(a.L.id, a.R.id)).nonce.toString() };
+  const startA = await startWith(a, baselineA);
+
+  // 2. After a timeout finalize (dispute started at nonce 7, so the chain's nonce becomes 8 and the epoch 1).
+  const b = await boot("baseline-finalize");
+  await b.fundedAccount();
+  const dispute = b.body(-10n);
+  const first = await b.start(b.R, b.L, 7, true, dispute, b.proofSig(b.L, await b.epochOf(), 7, true, dispute));
+  const baselineB = at(b, 9, (await b.epochOf()) + 1n);
+  const atStored = at(b, 8, baselineB.epoch);
+  b.at(130);
+  const finalized = await timeout(b, 7, dispute);
+  b.at(140);
+  const afterFinalize = { epoch: (await b.epochOf()).toString(), storedNonce: (await b.chain.getAccountInfo(b.L.id, b.R.id)).nonce.toString() };
+  const startAtStored = await startWith(b, atStored);
+  const startB = await startWith(b, baselineB);
+
+  // 3. Folding offdelta into ondeltaDiff leaves the payout unchanged: the same Account, offdelta -30, settled by a
+  //    dispute on the old state (epoch 0) and by folding the -30 into ondelta then disputing the offdelta-0 baseline.
+  const payout = async (folded: boolean) => {
+    const rig = await boot(folded ? "baseline-folded" : "baseline-unfolded");
+    await rig.fundedAccount();                                    // Left 900, Right 1000, collateral 100 (ondelta 100)
+    if (!folded) {
+      const old = at(rig, 1, await rig.epochOf(), -30n);
+      rig.at(10);
+      const started = await startWith(rig, old);
+      rig.at(140);
+      const done = await timeout(rig, 1, old.body);
+      return { started, finalized: done, ...json(await rig.reserves()) as object };
+    }
+    const fold = [{ tokenId: rig.TOKEN, leftDiff: 0n, rightDiff: 0n, collateralDiff: 0n, ondeltaDiff: -30n }];
+    const baseline = at(rig, 2, (await rig.epochOf()) + 1n);
+    const settled = await rig.settle(rig.L, rig.R, 1, fold, rig.coopSig(rig.R, await rig.epochOf(), 1, fold));
+    rig.at(10);
+    const started = await startWith(rig, baseline);
+    rig.at(140);
+    const done = await timeout(rig, 2, baseline.body);
+    return { settled, started, finalized: done, ...json(await rig.reserves()) as object };
+  };
+
+  // 4. The next-epoch baseline rides every frame, so it is fixed when frame F is co-signed (F = 7 here) and must survive
+  //    whatever opening comes first. Offsets are relative to F.
+  //    - settlement: the settlement executes at nonce F, the chain's nonce is F.
+  //    - timeoutFinalize: the counterparty holds the proposer-signed proof of the in-flight frame F + 1 and starts the
+  //      dispute with it; the timeout finalize leaves the chain's nonce at F + 2 (start nonce + 1).
+  const F = 7;
+  const openingThenBaseline = async (opening: "settlement" | "timeoutFinalize", offset: number) => {
+    const rig = await boot(`baseline-offset-${opening}-${offset}`);
+    await rig.fundedAccount();
+    const epoch = (await rig.epochOf()) + 1n;
+    const baseline = at(rig, F + offset, epoch);
+    if (opening === "settlement") {
+      const diffs = [{ tokenId: rig.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+      await rig.settle(rig.L, rig.R, F, diffs, rig.coopSig(rig.R, await rig.epochOf(), F, diffs));
+    } else {
+      const inFlight = rig.body(-10n);
+      await rig.start(rig.R, rig.L, F + 1, true, inFlight, rig.proofSig(rig.L, await rig.epochOf(), F + 1, true, inFlight));
+      rig.at(130);
+      await timeout(rig, F + 1, inFlight);
+    }
+    rig.at(140);
+    const stored = (await rig.chain.getAccountInfo(rig.L.id, rig.R.id)).nonce.toString();
+    return { storedNonce: stored, epoch: (await rig.epochOf()).toString(), start: await startWith(rig, baseline) };
+  };
+  const byOffset = async (opening: "settlement" | "timeoutFinalize") => ({
+    plus1: await openingThenBaseline(opening, 1),
+    plus2: await openingThenBaseline(opening, 2),
+    plus3: await openingThenBaseline(opening, 3),
+  });
+
+  return {
+    baselineOffsets: { frameNonce: F, settlement: await byOffset("settlement"), timeoutFinalize: await byOffset("timeoutFinalize") },
+    afterSettlement: { baseline: record(baselineA), settle: settleA, ...afterSettle, start: startA },
+    afterTimeoutFinalize: {
+      firstDisputeStart: first, finalize: finalized, ...afterFinalize,
+      baseline: record(baselineB), startAtStoredNonce: startAtStored, startAboveStoredNonce: startB,
+    },
+    foldedOffdelta: { unfolded: await payout(false), folded: await payout(true) },
   };
 };
 
 export const allVectors = async () => {
   const functions = await functionVectors(await boot("vectors-functions"));
   const lifecycle = await lifecycleVectors(await boot("vectors-lifecycle"));
-  return { functions, lifecycle };
+  const baseline = await baselineVectors();
+  return { functions, lifecycle, baseline };
 };

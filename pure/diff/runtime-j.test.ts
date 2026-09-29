@@ -15,7 +15,7 @@ import { buildCertifiedRegistrationEvidence, buildRegistrationEvidenceDigest } f
 import { computeCanonicalReceiptsRoot, createCanonicalReceiptProofs } from "../../core/jurisdiction/machine/receipt-codec/index.ts";
 import { deriveSignerKeySync, registerSignerKey, signAccountFrame } from "../../core/account/crypto.ts";
 import { createEmptyEnv } from "../../core/runtime/composition.ts";
-import { EntityProvider__factory } from "../../jurisdictions/typechain-types/index.ts";
+import { EntityProvider__factory } from "../../contracts/typechain-types/index.ts";
 import {
   applyRuntime, applyRuntimeTx, classifyJBatchFailure, createEntity, ogJBatchState, createRuntime, epActionAttemptId, initJBatch, jSubmitAttemptId, jurisdictionImportRequestHash, registerPendingJOutbox, replicaKey, runtimeComponentDigests, runtimeView, splitJOutbox, stableJson,
   type Binary, type EntityId, type EntityReplica, type EntityTx, type ImportConfig, type JInput, type JReplica, type Runtime, type RuntimeTx,

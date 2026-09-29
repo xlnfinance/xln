@@ -20,6 +20,8 @@ import {
 } from "../../core/jurisdiction/machine/board-registry/index.ts";
 import { registrationEvidenceKey } from "../../core/jurisdiction/machine/registration-evidence/index.ts";
 import { unwrap } from "../xln_run.ts";
+import { contractSet } from "./contracts.ts";
+import { shimBatchSubmission } from "./fork-shim.ts";
 import {
   bootChain,
   createLane,
@@ -140,6 +142,8 @@ export type World = {
   readonly batchOf: (x: number) => OgBatch | undefined;
   /** Every Entity's replicas (one per board member) and the spokes' hub Accounts, as the next two frames. */
   readonly importAll: () => readonly [readonly RuntimeTx[], readonly User[]];
+  /** Batches the chain refused (only with the fork's contracts, whose ABI og's submission is shimmed to). */
+  readonly refusals: () => readonly string[];
   readonly close: () => Promise<void>;
 };
 
@@ -162,6 +166,9 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
   // chain emission into its runtime mempool (observeJRange, the cursor, each validator's J-prefix attestation)
   attachLiveJAdapter(env, J.name, chain);
   chain.startWatching(env);
+  const refusals = contractSet() === "contracts"
+    ? shimBatchSubmission(chain.getBrowserVM(), BigInt(chain.chainId), chain.addresses.depository, KEYS)
+    : () => [] as readonly string[];
   KEYS.forEach((k, i) => registerSignerKey(env, SIGNERS[i]!, Buffer.from(k.slice(2), "hex")));
   const members = boardJoins() ? MEMBERS : MEMBERS.slice(0, BOARD);
   /** og ConsensusConfig of Entity x: its board members, one share each, and its threshold. */
@@ -326,6 +333,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
         && resolveObserverCertifiedBoardRecord(state as never, getCertifiedBoardNodeStore(env as never), ids[x]!) !== null;
     },
     importAll,
+    refusals,
     close,
   };
 };

@@ -186,7 +186,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
   }
 
   function _disputeHashOf(uint256 a, uint256 b) internal view returns (bytes32 h) {
-    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
+    (, h, , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
   }
 
   // ═══════════════ C4-hardening wave 2 (audit A4): fault-mode disputes ═══════════════
@@ -212,8 +212,8 @@ contract TransformerAllowanceInvariants is XlnFixture {
     // requesting Add(5000) WITH allowance — the fault is the only blocker.
     ProofBody memory faultPb;
     faultPb.watchSeed = watchSeed;
-    faultPb.leftResponseSeconds = 50;
-    faultPb.rightResponseSeconds = 50;
+    faultPb.leftResponseSeconds = 60;
+    faultPb.rightResponseSeconds = 60;
     faultPb.offdeltas = new Int512[](1);
     faultPb.offdeltas[0] = WideMath.fromInt(100);
     faultPb.tokenIds = new uint256[](1);
@@ -267,19 +267,19 @@ contract TransformerAllowanceInvariants is XlnFixture {
     bytes memory finFaultEncoded = abi.encode(finFault);
     uint256 rightNonce = dep.entityNonces(entity[right]) + 1;
     bytes32 rightBatchH =
-      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), finFaultEncoded, rightNonce);
+      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[right], finFaultEncoded, rightNonce);
     vm.expectRevert();
-    dep.processBatch(finFaultEncoded, _hanko(right, rightBatchH), rightNonce);
+    dep.processBatch(entity[right], finFaultEncoded, _hanko(right, rightBatchH), rightNonce);
     assertTrue(_disputeHashOf(left, right) != bytes32(0), "fault finalize must leave the dispute live");
 
     // 2) Starter after timeout: still reverts (fault modes are permanent).
-    (, , uint256 timeout, , , , , , , , , , , , ) = dep._accounts(key);
+    (, , uint256 timeout, , , , , , , , , , , , , , ) = dep._accounts(key);
     vm.warp(timeout + 1);
     uint256 leftNonce = dep.entityNonces(entity[left]) + 1;
     bytes32 leftBatchH =
-      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), finFaultEncoded, leftNonce);
+      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[left], finFaultEncoded, leftNonce);
     vm.expectRevert();
-    dep.processBatch(finFaultEncoded, _hanko(left, leftBatchH), leftNonce);
+    dep.processBatch(entity[left], finFaultEncoded, _hanko(left, leftBatchH), leftNonce);
     assertTrue(_disputeHashOf(left, right) != bytes32(0), "timeout fault finalize must leave the dispute live");
 
     // 3) Close via a NEWER counterparty-signed clean state: authored by LEFT
@@ -287,8 +287,8 @@ contract TransformerAllowanceInvariants is XlnFixture {
     //    non-starter RIGHT. Clause Add(5000) with allowance ±50.
     ProofBody memory cleanPb;
     cleanPb.watchSeed = watchSeed;
-    cleanPb.leftResponseSeconds = 50;
-    cleanPb.rightResponseSeconds = 50;
+    cleanPb.leftResponseSeconds = 60;
+    cleanPb.rightResponseSeconds = 60;
     cleanPb.offdeltas = new Int512[](1);
     cleanPb.offdeltas[0] = WideMath.fromInt(100);
     cleanPb.tokenIds = new uint256[](1);
@@ -342,7 +342,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
 
   /// @dev Account nonce helper on raw actor indexes.
   function _accountNonceOf(uint256 a, uint256 b) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[a], entity[b]));
   }
 
   // ═══════════════ coverage report ═══════════════

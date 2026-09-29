@@ -26,7 +26,7 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 ///   refresh revealedAt; fillRatio never decreases.
 ///
 /// C4-hardening wave 2 (audit A5): the windows are deliberately ASYMMETRIC
-/// (LEFT=50, RIGHT=70). HashLadderRegistry.registerReveal selects the owner
+/// (LEFT=60, RIGHT=90; H2 floors each window at 60 s). HashLadderRegistry.registerReveal selects the owner
 /// window by entity order (:68-70); with symmetric windows a side-selection
 /// bug (reading the counterparty's window) is unobservable. The ghost always
 /// uses the writer's OWN side, so the over-accepting direction of any swap
@@ -37,8 +37,8 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6;
-  uint32 public constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 public constant RIGHT_RESPONSE_SECONDS = 70;
+  uint32 public constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 90;
   uint256 public constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -122,8 +122,8 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   function _submit(uint256 actor, Batch memory batch) internal returns (bool ok) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    try dep.processBatch(encoded, _hanko(actor, h), nonce) {
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
       return true;
     } catch {
       return false;
@@ -138,11 +138,11 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _disputeHash(bytes32 e1, bytes32 e2) internal view returns (bytes32 h) {
-    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (, h, , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function slotCount() external view returns (uint256) {
@@ -187,7 +187,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   // ═══════════════════════════ actions ═══════════════════════════
 
-  /// @notice Opens a 50s/70s (asymmetric) dispute so Source windows become
+  /// @notice Opens a 60s/90s (asymmetric) dispute so Source windows become
   ///         reachable and window side-selection becomes observable.
   function openDispute(uint256 fromSeed, uint256 cpSeed, uint256 seedNoise) external {
     (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
@@ -446,7 +446,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   /// @dev Role-side assertion (audit A5): every live dispute stored the
   ///      signed asymmetric windows on the CORRECT AccountInfo fields —
-  ///      leftResponseSeconds=50 on the left entity's side, 70 on the right.
+  ///      leftResponseSeconds=60 on the left entity's side, 90 on the right.
   ///      A storage-side swap fires this check even when it would be
   ///      invisible under symmetric windows.
   function checkWindowSides() external view returns (uint256 violations) {
@@ -454,7 +454,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
       DisputeGhost memory g = disputes[pi];
       if (!g.active) continue;
       if (_disputeHash(entityOf[g.leftActor], entityOf[g.rightActor]) == bytes32(0)) continue;
-      (, , , , uint32 lrs, uint32 rrs, , , , , , , , , ) =
+      (, , , , uint32 lrs, uint32 rrs, , , , , , , , , , , ) =
         dep._accounts(XlnHanko.accountKey(entityOf[g.leftActor], entityOf[g.rightActor]));
       if (lrs != LEFT_RESPONSE_SECONDS || rrs != RIGHT_RESPONSE_SECONDS) violations++;
     }

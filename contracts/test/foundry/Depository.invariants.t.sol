@@ -33,7 +33,7 @@ contract DepositoryInvariants is XlnFixture {
     // contract; the handler pranks it, so no ownership transfer is needed.
     targetContract(address(handler));
 
-    bytes4[] memory selectors = new bytes4[](16);
+    bytes4[] memory selectors = new bytes4[](17);
     selectors[0] = handler.mint.selector;
     selectors[1] = handler.reserveToReserve.selector;
     selectors[2] = handler.reserveToCollateral.selector;
@@ -50,6 +50,7 @@ contract DepositoryInvariants is XlnFixture {
     selectors[13] = handler.advancePastDisputeDelay.selector;
     selectors[14] = handler.disputeFullCycle.selector;
     selectors[15] = handler.flashDeniedToDebtor.selector;
+    selectors[16] = handler.htlcCycle.selector;
     targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
   }
 
@@ -241,7 +242,7 @@ contract DepositoryInvariants is XlnFixture {
       for (uint256 j = i + 1; j < ACTORS; j++) {
         bytes memory key = XlnHanko.accountKey(entity[i], entity[j]);
         // AccountInfo timing is signed seconds, followed by proof commitments.
-        (, bytes32 disputeHash, uint256 timeout, uint256 startTs, , , bytes32 initialPbHash, , , , , , , , ) =
+        (, bytes32 disputeHash, uint256 timeout, uint256 startTs, , , bytes32 initialPbHash, , , , , , , , , , ) =
           dep._accounts(key);
         if (disputeHash == bytes32(0)) {
           assertEq(timeout, 0, "stale timeout on a cleared dispute");
@@ -264,7 +265,7 @@ contract DepositoryInvariants is XlnFixture {
     for (uint256 i = 0; i < ACTORS; i++) {
       for (uint256 j = i + 1; j < ACTORS; j++) {
         bytes memory key = XlnHanko.accountKey(entity[i], entity[j]);
-        (uint256 nonce, bytes32 disputeHash, , , , , , , , , , , , , ) = dep._accounts(key);
+        (uint256 nonce, bytes32 disputeHash, , , , , , , , , , , , , , , ) = dep._accounts(key);
         if (disputeHash != bytes32(0)) assertGt(nonce, 0, "dispute with a zero account nonce");
       }
     }
@@ -319,6 +320,15 @@ contract DepositoryInvariants is XlnFixture {
     revert("debtOutstanding slot not found");
   }
 
+  // ═══════════════ H1: unrevealed HTLC waits for its deadline ═══════════════
+
+  /// @notice A dispute carrying an unrevealed HTLC never finalizes while its payment deadline is open, and the finalize H1
+  ///         does allow (secret public, or deadline passed) is never refused. Exercised by `htlcCycle`.
+  function invariant_htlcFinalizeWaitsForDeadline() public view {
+    assertEq(handler.htlcEarlyFinalizeViolations(), 0, "unrevealed HTLC finalized before its deadline");
+    assertEq(handler.htlcLivenessViolations(), 0, "permitted HTLC finalize was rejected");
+  }
+
   // ═══════════════ coverage report ═══════════════
 
   function invariant_callSummary() public view {
@@ -337,6 +347,9 @@ contract DepositoryInvariants is XlnFixture {
     console.log("disputeFinalizeTimeout    ", handler.callCount("disputeFinalizeTimeout"));
     console.log("advance                   ", handler.callCount("advance"));
     console.log("disputeFullCycle          ", handler.callCount("disputeFullCycle"));
+    console.log("htlcStart                 ", handler.callCount("htlcStart"));
+    console.log("htlcFinalize              ", handler.callCount("htlcFinalize"));
+    console.log("-- htlc early rejections   ", handler.htlcEarlyRejections());
     console.log("-- states with live debt   ", handler.debtObservations());
     console.log("-- finalizes by starter    ", handler.starterTimeoutFinalizes());
     console.log("-- finalizes by counterpty ", handler.counterpartyTimeoutFinalizes());

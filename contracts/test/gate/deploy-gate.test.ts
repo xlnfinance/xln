@@ -98,8 +98,8 @@ describe("every deploy path runs the gate", () => {
 
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
-  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "write-vectors.ts"];
-  const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|tronWeb\.trx\.broadcast\(|broadcastTransaction\(|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
+  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts"];
+  const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const full = path.join(dir, name);
@@ -191,6 +191,16 @@ describe("every deploy path runs the gate", () => {
       server.stop(true);
     }
   }, 240_000);
+
+  test("the exported deployTronContract gates on its own, on the host its TronWeb talks to", async () => {
+    const { deployTronContract } = matrixModule;
+    const on = (host: string) => ({ fullNode: { host } });
+    await expect(deployTronContract(on("https://api.trongrid.io"), "Depository")).rejects.toThrow(/Deploy gate: MIN_RESPONSE_SECONDS is 60s/);
+    // a host no profile names is an unknown chain, never a testnet
+    await expect(deployTronContract(on("http://127.0.0.1:9090"), "Depository")).rejects.toThrow(/Deploy gate/);
+    // a named testnet gets past the gate (and stops later, on the missing TRON artifact)
+    await expect(deployTronContract(on("https://nile.trongrid.io"), "Depository")).rejects.not.toThrow(/Deploy gate/);
+  });
 
   test("the exported deployTron gates on its own, before any network call", async () => {
     const { profiles, deployTron } = matrixModule;
