@@ -383,7 +383,7 @@ ones sit above it: it lands as a no-op in the same round and the ones above it l
 batches with one nonce and different content); mutant `resign-at-a-signed-nonce` (the fresh nonce ignores what is signed) shows the
 burn. Test `neverTwoBatchesForOneNonceTest`.
 
-**J5. A batch that fails still takes its nonce. PROPOSAL for the contracts, needed by F1.**
+**J5. A batch that fails still takes its nonce. ACCEPTED (b) by the coordinator (2026-09-29); the contracts thread builds it test-first.**
 Today a batch that reverts (a payment the reserve cannot cover) leaves no trace, its nonce stays open, and every batch above it waits.
 F1 forbids signing another content at that nonce, so with the contract as it is a drained reserve holds every urgent op hostage until
 somebody refills it: `payment-revert-keeps-the-nonce` violates `urgent_lands` (found by simulation the moment F1 went in). Options:
@@ -393,7 +393,11 @@ waits REACT + LAG, not LAG; (b) **a batch that fails takes its nonce, applies no
 (c) payment ops skip like dispute ops (rejected: it makes a batch non-atomic, and a settlement that pays half is worse than one that
 does not run). Choice: (b). It is a small change in `processBatch` (catch the failure, keep the nonce, revert the effects). Until it
 lands the deadline numbers of the Entity layer need option (a)'s bound. The Entity reads BatchFailed like DisputeOpSkipped (R7).
-Tests: `revertedPaymentDoesNotBlockTheUrgentOpTest`. Model: `NONCE_ON_FAIL`.
+Decision: (b), for a failing payment or settlement op; (c) is rejected. The whole transaction must succeed: the failure is caught, its effects
+are undone, the nonce is stored and `BatchFailed` is emitted. A failure that reverts the transaction itself loses the nonce write and the nonce stays open
+(that is today's contract: `payment-revert-keeps-the-nonce`). The Entity reads `BatchFailed` and queues the payment again at a fresh nonce; it does
+not sign it again before it has read the event (`failed_read`, mutant `entity-ignores-batch-failed`). Tests: `revertedPaymentDoesNotBlockTheUrgentOpTest`.
+Model: `NONCE_ON_FAIL`, `failedEv`, `failSeen`; `urgent_lands` holds under it.
 
 **J4. Nonces: what the contract's strict sequence costs.**
 Any signed batch is a nonce burner in the adversary's hands (F1), and a payment batch that reverts blocks every batch above it (E2, J5).

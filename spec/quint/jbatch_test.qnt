@@ -39,7 +39,7 @@ module jbatch_test {
     .then(arrive(2))
     .then(attempt(0))                      // the payment batch fails: nonce 1 is used, nothing else happens
     .then(attempt(1))                      // the reveal lands at nonce 2
-    .expect(and { st.done.get(2), not(st.done.get(1)), st.gh.failed == 1, st.cnonce == 2, not(st.dropped.get(1)), nonce_final, safe })
+    .expect(and { st.done.get(2), not(st.done.get(1)), st.gh.failed == 1, st.failedEv.get(1) == 1, st.failSeen.get(1) == 1, st.cnonce == 2, not(st.dropped.get(1)), nonce_final, safe })
     .then(tick)
     .expect(and { st.sub.length() == 3, st.sub[2].b.nonce == 3, st.sub[2].b.ids == Set(1) })
     .then(refill(1))

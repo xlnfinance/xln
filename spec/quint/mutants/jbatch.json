@@ -62,7 +62,7 @@
     },
     {
       "id": "payment-revert-keeps-the-nonce",
-      "why": "J5: today a batch that reverts leaves its nonce open, so it blocks every batch above it (E2), urgent ones included, and F1 forbids signing another content at that nonce",
+      "why": "J5: the failed batch is caught but the transaction still reverts, so the nonce write is lost and the nonce stays open (today's contract): it blocks every batch above it, urgent ones included, and F1 forbids signing other content at that nonce",
       "file": "jbatch.qnt",
       "old": "pure val NONCE_ON_FAIL = true",
       "new": "pure val NONCE_ON_FAIL = false",
@@ -75,6 +75,14 @@
       "old": "    b.nonce == s.cnonce + 1,\n    payTotal",
       "new": "    b.nonce <= s.cnonce + 1,\n    payTotal",
       "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "entity-ignores-batch-failed",
+      "why": "J5: the Entity does not read BatchFailed, so the failed payment is never queued again",
+      "file": "jbatch.qnt",
+      "old": "        failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)),",
+      "new": "        failSeen: st.failSeen,",
+      "killedBy": "invariant:failed_read"
     }
   ],
   "init": "init",

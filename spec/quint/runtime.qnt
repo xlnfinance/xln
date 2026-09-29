@@ -71,7 +71,7 @@ module runtime {
   // The kind of chain event k, as the Runtime meets it. Every kind is a chain fact and goes through the same cursor: the watcher
   // does not choose which events to read. Kind 2 is DisputeOpSkipped (J2): our dispute start was skipped because a dispute is
   // already open. The Entity that sent the start waits for its outcome; the skip event is the only outcome it will ever get.
-  // BatchFailed (J5) is another event of the same standing: a batch that failed at its nonce.
+  // BatchFailed (J5, accepted) is another event of the same standing: a batch that failed at its nonce; the Entity re-queues the payment.
   pure def isSkipEvent(k: int): bool = k % 2 == 0
 
   pure def cursorOf(l: List[int]): int = l.foldl(0, (m, k) => if (isJ(k) and jIdx(k) > m) jIdx(k) else m)

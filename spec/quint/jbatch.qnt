@@ -75,6 +75,8 @@ module jbatch {
     runs: int -> int,                 // chain: how many times the op ran
     poisoned: int -> bool,            // chain: the op's dispute moved: it can never apply
     skipped: int -> bool,             // chain: DisputeOpSkipped was emitted for the op (J2)
+    failedEv: int -> int,             // chain: BatchFailed events emitted for a batch that carried the payment (J5)
+    failSeen: int -> int,             // the Entity has read that many
     gh: Ghost
   }
 
@@ -121,7 +123,11 @@ module jbatch {
         done: OPIDS.mapBy(i => s.done.get(i) or ran.contains(i)),
         runs: OPIDS.mapBy(i => s.runs.get(i) + (if (ran.contains(i)) 1 else 0)),
         gh: { ...s.gh, landed: s.gh.landed + 1 } }
-    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1) { ...s, cnonce: b.nonce, gh: { ...s.gh, landed: s.gh.landed + 1, failed: s.gh.failed + 1 } }
+    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1)
+      // the transaction itself succeeds: the failure is caught, its effects are undone, the nonce is stored and BatchFailed is emitted
+      { ...s, cnonce: b.nonce,
+        failedEv: OPIDS.mapBy(i => s.failedEv.get(i) + (if (b.ids.contains(i) and isPay(s, i)) 1 else 0)),
+        gh: { ...s.gh, landed: s.gh.landed + 1, failed: s.gh.failed + 1 } }
     else { ...s, gh: { ...s.gh, reverts: s.gh.reverts + 1 } }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -129,7 +135,8 @@ module jbatch {
   // ---------------------------------------------------------------------------------------------------------
 
   pure def urgentPending(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and not(isPay(s, i)))
-  pure def payQueued(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and isPay(s, i) and not(inFlight(s, i)))
+  // a payment whose batch failed is queued again only once the Entity has read the BatchFailed event
+  pure def payQueued(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and isPay(s, i) and not(inFlight(s, i)) and s.failSeen.get(i) == s.failedEv.get(i))
 
   pure def nothingAlive(s: S): bool = not(anySub(s, x => alive(s, x)))
 
@@ -168,6 +175,7 @@ module jbatch {
     arrived: OPIDS.mapBy(_ => false), dropped: OPIDS.mapBy(_ => false), sub: [],
     cnonce: 0, reserve: reserve,
     done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false), skipped: OPIDS.mapBy(_ => false),
+    failedEv: OPIDS.mapBy(_ => 0), failSeen: OPIDS.mapBy(_ => 0),
     gh: NO_GHOST
   }
 
@@ -189,6 +197,7 @@ module jbatch {
       arrived: OPIDS.mapBy(_ => false), dropped: OPIDS.mapBy(_ => false), sub: [],
       cnonce: 0, reserve: RESERVE_MAX,
       done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false), skipped: OPIDS.mapBy(_ => false),
+      failedEv: OPIDS.mapBy(_ => 0), failSeen: OPIDS.mapBy(_ => 0),
       gh: NO_GHOST
     }
   }
@@ -217,6 +226,7 @@ module jbatch {
       // ascending: every live batch with a lower nonce has been attempted this tick
       not(anySub(st, y => alive(st, y) and y.b.nonce < x.b.nonce and y.last < st.now)),
       st' = react({ ...s1,
+        failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)),
         dropped: OPIDS.mapBy(i => st.dropped.get(i) or dead.contains(i)),
         sub: st.sub.foldl([], (acc, y) => acc.append(if (y == x) { ...y, tried: true, last: st.now } else y)) })
     }
@@ -263,6 +273,8 @@ module jbatch {
   val skip_read: bool = OPIDS.forall(i => not(st.skipped.get(i)) or st.dropped.get(i))
   // F1: a signed batch is final at its nonce: the Entity never signs different content at a nonce it has already signed.
   val nonce_final: bool = st.sub.foldl(true, (ok, x) => ok and st.sub.foldl(true, (ok2, y) => ok2 and (x.b.nonce != y.b.nonce or x.b == y.b)))
+  // J5: every BatchFailed event is read and its payment queued again: without it the payment is signed for ever after.
+  val failed_read: bool = OPIDS.forall(i => st.failSeen.get(i) == st.failedEv.get(i))
   // a payment runs at most once: the signed batch that carries it can land only once per nonce, and the Entity never
   // signs it again while an older batch that carries it can still land.
   val pay_once: bool = OPIDS.forall(i => not(isPay(st, i)) or st.runs.get(i) <= 1)
@@ -273,7 +285,7 @@ module jbatch {
   // the reserve is the initial one, less what payments ran, plus what was refilled (checked by payments never overspending)
   val reserve_sound: bool = st.reserve >= 0 and st.reserve <= RESERVE_MAX
 
-  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound }
+  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, failed_read, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound }
 
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0
