@@ -41,6 +41,8 @@ contract DeltaTransformer {
   error InvalidDeltaIndex();
   error ContextLengthMismatch();
   error PullRevealWindowActive(uint256 disputeTimeout);
+  /// An unrevealed Payment whose deadline is still open. Finalization waits (H1) instead of settling it as unpaid.
+  error PaymentRevealWindowActive(uint256 revealedUntilTimestamp);
   error PullRevealRegistryUnavailable(address caller);
   error InvalidPullAmount();
   event SecretRevealed(bytes32 indexed hashlock, bytes32 secret);
@@ -283,7 +285,13 @@ contract DeltaTransformer {
         revealed = true;
       }
     }
-    if (!revealed) return;
+    if (!revealed) {
+      // H1: until the deadline the secret may still surface, and a forwarding hub needs it to claim upstream.
+      // Settling "unpaid" now would let payer and payee collude against the hub, so finalization waits. A reveal at
+      // the deadline second still counts (`<=` above), hence the wait includes it.
+      if (block.timestamp <= payment.revealedUntilTimestamp) revert PaymentRevealWindowActive(payment.revealedUntilTimestamp);
+      return;
+    }
     if (payment.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
     deltas[payment.deltaIndex] = WideMath.add(deltas[payment.deltaIndex], amount);

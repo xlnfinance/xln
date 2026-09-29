@@ -90,8 +90,9 @@ export type Body = {
   readonly rightResponseSeconds: number;
   readonly offdeltas: readonly bigint[];
   readonly tokenIds: readonly number[];
+  readonly transformers?: readonly unknown[];
 };
-export const bodyStruct = (b: Body) => ({ ...b, offdeltas: b.offdeltas.map(encodeInt512), transformers: [] });
+export const bodyStruct = (b: Body) => ({ ...b, offdeltas: b.offdeltas.map(encodeInt512), transformers: b.transformers ?? [] });
 export const bodyHash = (b: Body): string => ethers.keccak256(coder.encode([ethers.ParamType.from(PROOF_BODY_ABI)], [bodyStruct(b)]));
 
 const HANKO_ABI = ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])"];
@@ -125,10 +126,6 @@ export const boot = async (label: string, chainId = 31337) => {
   const at = (seconds: number): void => { vm.setBlockTimestamp(1_800_000_000_000 + seconds * 1000); };
   at(0);
 
-  const [p1, p2] = [party(`${label}-a`), party(`${label}-b`)];
-  const [L, R] = BigInt(p1.id) < BigInt(p2.id) ? [p1, p2] : [p2, p1];
-  const acctKey = acctKeyOf(L.id, R.id);
-
   // ---- payloads, mirroring HankoEncoding.sol (the fork's own library) ----
   const batchHash = (entity: string, encodedBatch: string, nonce: bigint): string => ethers.keccak256(
     features.batchEntity
@@ -137,26 +134,12 @@ export const boot = async (label: string, chainId = 31337) => {
       : ethers.solidityPacked(["bytes32", "uint256", "address", "bytes", "uint256"],
           [ethers.id("XLN_DEPOSITORY_HANKO_V1"), domain.chainId, domain.depository, encodedBatch, nonce]));
 
-  const epochOf = async (a = L.id, b = R.id): Promise<bigint> => {
+  const epochOf = async (a: string, b: string): Promise<bigint> => {
     if (!features.epoch) return 0n;
     const data = depositoryIface.encodeFunctionData("ondeltaEpoch", [a, b]);
     const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 500_000n });
     return BigInt(depositoryIface.decodeFunctionResult("ondeltaEpoch", result.execResult.returnValue)[0]);
   };
-
-  const proofHash = (epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string => ethers.keccak256(
-    features.epoch
-      ? coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "uint256", "bool", "bytes32", "bytes32"],
-          [1, domain.chainId, domain.depository, acctKey, epoch, nonce, proposerIsLeft, bodyHash(b), b.watchSeed])
-      : coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "bool", "bytes32", "bytes32"],
-          [1, domain.chainId, domain.depository, acctKey, nonce, proposerIsLeft, bodyHash(b), b.watchSeed]));
-
-  const coopHash = (epoch: bigint, nonce: number, diffs: readonly CooperativeUpdateDiff[], forgive: readonly number[] = []): string => ethers.keccak256(
-    features.epoch
-      ? coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM, "uint256[]"],
-          [0, domain.chainId, domain.depository, acctKey, epoch, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive])
-      : coder.encode(["uint256", "uint256", "address", "bytes", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM, "uint256[]"],
-          [0, domain.chainId, domain.depository, acctKey, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive]));
 
   // ---- submission ----
   /** Events decoded from the last accepted transaction (name and args, as og's J watcher sees them). */
@@ -177,9 +160,12 @@ export const boot = async (label: string, chainId = 31337) => {
 
   /** Replay a failed call read-only to name its custom error (executeTx keeps only "revert"). */
   const revertName = async (data: string): Promise<string> => {
-    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 15_000_000n });
+    // A read-only call runs in the EVM's default block; the reason must be replayed at the test clock, or every
+    // timing guard (dispute windows, reveal deadlines) reads the wrong time and names the wrong error.
+    const block = vm.createBlock(vm.getBlockTimestamp());
+    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 15_000_000n, block });
     const returned = ethers.hexlify(result.execResult.returnValue ?? new Uint8Array());
-    const parsed = returned === "0x" ? null : depositoryIface.parseError(returned) ?? forkAccount.createInterface().parseError(returned);
+    const parsed = returned === "0x" ? null : depositoryIface.parseError(returned) ?? forkAccount.createInterface().parseError(returned) ?? forkDeltaTransformer.createInterface().parseError(returned);
     return parsed ? `${parsed.name}(${parsed.args.join(",")})` : returned;
   };
 
@@ -192,22 +178,18 @@ export const boot = async (label: string, chainId = 31337) => {
     return sendRaw(who.id, encoded, rawHanko(hash, who.key), nonce);
   };
 
-  const proofSig = (signer: Party, epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string =>
-    rawHanko(proofHash(epoch, nonce, proposerIsLeft, b), signer.key);
-  const coopSig = (signer: Party, epoch: bigint, nonce: number, diffs: readonly CooperativeUpdateDiff[], forgive: readonly number[] = []): string =>
-    rawHanko(coopHash(epoch, nonce, diffs, forgive), signer.key);
-
   const start = (who: Party, other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) =>
     submit(who, { disputeStarts: [{
       counterentity: other.id, nonce, proposerIsLeft, proofbodyHash: bodyHash(b), initialProofbody: bodyStruct(b),
       watchSeed: b.watchSeed, sig, starterInitialArguments: "0x", starterCounterArguments: "0x",
       starterCounterProofCommitment: ethers.ZeroHash,
     }] });
-  const finalize = (who: Party, other: Party, init: { nonce: number; body: Body; startedByLeft: boolean }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string }) =>
+  const finalize = (who: Party, other: Party, init: { nonce: number; body: Body; startedByLeft: boolean }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string },
+    args: { readonly starter?: string; readonly other?: string } = {}) =>
     submit(who, { disputeFinalizations: [{
       counterentity: other.id, initialNonce: init.nonce, finalNonce: fin.nonce, proposerIsLeft: fin.proposerIsLeft,
-      initialProofbodyHash: bodyHash(init.body), finalProofbody: bodyStruct(fin.body), starterArguments: "0x",
-      otherArguments: "0x", sig: fin.sig, startedByLeft: init.startedByLeft, cooperative: false,
+      initialProofbodyHash: bodyHash(init.body), finalProofbody: bodyStruct(fin.body), starterArguments: args.starter ?? "0x",
+      otherArguments: args.other ?? "0x", sig: fin.sig, startedByLeft: init.startedByLeft, cooperative: false,
     }] });
   const settle = (who: Party, other: Party, nonce: number, diffs: readonly CooperativeUpdateDiff[], sig: string) =>
     submit(who, { settlements: [{
@@ -216,25 +198,53 @@ export const boot = async (label: string, chainId = 31337) => {
       diffs, forgiveDebtsInTokenIds: [], sig, nonce,
     }] });
 
-  const reserves = async () => ({
-    L: await chain.getReserves(L.id, TOKEN), R: await chain.getReserves(R.id, TOKEN),
-    collateral: await chain.getCollateral(L.id, R.id, TOKEN),
-    nonce: (await chain.getAccountInfo(L.id, R.id)).nonce,
-  });
-  const body = (offdelta: bigint, windows = 10): Body => ({
-    watchSeed: ethers.id(`${label}-seed`), leftResponseSeconds: windows, rightResponseSeconds: windows,
-    offdeltas: [offdelta], tokenIds: [TOKEN],
-  });
-  /** Both parties funded, Left's 100 in collateral (ondelta 100). */
-  const fundedAccount = async (): Promise<void> => {
-    await chain.debugFundReserves(L.id, TOKEN, 1000n);
-    await chain.debugFundReserves(R.id, TOKEN, 1000n);
-    const opened = await submit(L, { reserveToCollateral: [{ tokenId: TOKEN, receivingEntity: L.id, pairs: [{ entity: R.id, amount: 100n }] }] });
-    if (opened !== "ok") throw new Error(`fundedAccount: ${opened}`);
+  /** Everything that belongs to one Account: the two parties, their key, payloads, signatures, balances, funding. */
+  const accountOf = (a: Party, b: Party, seed: string) => {
+    const [L, R] = BigInt(a.id) < BigInt(b.id) ? [a, b] : [b, a];
+    const acctKey = acctKeyOf(L.id, R.id);
+    const currentEpoch = (): Promise<bigint> => epochOf(L.id, R.id);
+    const proofHash = (epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string => ethers.keccak256(
+      features.epoch
+        ? coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "uint256", "bool", "bytes32", "bytes32"],
+            [1, domain.chainId, domain.depository, acctKey, epoch, nonce, proposerIsLeft, bodyHash(b), b.watchSeed])
+        : coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "bool", "bytes32", "bytes32"],
+            [1, domain.chainId, domain.depository, acctKey, nonce, proposerIsLeft, bodyHash(b), b.watchSeed]));
+
+    const coopHash = (epoch: bigint, nonce: number, diffs: readonly CooperativeUpdateDiff[], forgive: readonly number[] = []): string => ethers.keccak256(
+      features.epoch
+        ? coder.encode(["uint256", "uint256", "address", "bytes", "uint256", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM, "uint256[]"],
+            [0, domain.chainId, domain.depository, acctKey, epoch, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive])
+        : coder.encode(["uint256", "uint256", "address", "bytes", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM, "uint256[]"],
+            [0, domain.chainId, domain.depository, acctKey, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive]));
+
+    const proofSig = (signer: Party, epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string =>
+      rawHanko(proofHash(epoch, nonce, proposerIsLeft, b), signer.key);
+    const coopSig = (signer: Party, epoch: bigint, nonce: number, diffs: readonly CooperativeUpdateDiff[], forgive: readonly number[] = []): string =>
+      rawHanko(coopHash(epoch, nonce, diffs, forgive), signer.key);
+
+    const reserves = async () => ({
+      L: await chain.getReserves(L.id, TOKEN), R: await chain.getReserves(R.id, TOKEN),
+      collateral: await chain.getCollateral(L.id, R.id, TOKEN),
+      nonce: (await chain.getAccountInfo(L.id, R.id)).nonce,
+    });
+    const body = (offdelta: bigint, windows = 10): Body => ({
+      watchSeed: ethers.id(`${seed}-seed`), leftResponseSeconds: windows, rightResponseSeconds: windows,
+      offdeltas: [offdelta], tokenIds: [TOKEN],
+    });
+    /** Both parties funded, Left's 100 in collateral (ondelta 100). */
+    const fundedAccount = async (): Promise<void> => {
+      await chain.debugFundReserves(L.id, TOKEN, 1000n);
+      await chain.debugFundReserves(R.id, TOKEN, 1000n);
+      const opened = await submit(L, { reserveToCollateral: [{ tokenId: TOKEN, receivingEntity: L.id, pairs: [{ entity: R.id, amount: 100n }] }] });
+      if (opened !== "ok") throw new Error(`fundedAccount: ${opened}`);
+    };
+
+    return { L, R, acctKey, epochOf: currentEpoch, proofHash, coopHash, proofSig, coopSig, reserves, body, fundedAccount };
   };
+  const pair = accountOf(party(`${label}-a`), party(`${label}-b`), label);
 
   return {
-    chain, vm, domain, features, last, TOKEN, L, R, acctKey, at, epochOf, batchHash, proofHash, coopHash, sendRaw, submit,
-    proofSig, coopSig, start, finalize, settle, reserves, body, fundedAccount, encodeJBatch, createEmptyBatch,
+    chain, vm, domain, features, last, TOKEN, at, batchHash, sendRaw, submit, start, finalize, settle,
+    accountOf, ...pair, encodeJBatch, createEmptyBatch,
   };
 };

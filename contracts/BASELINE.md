@@ -62,3 +62,9 @@ The drops come from the two intended interface changes (spot-checked: BoardRotat
 argument (C2), and the batch, dispute-proof and cooperative-update payloads changed (C1, C2), so every hash these suites
 sign or call `computeBatchHankoHash` with is now the old format. `contracts/test/vm/` covers the same paths against the
 new format and is the gate for these changes. Porting the inherited suites to the new interface is a separate change.
+
+## Follow-ups (out of PR #40)
+
+1. **Port the old Hardhat suites.** The inherited suites above still sign the old payloads and call the old three-argument `processBatch`. Port them to the new interface (entity argument, epoch in proofs, V2 domain), or retire each one once `test/vm/` covers its path.
+2. **Repoint the walk.** `bun diff/walk.ts` still deploys `jurisdictions/`. Pointing it at `contracts/` needs the pure encoders plus a shim for og's own signing, because og's signers and adapter use the old payloads and ABI.
+3. **H3** (cap retired-board evidence at collateral) is decided but not implemented; it is the next contract change.

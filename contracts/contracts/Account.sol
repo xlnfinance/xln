@@ -942,7 +942,7 @@ library Account {
       returnSize := returndatasize()
     }
     if (!callOk) {
-      // The cross-j reveal-window barrier and a missing registry are scheduling
+      // The reveal-window barriers (pull and open-deadline payment) and a missing registry are scheduling
       // and evidence conditions, not transformer faults. Bubble them verbatim
       // so operators and the runtime's finalize scheduler see the true reason
       // instead of a generic execution failure. Every other transformer
@@ -958,6 +958,7 @@ library Account {
         }
         if (
           reasonSelector == DeltaTransformer.PullRevealWindowActive.selector ||
+          reasonSelector == DeltaTransformer.PaymentRevealWindowActive.selector ||
           reasonSelector == DeltaTransformer.PullRevealRegistryUnavailable.selector
         ) {
           assembly ("memory-safe") {
