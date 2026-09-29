@@ -32,7 +32,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 - `params_test.qnt` (runs first in `check.sh`): LAG, REACT, DWIN, HOP, ESC agree across chain, entity and jbatch; the hub's deadline arithmetic
   pays the hub with the margin (`hopMarginPaysTheHubTest`) and loses without it (`noMarginLosesTheHubTest`) on the real dispute game.
 - `MODULES=jbatch ./check.sh`: typecheck, 10 scenario tests, `safe` (urgent_lands, dropped_only_dead, skip_read, nonce_final, pay_once, urgent_once, nonce_sequential,
-  reserve_sound) over 500 traces of 25 steps, 6 witnesses reached; also 20000 traces of 30 steps, three seeds, no violation.
+  reserve_sound) over 500 traces of 25 steps, 6 witnesses reached; also 20000 traces of 30 steps, seed 3 (after F1 and the skip event), no violation.
   `MUTANT_STEPS=25 MUTANT_SAMPLES=3000 python3 mutants/run.py jbatch`: 9 of 9 killed.
   Apalache, `quint verify jbatch.qnt --init init --step step --invariant safe --max-steps 4`: no violation in 585 s (before the skip event was added).
   Found while writing it: an older, smaller batch signed for one nonce burns the nonce of the fresher batch (J3), which F1 now rules out by signing every replacement at a fresh nonce; and F1 in turn makes a reverting payment hold every urgent op behind it, which J5 (a failed batch takes its nonce) removes: with `NONCE_ON_FAIL = false` (the contract today) `urgent_lands` is violated within a second of simulation.
