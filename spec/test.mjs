@@ -12,6 +12,7 @@ const pages = {
   money: { files: ["money/ledger.scm"], spec: "ledger" },
   dispute: { files: ["dispute/dispute.scm"], spec: "dispute" },
   entity: { files: ["entity/consensus.scm"], spec: "entity-consensus" },
+  clock: { files: ["account/clock.scm"], spec: "account-clock" },
   frame: { files: ["entity/frame.scm"], spec: "entity-frame" },
   runtime: { files: ["runtime/tick.scm"], spec: "runtime" },
   j: { files: ["j/batch.scm"], spec: "j-batch" },
@@ -34,6 +35,10 @@ const cases = [
   planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish"),
   planted("account", "commit a frame that skips ahead", "commit-any-frame", "no tx is both committed and refused"),
   planted("account", "skip re-validation", "skip-revalidation", "can always still finish"),
+  { page: "clock", name: "account clock (R-CLOCK)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 130, transitions: 377, goals: 2 }) },
+  planted("clock", "a stale stamp is refused, the signed frame is stuck (R-CLOCK)", "refuse-late", "no frame is refused for its age or its future date: a signed frame has an exit (R-CLOCK)"),
+  planted("clock", "a stamp ahead of the receiver's clock is refused (R-CLOCK)", "refuse-future", "no frame is refused for its age or its future date: a signed frame has an exit (R-CLOCK)"),
+  planted("clock", "expiry decided from the proposer's stamp (R-CLOCK)", "expire-by-frame-stamp", "a lock is expired only after the payee's own clock passed its deadline plus the reserve (R-CLOCK)"),
   { page: "money", name: "money ledger", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 820, transitions: 7094, goals: 0 }) },
   planted("money", "ignore open clauses in the guard", "ignore-clauses", "credit holds: RCPAN in the worst case over the open clauses"),
   planted("money", "credit lowered below usage", "credit-below-usage", "credit holds: RCPAN in the worst case over the open clauses"),
@@ -41,7 +46,7 @@ const cases = [
   planted("money", "a resolved clause lands on the wrong side", "resolve-wrong-side", "resolve: the clause pays, Δ moves against its payer by its amount"),
   planted("money", "a lapsed clause pays out", "expire-pays", "expire: the clause lapses, Δ and the money stay"),
   planted("money", "a Left deposit does not raise ondelta", "deposit-no-ondelta", "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation"),
-  { page: "dispute", name: "dispute", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 9771, transitions: 16667, goals: 5430 }) },
+  { page: "dispute", name: "dispute", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4506, transitions: 8204, goals: 2110 }) },
   planted("dispute", "finalize a stale start before T", "early-finalize", "the responder is never worse off than the newest proof it held"),
   planted("dispute", "no floor on the response windows", "no-floor", "the responder is never worse off than the newest proof it held"),
   planted("dispute", "Right outranks Left at an equal nonce", "tie-break-inverted", "an honest starter never ends on a losing proposal"),
@@ -59,6 +64,14 @@ const cases = [
   planted("dispute", "final Δ forgets ondelta", "delta-drops-ondelta", "Δ = ondelta + offdelta, less the clause if it paid"),
   planted("dispute", "a paid HTLC moves Δ the wrong way", "htlc-sign-flipped", "Δ = ondelta + offdelta, less the clause if it paid"),
   planted("dispute", "a timeout finalize does not consume a nonce", "chain-nonce-stale", "a timeout finalize consumes exactly one nonce; an adopted proof sets it"),
+  { page: "dispute", name: "dispute, deadline beyond MAX_LOCK_HORIZON (N2)", extra: ["dispute/configs/far-deadline.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 492, transitions: 697, goals: 283 }) },
+  planted("dispute", "a lock beyond MAX_LOCK_HORIZON is signed (N2)", "no-horizon", "no lock is signed beyond MAX_LOCK_HORIZON: every held clause is within the horizon of the clock (N2)", "dispute/configs/far-deadline.scm"),
+  planted("dispute", "a dispute op leaves the payee's secret out of the calldata (#37, R3)", "omits-secret", "a payee that acted before the deadline knowing the secret is never left with the clause unpaid (#37)"),
+  planted("dispute", "a settlement signed at the baseline nonce (N1)", "settle-nonce-high", "after an epoch advance each side still holds a valid proof of the new epoch"),
+  planted("dispute", "a settlement offered with an open clause (v1)", "settle-with-clause", "a cooperative settlement carries no open clause (v1)"),
+  planted("dispute", "a settlement does not fold offdelta into ondelta", "settle-drops-off", "a cooperative settlement moves nothing: \u0394 and the money are the same before and after"),
+  planted("dispute", "a settlement co-signs no baseline for the next epoch", "settle-no-baseline", "after an epoch advance each side still holds a valid proof of the new epoch"),
+  planted("dispute", "the first frame of the new epoch does not clear the baselines", "post-nonce-low", "in the new epoch a dispute pays the newest committed frame, never a baseline that outranks it"),
   { page: "entity", name: "entity consensus", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 6726, transitions: 29745, goals: 2060 }) },
   planted("entity", "own proposal kept on a conflicting certified frame (og today)", "commit-conflict", "can always still finish"),
   planted("entity", "own proposal dropped, its txs forgotten", "drop-txs-on-conflict", "no submitted tx is lost"),
@@ -92,6 +105,8 @@ const cases = [
   planted("j", "the Entity does not read BatchFailed (R-J5)", "ignores-batch-failed", "can always still finish", "j/configs/payment-failure.scm"),
   planted("j", "the chain applies half a batch", "partial-apply", "the chain is atomic: every applied op came from a batch that succeeded"),
   { page: "routing", name: "routing", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4698, transitions: 4932, goals: 0 }) },
+  { page: "routing", name: "routing, inbound lock beyond MAX_LOCK_HORIZON (N2)", extra: ["entity/configs/far-inbound.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 16, transitions: 15, goals: 0 }) },
+  planted("routing", "a hub forwards a lock beyond MAX_LOCK_HORIZON (N2)", "no-horizon", "no lock is forwarded whose deadline is beyond MAX_LOCK_HORIZON (N2, deadline_too_far)", "entity/configs/far-inbound.scm"),
   planted("routing", "no hop margin between the locks (R1)", "no-hop-margin", "H never pays B without being paid by A: a diligent hub cannot lose"),
   planted("routing", "fail-back before the chain fact can be seen (R2)", "early-failback", "H never pays B without being paid by A: a diligent hub cannot lose"),
   planted("routing", "a dispute start leaves a known secret out (R3)", "dispute-omits-secret", "a dispute start publishes every secret H knows (R3)"),
@@ -118,12 +133,22 @@ if (only !== undefined) {
   const jobs = Number(process.env.TEST_JOBS ?? 4);
   const order = cases.map((_, i) => i).sort((a, b) => Number(cases[a].extra.length > 0) - Number(cases[b].extra.length > 0));
   const results = new Array(cases.length);
+  const failures = [];
   const next = { i: 0 };
+  // a failing case is reported at the end; the rest still run, so one run shows every failure
   const worker = async () => {
-    for (let k = next.i++; k < order.length; k = next.i++) results[order[k]] = await run(order[k]);
+    for (let k = next.i++; k < order.length; k = next.i++) {
+      try {
+        results[order[k]] = await run(order[k]);
+      } catch (e) {
+        failures.push(`FAIL ${cases[order[k]].name}\n${String(e.message).split("\n").filter((l) => /^[+-] |actual|expected/.test(l)).join("\n")}`);
+      }
+    }
   };
   await Promise.all(Array.from({ length: jobs }, worker));
   results.forEach(({ name, result }) =>
     console.log(`ok   ${name}${result.trace ? ` — ${result.violated}\n       ${result.trace.join(" → ")}` : ` — ${result.states} states`}`),
   );
+  failures.forEach((f) => console.log(f));
+  if (failures.length) process.exitCode = 1;
 }

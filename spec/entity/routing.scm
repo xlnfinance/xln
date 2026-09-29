@@ -9,6 +9,9 @@
 ;;   R1    H forwards only if dOut <= dIn - HOP.
 ;;   R2    H fails the route back to A no earlier than dOut + LAG, and never while it can see a reveal:
 ;;         an on-chain reveal by B may still be in flight.
+;;   N2    (coordinator 21:50) H refuses to forward a lock, and A refuses to sign one, whose deadline is beyond
+;;         MAX_LOCK_HORIZON (`deadline_too_far`): under H1 a lock years out blocks close until the secret
+;;         appears. A policy parameter, default 7 days on the real system, at least the 24 h async window.
 ;;   R3    a dispute H starts on the inbound Account publishes EVERY secret H knows for the payee locks.
 ;;
 ;; H is safe when B is paid by the outbound lock only if H is paid by the inbound lock. The adversary
@@ -26,6 +29,8 @@
 (define/overridable d-in     (s/number) 5)
 (define/overridable max-time (s/number) 7)
 (define/overridable failback-wait (s/number) 1)
+(define/overridable max-lock-horizon (s/number) 5)
+(define (horizon-ok? d) (<= d max-lock-horizon))
 (define (hop) (* 2 lag))
 
 (define sides (list :hub))
@@ -50,7 +55,8 @@
 
 (define (forward-with d)
   (rule (str "forward " d) (w side)
-    (when (and (not (:forwarded w)) (= (:now w) 0) (>= d 1) (<= d d-in) (hop-ok? d)))
+    (when (and (not (:forwarded w)) (= (:now w) 0) (>= d 1) (<= d d-in) (hop-ok? d)
+               (horizon-ok? d-in) (horizon-ok? d)))
     (then (-> w (assoc-in (list :forwarded) #t) (assoc-in (list :d-out) d)))))
 
 (define a-goes-silent
@@ -115,6 +121,8 @@
    (property "H never pays B without being paid by A: a diligent hub cannot lose" (w) (not (loss? w)))
    (property "onward lock ends at least HOP before the inbound lock (R1)" (w)
      (or (not (:forwarded w)) (hop-ok? (:d-out w))))
+   (property "no lock is forwarded whose deadline is beyond MAX_LOCK_HORIZON (N2, deadline_too_far)" (w)
+     (or (not (:forwarded w)) (and (<= d-in max-lock-horizon) (<= (:d-out w) max-lock-horizon))))
    (property "a dispute start publishes every secret H knows (R3)" (w)
      (or (not (:dispute w)) (not (cadr (:dispute w))) (and (:h-public-at w) #t)))))
 

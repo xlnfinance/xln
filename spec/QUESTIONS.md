@@ -63,6 +63,28 @@ Choice: the lower entity id, as in the contract's `acct_key`. The page names sid
 `:right`; the rule "Left wins on an equal height" is the contract's equal-nonce rule.
 Source: Types.sol:150, Account.sol:361, Account.sol:732.
 
+**Q-A-9. A frame's timestamp carries no authority (R-CLOCK, coordinator 21:56).**
+Rule: no frame is refused for its age or its future date, because a signed frame refused without an exit
+deadlocks the Account (the proposer holds the frame, resends the same signed copy, and it is refused
+again). Every time-based decision (lock expiry, a deadline check, the N2 horizon) uses the deciding
+party's own clock plus a named reserve (`clock-reserve`), never a timestamp the counterparty wrote.
+Reason given: a late frame deadlocked an Account, and a future-dated frame let a payer expire a lock
+before the payee's own deadline. The frames page above has no time, so it holds under the rule by
+construction (it refuses only on height and on content, never on a stamp); the rule is checked in its own
+page, `account/clock.scm`: two clocks that only tick and drift apart freely, one lock, a pay frame and
+an expire frame, any stamp, any delay. Properties: "no frame is refused for its age or its future date"
+and "a lock is expired only after the payee's own clock passed its deadline plus the reserve".
+Planted bugs, one per case: `refuse-late` (a stale stamp is refused: the signed frame is stuck),
+`refuse-future` (a stamp ahead of the receiver's clock is refused) and `expire-by-frame-stamp` (the
+receiver decides expiry from the frame's stamp: a payer stamps the future and expires the lock at its
+own clock 2 while the payee's is 0). Capacity: 130 states, under a second.
+Consequence for the other pages: the dispute page's clock is the chain's (one clock, the deciding
+party's own for `horizon-ok?`, Q-D-20); the J batch page's deadlines are the chain's. An early expire is
+refused on CONTENT (a nack); a signed frame that is valid but early is not refused, it waits for the
+deciding party's clock. Not modelled: J-height deadlines (the same rule with the J clock), the payee's
+claim before its own deadline, the size of the reserve (a named parameter, not chosen here).
+Source: coordinator R-CLOCK (21:56).
+
 ## Money (`money/ledger.scm`)
 
 **Q-L-1. Which way does "credit-left" point?**
@@ -154,8 +176,8 @@ Choice: baseline nonce = frame nonce + 3. A proposer is at most one frame behind
 flight) and a timeout finalize on the newest initial proof leaves the chain nonce one above it; +2
 is not enough (planted bug `baseline-too-low`: the proposer holds no valid proof after finalize).
 The offset depends on the frame protocol allowing one unacked frame: pipelining k frames needs +2+k.
-A cooperative settlement (not in this page) carries the same baseline in its Lock frame and folds
-offdelta into ondeltaDiff; v1 requires no open clauses for it.
+A cooperative settlement carries the same baseline in its Lock frame and folds offdelta into
+ondeltaDiff; v1 requires no open clauses for it (in the page since 21:35, see Q-D-19).
 Source: coordinator decision, A:872, A:1315, D:843-856.
 
 **Q-D-5. Response windows (coordinator N3, floor H2).**
@@ -211,13 +233,12 @@ Source: coordinator decision H4, A:1216-1275, D:757-768.
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
 tokens. Model bounds: 5 scripted frames (one refused by RCPAN), one rival, one HTLC, two windows of 1,
-`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 9771 states,
-16667 transitions, 5430 goals, about 4 minutes alone. The review measured `max-time 3` with the HTLC
-deadline at 2 on the 3-frame script (10120 states, 331 s): the earlier note that it "exceeded the
-budget" was the tool's timeout (now 600 s), not a checker limit. Not modelled yet, listed by the
-review: secrets carried in the dispute call (#37), the N1 settlement branch and nonce continuity
-after an epoch advance, N2, H3, and a second dispute (`max-disputes` 2), so the pre-signed baseline
-is held but never presented.
+`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 4506 states,
+8204 transitions, 2110 goals, under 3 minutes alone (it was 9771 states before the payee's dispute ops
+carried the secret: a separate reveal at every time is no longer a separate branch). The review measured
+`max-time 3` with the HTLC deadline at 2 on the 3-frame script (10120 states, 331 s). Not modelled yet:
+N2 tolerance, H3, and a second dispute after a dispute (`max-disputes` 2). Secrets in calldata (Q-D-18)
+and the settlement branch with nonce continuity (Q-D-19) are in.
 
 **Q-D-13. The proofs are built by the frame rules, not listed (review of PR #41).**
 Before, proofs were ids into a table of states the author chose: "both sides sign the same proof"
@@ -264,6 +285,61 @@ window > LAG on every proof (testnet: 60 s, far above LAG), stated next to H2. T
 before T (now + LAG < T). Planted bug `window-below-lag` (LAG one tick, no floor): the responder
 cannot answer a stale start and "the responder is never worse off than the newest proof it held"
 fails. With LAG at a tick and correct windows of 2 the page would need `max-time` 4: not run.
+
+**Q-D-18. The payee's dispute ops carry the secret (lesson #37, R3, coordinator 21:35).**
+Before: the page had a separate `reveal` (the payee publishes the secret at any time) and a dispute
+never carried one, so a payee that started or countered without revealing lost the clause at the deadline
+and nothing said it should have known better. Now: every dispute op by the payee (start, counter,
+finalize) carries the secret it knows for the frozen Account's locks, whichever proof it presents (the
+calldata IS the reveal, so the chain sees it at the op's time). The payee knows the secret once the lock
+frame exists. The separate `reveal` stays (a reveal op in a batch of its own, R-SPLIT). Property: "a
+payee that acted before the deadline knowing the secret is never left with the clause unpaid". Planted
+bug `omits-secret` (the op leaves it out): start on the older proof, the counterparty counters with the
+clause proof, the deadline passes, the clause is unpaid. The routing page has the same rule one level up
+(R3, `dispute-omits-secret`). Contract side: `starterArguments`/`otherArguments` are the carrier (Account.sol
+dispute args, committed by hash); whether they carry EVERY known secret or only those of the presented
+proof is the open point for the contracts.
+Source: lessons #37, relay 18:10 R3; A: dispute argument commitments.
+
+**Q-D-19. The settlement branch and nonce continuity after an epoch advance (N1, coordinator 21:35).**
+The contract (Account.sol processSettlement, processC2R): a cooperative update is signed at a nonce
+strictly above the stored nonce, the stored nonce is SET to it, offdelta is folded through
+`ondeltaDiff`, and the epoch advances. The page adds `settle` (v1: no open clause; heights 1 and 2 of the
+script are offered), `post frame` (the first frame of the new epoch) and a dispute in the new epoch.
+Rules the page carries, each with a planted bug:
+- The settlement nonce is above the chain nonce and below the baselines already held for the epoch it opens
+  (frame height + 1; baselines sit at frame + 3). At the baseline nonce neither side holds a valid proof
+  (`settle-nonce-high`).
+- A settlement moves no allocation: Δ and the money are the same before and after; offdelta folds into
+  ondelta (`settle-drops-off`). It carries no open clause in v1 (`settle-with-clause`).
+- FINDING. The settlement must ALSO co-sign a baseline for the epoch AFTER the one it opens, at 3 above the
+  highest nonce valid in the new epoch (baselines included). Without it, a dispute in the new epoch before
+  another frame is signed leaves each side with no valid proof, and the counterparty can stretch the gap by
+  refusing to sign (`settle-no-baseline`, trace: propose, ack, settle, start on the old baseline, finalize).
+  The Lock frame carries the same baseline as every other frame (Q-D-4), and so must the settlement.
+- FINDING. Proof nonce and frame height are separate counters, and the first proof nonce of the new epoch
+  must clear every baseline of that epoch either side holds (baseline = old frame + 3, so it is above the
+  chain nonce the settlement leaves). If the runtime continues the frame counter from the chain nonce, a
+  baseline (offdelta 0) outranks the newest committed frame and a dispute pays from it
+  (`post-nonce-low`). Runtime rule: next proof nonce = 1 + the highest nonce of the epoch that any held
+  proof carries.
+Not modelled: several frames after a settlement, a settlement with open clauses (v2), several tokens, the
+finalize-then-continue path (the baseline check covers it, the frame after it is not walked).
+Source: Account.sol 1590-1690, 1354; coordinator N1 (revised), relay 21:35.
+
+**Q-D-20. MAX_LOCK_HORIZON (N2, coordinator 21:50).**
+A named policy parameter (default 7 days on the real system, never below the 24 h async window). A party
+refuses a lock whose deadline, in time or J height, is beyond it (`deadline_too_far`), and a hub refuses
+to forward one. Reason: under H1 a finalize waits for an open lock's deadline unless the secret is public,
+so a lock years out blocks cooperative and dispute close until the secret appears. In the page:
+`max-lock-horizon` (model units, default 1) and `horizon-ok?`, applied in `frame-ok?`, so BOTH sides
+recompute it and a lock frame beyond the horizon is never signed. Property: every held clause is within
+the horizon of the clock (the clock only grows, so it holds for as long as the proof is held). Config
+`dispute/configs/far-deadline.scm` (deadline 3): the lock is refused while it is far, the page settles.
+Planted bug `no-horizon` (with that config): the far lock is signed. Choice to confirm: the horizon is a
+LOCAL policy (each party's own tolerance), not a value both sides must agree on; a party that accepts a
+farther lock than its peer does simply gets refused by the peer at signing.
+Source: coordinator N2 (21:50); H1.
 
 ## Entity consensus (`entity/consensus.scm`)
 
@@ -545,6 +621,15 @@ A dispute H starts on the inbound Account carries every secret H knows for the p
 proof it presents (lesson from #37). Choice: the start action publishes them all; a start that leaves
 one out is a spec violation. Planted bug `dispute-omits-secret`. Source: relay 18:10 R3; lessons #37.
 
+**Q-RT-7. MAX_LOCK_HORIZON at the hub (N2, coordinator 21:50).**
+The hub refuses to forward a lock whose inbound or onward deadline is beyond `max-lock-horizon`
+(`deadline_too_far`), so a hub never carries a lock that H1 could keep open for years. Page:
+`horizon-ok?` in the forward guard; property "no lock is forwarded whose deadline is beyond
+MAX_LOCK_HORIZON". Config `entity/configs/far-inbound.scm` (inbound deadline one beyond the horizon):
+nothing is forwarded and nothing can be lost; planted bug `no-horizon` forwards it anyway. The onward
+deadline is at most the inbound one minus HOP (R1), so the inbound check is the binding one.
+Source: coordinator N2 (21:50).
+
 **Q-RT-4. The diligent hub.**
 A hub that does not act in the tick where it first sees the secret can always lose (the payee reveals
 at the last moment and the hub misses the inbound deadline). Choice: the page ASSUMES a diligent hub
@@ -670,5 +755,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
+- **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
+- **R-CLOCK** (21:56): see Q-A-9.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.

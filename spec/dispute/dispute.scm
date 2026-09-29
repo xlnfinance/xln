@@ -29,9 +29,21 @@
 ;; WINDOW. The clock may not reach T while the non-starter holds a proof that outranks the selected
 ;; one and has not answered. Take it away (bug `no-floor`, windows of zero) and the properties fail.
 ;;
+;;   secrets  a dispute op by the payee carries every secret it knows for the frozen Account's locks,
+;;            whichever proof it presents (lesson #37, R3): the calldata IS the reveal. `carry`.
+;;   settle   cooperative settlement (Account.sol processSettlement): a bilateral update at a nonce above
+;;            the chain nonce. It folds offdelta into ondelta (Δ and the money do not move), sets the chain
+;;            nonce to its own nonce and advances the epoch. v1: no open clause. It is co-signed with a
+;;            baseline for the epoch after the one it opens, like every frame (N1). After it the parties
+;;            sign one more frame, `post`, whose proof nonce must clear every baseline of its epoch (proof
+;;            nonce and frame height are separate counters), and a dispute may start in the new epoch.
+;;
+;;   horizon  N2 (coordinator 21:50): a party refuses a lock whose deadline is beyond MAX_LOCK_HORIZON. Under H1
+;;            a lock years out blocks cooperative and dispute close until the secret appears. `horizon-ok?`.
+;;
 ;; Not modelled here: Pull clauses (5b/5c wait for T when one is present), swaps, the watchtower
-;; (it can only run a counter or an already selected finalize), several tokens (GAP-7), cooperative
-;; settlement (its Lock frame would carry the same pre-signed baseline). See QUESTIONS.md.
+;; (it can only run a counter or an already selected finalize), several tokens (GAP-7), a settlement
+;; with open clauses (v2), more than one frame after a settlement. See QUESTIONS.md.
 ;;
 ;; Needs lib/vocabulary.scm and lib/check.scm.
 
@@ -46,12 +58,17 @@
 (define/overridable lag            (s/number) 0)
 (define/overridable max-time       (s/number) 2)
 (define/overridable htlc-deadline  (s/number) 1)
+;; MAX_LOCK_HORIZON: a named POLICY parameter (default 7 days on the real system, never below the 24 h
+;; async window): a lock is refused when its deadline is further away than this from the clock
+(define/overridable max-lock-horizon (s/number) 1)
 (define/overridable max-disputes   (s/number) 1)
 (define/overridable credit-left    (s/number) 1)   ; credit extended TO Left (Q-L-1)
 (define/overridable credit-right   (s/number) 1)
 (define/overridable collateral0    (s/number) 2)
 (define/overridable reserve-left0  (s/number) 1)
 (define/overridable reserve-right0 (s/number) 0)
+;; the frame heights at which a cooperative settlement is offered (height 2 holds an open clause)
+(define/overridable settle-heights (s/array (s/number)) (list 1 2))
 
 ;; ---- the domain
 (define sides (list :left :right))
@@ -116,7 +133,10 @@
   (let* ((delta (+ (:ondelta w) (p-off p)))
          (low (- delta (if (p-clause p) (clause-amount (p-clause p)) 0))))
     (and (>= low (- credit-left)) (<= delta (+ (:collateral w) credit-right)))))
-(define (frame-ok? w p) (and p (rcpan-ok? w p)))
+;; N2: a lock whose deadline is beyond MAX_LOCK_HORIZON is refused by BOTH sides (bug `no-horizon`)
+(define (horizon-ok? w p)
+  (or (not (p-clause p)) (<= (- (clause-deadline (p-clause p)) (:now w)) max-lock-horizon)))
+(define (frame-ok? w p) (and p (rcpan-ok? w p) (horizon-ok? w p)))
 ;; the receiver recomputes the body from ITS committed proof and signs only if it equals the
 ;; proposer's (bugs `blind-sign` and `no-rcpan` change these)
 (define (receiver-body tip op nonce proposer) (apply-op tip op nonce proposer #f))
@@ -130,7 +150,8 @@
 ;; timeout finalize on the initial proof leaves the chain nonce at n0 + 1, one above the newest
 ;; frame the counterparty holds.
 (define (baseline-nonce k) (+ k 3))
-(define (baseline-of k) (list (baseline-nonce k) :left 0 #f #f 1))
+;; the baseline of `epoch` (the epoch that follows the one the frame was signed in)
+(define (baseline-of k epoch) (list (baseline-nonce k) :left 0 #f #f epoch))
 (define (rival-at nonce) (find (lambda (r) (= (car r) nonce)) rivals))
 
 (define init
@@ -143,7 +164,10 @@
         :tip (dict :left genesis :right genesis)   ; the newest proof each side has committed
         :unacked #f                          ; #f, or (proposer's proof, receiver's proof): the proposer waits for the ack
         :proposed-rank 0                     ; rank of the newest frame proposed (the receiver committed it)
-        :held (dict :left (list (baseline-of 0)) :right (list (baseline-of 0)))  ; the genesis baseline is co-signed at open
+        :held (dict :left (list (baseline-of 0 1)) :right (list (baseline-of 0 1)))  ; the genesis baseline is co-signed at open
+        :knew-op #f                          ; the payee acted before the deadline knowing the secret
+        :settlements (list)                  ; what each cooperative settlement did
+        :post #f                             ; the frame signed after a settlement
         :deposit #f                          ; (funder beneficiary) of the one R2C made during a dispute
         :dispute #f
         :results (list)))
@@ -159,7 +183,7 @@
 (define (hold-frame w side p)
   (if (p-rival? p)
       (hold w side p)
-      (hold (hold w side p) side (baseline-of (p-nonce p)))))
+      (hold (hold w side p) side (baseline-of (p-nonce p) (+ (:epoch w) 1)))))
 
 ;; the next scripted frame as (proposer's proof, receiver's proof), or #f when it is not valid
 (define (next-frame w)
@@ -246,6 +270,18 @@
 ;; both sides had committed (Q-D-3); bug `late-ack` drops the assumption and shows it.
 (define (ack-in-window?) #t)
 
+;; ---- the secret in the calldata (#37, R3)
+;; The payee (Right) knows the secret once the lock frame exists. Every dispute op it sends carries it,
+;; so the chain sees it at the op's time; an op that leaves it out costs the payee the clause when the
+;; deadline passes (bug `omits-secret`).
+(define (known? w) (>= (:head w) 2))
+(define (publish-secret w) (if (:secret w) w (assoc-in w (list :secret) (:now w))))
+(define (note-knew w) (if (<= (:now w) htlc-deadline) (assoc-in w (list :knew-op) #t) w))
+(define (carry w side)
+  (if (and (equal? side :right) (known? w) (= (:epoch w) 0))
+      (publish-secret (note-knew w))
+      w))
+
 ;; ---- time and the public secret
 (define tick
   (rule "tick" (w side)
@@ -254,7 +290,7 @@
 
 (define reveal
   (rule "reveal" (w side)
-    (when (and (equal? side :right) (not (:secret w)) (>= (:head w) 2)))
+    (when (and (equal? side :right) (not (:secret w)) (>= (:head w) 2) (= (:epoch w) 0)))
     (then (assoc-in w (list :secret) (:now w)))))
 
 (define (start-with p)
@@ -263,7 +299,7 @@
                (member p (held-by w side)) (usable? w p) (window-floor-ok?)
                (<= (+ (:now w) (apply + (windows))) max-time)))
     (then (close-window
-           (assoc-in w (list :dispute)
+           (assoc-in (carry w side) (list :dispute)
                      (dict :starter side :at (:now w) :timeout (+ (:now w) (apply + (windows)))
                            :initial p :counter #f :closed-best #f :closed-proposed #f :counter-at #f
                            :best-start? (= (rank p) (best-rank w side))))))))
@@ -274,7 +310,7 @@
                (member p (held-by w side)) (usable? w p)
                (counter-window-open? w (:dispute w))
                (outranks? p (selected (:dispute w)))))
-    (then (assoc-in (assoc-in w (list :dispute :counter) p) (list :dispute :counter-at) (:now w)))))
+    (then (assoc-in (assoc-in (carry w side) (list :dispute :counter) p) (list :dispute :counter-at) (:now w)))))
 
 ;; ---- what the payout is worth
 (define (secret-public-by? w deadline) (and (:secret w) (<= (:secret w) deadline)))
@@ -322,6 +358,7 @@
         :believed (or (:closed-proposed d) (:proposed-rank w))
         :ondelta (:ondelta w) :secret (:secret w) :initial (:initial d) :counter-at (:counter-at d)
         :timeout (:timeout d) :adopted (adopted? d p)
+        :knew-op (:knew-op w) :post (:post w)
         :hasty (and (< (:now w) (:timeout d)) (own-ack-pending? w (responder-of d))))))
 
 (define (finalized w d p outcome path)
@@ -340,7 +377,7 @@
     (when (and (:dispute w) (:counter (:dispute w)) (>= (:now w) (:timeout (:dispute w)))
                (not (equal? (clause-outcome w (:counter (:dispute w))) :wait))))
     (then (let ((d (:dispute w)))
-            (finalized w d (:counter d) (clause-outcome w (:counter d)) "5a")))))
+            (finalized (carry w side) d (:counter d) (clause-outcome (carry w side) (:counter d)) "5a")))))
 
 ;; 5c: the initial proof stands. After T anyone; before T only the non-starter, and an honest
 ;; one does not close on something worse than the best proof it holds.
@@ -351,7 +388,7 @@
                    (and (equal? side (responder-of (:dispute w))) (not (responder-can-answer? w))))
                (not (equal? (clause-outcome w (:initial (:dispute w))) :wait))))
     (then (let ((d (:dispute w)))
-            (finalized w d (:initial d) (clause-outcome w (:initial d)) "5c")))))
+            (finalized (carry w side) d (:initial d) (clause-outcome (carry w side) (:initial d)) "5c")))))
 
 ;; 5b: no counter is registered; the non-starter brings its best proof, which outranks the
 ;; initial one, and closes at once
@@ -362,7 +399,60 @@
                (= (rank p) (best-rank w side))
                (not (equal? (clause-outcome w p) :wait))))
     (then (let ((d (:dispute w)))
-            (finalized w d p (clause-outcome w p) "5b")))))
+            (finalized (carry w side) d p (clause-outcome (carry w side) p) "5b")))))
+
+;; ---- cooperative settlement (Account.sol processSettlement) and the frame after it
+;; The settlement is the next frame: its nonce is above the chain nonce and below the baselines the
+;; parties already hold for the epoch it opens (baseline = frame nonce + 3). Bug `settle-nonce-high`.
+(define (settle-nonce w) (+ (:head w) 1))
+;; v1: a settlement carries no open clause (bug `settle-with-clause`)
+(define (settle-clause-ok? w) (not (p-clause (tip-of w :left))))
+;; the offdelta folds into ondelta, so Δ does not move (bug `settle-drops-off`)
+(define (folded-off off) off)
+(define (best-nonce w)
+  (reduce (lambda (p acc) (if (= (p-epoch p) (:epoch w)) (max acc (p-nonce p)) acc)) (:chain-nonce w) (all-proofs w)))
+;; the baseline for the epoch after the one just opened: 3 above the highest nonce valid in it. The
+;; settlement co-signs it, so a dispute in the new epoch still leaves each side a valid proof (bug
+;; `settle-no-baseline`).
+(define (settle-baseline w) (baseline-of (best-nonce w) (+ (:epoch w) 1)))
+(define (hold-both w p) (hold (hold w :left p) :right p))
+
+(define (settle-enabled? w)
+  (and (= (:epoch w) 0) (null? (:results w)) (not (frozen? w)) (not (:unacked w))
+       (member (:head w) (vector->list settle-heights)) (> (:head w) 0) (settle-clause-ok? w)))
+(define settle
+  (rule "settle" (w side)
+    (when (and (equal? side :left) (settle-enabled? w)))
+    (then (let* ((tip (tip-of w :left))
+                 (delta-before (+ (:ondelta w) (p-off tip)))
+                 (w1 (-> w (assoc-in (list :epoch) 1)
+                           (assoc-in (list :chain-nonce) (settle-nonce w))
+                           (update-in (list :ondelta) (lambda (o) (+ o (folded-off (p-off tip)))))
+                           (assoc-in (list :head) (length script))))
+                 (w2 (hold-both w1 (settle-baseline w1))))
+            (update-in w2 (list :settlements)
+                       (lambda (ss) (cons (dict :delta-before delta-before :delta-after (:ondelta w2)
+                                                :money-before (total-funds w) :money-after (total-funds w2)
+                                                :had-clause (if (p-clause tip) #t #f))
+                                          ss)))))))
+
+;; the first frame of the new epoch: Right pays Left 1. Its proof nonce clears every proof of the epoch
+;; either side holds, baselines included (proof nonce and frame height are separate counters). Bug
+;; `post-nonce-low` continues from the chain nonce: a baseline then outranks the newest frame.
+(define (post-nonce w) (+ 1 (best-nonce w)))
+(define (post-proof w)
+  (let ((base (list (:chain-nonce w) :left 0 #f #f (:epoch w))))
+    (append (take (apply-op base (list :pay :right 1) (post-nonce w) :right #f) 5) (list (:epoch w)))))
+(define post-frame
+  (rule "post frame" (w side)
+    (when (and (equal? side :right) (= (:epoch w) 1) (null? (:results w)) (not (frozen? w)) (not (:post w))
+               (pair? (:settlements w)) (rcpan-ok? w (post-proof w))))
+    (then (let ((p (post-proof w)))
+            (-> w (assoc-in (list :post) p)
+                  (assoc-in (list :proposed-rank) (rank p))
+                  (assoc-in (list :tip :left) p) (assoc-in (list :tip :right) p)
+                  (hold-both p)
+                  (hold-both (baseline-of (p-nonce p) (+ (:epoch w) 1))))))))
 
 ;; H4 (coordinator): R2C has no dispute check (Account.sol processR2C), so a deposit made while a
 ;; dispute is open changes the payout. Accepted: each deposit only raises its beneficiary's share.
@@ -386,7 +476,7 @@
 
 (define (rules-for w)
   (let ((ps (all-proofs w)))
-    (append (list propose collide ack tick reveal finalize-counter finalize-initial
+    (append (list propose collide ack tick reveal settle post-frame finalize-counter finalize-initial
                   (deposit-rule :left :left) (deposit-rule :right :right)
                   (deposit-rule :left :right) (deposit-rule :right :left))
             (map start-with ps) (map counter-with ps) (map finalize-with ps))))
@@ -438,8 +528,18 @@
      (every (lambda (r) (= (:proof-epoch r) (:epoch r))) (:results w)))
    ;; revised N1: no gap between the epoch advancing and a valid proof
    (property "after an epoch advance each side still holds a valid proof of the new epoch" (w)
-     (or (null? (:results w))
+     (or (= (:epoch w) 0)
          (every (lambda (side) (some (lambda (p) (usable? w p)) (held-by w side))) sides)))
+   ;; the settlement branch and nonce continuity (N1)
+   (property "a cooperative settlement moves nothing: Δ and the money are the same before and after" (w)
+     (every (lambda (s) (and (= (:delta-before s) (:delta-after s)) (= (:money-before s) (:money-after s)))) (:settlements w)))
+   (property "a cooperative settlement carries no open clause (v1)" (w)
+     (every (lambda (s) (not (:had-clause s))) (:settlements w)))
+   (property "in the new epoch a dispute pays the newest committed frame, never a baseline that outranks it" (w)
+     (every (lambda (r) (or (not (:post r)) (equal? (:proof r) (:post r)))) (:results w)))
+   (property "no lock is signed beyond MAX_LOCK_HORIZON: every held clause is within the horizon of the clock (N2)" (w)
+     (every (lambda (p) (or (not (p-clause p)) (<= (clause-deadline (p-clause p)) (+ (:now w) max-lock-horizon))))
+            (all-proofs w)))
    (property "an HTLC is never settled as unpaid before its deadline" (w)
      (every (lambda (r) (or (not (equal? (:outcome r) :unpaid)) (> (:at r) (clause-deadline (p-clause (:proof r))))))
             (:results w)))
@@ -459,6 +559,9 @@
                     (equal? (equal? (:outcome r) :paid)
                             (and (:secret r) (<= (:secret r) (clause-deadline c)))))))
             (:results w)))
+   ;; #37 / R3: the payee that acts before the deadline knowing the secret is paid
+   (property "a payee that acted before the deadline knowing the secret is never left with the clause unpaid (#37)" (w)
+     (every (lambda (r) (or (not (:knew-op r)) (not (equal? (:outcome r) :unpaid)))) (:results w)))
    (property "a counter is registered strictly before T" (w)
      (every (lambda (r) (or (not (:counter-at r)) (< (:counter-at r) (:timeout r)))) (:results w)))
    (property "a timeout finalize consumes exactly one nonce; an adopted proof sets it" (w)

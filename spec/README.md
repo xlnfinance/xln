@@ -14,6 +14,7 @@ spec/
   lib/vocabulary.scm       `rule` and `property`: how a page names its parts
   lib/check.scm            `check`: breadth-first walk of every reachable world
   account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
+  account/clock.scm        a frame's timestamp carries no authority (R-CLOCK): own clock plus a reserve
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
