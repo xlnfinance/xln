@@ -649,7 +649,7 @@ library Account {
     bytes32 watchSeed,
     bytes memory hanko,
     bytes32 expectedEntity
-  ) private view returns (bool success) {
+  ) private view returns (bool success, bool retired) {
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
       ondeltaEpoch,
@@ -658,11 +658,22 @@ library Account {
       proofbodyHash,
       watchSeed
     );
-    // This verifies historical bilateral evidence. Previous-board signatures
-    // must remain valid during the grace window or a board rotation could erase
-    // an already signed account state before either side can enforce it.
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
-    return valid && recoveredEntity == expectedEntity;
+    return _historicalEvidence(entityProvider, hanko, hash, expectedEntity);
+  }
+
+  /// @dev Verifies historical bilateral evidence. Previous-board signatures must remain valid during the grace window or
+  /// a board rotation could erase an already signed account state before either side can enforce it. `retired` says the
+  /// signature verifies only under a previous board; H3 settles such evidence clamped to the Account's collateral.
+  function _historicalEvidence(
+    address entityProvider,
+    bytes memory hanko,
+    bytes32 hash,
+    bytes32 expectedEntity
+  ) private view returns (bool valid, bool retired) {
+    (bytes32 currentEntity, bool currentValid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(hanko, hash);
+    if (currentValid && currentEntity == expectedEntity) return (true, false);
+    (bytes32 graceEntity, bool graceValid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return (graceValid && graceEntity == expectedEntity, true);
   }
 
   /// @notice Validate a finalization against durable dispute commitments and
@@ -782,7 +793,7 @@ library Account {
           params.finalNonce == account.nonce &&
           (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
         ) revert E2();
-        if (!verifyDisputeProofHanko(
+        (bool finalValid, bool finalRetired) = verifyDisputeProofHanko(
           entityProvider,
           acct_key,
           account.ondeltaEpoch,
@@ -792,7 +803,9 @@ library Account {
           params.finalProofbody.watchSeed,
           params.sig,
           params.counterentity
-        )) revert E4();
+        );
+        if (!finalValid) revert E4();
+        account.disputeRetiredEvidence = finalRetired;
         // Pull-free mutual consent still closes immediately. A newer state
         // containing Pulls must have been locked by processCounterDisputes
         // before T; accepting it for the first time at T would recreate the
@@ -868,6 +881,7 @@ library Account {
     account.starterCounterArgumentsCommitment = bytes32(0);
     account.starterCounterProofCommitment = bytes32(0);
     account.disputeStartedByLeft = false;
+    // disputeRetiredEvidence is left for Depository, which reads it to clamp this settlement and then clears it.
     // Finalization pays the Account out (collateral and ondelta reset), so every proof signed for the old baseline dies.
     _advanceOndeltaEpoch(_accounts, entityId, params.counterentity);
   }
@@ -1481,7 +1495,7 @@ library Account {
       // replace a RIGHT initial proof at the same nonce.
       if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) revert E2();
     }
-    if (!verifyDisputeProofHanko(
+    (bool counterValid, bool counterRetired) = verifyDisputeProofHanko(
       entityProvider,
       acctKey,
       account.ondeltaEpoch,
@@ -1491,7 +1505,8 @@ library Account {
       params.counterProofbody.watchSeed,
       params.sig,
       params.counterentity
-    )) revert E4();
+    );
+    if (!counterValid) revert E4();
 
     uint256 selectedNonce = account.disputeCounterNonce;
     if (selectedNonce != 0) {
@@ -1510,6 +1525,8 @@ library Account {
     account.disputeCounterNonce = params.counterNonce;
     account.disputeCounterProofbodyHash = bodyHash;
     account.disputeCounterProposerIsLeft = params.proposerIsLeft;
+    // The registered counter-proof replaces the initial proof as the state that settles, so its grade replaces too.
+    account.disputeRetiredEvidence = counterRetired;
     account.disputeHash = _encodeDisputeHash(
       account.nonce,
       account.disputeStartedByLeft,
@@ -1793,9 +1810,14 @@ library Account {
     // its latest state within boardChangeDelay instead of relying on this path.
     // Do not narrow this to verifyCurrentHankoSignature without first replacing
     // the repudiation defence it provides.
-    (bytes32 recoveredEntity, bool valid) =
-      IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
-    if (!valid || recoveredEntity != params.counterentity) revert E4();
+    //
+    // H3 caps the damage of the first attack without closing the second: evidence that verifies only under a retired
+    // board is accepted, and the dispute it starts settles clamped to [0, collateral] (Depository._finalizeAccount).
+    // The retired quorum can then never move more than the collateral already sitting in this one Account, and can
+    // never draw on reserves or create debt. The price is the unsecured part: credit beyond collateral that a retired
+    // board signed is not enforceable after a rotation. The design already calls that part unsecured.
+    (bool valid, bool retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
+    if (!valid) revert E4();
 
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
@@ -1841,6 +1863,7 @@ library Account {
     _accounts[acct_key].starterCounterArgumentsCommitment = counterArgumentsCommitment;
     _accounts[acct_key].starterCounterProofCommitment = params.starterCounterProofCommitment;
     _accounts[acct_key].disputeStartedByLeft = startedByLeft;
+    _accounts[acct_key].disputeRetiredEvidence = retired;
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;

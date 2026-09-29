@@ -77,7 +77,17 @@ export const lazyId = (address: string): string =>
   ethers.keccak256(coder.encode(BOARD_ABI, [[1, [ethers.zeroPadValue(address, 32)], [1], 0, 0, 0]]));
 export const rawHanko = (hash: string, key: string): string => new ethers.SigningKey(key).sign(ethers.getBytes(hash)).serialized;
 
-export type Party = { readonly key: string; readonly address: string; readonly id: string };
+/** A signer of an entity. A lazy entity signs with the raw 65 bytes; a numbered entity wraps them in a claims hanko. */
+export type Party = { readonly key: string; readonly address: string; readonly id: string; readonly wrap?: (raw: string) => string };
+export const signWith = (p: Party, hash: string): string => {
+  const raw = rawHanko(hash, p.key);
+  return p.wrap ? p.wrap(raw) : raw;
+};
+/** A board key acting for a numbered entity: same entity id for every board it ever had, claims-hanko signing. */
+export const boardOf = (seed: string, entityId: string): Party => {
+  const key = ethers.keccak256(ethers.toUtf8Bytes(seed));
+  return { key, address: new ethers.Wallet(key).address, id: entityId, wrap: (raw) => claimsHanko(raw, entityId) };
+};
 export const party = (seed: string): Party => {
   const key = ethers.keccak256(ethers.toUtf8Bytes(seed));
   const address = new ethers.Wallet(key).address;
@@ -175,7 +185,7 @@ export const boot = async (label: string, chainId = 31337) => {
     const nonce = (await chain.getEntityNonce(who.id)) + 1n;
     const hash = batchHash(who.id, encoded, nonce);
     last.batch = { entityId: who.id, encodedBatch: encoded, nonce, hash };
-    return sendRaw(who.id, encoded, rawHanko(hash, who.key), nonce);
+    return sendRaw(who.id, encoded, signWith(who, hash), nonce);
   };
 
   const start = (who: Party, other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) =>
@@ -191,12 +201,50 @@ export const boot = async (label: string, chainId = 31337) => {
       initialProofbodyHash: bodyHash(init.body), finalProofbody: bodyStruct(fin.body), starterArguments: args.starter ?? "0x",
       otherArguments: args.other ?? "0x", sig: fin.sig, startedByLeft: init.startedByLeft, cooperative: false,
     }] });
+  const counter = (who: Party, other: Party, init: { nonce: number; body: Body }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string }) =>
+    submit(who, { counterDisputes: [{
+      counterentity: other.id, initialNonce: init.nonce, initialProofbodyHash: bodyHash(init.body), counterNonce: fin.nonce,
+      proposerIsLeft: fin.proposerIsLeft, counterProofbody: bodyStruct(fin.body), sig: fin.sig,
+    }] });
   const settle = (who: Party, other: Party, nonce: number, diffs: readonly CooperativeUpdateDiff[], sig: string) =>
     submit(who, { settlements: [{
       leftEntity: BigInt(who.id) < BigInt(other.id) ? who.id : other.id,
       rightEntity: BigInt(who.id) < BigInt(other.id) ? other.id : who.id,
       diffs, forgiveDebtsInTokenIds: [], sig, nonce,
     }] });
+
+  // ---- numbered entities and board rotation (EntityProvider) ----
+  const providerIface = forkEntityProvider.createInterface();
+  const providerCall = async (fn: string, args: readonly unknown[]): Promise<void> => {
+    await vm.executeTx({ to: vm.entityProviderAddress.toString(), data: providerIface.encodeFunctionData(fn, args as unknown[]), gasLimit: 5_000_000n });
+  };
+  const providerReadAll = async (fn: string, args: readonly unknown[]): Promise<ethers.Result> => {
+    const data = providerIface.encodeFunctionData(fn, args as unknown[]);
+    const result = await vm.runReadOnlyCall({ to: vm.entityProviderAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 5_000_000n });
+    return providerIface.decodeFunctionResult(fn, result.execResult.returnValue);
+  };
+  const providerRead = async (fn: string, args: readonly unknown[]): Promise<unknown> => (await providerReadAll(fn, args))[0];
+  /** Register a numbered entity whose first board is the single key derived from `seed`. */
+  const registerNumbered = async (seed: string): Promise<Party> => {
+    const first = party(seed);
+    const { entityNumbers } = await vm.registerNumberedEntitiesBatch([singleSignerBoard(first.address)]);
+    return boardOf(seed, ethers.zeroPadValue(ethers.toBeHex(entityNumbers[0]!), 32));
+  };
+  /**
+   * Rotate `current`'s entity to the board of `next` (same entity id), waiting out the proposal delay on the test clock.
+   * The old board stays valid as evidence for 7 days. Returns the clock (seconds on the `at` scale) at activation.
+   */
+  const rotateBoard = async (current: Party, next: Party): Promise<number> => {
+    const newBoardHash = lazyId(next.address);
+    await providerCall("commitBoard", [singleSignerBoard(next.address)]);
+    const nonce = BigInt(await providerRead("boardActionNonces", [current.id]) as bigint) + 1n;
+    const digest = await providerRead("computeBoardProposalHash", [current.id, newBoardHash, 0, nonce]) as string;
+    await providerCall("proposeBoard", [current.id, newBoardHash, 0, [signWith(current, digest)]]);
+    const activateAt = Number((await providerReadAll("entities", [current.id])).activateAt);
+    vm.setBlockTimestamp(activateAt * 1000);
+    await providerCall("activateBoard", [current.id]);
+    return activateAt - 1_800_000_000;
+  };
 
   /** Everything that belongs to one Account: the two parties, their key, payloads, signatures, balances, funding. */
   const accountOf = (a: Party, b: Party, seed: string) => {
@@ -218,9 +266,9 @@ export const boot = async (label: string, chainId = 31337) => {
             [0, domain.chainId, domain.depository, acctKey, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive]));
 
     const proofSig = (signer: Party, epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string =>
-      rawHanko(proofHash(epoch, nonce, proposerIsLeft, b), signer.key);
+      signWith(signer, proofHash(epoch, nonce, proposerIsLeft, b));
     const coopSig = (signer: Party, epoch: bigint, nonce: number, diffs: readonly CooperativeUpdateDiff[], forgive: readonly number[] = []): string =>
-      rawHanko(coopHash(epoch, nonce, diffs, forgive), signer.key);
+      signWith(signer, coopHash(epoch, nonce, diffs, forgive));
 
     const reserves = async () => ({
       L: await chain.getReserves(L.id, TOKEN), R: await chain.getReserves(R.id, TOKEN),
@@ -244,7 +292,7 @@ export const boot = async (label: string, chainId = 31337) => {
   const pair = accountOf(party(`${label}-a`), party(`${label}-b`), label);
 
   return {
-    chain, vm, domain, features, last, TOKEN, at, batchHash, sendRaw, submit, start, finalize, settle,
-    accountOf, ...pair, encodeJBatch, createEmptyBatch,
+    chain, vm, domain, features, last, TOKEN, at, batchHash, sendRaw, submit, start, counter, finalize, settle,
+    accountOf, registerNumbered, rotateBoard, ...pair, encodeJBatch, createEmptyBatch,
   };
 };
