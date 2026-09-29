@@ -20,16 +20,18 @@
 ;;   payout   Δ = ondelta + offdelta (+ the clause, if its secret was public by the deadline).
 ;;            Δ <= 0: Right takes the collateral and Left owes -Δ. 0 < Δ < c: Δ / c-Δ.
 ;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall is paid from the debtor's
-;;            reserve first; the rest becomes debt. The epoch advances: every older proof dies
-;;            (N1), so payments on the Account pause until a new baseline is co-signed.
+;;            reserve first; the rest becomes debt. The epoch advances: every older proof dies (N1);
+;;            each side already holds the pre-signed baseline of the new epoch (see below).
+;;   deposit  R2C during a dispute is not blocked (H4, accepted): it changes the payout, and only
+;;            in favour of the beneficiary of the deposit.
 ;;
 ;; ASSUMPTION the safety properties stand on (stated, not hidden): the non-starter ACTS INSIDE ITS
 ;; WINDOW. The clock may not reach T while the non-starter holds a proof that outranks the selected
 ;; one and has not answered. Take it away (bug `no-floor`, windows of zero) and the properties fail.
 ;;
 ;; Not modelled here: Pull clauses (5b/5c wait for T when one is present), swaps, the watchtower
-;; (it can only run a counter or an already selected finalize), several tokens (GAP-7), R2C during
-;; a dispute (GAP-6), cooperative settlement. See QUESTIONS.md.
+;; (it can only run a counter or an already selected finalize), several tokens (GAP-7), cooperative
+;; settlement (its Lock frame would carry the same pre-signed baseline). See QUESTIONS.md.
 ;;
 ;; Needs lib/vocabulary.scm and lib/check.scm.
 
@@ -37,7 +39,7 @@
 (define/overridable window-left    (s/number) 1)
 (define/overridable window-right   (s/number) 1)
 (define/overridable min-window     (s/number) 1)
-(define/overridable max-time       (s/number) 3)
+(define/overridable max-time       (s/number) 2)
 (define/overridable htlc-deadline  (s/number) 1)
 (define/overridable max-disputes   (s/number) 1)
 (define/overridable credit-left    (s/number) 1)   ; credit extended TO Left (Q-L-1)
@@ -64,22 +66,39 @@
 (define rivals (list (dict :nonce 2 :state (state :right 3 #f))))
 
 ;; A proof is named by a string ("n2L": nonce 2, proposed by Left; a trailing ' marks a losing
-;; proposal) and looked up in a fixed table. Worlds hold only names, which keeps them cheap to compare.
+;; proposal; "B5": the pre-signed baseline of the NEXT epoch, nonce 5) and looked up in a fixed
+;; table. Worlds hold only names, which keeps them cheap to compare.
+;;
+;; The pre-signed baseline (coordinator, revised N1): every frame is co-signed together with a
+;; proof for epoch + 1 (offdelta 0, no clauses) whose nonce is above the chain nonce that any event
+;; opening the next epoch can leave. So an epoch advance never leaves an honest side without a
+;; valid proof, and the counterparty cannot stretch a gap by refusing to sign.
+;; Nonce = frame nonce + 3: a proposer is at most one frame behind (its ack is in flight), and a
+;; timeout finalize on the initial proof leaves the chain nonce at n0 + 1, one above the newest
+;; frame the counterparty holds.
+(define (baseline-nonce k) (+ k 3))
 (define (side-letter side) (if (equal? side :left) "L" "R"))
 (define (proof-entry nonce st rival?)
   (let ((id (str "n" nonce (side-letter (:proposer st)) (if rival? "'" ""))))
-    (cons id (dict :nonce nonce :proposer (:proposer st) :off (:off st) :clause (:clause st) :rival rival?))))
+    (cons id (dict :nonce nonce :proposer (:proposer st) :off (:off st) :clause (:clause st) :rival rival? :epoch 0))))
+(define (baseline-entry k)
+  (cons (str "B" (baseline-nonce k))
+        (dict :nonce (baseline-nonce k) :proposer :left :off 0 :clause #f :rival #f :epoch 1)))
 (define proof-table
   (append (map (lambda (i) (proof-entry (+ i 1) (list-ref script i) #f)) (iota (length script)))
-          (map (lambda (r) (proof-entry (:nonce r) (:state r) #t)) rivals)))
+          (map (lambda (r) (proof-entry (:nonce r) (:state r) #t)) rivals)
+          (map baseline-entry (iota (+ (length script) 1)))))
 (define (proof-ref id) (cdr (assoc id proof-table)))
 (define (p-nonce id) (:nonce (proof-ref id)))
 (define (p-proposer id) (:proposer (proof-ref id)))
 (define (p-off id) (:off (proof-ref id)))
 (define (p-clause id) (:clause (proof-ref id)))
 (define (p-rival? id) (:rival (proof-ref id)))
+(define (p-epoch id) (:epoch (proof-ref id)))
 (define (rank id) (+ (* 2 (p-nonce id)) (if (equal? (p-proposer id) :left) 1 0)))
-(define (id-at nonce rival?) (car (find (lambda (e) (and (= (:nonce (cdr e)) nonce) (equal? (:rival (cdr e)) rival?))) proof-table)))
+(define (id-at nonce rival?)
+  (car (find (lambda (e) (and (= (:nonce (cdr e)) nonce) (equal? (:rival (cdr e)) rival?) (= (:epoch (cdr e)) 0))) proof-table)))
+(define (baseline-id k) (str "B" (baseline-nonce k)))
 (define (rival-at nonce) (find (lambda (r) (= (:nonce r) nonce)) rivals))
 
 (define init
@@ -90,9 +109,8 @@
         :secret #f                           ; #f, or when the secret became public on chain
         :head 0                              ; off-chain height: how many script states were proposed
         :unacked #f                          ; the proof whose proposer still waits for the ack
-        :held (dict :left (list) :right (list))
-        :history-epoch 0                     ; the epoch every held proof was signed for
-        :baselined 0                         ; the epoch a baseline was last co-signed for
+        :held (dict :left (list (baseline-id 0)) :right (list (baseline-id 0)))  ; the genesis baseline is co-signed at open
+        :deposit #f                          ; (funder beneficiary) of the one R2C made during a dispute
         :dispute #f
         :results (list)))
 
@@ -102,17 +120,21 @@
 (define (next-nonce w) (+ (:head w) 1))
 (define (hold w side p) (update-in w (list :held side) (lambda (hs) (append hs (list p)))))
 (define (frozen? w) (:dispute w))
-(define (paused? w) (not (= (:baselined w) (:epoch w))))
 
+;; a frame proof comes with the next epoch's baseline for the same frame
+(define (hold-frame w side p)
+  (if (p-rival? p)
+      (hold w side p)
+      (hold (hold w side p) side (baseline-id (p-nonce p)))))
 (define (proposal-enabled? w)
-  (and (script-left? w) (not (:unacked w)) (not (frozen? w)) (not (paused? w))))
+  (and (script-left? w) (not (:unacked w)) (not (frozen? w))))
 (define (proposed w p) (-> w (assoc-in (list :unacked) p) (update-in (list :head) (lambda (h) (+ h 1)))))
 
 (define propose
   (rule "propose" (w side)
     (when (and (proposal-enabled? w) (equal? (:proposer (next-state w)) side)))
     (then (let ((p (id-at (next-nonce w) #f)))
-            (proposed (hold w (peer side) p) p)))))
+            (proposed (hold-frame w (peer side) p) p)))))
 
 ;; a cross-open: Right proposed at the same height. Left's frame wins; Right signed its own, so
 ;; Left holds Right's losing proposal, Right holds Left's frame.
@@ -121,13 +143,13 @@
     (when (and (equal? side :left) (proposal-enabled? w)
                (equal? (:proposer (next-state w)) :left) (rival-at (next-nonce w))))
     (then (let ((p (id-at (next-nonce w) #f)))
-            (proposed (-> w (hold :right p) (hold :left (id-at (next-nonce w) #t))) p)))))
+            (proposed (-> w (hold-frame :right p) (hold-frame :left (id-at (next-nonce w) #t))) p)))))
 
 ;; the receiver's signature reaches the proposer
 (define ack
   (rule "ack" (w side)
     (when (and (:unacked w) (equal? (p-proposer (:unacked w)) side)))
-    (then (-> w (hold side (:unacked w)) (assoc-in (list :unacked) #f)))))
+    (then (-> w (hold-frame side (:unacked w)) (assoc-in (list :unacked) #f)))))
 
 ;; ---- the dispute
 (define (selected d) (or (:counter d) (:initial d)))
@@ -135,7 +157,7 @@
 (define (held-by w side) (get-in w (list :held side)))
 (define (all-proofs w) (delete-duplicates (append (held-by w :left) (held-by w :right))))
 (define (outranks? p q) (> (rank p) (rank q)))
-(define (usable? w p) (and (= (:history-epoch w) (:epoch w)) (> (p-nonce p) (:chain-nonce w))))
+(define (usable? w p) (and (= (p-epoch p) (:epoch w)) (> (p-nonce p) (:chain-nonce w))))
 (define (best-rank w side)
   (reduce (lambda (q acc) (max acc (if (usable? w q) (rank q) -1))) -1 (held-by w side)))
 
@@ -218,12 +240,16 @@
 
 ;; the record the properties read: what was decided, on what, and what each side owned before and after
 (define (record w paid d p outcome path)
-  (dict :proof p :path path :starter (:starter d) :delta (final-delta w p outcome)
-        :outcome outcome :at (:now w) :epoch (:epoch w) :proof-epoch (:history-epoch w) :collateral (:collateral w)
+  (let* ((cf (undo-deposit w))
+         (cf-paid (payout cf (final-delta cf p outcome))))
+   (dict :proof p :path path :starter (:starter d) :delta (final-delta w p outcome)
+        :outcome outcome :at (:now w) :epoch (:epoch w) :proof-epoch (p-epoch p) :collateral (:collateral w)
         :best-start? (:best-start? d)
         :net-before-left (net w :left) :net-before-right (net w :right)
         :net-after-left (net paid :left) :net-after-right (net paid :right)
-        :best-held (or (:closed-best d) (best-rank w (responder-of d)))))
+        :cf-net-left (net cf-paid :left) :cf-net-right (net cf-paid :right)
+        :funded-left (funded w :left) :funded-right (funded w :right)
+        :best-held (or (:closed-best d) (best-rank w (responder-of d))))))
 
 (define (finalized w d p outcome path)
   (let ((paid (payout w (final-delta w p outcome))))
@@ -265,15 +291,31 @@
     (then (let ((d (:dispute w)))
             (finalized w d p (clause-outcome w p) "5b")))))
 
-;; after a finalize the old proofs are dead (epoch); the parties co-sign a new baseline
-(define rebaseline
-  (rule "rebaseline" (w side)
-    (when (and (equal? side :left) (paused? w) (not (:dispute w))))
-    (then (assoc-in w (list :baselined) (:epoch w)))))
+;; H4 (coordinator): R2C has no dispute check (Account.sol processR2C), so a deposit made while a
+;; dispute is open changes the payout. Accepted: each deposit only raises its beneficiary's share.
+;; The receiving entity need not be the funder. One deposit of 1, during a dispute.
+(define (deposit-rule funder beneficiary)
+  (rule (str "deposit " funder "->" beneficiary) (w side)
+    (when (and (equal? side funder) (:dispute w) (not (:deposit w)) (>= (get-in w (list :reserve funder)) 1)))
+    (then (-> w (update-in (list :collateral) (lambda (c) (+ c 1)))
+                (update-in (list :ondelta) (lambda (o) (if (equal? beneficiary :left) (+ o 1) o)))
+                (add-reserve funder -1)
+                (assoc-in (list :deposit) (list funder beneficiary))))))
+(define (undo-deposit w)
+  (if (:deposit w)
+      (let ((funder (car (:deposit w))) (beneficiary (cadr (:deposit w))))
+        (-> w (update-in (list :collateral) (lambda (c) (- c 1)))
+              (update-in (list :ondelta) (lambda (o) (if (equal? beneficiary :left) (- o 1) o)))
+              (add-reserve funder 1)
+              (assoc-in (list :deposit) #f)))
+      w))
+(define (funded w side) (if (and (:deposit w) (equal? (car (:deposit w)) side)) 1 0))
 
 (define (rules-for w)
   (let ((ps (all-proofs w)))
-    (append (list propose collide ack tick reveal finalize-counter finalize-initial rebaseline)
+    (append (list propose collide ack tick reveal finalize-counter finalize-initial
+                  (deposit-rule :left :left) (deposit-rule :right :right)
+                  (deposit-rule :left :right) (deposit-rule :right :left))
             (map start-with ps) (map counter-with ps) (map finalize-with ps))))
 (define (next w) (successors (rules-for w) sides w))
 
@@ -306,11 +348,21 @@
    ;; a starter that starts with a stale proof is the one that pays for it; an honest starter is not
    (property "an honest starter never ends on a losing proposal" (w)
      (every (lambda (r) (or (not (:best-start? r)) (not (p-rival? (:proof r))))) (:results w)))
-   (property "an HTLC is never settled as unpaid before its deadline" (w)
-     (every (lambda (r) (or (not (equal? (:outcome r) :unpaid)) (> (:at r) (:deadline (p-clause (:proof r))))))
+   ;; H4: a deposit made during a dispute costs no side more than the side funded
+   (property "a deposit during a dispute raises only its beneficiary's share: no side loses more than it funded" (w)
+     (every (lambda (r)
+              (and (>= (+ (:net-after-left r) (:funded-left r)) (:cf-net-left r))
+                   (>= (+ (:net-after-right r) (:funded-right r)) (:cf-net-right r))))
             (:results w)))
    (property "only a proof of the current epoch pays out" (w)
-     (every (lambda (r) (= (:proof-epoch r) (:epoch r))) (:results w)))))
+     (every (lambda (r) (= (:proof-epoch r) (:epoch r))) (:results w)))
+   ;; revised N1: no gap between the epoch advancing and a valid proof
+   (property "after an epoch advance each side still holds a valid proof of the new epoch" (w)
+     (or (null? (:results w))
+         (every (lambda (side) (some (lambda (p) (usable? w p)) (held-by w side))) sides)))
+   (property "an HTLC is never settled as unpaid before its deadline" (w)
+     (every (lambda (r) (or (not (equal? (:outcome r) :unpaid)) (> (:at r) (:deadline (p-clause (:proof r))))))
+            (:results w)))))
 
 ;; finished: a dispute was settled, or the model's clock has run out with none active (no window fits)
 (define (settled? w)

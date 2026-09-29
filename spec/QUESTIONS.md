@@ -131,12 +131,20 @@ floor (H2, 60 s on testnet) has to be far above the worst message delay, and a p
 treat its unacked frame as enforceable by the peer only.
 Source: A:1466, design/account-model.md P5.
 
-**Q-D-4. Epoch pause (coordinator N1).**
-A party signs a proof only for the current ondeltaEpoch; finalize advances it, so every older proof
-dies (A:872). Off-chain payments pause until a new baseline is co-signed: modelled as `paused?`
-(no proposal while the baseline epoch differs) and the rule `rebaseline`. The planted bug
-`no-epoch` (a second dispute with an old proof) shows the exposure.
-Source: coordinator decision N1; A:872, A:1315.
+**Q-D-4. Epoch advance and the pre-signed baseline (coordinator N1, revised 17:21).**
+Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872), with one exception: every frame
+is co-signed together with a baseline proof for epoch + 1 (offdelta 0, no clauses). Without it the
+honest side has no valid proof between the epoch advancing and a new baseline being co-signed, and
+the counterparty can stretch that gap by refusing to sign. The baseline nonce must be above the chain
+nonce after ANY event that opens the next epoch (the settlement update, or a timeout finalize, which
+leaves the chain nonce at n0 + 1). Proof nonce and frame height are separate counters.
+Choice: baseline nonce = frame nonce + 3. A proposer is at most one frame behind (its ack is in
+flight) and a timeout finalize on the newest initial proof leaves the chain nonce one above it; +2
+is not enough (planted bug `baseline-too-low`: the proposer holds no valid proof after finalize).
+The offset depends on the frame protocol allowing one unacked frame: pipelining k frames needs +2+k.
+A cooperative settlement (not in this page) carries the same baseline in its Lock frame and folds
+offdelta into ondeltaDiff; v1 requires no open clauses for it.
+Source: coordinator decision, A:872, A:1315, D:843-856.
 
 **Q-D-5. Response windows (coordinator N3, floor H2).**
 The windows are constants of the Account, fixed at open; every proof carries the same values (A:1471-1474,
@@ -179,12 +187,56 @@ epoch; GAP-11 a near-max signed nonce blocks counters. The page is one token and
 settlement, so 6 and 7 need the multi-token widening.
 Source: scratchpad contracts-disputes.md section 8.
 
+**Q-D-12. R2C during a dispute (H4, coordinator: accepted, stated not forbidden).**
+Account.sol processR2C has no dispute check (GAP-6), so a deposit made while a dispute is open changes
+collateral (and Left's ondelta) between start and finalize, hence the payout. Accepted because each
+deposit only raises its beneficiary's share; the receiving entity need not be the funder. The page
+models one deposit of 1 by either side for either side, and checks "no side loses more than it funded"
+against the payout without the deposit. It holds.
+Source: coordinator decision H4, A:1216-1275, D:757-768.
+
 **Q-D-11. Not in the page.**
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
-tokens. Model bounds: 3 script states, one rival, one HTLC, two windows of 1, `max-disputes` 1.
-Capacity: 5220 states, 9062 transitions, about 2 minutes; the same page with max-time 4 has 9814
-states and takes 5 minutes.
+tokens. Model bounds: 3 script states, one rival, one HTLC, two windows of 1, `max-disputes` 1,
+`max-time` 2 (a dispute must start at the first tick). Capacity: 4029 states, 7686 transitions, about
+100 seconds. With H4 deposits and the baseline proofs, max-time 3 exceeded the 300 s default budget;
+before them, max-time 3 was 5220 states and max-time 4 was 9814 states (300+ s).
+
+## Entity consensus (`entity/consensus.scm`)
+
+**Q-E-1. An own uncommitted proposal meets a different certified frame (R-E3, lessons B-E1).**
+Options: (a) refuse it and keep the proposal (xln.ts today, `commit_conflict`, pure/xln.ts:28705);
+(b) drop the proposal, install the certified frame, keep the txs in the mempool (R-E3).
+Choice: (b). With (a) the replica is stranded at the old height while the others move on: the planted
+bug `commit-conflict` fails "can always still finish" in the trace propose A, timeout B, propose B.
+Half of (b), dropping the proposal but forgetting its txs, loses them (`drop-txs-on-conflict`).
+Source: lessons R-E3/B-E1, xln.ts 28693-28705 and 29137.
+
+**Q-E-2. View change.**
+xln.ts: a `proposed` replica KEEPS its proposal on a view change (29137). Choice: kept. The page lets
+one validator (B) move to view 1 alone, with no timeout certificate, so that two leaders are live at
+once (A in view 0, B in view 1): the case R-E3 is about. With every validator free to time out, the
+page has no leader in some worlds and exceeds the budget (12186 states at height 2, 524 s, before
+the checker speed-up). A real view change with certificates is a widening, not modelled.
+Source: xln.ts 28935-29051.
+
+**Q-E-3. Signatures and quorum.**
+Three validators, quorum two of three by share. A validator signs at most one frame per height (the
+leader's proposal is its precommit); leader + one follower is a quorum, so the follower commits at
+once and tells the rest. Property: "a validator signs one frame per height"; planted bug `double-sign`
+breaks agreement.
+Source: xln.ts 28453-28895.
+
+**Q-E-4. Mempool forwarding.**
+A validator that is not the leader sends its retained txs to the leader (xln.ts 27625, 29100). Modelled
+as the `forward` rule; committed txs leave the mempool at install.
+
+**Q-E-5. Not in this page.**
+Message loss and reordering beyond "delivered in any order" (the Account page covers loss), hashes and
+Hanko bytes, `heldQuorum` (signatures before the frame), J-prefix rounds inside consensus (27865-28300,
+see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm). Bounds: one height, one
+tx each for A and B. Capacity: 778 states, 2565 transitions, about 15 seconds.
 
 ## Checker (`lib/check.scm`)
 

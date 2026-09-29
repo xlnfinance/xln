@@ -19,7 +19,10 @@ spec/
   money/bugs/*.scm         planted money bugs
   dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, H1/H2
   dispute/bugs/*.scm       planted dispute bugs
+  entity/consensus.scm     Entity consensus: leader, quorum, own proposal vs certified frame (R-E3)
+  entity/bugs/*.scm        planted consensus bugs
   account-frames.check.scm entry point: check the Account frames page
+  entity-consensus.check.scm entry point: check the Entity consensus page
   dispute.check.scm        entry point: check the dispute page
   ledger.check.scm         entry point: check the ledger page
   test.mjs                 runs the page and every bug variant in parallel, asserts the verdicts
@@ -89,7 +92,10 @@ each with tests, sit in later commits so they can be sent upstream:
 4. Exact integers are bigints: exact arithmetic never overflows; the reader, `number->string`, the
    JS membrane and the zod codecs carry bigints (`src/values/`, `src/env/r7rs/numeric.ts`). Exact
    vs inexact comparison is exact, which also fixes chibi r7rs-tests line 811.
-5. `vendor/chibi-scheme/` holds the two chibi test files (BSD-3) the conformance suite reads.
+5. `%dict-set` is native (`src/env/polyglot/polyglot-clojure.ts`): `assoc-in` and `update-in` on a
+   17-field dict went from about 0.8 ms to 0.1 ms, which is the inner loop of the state-space checker.
+   Same semantics: an existing key keeps its position, a new key goes last.
+6. `vendor/chibi-scheme/` holds the two chibi test files (BSD-3) the conformance suite reads.
 
 Arrival suite after the patches: 5382 pass, 160 expected-fail, 6 fail; package lint 0 errors, 104 warnings (same as upstream). The 6 are the `grammar-ebnf` package-export
 tests, which fail the same way on upstream 6ba2b54f.
