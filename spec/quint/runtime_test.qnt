@@ -47,6 +47,18 @@ module runtime_test {
     .then(apply).then(persist).then(send)
     .expect(and { disk.applied == [jKey(1), jKey(2)], disk.cursor == 2, safe })
 
+  // J2 / R6: a skipped dispute start is announced by a DisputeOpSkipped event (the second event here). The watcher reads it like any
+  // other chain event, in order, exactly once, across a crash; the Entity that waits for the outcome of its start gets it.
+  run skipEventIsReadInOrderTest =
+    init
+    .then(chainEmit).then(chainEmit)
+    .then(watch).then(apply).then(persist).then(send)
+    .then(watch)
+    .then(crash)
+    .then(watch)
+    .then(apply).then(persist).then(send)
+    .expect(and { isSkipEvent(2), disk.applied == [jKey(1), jKey(2)], disk.cursor == 2, safe })
+
   // One frame applies what is due in canonical order, whatever the arrival order.
   run canonicalOrderTest =
     init

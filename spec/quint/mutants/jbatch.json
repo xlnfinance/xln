@@ -6,34 +6,10 @@
   "mutants": [
     {
       "id": "pack-everything",
-      "why": "J3: one batch of everything queued: a payment that cannot run takes the urgent ops down with it, and an outstanding payment batch delays them",
+      "why": "J3: one batch of everything queued, one outstanding: a payment that cannot run takes the urgent ops down with it, and an outstanding payment batch delays them",
       "file": "jbatch.qnt",
-      "old": "pure val STRAT = 3",
+      "old": "pure val STRAT = 4",
       "new": "pure val STRAT = 0",
-      "killedBy": "invariant:urgent_lands"
-    },
-    {
-      "id": "urgent-waits-for-outstanding",
-      "why": "J3: urgent ops are alone in a batch but wait for the outstanding batch to be read first",
-      "file": "jbatch.qnt",
-      "old": "pure val STRAT = 3",
-      "new": "pure val STRAT = 1",
-      "killedBy": "invariant:urgent_lands"
-    },
-    {
-      "id": "replace-without-follow-up",
-      "why": "J3: the urgent batch replaces the outstanding one at the same nonce, but when the old one lands first the urgent op waits another round",
-      "file": "jbatch.qnt",
-      "old": "pure val STRAT = 3",
-      "new": "pure val STRAT = 2",
-      "killedBy": "invariant:urgent_lands"
-    },
-    {
-      "id": "urgent-batches-fork-each-other",
-      "why": "J3: a second urgent op is signed at the same nonces as the first pair; the adversary lands the older, smaller batches and burns both nonces, so the newer ones die and cost another round",
-      "file": "jbatch.qnt",
-      "old": "val base = if (top > 0) top + 1 else n",
-      "new": "val base = n",
       "killedBy": "invariant:urgent_lands"
     },
     {
@@ -53,20 +29,52 @@
       "killedBy": "invariant:dropped_only_dead"
     },
     {
-      "id": "follow-up-carries-payments",
-      "why": "J3: the follow-up copy of an urgent batch may carry only ops that are idempotent; with a payment in both copies it runs twice",
+      "id": "entity-ignores-the-skip-event",
+      "why": "J2: the Entity does not read DisputeOpSkipped, so a skipped start stays pending: it waits for a DisputeStarted that never comes and signs the op again",
       "file": "jbatch.qnt",
-      "old": "    val u = urgentPending(s)\n    val p = payQueued(s)",
-      "new": "    val p = payQueued(s)\n    val u = urgentPending(s).union(p)",
-      "killedBy": "invariant:pay_once"
+      "old": "    val dead = if (TOLERANT) x.b.ids.filter(i => s1.skipped.get(i)) else",
+      "new": "    val dead = if (TOLERANT) x.b.ids.filter(i => false) else",
+      "killedBy": "invariant:skip_read"
     },
     {
-      "id": "contract-reverts-blocks-the-next-batch",
-      "why": "J2: a reverted urgent batch keeps its nonce, and the next urgent batch sits above it and cannot land (E2)",
+      "id": "urgent-waits-for-outstanding",
+      "why": "J3: the urgent batch waits until nothing is outstanding, so it is signed one round late",
       "file": "jbatch.qnt",
-      "old": "pure val TOLERANT = true",
-      "new": "pure val TOLERANT = false",
-      "killedBy": "test:spoiledBatchDoesNotBlockTheNextOneTest"
+      "old": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]",
+      "new": "      if (fresh.size() > 0 and nothingAlive(s)) [{ nonce: f, ids: fresh }]",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "resign-at-a-signed-nonce",
+      "why": "F1: the fresh nonce ignores what is already signed, so a second batch with other content is signed at a nonce that one already holds; the adversary lands the old one and burns the new",
+      "file": "jbatch.qnt",
+      "old": "    val f = topSigned(s) + 1",
+      "new": "    val f = s.cnonce + 1",
+      "killedBy": "invariant:nonce_final"
+    },
+    {
+      "id": "urgent-batch-carries-payments",
+      "why": "J3: a payment rides in the urgent batch; when it cannot run, the batch fails and the urgent op is lost with it",
+      "file": "jbatch.qnt",
+      "old": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]",
+      "new": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh.union(p) }]",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "payment-revert-keeps-the-nonce",
+      "why": "J5: today a batch that reverts leaves its nonce open, so it blocks every batch above it (E2), urgent ones included, and F1 forbids signing another content at that nonce",
+      "file": "jbatch.qnt",
+      "old": "pure val NONCE_ON_FAIL = true",
+      "new": "pure val NONCE_ON_FAIL = false",
+      "killedBy": "test:revertedPaymentDoesNotBlockTheUrgentOpTest"
+    },
+    {
+      "id": "chain-accepts-old-nonces",
+      "why": "E2: the chain accepts a nonce at or below the stored one, so a signed batch sent again runs its payment again",
+      "file": "jbatch.qnt",
+      "old": "    b.nonce == s.cnonce + 1,\n    payTotal",
+      "new": "    b.nonce <= s.cnonce + 1,\n    payTotal",
+      "killedBy": "invariant:pay_once"
     }
   ],
   "init": "init",

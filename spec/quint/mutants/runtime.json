@@ -59,6 +59,14 @@
       "old": "      phase == Idle, due.size() > 0, frames < MAXF,",
       "new": "      phase == Idle, frames < MAXF,",
       "killedBy": "invariant:canonical_frames"
+    },
+    {
+      "id": "watcher-skips-the-skip-event",
+      "why": "R7: the watcher reads only the kinds it knows the Entity waits for and passes over DisputeOpSkipped; a node whose start was skipped waits forever for a DisputeStarted that never comes",
+      "file": "runtime.qnt",
+      "old": "    mem.cursor < jhead,\n    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),",
+      "new": "    mem.cursor < jhead, not(isSkipEvent(mem.cursor + 1)),\n    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),",
+      "killedBy": "test:skipEventIsReadInOrderTest"
     }
   ],
   "init": "init",

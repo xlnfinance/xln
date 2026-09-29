@@ -159,6 +159,22 @@
       "old": "    val s1 = inps.foldl(s0, (acc, inp) => applyInput(acc, inp))",
       "new": "    val s1 = applyInput(s0, inps[0])",
       "killedBy": "test:ackAndRefusalInOneFrameTest"
+    },
+    {
+      "id": "skip-outcome-not-read",
+      "why": "J2: the Entity does not act on DisputeOpSkipped: its start is still awaited and no outcome comes",
+      "file": "entity.qnt",
+      "old": "    val s1 = if (skipped) onSkip(s, l) else",
+      "new": "    val s1 = if (skipped) s else",
+      "killedBy": "invariant:skip_ends_the_wait"
+    },
+    {
+      "id": "skip-read-as-started",
+      "why": "J2: a skipped start is taken for a landed one: the open dispute is still believed to be ours",
+      "file": "entity.qnt",
+      "old": "        | JSkip(l) => outcome(s1, l, true)",
+      "new": "        | JSkip(l) => outcome(s1, l, false)",
+      "killedBy": "test:skippedStartEndsTheWaitAndAnswersTheOpenOneTest"
     }
   ]
 }

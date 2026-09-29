@@ -21,7 +21,7 @@ mutants that prove each property bites. The files are the spec; this page is the
 | Entity | `entity` | what one Entity does with its Accounts: routing, deadlines, escalation, freezing, commands | peer frames, acks, J events, signed commands, the tick | Account transactions, J ops (dispute start, counter, reveal, finalize) |
 | J, one Account | `chain` | the dispute game and the payout of one Account on the Depository | J ops | reserves, collateral, epoch, debt, the secret registry |
 | J, settlement | `settle` | the off-chain epoch lifecycle over the chain (cooperative update, rebase, presign + fold) | frames, the chain's view | the next epoch's baseline |
-| J, batch | `jbatch` | how the Entity's ops reach the chain: strict nonce, atomic revert, urgent ops | ops | landed batches |
+| J, batch | `jbatch` | how the Entity's ops reach the chain: strict nonce, atomic revert, urgent ops, the skip event of a dead dispute op | ops | landed batches, `DisputeOpSkipped` |
 | Runtime | `runtime` | frame order, the idle gate, durability, J watching, the halt list | inputs from all sources | frames that are durable before they leave |
 
 Nothing crosses a layer boundary except what the table says. A chain fact reaches an Account only as a J event, `LAG` ticks after
@@ -75,29 +75,31 @@ A hub with two Accounts (IN: the peer pays us; OUT: we pay on), both peers adver
 state: (1) inputs (peer frames and acks first, then chain events: E1), (2) hooks read the state after the input (resolve, expire, route, fail back, escalate, reveal), (3) an atomic
 signed command, (4) propose one frame per Account in ascending order.
 
+Own dispute start: `Idle -> await -> {DisputeStarted: ours is open | DisputeOpSkipped: the peer's is open and ours is skipped}` (E12).
+
 Route per slot: `Idle -> Fwd -> {Paid | Back}`. Rules: onward deadline = inbound - HOP; escalate `ESC` before a deadline; fail back only
 when the onward lock is gone from a signed state or the deadline + LAG passed with the secret unknown; a dispute carries every known
 payee secret; a dispute freezes the Account's frames.
 
 Properties: `no_peer_halt`, `no_stranded`, `deadline_chain`, `dispute_carries_all`, `no_needless_dispute`, `no_frame_on_frozen`,
-`cmd_atomic`, `credit_holds`, `route_safe` (the hub is never out of pocket), `answer_in_window`. 18 mutants.
+`cmd_atomic`, `credit_holds`, `route_safe` (the hub is never out of pocket), `answer_in_window`, `skip_ends_the_wait`. 20 mutants.
 
 ## J batch (`jbatch.qnt`)
 
 State: the chain's stored nonce and reserve, the signed batches the Entity submitted (each with a nonce and a set of ops), the ops
 (payment, secret reveal, dispute step). A batch lands iff its nonce is the next and no op reverts; a signed batch never expires.
-Rules (J1 to J3): abandon an op only when it can never apply; urgent ops never share a batch with a payment; each urgent op gets a pair of
-batches at fresh nonces above every live urgent batch. Proposal (J2): dispute ops skip instead of reverting.
+Rules (J1 to J3, F1): abandon an op only when it can never apply; urgent ops never share a batch with a payment; **a signed batch is final at its
+nonce: never sign other content at a signed nonce, every replacement goes to a fresh one** (F1). J2 (accepted): dispute ops skip instead of reverting, and the chain emits `DisputeOpSkipped(sender, counterentity, op, reason, nonce)`; the Entity abandons the op on reading it.
 
-Properties: `urgent_lands`, `dropped_only_dead`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`. 8 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`. 9 mutants.
 
 ## Runtime (`runtime.qnt`)
 
 State: memory, the durable copy, the inbox, the chain head, what the peer has received. One frame = apply, persist, send; a crash
-can come between any two steps. Rules (R1 to R5): canonical order (peers, then chain events, then commands), idle gate, cursor moves with the frame that applies the event,
+can come between any two steps. Rules (R1 to R5): canonical order (peers, then chain events, then commands), idle gate, cursor moves with the frame that applies the event (every kind of event, `DisputeOpSkipped` included: R7),
 durable before send, command acknowledged only when durable, a closed list of local halt causes.
 
-Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_frames`. 7 mutants.
+Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_frames`. 8 mutants.
 
 ## What the spec asks of the contracts
 
@@ -106,6 +108,7 @@ Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_fra
 | C1, C2, H1, H2 | done in the fork (`contracts/`) | see plan/contracts-review.md | chain mutants |
 | C11 (accepted) | each dispute window above `LAG` (the floor of 60 s meets it while a J event is read and included in under 60 s) | the honest side needs `REACT` | `window-floor-below-react` |
 | J2 (accepted) | dispute ops (start, counter, finalize, reveal) skip instead of revert, and an op that already ran is a no-op | a revert takes the urgent ops of the batch with it | `contract-reverts-on-moved-dispute` |
+| J5 (proposal) | a batch that fails takes its nonce, applies nothing and emits `BatchFailed` | F1 forbids signing other content at an open nonce, so a batch that reverts holds every batch above it | `payment-revert-keeps-the-nonce` |
 | E6 | a secret revealed before the deadline pays at finalize even when the dispute starts later | the Entity relies on it | pinned on the real contracts (#47) |
 
 ## What is not in it yet

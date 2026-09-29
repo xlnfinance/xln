@@ -7,7 +7,8 @@
 //                    evidence the Entity answers with (QUESTIONS E1).
 //   2 clock          a frame opens only when there is an input due (the idle gate): an empty frame is not a frame [R-R1].
 //   3 J watching     the chain events are read in order and each is applied exactly once, across crashes: the cursor moves
-//                    with the state that applied the event, in one durable write [R-J1].
+//                    with the state that applied the event, in one durable write [R-J1]. Every kind of event is read, the
+//                    DisputeOpSkipped of a skipped dispute op (J2) among them [R7].
 //   4 durability     one frame is three steps, apply in memory, make it durable, send: the order is the rule. A signed frame that
 //                    leaves before it is durable can be re-derived differently after a crash, and then the Entity has signed two
 //                    frames for one height: the counterparty holds proof against it. A command is acknowledged to its user only
@@ -67,6 +68,12 @@ module runtime {
     })
 
   pure def has(l: List[int], k: int): bool = l.foldl(false, (a, x) => a or x == k)
+  // The kind of chain event k, as the Runtime meets it. Every kind is a chain fact and goes through the same cursor: the watcher
+  // does not choose which events to read. Kind 2 is DisputeOpSkipped (J2): our dispute start was skipped because a dispute is
+  // already open. The Entity that sent the start waits for its outcome; the skip event is the only outcome it will ever get.
+  // BatchFailed (J5) is another event of the same standing: a batch that failed at its nonce.
+  pure def isSkipEvent(k: int): bool = k % 2 == 0
+
   pure def cursorOf(l: List[int]): int = l.foldl(0, (m, k) => if (isJ(k) and jIdx(k) > m) jIdx(k) else m)
 
   // ---------------------------------------------------------------------------------------------------------

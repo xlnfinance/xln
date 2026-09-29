@@ -72,11 +72,15 @@ module entity {
     | Paid                     // the secret was already known: the inbound lock is claimed directly
   type Route = { st: RSt, h: int, dIn: int, dOut: int }
 
-  type JKind = | JSecret(int) | JDispute(int)       // a secret appeared on the chain; a dispute started on a link
-  type JEv = { live: bool, kind: JKind, at: int }
+  // A secret appeared on the chain; the peer's dispute started on a link; our own start landed (DisputeStarted); our own start was
+  // skipped because a dispute is already open (DisputeOpSkipped, J2: at most one dispute per Account).
+  type JKind = | JSecret(int) | JDispute(int) | JStarted(int) | JSkip(int)
+  type JEv = { live: bool, kind: JKind, at: int, seq: int }         // seq: the order the chain emitted it in (the Runtime reads in order)
 
   // A dispute on a link. `answered`: we have read it and named the proof we stand on (the tip when we read or started).
-  type Disp = { on: bool, byUs: bool, answered: bool, proof: Body }
+  // `await`: we sent a start and have not read its outcome (DisputeStarted or DisputeOpSkipped); `pend`: the tick by which our start
+  // is on the chain (0 = it is not in flight).
+  type Disp = { on: bool, byUs: bool, answered: bool, proof: Body, await: bool, pend: int }
 
   type Op = { link: int, tx: Tx }
   type Cmd = { nonce: int, ops: List[Op] }
@@ -103,6 +107,9 @@ module entity {
     chainRev: int -> int,             // secret id -> the time it is on the chain (0 = not)
     jev: int -> JEv,
     disp: int -> Disp,
+    cd: int -> int,                   // chain: who holds the open dispute of the link: 0 nobody, 1 us, 2 the peer (at most one)
+    jseq: int,                        // chain: events emitted so far
+    outcomeRead: int -> bool,         // ghost: we read the outcome of our own start
     outRes: int -> bool,              // ghost: the onward lock was resolved off-chain by peer 2
     inRes: int -> bool,               // ghost: we resolved the inbound lock off-chain
     outCommitted: int -> bool,        // ghost: the onward lock became part of a signed state
@@ -110,8 +117,8 @@ module entity {
   }
 
   pure val NO_ROUTE: Route = { st: Idle, h: 0, dIn: 0, dOut: 0 }
-  pure val NO_DISP: Disp = { on: false, byUs: false, answered: false, proof: GENESIS }
-  pure val NO_JEV: JEv = { live: false, kind: JSecret(0), at: 0 }
+  pure val NO_DISP: Disp = { on: false, byUs: false, answered: false, proof: GENESIS, await: false, pend: 0 }
+  pure val NO_JEV: JEv = { live: false, kind: JSecret(0), at: 0, seq: 0 }
   pure val NO_GHOST: Ghost = {
     halted: false, refusals: 0, drops: 0, frameOnFrozen: false, needless: false, partialCmd: false, lateAnswer: false,
     forwards: 0, failBacks: 0, resolves: 0, escalations: 0, cmds: 0, collisions: 0
@@ -130,6 +137,9 @@ module entity {
     chainRev: SECRETS.mapBy(_ => 0),
     jev: 1.to(NJ).mapBy(_ => NO_JEV),
     disp: Map(IN -> NO_DISP, OUT -> NO_DISP),
+    cd: Map(IN -> 0, OUT -> 0),
+    jseq: 0,
+    outcomeRead: Map(IN -> false, OUT -> false),
     outRes: ROUTES.mapBy(_ => false),
     inRes: ROUTES.mapBy(_ => false),
     outCommitted: ROUTES.mapBy(_ => false),
@@ -253,6 +263,20 @@ module entity {
     publishFor({ ...s, disp: s.disp.set(l, { ...d, on: true, answered: true, proof: s.links.get(l).tip }) }, l)
   }
 
+  // We read the outcome of our own start. It landed (DisputeStarted): nothing more to wait for. It was skipped (DisputeOpSkipped):
+  // a dispute is already open and it is not ours, so the wait is over and we answer the open one with our tip and every known secret
+  // (the DisputeStarted of the open dispute comes first in chain order; answering again is the same answer).
+  pure def onSkip(s: S, l: int): S = {
+    val s1 = answer(freeze(s, l), l)
+    val d = s1.disp.get(l)
+    { ...s1, disp: s1.disp.set(l, { ...d, byUs: false, await: false }) }
+  }
+
+  pure def outcome(s: S, l: int, skipped: bool): S = {
+    val s1 = if (skipped) onSkip(s, l) else { ...s, disp: s.disp.set(l, { ...s.disp.get(l), await: false }) }
+    { ...s1, outcomeRead: s1.outcomeRead.set(l, true) }
+  }
+
   pure def jdeliver(s: S, i: int): S = {
     val ev = s.jev.get(i)
     if (not(ev.live) or ev.at > s.now) s
@@ -265,6 +289,8 @@ module entity {
           // the dispute is on the chain since ev.at; our counter lands LAG after we read it and must beat the timeout (C11)
           { ...s2, gh: { ...s2.gh, lateAnswer: s2.gh.lateAnswer or s.now + LAG >= ev.at + DWIN } }
         }
+        | JStarted(l) => outcome(s1, l, false)
+        | JSkip(l) => outcome(s1, l, true)
       }
     }
   }
@@ -332,7 +358,7 @@ module entity {
   pure def startOwn(s: S, l: int): S = {
     val s1 = freeze(s, l)
     val s2 = { ...s1,
-               disp: s1.disp.set(l, { on: true, byUs: true, answered: true, proof: s.links.get(l).tip }),
+               disp: s1.disp.set(l, { on: true, byUs: true, answered: true, proof: s.links.get(l).tip, await: true, pend: s.now + LAG }),
                gh: { ...s1.gh, escalations: s1.gh.escalations + 1, needless: s1.gh.needless or not(escalates(s.links, s, l)) } }
     publishFor(s2, l)
   }
@@ -445,8 +471,12 @@ module entity {
   // Nothing is left to do at this tick, and no J event has waited longer than LAG.
   pure def quiescent(s: S): bool = frame(s, Timer) == s
   pure def overdue(s: S): bool = 1.to(NJ).exists(i => s.jev.get(i).live and s.jev.get(i).at + LAG <= s.now)
+  // a start of ours that was sent is on the chain by `pend`: time does not move past it
+  pure def startOverdue(s: S): bool = LINKSET.exists(l => s.disp.get(l).pend > 0 and s.disp.get(l).pend <= s.now)
 
   action tick: bool = all { st.now < MAXT, quiescent(st), not(overdue(st)), st' = { ...st, now: st.now + 1 } }
+  // in a run, time also waits for our start to land; scripted tests move the clock as they like
+  action tickWaitingForStart: bool = all { not(startOverdue(st)), tick }
 
   action timer: bool = feed(Timer)
 
@@ -505,12 +535,15 @@ module entity {
   // The chain: a peer reveals a secret on it, or starts a dispute on a link. Each becomes an event we read within LAG.
   pure def freeJ(s: S): int = 1.to(NJ).fold(0, (m, i) => if (m == 0 and not(s.jev.get(i).live)) i else m)
 
+  // the chain emits an event into a free slot; we read it within LAG, in the order it was emitted
+  pure def emitJ(s: S, i: int, kind: JKind): S =
+    { ...s, jseq: s.jseq + 1, jev: s.jev.set(i, { live: true, kind: kind, at: s.now + LAG, seq: s.jseq + 1 }) }
+
   action peerReveal(sec: int): bool = {
     val i = freeJ(st)
     all {
       i != 0, st.chainRev.get(sec) == 0,
-      st' = { ...st, chainRev: st.chainRev.set(sec, st.now + LAG),
-              jev: st.jev.set(i, { live: true, kind: JSecret(sec), at: st.now + LAG }) }
+      st' = emitJ({ ...st, chainRev: st.chainRev.set(sec, st.now + LAG) }, i, JSecret(sec))
     }
   }
   action peerRevealChain: bool = { nondet sec = SECRETS.oneOf() peerReveal(sec) }
@@ -519,13 +552,38 @@ module entity {
     val i = freeJ(st)
     all {
       i != 0, not(st.disp.get(l).on),
-      st' = { ...st, disp: st.disp.set(l, { on: true, byUs: false, answered: false, proof: GENESIS }),
-              jev: st.jev.set(i, { live: true, kind: JDispute(l), at: st.now + LAG }) }
+      st' = emitJ({ ...st, disp: st.disp.set(l, { ...NO_DISP, on: true }), cd: st.cd.set(l, 2) }, i, JDispute(l))
+    }
+  }
+
+  // The peer's start reaches the chain before ours does: a dispute is open when our start (sent at the same time) is included.
+  action peerStartsBeside(l: int): bool = {
+    val i = freeJ(st)
+    val d = st.disp.get(l)
+    all {
+      i != 0, d.on, d.byUs, d.pend > 0, st.now <= d.pend, st.cd.get(l) == 0,
+      st' = emitJ({ ...st, cd: st.cd.set(l, 2) }, i, JDispute(l))
+    }
+  }
+
+  // Our start is included. With no dispute open it opens ours (DisputeStarted); with one open it is skipped (DisputeOpSkipped).
+  action ownStartLands(l: int): bool = {
+    val i = freeJ(st)
+    val d = st.disp.get(l)
+    all {
+      i != 0, d.on, d.byUs, d.pend > 0, st.now <= d.pend,
+      st' = emitJ({ ...st, disp: st.disp.set(l, { ...d, pend: 0 }), cd: st.cd.set(l, if (st.cd.get(l) == 0) 1 else st.cd.get(l)) },
+                  i, if (st.cd.get(l) == 0) JStarted(l) else JSkip(l))
     }
   }
 
   action deliver(i: int): bool = feed(JDeliver(i))
-  action deliverJ: bool = { nondet i = 1.to(NJ).oneOf() deliver(i) }
+  // The Runtime reads chain events in the order the chain emitted them (runtime.qnt R-J1).
+  pure def nextJ(s: S, i: int): bool = and {
+    s.jev.get(i).live,
+    1.to(NJ).forall(j => not(s.jev.get(j).live) or s.jev.get(j).seq >= s.jev.get(i).seq)
+  }
+  action deliverJ: bool = { nondet i = 1.to(NJ).oneOf() all { nextJ(st, i), deliver(i) } }
 
   // Local commands: a payment on one Account, or one on each (a batch that must apply as a whole).
   action cmd(nonce: int, ops: List[Op]): bool = feed(Command({ nonce: nonce, ops: ops }))
@@ -542,11 +600,12 @@ module entity {
   }
 
   action step = any {
-    tick, timer, feedTwo,
+    tickWaitingForStart, timer, feedTwo,
     peerLockIn, peerLockIn, peerResolveOut, peerCancelOut,
     peerAny(IN), peerAny(OUT),
     peerAck(IN), peerAck(OUT),
     peerRevealChain, peerStartsDispute(IN), peerStartsDispute(OUT),
+    peerStartsBeside(IN), peerStartsBeside(OUT), ownStartLands(IN), ownStartLands(OUT),
     deliverJ, deliverJ,
     cmdPay, cmdBatch
   }
@@ -590,6 +649,13 @@ module entity {
   // together are longer than that.
   val answer_in_window: bool = not(st.gh.lateAnswer)
 
+  // J2: the outcome of our own start is read from the chain and ends the wait, skipped or not. A skipped start leaves the open
+  // dispute (the peer's) answered, and it is not ours any more.
+  val skip_ends_the_wait: bool = LINKSET.forall(l => {
+    val d = st.disp.get(l)
+    or { not(st.outcomeRead.get(l)), and { not(d.await), d.answered } }
+  })
+
   // Flaw 3: a frozen Account never gets a frame from us.
   val no_frame_on_frozen: bool = not(st.gh.frameOnFrozen)
 
@@ -619,7 +685,7 @@ module entity {
 
   val safe: bool = and {
     no_peer_halt, no_stranded, deadline_chain, dispute_carries_all, no_needless_dispute,
-    no_frame_on_frozen, cmd_atomic, credit_holds, route_safe, answer_in_window
+    no_frame_on_frozen, cmd_atomic, credit_holds, route_safe, answer_in_window, skip_ends_the_wait
   }
 
   // Coverage witnesses: each is false on purpose; `quint run --invariant` must find a violating trace.
@@ -633,5 +699,6 @@ module entity {
   val w_no_frozen: bool = not(LINKSET.exists(l => st.links.get(l).frozen))
   val w_no_out_paid: bool = not(ROUTES.exists(k => st.outRes.get(k)))
   val w_no_chain_reveal: bool = not(SECRETS.exists(sec => st.chainRev.get(sec) != 0))
+  val w_no_outcome: bool = not(LINKSET.exists(l => st.outcomeRead.get(l)))
   val w_no_in_claim: bool = not(ROUTES.exists(k => st.inRes.get(k)))
 }

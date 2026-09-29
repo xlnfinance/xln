@@ -312,6 +312,20 @@ peer's [R-A1]. `rightRollsBackOnCollisionTest`, `leftKeepsItsFrameOnCollisionTes
 
 **E10. A refused peer frame is a value.** It counts and changes nothing; it never halts [R-X1] (`halt-on-refusal`).
 
+**E12. Our start lands beside the peer's: DisputeOpSkipped. CLOSED.**
+We send a dispute start; the peer's start reaches the chain first. There is one dispute per Account, so ours is skipped and the chain
+emits `DisputeOpSkipped` (J2). What the Entity does: (1) until it reads the outcome of its own start it is `await`ing; the outcome is
+either DisputeStarted (ours landed) or DisputeOpSkipped (ours was skipped); (2) the peer's DisputeStarted, which comes first in chain
+order, is answered as any peer dispute is: freeze, name the tip, publish every known secret; (3) the skip ends the wait, the open
+dispute is not ours (`byUs` false) and, if the peer's event was not read yet, the skip answers it too (the same answer twice is one
+answer). Counter after the window closed: the Entity's answer is late, which `answer_in_window` already flags (C11); the skip event
+then only tells it not to send the counter again. Options for (1): treat the next DisputeStarted on the Account as the outcome of our
+start (rejected: it would swallow the peer's dispute; the starter is in the event). Model: `ownStartLands`, `peerStartsBeside`, events
+`JStarted` and `JSkip`, property `skip_ends_the_wait`, tests `ownStartLandsIsReadTest`, `skippedStartEndsTheWaitAndAnswersTheOpenOneTest`,
+`skipAloneAnswersTheOpenDisputeTest`, mutants `skip-outcome-not-read` and `skip-read-as-started`. The race needs an escalation and three more steps: the random simulation reaches
+it only on some seeds (seed 1 kills `skip-outcome-not-read` by the invariant, seed 7 does not reach it in 3000 traces), so the witness
+`w_no_outcome` covers the landed start and the scenario tests cover the skip.
+
 **E11. Found while writing it.**
 (a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`
 (E7). (b) A secret on the chain pays nobody without a dispute holding the clause; the first `route_safe` treated it as payment and
@@ -325,15 +339,17 @@ One Entity, one token, four ops (a payment, a secret reveal, a dispute step, ano
 `contracts/contracts/Depository.sol` `processBatch` / `_processBatch`: a batch is signed for an entity and a nonce and lands only at
 `nonce = stored + 1`; a reverting op reverts all of it; a signed batch never expires and anybody can submit it, again, later. The
 honest relayer submits every batch in ascending nonce order and each first attempt happens within LAG; the adversary picks which batch
-of one nonce lands, spoils dispute ops (`poison`), moves the reserve and re-submits anything ever signed. Simulation only.
+of one nonce lands (when the Entity signed several), spoils dispute ops (`poison`), moves the reserve and re-submits anything ever signed.
+Simulation only.
 
 **J1. What a lost, reverted or dropped batch does (Q-J1). CLOSED.**
-A batch that reverts leaves nothing on the chain, and it stays valid: the reserve and collateral it names are untouched, and it can
-land later at its nonce (`signedBatchLandsLaterTest`). So the Entity's latches are Entity-side bookkeeping with one rule: a latch is
-released only when a batch carrying the op has landed, or the op can never apply (its dispute moved, seen as a skip or a receipt).
-Never on a timeout: `drop-every-op-of-a-failed-batch` (property `dropped_only_dead`) abandons a payment whose signed batch then lands
-later. A payment goes into a new batch only when no live batch carries it (`follow-up-carries-payments`, property `pay_once`); two
-batches of one nonce exclude each other, two batches of different nonces do not. `revertedPaymentIsKeptTest`. Source: Q-J1.
+A batch that reverts leaves nothing on the chain, and it stays valid: the reserve and collateral it names are untouched, and it can be
+sent again by anyone, at any time (`resubmittedBatchIsHarmlessTest`: the second landing is refused by the nonce, E2, and runs nothing;
+`chain-accepts-old-nonces` shows the double payment otherwise, property `pay_once`). So the Entity's latches are Entity-side bookkeeping
+with one rule: a latch is released only when a batch carrying the op has landed, or the op can never apply (its dispute moved, seen as
+a DisputeOpSkipped). Never on a timeout: `drop-every-op-of-a-failed-batch` (property `dropped_only_dead`) abandons a payment whose
+signed batch then lands later. A payment failed at its nonce (J5) is queued again and signed at a fresh nonce
+(`revertedPaymentDoesNotBlockTheUrgentOpTest`). Source: Q-J1.
 
 **J2. A dispute op that cannot apply: revert the batch or skip the op? ACCEPTED (TOLERANT); the contracts thread changes it test-first.**
 Today one dispute start over a dispute that moved (the adversary finalized first, a counter already registered) reverts the whole
@@ -342,23 +358,47 @@ reveal) skip when they cannot apply or already ran, and emit an event; payments,
 the Entity puts every urgent op in a batch of its own. Choice: (b). With (a) an urgent op cannot be bound by LAG: every spoiled op
 costs a round (`contract-reverts-on-moved-dispute`), with (c) k urgent ops cost k rounds. This is a contract change for the
 contracts thread; until it lands the spec's deadline numbers need `(k + 1) * LAG` where k is the number of concurrent urgent ops.
-Also required: an urgent op that already ran is skipped when it appears again (the follow-up copy of J3 does that).
+Also required: an urgent op that already ran is skipped when it appears again (a batch that is sent again).
+**The event (coordinator, 2026-09-29, built in the contracts).** A skipped dispute op emits
+`DisputeOpSkipped(sender, counterentity, op, reason, nonce)`. The reasons the spec covers: a start beside an open dispute (there is at
+most one dispute per Account), a counter after the window closed, an op that already ran. The event is a chain fact like any other:
+the Entity that sent the op learns from it that the op is dead and abandons it (`skip_read`, mutant `entity-ignores-the-skip-event`);
+without it the node waits for an outcome (a DisputeStarted) that never comes. The Runtime must read it (R7) and the Entity must
+act on it (E12).
 
-**J3. How the Entity signs urgent ops. CLOSED (given J2).**
+**J3. How the Entity signs urgent ops. CLOSED (given J2, J5 and F1).**
 (1) An urgent op (a reveal or a dispute step) never rides with a payment: a payment that cannot run (reserve moved) would take it
-down (`pack-everything`). (2) Each urgent op that is in no live batch gets a pair of batches of its own: the first at `stored + 1`
-when no urgent batch is live (it may fork with an outstanding payment batch: the adversary may land the payment batch first), the
-second right behind (so when the payment batch lands first, the pair's second one carries the op in the same round:
-`urgentBehindAnOutstandingPaymentTest`, `replace-without-follow-up`). (3) The nonces of a new urgent pair sit above every urgent batch
-already signed: two urgent batches at one nonce are a fork, the adversary lands the older and smaller, both nonces are burnt and the
-fresh batches die (`urgent-batches-fork-each-other`; the simulation found it). (4) Payments wait until nothing is live
-(`urgent-waits-for-outstanding` shows the price of also making urgent ops wait). With J2 and J3 an urgent op lands within LAG of
-reaching the Entity, which is the LAG the deadline arithmetic of the Entity layer uses (`params_test.qnt` pins jbatch.LAG = entity.LAG).
+down (`pack-everything`, `urgent-batch-carries-payments`). (2) Each urgent op that is in no live batch gets one batch of its own, at a
+fresh nonce (F1). (3) Payments wait until nothing is live (`urgent-waits-for-outstanding` shows the price of also making urgent ops
+wait). With J2, J5 and F1 an urgent op lands within LAG of reaching the Entity, which is the LAG the deadline arithmetic of the
+Entity layer uses (`params_test.qnt` pins jbatch.LAG = entity.LAG). The first version of this rule signed a pair of batches, the
+first at a nonce a live payment batch also held; the simulation found that an older batch signed for a nonce burns the fresh one's
+nonce. F1 replaces the pair.
+
+**F1. A signed batch is final at its nonce (coordinator, from the J2 review). CLOSED.**
+`processBatch` is permissionless: anybody may send any signed batch, at any time. With J2 a batch whose ops are all stale lands as a
+no-op and still takes its entity nonce. So the rule is: never sign different content at a nonce you have already signed, and always
+send a replacement at a fresh nonce (above every nonce signed so far, `topSigned`). An abandoned batch costs nothing when the fresh
+ones sit above it: it lands as a no-op in the same round and the ones above it land right behind it. Property `nonce_final` (no two signed
+batches with one nonce and different content); mutant `resign-at-a-signed-nonce` (the fresh nonce ignores what is signed) shows the
+burn. Test `neverTwoBatchesForOneNonceTest`.
+
+**J5. A batch that fails still takes its nonce. PROPOSAL for the contracts, needed by F1.**
+Today a batch that reverts (a payment the reserve cannot cover) leaves no trace, its nonce stays open, and every batch above it waits.
+F1 forbids signing another content at that nonce, so with the contract as it is a drained reserve holds every urgent op hostage until
+somebody refills it: `payment-revert-keeps-the-nonce` violates `urgent_lands` (found by simulation the moment F1 went in). Options:
+(a) as is, and the Entity tops up the reserve on reading a failed payment (an external deposit takes no entity nonce): the urgent op
+waits REACT + LAG, not LAG; (b) **a batch that fails takes its nonce, applies nothing and emits `BatchFailed(entity, nonce, reason)`**
+(Ethereum's own rule for a failed transaction): nothing is ever blocked, the payment is queued and signed again at a fresh nonce;
+(c) payment ops skip like dispute ops (rejected: it makes a batch non-atomic, and a settlement that pays half is worse than one that
+does not run). Choice: (b). It is a small change in `processBatch` (catch the failure, keep the nonce, revert the effects). Until it
+lands the deadline numbers of the Entity layer need option (a)'s bound. The Entity reads BatchFailed like DisputeOpSkipped (R7).
+Tests: `revertedPaymentDoesNotBlockTheUrgentOpTest`. Model: `NONCE_ON_FAIL`.
 
 **J4. Nonces: what the contract's strict sequence costs.**
-Any signed batch is a nonce burner in the adversary's hands, and a payment batch that reverts blocks every batch above it (E2). Options:
-(a) keep the strict sequence (J3 works around it), (b) unordered nonces with revocation. Choice: (a) for v1. (b) removes the fork and the
-hostage chain but needs a revocation batch before an op is re-signed, and the double-run hazard for payments returns. The batch limits
+Any signed batch is a nonce burner in the adversary's hands (F1), and a payment batch that reverts blocks every batch above it (E2, J5).
+Options: (a) keep the strict sequence (F1 and J5 work around it), (b) unordered nonces with revocation. Choice: (a) for v1. (b) removes
+the burn and the hostage chain but needs a revocation batch before an op is re-signed, and the double-run hazard for payments returns. The batch limits
 of R-J3 (`MAX_ENCODED_BATCH_BYTES`, per-array bounds) are not modelled: a full batch is a refusal, as in R-J3.
 
 ---
@@ -405,6 +445,12 @@ A halt stops one Entity and is reported; nothing else stops. The list of causes,
 Everything a peer can cause is a refusal: a malformed or badly signed frame, a stale or future nonce, an unknown Account, a full
 batch (R-J3), a command over a limit. A refusal is a value: counted, no state change, optionally answered, never a halt
 (`halt-on-refusal` in entity.qnt kills the opposite). The og engine has 8 halts that a peer can trigger; none of them is on this list.
+
+**R7. Every kind of chain event is read. CLOSED.**
+The watcher does not choose which events to read: the cursor moves over every event of the Depository log for the Entity's Accounts,
+DisputeOpSkipped (J2) included. A watcher that reads only the kinds it thinks the Entity waits for leaves a node whose start was
+skipped waiting for a DisputeStarted that never comes (`watcher-skips-the-skip-event`, `skipEventIsReadInOrderTest`). The event is
+applied in order with the others, exactly once, across crashes (R2), and the frame that applies it moves the cursor.
 
 **R6. Not modelled here.** Several Entities in one Runtime (they share nothing but the process: the properties are per Entity),
 the board's own consensus (v2: boards), the network beyond "a peer resends until acked", storage cost, and the offline Entity: a

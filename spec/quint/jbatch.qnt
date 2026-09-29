@@ -5,6 +5,9 @@
 //     nonce; a batch that reverts leaves no trace, not even the nonce;
 //   - a batch is atomic: one op that reverts (an R2R the reserve cannot cover, a dispute start over a dispute that moved) reverts
 //     the whole batch, and a signed batch never expires: anybody can submit it, again, at any later time;
+//   - with the tolerant contract (J2) a dispute op that cannot apply is skipped and the chain emits
+//     DisputeOpSkipped(sender, counterentity, op, reason, nonce): a start beside an open dispute (there is at most one dispute per
+//     Account), a counter after the window closed, an op that already ran. That event is how the Entity learns the op is dead;
 //   - the ops of a batch run in a fixed order (deposits, R2R, C2R, settlements, dispute starts, counters, secret reveals,
 //     finalizations, R2C, withdrawals), so one batch can reveal a secret and finalize with it.
 //
@@ -13,6 +16,10 @@
 //     only ops that can never apply, because a signed batch can land later;
 //   - what the fate sharing of one batch and the strict nonce cost the deadline arithmetic of the urgent ops (secret reveals and
 //     dispute steps), and which contract behaviour and which Entity packing keep an urgent op inside LAG.
+//
+// F1 (coordinator, from the J2 review): processBatch is permissionless and a batch whose ops are all stale lands as a no-op and still
+// takes its nonce, so a signed batch is final at its nonce: the Entity never signs other content at a signed nonce and always sends a
+// replacement at a fresh one. J5 (proposal): a batch that fails takes its nonce too, or one failed payment holds every batch above it.
 //
 // The model: one Entity, one token, four ops with a kind, an arrival time and a deadline. The honest relayer submits every batch the
 // Entity signs, in ascending nonce order, and each first attempt happens within LAG. The adversary chooses which of several batches
@@ -30,9 +37,13 @@ module jbatch {
   pure val RESERVE_MAX = 3
   // chain: does a dispute op that cannot apply revert the whole batch (Depository today) or is it skipped? [J2]
   pure val TOLERANT = true
-  // Entity: how it packs and signs. 0 = one batch of everything queued; 1 = urgent ops first and alone, one batch outstanding;
-  // 2 = also replaces an outstanding payment batch at the same nonce; 3 = also signs a follow-up at the next nonce. [J3]
-  pure val STRAT = 3
+  // Entity: how it packs and signs. 0 = one batch of everything queued, one batch outstanding (the naive way); 4 = urgent ops alone,
+  // and a signed batch is final at its nonce: content is never signed again at a signed nonce, every replacement goes to a fresh one
+  // [J3, F1].
+  pure val STRAT = 4
+  // chain: a batch that reverts (a payment the reserve cannot cover) still takes its nonce and applies nothing [J5, proposal]; today it
+  // leaves no trace and its nonce stays open, so it blocks every batch above it.
+  pure val NONCE_ON_FAIL = true
 
   // ---------------------------------------------------------------------------------------------------------
   // Domain model
@@ -49,7 +60,7 @@ module jbatch {
   type Ghost = {
     landed: int,               // batches that landed
     missed: bool,              // an urgent op passed its deadline, still owed and alive
-    reverts: int, forks: int
+    reverts: int, forks: int, failed: int
   }
 
   type S = {
@@ -63,10 +74,11 @@ module jbatch {
     done: int -> bool,                // chain: the op ran
     runs: int -> int,                 // chain: how many times the op ran
     poisoned: int -> bool,            // chain: the op's dispute moved: it can never apply
+    skipped: int -> bool,             // chain: DisputeOpSkipped was emitted for the op (J2)
     gh: Ghost
   }
 
-  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0 }
+  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0 }
 
   var st: S
 
@@ -96,16 +108,21 @@ module jbatch {
   }
 
   // What running the batch does: a payment runs each time, an urgent op runs once and only if its dispute did not move.
+  pure def skippedBy(s: S, b: Batch): Set[int] =
+    b.ids.filter(i => isDisp(s, i) and not(s.done.get(i)) and s.poisoned.get(i))
+
   pure def landOn(s: S, b: Batch): S =
     if (applies(s, b)) {
       val ran = b.ids.filter(i => isPay(s, i) or (not(s.done.get(i)) and not(s.poisoned.get(i))))
       { ...s,
+        skipped: OPIDS.mapBy(i => s.skipped.get(i) or skippedBy(s, b).contains(i)),
         cnonce: b.nonce,
         reserve: s.reserve - payTotal(s, b.ids),
         done: OPIDS.mapBy(i => s.done.get(i) or ran.contains(i)),
         runs: OPIDS.mapBy(i => s.runs.get(i) + (if (ran.contains(i)) 1 else 0)),
         gh: { ...s.gh, landed: s.gh.landed + 1 } }
-    } else { ...s, gh: { ...s.gh, reverts: s.gh.reverts + 1 } }
+    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1) { ...s, cnonce: b.nonce, gh: { ...s.gh, landed: s.gh.landed + 1, failed: s.gh.failed + 1 } }
+    else { ...s, gh: { ...s.gh, reverts: s.gh.reverts + 1 } }
 
   // ---------------------------------------------------------------------------------------------------------
   // The Entity: what it signs
@@ -114,38 +131,26 @@ module jbatch {
   pure def urgentPending(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and not(isPay(s, i)))
   pure def payQueued(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and isPay(s, i) and not(inFlight(s, i)))
 
-  // a live batch at nonce n that carries every id of `u` and no payment
-  pure def coversAt(s: S, n: int, u: Set[int]): bool =
-    anySub(s, x => alive(s, x) and x.b.nonce == n and u.subseteq(x.b.ids) and x.b.ids.forall(i => not(isPay(s, i))))
-
   pure def nothingAlive(s: S): bool = not(anySub(s, x => alive(s, x)))
 
-  // the highest nonce of a live batch that carries no payment (0 = none)
-  pure def topUrgentNonce(s: S): int =
-    s.sub.foldl(0, (m, x) => if (alive(s, x) and x.b.ids.forall(i => not(isPay(s, i))) and x.b.nonce > m) x.b.nonce else m)
+  // the highest nonce signed so far, or the stored one: the next fresh nonce is above it
+  pure def topSigned(s: S): int = s.sub.foldl(s.cnonce, (m, x) => if (x.b.nonce > m) x.b.nonce else m)
 
   pure def plan(s: S): List[Batch] = {
-    val n = s.cnonce + 1
     val u = urgentPending(s)
     val p = payQueued(s)
     val q = u.union(p)
-    if (STRAT == 0) (if (nothingAlive(s) and q.size() > 0) [{ nonce: n, ids: q }] else [])
-    else if (u.size() > 0) {
-      if (STRAT == 1) (if (nothingAlive(s)) [{ nonce: n, ids: u }] else [])
-      else if (STRAT == 2) (if (coversAt(s, n, u)) [] else [{ nonce: n, ids: u }])
-      else {
-        // Every urgent op that is in no live batch gets a pair of batches of its own, at nonces above every urgent batch already
-        // signed (so urgent batches never fork each other, and an old one cannot burn the nonce of a new one). The first of the pair
-        // sits at the nonce a live payment batch also holds when there is none above it (a fork the adversary may win, but the
-        // second one follows it), the second right behind.
-        val fresh = u.filter(i => not(inFlight(s, i)))
-        val top = topUrgentNonce(s)
-        val base = if (top > 0) top + 1 else n
-        if (fresh.size() > 0) [{ nonce: base, ids: fresh }, { nonce: base + 1, ids: fresh }] else []
-      }
+    val f = topSigned(s) + 1
+    if (STRAT == 0) (if (nothingAlive(s) and q.size() > 0) [{ nonce: s.cnonce + 1, ids: q }] else [])
+    else {
+      // F1: every batch goes to a nonce nobody has signed. An urgent op that is in no live batch gets a batch of its own (no payment
+      // in it); payments wait until nothing is outstanding. A batch that is no longer wanted still lands as a no-op and takes its
+      // own nonce, which costs nothing: the batches above it land right behind it in the same round.
+      val fresh = u.filter(i => not(inFlight(s, i)))
+      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]
+      else if (nothingAlive(s) and p.size() > 0) [{ nonce: f, ids: p }]
+      else []
     }
-    else if (nothingAlive(s) and p.size() > 0) [{ nonce: n, ids: p }]
-    else []
   }
 
   pure def submit(s: S, bs: List[Batch]): S =
@@ -162,7 +167,7 @@ module jbatch {
     now: 1, ops: ops,
     arrived: OPIDS.mapBy(_ => false), dropped: OPIDS.mapBy(_ => false), sub: [],
     cnonce: 0, reserve: reserve,
-    done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false),
+    done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false), skipped: OPIDS.mapBy(_ => false),
     gh: NO_GHOST
   }
 
@@ -183,7 +188,7 @@ module jbatch {
       ),
       arrived: OPIDS.mapBy(_ => false), dropped: OPIDS.mapBy(_ => false), sub: [],
       cnonce: 0, reserve: RESERVE_MAX,
-      done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false),
+      done: OPIDS.mapBy(_ => false), runs: OPIDS.mapBy(_ => 0), poisoned: OPIDS.mapBy(_ => false), skipped: OPIDS.mapBy(_ => false),
       gh: NO_GHOST
     }
   }
@@ -201,11 +206,12 @@ module jbatch {
   }
 
   // a submitted batch is attempted. The honest relayer attempts in ascending nonce order; the adversary picks among the copies of
-  // one nonce, and may attempt any batch again. The Entity abandons an op it sees can never apply (its dispute moved) and only that.
+  // one nonce, and may attempt any batch again. The Entity abandons an op it reads DisputeOpSkipped for (its dispute moved) and only that;
+  // when the contract reverts instead (J2 off) it sees the revert and the moved dispute.
   action attempt(j: int): bool = {
     val x = st.sub[j]
     val s1 = landOn(st, x.b)
-    val dead = x.b.ids.filter(i => isDisp(st, i) and st.poisoned.get(i))
+    val dead = if (TOLERANT) x.b.ids.filter(i => s1.skipped.get(i)) else x.b.ids.filter(i => isDisp(st, i) and st.poisoned.get(i))
     all {
       j >= 0, j < st.sub.length(),
       // ascending: every live batch with a lower nonce has been attempted this tick
@@ -253,6 +259,10 @@ module jbatch {
   val urgent_lands: bool = not(st.gh.missed)
   // Q-J1: the Entity abandons only ops that can never apply.
   val dropped_only_dead: bool = OPIDS.forall(i => not(st.dropped.get(i)) or st.poisoned.get(i))
+  // J2: every DisputeOpSkipped event is read and its op abandoned: without that the Entity waits for an outcome that never comes.
+  val skip_read: bool = OPIDS.forall(i => not(st.skipped.get(i)) or st.dropped.get(i))
+  // F1: a signed batch is final at its nonce: the Entity never signs different content at a nonce it has already signed.
+  val nonce_final: bool = st.sub.foldl(true, (ok, x) => ok and st.sub.foldl(true, (ok2, y) => ok2 and (x.b.nonce != y.b.nonce or x.b == y.b)))
   // a payment runs at most once: the signed batch that carries it can land only once per nonce, and the Entity never
   // signs it again while an older batch that carries it can still land.
   val pay_once: bool = OPIDS.forall(i => not(isPay(st, i)) or st.runs.get(i) <= 1)
@@ -263,12 +273,12 @@ module jbatch {
   // the reserve is the initial one, less what payments ran, plus what was refilled (checked by payments never overspending)
   val reserve_sound: bool = st.reserve >= 0 and st.reserve <= RESERVE_MAX
 
-  val safe: bool = and { urgent_lands, dropped_only_dead, pay_once, urgent_once, nonce_sequential, reserve_sound }
+  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound }
 
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0
   val w_no_revert: bool = st.gh.reverts == 0
-  val w_no_fork: bool = not(OPIDS.exists(i => st.done.get(i) and anySub(st, x => not(alive(st, x)) and x.b.ids.contains(i) and x.tried == false)))
+  val w_no_failed_batch: bool = st.gh.failed == 0                // a batch failed at its nonce (J5)
   val w_no_drop: bool = not(OPIDS.exists(i => st.dropped.get(i)))
   val w_no_pay: bool = not(OPIDS.exists(i => isPay(st, i) and st.done.get(i)))
   val w_no_two_landings: bool = st.gh.landed < 2

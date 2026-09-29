@@ -60,6 +60,50 @@ module entity_test {
     .then(tick).then(tick)
     .expect(and { st.now == 6, route_safe, safe })
 
+  // J2: our start reaches the chain and opens the dispute. We read DisputeStarted and stop waiting for the outcome.
+  run ownStartLandsIsReadTest =
+    init
+    .then(peerLock(1, 1, 4, 1)).then(peerAck(OUT)).then(peerResolve(1, 1))
+    .then(tick).then(tick).then(tick)
+    .then(timer)
+    .expect(and { st.disp.get(IN).await, st.disp.get(IN).byUs, st.disp.get(IN).pend == 5 })
+    .then(ownStartLands(IN))
+    .then(tick)
+    .then(deliver(1))
+    .expect(and { not(st.disp.get(IN).await), st.disp.get(IN).byUs, st.cd.get(IN) == 1, st.outcomeRead.get(IN), safe })
+
+  // J2: the peer's start reaches the chain first. There is one dispute per Account, so our start is skipped and the chain emits
+  // DisputeOpSkipped. We read the peer's DisputeStarted first (chain order) and answer it; the skip event ends the wait for an
+  // outcome that will never come, and the open dispute is not ours.
+  run skippedStartEndsTheWaitAndAnswersTheOpenOneTest =
+    init
+    .then(peerLock(1, 1, 4, 1)).then(peerAck(OUT)).then(peerResolve(1, 1))
+    .then(tick).then(tick).then(tick)
+    .then(timer)                                   // we start a dispute at 4, carrying the secret
+    .then(peerStartsBeside(IN))                    // the peer's start is included first
+    .then(ownStartLands(IN))                       // ours is skipped
+    .expect(and { st.cd.get(IN) == 2, st.disp.get(IN).await })
+    .then(tick)
+    .then(deliver(1))                              // DisputeStarted of the peer: answered
+    .expect(and { st.disp.get(IN).answered, st.disp.get(IN).await, not(st.outcomeRead.get(IN)) })
+    .then(deliver(2))                              // DisputeOpSkipped of our start: the wait is over
+    .expect(and {
+      not(st.disp.get(IN).await), not(st.disp.get(IN).byUs), st.disp.get(IN).answered, st.links.get(IN).frozen,
+      st.outcomeRead.get(IN), st.chainRev.get(1) == 5, skip_ends_the_wait, answer_in_window, safe
+    })
+
+  // The same race, but the skip event is read before the peer's DisputeStarted (a Runtime that reads out of order): the skip alone
+  // makes us answer the open dispute.
+  run skipAloneAnswersTheOpenDisputeTest =
+    init
+    .then(peerLock(1, 1, 4, 1)).then(peerAck(OUT)).then(peerResolve(1, 1))
+    .then(tick).then(tick).then(tick)
+    .then(timer)
+    .then(peerStartsBeside(IN)).then(ownStartLands(IN))
+    .then(tick)
+    .then(deliver(2))
+    .expect(and { not(st.disp.get(IN).await), not(st.disp.get(IN).byUs), st.disp.get(IN).answered, st.links.get(IN).frozen, safe })
+
   // A dispute carries every known secret that opens a payee clause of the proof, not only the one that made us start.
   run secondSecretIsCarriedTest =
     init
