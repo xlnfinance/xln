@@ -70,6 +70,8 @@ const COOPERATIVE_UPDATE_DIFF_PARAM = ethers.ParamType.from({
   ],
 });
 
+export const COOPERATIVE_UPDATE_DIFF_PARAM_FOR_TEST = COOPERATIVE_UPDATE_DIFF_PARAM;
+
 const BOARD_ABI = ["tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)"];
 export const lazyId = (address: string): string =>
   ethers.keccak256(coder.encode(BOARD_ABI, [[1, [ethers.zeroPadValue(address, 32)], [1], 0, 0, 0]]));
@@ -157,13 +159,16 @@ export const boot = async (label: string, chainId = 31337) => {
           [0, domain.chainId, domain.depository, acctKey, nonce, diffs.map(encodeCooperativeUpdateDiff), forgive]));
 
   // ---- submission ----
+  /** Events decoded from the last accepted transaction (name and args, as og's J watcher sees them). */
+  const last: { events: readonly unknown[]; batch: { entityId: string; encodedBatch: string; nonce: bigint; hash: string } | null } = { events: [], batch: null };
   /** Send `encodedBatch` with `hanko` as `entity` through the fork's own ABI. */
   const sendRaw = async (entity: string, encodedBatch: string, hanko: string, nonce: bigint): Promise<string> => {
     const data = features.batchEntity
       ? depositoryIface.encodeFunctionData("processBatch", [entity, encodedBatch, hanko, nonce])
       : depositoryIface.encodeFunctionData("processBatch", [encodedBatch, hanko, nonce]);
     try {
-      await vm.executeTx({ to: domain.depository, data, gasLimit: 15_000_000n });
+      const done = await vm.executeTx({ to: domain.depository, data, gasLimit: 15_000_000n }, undefined, { emitEvents: true });
+      last.events = done.events ?? [];
       return "ok";
     } catch {
       return `REVERT ${await revertName(data)}`;
@@ -182,7 +187,9 @@ export const boot = async (label: string, chainId = 31337) => {
   const submit = async (who: Party, patch: Record<string, unknown>): Promise<string> => {
     const encoded = encodeJBatch({ ...createEmptyBatch(), ...patch } as never);
     const nonce = (await chain.getEntityNonce(who.id)) + 1n;
-    return sendRaw(who.id, encoded, rawHanko(batchHash(who.id, encoded, nonce), who.key), nonce);
+    const hash = batchHash(who.id, encoded, nonce);
+    last.batch = { entityId: who.id, encodedBatch: encoded, nonce, hash };
+    return sendRaw(who.id, encoded, rawHanko(hash, who.key), nonce);
   };
 
   const proofSig = (signer: Party, epoch: bigint, nonce: number, proposerIsLeft: boolean, b: Body): string =>
@@ -227,7 +234,7 @@ export const boot = async (label: string, chainId = 31337) => {
   };
 
   return {
-    chain, vm, domain, features, TOKEN, L, R, acctKey, at, epochOf, batchHash, proofHash, coopHash, sendRaw, submit,
+    chain, vm, domain, features, last, TOKEN, L, R, acctKey, at, epochOf, batchHash, proofHash, coopHash, sendRaw, submit,
     proofSig, coopSig, start, finalize, settle, reserves, body, fundedAccount, encodeJBatch, createEmptyBatch,
   };
 };

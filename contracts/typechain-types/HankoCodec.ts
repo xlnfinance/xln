@@ -50,6 +50,66 @@ export type SettlementDiffStructOutput = [
   ondeltaDiff: SignedAmountStructOutput;
 };
 
+export type Int512Struct = { high: BigNumberish; low: BigNumberish };
+
+export type Int512StructOutput = [high: bigint, low: bigint] & {
+  high: bigint;
+  low: bigint;
+};
+
+export type AllowanceStruct = {
+  deltaIndex: BigNumberish;
+  rightAllowance: BigNumberish;
+  leftAllowance: BigNumberish;
+};
+
+export type AllowanceStructOutput = [
+  deltaIndex: bigint,
+  rightAllowance: bigint,
+  leftAllowance: bigint
+] & { deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint };
+
+export type TransformerClauseStruct = {
+  transformerAddress: AddressLike;
+  encodedBatch: BytesLike;
+  allowances: AllowanceStruct[];
+};
+
+export type TransformerClauseStructOutput = [
+  transformerAddress: string,
+  encodedBatch: string,
+  allowances: AllowanceStructOutput[]
+] & {
+  transformerAddress: string;
+  encodedBatch: string;
+  allowances: AllowanceStructOutput[];
+};
+
+export type ProofBodyStruct = {
+  watchSeed: BytesLike;
+  leftResponseSeconds: BigNumberish;
+  rightResponseSeconds: BigNumberish;
+  offdeltas: Int512Struct[];
+  tokenIds: BigNumberish[];
+  transformers: TransformerClauseStruct[];
+};
+
+export type ProofBodyStructOutput = [
+  watchSeed: string,
+  leftResponseSeconds: bigint,
+  rightResponseSeconds: bigint,
+  offdeltas: Int512StructOutput[],
+  tokenIds: bigint[],
+  transformers: TransformerClauseStructOutput[]
+] & {
+  watchSeed: string;
+  leftResponseSeconds: bigint;
+  rightResponseSeconds: bigint;
+  offdeltas: Int512StructOutput[];
+  tokenIds: bigint[];
+  transformers: TransformerClauseStructOutput[];
+};
+
 export interface HankoCodecInterface extends Interface {
   getFunction(
     nameOrSignature:
@@ -64,6 +124,7 @@ export interface HankoCodecInterface extends Interface {
       | "computeFinalDisputeProofHankoHashForDomain"
       | "computeReleaseControlSharesHankoHashForDomain"
       | "computeWatchtowerCounterDisputeHankoHashForDomain"
+      | "counterProofCommitment"
       | "encodeBatchHankoPayloadForDomain"
       | "encodeBoardProposalCancelHankoPayloadForDomain"
       | "encodeBoardProposalHankoPayloadForDomain"
@@ -75,6 +136,7 @@ export interface HankoCodecInterface extends Interface {
       | "encodeFinalDisputeProofHankoPayloadForDomain"
       | "encodeReleaseControlSharesHankoPayloadForDomain"
       | "encodeWatchtowerCounterDisputeHankoPayloadForDomain"
+      | "proofBodyHash"
   ): FunctionFragment;
 
   encodeFunctionData(
@@ -210,6 +272,10 @@ export interface HankoCodecInterface extends Interface {
     ]
   ): string;
   encodeFunctionData(
+    functionFragment: "counterProofCommitment",
+    values: [BigNumberish, boolean, BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "encodeBatchHankoPayloadForDomain",
     values: [
       BytesLike,
@@ -341,6 +407,10 @@ export interface HankoCodecInterface extends Interface {
       BigNumberish
     ]
   ): string;
+  encodeFunctionData(
+    functionFragment: "proofBodyHash",
+    values: [ProofBodyStruct]
+  ): string;
 
   decodeFunctionResult(
     functionFragment: "computeBatchHankoHashForDomain",
@@ -387,6 +457,10 @@ export interface HankoCodecInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "counterProofCommitment",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "encodeBatchHankoPayloadForDomain",
     data: BytesLike
   ): Result;
@@ -428,6 +502,10 @@ export interface HankoCodecInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "encodeWatchtowerCounterDisputeHankoPayloadForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "proofBodyHash",
     data: BytesLike
   ): Result;
 }
@@ -634,6 +712,16 @@ export interface HankoCodec extends BaseContract {
     "view"
   >;
 
+  counterProofCommitment: TypedContractMethod<
+    [
+      counterNonce: BigNumberish,
+      counterProposerIsLeft: boolean,
+      counterProofbodyHash: BytesLike
+    ],
+    [string],
+    "view"
+  >;
+
   encodeBatchHankoPayloadForDomain: TypedContractMethod<
     [
       domainSeparator: BytesLike,
@@ -789,6 +877,12 @@ export interface HankoCodec extends BaseContract {
       lastResortWindowSeconds: BigNumberish,
       appointmentSequence: BigNumberish
     ],
+    [string],
+    "view"
+  >;
+
+  proofBodyHash: TypedContractMethod<
+    [proofbody: ProofBodyStruct],
     [string],
     "view"
   >;
@@ -968,6 +1062,17 @@ export interface HankoCodec extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "counterProofCommitment"
+  ): TypedContractMethod<
+    [
+      counterNonce: BigNumberish,
+      counterProposerIsLeft: boolean,
+      counterProofbodyHash: BytesLike
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "encodeBatchHankoPayloadForDomain"
   ): TypedContractMethod<
     [
@@ -1137,6 +1242,9 @@ export interface HankoCodec extends BaseContract {
     [string],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "proofBodyHash"
+  ): TypedContractMethod<[proofbody: ProofBodyStruct], [string], "view">;
 
   filters: {};
 }

@@ -7,6 +7,21 @@ import "./HankoEncoding.sol";
 /// @dev Production contracts never call this contract. They call HankoEncoding
 ///      internally and supply block.chainid + address(this) themselves.
 contract HankoCodec {
+  /// @notice Hash of a dispute proof body: keccak256(abi.encode(ProofBody)), the value start, counter and finalize
+  ///         compare (Account._validateProofBody, private, also enforces size bounds).
+  function proofBodyHash(ProofBody memory proofbody) external pure returns (bytes32) {
+    return keccak256(abi.encode(proofbody));
+  }
+
+  /// @notice Account._counterProofCommitment: what a starter commits to for the one newer branch it pre-arms.
+  function counterProofCommitment(
+    uint256 counterNonce,
+    bool counterProposerIsLeft,
+    bytes32 counterProofbodyHash
+  ) external pure returns (bytes32) {
+    return keccak256(abi.encode(counterNonce, counterProposerIsLeft, counterProofbodyHash));
+  }
+
   function encodeBatchHankoPayloadForDomain(
     bytes32 domainSeparator,
     uint256 chainId,
