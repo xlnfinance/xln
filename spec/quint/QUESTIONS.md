@@ -142,7 +142,7 @@ board rotation, so it belongs in entity.qnt), cooperative settlement and C2R (th
 several tokens, C2 (batch authority is per entity; nothing visible in a one-Account model), per-batch atomicity across
 Accounts (N2: finalizes are submitted per Account, so one action is one batch).
 
-**C11. The honest side takes time: a floor for the windows, derived.**
+**C11. The honest side takes time: a floor for the windows, derived. ACCEPTED by the coordinator (2026-09-29).**
 Until now the chain model let the honest party answer at the same tick as the event ("time does not move while a response is
 due"). A real party reads the chain LAG ticks late and its answer needs LAG ticks to be included, so it answers REACT = 2 * LAG
 after the event, and the adversary gets those ticks for free. The model now makes time stop only REACT ticks after the start
@@ -335,7 +335,7 @@ Never on a timeout: `drop-every-op-of-a-failed-batch` (property `dropped_only_de
 later. A payment goes into a new batch only when no live batch carries it (`follow-up-carries-payments`, property `pay_once`); two
 batches of one nonce exclude each other, two batches of different nonces do not. `revertedPaymentIsKeptTest`. Source: Q-J1.
 
-**J2. A dispute op that cannot apply: revert the batch or skip the op? OPEN for the contracts, recommendation TOLERANT.**
+**J2. A dispute op that cannot apply: revert the batch or skip the op? ACCEPTED (TOLERANT); the contracts thread changes it test-first.**
 Today one dispute start over a dispute that moved (the adversary finalized first, a counter already registered) reverts the whole
 batch, and the secret reveal in the same batch is lost with it. Options: (a) as is; (b) dispute-class ops (start, counter, finalize,
 reveal) skip when they cannot apply or already ran, and emit an event; payments, deposits and settlements keep reverting; (c) as (a) and

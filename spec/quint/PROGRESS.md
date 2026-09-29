@@ -9,7 +9,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 | Account | `account.qnt` | v1 done: two parties, one token, credit, HTLC clauses, frame protocol with collision, resend, loss. 14 scenario tests, invariants P2 and P4a-c by simulation, 14 mutants killed |
 | J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 22 scenario tests, P1 P3 by simulation, 26 mutants killed. J latency: the honest side answers REACT = 2 * LAG after an event (C11). Apalache: see Evidence |
 | Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 17 scenario tests, 10 properties by simulation, 18 mutants killed. Several inputs per frame (E1). Simulation only (one state record) |
-| J batch | `jbatch.qnt` | v1 done: the Entity's batch over the chain's strict nonce and atomic revert; urgent ops, forks, nonce burning, what a lost batch holds. 10 scenario tests, 6 properties by simulation, 8 mutants killed. Proposes one contract change (J2: tolerant dispute ops) |
+| J batch | `jbatch.qnt` | v1 done: the Entity's batch over the chain's strict nonce and atomic revert; urgent ops, forks, nonce burning, what a lost batch holds. 10 scenario tests, 6 properties by simulation, 8 mutants killed. One contract change accepted (J2: tolerant dispute ops) |
 | Runtime | `runtime.qnt` | v1 done: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart, the halt taxonomy. 7 scenario tests, 4 properties by simulation, 7 mutants killed |
 | Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 15 scenario tests, 6 properties by simulation, 20 mutants killed. S3 closed: presign+fold, the baseline rides every frame at nonce + 3 |
 
@@ -63,9 +63,8 @@ Neither spec reads the other. Three leaks, all harmless but recorded:
 1. Account + chain with real Account histories instead of the arena (the joint state of the hub's two Accounts and the chain, beyond the
    interface and the shared numbers of `params_test.qnt`).
 2. Entity: several routes per slot and a free-slot rule (E7), an offline Entity.
-3. v2 proposals: order book, lending, boards.
-4. Contract-side items this spec asks for: C11 (window floor above LAG), J2 (tolerant dispute ops in a batch), and the chain fact E6
-   (pinned on the real contracts by #47).
+3. Apalache on the J modules (`jbatch`, `runtime`, `settle`) where it finishes; v2 models (proposals are in V2.md).
+4. Contract-side items: C11 (window floor above LAG) and J2 (tolerant dispute ops in a batch) accepted by the coordinator 2026-09-29; the contracts thread changes J2 test-first. The chain fact E6 is pinned on the real contracts (#47).
 
 ## Pick-up command
 
