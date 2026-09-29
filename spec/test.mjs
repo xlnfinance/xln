@@ -19,10 +19,10 @@ const pages = {
 };
 const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra], `(check ${pages[page].spec})`);
 
-const planted = (page, name, file, violated) => ({
+const planted = (page, name, file, violated, config) => ({
   page,
   name: `planted: ${name}`,
-  extra: [`${pages[page].files[0].split("/")[0]}/bugs/${file}.scm`],
+  extra: [...(config ? [config] : []), `${pages[page].files[0].split("/")[0]}/bugs/${file}.scm`],
   expect: (r) => assert.equal(r.violated, violated),
 });
 
@@ -79,18 +79,23 @@ const cases = [
   planted("runtime", "replay stamps frames with the current clock", "replay-wall-clock", "recovery reproduces the committed state"),
   planted("runtime", "frame timestamp is the input's own", "raw-input-timestamp", "the frame timestamp never goes back"),
   planted("runtime", "a crash forgets the uncommitted input", "drop-uncommitted-input", "no input is lost: committed, staged, queued, or the halting one"),
-  { page: "j", name: "J batch", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 5262, transitions: 17049, goals: 736 }) },
-  planted("j", "a finalize bundled with other ops (N2)", "bundle-finalize", "a deadline revert never blocks another Account's ops: a reverted finalize goes alone"),
-  planted("j", "a quarantined batch is never recovered (og, non-hub)", "no-recovery", "can always still finish"),
-  planted("j", "an event does not clear the draft", "trust-the-draft", "no op is applied twice on chain"),
+  { page: "j", name: "J batch", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4891, transitions: 15651, goals: 848 }) },
+  planted("j", "a finalize bundled with other dispute ops (N2)", "bundle-finalize", "a deadline revert never blocks another Account's ops: a reverted finalize goes alone"),
+  planted("j", "dispute and payment ops share a batch (R-SPLIT)", "mixed-batch", "dispute ops never share a batch with payment ops (R-SPLIT)"),
+  planted("j", "an abandoned batch is re-signed with other content at its nonce (R-NONCE, F1)", "resign-at-nonce", "a signed batch is final at its nonce: no nonce is signed twice (R-NONCE, F1)"),
+  planted("j", "an aborted batch requeues a deposit too (not idempotent)", "requeue-deposit", "no op is applied twice on chain"),
   planted("j", "a full draft halts the Entity (og)", "full-halts", "a full batch is a refusal, never a halt"),
   planted("j", "a stale dispute op reverts the whole batch (R-J2)", "stale-reverts", "a stale or already applied dispute op is skipped, never a revert of the batch (R-J2)"),
+  planted("j", "the Entity does not read DisputeOpSkipped", "ignores-skip", "can always still finish"),
+  { page: "j", name: "J batch, one payment batch fails (R-J5)", extra: ["j/configs/payment-failure.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4528, transitions: 13917, goals: 840 }) },
+  planted("j", "a failed batch takes no nonce and says nothing (contracts today, R-J5)", "failure-no-nonce", "a failed batch takes its nonce: the chain has moved past it (R-J5)", "j/configs/payment-failure.scm"),
+  planted("j", "the Entity does not read BatchFailed (R-J5)", "ignores-batch-failed", "can always still finish", "j/configs/payment-failure.scm"),
   planted("j", "the chain applies half a batch", "partial-apply", "the chain is atomic: every applied op came from a batch that succeeded"),
   { page: "routing", name: "routing", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4698, transitions: 4932, goals: 0 }) },
   planted("routing", "no hop margin between the locks (R1)", "no-hop-margin", "H never pays B without being paid by A: a diligent hub cannot lose"),
   planted("routing", "fail-back before the chain fact can be seen (R2)", "early-failback", "H never pays B without being paid by A: a diligent hub cannot lose"),
   planted("routing", "a dispute start leaves a known secret out (R3)", "dispute-omits-secret", "a dispute start publishes every secret H knows (R3)"),
-  planted("money", "deposit from nowhere", "deposit-from-nowhere", "money is conserved: reserves + collateral never change"),
+  planted("money", "deposit from nowhere", "deposit-from-nowhere", "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation"),
 ];
 
 // One process per case (the interpreter is single-threaded): `node test.mjs` runs them all in

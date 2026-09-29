@@ -371,18 +371,24 @@ whether its batch "succeeded". Planted bug `partial-apply` (the chain keeps the 
 one) breaks the property "every applied op came from a batch that succeeded".
 Source: D:329-575, xln.ts 2953-2972.
 
-**Q-J-2. A quarantined batch (open question 3).**
+**Q-J-2. A quarantined batch (open question 3): gone by construction (F1).**
 A batch aborted and re-sealed can land after its replacement was sealed at the same nonce; the event
 carries a different hash at a nonce >= the pending one, so the pending batch can never land.
 xln.ts: `quarantined`, message only; recovery is a manual abort or clear, and the hub-only stale timer
-(17961) does not cover other Entities. Choice: automatic `recover`: requeue the pending batch minus the
-ops already done. Planted bug `no-recovery` (og today for a non-hub) fails "can always still finish".
+(17961) does not cover other Entities. Choice (20:14, F1): the case cannot arise. A signed batch is
+final at its nonce and a replacement is always signed at a fresh nonce (Q-J-9), so two different hashes
+never meet at one nonce, and the quarantine and its recovery are not needed. Planted bug `no-recovery`
+is removed with them; its replacement is `resign-at-nonce` (Q-J-9).
 Source: xln.ts 2953-2972, 3036, 17961.
 
 **Q-J-3. Abort and then the batch lands (finding).**
 `j_abort_sent_batch` requeues the ops. If the aborted batch lands afterwards, the requeued ops are
-drafted again and the next batch applies them a second time (a deposit twice). Choice: an event clears
-the ops it applied from the draft, whatever batch requeued them. Planted bug `trust-the-draft`.
+drafted again and the next batch applies them a second time (a deposit twice). Choice (F1): an aborted
+batch is ABANDONED, not forgotten, and only its dispute ops are requeued: they are idempotent under
+R-J2 (a second copy is skipped as already applied). A deposit is not idempotent, so it is NOT requeued;
+it stays with the abandoned batch, which anyone can push. An event clears the ops it applied, whatever
+batch carried them. Planted bugs: `requeue-deposit` (an aborted batch requeues a deposit too: "no op is
+applied twice on chain" fails); `trust-the-draft` is removed, F1 plus R-J2 rule it out.
 Source: xln.ts 3036-3062.
 
 **Q-J-4. A full batch is a refusal (lessons R-J3).**
@@ -406,8 +412,9 @@ Reorg below finalized height (`J_HISTORY_FINALIZED_REORG` is a Runtime halt toda
 J-prefix attestation round, Hanko bytes, size and gas limits, several tokens, debt enforcement, watchers.
 Bounds: three ops (deposit, finalize on an Account with an open HTLC deadline, deposit), draft cap 2,
 one abort, time 0..2, deadline 1, no chain faults (`faults` 0). With one fault (the chain drops or
-reverts a batch) the page exceeds the 300 s budget. Capacity: 5262 states, 17049 transitions, about
-85 seconds.
+reverts a batch) the page exceeds the 300 s budget. Capacity: 4891 states, 15651 transitions, about
+2 minutes; the R-J5 bound (one payment batch fails, no abort) is a second config,
+`j/configs/payment-failure.scm`: 4528 states, 13917 transitions, about 100 seconds.
 
 **Q-J-8. A stale or already applied dispute op is skipped, not a revert (R-J2, coordinator 18:57).**
 Before: any op that could not apply reverted the whole batch (Depository.processBatch is atomic and
@@ -418,17 +425,58 @@ finalize whose HTLC deadline is open) is not covered by this rule: it still reve
 event names applied and skipped ops, and the entity treats both as done. Planted bug `stale-reverts`
 (the contracts today): a batch of a stale op and a deposit reverts and the deposit is held up. The
 contracts have to change to match; this page is the statement of what they must do.
-Source: coordinator R-J2; contracts D:329-575.
+Addition (19:52, built in the contracts): a skipped op emits its own event,
+`DisputeOpSkipped(sender, counterentity, op, reason, nonce)`, and the Runtime reads it as a J fact.
+The page's batch event names the ops applied and, apart, each op skipped with its reason
+(`stale`, `already-applied`); the Entity marks both done and never redrafts them. Planted bug
+`ignores-skip`: the Entity does not read the skip event, the skipped op is neither done nor
+requeued, and the node waits for an effect that never comes ("can always still finish" fails). Two
+more skips the coordinator named are in the dispute page as guards, not as events: a start beside an
+open dispute (at most one per Account: the `start` rule is off while a dispute is open, and the node
+counters the open one) and a counter after the window closed (the counter must land before T, see
+Q-D-17). The Runtime page treats every J fact, this one included, as a good input; a Runtime input
+kind for the skip fact is not modelled.
+Source: coordinator R-J2 and its addition; contracts D:329-575.
 
-**Q-J-9. A signed batch never expires (R-NONCE, coordinator 18:57): adopted, not modelled.**
-Rule: an urgent op is sent in a batch at a fresh nonce and never relies on an older signed batch not
-landing first. Why it is not in the page: the chain here accepts only nonce + 1, so an aborted batch
-and its replacement collide at one nonce and whichever lands first wins (the quarantine path of the
-page). A fresh nonce (above every nonce ever signed) needs the chain to accept any nonce above the
-current one, and then an aborted batch can land first and its ops must be "already applied" for the
-new batch: R-J2's skip is what makes that safe. Open: the contract change (nonce > current) and the
-recovery that follows. Property to state when the chain accepts it: no op is applied twice, and an
-urgent op lands whatever older signed batches do.
+**Q-J-9. A signed batch is final at its nonce (R-NONCE, widened by the coordinator at 20:14, F1): modelled.**
+Rule: `processBatch` is permissionless and a signed batch never expires, so anyone can land an
+abandoned batch later; with R-J2 an abandoned batch whose ops are all stale lands as a no-op and still
+takes its entity nonce. The Entity therefore never signs different content at a nonce it already
+signed, and always sends a replacement at a fresh nonce (above every nonce it ever signed).
+In the page: `:signed-max`, `:signed` (nonce and hash of every signature), `fresh-nonce`, `:abandoned`,
+and `push` (anyone lands an abandoned batch; the chain then accepts the next nonce). The chain still
+needs nonce + 1, so a replacement lands after the abandoned batches below it. A hole is not possible
+because the Entity only signs fresh nonces above everything it signed, and abandoned ones are pushed
+first. Properties: "a signed batch is final at its nonce: no nonce is signed twice"; the lost-op
+property counts abandoned batches' ops as held. Planted bug `resign-at-nonce` (the replacement reuses
+the abandoned nonce) fails the first.
+Finding: requeueing a deposit after an abort is unsafe under F1 (the abandoned batch can still land), so
+only dispute ops are requeued (Q-J-3). Open for the contracts: nothing beyond R-J2's skip; a nonce
+gap (accept any nonce above the current one) would make a replacement independent of pushing the
+abandoned batch and is worth deciding.
+
+**Q-J-10. A failed payment batch takes its nonce and says so (R-J5, coordinator 20:29) and dispute ops are split off (R-SPLIT, 21:01): modelled.**
+Rule R-J5: an authenticated batch with NO dispute ops whose payment, settlement or reserve ops fail
+applies none of them, still consumes its entity nonce and emits `BatchFailed(entity, nonce, reason)`.
+The Runtime reads it as a J fact; the Entity re-queues the batch's work at a fresh nonce. Bad
+authentication still reverts and takes no nonce (not modelled: the Entity signs everything it sends).
+Rule R-SPLIT: dispute, reveal and hash-ladder ops never share a batch with payment, settlement or
+reserve ops. A batch WITH dispute ops that fails (the H1 deadline wait is that case) reverts whole and
+takes no nonce, so a mixed batch would re-open the stall: with R-NONCE a signed batch is final at its
+nonce, and one that reverted without taking it would block every batch signed above it.
+In the page: `fail-batch` (a payment batch: nonce advances and `BatchFailed` is queued; a dispute batch:
+recorded, plain revert), `observe-failure` (the sent or an abandoned batch is dead; its ops go back to
+the draft, deposits included, since a dead nonce can never land), `pick-ops` (a finalize alone, else
+dispute ops together, else payment ops). A dispute batch that reverts stays signed and is retried at its
+nonce once the deadline passed. Properties: "a failed batch takes its nonce" (payment batches);
+"dispute ops never share a batch with payment ops (R-SPLIT)", checked on every signature; liveness covers
+the re-queue. Planted bugs: `failure-no-nonce` (revert, no nonce, no event), `ignores-batch-failed`
+(the Entity never re-queues; "can always still finish" fails), `mixed-batch` (R-SPLIT broken);
+`bundle-finalize` (N2) now bundles a finalize with a counter, both dispute ops.
+Not modelled: a Runtime input kind for `BatchFailed` (the Runtime page treats every J fact as a good
+input); a reason code per failing op (the page has one: `reserve`); settlement and reveal ops (the
+page has one payment op, `r1`, and two dispute ops).
+Source: coordinator R-J5, R-SPLIT.
 
 ## Runtime (`runtime/tick.scm`)
 
@@ -620,6 +668,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **N3. Windows.** The response windows are fixed per Account at open; every proof of that Account
   carries the same values. Both are at least MIN_RESPONSE_SECONDS (60 on testnet; contracts H2).
 - **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
+- **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
