@@ -30,6 +30,17 @@ describe(seedTag("fork encoders (contracts/vectors)"), () => {
     });
   });
 
+  // The "small" sample has chainId, epoch and nonce all 7 and "wide" is all ones, so both are blind to swapping two slots.
+  // The "mixed" sample has a different value in every slot: a swap of ondeltaEpoch and nonce (C1's whole point) fails here.
+  test("the mixed samples exist and carry a distinct epoch and nonce", () => {
+    for (const fn of ["computeDisputeProofHankoHashForDomain", "computeCooperativeUpdateHankoHashForDomain"]) {
+      const mixed = vectorsFor(fn).filter((v) => v.label === "mixed");
+      expect(mixed.length).toBe(1);
+      const [chainId, , , epoch, nonce] = mixed[0]!.args;
+      expect(new Set([chainId, epoch, nonce]).size).toBe(3);
+    }
+  });
+
   test("MATCH: encodeForkDisputeProofHash == the deployed computeDisputeProofHankoHash (epoch after the account key)", () => {
     const small = vectorsFor("computeDisputeProofHankoHashForDomain").filter((v) => fits(v.args[0]));
     expect(small.length).toBeGreaterThan(0);

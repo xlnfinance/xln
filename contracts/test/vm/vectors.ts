@@ -3,7 +3,7 @@
 //
 // Two kinds:
 //   functions.json  every audit-surface and pure encoder the contracts expose, called on the deployed bytecode with
-//                   deterministic sample arguments (small and wide values), as calldata and return data.
+//                   deterministic sample arguments (small, wide and mixed values), as calldata and return data.
 //   lifecycle.json  one account lifecycle run through the real Depository: the values production stores and emits.
 import { ethers } from "ethers";
 import { createAddressFromString } from "@ethereumjs/util";
@@ -17,17 +17,29 @@ const coder = ethers.AbiCoder.defaultAbiCoder();
 
 const digest = (path: string): string => ethers.keccak256(ethers.toUtf8Bytes(path));
 
-const sample = (param: ethers.ParamType, path: string, wide: boolean): unknown => {
+/** small: every slot 7 / false; wide: every slot at its type's limit; mixed: a different small value in every slot, so a swap of two slots changes the output. */
+type Mode = boolean | "mixed";
+const modeLabel = (mode: Mode): string => (mode === "mixed" ? "mixed" : mode ? "wide" : "small");
+const distinct = (path: string, bits: number): bigint => (BigInt(digest(path)) % (1n << BigInt(Math.min(bits, 20)))) + 1n;
+
+const sample = (param: ethers.ParamType, path: string, mode: Mode): unknown => {
+  const wide = mode === true;
   if (param.baseType === "array") {
-    const length = wide ? 2 : 1;
-    return Array.from({ length }, (_, i) => sample(param.arrayChildren!, `${path}[${i}]`, wide));
+    const length = wide || mode === "mixed" ? 2 : 1;
+    return Array.from({ length }, (_, i) => sample(param.arrayChildren!, `${path}[${i}]`, mode));
   }
-  if (param.baseType === "tuple") return Object.fromEntries(param.components!.map((c, i) => [c.name || `f${i}`, sample(c, `${path}.${c.name || i}`, wide)]));
-  if (param.baseType === "bool") return wide;
+  if (param.baseType === "tuple") return Object.fromEntries(param.components!.map((c, i) => [c.name || `f${i}`, sample(c, `${path}.${c.name || i}`, mode)]));
+  if (param.baseType === "bool") return mode === "mixed" ? BigInt(digest(path)) % 2n === 0n : wide;
+  if (mode === "mixed") {
+    const uintBits = /^uint(\d*)$/.exec(param.baseType);
+    if (uintBits) return distinct(path, uintBits[1] ? Number(uintBits[1]) : 256);
+    const intBits = /^int(\d*)$/.exec(param.baseType);
+    if (intBits) return -distinct(path, intBits[1] ? Number(intBits[1]) - 1 : 255);
+  }
   if (param.baseType === "address") return ethers.getAddress(`0x${digest(path).slice(26)}`);
   if (param.baseType === "bytes32") return digest(path);
-  if (param.baseType === "bytes") return wide ? `0x${digest(path).slice(2, 76)}` : "0x";
-  if (param.baseType === "string") return wide ? path : "";
+  if (param.baseType === "bytes") return wide || mode === "mixed" ? `0x${digest(path).slice(2, 76)}` : "0x";
+  if (param.baseType === "string") return wide || mode === "mixed" ? path : "";
   const uint = /^uint(\d*)$/.exec(param.baseType);
   if (uint) return wide ? (1n << BigInt(uint[1] ? Number(uint[1]) : 256)) - 1n : 7n;
   const int = /^int(\d*)$/.exec(param.baseType);
@@ -97,9 +109,9 @@ export const functionVectors = async (rig: Rig) => {
 
   const codec = HankoCodec__factory.createInterface();
   for (const fragment of codec.fragments.filter((f): f is ethers.FunctionFragment => f.type === "function")) {
-    for (const wide of [false, true]) {
-      const args = fragment.inputs.map((p, i) => sample(p, `${fragment.name}.${p.name || i}`, wide));
-      await record("HankoCodec", codecAddress, codec, fragment.name, args, wide ? "wide" : "small");
+    for (const mode of [false, true, "mixed"] as const) {
+      const args = fragment.inputs.map((p, i) => sample(p, `${fragment.name}.${p.name || i}`, mode));
+      await record("HankoCodec", codecAddress, codec, fragment.name, args, modeLabel(mode));
     }
   }
 
