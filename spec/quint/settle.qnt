@@ -25,6 +25,7 @@
 //   claims_conserved  an update moves custody without changing what either side would be paid if the Account closed
 //   book_enforceable  the honest side's newest proof of the chain's epoch pays exactly what both agreed
 //   hostage_free      (presign only) the honest side can always close the Account, whatever the other side does
+//   baseline_clears   (presign only) the pre-signed baseline is above every nonce either epoch-opening event can store
 module settle {
   import chain.* from "./chain"
 
@@ -369,6 +370,22 @@ module settle {
     t == 0 or arena.get(t).offdelta == book
   }
 
+  // The pre-signed baseline (presign) is usable whichever event opens its epoch. A start needs a proof nonce above the stored
+  // one, and the two events store: the update its own nonce, a finalize the adopted proof's nonce, or the old nonce + 1.
+  // So the baseline must clear the update, the highest both-signed proof of the epoch, and the old nonce + 1. After the epoch
+  // has opened it must clear what is stored. The frame height of the Account has no part in this: only chain nonces do.
+  val baseline_clears: bool = or {
+    acc.next == 0,
+    {
+      val b = arena.get(acc.next)
+      val u = upds.get(acc.locked)
+      val t = tipId(arena, b.epoch - 1)
+      if (acct.epoch == b.epoch) dispute.on or b.nonce > acct.nonce            // a start stores the nonce of the proof it used
+      else if (acct.epoch > b.epoch) true
+      else and { b.nonce > u.nonce, b.nonce > acct.nonce + 1, t == 0 or b.nonce > arena.get(t).nonce }
+    }
+  }
+
   // what the honest side would hold in the Account if it closed on the agreed offdelta (debt ignored)
   val honestStake: int = {
     val d = imax(0, imin(acct.coll, acct.ondelta + book))
@@ -383,7 +400,7 @@ module settle {
   }
   val hostage_free: bool = not(mode) or exit_ok
 
-  val wsafe: bool = and { safe, no_dead_commit, no_lost_pay, claims_conserved, book_enforceable, hostage_free }
+  val wsafe: bool = and { safe, no_dead_commit, no_lost_pay, claims_conserved, book_enforceable, hostage_free, baseline_clears }
 
   // coverage: each must be violated by some run
   val w_no_lock: bool = acc.locked == 0

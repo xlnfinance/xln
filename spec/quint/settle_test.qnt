@@ -49,6 +49,20 @@ module settle_test {
     .then(cFinalize(honestFinalize))
     .expect(and { money.res == Map(Left -> 2, Right -> 4), acct.coll == 0, wsafe })
 
+  // whichever proof the adversary starts with (the stale baseline or the locked state, chosen at random) and whatever nonce
+  // the finalize stores, the baseline still clears it and the Account can be closed again
+  run presignBaselineStartsAfterStaleFinalizeTest =
+    presignRun
+    .then(signUpd(Left, 1)).then(signUpd(Right, 1))
+    .then(cNeutral(setOffline(true)))
+    .then(cNeutral(adversaryStart))
+    .then(cNeutral(tick)).then(cNeutral(tick))
+    .then(cFinalize(adversaryFinalize))
+    .then(cNeutral(setOffline(false)))
+    .then(observe(Right))
+    .expect(and { acct.epoch == 1, arena.get(acc.tip).epoch == 1, arena.get(acc.tip).nonce > acct.nonce,
+                  startable, baseline_clears, wsafe })
+
   // ---- N1 as decided: a window without a proof, closed by the Rebase ---------------------------------------------
 
   run rebaseLeavesAWindowWithoutAProofTest =

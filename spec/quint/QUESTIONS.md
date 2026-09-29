@@ -160,7 +160,7 @@ is authorised by its own batch. So one signature is enough to execute, and whoev
 any time until the epoch or nonce moves. The update dies with any other epoch event (finalize, another update); it cannot
 execute during a dispute. Source: `Account.sol:1540-1650`.
 
-**S3. FINDING. N1 as decided leaves a window in which the honest side has no proof for the epoch.**
+**S3. CLOSED (coordinator, 17:20Z): option (b) adopted. N1 as decided leaves a window in which the honest side has no proof for the epoch.**
 After an update executes, every earlier proof is dead (C1) and the baseline of the new epoch is co-signed only after the
 event is read. Until then the honest side cannot start a dispute (no proof), and the counterparty can extend the window for as
 long as it declines to co-sign. It is a hostage situation, not theft: the counterparty's own share is frozen too. Reachable in
@@ -178,7 +178,17 @@ Options:
      not have today.
 Cost of (b): one exception to "sign only for the current epoch", and a settlement may carry no open clause (a clause would
 be dropped by the fold; R-A3 already forbids settling over queued work).
-Choice: (b); the model has both (`presign`), the coordinator decides. If (a), the nonce floor of C3 still applies.
+Choice: (b); the model has both modes (`mode` = presign, otherwise the rebase of N1 as first decided).
+Decision, as it now reads in N1: a party signs proofs only for the current epoch, with one exception: the Lock frame of a
+settlement also carries a co-signed baseline for epoch+1 (offdelta 0, no clauses), and the update folds offdelta into
+`ondeltaDiff`. A settlement requires no open clauses in v1; lifting that is a v2 proposal (settle.qnt proofs carry no clauses,
+so the rule is not a guard here; the Entity layer enforces it with R-A3).
+The baseline's nonce is a chain nonce, never the frame height: it must clear whatever either event stores, which is the
+update's nonce, the adopted proof's nonce, or the old nonce + 1 (a timeout finalize that adopts nothing). Pinned by
+`baseline_clears` (killed by `baseline-nonce-not-above-update`), by `presignBaselineStartsAfterStaleFinalizeTest` (the
+finalize route, whichever proof the adversary starts with, killed by `finalize-stores-high-nonce`) and by
+`presignSettlementOpensNextEpochTest` (the update route). `hostage_free` holds in this mode and fails in the rebase mode
+(witness `w_hostage`), so the window is gone rather than merely unreached.
 
 **S4. Fund only into an Account you hold a proof for.**
 Found by simulation: after a finalize opened epoch 1 the Account has no proof; a deposit into it is a stake nobody can

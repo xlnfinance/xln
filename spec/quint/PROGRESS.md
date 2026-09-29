@@ -10,7 +10,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 | J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 19 scenario tests, P1 P3 by simulation, 20 mutants killed. Apalache: see Evidence |
 | Entity frame | `entity.qnt` | not started |
 | Runtime | `runtime.qnt` | not started |
-| Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 12 scenario tests, 5 properties by simulation, 16 mutants killed. Finding S3 (hostage window) awaits a decision |
+| Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 13 scenario tests, 6 properties by simulation, 18 mutants killed. S3 (hostage window) closed: presign+fold adopted |
 
 ## Evidence
 
@@ -21,9 +21,9 @@ Handoff format: what is done per layer, what is next, how to pick up.
   reach a collision, so it is checked by simulation, not by Apalache. Apalache is for the smaller models that follow.
 - `MODULES=chain ./check.sh`: typecheck, 19 scenario tests, `safe` over 1500 traces of 16 steps (~22 s), 7 witnesses reached.
   `MUTANT_STEPS=14 MUTANT_SAMPLES=2000 python3 mutants/run.py chain`: 20 of 20 killed (6 by invariant, 14 by scenario test).
-- `MODULES=settle ./check.sh`: typecheck, 12 scenario tests, `wsafe` (chain's `safe` plus `no_dead_commit`, `no_lost_pay`,
-  `claims_conserved`, `book_enforceable`, `hostage_free`) over simulated traces of 25 steps, all settle witnesses reached.
-  `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 16 of 16 killed (7 by invariant, 9 by scenario test).
+- `MODULES=settle ./check.sh`: typecheck, 13 scenario tests, `wsafe` (chain's `safe` plus `no_dead_commit`, `no_lost_pay`,
+  `claims_conserved`, `book_enforceable`, `hostage_free`, `baseline_clears`) over simulated traces of 25 steps, all settle witnesses reached.
+  `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 18 of 18 killed (7 by invariant, 11 by scenario test).
   One invariant hunt (`forged-baseline-invariant`) needs 20000 traces of 30 steps: the schedule that reaches it is long.
 - Tools: `@informalsystems/quint` 0.33.0, Apalache 0.62.1 (fetched by `quint verify`), Java 21. The rust
   simulator backend cannot be fetched (`Release v0.7.0 not found: Failed to fetch from GitHub: Forbidden`); use

@@ -25,8 +25,8 @@
       "id": "c1-epoch-not-advanced",
       "why": "C1: finalize does not advance the epoch, so the same proofs stay valid",
       "file": "chain.qnt",
-      "old": "acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0 }",
-      "new": "acct' = { nonce: newNonce, epoch: acct.epoch, coll: 0, ondelta: 0 }",
+      "old": "acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0, via: 0 }",
+      "new": "acct' = { nonce: newNonce, epoch: acct.epoch, coll: 0, ondelta: 0, via: 0 }",
       "killedBy": "test:oldEpochProofIsDeadTest"
     },
     {
