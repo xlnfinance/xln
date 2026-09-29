@@ -98,7 +98,7 @@ describe("every deploy path runs the gate", () => {
 
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
-  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "write-vectors.ts"];
+  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts"];
   const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
