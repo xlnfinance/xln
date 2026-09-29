@@ -95,6 +95,15 @@ same way (a Left deposit raises ondelta and collateral by the amount, so Left's 
 put in; a Right deposit raises collateral only, so Right's share, collateral minus Δ, grows). Conservation is "reserves + collateral never change" for a single Account.
 Source: Account.sol cooperative update (leftDiff + rightDiff + collateralDiff = 0, line 1559).
 
+**Q-L-5. What each rule DID (step properties, review of PR #41).**
+A property of a world cannot see a rule that moves the wrong amount in the wrong direction and still
+lands on a world with RCPAN (the guard and the invariant are one formula). The checker now takes
+`:steps`, properties over (world, rule, side, next world), and the ledger states what each rule does
+from the formula: a payment moves the payer's allocation by exactly its amount; a resolved clause
+moves Δ against its payer; a lapsed clause moves nothing; R2C/C2R move one unit between reserve and
+collateral and a Left deposit is Left's allocation; a credit change changes only the limit. Planted
+bugs: `pay-wrong-way`, `resolve-wrong-side`, `expire-pays`, `deposit-no-ondelta`.
+
 ## Dispute (`dispute/dispute.scm`)
 
 Contract refs: A = Account.sol, D = Depository.sol, X = DeltaTransformer.sol on branch
@@ -121,15 +130,18 @@ ends on a losing proposal". Runtime rule that follows: a starter starts with the
 holds, always; and a party that loses a cross-open keeps its own losing signature in mind.
 Source: A:1478-1483, Types.sol:150, lessons R-A1.
 
-**Q-D-3. Late ack: the proposer's newest proof can be one behind (finding).**
+**Q-D-3. Late ack: a dispute pays what both sides had committed only if the ack beats the window.**
 A frame commits when the receiver signs, so the proposer holds the receiver's signature one message
 later. A counterparty that starts a dispute with the previous state in that gap leaves the proposer
-holding only the older proof; if the ack arrives after T it is of no use. The safety properties
-freeze the responder's holdings at T (a late ack is not one it could have used). This is a real
-exposure bounded by the response window against message delay, not a contract defect: the window
-floor (H2, 60 s on testnet) has to be far above the worst message delay, and a proposer should
-treat its unacked frame as enforceable by the peer only.
-Source: A:1466, design/account-model.md P5.
+holding only the older proof; if the ack arrives after T it is of no use. This is a real exposure,
+not a contract defect. It is now a stated assumption and a property, not a finding inside a
+question: ASSUMPTION `ack-in-window?` (the ack delay is shorter than the response window; the tick
+is blocked while an ack is pending and the next tick would reach T), and PROPERTY "a dispute pays
+what both sides had committed: the final proof ranks at least the newest frame proposed by T".
+Planted bug `late-ack` drops the assumption and the property fails (propose n1, ack, propose n2,
+start n1R, two ticks, finalize on n1R). The window floor (H2, 60 s on testnet) has to be far above
+the worst message delay, and a proposer treats its unacked frame as enforceable by the peer only.
+Source: A:1466, design/account-model.md P5; review of PR #41 (the literal form fails).
 
 **Q-D-4. Epoch advance and the pre-signed baseline (coordinator N1, revised 17:21).**
 Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872), with one exception: every frame
@@ -155,7 +167,7 @@ interval. Choice: (a), it is what the fixed contracts do.
 Source: A:1802-1805, A:1466, GAP-4, GAP-5.
 
 **Q-D-6. Time.**
-An abstract integer clock, `tick` by one, bounded by `max-time` (default 3). A dispute may only
+An abstract integer clock, `tick` by one, bounded by `max-time` (default 2). A dispute may only
 start if T fits in the horizon, so the liveness goal is "a dispute settles, or the clock ran out".
 Real windows are seconds; only the order of S, T, deadlines and reveal times matters.
 
@@ -198,10 +210,60 @@ Source: coordinator decision H4, A:1216-1275, D:757-768.
 **Q-D-11. Not in the page.**
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
-tokens. Model bounds: 3 script states, one rival, one HTLC, two windows of 1, `max-disputes` 1,
-`max-time` 2 (a dispute must start at the first tick). Capacity: 4029 states, 7686 transitions, about
-100 seconds. With H4 deposits and the baseline proofs, max-time 3 exceeded the 300 s default budget;
-before them, max-time 3 was 5220 states and max-time 4 was 9814 states (300+ s).
+tokens. Model bounds: 5 scripted frames (one refused by RCPAN), one rival, one HTLC, two windows of 1,
+`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 9771 states,
+16667 transitions, 5430 goals, about 4 minutes alone. The review measured `max-time 3` with the HTLC
+deadline at 2 on the 3-frame script (10120 states, 331 s): the earlier note that it "exceeded the
+budget" was the tool's timeout (now 600 s), not a checker limit. Not modelled yet, listed by the
+review: secrets carried in the dispute call (#37), the N1 settlement branch and nonce continuity
+after an epoch advance, N2, H3, and a second dispute (`max-disputes` 2), so the pre-signed baseline
+is held but never presented.
+
+**Q-D-13. The proofs are built by the frame rules, not listed (review of PR #41).**
+Before, proofs were ids into a table of states the author chose: "both sides sign the same proof"
+was a tautology and "credit holds" held because of the chosen numbers. Now a frame is a tx (`pay`,
+`lock`, `unlock-pay`) that each side applies to ITS OWN committed proof; the proposer signs its
+body, the receiver recomputes and signs only if the bodies are equal and RCPAN holds on it
+(`receiver-accepts?`, `rcpan-ok?`). The last tx of the script (Left pays 3 more) breaks RCPAN and
+is refused. Planted bugs: `blind-sign` (the receiver signs a body that differs from the
+proposer's: "both sides sign the same proof" fails right after the ack) and `no-rcpan` (nobody
+checks: the payment goes through and a dispute books debt 3 against a credit of 1: "credit holds"
+fails). The full composition with the Account frames page (lost messages, refusals) is still open:
+this page has one FIFO stream of frames and a fixed script.
+Source: review of PR #41 (properties 2 and 3 of the done list).
+
+**Q-D-14. The honest responder waits for its own ack.**
+An honest non-starter closes a dispute early (5b, 5c) only if no ack of a frame it proposed is on
+its way: that ack brings it a better proof. Without this guard the responder ends the dispute on
+the starter's stale proof while the newest frame, which both sides committed, is unacked, and the
+literal property of Q-D-3 fails. Same family as the assumption of Q-D-1.
+
+**Q-D-15. Properties restated from the contract's rule (review of PR #41).**
+Five properties are written from the contract text and not through the page's own helpers, so a
+wrong Δ or a wrong nonce cannot hide: no reserve, collateral or debt is negative (`shortfall-uncapped`);
+Δ = ondelta + offdelta, less the clause if it paid (`delta-drops-ondelta`, `htlc-sign-flipped`); a
+clause pays exactly when its secret was public by the deadline (`secret-strict`, `secret-any-time`);
+a counter is registered strictly before T; a timeout finalize consumes one nonce and an adopted
+proof sets it (`chain-nonce-stale`). The counter-at-T mutant of the review is EQUIVALENT under the
+assumption of Q-D-1: the clock cannot reach T while the responder holds a better proof, so a counter
+at T never arises; the property stays, and no planted bug is kept for it. To make it bite, weaken
+the assumption (a responder that may be late), which is what `no-floor` does.
+
+**Q-D-16. A hasty close is the responder's own harm.**
+The contract lets the non-starter close before T (5b, 5c) while an ack of a frame it proposed is
+still on its way. Then it ends on the starter's older proof. The record marks it `:hasty` and the
+"pays what both sides had committed" property skips it; "after an epoch advance each side still
+holds a valid proof of the new epoch" covers it, and is what keeps the baseline nonce at frame + 3
+(planted bug `baseline-too-low`).
+
+**Q-D-17. Every dispute window is greater than LAG (R-C11, coordinator 18:57).**
+LAG is the time to read a J event and get an op included. The responder sees a start at S + LAG and
+its counter lands LAG later, so a window at or below LAG leaves it no time. The floor is
+window > LAG on every proof (testnet: 60 s, far above LAG), stated next to H2. The page has `lag`
+(0: LAG is below one model tick, the tick being the smallest window) and a counter that must LAND
+before T (now + LAG < T). Planted bug `window-below-lag` (LAG one tick, no floor): the responder
+cannot answer a stale start and "the responder is never worse off than the newest proof it held"
+fails. With LAG at a tick and correct windows of 2 the page would need `max-time` 4: not run.
 
 ## Entity consensus (`entity/consensus.scm`)
 
@@ -211,6 +273,9 @@ Options: (a) refuse it and keep the proposal (xln.ts today, `commit_conflict`, p
 Choice: (b). With (a) the replica is stranded at the old height while the others move on: the planted
 bug `commit-conflict` fails "can always still finish" in the trace propose A, timeout B, propose B.
 Half of (b), dropping the proposal but forgetting its txs, loses them (`drop-txs-on-conflict`).
+"Its txs ride in a later frame" is now CHECKED: the page runs two heights with the goal "every
+submitted tx is committed everywhere" (before, one height could only show the tx stayed in a
+mempool). That check needed the two rules of Q-E-6 and Q-E-7.
 Source: lessons R-E3/B-E1, xln.ts 28693-28705 and 29137.
 
 **Q-E-2. View change.**
@@ -235,8 +300,28 @@ as the `forward` rule; committed txs leave the mempool at install.
 **Q-E-5. Not in this page.**
 Message loss and reordering beyond "delivered in any order" (the Account page covers loss), hashes and
 Hanko bytes, `heldQuorum` (signatures before the frame), J-prefix rounds inside consensus (27865-28300,
-see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm). Bounds: one height, one
-tx each for A and B. Capacity: 778 states, 2565 transitions, about 15 seconds.
+see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm), the `locked` phase
+(with 3 validators and quorum 2 the second signer always commits; `quorum 3 of 3` would give a real
+locked state and make a conflict against a locked replica testable; not done), `notSuperseded` (leader
+votes and certificates). Bounds: two heights, one tx each for A and B, one view change. Capacity:
+6726 states, 29745 transitions, 2060 goals, about 4 minutes.
+
+**Q-E-6. View sync after R-E3 (found at two heights).**
+The replica that dropped its proposal installs the other leader's frame but stays in the old view;
+its next frame is refused by the others, who are in the new view, and nobody sends its txs to the
+new leader (trace: propose A, timeout B, propose B, C signs B's frame, A installs and is stranded).
+Options: (a) the certified frame carries its view and installing it moves the replica to at least
+that view; (b) the replica resends to every leader it has seen. Choice: (a). Planted bug
+`no-view-sync`. xln.ts: not checked whether a certified proposal moves the replica's view; ask.
+Source: review of PR #41.
+
+**Q-E-7. A proposal for a height not yet reached.**
+Second wedge at two heights: B proposes height 2 while A and C have not yet installed height 1; they
+consume and ignore it, B stays `proposed` and nothing resends. Options: (a) park the message until
+the replica reaches that height (the `proposal_wait` of xln.ts, 28797); (b) the proposer resends on
+a timer. Choice: (a), for proposals and certified frames alike. Planted bug `drop-future`. Whether
+xln.ts parks or drops depends on the runtime's handling of `proposal_wait`; not traced.
+Source: review of PR #41.
 
 ## Entity frame (`entity/frame.scm`)
 
@@ -324,6 +409,27 @@ one abort, time 0..2, deadline 1, no chain faults (`faults` 0). With one fault (
 reverts a batch) the page exceeds the 300 s budget. Capacity: 5262 states, 17049 transitions, about
 85 seconds.
 
+**Q-J-8. A stale or already applied dispute op is skipped, not a revert (R-J2, coordinator 18:57).**
+Before: any op that could not apply reverted the whole batch (Depository.processBatch is atomic and
+has no per-op failure). Now: a dispute op that is stale (its Account's dispute was finalized) or
+already applied is SKIPPED with an event and the other ops of the batch land. The H1 wait (a
+finalize whose HTLC deadline is open) is not covered by this rule: it still reverts, so N2 stands
+(a finalize goes alone). The page has a dispute op `cnt-a` that goes stale once `fin-a` applied; the
+event names applied and skipped ops, and the entity treats both as done. Planted bug `stale-reverts`
+(the contracts today): a batch of a stale op and a deposit reverts and the deposit is held up. The
+contracts have to change to match; this page is the statement of what they must do.
+Source: coordinator R-J2; contracts D:329-575.
+
+**Q-J-9. A signed batch never expires (R-NONCE, coordinator 18:57): adopted, not modelled.**
+Rule: an urgent op is sent in a batch at a fresh nonce and never relies on an older signed batch not
+landing first. Why it is not in the page: the chain here accepts only nonce + 1, so an aborted batch
+and its replacement collide at one nonce and whichever lands first wins (the quarantine path of the
+page). A fresh nonce (above every nonce ever signed) needs the chain to accept any nonce above the
+current one, and then an aborted batch can land first and its ops must be "already applied" for the
+new batch: R-J2's skip is what makes that safe. Open: the contract change (nonce > current) and the
+recovery that follows. Property to state when the chain accepts it: no op is applied twice, and an
+urgent op lands whatever older signed batches do.
+
 ## Runtime (`runtime/tick.scm`)
 
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
@@ -354,6 +460,14 @@ entity/routing.scm).
 
 **Q-R-5. An input the crash caught before its commit.**
 It comes back from the network (peers resend; Account page). Planted bug `drop-uncommitted-input`.
+
+**Q-R-7. A frame is persisted before any of its outputs leave (R-DURABLE, coordinator 18:57).**
+A crash between send and persist would equivocate: the peer holds an output of a frame that the
+recovered Runtime no longer has, and may build a different one. Adopted; the page already states it
+as "outputs leave only after their WAL row is committed" (planted bug `send-before-commit`). What it
+does not check is equivocation itself: the abstract output is a function of the input, so a
+re-applied input reproduces the same output. Making the state and the timestamp part of the output
+would make that visible. Not done.
 
 **Q-R-6. Not in the page.**
 The entity-height durability barrier, atomic cross-j pairs, the bounded drain of local commands (cycle
@@ -403,6 +517,11 @@ payer's own fail-back, the onward Account also in dispute. Bounds: one hop, amou
 time 7. Capacity: 4698 states.
 
 ## Checker (`lib/check.scm`)
+
+**Q-C-3. Step properties.**
+`:steps` is an optional list of `step-property` (world, rule name, side, next world). A page states
+what each rule did, from the formula (money/ledger.scm). Gotcha found on the way: a lambda parameter
+named `rule` reads as nil (it shadows the macro), so step properties take `rname`.
 
 **Q-C-1. What does "live" mean?**
 Choice: no fairness model. The check is "from every reachable world, a goal world is still
@@ -487,16 +606,20 @@ Each line is what the first page would have to decide.
 
 ## Decided by the coordinator (rules the spec carries; not open)
 
+The N1 below is the FIRST version (15:19). The revised N1 (17:21) replaces it: a baseline proof for
+epoch + 1 is co-signed with every frame (offdelta 0, no clauses), nonce = frame nonce + 3, so an
+epoch advance never leaves an honest side without a valid proof and payments do not pause. See Q-D-4.
+
 Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 
-- **N1. Epoch.** A party signs a proof only for the CURRENT on-chain `ondeltaEpoch`. Signing for
-  epoch+1 in advance is unsafe: a dispute finalize can reach that epoch with no settlement. After
-  any event that advances the epoch (settlement, C2R, dispute finalize) off-chain payments on
-  that Account pause until the new baseline proof is co-signed. Belongs in the Account state machine.
+- **N1 (first version, replaced).** A party signs a proof only for the CURRENT on-chain
+  `ondeltaEpoch`; after an epoch advance payments pause until a new baseline is co-signed.
 - **N2. Deadlines.** One open HTLC deadline reverts a whole batch at finalize, so the runtime
   submits finalizes per Account, never bundled. A party refuses to sign an HTLC whose deadline is
   beyond its own tolerance (a named policy parameter, not a protocol constant).
 - **N3. Windows.** The response windows are fixed per Account at open; every proof of that Account
   carries the same values. Both are at least MIN_RESPONSE_SECONDS (60 on testnet; contracts H2).
+- **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
+- **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.

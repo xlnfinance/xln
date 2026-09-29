@@ -2,10 +2,10 @@
 ;; nonce unchanged), and finalizes are bundled so a batch can fail half way. The retry applies
 ;; the deposit again.
 (define (pick-ops draft) draft)
-(define (revert w b)
+(define (revert w b fault?)
   (let ((partial (let loop ((rest (:ops b)) (acc w))
                    (if (or (null? rest) (not (op-ok? acc (car rest) (:reserve acc))))
                        acc
                        (loop (cdr rest) (apply-op acc (car rest)))))))
     (update-in partial (list :reverts)
-               (lambda (r) (let ((rec (dict :ops (:ops b) :now (:now w)))) (if (member rec r) r (append r (list rec))))))))
+               (lambda (r) (let ((rec (dict :ops (:ops b) :now (:now w) :stale-only? #f))) (if (member rec r) r (append r (list rec))))))))

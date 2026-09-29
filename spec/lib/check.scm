@@ -3,6 +3,7 @@
 ;;         :next (world -> list of (dict :label :world))
 ;;         :invariants (list of property)     ; hold in every reachable world
 ;;         :at-rest (list of property)        ; hold where no rule applies
+;;         :steps (list of step-property)     ; optional: hold for every transition (world, rule name, side, next world)
 ;;         :goal (world -> bool))             ; optional: "done"
 ;; Breadth-first, so a counterexample trace is a shortest one.
 ;;
@@ -46,6 +47,21 @@
 
 (define (broken props w) (find (lambda (p) (not ((:holds p) w))) props))
 
+;; step properties look at a transition: (:holds p) takes the world, the rule's name, the side
+;; that acted and the next world. They see what a rule DID, which no property of a world can.
+(define (steps-of spec) (if (dict-has-key? spec :steps) (:steps spec) (list)))
+(define (broken-step props w s)
+  (find (lambda (p) (not ((:holds p) w (:name s) (:side s) (:world s)))) props))
+;; the first successor that breaks a step property, as (property . successor), or #f
+(define (first-broken-step props w succ)
+  (if (null? props)
+      #f
+      (let scan ((ss succ))
+        (if (null? ss)
+            #f
+            (let ((p (broken-step props w (car ss))))
+              (if p (cons p (car ss)) (scan (cdr ss))))))))
+
 ;; oldest first, root included
 (define (path recs n idx)
   (let up ((r (rec-at recs n idx)) (acc (list)))
@@ -59,6 +75,13 @@
           :trace (map rec-label (cdr steps))
           :state (rec-world (car (reverse steps))))))
 
+;; a step property broken by the transition from world idx to `s`: the trace ends with that step
+(define (step-violation name recs n idx s)
+  (let ((steps (path recs n idx)))
+    (dict :ok #f :violated name
+          :trace (append (map rec-label (cdr steps)) (list (:label s)))
+          :state (:world s))))
+
 ;; One breadth-first level: every frontier entry (list idx world) is checked, then its
 ;; successors are folded in. Returns the next graph, or (dict :bad violation).
 (define (level-step spec frontier seen recs edges n transitions)
@@ -70,9 +93,12 @@
                (w    (cadr (car entries)))
                (succ ((:next spec) w))
                (bad  (or (broken (:invariants spec) w)
-                         (and (null? succ) (broken (:at-rest spec) w)))))
-          (if bad
-              (dict :bad (violation (:name bad) recs n idx))
+                         (and (null? succ) (broken (:at-rest spec) w))))
+               (bad-step (and (not bad) (first-broken-step (steps-of spec) w succ))))
+          (if (or bad bad-step)
+              (dict :bad (if bad
+                             (violation (:name bad) recs n idx)
+                             (step-violation (:name (car bad-step)) recs n idx (cdr bad-step))))
               (let steps ((ss succ) (seen seen) (recs recs) (edges edges) (n n) (fresh fresh))
                 (if (null? ss)
                     (nodes (cdr entries) seen recs edges n (+ tr (length succ)) fresh)
@@ -157,5 +183,5 @@
   (append-map (lambda (side)
                 (->> rules
                      (filter (lambda (r) ((:when r) w side)))
-                     (map (lambda (r) (dict :label (str (:name r) " " side) :world ((:then r) w side))))))
+                     (map (lambda (r) (dict :label (str (:name r) " " side) :name (:name r) :side side :world ((:then r) w side))))))
               sides))

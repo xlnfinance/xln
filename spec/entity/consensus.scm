@@ -20,6 +20,15 @@
 ;;   R-E3 (chosen here): the replica drops its proposal, installs the certified frame, and its
 ;;   txs, still in the mempool, ride in a later frame.
 ;;
+;; Two rules the two-height model needs (found by the review of PR #41; QUESTIONS Q-E-6, Q-E-7):
+;;   view sync   a certified frame carries the view it was certified in; installing it moves the
+;;               replica to at least that view. Without it the replica that dropped its proposal (R-E3)
+;;               sits in the old view, its next frame is refused by the others, and nobody sends its
+;;               txs to the new leader.
+;;   parking     a proposal or a certified frame for a height above the replica's next one is not
+;;               consumed and not dropped: it waits until the replica reaches that height (the
+;;               `proposal_wait` of xln.ts). Dropping it strands the proposer, which has no resend.
+;;
 ;; Abstractions: messages are never lost or reordered beyond "delivered in any order"; the
 ;; view-change certificate is not modelled (a validator moves view by itself), which only adds
 ;; behaviours; the signature is the signer's name; hashes are the frame itself. One shared frame
@@ -28,7 +37,7 @@
 ;; Needs lib/vocabulary.scm and lib/check.scm.
 
 (define/overridable max-view   (s/number) 1)
-(define/overridable max-height (s/number) 1)
+(define/overridable max-height (s/number) 2)
 (define/overridable a-txs (s/array (s/string)) (list "a"))
 (define/overridable b-txs (s/array (s/string)) (list "b"))
 
@@ -76,6 +85,11 @@
       (assoc-in (list :signed) #f)))
 
 (define (certified-here? r f) (= (frame-height f) (next-height r)))
+(define (adopt-view w side v) (update-in w (list side :view) (lambda (cur) (max cur v))))
+;; a message for a height the replica has not reached yet waits in the network
+(define (parked? r m)
+  (and (or (equal? (:kind m) :prop) (equal? (:kind m) :commit))
+       (> (frame-height (:frame m)) (next-height r))))
 
 ;; ---- rules
 (define propose
@@ -108,15 +122,15 @@
     (if (and (>= (:view m) (:view r)) (certified-here? r f) (not (:signed r)))
         ;; sign; leader + me is a quorum, so commit and tell the others
         (-> w (assoc-in (list side) (install (assoc-in r (list :view) (:view m)) f))
-              (send (msgs-to side (lambda (to) (dict :kind :commit :frame f :to to)))))
+              (send (msgs-to side (lambda (to) (dict :kind :commit :frame f :view (:view m) :to to)))))
         w)))
 
 ;; a certified frame reaches me
 (define (on-commit w side m)
   (let ((r (side w)) (f (:frame m)))
     (cond ((not (certified-here? r f)) w)
-          ((and (:proposal r) (not (equal? (:proposal r) f))) (on-conflict w side f))
-          (else (assoc-in w (list side) (install r f))))))
+          ((and (:proposal r) (not (equal? (:proposal r) f))) (on-conflict (adopt-view w side (:view m)) side f))
+          (else (assoc-in (adopt-view w side (:view m)) (list side) (install (side (adopt-view w side (:view m))) f))))))
 
 ;; R-E3: drop my own proposal, adopt the certified frame; my txs are still in my mempool
 (define (on-conflict w side f)
@@ -130,7 +144,8 @@
 
 (define (deliver-nth i)
   (rule (str "deliver " i) (w side)
-    (when (and (< i (length (:net w))) (equal? (:to (list-ref (:net w) i)) side)))
+    (when (and (< i (length (:net w))) (equal? (:to (list-ref (:net w) i)) side)
+               (not (parked? (side w) (list-ref (:net w) i)))))
     (then (let* ((m (list-ref (:net w) i))
                  (w1 (update-in w (list :net) (lambda (net) (append (take net i) (list-tail net (+ i 1)))))))
             (case (:kind m)
@@ -167,13 +182,15 @@
                   (some (lambda (r) (and (:proposal (r w)) (member t (frame-txs (:proposal (r w)))))) replicas)
                   (some (lambda (m) (and (equal? (:kind m) :fwd) (equal? (:tx m) t))) (:net w))))
             all-txs))
+   (property "a signature is for the height being decided: it is dropped when that height is committed" (w)
+     (every (lambda (r) (or (not (:signed (r w))) (= (frame-height (:signed (r w))) (next-height (r w))))) replicas))
    (property "a validator signs one frame per height" (w)
      (every (lambda (r) (or (not (:proposal (r w))) (equal? (:proposal (r w)) (:signed (r w))))) replicas))))
 
-;; done: nothing is left to propose and every validator has committed the same history
+;; done: every validator has committed the same history and every submitted tx is in it
 (define (done? w)
   (and (every (lambda (r) (equal? (:committed (r w)) (:committed (:a w)))) replicas)
-       (>= (height (:a w)) max-height)))
+       (every (lambda (t) (member t (committed-txs (:a w)))) all-txs)))
 
 (define entity-consensus
   (dict :init init :next next :invariants invariants :at-rest (list) :goal done?))

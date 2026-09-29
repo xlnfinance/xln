@@ -115,4 +115,48 @@
      (and (<= (clause-sum w :left) (+ (total-delta w) (:credit-left w)))
           (<= (clause-sum w :right) (- (+ (:collateral w) (:credit-right w)) (total-delta w)))))))
 
-(define ledger (dict :init init :next next :invariants invariants :at-rest (list)))
+;; ---- step properties: what each rule DID, from the formula and not from the page's helpers.
+;; A world-only property cannot see a rule that moves the wrong amount in the wrong direction and
+;; still lands on a world that satisfies RCPAN (the guard and the invariant are one formula).
+(define (rule-is? prefix rname) (string-prefix? prefix rname))
+(define (clause-count w) (length (:clauses w)))
+(define (reserve-of w side) (get-in w (list :reserve side)))
+(define (same-money? w w2)
+  (and (= (reserve-of w :left) (reserve-of w2 :left)) (= (reserve-of w :right) (reserve-of w2 :right))
+       (= (:collateral w) (:collateral w2))))
+;; Left's allocation moves down when Left pays and up when Right pays
+(define (payer-sign side) (if (equal? side :left) -1 1))
+(define (rule-amount rname) (string->number (substring rname 4 5)))
+
+(define steps
+  (list
+   (step-property "pay n: the payer's allocation falls by n; nothing else moves" (w rname side w2)
+     (or (not (rule-is? "pay" rname))
+         (and (= (total-delta w2) (+ (total-delta w) (* (payer-sign side) (rule-amount rname))))
+              (same-money? w w2) (equal? (:clauses w) (:clauses w2)))))
+   (step-property "lock: Δ and the money stay, one clause of the payer is added" (w rname side w2)
+     (or (not (rule-is? "lock" rname))
+         (and (= (total-delta w2) (total-delta w)) (same-money? w w2)
+              (= (clause-count w2) (+ (clause-count w) 1))
+              (equal? (:payer (list-ref (:clauses w2) (clause-count w))) side))))
+   (step-property "resolve: the clause pays, Δ moves against its payer by its amount" (w rname side w2)
+     (or (not (rule-is? "resolve" rname))
+         (let ((c (list-ref (:clauses w) (string->number (substring rname 8 9)))))
+           (and (= (total-delta w2) (+ (total-delta w) (* (payer-sign (:payer c)) (:amount c))))
+                (same-money? w w2) (= (clause-count w2) (- (clause-count w) 1))))))
+   (step-property "expire: the clause lapses, Δ and the money stay" (w rname side w2)
+     (or (not (rule-is? "expire" rname))
+         (and (= (total-delta w2) (total-delta w)) (same-money? w w2)
+              (= (clause-count w2) (- (clause-count w) 1)))))
+   (step-property "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation" (w rname side w2)
+     (or (not (or (rule-is? "r2c" rname) (rule-is? "c2r" rname)))
+         (let ((dir (if (rule-is? "r2c" rname) 1 -1)))
+           (and (= (:collateral w2) (+ (:collateral w) dir))
+                (= (reserve-of w2 side) (- (reserve-of w side) dir))
+                (= (reserve-of w2 (peer side)) (reserve-of w (peer side)))
+                (= (total-delta w2) (+ (total-delta w) (if (equal? side :left) dir 0)))))))
+   (step-property "credit: only the credit limit changes" (w rname side w2)
+     (or (not (rule-is? "credit" rname))
+         (and (= (total-delta w2) (total-delta w)) (same-money? w w2) (equal? (:clauses w) (:clauses w2)))))))
+
+(define ledger (dict :init init :next next :invariants invariants :steps steps :at-rest (list)))

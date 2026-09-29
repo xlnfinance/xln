@@ -37,7 +37,11 @@ const cases = [
   { page: "money", name: "money ledger", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 820, transitions: 7094, goals: 0 }) },
   planted("money", "ignore open clauses in the guard", "ignore-clauses", "credit holds: RCPAN in the worst case over the open clauses"),
   planted("money", "credit lowered below usage", "credit-below-usage", "credit holds: RCPAN in the worst case over the open clauses"),
-  { page: "dispute", name: "dispute", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4029, transitions: 7686, goals: 2075 }) },
+  planted("money", "a payment moves the allocation the wrong way", "pay-wrong-way", "pay n: the payer's allocation falls by n; nothing else moves"),
+  planted("money", "a resolved clause lands on the wrong side", "resolve-wrong-side", "resolve: the clause pays, Δ moves against its payer by its amount"),
+  planted("money", "a lapsed clause pays out", "expire-pays", "expire: the clause lapses, Δ and the money stay"),
+  planted("money", "a Left deposit does not raise ondelta", "deposit-no-ondelta", "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation"),
+  { page: "dispute", name: "dispute", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 9771, transitions: 16667, goals: 5430 }) },
   planted("dispute", "finalize a stale start before T", "early-finalize", "the responder is never worse off than the newest proof it held"),
   planted("dispute", "no floor on the response windows", "no-floor", "the responder is never worse off than the newest proof it held"),
   planted("dispute", "Right outranks Left at an equal nonce", "tie-break-inverted", "an honest starter never ends on a losing proposal"),
@@ -45,10 +49,25 @@ const cases = [
   planted("dispute", "Left paid past the collateral", "payout-no-cap", "a dispute pays out what the selected state says: net left + Δ, net right + collateral - Δ"),
   planted("dispute", "proof of an old epoch still pays", "no-epoch", "only a proof of the current epoch pays out"),
   planted("dispute", "baseline of the next epoch too low", "baseline-too-low", "after an epoch advance each side still holds a valid proof of the new epoch"),
-  { page: "entity", name: "entity consensus", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 778, transitions: 2565, goals: 264 }) },
+  planted("dispute", "the receiver signs a body it did not recompute", "blind-sign", "both sides sign the same proof: proofs of one nonce, proposer and kind have one body"),
+  planted("dispute", "nobody checks RCPAN before signing a frame", "no-rcpan", "credit holds: what a side owes never exceeds the credit extended to it"),
+  planted("dispute", "an ack lands after the response window (Q-D-3)", "late-ack", "a dispute pays what both sides had committed: the final proof ranks at least the newest frame proposed by T"),
+  planted("dispute", "a response window at or below LAG (R-C11)", "window-below-lag", "the responder is never worse off than the newest proof it held"),
+  planted("dispute", "a shortfall taken past the reserve", "shortfall-uncapped", "no reserve, collateral or debt is ever negative"),
+  planted("dispute", "a secret at the deadline second does not pay", "secret-strict", "a clause pays exactly when its secret was public by the deadline"),
+  planted("dispute", "a secret after the deadline pays", "secret-any-time", "a clause pays exactly when its secret was public by the deadline"),
+  planted("dispute", "final Δ forgets ondelta", "delta-drops-ondelta", "Δ = ondelta + offdelta, less the clause if it paid"),
+  planted("dispute", "a paid HTLC moves Δ the wrong way", "htlc-sign-flipped", "Δ = ondelta + offdelta, less the clause if it paid"),
+  planted("dispute", "a timeout finalize does not consume a nonce", "chain-nonce-stale", "a timeout finalize consumes exactly one nonce; an adopted proof sets it"),
+  { page: "entity", name: "entity consensus", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 6726, transitions: 29745, goals: 2060 }) },
   planted("entity", "own proposal kept on a conflicting certified frame (og today)", "commit-conflict", "can always still finish"),
   planted("entity", "own proposal dropped, its txs forgotten", "drop-txs-on-conflict", "no submitted tx is lost"),
   planted("entity", "a validator signs two frames at one height", "double-sign", "agreement: no two validators commit different frames at a height"),
+  planted("entity", "installing a frame does not move the view (Q-E-6)", "no-view-sync", "can always still finish"),
+  planted("entity", "a proposal for a future height is dropped (Q-E-7)", "drop-future", "can always still finish"),
+  planted("entity", "installing a frame keeps its txs in the mempool", "install-keeps-mempool", "no tx is committed twice"),
+  planted("entity", "a forwarded tx already committed is queued again", "fwd-no-dedup", "no tx is committed twice"),
+  planted("entity", "a conflict keeps the signature on the old proposal", "conflict-keeps-signed", "a signature is for the height being decided: it is dropped when that height is committed"),
   { page: "frame", name: "entity frame", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 1770, transitions: 2228, goals: 1158 }) },
   planted("frame", "guards see the Account before the frame (two views)", "two-views", "credit holds: nothing sent, in flight or staged exceeds the cap and the credits received"),
   planted("frame", "txs folded before hooks", "txs-before-hooks", "hooks are queued before the frame's own txs (R-E2)"),
@@ -65,6 +84,7 @@ const cases = [
   planted("j", "a quarantined batch is never recovered (og, non-hub)", "no-recovery", "can always still finish"),
   planted("j", "an event does not clear the draft", "trust-the-draft", "no op is applied twice on chain"),
   planted("j", "a full draft halts the Entity (og)", "full-halts", "a full batch is a refusal, never a halt"),
+  planted("j", "a stale dispute op reverts the whole batch (R-J2)", "stale-reverts", "a stale or already applied dispute op is skipped, never a revert of the batch (R-J2)"),
   planted("j", "the chain applies half a batch", "partial-apply", "the chain is atomic: every applied op came from a batch that succeeded"),
   { page: "routing", name: "routing", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4698, transitions: 4932, goals: 0 }) },
   planted("routing", "no hop margin between the locks (R1)", "no-hop-margin", "H never pays B without being paid by A: a diligent hub cannot lose"),
@@ -88,7 +108,16 @@ if (only !== undefined) {
         error ? reject(new Error(`case ${i} (${cases[i].name}) failed:\n${stderr || stdout}`)) : resolve(JSON.parse(stdout)),
       ),
     );
-  const results = await Promise.all(cases.map((_, i) => run(i)));
+  // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The
+  // heavy cases (the pages themselves, no planted bug) start first.
+  const jobs = Number(process.env.TEST_JOBS ?? 4);
+  const order = cases.map((_, i) => i).sort((a, b) => Number(cases[a].extra.length > 0) - Number(cases[b].extra.length > 0));
+  const results = new Array(cases.length);
+  const next = { i: 0 };
+  const worker = async () => {
+    for (let k = next.i++; k < order.length; k = next.i++) results[order[k]] = await run(order[k]);
+  };
+  await Promise.all(Array.from({ length: jobs }, worker));
   results.forEach(({ name, result }) =>
     console.log(`ok   ${name}${result.trace ? ` — ${result.violated}\n       ${result.trace.join(" → ")}` : ` — ${result.states} states`}`),
   );

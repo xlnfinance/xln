@@ -51,7 +51,7 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 2 minutes: {:ok #t :states 3651 :transitions 11335 :goals 16}
-npm test               # about 2 minutes (4 cores): the page passes; each planted bug fails with its property
+npm test               # about 15 minutes (4 cores, a pool of TEST_JOBS=4): each page passes; each planted bug fails with its property
 ```
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
