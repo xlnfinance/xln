@@ -36,6 +36,9 @@ const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
   'node_modules',
 ]);
 
+// Generated output, plus trees this invariant does not govern: pure/ is the rewrite (its own
+// style gate), spec/arrival is a verbatim vendor of here-build/arrival, contracts/typechain-types
+// is generated like jurisdictions/typechain-types.
 const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.agents',
   '.archive',
@@ -50,6 +53,9 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.vscode',
   '.xln-db',
   'brainvault',
+  'contracts/artifacts',
+  'contracts/cache',
+  'contracts/typechain-types',
   'data/tmp',
   'db',
   'frontend/.svelte-kit',
@@ -68,7 +74,9 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'jurisdictions/typechain-types',
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',
+  'pure',
   'reports',
+  'spec/arrival',
   'ui',
 ]);
 
@@ -78,6 +86,7 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
+  'contracts/contracts': 16,
   'core/__tests__/runtime/ingress': 11,
   'core/__tests__/runtime/observability': 11,
   'core/entity/tx/handlers/account': 11,
