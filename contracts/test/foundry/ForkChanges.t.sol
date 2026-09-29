@@ -319,9 +319,9 @@ contract ForkChangesTest is XlnFixture {
     _submit(L, _settlementBatch(diffs, 3, _hanko(R, sh)));
     assertEq(_nonce(), 3);
 
-    // start at nonce == stored and below: E2
-    _submitExpectRevert(L, _startNow(L, 3, _body(0)), abi.encodeWithSelector(E2.selector));
-    _submitExpectRevert(L, _startNow(L, 2, _body(0)), abi.encodeWithSelector(E2.selector));
+    // start at nonce == stored and below: skipped (J2), not reverted; nothing moves
+    _submitSkipped(L, _startNow(L, 3, _body(0)), entity[R], T, OP_START, SKIP_NONCE_NOT_ABOVE_STORED, 3);
+    _submitSkipped(L, _startNow(L, 2, _body(0)), entity[R], T, OP_START, SKIP_NONCE_NOT_ABOVE_STORED, 2);
 
     // settlement at nonce == stored: E2 (signature is valid at the current epoch)
     bytes32 sh3 = XlnHanko.cooperativeUpdateHash(address(dep), _key(), 3, diffs, new uint256[](0));

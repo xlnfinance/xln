@@ -771,7 +771,8 @@ contract LifecycleTest is XlnFixture {
     assertEq(dep._reserves(right, T), 600);
   }
 
-  function test_disputeFinalizeTwiceReverts() public {
+  /// J2: a finalize replayed after the dispute closed is skipped (op 2, reason 2), not reverted, and moves nothing.
+  function test_disputeFinalizeTwiceIsSkipped() public {
     _fundCollateral(1_000);
     bool startedByLeft = entity[0] < entity[1];
     (uint256 nonce, bytes32 pbHash, bytes32 seed) = _startDispute(0, 1, int256(400));
@@ -780,14 +781,10 @@ contract LifecycleTest is XlnFixture {
     Batch memory fin = _timeoutFinalize(1, nonce, pbHash, seed, 400, startedByLeft);
     assertTrue(_submit(0, fin));
 
-    bytes memory encoded = abi.encode(fin);
-    uint256 bn = dep.entityNonces(entity[0]) + 1;
-    bytes32 bh = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[0], encoded, bn);
-    vm.expectRevert(); // E5 — no active dispute
-    dep.processBatch(entity[0], encoded, _hanko(0, bh), bn);
+    _submitSkipped(0, fin, entity[1], T, OP_FINALIZE, SKIP_NO_ACTIVE_DISPUTE, nonce);
   }
 
-  function test_disputeStartOverLiveDisputeReverts() public {
+  function test_disputeStartOverLiveDisputeIsSkipped() public {
     _fundCollateral(1_000);
     _startDispute(0, 1, int256(400));
 
@@ -811,11 +808,8 @@ contract LifecycleTest is XlnFixture {
       starterCounterProofCommitment: bytes32(0)
     });
 
-    bytes memory encoded = abi.encode(b);
-    uint256 bn = dep.entityNonces(me) + 1;
-    bytes32 bh = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[0], encoded, bn);
-    vm.expectRevert(); // E6 — dispute in progress
-    dep.processBatch(entity[0], encoded, _hanko(0, bh), bn);
+    // J2: a start beside a live dispute is skipped (op 0, reason 1); the open dispute stands.
+    _submitSkipped(0, b, other, T, OP_START, SKIP_DISPUTE_ACTIVE, nonce2);
   }
 
   /// @notice The counterparty may finalize immediately — it is accepting the

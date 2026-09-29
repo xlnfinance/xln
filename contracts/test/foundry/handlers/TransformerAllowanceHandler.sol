@@ -318,6 +318,9 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     }
     DisputeGhost memory g = disputes[pi];
     if (g.startTimestamp == 0) return;
+    // J2: a finalize for a dispute that is no longer open lands as a skip (DisputeOpSkipped), not a revert, and would be
+    // counted here as an accepted finalize with no delta. Only a live dispute is finalized by this handler.
+    if (!g.active || _disputeHash(entityOf[g.starter], entityOf[g.counter]) == bytes32(0)) return;
 
     bool byStarter = bySeed % 2 == 0;
     uint256 caller = byStarter ? g.starter : g.counter;

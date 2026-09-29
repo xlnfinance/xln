@@ -272,14 +272,19 @@ contract TransformerAllowanceInvariants is XlnFixture {
     dep.processBatch(entity[right], finFaultEncoded, _hanko(right, rightBatchH), rightNonce);
     assertTrue(_disputeHashOf(left, right) != bytes32(0), "fault finalize must leave the dispute live");
 
-    // 2) Starter after timeout: still reverts (fault modes are permanent).
+    // 2) Starter after timeout: still reverts (fault modes are permanent). The starter's batch names RIGHT as the
+    //    counterentity (the batch above, built for RIGHT, names LEFT: submitted by LEFT it would be a finalize on no
+    //    Account, which J2 skips instead of reverting).
     (, , uint256 timeout, , , , , , , , , , , , , , ) = dep._accounts(key);
     vm.warp(timeout + 1);
+    Batch memory finFaultByStarter = finFault;
+    finFaultByStarter.disputeFinalizations[0].counterentity = entity[right];
+    bytes memory finFaultStarterEncoded = abi.encode(finFaultByStarter);
     uint256 leftNonce = dep.entityNonces(entity[left]) + 1;
     bytes32 leftBatchH =
-      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[left], finFaultEncoded, leftNonce);
-    vm.expectRevert();
-    dep.processBatch(entity[left], finFaultEncoded, _hanko(left, leftBatchH), leftNonce);
+      XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[left], finFaultStarterEncoded, leftNonce);
+    vm.expectRevert(abi.encodeWithSignature("TransformerExecutionFailed()"));
+    dep.processBatch(entity[left], finFaultStarterEncoded, _hanko(left, leftBatchH), leftNonce);
     assertTrue(_disputeHashOf(left, right) != bytes32(0), "timeout fault finalize must leave the dispute live");
 
     // 3) Close via a NEWER counterparty-signed clean state: authored by LEFT

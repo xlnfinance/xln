@@ -1093,7 +1093,7 @@ describe('Depository', () => {
     expect(account.disputeTimeout).to.equal(0n);
   });
 
-  it('rejects historical cooperative signatures as a dispute bypass', async function () {
+  it('skips (does not apply) a historical cooperative signature offered as a dispute bypass', async function () {
     const { depository } = await loadFixture(deployFixture);
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -1153,10 +1153,19 @@ describe('Depository', () => {
     });
     const close = await signDepositoryBatch(depository, left.entityId, left.privateKey, closeBatch);
 
+    // J2: a finalize for an Account with no open dispute is skipped (op 2, reason 2), not reverted, and moves nothing.
+    const reservesBefore = [
+      await depository._reserves(left.entityId, tokenId),
+      await depository._reserves(right.entityId, tokenId),
+    ];
     await expect(
       depository.connect(left.signer).processBatch(close.entityId, close.encodedBatch, close.hankoData, close.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
+    ).to.emit(depository, 'DisputeOpSkipped').withArgs(left.entityId, right.entityId, 2n, 2n, finalNonce);
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+    expect([
+      await depository._reserves(left.entityId, tokenId),
+      await depository._reserves(right.entityId, tokenId),
+    ]).to.deep.equal(reservesBefore);
   });
 
   // ── implicit flash: Batch has no Flashloan[]; the initiator may spend ahead of

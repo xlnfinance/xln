@@ -2127,9 +2127,14 @@ describe('Depository', () => {
       left.privateKey,
       emptyBatch({ disputeStarts: [disputeStart] }),
     );
+    // J2: the replayed start is skipped (op 0, reason 0: the stored nonce already passed it), not reverted, and moves nothing.
     await expect(
       depository.connect(left.signer).processBatch(replay.entityId, replay.encodedBatch, replay.hankoData, replay.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
+    ).to.emit(depository, 'DisputeOpSkipped').withArgs(left.entityId, right.entityId, 0n, 0n, disputeNonce);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
+    expect((await depository._accounts(acctKey)).disputeHash).to.equal(ethers.ZeroHash);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(950n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(50n);
   });
 
   it('binds starter initial and counter dispute arguments independently', async function () {
