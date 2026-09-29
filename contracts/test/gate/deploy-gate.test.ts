@@ -99,7 +99,7 @@ describe("every deploy path runs the gate", () => {
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
   const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "write-vectors.ts"];
-  const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|broadcastTransaction\(|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
+  const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|tronWeb\.trx\.broadcast\(|broadcastTransaction\(|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const full = path.join(dir, name);
@@ -132,6 +132,9 @@ describe("every deploy path runs the gate", () => {
     expect(commands.filter((command) => /hardhat ignition/.test(command))).toEqual([]);
     const referenced = commands.flatMap((command) => [...command.matchAll(/(?:^|[\s&;])(?:bun|node|bash|sh)\s+scripts\/([\w./-]+)/g)].map((match) => match[1]!)).filter((file) => existsSync(path.join(scriptsRoot, file)));
     expect(referenced.filter((file) => !(file in entries) && !nonDeploying.includes(file))).toEqual([]);
+    // A `hardhat run` target anywhere (outside scripts/ too) must be a script that has an entry.
+    const hardhatTargets = commands.flatMap((command) => [...command.matchAll(/hardhat run\s+(?:--\S+\s+\S+\s+)*([^\s&;]+)/g)].map((match) => match[1]!));
+    expect(hardhatTargets.filter((target) => !(target.replace(/^\.?\/?scripts\//, "") in entries) || !target.replace(/^\.\//, "").startsWith("scripts/"))).toEqual([]);
   });
 
   for (const [script, cases] of Object.entries(entries)) {
@@ -143,7 +146,7 @@ describe("every deploy path runs the gate", () => {
       // Refused before any deployment step started.
       expect(output).not.toContain("preflight");
       expect(output).not.toContain("Deploying");
-    });
+    }, 240_000);
   }
 
   test("deploy-chain-matrix.cjs refuses --skip-compile on a mainnet", () => {
@@ -200,9 +203,17 @@ describe("every deploy path runs the gate", () => {
     expect(Object.values(root.scripts).filter((command) => /jurisdictions.*deploy-chain-matrix.*--profile=mainnet/.test(command))).toEqual([]);
   });
 
-  test("the exported deployTron gates on its own, before any RPC or key", async () => {
+  test("the exported deployTron gates on its own, before any network call", async () => {
     const { profiles, deployTron } = matrixModule;
-    await expect(deployTron(profiles.mainnet.tron, { dryRun: false, skipCompile: true })).rejects.toThrow(/Deploy gate: MIN_RESPONSE_SECONDS is 60s/);
-    await expect(deployTron(profiles.mainnet.tron, { dryRun: true })).rejects.toThrow(/Deploy gate/);
+    const calls: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: unknown) => { calls.push(String(input)); return Promise.reject(new Error("network call before the gate")); }) as typeof fetch;
+    try {
+      await expect(deployTron(profiles.mainnet.tron, { dryRun: false, skipCompile: true })).rejects.toThrow(/Deploy gate: MIN_RESPONSE_SECONDS is 60s/);
+      await expect(deployTron(profiles.mainnet.tron, { dryRun: true })).rejects.toThrow(/Deploy gate/);
+      expect(calls).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });
