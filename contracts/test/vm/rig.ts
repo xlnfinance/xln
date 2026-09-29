@@ -92,6 +92,17 @@ export type Body = {
 export const bodyStruct = (b: Body) => ({ ...b, offdeltas: b.offdeltas.map(encodeInt512), transformers: [] });
 export const bodyHash = (b: Body): string => ethers.keccak256(coder.encode([ethers.ParamType.from(PROOF_BODY_ABI)], [bodyStruct(b)]));
 
+const HANKO_ABI = ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])"];
+/** Wrap one raw 65-byte signature as a claims hanko that names `entityId`, whose board is the signer's 1-of-1 board. */
+export const claimsHanko = (rawSignature: string, entityId: string): string => {
+  const sig = ethers.Signature.from(rawSignature);
+  const vBits = new Uint8Array([sig.v === 28 ? 1 : 0]);
+  return coder.encode(HANKO_ABI, [[[], ethers.concat([sig.r, sig.s, ethers.hexlify(vBits)]), [[entityId, [0], [1], 1, 0, 0, 0]], []]]);
+};
+/** The board encoding EntityProvider registers a numbered entity with, for a 1-of-1 board of `address`. */
+export const singleSignerBoard = (address: string): string =>
+  coder.encode(BOARD_ABI, [[1, [ethers.zeroPadValue(address, 32)], [1], 0, 0, 0]]);
+
 export type Domain = { readonly chainId: bigint; readonly depository: string };
 
 export const acctKeyOf = (a: string, b: string): string =>

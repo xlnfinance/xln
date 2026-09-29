@@ -8,10 +8,12 @@ library HankoEncoding {
     bytes32 domainSeparator,
     uint256 chainId,
     address contractAddress,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) internal pure returns (bytes memory) {
-    return abi.encodePacked(domainSeparator, chainId, contractAddress, encodedBatch, nonce);
+    // entityId is fixed-width and encodedBatch is followed by a fixed-width nonce, so the packing is unambiguous.
+    return abi.encodePacked(domainSeparator, chainId, contractAddress, entityId, encodedBatch, nonce);
   }
 
   function encodeCooperativeUpdate(

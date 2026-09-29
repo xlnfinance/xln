@@ -368,7 +368,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "processBatch",
-    values: [BytesLike, BytesLike, BigNumberish]
+    values: [BytesLike, BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "registerExternalToken",
@@ -1162,7 +1162,12 @@ export interface DepositoryDebtHarness extends BaseContract {
   >;
 
   processBatch: TypedContractMethod<
-    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
+    [
+      entityId: BytesLike,
+      encodedBatch: BytesLike,
+      hankoData: BytesLike,
+      nonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -1416,7 +1421,12 @@ export interface DepositoryDebtHarness extends BaseContract {
   getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
-    [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
+    [
+      entityId: BytesLike,
+      encodedBatch: BytesLike,
+      hankoData: BytesLike,
+      nonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;

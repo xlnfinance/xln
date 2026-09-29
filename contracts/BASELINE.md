@@ -30,3 +30,35 @@ against these counts: no file may pass fewer tests than here.
 | test/protocol/ContractSize.test.ts | 3 passing | 0 failing |
 | test/protocol/HashLadder.test.ts | 4 passing | 0 failing |
 | test/protocol/HashLadderRegistry.test.ts | 0 passing | 23 failing |
+
+## After C1 and C2 (same runs, same toolchain)
+
+| file | passing before | passing after | failing before | failing after |
+|---|---|---|---|---|
+| test/dispute/DebtForgiveness.test.ts | 0 | 0 | 2 | 2 |
+| test/dispute/DeltaTransformer.test.ts | 1 | 1 | 9 | 9 |
+| test/dispute/Depository-part-1.ts | 28 | 7 **drop** | 22 | 43 |
+| test/dispute/Depository-part-2.ts | 3 | 1 **drop** | 12 | 14 |
+| test/dispute/DisputeHashVector.test.ts | 1 | 1 | 0 | 0 |
+| test/dispute/DisputeOndeltaLiveness.test.ts | 0 | 0 | 8 | 8 |
+| test/dispute/SecretRevealLiveness.test.ts | 1 | 1 | 0 | 0 |
+| test/dispute/SettlementFinality.test.ts | 1 | 0 **drop** | 0 | 1 |
+| test/governance/BoardRotationAuthority.test.ts | 6 | 0 **drop** | 0 | 6 |
+| test/governance/BoardRotationGrace.test.ts | 5 | 3 **drop** | 1 | 3 |
+| test/governance/ControlShares.test.mjs | 6 | 6 | 0 | 0 |
+| test/governance/EntityProvider.test.mjs | 13 | 13 | 0 | 0 |
+| test/governance/FoundationRegistry.test.ts | 1 | 1 | 0 | 0 |
+| test/governance/HankoAuthorization.test.ts | 23 | 18 **drop** | 0 | 5 |
+| test/governance/HankoMembers.test.ts | 7 | 7 | 0 | 0 |
+| test/governance/OnchainHankoDomain.test.ts | 0 | 0 | 0 | 0 |
+| test/governance/Redesign.test.ts | 10 | 10 | 0 | 0 |
+| test/governance/ReleaseHanko.test.ts | 1 | 1 | 0 | 0 |
+| test/protocol/CanonicalTransformerReveal.test.ts | 3 | 0 **drop** | 0 | 3 |
+| test/protocol/ContractSize.test.ts | 3 | 3 | 0 | 0 |
+| test/protocol/HashLadder.test.ts | 4 | 4 | 0 | 0 |
+| test/protocol/HashLadderRegistry.test.ts | 0 | 0 | 23 | 23 |
+
+The drops come from the two intended interface changes (spot-checked: BoardRotationAuthority and SettlementFinality fail with ethers "no matching fragment" for the old three-argument `processBatch`): `processBatch` now takes the acting entity as its first
+argument (C2), and the batch, dispute-proof and cooperative-update payloads changed (C1, C2), so every hash these suites
+sign or call `computeBatchHankoHash` with is now the old format. `contracts/test/vm/` covers the same paths against the
+new format and is the gate for these changes. Porting the inherited suites to the new interface is a separate change.

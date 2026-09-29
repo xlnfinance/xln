@@ -535,6 +535,7 @@ library Account {
 
   function _encodeBatchHankoPayload(
     bytes32 domainSep,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) private view returns (bytes memory) {
@@ -542,6 +543,7 @@ library Account {
       domainSep,
       block.chainid,
       address(this),
+      entityId,
       encodedBatch,
       nonce
     );
@@ -549,10 +551,11 @@ library Account {
 
   function computeBatchHankoHash(
     bytes32 domainSep,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) external view returns (bytes32) {
-    return keccak256(_encodeBatchHankoPayload(domainSep, encodedBatch, nonce));
+    return keccak256(_encodeBatchHankoPayload(domainSep, entityId, encodedBatch, nonce));
   }
 
   // Account is a linked library, so production entry points execute by

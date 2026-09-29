@@ -307,7 +307,8 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   mapping(bytes32 => uint256) public entityNonces;
 
   /// @notice Domain separator used when hashing Hanko payloads for verification.
-  bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
+  /// @dev V2: the batch payload binds the acting entity (see processBatch); V1 signatures are not valid here.
+  bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V2");
   bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
     keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
@@ -323,7 +324,10 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @notice Process a batch authorized by entity Hanko.
   /// @dev This is the canonical production write path.
   ///      Depository is bound to a single immutable EntityProvider at deploy time.
+  /// @param entityId The entity the batch acts for. The signed payload commits to it, and the hanko must verify to it:
+  ///        a signature made for one entity never runs as another entity that happens to share its board.
   function processBatch(
+    bytes32 entityId,
     bytes calldata encodedBatch,
     bytes calldata hankoData,
     uint256 nonce
@@ -337,13 +341,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       batch.counterDisputes,
       batch.disputeFinalizations
     );
-    bytes32 batchHash = Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce);
-    (bytes32 entityId, bool hankoValid) =
+    bytes32 batchHash = Account.computeBatchHankoHash(DOMAIN_SEPARATOR, entityId, encodedBatch, nonce);
+    (bytes32 recoveredEntity, bool hankoValid) =
       EntityProvider(entityProvider).verifyCurrentHankoSignature(
         hankoData,
         batchHash
       );
-    if (!hankoValid || entityId == bytes32(0)) revert E4();
+    if (!hankoValid || entityId == bytes32(0) || recoveredEntity != entityId) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
     _processBatch(entityId, batch);

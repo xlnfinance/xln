@@ -11,20 +11,22 @@ contract HankoCodec {
     bytes32 domainSeparator,
     uint256 chainId,
     address contractAddress,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) external pure returns (bytes memory) {
-    return HankoEncoding.encodeBatch(domainSeparator, chainId, contractAddress, encodedBatch, nonce);
+    return HankoEncoding.encodeBatch(domainSeparator, chainId, contractAddress, entityId, encodedBatch, nonce);
   }
 
   function computeBatchHankoHashForDomain(
     bytes32 domainSeparator,
     uint256 chainId,
     address contractAddress,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) external pure returns (bytes32) {
-    return keccak256(HankoEncoding.encodeBatch(domainSeparator, chainId, contractAddress, encodedBatch, nonce));
+    return keccak256(HankoEncoding.encodeBatch(domainSeparator, chainId, contractAddress, entityId, encodedBatch, nonce));
   }
 
   function encodeCooperativeUpdateHankoPayloadForDomain(

@@ -271,7 +271,7 @@ export interface AccountInterface extends Interface {
 
   encodeFunctionData(
     functionFragment: "computeBatchHankoHash",
-    values: [BytesLike, BytesLike, BigNumberish]
+    values: [BytesLike, BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeDisputeHash",
@@ -586,7 +586,12 @@ export interface Account extends BaseContract {
   ): Promise<this>;
 
   computeBatchHankoHash: TypedContractMethod<
-    [domainSep: BytesLike, encodedBatch: BytesLike, nonce: BigNumberish],
+    [
+      domainSep: BytesLike,
+      entityId: BytesLike,
+      encodedBatch: BytesLike,
+      nonce: BigNumberish
+    ],
     [string],
     "view"
   >;
@@ -637,7 +642,12 @@ export interface Account extends BaseContract {
   getFunction(
     nameOrSignature: "computeBatchHankoHash"
   ): TypedContractMethod<
-    [domainSep: BytesLike, encodedBatch: BytesLike, nonce: BigNumberish],
+    [
+      domainSep: BytesLike,
+      entityId: BytesLike,
+      encodedBatch: BytesLike,
+      nonce: BigNumberish
+    ],
     [string],
     "view"
   >;

@@ -79,7 +79,14 @@ export interface HankoCodecInterface extends Interface {
 
   encodeFunctionData(
     functionFragment: "computeBatchHankoHashForDomain",
-    values: [BytesLike, BigNumberish, AddressLike, BytesLike, BigNumberish]
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "computeBoardProposalCancelHankoHashForDomain",
@@ -204,7 +211,14 @@ export interface HankoCodecInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "encodeBatchHankoPayloadForDomain",
-    values: [BytesLike, BigNumberish, AddressLike, BytesLike, BigNumberish]
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeBoardProposalCancelHankoPayloadForDomain",
@@ -466,6 +480,7 @@ export interface HankoCodec extends BaseContract {
       domainSeparator: BytesLike,
       chainId: BigNumberish,
       contractAddress: AddressLike,
+      entityId: BytesLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
     ],
@@ -624,6 +639,7 @@ export interface HankoCodec extends BaseContract {
       domainSeparator: BytesLike,
       chainId: BigNumberish,
       contractAddress: AddressLike,
+      entityId: BytesLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
     ],
@@ -788,6 +804,7 @@ export interface HankoCodec extends BaseContract {
       domainSeparator: BytesLike,
       chainId: BigNumberish,
       contractAddress: AddressLike,
+      entityId: BytesLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
     ],
@@ -957,6 +974,7 @@ export interface HankoCodec extends BaseContract {
       domainSeparator: BytesLike,
       chainId: BigNumberish,
       contractAddress: AddressLike,
+      entityId: BytesLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
     ],
