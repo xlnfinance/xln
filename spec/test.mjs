@@ -22,7 +22,7 @@ const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra]
 const planted = (page, name, file, violated) => ({
   page,
   name: `planted: ${name}`,
-  extra: [`${page}/bugs/${file}.scm`],
+  extra: [`${pages[page].files[0].split("/")[0]}/bugs/${file}.scm`],
   expect: (r) => assert.equal(r.violated, violated),
 });
 
