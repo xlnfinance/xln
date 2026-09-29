@@ -22,6 +22,8 @@ import { DEFAULT_SPREAD_DISTRIBUTION } from "../../core/orderbook/types.ts";
 import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { unwrap } from "../xln_run.ts";
 import { tracing } from "./scenario-trace.ts";
+import { contractSet } from "./contracts.ts";
+import { shimBatchSubmission } from "./fork-shim.ts";
 import {
   bootChain,
   createLane,
@@ -75,7 +77,7 @@ const tokenOf = (x: number): TokenId => unwrap(tokenId(String(TOKEN_OF[x])));
 const HUB_OF = [HUB_SRC, HUB_TGT, HUB_SRC, HUB_TGT];
 
 type Chains = readonly [JAdapter, JAdapter];
-type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean };
+type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[] };
 
 const runCrossJ = async (seed: number): Promise<Coverages> => {
   const rand = prng(seed);
@@ -83,6 +85,14 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
   const tag = `SEEDX=0x${seed.toString(16)}`;
   const chains: Chains = [await bootChain(31337), await bootChain(31338)];
   const js = [jurisdictionOf(chains[0], "CrossJ Source"), jurisdictionOf(chains[1], "CrossJ Target")];
+  // og's batches reach the fork's contracts through the shim on each chain's VM (every Runtime's view shares it), and a
+  // batch either chain refuses fails the run: og logs it and carries on, which reads as agreement
+  const refusalsOf = chains.map((chain) =>
+    contractSet() === "contracts"
+      ? shimBatchSubmission(chain.getBrowserVM(), BigInt(chain.chainId), chain.addresses.depository, KEYS)
+      : () => [] as readonly string[],
+  );
+  const refusals = (): readonly string[] => refusalsOf.flatMap((r, i) => r().map((m) => `${tag} chain ${i}: ${m}`));
   const jOf = (x: number) => js[CHAIN_OF[x]!]!;
   const config = (x: number): ImportConfig => {
     const s = SIGNERS[x]!;
@@ -391,7 +401,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
       state.materialized ||= swapOf(HUB_SRC)?.sourcePull !== undefined && swapOf(HUB_TGT)?.targetPull !== undefined;
       state.settled = status === "settled" || status === "cancelled";
     }, Promise.resolve());
-    return { coverage, settled: state.settled, materialized: state.materialized };
+    return { coverage, settled: state.settled, materialized: state.materialized, refusals: refusals() };
   } finally {
     await Promise.all(accountWorkers.map((workers) => workers.close()));
     await [envU, envH].reduce(async (prev, env) => {
@@ -420,6 +430,7 @@ describe("scenario: a cross-jurisdiction swap across two Runtimes, og vs the rew
         `settled ${r.settled}, actions ${stableJson(r.coverage.actions)}`,
       );
       expect(r.coverage.frames).toBeGreaterThan(10);
+      expect(r.refusals).toEqual([]);
     }, 900_000);
   });
   test("a cross-j swap settles", () => {
