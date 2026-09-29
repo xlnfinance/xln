@@ -8,13 +8,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { stricterDeparture } from "./departures.ts";
+import { afterStricter, stricterDeparture, type FarLock, type FrameDiff } from "./departures.ts";
 import { TERMS, unwrap } from "../xln_run.ts";
 import {
-  HTLC_MIN_FORWARD_TIMELOCK_MS, HTLC_REVEAL_DELTA_BLOCKS, HTLC_TIMELOCK_DELTA_MS, LAG_BLOCKS, LAG_MS,
+  HTLC_MIN_FORWARD_TIMELOCK_MS, HTLC_REVEAL_DELTA_BLOCKS, HTLC_TIMELOCK_DELTA_MS, J_BLOCK_TIME_MS, LAG_BLOCKS, LAG_MS,
   MAX_LOCK_HORIZON_BLOCKS, MAX_LOCK_HORIZON_MS, accountId, accountTerms, applyAccountBody, entityId,
-  genesisAccount, genesisAccountBody, hashHtlcSecret, onwardDeadline, tokenId,
-  type AccountBody, type FoldCtx,
+  blocksSpanning, genesisAccount, genesisAccountBody, hashHtlcSecret, onwardDeadline, tokenId,
+  type AccountBody, type FoldCtx, type Runtime,
 } from "../xln.ts";
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -100,11 +100,23 @@ describe("lock horizon: the deadline a party accepts is bounded", () => {
 describe("HOP and LAG: the deltas come from the deployment's lag", () => {
   test("HOP is 2 * LAG, in time and in blocks, and today's deltas are unchanged", () => {
     expect(HTLC_TIMELOCK_DELTA_MS).toBeGreaterThanOrEqual(2 * LAG_MS);
-    expect(HTLC_REVEAL_DELTA_BLOCKS).toBeGreaterThanOrEqual(2 * LAG_BLOCKS);
-    expect(HTLC_TIMELOCK_DELTA_MS).toBe(2 * LAG_MS);
-    expect(HTLC_REVEAL_DELTA_BLOCKS).toBe(Math.ceil(2 * LAG_BLOCKS));
+    expect(HTLC_REVEAL_DELTA_BLOCKS).toBeGreaterThanOrEqual(blocksSpanning(2 * LAG_MS));
     expect(HTLC_TIMELOCK_DELTA_MS).toBe(10_000);
     expect(HTLC_REVEAL_DELTA_BLOCKS).toBe(3);
+    expect(HTLC_MIN_FORWARD_TIMELOCK_MS).toBe(20_000);
+  });
+
+  test("every delta derives from LAG_MS and the named block time, none is a literal of its own", () => {
+    expect(J_BLOCK_TIME_MS).toBe(5_000);
+    expect(LAG_BLOCKS).toBe(blocksSpanning(LAG_MS));
+    expect(HTLC_TIMELOCK_DELTA_MS).toBe(2 * LAG_MS);
+    expect(HTLC_REVEAL_DELTA_BLOCKS).toBe(blocksSpanning(2 * LAG_MS));
+    expect(HTLC_MIN_FORWARD_TIMELOCK_MS).toBe(2 * HTLC_TIMELOCK_DELTA_MS);
+    expect(MAX_LOCK_HORIZON_BLOCKS).toBe(Math.ceil(MAX_LOCK_HORIZON_MS / J_BLOCK_TIME_MS));
+  });
+
+  test("a span of time touches at most ceil(span / block) + 1 blocks: it starts anywhere inside one", () => {
+    expect([0, 1, J_BLOCK_TIME_MS, J_BLOCK_TIME_MS + 1, 2 * J_BLOCK_TIME_MS].map(blocksSpanning)).toEqual([1, 2, 2, 3, 3]);
   });
 
   test("every dispute window stays above LAG (C11): the contracts' floor and the default terms", () => {
@@ -113,5 +125,57 @@ describe("HOP and LAG: the deltas come from the deployment's lag", () => {
     expect(floor * 1000).toBeGreaterThan(LAG_MS);
     const { leftResponseSeconds, rightResponseSeconds } = TERMS.disputeConfig;
     expect(Math.min(leftResponseSeconds, rightResponseSeconds) * 1000).toBeGreaterThan(LAG_MS);
+  });
+});
+
+/**
+ * A stricter departure excuses only what the refused lock reaches (departures.ts afterStricter): the digests and rows
+ * that carry its proposer's Account frame, and that proposer's head. It also requires the rewrite to have refused it.
+ */
+describe("stricter departure: the walk reports everything the refused lock does not reach", () => {
+  const FAR = { type: "htlc_lock", data: { lockId: "0xfar", timelock: 1n, revealBeforeHeight: 1 } };
+  const at = { timestamp: 1_000_000, jHeight: 100 };
+  const far: FarLock = { departure: stricterDeparture({ ...FAR, data: { ...FAR.data, timelock: BigInt(at.timestamp + MAX_LOCK_HORIZON_MS + 1) } }, at)!, lockId: "0xfar", proposerName: "Bob" };
+  const diff = (what: string): FrameDiff => ({ what, text: `f9 ${what}: og=1 rw=2` });
+  /** A Runtime holding one Account whose locks, mempool and candidate frame are given, and a retained outbox. */
+  const runtime = (held: { locks?: readonly string[]; mempool?: readonly object[]; rows?: readonly object[] }): Runtime =>
+    ({
+      entities: new Map([["e", { accountReplicas: new Map([["p", {
+        _tag: "open", mempool: held.mempool ?? [], state: { locks: new Map((held.locks ?? []).map((l) => [l, {}])) },
+      }]]) }]]),
+      pendingNetworkOutputs: held.rows ?? [],
+    }) as unknown as Runtime;
+  const clean = runtime({});
+
+  test("the digests and rows that carry the proposer's frame are excused", () => {
+    const reached = ["head[Bob]", "entityHashes", "components", "postStateHash", "metaRows", "meta[3]", "routed", "remote", "remoteFrame"];
+    expect(afterStricter(reached.map(diff), far, clean)).toEqual([]);
+  });
+
+  test("a difference the lock does not reach is still reported", () => {
+    const unreached = ["height", "timestamp", "advanced", "deferred", "queued", "queueOrder", "head[Carol]"];
+    expect(afterStricter(unreached.map(diff), far, clean)).toEqual(unreached.map((w) => diff(w).text));
+  });
+
+  test("reached and unreached differences in one frame are told apart", () => {
+    expect(afterStricter([diff("components"), diff("head[Carol]"), diff("head[Bob]")], far, clean)).toEqual([diff("head[Carol]").text]);
+  });
+
+  test("no difference and no lock: the departure is clean", () => {
+    expect(afterStricter([], far, clean)).toEqual([]);
+  });
+
+  const carried: readonly (readonly [string, Runtime])[] = [
+    ["in an Account's locks", runtime({ locks: ["0xfar"] })],
+    ["in an Account's mempool", runtime({ mempool: [{ type: "htlc_lock", lockId: "0xfar" }] })],
+    ["in a retained outbox row", runtime({ rows: [{ entityTxs: [{ data: { proposal: { frame: { accountTxs: [{ type: "htlc_lock", data: { lockId: "0xfar" } }] } } } }] }] })],
+  ];
+  test.each(carried)("a rewrite that still carries the refused lock %s is reported", (_where, after) => {
+    const [reported] = afterStricter([diff("components")], far, after);
+    expect(reported).toContain("the rewrite still carries lock 0xfar");
+  });
+
+  test("another lock in the rewrite is not this one", () => {
+    expect(afterStricter([], far, runtime({ locks: ["0xnear"], mempool: [{ type: "htlc_lock", lockId: "0xnear" }] }))).toEqual([]);
   });
 });

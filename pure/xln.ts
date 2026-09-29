@@ -5123,20 +5123,29 @@ export const decodeOnionLayer = (bytes: Uint8Array): Result<OnionLayer, OnionErr
 // The source's lock gets the whole window; each forward shortens the timelock by one delta and reveals one step
 // of blocks earlier, so every hop can still claim upstream after its downstream reveals.
 /**
+ * The J block time, in ms, that block counts are derived from (og counts its async payment expiry at this rate).
+ * A span of time touches at most ceil(span / block) + 1 blocks, because it starts anywhere inside one.
+ */
+export const J_BLOCK_TIME_MS = 5_000;
+export const blocksSpanning = (ms: number): number => Math.ceil(ms / J_BLOCK_TIME_MS) + 1;
+/**
  * LAG, the deployment's lag: a J transaction is included, and its event read, within this long (spec: REACT = 2 * LAG,
- * HOP >= REACT between a hub's inbound and onward deadlines, every dispute window above LAG). 5 s and 1.5 blocks are
- * the defaults that reproduce og's deltas; the testnet value is set from a measured LAG before deploy.
+ * HOP >= REACT between a hub's inbound and onward deadlines, every dispute window above LAG). The testnet value is set
+ * from a measured LAG before deploy; every delta below moves with it. At 5 s and 5 s blocks they equal og's constants
+ * (10 s and 3 blocks per hop, 20 s at the first hop).
  */
 export const LAG_MS = 5_000;
-export const LAG_BLOCKS = 1.5;
+export const LAG_BLOCKS = blocksSpanning(LAG_MS);
+/** HOP = REACT = 2 * LAG: a hub reacts to a downstream reveal and still claims upstream before the inbound deadline. */
 export const HTLC_TIMELOCK_DELTA_MS = 2 * LAG_MS;
-export const HTLC_REVEAL_DELTA_BLOCKS = Math.ceil(2 * LAG_BLOCKS);
-export const HTLC_MIN_FORWARD_TIMELOCK_MS = 20_000;
+export const HTLC_REVEAL_DELTA_BLOCKS = blocksSpanning(2 * LAG_MS);
+/** The first hop keeps two hop deltas: its own claim and the next hop's reaction (og MIN_FORWARD_TIMELOCK_MS). */
+export const HTLC_MIN_FORWARD_TIMELOCK_MS = 2 * HTLC_TIMELOCK_DELTA_MS;
 export const HTLC_MAX_HOPS = 100;
 const INSTANT_PAYMENT_EXPIRY_MS = 120_000;
 const INSTANT_PAYMENT_EXPIRY_BLOCKS = 50;
 const ASYNC_PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
-const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / 5_000);
+const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / J_BLOCK_TIME_MS);
 /**
  * N2: no deadline beyond a party's own tolerance. Under H1 an Account with an open HTLC cannot finalize before its
  * deadline unless the secret shows up, so a lock signed for years holds the Account (and a forwarding hub's onward
@@ -5144,7 +5153,7 @@ const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / 5_000);
  * default: a week, above the 24 h async window, leaving room for a stuck route.
  */
 export const MAX_LOCK_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
-export const MAX_LOCK_HORIZON_BLOCKS = Math.ceil(MAX_LOCK_HORIZON_MS / 5_000);
+export const MAX_LOCK_HORIZON_BLOCKS = Math.ceil(MAX_LOCK_HORIZON_MS / J_BLOCK_TIME_MS);
 /** The reject and refusal reason of a deadline beyond the horizon (a stricter-than-og departure, departures.ts). */
 const DEADLINE_TOO_FAR = "deadline_too_far";
 export type ConditionalMode = "instant" | "async";
@@ -22863,7 +22872,7 @@ export const preparedEntryOf = (b: Binary, previousKey: string): PreparedHtlcEnt
  * The proposer's (or a validator's) inbound decryption view: the pre-frame Entity, the frame clock, the Entity keypair
  * and the liveness it asserts.
  */
-type HtlcInboundView = {
+export type HtlcInboundView = {
   readonly state: EntityState;
   readonly replicas: Replicas;
   readonly timestamp: number;
@@ -22964,7 +22973,9 @@ export const onwardDeadline = (
  * og materializeForwardOutcome: the next hop's Account, liveness, committed capacity, the hub fee and a safe onward
  * deadline, in that order.
  */
-const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer: ForwardLayer): PreparedHtlcEntry => {
+export const forwardOutcome = (
+  v: HtlcInboundView, binding: PreparedHtlcBinding, layer: ForwardLayer,
+): PreparedHtlcEntry => {
   const nextHopEntityId = layer.nextHop.toLowerCase();
   const child = v.replicas.get(nextHopEntityId as EntityId);
   if (child === undefined) return preparedReject(binding, "next_hop_account_missing");
