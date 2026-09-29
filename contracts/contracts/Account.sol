@@ -661,6 +661,12 @@ library Account {
     return _historicalEvidence(entityProvider, hanko, hash, expectedEntity);
   }
 
+  /// @dev The signer of dispute evidence is the counterentity of the entity submitting it. Left is the smaller entity id.
+  function _retiredSide(bool retired, bytes32 submitter, bytes32 signer) private pure returns (uint8) {
+    if (!retired) return 0;
+    return signer < submitter ? 1 : 2;
+  }
+
   /// @dev Verifies historical bilateral evidence. Previous-board signatures must remain valid during the grace window or
   /// a board rotation could erase an already signed account state before either side can enforce it. `retired` says the
   /// signature verifies only under a previous board; H3 settles such evidence clamped to the Account's collateral.
@@ -805,7 +811,7 @@ library Account {
           params.counterentity
         );
         if (!finalValid) revert E4();
-        account.disputeRetiredEvidence = finalRetired;
+        account.disputeRetiredSide = _retiredSide(finalRetired, entityId, params.counterentity);
         // Pull-free mutual consent still closes immediately. A newer state
         // containing Pulls must have been locked by processCounterDisputes
         // before T; accepting it for the first time at T would recreate the
@@ -881,7 +887,7 @@ library Account {
     account.starterCounterArgumentsCommitment = bytes32(0);
     account.starterCounterProofCommitment = bytes32(0);
     account.disputeStartedByLeft = false;
-    // disputeRetiredEvidence is left for Depository, which reads it to clamp this settlement and then clears it.
+    // disputeRetiredSide is left for Depository, which reads it to clamp this settlement and then clears it.
     // Finalization pays the Account out (collateral and ondelta reset), so every proof signed for the old baseline dies.
     _advanceOndeltaEpoch(_accounts, entityId, params.counterentity);
   }
@@ -1507,6 +1513,7 @@ library Account {
       params.counterentity
     );
     if (!counterValid) revert E4();
+    uint8 counterSide = _retiredSide(counterRetired, entityId, params.counterentity);
 
     uint256 selectedNonce = account.disputeCounterNonce;
     if (selectedNonce != 0) {
@@ -1518,6 +1525,9 @@ library Account {
         } else if (bodyHash != account.disputeCounterProofbodyHash) {
           revert IDepositoryDelegateErrorAbi.E9();
         } else {
+          // The same body again. Current-board evidence of it is strictly stronger than a retired signature of it, so
+          // a re-registration may upgrade the grade to none; it can never downgrade it.
+          if (counterSide == 0) account.disputeRetiredSide = 0;
           return;
         }
       }
@@ -1526,7 +1536,7 @@ library Account {
     account.disputeCounterProofbodyHash = bodyHash;
     account.disputeCounterProposerIsLeft = params.proposerIsLeft;
     // The registered counter-proof replaces the initial proof as the state that settles, so its grade replaces too.
-    account.disputeRetiredEvidence = counterRetired;
+    account.disputeRetiredSide = counterSide;
     account.disputeHash = _encodeDisputeHash(
       account.nonce,
       account.disputeStartedByLeft,
@@ -1812,10 +1822,10 @@ library Account {
     // the repudiation defence it provides.
     //
     // H3 caps the damage of the first attack without closing the second: evidence that verifies only under a retired
-    // board is accepted, and the dispute it starts settles clamped to [0, collateral] (Depository._finalizeAccount).
-    // The retired quorum can then never move more than the collateral already sitting in this one Account, and can
-    // never draw on reserves or create debt. The price is the unsecured part: credit beyond collateral that a retired
-    // board signed is not enforceable after a rotation. The design already calls that part unsecured.
+    // board is accepted, and the dispute it starts records which side's board was retired; Depository then refuses to
+    // settle a shortfall against that side from reserves (_capRetiredSide). The retired quorum can never draw on its
+    // entity's reserves or create debt for it, and the direction in which the retired entity is OWED is never clamped,
+    // so a rotation cannot be used by a debtor to forgive its own debt.
     (bool valid, bool retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
     if (!valid) revert E4();
 
@@ -1863,7 +1873,7 @@ library Account {
     _accounts[acct_key].starterCounterArgumentsCommitment = counterArgumentsCommitment;
     _accounts[acct_key].starterCounterProofCommitment = params.starterCounterProofCommitment;
     _accounts[acct_key].disputeStartedByLeft = startedByLeft;
-    _accounts[acct_key].disputeRetiredEvidence = retired;
+    _accounts[acct_key].disputeRetiredSide = _retiredSide(retired, entityId, params.counterentity);
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;

@@ -19,9 +19,9 @@ before it and passes after it.
 | C2 | `processBatch(entityId, ...)`, batch hanko binds the entity, domain V2 | `c2-batch-entity` |
 | H1 | finalize reverts `PaymentRevealWindowActive(deadline)` for an unrevealed HTLC until its deadline, unless the secret is public | `h1-htlc-deadline` |
 | H2 | both response windows of every proof body must be at least `MIN_RESPONSE_SECONDS` (60 s, testnet only; mainnet needs hours), else `ResponseWindowTooShort` | `h2-window-floor` |
-| H3 | evidence that verifies only under a retired board settles clamped to `[0, collateral]`: no reserves drawn, no debt | `h3-retired-board-cap` |
+| H3 | evidence signed by a retired board still counts, but a dispute settling on it cannot make the retired side pay from reserves (retired Left clamped at Δ ≥ 0, retired Right at Δ ≤ collateral); what the retired entity is owed is never clamped | `h3-retired-board-cap` |
 
-Reasons and options: `plan/contracts-decisions.md`. `scripts/deploy-gate.cjs` refuses `MIN_RESPONSE_SECONDS` below 6 hours on any chain that is not a named testnet (`test/gate/`). CI: the `contracts-fork` job rebuilds, checks `typechain-types` is current and runs every `test/vm` and `test/gate` file in its own process.
+Reasons and options: `plan/contracts-decisions.md`. `scripts/deploy-gate.cjs` refuses `MIN_RESPONSE_SECONDS` below 6 hours on any chain id that is not a named testnet, on every deploy path, reading the compiled build (`test/gate/`). CI: the `contracts-fork` job rebuilds, checks `typechain-types` is current, and runs every `test/vm` and `test/gate` file (including the EIP-170 size check) in its own process.
 
 ---
 

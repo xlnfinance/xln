@@ -81,10 +81,13 @@ struct AccountInfo {
   // and cooperative updates commit to it, so a proof signed for an earlier baseline can never be applied to a later one.
   // R2C does not advance it: it needs no counterparty signature, so anyone could otherwise void every signed proof.
   uint256 ondeltaEpoch;
-  // H3: the proof that would settle the active dispute was signed by a RETIRED board of the entity on the other side
-  // (still provable for the seven-day grace, see EntityProvider). Such evidence settles clamped to [0, collateral].
+  // H3: which side's board was RETIRED on the proof that would settle the active dispute (0 none, 1 Left, 2 Right).
+  // Evidence signed by a retired board is still valid (seven-day grace, see EntityProvider), but it settles clamped in
+  // the one direction where that side would pay from reserves: retired Left cannot be made to owe beyond the collateral,
+  // retired Right likewise. The other direction is never clamped: a rotation must not forgive what the rotating entity
+  // is owed. The signer of start, counter and final evidence is the counterentity of the entity that submits it.
   // Set by start, counter registration and a signed finalization; read and cleared by Depository at finalization.
-  bool disputeRetiredEvidence;
+  uint8 disputeRetiredSide;
 }
 
 struct AccountCollateral {

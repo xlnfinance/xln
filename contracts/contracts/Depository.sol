@@ -826,9 +826,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       entityProvider,
       deltaTransformer
     );
-    // H3: the proof that settles was signed by a retired board, so it settles clamped to the Account's collateral.
-    bool retiredEvidence = account.disputeRetiredEvidence;
-    account.disputeRetiredEvidence = false;
+    // H3: the proof that settles was signed by a retired board of this side (0 none, 1 Left, 2 Right).
+    uint8 retiredSide = account.disputeRetiredSide;
+    account.disputeRetiredSide = 0;
 
     _finalizeAccount(
       entityId,
@@ -842,7 +842,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       disputeTimeout,
       leftResponseSeconds,
       rightResponseSeconds,
-      retiredEvidence
+      retiredSide
     );
     // Cooperative/counter-dispute adopts its signed nonce. A unilateral
     // timeout has no newer signature, so it consumes exactly one nonce.
@@ -904,7 +904,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     uint256 disputeTimeout,
     uint32 leftResponseSeconds,
     uint32 rightResponseSeconds,
-    bool retiredEvidence
+    uint8 retiredSide
   ) private {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
 
@@ -937,8 +937,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       Int768 memory delta = transformerDeltas[i];
       bool negativeDelta = delta.high < 0;
       Uint512 memory deltaMagnitude = WideMath.magnitude(delta);
-      if (retiredEvidence) {
-        (negativeDelta, deltaMagnitude) = _capAtCollateral(
+      if (retiredSide != 0) {
+        (negativeDelta, deltaMagnitude) = _capRetiredSide(
+          retiredSide,
           negativeDelta,
           deltaMagnitude,
           _collaterals[acct_key][proofbody.tokenIds[i]].collateral
@@ -957,17 +958,24 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     // Nonce update is handled by _disputeFinalizeInternal (caller).
   }
 
-  /// @dev H3: Δ (Left's allocation) clamped to [0, collateral]. A negative Δ becomes 0, so Right takes the collateral
-  /// and Left owes nothing; a Δ above the collateral becomes the collateral, so Left takes it and Right owes nothing.
-  /// No shortfall reaches reserves and no debt is booked.
-  function _capAtCollateral(bool negativeDelta, Uint512 memory magnitude, uint256 collateral)
+  /// @dev H3: a retired board cannot be made to pay from reserves. Δ is Left's allocation, so Left pays when Δ < 0 and
+  /// Right pays when Δ exceeds the collateral. For a retired Left a negative Δ becomes 0 (Right takes the collateral,
+  /// Left owes nothing); for a retired Right a Δ above the collateral becomes the collateral (Left takes it, Right owes
+  /// nothing). The other direction is left exactly as signed: what the retired entity is OWED is never forgiven by a
+  /// rotation. No shortfall of the retired side reaches reserves and no debt is booked for it.
+  function _capRetiredSide(uint8 retiredSide, bool negativeDelta, Uint512 memory magnitude, uint256 collateral)
     private
     pure
     returns (bool, Uint512 memory)
   {
-    if (negativeDelta) return (false, Uint512({ high: 0, low: 0 }));
-    if (magnitude.high != 0 || magnitude.low > collateral) return (false, Uint512({ high: 0, low: collateral }));
-    return (false, magnitude);
+    if (retiredSide == 1) {
+      if (negativeDelta) return (false, Uint512({ high: 0, low: 0 }));
+      return (negativeDelta, magnitude);
+    }
+    if (!negativeDelta && (magnitude.high != 0 || magnitude.low > collateral)) {
+      return (false, Uint512({ high: 0, low: collateral }));
+    }
+    return (negativeDelta, magnitude);
   }
 
   /// @notice Apply delta to account collateral and reserves

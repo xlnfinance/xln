@@ -986,7 +986,7 @@ export interface DepositoryDebtHarness extends BaseContract {
         string,
         boolean,
         bigint,
-        boolean
+        bigint
       ] & {
         nonce: bigint;
         disputeHash: string;
@@ -1004,7 +1004,7 @@ export interface DepositoryDebtHarness extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
-        disputeRetiredEvidence: boolean;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"
@@ -1228,7 +1228,7 @@ export interface DepositoryDebtHarness extends BaseContract {
         string,
         boolean,
         bigint,
-        boolean
+        bigint
       ] & {
         nonce: bigint;
         disputeHash: string;
@@ -1246,7 +1246,7 @@ export interface DepositoryDebtHarness extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
-        disputeRetiredEvidence: boolean;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"

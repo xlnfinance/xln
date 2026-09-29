@@ -5,7 +5,7 @@ const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs'
 const path = require('node:path');
 
 const { buildFoundationTokenListing, foundationEntityId } = require('./foundation-hanko.cjs');
-const { assertResponseFloor } = require('./deploy-gate.cjs');
+const { assertResponseFloor, isNamedTestnet } = require('./deploy-gate.cjs');
 const { broadcastTronTransaction } = require('../../core/jurisdiction/adapter/operations/tron-broadcast.ts');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -641,7 +641,13 @@ const main = async () => {
   }
 
   const selected = selectChains(profile, options.chain);
-  // Before any RPC or key is touched: the testnet response-window floor must not reach a mainnet.
+  // Before any RPC or key is touched: the testnet response-window floor must not reach a mainnet. A chain that is not a
+  // named testnet is always built fresh (a prebuilt artifact could carry another floor than the source), then gated
+  // on the compiled build. TRON artifacts are compiled from the same sources by compile-tron.cjs below.
+  if (selected.some((chain) => !isNamedTestnet(chain))) {
+    if (options.skipCompile) throw new Error('Deploy gate: --skip-compile is refused for any chain that is not a named testnet');
+    run('bunx', ['--bun', 'hardhat', 'compile']);
+  }
   assertResponseFloor(selected);
   assertFreshDeploymentTargets(options.profile, selected, options);
   const results = [];
