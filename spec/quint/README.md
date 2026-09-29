@@ -1,0 +1,74 @@
+# XLN protocol spec in Quint
+
+A complete, machine-checked spec of the XLN protocol layers (Account, Entity, J, Runtime) written in
+[Quint](https://quint-lang.org). It is written **independently of the Arrival spec** under `../`: nothing in this
+directory is derived from it, and it must not read it until the coordinator says both specs are complete. Differences
+between the two will then be analysed to find unclear points.
+
+Where a rule is unclear, this spec picks the reading the sources best support and writes the choice down in
+[QUESTIONS.md](QUESTIONS.md): the point, the options, the choice, the source.
+
+## Sources
+
+`plan/lessons.md` (rules R-*, questions Q-*, bugs B-*), `plan/xln-inventory.md`, `plan/vision.md`,
+`plan/contracts-review.md` (flaws C1, C2, H1-H3), `plan/contracts-decisions.md`, `design/account-model.md`,
+`pure/xln.ts`, and the forked contracts under `contracts/` with their encoding vectors. The contracts are ours; this
+spec describes the **fixed** contracts (ondelta epoch, entity-bound batch payload, H1 finalize wait, H2 window floor,
+H3 clamp). og is a reference, never the oracle.
+
+## Layout
+
+| file | what it is |
+|---|---|
+| `account.qnt` | Account layer: ledger, credit, HTLC clauses, the signed-frame protocol, signed proofs, properties |
+| `account_test.qnt` | scenario tests: exact schedules with exact expected results |
+| `mutants/` | deliberately broken copies of the spec; every property must kill its mutants (`mutants/run.py <module>`) |
+| `traces/` | ITF traces (Quint's JSON trace format) for replay against another spec |
+| `QUESTIONS.md` | every unclear point, the options, the choice made, the source |
+| `PROGRESS.md` | what is done per layer and what is next, for a successor after a context reset |
+| `check.sh` | everything that must pass before a change |
+
+## Running
+
+```
+cd spec/quint && npm install          # installs quint 0.33; Apalache is fetched on the first `verify`
+./check.sh                            # typecheck, scenario tests, invariants and witnesses by simulation
+MUTANTS=1 ./check.sh                  # also kill every mutant
+./node_modules/.bin/quint verify account.qnt --invariant credit_holds --max-steps 3    # Apalache, bounded
+```
+
+Use `--backend typescript` for `quint run` and `quint test`. The default rust evaluator is downloaded from GitHub
+releases and the sandbox proxy refuses it: `Release v0.7.0 not found: Failed to fetch from GitHub: Forbidden`.
+Apalache and Java 21 work.
+
+## How to read a module
+
+1. **Domain types first**: `Body`, `Tx`, `Frame`, `Status`. They are the vocabulary.
+2. **Pure transition functions**: `applyTx`, `replay`, `onPropose`, `commit`. Every refusal is a value (`Refused(why)`);
+   nothing halts a Runtime.
+3. **Actions**: thin wrappers that add the guard and thread the variables. Each has a scripted form taking exact
+   arguments (used by tests) and a nondeterministic form (used by `quint run` / `verify`).
+4. **Properties**: named `val`s at the bottom, and `safe` = all of them. `w_*` witnesses are false on purpose: each
+   must be violated by some trace, which proves the path they name is reachable.
+
+## Encoding rules (so that Apalache can check the module)
+
+- Collections with a small fixed key set are maps over that set (locks by slot, signatures by
+  `(signer, nonce, branch)`), never sets of records.
+- A nondeterministic tx is built from small independent picks (`mkTx`), never drawn from a set of variants.
+- State is a handful of separate variables. One record holding everything makes the checker's input exceed
+  Apalache's 20 MB RPC limit (`String value length (20051112) exceeds the maximum allowed (20000000)`).
+- Frames live in an arena and messages carry frame ids, as the wire carries hashes.
+- Ghost variables (`equivocated`, `diverged`) record a violation at the moment the protocol would cause it, so an
+  invariant is a single boolean.
+
+## Properties (what "correct" means here)
+
+| id | property | module |
+|---|---|---|
+| P2 | credit holds: every committed and in-flight state satisfies RCPAN in the worst case over open clauses | `credit_holds` |
+| P4a | agreed: two sides never commit different bodies at one height | `agreed` |
+| P4b | no equivocation: a signer never signs two different proofs for one (nonce, branch) | `no_equivocation` |
+| P4c | both sign the same proof: at each side's head, both signatures over the proof of the committed body exist | `both_signed` |
+
+P1 (a dispute pays what both sides believed) and P3 (money is conserved) need the chain and belong to `chain.qnt`.
