@@ -1,0 +1,3 @@
+{
+  "capabilities": [{ "module": "./arrival/packages/arrival/dist/env/overridable/overridable.js" }]
+}

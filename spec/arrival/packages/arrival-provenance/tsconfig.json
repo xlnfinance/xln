@@ -1,0 +1,14 @@
+{
+  "extends": ["@here.build/tsconfig/purpose/lib", "@here.build/tsconfig/env/node"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"]
+  },
+  // INCLUDES `src/__tests__/` so `typecheck` (tsc --noEmit) and the eslint project
+  // service cover test files. Emit is the separate src-only `tsconfig.build.json`
+  // (`build: tsc -p tsconfig.build.json`) — tests are type-checked, never compiled
+  // to dist. Same split as core arrival's tsconfig pair.
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

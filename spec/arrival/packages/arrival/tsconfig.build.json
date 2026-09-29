@@ -1,0 +1,9 @@
+{
+  // EMIT/build config — src only. Used by `build: tsc -p tsconfig.build.json`.
+  // `tsconfig.json` itself now includes the `*.test.ts` test files so `typecheck` checks them;
+  // this sibling keeps the emitted `dist/` src-only (tests are never compiled into dist).
+  // The include/exclude here mirror the pre-split build scope exactly.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.test-d.ts", "src/__*__/**/*"]
+}

@@ -1,0 +1,116 @@
+/**
+ * Shared overlay every arrival package spreads after `@here.build/eslint-configs`.
+ * Preset stays in the package (`nodejs` vs CLI `shared`); this is the domain floor
+ * (interpreter / parser / compiler) plus projectService + ignores.
+ */
+export const arrivalIgnores = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/dist-cases/**",
+  "**/*.config.*",
+  "**/vendor/**",
+  "**/__tests__/**",
+  "**/*.test.ts",
+  "**/*.spec.ts",
+  "**/*.test-d.ts",
+  "**/__visual__/**",
+  "**/__benchmarks__/**",
+  "**/__experiments__/**",
+  "**/__custdev__/**",
+  "**/__research__/**",
+  "**/.storybook/**",
+  "**/scripts/**",
+  "**/*.generated.ts",
+  "**/demos/**",
+  "**/vitest.global-setup.ts",
+];
+
+/** Rules the shared preset marks error that are false positives in this domain. */
+export const arrivalDomainRules = {
+  "sonarjs/function-return-type": "off",
+  "sonarjs/no-nested-template-literals": "off",
+  "sonarjs/no-nested-functions": "off",
+  "sonarjs/no-nested-assignment": "off",
+  "sonarjs/redundant-type-aliases": "off",
+  "sonarjs/updated-loop-counter": "off",
+  "sonarjs/slow-regex": "off",
+  "sonarjs/no-alphabetical-sort": "off",
+  "sonarjs/no-inverted-boolean-check": "off",
+  "sonarjs/unused-import": "off",
+  "sonarjs/no-unused-vars": "off",
+  "sonarjs/reduce-initial-value": "off",
+  "sonarjs/no-duplicated-branches": "off",
+  "sonarjs/no-all-duplicated-branches": "off",
+  "sonarjs/no-extra-arguments": "off",
+  "sonarjs/disabled-auto-escaping": "off",
+  "sonarjs/regex-complexity": "off",
+  "sonarjs/no-useless-catch": "off",
+  "sonarjs/no-redundant-optional": "off",
+  "sonarjs/no-selector-parameter": "off",
+  "sonarjs/argument-type": "off",
+  "sonarjs/no-identical-functions": "off",
+  "sonarjs/block-scoped-var": "off",
+  "sonarjs/class-name": "off",
+  "sonarjs/no-labels": "off",
+  "sonarjs/no-redundant-assignments": "off",
+  "sonarjs/prefer-regexp-exec": "off",
+  "sonarjs/duplicates-in-character-class": "off",
+  "unicorn/consistent-function-scoping": "off",
+  "unicorn/no-array-sort": "off",
+  "unicorn/no-array-reverse": "off",
+  // `.at(-1)` is `T | undefined`; autofix broke tsc in sugarcoat.
+  "unicorn/prefer-at": "off",
+  // `readonly tuple`.includes(string) is a type error; `.some(x => x === s)` is the typed form.
+  "unicorn/prefer-includes": "off",
+  "unicorn/prefer-single-call": "off",
+  "unicorn/no-array-for-each": "off",
+  "unicorn/prefer-code-point": "off",
+  "unicorn/no-await-expression-member": "off",
+  "unicorn/no-useless-spread": "off",
+  "unicorn/prefer-string-slice": "off",
+  "unicorn/prefer-native-coercion-functions": "off",
+  "unicorn/prefer-switch": "off",
+  "unicorn/no-for-loop": "off",
+  "unicorn/no-object-as-default-parameter": "off",
+  "unicorn/prefer-regexp-test": "off",
+  "regexp/prefer-d": "off",
+  "regexp/no-unused-capturing-group": "off",
+  "regexp/optimal-quantifier-concatenation": "off",
+  "regexp/no-useless-non-capturing-group": "off",
+  "regexp/no-dupe-disjunctions": "off",
+  "regexp/no-dupe-characters-character-class": "off",
+  "security/detect-unsafe-regex": "off",
+  "security/detect-non-literal-regexp": "off",
+  "security/detect-non-literal-fs-filename": "off",
+  "security/detect-possible-timing-attacks": "off",
+  "no-console": "off",
+  "import-x/order": "off",
+  "import-x/no-nodejs-modules": "off",
+  "no-secrets/no-secrets": "off",
+  "@typescript-eslint/no-unnecessary-condition": "off",
+  "@typescript-eslint/prefer-nullish-coalescing": "off",
+  "@typescript-eslint/prefer-optional-chain": "off",
+  "@typescript-eslint/no-shadow": "off",
+  "promise/catch-or-return": "off",
+  "promise/always-return": "off",
+  "promise/param-names": "off",
+  "no-useless-catch": "off",
+  // Ink (and other ref-as-store) reads refs during render on purpose.
+  "react-hooks/refs": "off",
+};
+
+export function arrivalOverlay({ tsconfigRootDir, extraRules = {}, extraIgnores = [], extraConfigs = [] } = {}) {
+  return [
+    {
+      languageOptions: {
+        parserOptions: {
+          projectService: true,
+          tsconfigRootDir,
+        },
+      },
+    },
+    { rules: { ...arrivalDomainRules, ...extraRules } },
+    ...extraConfigs,
+    { ignores: [...arrivalIgnores, ...extraIgnores] },
+  ];
+}

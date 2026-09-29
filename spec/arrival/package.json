@@ -1,0 +1,23 @@
+{
+  "name": "@inhuman.tools/arrival-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The arrival language — an R7RS-subset Scheme for AI-agent constraint-based execution: interpreter, capability environments, provenance, and the CLI",
+  "scripts": {
+    "prepare": "node packages/arrival/scripts/sparse-chibi.mjs",
+    "build": "turbo build",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "lint": "turbo lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.8.1",
+    "turbo": "^2.9.0"
+  },
+  "packageManager": "pnpm@10.3.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

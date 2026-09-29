@@ -1,0 +1,39 @@
+{
+  // ── The bite-guard program ────────────────────────────────────────────────
+  // Compiles EXACTLY {PRE prelude + every builtin leaf + every `<slug>.cases.ts`}
+  // as ONE program. That single-program composition is load-bearing twice over:
+  //   1. all leaf ambient `declare function <encodeSchemeIdent(name)>…` share one
+  //      global scope — a cross-leaf name collision is a compile error, and
+  //   2. every `.cases.ts` sees the full ambient builtin surface (no `__arr` bag).
+  // The cases assert with `expectTypeOf` (positives, exact result type) and
+  // `// @ts-expect-error` (negatives). A green compile == the whole fan-out bites.
+  //
+  // Strictness is inherited from the package tsconfig so cases are checked under
+  // the same rules the build uses; only module resolution is re-pinned to the
+  // permissive bundler mode (so the `vitest` type-only import resolves cleanly).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // `composite` makes this a referenced project of tsconfig.json, so the editor
+    // routes an opened `<slug>.cases.ts` HERE (not to an inferred project that
+    // lacks the ambient PRE prelude + leaves) — that is what makes a cases file
+    // resolve ambient builtins / brands when opened directly, with no per-file
+    // imports and no `/// <reference>` headers.
+    //
+    // A *referenced* composite project may not set `noEmit` (TS6310), so emit is
+    // directed to a throwaway `dist-cases/` (gitignored, NOT in package `files`, so
+    // never shipped). It is only ever produced by an explicit `tsc -b`; the package
+    // `build` script is plain `tsc`, which does not build references, and the test
+    // harness type-checks via the TS API without emitting. So `dist-cases/` is, in
+    // practice, never written during normal build/test — it exists only to satisfy
+    // the composite-reference contract.
+    "composite": true,
+    "outDir": "./dist-cases",
+    "tsBuildInfoFile": "./dist-cases/.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "rootDir": "."
+  },
+  "include": ["src/prelude/types.d.ts", "src/prelude/builtins/**/*.d.ts", "src/prelude/builtins/**/*.cases.ts"],
+  "exclude": ["node_modules", "dist"]
+}

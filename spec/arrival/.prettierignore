@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-cases/
+.turbo/
+coverage/
+storybook-static/
+vendor/
+**/*.tsbuildinfo
+pnpm-lock.yaml
+.claude/
+**/__visual__/out/**
+**/*.generated.ts
+**/*.png
+**/*.svg
+**/*.woff2

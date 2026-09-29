@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "description": "Typical agent Scheme workloads: pure transforms over tool-shaped dicts/lists. No IO.",
+  "tasks": [
+    {
+      "id": "filter-project",
+      "title": "Filter open rows and project fields",
+      "invite": ["dict", "keyword-access", "filter", "map"],
+      "invite_any": true,
+      "fixture": "(define rows (list (dict :id 1 :status \"open\" :score 3) (dict :id 2 :status \"closed\" :score 9) (dict :id 3 :status \"open\" :score 7)))",
+      "prompt": "From `rows`, keep only status equal to \"open\". Return a list of dicts with only :id and :score for each kept row, same order.",
+      "oracle": [
+        { "id": 1, "score": 3 },
+        { "id": 3, "score": 7 }
+      ]
+    },
+    {
+      "id": "nested-path",
+      "title": "Nested read and pure update",
+      "invite": ["dict", "keyword-access", "get-in", "assoc-in"],
+      "invite_any": true,
+      "fixture": "(define user (dict :id \"u1\" :profile (dict :name \"Ada\" :city \"London\") :flags (dict :beta #t)))",
+      "prompt": "Build a NEW user dict where profile name is \"Ada Lovelace\" and a new top-level :greeting is the string made from \"Hello, \" and the new name. Do not mutate. Return the new dict. Prefer nested path helpers if available.",
+      "oracle": {
+        "id": "u1",
+        "profile": { "name": "Ada Lovelace", "city": "London" },
+        "flags": { "beta": true },
+        "greeting": "Hello, Ada Lovelace"
+      }
+    },
+    {
+      "id": "pipeline-topn",
+      "title": "Pipeline: filter, sort, take",
+      "invite": ["thread", "keyword-access", "filter"],
+      "invite_any": true,
+      "fixture": "(define events (list (dict :kind \"click\" :n 2) (dict :kind \"view\" :n 9) (dict :kind \"click\" :n 5) (dict :kind \"view\" :n 1) (dict :kind \"click\" :n 8)))",
+      "prompt": "From `events`, keep kind \"click\", sort remaining by :n descending, take the top 2, return the list of their :n values (numbers only).",
+      "oracle": [8, 5]
+    },
+    {
+      "id": "group-count",
+      "title": "Group by field and count",
+      "invite": ["group-by", "frequencies", "dict", "keyword-access"],
+      "invite_any": true,
+      "fixture": "(define items (list (dict :kind \"a\" :v 1) (dict :kind \"b\" :v 2) (dict :kind \"a\" :v 3) (dict :kind \"a\" :v 4) (dict :kind \"c\" :v 5)))",
+      "prompt": "Return a dict mapping each :kind string to how many items have that kind. Keys may be strings.",
+      "oracle": { "a": 3, "b": 1, "c": 1 }
+    },
+    {
+      "id": "string-report",
+      "title": "Mixed-type string report",
+      "invite": ["str", "join", "keyword-access", "map"],
+      "invite_any": true,
+      "fixture": "(define people (list (dict :name \"Ann\" :age 30) (dict :name \"Bo\" :age 21)))",
+      "prompt": "Return one string: each person as \"Name=…;Age=…\" joined by \" | \" (spaces around the pipe). Example shape: \"Name=Ann;Age=30 | Name=Bo;Age=21\".",
+      "oracle": "Name=Ann;Age=30 | Name=Bo;Age=21"
+    },
+    {
+      "id": "safe-default",
+      "title": "Missing key defaults",
+      "invite": ["keyword-access", "dict"],
+      "invite_any": true,
+      "fixture": "(define cfg (dict :host \"api.example\" :retries 2))",
+      "prompt": "Return a dict with :host from cfg, :retries from cfg, and :timeout equal to cfg's :timeout if present else 30. Missing keys are nil/null — treat that as absent.",
+      "oracle": { "host": "api.example", "retries": 2, "timeout": 30 }
+    },
+    {
+      "id": "helpers-compose",
+      "title": "Define helpers and compose",
+      "invite": ["keyword-access", "filter", "map", "dict"],
+      "invite_any": true,
+      "fixture": "(define rows (list (dict :id \"a\" :ok #t :n 1) (dict :id \"b\" :ok #f :n 2) (dict :id \"c\" :ok #t :n 3)))",
+      "prompt": "Define a helper `(ok? row)` that is true when :ok is true. Define `(ids xs)` that maps :id over a list. Return (ids of only ok rows).",
+      "oracle": ["a", "c"]
+    },
+    {
+      "id": "branch-enrich",
+      "title": "Branching map enrichment",
+      "invite": ["dict", "keyword-access", "map", "cond"],
+      "invite_any": true,
+      "fixture": "(define scores (list (dict :id 1 :n -2) (dict :id 2 :n 0) (dict :id 3 :n 5)))",
+      "prompt": "Map each score dict to a new dict with the same :id, same :n, and :label equal to \"neg\" if n<0, \"zero\" if n=0, else \"pos\".",
+      "oracle": [
+        { "id": 1, "n": -2, "label": "neg" },
+        { "id": 2, "n": 0, "label": "zero" },
+        { "id": 3, "n": 5, "label": "pos" }
+      ]
+    },
+    {
+      "id": "zip-enrich",
+      "title": "Join two lists by id",
+      "invite": ["dict", "keyword-access", "map"],
+      "invite_any": true,
+      "fixture": "(define users (list (dict :id 1 :name \"Ada\") (dict :id 2 :name \"Grace\"))) (define stats (list (dict :id 2 :hits 9) (dict :id 1 :hits 4)))",
+      "prompt": "For each user, find the stats row with the same :id and return a list of dicts {:id :name :hits} in the order of `users`. Every user has a matching stats row.",
+      "oracle": [
+        { "id": 1, "name": "Ada", "hits": 4 },
+        { "id": 2, "name": "Grace", "hits": 9 }
+      ]
+    },
+    {
+      "id": "reduce-sum",
+      "title": "Conditional reduce",
+      "invite": ["reduce", "filter", "keyword-access", "thread"],
+      "invite_any": true,
+      "fixture": "(define txs (list (dict :type \"credit\" :amt 10) (dict :type \"debit\" :amt 3) (dict :type \"credit\" :amt 5) (dict :type \"debit\" :amt 1)))",
+      "prompt": "Sum :amt for type \"credit\" only. Return a single number.",
+      "oracle": 15
+    }
+  ]
+}

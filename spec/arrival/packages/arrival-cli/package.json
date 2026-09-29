@@ -1,0 +1,76 @@
+{
+  "name": "@inhuman.tools/arrival-cli",
+  "version": "0.9.9",
+  "description": "The arrival command — run programs, REPL, and static-check from the terminal. `arrival run file.scm` (whole-program diagnostics, then execute with (require …) rooted at the file's dir), `arrival repl` (persistent-scope session, teaching-door errors), `arrival check file.scm` (the eslint-style pass, no execution).",
+  "keywords": [
+    "arrival",
+    "scheme",
+    "cli",
+    "repl"
+  ],
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-cli"
+  },
+  "type": "module",
+  "bin": {
+    "arrival": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__",
+    "!**/__research__",
+    "!**/__benchmarks__",
+    "!**/__custdev__",
+    "!**/__visual__",
+    "!**/*.test.*",
+    "!**/*.stories.*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "shot": "tsx src/__visual__/main.ts"
+  },
+  "dependencies": {
+    "@inhuman.tools/arrival": "workspace:^",
+    "@inhuman.tools/arrival-modules": "workspace:^",
+    "@inhuman.tools/arrival-serializer": "workspace:^",
+    "@inhuman.tools/arrival-sugarcoat": "workspace:^",
+    "chalk": "5.6.2",
+    "culori": "4.0.2",
+    "ink": "7.1.1",
+    "react": "19.2.8"
+  },
+  "devDependencies": {
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@types/culori": "4.0.1",
+    "@types/node": "24.0.0",
+    "@types/react": "19.2.18",
+    "eslint": "9.39.5",
+    "ink-testing-library": "4.0.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11",
+    "zod": "^4.5.4"
+  }
+}

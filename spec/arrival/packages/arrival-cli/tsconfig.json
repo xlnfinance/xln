@@ -1,0 +1,13 @@
+{
+  "extends": ["@here.build/tsconfig/purpose/lib", "@here.build/tsconfig/env/node"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "src/__tests__/**/*", "src/__visual__/**/*"]
+}

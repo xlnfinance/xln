@@ -1,0 +1,17 @@
+{
+  // Typecheck program for the `*.test-d.ts` TYPE-TESTS, run under `vitest --typecheck`
+  // (see `vitest.typecheck.config.ts`). Extends the package config so the proofs are checked
+  // with the SAME compiler options (NodeNext, strict, the browser/lib target) as the build.
+  //
+  // Why this file exists at all: `tsconfig.json` EXCLUDES the test dirs (`src/**/*.test.ts`,
+  // `src/__*__/**/*`), so the everyday build/typecheck never compiles them — which is exactly
+  // why the `symbol.ts` contract proofs were once inlined into the source. This config
+  // re-includes ONLY the `*.test-d.ts` type-tests so vitest's tsc pass can see them, letting
+  // the proofs fail CI as a real test on a type regression instead of riding the build.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/__tests__/**/*.test-d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

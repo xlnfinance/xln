@@ -1,0 +1,18 @@
+{
+  "extends": ["@here.build/tsconfig/purpose/lib", "@here.build/tsconfig/env/node"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  // `*.cases.ts` are bite-guard fixtures (expect-type assertions that import
+  // vitest); they are NOT shipped — compiled only by tsconfig.cases.json. The
+  // reference below routes an opened cases file to that project in the editor, so
+  // it resolves ambient builtins / brands instead of erroring in an inferred
+  // project. Plain `tsc` (this build) ignores references, so cases stay out of dist.
+  "exclude": ["node_modules", "dist", "src/__tests__/**/*", "src/**/*.cases.ts"],
+  "references": [{ "path": "./tsconfig.cases.json" }]
+}

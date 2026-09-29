@@ -1,0 +1,6 @@
+{
+  // The EMIT config — src only, tests excluded (they are type-checked via the main
+  // tsconfig.json, which `typecheck` and the eslint project service use).
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/__tests__/**/*"]
+}

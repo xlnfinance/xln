@@ -1,0 +1,86 @@
+{
+  "name": "@inhuman.tools/arrival-codemirror",
+  "version": "0.9.9",
+  "description": "CodeMirror 6 for arrival Scheme (Scheme + sugarcoat). Language, structural editing, ghost, param hints, and full IDE surface (lint/hover/completion/goto) over a SchemeIdeBackend seam.",
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-codemirror"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__",
+    "!**/__research__",
+    "!**/__benchmarks__",
+    "!**/__custdev__",
+    "!**/__visual__",
+    "!**/*.test.*",
+    "!**/*.stories.*"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build-storybook": "storybook build",
+    "demo": "vite demos",
+    "dev": "tsc --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "storybook": "storybook dev -p 6011",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit && tsc -p demos/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.2",
+    "@codemirror/view": "6.43.10",
+    "@inhuman.tools/arrival-sugarcoat": "workspace:^",
+    "@inhuman.tools/arrival-lsp": "workspace:^",
+    "@inhuman.tools/arrival-types-bridge": "workspace:^",
+    "@here.build/editor-theme": "0.9.0",
+    "@lezer/highlight": "1.2.3",
+    "@uiw/react-codemirror": "4.25.11"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@storybook/react": "10.5.10",
+    "@storybook/react-vite": "10.5.10",
+    "eslint": "9.39.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "storybook": "10.5.10",
+    "tslib": "2.8.1",
+    "typescript": "6.0.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}
