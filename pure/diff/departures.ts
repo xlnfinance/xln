@@ -73,5 +73,13 @@ export const KNOWN_OG_HALTS: readonly KnownHalt[] = [
     issue: "review/og-issues-halts-2026-09-28.md, issue 2",
     halts: (ogHalt) => /SETTLEMENT_TRANSITION_PROPOSAL_FAILED:hanko:POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:0x/.test(ogHalt),
   },
+  {
+    // core/runtime/frame/cross-j/evidence.ts:33: the ack outputs matching a pair's two legs are not exactly one each and
+    // distinct. Two shapes seen: a pure-cancel close (scenario-cross-j seeds 0xc106, 0xc10d) and an open pair (0xc10f).
+    // Cross-jurisdiction atomic swaps are v2; not root-caused (og issue 9 candidate).
+    name: "a cross-jurisdiction atomic pair's ack outputs are not one per leg",
+    issue: "review/og-issues-halts-2026-09-28.md, issue 9 (candidate)",
+    halts: (ogHalt) => /RUNTIME_CROSS_J_ATOMIC_ACK_OUTPUTS_INVALID:proposal/.test(ogHalt),
+  },
 ];
 export const knownHalt = (ogHalt: string): KnownHalt | undefined => KNOWN_OG_HALTS.find((k) => k.halts(ogHalt));

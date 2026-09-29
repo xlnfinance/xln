@@ -23,6 +23,7 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { unwrap } from "../xln_run.ts";
 import { tracing } from "./scenario-trace.ts";
 import { contractSet } from "./contracts.ts";
+import { knownHalt } from "./departures.ts";
 import { shimBatchSubmission, type Refusals } from "./fork-shim.ts";
 import {
   bootChain,
@@ -77,7 +78,7 @@ const tokenOf = (x: number): TokenId => unwrap(tokenId(String(TOKEN_OF[x])));
 const HUB_OF = [HUB_SRC, HUB_TGT, HUB_SRC, HUB_TGT];
 
 type Chains = readonly [JAdapter, JAdapter];
-type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[]; readonly landed: readonly number[] };
+type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[]; readonly landed: readonly number[]; readonly unknownHalts: readonly string[] };
 
 const runCrossJ = async (seed: number): Promise<Coverages> => {
   const rand = prng(seed);
@@ -414,7 +415,10 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
       state.materialized ||= swapOf(HUB_SRC)?.sourcePull !== undefined && swapOf(HUB_TGT)?.targetPull !== undefined;
       state.settled = status === "settled" || status === "cancelled";
     }, Promise.resolve());
-    return { coverage, settled: state.settled, materialized: state.materialized, refusals: refusals(), landed: refusalsOf.map((r) => r.landed()) };
+    return { coverage, settled: state.settled, materialized: state.materialized, refusals: refusals(), landed: refusalsOf.map((r) => r.landed()),
+      // a halt both sides share ends the run quietly; only a registered og halt (departures.ts) may do that here
+      unknownHalts: coverage.haltTexts.filter((h) => knownHalt(h) === undefined),
+    };
   } finally {
     await Promise.all(accountWorkers.map((workers) => workers.close()));
     await [envU, envH].reduce(async (prev, env) => {
@@ -444,6 +448,7 @@ describe("scenario: a cross-jurisdiction swap across two Runtimes, og vs the rew
       );
       expect(r.coverage.frames).toBeGreaterThan(10);
       expect(r.refusals).toEqual([]);
+      expect(r.unknownHalts).toEqual([]);
       // an empty refusal list proves nothing unless a batch reached each chain
       expect(r.landed.every((n) => n > 0)).toBe(true);
     }, 900_000);
