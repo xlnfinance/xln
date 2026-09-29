@@ -56,21 +56,28 @@ const credit = (to: EntityId, amount: bigint): EntityTx =>
 const replicaOf = (rt: Runtime, id: EntityId): EntityReplica => rt.entities.get(replicaKey(id, SIGNERS.get(id)!))!;
 
 /** One Runtime frame: the new runtime and the inputs its outbox routes. */
-type Step = { readonly runtime: Runtime; readonly routed: readonly RoutedEntityInput[] };
+type Step = {
+  readonly runtime: Runtime; readonly routed: readonly RoutedEntityInput[];
+  readonly events: readonly { readonly eventName: string; readonly data: Record<string, unknown> }[];
+};
 const step = (rt: Runtime, input: RoutedEntityInput): Step => {
   const out = unwrap(applyRuntime(rt, { runtimeTxs: [], entityInputs: [input] }, context() as never));
   const clock = input.input.kind === "txs" ? input.input.timestamp : NOW;
   const routed = out.outbox.flatMap((o) =>
     "input" in o && o.input.kind === "txs" && o.input.txs.length === 0 && o.to === input.entityId ? [] : [unwrap(convertOutput(out.runtime, o, input.entityId, clock))]);
-  return { runtime: out.runtime, routed };
+  return { runtime: out.runtime, routed, events: out.events as Step["events"] };
 };
 /** Frames run until no input is left, delivering each output in order at the clock of the frame that made it. */
-const settle = (rt: Runtime, queue: readonly RoutedEntityInput[]): Runtime => {
+const settle = (rt: Runtime, queue: readonly RoutedEntityInput[]): Runtime => settleWith(rt, queue).runtime;
+/** `settle`, and the Runtime events every frame of it emitted, in order. */
+const settleWith = (rt: Runtime, queue: readonly RoutedEntityInput[]): Pick<Step, "runtime" | "events"> => {
   const [head, ...rest] = queue;
-  if (head === undefined) return rt;
+  if (head === undefined) return { runtime: rt, events: [] };
   const done = step(rt, head);
-  return settle(done.runtime, [...rest, ...done.routed]);
+  const tail = settleWith(done.runtime, [...rest, ...done.routed]);
+  return { runtime: tail.runtime, events: [...done.events, ...tail.events] };
 };
+const failures = (events: Step["events"]) => events.filter((e) => e.eventName === "HtlcFailed");
 /** Alice -- Bob -- Carol: Bob opens both Accounts and extends Alice 1000 of credit; Carol extends Bob 1000. */
 const network = (): Runtime => {
   const spawned = spawn(spawn(spawn(withTestJurisdiction(createRuntime()), entityOf(ALICE)), entityOf(BOB)), entityOf(CAROL));
@@ -108,6 +115,11 @@ describe("failed lock: a lock the proposal refuses ends its payment route", () =
     const answered = step(paying.runtime, later(held.answer));
     expect(mempoolTypes(answered.runtime, ALICE, BOB)).toEqual([]);
     expect(paybookHashlocks(answered.runtime, ALICE)).toEqual([]);
+    // og failOriginatedPayment: one HtlcFailed for the payment, with the proposal's refusal and Alice as the entity
+    const [failed, ...rest] = failures(answered.events);
+    expect(rest).toEqual([]);
+    expect(failed?.data["entityId"]).toBe(ALICE);
+    expect(String(failed?.data["reason"]).length).toBeGreaterThan(0);
   });
 
   /**
@@ -120,6 +132,20 @@ describe("failed lock: a lock the proposal refuses ends its payment route", () =
     const paying = step(held.runtime, inputOf(ALICE, [payment()], NOW + 2000n));
     const forwarded = settle(paying.runtime, paying.routed);
     expect(mempoolTypes(forwarded, BOB, CAROL)).toEqual(["htlc_lock"]);
+    // one Runtime frame after Bob's answer: the refusal ends Bob's route on the spot and the resolve is proposed to Alice
+    // in that same Entity frame (og adds the woken Account to the frame's worklist)
+    const proposing = step(forwarded, later(held.answer));
+    // one Entity frame, not two: without the wake the resolve waits for the Runtime's next frame of Bob
+    expect(replicaOf(proposing.runtime, BOB).state.height).toBe(replicaOf(forwarded, BOB).state.height + 1n);
+    expect(mempoolTypes(proposing.runtime, BOB, CAROL)).toEqual([]);
+    expect(paybookHashlocks(proposing.runtime, BOB)).toEqual([]);
+    const toAlice = replicaOf(proposing.runtime, BOB).accountReplicas.get(ALICE) as unknown as
+      { _tag: string; candidate?: { frame: { txs: readonly { type: string; outcome?: string; reason?: string }[] } } };
+    expect(toAlice._tag).toBe("proposed");
+    // the payer is told `forward_failed:<reason>` (og failedProposalHtlcFollowup)
+    const [resolve] = toAlice.candidate?.frame.txs ?? [];
+    expect([resolve?.type, resolve?.outcome]).toEqual(["htlc_resolve", "error"]);
+    expect(resolve?.reason?.startsWith("forward_failed:")).toBe(true);
     const failed = settle(forwarded, [later(held.answer)]);
     expect(mempoolTypes(failed, BOB, CAROL)).toEqual([]);
     expect(paybookHashlocks(failed, BOB)).toEqual([]);
@@ -127,5 +153,24 @@ describe("failed lock: a lock the proposal refuses ends its payment route", () =
     expect(lockCount(failed, ALICE, BOB)).toBe(0);
     expect(lockCount(failed, BOB, ALICE)).toBe(0);
     expect(deltaOf(failed, ALICE, BOB).offdelta).toBe(0n);
+  });
+
+  /**
+   * Bob's Account with Alice is frozen for a dispute when his onward lock is refused: it takes no new work, so the
+   * resolve cannot be queued. The entry stays until the upstream lock ends on its own (expiry or the dispute), never
+   * removed for a resolve nobody will propose.
+   */
+  test("a forwarded payment whose inbound Account is frozen keeps its paybook entry", () => {
+    const held = holdAnswer(BOB, CAROL);
+    const paying = step(held.runtime, inputOf(ALICE, [payment()], NOW + 2000n));
+    const forwarded = settle(paying.runtime, paying.routed);
+    expect(mempoolTypes(forwarded, BOB, CAROL)).toEqual(["htlc_lock"]);
+    const dispute: EntityTx = { type: "prepareDispute", data: { counterpartyEntityId: ALICE } } as unknown as EntityTx;
+    const frozen = step(forwarded, inputOf(BOB, [dispute], NOW + 3000n)).runtime;
+    expect(["preparing", "disputed"]).toContain(replicaOf(frozen, BOB).accountReplicas.get(ALICE)!._tag);
+    const failed = settle(frozen, [later(held.answer)]);
+    expect(mempoolTypes(failed, BOB, CAROL)).toEqual([]);
+    expect(paybookHashlocks(failed, BOB).length).toBe(1);
+    expect(mempoolTypes(failed, BOB, ALICE)).toEqual([]);
   });
 });
