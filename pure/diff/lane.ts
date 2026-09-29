@@ -287,6 +287,29 @@ const rowKey = (row: unknown): string => {
   return stableJson(mapsSpelled(carried));
 };
 
+/** Whether an output row carries txs and nothing else: only those batch at dispatch. */
+const txOnly = (row: NetworkOutput): boolean =>
+  Array.isArray(row["entityTxs"]) && row["entityTxs"].length > 0 &&
+  ["proposedFrame", "hashPrecommits", "leaderTimeoutVote", "jPrefixAttestations"].every((k) => row[k] === undefined);
+/** The lane og batches a row into: Runtime, Entity, signer and source frame. */
+const laneOf = (row: NetworkOutput): string => {
+  const frame = row["sourceRuntimeFrame"] as unknown as SourceRuntimeFrame;
+  return [row["runtimeId"], row["entityId"], row["signerId"] ?? "", frame.height, frame.timestamp].map(String).join(":");
+};
+/**
+ * og dispatch batchOutputsByTarget: the tx-only rows of one lane ship as one input, their txs joined in order into the
+ * first one's slot; every consensus payload keeps its own input. The retained outbox (frame.runtimeOutputs, which the
+ * rewrite commits) is not batched: two Account messages one Entity frame sends the same peer, at different heights, are
+ * two rows there and one input on the wire.
+ */
+const batchedByLane = (rows: readonly NetworkOutput[]): readonly NetworkOutput[] =>
+  rows.reduce<readonly NetworkOutput[]>((batched, row) => {
+    const at = txOnly(row) ? batched.findIndex((b) => txOnly(b) && laneOf(b) === laneOf(row)) : -1;
+    const joined = (b: NetworkOutput): NetworkOutput =>
+      ({ ...b, entityTxs: [...(b["entityTxs"] as readonly unknown[]), ...(row["entityTxs"] as readonly unknown[])] }) as NetworkOutput;
+    return at < 0 ? [...batched, row] : batched.map((b, i) => (i === at ? joined(b) : b));
+  }, []);
+
 /** One local continuation under its og route key. */
 type Slot = readonly [string, RoutedEntityInput];
 /**
@@ -604,7 +627,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const ogRemote = sent.og.flatMap((e) => e.entityInputs);
     const ogFrames = sent.og.flatMap((e) =>
       e.entityInputs.map(() => ({ height: e.sourceRuntimeHeight, timestamp: e.sourceRuntimeTimestamp })));
-    const rwRows = c === null ? [] : c.runtimeOutputs;
+    const rwRows = c === null ? [] : batchedByLane(c.runtimeOutputs);
+    const merged = c === null ? 0 : c.runtimeOutputs.length - rwRows.length;
+    if (merged > 0) coverage.actions["batchedRows"] = (coverage.actions["batchedRows"] ?? 0) + merged;
     // og's dispatch regroups the rows into envelopes (atomic cross-j cohorts first): the same rows, in its order
     const sorted = (keys: readonly string[]): readonly unknown[] => [...keys].sort().map((k) => JSON.parse(k));
     cmp("remote", sorted(ogRemote.map(rowKey)), sorted(rwRows.map(rowKey)));
@@ -653,7 +678,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     (c?.jOutbox ?? []).forEach((j) =>
       j.jTxs.forEach((t) => coverage.accountTxs.add(`j:${(t as { type: string }).type}`)));
     if (c !== null) {
-      const rows = c.runtimeOutputs;
+      const rows = batchedByLane(c.runtimeOutputs);
       const shipped = remoteInputs(c.runtime, c.outbox, rows);
       // og's dispatch retires every output its transport accepted; the harness transport accepts them all
       rt = sent.og.length > 0 ? retireNetworkOutputs(c.runtime, () => true) : c.runtime;
