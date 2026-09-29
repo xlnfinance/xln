@@ -48,7 +48,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 
 ## Independence log
 
-Neither spec reads the other. Three leaks, all harmless but recorded:
+Neither spec reads the other. Four leaks, all harmless but recorded:
 1. At session start the harness put the team memory `spec-language-arrival-vs-quint` into my context by relevance
    retrieval. I did not open it or act on it. It describes the Arrival page's scope (account frames, order and both-sides
    properties, three planted bugs).
@@ -58,6 +58,11 @@ Neither spec reads the other. Three leaks, all harmless but recorded:
    can discount it.
 3. My first shell command listed `spec/` once, which showed the directory names of the Arrival spec (`account`,
    `arrival`, `lib`, `mcp`). I have not opened anything there.
+4. At 2026-09-29 ~21:00Z relevance retrieval put the same memory file into my context again, in a newer version. It says the
+   Arrival spec now has a page per layer (account frames, money, dispute, Entity consensus, Entity frame, J batch, Runtime tick,
+   routing) with planted bugs, and names some of its rule numbers and state counts. I did not use it: everything in this
+   spec after that point (DisputeOpSkipped, F1, J5, `failed_read`) came from the coordinator's relays and the sources under `plan/`
+   and `contracts/`. Recorded so the comparison can discount it.
 
 ## Next
 
