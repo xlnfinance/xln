@@ -79,6 +79,20 @@ module settle {
   pure def closesTo(m: Money, coll: int, ondelta: int, off: int): Money = payout(m, coll, ondelta + off)
 
   // ---------------------------------------------------------------------------------------------------------
+  // The baseline of the next epoch, co-signed with EVERY frame (N1, revised): a finalize can open a new epoch with no
+  // settlement in sight, and then the honest side needs a proof of that epoch at once. Its nonce is a chain nonce and has to
+  // be above whatever the opening event stores. The events and what they store (chain.qnt):
+  //   an update          its own nonce
+  //   a finalize by path 1 or 2   the nonce of the proof it adopts
+  //   a timeout finalize (path 0) the nonce of the proof the dispute STARTED with, plus 1 (the start stored that nonce)
+  // The proofs a counterparty can start or adopt are the ones the honest side has signed: the co-signed ones, and at most one
+  // proposal of its own that is still unacked (nonce tip + 1). So the largest stored nonce is tip + 1 + 1 and the smallest
+  // baseline that is still above it is tip + 3. Two is the nonce of a baseline that fails when a start uses the proposal.
+  // ---------------------------------------------------------------------------------------------------------
+  pure val BASELINE_GAP = 3
+  pure def baselineOf(p: SignedProof, la: bool): SignedProof = mkProof(true, p.nonce + BASELINE_GAP, p.epoch + 1, la, 0, NO_CLAUSE, true, true)
+
+  // ---------------------------------------------------------------------------------------------------------
   // The rule of the Account state machine (N1). A side runs it before it signs (as author) and before it acks.
   //   Pay, Lock  the Account is open, both the side and the proof are in the same epoch, the proof nonce follows the tip
   //   Rebase     an epoch event was observed, the Account is locked or closed, the baseline is signed for the epoch
@@ -120,7 +134,7 @@ module settle {
   action sinit(hon: Side, pre: bool, resL: int, resR: int, cl: int, cr: int): bool = {
     val base = mkProof(true, 1, 0, true, 0, NO_CLAUSE, true, true)
     all {
-      arena' = SLOTS.mapBy(i => if (i == 1) base else NO_PROOF),
+      arena' = SLOTS.mapBy(i => if (i == 1) base else if (i == 2 and pre) baselineOf(base, true) else NO_PROOF),
       honest' = hon,
       now' = 1,
       acct' = { nonce: 0, epoch: 0, coll: cl + cr, ondelta: cl, via: 0 },
@@ -134,10 +148,10 @@ module settle {
       ghost' = { badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false,
                  xWasOffline: false, finalizes: 0, lastApplied: 0 },
       seen' = SIDES.mapBy(_ => { epoch: 0, nonce: 0, dispute: false }),
-      acc' = { tip: 1, next: 0, locked: 0 },
+      acc' = { tip: 1, next: if (pre) 2 else 0, locked: 0 },
       book' = 0,
       prop' = NO_PROP,
-      np' = 2,
+      np' = if (pre) 3 else 2,
       upds' = 0.to(NUPD - 1).mapBy(_ => NO_UPD),
       nu' = 1,
       mode' = pre,
@@ -189,25 +203,27 @@ module settle {
     all {
       prop.on, isPay(prop.kind),
       ackable(prop, seen, acc, arena.get(acc.tip), book, p, money, acct.coll, honest),
-      arena' = arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
-      acc' = { ...acc, tip: prop.pid },
+      arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true }).set(np, baselineOf(p, isLeft(prop.author)))
+               else arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
+      np' = if (mode) np + 1 else np,
+      acc' = { ...acc, tip: prop.pid, next: if (mode) np else acc.next },
       book' = p.offdelta,
       prop' = NO_PROP,
       wg' = { ...wg, deadCommit: wg.deadCommit or (p.epoch != acct.epoch and paidToHonest(prop.kind, honest)), commits: wg.commits + 1 },
       keepChain,
-      seen' = seen, np' = np, upds' = upds, nu' = nu, mode' = mode
+      seen' = seen, upds' = upds, nu' = nu, mode' = mode
     }
   }
 
-  // A Lock commits the update the two sides intend to execute. From here payments pause. In presign mode the same frame
-  // co-signs the baseline of the next epoch (nonce above the update's, offdelta 0).
+  // A Lock commits the update the two sides intend to execute. From here payments pause. In presign mode the frame co-signs
+  // the baseline of the next epoch, as every frame does.
   action ackLock: bool = {
     val p = arena.get(prop.pid)
     val acker = other(prop.author)
     val lk = match prop.kind { | KLock(l) => l | _ => { dl: 0, dr: 0 } }
     val u: Upd = { live: true, epoch: p.epoch, nonce: p.nonce + 1, dl: lk.dl, dr: lk.dr, fold: p.offdelta,
                    sigL: false, sigR: false }
-    val baseline = mkProof(true, p.nonce + 2, p.epoch + 1, isLeft(prop.author), 0, NO_CLAUSE, true, true)
+    val baseline = baselineOf(p, isLeft(prop.author))
     all {
       prop.on, isLock(prop.kind),
       ackable(prop, seen, acc, arena.get(acc.tip), book, p, money, acct.coll, honest),
@@ -371,18 +387,22 @@ module settle {
   }
 
   // The pre-signed baseline (presign) is usable whichever event opens its epoch. A start needs a proof nonce above the stored
-  // one, and the two events store: the update its own nonce, a finalize the adopted proof's nonce, or the old nonce + 1.
-  // So the baseline must clear the update, the highest both-signed proof of the epoch, and the old nonce + 1. After the epoch
-  // has opened it must clear what is stored. The frame height of the Account has no part in this: only chain nonces do.
+  // one, and the events store at most: an update its nonce; a finalize the nonce of what it adopts, or, for a timeout, the
+  // nonce the dispute started with plus 1. What can be started or adopted is what the honest side has signed. So before the
+  // event the baseline must clear the highest nonce the honest side has signed for the epoch, plus 1, and the update's
+  // nonce; after it, the stored nonce (a dispute that started with the baseline itself has stored its nonce). The frame
+  // height of the Account has no part in this: only chain nonces do.
+  def signedNonce(e: int): int = RECS.fold(0, (m, i) =>
+    if (arena.get(i).live and arena.get(i).epoch == e and signedBy(arena.get(i), honest)) imax(m, arena.get(i).nonce) else m)
+
   val baseline_clears: bool = or {
     acc.next == 0,
     {
       val b = arena.get(acc.next)
       val u = upds.get(acc.locked)
-      val t = tipId(arena, b.epoch - 1)
       if (acct.epoch == b.epoch) dispute.on or b.nonce > acct.nonce            // a start stores the nonce of the proof it used
       else if (acct.epoch > b.epoch) true
-      else and { b.nonce > u.nonce, b.nonce > acct.nonce + 1, t == 0 or b.nonce > arena.get(t).nonce }
+      else and { b.nonce > signedNonce(b.epoch - 1) + 1, b.nonce > acct.nonce + 1, b.nonce > u.nonce }
     }
   }
 

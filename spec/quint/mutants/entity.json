@@ -1,0 +1,148 @@
+{
+  "files": [
+    "account_core.qnt",
+    "entity.qnt",
+    "entity_test.qnt"
+  ],
+  "test": "entity_test.qnt",
+  "init": "init",
+  "step": "step",
+  "testSamples": 3,
+  "mutants": [
+    {
+      "id": "halt-on-refusal",
+      "why": "a refused peer frame halts the Entity [R-X1]",
+      "file": "entity.qnt",
+      "old": "pure val HALT_ON_REFUSAL = false",
+      "new": "pure val HALT_ON_REFUSAL = true",
+      "killedBy": "test:refusalNeverHaltsTest"
+    },
+    {
+      "id": "halt-on-refusal-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "entity.qnt",
+      "old": "pure val HALT_ON_REFUSAL = false",
+      "new": "pure val HALT_ON_REFUSAL = true",
+      "killedBy": "invariant:no_peer_halt"
+    },
+    {
+      "id": "forward-deadline-equal",
+      "why": "[R-P2] the onward lock gets the inbound deadline: no time to claim after the reveal",
+      "file": "entity.qnt",
+      "old": "pure def outDeadline(dIn: int): int = dIn - HOP",
+      "new": "pure def outDeadline(dIn: int): int = dIn",
+      "killedBy": "test:forwardKeepsTheMarginTest"
+    },
+    {
+      "id": "forward-deadline-equal-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "entity.qnt",
+      "old": "pure def outDeadline(dIn: int): int = dIn - HOP",
+      "new": "pure def outDeadline(dIn: int): int = dIn",
+      "killedBy": "invariant:deadline_chain"
+    },
+    {
+      "id": "no-failback-when-tight",
+      "why": "[R-P1] a lock that cannot be forwarded is left to expire",
+      "file": "entity.qnt",
+      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
+      "new": "      else s\n",
+      "killedBy": "test:tooTightFailsBackAtOnceTest"
+    },
+    {
+      "id": "no-failback-when-tight-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "entity.qnt",
+      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
+      "new": "      else s\n",
+      "killedBy": "invariant:no_stranded"
+    },
+    {
+      "id": "failback-without-lag",
+      "why": "the route is failed back the moment the onward deadline passes, before a reveal on the chain can have reached us",
+      "file": "entity.qnt",
+      "old": "s.now > r.dOut + LAG }",
+      "new": "s.now > r.dOut }",
+      "killedBy": "test:lateRevealCannotBeMissedTest"
+    },
+    {
+      "id": "escalation-too-late",
+      "why": "[R-P3] the payee escalates only when the deadline is here, so the reveal lands after it",
+      "file": "entity.qnt",
+      "old": "s.now + ESC >= lock.deadline",
+      "new": "s.now >= lock.deadline",
+      "killedBy": "test:peerNeverAcksEscalatesTest"
+    },
+    {
+      "id": "publish-first-slot-only",
+      "why": "[R-P3, #37] a dispute carries the secret of the first lock only",
+      "file": "entity.qnt",
+      "old": "    ORDER.foldl(s, (acc, k) => {\n      val lock = d.proof.locks.get(k)",
+      "new": "    List(1).foldl(s, (acc, k) => {\n      val lock = d.proof.locks.get(k)",
+      "killedBy": "test:secondSecretIsCarriedTest"
+    },
+    {
+      "id": "hooks-read-pre-arrival",
+      "why": "[R-P4] the escalation reads the links from before this frame's input",
+      "file": "entity.qnt",
+      "old": "val s2 = hooks(s1, s1.links)",
+      "new": "val s2 = hooks(s1, s0.links)",
+      "killedBy": "test:arrivalsBeforeHooksTest"
+    },
+    {
+      "id": "frozen-keeps-proposing",
+      "why": "[flaw 3] a frozen Account keeps its queue and proposes from it",
+      "file": "entity.qnt",
+      "old": "frozen: true, inflight: [], mempool: [] }",
+      "new": "frozen: true, inflight: [] }",
+      "killedBy": "test:peerDisputeFreezesAndIsAnsweredTest",
+      "also": [
+        {
+          "file": "entity.qnt",
+          "old": "if (lk.frozen or lk.inflight.length() > 0 or lk.mempool.length() == 0) s",
+          "new": "if (lk.inflight.length() > 0 or lk.mempool.length() == 0) s"
+        }
+      ]
+    },
+    {
+      "id": "partial-command",
+      "why": "[Q-E2] a command that fails half way keeps the first half",
+      "file": "entity.qnt",
+      "old": "      val out = if (r.ok) { ...s, links: r.ls, nextCmd: s.nextCmd + 1, gh: { ...s.gh, cmds: s.gh.cmds + 1 } } else s",
+      "new": "      val out = if (r.ok) { ...s, links: r.ls, nextCmd: s.nextCmd + 1, gh: { ...s.gh, cmds: s.gh.cmds + 1 } } else { ...s, links: r.ls }",
+      "killedBy": "test:commandIsAllOrNothingTest"
+    },
+    {
+      "id": "partial-command-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "entity.qnt",
+      "old": "      val out = if (r.ok) { ...s, links: r.ls, nextCmd: s.nextCmd + 1, gh: { ...s.gh, cmds: s.gh.cmds + 1 } } else s",
+      "new": "      val out = if (r.ok) { ...s, links: r.ls, nextCmd: s.nextCmd + 1, gh: { ...s.gh, cmds: s.gh.cmds + 1 } } else { ...s, links: r.ls }",
+      "killedBy": "invariant:cmd_atomic"
+    },
+    {
+      "id": "right-drops-inflight-on-collision",
+      "why": "[R-A1] the Right side loses its frame in flight instead of queueing it again",
+      "file": "entity.qnt",
+      "old": "mempool: lk.inflight.concat(lk.mempool), inflight: [] }",
+      "new": "mempool: lk.mempool, inflight: [] }",
+      "killedBy": "test:rightRollsBackOnCollisionTest"
+    },
+    {
+      "id": "left-yields-on-collision",
+      "why": "[R-A1] the Left side gives way instead of keeping its frame",
+      "file": "entity.qnt",
+      "old": "else if (lk.inflight.length() > 0 and me == Left) {",
+      "new": "else if (lk.inflight.length() > 0 and me == Right) {",
+      "killedBy": "test:leftKeepsItsFrameOnCollisionTest"
+    },
+    {
+      "id": "forward-deadline-equal-consequence",
+      "why": "same mutant: peer 2 resolves at the last tick of a lock that has the inbound deadline",
+      "file": "entity.qnt",
+      "old": "pure def outDeadline(dIn: int): int = dIn - HOP",
+      "new": "pure def outDeadline(dIn: int): int = dIn",
+      "killedBy": "test:lastTickResolveIsRefusedTest"
+    }
+  ]
+}

@@ -179,16 +179,28 @@ Options:
 Cost of (b): one exception to "sign only for the current epoch", and a settlement may carry no open clause (a clause would
 be dropped by the fold; R-A3 already forbids settling over queued work).
 Choice: (b); the model has both modes (`mode` = presign, otherwise the rebase of N1 as first decided).
-Decision, as it now reads in N1: a party signs proofs only for the current epoch, with one exception: the Lock frame of a
-settlement also carries a co-signed baseline for epoch+1 (offdelta 0, no clauses), and the update folds offdelta into
-`ondeltaDiff`. A settlement requires no open clauses in v1; lifting that is a v2 proposal (settle.qnt proofs carry no clauses,
-so the rule is not a guard here; the Entity layer enforces it with R-A3).
-The baseline's nonce is a chain nonce, never the frame height: it must clear whatever either event stores, which is the
-update's nonce, the adopted proof's nonce, or the old nonce + 1 (a timeout finalize that adopts nothing). Pinned by
-`baseline_clears` (killed by `baseline-nonce-not-above-update`), by `presignBaselineStartsAfterStaleFinalizeTest` (the
-finalize route, whichever proof the adversary starts with, killed by `finalize-stores-high-nonce`) and by
-`presignSettlementOpensNextEpochTest` (the update route). `hostage_free` holds in this mode and fails in the rebase mode
-(witness `w_hostage`), so the window is gone rather than merely unreached.
+Decision, as it now reads in N1 (revised 17:36Z, replacing the first S3 note): a party signs proofs only for the current epoch,
+with one exception: EVERY frame also carries a co-signed baseline of epoch+1 (offdelta 0, no clauses). A finalize can open a
+new epoch with no settlement Lock before it, and the honest side would be left without a disputable proof again. A settlement
+still requires no open clauses in v1 (lifting that is a v2 proposal: settle.qnt proofs carry no clauses, so this is not a guard
+here and the Entity layer enforces it with R-A3), and the update folds offdelta into `ondeltaDiff`.
+The baseline's nonce is a chain nonce, never the frame height, and the smallest one that survives every opening event is
+**frame nonce + 3**. Derivation (chain.qnt): an update stores its own nonce; a finalize on path 1 or 2 stores the adopted
+proof's nonce; a timeout finalize (path 0) stores the nonce of the proof the dispute started with, plus 1. A counterparty
+can start or adopt what the honest side has signed: every co-signed proof, and its own unacked proposal at tip + 1. So the
+largest stored nonce is (tip + 1) + 1 = tip + 2, and a start needs a nonce strictly above it: tip + 3.
+`baselineNonceIsTipPlusThreeTest` runs that schedule (Left starts with Right's unacked proposal and lets the window run out:
+stored 4, baseline 5); with a gap of 2 the baseline is dead (`baseline-gap-two`, killed by the test and by `baseline_clears`),
+with a gap of 1 an update already kills it (`baseline-gap-one`). `baselineRidesEveryFrameTest` runs the case with no
+settlement at all (`pay-frame-without-baseline` is killed by it and by `hostage_free`). `hostage_free` holds in this mode
+and fails in the rebase mode (witness `w_hostage`), so the window is gone rather than merely unreached.
+Not modelled: an unacked baseline of epoch+1 signed only by the honest side can also be presented by the counterparty; every
+baseline pays offdelta 0 on an emptied Account, so presenting any of them pays the same.
+
+**S3b. A party that starts a dispute uses its newest co-signed proof (coordinator, 17:36Z).**
+An older proof, or a proposal it has not seen countersigned, is presentable on chain and can be the one that settles, so the
+starter never picks by convenience: `honestStart` uses `tipId`. `starterUsesNewestProofTest` and the mutant
+`honest-starts-with-older-proof` (chain.json) pin it: with nobody answering, the older proof would be paid.
 
 **S4. Fund only into an Account you hold a proof for.**
 Found by simulation: after a finalize opened epoch 1 the Account has no proof; a deposit into it is a stake nobody can
@@ -204,3 +216,73 @@ that has to exceed it; the protocol cannot enforce it, so it is a deployment par
 forgiveness (`forgiveDebtsInTokenIds`), an `ondeltaDiff` that changes what a side is owed (a settlement paying an off-chain
 balance out of reserves; the two shapes covered are custody-only and fold), credit limits across epochs, and the Entity's
 choice of when to settle.
+
+---
+
+# The Entity (entity.qnt)
+
+The Entity under test is a hub with two Accounts: IN (peer 1 sends, we are the payee of its locks) and OUT (we send on to peer 2,
+we are the payer). Both peers are adversaries; the Entity is honest and online.
+
+**E1. One frame, four phases, one input.**
+A frame is a pure function `frame(state, input)`: (1) the input: a peer's frame, a peer's ack or a J event; (2) the hooks:
+resolve, expire, route, fail back, escalate, reveal, all reading the state after the input; (3) a signed local command;
+(4) one proposal per Account, ascending. A real frame batches several inputs in phase 1; the model feeds one, which keeps the
+phase order and the state space small. Inside a batch the choice is: peer frames first, then J events. A dispute event that
+arrives with a peer frame then freezes the Account with evidence that includes the frame. Source: R-E4, R-P4; the batch order is
+mine (lessons.md does not fix it).
+
+**E2. What is and is not modelled.**
+A hub, one token, one route per slot (IN slot k feeds OUT slot k), amount 1 or 2, two secrets. The Entity's reaction time is
+zero ticks: time advances only when the Entity has nothing left to do at this tick (a checked assumption, not a rule the protocol
+can enforce; the deployment number is "processing < one tick"). The two replicas of one Account are account.qnt's business; here a
+peer frame is one transaction, validated, applied and acked at once. Not modelled: several routes per slot, tokens, boards, the
+J batch (jbatch, next), several inputs per frame, an offline Entity (runtime.qnt), `SetCredit`, swaps.
+
+**E3. The deadline arithmetic, derived.**
+Let LAG be the ticks a J transaction needs to be included, and the ticks a J event needs to reach the Entity. A payee that knows
+a secret only off-chain must put it on the chain by the deadline, so it starts a dispute at deadline - ESC with ESC >= LAG
+(`escalation-too-late`: escalating at the deadline puts the secret there one tick late). An onward lock must end HOP before the
+inbound one: peer 2 may resolve at the last tick of its lock, the hub learns it then, and needs ESC ticks after that
+(HOP >= ESC; `forward-deadline-equal` and its consequence test show the loss with HOP = 0). The model also passes with HOP = 1 =
+LAG. The spec value is **HOP = 2 = 2 * LAG**: one tick of slack for the Entity's reaction, which the model sets to zero. The
+inequalities are the rule; the numbers are deployment parameters. Source: R-P2, R-P3.
+
+**E4. When a forwarded route may be failed back.**
+Not when the onward deadline passes: peer 2 may have put the secret on the chain by then (inclusion time <= deadline) and the
+Entity reads the event up to LAG later. The route fails back when the onward lock is gone from a signed state (a newer proof
+without it beats any older one), or when the deadline + LAG has passed with the secret still unknown, and never while the secret
+is known (that is a claim, not a failure). `failback-without-lag` with `lateRevealCannotBeMissedTest`.
+
+**E5. What a dispute carries, and until when.**
+Every known secret that opens a payee clause of the proof the Entity stands on: at the start, and again in every later frame
+for a secret learned afterwards (`publishFor`, one rule with two moments). The proof it stands on is its tip when it reads the
+dispute (its own start or the peer's). `publish-first-slot-only` shows the loss (the second route's secret is not on the chain).
+Source: #37, R-P3.
+
+**E6. What the model needs from the chain (an interface, not a proof).**
+A clause pays its payee iff its secret is on the chain by the clause's deadline and the proof holding the clause is the one the
+dispute settles; a secret on the chain pays nobody by itself (there must be a dispute on that Account whose proof holds the
+clause); starting the dispute after the deadline still pays a clause whose secret was revealed in time. chain.qnt has the first
+two (`revealedClausePaysTest`, `lateSecretPaysNothingTest`); the third is used by the Entity model (a late start is fine as long
+as the reveal was on time) and has no test there yet. To close by composing entity and chain.
+
+**E7. A route slot is not a private namespace.**
+Peer 2 may put a lock of its own into OUT slot k. Then the forward is refused (`lock_exists`) and the route fails back. The rule
+"pick a free OUT slot" is not modelled; the properties talk about the lock the Entity put there (`outLockOf`).
+
+**E8. Commands.**
+A signed command names one or more Accounts. It applies to all of them or to none (the nonce is spent only when it applies), it is
+admitted against the planning view (tip, our frame in flight, our queue) and a replayed nonce is refused without effect
+[Q-E2, Q-E1]. Hooks' own transactions bypass the queue cap (they are the protocol, not a user).
+
+**E9. Collisions as the Entity lives them.**
+Left ignores the peer's frame and keeps its own in flight; Right puts its frame back at the front of its queue and applies the
+peer's [R-A1]. `rightRollsBackOnCollisionTest`, `leftKeepsItsFrameOnCollisionTest`.
+
+**E10. A refused peer frame is a value.** It counts and changes nothing; it never halts [R-X1] (`halt-on-refusal`).
+
+**E11. Found while writing it.**
+(a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`
+(E7). (b) A secret on the chain pays nobody without a dispute holding the clause; the first `route_safe` treated it as payment and
+called a correct fail back a loss. Both were the model being wrong, not the Entity.

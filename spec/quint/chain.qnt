@@ -170,7 +170,7 @@ module chain {
   var applied: int -> bool           // arena records that have settled
   var ghost: Ghost
 
-  pure val NREC = 12
+  pure val NREC = 16
   pure val RECS = 1.to(NREC)
   pure val SLOTS = 0.to(NREC)     // slot 0 is the empty proof: "no proof" is a valid lookup
 

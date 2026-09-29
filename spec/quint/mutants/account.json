@@ -1,11 +1,15 @@
 {
-  "files": ["account.qnt", "account_test.qnt"],
+  "files": [
+    "account.qnt",
+    "account_core.qnt",
+    "account_test.qnt"
+  ],
   "test": "account_test.qnt",
   "mutants": [
     {
       "id": "collision-both-roll-back",
       "why": "R-A1: on a same-height collision both sides give way, so each commits the other's frame",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "            match s {\n              | Left => keep\n              | Right => {",
       "new": "            match Right {\n              | Left => keep\n              | Right => {",
       "killedBy": "invariant:agreed"
@@ -13,7 +17,7 @@
     {
       "id": "pay-ignores-capacity",
       "why": "R-A6: a payment is not checked against the payer's room",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "        else if (p.amount > room(b, p.from)) Refused(\"insufficient_capacity\")\n        else match p.from {",
       "new": "        else match p.from {",
       "killedBy": "invariant:credit_holds"
@@ -21,7 +25,7 @@
     {
       "id": "credit-drop-unchecked",
       "why": "R-A6: a credit limit may be lowered below what is already owed",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "if (rcpan(nb)) Ok(nb) else Refused(\"credit_below_usage\")",
       "new": "Ok(nb)",
       "killedBy": "invariant:credit_holds"
@@ -29,7 +33,7 @@
     {
       "id": "room-ignores-clauses",
       "why": "R-A6: open clauses do not hold the payer's room, so worst-case RCPAN breaks",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "    | Left => imax(0, delta(b) + b.limitLeft - holds(b, Left))",
       "new": "    | Left => imax(0, delta(b) + b.limitLeft)",
       "killedBy": "invariant:credit_holds"
@@ -37,7 +41,7 @@
     {
       "id": "propose-while-in-flight",
       "why": "P4: a second proposal at the same height signs a second, different proof for one nonce",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    isOpen(r),",
       "new": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    true,",
       "killedBy": "invariant:no_equivocation"
@@ -61,7 +65,7 @@
     {
       "id": "rollback-drops-txs",
       "why": "R-A1: Right's rolled-back txs are not restored to its mempool",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "mempool: own.txs.concat(r.mempool) }",
       "new": "mempool: r.mempool }",
       "killedBy": "test:collisionLeftWinsTest"
@@ -69,7 +73,7 @@
     {
       "id": "resolve-after-deadline",
       "why": "P5: a secret is accepted after the lock's deadline",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "          else if (ts > l.deadline) Refused(\"past_deadline\")\n",
       "new": "",
       "killedBy": "test:htlcResolveMovesOffdeltaOnceTest"
@@ -77,7 +81,7 @@
     {
       "id": "expire-at-deadline",
       "why": "P5: a lock expires while the deadline second is still open",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "        else if (ts <= b.locks.get(r.id).deadline) Refused(\"not_expired\")",
       "new": "        else if (ts < b.locks.get(r.id).deadline) Refused(\"not_expired\")",
       "killedBy": "test:htlcExpireAndCancelTest"
@@ -85,7 +89,7 @@
     {
       "id": "spend-others-funds",
       "why": "R-A6: a side may pay from the other side's funds",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "        if (p.from != author) Refused(\"not_own_funds\")\n        else if (p.amount < 1 or p.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (p.amount > room",
       "new": "        if (p.amount < 1 or p.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (p.amount > room",
       "killedBy": "test:payNeedsRoomTest"
@@ -93,7 +97,7 @@
     {
       "id": "no-reack-on-duplicate",
       "why": "Q-A2: a repeated proposal for an already committed frame is not answered, so a lost ack is never recovered",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "          else if (r.lastFid == fid) { ...keep, ack: true }\n",
       "new": "",
       "killedBy": "test:lostAckIsRecoveredByResendTest"
@@ -101,7 +105,7 @@
     {
       "id": "lock-slot-overwrite",
       "why": "an open clause in a slot is overwritten by a new lock, silently dropping the first",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "        else if (b.locks.get(l.id).on) Refused(\"lock_exists\")\n",
       "new": "",
       "killedBy": "test:htlcLockHoldsRoomTest"
@@ -109,7 +113,7 @@
     {
       "id": "queue-guard-reads-committed-only",
       "why": "Q-E1: a local tx is admitted against the committed state, blind to what is already queued",
-      "file": "account.qnt",
+      "file": "account_core.qnt",
       "old": "    match replay(plan, r.mempool, s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
       "new": "    match replay(plan, List(), s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
       "killedBy": "test:queuedPaymentIsVisibleToAPaymentTest"

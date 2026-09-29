@@ -103,15 +103,6 @@
       "step": "wfocus"
     },
     {
-      "id": "presign-baseline-missing",
-      "why": "the Lock frame does not co-sign the next epoch's baseline",
-      "file": "settle.qnt",
-      "old": "arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true }).set(np, baseline)",
-      "new": "arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true })",
-      "killedBy": "invariant:hostage_free",
-      "step": "wfocus"
-    },
-    {
       "id": "update-ignores-epoch",
       "why": "C1 for updates: an update signed for an older epoch still executes",
       "file": "settle.qnt",
@@ -152,21 +143,45 @@
       "killedBy": "test:presignSettlementOpensNextEpochTest"
     },
     {
-      "id": "baseline-nonce-not-above-update",
-      "why": "the pre-signed baseline reuses the update's nonce, so it is not above what the update stores",
-      "file": "settle.qnt",
-      "old": "mkProof(true, p.nonce + 2, p.epoch + 1, isLeft(prop.author), 0, NO_CLAUSE, true, true)",
-      "new": "mkProof(true, p.nonce + 1, p.epoch + 1, isLeft(prop.author), 0, NO_CLAUSE, true, true)",
-      "killedBy": "invariant:baseline_clears",
-      "step": "wfocus"
-    },
-    {
       "id": "finalize-stores-high-nonce",
       "why": "a finalize that adopts no proof stores a nonce above the pre-signed baseline",
       "file": "chain.qnt",
       "old": "val newNonce = if (adopts) r.nonce else acct.nonce + 1",
       "new": "val newNonce = if (adopts) r.nonce else acct.nonce + 5",
       "killedBy": "test:presignBaselineStartsAfterStaleFinalizeTest"
+    },
+    {
+      "id": "pay-frame-without-baseline",
+      "why": "a payment frame does not co-sign the next epoch's baseline (only settlements would)",
+      "file": "settle.qnt",
+      "old": ".set(np, baselineOf(p, isLeft(prop.author)))",
+      "new": ".set(np, NO_PROOF)",
+      "killedBy": "test:baselineRidesEveryFrameTest"
+    },
+    {
+      "id": "baseline-gap-two",
+      "why": "the baseline is two above its frame: a start with the unacked proposal stores tip + 2 and kills it",
+      "file": "settle.qnt",
+      "old": "pure val BASELINE_GAP = 3",
+      "new": "pure val BASELINE_GAP = 2",
+      "killedBy": "test:baselineNonceIsTipPlusThreeTest"
+    },
+    {
+      "id": "baseline-gap-two-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "pure val BASELINE_GAP = 3",
+      "new": "pure val BASELINE_GAP = 2",
+      "killedBy": "invariant:baseline_clears",
+      "step": "wfocus"
+    },
+    {
+      "id": "baseline-gap-one",
+      "why": "the baseline is one above its frame: not above what an update stores",
+      "file": "settle.qnt",
+      "old": "pure val BASELINE_GAP = 3",
+      "new": "pure val BASELINE_GAP = 1",
+      "killedBy": "test:presignSettlementOpensNextEpochTest"
     }
   ]
 }

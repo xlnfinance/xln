@@ -20,12 +20,15 @@ H3 clamp). og is a reference, never the oracle.
 
 | file | what it is |
 |---|---|
-| `account.qnt` | Account layer: ledger, credit, HTLC clauses, the signed-frame protocol, signed proofs, properties |
+| `account.qnt` | Account layer: the state machine (propose, receive, ack, resend, loss) over `account_core.qnt`, and its properties |
 | `account_test.qnt` | scenario tests: exact schedules with exact expected results |
 | `chain.qnt` | J layer for one Account: reserves, collateral, epoch, debt, the dispute game (start, counter, three finalize paths), payout |
 | `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, H1 wait, H2 floor, debt, deposits, absent party |
 | `settle.qnt` | off-chain epoch lifecycle over `chain.qnt`: Pay, Lock and Rebase frames, the N1 pause, the cooperative update, baseline nonce floor |
 | `settle_test.qnt` | scenario tests: pause while locked, presign vs rebase, forged baseline, dead-epoch payment, update dies with a finalize |
+| `account_core.qnt` | the pure part of the Account layer (types, transition table, replica rules); `account.qnt` and `entity.qnt` build on it |
+| `entity.qnt` | Entity layer: a hub with two Accounts, the four-phase frame, routing, fail back, escalation, commands |
+| `entity_test.qnt` | scenario tests: forward with margin, fail back at once, escalation, secrets, late reveal, arrivals first, freeze, commands, collisions |
 | `mutants/` | deliberately broken copies of the spec; every property must kill its mutants (`mutants/run.py <module>`) |
 | `traces/` | ITF traces (Quint's JSON trace format) for replay against another spec |
 | `QUESTIONS.md` | every unclear point, the options, the choice made, the source |

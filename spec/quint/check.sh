@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 Q=./node_modules/.bin/quint
 SAMPLES=${SAMPLES:-500}
-MODULES=${MODULES:-account chain settle}
+MODULES=${MODULES:-account chain settle entity}
 
 for m in $MODULES; do
   echo "== $m: typecheck"
@@ -18,6 +18,7 @@ for m in $MODULES; do
   case "$m" in
     chain)  steps=16 ;;                                  # the chain clock is short; longer traces only repeat finalizes
     settle) init=winit; step=wstep; inv=wsafe; steps=25 ;;
+    entity) steps=25 ;;
   esac
   $Q typecheck "$m.qnt"
   if [ -f "${m}_test.qnt" ]; then

@@ -164,6 +164,14 @@
       "old": "acct' = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
       "new": "acct' = { ...acct, coll: acct.coll + (if (dispute.on) 0 else amt), ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
       "killedBy": "invariant:p3_conserved"
+    },
+    {
+      "id": "honest-starts-with-older-proof",
+      "why": "the honest party starts with a co-signed proof that is not its newest",
+      "file": "chain.qnt",
+      "old": "startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)",
+      "new": "startWith(honest, tipId(arena, acct.epoch) - 1, knows.get(honest) != 0, 0, false)",
+      "killedBy": "test:starterUsesNewestProofTest"
     }
   ]
 }

@@ -63,6 +63,31 @@ module settle_test {
     .expect(and { acct.epoch == 1, arena.get(acc.tip).epoch == 1, arena.get(acc.tip).nonce > acct.nonce,
                   startable, baseline_clears, wsafe })
 
+  // The baseline of the next epoch rides with every frame, not only with a settlement: here no update is ever agreed, a
+  // dispute finalizes, and the honest side still holds a proof of the new epoch.
+  run baselineRidesEveryFrameTest =
+    sinit(Right, true, 2, 2, 1, 1)
+    .then(offPropose(Left, KPay({ from: Left, amt: 1 }))).then(ackPay)
+    .then(cHonestDisputes(honestStart))
+    .then(cHonest(tick)).then(cHonest(tick))
+    .then(cFinalize(honestFinalize))
+    .then(observe(Right))
+    .expect(and { acct.epoch == 1, arena.get(acc.tip).epoch == 1, arena.get(acc.tip).nonce > acct.nonce, startable, hostage_free, wsafe })
+
+  // Why the baseline is three above the frame it rides with. Right, honest, has an unacked proposal at nonce 3 (tip is 2);
+  // Left starts a dispute with it (Right signed it) and lets the window run out: a timeout finalize stores the start nonce
+  // plus 1 = 4. The baseline of the tip is at 2 + 3 = 5 and still opens the Account; at nonce 4 or less it would not.
+  run baselineNonceIsTipPlusThreeTest =
+    sinit(Right, true, 2, 2, 1, 1)
+    .then(offPropose(Left, KPay({ from: Left, amt: 1 }))).then(ackPay)
+    .then(offPropose(Right, KPay({ from: Right, amt: 1 })))
+    .then(cNeutral(startWith(Left, 5, false, 0, false)))
+    .then(observe(Right))
+    .then(cHonest(tick)).then(cHonest(tick))
+    .then(cFinalize(finalizeWith(Left, 0, 0, false)))
+    .then(observe(Right))
+    .expect(and { acct.epoch == 1, acct.nonce == 4, arena.get(acc.tip).nonce == 5, startable, baseline_clears, wsafe })
+
   // ---- N1 as decided: a window without a proof, closed by the Rebase ---------------------------------------------
 
   run rebaseLeavesAWindowWithoutAProofTest =

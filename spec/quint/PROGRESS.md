@@ -8,7 +8,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 |---|---|---|
 | Account | `account.qnt` | v1 done: two parties, one token, credit, HTLC clauses, frame protocol with collision, resend, loss. 14 scenario tests, invariants P2 and P4a-c by simulation, 14 mutants killed |
 | J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 19 scenario tests, P1 P3 by simulation, 20 mutants killed. Apalache: see Evidence |
-| Entity frame | `entity.qnt` | not started |
+| Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 14 scenario tests, 9 properties by simulation, 16 mutants killed. Simulation only (one state record) |
 | Runtime | `runtime.qnt` | not started |
 | Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 13 scenario tests, 6 properties by simulation, 18 mutants killed. S3 (hostage window) closed: presign+fold adopted |
 
@@ -25,6 +25,11 @@ Handoff format: what is done per layer, what is next, how to pick up.
   `claims_conserved`, `book_enforceable`, `hostage_free`, `baseline_clears`) over simulated traces of 25 steps, all settle witnesses reached.
   `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 18 of 18 killed (7 by invariant, 11 by scenario test).
   One invariant hunt (`forged-baseline-invariant`) needs 20000 traces of 30 steps: the schedule that reaches it is long.
+- `MODULES=entity ./check.sh`: typecheck, 14 scenario tests, `safe` (no_peer_halt, no_stranded, deadline_chain, dispute_carries_all,
+  no_needless_dispute, no_frame_on_frozen, cmd_atomic, credit_holds, route_safe) over 500 traces of 25 steps, 11 witnesses reached.
+  `python3 mutants/run.py entity`: 16 of 16 killed (4 by invariant, 12 by scenario test).
+- Apalache on `chain.qnt`, `quint verify chain.qnt --init init --step step --invariant safe --max-steps 6`: did not get past step 1
+  in 12 minutes (java at 9.5 GB resident) and was killed. A copy with `NREC = 7`: see the line below when it ends.
 - Tools: `@informalsystems/quint` 0.33.0, Apalache 0.62.1 (fetched by `quint verify`), Java 21. The rust
   simulator backend cannot be fetched (`Release v0.7.0 not found: Failed to fetch from GitHub: Forbidden`); use
   `--backend typescript`.
@@ -44,12 +49,11 @@ Neither spec reads the other. Three leaks, all harmless but recorded:
 
 ## Next
 
-1. Apalache on `chain.qnt` (one job at a time: `quint verify` uses one shared server), then compose account + chain:
-   real Account histories instead of the arena, so P1 is checked against what the frame protocol can produce.
-2. `entity.qnt`: the frame pipeline (arrivals, J events, hooks, local commands, propose), one Account state per peer.
-3. `jbatch` (J batch lifecycle and failure), `runtime.qnt` (delivery, clock, halt taxonomy, J watching).
-4. Hub route model: the deadline chain across two Accounts (P5).
-5. v2 proposals: order book, lending, boards.
+1. Compose entity and chain (E6): the hub's dispute against the real dispute game, so "a clause pays iff revealed by the deadline" is
+   checked and not assumed; then account + chain with real Account histories instead of the arena.
+2. `jbatch` (J batch lifecycle and failure), `runtime.qnt` (delivery, clock, halt taxonomy, J watching).
+3. Entity: several routes per slot and a free-slot rule (E7), several inputs per frame (E1), an offline Entity.
+4. v2 proposals: order book, lending, boards.
 
 ## Pick-up command
 

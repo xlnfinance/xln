@@ -82,6 +82,15 @@ module chain_test {
     .then(honestCounter)
     .fail()
 
+  // A party that starts a dispute starts with its newest co-signed proof, never an older one: nobody answers, so the older
+  // proof is what the chain would pay.
+  run starterUsesNewestProofTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and { money.res == Map(Left -> 1, Right -> 1), acct.nonce == 3, safe })
+
   // ---- epochs (C1) --------------------------------------------------------------------------------------------
 
   // After a finalize every proof of the old epoch is dead: replaying one is refused; the next epoch's baseline is not.
