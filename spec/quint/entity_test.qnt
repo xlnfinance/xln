@@ -184,4 +184,41 @@ module entity_test {
     .then(peerLock(1, 1, 4, 1))                                        // OUT inflight = [Lock 1]
     .then(peerCancel(1))
     .expect(and { st.gh.collisions == 1, st.gh.refusals == 0, st.links.get(OUT).inflight.length() == 1, not(st.links.get(OUT).tip.locks.get(1).on) })
+
+  // ---- several inputs in one frame (E1) -----------------------------------------------------------------------------
+
+  action feedList(inps: List[Input]): bool = all { st.now <= MAXT, st' = frameOf(st, inps) }
+
+  // The ack that resolves the inbound lock and an unrelated refused frame arrive together at the tick the hub would escalate:
+  // both are applied before the hooks read, so there is no dispute, and the refusal is a value.
+  run ackAndRefusalInOneFrameTest =
+    init
+    .then(peerLock(1, 1, 4, 1)).then(peerAck(OUT)).then(peerResolve(1, 1))
+    .then(tick).then(tick).then(tick)
+    .then(feedList([AckOf(IN), Arrive({ link: OUT, tx: HtlcCancel({ id: 2 }) })]))
+    .expect(and {
+      not(st.links.get(IN).frozen), st.gh.escalations == 0, st.links.get(IN).tip.offdelta == 1,
+      st.gh.refusals == 1, no_peer_halt, no_needless_dispute, safe
+    })
+
+  // A peer's frame and a chain event in one frame, in the Runtime's order: the frame is applied first, then the dispute is read and
+  // freezes the Account. The frame is part of the state the Entity answers the dispute with.
+  run peerFrameBeforeChainEventTest =
+    init
+    .then(peerStartsDispute(IN))
+    .then(tick)
+    .then(feedList([Arrive({ link: IN, tx: HtlcLock({ id: 1, payer: peerSide(IN), amount: 1, hashlock: hashOf(1), deadline: 5 }) }), JDeliver(1)]))
+    .expect(and {
+      st.links.get(IN).frozen, st.links.get(IN).tip.locks.get(1).on, st.disp.get(IN).proof.locks.get(1).on,
+      no_frame_on_frozen, no_peer_halt, safe
+    })
+
+  // The same two inputs the other way round: the Account is frozen first and the frame changes nothing. The order is the Runtime's
+  // rule (runtime.qnt R1), and it is what makes the result the same on every replica.
+  run chainEventBeforePeerFrameDiffersTest =
+    init
+    .then(peerStartsDispute(IN))
+    .then(tick)
+    .then(feedList([JDeliver(1), Arrive({ link: IN, tx: HtlcLock({ id: 1, payer: peerSide(IN), amount: 1, hashlock: hashOf(1), deadline: 5 }) })]))
+    .expect(and { st.links.get(IN).frozen, not(st.links.get(IN).tip.locks.get(1).on), st.routes.get(1).st == Idle })
 }

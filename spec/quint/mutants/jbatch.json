@@ -1,0 +1,75 @@
+{
+  "files": [
+    "jbatch.qnt",
+    "jbatch_test.qnt"
+  ],
+  "mutants": [
+    {
+      "id": "pack-everything",
+      "why": "J3: one batch of everything queued: a payment that cannot run takes the urgent ops down with it, and an outstanding payment batch delays them",
+      "file": "jbatch.qnt",
+      "old": "pure val STRAT = 3",
+      "new": "pure val STRAT = 0",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "urgent-waits-for-outstanding",
+      "why": "J3: urgent ops are alone in a batch but wait for the outstanding batch to be read first",
+      "file": "jbatch.qnt",
+      "old": "pure val STRAT = 3",
+      "new": "pure val STRAT = 1",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "replace-without-follow-up",
+      "why": "J3: the urgent batch replaces the outstanding one at the same nonce, but when the old one lands first the urgent op waits another round",
+      "file": "jbatch.qnt",
+      "old": "pure val STRAT = 3",
+      "new": "pure val STRAT = 2",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "urgent-batches-fork-each-other",
+      "why": "J3: a second urgent op is signed at the same nonces as the first pair; the adversary lands the older, smaller batches and burns both nonces, so the newer ones die and cost another round",
+      "file": "jbatch.qnt",
+      "old": "val base = if (top > 0) top + 1 else n",
+      "new": "val base = n",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "contract-reverts-on-moved-dispute",
+      "why": "J2: the batch reverts as a whole when a dispute op cannot apply (Depository today): the secret reveal in the same batch is lost with it",
+      "file": "jbatch.qnt",
+      "old": "pure val TOLERANT = true",
+      "new": "pure val TOLERANT = false",
+      "killedBy": "test:revealSurvivesAMovedDisputeInOneFrameTest"
+    },
+    {
+      "id": "drop-every-op-of-a-failed-batch",
+      "why": "Q-J1: the Entity abandons all ops of a batch that reverted, but the signed batch can still land later",
+      "file": "jbatch.qnt",
+      "old": "dropped: OPIDS.mapBy(i => st.dropped.get(i) or dead.contains(i)),",
+      "new": "dropped: OPIDS.mapBy(i => st.dropped.get(i) or x.b.ids.contains(i)),",
+      "killedBy": "invariant:dropped_only_dead"
+    },
+    {
+      "id": "follow-up-carries-payments",
+      "why": "J3: the follow-up copy of an urgent batch may carry only ops that are idempotent; with a payment in both copies it runs twice",
+      "file": "jbatch.qnt",
+      "old": "    val u = urgentPending(s)\n    val p = payQueued(s)",
+      "new": "    val p = payQueued(s)\n    val u = urgentPending(s).union(p)",
+      "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "contract-reverts-blocks-the-next-batch",
+      "why": "J2: a reverted urgent batch keeps its nonce, and the next urgent batch sits above it and cannot land (E2)",
+      "file": "jbatch.qnt",
+      "old": "pure val TOLERANT = true",
+      "new": "pure val TOLERANT = false",
+      "killedBy": "test:spoiledBatchDoesNotBlockTheNextOneTest"
+    }
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "jbatch_test.qnt"
+}

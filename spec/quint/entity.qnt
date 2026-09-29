@@ -35,6 +35,7 @@ module entity {
   pure val LAG = 1                  // a J transaction is included, and a J event reaches the Entity, within LAG ticks
   pure val HOP = 2                  // the onward lock's deadline is this much earlier than the inbound lock's (2 * LAG)
   pure val ESC = 1                  // a payee escalates when the deadline is at most this far away (>= LAG)
+  pure val DWIN = 4                 // a dispute's two response windows together (chain: 2 * MIN_WINDOW); the answer must land inside
   pure val MAXT = 8
   pure val IN = 1
   pure val OUT = 2
@@ -89,7 +90,7 @@ module entity {
 
   type Ghost = {
     halted: bool, refusals: int, drops: int,
-    frameOnFrozen: bool, needless: bool, partialCmd: bool,
+    frameOnFrozen: bool, needless: bool, partialCmd: bool, lateAnswer: bool,
     forwards: int, failBacks: int, resolves: int, escalations: int, cmds: int, collisions: int
   }
 
@@ -112,7 +113,7 @@ module entity {
   pure val NO_DISP: Disp = { on: false, byUs: false, answered: false, proof: GENESIS }
   pure val NO_JEV: JEv = { live: false, kind: JSecret(0), at: 0 }
   pure val NO_GHOST: Ghost = {
-    halted: false, refusals: 0, drops: 0, frameOnFrozen: false, needless: false, partialCmd: false,
+    halted: false, refusals: 0, drops: 0, frameOnFrozen: false, needless: false, partialCmd: false, lateAnswer: false,
     forwards: 0, failBacks: 0, resolves: 0, escalations: 0, cmds: 0, collisions: 0
   }
   pure def emptyLink(tip: Body): Link = { tip: tip, inflight: [], ifTs: 0, mempool: [], frozen: false }
@@ -259,7 +260,11 @@ module entity {
       val s1 = { ...s, jev: s.jev.set(i, { ...ev, live: false }) }
       match ev.kind {
         | JSecret(sec) => { ...s1, known: s1.known.set(sec, true) }
-        | JDispute(l) => answer(freeze(s1, l), l)
+        | JDispute(l) => {
+          val s2 = answer(freeze(s1, l), l)
+          // the dispute is on the chain since ev.at; our counter lands LAG after we read it and must beat the timeout (C11)
+          { ...s2, gh: { ...s2.gh, lateAnswer: s2.gh.lateAnswer or s.now + LAG >= ev.at + DWIN } }
+        }
       }
     }
   }
@@ -400,17 +405,32 @@ module entity {
   // One Entity frame
   // ---------------------------------------------------------------------------------------------------------
 
-  pure def frame(s0: S, inp: Input): S = {
-    val s1 = match inp {
-      | Arrive(a) => arrive(s0, a.link, a.tx)
-      | AckOf(l) => ackOf(s0, l)
-      | JDeliver(i) => jdeliver(s0, i)
-      | _ => s0
-    }
+  // Phase 1 for one input.
+  pure def applyInput(s: S, inp: Input): S = match inp {
+    | Arrive(a) => arrive(s, a.link, a.tx)
+    | AckOf(l) => ackOf(s, l)
+    | JDeliver(i) => jdeliver(s, i)
+    | _ => s
+  }
+
+  // The inputs of one frame, in the Runtime's canonical order (runtime.qnt R1): the peers' frames and acks, then chain events, then
+  // commands. `frameOf` takes them as given; a frame carries at most one command.
+  pure def rankOf(inp: Input): int = match inp {
+    | Arrive(_) => 0
+    | AckOf(_) => 0
+    | JDeliver(_) => 1
+    | Command(_) => 2
+    | Timer => 3
+  }
+
+  pure def frameOf(s0: S, inps: List[Input]): S = {
+    val s1 = inps.foldl(s0, (acc, inp) => applyInput(acc, inp))
     val s2 = hooks(s1, s1.links)
-    val s3 = match inp { | Command(c) => applyCmd(s2, c) | _ => s2 }
+    val s3 = inps.foldl(s2, (acc, inp) => match inp { | Command(c) => applyCmd(acc, c) | _ => acc })
     LINKS.foldl(s3, (acc, l) => proposeOn(acc, l))
   }
+
+  pure def frame(s0: S, inp: Input): S = frameOf(s0, [inp])
 
   // ---------------------------------------------------------------------------------------------------------
   // State and actions: the environment is the two peers and the chain
@@ -429,6 +449,29 @@ module entity {
   action tick: bool = all { st.now < MAXT, quiescent(st), not(overdue(st)), st' = { ...st, now: st.now + 1 } }
 
   action timer: bool = feed(Timer)
+
+  // Two inputs in one frame (E1): any two of the peers' frames, acks and chain events, in canonical order.
+  pure def someInput(kind: int, l: int, k: int, sec: int, off: int, amt: int, i: int, now: int): Input =
+    if (kind == 0) Arrive({ link: IN, tx: HtlcLock({ id: k, payer: peerSide(IN), amount: amt, hashlock: hashOf(sec), deadline: now + off }) })
+    else if (kind == 1) Arrive({ link: OUT, tx: HtlcResolve({ id: k, secret: sec }) })
+    else if (kind == 2) Arrive({ link: OUT, tx: HtlcCancel({ id: k }) })
+    else if (kind == 3) AckOf(l)
+    else JDeliver(i)
+
+  action feedTwo: bool = {
+    nondet k1 = 0.to(4).oneOf()
+    nondet k2 = 0.to(4).oneOf()
+    nondet l = LINKSET.oneOf()
+    nondet k = ROUTES.oneOf()
+    nondet sec = SECRETS.oneOf()
+    nondet off = 1.to(LOCK_SLACK).oneOf()
+    nondet amt = 1.to(2).oneOf()
+    nondet i = 1.to(NJ).oneOf()
+    val a = someInput(k1, l, k, sec, off, amt, i, st.now)
+    val b = someInput(k2, l, k, sec, off, amt, i, st.now)
+    val pair = if (rankOf(a) <= rankOf(b)) [a, b] else [b, a]
+    all { st.now <= MAXT, st' = frameOf(st, pair) }
+  }
 
   // Peer 1 offers a lock on IN: any slot, any secret (it knows them all), any deadline the Account accepts.
   action peerLock(k: int, sec: int, off: int, amt: int): bool =
@@ -499,7 +542,7 @@ module entity {
   }
 
   action step = any {
-    tick, timer,
+    tick, timer, feedTwo,
     peerLockIn, peerLockIn, peerResolveOut, peerCancelOut,
     peerAny(IN), peerAny(OUT),
     peerAck(IN), peerAck(OUT),
@@ -543,6 +586,10 @@ module entity {
   // R-P4: the Entity never opens a dispute over a lock that this frame's input already resolved.
   val no_needless_dispute: bool = not(st.gh.needless)
 
+  // C11: the Entity's answer to a dispute lands before the windows close: read within LAG, included within LAG, and the two windows
+  // together are longer than that.
+  val answer_in_window: bool = not(st.gh.lateAnswer)
+
   // Flaw 3: a frozen Account never gets a frame from us.
   val no_frame_on_frozen: bool = not(st.gh.frameOnFrozen)
 
@@ -572,7 +619,7 @@ module entity {
 
   val safe: bool = and {
     no_peer_halt, no_stranded, deadline_chain, dispute_carries_all, no_needless_dispute,
-    no_frame_on_frozen, cmd_atomic, credit_holds, route_safe
+    no_frame_on_frozen, cmd_atomic, credit_holds, route_safe, answer_in_window
   }
 
   // Coverage witnesses: each is false on purpose; `quint run --invariant` must find a violating trace.

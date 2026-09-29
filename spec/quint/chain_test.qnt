@@ -23,7 +23,7 @@ module chain_test {
     initFrom(stale, Right, 0, 0, 2)
     .then(startWith(Left, 1, false, 0, false))
     .then(honestCounter)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and {
       money.res == Map(Left -> 1, Right -> 1),              // Δ = 1: the collateral splits
@@ -32,12 +32,23 @@ module chain_test {
       safe
     })
 
-  // The honest side is never out-waited: time does not move while it has a response to make.
+  // The honest side has REACT ticks to answer (read the start, get the counter included), and time does not move past that
+  // while it has a response to make.
   run timeWaitsForHonestResponseTest =
     initFrom(stale, Right, 0, 0, 2)
     .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick)
     .then(tick)
     .fail()
+  // The answer that lands last (REACT ticks after the start) still beats the timeout: the windows exceed REACT (C11).
+  run lastMomentCounterStillWinsTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick)
+    .then(honestCounter)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and { acct.nonce == 2, money.res == Map(Left -> 1, Right -> 1), safe })
 
   // A starter cannot cut the window short, and cannot use its own newer proof to close at once (path 2 is the
   // non-starter's).
@@ -67,7 +78,7 @@ module chain_test {
       Right, 0, 0, 2)
     .then(startWith(Left, 5, false, 0, false))
     .then(honestCounter)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and { arena.get(1).nonce == arena.get(5).nonce, rank(arena.get(1)) > rank(arena.get(5)),
                   money.res == Map(Left -> 1, Right -> 1), safe })
@@ -77,7 +88,7 @@ module chain_test {
     initFrom(stale, Right, 0, 0, 2)
     .then(startWith(Left, 1, false, 0, false))
     .then(setOffline(true))
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(setOffline(false))
     .then(honestCounter)
     .fail()
@@ -87,7 +98,7 @@ module chain_test {
   run starterUsesNewestProofTest =
     initFrom(stale, Right, 0, 0, 2)
     .then(honestStart)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and { money.res == Map(Left -> 1, Right -> 1), acct.nonce == 3, safe })
 
@@ -98,14 +109,14 @@ module chain_test {
   run oldEpochProofIsDeadTest =
     initFrom(BASE.set(1, pf(1, true, 0, true, true)).set(4, pf(4, true, -2, true, false)), Left, 0, 0, 2)
     .then(honestStart)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .then(startWith(Right, 4, false, 0, false))
     .fail()
   run newEpochBaselineStartsTest =
     initFrom(BASE.set(1, pf(1, true, 0, true, true)), Left, 0, 0, 2)
     .then(honestStart)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .then(startWith(Right, 6, false, 0, false))
     .expect(dispute.on and acct.epoch == 1)
@@ -154,10 +165,11 @@ module chain_test {
     .then(startWith(Left, 1, false, 0, false))
     .then(finalizeWith(Right, 0, 0, false))
     .expect(and { money.res == Map(Left -> 1, Right -> 2), safe })
-  // The honest payee publishes the moment it knows: time waits for it.
-  run payeePublishesAtOnceTest =
+  // The honest payee publishes within LAG of learning the secret: time waits for it.
+  run payeePublishesWithinLagTest =
     initFrom(hub, Right, 1, 0, 2)
     .then(learn(Right))
+    .then(tick)
     .then(tick)
     .fail()
 
@@ -174,7 +186,7 @@ module chain_test {
   run shortfallBecomesDebtTest =
     initFrom(BASE.set(1, pf(1, true, -3, true, true)), Left, 1, 0, 1)
     .then(honestStart)
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and {
       money.res == Map(Left -> 0, Right -> 2),               // Right took the collateral (1) and Left's whole reserve (1)
@@ -187,14 +199,14 @@ module chain_test {
     initFrom(BASE.set(1, pf(1, true, 1, true, true)), Left, 0, 1, 2)
     .then(honestStart)
     .then(r2c(Right, Right, 1))
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and { money.res == Map(Left -> 1, Right -> 2), safe })   // Δ = 1 of collateral 3
   run depositForLeftRaisesOndeltaTest =
     initFrom(BASE.set(1, pf(1, true, 1, true, true)), Left, 0, 1, 2)
     .then(honestStart)
     .then(r2c(Right, Left, 1))
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(honestFinalize)
     .expect(and { money.res == Map(Left -> 2, Right -> 1), safe })   // ondelta 1: Δ = 2 of collateral 3
 
@@ -206,7 +218,7 @@ module chain_test {
     initFrom(stale, Right, 0, 0, 2)
     .then(setOffline(true))
     .then(startWith(Left, 1, false, 0, false))
-    .then(tick).then(tick)
+    .then(tick).then(tick).then(tick).then(tick)
     .then(finalizeWith(Left, 0, 0, false))
     .expect(and { ghost.xWasOffline, money.res == Map(Left -> 2, Right -> 0), safe })
 }

@@ -14,7 +14,8 @@ Where a rule is unclear, this spec picks the reading the sources best support an
 `plan/contracts-review.md` (flaws C1, C2, H1-H3), `plan/contracts-decisions.md`, `design/account-model.md`,
 `pure/xln.ts`, and the forked contracts under `contracts/` with their encoding vectors. The contracts are ours; this
 spec describes the **fixed** contracts (ondelta epoch, entity-bound batch payload, H1 finalize wait, H2 window floor,
-H3 clamp). og is a reference, never the oracle.
+H3 clamp) and takes two contract changes as proposals, flagged in QUESTIONS.md: the window floor above LAG (C11) and tolerant
+dispute ops in a batch (J2). og is a reference, never the oracle.
 
 ## Layout
 
@@ -29,8 +30,14 @@ H3 clamp). og is a reference, never the oracle.
 | `account_core.qnt` | the pure part of the Account layer (types, transition table, replica rules); `account.qnt` and `entity.qnt` build on it |
 | `entity.qnt` | Entity layer: a hub with two Accounts, the four-phase frame, routing, fail back, escalation, commands |
 | `entity_test.qnt` | scenario tests: forward with margin, fail back at once, escalation, secrets, late reveal, arrivals first, freeze, commands, collisions |
+| `jbatch.qnt` | J layer, the Entity's batch: strict nonce, atomic revert, urgent ops, forks and nonce burning, what a lost batch holds |
+| `jbatch_test.qnt` | scenario tests: payment lands, urgent behind a payment, fork winners, moved dispute, reverted payment kept, signed batch lands later |
+| `runtime.qnt` | Runtime layer: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart |
+| `runtime_test.qnt` | scenario tests: three-step frame, crash before and after durable, chain event across a crash, canonical order |
+| `params_test.qnt` | the numbers the layers share (LAG, REACT, windows, HOP, ESC) and the entity's deadline arithmetic played on the real dispute game |
 | `mutants/` | deliberately broken copies of the spec; every property must kill its mutants (`mutants/run.py <module>`) |
 | `traces/` | ITF traces (Quint's JSON trace format) for replay against another spec |
+| `OVERVIEW.md` | the spec in one read: layers, data flow, state machines, properties, what it asks of the contracts |
 | `QUESTIONS.md` | every unclear point, the options, the choice made, the source |
 | `PROGRESS.md` | what is done per layer and what is next, for a successor after a context reset |
 | `check.sh` | everything that must pass before a change |

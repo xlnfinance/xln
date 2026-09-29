@@ -142,6 +142,22 @@ board rotation, so it belongs in entity.qnt), cooperative settlement and C2R (th
 several tokens, C2 (batch authority is per entity; nothing visible in a one-Account model), per-batch atomicity across
 Accounts (N2: finalizes are submitted per Account, so one action is one batch).
 
+**C11. The honest side takes time: a floor for the windows, derived.**
+Until now the chain model let the honest party answer at the same tick as the event ("time does not move while a response is
+due"). A real party reads the chain LAG ticks late and its answer needs LAG ticks to be included, so it answers REACT = 2 * LAG
+after the event, and the adversary gets those ticks for free. The model now makes time stop only REACT ticks after the start
+(or after the last counter), or LAG ticks after the payee learned the secret (that one needs no read). Consequence, and the rule
+the contracts must meet: **the two windows of a dispute together must exceed REACT** (`wl + wr > 2 * LAG`; with LAG = 1 the
+model floor is 2 ticks per window; the contracts' 60 s floor meets it while a J event is read and included in under 60 s). Options: (a) floor per window `MIN_WINDOW >= LAG + 1`, (b) floor on the
+sum. Choice: (a), it is what the contract can check on one proof, and it keeps H2's shape (a per-window floor). The deployment
+numbers are what the coordinator decides: a floor in blocks that is several times the slowest read + inclusion. Model evidence:
+`window-floor-below-react` (MIN_WINDOW = 1: the adversary finalizes a stale proof at the tick the answer would have landed),
+`react-longer-than-windows`, `lastMomentCounterStillWinsTest`. The Entity side is `answer_in_window` (`windows-shorter-than-answer`);
+`params_test.qnt` pins the shared numbers (LAG, REACT, DWIN, HOP >= REACT, ESC >= LAG), so a change to one layer fails the test.
+A second consequence: a payee that learns the secret at the deadline is not owed payment (its publish needs LAG): the property
+`p1_clause` reads "learned at least LAG before the deadline" (`no-publish-tolerance`). This is the deadline tolerance of E3 seen
+from the chain. Source: R-P2, H2.
+
 ---
 
 # Settlement and epochs (settle.qnt)
@@ -209,8 +225,9 @@ This is the "open" protocol of Q-A1 stated as an order of operations: co-sign th
 
 **S5. Lag between the chain and a side.**
 Each side reads the chain with a delay. The model lets it act on a stale view but requires the honest side to read the chain
-before time passes (a tick). That is the bound "J event lag + processing < response window". H2's floor (60 s) is the number
-that has to exceed it; the protocol cannot enforce it, so it is a deployment parameter to be written next to the floor.
+before time passes (a tick). That is the bound "J event lag + processing < response window". C11 now derives it: the H2 floor
+(60 s per window in the contracts) has to exceed LAG, so that both windows together exceed REACT = 2 * LAG; the protocol cannot
+enforce the lag, so LAG is the deployment number written next to the floor.
 
 **S6. Not modelled here.** Open clauses in a settlement (fold kills them; the spec only says refuse), several tokens, debt
 forgiveness (`forgiveDebtsInTokenIds`), an `ondeltaDiff` that changes what a side is owed (a settlement paying an off-chain
@@ -224,20 +241,23 @@ choice of when to settle.
 The Entity under test is a hub with two Accounts: IN (peer 1 sends, we are the payee of its locks) and OUT (we send on to peer 2,
 we are the payer). Both peers are adversaries; the Entity is honest and online.
 
-**E1. One frame, four phases, one input.**
-A frame is a pure function `frame(state, input)`: (1) the input: a peer's frame, a peer's ack or a J event; (2) the hooks:
-resolve, expire, route, fail back, escalate, reveal, all reading the state after the input; (3) a signed local command;
-(4) one proposal per Account, ascending. A real frame batches several inputs in phase 1; the model feeds one, which keeps the
-phase order and the state space small. Inside a batch the choice is: peer frames first, then J events. A dispute event that
-arrives with a peer frame then freezes the Account with evidence that includes the frame. Source: R-E4, R-P4; the batch order is
-mine (lessons.md does not fix it).
+**E1. One frame, four phases, several inputs. CLOSED.**
+A frame is a pure function `frameOf(state, inputs)`: (1) the inputs: peers' frames and acks, then J events; (2) the hooks:
+resolve, expire, route, fail back, escalate, reveal, all reading the state after the inputs; (3) a signed local command;
+(4) one proposal per Account, ascending. Inside a batch the order is: peer frames first, then J events (then the command). A
+dispute event that arrives with a peer frame then freezes the Account with evidence that includes the frame
+(`peerFrameBeforeChainEventTest`); the other order freezes first and the frame changes nothing (`chainEventBeforePeerFrameDiffersTest`),
+so the order is a rule, and it is the Runtime's canonical order (runtime.qnt R1). The action `feedTwo` feeds any two inputs in that
+order and the invariants hold over 5000 traces; `only-first-input-of-a-frame` is killed by `ackAndRefusalInOneFrameTest`. Source: R-E4,
+R-P4; the batch order is mine (lessons.md does not fix it).
 
 **E2. What is and is not modelled.**
 A hub, one token, one route per slot (IN slot k feeds OUT slot k), amount 1 or 2, two secrets. The Entity's reaction time is
 zero ticks: time advances only when the Entity has nothing left to do at this tick (a checked assumption, not a rule the protocol
 can enforce; the deployment number is "processing < one tick"). The two replicas of one Account are account.qnt's business; here a
-peer frame is one transaction, validated, applied and acked at once. Not modelled: several routes per slot, tokens, boards, the
-J batch (jbatch, next), several inputs per frame, an offline Entity (runtime.qnt), `SetCredit`, swaps.
+peer frame is one transaction, validated, applied and acked at once. Not modelled: several routes per slot, tokens, boards, an
+offline Entity (a Runtime that is down: chain.qnt `offline`), `SetCredit`, swaps. The J batch is jbatch.qnt; several inputs per frame
+are E1.
 
 **E3. The deadline arithmetic, derived. CLOSED.**
 Let LAG be the ticks a J transaction needs to be included, and the ticks a J event needs to reach the Entity. A payee that knows
@@ -245,7 +265,7 @@ a secret only off-chain must put it on the chain by the deadline, so it starts a
 (`escalation-too-late`: escalating at the deadline puts the secret there one tick late). An onward lock must end HOP before the
 inbound one: peer 2 may resolve at the last tick of its lock, the hub learns it then, and needs ESC ticks after that
 (HOP >= ESC; `forward-deadline-equal` and its consequence test show the loss with HOP = 0). The model also passes with HOP = 1 =
-LAG. The spec value is **HOP = 2 = 2 * LAG**: one tick of slack for the Entity's reaction, which the model sets to zero. The
+LAG (chain.REACT was 0 then). Since C11 REACT = 2 * LAG and `params_test.qnt` requires HOP >= REACT. The spec value is **HOP = 2 = 2 * LAG**: one tick of slack for the Entity's reaction, which the model sets to zero. The
 inequalities are the rule; the numbers are deployment parameters. Decision: HOP = 2 * LAG is a named policy parameter, not a
 protocol constant. Source: R-P2, R-P3.
 
@@ -267,8 +287,15 @@ dispute settles; a secret on the chain pays nobody by itself (there must be a di
 clause); starting the dispute after the deadline still pays a clause whose secret was revealed in time. chain.qnt has the first
 two (`revealedClausePaysTest`, `lateSecretPaysNothingTest`); the third is `lateStartStillPaysARevealedClauseTest` (a hub fixture: the
 payee reveals, four ticks pass, the starter starts with the older proof; finalize pays the payee 3, no debt), with the mutant
-`reveal-counts-only-if-start-in-time` killed by it. Decision: the contracts thread pins the same fact on the real contracts; the
-Entity model relies on it. What remains is composing entity and chain in one model (next), so the two are checked together.
+`reveal-counts-only-if-start-in-time` killed by it. Decision (coordinator, 18:15Z): the contracts pin the same fact on the real contracts
+(`contracts/test/vm/h1-htlc-deadline.test.ts`, #47): a secret revealed before the deadline is paid at finalize even when the dispute
+starts after it; one revealed after is not. Entity and chain are composed at four points, each checked: (1) the interface above, in
+`chain_test.qnt`; (2) one set of numbers, `params_test.qnt` (LAG, REACT = 2 * LAG, DWIN = 2 * MIN_WINDOW, HOP >= REACT, ESC >= LAG);
+(3) the answer's timing: the chain forces the honest side only REACT ticks after an event (C11) and the Entity's answer lands
+inside the windows (`answer_in_window`); (4) the entity's deadline arithmetic played on the real dispute game
+(`hopMarginPaysTheHubTest`, `noMarginLosesTheHubTest`). One state machine with both would only re-check (1) to (4) with more
+states: the chain's state is one Account and the Entity's is two, so a joint model needs the Account histories of the real
+frames (the next item, "account + chain").
 
 **E7. A route slot is not a private namespace.**
 Peer 2 may put a lock of its own into OUT slot k. Then the forward is refused (`lock_exists`) and the route fails back. The rule
@@ -289,3 +316,96 @@ peer's [R-A1]. `rightRollsBackOnCollisionTest`, `leftKeepsItsFrameOnCollisionTes
 (a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`
 (E7). (b) A secret on the chain pays nobody without a dispute holding the clause; the first `route_safe` treated it as payment and
 called a correct fail back a loss. Both were the model being wrong, not the Entity.
+
+---
+
+# The J batch (jbatch.qnt)
+
+One Entity, one token, four ops (a payment, a secret reveal, a dispute step, another payment). The chain facts are read from
+`contracts/contracts/Depository.sol` `processBatch` / `_processBatch`: a batch is signed for an entity and a nonce and lands only at
+`nonce = stored + 1`; a reverting op reverts all of it; a signed batch never expires and anybody can submit it, again, later. The
+honest relayer submits every batch in ascending nonce order and each first attempt happens within LAG; the adversary picks which batch
+of one nonce lands, spoils dispute ops (`poison`), moves the reserve and re-submits anything ever signed. Simulation only.
+
+**J1. What a lost, reverted or dropped batch does (Q-J1). CLOSED.**
+A batch that reverts leaves nothing on the chain, and it stays valid: the reserve and collateral it names are untouched, and it can
+land later at its nonce (`signedBatchLandsLaterTest`). So the Entity's latches are Entity-side bookkeeping with one rule: a latch is
+released only when a batch carrying the op has landed, or the op can never apply (its dispute moved, seen as a skip or a receipt).
+Never on a timeout: `drop-every-op-of-a-failed-batch` (property `dropped_only_dead`) abandons a payment whose signed batch then lands
+later. A payment goes into a new batch only when no live batch carries it (`follow-up-carries-payments`, property `pay_once`); two
+batches of one nonce exclude each other, two batches of different nonces do not. `revertedPaymentIsKeptTest`. Source: Q-J1.
+
+**J2. A dispute op that cannot apply: revert the batch or skip the op? OPEN for the contracts, recommendation TOLERANT.**
+Today one dispute start over a dispute that moved (the adversary finalized first, a counter already registered) reverts the whole
+batch, and the secret reveal in the same batch is lost with it. Options: (a) as is; (b) dispute-class ops (start, counter, finalize,
+reveal) skip when they cannot apply or already ran, and emit an event; payments, deposits and settlements keep reverting; (c) as (a) and
+the Entity puts every urgent op in a batch of its own. Choice: (b). With (a) an urgent op cannot be bound by LAG: every spoiled op
+costs a round (`contract-reverts-on-moved-dispute`), with (c) k urgent ops cost k rounds. This is a contract change for the
+contracts thread; until it lands the spec's deadline numbers need `(k + 1) * LAG` where k is the number of concurrent urgent ops.
+Also required: an urgent op that already ran is skipped when it appears again (the follow-up copy of J3 does that).
+
+**J3. How the Entity signs urgent ops. CLOSED (given J2).**
+(1) An urgent op (a reveal or a dispute step) never rides with a payment: a payment that cannot run (reserve moved) would take it
+down (`pack-everything`). (2) Each urgent op that is in no live batch gets a pair of batches of its own: the first at `stored + 1`
+when no urgent batch is live (it may fork with an outstanding payment batch: the adversary may land the payment batch first), the
+second right behind (so when the payment batch lands first, the pair's second one carries the op in the same round:
+`urgentBehindAnOutstandingPaymentTest`, `replace-without-follow-up`). (3) The nonces of a new urgent pair sit above every urgent batch
+already signed: two urgent batches at one nonce are a fork, the adversary lands the older and smaller, both nonces are burnt and the
+fresh batches die (`urgent-batches-fork-each-other`; the simulation found it). (4) Payments wait until nothing is live
+(`urgent-waits-for-outstanding` shows the price of also making urgent ops wait). With J2 and J3 an urgent op lands within LAG of
+reaching the Entity, which is the LAG the deadline arithmetic of the Entity layer uses (`params_test.qnt` pins jbatch.LAG = entity.LAG).
+
+**J4. Nonces: what the contract's strict sequence costs.**
+Any signed batch is a nonce burner in the adversary's hands, and a payment batch that reverts blocks every batch above it (E2). Options:
+(a) keep the strict sequence (J3 works around it), (b) unordered nonces with revocation. Choice: (a) for v1. (b) removes the fork and the
+hostage chain but needs a revocation batch before an op is re-signed, and the double-run hazard for payments returns. The batch limits
+of R-J3 (`MAX_ENCODED_BATCH_BYTES`, per-array bounds) are not modelled: a full batch is a refusal, as in R-J3.
+
+---
+
+# The Runtime (runtime.qnt)
+
+The Entity is abstracted to its input history (the keys of the inputs it applied, in order); the signed frame it sends is
+`(height, history)`. Two different histories at one height are an equivocation. Inputs: chain events (key k), peer messages
+(10 + k), commands (20 + k). One frame is three steps, apply in memory, make it durable, send; a crash and restart can happen
+between any two. Simulation only.
+
+**R1. The order of a frame (R-R1). CLOSED.**
+A frame applies the inputs due at its tick as one batch in ascending key order: the peer's messages, then chain events, then
+commands, whatever order they arrived in (peers first: a frame co-signed at the tick a dispute is read is in the evidence, E1). `frame-in-arrival-order` (property `canonical_frames`), `canonicalOrderTest`. A frame opens
+only when an input is due (the idle gate): `empty-frame`, `noFrameWithoutInputTest`. Canonical order is the spec's choice; the
+Entity's own order inside the frame (input, hooks, command, propose) is entity.qnt's and is a separate rule [R-E1].
+
+**R2. J watching: exactly once, in order (R-J1). CLOSED.**
+The watcher offers the event after the cursor, again and again until it is applied. The cursor moves with the frame that applies the
+event, in the same durable write, and nowhere else: `cursor-moves-when-read` loses an event after a crash, `cursor-not-with-state` leaves
+the cursor behind the history, `no-dedupe` applies an input twice (`exactly_once_j`, `chainEventSurvivesACrashTest`). A gap in the
+event sequence is not something the Runtime can repair: see R5.
+
+**R3. Durable before it leaves. CLOSED.**
+(1) A signed frame is sent only after the state that produced it is durable: with the frame in flight a crash throws away memory, the
+restart derives the next frame from different inputs, and the Entity has signed two frames for one height. The counterparty then holds
+proof of it (`send-before-persist`, property `no_equivocation`). (2) A command is acknowledged to its user only once durable
+(`ack-before-persist`, `acked_durable`). (3) On restart the last signed frame is sent again, and it is the same frame
+(`crashAfterDurableResendsTest`); peer messages and commands that were only in memory are resent or resubmitted by their senders
+(assumption: a peer resends until acked, which account.qnt models; a command is resubmitted by its user until acknowledged).
+
+**R4. Time.**
+The Runtime's clock is an input: a frame carries the timestamp the Runtime committed for it, never a wall-clock read inside the
+Entity, so replaying the log reproduces the state [R-R1]. entity.qnt takes `now` from the input and advances it only when the Entity
+is quiescent, which is this assumption stated for the Entity (zero reaction time; the deployment number is "processing under one tick").
+
+**R5. The halt taxonomy (R-X1, Q-R1). CLOSED, a closed list.**
+A halt stops one Entity and is reported; nothing else stops. The list of causes, all local:
+(a) a durable write fails (the Runtime cannot keep R3, so it stops instead of sending);
+(b) the durable state does not load or does not verify at restart;
+(c) an invariant of the Entity's own state breaks after a frame (a bug: a balance below its bound, a lock that cannot be resolved);
+(d) the two replicas of one board disagree on the state hash of a frame they both applied (a fork of our own doing);
+(e) the chain event sequence has a gap the watcher cannot fill (R2).
+Everything a peer can cause is a refusal: a malformed or badly signed frame, a stale or future nonce, an unknown Account, a full
+batch (R-J3), a command over a limit. A refusal is a value: counted, no state change, optionally answered, never a halt
+(`halt-on-refusal` in entity.qnt kills the opposite). The og engine has 8 halts that a peer can trigger; none of them is on this list.
+
+**R6. Not modelled here.** Several Entities in one Runtime (they share nothing but the process: the properties are per Entity),
+the board's own consensus (v2: boards), the network beyond "a peer resends until acked", storage cost, and the offline Entity: a
+Runtime that is down misses windows, which chain.qnt models as `offline` (the honest party can lose).

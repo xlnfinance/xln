@@ -180,6 +180,38 @@
       "old": "    reg != 0 and reg <= r.clause.deadline,",
       "new": "    reg != 0 and reg <= r.clause.deadline and d.t0 <= r.clause.deadline,",
       "killedBy": "test:lateStartStillPaysARevealedClauseTest"
+    },
+    {
+      "id": "window-floor-below-react",
+      "why": "C11: the H2 floor lets both windows together be no longer than the honest side needs to answer (REACT)",
+      "file": "chain.qnt",
+      "old": "pure val MIN_WINDOW = 2 ",
+      "new": "pure val MIN_WINDOW = 1 ",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "react-longer-than-windows",
+      "why": "C11: the honest side needs as long as both windows together: its counter can land only after the timeout",
+      "file": "chain.qnt",
+      "old": "pure val REACT = 2 * LAG ",
+      "new": "pure val REACT = 4 * LAG ",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "no-publish-tolerance",
+      "why": "the honest payee is expected to be paid even when it learned the secret at the deadline: publishing takes LAG, so the property must allow for it",
+      "file": "chain.qnt",
+      "old": "knows.get(honest) + LAG <= r.clause.deadline,",
+      "new": "knows.get(honest) <= r.clause.deadline,",
+      "killedBy": "invariant:p1_clause"
+    },
+    {
+      "id": "publish-not-forced",
+      "why": "the honest payee may sit on the secret past the deadline",
+      "file": "chain.qnt",
+      "old": " and now >= knows.get(honest) + LAG\n",
+      "new": " and now >= knows.get(honest) + LAG + 3\n",
+      "killedBy": "invariant:p1_clause"
     }
   ]
 }

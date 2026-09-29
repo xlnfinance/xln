@@ -27,7 +27,10 @@ module chain {
   // ---------------------------------------------------------------------------------------------------------
 
   pure val MAXT = 6              // the clock runs 1..MAXT+1; 0 means "never" in registry and knows
-  pure val MIN_WINDOW = 1        // H2: each response window, in ticks
+  pure val LAG = 1               // a J transaction needs this many ticks to be included, and a J event this many to be read
+                                 // (the same number as entity.LAG; the honest side's reaction time is derived from it)
+  pure val REACT = 2 * LAG       // an event on the chain to its answer on the chain: read it, then get the answer included
+  pure val MIN_WINDOW = 2        // H2: each response window, in ticks; the two windows together must exceed REACT (QUESTIONS C11)
   pure val NONCE_TOP = 3         // the highest committed nonce of epoch 0
   pure val SECRET = 1            // the one secret; every clause's hashlock is its hash
   pure val RESERVE_MAX = 2       // initial reserve of each side
@@ -67,6 +70,7 @@ module chain {
     wl: int, wr: int,         // windows frozen from the initial proof
     initArgs: bool,           // the starter revealed the secret in its start arguments (frozen at start)
     counter: int,             // arena id of the registered counter-proof (0 = none)
+    ct: int,                  // time of the newest step of the game (the start, then a counter): what the honest side reacts to
     counterBranch: int,       // the one newer branch the starter named at start, with its own arguments
     counterArgs: bool
   }
@@ -93,7 +97,7 @@ module chain {
   }
   pure val NO_DISPUTE: Dispute = {
     on: false, starter: Left, rec0: 0, t0: 0, timeout: 0, wl: 0, wr: 0, initArgs: false,
-    counter: 0, counterBranch: 0, counterArgs: false
+    counter: 0, ct: 0, counterBranch: 0, counterArgs: false
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -325,13 +329,20 @@ module chain {
     })
   }
 
-  // The honest party has something it must do before time passes.
+  // The honest party has something it must do. It may do it at once (the model is generous in that), and it must have done
+  // it REACT ticks after the event it answers (for a counter: the start or the last counter) or LAG ticks after it learned
+  // the secret (it needs no read: it learned it off-chain). Time does not pass beyond that.
   val respondDue: bool = or {
     honestCounterId(arena, acct, dispute, honest) != 0,
     honestCanPublish(arena, acct, dispute, honest, knows, registry, now)
   }
 
-  val urgent: bool = not(offline) and respondDue
+  val mustAct: bool = or {
+    honestCounterId(arena, acct, dispute, honest) != 0 and now >= dispute.ct + REACT,
+    honestCanPublish(arena, acct, dispute, honest, knows, registry, now) and now >= knows.get(honest) + LAG
+  }
+
+  val urgent: bool = not(offline) and mustAct
 
   action tick: bool = all {
     now <= MAXT,
@@ -388,7 +399,7 @@ module chain {
     dispute' = {
       on: true, starter: s, rec0: rid, t0: now, timeout: now + arena.get(rid).wl + arena.get(rid).wr,
       wl: arena.get(rid).wl, wr: arena.get(rid).wr,
-      initArgs: initArgs, counter: 0, counterBranch: branch, counterArgs: counterArgs
+      initArgs: initArgs, counter: 0, ct: now, counterBranch: branch, counterArgs: counterArgs
     },
     acct' = { ...acct, nonce: arena.get(rid).nonce },
     ghost' = { ...ghost, nonceBack: ghost.nonceBack or arena.get(rid).nonce < acct.nonce },
@@ -425,7 +436,7 @@ module chain {
       signedBy(r, dispute.starter),
       rank(r) > rank(arena.get(dispute.rec0)),
       dispute.counter == 0 or rank(r) > rank(arena.get(dispute.counter)),
-      dispute' = { ...dispute, counter: rid },
+      dispute' = { ...dispute, counter: rid, ct: now },
       arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
       registry' = registry, knows' = knows, offline' = offline, applied' = applied, ghost' = ghost
     }
@@ -475,7 +486,7 @@ module chain {
       ghost' = {
         badApply: ghost.badApply or (not(allowed(arena, acct.epoch, honest, useId)) and not(ghost.xWasOffline)),
         clauseMiss: ghost.clauseMiss or and {
-          r.clause.on, payeeOf(r.clause) == honest, knows.get(honest) != 0, knows.get(honest) <= r.clause.deadline,
+          r.clause.on, payeeOf(r.clause) == honest, knows.get(honest) != 0, knows.get(honest) + LAG <= r.clause.deadline,
           not(ghost.xWasOffline), not(revealed)
         },
         nonceBack: ghost.nonceBack or newNonce < acct.nonce,
