@@ -36,9 +36,8 @@ const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
   'node_modules',
 ]);
 
-// Generated output, plus trees this invariant does not govern: pure/ is the rewrite (its own
-// style gate), spec/arrival is a verbatim vendor of here-build/arrival, contracts/typechain-types
-// is generated like jurisdictions/typechain-types.
+// Generated output, plus spec/arrival, a verbatim vendor of here-build/arrival.
+// contracts/typechain-types is generated like jurisdictions/typechain-types.
 const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.agents',
   '.archive',
@@ -74,7 +73,6 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'jurisdictions/typechain-types',
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',
-  'pure',
   'reports',
   'spec/arrival',
   'ui',
@@ -96,6 +94,7 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'core/scripts/operations/hlt': 12,
   'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
+  'pure/diff': 53,
   'rscore/crates/entity-kernel/src': 12,
   'rscore/crates/entity-kernel/src/consensus': 11,
   'rscore/crates/entity-kernel/tests': 11,
