@@ -147,6 +147,9 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     bytes32 finalizationEvidenceHash
   );
   event CounterDisputeRegistered(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bool proposerIsLeft, bytes32 proofbodyHash);
+  /// @dev J2: a dispute op inside processBatch that is stale or already applied. op 0 start, 1 counter, 2 finalize; reason
+  /// codes are Account.sol DISPUTE_SKIP_*.
+  event DisputeOpSkipped(bytes32 indexed sender, bytes32 indexed counterentity, uint8 op, uint8 reason, uint256 nonce);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -551,6 +554,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     // Dispute finalizations stay in Depository (too many storage refs for Account)
     for (uint i = 0; i < batch.disputeFinalizations.length; i++) {
+      if (_finalizeStale(entityId, batch.disputeFinalizations[i])) continue;
       _disputeFinalizeInternal(entityId, batch.disputeFinalizations[i]);
     }
 
@@ -801,6 +805,23 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
   function _decreaseReserve(bytes32 entity, uint256 tokenId, uint256 amount) internal {
     Account.decreaseReserve(_reserves, entity, tokenId, amount);
+  }
+
+  /// @dev J2: inside a batch a finalize the Account has already moved past is skipped with DisputeOpSkipped, so it cannot
+  /// take the rest of the batch (an urgent secret reveal) down with it. Only "no dispute open" (finalized, or never started)
+  /// and "another dispute's nonce" are skips: too early, a wrong sender, mismatched evidence and everything else still revert
+  /// the batch. The watchtower entrypoint calls _disputeFinalizeInternal directly and keeps reverting.
+  function _finalizeStale(bytes32 entityId, FinalDisputeProof memory params) private returns (bool) {
+    AccountInfo storage account = _accounts[_accountKey(entityId, params.counterentity)];
+    if (account.disputeHash == bytes32(0)) {
+      emit DisputeOpSkipped(entityId, params.counterentity, 2, 2, params.finalNonce);
+      return true;
+    }
+    if (params.initialNonce != account.nonce) {
+      emit DisputeOpSkipped(entityId, params.counterentity, 2, 3, params.finalNonce);
+      return true;
+    }
+    return false;
   }
 
   /// @notice Internal dispute finalize with full storage access

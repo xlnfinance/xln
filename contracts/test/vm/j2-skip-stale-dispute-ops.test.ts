@@ -35,6 +35,8 @@ const world = async () => {
   const counterBody = (offdelta: bigint): Body => acct.body(offdelta, WINDOWS);
   const counterSig = (nonce: number, b: Body) => acct.proofSig(A, epoch, nonce, !aIsLeft, b);
   const counterOp = (nonce: number, b: Body) => w.counterOp(A, { nonce: 1, body }, { nonce, proposerIsLeft: !aIsLeft, body: b, sig: counterSig(nonce, b) });
+  /** The same counter as the starter A would send it: against B, the wrong sender. */
+  const counterOpFromStarter = (nonce: number, b: Body) => w.counterOp(B, { nonce: 1, body }, { nonce, proposerIsLeft: !aIsLeft, body: b, sig: acct.proofSig(B, epoch, nonce, !aIsLeft, b) });
   const finalizeAgainst = (other: Party) => w.finalizeOp(other, { nonce: 1, body, startedByLeft: aIsLeft }, { nonce: 1, proposerIsLeft: aIsLeft, body, sig: "0x" });
   const revealedAt = async (): Promise<bigint> => {
     const iface = forkTransformer.createInterface();
@@ -48,7 +50,7 @@ const world = async () => {
     w.at(100);
     expect(await w.submit(A, { disputeStarts: [startOp(1)] })).toBe("ok");
   };
-  return { w, A, B, acct, aIsLeft, body, reveal, secret, revealedAt, events, skipped, startOp, counterOp, counterBody, finalizeAgainst, started, evidence };
+  return { w, A, B, acct, aIsLeft, body, reveal, secret, revealedAt, events, skipped, startOp, counterOp, counterOpFromStarter, counterBody, finalizeAgainst, started, evidence };
 };
 
 describe("J2 a stale or already-applied dispute op is skipped, the rest of the batch lands", () => {
@@ -169,10 +171,10 @@ describe("J2 a real error still reverts the whole batch", () => {
   });
 
   test("a counter from the starter (the wrong sender) reverts", async () => {
-    const { w, A, counterOp, counterBody, reveal, revealedAt, started } = await world();
+    const { w, A, counterOpFromStarter, counterBody, reveal, revealedAt, started } = await world();
     await started();
     w.at(110);
-    expect(await w.submit(A, { counterDisputes: [counterOp(2, counterBody(20n))], revealSecrets: [reveal] })).toMatch(/^REVERT /);
+    expect(await w.submit(A, { counterDisputes: [counterOpFromStarter(2, counterBody(20n))], revealSecrets: [reveal] })).toBe("REVERT E2()");
     expect(await revealedAt()).toBe(0n);
   });
 

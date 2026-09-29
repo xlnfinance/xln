@@ -251,6 +251,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
       | "DebtEnforced"
       | "DebtForgiven"
       | "DisputeFinalized"
+      | "DisputeOpSkipped"
       | "DisputeStarted"
       | "HankoBatchProcessed"
       | "HashLadderRevealRegistered"
@@ -669,6 +670,34 @@ export namespace DisputeFinalizedEvent {
     nonce: bigint;
     finalProofbodyHash: string;
     finalizationEvidenceHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace DisputeOpSkippedEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    op: BigNumberish,
+    reason: BigNumberish,
+    nonce: BigNumberish
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    op: bigint,
+    reason: bigint,
+    nonce: bigint
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    op: bigint;
+    reason: bigint;
+    nonce: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1516,6 +1545,13 @@ export interface DepositoryDebtHarness extends BaseContract {
     DisputeFinalizedEvent.OutputObject
   >;
   getEvent(
+    key: "DisputeOpSkipped"
+  ): TypedContractEvent<
+    DisputeOpSkippedEvent.InputTuple,
+    DisputeOpSkippedEvent.OutputTuple,
+    DisputeOpSkippedEvent.OutputObject
+  >;
+  getEvent(
     key: "DisputeStarted"
   ): TypedContractEvent<
     DisputeStartedEvent.InputTuple,
@@ -1659,6 +1695,17 @@ export interface DepositoryDebtHarness extends BaseContract {
       DisputeFinalizedEvent.InputTuple,
       DisputeFinalizedEvent.OutputTuple,
       DisputeFinalizedEvent.OutputObject
+    >;
+
+    "DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)": TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
+    >;
+    DisputeOpSkipped: TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
     >;
 
     "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)": TypedContractEvent<
