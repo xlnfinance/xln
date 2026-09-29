@@ -1391,6 +1391,61 @@ describe('Depository', () => {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
   });
+  // Every path that turns a uint256 amount into a signed delta, tried at the int256 edges: none may wrap or flip sign.
+  // Settlement diffs are SignedAmount (sign + uint256 magnitude) and ondelta is Int512, so 2^255 - 1, 2^255 and 2^256 - 1
+  // all move exactly: collateral A -> LEFT reserve A, ondelta A -> 0.
+  for (const [label, amount] of [
+    ['2^255 - 1, the int256 maximum', (1n << 255n) - 1n],
+    ['2^255, one past int256', 1n << 255n],
+    ['2^256 - 1, the uint256 maximum', (1n << 256n) - 1n],
+  ] as const) {
+    it(`settles collateral A back to a reserve at A = ${label}: exact, no wrap, no sign flip`, async function () {
+      const { depository } = await loadFixture(deployFixture);
+      const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+      const tokenId = 1n;
+      await depository.mintToReserve(left.entityId, tokenId, amount);
+      const fund = await signDepositoryBatch(
+        depository,
+        left.entityId,
+        left.privateKey,
+        emptyBatch({ reserveToCollateral: [{ tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount }] }] }),
+      );
+      await depository.connect(left.signer).processBatch(fund.entityId, fund.encodedBatch, fund.hankoData, fund.nonce);
+      const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+      const funded = await depository._collaterals(acctKey, tokenId);
+      expect(funded.collateral).to.equal(amount);
+      expect(wide(funded.ondelta)).to.equal(amount);
+      expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+
+      const settlementNonce = 1n;
+      const diffs = [{ tokenId, leftDiff: amount, rightDiff: 0n, collateralDiff: -amount, ondeltaDiff: -amount }];
+      const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+      const signed = await signDepositoryBatch(
+        depository,
+        left.entityId,
+        left.privateKey,
+        emptyBatch({
+          settlements: [{
+            leftEntity: left.entityId,
+            rightEntity: right.entityId,
+            diffs,
+            forgiveDebtsInTokenIds: [] as bigint[],
+            sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+            nonce: settlementNonce,
+          }],
+        }),
+      );
+      await expect(
+        depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
+      ).to.not.revert(ethers);
+      const settled = await depository._collaterals(acctKey, tokenId);
+      expect(settled.collateral).to.equal(0n);
+      expect(wide(settled.ondelta)).to.equal(0n);
+      expect(await depository._reserves(left.entityId, tokenId)).to.equal(amount);
+      expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
+    });
+  }
+
   it('requires counterparty hanko for empty settlements too', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));

@@ -143,29 +143,36 @@ describe('dispute ondelta liveness', function () {
     expect(await depository._reserves(owner.entityId, tokenId)).to.equal(UINT256_MAX);
   });
 
-  it('finalizes exactly when ondelta and offdelta both sit at the MAX_MONEY bound', async function () {
-    // ondelta + offdelta = 2^201 fits int256 with room to spare, so the delta is
-    // plain checked arithmetic: LEFT takes the whole collateral and RIGHT owes
-    // the remaining 2^200 as debt. No sign/magnitude encoding, no transformer gate.
+  for (const [label, amount] of [
+    ['2^200, the retired cap', MAX_MONEY],
+    ['2^255 - 1, the int256 maximum', (1n << 255n) - 1n],
+    ['2^255, one past int256', 1n << 255n],
+    ['2^256 - 1, the uint256 maximum', UINT256_MAX],
+  ] as const) {
+    for (const sign of [1, -1] as const) {
+  it(`R2C then dispute finalize at ${label}, offdelta ${sign > 0 ? '+' : '-'}A: exact payout, no wrap, no sign flip`, async function () {
+    // ondelta = A after the R2C, offdelta = +A or -A. The absolute delta is Int768 arithmetic, so it never passes through
+    // an int256: with +A the delta is 2A (LEFT takes the whole collateral A and RIGHT owes the other A as debt), with -A the
+    // delta is 0 (RIGHT takes the whole collateral). At A = 2^255 - 1, 2^255 and 2^256 - 1 nothing may wrap or flip sign.
     const { depository, signer0, signer1 } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(actor(signer0, 0), actor(signer1, 1));
     const { tokenId } = await registerFixedErc20(depository, MAX_MONEY);
     const proofNonce = 1n;
     const accountKey = canonicalAccountKey(left.entityId, right.entityId);
 
-    await depository.mintToReserve(left.entityId, tokenId, MAX_MONEY);
+    await depository.mintToReserve(left.entityId, tokenId, amount);
     await processBatch(depository, left, emptyBatch({
       reserveToCollateral: [{
         tokenId,
         receivingEntity: left.entityId,
-        pairs: [{ entity: right.entityId, amount: MAX_MONEY }],
+        pairs: [{ entity: right.entityId, amount: amount }],
       }],
     }));
     const funded = await depository._collaterals(accountKey, tokenId);
-    expect(funded.collateral).to.equal(MAX_MONEY);
-    expect(decodeInt512(funded.ondelta)).to.equal(MAX_MONEY);
+    expect(funded.collateral).to.equal(amount);
+    expect(decodeInt512(funded.ondelta)).to.equal(amount);
 
-    const proofbody = bodyOf(MAX_MONEY, tokenId);
+    const proofbody = bodyOf(sign > 0 ? amount : -amount, tokenId);
     const proofbodyHash = ethers.keccak256(abi.encode([PROOF_BODY_ABI], [proofbody]));
     const innerHash = await disputeProofHash(depository, accountKey, proofNonce, proofbodyHash);
     const innerHanko = buildSingleSignerHanko(right.entityId, innerHash, right.privateKey);
@@ -205,11 +212,15 @@ describe('dispute ondelta liveness', function () {
     expect(collateral.collateral).to.equal(0n);
     expect(decodeInt512(collateral.ondelta)).to.equal(0n);
     expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    expect(await depository._reserves(left.entityId, tokenId)).to.equal(MAX_MONEY);
-    expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
-    expect(decodeUint768(await depository.debtOutstanding(right.entityId, tokenId))).to.equal(MAX_MONEY);
+    const leftGets = sign > 0 ? amount : 0n;
+    const rightGets = sign > 0 ? 0n : amount;
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(leftGets);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(rightGets);
+    expect(decodeUint768(await depository.debtOutstanding(right.entityId, tokenId))).to.equal(sign > 0 ? amount : 0n);
     expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(0n);
   });
+    }
+  }
 
   // The old suite rejected |offdelta| > 2^200 at dispute start (E8) and settled exactly -2^200. The cap is gone with the
   // wide-integer rewrite: proof-body offdeltas are Int512 and the debt is an exact Uint512, so both the old bound and
