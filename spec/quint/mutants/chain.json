@@ -1,0 +1,169 @@
+{
+  "files": [
+    "chain.qnt",
+    "chain_test.qnt"
+  ],
+  "test": "chain_test.qnt",
+  "mutants": [
+    {
+      "id": "c1-start-epoch-unchecked",
+      "why": "C1: a dispute may start with a proof of an earlier epoch",
+      "file": "chain.qnt",
+      "old": "      r.epoch == w.a.epoch,             // C1\n",
+      "new": "",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "c1-start-epoch-unchecked-test",
+      "why": "C1: same mutant, judged by the scenario",
+      "file": "chain.qnt",
+      "old": "      r.epoch == w.a.epoch,             // C1\n",
+      "new": "",
+      "killedBy": "test:oldEpochProofIsDeadTest"
+    },
+    {
+      "id": "c1-epoch-not-advanced",
+      "why": "C1: finalize does not advance the epoch, so the same proofs stay valid",
+      "file": "chain.qnt",
+      "old": "acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0 }",
+      "new": "acct' = { nonce: newNonce, epoch: acct.epoch, coll: 0, ondelta: 0 }",
+      "killedBy": "test:oldEpochProofIsDeadTest"
+    },
+    {
+      "id": "h1-wait-removed",
+      "why": "H1: finalize does not wait for an open HTLC deadline",
+      "file": "chain.qnt",
+      "old": "      not(r.clause.on and not(revealed) and now <= r.clause.deadline),\n",
+      "new": "",
+      "killedBy": "test:finalizeWaitsForDeadlineTest"
+    },
+    {
+      "id": "h1-ignores-public-secret",
+      "why": "H1: the wait applies even when the secret is public",
+      "file": "chain.qnt",
+      "old": "not(r.clause.on and not(revealed) and now <= r.clause.deadline)",
+      "new": "not(r.clause.on and now <= r.clause.deadline)",
+      "killedBy": "test:revealedClausePaysTest"
+    },
+    {
+      "id": "h2-zero-window-allowed",
+      "why": "H2: a response window may be zero",
+      "file": "chain.qnt",
+      "old": "pure def windowsOk(r: SignedProof): bool = r.wl >= MIN_WINDOW and r.wr >= MIN_WINDOW",
+      "new": "pure def windowsOk(r: SignedProof): bool = true",
+      "killedBy": "test:zeroWindowIsRefusedTest"
+    },
+    {
+      "id": "tie-break-reversed",
+      "why": "R-A1: an equal nonce is won by Right, not Left",
+      "file": "chain.qnt",
+      "old": "pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 1 else 0)",
+      "new": "pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 0 else 1)",
+      "killedBy": "test:leftWinsEqualNonceTest"
+    },
+    {
+      "id": "starter-closes-early",
+      "why": "the starter may finalize its own initial proof before the window ends",
+      "file": "chain.qnt",
+      "old": "if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }",
+      "new": "if (path == 0) and { not(hasCounter) }",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "path2-by-starter",
+      "why": "the starter may close at once with a newer proof",
+      "file": "chain.qnt",
+      "old": "        not(hasCounter), isNonStarter, r.epoch == acct.epoch,",
+      "new": "        not(hasCounter), r.epoch == acct.epoch,",
+      "killedBy": "test:starterCannotUseNewerProofTest"
+    },
+    {
+      "id": "counter-after-window",
+      "why": "a counter-proof is accepted after the window",
+      "file": "chain.qnt",
+      "old": "      now < dispute.timeout,\n      rid >= 1, r.live,",
+      "new": "      rid >= 1, r.live,",
+      "killedBy": "test:counterAfterWindowRefusedTest"
+    },
+    {
+      "id": "counter-unsigned-by-starter",
+      "why": "a counter-proof need not be signed by the starter",
+      "file": "chain.qnt",
+      "old": "      signedBy(r, dispute.starter),\n      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
+      "new": "      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "start-unsigned-by-counterparty",
+      "why": "a dispute may start with a proof the counterparty never signed",
+      "file": "chain.qnt",
+      "old": "      signedBy(r, other(s)),\n      windowsOk(r)",
+      "new": "      windowsOk(r)",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "expired-clause-pays",
+      "why": "a clause whose secret came too late still moves money",
+      "file": "chain.qnt",
+      "old": "reg != 0 and reg <= r.clause.deadline,",
+      "new": "reg != 0,",
+      "killedBy": "test:lateSecretPaysNothingTest"
+    },
+    {
+      "id": "unrevealed-clause-pays",
+      "why": "a clause moves money whether or not the secret was shown",
+      "file": "chain.qnt",
+      "old": "if (r.clause.on and revealed)",
+      "new": "if (r.clause.on)",
+      "killedBy": "test:expiredClauseIsDroppedTest"
+    },
+    {
+      "id": "clause-sign-flipped",
+      "why": "a revealed clause moves offdelta the wrong way",
+      "file": "chain.qnt",
+      "old": "| Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount",
+      "new": "| Left => r.offdelta + r.clause.amount | Right => r.offdelta - r.clause.amount",
+      "killedBy": "test:revealedClausePaysTest"
+    },
+    {
+      "id": "split-loses-money",
+      "why": "the split payout forgets Right's share",
+      "file": "chain.qnt",
+      "old": "res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt",
+      "new": "res: m.res.set(Left, m.res.get(Left) + d), debt: m.debt",
+      "killedBy": "invariant:p3_conserved"
+    },
+    {
+      "id": "shortfall-all-debt",
+      "why": "a payout books everything as debt, paying nothing from reserve",
+      "file": "chain.qnt",
+      "old": "val pay = imin(amount, spendable(m, debtor))",
+      "new": "val pay = 0",
+      "killedBy": "test:shortfallBecomesDebtTest"
+    },
+    {
+      "id": "shortfall-all-debt-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "chain.qnt",
+      "old": "val pay = imin(amount, spendable(m, debtor))",
+      "new": "val pay = 0",
+      "killedBy": "invariant:debt_only_when_broke"
+    },
+    {
+      "id": "nonce-goes-back",
+      "why": "finalize resets the stored nonce",
+      "file": "chain.qnt",
+      "old": "val newNonce = if (adopts) r.nonce else acct.nonce + 1",
+      "new": "val newNonce = if (adopts) r.nonce else 0",
+      "killedBy": "invariant:nonce_monotone"
+    },
+    {
+      "id": "deposit-ignored-in-dispute",
+      "why": "R2C forgets the collateral it added when a dispute is running",
+      "file": "chain.qnt",
+      "old": "acct' = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
+      "new": "acct' = { ...acct, coll: acct.coll + (if (dispute.on) 0 else amt), ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
+      "killedBy": "invariant:p3_conserved"
+    }
+  ]
+}

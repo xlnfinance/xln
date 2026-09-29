@@ -1,0 +1,194 @@
+// Scenario tests for chain.qnt: the dispute game on hand-made histories. Each states what the chain must do.
+// Run with: quint test chain_test.qnt --backend typescript
+module chain_test {
+  import chain.* from "./chain"
+
+  // ---- histories -------------------------------------------------------------------------------------------
+
+  pure val EMPTY: int -> SignedProof = SLOTS.mapBy(_ => NO_PROOF)
+  // an epoch-1 baseline that every epoch-0 event can be told apart from (slot 6)
+  pure val BASE: int -> SignedProof = EMPTY.set(6, mkProof(true, 6, 1, true, 0, NO_CLAUSE, true, true))
+  // a proof of epoch 0: nonce, authored by Left?, offdelta, signed by Left?, signed by Right?
+  pure def pf(n: int, la: bool, off: int, sl: bool, sr: bool): SignedProof = mkProof(true, n, 0, la, off, NO_CLAUSE, sl, sr)
+  pure def withClause(p: SignedProof, payer: Side, amount: int, deadline: int): SignedProof =
+    { ...p, clause: { on: true, payer: payer, amount: amount, deadline: deadline } }
+
+  val stale = BASE.set(1, pf(1, true, 2, true, true)).set(2, pf(2, false, 1, true, true))
+
+  // ---- the game ------------------------------------------------------------------------------------------------
+
+  // Left starts with a stale proof that favours it. The honest Right answers with its newer both-signed state, and the
+  // chain settles that one after the window.
+  run staleStartIsCounteredTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(honestCounter)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and {
+      money.res == Map(Left -> 1, Right -> 1),              // Δ = 1: the collateral splits
+      acct.nonce == 2, acct.epoch == 1, acct.coll == 0,
+      dispute == NO_DISPUTE,
+      safe
+    })
+
+  // The honest side is never out-waited: time does not move while it has a response to make.
+  run timeWaitsForHonestResponseTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick)
+    .fail()
+
+  // A starter cannot cut the window short, and cannot use its own newer proof to close at once (path 2 is the
+  // non-starter's).
+  run starterCannotCloseEarlyTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Left, 0, 0, false))
+    .fail()
+  run starterCannotUseNewerProofTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Left, 2, 2, false))
+    .fail()
+
+  // The non-starter may close at once with a newer proof the starter signed.
+  run nonStarterClosesWithNewerProofTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Right, 2, 2, false))
+    .expect(and { money.res == Map(Left -> 1, Right -> 1), acct.nonce == 2, safe })
+
+  // Equal nonces: Left's proof outranks Right's (Left is the tie-break winner everywhere). Left starts with the proof Right
+  // signed and lost the collision on; the honest Right answers with the Left-authored state of the same nonce.
+  run leftWinsEqualNonceTest =
+    initFrom(
+      BASE.set(1, pf(1, true, 1, true, true)).set(5, pf(1, false, 2, false, true)),
+      Right, 0, 0, 2)
+    .then(startWith(Left, 5, false, 0, false))
+    .then(honestCounter)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and { arena.get(1).nonce == arena.get(5).nonce, rank(arena.get(1)) > rank(arena.get(5)),
+                  money.res == Map(Left -> 1, Right -> 1), safe })
+
+  // The non-starter's answer must land inside the window.
+  run counterAfterWindowRefusedTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(setOffline(true))
+    .then(tick).then(tick)
+    .then(setOffline(false))
+    .then(honestCounter)
+    .fail()
+
+  // ---- epochs (C1) --------------------------------------------------------------------------------------------
+
+  // After a finalize every proof of the old epoch is dead: replaying one is refused; the next epoch's baseline is not.
+  // (nonce 4 is above the chain's nonce after the finalize, so only the epoch stops it)
+  run oldEpochProofIsDeadTest =
+    initFrom(BASE.set(1, pf(1, true, 0, true, true)).set(4, pf(4, true, -2, true, false)), Left, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .then(startWith(Right, 4, false, 0, false))
+    .fail()
+  run newEpochBaselineStartsTest =
+    initFrom(BASE.set(1, pf(1, true, 0, true, true)), Left, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .then(startWith(Right, 6, false, 0, false))
+    .expect(dispute.on and acct.epoch == 1)
+
+  // ---- H1: an HTLC settled on chain is judged by the secret, and finalize waits for the deadline ------------------
+
+  val hub = BASE.set(1, withClause(pf(1, true, 0, true, true), Left, 1, 4))
+
+  // Right is the payee, does not know the secret, and cannot close while the deadline is open (H1).
+  run finalizeWaitsForDeadlineTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick)
+    .then(finalizeWith(Right, 0, 0, false))
+    .fail()
+  // Past the deadline the payer keeps its money: the clause is dropped, offdelta stays 0.
+  run expiredClauseIsDroppedTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(finalizeWith(Right, 0, 0, false))
+    .expect(and { money.res == Map(Left -> 1, Right -> 2), safe })
+  // With the secret on chain in time, the payee is paid: Left's offdelta drops by the amount, Left owes 1 and pays it.
+  run revealedClausePaysTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(learn(Right))
+    .then(publish(Right))
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Right, 0, 0, false))
+    .expect(and { money.res == Map(Left -> 0, Right -> 3), money.debt == Map(Left -> 0, Right -> 0), safe })
+  // A secret shown after the deadline pays nobody: the payer keeps its money.
+  run lateSecretPaysNothingTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(learn(Right))
+    .then(publish(Right))
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Right, 0, 0, false))
+    .expect(and { money.res == Map(Left -> 1, Right -> 2), safe })
+  // The honest payee publishes the moment it knows: time waits for it.
+  run payeePublishesAtOnceTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(learn(Right))
+    .then(tick)
+    .fail()
+
+  // ---- H2: a zero response window is refused --------------------------------------------------------------------
+
+  run zeroWindowIsRefusedTest =
+    initFrom(BASE.set(1, { ...pf(1, true, 0, true, true), wl: 0 }), Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .fail()
+
+  // ---- money ---------------------------------------------------------------------------------------------------------
+
+  // A payout the debtor's reserve cannot cover becomes debt, and only for the uncovered part.
+  run shortfallBecomesDebtTest =
+    initFrom(BASE.set(1, pf(1, true, -3, true, true)), Left, 1, 0, 1)
+    .then(honestStart)
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and {
+      money.res == Map(Left -> 0, Right -> 2),               // Right took the collateral (1) and Left's whole reserve (1)
+      money.debt == Map(Left -> 2, Right -> 0),
+      safe
+    })
+
+  // A deposit during a dispute is not lost: the proof only fixes offdelta, the chain reads collateral at finalize.
+  run depositDuringDisputeCountsTest =
+    initFrom(BASE.set(1, pf(1, true, 1, true, true)), Left, 0, 1, 2)
+    .then(honestStart)
+    .then(r2c(Right, Right, 1))
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and { money.res == Map(Left -> 1, Right -> 2), safe })   // Δ = 1 of collateral 3
+  run depositForLeftRaisesOndeltaTest =
+    initFrom(BASE.set(1, pf(1, true, 1, true, true)), Left, 0, 1, 2)
+    .then(honestStart)
+    .then(r2c(Right, Left, 1))
+    .then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and { money.res == Map(Left -> 2, Right -> 1), safe })   // ondelta 1: Δ = 2 of collateral 3
+
+  // ---- an absent honest party -----------------------------------------------------------------------------------
+
+  // If the honest party is offline for a whole window it can lose the game. That is not a protocol failure, and it is
+  // recorded, so the invariants exclude it.
+  run offlinePartyCanLoseTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(setOffline(true))
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick)
+    .then(finalizeWith(Left, 0, 0, false))
+    .expect(and { ghost.xWasOffline, money.res == Map(Left -> 2, Right -> 0), safe })
+}

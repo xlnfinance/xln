@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 Q=./node_modules/.bin/quint
 SAMPLES=${SAMPLES:-500}
-MODULES=${MODULES:-account}
+MODULES=${MODULES:-account chain}
 
 for m in $MODULES; do
   echo "== $m: typecheck"
@@ -18,12 +18,13 @@ for m in $MODULES; do
     echo "== $m: scenario tests"
     $Q test "${m}_test.qnt" --backend typescript
   fi
-  echo "== $m: invariant 'safe' over $SAMPLES traces"
-  $Q run "$m.qnt" --backend typescript --invariant safe --max-steps 40 --max-samples "$SAMPLES" --seed 0x1 --verbosity 1 \
+  steps=40; [ "$m" = chain ] && steps=16      # the chain clock is short; longer traces only repeat finalizes
+  echo "== $m: invariant 'safe' over $SAMPLES traces of $steps steps"
+  $Q run "$m.qnt" --backend typescript --invariant safe --max-steps $steps --max-samples "$SAMPLES" --seed 0x1 --verbosity 1 \
     | grep -E "^\[|Use --seed"
   echo "== $m: witnesses (each must be violated, or the path is unreachable)"
   for w in $(grep -oE '^  val w_[a-z_]+' "$m.qnt" | awk '{print $2}'); do
-    out=$($Q run "$m.qnt" --backend typescript --invariant "$w" --max-steps 40 --max-samples 3000 --seed 0x7 --verbosity 1 2>&1 || true)
+    out=$($Q run "$m.qnt" --backend typescript --invariant "$w" --max-steps $steps --max-samples 3000 --seed 0x7 --verbosity 1 2>&1 || true)
     if echo "$out" | grep -q "Invariant violated"; then
       echo "   reached  $w"
     else
@@ -32,7 +33,7 @@ for m in $MODULES; do
   done
   if [ "${MUTANTS:-0}" = "1" ]; then
     echo "== $m: mutants"
-    python3 mutants/run.py "$m"
+    MUTANT_STEPS=$steps python3 mutants/run.py "$m"
   fi
 done
 echo "check.sh: all green"
