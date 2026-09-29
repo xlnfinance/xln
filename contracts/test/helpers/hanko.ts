@@ -28,7 +28,7 @@ const BOARD_ABI = [
   'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)'
 ];
 
-const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes("XLN_DEPOSITORY_HANKO_V1"));
+const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes("XLN_DEPOSITORY_HANKO_V2"));
 
 export const addressEntityId = (address: string): string => ethers.zeroPadValue(address, 32);
 
@@ -138,15 +138,79 @@ export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<stri
   ...overrides,
 });
 
+/**
+ * The fork's batch hash (C2): the payload binds the ACTING entity, so a signature for one entity's batch is not valid
+ * for another. abi: packed(domain V2, chainId, depository, entityId, encodedBatch, nonce).
+ */
 export const computeDepositoryBatchHash = async (
   depository: { getAddress(): Promise<string> },
+  entityId: string,
   encodedBatch: string,
   nonce: bigint,
 ): Promise<string> => {
   const chainId = BigInt((await ethers.provider.getNetwork()).chainId);
   return ethers.keccak256(ethers.solidityPacked(
-    ['bytes32', 'uint256', 'address', 'bytes', 'uint256'],
-    [BATCH_DOMAIN_SEPARATOR, chainId, await depository.getAddress(), encodedBatch, nonce]
+    ['bytes32', 'uint256', 'address', 'bytes32', 'bytes', 'uint256'],
+    [BATCH_DOMAIN_SEPARATOR, chainId, await depository.getAddress(), ethers.zeroPadValue(entityId, 32), encodedBatch, nonce]
+  ));
+};
+
+type BatchSubmitter = {
+  processBatch(entityId: string, encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown>;
+};
+
+/** processBatch(entityId, encodedBatch, hanko, nonce) with the acting entity first (C2). */
+export const submitBatch = (
+  depository: { connect(runner: unknown): unknown },
+  signer: unknown,
+  entityId: string,
+  signed: { encodedBatch: string; hankoData: string; nonce: bigint },
+) =>
+  (depository.connect(signer) as BatchSubmitter).processBatch(
+    ethers.zeroPadValue(entityId, 32), signed.encodedBatch, signed.hankoData, signed.nonce,
+  );
+
+const PROOF_KIND_COOPERATIVE_UPDATE = 0;
+const PROOF_KIND_DISPUTE = 1;
+
+/** The Account's on-chain ondeltaEpoch (C1). Advances on settlement, C2R and finalize; not on R2C. */
+export const accountEpoch = async (
+  depository: { ondeltaEpoch(a: string, b: string): Promise<bigint> },
+  left: string,
+  right: string,
+): Promise<bigint> => depository.ondeltaEpoch(left, right);
+
+/** Cooperative-update payload hash (C1): the epoch sits right after the account key. */
+export const computeCooperativeUpdateHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  epoch: bigint,
+  nonce: bigint,
+  diffs: unknown[],
+  forgiveDebtsInTokenIds: bigint[],
+  diffsAbi: string,
+): Promise<string> => {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', diffsAbi, 'uint256[]'],
+    [PROOF_KIND_COOPERATIVE_UPDATE, chainId, await depository.getAddress(), accountKey, epoch, nonce, diffs, forgiveDebtsInTokenIds],
+  ));
+};
+
+/** Dispute-proof payload hash (C1): the epoch sits right after the account key. */
+export const computeDisputeProofHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  epoch: bigint,
+  nonce: bigint,
+  proposerIsLeft: boolean,
+  proofbodyHash: string,
+  watchSeed: string,
+): Promise<string> => {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
+    [PROOF_KIND_DISPUTE, chainId, await depository.getAddress(), accountKey, epoch, nonce, proposerIsLeft, proofbodyHash, watchSeed],
   ));
 };
 
