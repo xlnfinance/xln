@@ -59,6 +59,13 @@ describe("vectors", () => {
     expect(payout(o.folded)).toEqual(["970", "1030", "0"]);
   });
 
+  test("baseline offsets: after a settlement F+1..F+3 all start a dispute; after a timeout finalize of the in-flight frame F+1 only F+3 does", () => {
+    const { baselineOffsets: o } = committed("baseline");
+    expect(o.frameNonce).toBe(7);
+    expect(Object.values(o.settlement).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["7", "1", "ok"], ["7", "1", "ok"], ["7", "1", "ok"]]);
+    expect(Object.values(o.timeoutFinalize).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["9", "1", "REVERT E2()"], ["9", "1", "REVERT E2()"], ["9", "1", "ok"]]);
+  });
+
   test("lifecycle: production's own hashes match ours, and the epoch advances on settle and finalize", () => {
     const l = committed("lifecycle");
     expect([l.deposit.result, l.settle.result, l.disputeStart.result, l.disputeFinalize.result]).toEqual(["ok", "ok", "ok", "ok"]);

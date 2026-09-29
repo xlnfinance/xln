@@ -265,7 +265,38 @@ export const baselineVectors = async () => {
     return { settled, started, finalized: done, ...json(await rig.reserves()) as object };
   };
 
+  // 4. The next-epoch baseline rides every frame, so it is fixed when frame F is co-signed (F = 7 here) and must survive
+  //    whatever opening comes first. Offsets are relative to F.
+  //    - settlement: the settlement executes at nonce F, the chain's nonce is F.
+  //    - timeoutFinalize: the counterparty holds the proposer-signed proof of the in-flight frame F + 1 and starts the
+  //      dispute with it; the timeout finalize leaves the chain's nonce at F + 2 (start nonce + 1).
+  const F = 7;
+  const openingThenBaseline = async (opening: "settlement" | "timeoutFinalize", offset: number) => {
+    const rig = await boot(`baseline-offset-${opening}-${offset}`);
+    await rig.fundedAccount();
+    const epoch = (await rig.epochOf()) + 1n;
+    const baseline = at(rig, F + offset, epoch);
+    if (opening === "settlement") {
+      const diffs = [{ tokenId: rig.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+      await rig.settle(rig.L, rig.R, F, diffs, rig.coopSig(rig.R, await rig.epochOf(), F, diffs));
+    } else {
+      const inFlight = rig.body(-10n);
+      await rig.start(rig.R, rig.L, F + 1, true, inFlight, rig.proofSig(rig.L, await rig.epochOf(), F + 1, true, inFlight));
+      rig.at(130);
+      await timeout(rig, F + 1, inFlight);
+    }
+    rig.at(140);
+    const stored = (await rig.chain.getAccountInfo(rig.L.id, rig.R.id)).nonce.toString();
+    return { storedNonce: stored, epoch: (await rig.epochOf()).toString(), start: await startWith(rig, baseline) };
+  };
+  const byOffset = async (opening: "settlement" | "timeoutFinalize") => ({
+    plus1: await openingThenBaseline(opening, 1),
+    plus2: await openingThenBaseline(opening, 2),
+    plus3: await openingThenBaseline(opening, 3),
+  });
+
   return {
+    baselineOffsets: { frameNonce: F, settlement: await byOffset("settlement"), timeoutFinalize: await byOffset("timeoutFinalize") },
     afterSettlement: { baseline: record(baselineA), settle: settleA, ...afterSettle, start: startA },
     afterTimeoutFinalize: {
       firstDisputeStart: first, finalize: finalized, ...afterFinalize,
