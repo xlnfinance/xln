@@ -392,6 +392,8 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
 };
 
 const deployTron = async (chain, options) => {
+  // Exported and called directly by other scripts, so it gates on its own before any RPC or key.
+  assertResponseFloor([chain]);
   const preflight = await preflightChain(chain);
   const { TronWeb } = require('tronweb');
   const readOnlyTronWeb = new TronWeb({

@@ -1,12 +1,14 @@
 // N3: the deploy gate refuses the testnet response-window floor on any chain that is not a named testnet, on every
 // deploy path, reading the floor from the compiled build.
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 // @ts-expect-error CommonJS script without types
 import gate from "../../scripts/deploy-gate.cjs";
+// @ts-expect-error CommonJS script without types
+import matrixModule from "../../scripts/deploy-chain-matrix.cjs";
 
 const contractsRoot = path.join(import.meta.dir, "..", "..");
 const literal = (value: string, subdenomination: string | null = null) => ({ nodeType: "Literal", kind: "number", value, subdenomination });
@@ -94,11 +96,42 @@ describe("every deploy path runs the gate", () => {
     ],
   };
 
-  test("every script that deploys or broadcasts has an entry that exercises it", () => {
-    const sinks = /\.deploy\(|getContractFactory\(|broadcastTronTransaction\(|deployContract\(|sendTransaction\(/;
-    const scripts = readdirSync(path.join(contractsRoot, "scripts")).filter((name) => /\.(cjs|ts|js|mjs)$/.test(name) && name !== "deploy-gate.cjs");
-    const deployers = scripts.filter((name) => sinks.test(readFileSync(path.join(contractsRoot, "scripts", name), "utf8")));
-    expect(deployers.sort()).toEqual(Object.keys(entries).sort());
+  // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
+  // hide on this list after it grows a deploy path.
+  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "write-vectors.ts"];
+  const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|broadcastTransaction\(|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
+  const scriptsRoot = path.join(contractsRoot, "scripts");
+  const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+    const full = path.join(dir, name);
+    return statSync(full).isDirectory() ? filesUnder(full) : [full];
+  });
+  const allScripts = filesUnder(scriptsRoot).map((file) => path.relative(scriptsRoot, file));
+
+  test("every file under scripts/ has an entry that exercises it or is on the non-deploying list", () => {
+    expect(allScripts.filter((file) => !(file in entries) && !nonDeploying.includes(file))).toEqual([]);
+    expect(Object.keys(entries).filter((file) => !allScripts.includes(file))).toEqual([]);
+    expect(nonDeploying.filter((file) => !allScripts.includes(file))).toEqual([]);
+  });
+
+  test("a script on the non-deploying list contains no deploy or broadcast call", () => {
+    const offenders = nonDeploying.filter((file) => sinks.test(readFileSync(path.join(scriptsRoot, file), "utf8")));
+    expect(offenders).toEqual([]);
+  });
+
+  test("every script with a deploy or broadcast call has an entry", () => {
+    const deployers = allScripts.filter((file) => sinks.test(readFileSync(path.join(scriptsRoot, file), "utf8")));
+    expect(deployers.filter((file) => !(file in entries))).toEqual([]);
+    expect(Object.keys(entries).filter((file) => !deployers.includes(file))).toEqual([]);
+  });
+
+  test("no other deploy surface exists: no ignition or deploy directory, and package.json only runs listed scripts", () => {
+    expect(existsSync(path.join(contractsRoot, "ignition"))).toBe(false);
+    expect(existsSync(path.join(contractsRoot, "deploy"))).toBe(false);
+    const { scripts } = JSON.parse(readFileSync(path.join(contractsRoot, "package.json"), "utf8")) as { scripts: Record<string, string> };
+    const commands = Object.values(scripts);
+    expect(commands.filter((command) => /hardhat ignition/.test(command))).toEqual([]);
+    const referenced = commands.flatMap((command) => [...command.matchAll(/(?:^|[\s&;])(?:bun|node|bash|sh)\s+scripts\/([\w./-]+)/g)].map((match) => match[1]!)).filter((file) => existsSync(path.join(scriptsRoot, file)));
+    expect(referenced.filter((file) => !(file in entries) && !nonDeploying.includes(file))).toEqual([]);
   });
 
   for (const [script, cases] of Object.entries(entries)) {
@@ -122,5 +155,54 @@ describe("every deploy path runs the gate", () => {
   test("deploy-stack.cjs lets a local network through the gate (it stops later, on the missing stablecoin address)", () => {
     const result = stack("hardhat")();
     expect(`${result.stdout}${result.stderr}`).not.toContain("Deploy gate");
+  });
+
+  test("deploy-stack.cjs gates on the chain id the node reports when the network config names none", async () => {
+    // stack-manager and localhost carry no configured chain id, so only the post-RPC gate call can stop them.
+    const requests: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { id: number; method: string };
+        requests.push(body.method);
+        const results: Record<string, string> = { eth_chainId: "0x1", net_version: "1" };
+        return Response.json({ jsonrpc: "2.0", id: body.id, result: results[body.method] ?? "0x0" });
+      },
+    });
+    try {
+      const output = await new Promise<{ status: number | null; text: string }>((resolve) => {
+        const child = spawn("bunx", ["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", "stack-manager"], {
+          cwd: contractsRoot,
+          env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", XLN_STACK_MANAGER_RPC_URL: `http://127.0.0.1:${server.port}`, XLN_STACK_MANAGER_CHAIN_ID: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
+        });
+        let text = "";
+        child.stdout.on("data", (chunk) => { text += chunk; });
+        child.stderr.on("data", (chunk) => { text += chunk; });
+        child.on("close", (status) => resolve({ status, text }));
+      });
+      expect(output.status).not.toBe(0);
+      expect(output.text).toContain("Deploy gate: MIN_RESPONSE_SECONDS is 60s");
+      expect(requests).toContain("eth_chainId");
+      expect(requests.filter((method) => /^eth_send/.test(method))).toEqual([]);
+    } finally {
+      server.stop(true);
+    }
+  }, 240_000);
+
+  test("the root mainnet deploy scripts no longer reach the frozen jurisdictions/ deployer", () => {
+    const repoRoot = path.join(contractsRoot, "..");
+    for (const script of ["deploy:chains:mainnet", "deploy:mainnets"]) {
+      const result = spawnSync("bun", ["run", script], { cwd: repoRoot, encoding: "utf8", timeout: 60_000 });
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}${result.stderr}`).toContain("cd contracts && bun run deploy:chains:mainnet");
+    }
+    const root = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { scripts: Record<string, string> };
+    expect(Object.values(root.scripts).filter((command) => /jurisdictions.*deploy-chain-matrix.*--profile=mainnet/.test(command))).toEqual([]);
+  });
+
+  test("the exported deployTron gates on its own, before any RPC or key", async () => {
+    const { profiles, deployTron } = matrixModule;
+    await expect(deployTron(profiles.mainnet.tron, { dryRun: false, skipCompile: true })).rejects.toThrow(/Deploy gate: MIN_RESPONSE_SECONDS is 60s/);
+    await expect(deployTron(profiles.mainnet.tron, { dryRun: true })).rejects.toThrow(/Deploy gate/);
   });
 });

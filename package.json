@@ -156,7 +156,7 @@
     "native:extension": "bun scripts/native/build-platforms.ts extension",
     "deploy": "./scripts/deployment/deploy-platform.sh",
     "deploy:chains:testnet": "cd jurisdictions && bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
-    "deploy:chains:mainnet": "cd jurisdictions && bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
+    "deploy:chains:mainnet": "node -e \"console.error('Refused: jurisdictions/ is frozen and its contracts carry no mainnet response-window floor. Deploy mainnet from contracts/: cd contracts && bun run deploy:chains:mainnet'); process.exit(1)\"",
     "deploy:mainnets": "bun run deploy:chains:mainnet",
     "deploy:frontend": "./scripts/deployment/deploy-platform.sh --frontend",
     "deploy:ui": "ssh root@xln.finance 'bash -s' < scripts/deployment/deploy-ui.sh",

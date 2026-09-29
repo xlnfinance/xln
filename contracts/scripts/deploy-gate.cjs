@@ -3,7 +3,7 @@
 // counterparty who is offline overnight must still be able to answer a dispute (contracts-decisions.md, H2).
 //
 // Every deploy entry point must call `assertResponseFloor` before it sends anything (deploy-chain-matrix.cjs for the
-// matrix, deploy-stack.cjs for `hardhat run`); test/gate/deploy-gate.test.ts fails if a deploy script does not.
+// matrix, deploy-stack.cjs, which Hardhat launches); test/gate/deploy-gate.test.ts fails if a deploy script does not.
 //
 // The floor is read from the COMPILED build (solc's AST in the Hardhat build-info), never from source text, so a
 // comment cannot mask it. Build-info whose recorded sources differ from the files on disk is stale and does not count.
