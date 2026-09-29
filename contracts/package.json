@@ -1,0 +1,44 @@
+{
+  "name": "xln-contracts",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "compile": "bunx hardhat clean && bunx hardhat compile",
+    "compile:tron": "bun scripts/compile-tron.cjs --all",
+    "deploy:chains:testnet": "bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
+    "deploy:chains:mainnet": "bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
+    "test": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts -- bunx hardhat test",
+    "test:default": "bun ../core/scripts/e2e/runners/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default -- bunx hardhat test",
+    "forge:setup": "bash scripts/setup-forge-std.sh",
+    "test:forge": "bun run forge:setup && forge test --root .",
+    "test:forge:deep": "bun run forge:setup && FOUNDRY_PROFILE=deep forge test --root . --match-path 'test/foundry/*.invariants.t.sol'",
+    "deploy": "bun scripts/deploy-chain-matrix.cjs",
+    "console": "bunx hardhat console",
+    "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^4.0.15",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.11",
+    "@nomicfoundation/hardhat-ignition": "^3.1.8",
+    "@nomicfoundation/hardhat-ignition-ethers": "^3.1.6",
+    "@nomicfoundation/hardhat-keystore": "^3.0.13",
+    "@nomicfoundation/hardhat-mocha": "^3.1.0",
+    "@nomicfoundation/hardhat-network-helpers": "^3.0.11",
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
+    "@nomicfoundation/hardhat-typechain": "^3.1.1",
+    "@nomicfoundation/hardhat-verify": "^3.0.22",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "chai": "^6.2.2",
+    "ethers": "6.17.0",
+    "hardhat": "^3.13.0",
+    "mocha": "^11.8.0",
+    "typescript": ">=4.5.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1"
+  }
+}
