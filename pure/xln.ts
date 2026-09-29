@@ -9697,9 +9697,17 @@ type AccountEnv = {
   readonly refreshMigration?: RefreshMigration | undefined;
   /** og shadow.rejectedFrameEvidence: the last unsafe peer frame the Entity disputed (committed; never cleared). */
   readonly rejectedFrame?: RejectedFrame | undefined;
+  /**
+   * The txs this Entity frame asked the Account to queue that its mempool does not hold (deduped). og counts every
+   * staged request in the `LEFT has N pending txs` warning (restoreCollisionQueueEvent). Never committed; the Entity
+   * frame clears it.
+   */
+  readonly dedupedThisFrame?: number | undefined;
 };
-type EnvMeta =
-  Pick<AccountEnv, "boardRefresh" | "publicPinned" | "rebalancePolicy" | "refreshMigration" | "rejectedFrame">;
+type EnvMeta = Pick<
+  AccountEnv,
+  "boardRefresh" | "publicPinned" | "rebalancePolicy" | "refreshMigration" | "rejectedFrame" | "dedupedThisFrame"
+>;
 /** Entity-side Account fields every phase keeps (og counterpartyBoardHankoRefresh, publicPinned, rebalance policy). */
 const envMeta = (r: EnvMeta): EnvMeta => ({
   ...opt("boardRefresh", r.boardRefresh),
@@ -9707,6 +9715,7 @@ const envMeta = (r: EnvMeta): EnvMeta => ({
   ...opt("rebalancePolicy", r.rebalancePolicy),
   ...opt("refreshMigration", r.refreshMigration),
   ...opt("rejectedFrame", r.rejectedFrame),
+  ...opt("dedupedThisFrame", r.dedupedThisFrame),
 });
 /** og AccountBoardHankoRefreshMigration: the activation our refresh belongs to and its outcome. */
 export type RefreshMigration = {
@@ -10712,8 +10721,9 @@ const collision = (
 ): OnProposed => {
   const height = input.frame.height, own = r.candidate.frame;
   if (ctx.party.left) {
-    const waiting = `⚠️ LEFT has ${r.mempool.length} pending txs while waiting for RIGHT's ACK`;
-    const pending = r.mempool.length > 0 ? [accountSay(waiting)] : [];
+    const staged = r.mempool.length + (r.dedupedThisFrame ?? 0);
+    const waiting = `⚠️ LEFT has ${staged} pending txs while waiting for RIGHT's ACK`;
+    const pending = staged > 0 ? [accountSay(waiting)] : [];
     return ok(done<OpenAccount | ProposedAccount | ReceivedAccount, AccountOutput>(r, [
       accountSay(`📤 LEFT-WINS: Ignored RIGHT's frame ${height} (waiting for their ACK)`), ...pending,
     ]));
@@ -11247,9 +11257,11 @@ const queueOn = <R extends AccountReplica>(
     return chain(judged, (admitted): Result<Queued<R>, AccountReplicaError> => {
       const kept = new Set<WireAccountTx>(admitted);
       const queued = fresh.filter((tx) => tx.type !== "j_event_claim" || kept.has(tx));
+      const deduped = (r.dedupedThisFrame ?? 0) + txs.length - queued.length;
+      const replica = { ...r, mempool: [...r.mempool, ...queued], ...opt("dedupedThisFrame", deduped || undefined) };
       return held.length + queued.length > ACCOUNT_MEMPOOL_SIZE
         ? err({ _tag: "mempool_full", limit: ACCOUNT_MEMPOOL_SIZE })
-        : ok({ replica: { ...r, mempool: [...r.mempool, ...queued] }, queued });
+        : ok({ replica, queued });
     });
   });
 const pendingOf = (r: AccountReplica): readonly WireAccountTx[] => (r._tag === "proposed" ? r.candidate.frame.txs : []);
@@ -26826,6 +26838,14 @@ const primedAccounts = (arrived: Replicas): readonly EntityId[] =>
     .filter(([, c]) => arrivedProposable(c))
     .map(([peer]) => peer)
     .toSorted(asc);
+/** What an Entity frame asked its Accounts to queue and they did not hold is counted for that frame only. */
+const unstaged = (folded: FoldedTxs): FoldedTxs => {
+  const { accountReplicas } = folded.draft;
+  const counted = [...accountReplicas.values()].some((c) => c.dedupedThisFrame !== undefined);
+  const cleared = new Map([...accountReplicas].map(([peer, c]): [EntityId, AccountReplica] =>
+    [peer, { ...c, dedupedThisFrame: undefined }]));
+  return counted ? { ...folded, draft: { ...folded.draft, accountReplicas: cleared } } : folded;
+};
 /**
  * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
  * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
@@ -26900,7 +26920,7 @@ export const foldTxs = (
     return chain(frame, ({ handover, authorityOnly: onlyAuthority }) => {
       const frameCtx = handover === null ? ctx : { ...ctx, boardHandover: handover };
       const folded = foldEvicting(normalized, replicas, txs, frameCtx, state.id);
-      return chain(folded, onlyAuthority ? authorityOnly : proposeAfter);
+      return map(chain(folded, onlyAuthority ? authorityOnly : proposeAfter), unstaged);
     });
   });
 };

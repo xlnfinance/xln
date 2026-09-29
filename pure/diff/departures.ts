@@ -75,34 +75,3 @@ export const KNOWN_OG_HALTS: readonly KnownHalt[] = [
   },
 ];
 export const knownHalt = (ogHalt: string): KnownHalt | undefined => KNOWN_OG_HALTS.find((k) => k.halts(ogHalt));
-
-/**
- * A difference between og and the rewrite in a frame's content, not its state, that the project decided to carry rather
- * than fix. `causedBy` reads og's own frame events (the rewrite's are bound into its frame hash and not kept), and only
- * the paths `follows` names are masked, from the frame that shows the cause on: the frame hash and what commits to it.
- * Every other path, the state roots included, is still compared in every frame.
- */
-export type KnownDivergence = {
-  readonly name: string;
-  readonly reason: string;
-  readonly probe: string;
-  /** One frame event of og's, as its certified head holds it. */
-  readonly causedBy: (ogEvent: { readonly message?: unknown }) => boolean;
-  /** A diff path (`head[H].frameHash`, `postStateHash.`, ...) that follows from the cause. */
-  readonly follows: (path: string) => boolean;
-};
-/** The frame hash, its Hanko, the hashes to sign and the parent link: what commits to a frame's events. */
-const FRAME_HASH_PATH =
-  /^(meta\[\d+\]\.(certifiedFrameHeadDigest|entityHead\.(frameHash|parentFrameHash|hankos\.\d+|hashesToSign\.\d+\.hash|collectedSigs\..*))|head\[[^\]]+\]\.(frameHash|parentFrameHash|hankos\.\d+|hashesToSign\.\d+\.hash|collectedSigs\..*)|postStateHash\.)$/;
-export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
-  {
-    name: "LEFT-WINS warning counts only the Account mempool",
-    reason:
-      "og restoreCollisionQueueEvent adds the txs staged earlier in the Entity frame to the `LEFT has N pending txs` frame "
-      + "event; the rewrite counts its mempool alone. A diagnostic string bound into the frame hash, no money, deadline or "
-      + "consensus state; the spec decides whether diagnostics belong in a frame hash at all (review/walk-finding-left-wins-warning.md).",
-    probe: "adding 1 to the rewrite's count moves the first diff on WALK_SEED=0x30de1 from frame 16 to frame 24",
-    causedBy: (event) => /^⚠️ LEFT has \d+ pending txs while waiting for RIGHT's ACK$/.test(String(event.message ?? "")),
-    follows: (path) => FRAME_HASH_PATH.test(path),
-  },
-];
