@@ -143,6 +143,7 @@ describe("settle refresh: og refreshStaleUncommittedSettlementHankos then materi
       console.log(`refresh ${stableJson(refreshes[0])}; hankos ${stableJson(signed)} -> ${stableJson(resigned)}; ${halt}`);
       expect(halt).toBe(`frame=${w.lane.frames()} agreed halt`);
       expect(w.coverage.haltTexts.at(-1)).toContain(`SETTLEMENT_HANKO_NONCE_MISMATCH:${refreshes[0]!.expectedNonce}:${signed[0]}`);
+      expect(w.refusals()).toEqual([]);
     } finally {
       await w.close();
     }
