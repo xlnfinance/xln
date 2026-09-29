@@ -38,6 +38,7 @@ interface IDepositoryDelegateErrorAbi {
   error E5(); // NoActiveDispute / VirginAccount
   error E6(); // DisputeInProgress
   error E9(); // HashMismatch
+  error ResponseWindowTooShort(uint256 minSeconds); // a proof body's response window is below MIN_RESPONSE_SECONDS
   error TransformerGasBudgetUnavailable();
   error TransformerExecutionFailed();
 }

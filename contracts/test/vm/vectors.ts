@@ -163,8 +163,8 @@ export const lifecycleVectors = async (rig: Rig) => {
   const stored = await rig.chain.getAccountInfo(L.id, R.id);
   const startTimestamp = 1_800_000_000;
   const expectedDisputeHash = (await call(rig.chain.addresses.account, account, "encodeDisputeHash",
-    [7, false, true, stored.disputeTimeout, 10, 10, bodyHash(P7), startTimestamp, "0x", "0x", ethers.ZeroHash])).decoded;
-  rig.at(50);
+    [7, false, true, stored.disputeTimeout, 60, 60, bodyHash(P7), startTimestamp, "0x", "0x", ethers.ZeroHash])).decoded;
+  rig.at(130);
   const finalizeResult = await rig.finalize(R, L, { nonce: 7, body: P7, startedByLeft: false }, { nonce: 7, proposerIsLeft: true, body: P7, sig: "0x" });
   const finalizeBatch = batchRecord(rig, finalizeResult);
   const finalizeEvents = rig.last.events;

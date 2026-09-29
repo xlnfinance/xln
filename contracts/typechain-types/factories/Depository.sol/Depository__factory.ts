@@ -107,6 +107,17 @@ const _abi = [
     type: "error",
   },
   {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "minSeconds",
+        type: "uint256",
+      },
+    ],
+    name: "ResponseWindowTooShort",
+    type: "error",
+  },
+  {
     inputs: [],
     name: "TransformerExecutionFailed",
     type: "error",

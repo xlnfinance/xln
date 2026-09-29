@@ -63,6 +63,8 @@ argument (C2), and the batch, dispute-proof and cooperative-update payloads chan
 sign or call `computeBatchHankoHash` with is now the old format. `contracts/test/vm/` covers the same paths against the
 new format and is the gate for these changes. Porting the inherited suites to the new interface is a separate change.
 
+Re-measured after H1 and H2: every count is identical to the "after" column, so neither change dropped another inherited test. Those suites already fail on the C1/C2 payloads; H1/H2 cannot be judged by them until they are ported.
+
 ## Follow-ups (out of PR #40)
 
 1. **Port the old Hardhat suites.** The inherited suites above still sign the old payloads and call the old three-argument `processBatch`. Port them to the new interface (entity argument, epoch in proofs, V2 domain), or retire each one once `test/vm/` covers its path.

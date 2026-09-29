@@ -343,9 +343,14 @@ library Account {
   uint256 private constant MAX_DISPUTE_STARTER_ARGUMENT_BYTES = 64 * 1024;
   uint256 private constant MAX_DISPUTE_PROOF_TOKENS = 128;
   uint256 private constant MAX_DISPUTE_TRANSFORMERS = 32;
-  // A bilateral pair may intentionally choose zero or a very long response
-  // policy. The sole technical guard rejects only an obviously accidental
-  // lock longer than one year; there is deliberately no minimum.
+  // Response windows live in the signed proof body, and the starter of a dispute picks which proof to start with.
+  // A zero window would let the starter open and finalize in one batch and skip the counterparty's answer (H2), so
+  // both windows of every proof body must reach this floor.
+  //
+  // TESTNET VALUE. 60 seconds is only enough to exercise the dispute path end to end. A real deployment needs a
+  // floor in hours, not seconds: a counterparty who is offline for a night must still be able to answer a dispute.
+  uint256 private constant MIN_RESPONSE_SECONDS = 60;
+  // The other technical guard rejects an obviously accidental lock longer than one year.
   uint256 private constant MAX_DISPUTE_SECONDS = 365 days;
   // The account's left/right entity ids ride every transformer call: the stock
   // DeltaTransformer resolves cross-j pull ratios from the Depository reveal
@@ -485,6 +490,9 @@ library Account {
   }
 
   function _validateProofBody(ProofBody memory proofbody) private pure returns (bytes32 bodyHash) {
+    if (proofbody.leftResponseSeconds < MIN_RESPONSE_SECONDS || proofbody.rightResponseSeconds < MIN_RESPONSE_SECONDS) {
+      revert IDepositoryDelegateErrorAbi.ResponseWindowTooShort(MIN_RESPONSE_SECONDS);
+    }
     if (uint256(proofbody.leftResponseSeconds) + uint256(proofbody.rightResponseSeconds) > MAX_DISPUTE_SECONDS) {
       revert E10();
     }

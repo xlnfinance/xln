@@ -11,6 +11,17 @@ before it and passes after it.
 - The inherited Hardhat mocha suites under `test/` are unchanged copies. Several fail on this toolchain before any change
   (chai matcher version, missing og fixture); the baseline counts are in `BASELINE.md`.
 
+## Changes from og (each has a BrowserVM test in `test/vm/`)
+
+| id | change | test |
+|---|---|---|
+| C1 | `ondeltaEpoch` bound into dispute proofs and settlements; advances on settlement, C2R and finalize, not R2C | `c1-epoch` |
+| C2 | `processBatch(entityId, ...)`, batch hanko binds the entity, domain V2 | `c2-batch-entity` |
+| H1 | finalize reverts `PaymentRevealWindowActive(deadline)` for an unrevealed HTLC until its deadline, unless the secret is public | `h1-htlc-deadline` |
+| H2 | both response windows of every proof body must be at least `MIN_RESPONSE_SECONDS` (60 s, testnet only; mainnet needs hours), else `ResponseWindowTooShort` | `h2-window-floor` |
+
+Decided but not yet built: H3 (cap retired-board evidence at collateral). Reasons and options: `plan/contracts-decisions.md`.
+
 ---
 
 # xln jurisdiction contracts

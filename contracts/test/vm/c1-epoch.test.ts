@@ -21,7 +21,7 @@ describe("C1 ondelta epoch", () => {
     // Attack: Right opens again with Left's unacked P6 (nonce 6 > stored 5) and times it out.
     w.at(100);
     const attackStart = await w.start(R, L, 6, true, P6, p6ByL);
-    w.at(200);
+    w.at(300);
     const attackEnd = await w.finalize(R, L, { nonce: 6, body: P6, startedByLeft: false }, { nonce: 6, proposerIsLeft: true, body: P6, sig: "0x" });
     const end = await w.reserves();
     // The latest state both signed owes Right 30 in all; nothing beyond P5 may move.
@@ -37,12 +37,12 @@ describe("C1 ondelta epoch", () => {
     const p3ByL = w.proofSig(L, e0, 3, true, P3);
     const p5ByL = w.proofSig(L, e0, 5, true, P5);
     expect(await w.start(R, L, 3, true, P3, p3ByL)).toBe("ok");
-    w.at(50);
+    w.at(130);
     expect(await w.finalize(R, L, { nonce: 3, body: P3, startedByLeft: false }, { nonce: 3, proposerIsLeft: true, body: P3, sig: "0x" })).toBe("ok");
     const afterFirst = await w.reserves();
     expect(afterFirst.R - 1000n).toBe(10n);
     const second = await w.start(R, L, 5, true, P5, p5ByL);
-    w.at(100);
+    w.at(300);
     const secondEnd = await w.finalize(R, L, { nonce: 5, body: P5, startedByLeft: false }, { nonce: 5, proposerIsLeft: true, body: P5, sig: "0x" });
     const end = await w.reserves();
     // P5 alone would pay Right 30; the 10 already paid may not be paid again on top of it.
@@ -56,13 +56,13 @@ describe("C1 ondelta epoch", () => {
     const e0 = await w.epochOf();
     const P3 = w.body(-10n);
     expect(await w.start(R, L, 3, true, P3, w.proofSig(L, e0, 3, true, P3))).toBe("ok");
-    w.at(50);
+    w.at(130);
     expect(await w.finalize(R, L, { nonce: 3, body: P3, startedByLeft: false }, { nonce: 3, proposerIsLeft: true, body: P3, sig: "0x" })).toBe("ok");
     const e1 = await w.epochOf();
     expect(e1).toBe(w.features.epoch ? e0 + 1n : 0n);
     // Both sides re-sign after the finalize; the Account continues at the new epoch (offdelta restarts at 0).
     const Q = w.body(0n);
-    w.at(100);
+    w.at(140);
     expect(await w.start(R, L, 5, true, Q, w.proofSig(L, e1, 5, true, Q))).toBe("ok");
   });
 

@@ -227,8 +227,8 @@ export const boot = async (label: string, chainId = 31337) => {
       collateral: await chain.getCollateral(L.id, R.id, TOKEN),
       nonce: (await chain.getAccountInfo(L.id, R.id)).nonce,
     });
-    const body = (offdelta: bigint, windows = 10): Body => ({
-      watchSeed: ethers.id(`${seed}-seed`), leftResponseSeconds: windows, rightResponseSeconds: windows,
+    const body = (offdelta: bigint, windows = 60, rightWindows = windows): Body => ({
+      watchSeed: ethers.id(`${seed}-seed`), leftResponseSeconds: windows, rightResponseSeconds: rightWindows,
       offdeltas: [offdelta], tokenIds: [TOKEN],
     });
     /** Both parties funded, Left's 100 in collateral (ondelta 100). */
