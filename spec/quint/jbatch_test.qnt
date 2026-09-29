@@ -65,6 +65,16 @@ module jbatch_test {
     .then(attempt(0))                      // the batch lands, the start is skipped, DisputeOpSkipped is emitted
     .expect(and { st.skipped.get(3), st.dropped.get(3), not(st.done.get(3)), nothingAlive(st), st.sub.length() == 1, safe })
 
+  // A relayer that starves the call of gas does not burn the batch: the transaction reverts, the nonce stays open, the honest relayer's
+  // next attempt lands it. Without the gas guard the payment batch would be failed at its nonce though it would have applied.
+  run starvedBatchLandsLaterTest =
+    initFrom(cat(1, 6, 6), 3)
+    .then(arrive(1))
+    .then(starve(0))
+    .expect(and { st.cnonce == 0, st.gh.failed == 0, st.gh.reverts == 1, not(st.gh.burned) })
+    .then(attempt(0))
+    .expect(and { st.done.get(1), st.runs.get(1) == 1, st.cnonce == 1, safe })
+
   // A signed batch never expires and anybody can send it again: the second landing is refused by the nonce (E2) and runs nothing.
   run resubmittedBatchIsHarmlessTest =
     initFrom(cat(1, 6, 6), 3)

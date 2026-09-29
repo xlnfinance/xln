@@ -44,6 +44,12 @@ module jbatch {
   // chain: a batch that reverts (a payment the reserve cannot cover) still takes its nonce and applies nothing [J5, proposal]; today it
   // leaves no trace and its nonce stays open, so it blocks every batch above it.
   pure val NONCE_ON_FAIL = true
+  // J5 as built: only a batch with no dispute, reveal or hash-ladder op gets that treatment; a mixed batch that fails still reverts whole
+  // and keeps its nonce open. So the Entity splits its batches (R-SPLIT): urgent ops never share a batch with payment, settlement or
+  // reserve ops (Entity side: `plan`).
+  // chain: a failure that leaves under 1/32 of the gas reverts the transaction instead of emitting BatchFailed, so a relayer that
+  // starves a good batch cannot burn its nonce.
+  pure val GAS_GUARD = true
 
   // ---------------------------------------------------------------------------------------------------------
   // Domain model
@@ -60,7 +66,8 @@ module jbatch {
   type Ghost = {
     landed: int,               // batches that landed
     missed: bool,              // an urgent op passed its deadline, still owed and alive
-    reverts: int, forks: int, failed: int
+    reverts: int, forks: int, failed: int,
+    burned: bool               // a batch that would have applied was failed at its nonce (a starved relayer call)
   }
 
   type S = {
@@ -80,7 +87,7 @@ module jbatch {
     gh: Ghost
   }
 
-  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0 }
+  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false }
 
   var st: S
 
@@ -123,7 +130,7 @@ module jbatch {
         done: OPIDS.mapBy(i => s.done.get(i) or ran.contains(i)),
         runs: OPIDS.mapBy(i => s.runs.get(i) + (if (ran.contains(i)) 1 else 0)),
         gh: { ...s.gh, landed: s.gh.landed + 1 } }
-    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1)
+    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and b.ids.forall(i => isPay(s, i)))   // R-SPLIT: never for a batch with an urgent op
       // the transaction itself succeeds: the failure is caught, its effects are undone, the nonce is stored and BatchFailed is emitted
       { ...s, cnonce: b.nonce,
         failedEv: OPIDS.mapBy(i => s.failedEv.get(i) + (if (b.ids.contains(i) and isPay(s, i)) 1 else 0)),
@@ -232,6 +239,22 @@ module jbatch {
     }
   }
 
+  // A relayer that gives the call too little gas. With the guard the transaction reverts and nothing happens, the batch stays valid.
+  // Without it the batch is failed at its nonce (BatchFailed), good or not, and a payment batch that would have applied is burnt.
+  action starve(j: int): bool = {
+    val x = st.sub[j]
+    val b = x.b
+    val burns = not(GAS_GUARD) and b.nonce == st.cnonce + 1 and b.ids.forall(i => isPay(st, i))
+    val s1 = if (burns) { ...st, cnonce: b.nonce,
+                          failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),
+                          gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, burned: st.gh.burned or applies(st, b) } }
+             else { ...st, gh: { ...st.gh, reverts: st.gh.reverts + 1 } }
+    all {
+      j >= 0, j < st.sub.length(),
+      st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })
+    }
+  }
+
   action poison(i: int): bool = all {
     isDisp(st, i), not(st.done.get(i)), not(st.poisoned.get(i)),
     st' = { ...st, poisoned: st.poisoned.set(i, true) }
@@ -256,6 +279,7 @@ module jbatch {
     { nondet i = OPIDS.oneOf() arrive(i) },
     arriveDue,
     { nondet j = 0.to(9).oneOf() attempt(j) },
+    { nondet j = 0.to(9).oneOf() starve(j) },
     { nondet i = OPIDS.oneOf() poison(i) },
     { nondet a = 1.to(2).oneOf() drain(a) },
     { nondet a = 1.to(2).oneOf() refill(a) }
@@ -275,6 +299,8 @@ module jbatch {
   val nonce_final: bool = st.sub.foldl(true, (ok, x) => ok and st.sub.foldl(true, (ok2, y) => ok2 and (x.b.nonce != y.b.nonce or x.b == y.b)))
   // J5: every BatchFailed event is read and its payment queued again: without it the payment is signed for ever after.
   val failed_read: bool = OPIDS.forall(i => st.failSeen.get(i) == st.failedEv.get(i))
+  // A starved relayer call never burns a good batch (gas guard).
+  val no_burn: bool = not(st.gh.burned)
   // a payment runs at most once: the signed batch that carries it can land only once per nonce, and the Entity never
   // signs it again while an older batch that carries it can still land.
   val pay_once: bool = OPIDS.forall(i => not(isPay(st, i)) or st.runs.get(i) <= 1)
@@ -285,7 +311,7 @@ module jbatch {
   // the reserve is the initial one, less what payments ran, plus what was refilled (checked by payments never overspending)
   val reserve_sound: bool = st.reserve >= 0 and st.reserve <= RESERVE_MAX
 
-  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, failed_read, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound }
+  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound }
 
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0

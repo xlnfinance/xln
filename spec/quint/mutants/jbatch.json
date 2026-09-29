@@ -54,7 +54,7 @@
     },
     {
       "id": "urgent-batch-carries-payments",
-      "why": "J3: a payment rides in the urgent batch; when it cannot run, the batch fails and the urgent op is lost with it",
+      "why": "R-SPLIT: a payment rides in the urgent batch; when it cannot run the mixed batch reverts whole and keeps its nonce open (J5 as built covers only a batch with no dispute, reveal or hash-ladder op), so the urgent op is lost with it and blocks every batch above it",
       "file": "jbatch.qnt",
       "old": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]",
       "new": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh.union(p) }]",
@@ -83,6 +83,14 @@
       "old": "        failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)),",
       "new": "        failSeen: st.failSeen,",
       "killedBy": "invariant:failed_read"
+    },
+    {
+      "id": "no-gas-guard",
+      "why": "J5 as built: without the 1/32 gas rule a relayer that starves the call burns a good payment batch: it is failed at its nonce though it would have applied",
+      "file": "jbatch.qnt",
+      "old": "  pure val GAS_GUARD = true",
+      "new": "  pure val GAS_GUARD = false",
+      "killedBy": "invariant:no_burn"
     }
   ],
   "init": "init",

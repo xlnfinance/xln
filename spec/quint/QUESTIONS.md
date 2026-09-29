@@ -398,6 +398,15 @@ are undone, the nonce is stored and `BatchFailed` is emitted. A failure that rev
 (that is today's contract: `payment-revert-keeps-the-nonce`). The Entity reads `BatchFailed` and queues the payment again at a fresh nonce; it does
 not sign it again before it has read the event (`failed_read`, mutant `entity-ignores-batch-failed`). Tests: `revertedPaymentDoesNotBlockTheUrgentOpTest`.
 Model: `NONCE_ON_FAIL`, `failedEv`, `failSeen`; `urgent_lands` holds under it.
+**As built (coordinator, 2026-09-29).** Two limits that the spec now carries.
+**R-SPLIT.** Only a batch with no dispute, reveal or hash-ladder op gets the BatchFailed treatment (applies nothing, takes its nonce).
+A mixed batch that fails still reverts whole and keeps its nonce open. So the Entity's rule: dispute, reveal and hash-ladder ops never share a
+batch with payment, settlement or reserve ops. This was already J3(1); it is now also the chain's line: `urgent-batch-carries-payments`
+(the Entity mixes them) breaks `urgent_lands` because the failed mixed batch reverts, loses the urgent op and holds every batch above it.
+**Gas guard.** A failure that leaves under 1/32 of the gas reverts the transaction instead of emitting BatchFailed, so a relayer cannot burn
+a good batch by starving the call. Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
+burns a payment batch that would have applied (`starvedBatchLandsLaterTest`). The starved call of an urgent batch only reverts whole, which
+leaves the batch valid for the honest relayer's next attempt.
 
 **J4. Nonces: what the contract's strict sequence costs.**
 Any signed batch is a nonce burner in the adversary's hands (F1), and a payment batch that reverts blocks every batch above it (E2, J5).
