@@ -25,15 +25,16 @@ import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.
 import { haltDeparture } from "./departures.ts";
 import {
   canonicalEntityHashes,
-  commitRuntimeFrame,
   convertOutput,
   localNetworkOutputs,
   ok,
+  processRuntimeFrame,
   recoverRawSigner,
   replicaKey,
   replicaMetaRows,
   replicaWakes,
   retireNetworkOutputs,
+  routeKeyOf,
   runtimeComponentDigests,
   runtimeView,
   runtimeWake,
@@ -198,6 +199,40 @@ type OgInput = {
   jPrefixAttestations?: Map<string, unknown>;
 };
 type OgMempool = { runtimeTxs: RuntimeTx[]; entityInputs: OgInput[] };
+/** An og queued input's route and consensus shape: its lane, and what it carries at which height. */
+const ogShape = (i: OgInput): string => {
+  const o = i as OgInput & {
+    proposedFrame?: { height: number };
+    hashPrecommitFrame?: { height: number };
+    hashPrecommits?: Map<string, unknown>;
+  };
+  const payload = (): string => {
+    if (o.proposedFrame) return `proposal@${o.proposedFrame.height}`;
+    if (o.hashPrecommits?.size) return `precommit@${o.hashPrecommitFrame?.height}:${[...o.hashPrecommits.keys()]}`;
+    if (o.jPrefixAttestations) return `jPrefix:${[...o.jPrefixAttestations.keys()]}`;
+    return `txs:${(o.entityTxs ?? []).map((tx) => tx.type)}`;
+  };
+  return `${o.entityId.toLowerCase()}:${o.signerId.toLowerCase()}:${o.from ?? "local"} ${payload()}`;
+};
+/** The rewrite's routed input in ogShape's terms. */
+const rwShape = (r: RoutedEntityInput): string => {
+  const i = r.input;
+  const payload = (): string => {
+    switch (i.kind) {
+      case "proposal":
+        return `proposal@${i.frame.height}`;
+      case "precommit":
+        return `precommit@${i.height}:${[...i.signatures.keys()]}`;
+      case "jPrefixAttestations":
+        return `jPrefix:${[...i.attestations.keys()]}`;
+      case "txs":
+        return `txs:${i.txs.map((tx) => tx.type)}`;
+      default:
+        return i.kind;
+    }
+  };
+  return `${r.entityId.toLowerCase()}:${r.signerId.toLowerCase()}:${r.from ?? "local"} ${payload()}`;
+};
 type OgEnv = ReturnType<typeof import("../../core/runtime.ts").createEmptyEnv>;
 /** One og direct-transport envelope (core/runtime/delivery/dispatch.ts). */
 type OgEnvelope = {
@@ -212,10 +247,20 @@ export type Outgoing = { readonly og: readonly OgEnvelope[]; readonly rw: readon
 type Shipped = { readonly key: string; readonly input: RoutedEntityInput };
 /** A wire tx as the transport compares it. */
 const wireKey = (tx: unknown): string => stableJson(plain(tx));
+/**
+ * A value with every Map spelled out as its entries in order: stableJson alone reads a Map as `{}`, so rows differing
+ * only in their J-prefix attestations (keyed by author) would share one key.
+ */
+const mapsSpelled = (v: unknown): unknown => {
+  if (v instanceof Map) return { __map: [...v].map(([k, x]) => [mapsSpelled(k), mapsSpelled(x)]) };
+  if (v === null || typeof v !== "object" || v instanceof Uint8Array) return v;
+  if (Array.isArray(v)) return v.map(mapsSpelled);
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, mapsSpelled(x)]));
+};
 /** An output row as og's envelope carries it: its source frame and atomic cohort move to the envelope. */
 const rowKey = (row: unknown): string => {
   const { sourceRuntimeFrame: _frame, atomicCrossJurisdictionPair: _pair, ...carried } = row as Record<string, unknown>;
-  return stableJson(plain(carried));
+  return stableJson(mapsSpelled(carried));
 };
 
 /** One local continuation under its og route key. */
@@ -290,6 +335,8 @@ export const createLane = (cfg: LaneConfig): Lane => {
   let rt = cfg.runtime;
   let frame = 0;
   let pending: readonly RoutedEntityInput[] = [];
+  /** The inputs the rewrite's entity-height barrier requeued last frame: og holds them at the front of its mempool. */
+  let deferred: readonly RoutedEntityInput[] = [];
   let arrived: readonly RoutedEntityInput[] = [];
   let sent: { og: OgEnvelope[]; rw: readonly Shipped[] } = { og: [], rw: [] };
   /**
@@ -324,8 +371,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
   const ogMempool = (): OgMempool =>
     (env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] }) as unknown as OgMempool;
   /**
-   * og's queued inputs in its own arrival order, rebuilt on the rewrite's side: the watcher's attestations stand
-   * where og queued them, a remote input (it carries its source Runtime) is the next one delivered, anything else is
+   * og's queued inputs in its own arrival order, rebuilt on the rewrite's side: the barrier's deferred inputs lead
+   * (og applyEntityHeightDurabilityBarrier puts them ahead of its mempool), the watcher's attestations stand where og
+   * queued them, a remote input (it carries its source Runtime) is the next one delivered, anything else is
    * the next local continuation we carry (which the previous frame already proved equal to og's).
    */
   const hostInputs = (carried: readonly RoutedEntityInput[]) => {
@@ -337,7 +385,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
         input: { kind: "jPrefixAttestations", attestations: treeClone(i.jPrefixAttestations!) },
       }) as unknown as RoutedEntityInput;
     type Weave = { out: RoutedEntityInput[]; local: number; remote: number };
-    const woven = mempool.entityInputs.reduce<Weave>((acc, i) => {
+    const woven = mempool.entityInputs.slice(deferred.length).reduce<Weave>((acc, i) => {
       if (watched(i)) return { ...acc, out: [...acc.out, attestation(i)] };
       if (i.from !== undefined) {
         return { ...acc, out: [...acc.out, ...arrived.slice(acc.remote, acc.remote + 1)], remote: acc.remote + 1 };
@@ -346,7 +394,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     }, { out: [], local: 0, remote: 0 });
     const runtimeTxs = treeClone(mempool.runtimeTxs.filter((tx) => IO_TXS.has(tx.type)));
     const rest = [...carried.slice(woven.local), ...arrived.slice(woven.remote)];
-    return { runtimeTxs, entityInputs: [...woven.out, ...rest] };
+    return { runtimeTxs, entityInputs: [...deferred, ...woven.out, ...rest] };
   };
   const ogEntityHeights = (): number =>
     [...env.state.eReplicas.values()].reduce((sum, r) => sum + Number(r.state.height), 0);
@@ -458,7 +506,8 @@ export const createLane = (cfg: LaneConfig): Lane => {
     });
     const runtimeSeed = (env as unknown as { runtimeSeed?: string }).runtimeSeed;
     // og admission signs every local tx into the replica's own Entity command (prepareLocallyAuthoredEntityTxs)
-    const committed = commitRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, routes: cfg.routes, runtimeSeed });
+    const run = processRuntimeFrame(rt, input, { ...CRYPTO, local, htlcInfra, routes: cfg.routes, runtimeSeed });
+    const committed = run.ok ? ok(run.value.commit) : run;
     if (ogHalt !== undefined && committed.ok) {
       // the rewrite may commit a frame og halts on only as a named departure, and only doing what it names
       const departure = haltDeparture(ogHalt);
@@ -519,7 +568,11 @@ export const createLane = (cfg: LaneConfig): Lane => {
       signerId: p.signerId,
       entityTxs: p.input.kind === "txs" ? p.input.txs.map(wireEntityTx) : [],
     }));
-    const ogRouted = ogMempool().entityInputs.filter((i) => !watched(i));
+    // og's mempool leads with the inputs its barrier deferred, then the frame's routed continuations
+    const rwDeferred = run.ok ? run.value.deferred : [];
+    const ogQueue = ogMempool().entityInputs;
+    cmp("deferred", ogQueue.slice(0, rwDeferred.length).map(ogShape), rwDeferred.map(rwShape));
+    const ogRouted = ogQueue.slice(rwDeferred.length).filter((i) => !watched(i));
     const rwRouted = c === null ? [] : [...unwrap(localNetworkOutputs(c.runtime, c.outbox, cfg.routes)), ...pingWire];
     cmp("routed", ogRouted, rwRouted);
     // what og's transport carried off this frame is exactly the retained outbox the rewrite committed
@@ -565,7 +618,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
         accountLines(accounts, mine, name, name(r.entityId), diff).forEach((line) => console.log(line));
       });
     }
-    // a frame that commits nothing re-enqueues nothing: og drained its mempool into the frame and keeps no input
+    // a frame that commits nothing re-enqueues nothing: og drained its mempool into the frame and keeps no input but
+    // the ones its barrier deferred, which lead the next frame's queue either way
+    deferred = rwDeferred;
     own =
       c === null
         ? { ...own, pings: [] }
@@ -586,7 +641,8 @@ export const createLane = (cfg: LaneConfig): Lane => {
         .filter((o) => localTo.has(o.to.toLowerCase()))
         .map((o): Slot => {
           const { from: _local, ...routed } = unwrap(convertOutput(rt, o, o.to, rt.timestamp));
-          const key = unwrap(localNetworkOutputs(rt, [o], cfg.routes)).map(rowKey).join("\n");
+          const routedRows = unwrap(localNetworkOutputs(rt, [o], cfg.routes));
+          const key = routedRows.map((row) => unwrap(routeKeyOf(row))).join("\n");
           return [key, routed];
         });
       pending = slotted(continuations);
