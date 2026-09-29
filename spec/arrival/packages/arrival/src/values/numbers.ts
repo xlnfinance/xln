@@ -66,6 +66,15 @@ function exactOfDouble(x: number): AExact {
   return new AExact(BigInt(scaled), denom);
 }
 
+/** An exact number against a double, never through the exact's own (rounded) double:
+ *  every exact is finite, so it is below +inf.0 and above -inf.0, and NaN is incomparable. */
+function exactVsDouble(x: AExact, d: number): number {
+  if (Number.isNaN(d)) return Number.NaN;
+  if (d === Number.POSITIVE_INFINITY) return -1;
+  if (d === Number.NEGATIVE_INFINITY) return 1;
+  return x.cmp(exactOfDouble(d));
+}
+
 /**
  * Three-way comparison: -1 / 0 / 1, or NaN if incomparable (either operand NaN).
  * xln fork: exact components are unbounded, so a mixed exact/inexact compare converts the
@@ -76,11 +85,11 @@ export function schemeCompare(a: ANumeric, b: ANumeric): number {
   if (a instanceof AExact && b instanceof AExact) {
     return a.cmp(b);
   }
+  if (a instanceof AExact) return exactVsDouble(a, toReal(b));
+  if (b instanceof AExact) return -exactVsDouble(b, toReal(a));
   const ar = toReal(a);
   const br = toReal(b);
   if (Number.isNaN(ar) || Number.isNaN(br)) return Number.NaN;
-  if (a instanceof AExact && Number.isFinite(br)) return a.cmp(exactOfDouble(br));
-  if (b instanceof AExact && Number.isFinite(ar)) return exactOfDouble(ar).cmp(b);
   if (ar < br) return -1;
   if (ar > br) return 1;
   return 0;
@@ -175,7 +184,7 @@ export function isComplex(_n: unknown): boolean {
 
 export function isInteger(n: unknown): n is AExact | number {
   if (n instanceof AExact) {
-    return n.denom === 1;
+    return n.isInteger;
   }
   if (n instanceof AInexact) {
     return false;

@@ -15,11 +15,16 @@ const check = async (extra) => {
 };
 
 const cases = [
-  { name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 90, transitions: 146 }) },
+  { name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 313, transitions: 557 }) },
   {
     name: "planted: drop on rollback",
     extra: ["account/bugs/drop-on-rollback.scm"],
     expect: (r) => assert.equal(r.violated, "no submitted tx is lost"),
+  },
+  {
+    name: "planted: rollback after mempool",
+    extra: ["account/bugs/rollback-after-mempool.scm"],
+    expect: (r) => assert.equal(r.violated, "each side's txs commit in submission order"),
   },
   {
     name: "planted: no tie-break",

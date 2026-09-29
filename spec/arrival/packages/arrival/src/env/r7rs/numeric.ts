@@ -36,7 +36,7 @@ import { AInexact } from "../../values/primitives/AInexact.js";
 import { AString } from "../../values/primitives/AString.js";
 import { APair } from "../../values/primitives/APair.js";
 import type { SchemeValue } from "../../values/types.js";
-import { type ANumeric, exactISqrt, complexDoor, isComplex, schemeCompare, toReal } from "../../values/numbers.js";
+import { type ANumeric, complexDoor, isComplex, schemeCompare, toReal } from "../../values/numbers.js";
 import {
   coerceNumeric,
   isSchemeNumber,
@@ -283,8 +283,10 @@ function floorDiv(a: number, b: number): number {
 
 function toInteger(n: ANumeric, opName: string): { value: number; exact: boolean } {
   if (n instanceof AExact) {
-    TypeError.invariant(n.denom === 1, `${opName}: not an integer`);
-    return { value: n.num, exact: true };
+    TypeError.invariant(n.isInteger, `${opName}: not an integer`);
+    // Only the mixed exact/inexact path reaches here (all-exact goes through bigints), and
+    // its result is inexact, so rounding a big exact to a double is contagion, not loss.
+    return { value: Number(n.numerator), exact: true };
   }
   TypeError.invariant(Number.isInteger(n.real), `${opName}: not an integer`);
   return { value: n.real, exact: false };
@@ -448,23 +450,6 @@ const lcmFn = (...args: ANumeric[]): ANumeric => {
 
 // ── expt ─────────────────────────────────────────────────────────────────────────
 
-/** `base**exponent` via a checked repeated-mult fold (§2.1: "expt (repeated-mult with
- *  per-step check)") — never the bare `**` operator, which would silently produce an
- *  imprecise/overflowed float with no crash-on-overflow gate. `exponent` is always a
- *  non-negative safe-int here (schemeExpt's own `n >= 0`/`m = -n` split). Fast paths
- *  for |base| ≤ 1 avoid looping the full exponent magnitude when the result is bounded
- *  regardless (0^n, 1^n, (-1)^n) — exponents can themselves be up to 2^53. */
-function checkedPow(base: number, exponent: number, op: string): number {
-  if (base === 0) return exponent === 0 ? 1 : 0;
-  if (base === 1) return 1;
-  if (base === -1) return exponent % 2 === 0 ? 1 : -1;
-  let result = 1;
-  for (let i = 0; i < exponent; i++) {
-    result = checkedMul(result, base, op);
-  }
-  return result;
-}
-
 function schemeExpt(base: ANumeric, power: ANumeric): ANumeric {
   if (base instanceof AExact && power instanceof AExact && power.isInteger) {
     // xln fork: unbounded components. The exponent itself must be a machine number
@@ -558,8 +543,8 @@ const minFn = (first: ANumeric, ...rest: ANumeric[]): ANumeric => {
 const isZeroFn = (x: ANumeric): boolean => x.isZero;
 const isPositiveFn = (x: ANumeric): boolean => x.isPositive;
 const isNegativeFn = (x: ANumeric): boolean => x.isNegative;
-const isOddFn = (x: number): boolean => x % 2 !== 0;
-const isEvenFn = (x: number): boolean => x % 2 === 0;
+const isOddFn = (x: bigint): boolean => x % 2n !== 0n;
+const isEvenFn = (x: bigint): boolean => x % 2n === 0n;
 
 // ── Rounding ──────────────────────────────────────────────────────────────────────
 
@@ -925,9 +910,7 @@ const numberToStringFn = function (this: CallCtx, z: unknown, radix?: unknown): 
   const base = radixArg === undefined ? 10 : Number(radixArg.valueOf());
   let s: string;
   if (n instanceof AExact) {
-    s = n.isInteger
-      ? n.numerator.toString(base)
-      : `${n.numerator.toString(base)}/${n.denominator.toString(base)}`;
+    s = n.isInteger ? n.numerator.toString(base) : `${n.numerator.toString(base)}/${n.denominator.toString(base)}`;
   } else {
     // Inexact mark preservation (R7RS § 6.2): `(number->string 5.0)` must stay "5.0".
     s = base === 10 ? n.toString() : n.real.toString(base);
@@ -1044,12 +1027,10 @@ const minSpec: NumSpec = { in: [z.schemeNumber], inRest: z.schemeNumber, out: z.
 const zeroSpec: NumSpec = { in: [z.schemeNumber], out: z.boolean, fn: isZeroFn };
 const positiveSpec: NumSpec = { in: [z.schemeNumber], out: z.boolean, fn: isPositiveFn };
 const negativeSpec: NumSpec = { in: [z.schemeNumber], out: z.boolean, fn: isNegativeFn };
-// odd?/even? use `z.integer`, NOT `z.bigint`: `z.integer` decodes either
-// AExact/AInexact to a safe-int `number` and doors on a non-integer/out-of-range
-// operand with an "integer" message, matching R7RS's own domain for these two
-// predicates.
-const oddSpec: NumSpec = { in: [z.integer], out: z.boolean, fn: isOddFn };
-const evenSpec: NumSpec = { in: [z.integer], out: z.boolean, fn: isEvenFn };
+// odd?/even? use `z.bigint` (xln fork): it decodes an exact or inexact integer of any
+// size and doors on a non-integer with an integer message, R7RS's own domain for these.
+const oddSpec: NumSpec = { in: [z.bigint], out: z.boolean, fn: isOddFn };
+const evenSpec: NumSpec = { in: [z.bigint], out: z.boolean, fn: isEvenFn };
 const floorSpec: NumSpec = { in: [z.schemeNumber], out: z.schemeNumber, fn: schemeFloor };
 const ceilingSpec: NumSpec = { in: [z.schemeNumber], out: z.schemeNumber, fn: schemeCeiling };
 const truncateSpec: NumSpec = { in: [z.schemeNumber], out: z.schemeNumber, fn: schemeTruncate };

@@ -82,7 +82,7 @@ server.registerTool(
   {
     description:
       "Static diagnostics for Arrival files under spec/: every unbound name and misuse at once, each with its fix. " +
-      "Nothing is evaluated. Files that use (require …) are reported as skipped.",
+      "Nothing is evaluated. Files that use (require …) are reported as skipped; a page that relies on its entry file's requires reports false unbound names, so check entry files (*.check.scm).",
     inputSchema: { files: z.array(z.string()).min(1).describe("paths under spec/") },
   },
   async ({ files }) => report(await cli(["check", ...files.map((f) => path.relative(SPEC, inSpec(f)))])),

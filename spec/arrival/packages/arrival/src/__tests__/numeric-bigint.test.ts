@@ -55,4 +55,38 @@ describe("unbounded exact integers", () => {
     const double = toJS(values.at(-1)!) as (x: bigint) => Promise<unknown>;
     expect(await double(2n ** 255n)).toBe(2n ** 256n);
   });
+
+  it("tests parity of integers beyond 2^53", async () => {
+    expect(await last(`(even? (expt 2 100))`)).toBe(true);
+    expect(await last(`(odd? (+ (expt 2 100) 1))`)).toBe(true);
+    expect(await last(`(odd? 1e300)`)).toBe(false);
+  });
+
+  it("names the limit when a machine-integer codec gets a bigint", async () => {
+    const z = await import("../common/scheme-zod/index.js");
+    const { AExact } = await import("../values/primitives/AExact.js");
+    for (const codec of [z.integer, z.exact]) {
+      expect(() => z.decode(codec, new AExact(2n ** 60n))).toThrow(/machine integer/);
+      expect(z.decode(codec, new AExact(2n ** 52n))).toBe(2 ** 52);
+    }
+  });
+
+  it("puts every exact number between -inf.0 and +inf.0", async () => {
+    expect(await last(`(= (expt 2 1100) +inf.0)`)).toBe(false);
+    expect(await last(`(< (expt 2 1100) +inf.0)`)).toBe(true);
+    expect(await last(`(> (- (expt 2 1100)) -inf.0)`)).toBe(true);
+    expect(await last(`(< 1 +nan.0)`)).toBe(false);
+  });
+
+  it("converts a rational with huge parts to the nearest double", async () => {
+    const big = `(/ (+ (expt 10 400) 1) (expt 10 400))`;
+    expect(await last(`(exact->inexact ${big})`)).toBe(1);
+    expect(await last(`(< ${big} 2.0)`)).toBe(true);
+    expect(await last(`(> ${big} 1.0)`)).toBe(true);
+    expect(await last(`(exact->inexact (/ (expt 10 400) (* 3 (expt 10 399))))`)).toBe(10 / 3);
+    expect(await last(`(exact->inexact (/ (- (expt 3 700)) (expt 2 1100)))`)).toBeCloseTo(
+      -Number((3n ** 700n) >> 1000n) / 2 ** 100,
+      9,
+    );
+  });
 });

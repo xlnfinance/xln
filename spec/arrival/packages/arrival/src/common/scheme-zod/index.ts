@@ -346,12 +346,14 @@ export const error = named(
 // JS face is plain `number`: every AExact is a safe-integer number by
 // construction. A raw host `bigint` doors at the membrane — this encode does
 // not auto-adopt; convert explicitly (or use `z.bigint`, which boxes first).
+const MAX_SAFE_BIG = BigInt(Number.MAX_SAFE_INTEGER);
+
 export const exact = named(
   "exact",
   z.codec(z.instanceof(AExact), z.number(), {
     decode: (n) => {
-      if (n.denom !== 1) throw new CodecFidelityError("exact", `exact rational ${n.toString()} has no integer form`);
-      return n.num;
+      if (!n.isInteger) throw new CodecFidelityError("exact", `exact rational ${n.toString()} has no integer form`);
+      return machineIntegerOrDoor("exact", n);
     },
     encode: (n) => {
       TypeError.invariant(Number.isSafeInteger(n), `exact codec: ${n} is not a safe integer`);
@@ -369,16 +371,27 @@ export const inexact = named(
   }),
 );
 
+/** xln fork: exact integers are unbounded, but these codecs hand the host a `number`. An
+ *  integer beyond 2^53 has no faithful `number` form — door with that, never a type mismatch. */
+function machineIntegerOrDoor(codec: string, n: AExact): number {
+  if (n.numerator > MAX_SAFE_BIG || n.numerator < -MAX_SAFE_BIG) {
+    throw new CodecFidelityError(
+      codec,
+      `exact integer ${n.toString()} needs a machine integer (|n| ≤ 2^53 − 1) here — this builtin does not take bigints`,
+    );
+  }
+  return Number(n.numerator);
+}
+
 function exactToJsNumberOrDoor(n: AExact): number {
   // Door — model-reachable (preamble DOOR VS INVARIANT).
-  if (n.denom !== 1) {
+  if (!n.isInteger) {
     throw new CodecFidelityError(
       "number",
       `exact rational ${n.toString()} cannot be a faithful JS number — use the integer codec, or looseNumber to accept the projected (divided) value`,
     );
   }
-  // AExact.num is already a safe integer by construction.
-  return n.num;
+  return machineIntegerOrDoor("number", n);
 }
 
 // Accepts either exact-domain kind; encode canonicalizes to AExact.

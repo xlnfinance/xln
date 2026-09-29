@@ -40,6 +40,30 @@ function bigGcd(a: bigint, b: bigint): bigint {
 
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
+const bitLength = (x: bigint): number => (x === 0n ? 0 : x.toString(2).length);
+
+/** x · 2^e without overflowing the scale factor itself (2^e alone leaves the double range
+ *  long before x · 2^e does). */
+function scaleByPowerOfTwo(x: number, e: number): number {
+  const step = e > 0 ? 1000 : -1000;
+  return Math.abs(e) <= 1000 ? x * 2 ** e : scaleByPowerOfTwo(x * 2 ** step, e - step);
+}
+
+/** n/d (d > 0) as a double, rounded once: when both fit a double exactly, IEEE division;
+ *  otherwise scale so the integer quotient has ≥ 64 bits, keep a sticky bit for any
+ *  remainder, and let `Number(bigint)` round. `Number(n) / Number(d)` would be ∞/∞ = NaN
+ *  once both parts pass 2^1024. */
+function ratioToDouble(n: bigint, d: bigint): number {
+  const m = bigAbs(n);
+  if (m <= MAX_SAFE && d <= MAX_SAFE) return Number(n) / Number(d);
+  const shift = bitLength(d) - bitLength(m) + 65;
+  const [num, den] = shift >= 0 ? [m << BigInt(shift), d] : [m, d << BigInt(-shift)];
+  const q = num / den;
+  const sticky = num % den === 0n ? q : q | 1n;
+  const magnitude = scaleByPowerOfTwo(Number(sticky), -shift);
+  return n < 0n ? -magnitude : magnitude;
+}
+
 /** Read a component as a machine `number` — exact in the safe range, a door outside it. */
 function machine(x: bigint, op: string): number {
   if (x > MAX_SAFE || x < -MAX_SAFE) throw new ExactOverflowError(op, x.toString());
@@ -125,7 +149,7 @@ export class AExact extends AValue {
 
   /** The nearest double; exact in the safe range, rounded beyond it. */
   valueOf(): number {
-    return this.denominator === 1n ? Number(this.numerator) : Number(this.numerator) / Number(this.denominator);
+    return this.denominator === 1n ? Number(this.numerator) : ratioToDouble(this.numerator, this.denominator);
   }
 
   /** Egress: a safe integer leaves as `number`, a larger integer as `bigint`, a rational

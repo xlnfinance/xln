@@ -1,6 +1,5 @@
 import invariant from "tiny-invariant";
 import type { RunContext } from "../run/RunContext.js";
-import { NoLensError } from "../errors.js";
 import { AValue, EMPTY_PROVENANCE } from "../values/primitives/AValue.js";
 import { AString } from "../values/primitives/AString.js";
 import { AExact } from "../values/primitives/AExact.js";

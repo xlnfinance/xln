@@ -6,11 +6,18 @@
 ;; equal hashes. When both propose at once, left keeps its frame; right rolls its
 ;; own back into the mempool, commits left's, and acks.
 ;;
+;; Abstractions (what this page does NOT cover):
+;;   - a receiver commits a frame when it arrives; xln.ts holds it as a `received`
+;;     candidate first;
+;;   - a frame and its ack are separate messages (xln.ts can ride an ack on the next frame);
+;;   - links are reliable and FIFO: no loss, no resend;
+;;   - every tx is valid: no frame is rejected on content.
+;;
 ;; Needs lib/vocabulary.scm (rule, property) and lib/check.scm (successors).
 
 ;; ---- model bounds: declared, typed inputs of this page
 (define/overridable left-txs  (s/array (s/string)) (list "a" "b"))
-(define/overridable right-txs (s/array (s/string)) (list "x"))
+(define/overridable right-txs (s/array (s/string)) (list "x" "y"))
 
 ;; ---- the world
 (define sides (list :left :right))
@@ -91,6 +98,7 @@
   (and (>= (length long) (length short))
        (equal? (list-tail long (- (length long) (length short))) short)))
 (define (committed r) (append-map (lambda (frame) frame) (:head r)))
+(define (committed-in-order r) (append-map (lambda (frame) frame) (reverse (:head r))))
 (define (held r) (append (committed r) (:mempool r) (if (:pending r) (:txs (:pending r)) (list))))
 (define (submitted w side)
   (let ((all (txs-of side)))
@@ -110,7 +118,14 @@
      (every (lambda (side) (every (lambda (tx) (member tx (held (side w)))) (submitted w side)))
             sides))
    (property "no tx committed twice" (w)
-     (let ((txs (committed (:left w)))) (= (length txs) (length (delete-duplicates txs)))))))
+     (every (lambda (side)
+              (let ((txs (committed (side w)))) (= (length txs) (length (delete-duplicates txs)))))
+            sides))
+   (property "each side's txs commit in submission order" (w)
+     (every (lambda (side)
+              (let ((mine (filter (lambda (tx) (member tx (txs-of side))) (committed-in-order (side w)))))
+                (equal? mine (take (txs-of side) (length mine)))))
+            sides))))
 
 (define at-rest
   (list

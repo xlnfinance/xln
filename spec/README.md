@@ -28,8 +28,8 @@ Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
 cd spec
 npm install            # or: bun install    (MCP server dependencies)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
-npm run check          # {:ok #t :states 90 :transitions 146}
-npm test               # the page passes; each bug variant fails with its property
+npm run check          # {:ok #t :states 313 :transitions 557}
+npm test               # the page passes; each planted bug fails with its property
 ```
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
@@ -62,7 +62,11 @@ Rules and properties are named data:
 - `(when …)` is the guard, `(then …)` the next world. Both are pure; there is no `set!`.
 - The walk is breadth-first, so a reported trace is a shortest one.
 - Model bounds are `define/overridable` with an `s/*` schema, so a run can widen them without editing
-  the page.
+  the page. Put the override in a config file and pass it: `--config wide.json` with
+  `{"capabilities":[{"module":"./arrival/packages/arrival/dist/env/overridable/overridable.js",
+  "config":{"params":{"right-txs":["x","y","z"]}}}]}` (2 + 3 txs: 888 states).
+- `arrival_check` and `arrival check` on a page file report false unbound names (`rule`, `check`),
+  because a page relies on the entry file's `(require …)`. Check entry files (`*.check.scm`).
 - Numbers are exact and unbounded: `(- (expt 2 256) 1)` is exact. Use them for amounts.
 
 ## Vendored Arrival
@@ -79,7 +83,7 @@ each with tests, sit in later commits so they can be sent upstream:
    vs inexact comparison is exact, which also fixes chibi r7rs-tests line 811.
 5. `vendor/chibi-scheme/` holds the two chibi test files (BSD-3) the conformance suite reads.
 
-Arrival suite after the patches: 5538 pass, 6 fail. The 6 are the `grammar-ebnf` package-export
+Arrival suite after the patches: 5382 pass, 160 expected-fail, 6 fail; package lint 0 errors, 104 warnings (same as upstream). The 6 are the `grammar-ebnf` package-export
 tests, which fail the same way on upstream 6ba2b54f.
 
 Known gap, upstream too: a `define` produced by a macro expansion is not visible to later top-level
@@ -129,7 +133,7 @@ If `node` is not on the app's PATH, put the absolute path of `node` in `command`
 ### Checking it works
 
 Ask the agent to call `arrival_run` with `file: "account-frames.check.scm"`; it should print
-`{:ok #t :states 90 :transitions 146}`. Without an MCP client:
+`{:ok #t :states 313 :transitions 557}`. Without an MCP client:
 
 ```sh
 npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
