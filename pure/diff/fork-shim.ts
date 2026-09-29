@@ -5,6 +5,7 @@
 // Runtime commits, signs and compares stays og's, and the chain still sees a real hanko for its own digest.
 import { ethers } from "ethers";
 import { computeBatchHankoHash, decodeJBatch, encodeJBatch, type JBatch } from "../../core/jurisdiction/machine/batch/index.ts";
+import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
 import { PROOF_BODY_ABI } from "../../core/protocol/dispute/proof-body.ts";
 import { SIGNED_AMOUNT_ABI_COMPONENTS } from "../../core/protocol/crypto/abi-money.ts";
 import { encodeCooperativeUpdateDiff, encodeCooperativeUpdateHankoPayload, encodeDisputeProofHankoPayload } from "../../core/hanko/onchain-domain.ts";
@@ -182,6 +183,25 @@ const installBatchHashView = (): void => {
   } as typeof ethers.Interface.prototype.parseLog;
 };
 
+let calldataInstalled = false;
+/**
+ * og reads dispute evidence back out of the chain's own transaction calldata (rpc-public.ts), by parsing it with a
+ * Depository interface and taking the batch as the first argument of processBatch. The fork's call carries the acting
+ * Entity first, so og's parse of it is shown the same call in og's shape: the entity dropped from the arguments.
+ */
+const installCalldataView = (): void => {
+  if (calldataInstalled) return;
+  calldataInstalled = true;
+  const fork = new ethers.Interface(Depository__factory.abi);
+  const selector = fork.getFunction("processBatch")!.selector;
+  const parse = ethers.Interface.prototype.parseTransaction;
+  ethers.Interface.prototype.parseTransaction = function (this: ethers.Interface, tx: { data: string; value?: ethers.BigNumberish }) {
+    if (tx.data.slice(0, 10).toLowerCase() !== selector) return parse.call(this, tx);
+    const call = parse.call(fork, tx)!;
+    return { name: call.name, args: ethers.Result.fromItems(call.args.slice(1), ["encodedBatch", "hankoData", "nonce"]), fragment: call.fragment, selector: call.selector, signature: call.signature, value: call.value };
+  } as typeof ethers.Interface.prototype.parseTransaction;
+};
+
 type Encoder = { encodeFunctionData: (fragment: unknown, values?: readonly unknown[]) => string };
 type Vm = {
   depositoryInterface: Encoder & { decodeFunctionResult: (f: string, d: string) => ethers.Result };
@@ -207,6 +227,7 @@ export const shimBatchSubmission = (
   keys: readonly string[],
 ): (() => readonly string[]) => {
   installBatchHashView();
+  installCalldataView();
   const provider = vm as Vm;
   const iface = provider.depositoryInterface;
   const encode = iface.encodeFunctionData.bind(iface);
