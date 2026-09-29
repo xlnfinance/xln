@@ -619,6 +619,11 @@ export function transform_syntax({
     if (symbols.includes(name)) {
       return symbol;
     }
+    // A `:keyword` is a self-evaluating datum, not a reference: renaming it would turn
+    // `(dict :name …)` in a template into an unbound gensym.
+    if (typeof name === "string" && name.startsWith(":")) {
+      return symbol;
+    }
     return rename(name, symbol);
   }
 

@@ -231,7 +231,11 @@ export class Resolver {
    * distinct from {@link resolve} (which synthesizes c[ad]+r and throws on miss).
    */
   lookupSettled(name: BindingName): AmbientValue | undefined {
-    return this.env.get(name, { throwError: false });
+    // Cut mode: the lexical env is null-rooted, so a builtin (a kernel keyword such as
+    // `lambda`) lives only in the capability base. Without this fall-through a macro
+    // template's `lambda` renamed to an unbound gensym under the public `exec`.
+    const key = typeof name === "string" || typeof name === "symbol" ? name : name.valueOf();
+    return this.env.get(name, { throwError: false }) ?? this.capabilities.lookup(key);
   }
 
   /**
