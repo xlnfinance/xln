@@ -1,0 +1,26 @@
+node_modules
+.env
+
+# Hardhat files
+/cache
+/artifacts
+/build-tron
+
+# TypeChain files
+# typechain-types is tracked in git; the hardhat plugin writes elsewhere.
+/.typechain-hardhat
+/.typechain-types-build-*
+
+# solidity-coverage files
+/coverage
+/coverage.json
+
+# Hardhat Ignition default folder for deployments against a local node
+ignition/deployments/chain-31337
+/openzeppelin-contracts
+
+# Foundry
+/forge-out
+/out
+/forge-cache
+/lib
