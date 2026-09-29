@@ -12,6 +12,7 @@ const pages = {
   money: { files: ["money/ledger.scm"], spec: "ledger" },
   dispute: { files: ["dispute/dispute.scm"], spec: "dispute" },
   entity: { files: ["entity/consensus.scm"], spec: "entity-consensus" },
+  j: { files: ["j/batch.scm"], spec: "j-batch" },
 };
 const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra], `(check ${pages[page].spec})`);
 
@@ -45,6 +46,12 @@ const cases = [
   planted("entity", "own proposal kept on a conflicting certified frame (og today)", "commit-conflict", "can always still finish"),
   planted("entity", "own proposal dropped, its txs forgotten", "drop-txs-on-conflict", "no submitted tx is lost"),
   planted("entity", "a validator signs two frames at one height", "double-sign", "agreement: no two validators commit different frames at a height"),
+  { page: "j", name: "J batch", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 5262, transitions: 17049, goals: 736 }) },
+  planted("j", "a finalize bundled with other ops (N2)", "bundle-finalize", "a deadline revert never blocks another Account's ops: a reverted finalize goes alone"),
+  planted("j", "a quarantined batch is never recovered (og, non-hub)", "no-recovery", "can always still finish"),
+  planted("j", "an event does not clear the draft", "trust-the-draft", "no op is applied twice on chain"),
+  planted("j", "a full draft halts the Entity (og)", "full-halts", "a full batch is a refusal, never a halt"),
+  planted("j", "the chain applies half a batch", "partial-apply", "the chain is atomic: every applied op came from a batch that succeeded"),
   planted("money", "deposit from nowhere", "deposit-from-nowhere", "money is conserved: reserves + collateral never change"),
 ];
 

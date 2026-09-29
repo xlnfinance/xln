@@ -238,6 +238,54 @@ Hanko bytes, `heldQuorum` (signatures before the frame), J-prefix rounds inside 
 see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm). Bounds: one height, one
 tx each for A and B. Capacity: 778 states, 2565 transitions, about 15 seconds.
 
+## J batch (`j/batch.scm`)
+
+**Q-J-1. Partial application (open question 4 of the xln.ts review).**
+The chain is atomic: every op applies or none does, and a failure emits nothing but the revert
+(Depository.sol processBatch, D:329-575; no per-op result). Choice: the entity treats per-op effect
+events as the truth: the event names the ops it applied and they are DONE. An op is never judged by
+whether its batch "succeeded". Planted bug `partial-apply` (the chain keeps the ops before a failing
+one) breaks the property "every applied op came from a batch that succeeded".
+Source: D:329-575, xln.ts 2953-2972.
+
+**Q-J-2. A quarantined batch (open question 3).**
+A batch aborted and re-sealed can land after its replacement was sealed at the same nonce; the event
+carries a different hash at a nonce >= the pending one, so the pending batch can never land.
+xln.ts: `quarantined`, message only; recovery is a manual abort or clear, and the hub-only stale timer
+(17961) does not cover other Entities. Choice: automatic `recover`: requeue the pending batch minus the
+ops already done. Planted bug `no-recovery` (og today for a non-hub) fails "can always still finish".
+Source: xln.ts 2953-2972, 3036, 17961.
+
+**Q-J-3. Abort and then the batch lands (finding).**
+`j_abort_sent_batch` requeues the ops. If the aborted batch lands afterwards, the requeued ops are
+drafted again and the next batch applies them a second time (a deposit twice). Choice: an event clears
+the ops it applied from the draft, whatever batch requeued them. Planted bug `trust-the-draft`.
+Source: xln.ts 3036-3062.
+
+**Q-J-4. A full batch is a refusal (lessons R-J3).**
+xln.ts: `batchRoom` overflow is `j_batch`, then `batchThrew`, then `entity_invariant`: a halt (2714).
+Choice: the op is refused with notice and listed in `refused`. Planted bug `full-halts`. The same
+applies to an insufficient reserve for r2r/r2e (2628-2704).
+Source: lessons R-J3, R-X1; xln.ts 2714.
+
+**Q-J-5. A finalize goes alone (coordinator N2).**
+One open HTLC deadline reverts the whole batch at finalize (H1), so a dispute finalize is never bundled
+with other ops: `pick-ops` returns the finalize alone. The contracts already allow one finalization per
+batch (B:16). Planted bug `bundle-finalize`: a deposit is held up by another Account's deadline.
+Source: coordinator decision N2, X:292, xln.ts 2854.
+
+**Q-J-6. Retry and nonce.**
+`retry` resends the sent batch at its own nonce (xln.ts `j_rebroadcast`); the chain refuses any batch
+whose nonce is not stored + 1, so a stale copy is harmless. The batch hash is per seal.
+
+**Q-J-7. Not in the page.**
+Reorg below finalized height (`J_HISTORY_FINALIZED_REORG` is a Runtime halt today; policy open), the
+J-prefix attestation round, Hanko bytes, size and gas limits, several tokens, debt enforcement, watchers.
+Bounds: three ops (deposit, finalize on an Account with an open HTLC deadline, deposit), draft cap 2,
+one abort, time 0..2, deadline 1, no chain faults (`faults` 0). With one fault (the chain drops or
+reverts a batch) the page exceeds the 300 s budget. Capacity: 5262 states, 17049 transitions, about
+85 seconds.
+
 ## Checker (`lib/check.scm`)
 
 **Q-C-1. What does "live" mean?**

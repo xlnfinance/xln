@@ -21,7 +21,10 @@ spec/
   dispute/bugs/*.scm       planted dispute bugs
   entity/consensus.scm     Entity consensus: leader, quorum, own proposal vs certified frame (R-E3)
   entity/bugs/*.scm        planted consensus bugs
+  j/batch.scm              the J batch: atomic chain, sealing, abort, quarantine recovery, refusal when full
+  j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
+  j-batch.check.scm        entry point: check the J batch page
   entity-consensus.check.scm entry point: check the Entity consensus page
   dispute.check.scm        entry point: check the dispute page
   ledger.check.scm         entry point: check the ledger page
