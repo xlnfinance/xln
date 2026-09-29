@@ -6,6 +6,8 @@ import {XlnFixture} from "./helpers/XlnFixture.sol";
 import {XlnHanko} from "./helpers/XlnHanko.sol";
 import {ConservationHandler} from "./handlers/ConservationHandler.sol";
 import {ERC20Mock} from "../../contracts/ERC20Mock.sol";
+import {Depository} from "../../contracts/Depository.sol";
+import {DepositoryDebtHarness} from "../../contracts/mocks/DepositoryDebtHarness.sol";
 import "../../contracts/Types.sol";
 
 /// @notice Task C4, targets 1 + 3: value conservation through *composed*
@@ -24,6 +26,12 @@ contract DepositoryConservationInvariants is XlnFixture {
 
   uint256[3] internal TOKENS = [uint256(1), uint256(2), uint256(3)];
 
+  /// @dev The handler seeds debts (`seedDebt`) so that debtors spend through batches: a debtor gets no implicit flash credit,
+  ///      and a batch in which it overspends must fail, never land partly applied.
+  function _newDepository() internal override returns (Depository) {
+    return new DepositoryDebtHarness(address(ep), address(deltaTransformer));
+  }
+
   function setUp() public {
     _deployXln(); // registers `erc20` as internal token 1
 
@@ -35,10 +43,11 @@ contract DepositoryConservationInvariants is XlnFixture {
 
     targetContract(address(handler));
 
-    bytes4[] memory selectors = new bytes4[](3);
+    bytes4[] memory selectors = new bytes4[](4);
     selectors[0] = handler.mint.selector;
     selectors[1] = handler.mixedBatch.selector;
     selectors[2] = handler.replayLast.selector;
+    selectors[3] = handler.seedDebt.selector;
     targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
   }
 
@@ -167,6 +176,11 @@ contract DepositoryConservationInvariants is XlnFixture {
   }
 
   // ═══════════════ coverage report ═══════════════
+
+  /// @notice A debtor gets no implicit flash credit: a batch whose R2R legs overspend its spendable reserve never lands.
+  function invariant_debtorNeverOverspendsThroughABatch() public view {
+    assertEq(handler.debtorOverspendViolations(), 0, "a batch that overspends a debtor landed");
+  }
 
   function invariant_callSummary() public view {
     console.log("mint              ", handler.callCount("mint"));

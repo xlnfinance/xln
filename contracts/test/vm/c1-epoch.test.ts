@@ -1,6 +1,7 @@
 // C1 (contracts-review.md): after a dispute finalizes, a proof with a higher nonce that was signed earlier must not
 // settle its offdelta a second time. Runs the real Depository stack in BrowserVM.
 import { describe, expect, test } from "bun:test";
+import { ethers } from "ethers";
 import { boot } from "./rig.ts";
 
 describe("C1 ondelta epoch", () => {
@@ -88,7 +89,12 @@ describe("C1 ondelta epoch", () => {
     expect(e1).toBe(e0 + 1n);
     // Both artifacts carry a nonce above 5, and both were signed before the settlement.
     expect(await w.start(R, L, 7, true, staleProof, proofByL)).toBe("REVERT E4()");
-    expect(await w.settle(L, R, 9, staleSettlement, settlementByR9)).toBe("REVERT E4()");
+    // J5: a co-signed settlement made stale by a landed one is a bad counterparty signature inside the ops: the batch fails (E4
+    // reported, entity nonce spent, nothing applied) instead of reverting, so the entity is not stalled at that nonce
+    const nonceBefore = await w.chain.getEntityNonce(L.id);
+    expect(await w.settle(L, R, 9, staleSettlement, settlementByR9)).toBe("ok");
+    const failedReasons = (w.last.events as { name: string; args: Record<string, unknown> }[]).filter((e) => e.name === "BatchFailed").map((e) => String(e.args["reason"]));
+    expect({ failedReasons, spent: (await w.chain.getEntityNonce(L.id)) - nonceBefore }).toEqual({ failedReasons: [ethers.id("E4()").slice(0, 10)], spent: 1n });
     // The same artifacts re-signed for the new baseline are accepted.
     expect(await w.settle(L, R, 9, staleSettlement, w.coopSig(R, e1, 9, staleSettlement))).toBe("ok");
     expect(await w.epochOf()).toBe(e1 + 1n);

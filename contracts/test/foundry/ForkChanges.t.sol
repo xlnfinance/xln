@@ -284,7 +284,8 @@ contract ForkChangesTest is XlnFixture {
     // Both stale artifacts carry a nonce above 5 and were signed before the settlement.
     (Batch memory staleStart, ) = _start(L, 7, stale, staleProofSigned);
     _submitExpectRevert(L, staleStart, abi.encodeWithSelector(E4.selector));
-    _submitExpectRevert(L, _settlementBatch(staleDiffs, 9, _hanko(R, staleSettlementSigned)), abi.encodeWithSelector(E4.selector));
+    // J5: a stale co-signed settlement is a bad counterparty signature inside the ops: the batch fails E4, its nonce is spent
+    _submitFailedUnmoved(L, _settlementBatch(staleDiffs, 9, _hanko(R, staleSettlementSigned)), E4.selector, entity[R], T);
 
     // Re-signed for the new baseline they are accepted.
     _submit(L, _startNow(L, 7, stale));

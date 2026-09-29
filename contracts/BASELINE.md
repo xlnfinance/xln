@@ -231,36 +231,51 @@ finalize with the starter as its own counterentity, so it reverted for the wrong
 
 ## After J5 (a batch that cannot apply fails soft: nonce spent, `BatchFailed`; one file or suite per process)
 
-J5 (decisions doc, coordinator 21:01) runs the ops of a batch with no dispute, reveal or hash-ladder op through an
-external self-call in try/catch. A failing batch applies nothing, keeps its entity nonce spent, and emits
-`BatchFailed(entityId, nonce, reason)` instead of reverting. Authentication failures (E4), a wrong nonce, malformed or oversize
-batches, the bounds and any batch that carries a dispute, reveal or hash-ladder op still revert. Pinned by
-`test/vm/j5-batch-failed.test.ts` (13, test first).
+J5 (decisions doc, coordinator 21:01, refined 22:31 after the #54 review) runs the ops of a batch with no dispute, reveal,
+hash-ladder or external-deposit op through an external self-call in try/catch. A failing batch applies nothing, keeps its
+entity nonce spent, and emits `BatchFailed(entityId, nonce, reason)` instead of reverting. What still reverts and takes no
+nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, an
+op that fails with an **empty revert reason** (an out-of-gas frame returns none), and any batch that carries a dispute, reveal,
+hash-ladder or **deposit** op. A bad counterparty signature inside the ops (a settlement or C2R signed at an old account epoch)
+is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch-failed.test.ts` (13),
+`test/vm/j5-review-extra.test.ts` (8, the review's) and `test/foundry/J5Attacks.t.sol` (the review's 6, deposit tests flipped
+to the fixed behaviour).
 
-**Measured.** Depository 22791 bytes (J2: 22994), Account 24448 (unchanged; 128 bytes under 24576). The self-call wrapper costs
+**Measured.** Depository 22772 bytes (J2: 22994), Account 24448 (unchanged; 128 bytes under 24576). The self-call wrapper costs
 gas, so `MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL` goes from 256 to 250: 256 pairs measured 15,059,370, over the 15M
 liveness budget. 250 pairs (4 entries of 63, 63, 62, 62) measure **14,763,601** execution gas
-(`BatchBounds.test_gas_maxReserveToCollateralProduct`, which now also fails if the maximal batch stops landing or fits no more);
+(`BatchBounds.test_gas_maxReserveToCollateralProduct`, which also fails if the maximal batch stops landing);
 `test_reserveToCollateralAggregatePairCapRejectsTwoHundredFiftyOne` pins 251 rejected.
 
-**A bug the ripple found.** Inside the self-call msg.sender is the Depository, so an external deposit pulled tokens from the
-Depository itself. `applyBatch` now takes the outer caller as `payer` (ERC20 pull, ERC721 and ERC1155 custody, and the default
-deposit target). Caught by Foundry `Lifecycle` (4 full-uint256 tests) and Hardhat NFT deposit tests; pinned by them.
+**Two bugs the ripple and the review found.** (1) Inside the self-call msg.sender is the Depository, so an external deposit pulled
+tokens from the Depository itself; `applyBatch` takes the outer caller as `payer` (found by Foundry `Lifecycle` and the Hardhat NFT
+tests). (2) Deposits pull from the caller and `processBatch` is permissionless, so as a soft failure a relayer without an allowance
+could burn the signer's nonce (review F1, `J5Attacks.test_relayerWithoutAllowanceCannotBurnTheNonceOfADepositBatch`); deposit
+batches now revert whole.
 
 **Tests rewritten.** Every plain-batch revert assertion became a `BatchFailed` assertion: the reason selector, the entity nonce
 spent, no `HankoBatchProcessed`, and the state unchanged (Foundry `_submitFailed`, `_submitFailedUnmoved`; Hardhat
 `test/helpers/batch-failed.ts`). 23 Hardhat tests (Depository-part-1 17, part-2 5, DebtForgiveness 1), 5 Foundry `Lifecycle`
-tests, 1 `ForkChanges` (two lines) and one vector cell (`settleAtStoredNonce`: "ok, batch failed (E2)"). The test named "reverts
-an underfunded R2C batch without consuming its nonce" is now "fails an underfunded R2C batch soft: the nonce is consumed and
-nothing moves". The four invariant handlers (`DebtLifecycle`, `Depository`, `TransformerAllowance`, `HashLadder`) and
-`ConservationHandler` count a `BatchFailed` batch as not landed; the conservation handler also checks that it moved no value and
-that the nonce ghost advanced by one (`failedBatches`). Two bare `expectRevert()` in the Foundry lifecycle and fault-mode
-control tests now name their selectors (E2, `TransformerExecutionFailed`).
+tests, `ForkChanges` (three lines), `BoardRotationGrace` (old-board counterparty signatures; the same intent now goes at a fresh
+outer nonce, as F1 requires), `c1-epoch` and one vector cell (`settleAtStoredNonce`: "ok, batch failed (E2)"). The test named
+"reverts an underfunded R2C batch without consuming its nonce" is now "fails an underfunded R2C batch soft: the nonce is consumed
+and nothing moves". Two Hardhat tests went back to reverts (token-id allocation through a deposit batch; the empty-reason C2R).
+The four invariant handlers count a `BatchFailed` batch as not landed. **`ConservationHandler`** hashes the whole state before
+each batch (every reserve, debt, collateral, offset, account nonce and dispute hash) and requires it equal after a failed or
+reverted batch; it also seeds debts (`seedDebt`, on the `DepositoryDebtHarness`) and checks that a batch whose R2R legs overspend
+a debtor never lands (`invariant_debtorNeverOverspendsThroughABatch`). The review's planted partial-apply mutant k27 (a failing R2R
+returns instead of reverting) survived the old handler and is killed by this one. Mutants checked at this head: k27 (handler),
+deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason guard deleted (Hardhat part-1 "refuses an
+unsigned C2R"). The two bare `expectRevert()` calls in the lifecycle and fault-mode control tests name their selectors (E2,
+`TransformerExecutionFailed`).
 
-Results after J5 (local runs, sandbox with forge 1.7.1, on top of J2 at 5404483, uncommitted at the time of the run):
+Results after J5 (local runs, sandbox with forge 1.7.1, one file or suite per process; the three E4-flip tests re-run after the
+sweep and pass; code and tests as committed):
 
-- Foundry, one suite per process, 0 failures in all 16: same counts as after J2.
-- Hardhat, one file per process, 0 failures: same counts as after J2 (Depository-part-1 66, part-2 15, DebtForgiveness 2).
-- `test/vm/`: j5-batch-failed 13, j2-skip-stale-dispute-ops 12, j2-review-extra 16, c1-epoch 5, c2-batch-entity 3,
-  h1-htlc-deadline 5, h2-window-floor 3, h3-retired-board-cap 11, h4-deposit-during-dispute 4, vectors 8; `test/gate/`:
-  contract-size 5, deploy-gate 23.
+- Foundry, all 17 suites, 0 failures: DebtLifecycle 11, Depository.invariants 16, DepositoryConservation 10, ForkChanges 10,
+  HalmosLemmas 6, HankoThreshold 7, HashLadder 9, J5Attacks 1+4+2 (three contracts), Lifecycle 26, RetiredBoardH3 7, Smoke 1,
+  TransformerAllowance 8, TransformerFaultModes 15, WideMath 30, WideTransformer 6, BatchBounds 11, DebtChunking 6.
+- Hardhat, all 22 files, 0 failures: Depository-part-1 66, part-2 15, DebtForgiveness 2, BoardRotationGrace 6, the rest unchanged.
+- `test/vm/`: j5-batch-failed 13, j5-review-extra 8, j2-skip-stale-dispute-ops 12, j2-review-extra 16, c1-epoch 5,
+  c2-batch-entity 3, h1-htlc-deadline 5, h2-window-floor 3, h3-retired-board-cap 11, h4-deposit-during-dispute 4, vectors 8;
+  `test/gate/`: contract-size 5, deploy-gate 23.

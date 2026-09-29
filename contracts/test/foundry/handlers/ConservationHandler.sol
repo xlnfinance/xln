@@ -7,6 +7,7 @@ import {StdUtils} from "forge-std/StdUtils.sol";
 import "../../../contracts/Depository.sol";
 import "../../../contracts/EntityProvider.sol";
 import {ERC20Mock} from "../../../contracts/ERC20Mock.sol";
+import {DepositoryDebtHarness} from "../../../contracts/mocks/DepositoryDebtHarness.sol";
 import "../../../contracts/Types.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 
@@ -46,6 +47,9 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
   /// @dev entityNonces moved by anything other than exactly +1 on accept,
   ///      or moved at all on reject.
   uint256 public nonceViolations;
+  /// @dev A batch landed although a debtor's reserve-to-reserve legs spent more than its spendable reserve on a token: a debtor
+  ///      gets no implicit flash credit, so such a batch must fail whole (it must never land partly applied).
+  uint256 public debtorOverspendViolations;
   /// @dev An exact (bytes, hanko, nonce) replay of an accepted batch succeeded.
   uint256 public replayViolations;
   uint256 public replayAttempts;
@@ -128,6 +132,44 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
+  /// @dev J5: everything a batch could move, folded into one hash: every actor's reserve and outstanding debt per token, every
+  ///      pair's collateral, ondelta, account nonce and dispute hash per token. A batch that failed soft must leave it equal.
+  function _fingerprint() internal view returns (bytes32 h) {
+    for (uint256 k = 0; k < 3; k++) {
+      uint256 t = TOKENS[k];
+      for (uint256 i = 0; i < ACTORS; i++) {
+        (uint256 high, uint256 middle, uint256 low) = dep.debtOutstanding(entityOf[i], t);
+        h = keccak256(abi.encode(h, dep._reserves(entityOf[i], t), high, middle, low));
+      }
+      for (uint256 i = 0; i < ACTORS; i++) {
+        for (uint256 j = i + 1; j < ACTORS; j++) {
+          bytes memory key = XlnHanko.accountKey(entityOf[i], entityOf[j]);
+          (uint256 collateral, Int512 memory ondelta) = dep._collaterals(key, t);
+          (uint256 accountNonce, bytes32 disputeHash, , , , , , , , , , , , , , , ) = dep._accounts(key);
+          h = keccak256(abi.encode(h, collateral, ondelta.high, ondelta.low, accountNonce, disputeHash));
+        }
+      }
+    }
+  }
+
+  /// @dev True when the batch's R2R legs spend more of some token than `actor` can spend while the actor owes more of it than
+  ///      its reserve holds: such a debtor gets no implicit flash credit, so the batch cannot land.
+  function _debtorOverspends(uint256 actor, Batch memory b) internal view returns (bool) {
+    for (uint256 k = 0; k < 3; k++) {
+      uint256 t = TOKENS[k];
+      (uint256 high, uint256 middle, uint256 low) = dep.debtOutstanding(entityOf[actor], t);
+      // a debt the reserve covers is paid off by the first R2R leg (debts are enforced before the spend check), which leaves a
+      // debt-free initiator that may flash-overdraw; only a debt beyond the reserve stays a debt and denies the spend
+      if (high == 0 && middle == 0 && low <= _reserve(actor, t)) continue;
+      uint256 sent;
+      for (uint256 i = 0; i < b.reserveToReserve.length; i++) {
+        if (b.reserveToReserve[i].tokenId == t) sent += b.reserveToReserve[i].amount;
+      }
+      if (sent > _spendable(actor, t)) return true;
+    }
+    return false;
+  }
+
   function _totalInternal(uint256 tokenId) internal view returns (uint256 total) {
     for (uint256 i = 0; i < ACTORS; i++) {
       total += dep._reserves(entityOf[i], tokenId);
@@ -173,6 +215,15 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
       ghostMinted[t] += amount;
       _bump("mint");
     } catch {}
+  }
+
+  /// @notice Books a debt (outside the value pool) so that debtors take part in the batches below.
+  function seedDebt(uint256 debtorSeed, uint256 creditorSeed, uint256 tokenSeed, uint256 amount) external {
+    (uint256 debtor, uint256 creditor) = _distinct(debtorSeed, creditorSeed);
+    uint256 t = _token(tokenSeed);
+    amount = bound(amount, 1, 1e21);
+    DepositoryDebtHarness(address(dep)).harnessAddDebt(entityOf[debtor], t, entityOf[creditor], amount);
+    _bump("seedDebt");
   }
 
   /// @notice The core action: one processBatch with a bounded-random
@@ -346,6 +397,9 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
       beforeExternal[k] = _externalBalance(TOKENS[k]);
     }
 
+    bytes32 fingerprintBefore = _fingerprint();
+    // the prediction below is sound only without deposit legs (a deposit lands before the R2R legs and raises the reserve)
+    bool overspends = nDep == 0 && _debtorOverspends(a, b);
     address caller = vm.addr(pk[a]);
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
@@ -359,9 +413,12 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
       if (XlnHanko.batchFailed(vm.getRecordedLogs())) {
         failedBatches++;
         _bump("mixedBatchFailedSoft");
+        // a failed batch is all-or-nothing: no reserve, debt, collateral, offset, account nonce or dispute moved
+        if (_fingerprint() != fingerprintBefore) batchValueViolations++;
       } else {
         acceptedBatches++;
         _bump("mixedBatch");
+        if (overspends) debtorOverspendViolations++;
       }
       // either way the nonce moved by exactly +1, and the same triple must never replay
       _recordSubmitOutcome(a, nonce, encoded, hanko);
@@ -387,6 +444,7 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
       }
     } catch {
       rejectedBatches++;
+      if (_fingerprint() != fingerprintBefore) batchValueViolations++;
       if (dep.entityNonces(entityOf[a]) != ghostEntityNonce[a]) nonceViolations++;
       for (uint256 k = 0; k < 3; k++) {
         if (_totalInternal(TOKENS[k]) != beforeInternal[k]) batchValueViolations++;

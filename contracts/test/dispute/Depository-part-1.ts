@@ -495,7 +495,7 @@ describe('Depository', () => {
         .collateral,
     ).to.equal(0n);
   });
-  it('fails underfunded C2R/R2E batches soft and keeps signature failures fatal', async function () {
+  it('fails underfunded C2R/R2E batches and bad counterparty signatures soft, and keeps a bad batch hanko fatal', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
@@ -549,11 +549,15 @@ describe('Depository', () => {
       ],
     });
     const invalid = await signDepositoryBatch(depository, left.entityId, left.privateKey, invalidBatch);
+    // a bad counterparty signature inside the ops is a failure of the batch like any other: E4 reported, nonce 2 spent
+    await expectBatchFailed(depository, left.signer, invalid, 'E4');
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
+    // the batch's own hanko is what stays fatal: a hanko signed by the wrong key reverts E4 and takes no nonce
+    const forged = await signDepositoryBatch(depository, left.entityId, right.privateKey, invalidBatch);
     await expect(
-      depository.connect(left.signer).processBatch(invalid.entityId, invalid.encodedBatch, invalid.hankoData, invalid.nonce),
+      depository.connect(left.signer).processBatch(forged.entityId, forged.encodedBatch, forged.hankoData, forged.nonce),
     ).to.be.revertedWithCustomError(depository, 'E4');
-    // the underfunded batch above spent nonce 1; the bad signature is fatal and takes none
-    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
   });
   it('rejects permissionless token-id allocation from the production batch path', async function () {
     const { depository, erc20 } = await loadFixture(deployFixture);
@@ -573,7 +577,11 @@ describe('Depository', () => {
       ],
     });
     const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
-    await expectBatchFailed(depository, user0, deposit, 'E11');
+    // deposit legs pull from the caller, so a batch with one reverts whole and takes no nonce (a relayer cannot burn it)
+    await expect(
+      depository.connect(user0).processBatch(deposit.entityId, deposit.encodedBatch, deposit.hankoData, deposit.nonce),
+    ).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
     expect(await depository.getTokensLength()).to.equal(registryLengthBefore);
   });
   it('assigns stable token IDs only through a Foundation listing', async function () {
@@ -1637,7 +1645,11 @@ describe('Depository', () => {
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
     const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
 
-    await expectBatchFailed(depository, left.signer, signed, 'none');
+    // an empty revert reason is never reported as BatchFailed (an out-of-gas frame returns none): it reverts whole, no nonce
+    await expect(
+      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithoutReason(ethers);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
   });

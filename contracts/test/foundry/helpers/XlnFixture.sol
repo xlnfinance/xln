@@ -34,10 +34,15 @@ abstract contract XlnFixture is Test {
 
   uint256 internal constant FOUNDATION_PK = uint256(keccak256("xln.foundation"));
 
+  /// @dev The Depository under test; a suite that needs a debt it cannot reach through disputes overrides this with a harness.
+  function _newDepository() internal virtual returns (Depository) {
+    return new Depository(address(ep), address(deltaTransformer));
+  }
+
   function _deployXln() internal {
     ep = new EntityProvider(vm.addr(FOUNDATION_PK));
     deltaTransformer = new DeltaTransformer();
-    dep = new Depository(address(ep), address(deltaTransformer));
+    dep = _newDepository();
     vm.prank(vm.addr(FOUNDATION_PK));
     ep.bindShareDepository(address(dep));
 

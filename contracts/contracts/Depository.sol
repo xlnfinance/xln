@@ -358,22 +358,24 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (!hankoValid || entityId == bytes32(0) || recoveredEntity != entityId) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
-    if (_carriesDisputeOps(batch)) {
+    if (_revertsWhole(batch)) {
       _processBatch(entityId, batch, msg.sender);
     } else {
       // J5: from here the batch is authenticated and its nonce is spent. When its ops fail, the failure is undone as one
       // unit (the external self-call reverts its own writes) and reported, so the nonce does not stay open and stall
-      // every urgent batch above it. A batch with dispute or reveal ops keeps the J2 rule: a real error reverts it all.
+      // every urgent batch above it. A batch that reverts whole (see _revertsWhole) keeps the J2 rule instead.
       uint256 gasBefore = gasleft();
       try this.applyBatch(entityId, encodedBatch, msg.sender) {} catch (bytes memory reason) {
-        // a call that ran out of gas fails the same way; a relayer must not turn a good batch into a failed one by
-        // withholding gas, so a failure that left under 1/32 of the gas (the 63/64 rule leaves the caller about 1/64) reverts
-        if (gasleft() < gasBefore / 32) revert BatchGasStarved();
-        // a bad signature inside the ops (a counterparty's settlement signature) is an authentication failure: it is not
-        // state-dependent, so it cannot start to succeed later, and it reverts without taking the nonce
-        if (bytes4(reason) == E4.selector) {
-          assembly ("memory-safe") { revert(add(reason, 32), mload(reason)) }
+        // a frame that ran out of gas returns no data, so an empty reason is never reported as a failure of the batch
+        if (reason.length < 4) {
+          assembly ("memory-safe") { revert(0, 0) }
         }
+        // a call that ran out of gas deeper down can bubble up as an ordinary revert; a relayer must not turn a good batch
+        // into a failed one by withholding gas, so a failure that left under 1/32 of the gas (the 63/64 rule leaves the
+        // caller about 1/64) reverts. The batch's own hanko was checked above and reverted E4 without a nonce; a bad
+        // counterparty signature inside the ops (a settlement or C2R signed at an old account epoch) is a failure of the
+        // batch like any other, and spends the nonce, because under F1 the entity cannot sign a different batch at it.
+        if (gasleft() < gasBefore / 32) revert BatchGasStarved();
         emit BatchFailed(entityId, nonce, bytes4(reason));
         return;
       }
@@ -388,9 +390,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     _processBatch(entityId, abi.decode(encodedBatch, (Batch)), payer);
   }
 
-  function _carriesDisputeOps(Batch memory batch) private pure returns (bool) {
+  /// @dev Batches that revert whole when an op fails, and take no nonce: those with a dispute, reveal or hash-ladder op (the J2
+  ///      rule: an urgent op is never lost to, nor burns the nonce for, a neighbour), and those with an external deposit leg.
+  ///      Deposits pull from the caller, so whether they succeed depends on who submits, not on what was signed: a relayer
+  ///      without an allowance must not be able to spend the signer's nonce on it.
+  function _revertsWhole(Batch memory batch) private pure returns (bool) {
     return batch.disputeStarts.length + batch.counterDisputes.length + batch.disputeFinalizations.length
-      + batch.revealSecrets.length + batch.hashLadderRegistrations.length > 0;
+      + batch.revealSecrets.length + batch.hashLadderRegistrations.length + batch.externalTokenToReserve.length > 0;
   }
 
   /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.

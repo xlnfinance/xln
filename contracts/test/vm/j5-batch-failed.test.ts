@@ -2,8 +2,9 @@
 // reserve ops) applies none of them, still consumes the entity nonce, and emits BatchFailed(entity, nonce, reason); the
 // transaction does not revert. Why: with F1 (a signed batch is final at its nonce) a reverting batch leaves its nonce open, and
 // every urgent op above it stalls, because nothing else may be signed at that nonce.
-// Authentication failures (bad hanko, wrong entity, wrong nonce, malformed or oversize batch) still revert and take no nonce,
-// so nobody can burn nonces with garbage. A relayer must not be able to turn a batch that would succeed into a failed one by
+// A failure of the batch's own hanko authorisation (bad hanko, wrong entity, wrong nonce, malformed or oversize batch) still reverts
+// and takes no nonce, so nobody can burn nonces with garbage; a bad counterparty signature inside the ops is a BatchFailed.
+// A batch with an external deposit leg reverts whole too: deposits pull from the caller, so a relayer must not burn the nonce. A relayer must not be able to turn a batch that would succeed into a failed one by
 // starving it of gas. Real Depository stack in BrowserVM; one file per process: `bun test contracts/test/vm/j5-batch-failed.test.ts`.
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
@@ -91,7 +92,30 @@ describe("J5 a failing payment batch consumes its nonce and the urgent batch abo
   });
 });
 
-describe("J5 authentication failures still revert and take no nonce", () => {
+describe("J5 a bad counterparty signature inside the ops is a failure of the batch: it spends the nonce", () => {
+  // Why not a revert: a settlement or C2R is co-signed against the account epoch, which every landed settlement, C2R and
+  // dispute finalize advances. A co-signed batch made stale that way would revert E4 forever, and under F1 the entity cannot sign
+  // a different batch at that nonce, so it would stall every batch above it. Only the signer can put a bad signature in the
+  // bytes, so spending the nonce hurts no one else.
+  const E4 = ethers.id("E4()").slice(0, 10);
+
+  test("a settlement signed by the wrong party is a BatchFailed E4, nonce spent, nothing moves", async () => {
+    const { w, A, B, nonceOf, failed, events } = await world();
+    const acct = w.accountOf(A, B, "j5-badsig");
+    await acct.fundedAccount();
+    const nonceBefore = await nonceOf();
+    const reserves = await acct.reserves();
+    const diffs = [{ tokenId: w.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+    // signed by A itself, not by the counterparty B
+    expect(await w.settle(A, B, 5, diffs, acct.coopSig(A, await acct.epochOf(), 5, diffs))).toBe("ok");
+    expect(await nonceOf()).toBe(nonceBefore + 1n);
+    expect(failed()).toEqual([{ entity: A.id, nonce: nonceBefore + 1n, reason: E4 }]);
+    expect(events("HankoBatchProcessed")).toHaveLength(0);
+    expect(await acct.reserves()).toEqual(reserves);
+  });
+});
+
+describe("J5 a failure of the batch's own hanko authorisation still reverts and takes no nonce", () => {
   test("a bad hanko reverts E4 and the nonce stays open", async () => {
     const { w, A, B, pay, nonceOf } = await world();
     const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), reserveToReserve: [pay(5000n)] } as never);
@@ -105,17 +129,6 @@ describe("J5 authentication failures still revert and take no nonce", () => {
     expect(await w.sendRaw(A.id, encoded, signWith(B, w.batchHash(B.id, encoded, 1n)), 1n)).toBe("REVERT E4()");
     expect(await nonceOf()).toBe(0n);
     expect(await nonceOf(B)).toBe(0n);
-  });
-
-  test("a settlement whose counterparty signature is bad reverts E4 (a bad signature is not state-dependent) and the nonce stays open", async () => {
-    const { w, A, B, nonceOf } = await world();
-    const acct = w.accountOf(A, B, "j5-badsig");
-    await acct.fundedAccount();
-    const nonceBefore = await nonceOf();
-    const diffs = [{ tokenId: w.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
-    // signed by A itself, not by the counterparty B
-    expect(await w.settle(A, B, 5, diffs, acct.coopSig(A, await acct.epochOf(), 5, diffs))).toBe("REVERT E4()");
-    expect(await nonceOf()).toBe(nonceBefore);
   });
 
   test("a wrong nonce reverts E2 and the entity nonce is unchanged", async () => {
