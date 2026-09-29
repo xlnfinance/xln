@@ -1,9 +1,25 @@
 // Core draws: the base world every area walks on (Accounts, credit, payments, reserves, the J batch, chat, profile
 // and hub config). Owner: thread "Independent review of main".
 import { drawn, arises, pending, type Moves, type Step, type WorldMoves } from "./areas.ts";
-import { PARTIES, activePairs, pick, amount, one, tx, sealed, queued } from "./world-view.ts";
+import { PARTIES, activePairs, pick, amount, one, tx, sealed, queued, batchRoom, reserveAdmits } from "./world-view.ts";
 import { HUB, SPOKES, TOKEN, type World } from "../world.ts";
 import { SIGNERS } from "../lane.ts";
+
+/** Entity x can queue a reserve op: it holds reserve, its batch is not sealed, and the batch has room. */
+const canQueue = (w: World, x: number): boolean => w.reserveOf(x) > 0n && !sealed(w, x) && batchRoom(w, x);
+
+/** og handleR2R's own admission: a transfer of `amount` from x to y fits beside x's draft batch and debts. */
+const r2rAdmits = (w: World, x: number, y: number, amount: bigint): boolean =>
+  reserveAdmits(w, x, { type: "reserveToReserve", receivingEntity: w.ids[y]!, tokenId: 1, amount });
+/** Sender and receiver pairs og admits at least the smallest transfer for. */
+const senders = (w: World): readonly (readonly [number, number])[] =>
+  PARTIES.filter((x) => canQueue(w, x)).flatMap((x) =>
+    PARTIES.filter((y) => y !== x && r2rAdmits(w, x, y, 1n)).map((y) => [x, y] as const));
+/** A share of x's reserve when og admits it, else the smallest transfer. */
+const transfer = (w: World, x: number, y: number): bigint => {
+  const share = 1n + (w.reserveOf(x) * BigInt(w.ri(20))) / 100n;
+  return r2rAdmits(w, x, y, share) ? share : 1n;
+};
 
 /**
  * Spoke pairs neither side has opened. og handleOpenAccount (open-account.ts:228) throws OPEN_ACCOUNT_ALREADY_EXISTS,
@@ -43,18 +59,17 @@ export const CORE: Moves<"core"> = {
     },
   ),
   r2c: drawn(
-    (w) => activePairs(w).some(([x]) => w.reserveOf(x) > 0n && !sealed(w, x)),
+    (w) => activePairs(w).some(([x]) => canQueue(w, x)),
     (w) => {
-      const [x, y] = pick(w, activePairs(w).filter(([x]) => w.reserveOf(x) > 0n && !sealed(w, x)));
+      const [x, y] = pick(w, activePairs(w).filter(([x]) => canQueue(w, x)));
       return one(w, x, [tx("r2c", { counterpartyId: w.ids[y], tokenId: 1, amount: 1n + (w.reserveOf(x) * BigInt(w.ri(30))) / 100n })]);
     },
   ),
   r2r: drawn(
-    (w) => PARTIES.some((x) => w.reserveOf(x) > 0n && !sealed(w, x)),
+    (w) => senders(w).length > 0,
     (w) => {
-      const x = pick(w, PARTIES.filter((x) => w.reserveOf(x) > 0n && !sealed(w, x)));
-      const y = pick(w, PARTIES.filter((y) => y !== x));
-      return one(w, x, [tx("r2r", { toEntityId: w.ids[y], tokenId: 1, amount: 1n + (w.reserveOf(x) * BigInt(w.ri(20))) / 100n })]);
+      const [x, y] = pick(w, senders(w));
+      return one(w, x, [tx("r2r", { toEntityId: w.ids[y], tokenId: 1, amount: transfer(w, x, y) })]);
     },
   ),
   j_broadcast: drawn(
