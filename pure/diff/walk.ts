@@ -109,7 +109,7 @@ export const uncovered = (moves: readonly Drawn[], seen: ReadonlySet<string>): r
 
 export const walkLine = (seed: number, c: Coverage): string =>
   `seed 0x${seed.toString(16)}: ${c.frames} Runtime frames, halts ${stableJson(c.haltTexts)}, departures `
-  + `${stableJson(c.departures)}, moves ${stableJson(c.actions)}\n  committed kinds ${[...c.entityTxs].sort().join(",")}; `
+  + `${stableJson(c.departures)}, divergences ${stableJson(c.divergences)}, moves ${stableJson(c.actions)}\n  committed kinds ${[...c.entityTxs].sort().join(",")}; `
   + `Account txs ${[...c.accountTxs].sort().join(",")}`;
 
 // ---- the command ----
