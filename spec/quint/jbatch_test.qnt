@@ -115,4 +115,34 @@ module jbatch_test {
     .then(arrive(2))                       // the reveal goes to nonce 2
     .then(attempt(1))                      // lands
     .expect(and { st.done.get(2), st.cnonce == 2, safe })
+
+  // The Entity gives a signed draft up. The payment in it is not signed again while the batch can still land: that would run it twice.
+  run abortedPaymentIsNotSignedAgainTest =
+    initFrom(cat(1, 6, 6), 3)
+    .then(arrive(1))
+    .then(abort(0))
+    .expect(and { st.sub.length() == 1, st.sub[0].aband, nonce_final, safe })
+    .then(attempt(0))                      // the abandoned copy lands: the payment runs, once
+    .then(tick)
+    .expect(and { st.done.get(1), st.runs.get(1) == 1, st.sub.length() == 1, safe })
+
+  // The same for a payment whose aborted batch fails: the Entity signs it again only once the nonce is used and it has read BatchFailed.
+  run abortedPaymentWaitsForBatchFailedTest =
+    initFrom(cat(1, 6, 6), 1)
+    .then(arrive(1))
+    .then(drain(1))
+    .then(abort(0))
+    .expect(and { st.sub.length() == 1 })   // the batch is still alive: nothing new is signed
+    .then(attempt(0))                      // fails at nonce 1, BatchFailed is read
+    .expect(and { st.gh.failed == 1, st.failSeen.get(1) == 1, st.sub.length() == 2, st.sub[1].b.nonce == 2, st.sub[1].b.ids == Set(1), safe })
+
+  // An urgent op is idempotent (it runs once or is skipped): after an abort it goes back into the draft at once, at a fresh nonce. If
+  // both copies land the reveal has still run once.
+  run abortedRevealIsSignedAtOnceTest =
+    initFrom(cat(6, 1, 6), 3)
+    .then(arrive(2))
+    .then(abort(0))
+    .expect(and { st.sub.length() == 2, st.sub[1].b.nonce == 2, st.sub[1].b.ids == Set(2), nonce_final, safe })
+    .then(attempt(0)).then(attempt(1))
+    .expect(and { st.done.get(2), st.runs.get(2) == 1, safe })
 }

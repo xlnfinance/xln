@@ -64,13 +64,14 @@ module entity {
     frozen: bool               // a dispute runs: off-chain frames stop [flaw 3]
   }
 
-  // The route of a payment through the hub, per slot: In lock k is forwarded as Out lock k.
+  // The route of a payment through the hub, per inbound slot k: the In lock k is forwarded as an Out lock in the lowest free Out slot
+  // `os` (E7). Peer 2 may hold Out slots of its own, and another route may hold one, so the slot is not k.
   type RSt =
     | Idle                     // no inbound lock seen
     | Fwd                      // onward lock proposed or live
     | Back                     // failed back: the inbound lock is cancelled or being cancelled
     | Paid                     // the secret was already known: the inbound lock is claimed directly
-  type Route = { st: RSt, h: int, dIn: int, dOut: int }
+  type Route = { st: RSt, h: int, dIn: int, dOut: int, os: int }         // os: the Out slot of the onward lock, 0 = none
 
   // A secret appeared on the chain; the peer's dispute started on a link; our own start landed (DisputeStarted); our own start was
   // skipped because a dispute is already open (DisputeOpSkipped, J2: at most one dispute per Account).
@@ -110,13 +111,13 @@ module entity {
     cd: int -> int,                   // chain: who holds the open dispute of the link: 0 nobody, 1 us, 2 the peer (at most one)
     jseq: int,                        // chain: events emitted so far
     outcomeRead: int -> bool,         // ghost: we read the outcome of our own start
-    outRes: int -> bool,              // ghost: the onward lock was resolved off-chain by peer 2
+    outRes: int -> bool,              // ghost, per Out slot: the onward lock was resolved off-chain by peer 2
     inRes: int -> bool,               // ghost: we resolved the inbound lock off-chain
-    outCommitted: int -> bool,        // ghost: the onward lock became part of a signed state
+    outCommitted: int -> bool,        // ghost, per Out slot: the onward lock became part of a signed state
     gh: Ghost
   }
 
-  pure val NO_ROUTE: Route = { st: Idle, h: 0, dIn: 0, dOut: 0 }
+  pure val NO_ROUTE: Route = { st: Idle, h: 0, dIn: 0, dOut: 0, os: 0 }
   pure val NO_DISP: Disp = { on: false, byUs: false, answered: false, proof: GENESIS, await: false, pend: 0 }
   pure val NO_JEV: JEv = { live: false, kind: JSecret(0), at: 0, seq: 0 }
   pure val NO_GHOST: Ghost = {
@@ -183,11 +184,22 @@ module entity {
   pure def isLockTx(tx: Tx, k: int): bool = match tx { | HtlcLock(x) => x.id == k | _ => false }
   pure def hasLockTx(lk: Link, k: int): bool = lk.inflight.concat(lk.mempool).select(t => isLockTx(t, k)).length() > 0
 
-  // The onward lock of route k: the lock in slot k of OUT, if it is the one we put there for this route (peer 2 may use the
-  // slot for a lock of its own).
+  // The onward lock of route k: the lock in the route's Out slot, if it is the one we put there for this route.
   pure def outLockOf(s: S, k: int): Lock = {
-    val l = s.links.get(OUT).tip.locks.get(k)
-    if (l.on and l.payer == ours(OUT) and l.hashlock == s.routes.get(k).h) l else NO_LOCK
+    val r = s.routes.get(k)
+    if (r.os == 0) NO_LOCK
+    else {
+      val l = s.links.get(OUT).tip.locks.get(r.os)
+      if (l.on and l.payer == ours(OUT) and l.hashlock == r.h) l else NO_LOCK
+    }
+  }
+
+  // E7: the Out slot a new route takes: the lowest one that is free on the planning view (committed, in flight and queued) and that no
+  // route that is not over holds. 0 when there is none.
+  pure def reservedOut(s: S, j: int): bool = ROUTES.exists(k => s.routes.get(k).os == j)
+  pure def freeOutSlot(s: S): int = {
+    val plan = planOf(s.links.get(OUT), ours(OUT), s.now)
+    ORDER.foldl(0, (m, j) => if (m == 0 and not(plan.locks.get(j).on) and not(reservedOut(s, j))) j else m)
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -321,15 +333,18 @@ module entity {
     val r = s.routes.get(k)
     if (lk.frozen or not(lock.on) or payee(lock) != ours(IN) or r.st != Idle) s
     else if (knowsHash(s, lock.hashlock))
-      { ...s, routes: s.routes.set(k, { st: Paid, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }) }
+      { ...s, routes: s.routes.set(k, { st: Paid, h: lock.hashlock, dIn: lock.deadline, dOut: 0, os: 0 }) }
     else {
       val dOut = outDeadline(lock.deadline)
-      val fw = HtlcLock({ id: k, payer: ours(OUT), amount: lock.amount, hashlock: lock.hashlock, deadline: dOut })
-      if (sysOk(s, OUT, fw))
-        { ...queueTx(s, OUT, fw), routes: s.routes.set(k, { st: Fwd, h: lock.hashlock, dIn: lock.deadline, dOut: dOut }),
+      val os = freeOutSlot(s)
+      val fw = HtlcLock({ id: os, payer: ours(OUT), amount: lock.amount, hashlock: lock.hashlock, deadline: dOut })
+      if (os != 0 and sysOk(s, OUT, fw))
+        { ...queueTx(s, OUT, fw),
+          routes: s.routes.set(k, { st: Fwd, h: lock.hashlock, dIn: lock.deadline, dOut: dOut, os: os }),
+          outRes: s.outRes.set(os, false), outCommitted: s.outCommitted.set(os, false),
           gh: { ...s.gh, forwards: s.gh.forwards + 1 } }
       else
-        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }),
+        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0, os: 0 }),
           gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }
     }
   }
@@ -341,7 +356,7 @@ module entity {
     if (r.st != Fwd) s
     else {
       val outLock = outLockOf(s, k)
-      val outDead = or { and { s.outCommitted.get(k), not(outLock.on) }, s.now > r.dOut + LAG }
+      val outDead = or { and { s.outCommitted.get(r.os), not(outLock.on) }, s.now > r.dOut + LAG }
       if (knowsHash(s, r.h) or not(outDead)) s
       else { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { ...r, st: Back }),
              gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }
@@ -373,11 +388,11 @@ module entity {
   pure def resetOne(s: S, k: int): S = {
     val r = s.routes.get(k)
     val inGone = not(s.links.get(IN).tip.locks.get(k).on)
-    val outGone = and { not(outLockOf(s, k).on), not(hasLockTx(s.links.get(OUT), k)) }
-    if (r.st != Idle and inGone and outGone)
-      { ...s, routes: s.routes.set(k, NO_ROUTE), outRes: s.outRes.set(k, false), inRes: s.inRes.set(k, false),
-        outCommitted: s.outCommitted.set(k, false) }
-    else s
+    val outGone = and { not(outLockOf(s, k).on), not(hasLockTx(s.links.get(OUT), r.os)) }
+    if (r.st != Idle and inGone and outGone) {
+      val s1 = { ...s, routes: s.routes.set(k, NO_ROUTE), inRes: s.inRes.set(k, false) }
+      if (r.os == 0) s1 else { ...s1, outRes: s1.outRes.set(r.os, false), outCommitted: s1.outCommitted.set(r.os, false) }
+    } else s
   }
 
   pure def perLink(s: S, f: (S, int) => S): S = LINKS.foldl(s, (acc, l) => f(acc, l))
@@ -676,9 +691,9 @@ module entity {
     val r = st.routes.get(k)
     val dIn = st.disp.get(IN)
     val dOut = st.disp.get(OUT)
-    val outProofLock = dOut.proof.locks.get(k)
+    val outProofLock = if (r.os == 0) NO_LOCK else dOut.proof.locks.get(r.os)
     val outHeld = and { dOut.on, dOut.answered, outProofLock.on, outProofLock.payer == ours(OUT), outProofLock.hashlock == r.h }
-    val paidOut = st.outCommitted.get(k) and (st.outRes.get(k) or (outHeld and chainPaid(st, r.h, r.dOut)))
+    val paidOut = r.os != 0 and st.outCommitted.get(r.os) and (st.outRes.get(r.os) or (outHeld and chainPaid(st, r.h, r.dOut)))
     val claimedIn = st.inRes.get(k) or (dIn.on and dIn.proof.locks.get(k).on and chainPaid(st, r.h, r.dIn))
     not(r.st != Idle and st.now > r.dIn and paidOut and not(claimedIn))
   })

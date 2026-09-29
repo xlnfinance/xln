@@ -77,21 +77,21 @@ signed command, (4) propose one frame per Account in ascending order.
 
 Own dispute start: `Idle -> await -> {DisputeStarted: ours is open | DisputeOpSkipped: the peer's is open and ours is skipped}` (E12).
 
-Route per slot: `Idle -> Fwd -> {Paid | Back}`. Rules: onward deadline = inbound - HOP; escalate `ESC` before a deadline; fail back only
+Route per inbound slot: `Idle -> Fwd -> {Paid | Back}`; the onward lock goes to the lowest free OUT slot (E7). Rules: onward deadline = inbound - HOP; escalate `ESC` before a deadline; fail back only
 when the onward lock is gone from a signed state or the deadline + LAG passed with the secret unknown; a dispute carries every known
 payee secret; a dispute freezes the Account's frames.
 
 Properties: `no_peer_halt`, `no_stranded`, `deadline_chain`, `dispute_carries_all`, `no_needless_dispute`, `no_frame_on_frozen`,
-`cmd_atomic`, `credit_holds`, `route_safe` (the hub is never out of pocket), `answer_in_window`, `skip_ends_the_wait`. 20 mutants.
+`cmd_atomic`, `credit_holds`, `route_safe` (the hub is never out of pocket), `answer_in_window`, `skip_ends_the_wait`. 23 mutants.
 
 ## J batch (`jbatch.qnt`)
 
 State: the chain's stored nonce and reserve, the signed batches the Entity submitted (each with a nonce and a set of ops), the ops
 (payment, secret reveal, dispute step). A batch lands iff its nonce is the next and no op reverts; a signed batch never expires.
-Rules (J1 to J3, F1, R-SPLIT): abandon an op only when it can never apply; urgent ops (dispute, reveal, hash ladder) never share a batch with payment, settlement or reserve ops (R-SPLIT); **a signed batch is final at its
-nonce: never sign other content at a signed nonce, every replacement goes to a fresh one** (F1). J2 (accepted): dispute ops skip instead of reverting, and the chain emits `DisputeOpSkipped(sender, counterentity, op, reason, nonce)`; the Entity abandons the op on reading it.
+Rules (J1 to J3, F1, F2, R-SPLIT): abandon an op only when it can never apply; urgent ops (dispute, reveal, hash ladder) never share a batch with payment, settlement or reserve ops (R-SPLIT); **a signed batch is final at its
+nonce: never sign other content at a signed nonce, every replacement goes to a fresh one** (F1); after an abort only urgent ops go back into the draft at once, a payment, deposit or reserve move only after the abandoned batch's nonce is used and BatchFailed is read (F2). J2 (accepted): dispute ops skip instead of reverting, and the chain emits `DisputeOpSkipped(sender, counterentity, op, reason, nonce)`; the Entity abandons the op on reading it.
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`. 11 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`. 12 mutants.
 
 ## Runtime (`runtime.qnt`)
 
@@ -114,4 +114,4 @@ Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_fra
 ## What is not in it yet
 
 Several tokens and swaps (v2), the order book, lending, boards (v2), the joint state of the hub's two Accounts and the chain (the
-Account-to-chain link is checked as a predicate over Bodies, C12), several routes per slot, an offline Entity. See PROGRESS.md "Next".
+Account-to-chain link is checked as a predicate over Bodies, C12), an offline Entity. See PROGRESS.md "Next".

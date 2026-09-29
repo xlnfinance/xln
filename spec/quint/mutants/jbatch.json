@@ -91,6 +91,14 @@
       "old": "  pure val GAS_GUARD = true",
       "new": "  pure val GAS_GUARD = false",
       "killedBy": "invariant:no_burn"
+    },
+    {
+      "id": "abort-requeues-payments-at-once",
+      "why": "F1 with the coordinator's abort rule: after the Entity gives a signed draft up, its payment goes back into the draft at once, though the abandoned batch can still land: the payment runs twice",
+      "file": "jbatch.qnt",
+      "old": "pure val PAY_HELD_AFTER_ABORT = true",
+      "new": "pure val PAY_HELD_AFTER_ABORT = false",
+      "killedBy": "invariant:pay_once"
     }
   ],
   "init": "init",

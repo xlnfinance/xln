@@ -175,6 +175,30 @@
       "old": "        | JSkip(l) => outcome(s1, l, true)",
       "new": "        | JSkip(l) => outcome(s1, l, false)",
       "killedBy": "test:skippedStartEndsTheWaitAndAnswersTheOpenOneTest"
+    },
+    {
+      "id": "fixed-out-slot",
+      "why": "E7: the onward lock reuses the inbound slot number, as if the two Accounts numbered their slots alike; a lock of peer 2 or another route in that slot makes the forward refuse or clash",
+      "file": "entity.qnt",
+      "old": "      val os = freeOutSlot(s)\n",
+      "new": "      val os = k\n",
+      "killedBy": "test:onwardSlotIsTheLowestFreeOneTest"
+    },
+    {
+      "id": "free-slot-ignores-the-plan",
+      "why": "E7: a slot counts as free when the committed state says so, though a lock of ours already holds it in the planning view (sent by a command, not yet acked)",
+      "file": "entity.qnt",
+      "old": "    val plan = planOf(s.links.get(OUT), ours(OUT), s.now)\n",
+      "new": "    val plan = s.links.get(OUT).tip\n",
+      "killedBy": "test:ownLockInFlightHoldsTheLowSlotTest"
+    },
+    {
+      "id": "free-slot-ignores-reservations",
+      "why": "E7: a slot held by a route that is not over (failed back, lock still on its way out) is handed to the next route",
+      "file": "entity.qnt",
+      "old": "  pure def reservedOut(s: S, j: int): bool = ROUTES.exists(k => s.routes.get(k).os == j)",
+      "new": "  pure def reservedOut(s: S, j: int): bool = false",
+      "killedBy": "test:slotStaysReservedUntilTheRouteIsOverTest"
     }
   ]
 }

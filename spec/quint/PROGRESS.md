@@ -8,8 +8,8 @@ Handoff format: what is done per layer, what is next, how to pick up.
 |---|---|---|
 | Account | `account.qnt` | v1 done: two parties, one token, credit, HTLC clauses, frame protocol with collision, resend, loss. 14 scenario tests, invariants P2 and P4a-c by simulation, 14 mutants killed |
 | J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 22 scenario tests, P1 P3 by simulation, 26 mutants killed. J latency: the honest side answers REACT = 2 * LAG after an event (C11). Apalache: see Evidence |
-| Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 20 scenario tests, 11 properties by simulation, 20 mutants killed. Several inputs per frame (E1); own start and the peer's beside it (E12). Simulation only (one state record) |
-| J batch | `jbatch.qnt` | v1 done: the Entity's batch over the chain's strict nonce and atomic revert; urgent ops, forks, nonce burning, what a lost batch holds. 11 scenario tests, 10 properties by simulation, 11 mutants killed. J2 accepted (tolerant dispute ops, with the `DisputeOpSkipped` event the Entity reads); F1 (a signed batch is final at its nonce) is the Entity's rule; J5 accepted (a failed batch takes its nonce and emits `BatchFailed`, which the Entity reads) |
+| Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 25 scenario tests, 11 properties by simulation, 23 mutants killed. Several inputs per frame (E1); own start and the peer's beside it (E12); the onward lock takes the lowest free OUT slot (E7). Simulation only (one state record) |
+| J batch | `jbatch.qnt` | v1 done: the Entity's batch over the chain's strict nonce and atomic revert; urgent ops, forks, nonce burning, what a lost batch holds. 14 scenario tests, 10 properties by simulation, 12 mutants killed. J2 accepted (tolerant dispute ops, with the `DisputeOpSkipped` event the Entity reads); F1 (a signed batch is final at its nonce) and F2 (after an abort only urgent ops go back at once; a payment waits until the abandoned batch's nonce is used) are the Entity's rules; J5 accepted (a failed batch takes its nonce and emits `BatchFailed`, which the Entity reads) |
 | Runtime | `runtime.qnt` | v1 done: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart, the halt taxonomy. 8 scenario tests, 4 properties by simulation, 8 mutants killed; every event kind is read (R7) |
 | Account to chain | `compose.qnt` | every RCPAN Body in a small domain and every outcome of its open clauses, settled by the chain's `payout`: credit holds on the chain, collateral conserved (C12). 3 tests, 3 mutants |
 | Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 15 scenario tests, 6 properties by simulation, 20 mutants killed. S3 closed: presign+fold, the baseline rides every frame at nonce + 3 |
@@ -27,14 +27,14 @@ Handoff format: what is done per layer, what is next, how to pick up.
   `claims_conserved`, `book_enforceable`, `hostage_free`, `baseline_clears`) over simulated traces of 25 steps, all settle witnesses reached.
   `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 20 of 20 killed (6 by invariant, 14 by scenario test).
   One invariant hunt (`forged-baseline-invariant`) needs 20000 traces of 30 steps: the schedule that reaches it is long.
-- `MODULES=entity ./check.sh`: typecheck, 20 scenario tests, `safe` (no_peer_halt, no_stranded, deadline_chain, dispute_carries_all,
+- `MODULES=entity ./check.sh`: typecheck, 25 scenario tests, `safe` (no_peer_halt, no_stranded, deadline_chain, dispute_carries_all,
   no_needless_dispute, no_frame_on_frozen, cmd_atomic, credit_holds, route_safe, answer_in_window, skip_ends_the_wait) over 500 traces of 25 steps, 12 witnesses reached.
-  `python3 mutants/run.py entity`: 20 of 20 killed (6 by invariant, 14 by scenario test).
+  `python3 mutants/run.py entity`: 23 of 23 killed (6 by invariant, 17 by scenario test).
 - `params_test.qnt` (runs first in `check.sh`): LAG, REACT, DWIN, HOP, ESC agree across chain, entity and jbatch; the hub's deadline arithmetic
   pays the hub with the margin (`hopMarginPaysTheHubTest`) and loses without it (`noMarginLosesTheHubTest`) on the real dispute game.
-- `MODULES=jbatch ./check.sh`: typecheck, 11 scenario tests, `safe` (urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential,
+- `MODULES=jbatch ./check.sh`: typecheck, 14 scenario tests, `safe` (urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential,
   reserve_sound) over 500 traces of 25 steps, 6 witnesses reached; also 20000 traces of 30 steps, seed 3 (after F1 and the skip event), no violation.
-  `MUTANT_STEPS=25 MUTANT_SAMPLES=3000 python3 mutants/run.py jbatch`: 11 of 11 killed.
+  `MUTANT_STEPS=25 MUTANT_SAMPLES=3000 python3 mutants/run.py jbatch`: 12 of 12 killed.
   Apalache, `quint verify jbatch.qnt --init init --step step --invariant safe --max-steps 4`: no violation in 585 s on the first version; again on the version with the skip event, F1, J5 and `failed_read`: no violation in 284 s, all 9 properties. On the current version (R-SPLIT, gas guard, `no_burn`, all 10 properties): no violation in 442 s.
   Found while writing it: an older, smaller batch signed for one nonce burns the nonce of the fresher batch (J3), which F1 now rules out by signing every replacement at a fresh nonce; and F1 in turn makes a reverting payment hold every urgent op behind it, which J5 (a failed batch takes its nonce) removes: with `NONCE_ON_FAIL = false` (the contract today) `urgent_lands` is violated within a second of simulation.
 - `MODULES=runtime ./check.sh`: typecheck, 8 scenario tests, `safe` (no_equivocation, exactly_once_j, acked_durable, canonical_frames) over 500 traces
@@ -68,7 +68,7 @@ Neither spec reads the other. Four leaks, all harmless but recorded:
 ## Next
 
 1. Account + chain: the link is checked as a predicate over Bodies (`compose.qnt`, C12); a joint state machine of the hub's two Accounts and the chain is still not built.
-2. Entity: several routes per slot and a free-slot rule (E7), an offline Entity.
+2. Entity: an offline Entity.
 3. Apalache on the J modules (`jbatch`, `runtime`, `settle`) where it finishes; v2 models (proposals are in V2.md).
 4. Contract-side items: J5 (a failed batch takes its nonce, `BatchFailed`), C11 (window floor above LAG) and J2 (tolerant dispute ops in a batch) accepted by the coordinator 2026-09-29; the contracts thread changes J2 test-first. The chain fact E6 is pinned on the real contracts (#47).
 

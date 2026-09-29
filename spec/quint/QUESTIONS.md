@@ -297,9 +297,15 @@ inside the windows (`answer_in_window`); (4) the entity's deadline arithmetic pl
 states: the chain's state is one Account and the Entity's is two, so a joint model needs the Account histories of the real
 frames (the next item, "account + chain").
 
-**E7. A route slot is not a private namespace.**
-Peer 2 may put a lock of its own into OUT slot k. Then the forward is refused (`lock_exists`) and the route fails back. The rule
-"pick a free OUT slot" is not modelled; the properties talk about the lock the Entity put there (`outLockOf`).
+**E7. A route slot is not a private namespace. CLOSED (2026-09-29).**
+The inbound slot number and the onward slot number are unrelated: peer 2 may hold OUT slot 1 with a lock of its own, and a command of
+ours may have one in flight. The route (per inbound slot k) carries its own OUT slot `os`: the lowest slot that is free on the planning
+view (committed, in flight, queued) and that no route which is not over holds (`freeOutSlot`). None free: the inbound lock fails back
+at once. A route keeps its slot until both locks are gone and nothing is queued for it (`resetOne`), and the ghost record of what
+peer 2 did with the lock is kept per OUT slot. Options: (a) reuse k (the first model; refused whenever the slot is taken), (b) pick
+the free slot (chosen; a forward is refused only for lack of credit or of a free slot). Tests `onwardSlotIsTheLowestFreeOneTest`,
+`twoForwardsInOneFrameUseTwoSlotsTest`, `slotStaysReservedUntilTheRouteIsOverTest`, `peerHoldsTheLowSlotTest`,
+`ownLockInFlightHoldsTheLowSlotTest`; mutants `fixed-out-slot`, `free-slot-ignores-the-plan`, `free-slot-ignores-reservations`.
 
 **E8. Commands.**
 A signed command names one or more Accounts. It applies to all of them or to none (the nonce is spent only when it applies), it is
@@ -396,6 +402,18 @@ send a replacement at a fresh nonce (above every nonce signed so far, `topSigned
 ones sit above it: it lands as a no-op in the same round and the ones above it land right behind it. Property `nonce_final` (no two signed
 batches with one nonce and different content); mutant `resign-at-a-signed-nonce` (the fresh nonce ignores what is signed) shows the
 burn. Test `neverTwoBatchesForOneNonceTest`.
+
+**F2. After an abort only urgent ops go back at once (coordinator rule, 2026-09-29). CLOSED.**
+The Entity may give a signed draft up (a rolled-back frame, a restart that lost the outbox), but the signed batch is not recalled and
+can still land (F1: it never expires). A dispute step, secret reveal or hash-ladder op runs once or is skipped (J2), so it goes back into
+the draft at once at a fresh nonce; if both copies land it has still run once (`abortedRevealIsSignedAtOnceTest`). A payment, a deposit
+or a reserve move runs every time its batch lands, so it goes back only after the abandoned batch's nonce is used, and after the Entity
+has read `BatchFailed` if the batch failed (`inFlight` and `nothingAlive` keep counting an abandoned batch for those ops:
+`PAY_HELD_AFTER_ABORT`). The model has one op kind for all three (`Pay`: R-SPLIT groups payments, settlements and reserve moves as the
+ones a failed batch does not touch); deposits and reserve moves are the same as payments for this rule, and the mutant
+`abort-requeues-payments-at-once` (the abandoned batch and its replacement both land) violates `pay_once`. Tests
+`abortedPaymentIsNotSignedAgainTest`, `abortedPaymentWaitsForBatchFailedTest`. The Entity layer models no deposit op of its own; the
+rule lives in the J batch layer where the ops are queued.
 
 **J5. A batch that fails still takes its nonce. ACCEPTED (b) by the coordinator (2026-09-29); the contracts thread builds it test-first.**
 Today a batch that reverts (a payment the reserve cannot cover) leaves no trace, its nonce stays open, and every batch above it waits.

@@ -50,6 +50,10 @@ module jbatch {
   // chain: a failure that leaves under 1/32 of the gas reverts the transaction instead of emitting BatchFailed, so a relayer that
   // starves a good batch cannot burn its nonce.
   pure val GAS_GUARD = true
+  // Entity: after it gives a signed draft up, a payment, deposit or reserve move in it stays "in flight" until the batch's nonce is used
+  // (and BatchFailed read, if it failed): the signed batch can still land, and such an op runs every time. Only urgent ops (dispute step,
+  // reveal, hash ladder), which run once or are skipped, go back into the draft at once [coordinator rule, F1].
+  pure val PAY_HELD_AFTER_ABORT = true
 
   // ---------------------------------------------------------------------------------------------------------
   // Domain model
@@ -61,7 +65,7 @@ module jbatch {
   type Kind = | Pay | Reveal | Disp
   type Op = { kind: Kind, amt: int, arr: int, dl: int }         // it reaches the Entity at `arr`; on the chain by `dl` (0 = no deadline)
   type Batch = { nonce: int, ids: Set[int] }
-  type Sub = { b: Batch, at: int, tried: bool, last: int }       // submitted at `at`; `last` = the tick of its latest attempt
+  type Sub = { b: Batch, at: int, tried: bool, last: int, aband: bool }       // submitted at `at`; `last` = the tick of its latest attempt; `aband`: the Entity gave the draft up (the signed copy is still out there)
 
   type Ghost = {
     landed: int,               // batches that landed
@@ -104,7 +108,11 @@ module jbatch {
 
   // the Entity's view of an op
   pure def pending(s: S, i: int): bool = s.arrived.get(i) and not(s.done.get(i)) and not(s.dropped.get(i))
-  pure def inFlight(s: S, i: int): bool = anySub(s, x => alive(s, x) and x.b.ids.contains(i))
+  // After an abort the signed batch can still land. An urgent op (idempotent: it runs once, or is skipped) goes back into the draft at
+  // once; a payment, deposit or reserve move (it runs every time) only once its batch's nonce is used, and once the Entity has read
+  // BatchFailed if the batch failed (PAY_HELD_AFTER_ABORT).
+  pure def inFlight(s: S, i: int): bool =
+    anySub(s, x => alive(s, x) and x.b.ids.contains(i) and (not(x.aband) or (isPay(s, i) and PAY_HELD_AFTER_ABORT)))
 
   // ---------------------------------------------------------------------------------------------------------
   // The chain: processBatch
@@ -145,7 +153,7 @@ module jbatch {
   // a payment whose batch failed is queued again only once the Entity has read the BatchFailed event
   pure def payQueued(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and isPay(s, i) and not(inFlight(s, i)) and s.failSeen.get(i) == s.failedEv.get(i))
 
-  pure def nothingAlive(s: S): bool = not(anySub(s, x => alive(s, x)))
+  pure def nothingAlive(s: S): bool = not(anySub(s, x => alive(s, x) and (not(x.aband) or PAY_HELD_AFTER_ABORT)))
 
   // the highest nonce signed so far, or the stored one: the next fresh nonce is above it
   pure def topSigned(s: S): int = s.sub.foldl(s.cnonce, (m, x) => if (x.b.nonce > m) x.b.nonce else m)
@@ -168,7 +176,7 @@ module jbatch {
   }
 
   pure def submit(s: S, bs: List[Batch]): S =
-    { ...s, sub: s.sub.concat(bs.foldl([], (acc, b) => acc.append({ b: b, at: s.now, tried: false, last: 0 }))) }
+    { ...s, sub: s.sub.concat(bs.foldl([], (acc, b) => acc.append({ b: b, at: s.now, tried: false, last: 0, aband: false }))) }
 
   pure def react(s: S): S = submit(s, plan(s))
 
@@ -255,6 +263,16 @@ module jbatch {
     }
   }
 
+  // The Entity gives a signed draft up (a rolled-back frame, a restart that lost the outbox): the signed batch is not recalled.
+  action abort(j: int): bool = {
+    val x = st.sub[j]
+    all {
+      j >= 0, j < st.sub.length(),
+      alive(st, x), not(x.aband),
+      st' = react({ ...st, sub: st.sub.foldl([], (acc, y) => acc.append(if (y == x) { ...y, aband: true } else y)) })
+    }
+  }
+
   action poison(i: int): bool = all {
     isDisp(st, i), not(st.done.get(i)), not(st.poisoned.get(i)),
     st' = { ...st, poisoned: st.poisoned.set(i, true) }
@@ -280,6 +298,7 @@ module jbatch {
     arriveDue,
     { nondet j = 0.to(9).oneOf() attempt(j) },
     { nondet j = 0.to(9).oneOf() starve(j) },
+    { nondet j = 0.to(9).oneOf() abort(j) },
     { nondet i = OPIDS.oneOf() poison(i) },
     { nondet a = 1.to(2).oneOf() drain(a) },
     { nondet a = 1.to(2).oneOf() refill(a) }

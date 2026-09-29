@@ -265,4 +265,65 @@ module entity_test {
     .then(tick)
     .then(feedList([JDeliver(1), Arrive({ link: IN, tx: HtlcLock({ id: 1, payer: peerSide(IN), amount: 1, hashlock: hashOf(1), deadline: 5 }) })]))
     .expect(and { st.links.get(IN).frozen, not(st.links.get(IN).tip.locks.get(1).on), st.routes.get(1).st == Idle })
+
+  // ---- the Out slot of a route (E7) -----------------------------------------------------------------------------------
+
+  // The first lock to arrive is on In slot 2. The onward lock goes to the lowest free Out slot, which is 1: the two slots are not the
+  // same thing. Peer 2 resolves Out lock 1 and the route (In slot 2) is paid.
+  run onwardSlotIsTheLowestFreeOneTest =
+    init
+    .then(peerLock(2, 1, 4, 1))
+    .expect(and {
+      st.routes.get(2).st == Fwd, st.routes.get(2).os == 1, st.links.get(OUT).inflight == [HtlcLock({ id: 1, payer: ours(OUT), amount: 1, hashlock: hashOf(1), deadline: 3 })],
+      safe
+    })
+    .then(peerAck(OUT))
+    .then(peerResolve(1, 1))
+    .expect(and { st.outRes.get(1), st.known.get(1), st.links.get(IN).inflight == [HtlcResolve({ id: 2, secret: 1 })], safe })
+    .then(peerAck(IN))
+    .expect(and {
+      not(st.links.get(IN).tip.locks.get(2).on), not(st.links.get(OUT).tip.locks.get(1).on),
+      st.routes.get(2).st == Idle, st.routes.get(2).os == 0, not(st.outRes.get(1)), safe
+    })
+
+  // Two locks arrive on In in one frame: they take the two Out slots, one each.
+  run twoForwardsInOneFrameUseTwoSlotsTest =
+    init
+    .then(feedList([
+      Arrive({ link: IN, tx: HtlcLock({ id: 1, payer: peerSide(IN), amount: 1, hashlock: hashOf(1), deadline: 5 }) }),
+      Arrive({ link: IN, tx: HtlcLock({ id: 2, payer: peerSide(IN), amount: 1, hashlock: hashOf(2), deadline: 5 }) })
+    ]))
+    .expect(and {
+      st.routes.get(1).os == 1, st.routes.get(2).os == 2, st.links.get(OUT).inflight.length() == 2, st.gh.forwards == 2, safe
+    })
+
+  // A route that failed back still holds its Out slot until it is over: the next lock does not take it in the same frame.
+  run slotStaysReservedUntilTheRouteIsOverTest =
+    init
+    .then(peerLock(1, 1, 4, 1)).then(peerAck(OUT))
+    .then(peerCancel(1))                                               // peer 2 gives up: the onward lock is gone, the route fails back
+    .then(peerLock(2, 2, 4, 1))
+    .expect(and { st.routes.get(1).st == Back, st.routes.get(1).os == 1, st.routes.get(2).st == Fwd, st.routes.get(2).os == 2, safe })
+
+  // Peer 2 holds Out slot 1 with a lock of its own: the onward lock goes to slot 2, and peer 2's lock is left alone.
+  run peerHoldsTheLowSlotTest =
+    init
+    .then(cmd(1, [{ link: OUT, tx: SetCredit({ by: ours(OUT), limit: 2 }) }])).then(peerAck(OUT))   // we extend credit to peer 2: it can lock
+    .expect(st.links.get(OUT).tip.limitRight == 2)
+    .then(peerAnyLock(OUT, 1, 1, 5))
+    .expect(and { st.links.get(OUT).tip.locks.get(1).on, st.links.get(OUT).tip.locks.get(1).payer == peerSide(OUT) })
+    .then(peerLock(1, 2, 4, 1))
+    .expect(and { st.routes.get(1).st == Fwd, st.routes.get(1).os == 2, st.links.get(OUT).inflight.length() == 1, safe })
+
+  action peerAnyLock(l: int, k: int, sec: int, dl: int): bool =
+    feed(Arrive({ link: l, tx: HtlcLock({ id: k, payer: peerSide(l), amount: 1, hashlock: hashOf(sec), deadline: dl }) }))
+
+  // A lock of ours on Out is in flight (our own payment, sent by a command) and not yet part of the committed state: the planning view
+  // holds it already, so the onward lock goes to slot 2. Reading the committed state alone would offer slot 1 and be refused.
+  run ownLockInFlightHoldsTheLowSlotTest =
+    init
+    .then(cmd(1, [{ link: OUT, tx: HtlcLock({ id: 1, payer: ours(OUT), amount: 1, hashlock: hashOf(2), deadline: 5 }) }]))
+    .expect(and { not(st.links.get(OUT).tip.locks.get(1).on), st.links.get(OUT).inflight.length() == 1 })
+    .then(peerLock(1, 1, 4, 1))
+    .expect(and { st.routes.get(1).st == Fwd, st.routes.get(1).os == 2, st.links.get(OUT).mempool.length() == 1, safe })
 }
