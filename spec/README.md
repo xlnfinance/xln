@@ -21,9 +21,15 @@ spec/
   dispute/bugs/*.scm       planted dispute bugs
   entity/consensus.scm     Entity consensus: leader, quorum, own proposal vs certified frame (R-E3)
   entity/bugs/*.scm        planted consensus bugs
+  entity/frame.scm         the Entity frame: four phases, one view, hooks before txs, first-touch proposals
+  entity/bugs/*.scm        (also the frame's planted bugs)
+  runtime/tick.scm         the Runtime tick: apply, commit, flush, crash, replay; what may halt
+  runtime/bugs/*.scm       planted Runtime bugs
   j/batch.scm              the J batch: atomic chain, sealing, abort, quarantine recovery, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
+  entity-frame.check.scm   entry point: check the Entity frame page
+  runtime.check.scm        entry point: check the Runtime page
   j-batch.check.scm        entry point: check the J batch page
   entity-consensus.check.scm entry point: check the Entity consensus page
   dispute.check.scm        entry point: check the dispute page

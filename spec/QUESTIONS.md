@@ -238,6 +238,44 @@ Hanko bytes, `heldQuorum` (signatures before the frame), J-prefix rounds inside 
 see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm). Bounds: one height, one
 tx each for A and B. Capacity: 778 states, 2565 transitions, about 15 seconds.
 
+## Entity frame (`entity/frame.scm`)
+
+**Q-F-1. Phases and the one view (lessons R-E1, Q-E1).**
+The frame is four phases: arrivals, hooks, txs, proposals. lessons R-E1 lists three; xln.ts splits the
+third (post-tx work, then Account proposals). Choice: four, and ONE view: a tx is admitted against an
+Account that already holds every tx staged earlier in the frame (xln.ts `enqueueTo` 25835 does this
+today, but no rule states it). Planted bug `two-views`: two payments that each fit are both admitted.
+Source: lessons R-E1, Q-E1; xln.ts 26673-26746, 25835, 17273.
+
+**Q-F-2. Arrivals are applied first, wherever they sit in the input (finding about xln.ts).**
+xln.ts applies arrivals up front only to build the proposal worklist; the tx loop starts from the ORIGINAL
+replicas and each accountInput tx applies at its own position (26641, 26595), so R-E1 is only partly
+literal. Choice: arrivals first, always, and the property is that moving arrivals among the txs does not
+change the frame. Planted bug `arrivals-in-place` breaks it.
+Source: xln.ts 26595-26641, lessons R-E1.
+
+**Q-F-3. Hooks before the frame's own txs (R-E2).**
+A wake's returned Account txs are queued before the frame's own txs, so they win contested room.
+Planted bug `txs-before-hooks`.
+Source: lessons R-E2; xln.ts 18098, 23421.
+
+**Q-F-4. Proposal order (R-E4).**
+Accounts touched in this frame propose in first-touch order; the rest (staged earlier, waiting for an
+ack) follow in ascending id (xln.ts 26717-26719). Planted bug `sorted-proposals`.
+Source: lessons R-E4; xln.ts 26622, 26717.
+
+**Q-F-5. Refusal.**
+A tx that does not fit is refused with notice and the frame goes on (xln.ts `foldEvicting` 26595); the
+fatal errors that refuse the whole input (openAccount, lending_entity, entity_invariant) are the Runtime
+page's halt classes. The property "no tx is lost" is: every admitted tx is sent, in flight or staged.
+
+**Q-F-6. Not in the page.**
+The book phase (cancels, then matcher: v2), settlements materialised after the txs, several tokens,
+holds for HTLC locks and swaps (they are clauses of money/ledger.scm), an Account with a pending frame
+that receives a new frame the same height (account/frames.scm). Bounds: two Accounts, payments of 1,
+cap 1, at most two frames, four inputs in any order. Capacity: 1770 states, 2228 transitions, about
+30 seconds.
+
 ## J batch (`j/batch.scm`)
 
 **Q-J-1. Partial application (open question 4 of the xln.ts review).**
@@ -285,6 +323,42 @@ Bounds: three ops (deposit, finalize on an Account with an open HTLC deadline, d
 one abort, time 0..2, deadline 1, no chain faults (`faults` 0). With one fault (the chain drops or
 reverts a batch) the page exceeds the 300 s budget. Capacity: 5262 states, 17049 transitions, about
 85 seconds.
+
+## Runtime (`runtime/tick.scm`)
+
+**Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
+Choice: only after the frame's WAL row is committed (xln.ts `commitRuntimeFrame` 42045, outputs leave
+after the row). A crash between apply and commit must not leave a peer with an output of a frame
+that no longer exists. Planted bug `send-before-commit`.
+
+**Q-R-2. Which errors halt (R-X1, open question 11).**
+xln.ts halts on `entity_invariant` or `accountThrew` (`haltsRuntime` 40293), but many `invariant(...)`
+sites are peer-reachable (J-range `j_event` rejections, `runtimeOutputTx` authority errors, fatal
+openAccount, `lending_entity`, SETTLEMENT_* checks), so a peer can halt a Runtime. Choice: halt only on
+local corruption; every peer-reachable failure is rejected in place with a rejection to the peer.
+The closed list of halting errors (lessons Q-R1) does not exist in xln.ts; the spec's rule is a
+property, not a list. Planted bug `bad-halts`.
+Source: lessons R-X1, Q-R1; xln.ts 40293, 40449, 20933.
+
+**Q-R-3. Recovery is replay, with the row's own clock.**
+`recoverRuntime` (42158) replays each row with `replay: true` at the row's timestamp and checks the
+frame hash and the outbox. Choice: the recovered state must equal the committed state, and outputs of
+committed rows that never left are sent again (peers deduplicate: the Account page re-acks a duplicate).
+Planted bug `replay-wall-clock`.
+
+**Q-R-4. The frame timestamp.**
+max(runtime timestamp, input timestamp) (`frameTimestamp` 40777); never back. Planted bug
+`raw-input-timestamp`. Which clock judges timeouts (lessons R-X2, open question 15) is not decided
+here: disputes use chain time, HTLC expiry uses the Account frame time plus the J height (see
+entity/routing.scm).
+
+**Q-R-5. An input the crash caught before its commit.**
+It comes back from the network (peers resend; Account page). Planted bug `drop-uncommitted-input`.
+
+**Q-R-6. Not in the page.**
+The entity-height durability barrier, atomic cross-j pairs, the bounded drain of local commands (cycle
+detection), ingress limits (mempool_full, frame_timestamp_invalid), Runtime txs (`observeJRange` etc.),
+several Entities. Bounds: four inputs (good, bad, good, fatal), one crash. Capacity: 162 states.
 
 ## Checker (`lib/check.scm`)
 
