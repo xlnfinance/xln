@@ -1,0 +1,16 @@
+{
+  "name": "xln-spec",
+  "private": true,
+  "type": "module",
+  "description": "The xln protocol spec, written in Arrival (vendored under arrival/), and its MCP server.",
+  "scripts": {
+    "setup": "cd arrival && pnpm install --frozen-lockfile && pnpm build",
+    "check": "node arrival/packages/arrival-cli/dist/cli.js run account-frames.check.scm",
+    "test": "node test.mjs",
+    "mcp": "node mcp/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.25.0"
+  }
+}

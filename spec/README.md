@@ -1,0 +1,139 @@
+# xln spec
+
+The xln protocol spec, written in [Arrival](https://github.com/here-build/arrival): a sandboxed
+R7RS Scheme for agents. A spec page describes the protocol as rules over a world and properties
+that must hold; it does not implement it. An explicit-state checker walks every reachable world of
+a page and reports the first property that breaks, with the trace that breaks it.
+
+## Layout
+
+```
+spec/
+  arrival/                 Arrival, vendored from here-build/arrival@6ba2b54f (see "Vendored Arrival")
+  arrival.config.json      arms define/overridable for the CLI (run from spec/)
+  lib/vocabulary.scm       `rule` and `property`: how a page names its parts
+  lib/check.scm            `check`: breadth-first walk of every reachable world
+  account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
+  account/bugs/*.scm       deliberately broken variants; the checker must catch each
+  account-frames.check.scm entry point: check the Account frames page
+  test.mjs                 runs the page and every bug variant, asserts the verdicts
+  mcp/server.mjs           MCP server: lets an agent run and check Arrival programs here
+```
+
+## Run
+
+Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
+
+```sh
+cd spec
+npm install            # or: bun install    (MCP server dependencies)
+npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
+npm run check          # {:ok #t :states 90 :transitions 146}
+npm test               # the page passes; each bug variant fails with its property
+```
+
+Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
+`(require "lib/check.scm")` resolves against the directory of the entry file, so run from `spec/`.
+
+## Writing a page
+
+A page exports one dict for the checker (see the end of `account/frames.scm`):
+
+```scheme
+(define account-frames
+  (dict :init init              ; the starting world
+        :next next              ; world -> labelled successor worlds, built by `successors` from rules
+        :invariants invariants  ; properties that hold in every reachable world
+        :at-rest at-rest))      ; properties that hold wherever no rule applies
+```
+
+Rules and properties are named data:
+
+```scheme
+(rule "propose" (w side)
+  (when (can-propose? w side))
+  (then (propose w side)))
+
+(property "committed histories agree: one extends the other" (w)
+  (or (extends? (head-of w :left) (head-of w :right))
+      (extends? (head-of w :right) (head-of w :left))))
+```
+
+- `(when …)` is the guard, `(then …)` the next world. Both are pure; there is no `set!`.
+- The walk is breadth-first, so a reported trace is a shortest one.
+- Model bounds are `define/overridable` with an `s/*` schema, so a run can widen them without editing
+  the page.
+- Numbers are exact and unbounded: `(- (expt 2 256) 1)` is exact. Use them for amounts.
+
+## Vendored Arrival
+
+`arrival/` is here-build/arrival at 6ba2b54f (MIT), imported verbatim in one commit. Local patches,
+each with tests, sit in later commits so they can be sent upstream:
+
+1. Macros through the public `exec`: `syntax-rules` templates that used a kernel keyword such as
+   `lambda` failed with `Unbound variable Symbol(#:lambda)` (`src/eval/Resolver.ts`).
+2. Keywords in macro templates (`:name`) are no longer renamed by hygiene (`src/eval/syntax-rules.ts`).
+3. Static validation sees names bound by `define/overridable` (`src/static-validation/`).
+4. Exact integers are bigints: exact arithmetic never overflows; the reader, `number->string`, the
+   JS membrane and the zod codecs carry bigints (`src/values/`, `src/env/r7rs/numeric.ts`). Exact
+   vs inexact comparison is exact, which also fixes chibi r7rs-tests line 811.
+5. `vendor/chibi-scheme/` holds the two chibi test files (BSD-3) the conformance suite reads.
+
+Arrival suite after the patches: 5538 pass, 6 fail. The 6 are the `grammar-ebnf` package-export
+tests, which fail the same way on upstream 6ba2b54f.
+
+Known gap, upstream too: a `define` produced by a macro expansion is not visible to later top-level
+forms. Pages define with plain `define`.
+
+## MCP server
+
+`mcp/server.mjs` is a stdio MCP server named `arrival-xln-spec`. Tools:
+
+| tool             | does                                                                  |
+|------------------|-----------------------------------------------------------------------|
+| `arrival_run`    | runs a `.scm` file under `spec/`, or a code snippet evaluated from `spec/` |
+| `arrival_check`  | static diagnostics (unbound names, misuse, each with its fix), no evaluation |
+| `arrival_guide`  | the Arrival language card, then this README                          |
+
+Paths are confined to `spec/`. It shells out to the built CLI, so run the setup above first.
+
+### Claude Code
+
+The repo's `.mcp.json` already registers it as `arrival`, relative to the repo root. After
+`npm install && npm run setup` in `spec/`, start Claude Code from the repo root and approve the
+server when asked; `/mcp` shows its state. To add it yourself instead:
+
+```sh
+claude mcp add arrival -- node spec/mcp/server.mjs            # this checkout, only you
+claude mcp add -s user arrival -- node /abs/path/og_xln/spec/mcp/server.mjs   # every project
+```
+
+### Claude Desktop
+
+Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows:
+`%APPDATA%\Claude\`), use absolute paths, then restart the app:
+
+```json
+{
+  "mcpServers": {
+    "arrival": {
+      "command": "node",
+      "args": ["/abs/path/og_xln/spec/mcp/server.mjs"]
+    }
+  }
+}
+```
+
+If `node` is not on the app's PATH, put the absolute path of `node` in `command`.
+
+### Checking it works
+
+Ask the agent to call `arrival_run` with `file: "account-frames.check.scm"`; it should print
+`{:ok #t :states 90 :transitions 146}`. Without an MCP client:
+
+```sh
+npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
+```
+
+If the server fails to start, the usual cause is a missing build: `arrival/packages/arrival-cli/dist/cli.js`
+must exist (`npm run setup`), and `spec/node_modules` must exist (`npm install`).

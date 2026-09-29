@@ -6,6 +6,13 @@
       "env": {
         "AST_GREP_PATH": "ast-grep"
       }
+    },
+    "arrival": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "spec/mcp/server.mjs"
+      ]
     }
   }
 }
