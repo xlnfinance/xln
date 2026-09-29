@@ -23634,12 +23634,13 @@ const paybookTailFollowups = (f: PaybookFlow, frames: readonly CommittedHtlcFram
 const queueReturned = (d: Draft, target: AccountTxTarget): Draft => admitReturned(d, target) ?? d;
 /**
  * og applyAccountInput enqueue of one returned tx: the Draft with it queued, or undefined when the Account does not
- * admit it.
+ * admit it. A frozen Account (preparing or disputed) takes no new work, so it does not admit either: the caller must
+ * not read that as the tx being queued (admitAt reports ok for a frozen Account and drops the tx silently).
  */
 const admitReturned = (d: Draft, target: AccountTxTarget): Draft | undefined => {
   const peer = target.accountId.toLowerCase() as EntityId;
   const child = d.accountReplicas.get(peer);
-  if (child === undefined) return undefined;
+  if (child === undefined || !isLive(child)) return undefined;
   const admitted = admitAt(child, [target.tx], d.state.id, L0_CLOCK);
   return admitted.ok ? { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value) } : undefined;
 };
