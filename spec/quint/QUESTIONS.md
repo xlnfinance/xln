@@ -239,33 +239,36 @@ can enforce; the deployment number is "processing < one tick"). The two replicas
 peer frame is one transaction, validated, applied and acked at once. Not modelled: several routes per slot, tokens, boards, the
 J batch (jbatch, next), several inputs per frame, an offline Entity (runtime.qnt), `SetCredit`, swaps.
 
-**E3. The deadline arithmetic, derived.**
+**E3. The deadline arithmetic, derived. CLOSED.**
 Let LAG be the ticks a J transaction needs to be included, and the ticks a J event needs to reach the Entity. A payee that knows
 a secret only off-chain must put it on the chain by the deadline, so it starts a dispute at deadline - ESC with ESC >= LAG
 (`escalation-too-late`: escalating at the deadline puts the secret there one tick late). An onward lock must end HOP before the
 inbound one: peer 2 may resolve at the last tick of its lock, the hub learns it then, and needs ESC ticks after that
 (HOP >= ESC; `forward-deadline-equal` and its consequence test show the loss with HOP = 0). The model also passes with HOP = 1 =
 LAG. The spec value is **HOP = 2 = 2 * LAG**: one tick of slack for the Entity's reaction, which the model sets to zero. The
-inequalities are the rule; the numbers are deployment parameters. Source: R-P2, R-P3.
+inequalities are the rule; the numbers are deployment parameters. Decision: HOP = 2 * LAG is a named policy parameter, not a
+protocol constant. Source: R-P2, R-P3.
 
-**E4. When a forwarded route may be failed back.**
+**E4. When a forwarded route may be failed back. CLOSED.**
 Not when the onward deadline passes: peer 2 may have put the secret on the chain by then (inclusion time <= deadline) and the
 Entity reads the event up to LAG later. The route fails back when the onward lock is gone from a signed state (a newer proof
 without it beats any older one), or when the deadline + LAG has passed with the secret still unknown, and never while the secret
-is known (that is a claim, not a failure). `failback-without-lag` with `lateRevealCannotBeMissedTest`.
+is known (that is a claim, not a failure). `failback-without-lag` with `lateRevealCannotBeMissedTest`. Decision: the hub waits one LAG after the onward deadline before it fails back.
 
-**E5. What a dispute carries, and until when.**
+**E5. What a dispute carries, and until when. CLOSED.**
 Every known secret that opens a payee clause of the proof the Entity stands on: at the start, and again in every later frame
 for a secret learned afterwards (`publishFor`, one rule with two moments). The proof it stands on is its tip when it reads the
 dispute (its own start or the peer's). `publish-first-slot-only` shows the loss (the second route's secret is not on the chain).
-Source: #37, R-P3.
+Decision: every known payee secret goes into a dispute. Source: #37, R-P3.
 
-**E6. What the model needs from the chain (an interface, not a proof).**
+**E6. What the model needs from the chain (an interface, not a proof). CLOSED on the chain side.**
 A clause pays its payee iff its secret is on the chain by the clause's deadline and the proof holding the clause is the one the
 dispute settles; a secret on the chain pays nobody by itself (there must be a dispute on that Account whose proof holds the
 clause); starting the dispute after the deadline still pays a clause whose secret was revealed in time. chain.qnt has the first
-two (`revealedClausePaysTest`, `lateSecretPaysNothingTest`); the third is used by the Entity model (a late start is fine as long
-as the reveal was on time) and has no test there yet. To close by composing entity and chain.
+two (`revealedClausePaysTest`, `lateSecretPaysNothingTest`); the third is `lateStartStillPaysARevealedClauseTest` (a hub fixture: the
+payee reveals, four ticks pass, the starter starts with the older proof; finalize pays the payee 3, no debt), with the mutant
+`reveal-counts-only-if-start-in-time` killed by it. Decision: the contracts thread pins the same fact on the real contracts; the
+Entity model relies on it. What remains is composing entity and chain in one model (next), so the two are checked together.
 
 **E7. A route slot is not a private namespace.**
 Peer 2 may put a lock of its own into OUT slot k. Then the forward is refused (`lock_exists`) and the route fails back. The rule

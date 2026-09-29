@@ -7,10 +7,10 @@ Handoff format: what is done per layer, what is next, how to pick up.
 | layer | file | state |
 |---|---|---|
 | Account | `account.qnt` | v1 done: two parties, one token, credit, HTLC clauses, frame protocol with collision, resend, loss. 14 scenario tests, invariants P2 and P4a-c by simulation, 14 mutants killed |
-| J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 19 scenario tests, P1 P3 by simulation, 20 mutants killed. Apalache: see Evidence |
+| J / contracts, disputes | `chain.qnt` | v1 done: one Account, one token: reserves, collateral, ondelta, epoch (C1), debt, secret registry, dispute start / counter / three finalize paths, H1 wait, H2 floor, payout with shortfall. 21 scenario tests, P1 P3 by simulation, 22 mutants killed. Apalache: see Evidence |
 | Entity | `entity.qnt` | v1 done: a hub with two Accounts, both peers adversarial: the four-phase frame, routing with the deadline arithmetic, fail back, escalation and secret publication, freeze on a dispute, atomic commands, collisions. 14 scenario tests, 9 properties by simulation, 16 mutants killed. Simulation only (one state record) |
 | Runtime | `runtime.qnt` | not started |
-| Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 13 scenario tests, 6 properties by simulation, 18 mutants killed. S3 (hostage window) closed: presign+fold adopted |
+| Settlement, epoch | `settle.qnt` | v1 done: the off-chain epoch lifecycle over `chain.qnt`: Pay / Lock / Rebase frames, N1 pause, the update (cooperative settlement) with C3 nonce floor, presign+fold vs rebase mode. 15 scenario tests, 6 properties by simulation, 20 mutants killed. S3 closed: presign+fold, the baseline rides every frame at nonce + 3 |
 
 ## Evidence
 
@@ -19,11 +19,11 @@ Handoff format: what is done per layer, what is next, how to pick up.
 - Apalache: `quint verify account.qnt --invariant credit_holds --max-steps 3` does not finish inside 250 s at the
   default bounds (`quint verify` reaches "State 3" after ~8 minutes). The Account frame protocol needs about 9 steps to
   reach a collision, so it is checked by simulation, not by Apalache. Apalache is for the smaller models that follow.
-- `MODULES=chain ./check.sh`: typecheck, 19 scenario tests, `safe` over 1500 traces of 16 steps (~22 s), 7 witnesses reached.
-  `MUTANT_STEPS=14 MUTANT_SAMPLES=2000 python3 mutants/run.py chain`: 20 of 20 killed (6 by invariant, 14 by scenario test).
-- `MODULES=settle ./check.sh`: typecheck, 13 scenario tests, `wsafe` (chain's `safe` plus `no_dead_commit`, `no_lost_pay`,
+- `MODULES=chain ./check.sh`: typecheck, 21 scenario tests, `safe` over 1500 traces of 16 steps (~22 s), 7 witnesses reached.
+  `MUTANT_STEPS=14 MUTANT_SAMPLES=2000 python3 mutants/run.py chain`: 22 of 22 killed (8 by invariant, 14 by scenario test; the last added: a clause revealed in time pays even when the dispute starts late).
+- `MODULES=settle ./check.sh`: typecheck, 15 scenario tests, `wsafe` (chain's `safe` plus `no_dead_commit`, `no_lost_pay`,
   `claims_conserved`, `book_enforceable`, `hostage_free`, `baseline_clears`) over simulated traces of 25 steps, all settle witnesses reached.
-  `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 18 of 18 killed (7 by invariant, 11 by scenario test).
+  `MUTANT_STEPS=25 MUTANT_SAMPLES=1500 python3 mutants/run.py settle`: 20 of 20 killed (6 by invariant, 14 by scenario test).
   One invariant hunt (`forged-baseline-invariant`) needs 20000 traces of 30 steps: the schedule that reaches it is long.
 - `MODULES=entity ./check.sh`: typecheck, 14 scenario tests, `safe` (no_peer_halt, no_stranded, deadline_chain, dispute_carries_all,
   no_needless_dispute, no_frame_on_frozen, cmd_atomic, credit_holds, route_safe) over 500 traces of 25 steps, 11 witnesses reached.

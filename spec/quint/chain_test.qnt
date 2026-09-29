@@ -136,6 +136,15 @@ module chain_test {
     .then(startWith(Left, 1, false, 0, false))
     .then(finalizeWith(Right, 0, 0, false))
     .expect(and { money.res == Map(Left -> 0, Right -> 3), money.debt == Map(Left -> 0, Right -> 0), safe })
+  // The dispute may start after the deadline: what counts is when the secret reached the chain (E6 in QUESTIONS.md).
+  run lateStartStillPaysARevealedClauseTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(learn(Right))
+    .then(publish(Right))
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Right, 0, 0, false))
+    .expect(and { money.res == Map(Left -> 0, Right -> 3), money.debt == Map(Left -> 0, Right -> 0), safe })
   // A secret shown after the deadline pays nobody: the payer keeps its money.
   run lateSecretPaysNothingTest =
     initFrom(hub, Right, 1, 0, 2)

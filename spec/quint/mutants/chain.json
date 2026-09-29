@@ -172,6 +172,14 @@
       "old": "startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)",
       "new": "startWith(honest, tipId(arena, acct.epoch) - 1, knows.get(honest) != 0, 0, false)",
       "killedBy": "test:starterUsesNewestProofTest"
+    },
+    {
+      "id": "reveal-counts-only-if-start-in-time",
+      "why": "a secret on the chain in time pays only when the dispute also started in time",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg <= r.clause.deadline and d.t0 <= r.clause.deadline,",
+      "killedBy": "test:lateStartStillPaysARevealedClauseTest"
     }
   ]
 }
