@@ -42,6 +42,8 @@ transaction ids are left out). The stored `disputeHash` equals `Account.encodeDi
 
 `reopen` is the same account after the epoch-advancing finalize (a timeout finalize of a dispute started at nonce 7 leaves the stored nonce at 8, epoch 2). Attempts to reopen at the stored nonce, at the old baseline nonce, and to settle at the stored nonce all revert `E2()`; a dispute started at nonce 9 is accepted. So the reopened baseline proof needs a nonce strictly above the chain's stored nonce, whatever the off-chain frame height is.
 
+`baseline.json` pins the baseline rule: a settlement's Lock frame carries a co-signed proof for epoch + 1 (offdelta 0, no clauses, a nonce above the chain's), signed before the settlement executes. `afterSettlement`: the baseline for epoch 1 (nonce 6) is signed at epoch 0, the settlement runs (epoch 1, stored nonce 5), and a dispute started with the baseline is accepted. `afterTimeoutFinalize`: the same after a timeout finalize (epoch 1, stored nonce 8); the baseline at nonce 9 starts a dispute, one at the stored nonce 8 reverts `E2()`. `foldedOffdelta`: an Account with offdelta -30 pays Left 970 / Right 1030 / collateral 0 whether the -30 is disputed as offdelta or folded into `ondeltaDiff` by a settlement and the offdelta-0 baseline is disputed.
+
 ## Not covered
 
 - `FinalDisputeProof` and `CooperativeDisputeProof` payloads exist in the library but nothing verifies them

@@ -15,7 +15,7 @@ const word = (returnData: string): string => ethers.hexlify(coder.decode(["bytes
 describe("vectors", () => {
   test("committed files equal a fresh run against the deployed bytecode", async () => {
     const fresh = JSON.parse(JSON.stringify(await allVectors()));
-    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle") });
+    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline") });
   }, 120_000);
 
   test("batch payload: packed(domain, chainId, depository, entityId, encodedBatch, nonce)", () => {
@@ -47,6 +47,16 @@ describe("vectors", () => {
     expect(reopen.startAtOldBaselineNonce).toBe("REVERT E2()");   // the old baseline nonce is below
     expect(reopen.settleAtStoredNonce).toBe("REVERT E2()");       // cooperative updates too
     expect(reopen.startAboveStoredNonce).toBe("ok");
+  });
+
+  test("baseline: a proof signed for epoch + 1 before the settlement or finalize starts a dispute after it", () => {
+    const { afterSettlement: s, afterTimeoutFinalize: f, foldedOffdelta: o } = committed("baseline");
+    expect([s.baseline.epoch, s.settle, s.epoch, s.storedNonce, s.start]).toEqual(["1", "ok", "1", "5", "ok"]);
+    expect([f.firstDisputeStart, f.finalize, f.epoch, f.storedNonce]).toEqual(["ok", "ok", "1", "8"]);
+    expect([f.baseline.epoch, f.startAtStoredNonce, f.startAboveStoredNonce]).toEqual(["1", "REVERT E2()", "ok"]);
+    const payout = (r: { L: string; R: string; collateral: string }) => [r.L, r.R, r.collateral];
+    expect(payout(o.folded)).toEqual(payout(o.unfolded));
+    expect(payout(o.folded)).toEqual(["970", "1030", "0"]);
   });
 
   test("lifecycle: production's own hashes match ours, and the epoch advances on settle and finalize", () => {

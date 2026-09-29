@@ -1,0 +1,47 @@
+{
+  "afterSettlement": {
+    "baseline": {
+      "epoch": "1",
+      "nonce": 6,
+      "proofBodyHash": "0x233ce81593ac1b93643cd95406c57495be27a46720b3fdb15eeef12549ba0900",
+      "proofHash": "0x27bca171d97188c4aa489f8662e335243e8331e6efdd911caa4f04133bd660d3"
+    },
+    "settle": "ok",
+    "epoch": "1",
+    "storedNonce": "5",
+    "start": "ok"
+  },
+  "afterTimeoutFinalize": {
+    "firstDisputeStart": "ok",
+    "finalize": "ok",
+    "epoch": "1",
+    "storedNonce": "8",
+    "baseline": {
+      "epoch": "1",
+      "nonce": 9,
+      "proofBodyHash": "0x6715fc413cafab416edb4209653a162411473d9ce5933576828b7166f896d994",
+      "proofHash": "0xcd589e10b047a15df98bcce9228fea5dd2e8388d3d3731910b9954ecf8f01f6c"
+    },
+    "startAtStoredNonce": "REVERT E2()",
+    "startAboveStoredNonce": "ok"
+  },
+  "foldedOffdelta": {
+    "unfolded": {
+      "started": "ok",
+      "finalized": "ok",
+      "L": "970",
+      "R": "1030",
+      "collateral": "0",
+      "nonce": "2"
+    },
+    "folded": {
+      "settled": "ok",
+      "started": "ok",
+      "finalized": "ok",
+      "L": "970",
+      "R": "1030",
+      "collateral": "0",
+      "nonce": "3"
+    }
+  }
+}

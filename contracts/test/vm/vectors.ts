@@ -203,8 +203,81 @@ export const lifecycleVectors = async (rig: Rig) => {
   };
 };
 
+/**
+ * The spec's baseline rule: a settlement's Lock frame carries a co-signed baseline proof for epoch + 1 (offdelta 0, no
+ * clauses, a nonce above the chain's), signed BEFORE the settlement executes, so the honest side always holds a proof it
+ * can start a dispute with. Each scenario signs the baseline first, advances the epoch, then starts with it.
+ */
+export const baselineVectors = async () => {
+  const at = (rig: Rig, nonce: number, epoch: bigint, offdelta = 0n) => {
+    const body = rig.body(offdelta);
+    return { body, nonce, epoch, hash: rig.proofHash(epoch, nonce, true, body), sig: rig.proofSig(rig.L, epoch, nonce, true, body) };
+  };
+  const startWith = (rig: Rig, b: ReturnType<typeof at>) => rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig);
+  const timeout = (rig: Rig, nonce: number, body: ReturnType<Rig["body"]>) =>
+    rig.finalize(rig.R, rig.L, { nonce, body, startedByLeft: false }, { nonce, proposerIsLeft: true, body, sig: "0x" });
+  const record = (b: ReturnType<typeof at>) => ({ epoch: b.epoch.toString(), nonce: b.nonce, proofBodyHash: bodyHash(b.body), proofHash: b.hash });
+
+  // 1. After a cooperative settlement (the epoch advances 0 -> 1; the chain's nonce becomes the settlement's, 5).
+  const a = await boot("baseline-settle");
+  await a.fundedAccount();
+  const diffs = [{ tokenId: a.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+  const baselineA = at(a, 6, (await a.epochOf()) + 1n);
+  const settleA = await a.settle(a.L, a.R, 5, diffs, a.coopSig(a.R, await a.epochOf(), 5, diffs));
+  a.at(10);
+  const afterSettle = { epoch: (await a.epochOf()).toString(), storedNonce: (await a.chain.getAccountInfo(a.L.id, a.R.id)).nonce.toString() };
+  const startA = await startWith(a, baselineA);
+
+  // 2. After a timeout finalize (dispute started at nonce 7, so the chain's nonce becomes 8 and the epoch 1).
+  const b = await boot("baseline-finalize");
+  await b.fundedAccount();
+  const dispute = b.body(-10n);
+  const first = await b.start(b.R, b.L, 7, true, dispute, b.proofSig(b.L, await b.epochOf(), 7, true, dispute));
+  const baselineB = at(b, 9, (await b.epochOf()) + 1n);
+  const atStored = at(b, 8, baselineB.epoch);
+  b.at(130);
+  const finalized = await timeout(b, 7, dispute);
+  b.at(140);
+  const afterFinalize = { epoch: (await b.epochOf()).toString(), storedNonce: (await b.chain.getAccountInfo(b.L.id, b.R.id)).nonce.toString() };
+  const startAtStored = await startWith(b, atStored);
+  const startB = await startWith(b, baselineB);
+
+  // 3. Folding offdelta into ondeltaDiff leaves the payout unchanged: the same Account, offdelta -30, settled by a
+  //    dispute on the old state (epoch 0) and by folding the -30 into ondelta then disputing the offdelta-0 baseline.
+  const payout = async (folded: boolean) => {
+    const rig = await boot(folded ? "baseline-folded" : "baseline-unfolded");
+    await rig.fundedAccount();                                    // Left 900, Right 1000, collateral 100 (ondelta 100)
+    if (!folded) {
+      const old = at(rig, 1, await rig.epochOf(), -30n);
+      rig.at(10);
+      const started = await startWith(rig, old);
+      rig.at(140);
+      const done = await timeout(rig, 1, old.body);
+      return { started, finalized: done, ...json(await rig.reserves()) as object };
+    }
+    const fold = [{ tokenId: rig.TOKEN, leftDiff: 0n, rightDiff: 0n, collateralDiff: 0n, ondeltaDiff: -30n }];
+    const baseline = at(rig, 2, (await rig.epochOf()) + 1n);
+    const settled = await rig.settle(rig.L, rig.R, 1, fold, rig.coopSig(rig.R, await rig.epochOf(), 1, fold));
+    rig.at(10);
+    const started = await startWith(rig, baseline);
+    rig.at(140);
+    const done = await timeout(rig, 2, baseline.body);
+    return { settled, started, finalized: done, ...json(await rig.reserves()) as object };
+  };
+
+  return {
+    afterSettlement: { baseline: record(baselineA), settle: settleA, ...afterSettle, start: startA },
+    afterTimeoutFinalize: {
+      firstDisputeStart: first, finalize: finalized, ...afterFinalize,
+      baseline: record(baselineB), startAtStoredNonce: startAtStored, startAboveStoredNonce: startB,
+    },
+    foldedOffdelta: { unfolded: await payout(false), folded: await payout(true) },
+  };
+};
+
 export const allVectors = async () => {
   const functions = await functionVectors(await boot("vectors-functions"));
   const lifecycle = await lifecycleVectors(await boot("vectors-lifecycle"));
-  return { functions, lifecycle };
+  const baseline = await baselineVectors();
+  return { functions, lifecycle, baseline };
 };
