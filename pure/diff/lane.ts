@@ -302,7 +302,7 @@ const laneOf = (row: NetworkOutput): string => {
  * rewrite commits) is not batched: two Account messages one Entity frame sends the same peer, at different heights, are
  * two rows there and one input on the wire.
  */
-const batchedByLane = (rows: readonly NetworkOutput[]): readonly NetworkOutput[] =>
+export const batchedByLane = (rows: readonly NetworkOutput[]): readonly NetworkOutput[] =>
   rows.reduce<readonly NetworkOutput[]>((batched, row) => {
     const at = txOnly(row) ? batched.findIndex((b) => txOnly(b) && laneOf(b) === laneOf(row)) : -1;
     const joined = (b: NetworkOutput): NetworkOutput =>
@@ -559,7 +559,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
       // the rewrite may commit a frame og halts on only as a named departure, and only doing what it names
       const departure = haltDeparture(ogHalt);
       if (departure === undefined) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
-      const wrong = departure.instead(committed.value === null ? rt : committed.value.runtime);
+      const wrong = departure.instead(committed.value === null ? rt : committed.value.runtime, ogHalt);
       if (wrong !== null) return [`${label} ${departure.name}: ${wrong}`];
       coverage.departures.push(`${label} ${departure.name}`);
       return [];

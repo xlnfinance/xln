@@ -8,8 +8,11 @@ export type HaltDeparture = {
   readonly name: string;
   /** og's halt text (the cause the lane reads off processRuntime) is this departure's halt. */
   readonly halts: (ogHalt: string) => boolean;
-  /** What the rewrite must have done instead, on the frame it committed; null when it did, else what is wrong. */
-  readonly instead: (after: Runtime) => string | null;
+  /**
+   * What the rewrite must have done instead, on the frame it committed; null when it did, else what is wrong. It reads
+   * og's halt text too, for a departure whose halt names what the rewrite must still hold.
+   */
+  readonly instead: (after: Runtime, ogHalt: string) => string | null;
 };
 
 type Account = NonNullable<ReturnType<Runtime["entities"]["get"]>>["accountReplicas"] extends ReadonlyMap<EntityId, infer A>
@@ -59,13 +62,20 @@ const staleTransition: HaltDeparture = {
   },
 };
 
-/** Whether the rewrite still holds a cross-j pull leg in its retained outbox: the leg og refused to send alone. */
-const holdsCrossPullLeg = (after: Runtime): boolean =>
-  (after.pendingNetworkOutputs ?? []).some((output) =>
-    (Array.isArray(output["entityTxs"]) ? (output["entityTxs"] as readonly WireTx[]) : []).some(
-      (tx) => tx.data?.proposal?.frame?.accountTxs?.some((a) => a.type === "cross_pull_lock") === true,
-    ),
-  );
+/**
+ * Whether the rewrite still holds, in its retained outbox, a cross-j pull leg addressed to `targetRuntimeId`: the leg og
+ * refused to send alone (its halt names the Runtime the leg was headed to). A leg for another Runtime is not it.
+ */
+const holdsCrossPullLegFor = (after: Runtime, targetRuntimeId: string): boolean =>
+  (after.pendingNetworkOutputs ?? [])
+    .filter((output) => String(output["runtimeId"]).toLowerCase() === targetRuntimeId.toLowerCase())
+    .some((output) =>
+      (Array.isArray(output["entityTxs"]) ? (output["entityTxs"] as readonly WireTx[]) : []).some(
+        (tx) => tx.data?.proposal?.frame?.accountTxs?.some((a) => a.type === "cross_pull_lock") === true,
+      ),
+    );
+/** The Runtime id og's lone-leg halt names: `CROSS_J_INCOMPLETE_COHORT_DROPPED:<targetRuntimeId>`. */
+const droppedCohortTarget = (ogHalt: string): string => ogHalt.replace(/^CROSS_J_INCOMPLETE_COHORT_DROPPED:/, "");
 type WireTx = { readonly data?: { readonly proposal?: { readonly frame?: { readonly accountTxs?: readonly { readonly type: string }[] } } } };
 
 /**
@@ -79,7 +89,10 @@ type WireTx = { readonly data?: { readonly proposal?: { readonly frame?: { reado
 const loneCrossJLeg: HaltDeparture = {
   name: "a lone cross-jurisdiction leg is retained, not halted on",
   halts: (ogHalt) => /^CROSS_J_INCOMPLETE_COHORT_DROPPED:0x/.test(ogHalt),
-  instead: (after) => (holdsCrossPullLeg(after) ? null : "no cross-jurisdiction leg is left in the retained outbox"),
+  instead: (after, ogHalt) =>
+    holdsCrossPullLegFor(after, droppedCohortTarget(ogHalt))
+      ? null
+      : "no cross-jurisdiction leg for the halted Runtime is left in the retained outbox",
 };
 
 export const HALT_DEPARTURES: readonly HaltDeparture[] = [unsignableApproval, staleTransition, loneCrossJLeg];
