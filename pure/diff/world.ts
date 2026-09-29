@@ -75,7 +75,7 @@ export const NAMES = MEMBERS.map((m) => m.name);
  * (runtime/mempool/entity-height-barrier.ts applyEntityHeightDurabilityBarrier: one merge group per certificate-carrying
  * replica lane in a Runtime frame, the rest requeued), which the rewrite runs as processRuntimeFrame.
  */
-const boardJoins = (): boolean => process.env["WALK_BOARD"] === "1";
+export const boardJoins = (): boolean => process.env["WALK_BOARD"] === "1";
 
 type ProfileRow = { counterpartyId: string; tokenCapacities: unknown };
 /** og's committed Account, as far as steps read it. */
