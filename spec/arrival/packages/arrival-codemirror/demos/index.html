@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>arrival-codemirror demos</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+      .cm-editor {
+        border: 1px solid #ccc;
+        min-height: 12rem;
+      }
+      .pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+      h2 {
+        margin-top: 2.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>@inhuman.tools/arrival-codemirror</h1>
+
+    <h2>1 · Vanilla IDE — paredit + tsc squiggles, no framework</h2>
+    <p>Hover <code>greet</code>. Ctrl-Space inside the call. Try <kbd>Mod-Shift-K</kbd> (slurp).</p>
+    <div id="editor"></div>
+
+    <h2>2 · One program, two faces — same backend on both</h2>
+    <div class="pair">
+      <div>
+        <h3>scheme</h3>
+        <div id="scheme"></div>
+      </div>
+      <div>
+        <h3>sugarcoat</h3>
+        <div id="sugarcoat"></div>
+      </div>
+    </div>
+
+    <script type="module" src="./vanilla-ide.ts"></script>
+    <script type="module" src="./sugarcoat-flip.ts"></script>
+  </body>
+</html>

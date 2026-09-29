@@ -1,0 +1,128 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Sugarcoat",
+  "scopeName": "source.sugarcoat",
+  "fileTypes": ["sugarcoat"],
+  "comment": "Derived from GRAMMAR.md §8 (token classes). Basic-fidelity highlighting only — structural features should go through the lens (alignSugarcoatScheme), see @inhuman.tools/arrival-codemirror for the reference integration.",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#at-expression" },
+    { "include": "#string" },
+    { "include": "#char" },
+    { "include": "#boolean" },
+    { "include": "#keyword-prefix" },
+    { "include": "#keyword-suffix" },
+    { "include": "#core-words" },
+    { "include": "#arrow" },
+    { "include": "#operators" },
+    { "include": "#method-dot" },
+    { "include": "#subscript" },
+    { "include": "#number" },
+    { "include": "#quote-prefix" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.semicolon.sugarcoat",
+      "match": ";.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.sugarcoat",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [{ "name": "constant.character.escape.sugarcoat", "match": "\\\\." }]
+    },
+    "char": {
+      "name": "constant.character.sugarcoat",
+      "match": "#\\\\(?:[A-Za-z]+|.)"
+    },
+    "boolean": {
+      "name": "constant.language.boolean.sugarcoat",
+      "match": "#[tf]\\b"
+    },
+    "number": {
+      "name": "constant.numeric.sugarcoat",
+      "match": "(?<![\\w.])[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?(?![\\w.])"
+    },
+    "keyword-prefix": {
+      "name": "constant.other.keyword.sugarcoat",
+      "match": "(?<=[\\s({\\[]|^):[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~.-]*"
+    },
+    "keyword-suffix": {
+      "name": "constant.other.keyword.suffix.sugarcoat",
+      "match": "\\b[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~.-]*:(?=\\s|$)"
+    },
+    "core-words": {
+      "name": "keyword.control.sugarcoat",
+      "match": "(?<=[\\s({\\[]|^)(define|lambda|let\\*?|letrec\\*?|cond|if|else|begin|when|unless|require|dict|quote|quasiquote|unquote|unquote-splicing)(?=[\\s(){}\\[\\]]|$)"
+    },
+    "arrow": {
+      "name": "storage.type.function.arrow.sugarcoat",
+      "match": "=>"
+    },
+    "operators": {
+      "name": "keyword.operator.sugarcoat",
+      "match": "(?<=[\\s])(==|and|or|<=|>=|<|>|=|\\+|-|\\*|/|modulo|quotient|remainder)(?=[\\s])"
+    },
+    "method-dot": {
+      "patterns": [
+        {
+          "name": "entity.name.function.method.sugarcoat",
+          "match": "(?<=[\\w)\\]}\"'])\\.[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~>-]*"
+        },
+        {
+          "match": "^(\\s*)(\\.[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~>-]*)",
+          "captures": {
+            "2": { "name": "entity.name.function.method.sugarcoat" }
+          }
+        }
+      ]
+    },
+    "subscript": {
+      "begin": "(?<=[\\w)\\]}])\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.section.subscript.sugarcoat" } },
+      "endCaptures": { "0": { "name": "punctuation.section.subscript.sugarcoat" } },
+      "patterns": [
+        { "name": "constant.other.keyword.sugarcoat", "match": ":[\\w!$%&*/<=>?^_~.-]+" },
+        { "name": "constant.numeric.sugarcoat", "match": "\\d+:?" },
+        { "include": "#string" }
+      ]
+    },
+    "quote-prefix": {
+      "name": "keyword.operator.quote.sugarcoat",
+      "match": ",@|[',`]"
+    },
+    "at-expression": {
+      "begin": "@[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~-]*\\{|@\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "entity.name.tag.at-head.sugarcoat" } },
+      "endCaptures": { "0": { "name": "entity.name.tag.at-head.sugarcoat" } },
+      "contentName": "string.unquoted.at-body.sugarcoat",
+      "patterns": [{ "include": "#at-body" }]
+    },
+    "at-body": {
+      "patterns": [
+        {
+          "name": "variable.other.interpolation.sugarcoat",
+          "match": "@\\|[^|]*\\|"
+        },
+        {
+          "begin": "@\\(",
+          "end": "\\)",
+          "name": "variable.other.interpolation.graft.sugarcoat",
+          "patterns": [{ "include": "$self" }]
+        },
+        {
+          "name": "variable.other.interpolation.sugarcoat",
+          "match": "@[A-Za-z!$%&*/<=>?^_~][\\w!$%&*/<=>?^_~-]*"
+        },
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "name": "string.unquoted.at-body.sugarcoat",
+          "patterns": [{ "include": "#at-body" }]
+        }
+      ]
+    }
+  }
+}

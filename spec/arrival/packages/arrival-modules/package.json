@@ -1,0 +1,99 @@
+{
+  "name": "@inhuman.tools/arrival-modules",
+  "version": "0.9.9",
+  "description": "(require …) for Arrival — the loader capability, path jail, and builtin .scm/.json/.ndjson/.txt resolvers. File-type extension packs export from ./yaml, ./toml, and ./handlebars (plus ./handlebars/runtime); their parsers are optional peerDependencies.",
+  "keywords": [
+    "arrival",
+    "scheme",
+    "require",
+    "modules",
+    "loader"
+  ],
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-modules"
+  },
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./yaml": {
+      "types": "./dist/yaml/index.d.ts",
+      "import": "./dist/yaml/index.js"
+    },
+    "./toml": {
+      "types": "./dist/toml/index.d.ts",
+      "import": "./dist/toml/index.js"
+    },
+    "./handlebars": {
+      "types": "./dist/handlebars/index.d.ts",
+      "import": "./dist/handlebars/index.js"
+    },
+    "./handlebars/runtime": {
+      "types": "./dist/handlebars/runtime.d.ts",
+      "import": "./dist/handlebars/runtime.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__",
+    "!**/*.test.*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inhuman.tools/arrival": "workspace:^",
+    "tiny-invariant": "1.3.3"
+  },
+  "peerDependencies": {
+    "@inhuman.tools/arrival": "workspace:^",
+    "handlebars": "^4.7.9",
+    "smol-toml": "^1.6.1",
+    "yaml": "^2.8.0"
+  },
+  "peerDependenciesMeta": {
+    "handlebars": {
+      "optional": true
+    },
+    "smol-toml": {
+      "optional": true
+    },
+    "yaml": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@types/node": "24.0.0",
+    "eslint": "9.39.5",
+    "handlebars": "4.7.9",
+    "smol-toml": "1.8.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
+  }
+}

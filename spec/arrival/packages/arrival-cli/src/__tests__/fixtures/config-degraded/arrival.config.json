@@ -1,0 +1,3 @@
+{
+  "capabilities": [{ "module": "../caps/config-greet.mjs" }]
+}

@@ -1,0 +1,27 @@
+# wrangler.provenance-budget.toml — Q19 conjunct C2's minimal REAL-workerd harness
+# (docs/PROVENANCE-PLAN.md Q19; docs/PROVENANCE.md §5 C1 "fold-as-recovery").
+#
+# Only surface: PROVENANCE_DO, a Durable Object proving the `ProvenanceStore`
+# contract (append/allocateSeq/readStream/getHeader/putHeader — `src/provenance/
+# store/interfaces.ts`) against REAL DO storage (SQLite-backed) — no HTTP routes,
+# no other bindings, no R2 (C2's pass condition per Appendix A.2 is scoped to
+# "the recorded stream reconstructs regions (C1 fold) after a FORCED mid-run
+# eviction" — a `ProvenanceStore`/fold concern; payload/R2 tiering stays fakes-only,
+# same split the task itself draws: "conjuncts 1 and 3 run on fakes; conjunct 2
+# runs on workerd").
+#
+# This is a TEST-ONLY worker — never deployed (no `deploy` script references this
+# config; `cloudflareTest`'s `wrangler.configPath`, in `vitest.workerd.config.ts`,
+# is the only consumer).
+name = "arrival-provenance-budget-workerd"
+main = "src/__benchmarks__/workerd/provenance-do-worker.ts"
+compatibility_date = "2026-03-17"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "PROVENANCE_DO"
+class_name = "ProvenanceRegionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProvenanceRegionDO"]

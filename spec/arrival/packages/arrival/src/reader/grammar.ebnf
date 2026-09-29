@@ -1,0 +1,141 @@
+(*
+  Arrival Scheme — reader eBNF (loose Parser).
+
+  This is the formal production of docs/grammar.md: R7RS §7.1 <datum> plus the
+  named supersets ([…] / {…} / comma / suffix-colon symbols / #null #void /
+  #attachment). The executable reader is Parser.ts (this directory). Published
+  as `@inhuman.tools/arrival/grammar.ebnf`. When Parser and this file disagree
+  on a string the loose reader ACCEPTS, this file is the bug — unless the
+  Parser is a silent-loss quirk (a second `.` in a list, a dotted `#(` / `#u8(`),
+  in which case the Parser gains a door and this file stays.
+
+  Scope. Reader CFG of datums. Not evaluator well-formedness (let-binding
+  shape). Not Sugarcoat. Not env vocabulary. Reader-time doors (E-DICT-*,
+  E-LITERAL-DOT, E-DOT-EXTRA-ELEMENT, infix) teach; this CFG may over-accept
+  them. Doors after read may reject a string this grammar accepts.
+
+  Start symbol: program. Multiple top-level datums, including none.
+
+  Dialect. ISO 14977 syntax rules (`=` `|` `,` `;` `[ ]` `{ }` `( )`,
+  terminals in quotes, comments in star-paren). Two documented deviations
+  the tests interpret (the matcher is not shipped):
+
+    1. `|` is ordered choice (PEG): first matching alternative wins.
+    2. A special sequence `?/regex/` is a JS Unicode regex matched at the
+       current index (sticky). It must consume at least one character.
+
+  `{ X }` is greedy repetition; X must consume ≥1 character. Concatenation
+  is `,`. Scheme brackets are quoted terminals (`'{'`, `'['`) so they are
+  not ISO meta `{ }` / `[ ]`.
+
+  Delimiter class is `Lexer.boundary`: `[\s()[\]{}',]`. `"` `;` backtick are
+  symbol content mid-token (comments and strings start only from a boundary).
+  Longest-match for numbers/booleans/directives lives in the lookahead
+  `(?=$|[\s()[\]{}',])`. Leaf simples (`number`, `boolean`, `character`,
+  `hash-const`) are structural annotations; `identifier` is the token
+  catch-all. A comma is atmosphere only inside `[…]` / `{…}` — the CFG
+  over-approximates grammar.md §COMMA (one-comma / even-boundary live in
+  `read_literal_elements`, not here). Outside, `,` is the unquote prefix.
+*)
+
+program = { atmosphere } , [ datum , { { atmosphere } , datum } , { atmosphere } ] ;
+
+atmosphere = whitespace
+           | line-comment
+           | block-comment
+           | datum-comment
+           | directive ;
+
+whitespace = ?/[\s]+/? ;
+
+line-comment = ?/;[^\n]*/? ;
+
+(* Nested `#| … |#` (R7RS 2.2). A lone char cannot eat `#`/`|` when they start
+   `#|` or `|#` — otherwise an inner closer would close the outer. *)
+block-comment = '#|' , block-comment-body ;
+block-comment-body = '|#'
+                   | block-comment , block-comment-body
+                   | comment-char , block-comment-body ;
+comment-char = ?/[^#|]/? | '#' , ?/[^|]/? | '|' , ?/[^#]/? ;
+
+datum-comment = '#;' , { atmosphere } , datum ;
+
+directive = ?/#!fold-case(?=$|[\s()[\]{}',])/?
+          | ?/#!no-fold-case(?=$|[\s()[\]{}',])/? ;
+
+(* PEG order: prefixes and compounds before simples, longer hash forms before shorter. *)
+datum = abbreviation
+      | compound
+      | label-def
+      | label-ref
+      | simple
+      | dot-symbol ;
+
+(* `.` is a symbol everywhere except list-continuation, where it is dotted-tail. *)
+dot-symbol = ?/\.(?=$|[\s()[\]{}',])/? ;
+
+item = abbreviation
+     | compound
+     | label-def
+     | label-ref
+     | simple ;
+
+abbreviation = abbrev-prefix , { atmosphere } , datum ;
+abbrev-prefix = ',@' | "'" | '`' | ',' | '#attachment' ;
+
+compound = list | vector | bytevector | vec-lit | dict-lit ;
+
+list = '(' , { atmosphere } , [ list-body ] , ')' ;
+list-body = datum , list-after ;
+list-after = { atmosphere } , [ dotted-tail | ( item , list-after ) ] ;
+dotted-tail = ?/\.(?=$|[\s()[\]{}',])/? , { atmosphere } , datum , { atmosphere } ;
+
+vector = '#(' , { atmosphere } , [ datum , { { atmosphere } , datum } , { atmosphere } ] , ')' ;
+
+bytevector = '#u8(' , { atmosphere } , [ datum , { { atmosphere } , datum } , { atmosphere } ] , ')' ;
+
+(* grammar.md §LITERALS. Comma and a lone JSON `:` are atmosphere here, not datums. *)
+vec-lit = '[' , { lit-atmosphere } , [ datum , { { lit-atmosphere } , datum } , { lit-atmosphere } ] , ']' ;
+dict-lit = '{' , { lit-atmosphere } , [ datum , { { lit-atmosphere } , datum } , { lit-atmosphere } ] , '}' ;
+lit-atmosphere = atmosphere | ',' | ':' ;
+
+(* R7RS §7.1.2 labels. Sampling rarely emits them; the reader accepts them. *)
+label-def = ?/#\d+=/? , { atmosphere } , datum ;
+label-ref = ?/#\d+#/? ;
+
+simple = string | character | boolean | hash-const | number | bar-symbol | identifier ;
+
+string = ?/"(?:\\[\s\S]|[^\\"])*"/? ;
+
+(* Lexer character state runs to the next boundary, including a delimiter as the
+   first char after `#\`. Classification (char vs symbol) is parse_argument. *)
+character = ?/#\\[\s\S][^\s()[\]{}',]*(?=$|[\s()[\]{}',])/? ;
+
+boolean = ?/#false(?=$|[\s()[\]{}',])/?
+        | ?/#true(?=$|[\s()[\]{}',])/?
+        | ?/#f(?=$|[\s()[\]{}',])/?
+        | ?/#t(?=$|[\s()[\]{}',])/? ;
+
+(* grammar.md §LOOSE-STRICT. Loose-mode readable literals. *)
+hash-const = ?/#null(?=$|[\s()[\]{}',])/?
+           | ?/#void(?=$|[\s()[\]{}',])/? ;
+
+number = inf-nan | prefixed-number | plain-number ;
+
+inf-nan = ?/[+-](?:inf|nan)\.0(?=$|[\s()[\]{}',])/? ;
+
+prefixed-number = ?/#(?:[eidobx]#)?[eidobx][+-]?[0-9a-fA-F]+(?:\/[0-9a-fA-F]+)?(?=$|[\s()[\]{}',])/? ;
+
+plain-number = ?/[+-]?(?:[0-9]+\/[0-9]+|(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[0-9]+(?:[eE][+-]?[0-9]+)?)(?=$|[\s()[\]{}',])/? ;
+
+(* R7RS §7.1.1 `|…|`. Spaces and delimiters are legal inside the bars. *)
+bar-symbol = ?/\|(?:\\[\s\S]|[^\\|])*\|/? ;
+
+(*
+  Any non-delimiter run that is not a more specific simple. Negative lookaheads:
+  lone `.` is `dot-symbol` / `dotted-tail`; `#|` / `#;` / `#attachment` / leading `|`
+  are their own productions. `"` `;` backtick start string / comment / quasiquote
+  from a boundary — they are symbol content only after the first char. `#:name`
+  (loose keyword recovery) stays here.
+*)
+identifier = ?/(?!\.(?:$|[\s()[\]{}',]))(?!#\|)(?!#;)(?!#attachment(?:$|[\s()[\]{}',]))(?!\|)(?![;"`])[^\s()[\]{}',]+/? ;

@@ -1,0 +1,28 @@
+{
+  "extends": ["@here.build/tsconfig/purpose/lib", "@here.build/tsconfig/env/browser"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"]
+    // noImplicitAny override removed (was 9f7a8aaf6): TS 6.0.2 (installed) infers
+    // implicit-any more aggressively than the version the lock was authored
+    // against, so `noImplicitAny: true` surfaced ~260 pre-existing implicit-anys
+    // across heritage-origin files and broke the everyday tsc/build gate. Inherit
+    // the shared lib config's `noImplicitAny: false` (still `strict: true`).
+  },
+  // INCLUDES test files (`*.test.ts` + `__tests__/`) so `typecheck` (tsc --noEmit) checks them.
+  // Emit is the separate src-only `tsconfig.build.json` (`build: tsc -p tsconfig.build.json`) —
+  // tests are type-checked, never compiled to dist. Excluded: `*.test-d.ts` type-proofs (owned by
+  // tsconfig.typecheck.json under vitest --typecheck) + the loose opt-in categories (not gates).
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test-d.ts",
+    "src/**/__research__/**",
+    "src/**/__benchmarks__/**",
+    "src/**/__experiments__/**",
+    "src/**/__custdev__/**",
+    "src/**/__visual__/**"
+  ]
+}

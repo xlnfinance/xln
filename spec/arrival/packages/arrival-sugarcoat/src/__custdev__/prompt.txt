@@ -1,0 +1,7 @@
+Read the file ./LEARN.md — it teaches Sugarcoat, a readable surface syntax for Scheme.
+
+After reading it, write 10 small Scheme programs USING SUGARCOAT SYNTAX (not plain parenthesized Scheme). Vary difficulty and cover different features: indentation structure, curly-infix, subscripts, method-dot chains, the it pronoun, arrow lambdas, let*/cond forms, dict kwargs, at-expressions. At least 3 programs should combine several features. Make them realistic little programs (data munging, scoring, formatting), not syntax demos.
+
+For EACH program also state the canonical Scheme s-expression you believe it lowers to.
+
+Return ONLY the final JSON: {"programs": [{"title": string, "features": string[], "sugarcoat": string, "expected_canonical": string}]}

@@ -1,0 +1,63 @@
+{
+  "name": "@inhuman.tools/arrival-internals-types-prelude",
+  "version": "0.9.9",
+  "description": "The TypeScript type vocabulary for arrival builtins — the PRE prelude plus per-builtin ambient `declare function` leaves (encodeSchemeIdent names: `car`, `string$dash$append`, `null$qmark$`, …) over `sexpr`, `List`/`Tuple`, and list/string/math ops. The shared type surface both the interactive LSP and the batch typefacts extractor stand on; loaded via fs (Node) or a vite-inlined `?raw` glob (browser).",
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-internals-types-prelude"
+  },
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./virtual-files": {
+      "types": "./dist/virtual-files.d.ts",
+      "import": "./dist/virtual-files.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__",
+    "!**/*.test.*",
+    "!**/*.cases.ts"
+  ],
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "tsc --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@types/node": "24.0.0",
+    "eslint": "9.39.5",
+    "tslib": "2.8.1",
+    "typescript": "6.0.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}

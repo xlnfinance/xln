@@ -1,0 +1,13 @@
+# Pairs with @here.build/eslint-configs `browserslistOpts.env` and
+# @here.build/tsconfig/env/*. Without a named `node` env, compat falls
+# back to the default query (includes Opera Mini) and flags Promise.
+
+# Server/CLI/shared packages: Node 22+
+[node]
+node >= 22
+
+# Editor / interpreter packages that also ship in the browser
+[browser]
+Chrome >= 131
+Safari >= 26.2
+Firefox >= 147

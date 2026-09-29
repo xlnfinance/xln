@@ -1,0 +1,50 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "benchmarks": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "experiments": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "custdev": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "research": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "workerd": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "test-d": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "conformance": {
+      "dependsOn": ["build"],
+      "outputs": []
+    }
+  }
+}

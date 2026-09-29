@@ -1,0 +1,99 @@
+{
+  "name": "@inhuman.tools/arrival-lsp",
+  "version": "0.9.9",
+  "description": "Scheme language service (type lens over TypeScript LS) — browser worker + node. PRE prelude, virtual-TS emit host, diagnostics/completions/hover lifted to Scheme spans.",
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-lsp"
+  },
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    },
+    "./ls-protocol": {
+      "types": "./dist/ls-protocol.d.ts",
+      "import": "./dist/ls-protocol.js"
+    },
+    "./ls-client": {
+      "types": "./dist/ls-client.d.ts",
+      "import": "./dist/ls-client.js"
+    },
+    "./host-prelude": {
+      "types": "./dist/host-prelude.d.ts",
+      "import": "./dist/host-prelude.js"
+    },
+    "./balance": {
+      "types": "./dist/balance.d.ts",
+      "import": "./dist/balance.js"
+    },
+    "./span-map": {
+      "types": "./dist/span-map.d.ts",
+      "import": "./dist/span-map.js"
+    },
+    "./require-path": {
+      "types": "./dist/require-path.d.ts",
+      "import": "./dist/require-path.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!**/__tests__",
+    "!**/__research__",
+    "!**/__benchmarks__",
+    "!**/__custdev__",
+    "!**/__visual__",
+    "!**/*.test.*",
+    "!**/*.stories.*"
+  ],
+  "scripts": {
+    "build": "npm run generate:bundles && tsc && vite build",
+    "dev": "tsc --watch",
+    "generate:bundles": "node scripts/generate-bundles.mjs",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "research": "vitest run --config vitest.research.config.ts"
+  },
+  "dependencies": {
+    "@inhuman.tools/arrival-internals-types-prelude": "workspace:^",
+    "@inhuman.tools/arrival-types-bridge": "workspace:^",
+    "@inhuman.tools/arrival-sugarcoat": "workspace:^",
+    "typescript": "6.0.3"
+  },
+  "devDependencies": {
+    "@inhuman.tools/arrival": "workspace:^",
+    "@inhuman.tools/arrival-modules": "workspace:^",
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@types/node": "24.0.0",
+    "eslint": "9.39.5",
+    "tslib": "2.8.1",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  }
+}

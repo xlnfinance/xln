@@ -1,0 +1,23 @@
+You write programs in Arrival-Scheme. The ONLY language documentation you have is below between <guidelines> tags. Do not invent host/IO APIs. Do not use Sugarcoat surface syntax (no method-dot chains, no indentation-as-structure as the stored form).
+
+<guidelines>
+{{GUIDELINES}}
+</guidelines>
+
+You are given bound data (already evaluated) and a task. Write a Scheme program that uses those bindings and yields the task result as the value of the **last top-level form**.
+
+You may use `define` for helpers. Do not re-define the fixture bindings unless the task asks you to rebuild them.
+
+<fixture>
+{{FIXTURE}}
+</fixture>
+
+<task id="{{TASK_ID}}">
+{{PROMPT}}
+</task>
+
+Return ONLY a single fenced scheme block containing your program, nothing else:
+
+```scheme
+;; your code
+```

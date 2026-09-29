@@ -1,0 +1,82 @@
+{
+  "name": "@inhuman.tools/arrival-sugarcoat",
+  "version": "0.9.9",
+  "description": "Sugarcoat lens for Arrival — Scheme↔sugarcoat source rendering (indentation I-expressions, curly-infix, => lambda, method-dot, accessor subscripts, colon kwargs, at-expressions). Leaf relative to the interpreter; parseSexprs lives in @inhuman.tools/arrival-syntax. Consumed by the studio editor, codemirror, the chain-view compiler, and provenance rendering.",
+  "keywords": [
+    "arrival",
+    "s-expressions",
+    "sweet-expressions",
+    "lisp",
+    "scheme",
+    "formatter"
+  ],
+  "homepage": "https://github.com/here-build/arrival#readme",
+  "bugs": {
+    "url": "https://github.com/here-build/arrival/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/here-build/arrival.git",
+    "directory": "packages/arrival-sugarcoat"
+  },
+  "license": "MIT",
+  "author": "here.build",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./names": {
+      "types": "./dist/names.d.ts",
+      "import": "./dist/names.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "LEARN.md",
+    "GRAMMAR.md",
+    "editors",
+    "!**/__tests__",
+    "!**/__research__",
+    "!**/__benchmarks__",
+    "!**/__custdev__",
+    "!**/__visual__",
+    "!**/*.test.*",
+    "!**/*.stories.*"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "custdev": "vitest run --config vitest.custdev.config.ts"
+  },
+  "dependencies": {
+    "@here.build/lexical-namer": "0.9.0",
+    "@inhuman.tools/arrival-syntax": "workspace:^",
+    "pluralize": "8.0.0",
+    "tiny-invariant": "1.3.3"
+  },
+  "devDependencies": {
+    "@here.build/eslint-configs": "0.9.0",
+    "@here.build/tsconfig": "0.9.0",
+    "@types/node": "24.0.0",
+    "@types/pluralize": "0.0.33",
+    "eslint": "9.39.5",
+    "globals": "17.12.0",
+    "prettier": "3.8.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

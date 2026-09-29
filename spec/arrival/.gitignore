@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-cases/
+.turbo/
+*.tsbuildinfo
+storybook-static/
+*.log
+.DS_Store
+.idea/
+.claude/
+.env
+.env.*
+.wrangler/
+.dev.vars

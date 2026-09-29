@@ -1,0 +1,6 @@
+# tsgo wasm artifacts — built locally via scripts/build-tsgo-wasm.mjs, not committed
+/.tsgo/
+
+# bite-guard composite emit — tsconfig.cases.json must emit (TS6310: a referenced
+# composite project may not noEmit), so `tsc -b` writes here. Throwaway, never shipped.
+/dist-cases/

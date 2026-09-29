@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    // Demos import the package by its public name (copy-pasteable), mapped to
+    // the source so `pnpm typecheck` needs no prior build.
+    "paths": {
+      "@inhuman.tools/arrival-codemirror": ["../src/index.ts"],
+      "@inhuman.tools/arrival-codemirror/react": ["../src/react/index.ts"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}

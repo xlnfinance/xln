@@ -1,0 +1,10 @@
+{
+  "extends": ["@here.build/tsconfig/purpose/lib", "@here.build/tsconfig/env/node"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/__tests__/**/*"]
+}
