@@ -72,8 +72,8 @@ Ported to the C1/C2 interface (entity-first `processBatch`, V2 batch hash, epoch
 | file | passing before | passing after | failing before | failing after |
 |---|---|---|---|---|
 | test/dispute/DebtForgiveness.test.ts | 0 | 2 | 2 | 0 |
-| test/dispute/DeltaTransformer.test.ts | 1 | 9 | 9 | 1 |
-| test/dispute/Depository-part-1.ts | 7 | 45 | 43 | 5 |
+| test/dispute/DeltaTransformer.test.ts | 1 | 10 | 9 | 0 |
+| test/dispute/Depository-part-1.ts | 7 | 60 | 43 | 0 |
 | test/dispute/Depository-part-2.ts | 1 | 15 | 14 | 0 |
 | test/dispute/DisputeHashVector.test.ts | 1 | 1 | 0 | 0 |
 | test/dispute/DisputeOndeltaLiveness.test.ts | 0 | 9 | 8 | 0 |
@@ -96,9 +96,7 @@ Rewritten for an intended change, with the reason:
 - `BoardRotationGrace` watchtower: the last-resort delay must be at least the response window now, so it uses the full window.
 - `OnchainHankoDomain`: og's frozen `core/hanko/onchain-domain.ts` still emits the old settlement, dispute and batch payloads, so those three comparisons use independent ethers encoders in the test, plus an assertion that the fork differs from og's. The golden vector is a fork copy (`test/fixtures/onchain-hanko-golden.ts`); og's `tests/` copy is CommonJS-linked by this loader and reports its exports missing.
 
-Still red, a stale expectation and not a contract bug:
-
-- **The 2^200 ceiling (5 tests in `Depository-part-1`).** `docs/money-domain.md` (owner-approved 2026-09-06) removed the ceiling; these tests still expect `E8` above 2^200. The same class in `DisputeOndeltaLiveness` and `DeltaTransformer` was rewritten to the no-ceiling behavior by the port; the five in part-1 were held back pending a decision. Wide overflow still reverts; nothing wraps.
+The 2^200 ceiling tests (Arthur approved the overflow-check approach on 2026-09-29): `docs/money-domain.md` (owner-approved 2026-09-06) removed the ceiling, and it names no replacement bound. The tests that expected `E8` above 2^200 now assert the two things that are true: amounts past 2^200 are accepted (reserve, R2C and settlement collateral, C2R refused by the signature rule and not a ceiling, allowance past the old band, and proof-body offdeltas from 2^200 up to the `Int512` edges start a dispute), and the real edges revert instead of wrapping (reserve and collateral at uint256 max revert with panic 0x11 and leave no partial diff). `DisputeOndeltaLiveness` and `DeltaTransformer` got the same treatment in the port. Nothing wraps: reading the contracts, every `unchecked` block in `WideMath` carries an explicit `RepresentationOverflow` check.
 
 ## v2 input: the largest swap book that fits one `processBatch`
 

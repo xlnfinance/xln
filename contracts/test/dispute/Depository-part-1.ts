@@ -1145,9 +1145,9 @@ describe('Depository', () => {
       );
     expect((await depository._accounts(dispute.accountKey)).nonce).to.equal(maxSafeNonce);
   });
-  it('reverts settlement with E8 when a reserve would exceed MAX_MONEY and leaves no partial diff', async function () {
+  it('settles a reserve past the retired 2^200 ceiling and applies both diffs (docs/money-domain.md)', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const INT256_MAX = 1n << 200n; // MAX_MONEY (Types.sol); name kept for the assertions below
+    const INT256_MAX = 1n << 200n; // the retired MAX_MONEY: reserves are uint256, nothing else caps them
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
@@ -1180,15 +1180,56 @@ describe('Depository', () => {
     );
     await expect(
       depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E8');
+    ).to.not.revert(ethers);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(INT256_MAX + 1n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+  });
+  it('reverts settlement at the uint256 reserve edge instead of wrapping, and leaves no partial diff', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const INT256_MAX = (1n << 256n) - 1n; // the real edge: reserves are uint256
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
+    await depository.mintToReserve(right.entityId, tokenId, 1n);
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+    const diffs = [
+      {
+        tokenId,
+        leftDiff: 1n,
+        rightDiff: -1n,
+        collateralDiff: 0n,
+        ondeltaDiff: 0n,
+      },
+    ];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    const settlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs,
+      forgiveDebtsInTokenIds: [] as bigint[],
+      sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+      nonce: settlementNonce,
+    };
+    const signed = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ settlements: [settlement] }),
+    );
+    await expect(
+      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.be.revertedWithPanic(0x11);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(1n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
     expect(await depository.entityNonces(left.entityId)).to.equal(0n);
   });
-  it('reverts settlement and R2C with E8 when collateral would exceed MAX_MONEY', async function () {
+  it('accepts R2C and settlement collateral past the retired 2^200 ceiling', async function () {
     const { depository } = await loadFixture(deployFixture);
-    const INT256_MAX = 1n << 200n; // MAX_MONEY (Types.sol): exactly 2^200 is accepted, 2^200 + 1 is E8
+    const INT256_MAX = 1n << 200n; // the retired MAX_MONEY: 2^200 + 1 and beyond are accepted
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
     await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
@@ -1213,7 +1254,7 @@ describe('Depository', () => {
       .processBatch(fundMax.entityId, fundMax.encodedBatch, fundMax.hankoData, fundMax.nonce);
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
-    // Further R2C into the same collateral bucket must hit E8 (accumulation).
+    // Further R2C into the same collateral bucket accumulates past 2^200.
     const overflowR2c = await signDepositoryBatch(
       depository,
       right.entityId,
@@ -1232,7 +1273,89 @@ describe('Depository', () => {
       depository
         .connect(right.signer)
         .processBatch(overflowR2c.entityId, overflowR2c.encodedBatch, overflowR2c.hankoData, overflowR2c.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E8');
+    ).to.not.revert(ethers);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX + 1n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(1n);
+    // Settlement path: move 1 from right reserve into the collateral that is already past 2^200.
+    const settlementNonce = 1n;
+    const diffs = [
+      {
+        tokenId,
+        leftDiff: 0n,
+        rightDiff: -1n,
+        collateralDiff: 1n,
+        ondeltaDiff: 0n,
+      },
+    ];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    const settlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs,
+      forgiveDebtsInTokenIds: [] as bigint[],
+      sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+      nonce: settlementNonce,
+    };
+    const signed = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ settlements: [settlement] }),
+    );
+    await expect(
+      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
+    ).to.not.revert(ethers);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX + 2n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+  });
+  it('reverts R2C and settlement at the uint256 collateral edge instead of wrapping', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const INT256_MAX = (1n << 256n) - 1n; // the real edge: collateral is uint256
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, INT256_MAX);
+    await depository.mintToReserve(right.entityId, tokenId, 2n);
+    // Fund collateral to INT256_MAX via R2C from left.
+    const fundMax = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({
+        reserveToCollateral: [
+          {
+            tokenId,
+            receivingEntity: left.entityId,
+            pairs: [{ entity: right.entityId, amount: INT256_MAX }],
+          },
+        ],
+      }),
+    );
+    await depository
+      .connect(left.signer)
+      .processBatch(fundMax.entityId, fundMax.encodedBatch, fundMax.hankoData, fundMax.nonce);
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
+    // Further R2C into the same collateral bucket must revert at the uint256 edge (accumulation).
+    const overflowR2c = await signDepositoryBatch(
+      depository,
+      right.entityId,
+      right.privateKey,
+      emptyBatch({
+        reserveToCollateral: [
+          {
+            tokenId,
+            receivingEntity: left.entityId,
+            pairs: [{ entity: right.entityId, amount: 1n }],
+          },
+        ],
+      }),
+    );
+    await expect(
+      depository
+        .connect(right.signer)
+        .processBatch(overflowR2c.entityId, overflowR2c.encodedBatch, overflowR2c.hankoData, overflowR2c.nonce),
+    ).to.be.revertedWithPanic(0x11);
     expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
     // Settlement path: move 1 from right reserve into already-max collateral.
@@ -1263,7 +1386,7 @@ describe('Depository', () => {
     );
     await expect(
       depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E8');
+    ).to.be.revertedWithPanic(0x11);
     expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
@@ -1410,7 +1533,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(200n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
-  it('rejects C2R amounts above MAX_MONEY before mutation', async function () {
+  it('refuses an unsigned C2R above the retired 2^200 ceiling by the signature rule, not a ceiling, before mutation', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
@@ -1431,7 +1554,7 @@ describe('Depository', () => {
 
     await expect(
       depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E8');
+    ).to.be.revertedWithoutReason(ethers);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
   });
@@ -2622,7 +2745,7 @@ describe('Depository', () => {
     expect(wide(await depository.debtOutstanding(dispute.left.entityId, tokenB))).to.equal(25n);
   });
 
-  it('clamps to the maximum legal allowance band (2^200) and rejects allowances above it', async function () {
+  it('clamps at a 2^200 allowance band and accepts an allowance above the retired band', async function () {
     const { depository } = await loadFixture(deployFixture);
     const Harness = await ethers.getContractFactory('TransformerLivenessHarness');
     const harness = await Harness.deploy();
@@ -2659,9 +2782,8 @@ describe('Depository', () => {
     expect(await depository._reserves(dispute.right.entityId, tokenId)).to.equal(100n);
     expect(wide(await depository.debtOutstanding(dispute.left.entityId, tokenId))).to.equal(MAX_MONEY);
 
-    // rightAllowance == MAX_MONEY + 1 fails _validateAllowances: the signed clause
-    // cannot execute, so the dispute stays open (TransformerExecutionFailed).
-    // (A unilateral finalization bumps the account nonce once; start past it.)
+    // rightAllowance == MAX_MONEY + 1 is no longer over a band (docs/money-domain.md): the signed clause executes
+    // and the dispute closes. (A unilateral finalization bumps the account nonce once; start past it.)
     const nextDisputeNonce = (await depository._accounts(dispute.accountKey)).nonce + 1n;
     const overCap = await buildTimedOutTransformerFinalization(
       depository,
@@ -2682,14 +2804,23 @@ describe('Depository', () => {
         .processBatch(overCap.final.entityId, overCap.final.encodedBatch, overCap.final.hankoData, overCap.final.nonce, {
           gasLimit: 15_000_000n,
         }),
-    ).to.be.revertedWithCustomError(depository, 'TransformerExecutionFailed');
-    expect((await depository._accounts(overCap.accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+    ).to.not.revert(ethers);
+    expect((await depository._accounts(overCap.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
-  it('rejects a proof body with |offdelta| above MAX_MONEY at dispute start, accepts the exact bound', async function () {
+  for (const [label, offdelta] of [
+    ['2^200 (the retired bound)', 1n << 200n],
+    ['-2^200', -(1n << 200n)],
+    ['2^200 + 1, one past the retired bound', (1n << 200n) + 1n],
+    ['-(2^200 + 1)', -((1n << 200n) + 1n)],
+    ['2^255 - 1, the old int256 maximum', (1n << 255n) - 1n],
+    ['-2^255, the old int256 minimum', -(1n << 255n)],
+    ['2^511 - 1, the Int512 maximum', (1n << 511n) - 1n],
+    ['-2^511, the Int512 minimum', -(1n << 511n)],
+  ] as const) {
+  it(`starts a dispute with a proof body whose offdelta is ${label}: no ceiling, Int512 is the domain`, async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
-    const MAX_MONEY = 1n << 200n;
     const tokenId = 1n;
     const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const disputeNonce = 1n;
@@ -2721,21 +2852,13 @@ describe('Depository', () => {
       );
     };
 
-    for (const offdelta of [MAX_MONEY + 1n, -(MAX_MONEY + 1n), (1n << 255n) - 1n, -(1n << 255n)]) {
-      const start = await startBatch(offdelta);
-      await expect(
-        depository.connect(left.signer).processBatch(start.entityId, start.encodedBatch, start.hankoData, start.nonce),
-      ).to.be.revertedWithCustomError(depository, 'E8');
-    }
-    expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
-
-    const exact = await startBatch(-MAX_MONEY);
+    const start = await startBatch(offdelta);
     await expect(
-      depository.connect(left.signer).processBatch(exact.entityId, exact.encodedBatch, exact.hankoData, exact.nonce),
+      depository.connect(left.signer).processBatch(start.entityId, start.encodedBatch, start.hankoData, start.nonce),
     ).to.emit(depository, 'DisputeStarted');
     expect((await depository._accounts(accountKey)).disputeHash).to.not.equal(ethers.ZeroHash);
   });
+  }
 
   const finalizeSwapBook = async (swapCount: number) => {
     const { depository } = await loadFixture(deployFixture);
