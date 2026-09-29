@@ -83,7 +83,7 @@ module account {
     nondet n = 0.to(MAX_AMOUNT).oneOf()
     nondet id = LOCK_SLOTS.oneOf()
     nondet secret = SECRETS.oneOf()
-    nondet dl = 1.to(LOCK_SLACK).oneOf()
+    nondet dl = 1.to(MAX_LOCK_HORIZON).oneOf()
     enqueueTx(s, mkTx(kind, side, n, id, secret, dl, clock.get(s)))
   }
 

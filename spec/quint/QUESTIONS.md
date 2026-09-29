@@ -59,9 +59,14 @@ enforcement margin in the Account: a margin is Entity policy. Source: R-X2, `htl
 Open: `TOLERANCE >= DRIFT` is needed for two honest sides to accept each other; the model does not prove the
 Runtime keeps it.
 
-**A9. HTLC deadline horizon (coordinator decision, policy).**
-Choice: a side refuses a lock whose deadline is more than `LOCK_SLACK` after the frame's timestamp. It is a per-side
-policy parameter, not a protocol constant; the contracts bound nothing here. Modelled as a global for now.
+**A9. HTLC deadline horizon: `MAX_LOCK_HORIZON` (coordinator decision, N2, policy).**
+Choice: a side refuses a lock whose deadline is more than `MAX_LOCK_HORIZON` after the frame's timestamp (`deadline_too_far`). It is
+a per-side policy parameter, not a protocol constant; the contracts bound nothing here. The coordinator names the default 7 days, never
+below the 24 h async window, enforced in time and in J height, at lock admission and at forward. The model has one clock: a tick is a
+unit of time and of J height alike (`LAG` counts J inclusion in ticks), so the two bounds are one number here, and the second check would
+only repeat the first; a real implementation keeps both (a lock may carry a J height deadline the chain reads). At forward the hub's own
+onward lock goes through the same `applyTx`; its deadline is the inbound one less `HOP`, so it is inside the horizon whenever the
+inbound lock was (`farDeadlineIsRefusedTest`; `forwardKeepsTheMarginTest` forwards a lock at the horizon); mutant `horizon-off`.
 
 **A10. HTLC resolution rights.**
 Choice: only the payee can resolve (reveal) or cancel a lock; anyone can expire it, after the deadline. A secret is

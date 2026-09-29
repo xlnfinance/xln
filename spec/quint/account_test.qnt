@@ -17,6 +17,16 @@ module account_test {
     applyTx(funded, payL1, Right, 0) == Refused("not_own_funds")                    // a side can only spend its own
   })
 
+  // N2: a lock's deadline is at most MAX_LOCK_HORIZON after the frame that opens it: the last tick of the horizon is admitted, one more is refused.
+  run farDeadlineIsRefusedTest = init.expect({
+    val atLimit = HtlcLock({ id: 1, payer: Left, amount: 2, hashlock: hashOf(1), deadline: 1 + MAX_LOCK_HORIZON })
+    val tooFar = HtlcLock({ id: 1, payer: Left, amount: 2, hashlock: hashOf(1), deadline: 2 + MAX_LOCK_HORIZON })
+    and {
+      applyTx(funded, atLimit, Left, 1) != Refused("deadline_too_far"),
+      applyTx(funded, tooFar, Left, 1) == Refused("deadline_too_far")
+    }
+  })
+
   run creditCannotDropBelowUsageTest = init.expect({
     val used = { ...funded, offdelta: -2 }                                           // Left owes 2, limitLeft is 2
     and {

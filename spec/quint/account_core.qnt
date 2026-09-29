@@ -14,7 +14,7 @@ module account_core {
   pure val MAX_CLOCK = 4         // logical seconds
   pure val DRIFT = 1             // the two clocks never differ by more than this (assumption, QUESTIONS.md Q-X2)
   pure val TOLERANCE = 1         // a receiver refuses a frame whose timestamp is further than this from its own clock
-  pure val LOCK_SLACK = 4        // a lock's deadline is at most this far after the frame that opens it (room for a two-hop chain)
+  pure val MAX_LOCK_HORIZON = 4  // policy parameter (coordinator, N2: 7 days by default, never below the 24 h async window): a lock's deadline is at most this far after the frame that opens it, at admission and at forward (room for a two-hop chain)
   pure val LOCK_SLOTS = Set(1, 2) // open clauses per Account (the contract's bound is 32, see contracts-review.md)
   pure val SECRETS = Set(1, 2)   // the secrets that exist; a hashlock is hashOf(secret)
 
@@ -150,7 +150,7 @@ module account_core {
         else if (l.amount < 1 or l.amount > MAX_AMOUNT) Refused("bad_amount")
         else if (b.locks.get(l.id).on) Refused("lock_exists")
         else if (l.deadline <= ts) Refused("deadline_past")
-        else if (l.deadline > ts + LOCK_SLACK) Refused("deadline_too_far")
+        else if (l.deadline > ts + MAX_LOCK_HORIZON) Refused("deadline_too_far")
         else if (l.amount > room(b, l.payer)) Refused("insufficient_capacity")
         else Ok(withLock(b, l.id, { on: true, payer: l.payer, amount: l.amount, hashlock: l.hashlock, deadline: l.deadline }))
     | HtlcResolve(r) =>

@@ -117,6 +117,14 @@
       "old": "    match replay(plan, r.mempool, s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
       "new": "    match replay(plan, List(), s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
       "killedBy": "test:queuedPaymentIsVisibleToAPaymentTest"
+    },
+    {
+      "id": "horizon-off",
+      "why": "N2: no bound on how far a lock's deadline lies after its frame (MAX_LOCK_HORIZON): a hub could be asked to hold a route for ever",
+      "file": "account_core.qnt",
+      "old": "        else if (l.deadline > ts + MAX_LOCK_HORIZON) Refused(\"deadline_too_far\")\n",
+      "new": "",
+      "killedBy": "test:farDeadlineIsRefusedTest"
     }
   ]
 }

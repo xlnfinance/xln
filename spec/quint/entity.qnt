@@ -96,7 +96,7 @@ module entity {
   type Ghost = {
     halted: bool, refusals: int, drops: int,
     frameOnFrozen: bool, needless: bool, partialCmd: bool, lateAnswer: bool,
-    forwards: int, failBacks: int, resolves: int, escalations: int, cmds: int, collisions: int
+    forwards: int, failBacks: int, resolves: int, escalations: int, cmds: int, collisions: int, skipsRead: int
   }
 
   type S = {
@@ -122,7 +122,7 @@ module entity {
   pure val NO_JEV: JEv = { live: false, kind: JSecret(0), at: 0, seq: 0 }
   pure val NO_GHOST: Ghost = {
     halted: false, refusals: 0, drops: 0, frameOnFrozen: false, needless: false, partialCmd: false, lateAnswer: false,
-    forwards: 0, failBacks: 0, resolves: 0, escalations: 0, cmds: 0, collisions: 0
+    forwards: 0, failBacks: 0, resolves: 0, escalations: 0, cmds: 0, collisions: 0, skipsRead: 0
   }
   pure def emptyLink(tip: Body): Link = { tip: tip, inflight: [], ifTs: 0, mempool: [], frozen: false }
 
@@ -281,7 +281,7 @@ module entity {
   pure def onSkip(s: S, l: int): S = {
     val s1 = answer(freeze(s, l), l)
     val d = s1.disp.get(l)
-    { ...s1, disp: s1.disp.set(l, { ...d, byUs: false, await: false }) }
+    { ...s1, disp: s1.disp.set(l, { ...d, byUs: false, await: false }), gh: { ...s1.gh, skipsRead: s1.gh.skipsRead + 1 } }
   }
 
   pure def outcome(s: S, l: int, skipped: bool): S = {
@@ -509,7 +509,7 @@ module entity {
     nondet l = LINKSET.oneOf()
     nondet k = ROUTES.oneOf()
     nondet sec = SECRETS.oneOf()
-    nondet off = 1.to(LOCK_SLACK).oneOf()
+    nondet off = 1.to(MAX_LOCK_HORIZON).oneOf()
     nondet amt = 1.to(2).oneOf()
     nondet i = 1.to(NJ).oneOf()
     val a = someInput(k1, l, k, sec, off, amt, i, st.now)
@@ -524,7 +524,7 @@ module entity {
   action peerLockIn: bool = {
     nondet k = ROUTES.oneOf()
     nondet sec = SECRETS.oneOf()
-    nondet off = 1.to(LOCK_SLACK).oneOf()
+    nondet off = 1.to(MAX_LOCK_HORIZON).oneOf()
     nondet amt = 1.to(2).oneOf()
     peerLock(k, sec, off, amt)
   }
@@ -541,7 +541,7 @@ module entity {
     nondet n = 0.to(MAX_AMOUNT).oneOf()
     nondet id = ROUTES.oneOf()
     nondet sec = SECRETS.oneOf()
-    nondet off = 1.to(LOCK_SLACK).oneOf()
+    nondet off = 1.to(MAX_LOCK_HORIZON).oneOf()
     feed(Arrive({ link: l, tx: mkTx(kind, peerSide(l), n, id, sec, off, st.now) }))
   }
 
@@ -592,6 +592,18 @@ module entity {
     }
   }
 
+  // The whole race in one step, so that simulation reaches it: the peer's start and ours are both included, the peer's first, so ours is
+  // skipped (J2). Two events are emitted, in the chain's order; the Runtime reads them one after the other.
+  action skipRace(l: int): bool = {
+    val i = freeJ(st)
+    val j = freeJ(emitJ(st, i, JDispute(l)))
+    val d = st.disp.get(l)
+    all {
+      i != 0, j != 0, d.on, d.byUs, d.pend > 0, st.now <= d.pend, st.cd.get(l) == 0,
+      st' = emitJ(emitJ({ ...st, disp: st.disp.set(l, { ...d, pend: 0 }), cd: st.cd.set(l, 2) }, i, JDispute(l)), j, JSkip(l))
+    }
+  }
+
   action deliver(i: int): bool = feed(JDeliver(i))
   // The Runtime reads chain events in the order the chain emitted them (runtime.qnt R-J1).
   pure def nextJ(s: S, i: int): bool = and {
@@ -621,6 +633,7 @@ module entity {
     peerAck(IN), peerAck(OUT),
     peerRevealChain, peerStartsDispute(IN), peerStartsDispute(OUT),
     peerStartsBeside(IN), peerStartsBeside(OUT), ownStartLands(IN), ownStartLands(OUT),
+    skipRace(IN), skipRace(OUT), skipRace(IN), skipRace(OUT),
     deliverJ, deliverJ,
     cmdPay, cmdBatch
   }
@@ -714,6 +727,7 @@ module entity {
   val w_no_frozen: bool = not(LINKSET.exists(l => st.links.get(l).frozen))
   val w_no_out_paid: bool = not(ROUTES.exists(k => st.outRes.get(k)))
   val w_no_chain_reveal: bool = not(SECRETS.exists(sec => st.chainRev.get(sec) != 0))
+  val w_no_skip_delivered: bool = st.gh.skipsRead == 0            // a DisputeOpSkipped of our own start was delivered and answered (J2)
   val w_no_outcome: bool = not(LINKSET.exists(l => st.outcomeRead.get(l)))
   val w_no_in_claim: bool = not(ROUTES.exists(k => st.inRes.get(k)))
 }
