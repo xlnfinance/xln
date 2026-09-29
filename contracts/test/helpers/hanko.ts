@@ -479,9 +479,13 @@ export const FORK_PROOF_BODY_ABI =
 export const toForkProofBody = (body: MoneyBatchRecord): MoneyBatchRecord => widenProofbody(body);
 
 /**
- * Our own batch gas limit for one processBatch (ours to set, not og's core/config PROCESS_BATCH_GAS_LIMIT).
- * MAX_SWAP_BOOK is the largest swap book that finishes a non-starter dispute finalize under it: measured 615 swaps =
- * 4,997,914 gas, 616 = 5,007,371 (contracts/test/dispute/Depository-part-1.ts). A v2 order-book input, see BASELINE.md.
+ * Our own batch gas limit for one processBatch (ours to set, not og's core/config PROCESS_BATCH_GAS_LIMIT), and the gas
+ * Account.sol holds back after the transformer call (TRANSFORMER_POST_CALL_GAS_RESERVE): the transformer gets gasleft()
+ * minus that reserve, so a transaction's limit must cover the transformer's use PLUS the reserve.
+ * MAX_SWAP_BOOK is the largest swap book whose non-starter dispute finalize succeeds when SENT with PROCESS_BATCH_GAS_LIMIT
+ * (Depository-part-1.ts, bisected): 382 swaps finalize, 383 revert TransformerExecutionFailed. A v2 order-book input,
+ * see BASELINE.md.
  */
 export const PROCESS_BATCH_GAS_LIMIT = 5_000_000n;
-export const MAX_SWAP_BOOK = 615;
+export const TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000n;
+export const MAX_SWAP_BOOK = 382;

@@ -1446,6 +1446,55 @@ describe('Depository', () => {
     });
   }
 
+  // The same edges through the C2R shortcut: Account.sol rebuilds the settlement diff from `amount` with sign + magnitude
+  // (no cast), so a signed C2R moves the whole uint256 domain exactly.
+  for (const [label, amount] of [
+    ['2^255 - 1, the int256 maximum', (1n << 255n) - 1n],
+    ['2^255, one past int256', 1n << 255n],
+    ['2^256 - 1, the uint256 maximum', (1n << 256n) - 1n],
+  ] as const) {
+    it(`withdraws collateral A with a signed C2R at A = ${label}: exact, no wrap, no sign flip`, async function () {
+      const { depository } = await loadFixture(deployFixture);
+      const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+      const tokenId = 1n;
+      await depository.mintToReserve(left.entityId, tokenId, amount);
+      const fund = await signDepositoryBatch(
+        depository,
+        left.entityId,
+        left.privateKey,
+        emptyBatch({ reserveToCollateral: [{ tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount }] }] }),
+      );
+      await depository.connect(left.signer).processBatch(fund.entityId, fund.encodedBatch, fund.hankoData, fund.nonce);
+      const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+
+      const c2rNonce = 1n;
+      const diffs = [{ tokenId, leftDiff: amount, rightDiff: 0n, collateralDiff: -amount, ondeltaDiff: -amount }];
+      const c2rHash = await cooperativeUpdateHash(depository, acctKey, c2rNonce, diffs);
+      const signed = await signDepositoryBatch(
+        depository,
+        left.entityId,
+        left.privateKey,
+        emptyBatch({
+          collateralToReserve: [{
+            counterparty: right.entityId,
+            tokenId,
+            amount,
+            nonce: c2rNonce,
+            sig: signEntityHash(right.entityId, c2rHash, right.privateKey),
+          }],
+        }),
+      );
+      await expect(
+        depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
+      ).to.not.revert(ethers);
+      const after = await depository._collaterals(acctKey, tokenId);
+      expect(after.collateral).to.equal(0n);
+      expect(wide(after.ondelta)).to.equal(0n);
+      expect(await depository._reserves(left.entityId, tokenId)).to.equal(amount);
+      expect((await depository._accounts(acctKey)).nonce).to.equal(c2rNonce);
+    });
+  }
+
   it('requires counterparty hanko for empty settlements too', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -2915,6 +2964,8 @@ describe('Depository', () => {
   });
   }
 
+  // Sends the finalize with the STATED batch gas limit: Account.sol hands the transformer gasleft() - 2M and holds the 2M back,
+  // so a transaction needs its limit to cover the transformer's use plus that reserve, and gasUsed alone understates it.
   const finalizeSwapBook = async (swapCount: number) => {
     const { depository } = await loadFixture(deployFixture);
     const DeltaTransformer = await ethers.getContractFactory('DeltaTransformer');
@@ -2969,24 +3020,26 @@ describe('Depository', () => {
       }),
     );
 
-    const tx = await depository
+    const send = () => depository
       .connect(dispute.right.signer)
       .processBatch(nonstarterFinal.entityId, nonstarterFinal.encodedBatch, nonstarterFinal.hankoData, nonstarterFinal.nonce, {
-        gasLimit: 15_000_000n,
+        gasLimit: PROCESS_BATCH_GAS_LIMIT,
       });
-    const receipt = await tx.wait();
-    expect((await depository._accounts(dispute.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
-    return receipt!.gasUsed;
+    return { depository, accountKey: dispute.accountKey, send };
   };
 
-  it('finalizes the largest supported swap book (MAX_SWAP_BOOK) inside the batch gas limit', async function () {
-    expect(await finalizeSwapBook(MAX_SWAP_BOOK)).to.be.lessThanOrEqual(PROCESS_BATCH_GAS_LIMIT);
+  // MAX_SWAP_BOOK is measured at the stated limit, so it moves with any compiler, optimizer or contract change: that is
+  // intended, update it (and BASELINE.md) when it does. It is a v2 input; the v1 runtime caps books far lower.
+  it('finalizes the largest supported swap book (MAX_SWAP_BOOK) at the stated batch gas limit', async function () {
+    const { depository: d, accountKey, send } = await finalizeSwapBook(MAX_SWAP_BOOK);
+    await (await send()).wait();
+    expect((await d._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
-  it('a swap book one larger than MAX_SWAP_BOOK no longer fits: the limit is measured, not a guess', async function () {
-    expect(await finalizeSwapBook(MAX_SWAP_BOOK + 1)).to.be.greaterThan(PROCESS_BATCH_GAS_LIMIT);
+  it('a swap book one larger than MAX_SWAP_BOOK does not finalize at the stated batch gas limit', async function () {
+    const { depository: d, send } = await finalizeSwapBook(MAX_SWAP_BOOK + 1);
+    await expect(send()).to.be.revertedWithCustomError(d, 'TransformerExecutionFailed');
   });
-
 
   it('allows a designated tower to submit a delayed last-resort counter-dispute', async function () {
     const { depository } = await loadFixture(deployFixture);
