@@ -171,8 +171,8 @@ Not covered by the Foundry suites (each is covered by `test/vm/` or is a known g
 J2 turns a dispute op the Account has moved past into a `DisputeOpSkipped` event instead of a revert. Seven ported tests
 asserted the old revert; each now asserts the skip (the event with its op, reason and nonce) and that the Account nonce,
 dispute state, reserves and collateral did not change. Real errors (bad signature, malformed or mismatched evidence, the
-wrong sender on a live dispute, an early finalize) still revert and are pinned by `test/vm/j2-skip-stale-dispute-ops.test.ts`
-(12) and `test/vm/j2-review-extra.test.ts` (16; the review's 16 tests, which also kill the 28 planted mutants).
+wrong sender on a live dispute, an early finalize) still revert and are pinned by `test/vm/disputes/j2-skip-stale-dispute-ops.test.ts`
+(12) and `test/vm/disputes/j2-review-extra.test.ts` (16; the review's 16 tests, which also kill the 28 planted mutants).
 
 | test | was | now |
 |---|---|---|
@@ -228,3 +228,206 @@ finalize with the starter as its own counterentity, so it reverted for the wrong
 3. ~~Port the Foundry suites~~ Done, see "Foundry suites" above.
 4. H3 is no longer open: it is built in the follow-up branch, test `h3-retired-board-cap`.
 5. **Run the TRON deploy path end to end.** `deploy-chain-matrix.cjs` and `compile-tron.cjs` were copied from `jurisdictions/scripts/` and have never been run here; only the deploy gate in front of them is tested (it refuses the testnet floor on TRON mainnet). Run it against TRON Nile before relying on it.
+
+## After J5 (a batch that cannot apply fails soft: nonce spent, `BatchFailed`; one file or suite per process)
+
+J5 (decisions doc, coordinator 21:01, refined 22:31 after the #54 review) runs the ops of a batch with no dispute, reveal,
+hash-ladder or external-deposit op through an external self-call in try/catch. A failing batch applies nothing, keeps its
+entity nonce spent, and emits `BatchFailed(entityId, nonce, reason)` instead of reverting. What still reverts and takes no
+nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, a transaction that offers less than the gas floor to a batch that failed (`BatchGasStarved`; an empty revert reason is no longer one of these, see the second review below), and any batch that carries a dispute, reveal,
+hash-ladder or **deposit** op. A bad counterparty signature inside the ops (a settlement or C2R signed at an old account epoch)
+is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch/j5-batch-failed.test.ts` (13),
+`test/vm/j5-batch/j5-review-extra.test.ts` (8, the review's) and `test/foundry/j5/J5Attacks.t.sol` (the review's 6, deposit tests flipped
+to the fixed behaviour).
+
+**Measured.** Depository 22772 bytes (J2: 22994), Account 24455 (J2: 24448; 121 bytes under 24576, see the C2R follow-up below; the second review below moves them to 23359 and 24400). The self-call wrapper costs
+gas, so `MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL` goes from 256 to 250: 256 pairs measured 15,059,370, over the 15M
+liveness budget. 250 pairs (4 entries of 63, 63, 62, 62) measure **14,763,601** execution gas
+(`BatchBounds.test_gas_maxReserveToCollateralProduct`, which also fails if the maximal batch stops landing);
+`test_reserveToCollateralAggregatePairCapRejectsTwoHundredFiftyOne` pins 251 rejected.
+
+**Two bugs the ripple and the review found.** (1) Inside the self-call msg.sender is the Depository, so an external deposit pulled
+tokens from the Depository itself; `applyBatch` takes the outer caller as `payer` (found by Foundry `Lifecycle` and the Hardhat NFT
+tests). (2) Deposits pull from the caller and `processBatch` is permissionless, so as a soft failure a relayer without an allowance
+could burn the signer's nonce (review F1, `J5Attacks.test_relayerWithoutAllowanceCannotBurnTheNonceOfADepositBatch`); deposit
+batches now revert whole.
+
+**Tests rewritten.** Every plain-batch revert assertion became a `BatchFailed` assertion: the reason selector, the entity nonce
+spent, no `HankoBatchProcessed`, and the state unchanged (Foundry `_submitFailed`, `_submitFailedUnmoved`; Hardhat
+`test/helpers/batch-failed.ts`). 23 Hardhat tests (Depository-part-1 17, part-2 5, DebtForgiveness 1), 5 Foundry `Lifecycle`
+tests, `ForkChanges` (three lines), `BoardRotationGrace` (old-board counterparty signatures; the same intent now goes at a fresh
+outer nonce, as F1 requires), `c1-epoch` and one vector cell (`settleAtStoredNonce`: "ok, batch failed (E2)"). The test named
+"reverts an underfunded R2C batch without consuming its nonce" is now "fails an underfunded R2C batch soft: the nonce is consumed
+and nothing moves". One Hardhat test went back to a revert (token-id allocation through a deposit batch). Follow-up (coordinator, 22:59): a C2R with an empty or malformed counterparty signature is a `BatchFailed` E4 with the nonce spent (`Account.processC2R` catches the empty revert of the signature check and reverts E4, as the settlement path did); pinned by two `j5-batch-failed` tests and the Hardhat "fails an unsigned C2R above the retired 2^200 ceiling soft (E4)".
+The four invariant handlers count a `BatchFailed` batch as not landed. **`ConservationHandler`** hashes the whole state before
+each batch (every reserve, debt, collateral, offset, account nonce and dispute hash) and requires it equal after a failed or
+reverted batch; it also seeds debts (`seedDebt`, on the `DepositoryDebtHarness`) and checks that a batch whose R2R legs overspend
+a debtor never lands (`invariant_debtorNeverOverspendsThroughABatch`). The review's planted partial-apply mutant k27 (a failing R2R
+returns instead of reverting) survived the old handler and is killed by this one. Mutants checked at this head: k27 (handler),
+deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason hard revert deleted (superseded: with the gas floor an empty reason is `BatchFailed(0)`).
+
+## After the second review of J5 (G1 gas, S1 stuck nonce, B1 co-signed veto)
+
+The second review of #54 (`review/j5-second-review-2026-09-29.md`, decisions in `plan/contracts-decisions.md`, J5 section) found one
+hole and two rule gaps.
+
+- **G1: a relayer's gas decided a signature check.** A starved ERC-1271 member four frames down read as an invalid hanko, `Account`
+  reverted E4, the parents still held about 6% of the gas (over the 1/32 guard), so a good co-signed C2R became `BatchFailed E4`
+  with the nonce spent. Both reviewers found it (first: burn 150K, 749 swept limits for a C2R; second: a 300k member, 538 limits).
+  Fixed by a **gas floor** (coordinator's choice over a 1/8 guard and a per-call stipend, both built and dropped): a failure is
+  reported only when the self-call started with at least `BATCH_GAS_FLOOR` = 15,000,000 * 64 / 63 + 2,000 = 15,240,095 gas, so it
+  cannot have been starvation at any depth; below it the transaction reverts `BatchGasStarved` and takes no nonce. Pinned by
+  `test/foundry/j5/J5Starve.t.sol` (8) and `test/vm/j5-gas-floor.test.ts` (4: 20k, 100k, 300k members and a member that rejects under
+  500k gas; every limit 40k to 1.4M: never a `BatchFailed`, the estimateGas-style search lands). **Mutant:** deleting the floor
+  fails 5 of the 8 `J5StarveTest` tests. Cost: a failing batch with under ~15.24M gas reverts instead of being reported (relayers
+  estimate; the vm rig uses 16M).
+- **Empty revert reason** (was a hard revert): with the floor it cannot be starvation, so it is `BatchFailed(0x00000000)`, nonce
+  spent (a token paused forever no longer stalls the entity; `J5EmptyReasonTest`). The dead `payer` parameter of `applyBatch` is
+  gone (deposits revert whole, so nothing in the self-call reads the caller). The conservation fingerprint covers the whole
+  `_accounts` record, the debt queue and cursor and the active-debt count; the planted `ondeltaEpoch` residue mutant r3 now fails
+  `invariant_everyBatchConservesValue`. `test/vm/j5-batch/j5b-review-extra.test.ts` (the re-review's 12 probes of bad counterparty
+  signatures, and the wrong-entity C2R case).
+- **S1: a dispute-class batch that can never succeed pinned the entity nonce** (F1 forbids re-signing at it). Skips now cover what
+  another party's move made permanent: a finalize whose nonce or side is not the state that settles once the window is over (reason 8; the body hash is not compared, hashing a maximal proof body broke the MAX_SWAP_BOOK gas budget),
+  a finalize or counter naming another opening state (reason 3), a rival body at a registered counter's nonce and side (reason 6),
+  and every former `E12` of a hash-ladder registration (op 3: window closed or no dispute, reason 9; conflict or lower replay,
+  reason 10). Too early still reverts; bytes-only failures still revert. `test/vm/j5-batch/j5-stuck-nonce.test.ts` (7); the three E12
+  tests, the conflicting-counter test and the post-T finalize line in `test/protocol/HashLadderRegistry.test.ts` now assert the
+  skip; the Foundry `HashLadder` handler counts a `DisputeOpSkipped` registration as not landed (`XlnHanko.opSkipped`).
+- **B1: the counterparty (and the relayer) can fail a batch, not only the signer.** No contract change: R-COSIGN, a batch that
+  carries a co-signed op carries only ops for that one Account. `test/vm/j5-batch/j5-cosign-veto.test.ts` (2) pins the veto: R starts a
+  dispute, L's `[payment, co-signed C2R]` is `BatchFailed E6`, nonce spent, payment gone; control lands.
+
+- **J6 (deposit legs) and A12 (two co-signed proofs at one nonce), from the Quint model, no contract change.** Deposit legs stay in
+  the batch as a hard-revert leg (there is no direct deposit path; adding one was refused by the permission classifier and is
+  Arthur's call); rules for the Runtime: a deposit leg travels alone, and is signed only after a successful simulation at the
+  head; the residual stall (a token paused after the simulation) is accepted in writing. A12: two different co-signed proofs can
+  exist at one nonce only with opposite proposer flags; at one nonce LEFT's proposal outranks RIGHT's in a fixed order, whoever
+  starts and whoever counters. `test/a12/a12-two-cosigned-proofs.test.ts` (4) pins all three orderings and the same-flag case;
+  rule R-ONE-BODY for the Runtime.
+
+**Size.** Depository 23359, Account 24400 (176 bytes under 24576): the shared `_requireCounterpartySignature` replaced two copies of the try/catch and paid for S1's two counter skips. Account's next change still needs a size plan.
+
+Results after J5 (local runs, sandbox with forge 1.7.1, one file or suite per process; the three E4-flip tests re-run after the
+sweep and pass; code and tests as committed):
+
+- Foundry, all 17 suites, 0 failures: DebtLifecycle 11, Depository.invariants 16, DepositoryConservation 10, ForkChanges 10,
+  HalmosLemmas 6, HankoThreshold 7, HashLadder 9, J5Attacks 1+4+2 (three contracts), Lifecycle 26, RetiredBoardH3 7, Smoke 1,
+  TransformerAllowance 8, TransformerFaultModes 15, WideMath 30, WideTransformer 6, BatchBounds 11, DebtChunking 6.
+- Hardhat, all 22 files, 0 failures: Depository-part-1 66, part-2 15, DebtForgiveness 2, BoardRotationGrace 6, the rest unchanged.
+- `test/vm/`: j5-batch-failed 13, j5-review-extra 8, j2-skip-stale-dispute-ops 12, j2-review-extra 16, c1-epoch 5,
+  c2-batch-entity 3, h1-htlc-deadline 5, h2-window-floor 3, h3-retired-board-cap 11, h4-deposit-during-dispute 4, vectors 8;
+  `test/gate/`: contract-size 5, deploy-gate 23.
+
+## After the third round of J5 (signed gas budget, epoch in the dispute start, deploy gate)
+
+The second reviewer's third pass and the first reviewer's re-review at 793e6bc (`review/j5-second-review-2026-09-29.md`,
+`review/pr-54-review-2026-09-29.md`) showed that a fixed gas floor is the wrong constant. Decisions are in
+`plan/contracts-decisions.md`, J5 section, "Signed gas budget" and "Third round of #54".
+
+- **Signed gas budget.** `Batch.gasBudget` (`uint64`, first field, so it is signed). `processBatch` requires
+  `gasleft() >= budget * 64 / 63 + BATCH_POST_CALL_RESERVE` (30,000, outside the budget), else `BatchGasStarved`, no nonce. The
+  self-call gets exactly `budget`, so once it started every failure inside it (out-of-gas and gas-burning callees included) is
+  `BatchFailed`. The floor, its tail check and the `gasBefore / 32` guard are deleted. `DepositoryBounds.assertBatch` rejects a
+  budget under `MIN_BATCH_GAS_BUDGET` (500,000) with E10; batches that revert whole ignore the budget but keep the minimum.
+- **Return bomb.** A bare assembly `call` reads only the first 4 bytes of the revert data; 1.5, 2 and 3 MB payloads give `BatchFailed`
+  with the nonce spent and the next batch landing (`j5-gas-callee`, `J5BloatTest`).
+- **Reserve (30,000, outside the budget) gives the callee the WHOLE signed budget.** Corrected at 0aeb766 after both reviewers: the check runs
+  about 160 gas before the CALL, and the CALL costs 100 before the EVM takes its 63/64, so with reserve 0 a transaction just above
+  `budget * 64/63` hands the callee about 230 gas less than the budget. A batch signed at its exact need then soft-fails and burns its nonce
+  at a limit the relayer chose: 232 consecutive limits (772,110 to 772,341) in `j5-gas-exact`, 3,806,117 gas seen against 3,806,337 in
+  `J5BudgetBoundary`. Both tests kill the reserve-0 mutant. The overhead is constant (about 230), so 30,000 is generous on purpose. It is not
+  what the code after the self-call needs (that is about 2,000, covered by the 1/64 the caller keeps and the gas the callee hands back; see
+  the measurement below).
+- **Budget drift accepted.** A batch made dearer by a third party between simulation and inclusion becomes `BatchFailed`, nonce spent,
+  entity not stalled. Spec rule R-SIMULATE: sign only after a successful simulation at the head, add a named margin, never exceed the
+  chain's transaction gas cap, never sign a time-gated op before its gate opens.
+- **Epoch in the start (S1').** `InitialDisputeProof.ondeltaEpoch`; a start signed at an old epoch is skipped with
+  `DisputeOpSkipped` reason 11, judged before the signature. Declaring the current epoch over an old signature is a real E4.
+- **Deploy gate.** `assertDeployGate` = response-window floor, then `assertBatchGasCap`: required tx gas
+  `HANKO_PRELUDE_GAS (4,900,000, measured 4,832,492 with the intrinsic gas) + ceil(500,000 * 64 / 63) + 30,000` = 5,437,937, checked against a per-chain cap table (EIP-7825's
+  16,777,216 for chain ids 1 and 11155111; unknown chains refused on a mainnet, allowed on a named testnet). Supported board size: 128
+  signing validators.
+- **Measured** (outer hanko check, EOA validators all signing; `j5-gas-prelude`): 1 validator 64,391 gas, 64 validators 1,348,965, 128
+  validators 4,522,148 (superlinear; execution only, the transaction's intrinsic gas of 21,000 + 16 per calldata byte, 310,344 at K=128, was left out until
+  the review at 0aeb766: prelude + intrinsic is 114,639 / 1,528,237 / 4,832,492); a failing batch is reported at 602,327, 1,886,901 and 5,060,084. A board of 256 cannot be
+  registered in the rig. F2 (two 8-member ERC-1271 boards) needs 15,623,512 gas, fails at a 15M budget and lands from 16,343,968 at a
+  16M budget (`j5-gas-budget`).
+- **Sizes** (limit 24,576): Depository 23,116, Account 24,427 (149 under; the epoch skip cost 27 bytes).
+
+Results (local runs, sandbox, forge 1.7.1, one file or suite per process): Hardhat `test/dispute`, `test/governance`, `test/protocol` all
+green (three tests read the live epoch now: `Depository-part-1` 66, `BoardRotationGrace` 6). vm: c1-epoch 5, c2 3, h1 5, h2 3, h3 11, h4 4,
+j2-review-extra 16, j2-skip 12, j5-batch-failed 15, j5-cosign-veto 2, j5-gas-budget 6, j5-gas-callee 6, j5-gas-prelude 3,
+j5-review-extra 8, j5-stuck-nonce 9, j5b-review-extra 12, vectors 8. gate: contract-size 5, deploy-gate 29. Foundry: every suite ok
+(J5Starve 8, J5Budget 1+4+6+4, BatchBounds 13 with the two new minimum-budget tests). Vectors regenerated (`lifecycle.json` only).
+Mutants killed: budget ignored (`j5-gas-budget`, `j5-gas-callee`), `64/63` dropped (`j5-gas-budget`), minimum budget removed
+(`BatchBounds`). The Foundry J5 suites alone do not kill the first two; the vm tests do.
+
+### Post-call gas of the failure path (coordinator 02:20: does the 30,000 reserve pay for anything?)
+
+Measured on the real `Depository.processBatch` with a temporary probe (removed; source is unchanged), a withdrawal whose token
+callee burns all its gas (INVALID, endless loop, empty revert, revert with a reason), budget 500,000:
+- **Gas used after the self-call returns, through the end of the `BatchFailed` log: 1,957** (same for all four callee modes). That
+  covers the 4-byte reason read (`returndatacopy`, mask) and the LOG3.
+- **No storage write and no cold slot after the call.** The nonce write (`entityNonces[entityId] = nonce`) happens before the
+  self-call and its slot is warm afterwards; the failure path writes nothing. The success path emits `HankoBatchProcessed` and writes
+  nothing either.
+- **What the caller keeps.** The EVM lets the callee take at most 63/64 of what is left, so after a callee that burns everything the
+  caller holds at least `gasleft_at_call / 64`: 7,936 at the smallest allowed budget (500,000 * 64/63 / 64) even with no reserve, 37,936
+  with the 30,000 reserve added to the requirement. So the margin is 4.05x without the reserve and 19x with it.
+- **Boundary sweep** (`BatchGasStarved` vs `BatchFailed` at every limit from 20 below the first non-starved limit to 400 above it,
+  callee INVALID, budget 500,000): the real build and the requirement lowered by 0, 4,000, 6,000 and 7,000 gas (a check below the budget
+  itself, which hands the callee less than 63/64 of the left gas) all give 0 out-of-gas, 0 unreported returns, 400 of 400 reported.
+- **Reading (corrected, see the next section).** The post-call code is safe without any reserve: it needs about 2,000 and the caller keeps at
+  least 1/64 (7,936 at the smallest budget), and the second reviewer's step trace found 44,413 held when the self-call returns, 14,668 even at
+  reserve 0. But that is the wrong side of the call. My boundary sweep only asked whether the transaction ended cleanly (it did, 400 of 400),
+  not whether the callee got the whole budget, so it could not see what the reserve is for. My 02:20 recommendation to drop the reserve was
+  wrong and is withdrawn; the reserve stays.
+
+## Fourth round of J5 (coordinator, from the two reviews at 0aeb766): what the reserve is for, boundary tests, gap tests, prelude with intrinsic gas
+
+- **Reserve stays (30,000); its comment and this file now say what it is for:** the callee gets the whole signed budget at every gas limit the
+  check accepts. New tests: `test/vm/j5-gas/j5-gas-exact.test.ts` (second reviewer: an ERC-1271 member burning about 600k, budget bisected to the exact
+  need, every limit from the check up lands; P part: post-call need 2,052 against 44,413 held) and `test/foundry/j5/J5BudgetBoundary.t.sol` (first
+  reviewer: an NFT that reports its own `gas()`; the callee sees exactly the budget at the lowest passing limit and at a much higher one, and
+  the limit below reverts). Mutants: reserve 0 is killed by both; the self-call getting budget + 100k is killed only by `J5BudgetBoundary`.
+- **Budget attacks** (`test/vm/j5-gas/j5-fourth-budget.test.ts`, 4): another budget under the same signature is E4 with no nonce; uint64 max and
+  budgets over the cap are `BatchGasStarved` with no nonce and no overflow; 500,000 lands, 499,999 and 0 are E10; a revert-whole batch ignores the
+  budget but keeps the minimum; a member that reads `gasleft()` sees the signed budget, never the relayer's limit, so a simulation at another
+  budget disagrees (R-SIMULATE, decisions doc).
+- **No upper bound on `gasBudget`** (accepted): a budget no chain can land never lands, the nonce stays open, the entity signs another batch at
+  it. Self-inflicted, costs nothing.
+- **Gap-killing tests** (first reviewer): `test/vm/j5-batch/j5e-review-outdated.test.ts` (4: every branch of the outdated-finalize-evidence decision;
+  killed t07, t08, t09, t11) and the lower-Target ladder replay in `test/protocol/HashLadderRegistry.test.ts` (skip with reason 10, nothing
+  changes; killed l03).
+- **Prelude constant includes intrinsic gas.** `j5-gas-prelude.test.ts` adds `21,000 + 16 * calldata bytes` (an upper bound) to the rig's
+  execution-only measurement (a read-only call charges none): 4,832,492 at K=128, so `HANKO_PRELUDE_GAS` goes from 4,600,000 to 4,900,000 and
+  the gate total from 5,137,937 to 5,437,937 (the earlier label 5,137,943 was wrong by 6: 4,600,000 + 507,937 + 30,000). Headroom under the
+  EIP-7825 cap is still about 11.3M; no gate decision changes.
+
+### The rewrite's fork shim (`pure/diff/rig/fork-shim.ts`, `pure/diff/rig/contracts.ts`): the two new ABI fields
+
+#50 and #55 are on main, so the shim that lets og's frozen Runtime talk to the fork's Depository now also speaks the J5 ABI:
+- `encodeForkBatch` re-encodes og's batch (after `rebindBatch` re-signed it for the epochs on chain) with the fork's `Batch` type: `gasBudget` in
+  front (`SHIM_GAS_BUDGET` = 14,000,000: og's BrowserVM sends every processBatch with 15,000,000 gas, and the Depository needs
+  `budget * 64/63 + 30,000` plus the hanko prelude on top) and `ondeltaEpoch` in every dispute start (the epoch `rebindBatch` signed it for).
+- The calldata view (og reads dispute evidence back out of the transaction) shows og the batch it sealed, not the fork's bytes, because og
+  decodes with its own ABI (`J_DISPUTE_PROOFBODY_CALLDATA_DECODE_FAILED` otherwise).
+- `installContracts` also swaps `DepositoryBounds`, `HashLadderRegistry` and `NftCustody`, so the linked bounds check reads the fork's `Batch`.
+- Results (local, sandbox): `pure/diff/cross-j/scenario-cross-j.test.ts` 9 of 9 (8 of 9 failed before, every batch refused with a bare revert);
+  `bun diff/walk.ts --area disputes|settlement|core|boards --seeds 3`: 3 walks each, 0 failed (disputes failed 3 of 3 with the calldata error
+  before the view fix); `bunx tsc -p pure` clean; `bun style/check.ts` at baseline.
+
+### Fourth-round gate (merged head)
+
+Local runs at the merge of main b471747 into the branch, one file or suite per process: Hardhat dispute, governance and protocol all passing except
+one test: `Depository-part-1` "keeps the dispute active when any signed transformer cannot execute exactly" times out at Hardhat's 40 s mocha
+limit on this machine, taking about 54 s (the out-of-gas mode alone about 52 s, mostly system time). It times out identically on main's own
+contracts here (checked in a clean worktree at b471747, same test alone), and the same file passed in 41 s in the earlier sandbox, so the cause
+is the machine, not #54; run on a faster one or raise the timeout for that test. vm 20 files, gate 2 files, `test/a12` (4), Foundry every suite: 0 failures.
+
+### Shim budget pin
+
+`pure/diff/rig/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/rig/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits by that bound (conservative: the first reviewer measured a real limit of about 38); the walk's largest has 3.
+
+**Measured need (instrument on the BrowserVM submit, not committed):** whole `processBatch` execution gas, prelude included, over the four area walks (disputes, settlement, core, boards; 3 seeds each), `scenario.test.ts` and `scenario-cross-j.test.ts`: the largest is **396,485**, most batches about 376,000. The 14,000,000 budget is a ceiling about 35 times that need, chosen to fit og's fixed 15,000,000 tx gas, not a margin measured from the walks.

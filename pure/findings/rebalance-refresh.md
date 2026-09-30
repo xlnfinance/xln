@@ -1,6 +1,6 @@
 # rebalance-refresh: hub rebalance task, board Hanko refresh sending chain, lending_overdue hook
 
-Spec: og (core/) is the authority. Tests are in `pure/diff/rebalance-refresh.test.ts`. Every test is a MATCH test that runs og live on randomized inputs.
+Spec: og (core/) is the authority. Tests are in `pure/diff/settlement/rebalance-refresh.test.ts`. Every test is a MATCH test that runs og live on randomized inputs.
 
 | ID | Item | og source | Rewrite | Test | Status |
 |---|---|---|---|---|---|

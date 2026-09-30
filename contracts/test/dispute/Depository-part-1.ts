@@ -29,6 +29,7 @@ import {
   MAX_SWAP_BOOK,
   PROCESS_BATCH_GAS_LIMIT,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 import { createWatchedErc20TokenReader } from '../../../core/jurisdiction/adapter/rpc-watcher-inputs.ts';
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const MAX_FILL_RATIO = 65535n;
@@ -325,6 +326,7 @@ describe('Depository', () => {
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments: leftArguments,
             starterCounterArguments: '0x',
+        ondeltaEpoch: await accountEpoch(target, left.entityId, right.entityId),
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
@@ -461,7 +463,7 @@ describe('Depository', () => {
     expect(reserveFrom).to.equal(750n);
     expect(reserveTo).to.equal(250n);
   });
-  it('reverts an underfunded R2C batch without consuming its nonce', async function () {
+  it('fails an underfunded R2C batch soft: the nonce is consumed and nothing moves', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [, , user2] = await ethers.getSigners();
     const actor = lazyActor(user0, 0);
@@ -482,9 +484,8 @@ describe('Depository', () => {
       ],
     });
     const signed = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, batch);
-    await expect(depository.connect(actor.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce))
-      .to.be.revertedWithCustomError(depository, 'E3');
-    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
+    await expectBatchFailed(depository, actor.signer, signed, 'E3');
+    expect(await depository.entityNonces(actor.entityId)).to.equal(1n);
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10n);
     expect(
       (await depository._collaterals(canonicalAccountKey(actor.entityId, firstCounterparty), tokenId))
@@ -495,7 +496,7 @@ describe('Depository', () => {
         .collateral,
     ).to.equal(0n);
   });
-  it('reverts underfunded C2R/R2E batches and keeps signature failures fatal', async function () {
+  it('fails underfunded C2R/R2E batches and bad counterparty signatures soft, and keeps a bad batch hanko fatal', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = await registerFixedSupplyErc20(depository, 1_000_000n);
@@ -534,8 +535,7 @@ describe('Depository', () => {
       ],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
-    await expect(depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce))
-      .to.be.revertedWithCustomError(depository, 'E3');
+    await expectBatchFailed(depository, left.signer, signed, 'E3');
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     const invalidBatch = emptyBatch({
@@ -550,10 +550,15 @@ describe('Depository', () => {
       ],
     });
     const invalid = await signDepositoryBatch(depository, left.entityId, left.privateKey, invalidBatch);
+    // a bad counterparty signature inside the ops is a failure of the batch like any other: E4 reported, nonce 2 spent
+    await expectBatchFailed(depository, left.signer, invalid, 'E4');
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
+    // the batch's own hanko is what stays fatal: a hanko signed by the wrong key reverts E4 and takes no nonce
+    const forged = await signDepositoryBatch(depository, left.entityId, right.privateKey, invalidBatch);
     await expect(
-      depository.connect(left.signer).processBatch(invalid.entityId, invalid.encodedBatch, invalid.hankoData, invalid.nonce),
+      depository.connect(left.signer).processBatch(forged.entityId, forged.encodedBatch, forged.hankoData, forged.nonce),
     ).to.be.revertedWithCustomError(depository, 'E4');
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
   });
   it('rejects permissionless token-id allocation from the production batch path', async function () {
     const { depository, erc20 } = await loadFixture(deployFixture);
@@ -573,9 +578,11 @@ describe('Depository', () => {
       ],
     });
     const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
+    // deposit legs pull from the caller, so a batch with one reverts whole and takes no nonce (a relayer cannot burn it)
     await expect(
       depository.connect(user0).processBatch(deposit.entityId, deposit.encodedBatch, deposit.hankoData, deposit.nonce),
     ).to.be.revertedWithCustomError(depository, 'E11');
+    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
     expect(await depository.getTokensLength()).to.equal(registryLengthBefore);
   });
   it('assigns stable token IDs only through a Foundation listing', async function () {
@@ -759,9 +766,7 @@ describe('Depository', () => {
       reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 1_000n }],
     });
     const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
-    await expect(
-      depository.connect(user0).processBatch(withdraw.entityId, withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E11');
+    await expectBatchFailed(depository, user0, withdraw, 'E11');
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(9_900n);
     expect(await token.balanceOf(user1.address)).to.equal(0n);
   });
@@ -790,9 +795,7 @@ describe('Depository', () => {
       reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId: erc721id, amount: 0n }],
     });
     const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
-    await expect(
-      depository.connect(user0).processBatch(withdraw.entityId, withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E1');
+    await expectBatchFailed(depository, user0, withdraw, 'E1');
     expect(await erc721.ownerOf(1)).to.equal(await depository.getAddress());
     expect(await depository._reserves(actor.entityId, erc721id)).to.equal(1n);
   });
@@ -820,9 +823,7 @@ describe('Depository', () => {
     const withdrawal = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
       reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 1n }],
     }));
-    await expect(
-      depository.connect(user0).processBatch(withdrawal.entityId, withdrawal.encodedBatch, withdrawal.hankoData, withdrawal.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E11');
+    await expectBatchFailed(depository, user0, withdrawal, 'E11');
     expect(await token.ownerOf(1)).to.equal(await depository.getAddress());
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(1n);
   });
@@ -850,9 +851,7 @@ describe('Depository', () => {
     const withdrawal = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
       reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 4n }],
     }));
-    await expect(
-      depository.connect(user0).processBatch(withdrawal.entityId, withdrawal.encodedBatch, withdrawal.hankoData, withdrawal.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E11');
+    await expectBatchFailed(depository, user0, withdrawal, 'E11');
     expect(await token.balanceOf(await depository.getAddress(), 1)).to.equal(10n);
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10n);
   });
@@ -979,11 +978,10 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(875n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(125n);
     const replay = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
-    await expect(
-      depository.connect(left.signer).processBatch(replay.entityId, replay.encodedBatch, replay.hankoData, replay.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
+    await expectBatchFailed(depository, left.signer, replay, 'E2');
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
-    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+    // the replayed settlement was signed at the next outer nonce, so the outer nonce advanced: it failed E2 soft
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
   });
   it('rejects duplicate forgiveness token ids before one settlement can advance the debt cursor twice', async function () {
     const { depository } = await loadFixture(deployFixture);
@@ -1009,10 +1007,8 @@ describe('Depository', () => {
       }],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    await expectBatchFailed(depository, left.signer, signed, 'E2');
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
   });
   it('rejects unsafe Account and outer batch nonces at the Solidity write boundary', async function () {
@@ -1039,17 +1035,27 @@ describe('Depository', () => {
       }],
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+    // J5: an unsafe account nonce inside a payment, settlement or C2R fails the batch soft (E10, the outer nonce is
+    // spent); an unsafe dispute start keeps the J2 rule and reverts the whole batch.
+    let spentOuterNonces = 0n;
     const expectUnsafeBatch = async (unsafeBatch: Record<string, unknown>): Promise<void> => {
       const candidate = await signDepositoryBatch(depository, left.entityId, left.privateKey, unsafeBatch);
-      await expect(
-        depository.connect(left.signer).processBatch(
-          candidate.entityId,
-          candidate.encodedBatch,
-          candidate.hankoData,
-          candidate.nonce,
-        ),
-      ).to.be.revertedWithCustomError(depository, 'E10');
-      expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+      const carriesDisputeOps = ['disputeStarts', 'counterDisputes', 'disputeFinalizations']
+        .some((key) => ((unsafeBatch[key] as unknown[] | undefined) ?? []).length > 0);
+      if (carriesDisputeOps) {
+        await expect(
+          depository.connect(left.signer).processBatch(
+            candidate.entityId,
+            candidate.encodedBatch,
+            candidate.hankoData,
+            candidate.nonce,
+          ),
+        ).to.be.revertedWithCustomError(depository, 'E10');
+      } else {
+        await expectBatchFailed(depository, left.signer, candidate, 'E10');
+        spentOuterNonces += 1n;
+      }
+      expect(await depository.entityNonces(left.entityId)).to.equal(spentOuterNonces);
     };
     await expectUnsafeBatch(batch);
     await expectUnsafeBatch(emptyBatch({
@@ -1074,6 +1080,7 @@ describe('Depository', () => {
         sig: '0x',
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: ethers.ZeroHash,
       }],
     }));
@@ -1106,7 +1113,7 @@ describe('Depository', () => {
     await expect(
       depository.connect(left.signer).processBatch(left.entityId, '0x', '0x', maxSafeNonce + 1n),
     ).to.be.revertedWithCustomError(depository, 'E10');
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(spentOuterNonces);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
   });
   it('reserves the maximum safe nonce for one unilateral finalization successor', async function () {
@@ -1186,7 +1193,7 @@ describe('Depository', () => {
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
     expect(await depository.entityNonces(left.entityId)).to.equal(1n);
   });
-  it('reverts settlement at the uint256 reserve edge instead of wrapping, and leaves no partial diff', async function () {
+  it('fails settlement at the uint256 reserve edge soft (Panic) instead of wrapping, and leaves no partial diff', async function () {
     const { depository } = await loadFixture(deployFixture);
     const INT256_MAX = (1n << 256n) - 1n; // the real edge: reserves are uint256
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -1219,13 +1226,11 @@ describe('Depository', () => {
       left.privateKey,
       emptyBatch({ settlements: [settlement] }),
     );
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithPanic(0x11);
+    await expectBatchFailed(depository, left.signer, signed, 'Panic');
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(1n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
   });
   it('accepts R2C and settlement collateral past the retired 2^200 ceiling', async function () {
     const { depository } = await loadFixture(deployFixture);
@@ -1309,7 +1314,7 @@ describe('Depository', () => {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
   });
-  it('reverts R2C and settlement at the uint256 collateral edge instead of wrapping', async function () {
+  it('fails R2C and settlement at the uint256 collateral edge soft (Panic) instead of wrapping', async function () {
     const { depository } = await loadFixture(deployFixture);
     const INT256_MAX = (1n << 256n) - 1n; // the real edge: collateral is uint256
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -1351,11 +1356,7 @@ describe('Depository', () => {
         ],
       }),
     );
-    await expect(
-      depository
-        .connect(right.signer)
-        .processBatch(overflowR2c.entityId, overflowR2c.encodedBatch, overflowR2c.hankoData, overflowR2c.nonce),
-    ).to.be.revertedWithPanic(0x11);
+    await expectBatchFailed(depository, right.signer, overflowR2c, 'Panic');
     expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
     // Settlement path: move 1 from right reserve into already-max collateral.
@@ -1384,9 +1385,7 @@ describe('Depository', () => {
       left.privateKey,
       emptyBatch({ settlements: [settlement] }),
     );
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithPanic(0x11);
+    await expectBatchFailed(depository, left.signer, signed, 'Panic');
     expect((await depository._collaterals(acctKey, tokenId)).collateral).to.equal(INT256_MAX);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(2n);
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
@@ -1510,11 +1509,9 @@ describe('Depository', () => {
     };
     const unsignedBatch = emptyBatch({ settlements: [unsignedSettlement] });
     const unsigned = await signDepositoryBatch(depository, left.entityId, left.privateKey, unsignedBatch);
-    await expect(
-      depository.connect(left.signer).processBatch(unsigned.entityId, unsigned.encodedBatch, unsigned.hankoData, unsigned.nonce),
-    ).to.be.revertedWith('Signature required for settlement');
+    await expectBatchFailed(depository, left.signer, unsigned, 'Error');
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);  // the unsigned settlement failed soft and spent nonce 1
     const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, []);
     const signedSettlement = {
       ...unsignedSettlement,
@@ -1522,11 +1519,9 @@ describe('Depository', () => {
     };
     const signedBatch = emptyBatch({ settlements: [signedSettlement] });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, signedBatch);
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
+    await expectBatchFailed(depository, left.signer, signed, 'E2');
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(2n);
   });
   it('blocks cooperative settlement and C2R while a dispute is active', async function () {
     const { depository } = await loadFixture(deployFixture);
@@ -1566,6 +1561,7 @@ describe('Depository', () => {
           sig: startSig,
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
@@ -1601,9 +1597,7 @@ describe('Depository', () => {
       ],
     });
     const settlement = await signDepositoryBatch(depository, left.entityId, left.privateKey, settlementBatch);
-    await expect(
-      depository.connect(left.signer).processBatch(settlement.entityId, settlement.encodedBatch, settlement.hankoData, settlement.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E6');
+    await expectBatchFailed(depository, left.signer, settlement, 'E6');
     const c2rDiffs = [
       {
         tokenId,
@@ -1630,14 +1624,12 @@ describe('Depository', () => {
       ],
     });
     const c2r = await signDepositoryBatch(depository, left.entityId, left.privateKey, c2rBatch);
-    await expect(
-      depository.connect(left.signer).processBatch(c2r.entityId, c2r.encodedBatch, c2r.hankoData, c2r.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E6');
+    await expectBatchFailed(depository, left.signer, c2r, 'E6');
     expect((await depository._accounts(acctKey)).nonce).to.equal(disputeNonce);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(200n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
-  it('refuses an unsigned C2R above the retired 2^200 ceiling by the signature rule, not a ceiling, before mutation', async function () {
+  it('fails an unsigned C2R above the retired 2^200 ceiling soft (E4) by the signature rule, not a ceiling, before mutation', async function () {
     const { depository } = await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
@@ -1656,9 +1648,10 @@ describe('Depository', () => {
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
     const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
 
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithoutReason(ethers);
+    // an empty counterparty signature is a bad counterparty signature like any other: the batch fails E4 (BatchFailed, nonce
+    // spent). Account gives it an explicit E4 so it never looks like the empty revert of an out-of-gas frame, which reverts whole.
+    await expectBatchFailed(depository, left.signer, signed, 'E4');
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
   });
@@ -1707,11 +1700,9 @@ describe('Depository', () => {
     });
     const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
 
-    await expect(
-      depository.connect(left.signer).processBatch(signed.entityId, signed.encodedBatch, signed.hankoData, signed.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E2');
+    await expectBatchFailed(depository, left.signer, signed, 'E2');
 
-    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(1_000n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
@@ -1829,15 +1820,11 @@ describe('Depository', () => {
         }],
       }),
     );
-    await expect(
-      depository
-        .connect(attacker.signer)
-        .processBatch(poison.entityId, poison.encodedBatch, poison.hankoData, poison.nonce),
-    ).to.be.revertedWithCustomError(depository, 'E1');
+    await expectBatchFailed(depository, attacker.signer, poison, 'E1');
 
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     expect((await depository._collaterals(acctKey, 999n)).collateral).to.equal(0n);
-    expect(await depository.entityNonces(attacker.entityId)).to.equal(0n);
+    expect(await depository.entityNonces(attacker.entityId)).to.equal(1n);
   });
 
   it('lets only the non-starter finalize a newer jointly signed counter-proof', async function () {
@@ -1882,6 +1869,7 @@ describe('Depository', () => {
       sig: startSig,
       starterInitialArguments,
       starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     const startBatch = emptyBatch({ disputeStarts: [disputeStart] });
@@ -2079,6 +2067,7 @@ describe('Depository', () => {
       sig: startSig,
       starterInitialArguments: '0x',
       starterCounterArguments: '0x',
+        ondeltaEpoch: await accountEpoch(depository, left.entityId, right.entityId),
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
     };
     const start = await signDepositoryBatch(
@@ -2167,6 +2156,7 @@ describe('Depository', () => {
             sig: startSig,
             starterInitialArguments,
             starterCounterArguments,
+            ondeltaEpoch: 0n,
             starterCounterProofCommitment,
           },
         ],
@@ -2269,9 +2259,11 @@ describe('Depository', () => {
         cooperative: false,
       };
       const final = await signFinalBatch(depository, left, finalization);
+      // S1: the dispute's starter side never changes, so a finalize naming the other side can never succeed: skipped (op 2,
+      // reason 3), not reverted, so it cannot pin the entity's nonce
       await expect(
         depository.connect(left.signer).processBatch(final.entityId, final.encodedBatch, final.hankoData, final.nonce),
-      ).to.be.revertedWithCustomError(depository, 'E9');
+      ).to.emit(depository, 'DisputeOpSkipped').withArgs(left.entityId, right.entityId, 2n, 3n, initialNonce);
     }
 
     {
@@ -2386,6 +2378,7 @@ describe('Depository', () => {
           sig: startSig,
           starterInitialArguments,
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],
@@ -2450,6 +2443,7 @@ describe('Depository', () => {
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments,
             starterCounterArguments,
+            ondeltaEpoch: 0n,
             starterCounterProofCommitment: ethers.ZeroHash,
           },
         ],
@@ -2531,6 +2525,7 @@ describe('Depository', () => {
             sig: signEntityHash(right.entityId, startHash, right.privateKey),
             starterInitialArguments: '0x',
             starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
           },
         ],
@@ -2954,6 +2949,7 @@ describe('Depository', () => {
               sig: signEntityHash(right.entityId, startHash, right.privateKey),
               starterInitialArguments: '0x',
               starterCounterArguments: '0x',
+              ondeltaEpoch: 0n,
               starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
             },
           ],
@@ -3088,6 +3084,7 @@ describe('Depository', () => {
           sig: startSig,
           starterInitialArguments,
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         },
       ],

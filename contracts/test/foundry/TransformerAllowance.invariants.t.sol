@@ -236,6 +236,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[right],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: startProposerIsLeft,
       proofbodyHash: faultHash,
       initialProofbody: faultPb,
@@ -268,7 +269,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
     uint256 rightNonce = dep.entityNonces(entity[right]) + 1;
     bytes32 rightBatchH =
       XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[right], finFaultEncoded, rightNonce);
-    vm.expectRevert();
+    vm.expectRevert(abi.encodeWithSignature("TransformerExecutionFailed()"));
     dep.processBatch(entity[right], finFaultEncoded, _hanko(right, rightBatchH), rightNonce);
     assertTrue(_disputeHashOf(left, right) != bytes32(0), "fault finalize must leave the dispute live");
 

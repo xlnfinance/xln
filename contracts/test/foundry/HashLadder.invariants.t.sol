@@ -101,7 +101,7 @@ contract HashLadderInvariants is XlnFixture {
   ///         without a live dispute is rejected; with a live dispute it lands;
   ///         an exact retry is a sticky no-op; a conflicting retry is rejected.
   function test_control_sourceSingleShotSemantics() public {
-    // No dispute: first Source write must be rejected (E12). Odd warpSeed so
+    // No dispute: first Source write must be skipped (S1: DisputeOpSkipped, it was E12). Odd warpSeed so
     // the handler's in-action dispute self-open stays disabled here.
     handler.registerReveal(0, 1, 1 /*source*/, 0x1234, 1, 3);
     (uint16 ratio, uint256 ts) =
@@ -129,11 +129,11 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(ratio3, 0x1234, "conflicting Source retry replaced the record");
   }
 
-  /// @notice CONTROL (C4-hardening A5, asymmetric window sides + close→E12):
+  /// @notice CONTROL (C4-hardening A5, asymmetric window sides + close→skip):
   ///         at t = S+75 (inside RIGHT's 90s owner window, past LEFT's 60s),
   ///         the RIGHT-side writer's first Source write is accepted while the
   ///         LEFT-side writer's is not — then closing the dispute makes any
-  ///         further first Source write E12-rejected. A registry reading the
+  ///         further first Source write skipped. A registry reading the
   ///         counterparty's window, or storing the windows on swapped sides,
   ///         fails this control.
   function test_control_asymmetricWindowsSelectTheWriterSide() public {
@@ -159,13 +159,13 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(leftRatio, 0, "LEFT-side out-of-window write was accepted");
 
     // Close the dispute (non-starter, immediate), then a first Source write
-    // on a fresh slot must hit the E12 branch.
+    // on a fresh slot must hit the skip branch.
     handler.closeDispute(0, 1);
     assertEq(handler.disputesClosed(), 1, "control: dispute did not close");
     handler.registerReveal(right, left, 2 /*source*/, 0x3333, 2 /*bucket*/, 1 /*no warp*/);
     (uint16 afterClose, ) =
       dep.getHashLadderReveal(handler.entityOf(right), handler.entityOf(left), _ladderOf(2, 0x3333), false);
-    assertEq(afterClose, 0, "first Source write accepted after the dispute closed (E12)");
+    assertEq(afterClose, 0, "first Source write accepted after the dispute closed (skip)");
     assertEq(handler.sourceOutsideWindowAccepted(), 0, "oracle flagged the correct control");
   }
 

@@ -1,6 +1,6 @@
 # followup-order: committed-frame followups, cross-j admission timing, active jurisdiction
 
-og (core/ + jurisdictions/) is the spec. The tests are in `pure/diff/followup-order.test.ts`, one MATCH test against live og `applySuccessfulAccountInput` + `admitLocalAccountTx` over 600 random cases.
+og (core/ + jurisdictions/) is the spec. The tests are in `pure/diff/account/followup-order.test.ts`, one MATCH test against live og `applySuccessfulAccountInput` + `admitLocalAccountTx` over 600 random cases.
 
 | # | og item | og file | Rewrite | Status |
 |---|---|---|---|---|

@@ -123,8 +123,10 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    vm.recordLogs();
     try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
-      return true;
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      return !XlnHanko.batchFailed(vm.getRecordedLogs());
     } catch {
       return false;
     }
@@ -287,6 +289,7 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: entityOf[cp],
       nonce: g.nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,

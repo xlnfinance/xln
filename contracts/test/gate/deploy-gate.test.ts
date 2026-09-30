@@ -73,6 +73,46 @@ describe("the gate is keyed by chain id", () => {
   });
 });
 
+describe("the batch gas budget fits the chain's transaction gas cap (J5)", () => {
+  const gas = { minBudget: 500_000, reserve: 30_000 };
+  const readGas = () => gas;
+  const capsOf = (caps: Record<number, number>) => (chain: { chainId: number }) => caps[Number(chain.chainId)] ?? null;
+
+  test("the constants are read from the compiled build, and the required gas is the supported board's hanko + budget * 64/63 + reserve", () => {
+    expect(gate.readCompiledBatchGas()).toEqual(gas);
+    expect(gate.requiredTxGas(gas)).toBe(gate.HANKO_PRELUDE_GAS + Math.ceil((500_000 * 64) / 63) + 30_000);
+    expect(gate.SUPPORTED_BOARD_SIGNERS).toBe(128); // the board size the prelude constant is measured for (test/vm/j5-gas-prelude.test.ts)
+  });
+
+  test("Ethereum's EIP-7825 cap carries it with room to spare", () => {
+    expect(gate.EIP_7825_TX_GAS_CAP).toBe(2 ** 24);
+    expect(gate.assertBatchGasCap([named(1), named(11155111)], readGas)).toBe(gate.requiredTxGas(gas));
+    expect(gate.EIP_7825_TX_GAS_CAP - gate.requiredTxGas(gas)).toBeGreaterThan(10_000_000);
+  });
+
+  test("a known cap below the requirement is refused, on a mainnet and on a testnet", () => {
+    const tight = capsOf({ 1: 5_000_000, 84532: 5_000_000 });
+    expect(() => gate.assertBatchGasCap([named(1, "ethereum-mainnet")], readGas, tight)).toThrow(/gas cap of ethereum-mainnet \(1\) is 5000000, below the/);
+    expect(() => gate.assertBatchGasCap([named(84532, "base-sepolia")], readGas, tight)).toThrow(/below the/);
+  });
+
+  test("an unknown cap is refused on a mainnet and never blocks a named testnet", () => {
+    expect(() => gate.assertBatchGasCap([named(8453, "base-mainnet")], readGas, capsOf({}))).toThrow(/gas cap of base-mainnet \(8453\) is not known/);
+    expect(gate.assertBatchGasCap([named(31337), named(84532), named(3448148188)], readGas, capsOf({}))).toBeNull();
+  });
+
+  test("fails closed when the constants cannot be read or are not plain constants, but never blocks a testnet with an unknown cap", () => {
+    expect(() => gate.assertBatchGasCap([named(1)], () => { throw new Error("stale"); })).toThrow(/cannot establish the batch gas budget/);
+    expect(() => gate.assertBatchGasCap([named(1)], () => ({ minBudget: null, reserve: 30_000 }))).toThrow(/not a plain constant/);
+    expect(gate.assertBatchGasCap([named(31337)], () => { throw new Error("stale"); }, capsOf({}))).toBeNull();
+  });
+
+  test("assertDeployGate runs the response-window floor first, then the gas cap", () => {
+    expect(() => gate.assertDeployGate([named(1, "ethereum-mainnet")])).toThrow(/MIN_RESPONSE_SECONDS is 60s/);
+    expect(gate.assertDeployGate([named(31337)])).toBeUndefined();
+  });
+});
+
 describe("every deploy path runs the gate", () => {
   const run = (args: string[], command = "bun") => spawnSync(command, args, {
     cwd: contractsRoot, encoding: "utf8", timeout: 240_000,
