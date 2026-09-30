@@ -14,6 +14,8 @@ The rules encode the rewrite's pure style: lines of at most 120 characters (`lon
 - `concat`: `joined.set(p, offset)` fills the fresh output buffer.
 - `committedView` and the prepared-body memo: `views.set` and two `preparedBodies.add` fill module-level `WeakMap`/`WeakSet` caches of pure results.
 
+- `rules/` (the register gate; `style/check.ts` scans only `xln.ts`, so these are listed here rather than counted): `depthsBefore` in `rules/names/source.ts` fills one local `Int32Array` inside the reduce that builds it and hands it out once, like `mapAccumResult`; `parseJson` in `rules/register.ts` and `parseMutants` in `rules/names/names.ts` are the two `try`/`catch` boundaries around `JSON.parse`, which turn bad text into a `Result` or an empty list. The gate's edges (`check.ts`, `base.ts`, `scan.ts`, `checks/*.ts`) read files, call git and exit; they hold no state.
+
 A new exception must be listed here, with why no pure expression does the same work at the same cost.
 
 ## Guide rules the ratchet also counts
