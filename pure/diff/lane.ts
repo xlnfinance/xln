@@ -24,7 +24,7 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
-import { haltDeparture } from "./departures.ts";
+import { afterStricter, haltDeparture, stricterDeparture, type FarLock, type FrameDiff, type OgAccountTx, type OgFrameClock } from "./departures.ts";
 import {
   canonicalEntityHashes,
   convertOutput,
@@ -157,13 +157,19 @@ export const treeClone = <T>(v: T): T => {
 /** Plain JSON view (bigints tagged), so og and rewrite values compare structurally. */
 export const plain = (v: unknown): unknown => JSON.parse(stableJson(v));
 /** The first differing leaves of two plain values, as `path: og=… rw=…`. */
-export const leafDiffs = (a: unknown, b: unknown, at = "", out: string[] = []): string[] => {
-  if (out.length >= Number(process.env["SCN_DIFFS"] ?? 6)) return out;
+export const leafDiffs = (
+  a: unknown,
+  b: unknown,
+  at = "",
+  out: string[] = [],
+  limit = Number(process.env["SCN_DIFFS"] ?? 6),
+): string[] => {
+  if (out.length >= limit) return out;
   const both = a !== null && b !== null && typeof a === "object" && typeof b === "object";
   if (both) {
     const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
     keys.forEach((k) =>
-      leafDiffs((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`, out),
+      leafDiffs((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`, out, limit),
     );
     return out;
   }
@@ -286,6 +292,29 @@ const rowKey = (row: unknown): string => {
   const { sourceRuntimeFrame: _frame, atomicCrossJurisdictionPair: _pair, ...carried } = row as Record<string, unknown>;
   return stableJson(mapsSpelled(carried));
 };
+
+/** Whether an output row carries txs and nothing else: only those batch at dispatch. */
+const txOnly = (row: NetworkOutput): boolean =>
+  Array.isArray(row["entityTxs"]) && row["entityTxs"].length > 0 &&
+  ["proposedFrame", "hashPrecommits", "leaderTimeoutVote", "jPrefixAttestations"].every((k) => row[k] === undefined);
+/** The lane og batches a row into: Runtime, Entity, signer and source frame. */
+const laneOf = (row: NetworkOutput): string => {
+  const frame = row["sourceRuntimeFrame"] as unknown as SourceRuntimeFrame;
+  return [row["runtimeId"], row["entityId"], row["signerId"] ?? "", frame.height, frame.timestamp].map(String).join(":");
+};
+/**
+ * og dispatch batchOutputsByTarget: the tx-only rows of one lane ship as one input, their txs joined in order into the
+ * first one's slot; every consensus payload keeps its own input. The retained outbox (frame.runtimeOutputs, which the
+ * rewrite commits) is not batched: two Account messages one Entity frame sends the same peer, at different heights, are
+ * two rows there and one input on the wire.
+ */
+export const batchedByLane = (rows: readonly NetworkOutput[]): readonly NetworkOutput[] =>
+  rows.reduce<readonly NetworkOutput[]>((batched, row) => {
+    const at = txOnly(row) ? batched.findIndex((b) => txOnly(b) && laneOf(b) === laneOf(row)) : -1;
+    const joined = (b: NetworkOutput): NetworkOutput =>
+      ({ ...b, entityTxs: [...(b["entityTxs"] as readonly unknown[]), ...(row["entityTxs"] as readonly unknown[])] }) as NetworkOutput;
+    return at < 0 ? [...batched, row] : batched.map((b, i) => (i === at ? joined(b) : b));
+  }, []);
 
 /** One local continuation under its og route key. */
 type Slot = readonly [string, RoutedEntityInput];
@@ -536,7 +565,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
       // the rewrite may commit a frame og halts on only as a named departure, and only doing what it names
       const departure = haltDeparture(ogHalt);
       if (departure === undefined) return [`${label} og halted (${ogHalt}) but the rewrite committed`];
-      const wrong = departure.instead(committed.value === null ? rt : committed.value.runtime);
+      const wrong = departure.instead(committed.value === null ? rt : committed.value.runtime, ogHalt);
       if (wrong !== null) return [`${label} ${departure.name}: ${wrong}`];
       coverage.departures.push(`${label} ${departure.name}`);
       return [];
@@ -554,9 +583,11 @@ export const createLane = (cfg: LaneConfig): Lane => {
     if (!committed.ok) return [`${label} rewrite refused the frame: ${stableJson(committed.error)}`];
     const c = committed.value;
     const after = c === null ? rt : c.runtime;
-    const diffs: string[] = [];
+    const found: FrameDiff[] = [];
     const cmp = (what: string, og: unknown, rw: unknown): void => {
-      leafDiffs(plain(og), plain(rw)).forEach((d) => diffs.push(`${label} ${what}${d}`));
+      leafDiffs(plain(og), plain(rw), "", [], 1000)
+        .slice(0, Number(process.env["SCN_DIFFS"] ?? 6))
+        .forEach((d) => found.push({ what, text: `${label} ${what}${d}` }));
     };
     cmp("height", env.state.height, Number(after.height));
     cmp("timestamp", env.state.timestamp, Number(after.timestamp));
@@ -604,7 +635,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const ogRemote = sent.og.flatMap((e) => e.entityInputs);
     const ogFrames = sent.og.flatMap((e) =>
       e.entityInputs.map(() => ({ height: e.sourceRuntimeHeight, timestamp: e.sourceRuntimeTimestamp })));
-    const rwRows = c === null ? [] : c.runtimeOutputs;
+    const rwRows = c === null ? [] : batchedByLane(c.runtimeOutputs);
+    const merged = c === null ? 0 : c.runtimeOutputs.length - rwRows.length;
+    if (merged > 0) coverage.actions["batchedRows"] = (coverage.actions["batchedRows"] ?? 0) + merged;
     // og's dispatch regroups the rows into envelopes (atomic cross-j cohorts first): the same rows, in its order
     const sorted = (keys: readonly string[]): readonly unknown[] => [...keys].sort().map((k) => JSON.parse(k));
     cmp("remote", sorted(ogRemote.map(rowKey)), sorted(rwRows.map(rowKey)));
@@ -619,6 +652,20 @@ export const createLane = (cfg: LaneConfig): Lane => {
         proposal?.frame.accountTxs.forEach((a) => coverage.accountTxs.add(a.type));
       }),
     );
+    // og accepted a tx the rewrite refuses on purpose (departures.ts): the states differ from here, so the walk ends
+    const far = [...ogRouted, ...ogRemote]
+      .flatMap((routed) => routed.entityTxs ?? [])
+      .flatMap((tx): readonly FarLock[] => {
+        const input = tx.type === "accountInput"
+          ? (tx.data as { fromEntityId: string; proposal?: { frame: OgFrameClock & { accountTxs: OgAccountTx[] } } })
+          : undefined;
+        const frame = input?.proposal?.frame;
+        return (frame?.accountTxs ?? []).flatMap((a) => {
+          const departure = stricterDeparture(a, frame!);
+          const proposer = names[ids.indexOf(input!.fromEntityId as EntityId)] ?? input!.fromEntityId.slice(-4);
+          return departure === undefined ? [] : [{ departure, lockId: String(a.data?.lockId), proposerName: proposer }];
+        });
+      })[0];
     if (rec !== undefined) coverage.frames += 1;
     if (c !== null) {
       input.entityInputs.forEach(({ input: i }) =>
@@ -630,7 +677,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     // og's own queue precedes its I/O results: the post-commit submit and the watcher run after the host re-queues
     const firstIo = ogQueued.findIndex((tx) => IO_TXS.has(tx.type));
     cmp("queueOrder", ogQueued.slice(firstIo < 0 ? ogQueued.length : firstIo).every((tx) => IO_TXS.has(tx.type)), true);
-    if (tracing() && diffs.length > 0) {
+    if (tracing() && found.length > 0) {
       console.log(`OG ROUTED ${routedLine(ogRouted)}\nRW ROUTED ${routedLine(rwRouted)}`);
       console.log(`OG REMOTE ${routedLine(ogRemote)}\nRW REMOTE ${routedLine(c?.runtimeOutputs ?? [])}`);
       if (c !== null && c.rejected.length > 0) console.log("RW REJECTED", stableJson(c.rejected).slice(0, 3000));
@@ -653,7 +700,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     (c?.jOutbox ?? []).forEach((j) =>
       j.jTxs.forEach((t) => coverage.accountTxs.add(`j:${(t as { type: string }).type}`)));
     if (c !== null) {
-      const rows = c.runtimeOutputs;
+      const rows = batchedByLane(c.runtimeOutputs);
       const shipped = remoteInputs(c.runtime, c.outbox, rows);
       // og's dispatch retires every output its transport accepted; the harness transport accepts them all
       rt = sent.og.length > 0 ? retireNetworkOutputs(c.runtime, () => true) : c.runtime;
@@ -671,7 +718,10 @@ export const createLane = (cfg: LaneConfig): Lane => {
         });
       pending = slotted(continuations);
     }
-    return diffs;
+    if (far === undefined) return found.map((d) => d.text);
+    const reported = [...afterStricter(found, far, after)];
+    if (reported.length === 0) coverage.departures.push(`${label} ${far.departure.name}`);
+    return reported;
   };
 
   const drain = (): Outgoing => {

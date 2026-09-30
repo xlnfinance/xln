@@ -212,6 +212,9 @@ type Vm = {
 };
 type Plan = { readonly entityId: string; readonly encodedBatch: string; readonly hanko: string };
 
+/** The chain's refusals, and how many batches it accepted (a check that nothing was refused proves nothing when none was sent). */
+export type Refusals = (() => readonly string[]) & { readonly landed: () => number };
+
 /**
  * Make og's BrowserVM talk to the fork's Depository. `vm` is og's BrowserVMProvider; its interface is the fork's
  * (installContracts), so processBatch there takes four arguments while og passes three. Each submission is translated
@@ -225,7 +228,7 @@ export const shimBatchSubmission = (
   chainId: bigint,
   depository: string,
   keys: readonly string[],
-): (() => readonly string[]) => {
+): Refusals => {
   installBatchHashView();
   installCalldataView();
   const provider = vm as Vm;
@@ -277,12 +280,15 @@ export const shimBatchSubmission = (
     return encode(fragment, [planned.entityId, planned.encodedBatch, planned.hanko, nonce]);
   };
   const refused: string[] = [];
+  let landed = 0;
   (["processBatch", "processBatchAs"] as const).forEach((method) => {
     const original = (provider as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method]!.bind(provider);
     (provider as unknown as Record<string, unknown>)[method] = async (encodedBatch: string, hanko: string, nonce: bigint, ...rest: unknown[]) => {
       try {
         await plan(encodedBatch, hanko, nonce);
-        return await original(encodedBatch, hanko, nonce, ...rest);
+        const result = await original(encodedBatch, hanko, nonce, ...rest);
+        landed += 1;
+        return result;
       } catch (error) {
         refused.push(`${method} refused: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
         throw error;
@@ -290,5 +296,5 @@ export const shimBatchSubmission = (
     };
   });
   provider.hasProcessedBatch = (entityId, batchHash, nonce) => processed(entityId, forkOf.get(batchHash.toLowerCase()) ?? batchHash, nonce);
-  return () => refused;
+  return Object.assign(() => refused as readonly string[], { landed: () => landed });
 };

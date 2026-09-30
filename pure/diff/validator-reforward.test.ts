@@ -88,6 +88,7 @@ describe("validator re-forward: og forwardValidatorMempool on every admitted inp
       // og forwarded the author's mempool on admitting its own command, and again on admitting the proposal
       console.log(`og forwards ${JSON.stringify(forwards)}`);
       expect(forwards.length).toBeGreaterThanOrEqual(2);
+      expect(w.refusals()).toEqual([]);
     } finally {
       await w.close();
     }

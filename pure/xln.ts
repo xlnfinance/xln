@@ -5122,14 +5122,40 @@ export const decodeOnionLayer = (bytes: Uint8Array): Result<OnionLayer, OnionErr
 // ---- deadlines: og config/constants.ts, payments/delivery.ts ----
 // The source's lock gets the whole window; each forward shortens the timelock by one delta and reveals one step
 // of blocks earlier, so every hop can still claim upstream after its downstream reveals.
-export const HTLC_TIMELOCK_DELTA_MS = 10_000;
-export const HTLC_REVEAL_DELTA_BLOCKS = 3;
-export const HTLC_MIN_FORWARD_TIMELOCK_MS = 20_000;
+/**
+ * The J block time, in ms, that block counts are derived from (og counts its async payment expiry at this rate).
+ * A span of time touches at most ceil(span / block) + 1 blocks, because it starts anywhere inside one.
+ */
+export const J_BLOCK_TIME_MS = 5_000;
+export const blocksSpanning = (ms: number): number => Math.ceil(ms / J_BLOCK_TIME_MS) + 1;
+/**
+ * LAG, the deployment's lag: a J transaction is included, and its event read, within this long (spec: REACT = 2 * LAG,
+ * HOP >= REACT between a hub's inbound and onward deadlines, every dispute window above LAG). The testnet value is set
+ * from a measured LAG before deploy; every delta below moves with it. At 5 s and 5 s blocks they equal og's constants
+ * (10 s and 3 blocks per hop, 20 s at the first hop).
+ */
+export const LAG_MS = 5_000;
+export const LAG_BLOCKS = blocksSpanning(LAG_MS);
+/** HOP = REACT = 2 * LAG: a hub reacts to a downstream reveal and still claims upstream before the inbound deadline. */
+export const HTLC_TIMELOCK_DELTA_MS = 2 * LAG_MS;
+export const HTLC_REVEAL_DELTA_BLOCKS = blocksSpanning(2 * LAG_MS);
+/** The first hop keeps two hop deltas: its own claim and the next hop's reaction (og MIN_FORWARD_TIMELOCK_MS). */
+export const HTLC_MIN_FORWARD_TIMELOCK_MS = 2 * HTLC_TIMELOCK_DELTA_MS;
 export const HTLC_MAX_HOPS = 100;
 const INSTANT_PAYMENT_EXPIRY_MS = 120_000;
 const INSTANT_PAYMENT_EXPIRY_BLOCKS = 50;
 const ASYNC_PAYMENT_EXPIRY_MS = 24 * 60 * 60 * 1000;
-const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / 5_000);
+const ASYNC_PAYMENT_EXPIRY_BLOCKS = Math.ceil(ASYNC_PAYMENT_EXPIRY_MS / J_BLOCK_TIME_MS);
+/**
+ * N2: no deadline beyond a party's own tolerance. Under H1 an Account with an open HTLC cannot finalize before its
+ * deadline unless the secret shows up, so a lock signed for years holds the Account (and a forwarding hub's onward
+ * lane) open for years. A lock ends within this horizon of the frame that carries it, in time and in J height. Policy
+ * default: a week, above the 24 h async window, leaving room for a stuck route.
+ */
+export const MAX_LOCK_HORIZON_MS = 7 * 24 * 60 * 60 * 1000;
+export const MAX_LOCK_HORIZON_BLOCKS = Math.ceil(MAX_LOCK_HORIZON_MS / J_BLOCK_TIME_MS);
+/** The reject and refusal reason of a deadline beyond the horizon (a stricter-than-og departure, departures.ts). */
+const DEADLINE_TOO_FAR = "deadline_too_far";
 export type ConditionalMode = "instant" | "async";
 type DeadlineWindow = Readonly<{ baseTimelock: bigint; baseHeight: number }>;
 /** og resolvePaymentDeadlineWindow (callers validate their inputs with toJHeight / toUnixMs). */
@@ -8488,6 +8514,12 @@ const htlcLockFailure = (a: AccountBody, x: TxOf<"htlc_lock">, ctx: FoldCtx): Ac
   () => refuse(ctx.nowMs >= x.timelock, `Timelock ${x.timelock} already expired (timestamp)`),
   () => refuse(x.revealBeforeHeight <= ctx.jHeight,
     `revealBeforeHeight ${x.revealBeforeHeight} already passed (current J height: ${ctx.jHeight})`),
+  () => refuse(x.timelock > ctx.nowMs + BigInt(MAX_LOCK_HORIZON_MS),
+    `${DEADLINE_TOO_FAR}: timelock ${x.timelock} is beyond the lock horizon `
+    + `(timestamp ${ctx.nowMs} + ${MAX_LOCK_HORIZON_MS} ms)`),
+  () => refuse(x.revealBeforeHeight > ctx.jHeight + BigInt(MAX_LOCK_HORIZON_BLOCKS),
+    `${DEADLINE_TOO_FAR}: revealBeforeHeight ${x.revealBeforeHeight} is beyond the lock horizon `
+    + `(current J height: ${ctx.jHeight} + ${MAX_LOCK_HORIZON_BLOCKS} blocks)`),
   () => refuse(!inPaymentRange(x.amount), `Invalid amount: ${x.amount} (min 1, max ${U256})`),
   () => refuse(a.locks.size >= MAX_ACCOUNT_HTLC_LOCKS, `Too many active HTLC locks: max ${MAX_ACCOUNT_HTLC_LOCKS}`),
   draftThrow(a, x.tokenId),
@@ -9697,9 +9729,17 @@ type AccountEnv = {
   readonly refreshMigration?: RefreshMigration | undefined;
   /** og shadow.rejectedFrameEvidence: the last unsafe peer frame the Entity disputed (committed; never cleared). */
   readonly rejectedFrame?: RejectedFrame | undefined;
+  /**
+   * The txs this Entity frame asked the Account to queue that its mempool does not hold (deduped). og counts every
+   * staged request in the `LEFT has N pending txs` warning (restoreCollisionQueueEvent). Never committed; the Entity
+   * frame clears it.
+   */
+  readonly dedupedThisFrame?: number | undefined;
 };
-type EnvMeta =
-  Pick<AccountEnv, "boardRefresh" | "publicPinned" | "rebalancePolicy" | "refreshMigration" | "rejectedFrame">;
+type EnvMeta = Pick<
+  AccountEnv,
+  "boardRefresh" | "publicPinned" | "rebalancePolicy" | "refreshMigration" | "rejectedFrame" | "dedupedThisFrame"
+>;
 /** Entity-side Account fields every phase keeps (og counterpartyBoardHankoRefresh, publicPinned, rebalance policy). */
 const envMeta = (r: EnvMeta): EnvMeta => ({
   ...opt("boardRefresh", r.boardRefresh),
@@ -9707,6 +9747,7 @@ const envMeta = (r: EnvMeta): EnvMeta => ({
   ...opt("rebalancePolicy", r.rebalancePolicy),
   ...opt("refreshMigration", r.refreshMigration),
   ...opt("rejectedFrame", r.rejectedFrame),
+  ...opt("dedupedThisFrame", r.dedupedThisFrame),
 });
 /** og AccountBoardHankoRefreshMigration: the activation our refresh belongs to and its outcome. */
 export type RefreshMigration = {
@@ -9879,9 +9920,16 @@ export type Preview = {
   readonly frameProof: LocalProof; readonly dispute: DisputePlan;
   readonly deferred: readonly WireAccountTx[]; readonly floor: number;
 };
+/**
+ * og AccountFailedHtlcLock: a queued htlc_lock the proposal refused for good (a refusal that is not retried), with og's
+ * refusal text. The Entity ends the payment route that lock belonged to.
+ */
+export type FailedLock = { readonly hashlock: string; readonly reason: string };
 export type ProposalPlan =
-  | Tagged<"frame", { preview: Preview }>
-  | Tagged<"idle", { refused: AccountReplicaError; deferred: readonly WireAccountTx[] }>;
+  | Tagged<"frame", { preview: Preview; failedLocks: readonly FailedLock[] }>
+  | Tagged<"idle", {
+    refused: AccountReplicaError; deferred: readonly WireAccountTx[]; failedLocks: readonly FailedLock[];
+  }>;
 /**
  * og proposal/transactions.ts throwCriticalProposalFailure: a refused matcher/settlement/cross-j-owned tx halts with
  * og's text; others are dropped.
@@ -9935,22 +9983,39 @@ const refusalHalt = (
   const halt = retried ? null : proposalHaltText(tx, f.message);
   return halt === null ? undefined : { _tag: "proposal_halt", txType: tx.type, cause: error, message: halt };
 };
+/** Whether a refusal keeps its tx queued for a later proposal: the deferred refusals, and og's `retry` rule. */
+const keptQueued =
+  (mempool: readonly WireAccountTx[], retry: RetryRule) =>
+  (index: number, error: BodyError): boolean =>
+    deferredRefusal(error) || retry(txAt(mempool, index), error);
 /**
  * `retry`: og proposalFailureDisposition's extra `retry` cases beyond the capacity/freeze refusals. `failure`: og's
  * text for the refused tx at an index; in window order the first thrown handler (og applyProposalTransaction rethrows)
- * or non-retried critical refusal halts the proposal. Otherwise the answer is the refused txs that stay queued.
+ * or non-retried critical refusal halts the proposal. Otherwise the answer is the refused txs that stay queued for
+ * retry.
  */
 const proposalRefusals = (
   mempool: readonly WireAccountTx[], refused: Refusals,
   retry: RetryRule = () => false, failure: FailureText = (_, e) => refusedTx(e._tag),
 ): Result<readonly WireAccountTx[], AccountReplicaError> => {
-  const retried = (index: number, error: BodyError): boolean =>
-    deferredRefusal(error) || retry(txAt(mempool, index), error);
+  const retried = keptQueued(mempool, retry);
   const halted = refused.reduce<AccountReplicaError | undefined>((found, { index, error }) =>
     found ?? refusalHalt(txAt(mempool, index), error, failure(index, error), retried(index, error)), undefined);
   return halted === undefined
     ? ok(refused.flatMap(({ index, error }) => (retried(index, error) ? [txAt(mempool, index)] : [])))
     : err(halted);
+};
+/** og failedHtlcLocks: each htlc_lock of the window the proposal refused and will not retry, in window order. */
+const failedLocksOf = (
+  window: readonly WireAccountTx[], refused: Refusals, retry: RetryRule, failure: FailureText,
+): readonly FailedLock[] => {
+  const retried = keptQueued(window, retry);
+  return refused.flatMap(({ index, error }): readonly FailedLock[] => {
+    const tx = txAt(window, index);
+    return tx.type === "htlc_lock" && !retried(index, error)
+      ? [{ hashlock: tx.hashlock, reason: failure(index, error).message }]
+      : [];
+  });
 };
 /** og tx-multiset.ts removeCommittedTxsFromMempool: drop each removed tx once, by exact bytes, in mempool order. */
 const withoutAccountTxs = (
@@ -10013,6 +10078,7 @@ const refreshableHanko = (r: OpenAccount): RetryRule => {
 const framePlan = (
   r: OpenAccount, party: Party, dt: DeltaTransformerRef | undefined,
   at: FoldAt, floor: number, folded: ProposalFold, deferred: readonly WireAccountTx[],
+  failedLocks: readonly FailedLock[],
 ): Result<ProposalPlan, AccountReplicaError> => {
   const built = all({ committed: commit(folded.state), stamped: stampClaims(folded.included, r.state, party.left) });
   return chain(built, ({ committed: { view, root }, stamped }) => {
@@ -10032,6 +10098,7 @@ const framePlan = (
           frame: { ...unhashed, stateHash }, draft: { state: folded.state, effects: folded.effects },
           frameProof, dispute, deferred, floor,
         },
+        failedLocks,
       })));
   });
 };
@@ -10044,13 +10111,15 @@ const planWindow = (
   const folded = proposalFold(r.state, window, ctx);
   const failure: FailureText = (index, e) =>
     accountTxFailure(lenientBefore(r.state, window, index, ctx), txAt(window, index), ctx, e, party.self, r.dispute);
-  const deferred = map(proposalRefusals(window, folded.refused, refreshableHanko(r), failure), (retried) =>
+  const retry = refreshableHanko(r);
+  const deferred = map(proposalRefusals(window, folded.refused, retry, failure), (retried) =>
     withoutAccountTxs(r.mempool, withoutAccountTxs(window, retried)));
+  const failedLocks = failedLocksOf(window, folded.refused, retry, failure);
   return chain(deferred, (kept) => {
     const [firstRefusal] = folded.refused;
     return folded.included.length === 0 && firstRefusal !== undefined
-      ? ok({ _tag: "idle", refused: firstRefusal.error, deferred: kept })
-      : framePlan(r, party, a.dt, at, floor, folded, kept);
+      ? ok({ _tag: "idle", refused: firstRefusal.error, deferred: kept, failedLocks })
+      : framePlan(r, party, a.dt, at, floor, folded, kept, failedLocks);
   });
 };
 type PlanResult = Result<ProposalPlan, AccountReplicaError>;
@@ -10684,8 +10753,9 @@ const collision = (
 ): OnProposed => {
   const height = input.frame.height, own = r.candidate.frame;
   if (ctx.party.left) {
-    const waiting = `⚠️ LEFT has ${r.mempool.length} pending txs while waiting for RIGHT's ACK`;
-    const pending = r.mempool.length > 0 ? [accountSay(waiting)] : [];
+    const staged = r.mempool.length + (r.dedupedThisFrame ?? 0);
+    const waiting = `⚠️ LEFT has ${staged} pending txs while waiting for RIGHT's ACK`;
+    const pending = staged > 0 ? [accountSay(waiting)] : [];
     return ok(done<OpenAccount | ProposedAccount | ReceivedAccount, AccountOutput>(r, [
       accountSay(`📤 LEFT-WINS: Ignored RIGHT's frame ${height} (waiting for their ACK)`), ...pending,
     ]));
@@ -11219,9 +11289,11 @@ const queueOn = <R extends AccountReplica>(
     return chain(judged, (admitted): Result<Queued<R>, AccountReplicaError> => {
       const kept = new Set<WireAccountTx>(admitted);
       const queued = fresh.filter((tx) => tx.type !== "j_event_claim" || kept.has(tx));
+      const deduped = (r.dedupedThisFrame ?? 0) + txs.length - queued.length;
+      const replica = { ...r, mempool: [...r.mempool, ...queued], ...opt("dedupedThisFrame", deduped || undefined) };
       return held.length + queued.length > ACCOUNT_MEMPOOL_SIZE
         ? err({ _tag: "mempool_full", limit: ACCOUNT_MEMPOOL_SIZE })
-        : ok({ replica: { ...r, mempool: [...r.mempool, ...queued] }, queued });
+        : ok({ replica, queued });
     });
   });
 const pendingOf = (r: AccountReplica): readonly WireAccountTx[] => (r._tag === "proposed" ? r.candidate.frame.txs : []);
@@ -18913,7 +18985,8 @@ const CROSS_SETUP_TXS: ReadonlySet<string> =
 const crossSetupTx = (tx: EntityTx): boolean => nestedFrameTxs(tx).some((n) => CROSS_SETUP_TXS.has(n.type));
 const accountTransitionTx = (tx: EntityTx): boolean =>
   nestedFrameTxs(tx).some((n) => n.type === "accountInput" || n.type === "crossJurisdictionFillNotice");
-type Proposing = { readonly draft: Draft; readonly frames: number };
+/** `woken`: the Accounts one proposal queued work on (a failed-back resolve), which join the frame's worklist. */
+type Proposing = { readonly draft: Draft; readonly frames: number; readonly woken: readonly EntityId[] };
 /** The propose input for a planned frame (with its pending Hankos) or an idle proposal, at the Entity clock. */
 const proposalInput = (
   plan: ProposalPlan,
@@ -18939,8 +19012,38 @@ const afterProposal = (draft: Draft, next: Draft): Draft => ({
   runtimeEvents: [...(draft.runtimeEvents ?? []), ...(next.runtimeEvents ?? [])],
 });
 /**
+ * The Entity after a proposal refused some of its own locks: each lock's route ends (og failedProposalHtlcFollowup).
+ * An originated payment fails; a forwarded one fails back over its inbound Account, whose worklist slot it wakes, and
+ * its entry stays until that Account admits the resolve.
+ */
+const endFailedRoutes = (draft: Draft, failed: readonly FailedLock[]): Proposing =>
+  failed.reduce<Proposing>(
+    (acc, failure) => {
+      const before = acc.draft.state.paybook ?? EMPTY_PAYBOOK;
+      const flow: PaybookFlow = { paybook: before, queue: [] };
+      const route = failedRouteOf(before, failure.hashlock);
+      switch (route._tag) {
+        case "absent":
+          return acc;
+        case "originated": {
+          const ended = failOriginated(flow, route.entry, failure.reason, acc.draft.state.id);
+          return { ...acc, draft: withPaybookFlow(acc.draft, ended, before) };
+        }
+        case "forwarded": {
+          const resolve = forwardFailedResolve(failure.hashlock, failure.reason);
+          const queued = admitReturned(acc.draft, { accountId: route.upstream, tx: resolve });
+          if (queued === undefined) return acc;
+          const ended = terminatePaybookEntry(flow, failure.hashlock);
+          const upstream = route.upstream.toLowerCase() as EntityId;
+          return { ...acc, draft: withPaybookFlow(queued, ended, before), woken: [...acc.woken, upstream] };
+        }
+      }
+    },
+    { draft, frames: 0, woken: [] },
+  );
+/**
  * One Account's proposal in og proposePendingAccountFrames: a refused proposal is skipped unless the Account machine
- * threw.
+ * threw. The locks it refused end their routes.
  */
 const proposeOne =
   (ctx: FoldContext, clock: FrameClock) =>
@@ -18970,8 +19073,9 @@ const proposeOne =
       });
       const next = routed(draft.state, draft.accountReplicas, peer, proposed);
       if (!next.ok) return accountThrew(next.error) ? err(next.error) : ok(acc);
+      const ended = endFailedRoutes(afterProposal(draft, next.value), plan.value.failedLocks);
       return ok({
-        draft: afterProposal(draft, next.value),
+        ...ended,
         frames: acc.frames + (plan.value._tag === "frame" ? 1 : 0),
       });
     });
@@ -19003,15 +19107,38 @@ const flushOrder = (fold: readonly EntityOutput[], proposals: readonly EntityOut
   const ranked = finals.map((o, i) => ({ o, i })).toSorted((a, b) => rank(a.o) - rank(b.o) || a.i - b.i);
   return [...fold.filter((o) => !isAck(o)), ...ranked.map(({ o }) => o)];
 };
+/** The Accounts still to propose, and the ones already taken, in worklist order (og createCanonicalAccountWorklist). */
+type Worklist = { readonly done: readonly EntityId[]; readonly todo: readonly EntityId[] };
+/**
+ * Takes the Accounts in order; one a proposal woke joins the end unless the worklist already holds it (og
+ * worklist.add), so it proposes later in the same frame. The answer is the proposals and the order they ran in.
+ */
+const proposeWorklist = (
+  one: (acc: Proposing, peer: EntityId) => Result<Proposing, EntityError>,
+  acc: Proposing,
+  list: Worklist,
+): Result<{ readonly proposing: Proposing; readonly order: readonly EntityId[] }, EntityError> => {
+  const [peer, ...rest] = list.todo;
+  if (peer === undefined) return ok({ proposing: acc, order: list.done });
+  return chain(one({ ...acc, woken: [] }, peer), (next) => {
+    const held = new Set([...list.done, peer, ...rest]);
+    const fresh = [...new Set(next.woken)].filter((woken) => !held.has(woken));
+    return proposeWorklist(one, next, { done: [...list.done, peer], todo: [...rest, ...fresh] });
+  });
+};
 /**
  * og proposePendingAccountFrames: every proposable Account in worklist order proposes one frame at the Entity clock; a
  * refused proposal is not a frame. A cross-j opening proposes exactly its sibling cohort (og
  * selectCrossJOpeningAccountProposalTxs) and waits while the reciprocal is missing.
  */
-const proposeAccounts = (d: Draft, order: readonly EntityId[], ctx: FoldContext): Result<Proposing, EntityError> => {
+const proposeAccounts = (
+  d: Draft, order: readonly EntityId[], ctx: FoldContext,
+): Result<{ readonly draft: Draft; readonly frames: number }, EntityError> => {
   const clock: FrameClock = { timestamp: ctx.timestamp, jHeight: entityJHeight(d.state) };
-  return map(foldResult(order, { draft: d, frames: 0 }, proposeOne(ctx, clock)), ({ draft, frames }) => {
-    const outputs = flushOrder(d.outputs, draft.outputs.slice(d.outputs.length), order);
+  const start: Proposing = { draft: d, frames: 0, woken: [] };
+  const worked = proposeWorklist(proposeOne(ctx, clock), start, { done: [], todo: order });
+  return map(worked, ({ proposing: { draft, frames }, order: taken }) => {
+    const outputs = flushOrder(d.outputs, draft.outputs.slice(d.outputs.length), taken);
     return { draft: { ...draft, outputs }, frames };
   });
 };
@@ -22631,7 +22758,8 @@ export type HtlcRejectReason =
   | "next_hop_offline"
   | "insufficient_capacity"
   | "fee_below_policy"
-  | "deadline_unsafe";
+  | "deadline_unsafe"
+  | "deadline_too_far";
 export type PreparedHtlcOutcome =
   | {
       readonly kind: "forward";
@@ -22659,6 +22787,7 @@ const HTLC_REJECT_REASONS: ReadonlySet<string> = new Set<HtlcRejectReason>([
   "insufficient_capacity",
   "fee_below_policy",
   "deadline_unsafe",
+  "deadline_too_far",
 ]);
 const isFields = (v: unknown): v is Fields =>
   v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Map);
@@ -22743,7 +22872,7 @@ export const preparedEntryOf = (b: Binary, previousKey: string): PreparedHtlcEnt
  * The proposer's (or a validator's) inbound decryption view: the pre-frame Entity, the frame clock, the Entity keypair
  * and the liveness it asserts.
  */
-type HtlcInboundView = {
+export type HtlcInboundView = {
   readonly state: EntityState;
   readonly replicas: Replicas;
   readonly timestamp: number;
@@ -22820,15 +22949,33 @@ const hubForwardFee = (state: EntityState, amount: bigint, out: bigint, inn: big
   const base = typeof baseFee === "bigint" && baseFee > 0n ? baseFee : 0n;
   return base + ((amount < 0n ? 0n : amount) * BigInt(sanitizeFeePpm(ppm, 1))) / 1_000_000n;
 };
-/** The onward lock must still expire, in time and in J height, safely after this frame. */
-const onwardDeadlineSafe = (v: HtlcInboundView, binding: PreparedHtlcBinding): boolean =>
-  binding.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) > BigInt(v.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS) &&
-  binding.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS > Number(entityJHeight(v.state));
+/**
+ * What a hub makes of an inbound lock's deadline: the onward lock must still expire, in time and in J height, safely
+ * after this frame ("unsafe" when it would not), and the inbound one must lie within the lock horizon ("too_far").
+ */
+export type OnwardDeadline = "safe" | "unsafe" | "too_far";
+export const onwardDeadline = (
+  now: { readonly timestamp: number; readonly jHeight: number },
+  lock: { readonly timelock: bigint; readonly revealBeforeHeight: number },
+): OnwardDeadline => {
+  switch (true) {
+    case lock.timelock > BigInt(now.timestamp) + BigInt(MAX_LOCK_HORIZON_MS)
+      || lock.revealBeforeHeight > now.jHeight + MAX_LOCK_HORIZON_BLOCKS:
+      return "too_far";
+    case lock.timelock - BigInt(HTLC_TIMELOCK_DELTA_MS) > BigInt(now.timestamp) + BigInt(HTLC_MIN_FORWARD_TIMELOCK_MS)
+      && lock.revealBeforeHeight - HTLC_REVEAL_DELTA_BLOCKS > now.jHeight:
+      return "safe";
+    default:
+      return "unsafe";
+  }
+};
 /**
  * og materializeForwardOutcome: the next hop's Account, liveness, committed capacity, the hub fee and a safe onward
  * deadline, in that order.
  */
-const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer: ForwardLayer): PreparedHtlcEntry => {
+export const forwardOutcome = (
+  v: HtlcInboundView, binding: PreparedHtlcBinding, layer: ForwardLayer,
+): PreparedHtlcEntry => {
   const nextHopEntityId = layer.nextHop.toLowerCase();
   const child = v.replicas.get(nextHopEntityId as EntityId);
   if (child === undefined) return preparedReject(binding, "next_hop_account_missing");
@@ -22846,13 +22993,18 @@ const forwardOutcome = (v: HtlcInboundView, binding: PreparedHtlcBinding, layer:
       return preparedReject(binding, "insufficient_capacity");
     case binding.amount - forwardAmount < hubForwardFee(v.state, binding.amount, out, inn):
       return preparedReject(binding, "fee_below_policy");
-    case !onwardDeadlineSafe(v, binding):
-      return preparedReject(binding, "deadline_unsafe");
     default:
-      return {
-        binding,
-        outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope },
-      };
+      switch (onwardDeadline({ timestamp: v.timestamp, jHeight: Number(entityJHeight(v.state)) }, binding)) {
+        case "too_far":
+          return preparedReject(binding, DEADLINE_TOO_FAR);
+        case "unsafe":
+          return preparedReject(binding, "deadline_unsafe");
+        case "safe":
+          return {
+            binding,
+            outcome: { kind: "forward", nextHopEntityId, forwardAmount, innerEnvelope: layer.innerEnvelope },
+          };
+      }
   }
 };
 /**
@@ -23310,6 +23462,41 @@ export const timeoutFollowup = (f: PaybookFlow, hashlock: string, self = ""): Pa
   return terminatePaybookEntry(failed, hashlock);
 };
 /**
+ * og failedProposalHtlcFollowup: the route a refused lock belonged to. Absent: this Entity holds no route for it (a
+ * lock it did not send for a payment). Originated: its own payment. Forwarded: a payment it relays from `upstream`.
+ */
+export type FailedRoute =
+  | Tagged<"absent">
+  | Tagged<"originated", { entry: PaybookEntry }>
+  | Tagged<"forwarded", { entry: PaybookEntry; upstream: string }>;
+export const failedRouteOf = (paybook: Paybook, hashlock: string): FailedRoute => {
+  const entry = paybook.entries.get(hashlock);
+  if (entry === undefined) return { _tag: "absent" };
+  const upstream = inboundOf(entry);
+  return upstream === undefined ? { _tag: "originated", entry } : { _tag: "forwarded", entry, upstream };
+};
+/**
+ * og failOriginatedPayment: the proposal refused the lock of this Entity's own payment, so the payment is over: an
+ * HtlcFailed event with the refusal's reason, and the entry leaves the paybook.
+ */
+export const failOriginated = (f: PaybookFlow, entry: PaybookEntry, reason: string, self: string): PaybookFlow => {
+  const failed = emitRuntime(f, "HtlcFailed", {
+    hashlock: entry.hashlock,
+    lockId: entry.hashlock,
+    reason,
+    entityId: self,
+    ...opt("description", entry.description || undefined),
+  });
+  return terminatePaybookEntry(failed, entry.hashlock);
+};
+/** og failedProposalHtlcFollowup: the resolve that fails a relayed payment back over its inbound Account. */
+export const forwardFailedResolve = (hashlock: string, reason: string): AccountTx => ({
+  type: "htlc_resolve",
+  lockId: hashlock,
+  outcome: "error",
+  reason: `forward_failed:${reason}`,
+});
+/**
  * og applyHtlcSecretFollowups: record the preimage once, earn the pending fee, pass the secret upstream and arm its ACK
  * deadline, or end an originated payment.
  */
@@ -23455,12 +23642,18 @@ const paybookTailFollowups = (f: PaybookFlow, frames: readonly CommittedHtlcFram
  * og applyLocalAccountEffects: each returned Account tx is admitted alone; a missing, frozen or refusing Account drops
  * it silently.
  */
-const queueReturned = (d: Draft, target: AccountTxTarget): Draft => {
+const queueReturned = (d: Draft, target: AccountTxTarget): Draft => admitReturned(d, target) ?? d;
+/**
+ * og applyAccountInput enqueue of one returned tx: the Draft with it queued, or undefined when the Account does not
+ * admit it. A frozen Account (preparing or disputed) takes no new work, so it does not admit either: the caller must
+ * not read that as the tx being queued (admitAt reports ok for a frozen Account and drops the tx silently).
+ */
+const admitReturned = (d: Draft, target: AccountTxTarget): Draft | undefined => {
   const peer = target.accountId.toLowerCase() as EntityId;
   const child = d.accountReplicas.get(peer);
-  if (child === undefined) return d;
+  if (child === undefined || !isLive(child)) return undefined;
   const admitted = admitAt(child, [target.tx], d.state.id, L0_CLOCK);
-  return admitted.ok ? { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value) } : d;
+  return admitted.ok ? { ...d, ...putChild(d.state, d.accountReplicas, peer, admitted.value) } : undefined;
 };
 // ---- settlements: propose, update, approve, execute, reject, deferred and committed auto-approval, continuations ----
 // og entity/tx/handlers/payments/settle.ts
@@ -26703,6 +26896,14 @@ const primedAccounts = (arrived: Replicas): readonly EntityId[] =>
     .filter(([, c]) => arrivedProposable(c))
     .map(([peer]) => peer)
     .toSorted(asc);
+/** What an Entity frame asked its Accounts to queue and they did not hold is counted for that frame only. */
+const unstaged = (folded: FoldedTxs): FoldedTxs => {
+  const { accountReplicas } = folded.draft;
+  const counted = [...accountReplicas.values()].some((c) => c.dedupedThisFrame !== undefined);
+  const cleared = new Map([...accountReplicas].map(([peer, c]): [EntityId, AccountReplica] =>
+    [peer, { ...c, dedupedThisFrame: undefined }]));
+  return counted ? { ...folded, draft: { ...folded.draft, accountReplicas: cleared } } : folded;
+};
 /**
  * One Entity frame's txs: the frame-wide budgets and wake order, the evicting fold under the frame's board authority,
  * then the settlement continuation, the book phase, the deferred settlement approvals and the Account proposals.
@@ -26777,7 +26978,7 @@ export const foldTxs = (
     return chain(frame, ({ handover, authorityOnly: onlyAuthority }) => {
       const frameCtx = handover === null ? ctx : { ...ctx, boardHandover: handover };
       const folded = foldEvicting(normalized, replicas, txs, frameCtx, state.id);
-      return chain(folded, onlyAuthority ? authorityOnly : proposeAfter);
+      return map(chain(folded, onlyAuthority ? authorityOnly : proposeAfter), unstaged);
     });
   });
 };

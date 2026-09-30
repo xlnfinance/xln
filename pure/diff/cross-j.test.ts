@@ -452,7 +452,7 @@ describe(seedTag("cross-j: htlc_lock envelope and envelopeHash"), () => {
       for (let i = 0; i < 10; i++) {
         const secret = hex(r, 32), byLeft = r() < 0.5, env = r() < 0.2 ? undefined : randomEnvelope(r);
         const hashlock = ethers.keccak256(secret);
-        const tx: any = { type: "htlc_lock", lockId: hashlock, hashlock, timelock: 10n ** 15n, revealBeforeHeight: 50n, amount: BigInt(1 + Math.floor(r() * 1000)), tokenId: "1", ...(r() < 0.3 ? { deliveryMode: pick(r, ["instant", "async"]) } : {}), ...(env === undefined ? {} : { envelope: env }) };
+        const tx: any = { type: "htlc_lock", lockId: hashlock, hashlock, timelock: 10n ** 8n, revealBeforeHeight: 50n, amount: BigInt(1 + Math.floor(r() * 1000)), tokenId: "1", ...(r() < 0.3 ? { deliveryMode: pick(r, ["instant", "async"]) } : {}), ...(env === undefined ? {} : { envelope: env }) };
         const ogTx = toOg(tx);
         ogTx.data.revealBeforeHeight = 50;
         const o = await og.run((acc) => handleHtlcLock(acc, ogTx, byLeft, { committedTimestamp: 7, enforcementTimestamp: 7, enforcementJHeight: 3 }));
