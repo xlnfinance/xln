@@ -80,7 +80,17 @@ const HUB_OF = [HUB_SRC, HUB_TGT, HUB_SRC, HUB_TGT];
 type Chains = readonly [JAdapter, JAdapter];
 type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[]; readonly landed: readonly number[]; readonly unknownHalts: readonly string[] };
 
-const runCrossJ = async (seed: number): Promise<Coverages> => {
+/** og's script: reserves move on each chain, the users sign one cross-j route, the book owner clears it, the swap settles. */
+const SWAP: Script = { name: "swap", steps: ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"] };
+/** Each user deposits collateral into its Account with its hub, and the batch lands: no swap. */
+const DEPOSIT: Script = { name: "deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast"] };
+/** The deposits land first, then the swap is signed. */
+const SWAP_AFTER_DEPOSIT: Script = { name: "swap-after-deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast", "swap", "clear"] };
+const LONE_LEG = "a lone cross-jurisdiction leg is retained, not halted on";
+
+/** A named script: the name keeps one seed's run in each script on its own storage namespace. */
+type Script = { readonly name: string; readonly steps: readonly string[] };
+const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
   const rand = prng(seed);
   const ri = (n: number): number => Math.floor(rand() * n);
   const tag = `SEEDX=0x${seed.toString(16)}`;
@@ -110,7 +120,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
 
   /** One Runtime: both chains bound through its own adapter view (og gives each Runtime its own watcher). */
   const host = async (name: string, hosted: readonly number[]) => {
-    const ns = `scn-cj-${process.pid}-${name}-${seed.toString(16)}`;
+    const ns = `scn-cj-${process.pid}-${script.name}-${name}-${seed.toString(16)}`;
     namespaces.push(ns);
     const env = createEmptyEnv(ns);
     env.scenarioMode = true;
@@ -271,6 +281,7 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
     settled: false,
     funded: false,
     transferred: false,
+    deposited: false,
   };
   const swapOf = (x: number): OgSwap | undefined => ogState(x)?.crossJurisdictionSwaps?.get(orderId);
   /** og's clear precondition: both legs resting with their pulls, the source offer and the book order in place. */
@@ -328,6 +339,16 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
       }
       case "broadcast":
         return state.transferred ? { users: [user(MM, [tx("j_broadcast", {})]), user(MMT, [tx("j_broadcast", {})])], hubs: [] } : undefined;
+      case "deposit": {
+        // a reserve-to-collateral deposit into each user's Account with its hub (og waits for idle Accounts)
+        if (!state.credited || !userAccountsSettled(2)) return undefined;
+        state.deposited = true;
+        const r2c = (x: number): EntityTx =>
+          tx("r2c", { counterpartyId: ids[HUB_OF[x]!]!, tokenId: TOKEN_OF[x]!, amount: usd(1_000) });
+        return { users: [user(MM, [r2c(MM)]), user(MMT, [r2c(MMT)])], hubs: [] };
+      }
+      case "depositBroadcast":
+        return state.deposited ? { users: [user(MM, [tx("j_broadcast", {})]), user(MMT, [tx("j_broadcast", {})])], hubs: [] } : undefined;
       case "swap": {
         // og's MM signs only once the hubs' credit is committed and both Accounts are idle
         if (!state.credited || !userAccountsSettled(2)) return undefined;
@@ -384,7 +405,6 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
     exchangeProfiles();
     return [...u, ...h];
   };
-  const script = ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"];
   const random = ["idle", "idle", "idle", "idle", "idle", "userCredit", "payToHub", "payFromHub"];
 
   try {
@@ -400,11 +420,11 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
       );
     const expectClean = (diffs: string[]): void => expect(diffs).toEqual([]);
     expectClean(await round(none, [imports(HOSTS.users), imports(HOSTS.hubs)]));
-    const queue = [...script];
+    const queue = [...script.steps];
     const rounds = Array.from({ length: ROUNDS }, (_, i) => i);
     await rounds.reduce(async (prev) => {
       await prev;
-      if (coverage.halts > 0 || state.settled) return;
+      if (coverage.halts > 0 || coverage.departures.length > 0 || state.settled) return;
       const kind = queue.length > 0 && rand() < 0.6 ? queue[0]! : random[ri(random.length)]!;
       const planned = await step(kind);
       if (planned !== undefined && queue[0] === kind) queue.shift();
@@ -438,14 +458,17 @@ const runCrossJ = async (seed: number): Promise<Coverages> => {
 
 describe("scenario: a cross-jurisdiction swap across two Runtimes, og vs the rewrite, frame by frame", () => {
   const totals = { settled: 0 };
+  const report = (r: Coverages, seed: number): void =>
+    console.log(
+      `seed 0x${seed.toString(16)}: ${r.coverage.frames} Runtime frames, materialized ${r.materialized},`,
+      `settled ${r.settled}, batches landed ${stableJson(r.landed)}, halts ${stableJson(r.coverage.haltTexts)},`,
+      `departures ${stableJson(r.coverage.departures)}, actions ${stableJson(r.coverage.actions)}`,
+    );
   SEEDS.forEach((seed) => {
     test(`MATCH: cross-j swap, seed 0x${seed.toString(16)}`, async () => {
-      const r = await runCrossJ(seed);
+      const r = await runCrossJ(seed, SWAP);
       totals.settled += r.settled ? 1 : 0;
-      console.log(
-        `seed 0x${seed.toString(16)}: ${r.coverage.frames} Runtime frames, materialized ${r.materialized},`,
-        `settled ${r.settled}, batches landed ${stableJson(r.landed)}, actions ${stableJson(r.coverage.actions)}`,
-      );
+      report(r, seed);
       expect(r.coverage.frames).toBeGreaterThan(10);
       expect(r.refusals).toEqual([]);
       expect(r.unknownHalts).toEqual([]);
@@ -456,4 +479,38 @@ describe("scenario: a cross-jurisdiction swap across two Runtimes, og vs the rew
   test("a cross-j swap settles", () => {
     expect(totals.settled).toBeGreaterThan(0);
   });
+
+  // A deposit sends the hub two Account messages in one Runtime frame (a collateral-claim proposal and, after the hub's
+  // own proposal collides with it, the re-proposal one height up). og ships them as one input; the retained outbox the
+  // rewrite commits holds two rows, which the lane batches the way og's dispatch does before comparing.
+  const batched = { rows: 0 };
+  SEEDS.forEach((seed) => {
+    test(`MATCH: collateral deposits land on both chains, seed 0x${seed.toString(16)}`, async () => {
+      const r = await runCrossJ(seed, DEPOSIT);
+      batched.rows += r.coverage.actions["batchedRows"] ?? 0;
+      report(r, seed);
+      expect(r.refusals).toEqual([]);
+      expect(r.unknownHalts).toEqual([]);
+      expect(r.coverage.departures).toEqual([]);
+      expect(r.coverage.accountTxs.has("j_event_claim")).toBe(true);
+      expect(r.landed.every((n) => n > 0)).toBe(true);
+    }, 900_000);
+  });
+
+  test("the deposits made the lane batch rows", () => {
+    expect(batched.rows).toBeGreaterThan(0);
+  });
+
+  // With a deposit in flight on the target user's Account the swap's target leg waits behind it and the source leg is
+  // ready alone: og halts at dispatch, the rewrite keeps the lone leg (departures.ts loneCrossJLeg).
+  test("a swap signed after a deposit: og halts on a lone leg where the rewrite retains it", async () => {
+    const runs = await SEEDS.reduce<Promise<readonly Coverages[]>>(
+      async (done, seed) => [...(await done), await runCrossJ(seed, SWAP_AFTER_DEPOSIT)],
+      Promise.resolve([]),
+    );
+    runs.forEach((r, i) => report(r, SEEDS[i]!));
+    expect(runs.flatMap((r) => r.refusals)).toEqual([]);
+    expect(runs.flatMap((r) => r.unknownHalts)).toEqual([]);
+    expect(runs.flatMap((r) => r.coverage.departures).some((d) => d.endsWith(LONE_LEG))).toBe(true);
+  }, 900_000);
 });
