@@ -4,13 +4,12 @@ import { afterAll, describe, expect, test } from "bun:test";
 // forwarded in its mempool until the frame carrying it commits (admission.ts:29), so every input it admits meanwhile
 // sends that mempool to the proposer again, ahead of the input's own outputs.
 //
-// A scripted run (fixed inputs, no walk) on the 2-of-3 board B (world.ts, WALK_BOARD=1), SIGNERS[0] proposing:
+// A scripted run (fixed inputs, no walk) on the 2-of-3 board B (world.ts, `{ board: true }`), SIGNERS[0] proposing:
 //   1. SIGNERS[2] authors a board proposal; its replica forwards it to the proposer (the txs input);
 //   2. the proposer proposes the frame carrying it to SIGNERS[1] and SIGNERS[2];
 //   3. SIGNERS[2]'s replica receives that proposal while it still holds its propose: og forwards it to the proposer
 //      once more, then precommits. The rewrite, before this fix, only precommitted.
 // The lane compares og processRuntime with the rewrite's commitRuntimeFrame on every frame.
-process.env["WALK_BOARD"] = "1";
 import { entityLog } from "../../core/entity/consensus/entity-log.ts";
 import type { EntityTx } from "../xln.ts";
 import { SIGNERS, type User } from "./lane.ts";
@@ -57,7 +56,7 @@ const boardHeight = (w: World): number => boardReplicas(w)[0]?.state.height ?? -
 
 describe("validator re-forward: og forwardValidatorMempool on every admitted input", () => {
   test("MATCH: a non-proposer still holding its propose forwards it to the proposer again when the proposal arrives", async () => {
-    const w = await openWorld(SEED, "validator-reforward");
+    const w = await openWorld(SEED, "validator-reforward", { board: true });
     const step = async (users: readonly User[]): Promise<readonly string[]> => w.lane.tick([], users);
     /** Idle frames, each compared, until the board settles (at most `left`). */
     const drain = async (left: number): Promise<readonly string[]> => {
