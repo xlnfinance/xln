@@ -332,20 +332,25 @@ The second reviewer's third pass and the first reviewer's re-review at 793e6bc (
   budget under `MIN_BATCH_GAS_BUDGET` (500,000) with E10; batches that revert whole ignore the budget but keep the minimum.
 - **Return bomb.** A bare assembly `call` reads only the first 4 bytes of the revert data; 1.5, 2 and 3 MB payloads give `BatchFailed`
   with the nonce spent and the next batch landing (`j5-gas-callee`, `J5BloatTest`).
-- **Post-call reserve.** Measured post-call code stays under 30,000 / 5 gas even after a callee burns everything, at the smallest allowed
-  budget (`J5ReserveTest`, `J5BurnerTest`, `j5-gas-callee` R). At the minimum budget the retained 1/63 alone covers it, so the
-  reserve is belt and braces (removing it is not killed by a test, by design).
+- **Reserve (30,000, outside the budget) gives the callee the WHOLE signed budget.** Corrected at 0aeb766 after both reviewers: the check runs
+  about 160 gas before the CALL, and the CALL costs 100 before the EVM takes its 63/64, so with reserve 0 a transaction just above
+  `budget * 64/63` hands the callee about 230 gas less than the budget. A batch signed at its exact need then soft-fails and burns its nonce
+  at a limit the relayer chose: 232 consecutive limits (772,110 to 772,341) in `j5-gas-exact`, 3,806,117 gas seen against 3,806,337 in
+  `J5BudgetBoundary`. Both tests kill the reserve-0 mutant. The overhead is constant (about 230), so 30,000 is generous on purpose. It is not
+  what the code after the self-call needs (that is about 2,000, covered by the 1/64 the caller keeps and the gas the callee hands back; see
+  the measurement below).
 - **Budget drift accepted.** A batch made dearer by a third party between simulation and inclusion becomes `BatchFailed`, nonce spent,
   entity not stalled. Spec rule R-SIMULATE: sign only after a successful simulation at the head, add a named margin, never exceed the
   chain's transaction gas cap, never sign a time-gated op before its gate opens.
 - **Epoch in the start (S1').** `InitialDisputeProof.ondeltaEpoch`; a start signed at an old epoch is skipped with
   `DisputeOpSkipped` reason 11, judged before the signature. Declaring the current epoch over an old signature is a real E4.
 - **Deploy gate.** `assertDeployGate` = response-window floor, then `assertBatchGasCap`: required tx gas
-  `HANKO_PRELUDE_GAS (4,600,000) + ceil(500,000 * 64 / 63) + 30,000` = 5,137,943, checked against a per-chain cap table (EIP-7825's
+  `HANKO_PRELUDE_GAS (4,900,000, measured 4,832,492 with the intrinsic gas) + ceil(500,000 * 64 / 63) + 30,000` = 5,437,937, checked against a per-chain cap table (EIP-7825's
   16,777,216 for chain ids 1 and 11155111; unknown chains refused on a mainnet, allowed on a named testnet). Supported board size: 128
   signing validators.
 - **Measured** (outer hanko check, EOA validators all signing; `j5-gas-prelude`): 1 validator 64,391 gas, 64 validators 1,348,965, 128
-  validators 4,522,148 (superlinear); a failing batch is reported at 602,327, 1,886,901 and 5,060,084. A board of 256 cannot be
+  validators 4,522,148 (superlinear; execution only, the transaction's intrinsic gas of 21,000 + 16 per calldata byte, 310,344 at K=128, was left out until
+  the review at 0aeb766: prelude + intrinsic is 114,639 / 1,528,237 / 4,832,492); a failing batch is reported at 602,327, 1,886,901 and 5,060,084. A board of 256 cannot be
   registered in the rig. F2 (two 8-member ERC-1271 boards) needs 15,623,512 gas, fails at a 15M budget and lands from 16,343,968 at a
   16M budget (`j5-gas-budget`).
 - **Sizes** (limit 24,576): Depository 23,116, Account 24,427 (149 under; the epoch skip cost 27 bytes).
@@ -373,10 +378,29 @@ callee burns all its gas (INVALID, endless loop, empty revert, revert with a rea
 - **Boundary sweep** (`BatchGasStarved` vs `BatchFailed` at every limit from 20 below the first non-starved limit to 400 above it,
   callee INVALID, budget 500,000): the real build and the requirement lowered by 0, 4,000, 6,000 and 7,000 gas (a check below the budget
   itself, which hands the callee less than 63/64 of the left gas) all give 0 out-of-gas, 0 unreported returns, 400 of 400 reported.
-- **Reading.** The reserve does not decide any outcome: what protects the post-call code is the EVM's retained 1/64 plus the 500,000
-  minimum budget, and the 30,000 only raises the requirement by 30,003 gas (first non-starved limit 577,475 with it, 547,472 without).
-  There is no limit at which a reserve of 0 and a reserve of 30,000 differ except which of two clean outcomes the transaction takes.
-  So a killing test for the reserve cannot exist except one that pins the constant. The invariant that does matter is
-  `MIN_BATCH_GAS_BUDGET / 64 > post-call gas` (7,936 > 1,957); a test on that invariant would kill a lowered minimum budget as well.
-  Recommendation to the reviewers: drop the reserve (one constant and one addend) and pin that invariant instead; keeping it costs 30k
-  of requirement and nothing else.
+- **Reading (corrected, see the next section).** The post-call code is safe without any reserve: it needs about 2,000 and the caller keeps at
+  least 1/64 (7,936 at the smallest budget), and the second reviewer's step trace found 44,413 held when the self-call returns, 14,668 even at
+  reserve 0. But that is the wrong side of the call. My boundary sweep only asked whether the transaction ended cleanly (it did, 400 of 400),
+  not whether the callee got the whole budget, so it could not see what the reserve is for. My 02:20 recommendation to drop the reserve was
+  wrong and is withdrawn; the reserve stays.
+
+## Fourth round of J5 (coordinator, from the two reviews at 0aeb766): what the reserve is for, boundary tests, gap tests, prelude with intrinsic gas
+
+- **Reserve stays (30,000); its comment and this file now say what it is for:** the callee gets the whole signed budget at every gas limit the
+  check accepts. New tests: `test/vm/j5-gas-exact.test.ts` (second reviewer: an ERC-1271 member burning about 600k, budget bisected to the exact
+  need, every limit from the check up lands; P part: post-call need 2,052 against 44,413 held) and `test/foundry/J5BudgetBoundary.t.sol` (first
+  reviewer: an NFT that reports its own `gas()`; the callee sees exactly the budget at the lowest passing limit and at a much higher one, and
+  the limit below reverts). Mutants: reserve 0 is killed by both; the self-call getting budget + 100k is killed only by `J5BudgetBoundary`.
+- **Budget attacks** (`test/vm/j5-fourth-budget.test.ts`, 4): another budget under the same signature is E4 with no nonce; uint64 max and
+  budgets over the cap are `BatchGasStarved` with no nonce and no overflow; 500,000 lands, 499,999 and 0 are E10; a revert-whole batch ignores the
+  budget but keeps the minimum; a member that reads `gasleft()` sees the signed budget, never the relayer's limit, so a simulation at another
+  budget disagrees (R-SIMULATE, decisions doc).
+- **No upper bound on `gasBudget`** (accepted): a budget no chain can land never lands, the nonce stays open, the entity signs another batch at
+  it. Self-inflicted, costs nothing.
+- **Gap-killing tests** (first reviewer): `test/vm/j5e-review-outdated.test.ts` (4: every branch of the outdated-finalize-evidence decision;
+  killed t07, t08, t09, t11) and the lower-Target ladder replay in `test/protocol/HashLadderRegistry.test.ts` (skip with reason 10, nothing
+  changes; killed l03).
+- **Prelude constant includes intrinsic gas.** `j5-gas-prelude.test.ts` adds `21,000 + 16 * calldata bytes` (an upper bound) to the rig's
+  execution-only measurement (a read-only call charges none): 4,832,492 at K=128, so `HANKO_PRELUDE_GAS` goes from 4,600,000 to 4,900,000 and
+  the gate total from 5,137,937 to 5,437,937 (the earlier label 5,137,943 was wrong by 6: 4,600,000 + 507,937 + 30,000). Headroom under the
+  EIP-7825 cap is still about 11.3M; no gate decision changes.

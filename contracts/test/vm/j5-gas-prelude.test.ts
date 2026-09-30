@@ -23,6 +23,8 @@ const TX_GAS_CAP = 16_777_216n;
 const MIN_BUDGET = 500_000n;
 const RESERVE = 30_000n;
 const requirement = (budget: bigint): bigint => (budget * 64n) / 63n + RESERVE;
+/** Intrinsic gas of a transaction with `bytes` of calldata, every byte counted as nonzero (an upper bound). */
+const intrinsicOf = (bytes: number): bigint => 21_000n + 16n * BigInt(bytes);
 
 describe("F1 the outer hanko of a big board no longer decides whether a failing batch can be reported", () => {
   for (const K of (process.env.KS ?? "1,64,128").split(",").map(Number)) test(`board of ${K} validators, all signing`, async () => {
@@ -49,8 +51,9 @@ describe("F1 the outer hanko of a big board no longer decides whether a failing 
     };
     const search = async (lo: bigint, hi: bigint): Promise<bigint> => (hi - lo <= 1000n ? hi : (await run((lo + hi) / 2n)).reported ? search(lo, (lo + hi) / 2n) : search((lo + hi) / 2n, hi));
     const landing = await search(500_000n, TX_GAS_CAP);
-    const intrinsic = 21_000n + 16n * BigInt(data.length);
-    const prelude = landing - requirement(MIN_BUDGET); // prelude + intrinsic + the search's 1000 resolution
+    const intrinsic = intrinsicOf(data.length);
+    // runReadOnlyCall charges no intrinsic gas (a call with a 3,000 limit succeeds), so `landing` is execution only: add the transaction's own 21,000 + 16 per byte (an upper bound)
+    const prelude = landing - requirement(MIN_BUDGET) + intrinsicOf(data.length); // execution before the self-call + intrinsic + the search's 1000 resolution
     console.log(`K=${K}: calldata ${data.length} B; lowest gas limit at which the failing batch is reported ${landing}; requirement of the budget alone ${requirement(MIN_BUDGET)}; `
       + `prelude + intrinsic ~ ${prelude} (intrinsic ~ ${intrinsic}); EIP-7825 cap ${TX_GAS_CAP}, headroom ${TX_GAS_CAP - landing}`);
     expect((await run(landing)).reported).toBe(true);

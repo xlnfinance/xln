@@ -133,10 +133,12 @@ const txGasCapOf = (chain) => TX_GAS_CAP_BY_CHAIN_ID.get(Number(chain.chainId)) 
 /** The largest board (EOA validators, all signing) whose outer hanko check the gate budgets for. The check is superlinear in the board size; larger boards are unsupported. */
 const SUPPORTED_BOARD_SIGNERS = 128;
 /**
- * Gas of that check for a board of SUPPORTED_BOARD_SIGNERS: prelude + intrinsic, measured at 4,522,148 for 128 signers (test/vm/j5-gas-prelude.test.ts, which fails
- * if the measurement passes this constant), rounded up. 64 signers measure 1,348,965; a lone validator 64,391.
+ * Gas before the self-call for a board of SUPPORTED_BOARD_SIGNERS: the outer hanko check PLUS the transaction's intrinsic gas (21,000 + calldata), measured at
+ * 4,832,492 for 128 signers (test/vm/j5-gas-prelude.test.ts, which adds the intrinsic gas itself because the rig's read-only call charges none, and fails if the
+ * measurement passes this constant), rounded up. 64 signers measure 1,528,237; a lone validator 114,639. The first version of this constant left the intrinsic gas
+ * out (4,522,148 of execution alone, review of #54 at 0aeb766).
  */
-const HANKO_PRELUDE_GAS = 4_600_000;
+const HANKO_PRELUDE_GAS = 4_900_000;
 
 /** MIN_BATCH_GAS_BUDGET (DepositoryBounds) and BATCH_POST_CALL_RESERVE (Depository) of the compiled build that matches the sources on disk. */
 const readCompiledBatchGas = (root = contractsRoot) => {

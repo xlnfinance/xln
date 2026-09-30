@@ -319,13 +319,17 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @dev J5: an authenticated batch without dispute or reveal ops whose ops failed. None of them was applied; the entity
   /// nonce is consumed. `reason` is the selector of the revert that stopped the batch (zero when it carried none).
   event BatchFailed(bytes32 indexed entityId, uint256 indexed nonce, bytes4 reason);
-  /// @dev J5: processBatch was offered less gas than the batch signed for (its gasBudget, plus the gas to log a failure afterwards).
+  /// @dev J5: processBatch was offered less gas than the batch signed for (its gasBudget * 64/63, plus the reserve that lets the self-call have the whole budget).
   ///      The transaction reverts and takes no nonce: it is resubmitted with more gas, and estimation finds the limit.
   error BatchGasStarved();
-  /// @dev J5: the fixed reserve that sits OUTSIDE the signed budget: what processBatch needs after the self-call returns (read the 4-byte
-  ///      reason, write the log, return), even when the ops burned their whole budget. The pre-call check demands budget * 64/63 + this.
-  ///      Measured at a small fraction of it, at the smallest allowed budget with a callee that burns everything
-  ///      (test/vm/j5-gas-budget.test.ts); the deploy gate reads the constant from the compiled build.
+  /// @dev J5: the fixed reserve that sits OUTSIDE the signed budget, so that the self-call gets the WHOLE signed budget. The pre-call
+  ///      check runs a few opcodes before the CALL and the CALL itself costs gas before the EVM takes its 63/64: without this addend,
+  ///      a transaction just above budget * 64/63 hands the callee budget minus about 230 gas, and a batch signed at its exact need
+  ///      soft-fails (BatchFailed, nonce spent) at a gas limit the relayer chose (review of #54 at 0aeb766: 232 consecutive limits, test/vm/j5-gas-exact.test.ts,
+  ///      test/foundry/J5BudgetBoundary.t.sol). The overhead is constant (about 230), so the number is generous on purpose.
+  ///      It is NOT what the code after the self-call needs (read the 4-byte reason, write the log, return: about 2,000, measured): that is
+  ///      covered by the 1/64 the caller keeps and by the gas the callee hands back, at every allowed budget (BASELINE.md).
+  ///      The deploy gate reads the constant from the compiled build.
   uint256 internal constant BATCH_POST_CALL_RESERVE = 30_000;
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
@@ -372,7 +376,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       // every urgent batch above it. A batch that reverts whole (see _revertsWhole) keeps the J2 rule instead.
       //
       // The ops run with EXACTLY the gas the batch signed for (batch.gasBudget), and the transaction must carry it (63/64 rule,
-      // plus the margin to log afterwards) or it reverts BatchGasStarved and takes no nonce. So a relayer's gas limit above that
+      // plus the reserve that lets the CALL hand over the whole budget) or it reverts BatchGasStarved and takes no nonce. So a relayer's gas limit above that
       // requirement changes nothing, and every failure the self-call reports (an out-of-gas frame, a callee that burns all its gas,
       // an ERC-1271 member four frames down) is the signer's own budget or the batch's own doing: a failure of the batch like any
       // other, BatchFailed with the nonce spent, because under F1 the entity cannot sign a different batch at it. The signer

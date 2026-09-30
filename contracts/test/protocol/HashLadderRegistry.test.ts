@@ -483,6 +483,28 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(raisedAt).to.equal(firstAt);
   });
 
+  it('target: a lower ratio replay is skipped and changes nothing (S1: op 3, reason 10), not a revert', async function () {
+    const dispute = await openPullDispute({ label: 'registry-target-lower', fillRatio: 0x0123, targetRole: true });
+    await registerReveal(dispute, dispute.right, {});
+    const ladder = ladderHashOf(dispute.pullProof);
+    const [firstRatio, firstAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId, dispute.left.entityId, ladder, true,
+    );
+    await time.increase(5);
+    const lowerProof = buildHashLadderProof('registry-target-lower', 0x0100);
+    // a lower witness can never lift the record; inside a batch a revert would pin the entity's nonce (F1), so it is skipped
+    await expect(registerReveal(dispute, dispute.right, {
+      fillRatio: 0x0100,
+      reveals: lowerProof.reveals,
+    })).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_CONFLICT, 0x0100n);
+    const [ratio, at] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId, dispute.left.entityId, ladder, true,
+    );
+    expect(ratio).to.equal(firstRatio);
+    expect(at).to.equal(firstAt);
+  });
+
   it('target: a higher ratio replaces even after timeout and the late timestamp settles zero', async function () {
     const dispute = await openPullDispute({
       label: 'registry-target-overwrite',
