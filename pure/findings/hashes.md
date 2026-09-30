@@ -1,6 +1,6 @@
 # hashes-codecs: og vs pure/xln.ts
 
-Tests: `pure/diff/hashes.test.ts`. Run it from `pure/` with `bun test diff/hashes.test.ts`. Result after the fixes: 48 pass, seeded mulberry32 PRNG (`0xC0FFEE`). Former DIVERGES tests for fixed findings are now MATCH tests; the remaining DIVERGES tests (H5, H6) belong to other areas. The og side is always og's own function, or the typechain ABI generated from the `.sol` files. ethers `solidityPacked` stands in for og only where og has no exported function; that happens once, for `Account.sol _encodeDisputeHash`.
+Tests: `pure/diff/account/hashes.test.ts`. Run it from `pure/` with `bun test diff/account/hashes.test.ts`. Result after the fixes: 48 pass, seeded mulberry32 PRNG (`0xC0FFEE`). Former DIVERGES tests for fixed findings are now MATCH tests; the remaining DIVERGES tests (H5, H6) belong to other areas. The og side is always og's own function, or the typechain ABI generated from the `.sol` files. ethers `solidityPacked` stands in for og only where og has no exported function; that happens once, for `Account.sol _encodeDisputeHash`.
 
 ## Findings
 
@@ -34,7 +34,7 @@ Tests: `pure/diff/hashes.test.ts`. Run it from `pure/` with `bun test diff/hashe
 
 ## Golden hashes hardcoded in `pure/oracle.test.ts`
 
-All of these were reproduced by og functions in `diff/hashes.test.ts`, in the tests `golden hashes hardcoded …` and `MATCH (golden provenance)`:
+All of these were reproduced by og functions in `diff/account/hashes.test.ts`, in the tests `golden hashes hardcoded …` and `MATCH (golden provenance)`:
 - **Account frame:** `0x4820…` from og `computeFrameHash`; this one is also og's own golden. Settlement `0x31c1e688…` and moved `0x2bbd9706…` also come from og `computeFrameHash`. og's golden test only asserts equality and inequality for these, not the literals.
 - **j-claim frame `0x11cbf820…`:** og `computeFrameHash` over the proposed frame. Its `accountStateRoot` equals og `computeAccountStateRoot` of the same committed view.
 - **Pending root `0x32a2477f…`:** og `createAccountJClaimRecord`, then `applyAccountJClaimInsert` twice with `createAccountJClaimProof`, using the events hash from `canonicalJurisdictionEventsHash`. The one-claim root also matches.

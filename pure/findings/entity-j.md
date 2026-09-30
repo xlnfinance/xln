@@ -1,6 +1,6 @@
 # entity-j: Entity-level J txs, j_event, boardHandover, numbered registration intents
 
-og (core/ and jurisdictions/ at 566c850) is the authority. Every test is in `pure/diff/entity-j.test.ts` and runs og live: the j-batch handlers, `applyJEvent`, `getBoardHandoverFrameConfig` + `handleBoardHandoverEntityTx`, `applyRuntimeTx`, and ethers v6 `Transaction.from`.
+og (core/ and jurisdictions/ at 566c850) is the authority. Every test is in `pure/diff/j/entity-j.test.ts` and runs og live: the j-batch handlers, `applyJEvent`, `getBoardHandoverFrameConfig` + `handleBoardHandoverEntityTx`, `applyRuntimeTx`, and ethers v6 `Transaction.from`.
 
 The Entity txs work on og's committed `jBatchState` (`state.committed["jBatchState"]`, og-shaped with numeric rows). They share the jBatch functions with the Host J layer, which are shape-agnostic.
 

@@ -1,7 +1,7 @@
 // Settlement draws (og entity/tx/handlers/payments/settle.ts). Owner: thread "Independent review of main".
 import { drawn, type Moves, type WorldMoves } from "./areas.ts";
 import { activePairs, pick, one, tx, isLeft, sealed, replica, quiet } from "./world-view.ts";
-import type { World } from "../world.ts";
+import type { World } from "../rig/world.ts";
 import type { SettlementOp } from "../../xln.ts";
 import { getSignedSettlementWorkspaceTxError } from "../../../core/account/tx/handlers/settlement/transition.ts";
 

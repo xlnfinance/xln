@@ -2,8 +2,8 @@
 // so a new kind without an area is a tsc error, and each area's draws file (draws/<area>.ts) is typed by exactly the
 // kinds this table gives it, so a missing or foreign kind there is a tsc error too. review/walk-areas.md says why.
 import type { EntityTx, RuntimeTx } from "../../xln.ts";
-import type { World } from "../world.ts";
-import type { User } from "../lane.ts";
+import type { World } from "../rig/world.ts";
+import type { User } from "../rig/lane.ts";
 
 export type Kind = EntityTx["type"];
 export const AREAS = ["core", "settlement", "orderbook", "lending", "boards", "disputes"] as const;

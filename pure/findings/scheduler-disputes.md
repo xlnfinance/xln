@@ -1,6 +1,6 @@
 # scheduler-disputes: og crontab scheduler, scheduledWake, disputeFinalize, J7 dispute effects, runtime events
 
-Spec: og at 566c850. Tests: `pure/diff/scheduler-disputes.test.ts`. Every test is a MATCH that runs og live on randomized inputs.
+Spec: og at 566c850. Tests: `pure/diff/disputes/scheduler-disputes.test.ts`. Every test is a MATCH that runs og live on randomized inputs.
 
 | # | Item | og source | Status |
 |---|------|-----------|--------|
@@ -23,4 +23,4 @@ Spec: og at 566c850. Tests: `pure/diff/scheduler-disputes.test.ts`. Every test i
 | 17 | SwapMatched, account_settled_finalized_bilateral, JEventReceived runtime events | swap / settle / j-events | SwapMatched FIXED (bookPhase, book-admission MATCH). account_settled_finalized_bilateral FIXED (runtime-final.md RF-7); JEventReceived FIXED (MATCH through og applyEntityTx in entity-j.test.ts; published by RuntimeStep.events, runtime-final.md RF-6) |
 | 18 | The jurisdictionId field in Htlc* events | protocol/htlc/events.ts | FIXED (lending-hub.md LH-5): read from jurisdictionConfig.name, in og key order; og's env.activeJurisdiction fallback is ported as the context's `activeJurisdiction` (og EntityRuntimeContext; never committed) |
 
-Note: `pure/diff/entity-cross-j.test.ts` (another area) gained a minimal edit. It passes `self` to paybookFollowups and compares runtimeEvents with og's candidateEffects.
+Note: `pure/diff/cross-j/entity-cross-j.test.ts` (another area) gained a minimal edit. It passes `self` to paybookFollowups and compares runtimeEvents with og's candidateEffects.
