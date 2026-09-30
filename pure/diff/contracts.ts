@@ -60,5 +60,27 @@ export const installContracts = (which: ContractSet = contractSet()): ContractSe
   return which;
 };
 
+/** og's Depository ABI as jurisdictions/ shipped it, whatever is installed now: og-shaped calldata is built from it. */
+export const shippedDepositoryAbi = shipped[1]!["abi"] as readonly unknown[];
+
+/**
+ * Load og code that must see the shipped ABI. og's modules make their interfaces from these factories once, at import,
+ * so a module first evaluated after installContracts carries the fork's ABI for the rest of the process, and a test of
+ * og's own decoding then compares the fork with itself. `load` evaluates a fresh copy of the module (an import with
+ * its own query string) while the shipped set is installed; the set that was chosen is put back afterwards.
+ */
+export const withShippedOg = <T>(load: () => Promise<T>): Promise<T> => {
+  installContracts("jurisdictions");
+  return load().finally(() => installContracts(contractSet()));
+};
+
+/** og's dispute-evidence decoders (rpc-public) read the Depository interface once, at import. */
+export type RpcPublic = typeof import("../../core/jurisdiction/adapter/rpc-public.ts");
+export const RPC_PUBLIC = "../../core/jurisdiction/adapter/rpc-public.ts";
+
+/** A fresh copy of og's rpc-public, made while the shipped ABI is installed. */
+export const loadShippedRpcPublic = (): Promise<RpcPublic> =>
+  withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as RpcPublic);
+
 // Before og's modules load: some of them make their interfaces once, at import.
 installContracts();

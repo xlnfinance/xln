@@ -81,15 +81,22 @@ type Chains = readonly [JAdapter, JAdapter];
 type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[]; readonly landed: readonly number[]; readonly unknownHalts: readonly string[] };
 
 /** og's script: reserves move on each chain, the users sign one cross-j route, the book owner clears it, the swap settles. */
-const SWAP: Script = { name: "swap", steps: ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"] };
+const SWAP: Script = { name: "swap", steps: ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"], pacing: "interleaved" };
 /** Each user deposits collateral into its Account with its hub, and the batch lands: no swap. */
-const DEPOSIT: Script = { name: "deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast"] };
+const DEPOSIT: Script = { name: "deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast"], pacing: "interleaved" };
 /** The deposits land first, then the swap is signed. */
-const SWAP_AFTER_DEPOSIT: Script = { name: "swap-after-deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast", "swap", "clear"] };
+const SWAP_AFTER_DEPOSIT: Script = { name: "swap-after-deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast", "swap", "clear"], pacing: "interleaved" };
+/** The same steps, one per round, no background moves: the deposit is in flight when the swap is signed, on every seed. */
+const SWAP_AFTER_DEPOSIT_STRICT: Script = { ...SWAP_AFTER_DEPOSIT, name: "swap-after-deposit-strict", pacing: "in-order" };
 const LONE_LEG = "a lone cross-jurisdiction leg is retained, not halted on";
 
-/** A named script: the name keeps one seed's run in each script on its own storage namespace. */
-type Script = { readonly name: string; readonly steps: readonly string[] };
+/**
+ * A named script: the name keeps one seed's run in each script on its own storage namespace. "in-order" plays the steps
+ * one per round and draws no background moves, so its timing does not depend on the seed; "interleaved" mixes random
+ * background moves between the steps.
+ */
+type Pacing = "in-order" | "interleaved";
+type Script = { readonly name: string; readonly steps: readonly string[]; readonly pacing: Pacing };
 const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
   const rand = prng(seed);
   const ri = (n: number): number => Math.floor(rand() * n);
@@ -406,6 +413,19 @@ const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
     return [...u, ...h];
   };
   const random = ["idle", "idle", "idle", "idle", "idle", "userCredit", "payToHub", "payFromHub"];
+  /** In order: the queue's head, then idle. */
+  const inOrder = (queue: readonly string[]): string => queue[0] ?? "idle";
+  /** Interleaved: the queue's head 60% of the time while it lasts, otherwise a random background move. */
+  const interleaved = (queue: readonly string[]): string =>
+    queue.length > 0 && rand() < 0.6 ? queue[0]! : random[ri(random.length)]!;
+  const nextKind = (queue: readonly string[]): string => {
+    switch (script.pacing) {
+      case "in-order":
+        return inOrder(queue);
+      case "interleaved":
+        return interleaved(queue);
+    }
+  };
 
   try {
     const imports = (hosted: readonly number[]): RuntimeTx[] =>
@@ -425,7 +445,7 @@ const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
     await rounds.reduce(async (prev) => {
       await prev;
       if (coverage.halts > 0 || coverage.departures.length > 0 || state.settled) return;
-      const kind = queue.length > 0 && rand() < 0.6 ? queue[0]! : random[ri(random.length)]!;
+      const kind = nextKind(queue);
       const planned = await step(kind);
       if (planned !== undefined && queue[0] === kind) queue.shift();
       count(planned === undefined ? "idle" : kind);
@@ -502,15 +522,24 @@ describe("scenario: a cross-jurisdiction swap across two Runtimes, og vs the rew
   });
 
   // With a deposit in flight on the target user's Account the swap's target leg waits behind it and the source leg is
-  // ready alone: og halts at dispatch, the rewrite keeps the lone leg (departures.ts loneCrossJLeg).
-  test("a swap signed after a deposit: og halts on a lone leg where the rewrite retains it", async () => {
-    const runs = await SEEDS.reduce<Promise<readonly Coverages[]>>(
-      async (done, seed) => [...(await done), await runCrossJ(seed, SWAP_AFTER_DEPOSIT)],
-      Promise.resolve([]),
-    );
-    runs.forEach((r, i) => report(r, SEEDS[i]!));
-    expect(runs.flatMap((r) => r.refusals)).toEqual([]);
-    expect(runs.flatMap((r) => r.unknownHalts)).toEqual([]);
-    expect(runs.flatMap((r) => r.coverage.departures).some((d) => d.endsWith(LONE_LEG))).toBe(true);
+  // ready alone: og halts at dispatch, the rewrite keeps the lone leg (departures.ts loneCrossJLeg). The strict script
+  // builds that case, so the departure is asserted on every run and does not depend on which seeds were drawn.
+  test("a swap signed with a deposit in flight: og halts on a lone leg where the rewrite retains it", async () => {
+    const r = await runCrossJ(SEED, SWAP_AFTER_DEPOSIT_STRICT);
+    report(r, SEED);
+    expect(r.refusals).toEqual([]);
+    expect(r.unknownHalts).toEqual([]);
+    expect(r.coverage.departures.filter((d) => d.endsWith(LONE_LEG))).toHaveLength(1);
   }, 900_000);
+
+  // The seeded draws interleave background moves with the same steps, so the swap may land before, with or behind the
+  // deposit. Whatever they reach, no batch is refused and no halt is unregistered.
+  SEEDS.forEach((seed) => {
+    test(`MATCH: swap after deposit, seed 0x${seed.toString(16)}`, async () => {
+      const r = await runCrossJ(seed, SWAP_AFTER_DEPOSIT);
+      report(r, seed);
+      expect(r.refusals).toEqual([]);
+      expect(r.unknownHalts).toEqual([]);
+    }, 900_000);
+  });
 });

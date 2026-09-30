@@ -60,7 +60,7 @@ const soleSigner = (name: string, signer: number, kind: Member["kind"]): Member 
 });
 /** Two numbered 1-of-1 Entities, each over a signer of its own; each can target the other. */
 export const NUMBERED = [4, 5] as const;
-/** The 2-of-3 lazy board over SIGNERS 0, 1 and 2, signer 0 proposing; it joins only under WALK_BOARD (see below). */
+/** The 2-of-3 lazy board over SIGNERS 0, 1 and 2, signer 0 proposing; it joins only when the world asks for it (see below). */
 export const BOARD = 6;
 const MEMBERS: readonly Member[] = [
   soleSigner("A", 0, "lazy"),
@@ -75,11 +75,15 @@ export const NAMES = MEMBERS.map((m) => m.name);
 /** The most signers any Entity of this world has: the outer hanko check of its batches grows with it (see fork-shim-budget.test.ts). */
 export const MAX_BOARD_SIGNERS = Math.max(...MEMBERS.map((m) => m.board.length));
 /**
- * The 2-of-3 board is opt-in (WALK_BOARD=1). Its first Entity frame needs og's frame preparation
+ * The 2-of-3 board is opt-in: a world asks for it with `openWorld(seed, name, { board: true })`, and the walk's command
+ * line with WALK_BOARD=1. Its first Entity frame needs og's frame preparation
  * (runtime/mempool/entity-height-barrier.ts applyEntityHeightDurabilityBarrier: one merge group per certificate-carrying
  * replica lane in a Runtime frame, the rest requeued), which the rewrite runs as processRuntimeFrame.
+ * A test file never sets the variable: in a one-process suite it would reach every file loaded after it.
  */
-export const boardJoins = (): boolean => process.env["WALK_BOARD"] === "1";
+export type WorldOptions = { readonly board?: boolean };
+export const boardJoins = (options: WorldOptions = {}): boolean =>
+  options.board ?? process.env["WALK_BOARD"] === "1";
 
 type ProfileRow = { counterpartyId: string; tokenCapacities: unknown };
 /** og's committed Account, as far as steps read it. */
@@ -118,7 +122,7 @@ export type World = {
   readonly multiSigner: (x: number) => boolean;
   /** The numbered Entities: registered on chain, so each holds a certified board record. */
   readonly numbered: readonly number[];
-  /** The multi-signer Entities in this world (none unless WALK_BOARD). */
+  /** The multi-signer Entities in this world (none unless the world asks for the board). */
   readonly boards: readonly number[];
   /**
    * og finds Entity x's own certified board record in x's registry (og board-registry resolveObserverCertifiedBoardRecord):
@@ -149,7 +153,7 @@ export type World = {
   readonly close: () => Promise<void>;
 };
 
-export const openWorld = async (seed: number, name: string): Promise<World> => {
+export const openWorld = async (seed: number, name: string, options: WorldOptions = {}): Promise<World> => {
   const rand = prng(seed);
   const ri = (n: number): number => Math.floor(rand() * n);
   const tag = `WALK_SEED=0x${seed.toString(16)}`;
@@ -172,7 +176,7 @@ export const openWorld = async (seed: number, name: string): Promise<World> => {
     ? shimBatchSubmission(chain.getBrowserVM(), BigInt(chain.chainId), chain.addresses.depository, KEYS)
     : () => [] as readonly string[];
   KEYS.forEach((k, i) => registerSignerKey(env, SIGNERS[i]!, Buffer.from(k.slice(2), "hex")));
-  const members = boardJoins() ? MEMBERS : MEMBERS.slice(0, BOARD);
+  const members = boardJoins(options) ? MEMBERS : MEMBERS.slice(0, BOARD);
   /** og ConsensusConfig of Entity x: its board members, one share each, and its threshold. */
   const config = (x: number): ImportConfig => {
     const validators = members[x]!.board.map((i) => SIGNERS[i]!);
