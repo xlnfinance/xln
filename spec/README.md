@@ -14,7 +14,7 @@ spec/
   lib/vocabulary.scm       `rule` and `property`: how a page names its parts
   lib/check.scm            `check`: breadth-first walk of every reachable world
   account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
-  account/clock.scm        a frame's timestamp carries no authority (R-CLOCK): own clock plus a reserve; a resolve is late by J height only
+  account/clock.scm        a frame's timestamp carries no authority (R-CLOCK); every HTLC time judgment is in J height by the party's own view, strict expiry bound with a reserve >= LAG, payee reveals at deadline - LAG (R-HTLC-CLOCK)
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
   money/core.scm           the arithmetic both money pages share: payment, worst-case credit bound, deposit (composition)
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation

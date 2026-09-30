@@ -83,6 +83,8 @@
                (if pays? (add-offdelta (without-clause w i) side (:amount c)) (without-clause w i))))))
 
 ;; cooperative collateral moves (R2C, C2R): `side` moves 1 between its reserve and the collateral.
+;; R-SETTLE-CREDIT (coordinator 09-30, Q-X-3): a party co-signs a settlement only if, after it, each side's position is still within the credit the
+;; other side extended: the same bound a payment respects, so `guarded` holds every collateral move to it (a withdrawal beyond one's own claim is refused).
 ;; A Left deposit raises ondelta with it: the deposit is Left's allocation (Account.sol:1251-1257).
 (define (move-collateral w side amount)
   (-> w (update-in (list :collateral) (lambda (c) (+ c amount)))

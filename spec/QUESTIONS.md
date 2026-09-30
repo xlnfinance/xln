@@ -18,8 +18,12 @@ Source: lessons R-X1 (no peer input halts a Runtime), og issues 1, 3, 4, 6, 7, 8
 
 **Q-A-2. A duplicate of the frame at my head.**
 Options: (a) ignore it; (b) answer with the same ack again.
-Choice: (b). With (a), one lost ack wedges the proposer: the planted bug `no-reack` fails the
-liveness check "can always still finish" after a single loss.
+Choice: (b), in ANY state (R-REACK, coordinator 09-30, Account comparison D-AC-1): a repeat of the frame I last
+committed is re-acked whether I am Open or hold my own pending frame. With (a), one lost ack wedges the proposer:
+the planted bug `no-reack` fails the liveness check "can always still finish" after a single loss. Quint's first
+rule re-acked only while Open: a replica that had already proposed its next frame refused the repeat, so the lost
+ack was never re-sent (both sides wedged). Planted bug `reack-open-only` is that rule and fails the same check;
+Quint took this page's rule and added the mutant, the scenario test and the liveness check.
 Source: design/account-model.md P4 (loss and duplication), lessons Q-A2.
 
 **Q-A-3. Who resends, and when?**
@@ -47,9 +51,11 @@ Source: design/account-model.md section 5 (P4: no two proofs per nonce).
 
 **Q-A-6. The link.**
 Choice: FIFO with bounded loss and duplication (`max-losses`, `max-dups`, default 1 and 1).
-Reordering is not modelled: the `prev` hash makes a frame from the future refusable, so
-reordering can only add stale copies, which duplication already covers. A full reordering model
-is a later widening.
+Reordering is not in the base page: the `prev` hash makes a frame from the future refusable, so
+reordering can only add stale copies, which duplication already covers. Evidence (R-NET, D-AC-8): the config
+`account/configs/reorder.scm` lets the receiver take any of the first three messages of its inbox (Quint's
+network is a set and delivers any message in flight) and the page still checks clean: 7312 states, 33183
+transitions, 16 goals. The base stays FIFO; Quint records its set network as an explicit choice (its A14).
 Source: design/account-model.md P4 ("loss, duplication and simultaneous proposals").
 
 **Q-A-7. Frame protocol shape (lessons Q-A4).**
@@ -63,34 +69,36 @@ Choice: the lower entity id, as in the contract's `acct_key`. The page names sid
 `:right`; the rule "Left wins on an equal height" is the contract's equal-nonce rule.
 Source: Types.sol:150, Account.sol:361, Account.sol:732.
 
-**Q-A-9. A frame's timestamp carries no authority (R-CLOCK, coordinator 21:56).**
-Rule: no frame is refused for its age or its future date, because a signed frame refused without an exit
-deadlocks the Account (the proposer holds the frame, resends the same signed copy, and it is refused
-again). Every time-based decision (lock expiry, a deadline check, the N2 horizon) uses the deciding
-party's own clock plus a named reserve (`clock-reserve`), never a timestamp the counterparty wrote.
-Reason given: a late frame deadlocked an Account, and a future-dated frame let a payer expire a lock
-before the payee's own deadline. The frames page above has no time, so it holds under the rule by
-construction (it refuses only on height and on content, never on a stamp); the rule is checked in its own
-page, `account/clock.scm`: two clocks that only tick and drift apart freely, one lock, a pay frame and
-an expire frame, any stamp, any delay. Properties: "no frame is refused for its age or its future date"
-and "a lock is expired only after the payee's own clock passed its deadline plus the reserve".
-Planted bugs, one per case: `refuse-late` (a stale stamp is refused: the signed frame is stuck),
-`refuse-future` (a stamp ahead of the receiver's clock is refused) and `expire-by-frame-stamp` (the
-receiver decides expiry from the frame's stamp: a payer stamps the future and expires the lock at its
-own clock 2 while the payee's is 0). Capacity: 1434 states (see the resolve refinement below).
-Consequence for the other pages: the dispute page's clock is the chain's (one clock, the deciding
-party's own for `horizon-ok?`, Q-D-20); the J batch page's deadlines are the chain's. An early expire is
-refused on CONTENT (a nack); a signed frame that is valid but early is not refused, it waits for the
-deciding party's clock. Not modelled: J-height deadlines (the same rule with the J clock), the payee's
-claim before its own deadline, the size of the reserve (a named parameter, not chosen here).
-Refinement (#57, coordinator 01:11): a secret resolve is decided by J height, never by the frame's stamp. The
-page now has a chain height (`:jh`) both parties read, a resolve frame the payee proposes with any stamp
-(honest 0, or the latest one a proposer can write), and the payer's decision `resolve-late?`: late only when the
-chain height passed `resolve-deadline`. Property "a secret resolve is late only by J height: a resolve delivered
-within the deadline is never refused whatever the frame stamp says". Planted bug `resolve-late-by-stamp` (the
-payer also refuses a stamp past the deadline). The goal accepts a lock that expired or a secret that resolved.
-The lock expiry path keeps its own-clock rule. Capacity: 1434 states, 6225 transitions, 186 goals, 21 s.
-Source: coordinator R-CLOCK (21:56), #57 (01:11).
+**Q-A-9. Time in the Account layer: R-CLOCK and R-HTLC-CLOCK (coordinator 21:56 09-29 and 09-30, Account comparison D-AC-2..4).**
+R-CLOCK: no frame is refused for its age or its future date, because a signed frame refused without an exit
+deadlocks the Account (the proposer holds the frame, resends the same signed copy, and it is refused again), and a
+frame's stamp is never the time (a future-dated stamp let a payer expire a lock before the payee's own deadline).
+R-HTLC-CLOCK (09-30): every HTLC time judgment is in J HEIGHT, never by an Account clock or a frame stamp. Each party
+judges by its own view, the `max(host.finalizedJHeight, ctx.jHeight)` door of R-CLOCK (`:view` on the page); a view
+lags the chain by at most LAG, so two views differ by at most LAG (R-DRIFT; `max-drift`).
+(a) A lock is live through its deadline height. The payer accepts a resolve while its own view is <= deadline,
+whatever the stamp and the chain height. (Closes the xln.ts `htlc_timeout` hole: at jHeight == revealBeforeHeight the
+lock is still live.)
+(b) An expiry needs own view > deadline + reserve, strict; the payer when it proposes, the payee when it accepts.
+The reserve is in J heights and at least LAG (`clock-reserve`), so a party past deadline + reserve has a counterparty
+within LAG of it, which is past the deadline.
+(c) A payee whose resolve is still unacked when its own view reaches deadline - LAG reveals on-chain (C11 already
+makes the dispute window larger than LAG). Assumption (diligence, as on the other pages): a payee that owes the
+reveal does it before the chain moves on and before it decides an expire frame (`payee-duty?`).
+The page `account/clock.scm`: the chain height, two views that only catch up (bounded by LAG behind the chain), one
+lock with a deadline, a pay frame, an expire frame (the payer may propose it at any time, so the payee's check alone
+must hold), a resolve frame with any stamp, any delay. Properties: no frame refused for its age or date; an expiry
+commits only when both parties' views are strictly past the deadline; a resolve is refused only when the payer's own
+view is past the deadline; a payee holding the secret has revealed on-chain before an expiry commits.
+Planted bugs: `refuse-late`, `refuse-future`, `expire-by-frame-stamp`, `expire-at-deadline` (>= instead of >),
+`expire-no-reserve`, `resolve-late-by-stamp`, `resolve-by-chain-height`, `payee-idle`. Config `no-secret`: the payee
+holds no secret, the lock can only expire. Capacity: 2730 states, 10546 transitions, 260 goals.
+Quint: the same rule, its receiver reads a J-height view, never a proposer-written field; its bounded drift and its
+`expiredEarly` oracle stand (D-AC-4); this page carries `max-drift` and the both-views property as the oracle.
+Consequence for the other pages: the dispute page's clock is the chain's (Q-D-20); the J batch page's deadlines are
+the chain's. An early expire is refused on CONTENT (a nack); a signed frame that is valid but early is not refused.
+Not modelled: several locks, the on-chain dispute itself (the dispute page has it), a view that stalls.
+Source: coordinator R-CLOCK (21:56), #57 (01:11), R-HTLC-CLOCK (09-30).
 
 **Q-A-10. A refused tx stays refused when its predecessor is rolled back (a6 of the round-2 review).**
 A validator refuses a tx that conflicts with the history before it, including the txs ahead of it in the SAME
@@ -950,6 +958,11 @@ the frame clock. Page: the fail-back wait R2 in entity/routing.scm.
 credit bound; the account-model document says it must (Q-L, money page). Settlement holds
 (`chargeSettlement` 4600) are stricter than the contract. Recommendation: refuse a setCredit that
 leaves the bound; keep the settlement hold as stated local policy, not protocol.
+DECIDED (coordinator 09-30, R-SETTLE-CREDIT): a party co-signs a settlement only if, after it, each side's position is still
+within the credit the other side extended (the bound a payment respects), so a withdrawal of collateral beyond one's own claim is
+refused. The test rig found it: a co-signed settlement left Left at delta -7,000,031 against credit 18,092
+(review/rig-properties-2026-09-30/REPORT.md). Page: money/ledger.scm holds every collateral move (`r2c`, `c2r`) to RCPAN; planted bug
+`settle-ignores-credit` (a C2R that skips the check) fails "credit holds".
 
 **Q-X-4. Debt.** Does the Entity act on it (forgive, repay order, revoke credit)? Recommendation: pure
 observation, and a forgiveness only inside a cooperative update. Page: dispute/dispute.scm keeps the
@@ -1022,7 +1035,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
-- **R-CLOCK** (21:56): see Q-A-9.
+- **R-CLOCK** (21:56) and **R-HTLC-CLOCK** (09-30): see Q-A-9. **R-REACK**: Q-A-2. **R-SETTLE-CREDIT** (09-30): Q-X-3. **R-NET**: Q-A-6.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
 - **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract
