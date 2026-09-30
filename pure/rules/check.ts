@@ -5,9 +5,10 @@
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
 //   --base <ref>             the ref the register may only grow from (default origin/main)
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
-// Runs the register gate and then the style gate of the new tree: one command, one exit code.
+// Runs the register gate, the style gate of the new tree and folder width (rules/checks/folder-width.ts): one
+// command, one exit code.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
-// no killer, or the new tree breaks a style rule. See plan/first-moves.md, brief 3.
+// no killer, the new tree breaks a style rule, or a folder holds more than its allowed source files. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -17,6 +18,7 @@ import { parseRegister } from "./register.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
+import { folderWidthReport } from "./checks/folder-width.ts";
 import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
 const here = import.meta.dir;
@@ -28,6 +30,12 @@ const runStyle = (): number => {
   const style = treeStyle(`${here}/..`);
   console.log(renderTreeStyle(style));
   return style.failed ? 1 : 0;
+};
+
+const runFolderWidth = (): number => {
+  const report = folderWidthReport(repoRoot);
+  report.lines.forEach((line) => console.log(line));
+  return report.failed ? 1 : 0;
 };
 
 if (args.includes("--style-only")) process.exit(runStyle());
@@ -79,6 +87,6 @@ const evaluation = { ...checked, problems: [...checked.problems, ...grown.proble
 console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
 grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
 const registerFailed = evaluation.problems.length > 0;
-// The matrix is for review/; the style gate runs with the plain gate.
-const styleFailed = args.includes("--matrix") ? 0 : runStyle();
-process.exit(registerFailed || styleFailed === 1 ? 1 : 0);
+// The matrix is for review/; the other gates run with the plain gate.
+const others = args.includes("--matrix") ? [] : [runStyle(), runFolderWidth()];
+process.exit(registerFailed || others.includes(1) ? 1 : 0);

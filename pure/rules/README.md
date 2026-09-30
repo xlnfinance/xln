@@ -1,6 +1,6 @@
 # Rule register and its gate
 
-`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`), so there is one gate command and one exit code (`--style-only` runs just the style part). Tests: `bun test rules`.
+`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`) and folder width (below), so there is one gate command and one exit code (`--style-only` runs just the style part; `--matrix` prints only the matrix). Tests: `bun test rules`.
 
 **Id policy (coordinator, 09-30).** New rule ids are descriptive names (`R-SOMETHING`), never bare numbers, so ids from different sources cannot collide. Review-finding ids (`F1`, `G1`, `S1`, ...) name findings only and are never rules. The policy is also the `policy` field at the top of `register.json`. A rule is retired with `retired_by: [successor ids]`, not deleted; a retired row needs no killer and claims no layer.
 
@@ -46,7 +46,7 @@ Never add a rule here that a decision did not make: the register records decisio
 ## Other gates in this folder
 
 - `bun rules/checks/frozen.ts` fails when the tree differs from og at `566c850` under `core/` or `jurisdictions/` in any way (edit, delete, rename out, mode change, untracked file, non-ASCII path). The allowlist is empty for good; a failing git is red.
-- `bun pure/rules/checks/folder-width.ts` is the root `check:folder-width`: og's limits and debt table (copied at `566c850`, plus `contracts/contracts` and the generated contracts folders), on the files git lists (tracked plus untracked, never ignored), so a dev machine's gitignored folders (`contracts/.typechain-hardhat`, `contracts/lib/forge-std`) do not widen a folder. It does not read og's script.
+- `bun pure/rules/checks/folder-width.ts` is the root `check:folder-width`, and `bun rules/check.ts` runs it too: og's limits and debt table (copied at `566c850`, plus `contracts/contracts` and the generated contracts folders), on the files git lists (tracked plus untracked, never ignored), so a dev machine's gitignored folders (`contracts/.typechain-hardhat`, `contracts/lib/forge-std`) do not widen a folder. It does not read og's script.
 
 ## Known reds that are og's
 
