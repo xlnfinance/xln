@@ -56,8 +56,8 @@ import {
   type FoldCtx,
 } from "./xln.ts";
 import { anvilKey, crypto, signerAddress } from "./xln_run.ts";
-import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og-author.ts";
-import { ogOf } from "./diff/og-state.ts";
+import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og/og-author.ts";
+import { ogOf } from "./diff/og/og-state.ts";
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 /** og jBlockHash is a 0x-prefixed block hash; the rewrite's Hash brand has no 0x constructor, so this one fixture is branded directly. */

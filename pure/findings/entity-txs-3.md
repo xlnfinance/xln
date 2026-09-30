@@ -1,6 +1,6 @@
 # entity-txs-3 findings (wave 3)
 
-Scope: the entity-tx items that were still open (REMAINING) in `entity-consensus-2.md` and `entity-runtime.md`, plus the J7 dispute J-event wiring. og (core/ + jurisdictions/ at 566c850) is the authority. The tests are in `pure/diff/entity-txs-3.test.ts`, and every MATCH test runs og live.
+Scope: the entity-tx items that were still open (REMAINING) in `entity-consensus-2.md` and `entity-runtime.md`, plus the J7 dispute J-event wiring. og (core/ + jurisdictions/ at 566c850) is the authority. The tests are in `pure/diff/entity/entity-txs-3.test.ts`, and every MATCH test runs og live.
 
 ## Fixes and gaps
 

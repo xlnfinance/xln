@@ -12,13 +12,13 @@
 //   bun diff/walk.ts --area orderbook --seeds 3      the core draws plus one area's, on the first 3 walk seeds
 //   bun diff/walk.ts --area orderbook --seed 0x30de1 one walk, as a run prints it
 import { seedOf, untilCovered } from "./seed.ts";
-import { tracing } from "./scenario-trace.ts";
-import type { Coverage } from "./lane.ts";
-import { openWorld } from "./world.ts";
+import { tracing } from "./og/scenario-trace.ts";
+import type { Coverage } from "./rig/lane.ts";
+import { openWorld } from "./rig/world.ts";
 import { AREA, AREAS, type Area } from "./draws/areas.ts";
 import { finalizedDisputes } from "./draws/disputes.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
-import { knownHalt } from "./departures.ts";
+import { knownHalt } from "./rig/departures.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */

@@ -94,7 +94,7 @@ jobs:
       - name: Run BrowserVM and deploy-gate tests, one file per process
         run: |
           set -e
-          for f in contracts/test/vm/*.test.ts contracts/test/gate/*.test.ts; do
+          for f in contracts/test/vm/*/*.test.ts contracts/test/gate/*.test.ts; do
             echo "::group::$f"
             bun test "$f"
             echo "::endgroup::"

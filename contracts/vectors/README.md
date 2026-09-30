@@ -2,7 +2,7 @@
 
 Every value here was produced by the fork's deployed bytecode in BrowserVM (og's `createJAdapter` with the fork's
 factories, see `../test/vm/rig.ts`). Two independent specs pin to these files. Regenerate with
-`bun contracts/scripts/write-vectors.ts`; `bun test contracts/test/vm/vectors.test.ts` fails if the committed files drift
+`bun contracts/scripts/write-vectors.ts`; `bun test contracts/test/vm/vectors/vectors.test.ts` fails if the committed files drift
 from the contracts, and re-derives the three signed payloads below with plain ethers, independently of the contracts.
 
 Numbers are decimal strings, bytes are lowercase hex, addresses are checksummed. chainId 31337. The Depository address is

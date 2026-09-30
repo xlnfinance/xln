@@ -1,6 +1,6 @@
 # runtime-final: Runtime transport, scheduling and events
 
-og is the authority: core/ and jurisdictions/ at 566c850. The tests are in `pure/diff/runtime-final.test.ts` unless another file is named. Every MATCH test runs og live.
+og is the authority: core/ and jurisdictions/ at 566c850. The tests are in `pure/diff/runtime/runtime-final.test.ts` unless another file is named. Every MATCH test runs og live.
 
 | ID | og | Rewrite | Finding | Test | Status |
 |---|---|---|---|---|---|
