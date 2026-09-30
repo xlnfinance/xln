@@ -53,6 +53,35 @@ test("P2: Right owed past collateral plus its credit is red", () => {
   expect(checkProperties(runtimeOf(a, a), NOTHING_SIGNED).violations.some((v) => v.startsWith("P2"))).toBe(true);
 });
 
+/** An Account holding a settlement workspace whose compiled diffs withdraw `amount` from the collateral on Left's side. */
+const withSettlement = (r: AccountReplica, status: "awaiting_counterparty" | "ready_to_submit", amount: bigint): AccountReplica => ({
+  ...r,
+  state: {
+    ...r.state,
+    settlement: {
+      workspaceHash: "0x", ops: [], status, revision: 1, createdAt: 0, lastUpdatedAt: 0, lastModifiedByLeft: true, executorIsLeft: true,
+      compiledDiffs: [{ tokenId: Number(TK), leftDiff: amount, rightDiff: 0n, collateralDiff: -amount, ondeltaDiff: -amount }],
+    },
+  },
+} as AccountReplica);
+
+test("P2: a co-signed settlement that leaves Left owing past the credit Right extends is red", () => {
+  // Δ = -30 now; withdrawing 60 of Left's claim makes Δ = -90 against a credit of 50
+  const a = withSettlement(replicaWith(honest), "ready_to_submit", 60n);
+  const { violations } = checkProperties(runtimeOf(a, a), NOTHING_SIGNED);
+  expect(violations.filter((v) => v.includes("after its signed settlement"))).toHaveLength(2);
+});
+
+test("P2: the same settlement signed by one side only is not a breach yet: the approver can still refuse it", () => {
+  const a = withSettlement(replicaWith(honest), "awaiting_counterparty", 60n);
+  expect(checkProperties(runtimeOf(a, a), NOTHING_SIGNED).violations).toEqual([]);
+});
+
+test("P2: a co-signed settlement that stays within the credit is clean", () => {
+  const a = withSettlement(replicaWith(honest), "ready_to_submit", 10n);
+  expect(checkProperties(runtimeOf(a, a), NOTHING_SIGNED).violations).toEqual([]);
+});
+
 test("P4: one Entity signing two bodies at one proof nonce is red, even frames apart", () => {
   const first = replicaWith(honest, { nextProofNonce: 5, current: witness(`0x${"a".repeat(64)}`) });
   const later = replicaWith(honest, { nextProofNonce: 5, current: witness(`0x${"b".repeat(64)}`) });

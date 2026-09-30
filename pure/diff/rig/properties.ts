@@ -31,7 +31,7 @@ const accountsOf = (rt: Runtime): readonly Held[] =>
 // RCPAN from the contract's side (Depository._applyAccountDelta): with Δ = ondelta + offdelta, Left can owe at most
 // the credit Right extends (Δ ≥ −leftCredit) and Right at most collateral + the credit Left extends
 // (Δ ≤ collateral + rightCredit), in the worst case over the open clauses: every lock, same-j swap offer and pull
-// paying out on its payer's side. A signed settlement moves collateral and ondelta on chain (Account._settleDiffs),
+// paying out on its payer's side. A co-signed settlement (ready_to_submit) moves collateral and ondelta on chain (Account._settleDiffs),
 // so the state after it must hold RCPAN too. Its reserve legs are not the Account's: a negative leftDiff spends
 // Left's reserve, not its room (og holds it against the room anyway, a stricter local policy).
 
@@ -64,7 +64,8 @@ const breach = (at: string, l: Ledger, owes: { readonly left: bigint; readonly r
 const overdrawn = (h: Held): readonly string[] => {
   const b = h.replica.state;
   const clauses = clausesOf(b);
-  const signed = b.settlement?.compiledDiffs ?? [];
+  // only a settlement both sides have signed can land: a half-signed workspace is still the approver's to refuse
+  const signed = b.settlement?.status === "ready_to_submit" ? b.settlement.compiledDiffs ?? [] : [];
   return [...b.account.deltas.values()].flatMap((d) => {
     const tokenId = Number(d.tokenId);
     const owes = clauses.get(tokenId) ?? { left: 0n, right: 0n };
@@ -75,7 +76,7 @@ const overdrawn = (h: Held): readonly string[] => {
     const settle = signed.find((x) => x.tokenId === tokenId);
     const after = settle === undefined
       ? []
-      : breach(`P2 ${h.self}→${h.peer} token ${tokenId} after its signed settlement`,
+      : breach(`P2 ${h.self}→${h.peer} token ${tokenId} after its signed settlement (collateral ${settle.collateralDiff >= 0n ? "+" : ""}${settle.collateralDiff}, ondelta ${settle.ondeltaDiff >= 0n ? "+" : ""}${settle.ondeltaDiff}, workspace ${b.settlement?.status}, from collateral ${now.collateral} Δ ${now.delta})`,
         { ...now, collateral: now.collateral + settle.collateralDiff, delta: now.delta + settle.ondeltaDiff }, owes);
     return [...breach(`P2 ${h.self}→${h.peer} token ${tokenId}`, now, owes), ...after];
   });

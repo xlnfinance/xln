@@ -241,11 +241,42 @@ type Vm = {
   deployerAddress: unknown;
   runReadOnlyCall: (call: unknown) => Promise<{ execResult: { returnValue: Uint8Array } }>;
   hasProcessedBatch: (entityId: string, batchHash: string, nonce: bigint) => boolean;
+  runTxWithNonce: (...args: unknown[]) => Promise<{ result: { totalGasSpent: bigint } }>;
 };
 type Plan = { readonly entityId: string; readonly encodedBatch: string; readonly hanko: string };
 
+/** The Account epoch the Depository holds now (C1), read straight from the chain. */
+export const chainEpoch = async (vm: unknown, a: string, b: string): Promise<bigint> => {
+  const provider = vm as Vm;
+  const iface = provider.depositoryInterface;
+  const data = iface.encodeFunctionData("ondeltaEpoch", [a, b]);
+  const result = await provider.runReadOnlyCall({
+    to: provider.depositoryAddress, caller: provider.deployerAddress, data: ethers.getBytes(data), gasLimit: 500_000n,
+  });
+  return BigInt(iface.decodeFunctionResult("ondeltaEpoch", ethers.hexlify(result.execResult.returnValue))[0]);
+};
+
+/** A dispute start the chain was handed: the epoch its bytes declare, and the epoch the Account held when it was sent. */
+export type StartSent = { readonly entityId: string; readonly counterentity: string; readonly declared: bigint; readonly current: bigint };
+
 /** The chain's refusals, and how many batches it accepted (a check that nothing was refused proves nothing when none was sent). */
 export type Refusals = (() => readonly string[]) & { readonly landed: () => number };
+
+/**
+ * What the shim also saw go by, for checks the walk runs on whole batches: every dispute start with the epoch it declared beside
+ * the epoch the chain held when it was sent (C1), and the most gas any accepted batch spent (J5's signed budget is a ceiling above it).
+ */
+export type Sent = Refusals & {
+  readonly starts: () => readonly StartSent[];
+  readonly peakGas: () => bigint;
+};
+
+/** What a world without the shim (og's own contracts) saw: nothing. */
+export const NOTHING_SENT: Sent = Object.assign(() => [] as readonly string[], {
+  landed: () => 0,
+  starts: (): readonly StartSent[] => [],
+  peakGas: (): bigint => 0n,
+});
 
 /**
  * Make og's BrowserVM talk to the fork's Depository. `vm` is og's BrowserVMProvider; its interface is the fork's
@@ -260,7 +291,7 @@ export const shimBatchSubmission = (
   chainId: bigint,
   depository: string,
   keys: readonly string[],
-): Refusals => {
+): Sent => {
   installBatchHashView();
   installCalldataView();
   const provider = vm as Vm;
@@ -276,11 +307,7 @@ export const shimBatchSubmission = (
 
   const epochs = new Map<string, bigint>();
   const readEpoch = async (a: string, b: string): Promise<void> => {
-    const data = iface.encodeFunctionData("ondeltaEpoch", [a, b]);
-    const result = await provider.runReadOnlyCall({
-      to: provider.depositoryAddress, caller: provider.deployerAddress, data: ethers.getBytes(data), gasLimit: 500_000n,
-    });
-    epochs.set(accountKey(a, b), BigInt(iface.decodeFunctionResult("ondeltaEpoch", ethers.hexlify(result.execResult.returnValue))[0]));
+    epochs.set(accountKey(a, b), await chainEpoch(provider, a, b));
   };
   const plan = async (encodedBatch: string, hanko: string, nonce: bigint): Promise<void> => {
     const old = computeBatchHankoHash(chainId, depository, encodedBatch, nonce);
@@ -314,14 +341,37 @@ export const shimBatchSubmission = (
     return encode(fragment, [planned.entityId, planned.encodedBatch, planned.hanko, nonce]);
   };
   const refused: string[] = [];
+  const starts: StartSent[] = [];
+  const spent: bigint[] = [];
   let landed = 0;
+  // processBatch is one transaction, so the gas it spent is whatever the provider's last transaction spent when it returns
+  let lastSpent = 0n;
+  const runTx = provider.runTxWithNonce.bind(provider);
+  provider.runTxWithNonce = async (...args) => {
+    const ran = await runTx(...args);
+    lastSpent = ran.result.totalGasSpent;
+    return ran;
+  };
+  /** Every dispute start of a planned batch, with the epoch its bytes declare and the epoch the Account holds right now. */
+  const startsOf = async (planned: Plan): Promise<readonly StartSent[]> => {
+    const batch = coder.decode([FORK_BATCH_PARAM], planned.encodedBatch)[0] as { disputeStarts: { counterentity: string; ondeltaEpoch: bigint }[] };
+    return Promise.all(batch.disputeStarts.map(async (start): Promise<StartSent> => ({
+      entityId: planned.entityId,
+      counterentity: start.counterentity,
+      declared: BigInt(start.ondeltaEpoch),
+      current: await chainEpoch(provider, planned.entityId, start.counterentity),
+    })));
+  };
   (["processBatch", "processBatchAs"] as const).forEach((method) => {
     const original = (provider as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method]!.bind(provider);
     (provider as unknown as Record<string, unknown>)[method] = async (encodedBatch: string, hanko: string, nonce: bigint, ...rest: unknown[]) => {
       try {
         await plan(encodedBatch, hanko, nonce);
+        const sent = await startsOf(plans.get(planKey(encodedBatch, nonce))!);
+        starts.push(...sent);
         const result = await original(encodedBatch, hanko, nonce, ...rest);
         landed += 1;
+        spent.push(lastSpent);
         return result;
       } catch (error) {
         refused.push(`${method} refused: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
@@ -330,5 +380,9 @@ export const shimBatchSubmission = (
     };
   });
   provider.hasProcessedBatch = (entityId, batchHash, nonce) => processed(entityId, forkOf.get(batchHash.toLowerCase()) ?? batchHash, nonce);
-  return Object.assign(() => refused as readonly string[], { landed: () => landed });
+  return Object.assign(() => refused as readonly string[], {
+    landed: () => landed,
+    starts: (): readonly StartSent[] => starts,
+    peakGas: (): bigint => spent.reduce((most, gas) => (gas > most ? gas : most), 0n),
+  });
 };

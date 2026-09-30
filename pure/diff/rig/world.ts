@@ -21,7 +21,7 @@ import {
 import { registrationEvidenceKey } from "../../../core/jurisdiction/machine/registration-evidence/index.ts";
 import { unwrap } from "../../xln_run.ts";
 import { contractSet } from "./contracts.ts";
-import { shimBatchSubmission } from "./fork-shim.ts";
+import { chainEpoch, NOTHING_SENT, shimBatchSubmission, type Sent } from "./fork-shim.ts";
 import {
   bootChain,
   createLane,
@@ -81,7 +81,14 @@ export const MAX_BOARD_SIGNERS = Math.max(...MEMBERS.map((m) => m.board.length))
  * replica lane in a Runtime frame, the rest requeued), which the rewrite runs as processRuntimeFrame.
  * A test file never sets the variable: in a one-process suite it would reach every file loaded after it.
  */
-export type WorldOptions = { readonly board?: boolean };
+export type WorldOptions = {
+  readonly board?: boolean;
+  /**
+   * A dispute is drawn only on an Account whose epoch has moved (C1: a settlement, a C2R or a finalize landed on it), so its
+   * start must carry the epoch it signed for, not the zero an Account starts with. The disputes walk asks for it.
+   */
+  readonly disputeAfterEpoch?: boolean;
+};
 export const boardJoins = (options: WorldOptions = {}): boolean =>
   options.board ?? process.env["WALK_BOARD"] === "1";
 
@@ -150,6 +157,14 @@ export type World = {
   readonly importAll: () => readonly [readonly RuntimeTx[], readonly User[]];
   /** Batches the chain refused (only with the fork's contracts, whose ABI og's submission is shimmed to). */
   readonly refusals: () => readonly string[];
+  /** What the shim saw go by: batches landed, every dispute start with its declared and current epoch, the peak batch gas. */
+  readonly sent: Sent;
+  /** Whether this world draws a dispute only on an Account whose epoch has moved (see WorldOptions). */
+  readonly disputeAfterEpoch: boolean;
+  /** The Account epoch the chain held at the last `syncEpochs` (C1; always 0 under og's own contracts, which have none). */
+  readonly epochOf: (x: number, y: number) => bigint;
+  /** Read every Account's epoch from the chain; the walk calls it after each frame, so `epochOf` is current for the next draw. */
+  readonly syncEpochs: () => Promise<void>;
   readonly close: () => Promise<void>;
 };
 
@@ -172,9 +187,9 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
   // chain emission into its runtime mempool (observeJRange, the cursor, each validator's J-prefix attestation)
   attachLiveJAdapter(env, J.name, chain);
   chain.startWatching(env);
-  const refusals = contractSet() === "contracts"
+  const sent = contractSet() === "contracts"
     ? shimBatchSubmission(chain.getBrowserVM(), BigInt(chain.chainId), chain.addresses.depository, KEYS)
-    : () => [] as readonly string[];
+    : NOTHING_SENT;
   KEYS.forEach((k, i) => registerSignerKey(env, SIGNERS[i]!, Buffer.from(k.slice(2), "hex")));
   const members = boardJoins(options) ? MEMBERS : MEMBERS.slice(0, BOARD);
   /** og ConsensusConfig of Entity x: its board members, one share each, and its threshold. */
@@ -285,6 +300,7 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
   const ogState = (x: number): OgEntityState | undefined =>
     [...env.state.eReplicas.values()].find((r) => r.entityId === ids[x])?.state as never;
   const ogAccount = (x: number, y: number): OgAccount | undefined => ogState(x)?.accounts?.get(ids[y]!);
+  const hasAccount = (x: number, y: number): boolean => ogState(x)?.accounts?.has(ids[y]!) ?? false;
   /** og importReplica: one replica per board member, all over the Entity's one seed; board index 0 proposes. */
   const importsOf = (x: number): readonly RuntimeTx[] =>
     members[x]!.board.map(
@@ -300,6 +316,14 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
     ids.flatMap((_, x) => importsOf(x)),
     SPOKES.map((s) => user(s, [open(s, HUB, BigInt(1 + ri(20_000)))])),
   ];
+  const epochKey = (x: number, y: number): string => (x < y ? `${x}/${y}` : `${y}/${x}`);
+  const epochs = new Map<string, bigint>();
+  const syncEpochs = async (): Promise<void> => {
+    if (contractSet() !== "contracts") return;
+    const held = ids.flatMap((_, x) => ids.flatMap((__, y) => (x < y && hasAccount(x, y) ? [[x, y] as const] : [])));
+    const read = await Promise.all(held.map(async ([x, y]) => [epochKey(x, y), await chainEpoch(chain.getBrowserVM(), ids[x]!, ids[y]!)] as const));
+    read.forEach(([key, epoch]) => epochs.set(key, epoch));
+  };
   const close = async (): Promise<void> => {
     await accountWorkers.close();
     await closeRuntimeDb(env);
@@ -330,7 +354,7 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
     routable,
     ogState,
     ogAccount,
-    hasAccount: (x, y) => ogState(x)?.accounts?.has(ids[y]!) ?? false,
+    hasAccount,
     reserveOf: (x) => ogState(x)?.reserves?.get(1) ?? 0n,
     batchOf: (x) => ogState(x)?.jBatchState,
     certified: (x) => {
@@ -339,7 +363,11 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
         && resolveObserverCertifiedBoardRecord(state as never, getCertifiedBoardNodeStore(env as never), ids[x]!) !== null;
     },
     importAll,
-    refusals,
+    refusals: () => sent(),
+    sent,
+    disputeAfterEpoch: options.disputeAfterEpoch === true,
+    epochOf: (x, y) => epochs.get(epochKey(x, y)) ?? 0n,
+    syncEpochs,
     close,
   };
 };

@@ -8,12 +8,18 @@
 // halt a walk reaches fails it, even when the rewrite halts too, unless it is a known og bug (departures.ts
 // KNOWN_OG_HALTS): otherwise it is a draw whose guard is weaker than og's.
 //
+// The properties of rig/properties.ts (P2 credit-bounded, P4 agreed) run after every committed frame, and P1 (the chain pays what the
+// Account says) runs a dispute to finalize when the walk ends. The disputes walk draws settlements too and starts its dispute only on
+// an Account whose epoch has moved, so the start has to carry the epoch (C1); rig/sent-checks.ts checks what the fork shim sent.
+//
 // One area, one walk per process (og worker fatals in one Bun process can crash it):
 //   bun diff/walk.ts --area orderbook --seeds 3      the core draws plus one area's, on the first 3 walk seeds
 //   bun diff/walk.ts --area orderbook --seed 0x30de1 one walk, as a run prints it
 import { seedOf, untilCovered } from "./seed.ts";
 import { tracing } from "./og/scenario-trace.ts";
 import type { Coverage } from "./rig/lane.ts";
+import { SHIM_GAS_BUDGET } from "./rig/fork-shim.ts";
+import { gasHeadroomLines, startEpochLines } from "./rig/sent-checks.ts";
 import { openWorld } from "./rig/world.ts";
 import { AREA, AREAS, type Area } from "./draws/areas.ts";
 import { finalizedDisputes } from "./draws/disputes.ts";
@@ -41,7 +47,7 @@ export const walk = async (
   world: readonly NamedWorldMove[],
   area?: Area,
 ): Promise<Walked> => {
-  const w = await openWorld(seed, "model");
+  const w = await openWorld(seed, "model", { disputeAfterEpoch: area === "disputes" });
   const { lane, coverage } = w;
   const tried = new Map<string, number>();
   try {
@@ -79,6 +85,7 @@ export const walk = async (
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
       const diffs = await lane.tick(step.runtimeTxs, step.users);
+      await w.syncEpochs();
       // P2 and P4 hold of the rewrite whatever og did (rig/properties.ts)
       const checked = checkProperties(lane.runtime(), signed);
       const broken = checked.violations.map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);
@@ -100,8 +107,13 @@ export const walk = async (
     const silent = own === 0 ? [`${w.tag} the walk committed none of ${area}'s moves, so it checked nothing of that area`] : [];
     // a disputes walk finalizes its dispute on both sides: a walk that only prepared one never checked the payout
     const unfinalized = area === "disputes" && finalizedDisputes(w) === 0 ? [`${w.tag} no dispute finalized on both sides`] : [];
+    coverage.actions["C1:startsAtMovedEpoch"] = w.sent.starts().filter((s) => s.current > 0n).length;
+    coverage.actions["J5:peakBatchGas"] = Number(w.sent.peakGas());
+    // C1 and J5 over what the shim handed the chain (rig/sent-checks.ts)
+    const sentScope = { tag: w.tag, disputes: area === "disputes", budget: SHIM_GAS_BUDGET };
+    const sentLines = [...startEpochLines(sentScope, w.sent), ...gasHeadroomLines(sentScope, w.sent)];
     const refused = w.refusals().map((r) => `${w.tag} the chain refused a batch og submitted: ${r}`);
-    return { coverage, diffs: [...diffs, ...unguarded, ...unclosed, ...silent, ...unfinalized, ...refused] };
+    return { coverage, diffs: [...diffs, ...unguarded, ...unclosed, ...silent, ...unfinalized, ...sentLines, ...refused] };
   } finally {
     await w.close();
   }
@@ -144,9 +156,18 @@ const parseArgs = (argv: readonly string[]): Args | string => {
   if (seed !== undefined && !Number.isSafeInteger(Number(seed))) return `bad --seed ${seed}`;
   return { area: area as Area | undefined, seeds, seed: seed === undefined ? undefined : Number(seed) };
 };
-/** The areas an area's walk draws from: the core world plus the area's own (every area when none is named). */
-const scopeOf = (area: Area | undefined): Scope =>
-  area === undefined ? "all" : area === "core" ? ["core"] : ["core", area];
+/**
+ * The areas an area's walk draws from: the core world plus the area's own (every area when none is named). The disputes walk
+ * also draws settlements, which move the Account epoch a dispute start has to carry (C1).
+ */
+const scopeOf = (area: Area | undefined): Scope => {
+  switch (area) {
+    case undefined: return "all";
+    case "core": return ["core"];
+    case "disputes": return ["core", "settlement", "disputes"];
+    default: return ["core", area];
+  }
+};
 const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(scopeOf(area));
 
 /** One walk in this process: 0 when the lane agreed on every frame. */
