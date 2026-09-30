@@ -7,10 +7,10 @@
 // One file per process: `bun test contracts/test/vm/j5-fifth-transformer-gas.test.ts` (N=junk secrets, default 1700; STEP default 1000, SPAN).
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
-import { boot, party, signWith, type Body, type Party } from "./rig.ts";
-import { BATCH_ABI } from "../../../core/protocol/dispute/proof-body.ts";
-import { encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
-import { Depository__factory as forkDepository } from "../../typechain-types/index.ts";
+import { boot, party, signWith, type Body, type Party } from "../rig.ts";
+import { BATCH_ABI } from "../../../../core/protocol/dispute/proof-body.ts";
+import { encodeSignedAmount } from "../../../../core/protocol/crypto/abi-money.ts";
+import { Depository__factory as forkDepository } from "../../../typechain-types/index.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const T0 = 1_800_000_000;
