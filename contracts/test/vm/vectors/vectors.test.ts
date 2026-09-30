@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
 import { allVectors } from "./vectors.ts";
 import { COOPERATIVE_UPDATE_DIFF_PARAM_FOR_TEST } from "../rig.ts";
+import { encodeCooperativeUpdateDiff } from "../../../../core/hanko/onchain-domain.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const committed = (name: string) => JSON.parse(readFileSync(new URL(`../../../vectors/${name}.json`, import.meta.url), "utf8"));
@@ -15,7 +16,7 @@ const word = (returnData: string): string => ethers.hexlify(coder.decode(["bytes
 describe("vectors", () => {
   test("committed files equal a fresh run against the deployed bytecode", async () => {
     const fresh = JSON.parse(JSON.stringify(await allVectors()));
-    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline") });
+    expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline"), batch: committed("batch"), hanko: committed("hanko") });
   }, 120_000);
 
   test("batch payload: packed(domain, chainId, depository, entityId, encodedBatch, nonce)", () => {
@@ -76,5 +77,91 @@ describe("vectors", () => {
     expect([l.epochAfterSettle, l.epochAfterFinalize]).toEqual(["1", "2"]);
     const advanced = [...l.settle.events, ...l.disputeFinalize.events].filter((e: { name: string }) => e.name === "AccountEpochAdvanced").map((e: { args: { ondeltaEpoch: string } }) => e.args.ondeltaEpoch);
     expect(advanced).toEqual(["1", "2"]);
+  });
+
+  test("batch layout: every op array alone and all together decode on the deployed bytecode, in the field order of the Batch struct", () => {
+    const { layout } = committed("batch");
+    expect(layout.fields).toEqual(["gasBudget", "reserveToReserve", "reserveToCollateral", "collateralToReserve", "settlements", "disputeStarts", "counterDisputes", "disputeFinalizations", "externalTokenToReserve", "reserveToExternalToken", "revealSecrets", "hashLadderRegistrations"]);
+    const accepted = layout.cases.filter((c: { accepted: boolean }) => c.accepted);
+    expect(layout.cases.filter((c: { rejectedWith?: string }) => c.rejectedWith).map((c: { rejectedWith: string }) => c.rejectedWith)).toEqual(["E10", "E10"]);
+    expect(accepted.length).toBe(layout.cases.length - 2);
+    // each single-field case carries exactly one populated array, at its own position, and the first word of the head is the gas budget
+    const word = (hex: string, i: number): bigint => BigInt(`0x${hex.slice(2 + 64 * i, 2 + 64 * (i + 1))}`);
+    for (const [i, field] of layout.fields.slice(1).entries()) {
+      const c = layout.cases.find((k: { label: string }) => k.label.startsWith(`only ${field} `));
+      const head = 1 + 1 + i;                          // [tuple offset][gasBudget][array offsets...]: array i is the (i+1)th head slot after the budget
+      expect(word(c.encodedBatch, 1)).toBe(BigInt(layout.gasBudget));
+      const offsets = Array.from({ length: layout.fields.length - 1 }, (_, k) => word(c.encodedBatch, 2 + k));
+      const lengthOf = (offset: bigint) => word(c.encodedBatch, 1 + Number(offset) / 32);   // the batch tuple starts at word 1; offsets are from the start of the tuple
+      const lengths = offsets.map(lengthOf);
+      expect(lengths.map((n, k) => (k === i ? n > 0n : n === 0n)).every(Boolean)).toBe(true);
+      expect(head).toBe(2 + i);
+    }
+  });
+
+  test("batch ops: each op the lifecycle does not run did what its rules say", () => {
+    const { ops } = committed("batch");
+    expect([ops.reserveToReserve.result, ops.reserveToReserve.state]).toEqual(["ok", { left: "877", right: "123" }]);
+    expect([ops.reserveToCollateral.result, ops.reserveToCollateral.state]).toEqual(["ok", { left: "727", collateralWithRight: "100", collateralWithThird: "50" }]);
+    expect([ops.collateralToReserve.result, ops.collateralToReserve.state]).toEqual(["ok", { left: "940", collateral: "60", storedNonce: "3" }]);
+    // re-derived here with plain ethers from the recorded fields (the leg's own account, not the lifecycle's)
+    const c2r = ops.collateralToReserve;
+    const diffs = c2r.signedDiffs.map((d: Record<string, string>) => encodeCooperativeUpdateDiff({ tokenId: BigInt(d.tokenId!), leftDiff: BigInt(d.leftDiff!), rightDiff: BigInt(d.rightDiff!), collateralDiff: BigInt(d.collateralDiff!), ondeltaDiff: BigInt(d.ondeltaDiff!) }));
+    expect(c2r.cooperativeUpdateHash).toBe(ethers.keccak256(coder.encode(
+      ["uint256", "uint256", "address", "bytes", "uint256", "uint256", COOPERATIVE_UPDATE_DIFF_PARAM_FOR_TEST, "uint256[]"],
+      [0, c2r.chainId, c2r.depository, c2r.accountKey, c2r.epoch, 3, diffs, []])));
+    expect(ops.revealSecrets.hashlock).toBe(ethers.keccak256(coder.encode(["bytes32"], [ops.revealSecrets.events[0].args.secret])));
+    expect([ops.counterDispute.start, ops.counterDispute.result, ops.counterDispute.events[0].name]).toEqual(["ok", "ok", "CounterDisputeRegistered"]);
+    // the implicit flash: the reserve is 50 short inside the batch and repaid by the collateral withdrawal, so the batch lands
+    expect([ops.composite.result, ops.composite.state]).toEqual(["ok", { left: "50", right: "1950", collateral: "0" }]);
+    for (const op of Object.values(ops) as { batchHash?: string; events?: { name: string; args: { batchHash?: string } }[] }[]) {
+      const processed = op.events?.find((e) => e.name === "HankoBatchProcessed");
+      if (processed) expect(processed.args.batchHash).toBe(op.batchHash);
+    }
+  });
+
+  test("hanko: every accepted envelope proves the entity its board hashes to, re-derived here from the envelope alone", () => {
+    const { cases, depository } = committed("hanko");
+    const HANKO = ["tuple(bytes32[] placeholders, bytes packedSignatures, tuple(bytes32 entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)[] claims, bytes[] memberSignatures)"];
+    const BOARD = ["tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)"];
+    const derive = (hanko: string, hash: string) => {
+      const [h] = coder.decode(HANKO, hanko) as unknown as [{ placeholders: string[]; packedSignatures: string; claims: { entityId: string; entityIndexes: bigint[]; weights: bigint[]; threshold: bigint }[] }];
+      const packed = ethers.getBytes(h.packedSignatures);
+      const count = packed.length === 0 ? 0 : Math.floor((packed.length * 8) / 513);
+      const signers = Array.from({ length: count }, (_, i) => {
+        const v = (packed[count * 64 + Math.floor(i / 8)]! >> (i % 8)) & 1 ? 28 : 27;
+        const signature = ethers.Signature.from({ r: ethers.hexlify(packed.slice(i * 64, i * 64 + 32)), s: ethers.hexlify(packed.slice(i * 64 + 32, i * 64 + 64)), v });
+        return ethers.zeroPadValue(ethers.recoverAddress(hash, signature), 32);
+      });
+      const members = [...h.placeholders, ...signers];
+      const ids: string[] = [];
+      const power: bigint[] = [];
+      for (const claim of h.claims) {
+        const memberIds = claim.entityIndexes.map((ix) => (Number(ix) < members.length ? members[Number(ix)]! : ids[Number(ix) - members.length]!));
+        ids.push(ethers.keccak256(coder.encode(BOARD, [[claim.threshold, memberIds, claim.weights, 0, 0, 0]])));
+        // power: the signed members, and the claims that themselves met their threshold
+        const signed = claim.entityIndexes.reduce((sum, ix, k) => {
+          const i = Number(ix);
+          const votes = i < h.placeholders.length ? 0n : i < members.length ? 1n : power[i - members.length]! >= h.claims[i - members.length]!.threshold ? 1n : 0n;
+          return sum + votes * claim.weights[k]!;
+        }, 0n);
+        power.push(signed);
+      }
+      const last = h.claims.length - 1;
+      return { claimIds: ids, proved: ids[last]!, met: power[last]! >= h.claims[last]!.threshold };
+    };
+    const accepted = cases.filter((c: any) => c.result.success === true);
+    const refused = cases.filter((c: any) => c.result.success === false || c.result.revertedWith);
+    expect(accepted.length + refused.length).toBe(cases.length);
+    for (const c of accepted) {
+      const d = derive(c.hanko, c.hash);
+      expect(d.claimIds).toEqual(c.claimEntityIds);
+      expect([d.proved, d.met]).toEqual([c.result.entityId, true]);
+    }
+    for (const c of cases.filter((k: any) => k.result.success === false)) expect(derive(c.hanko, c.hash).met).toBe(false);
+    expect(cases.filter((c: any) => c.result.revertedWith).map((c: any) => c.result.revertedWith).sort()).toEqual(
+      ["DuplicateHankoSigner", "InvalidHankoClaimOrder", "InvalidHankoFirstMember", "InvalidHankoPackedSignatureLength", "NonCanonicalHankoPlaceholder", "UnusedHankoClaim"]);
+    // the nested entity acts: its batch lands, moves its reserve, and the same Hanko over another hash is E4
+    expect([depository.result, depository.reserves, depository.signedForAnotherHash]).toEqual(["ok", { entity: "423", target: "77" }, "REVERT E4()"]);
   });
 });
