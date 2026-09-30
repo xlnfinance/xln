@@ -22,11 +22,16 @@ const YUL_CALLS = new Set(["call", "staticcall", "delegatecall", "callcode", "cr
 
 type Node = { nodeType?: string; [key: string]: any };
 
+/** The expression inside any number of redundant parentheses: `(x.call)("")` is a call of `x.call`, and its callee is a one-component tuple. */
+const unparen = (node: Node | undefined): Node | undefined =>
+  node?.nodeType === "TupleExpression" && node.components?.length === 1 && node.components[0] ? unparen(node.components[0]) : node;
+
 /** The swallow-capable kind of one AST node, if it is one: try/catch, `x.call/.staticcall/.delegatecall/.send`, or a Yul call or create opcode. */
 const siteOf = (node: Node): string | undefined => {
   if (node.nodeType === "TryStatement") return "try";
   if (node.nodeType === "FunctionCall") {
-    const callee = node.expression?.nodeType === "FunctionCallOptions" ? node.expression.expression : node.expression;
+    const called = unparen(node.expression);
+    const callee = unparen(called?.nodeType === "FunctionCallOptions" ? called.expression : called);
     return callee?.nodeType === "MemberAccess" && LOW_LEVEL_MEMBERS.has(callee.memberName) ? callee.memberName : undefined;
   }
   if (node.nodeType === "YulFunctionCall" && YUL_CALLS.has(node.functionName?.name)) return `yul:${node.functionName.name}`;
@@ -102,9 +107,28 @@ const AUDITED: readonly string[] = [
   "npm/@openzeppelin/contracts@5.6.1/utils/math/Math.sol: tryModExp: yul:staticcall",
 ];
 
+const importsUnder = (node: unknown): string[] => {
+  if (Array.isArray(node)) return node.flatMap(importsUnder);
+  if (node === null || typeof node !== "object") return [];
+  const own = (node as Node).nodeType === "ImportDirective" && typeof (node as Node).absolutePath === "string" ? [(node as Node).absolutePath as string] : [];
+  return [...own, ...Object.values(node).flatMap(importsUnder)];
+};
+
+/** "<source> imports <path>" for every import of a test-only path (`mocks/`, `*Mock.sol`) by a source that is not test-only itself. */
+const testOnlyImports = (sources: Record<string, { ast: Node }>): string[] =>
+  Object.entries(sources)
+    .filter(([name]) => !TEST_ONLY.test(name))
+    .flatMap(([name, unit]) => importsUnder(unit.ast).filter((imported) => TEST_ONLY.test(imported)).map((imported) => `${name} imports ${imported}`))
+    .sort();
+
 describe("R-OOG swallowed failures: every try/catch and low-level call is audited", () => {
   test("the deployed contracts have exactly the audited sites, in the audited places", () => {
     expect(placesIn(deployedSources())).toEqual([...AUDITED].sort());
+  });
+
+  // TEST_ONLY sources are left out of the scan by path. That is sound only while nothing that ships imports one (reviewer B, RB2-3).
+  test("no deployed source imports a test-only path, so the path exclusion hides no shipped site", () => {
+    expect(testOnlyImports(deployedSources())).toEqual([]);
   });
 });
 
@@ -149,6 +173,37 @@ describe("the AST scan sees what the text counter missed", () => {
         /* a real comment with x.call("") in it */
       }`),
     ).toEqual(["F.sol: a: call", "F.sol: b: staticcall"]);
+  });
+
+  test("redundant parentheses around the callee hide nothing (reviewer B, RB2-2: `(x.call)(\"\")` was not seen)", () => {
+    expect(
+      compile(`${HEAD}
+        function a(address x) external { (bool ok,) = (x.call)(""); ok; }
+        function b(address x) external view { (bool ok,) = ((x.staticcall))(""); ok; }
+        function c(address x) external { (bool ok,) = (x.call{gas: 5})(""); ok; }
+        function d(address payable x) external { bool ok = (x.send)(1); ok; }
+        function e(address x) external { (bool ok,) = (x.delegatecall)(""); ok; }
+      }`),
+    ).toEqual(["F.sol: a: call", "F.sol: b: staticcall", "F.sol: c: call", "F.sol: d: send", "F.sol: e: delegatecall"]);
+  });
+
+  test("a shipped source that imports a mocks/ or *Mock.sol path is reported, a test-only source that does is not", () => {
+    const out = JSON.parse(
+      solc.compile(
+        JSON.stringify({
+          language: "Solidity",
+          sources: {
+            "mocks/Bad.sol": { content: "pragma solidity ^0.8.24; contract Bad { function f(address x) external { (bool ok,) = x.call(''); ok; } }" },
+            "lib/ThingMock.sol": { content: "pragma solidity ^0.8.24; contract ThingMock {}" },
+            "Prod.sol": { content: "pragma solidity ^0.8.24; import './mocks/Bad.sol'; import './lib/ThingMock.sol'; contract Prod {}" },
+            "mocks/Harness.sol": { content: "pragma solidity ^0.8.24; import './Bad.sol'; contract Harness {}" },
+          },
+          settings: { outputSelection: { "*": { "": ["ast"] } } },
+        }),
+      ),
+    );
+    expect(out.errors?.filter((e: { severity: string }) => e.severity === "error") ?? []).toEqual([]);
+    expect(testOnlyImports(out.sources)).toEqual(["Prod.sol imports lib/ThingMock.sol", "Prod.sol imports mocks/Bad.sol"]);
   });
 
   test("swapping an audited site for another of a different kind in the same function changes the list (the old gate kept its count)", () => {
