@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { gateExit } from "./compose.ts";
+import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
   const green = { register: true, style: true, width: true };
@@ -65,4 +65,18 @@ describe("the real command over a scratch copy", () => {
     expect(code).toBe(1);
     expect(out).toContain("FOLDER_TOO_WIDE pure/w:11 > 10");
   });
+});
+
+describe("which parts a command line runs", () => {
+  const PARTS: readonly Part[] = ["register", "style", "width"];
+  const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
+
+  test("R-GATE-COMPOSE the plain command runs every part", () => expect(ran()).toEqual(["register", "style", "width"]));
+  test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
+  test("each --X-only flag runs that part alone", () => {
+    expect(ran("--register-only")).toEqual(["register"]);
+    expect(ran("--style-only")).toEqual(["style"]);
+    expect(ran("--width-only")).toEqual(["width"]);
+  });
+  test("a flag that is not a part flag changes nothing", () => expect(ran("--base", "HEAD")).toEqual(["register", "style", "width"]));
 });

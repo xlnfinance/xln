@@ -20,7 +20,7 @@ import { parseRegister } from "./register.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
-import { gateExit } from "./checks/compose.ts";
+import { gateExit, isWanted, selectionOf, type Part } from "./checks/compose.ts";
 import { folderWidthReport } from "./checks/folder-width.ts";
 import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
@@ -93,17 +93,10 @@ const runRegister = (): boolean => {
   return evaluation.problems.length === 0;
 };
 
-type Part = "register" | "style" | "width";
-const ONLY: Readonly<Record<string, Part>> = { "--register-only": "register", "--style-only": "style", "--width-only": "width" };
-const only = args.map((arg) => ONLY[arg]).find((part) => part !== undefined);
-const matrixOnly = args.includes("--matrix");
+const selection = selectionOf(args);
 
-// One table for every way in: a part runs when its --X-only flag names it, or (with no such flag) in the plain
-// command, where the matrix view keeps to the register. A part that does not run counts as passed.
+// One table for every way in; `isWanted` says which parts the command line runs. A part that does not run counts as passed.
 const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth };
-const passes = (part: Part): boolean => {
-  const wanted = only === undefined ? part === "register" || !matrixOnly : only === part;
-  return !wanted || PARTS[part]();
-};
+const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
 
 process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width") }));

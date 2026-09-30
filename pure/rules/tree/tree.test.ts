@@ -156,6 +156,7 @@ describe("the gate reads the files git lists, never the disk", () => {
     cpSync(`${pureRoot}/style`, `${root}/style`, { recursive: true });
     mkdirSync(`${root}/kernel`);
     mkdirSync(`${root}/chain`);
-    expect(treeStyle(root).failed).toBe(true);
+    // Named, because stale exception rows alone would also fail a scratch tree that has no sources.
+    expect(treeStyle(root).rows.map((row) => row.rule)).toContain("git-listing");
   });
 });
