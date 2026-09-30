@@ -16,6 +16,7 @@ export const scratch = (files: Readonly<Record<string, string>>, exceptions: obj
   writeFileSync(`${root}/style/tree-exceptions.json`, JSON.stringify(exceptions));
   mkdirSync(`${root}/kernel`);
   mkdirSync(`${root}/chain`);
+  mkdirSync(`${root}/account`);
   Object.entries(files).forEach(([file, text]) => {
     mkdirSync(dirname(`${root}/kernel/${file}`), { recursive: true });
     writeFileSync(`${root}/kernel/${file}`, text);

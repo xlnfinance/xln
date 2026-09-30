@@ -10,6 +10,8 @@ import { createAddressFromString } from "@ethereumjs/util";
 import { Account__factory, Depository__factory, DeltaTransformer__factory, EntityProvider__factory, HankoCodec__factory } from "../../../typechain-types/index.ts";
 import { boot, claimsHanko, rawHanko, bodyHash, type Rig } from "../rig.ts";
 import { encodeInt512, encodeSignedAmount } from "../../../../core/protocol/crypto/abi-money.ts";
+import { layoutVectors, opVectors } from "./batch-abi.ts";
+import { hankoMultiVectors } from "./hanko-multi.ts";
 
 /**
  * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. J5: a batch of
@@ -339,5 +341,7 @@ export const allVectors = async () => {
   const functions = await functionVectors(await boot("vectors-functions"));
   const lifecycle = await lifecycleVectors(await boot("vectors-lifecycle"));
   const baseline = await baselineVectors();
-  return { functions, lifecycle, baseline };
+  const batch = { layout: await layoutVectors(await boot("vectors-batch-layout")), ops: await opVectors() };
+  const hanko = await hankoMultiVectors();
+  return { functions, lifecycle, baseline, batch, hanko };
 };

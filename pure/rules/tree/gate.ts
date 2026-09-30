@@ -1,4 +1,4 @@
-// The style gate of the new tree (kernel/, chain/): every rule of the legacy ratchet, plus the tree rules, at zero.
+// The style gate of the new tree (kernel/, chain/, account/): every rule of the legacy ratchet, plus the tree rules, at zero.
 //
 // style/check.ts ratchets xln.ts down from its baseline and scans only that file. The new directories start at zero on
 // every rule, so a hit here is a failure and the only way to allow one is a registered exception: a rule, a file and a
@@ -11,7 +11,7 @@ import { compare, isOff, longLines, type Exceptions, type Hit, type Row } from "
 import { isSource, syntaxHits } from "./syntax.ts";
 
 // A layer is a directory or a single file directly under pure/ (entity.ts is as much a layer as entity/ is).
-export const TREE = ["kernel", "chain"] as const;
+export const TREE = ["kernel", "chain", "account"] as const;
 
 // Every other entry under pure/ is named here as deliberately outside this gate, so a new layer (account/, entity/,
 // entity.ts, ...) cannot land ungated by accident: it is a failing row until it joins TREE or this list.
