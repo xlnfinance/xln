@@ -59,7 +59,10 @@ async function selectScenario(page: Page, scenario: Scenario): Promise<void> {
 }
 
 async function runToPhase(page: Page, scenario: Scenario, phase: string): Promise<void> {
-  await selectScenario(page, scenario);
+  const selected = await page.locator('.rcpan-lab label', { hasText: /^Scenario/ }).locator('select').inputValue();
+  // Follow successive checkpoints in one real simulation. Restarting the same
+  // scenario before every checkpoint repeatedly replays already verified work.
+  if (selected !== scenario) await selectScenario(page, scenario);
   // Keep each phase visible for a full polling interval. At 3× the shortest
   // phase lasts ~233 ms, so a busy browser can observe the label and advance
   // again before Playwright clicks Pause.
@@ -181,14 +184,14 @@ test.describe('RCPAN dispute microscope', () => {
     const laptopIssues = await loadRcpan(laptop.page, 'dark');
     await assertCoreSurface(laptop.page);
 
-    await runToPhase(laptop.page, 'reserve-backed', 'finalizing');
-    await capture(laptop.page, testInfo, 'laptop-dark-70-30-finalizing', '.microscope-section');
-
     await runToPhase(laptop.page, 'reserve-backed', 'dispute open');
     await expect(laptop.page.getByTestId('microscope-court-request').last()).toBeVisible();
     await expect(laptop.page.getByTestId('microscope-dispute-outline').last()).toBeVisible();
     await assertMicroscopeNodesContained(laptop.page);
     await capture(laptop.page, testInfo, 'laptop-dark-dispute-request', '.microscope-section');
+
+    await runToPhase(laptop.page, 'reserve-backed', 'finalizing');
+    await capture(laptop.page, testInfo, 'laptop-dark-70-30-finalizing', '.microscope-section');
 
     await runToPhase(laptop.page, 'debt-recovery', 'settled');
     await expect(laptop.page.getByTestId('microscope-debt-object').last()).toContainText('FIFO debt object');

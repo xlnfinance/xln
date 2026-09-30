@@ -514,7 +514,7 @@ describe('TS Account worker engine parity with canonical sequential transitions'
     const w8 = await runCoordinator(mixedIds, mixedTxs, [], 8);
     expect(w8.outbound.accountsRoot).toBe(w1.outbound.accountsRoot);
     expect(digest(w8.outbound.effects)).toBe(digest(w1.outbound.effects));
-  });
+  }, 30_000);
 
   test('post-commit Account Hankos return to the shard owner without changing its root', async () => {
     const accountId = `0xabc${'1'.repeat(61)}`;

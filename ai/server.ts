@@ -14,6 +14,7 @@ import { serve } from "bun";
 import { spawn } from "child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 
 const PORT = 3031;
 const OLLAMA_URL = "http://localhost:11434";
@@ -133,7 +134,7 @@ async function ensureMLXModel(modelId: string): Promise<{ success: boolean; erro
     return { success: false, error: `Model ${modelId} is not an MLX model` };
   }
 
-  const modelPath = modelInfo.path?.replace("~", "/Users/zigota");
+  const modelPath = modelInfo.path?.replace("~", homedir());
   if (!modelPath) {
     return { success: false, error: `Model ${modelId} has no path configured` };
   }
@@ -187,7 +188,7 @@ async function ensureMLXModel(modelId: string): Promise<{ success: boolean; erro
       "--port", String(port),
       "--host", "0.0.0.0"
     ], {
-      env: { ...process.env, PATH: `/Users/zigota/Library/Python/3.9/bin:${process.env.PATH}` },
+      env: { ...process.env, PATH: `${join(homedir(), "Library/Python/3.9/bin")}:${process.env.PATH}` },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -237,8 +238,8 @@ async function ensureMLXModel(modelId: string): Promise<{ success: boolean; erro
   }
 }
 
-const CHATS_DIR = "/Users/zigota/ai/chats";
-const AGENTS_DIR = "/Users/zigota/xln/.agents";
+const CHATS_DIR = join(homedir(), "ai/chats");
+const AGENTS_DIR = join(import.meta.dir, "../.agents");
 
 // Ensure directories exist
 [CHATS_DIR, `${CHATS_DIR}/audio`, `${AGENTS_DIR}/papertrail`].forEach(dir => {
@@ -381,7 +382,7 @@ async function queryMLX(
 
   // Get the actual model path and URL from registry for MLX
   const modelInfo = MODELS[model];
-  const modelPath = modelInfo?.path?.replace("~", "/Users/zigota") || model;
+  const modelPath = modelInfo?.path?.replace("~", homedir()) || model;
 
   // Get model-specific URL from loaded models
   const mlxUrl = getMLXUrl(model);
@@ -971,7 +972,7 @@ serve({
             name: info.name,
             backend: info.backend,
             params: info.params,
-            available: existsSync(info.path?.replace("~", "/Users/zigota") || ""),
+            available: existsSync(info.path?.replace("~", homedir()) || ""),
             loaded: mlxState.activeModel === id,
             vision: info.vision,
             path: info.path,
