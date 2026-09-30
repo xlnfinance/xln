@@ -297,7 +297,7 @@ export const shimBatchSubmission = (
     const rebound = rebindBatch(batch, entityId, epochOf, { chainId, depository }, signerFor);
     const next = encodeForkBatch(rebound, entityId, epochOf);
     const digest = forkBatchHash(chainId, depository, entityId, next, nonce);
-    ogBatchOf.set(next.toLowerCase(), encodedBatch);
+    ogBatchOf.set(next.toLowerCase(), encodeJBatch(rebound));
     forkOf.set(old.toLowerCase(), digest);
     ogOf.set(digest.toLowerCase(), old);
     plans.set(planKey(encodedBatch, nonce), { entityId, encodedBatch: next, hanko: resign(hanko, old, digest, signerFor) });
