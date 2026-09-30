@@ -16,7 +16,7 @@ const assertNever = (x: never): never => {
   throw new Error(`unreachable: ${String(x)}`);
 };
 
-export const arm = <A extends object, K extends keyof A>(arms: A, k: K): A[K] =>
+const arm = <A extends object, K extends keyof A>(arms: A, k: K): A[K] =>
   (Object.hasOwn(arms, k) ? arms[k] : assertNever(k as never));
 
 export const match = <T extends { readonly _tag: string }, R>(

@@ -16,6 +16,8 @@ const scratch = (files: Readonly<Record<string, string>>, exceptions: object = {
   mkdirSync(`${root}/kernel`);
   mkdirSync(`${root}/chain`);
   Object.entries(files).forEach(([file, text]) => writeFileSync(`${root}/kernel/${file}`, text));
+  // The gate lists files with git (tracked plus untracked-not-ignored), so a scratch tree is a repository.
+  Bun.spawnSync(["git", "init", "-q"], { cwd: root });
   return root;
 };
 
@@ -124,5 +126,37 @@ describe("the gate cannot be satisfied by doing nothing", () => {
     mkdirSync(`${root}/account`);
     writeFileSync(`${root}/account/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
     expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir account");
+  });
+});
+
+describe("the gate reads the files git lists, never the disk", () => {
+  const clean = { "a.ts": "export const a = 1;\n", ...used("a") };
+  const offRows = (root: string): readonly string[] => treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`);
+
+  test("an ignored folder under pure/ (a local db-* from a test run) does not turn the gate red", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/.gitignore`, "db-*\n");
+    mkdirSync(`${root}/db-run`);
+    writeFileSync(`${root}/db-run/junk.ts`, "export const junk = () => { throw new Error('x'); };\n");
+    expect(offRows(root)).toEqual([]);
+  });
+
+  test("an ignored file under kernel/ is not counted, and the same file untracked-not-ignored is", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/.gitignore`, "kernel/ignored.ts\n");
+    const long = `export const ignored = "${"x".repeat(130)}";\n`;
+    writeFileSync(`${root}/kernel/ignored.ts`, long);
+    expect(offRows(root)).toEqual([]);
+    writeFileSync(`${root}/kernel/seen.ts`, long.replace("ignored", "seen"));
+    expect(offRows(root)).toContain("long-line kernel/seen.ts");
+  });
+
+  test("a directory that is not a git checkout is a failing gate, not an empty pass", () => {
+    const root = mkdtempSync(`${tmpdir()}/tree-nogit-`);
+    cpSync(`${pureRoot}/style`, `${root}/style`, { recursive: true });
+    mkdirSync(`${root}/kernel`);
+    mkdirSync(`${root}/chain`);
+    // Named, because stale exception rows alone would also fail a scratch tree that has no sources.
+    expect(treeStyle(root).rows.map((row) => row.rule)).toContain("git-listing");
   });
 });

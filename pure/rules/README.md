@@ -1,6 +1,6 @@
 # Rule register and its gate
 
-`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`) and folder width (below), so there is one gate command and one exit code (`--style-only` runs just the style part; `--matrix` prints only the matrix). Tests: `bun test rules`.
+`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`) and folder width (below), so there is one gate command and one exit code (`--register-only`, `--style-only` and `--width-only` run just that part through the same table the plain command uses; `--matrix` prints only the matrix). Tests: `bun test rules`.
 
 **Id policy (coordinator, 09-30).** New rule ids are descriptive names (`R-SOMETHING`), never bare numbers, so ids from different sources cannot collide. Review-finding ids (`F1`, `G1`, `S1`, ...) name findings only and are never rules. The policy is also the `policy` field at the top of `register.json`. A rule is retired with `retired_by: [successor ids]`, not deleted; a retired row needs no killer and claims no layer.
 
