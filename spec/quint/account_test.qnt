@@ -326,4 +326,19 @@ module account_test {
   run leapingProofNonceIsRefusedTest = init
     .then(turnByzantine(Left)).then(byzPropose(Left, 5, 1)).then(deliverProposal(Right, 1))
     .expect(and { refusals == 1, isOpen(replica.get(Right)), replica.get(Right).height == 0, no_bad_accept, safe })
+
+  // A12 (closed): Left acked Right's frame and committed it; the ack is lost; Left's key is then taken and it sends another frame for the same height.
+  // At one proof nonce the chain ranks the Left-authored proof above the Right-authored one, and the honest Right signed that frame itself, so taking it
+  // is not a disagreement: it is the frame the chain settles.
+  run equivocatingLeftIsSupersededByRankTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 1 })))
+    .then(propose(Right))
+    .then(deliverProposal(Left, 1))
+    .then(ackReceived(Left))                      // Left commits Right's frame
+    .then(loseAck(1))
+    .then(turnByzantine(Left))
+    .then(byzStamped(Left, false))                // frame 2: Left-authored, the same height and nonce
+    .then(deliverProposal(Right, 2))              // Right is the collision loser: it rolls back and takes Left's frame
+    .then(ackReceived(Right))
+    .expect(and { replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip != replica.get(Right).tip, not(diverged), superseded, safe })
 }

@@ -97,20 +97,15 @@ comes from routing) and is modelled as unconstrained, which over-approximates ho
 sign proofs only for the current epoch; pause payments until the new baseline proof is co-signed), account open
 (Q-A1), windows fixed at open (N3), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).
 
-**A12. A peer that acked a frame and then sends another for the same height. OPEN (found by simulation, 2026-09-29).**
-Sequence: Right proposes frame 1; Left acks it and commits; the ack is lost. Left's key is then taken (or Left is malicious all along), and it sends
-Right a different frame for height 1 (`byzStamped` in `account.qnt`; any frame that replays is accepted). Right, still waiting for its ack, is the collision
-loser: it rolls its own frame back and takes Left's (rule 3 of `deliverProposal`). Now the two sides committed different bodies at height 1, and Left
-holds a co-signed proof of each at nonce 1 (branch Right-authored with Left's ack; branch Left-authored with Right's ack). Nothing at the Account layer
-can prevent it: Right cannot tell a lost ack from an equivocating peer. `agreed` therefore reads "the sides agree, or the peer signed two proofs for one
-height" (`peerSignedTwice`; witness `w_no_divergence` proves the case is reached). The proof is in Right's hands (two signatures of Left at one height),
-but what it is worth depends on the chain: two co-signed proofs at one nonce, the counterparty free to start a dispute with either, and a counter needs a
-strictly higher nonce. **Question for the contracts thread:** at equal nonce and different `authorIsLeft`, may a dispute with one be answered with the
-other? If not, Right's only defence is to sign a frame at nonce 2 at once (the honest side does that in the normal course), and the window between the two
-frames is the exposure. Options: (a) accept (the Byzantine peer that signs twice is provable, and the damage is bounded by the frame that had not
-been acked); (b) the loser keeps its own frame while the peer's ack for it may still come (never roll back once the peer is known to have seen the
-frame: needs an ack-or-timeout state); (c) the receiver refuses any frame at a height for which it holds a proposal of its own until a timeout. Proposed: (a) for
-v1 and record it; (b) is a larger change to collision handling and belongs with the proof-nonce rule below.
+**A12. A peer that acked a frame and then sends another for the same height. CLOSED by rank (coordinator, 2026-09-30).**
+Found by simulation. Right proposes frame 1; Left acks it and commits; the ack is lost. Left's key is then taken, and it sends Right another frame for height 1
+(`byzStamped`). Right, still waiting for its ack, is the collision loser: it rolls its own frame back and takes Left's. The two sides hold different bodies at height 1.
+Resolution: at one proof nonce the chain ranks a proof by `nonce * 2 + leftAuthored`, so the Left-authored proof wins in a fixed order whoever starts or counters. The honest
+Right signed that Left-authored frame itself under the Left-priority rule, so nobody honest is hurt: the frame Right holds is the one the chain settles, and Left's earlier
+Right-authored proof cannot beat it. In the model `agreed` excuses exactly this (a later Left-authored commit over an earlier Right-authored one, only with a Byzantine peer:
+`mismatch`), not the reverse order and not two honest sides. Test `equivocatingLeftIsSupersededByRankTest`; mutant `supersession-reversed`; witness `w_no_supersede`.
+Restricting the exemption to a Byzantine peer is not checkable by mutant: two honest sides never reach that ordering (honest Left never proposes a second frame for a height it committed),
+so dropping the restriction is an equivalent mutant, and the restriction is a statement of intent.
 
 **A13. The proof nonce is its own counter (N1, coordinator; found while doing it).**
 Choice: a frame carries a `nonce`, the proof nonce a dispute start would use; each replica keeps `pnonce`, the nonce of the frame it committed last. A receiver
@@ -483,8 +478,7 @@ Model: `NONCE_ON_FAIL`, `failedEv`, `failSeen`; `urgent_lands` holds under it.
 A mixed batch that fails still reverts whole and keeps its nonce open. So the Entity's rule: dispute, reveal and hash-ladder ops never share a
 batch with payment, settlement or reserve ops. This was already J3(1); it is now also the chain's line: `urgent-batch-carries-payments`
 (the Entity mixes them) breaks `urgent_lands` because the failed mixed batch reverts, loses the urgent op and holds every batch above it.
-**Gas guard.** A failure that leaves under 1/32 of the gas reverts the transaction instead of emitting BatchFailed, so a relayer cannot burn
-a good batch by starving the call. Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
+**Gas guard (now a floor).** A batch failure is reported only when the self-call got at least `BATCH_GAS_FLOOR`; below it the transaction reverts and takes no nonce, so a relayer cannot burn a good batch by starving the call. (Was: under 1/32 of the gas.) Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
 burns a payment batch that would have applied (`starvedBatchLandsLaterTest`). The starved call of an urgent batch only reverts whole, which
 leaves the batch valid for the honest relayer's next attempt.
 **Refinement (coordinator, from the #54 review, 2026-09-29).** Two rules. (1) A batch that carries a deposit leg (`externalTokenToReserve`) reverts whole, like a
@@ -501,16 +495,15 @@ window ends) still reverts the batch whole and leaves the nonce open. The model 
 Entity rule that follows is written here and not checked: an urgent op is signed only when its precondition holds by the Entity's own clock plus `LAG` (else the batch would
 hold the nonce). (2) **R-COSIGN**: a batch that carries a co-signed op (a settlement or C2R) carries only ops for that one Account: a counterparty's state change or a
 relayer's gas choice can fail such a batch, so nothing unrelated may ride with it (`cosign_alone`; `coSignedOpsTravelAloneTest`, `coSignedOpsOfTwoAccountsDoNotShareABatchTest`;
-mutants `cosign-batch-carries-payments`, `cosign-batch-mixes-accounts`). (3) An ERC-1271 member gets a fixed gas stipend, and the transaction hard-reverts when the stipend
-cannot be given: gas starvation is a hard revert of the whole transaction, never `BatchFailed`. That is the model's `starve` with the guard (`starvedBatchLandsLaterTest`,
-`no_burn`, mutant `no-gas-guard`); the stipend is one more reason the guard is a rule and not a heuristic.
-**J6. The cost of revert-whole for deposits (found by the model, OPEN).** A deposit batch that cannot land keeps its nonce open, so every batch above it waits, an urgent op
-included (`stuckDepositBatchHoldsAnUrgentOpTest`: the reveal misses its deadline; the model records it as `hostage`, apart from `missed`, because no Entity behaviour can help:
-the token is not the Entity's). The rule the coordinator chose is right against a relayer that burns nonces, and this is what it costs against a paused token. Options: (a) accept
-and let the Entity keep deposit legs out of signed batches while any urgent op can arrive (use the direct external deposit, which takes no nonce, when the funds are already at hand);
-(b) a deposit that fails soft-fails only when the failure is the token's (a dead token cannot be fixed by waiting for a relayer); (c) accept as is. Proposed: (a), with the
-reason written into the Entity's packing rule. A witness is not possible by simulation (the sequence is too specific); the scenario test is the evidence.
-
+mutants `cosign-batch-carries-payments`, `cosign-batch-mixes-accounts`). (3) Gas (superseded, coordinator 2026-09-30: the ERC-1271 stipend is dropped for a floor): a batch failure is reported (`BatchFailed`, nonce spent) only when the self-call got at
+least `BATCH_GAS_FLOOR`; below it the transaction reverts and takes no nonce; at or above it an empty revert reason is `BatchFailed(0)` and spends the nonce. That is the model's `starve` with the guard
+(`starvedBatchLandsLaterTest`, `no_burn`, mutant `no-gas-guard`); gas starvation is a hard revert, never `BatchFailed`.
+**J6. The cost of revert-whole for deposits. ACCEPTED with rules (coordinator, 2026-09-30).** A deposit batch that cannot land keeps its nonce open, so every batch above it waits, an urgent op
+included (`stuckDepositBatchHoldsAnUrgentOpTest`: the reveal misses its deadline; the model records it as `hostage`, apart from `missed`, because no Entity behaviour can help). The contract has no
+direct deposit path and adding a permissionless one was refused, so deposit legs stay in signed batches, under three rules: (1) a deposit leg travels alone in its batch
+(`depositFundsThePaymentBehindItTest`); (2) the Runtime signs a deposit batch only after simulating it successfully (`SIMULATE_DEPOSITS`, `depositIsNotSignedWhileTheTokenIsPausedTest`, mutant
+`deposit-signed-without-simulation`); (3) a token paused between the simulation and the landing stalls the nonce, a residual risk that is accepted. No simulation witness reaches it (the sequence is too specific);
+the scenario test is the evidence.
 **J4. Nonces: what the contract's strict sequence costs.**
 Any signed batch is a nonce burner in the adversary's hands (F1), and a payment batch that reverts blocks every batch above it (E2, J5).
 Options: (a) keep the strict sequence (F1 and J5 work around it), (b) unordered nonces with revocation. Choice: (a) for v1. (b) removes

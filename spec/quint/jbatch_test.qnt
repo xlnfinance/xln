@@ -270,4 +270,14 @@ module jbatch_test {
     .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(1), cosign_alone })
     .then(attempt(0))
     .expect(and { st.sub.length() == 2, st.sub[1].b.ids == Set(4), st.sub[1].b.nonce == 2, cosign_alone, safe })
+
+  // J6 (coordinator): the Runtime signs a deposit batch only after simulating it successfully. While the token is paused nothing is signed;
+  // when it works again the deposit goes out at once. A token paused after the signing still stalls the nonce (stuckDepositBatchHoldsAnUrgentOpTest).
+  run depositIsNotSignedWhileTheTokenIsPausedTest =
+    initFrom(catD(1, 6, 6), 0)
+    .then(extLose)
+    .then(arrive(4))
+    .expect(st.sub.length() == 0)
+    .then(extBack)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(4), safe })
 }

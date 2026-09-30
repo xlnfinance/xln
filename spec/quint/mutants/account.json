@@ -349,6 +349,14 @@
       "old": "{ ...r, height: f.height, pnonce: f.nonce, tip: f.after,",
       "new": "{ ...r, height: f.height, tip: f.after,",
       "killedBy": "invariant:nonce_climbs"
+    },
+    {
+      "id": "supersession-reversed",
+      "why": "A12: a Right-authored frame is taken to supersede a Left-authored one at the same height, the reverse of the chain rank (Left wins at one nonce).",
+      "file": "account.qnt",
+      "old": "not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right)",
+      "new": "not(byzOn and f.author == Right and frames.get(fc.get(f.height)).author == Left)",
+      "killedBy": "test:equivocatingLeftIsSupersededByRankTest"
     }
   ],
   "testSamples": 50

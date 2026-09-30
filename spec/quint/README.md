@@ -82,7 +82,7 @@ Apalache and Java 21 work.
 | id | property | module |
 |---|---|---|
 | P2 | credit holds: every committed and in-flight state satisfies RCPAN in the worst case over open clauses | `credit_holds` |
-| P4a | agreed: two sides never commit different bodies at one height, unless the peer signed two proofs for one height (A12) | `agreed` |
+| P4a | agreed: two sides never commit different bodies at one height, except that a Left-authored frame supersedes a Right-authored one at one nonce with a Byzantine peer, as the chain ranks them (A12) | `agreed` |
 | P4b | no equivocation: a signer never signs two different proofs for one (nonce, branch) | `no_equivocation` |
 | P4c | both sign the same proof: at each side's head, both signatures over the proof of the committed body exist | `both_signed` |
 | P4d | a frame is held for an ack only if a correct receiver would accept it (state replays on its own tip and clock, next height, proof nonce above the last) | `no_bad_accept` |

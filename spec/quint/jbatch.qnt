@@ -47,14 +47,16 @@ module jbatch {
   // J5 as built: only a batch with no dispute, reveal or hash-ladder op gets that treatment; a mixed batch that fails still reverts whole
   // and keeps its nonce open. So the Entity splits its batches (R-SPLIT): urgent ops never share a batch with payment, settlement or
   // reserve ops (Entity side: `plan`).
-  // chain: a failure that leaves under 1/32 of the gas reverts the transaction instead of emitting BatchFailed, so a relayer that
-  // starves a good batch cannot burn its nonce.
+  // chain: a batch failure is reported (BatchFailed, nonce spent) only when the self-call got at least BATCH_GAS_FLOOR; below the floor the transaction
+  // reverts and takes no nonce, so a relayer that starves a good batch cannot burn its nonce. With the floor, an empty revert reason at or above it is
+  // BatchFailed(0) and spends the nonce (the same soft failure as any other). This replaces the earlier 1/32 rule and the ERC-1271 stipend.
   pure val GAS_GUARD = true
   // J5 refinement (coordinator, from the #54 review): a batch that carries a deposit leg (externalTokenToReserve) reverts whole, like a
   // dispute batch, and never soft-fails: a relayer or a paused token cannot burn its nonce. A bad counterparty signature inside a batch
   // (a settlement or C2R signed at an old account epoch: `Settle` poisoned) is a soft fail; only a failure of the batch's own hanko
   // authorisation reverts without taking the nonce (`forge`).
   pure val DEP_SOFT_FAILS = false
+  pure val SIMULATE_DEPOSITS = true       // J6: a deposit batch is signed only when it simulates successfully
   // Entity: after it gives a signed draft up, a payment, deposit or reserve move in it stays "in flight" until the batch's nonce is used
   // (and BatchFailed read, if it failed): the signed batch can still land, and such an op runs every time. Only urgent ops (dispute step,
   // reveal, hash ladder), which run once or are skipped, go back into the draft at once [coordinator rule, F1].
@@ -196,8 +198,11 @@ module jbatch {
       // own nonce, which costs nothing: the batches above it land right behind it in the same round.
       val fresh = u.filter(i => not(inFlight(s, i)))
       if (fresh.size() > 0) [{ nonce: f, ids: fresh }]
-      // a deposit leg reverts its batch whole (J5 refinement), so it travels alone: the payments behind it wait for the next round
-      else if (nothingAlive(s) and p.filter(i => isDep(s, i)).size() > 0) [{ nonce: f, ids: p.filter(i => isDep(s, i)) }]
+      // a deposit leg reverts its batch whole (J5 refinement), so it travels alone: the payments behind it wait for the next round. The Runtime
+      // signs a deposit batch only after simulating it successfully (`s.ext`: the token works now, J6); a token paused between the simulation and the
+      // landing stalls the nonce, a residual risk the coordinator accepted.
+      else if (nothingAlive(s) and p.filter(i => isDep(s, i)).size() > 0)
+        (if (s.ext or not(SIMULATE_DEPOSITS)) [{ nonce: f, ids: p.filter(i => isDep(s, i)) }] else [])
       // R-COSIGN (coordinator, #54 review): a batch that carries a co-signed op (a settlement or C2R) carries ops for that one Account only.
       // A counterparty's state change or a relayer's gas choice can fail such a batch, so nothing unrelated may ride with it.
       else if (nothingAlive(s) and p.filter(i => isSettle(s, i)).size() > 0) [{ nonce: f, ids: coSigned(s, p) }]

@@ -51,8 +51,8 @@ A Byzantine peer is part of the model: one side's key is taken at any moment and
 height, expiry stamped from the future, resolve stamped in the past, stale or leaping proof nonce, a wrong ack). The honest side is checked.
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
-height, unless the peer signed two: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 34 scenario tests, 43 mutants.
+height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 35 scenario tests, 44 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
@@ -105,7 +105,7 @@ J5 refinement (coordinator, #54 review): a batch with a deposit leg reverts whol
 settlement signed at an old epoch) is a soft fail; only a failure of the batch's own authorisation reverts without taking the nonce (`only_signed_land`). The cost of the first
 is J6 (a stuck deposit batch holds the urgent ops behind it). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`. 23 scenario tests, 21 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`. 24 scenario tests, 22 mutants.
 
 ## Runtime (`runtime.qnt`)
 
@@ -122,7 +122,7 @@ Properties: `no_equivocation`, `exactly_once_j`, `acked_durable`, `canonical_fra
 | C1, C2, H1, H2 | done in the fork (`contracts/`) | see plan/contracts-review.md | chain mutants |
 | C11 (accepted) | each dispute window above `LAG` (the floor of 60 s meets it while a J event is read and included in under 60 s) | the honest side needs `REACT` | `window-floor-below-react` |
 | J2 (accepted) | dispute ops (start, counter, finalize, reveal) skip instead of revert, and an op that already ran is a no-op | a revert takes the urgent ops of the batch with it | `contract-reverts-on-moved-dispute` |
-| J5 (accepted, as built) | a batch with no dispute, reveal or hash-ladder op that fails takes its nonce, applies nothing and emits `BatchFailed`; a mixed batch still reverts whole; a failure that leaves under 1/32 of the gas reverts instead | F1 forbids signing other content at an open nonce, so a batch that reverts holds every batch above it | `payment-revert-keeps-the-nonce` |
+| J5 (accepted, as built) | a batch with no dispute, reveal or hash-ladder op that fails takes its nonce, applies nothing and emits `BatchFailed`; a mixed batch still reverts whole; a failure is reported only when the self-call got at least `BATCH_GAS_FLOOR`, below it the transaction reverts and takes no nonce | F1 forbids signing other content at an open nonce, so a batch that reverts holds every batch above it | `payment-revert-keeps-the-nonce` |
 | E6 | a secret revealed before the deadline pays at finalize even when the dispute starts later | the Entity relies on it | pinned on the real contracts (#47) |
 
 ## What is not in it yet

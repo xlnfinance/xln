@@ -171,6 +171,14 @@
       "old": "    cs.filter(i => acctOf(i) == a)\n",
       "new": "    cs\n",
       "killedBy": "test:coSignedOpsOfTwoAccountsDoNotShareABatchTest"
+    },
+    {
+      "id": "deposit-signed-without-simulation",
+      "why": "J6: the Runtime signs a deposit batch while the token is paused, so the batch sits at the next nonce and holds everything above it.",
+      "file": "jbatch.qnt",
+      "old": "  pure val SIMULATE_DEPOSITS = true",
+      "new": "  pure val SIMULATE_DEPOSITS = false",
+      "killedBy": "test:depositIsNotSignedWhileTheTokenIsPausedTest"
     }
   ],
   "init": "init",

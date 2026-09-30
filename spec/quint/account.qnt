@@ -266,9 +266,14 @@ module account {
     deliverProposal(s, fid)
   }
 
-  // Ghost bookkeeping for agreement: the first commit at a height is remembered, the second must match it.
-  pure def mismatch(fc: int -> int, frames: int -> Frame, f: Frame): bool =
-    fc.get(f.height) != 0 and frames.get(fc.get(f.height)).after != f.after
+  // Ghost bookkeeping for agreement: the first commit at a height is remembered, the second must match it. One exception (A12, closed by the
+  // coordinator): when a peer's key has been taken, it may have signed two proofs for one height, and at one proof nonce the chain ranks the Left-authored
+  // one above the Right-authored one (rank = nonce * 2 + leftAuthored). The honest Right signed that Left-authored frame itself, so a later commit of it
+  // over an earlier Right-authored commit is not a disagreement: it is the frame the chain settles. The reverse order is one.
+  pure def mismatch(fc: int -> int, frames: int -> Frame, f: Frame, byzOn: bool): bool = and {
+    fc.get(f.height) != 0, frames.get(fc.get(f.height)).after != f.after,
+    not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right)
+  }
 
   // The receiver, holding a validated frame, signs the frame and the resulting proof, commits, and answers.
   // At the Entity layer this is the moment its consensus certifies the ack (entity.qnt).
@@ -283,7 +288,7 @@ module account {
       signed' = signed.set(sigKey(s, f), fid),
       equivocated' = (equivocated or clashes(signed, frames, sigKey(s, f), f)),
       firstCommit' = if (firstCommit.get(f.height) == 0) firstCommit.set(f.height, fid) else firstCommit,
-      diverged' = (diverged or mismatch(firstCommit, frames, f)),
+      diverged' = (diverged or mismatch(firstCommit, frames, f, byz != 0)),
       badCommit' = (badCommit or badCommitOf(r.tip, f, clock)), byz' = byz,
       acks' = acks.union(Set(fid)),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, clock' = clock,
@@ -304,7 +309,7 @@ module account {
       f.author == s,
       replica' = if (fits) replica.set(s, commit(r, fid, f)) else replica,
       firstCommit' = if (fits and firstCommit.get(f.height) == 0) firstCommit.set(f.height, fid) else firstCommit,
-      diverged' = (diverged or (fits and mismatch(firstCommit, frames, f))),
+      diverged' = (diverged or (fits and mismatch(firstCommit, frames, f, byz != 0))),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
       clock' = clock, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = (badCommit or (fits and badCommitOf(r.tip, f, clock))), byz' = byz
     }
@@ -360,16 +365,7 @@ module account {
   })
 
   // P4a agreed: the two sides never committed different bodies at one height.
-  // A peer that acked a frame and then sends another for the same height signs two proofs for one height; the honest side that took the second
-  // has diverged from the first, and it holds the peer's signature on both (QUESTIONS A12). The chain then decides, by nonce.
-  pure def signedBy(b: Side, fid: int, sg: SigKey -> int, fr: int -> Frame): bool =
-    fr.get(fid).author == b or sg.get(sigKey(b, fr.get(fid))) == fid
-  val peerSignedTwice: bool = 1.to(MAX_FRAMES).exists(i => 1.to(MAX_FRAMES).exists(j => and {
-    i < j, j < nextFid, frames.get(i).height == frames.get(j).height, frames.get(i).height > 0,
-    proofOf(frames.get(i).after) != proofOf(frames.get(j).after),
-    SIDES.exists(b => and { isByz(b), signedBy(b, i, signed, frames), signedBy(b, j, signed, frames) })
-  }))
-  val agreed: bool = not(diverged) or peerSignedTwice
+  val agreed: bool = not(diverged)
 
   // P4b no equivocation: a signer never signs two different proofs for one (nonce, branch author).
   val no_equivocation: bool = not(equivocated)
@@ -422,7 +418,12 @@ module account {
   val w_no_rollback: bool = rollbacks == 0
   val w_no_refusal: bool = refusals == 0
   // a Byzantine frame was sent: some frame in the arena was never signed by its author in the honest ledger
-  val w_no_divergence: bool = not(diverged)                       // a peer that acked and then equivocated (A12)
+  // a Left-authored frame committed over a Right-authored one at the same height: a peer that acked and then equivocated (A12)
+  val superseded: bool = SIDES.exists(s => {
+    val r = replica.get(s)
+    r.lastFid != 0 and firstCommit.get(frames.get(r.lastFid).height) != r.lastFid and firstCommit.get(frames.get(r.lastFid).height) != 0
+  })
+  val w_no_supersede: bool = not(superseded)
   val w_no_byz_frame: bool = not(1.to(MAX_FRAMES).exists(i => and { i < nextFid, signed.get(sigKey(frames.get(i).author, frames.get(i))) != i }))
   val w_no_lock: bool = lockCount(replica.get(Left).tip) == 0
   val w_no_paid: bool = replica.get(Left).tip.offdelta == 0
