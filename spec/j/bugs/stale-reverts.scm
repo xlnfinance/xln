@@ -3,6 +3,6 @@
 ;; by it (coordinator R-J2).
 (define (op-ok? w op reserve)
   (cond ((stale-op? w op) #f)
-        ((finalize? op) (> (:now w) a-deadline))
+        ((finalize? op) (h1-wait-over? w))
         ((counter? op) #t)
         (else (>= reserve 1))))

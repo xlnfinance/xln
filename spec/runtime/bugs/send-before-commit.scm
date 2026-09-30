@@ -6,4 +6,5 @@
         (update-in (list :queue) cdr)
         (assoc-in (list :staged) row)
         (update-in (list :sent) (lambda (s) (append s (list (row-output row)))))
+        (update-in (list :received) (lambda (r) (append r (list (row-output row)))))
         (assoc-in (list :ts) (row-ts row)))))

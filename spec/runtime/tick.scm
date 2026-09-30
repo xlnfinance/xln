@@ -7,10 +7,13 @@
 ;;            local-corruption input (FATAL) halts the Runtime, and then the frame is not committed.
 ;;            The frame timestamp is max(runtime timestamp, input timestamp): it never goes back.
 ;;   commit   the frame's WAL row is written: height, timestamp, input, output. Only now is the frame real.
-;;   flush    outputs of COMMITTED rows leave, one at a time. Nothing leaves before its row is committed.
+;;   flush    outputs of COMMITTED rows leave, one at a time, in row order. Nothing leaves before its row
+;;            is committed. The peer's receipt is the truth (`received`); what the Runtime believes it
+;;            sent (`sent`) is volatile and is lost at a crash.
 ;;   crash    volatile state is lost; an input not yet committed comes back from the network.
 ;;   recover  replay every WAL row with the row's own timestamp (no clock, no randomness inside a
-;;            transition); outputs of committed rows that never left are sent again.
+;;            transition). Belief about what left is gone, so the outputs of every committed row are sent
+;;            again; the peer drops a copy it already holds (R-DURABLE: persist before send, resend after).
 ;;
 ;; Abstractions: the state is the list of applied inputs with the timestamp each was applied at, the
 ;; hash of a frame is that state, the outbox digest is the output id; one Runtime, one Entity.
@@ -38,7 +41,7 @@
 (define init
   (dict :queue (map (lambda (row) (input-of (vector->list row))) (vector->list inputs))
         :state (list) :ts 0 :height 0 :staged #f :wal (list)
-        :committed-state (list) :sent (list)
+        :committed-state (list) :sent (list) :received (list)
         :crashed #f :crashes 0 :halted #f :halt-cause #f :clock 0))
 
 (define (frame-ts w i) (max (:ts w) (ts i)))
@@ -81,13 +84,16 @@
 (define flush
   (rule "flush" (w side)
     (when (and (pair? (unsent w)) (not (:crashed w))))
-    (then (update-in w (list :sent) (lambda (s) (append s (list (row-output (car (unsent w))))))))))
+    (then (let ((o (row-output (car (unsent w)))))
+            (-> w (update-in (list :sent) (lambda (s) (append s (list o))))
+                  (update-in (list :received) (lambda (r) (if (member o r) r (append r (list o))))))))))
 
 (define crash
   (rule "crash" (w side)
     (when (and (not (:crashed w)) (< (:crashes w) max-crashes)))
     (then (-> w (update-in (list :crashes) (lambda (n) (+ n 1)))
                 (assoc-in (list :crashed) #t)
+                (assoc-in (list :sent) (list))
                 (assoc-in (list :state) (list)) (assoc-in (list :ts) 0) (assoc-in (list :height) 0)
                 ;; an input that was applied but not committed comes back from the network
                 (update-in (list :queue) (lambda (q) (if (:staged w) (cons (staged-input w) q) q)))
@@ -122,7 +128,11 @@
 (define invariants
   (list
    (property "outputs leave only after their WAL row is committed" (w)
-     (every (lambda (o) (member o (wal-outputs w))) (:sent w)))
+     (every (lambda (o) (member o (wal-outputs w))) (:received w)))
+   (property "outputs reach the peer in row order: the peer holds a prefix of the WAL's outputs" (w)
+     (equal? (:received w) (take (wal-outputs w) (length (:received w)))))
+   (property "no committed output is forgotten: the peer holds it or it is still to be sent" (w)
+     (every (lambda (o) (or (member o (:received w)) (member o (map row-output (unsent w))))) (wal-outputs w)))
    (property "no peer input halts the Runtime: only local corruption does (R-X1)" (w)
      (or (not (:halted w)) (equal? (:halt-cause w) "fatal")))
    (property "recovery reproduces the committed state" (w)
@@ -142,6 +152,7 @@
 (define (finished? w)
   (and (not (:crashed w)) (not (:staged w))
        (or (:halted w) (null? (:queue w)))
-       (null? (unsent w))))
+       (null? (unsent w))
+       (every (lambda (o) (member o (:received w))) (wal-outputs w))))
 
 (define runtime (dict :init init :next next :invariants invariants :at-rest (list) :goal finished?))

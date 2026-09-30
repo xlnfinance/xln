@@ -40,6 +40,8 @@
 (define/overridable conflicts  (s/array (s/array (s/string))) (list (list "a" "x")))
 (define/overridable max-losses (s/number) 1)
 (define/overridable max-dups   (s/number) 1)
+;; frames a Byzantine proposer forges: its whole mempool as one frame, whatever it holds
+(define/overridable max-byz    (s/number) 1)
 
 ;; ---- the world
 (define sides (list :left :right))
@@ -53,7 +55,8 @@
         :inbox  (dict :left (list) :right (list))
         :unsent (dict :left (txs-of :left) :right (txs-of :right))
         :lost   0
-        :dups   0))
+        :dups   0
+        :byz    0))
 
 ;; ---- frames and messages
 (define (frame-hash f) (cons (:txs f) (:prev f)))
@@ -169,7 +172,17 @@
     (when (and (pair? (inbox-of w side)) (< (:dups w) max-dups)))
     (then (-> w (enqueue-copy side (car (inbox-of w side))) (update-in (list :dups) (lambda (n) (+ n 1)))))))
 
-(define rules (list submit propose deliver resend lose duplicate))
+;; a BYZANTINE proposer sends its whole mempool as one frame when that frame is invalid on its own (two
+;; conflicting txs). Nothing about it enters the proposer's books: only the receiver's validation stands
+;; between the frame and the history (bug `frame-order`).
+(define byz-frame
+  (rule "byz frame" (w side)
+    (when (and (< (:byz w) max-byz) (pair? (get-in w (list side :mempool)))
+               (pair? (:refused (split-valid (list) (get-in w (list side :mempool)))))))
+    (then (-> (enqueue w (peer side) (list (frame-msg (dict :txs (get-in w (list side :mempool)) :prev (get-in w (list side :head))))))
+              (update-in (list :byz) (lambda (n) (+ n 1)))))))
+
+(define rules (list submit propose deliver resend lose duplicate byz-frame))
 (define (next w) (successors rules sides w))
 
 ;; ---- properties
@@ -202,11 +215,20 @@
               (let ((mine (filter (lambda (tx) (member tx (txs-of side))) (committed-in-order (side w)))))
                 (equal? mine (filter (lambda (tx) (member tx mine)) (txs-of side)))))
             sides))
+   ;; restated through `split-valid`, not through `frame-valid?` (a planted bug redefines that one)
    (property "no committed tx is invalid against the history before it" (w)
-     (every (lambda (side) (frame-valid? (list) (committed-in-order (side w)))) sides))
-   (property "a refused tx really conflicts with the committed history" (w)
+     (every (lambda (side) (null? (:refused (split-valid (list) (committed-in-order (side w)))))) sides))
+   ;; a tx is refused only because a conflicting predecessor exists: one committed, or one ahead of it in
+   ;; its own frame. The predecessor may be rolled back afterwards (a cross-open), and the refusal stays:
+   ;; final with notice, the sender resubmits (QUESTIONS Q-A-10). So the check is on the pair, not on
+   ;; the state at the time of the check.
+   (property "a refused tx has a conflicting predecessor among the submitted txs" (w)
      (every (lambda (side)
-              (every (lambda (tx) (not (tx-valid? (committed-in-order (side w)) tx))) (:refused (side w))))
+              (every (lambda (tx)
+                       (some (lambda (pair) (and (equal? (cadr pair) tx)
+                                                 (member (car pair) (append (submitted w :left) (submitted w :right)))))
+                             (conflict-pairs)))
+                     (:refused (side w))))
             sides))
    (property "no tx is both committed and refused" (w)
      (every (lambda (side)

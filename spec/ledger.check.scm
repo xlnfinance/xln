@@ -1,5 +1,6 @@
 ;; Check the ledger page.   node arrival/packages/arrival-cli/dist/cli.js run ledger.check.scm   (from spec/)
 (require "lib/vocabulary.scm")
 (require "lib/check.scm")
+(require "money/core.scm")
 (require "money/ledger.scm")
 (check ledger)

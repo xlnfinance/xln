@@ -68,6 +68,10 @@
 (define/overridable reserve-left0  (s/number) 1)
 (define/overridable reserve-right0 (s/number) 0)
 ;; the frame heights at which a cooperative settlement is offered (height 2 holds an open clause)
+;; H3: the board of one side rotates (0: never; the `retired-left` and `retired-right` configs set 1)
+(define/overridable rotations (s/number) 0)
+;; the off-chain height at which the board rotates (frames up to it are retired-grade); one height keeps the bound small
+(define/overridable rotation-at (s/number) 4)
 (define/overridable settle-heights (s/array (s/number)) (list 1 2))
 
 ;; ---- the domain
@@ -107,7 +111,6 @@
 ;;   Left 2 (Δ 3: Right owes 1 if the state is final); n4 Left pays Right 4 (Δ -1: Left owes 1);
 ;;   n5 a payment by Left that would take Left past the credit Right extended (Δ -4): the RCPAN guard
 ;;   refuses it, bug `no-rcpan` lets it through. The values are the model's; the guard is the rule.
-(define (signed payer amount) (if (equal? payer :right) amount (- amount)))
 (define script
   (list (list :right (list :pay :right 1))
         (list :left  (list :lock 1))
@@ -122,17 +125,16 @@
 (define (apply-op tip op nonce proposer rival?)
   (let ((off (p-off tip)) (clause (p-clause tip)))
     (case (car op)
-      ((:pay) (make-proof nonce proposer (+ off (signed (cadr op) (caddr op))) clause rival?))
+      ((:pay) (make-proof nonce proposer (ledger-pay off (cadr op) (caddr op)) clause rival?))
       ((:lock) (if clause #f (make-proof nonce proposer off (htlc (cadr op) htlc-deadline) rival?)))
-      ((:unlock-pay) (if clause (make-proof nonce proposer (+ off (signed (cadr op) (caddr op))) #f rival?) #f))
+      ((:unlock-pay) (if clause (make-proof nonce proposer (ledger-pay off (cadr op) (caddr op)) #f rival?) #f))
       (else #f))))
 
 ;; RCPAN on a proof, in the worst case over its clause: Δ = ondelta + off
 ;;   -credit-left <= Δ - clause  and  Δ <= collateral + credit-right
 (define (rcpan-ok? w p)
-  (let* ((delta (+ (:ondelta w) (p-off p)))
-         (low (- delta (if (p-clause p) (clause-amount (p-clause p)) 0))))
-    (and (>= low (- credit-left)) (<= delta (+ (:collateral w) credit-right)))))
+  (ledger-rcpan-ok? (+ (:ondelta w) (p-off p)) (if (p-clause p) (clause-amount (p-clause p)) 0) 0
+                    (:collateral w) credit-left credit-right))
 ;; N2: a lock whose deadline is beyond MAX_LOCK_HORIZON is refused by BOTH sides (bug `no-horizon`)
 (define (horizon-ok? w p)
   (or (not (p-clause p)) (<= (- (clause-deadline (p-clause p)) (:now w)) max-lock-horizon)))
@@ -165,10 +167,12 @@
         :unacked #f                          ; #f, or (proposer's proof, receiver's proof): the proposer waits for the ack
         :proposed-rank 0                     ; rank of the newest frame proposed (the receiver committed it)
         :held (dict :left (list (baseline-of 0 1)) :right (list (baseline-of 0 1)))  ; the genesis baseline is co-signed at open
+        :signed (list)                       ; (proof byz? rcpan-ok?) of every frame a proposer signed
         :knew-op #f                          ; the payee acted before the deadline knowing the secret
         :settlements (list)                  ; what each cooperative settlement did
         :post #f                             ; the frame signed after a settlement
         :deposit #f                          ; (funder beneficiary) of the one R2C made during a dispute
+        :rot #f                              ; #f, or the off-chain height when the rotating side's board rotated
         :dispute #f
         :results (list)))
 
@@ -186,16 +190,28 @@
       (hold (hold w side p) side (baseline-of (p-nonce p) (+ (:epoch w) 1)))))
 
 ;; the next scripted frame as (proposer's proof, receiver's proof), or #f when it is not valid
-(define (next-frame w)
+;; the two bodies of the next scripted frame, before any check: (proposer's proof, receiver's proof)
+(define (frame-parts w)
   (let* ((entry (list-ref script (:head w)))
          (proposer (car entry)) (op (cadr entry)) (n (next-nonce w))
          (mine (apply-op (tip-of w proposer) op n proposer #f))
          (theirs (receiver-body (tip-of w (peer proposer)) op n proposer)))
-    (and (frame-ok? w mine) (receiver-accepts? mine theirs) (frame-ok? w theirs)
-         (list mine theirs))))
+    (and mine (list mine theirs))))
+;; each side's OWN credit and horizon check on the frame it signs (bugs `proposer-skips-rcpan`,
+;; `receiver-skips-rcpan` remove one at a time: the other must stand alone)
+(define (proposer-ok? w p) (frame-ok? w p))
+(define (receiver-ok? w p) (frame-ok? w p))
+;; the next scripted frame as (proposer's proof, receiver's proof), or #f when it is not valid
+(define (next-frame w)
+  (let ((f (frame-parts w)))
+    (and f (proposer-ok? w (car f)) (receiver-accepts? (car f) (cadr f)) (receiver-ok? w (cadr f)) f)))
 (define (proposal-enabled? w)
   (and (script-left? w) (not (:unacked w)) (not (frozen? w)) (next-frame w) #t))
 (define (proposer-of-next w) (car (list-ref script (:head w))))
+;; every frame a proposer signs is recorded, with whether its body passes RCPAN for the proposer
+(define (record-signed w p byz?)
+  (update-in w (list :signed)
+             (lambda (s) (let ((e (list p byz? (if (rcpan-ok? w p) #t #f)))) (if (member e s) s (append s (list e)))))))
 
 ;; the proposer sends; the receiver commits its own recomputation and holds the proposer's proof
 (define (proposed w f)
@@ -204,11 +220,24 @@
         (assoc-in (list :tip (peer (p-proposer (car f)))) (cadr f))
         (update-in (list :head) (lambda (h) (+ h 1)))))
 
+;; an honest proposer signs only a frame its own check passes; the receiver then decides on its own
 (define propose
   (rule "propose" (w side)
-    (when (and (proposal-enabled? w) (equal? (proposer-of-next w) side)))
-    (then (let ((f (next-frame w)))
-            (proposed (hold-frame w (peer side) (car f)) f)))))
+    (when (and (script-left? w) (not (:unacked w)) (not (frozen? w)) (equal? (proposer-of-next w) side)
+               (let ((f (frame-parts w))) (and f (proposer-ok? w (car f))))))
+    (then (let* ((f (frame-parts w)) (w1 (record-signed w (car f) #f)))
+            (if (and (receiver-accepts? (car f) (cadr f)) (receiver-ok? w (cadr f)))
+                (proposed (hold-frame w1 (peer side) (car f)) f)
+                w1)))))
+;; a BYZANTINE proposer signs a frame that overdraws itself: only the receiver's check stands
+(define byz-propose
+  (rule "byz propose" (w side)
+    (when (and (script-left? w) (not (:unacked w)) (not (frozen? w)) (equal? (proposer-of-next w) side)
+               (let ((f (frame-parts w))) (and f (not (frame-ok? w (car f)))))))
+    (then (let* ((f (frame-parts w)) (w1 (record-signed w (car f) #t)))
+            (if (and (receiver-accepts? (car f) (cadr f)) (receiver-ok? w (cadr f)))
+                (proposed (hold-frame w1 (peer side) (car f)) f)
+                w1)))))
 
 ;; a cross-open: Right proposed at the same height. Left's frame wins; Right signed its own, so
 ;; Left holds Right's losing proposal, Right holds Left's frame.
@@ -324,6 +353,31 @@
 (define (final-delta w p outcome)
   (- (+ (:ondelta w) (p-off p)) (if (equal? outcome :paid) (clause-amount (p-clause p)) 0)))
 
+;; ---- H3: evidence signed by a RETIRED board is valid but limited. A proof the rotating side signed before its
+;; board rotated is graded retired (verified under a previous board); the contract clamps only the direction in
+;; which that side would pay from reserves: retired Left settles at Δ >= 0, retired Right at Δ <= collateral.
+;; What the retired side is OWED is never clamped, or a debtor could erase its debt by racing the rotation.
+;; The grade belongs to the proof that settles (a counter replaces it), not to who starts.
+(define (rotating-side) :left)
+(define (signed-at w p)
+  (cond ((equal? p (:post w)) #f)
+        ((= (p-epoch p) 0) (p-nonce p))
+        (else (- (p-nonce p) 3))))
+(define (retired-of w p)
+  (let ((k (signed-at w p)))
+    (if (and (:rot w) k (<= k (:rot w))) (rotating-side) :none)))
+(define (clamp-retired retired delta collateral)
+  (cond ((equal? retired :left) (max delta 0))
+        ((equal? retired :right) (min delta collateral))
+        (else delta)))
+(define (settled-delta w p outcome)
+  (clamp-retired (retired-of w p) (final-delta w p outcome) (:collateral w)))
+(define rotate
+  (rule "rotate board" (w side)
+    (when (and (> rotations 0) (not (:rot w)) (equal? side (rotating-side)) (not (:dispute w)) (null? (:results w))
+               (= (:epoch w) 0) (= (:head w) rotation-at)))
+    (then (assoc-in w (list :rot) (:head w)))))
+
 (define (add-reserve w side amount) (update-in w (list :reserve side) (lambda (r) (+ r amount))))
 ;; a shortfall is paid from the debtor's reserve first; the rest becomes debt
 (define (shortfall w debtor amount)
@@ -346,8 +400,9 @@
 ;; the record the properties read: what was decided, on what, and what each side owned before and after
 (define (record w paid d p outcome path)
   (let* ((cf (undo-deposit w))
-         (cf-paid (payout cf (final-delta cf p outcome))))
-   (dict :proof p :path path :starter (:starter d) :delta (final-delta w p outcome)
+         (cf-paid (payout cf (settled-delta cf p outcome))))
+   (dict :proof p :path path :starter (:starter d) :delta (settled-delta w p outcome)
+        :raw-delta (final-delta w p outcome) :retired (retired-of w p)
         :outcome outcome :at (:now w) :epoch (:epoch w) :proof-epoch (p-epoch p) :collateral (:collateral w)
         :best-start? (:best-start? d)
         :net-before-left (net w :left) :net-before-right (net w :right)
@@ -356,13 +411,14 @@
         :funded-left (funded w :left) :funded-right (funded w :right)
         :best-held (or (:closed-best d) (best-rank w (responder-of d)))
         :believed (or (:closed-proposed d) (:proposed-rank w))
+        :acked (min (rank (tip-of w :left)) (rank (tip-of w :right)))
         :ondelta (:ondelta w) :secret (:secret w) :initial (:initial d) :counter-at (:counter-at d)
         :timeout (:timeout d) :adopted (adopted? d p)
         :knew-op (:knew-op w) :post (:post w)
         :hasty (and (< (:now w) (:timeout d)) (own-ack-pending? w (responder-of d))))))
 
 (define (finalized w d p outcome path)
-  (let ((paid (payout w (final-delta w p outcome))))
+  (let ((paid (payout w (settled-delta w p outcome))))
     (-> paid
         (assoc-in (list :dispute) #f)
         (update-in (list :epoch) (lambda (e) (+ e 1)))
@@ -461,14 +517,14 @@
   (rule (str "deposit " funder "->" beneficiary) (w side)
     (when (and (equal? side funder) (:dispute w) (not (:deposit w)) (>= (get-in w (list :reserve funder)) 1)))
     (then (-> w (update-in (list :collateral) (lambda (c) (+ c 1)))
-                (update-in (list :ondelta) (lambda (o) (if (equal? beneficiary :left) (+ o 1) o)))
+                (update-in (list :ondelta) (lambda (o) (ledger-deposit-ondelta o beneficiary 1)))
                 (add-reserve funder -1)
                 (assoc-in (list :deposit) (list funder beneficiary))))))
 (define (undo-deposit w)
   (if (:deposit w)
       (let ((funder (car (:deposit w))) (beneficiary (cadr (:deposit w))))
         (-> w (update-in (list :collateral) (lambda (c) (- c 1)))
-              (update-in (list :ondelta) (lambda (o) (if (equal? beneficiary :left) (- o 1) o)))
+              (update-in (list :ondelta) (lambda (o) (ledger-deposit-ondelta o beneficiary -1)))
               (add-reserve funder 1)
               (assoc-in (list :deposit) #f)))
       w))
@@ -476,7 +532,7 @@
 
 (define (rules-for w)
   (let ((ps (all-proofs w)))
-    (append (list propose collide ack tick reveal settle post-frame finalize-counter finalize-initial
+    (append (list propose byz-propose collide ack tick reveal rotate settle post-frame finalize-counter finalize-initial
                   (deposit-rule :left :left) (deposit-rule :right :right)
                   (deposit-rule :left :right) (deposit-rule :right :left))
             (map start-with ps) (map counter-with ps) (map finalize-with ps))))
@@ -508,9 +564,22 @@
                              (equal? p q)))
                        ps))
               ps)))
+   (property "an honest proposer never signs a frame that overdraws itself (its own RCPAN check)" (w)
+     (every (lambda (e) (or (cadr e) (caddr e))) (:signed w)))
+   ;; the credit bound written out again from the formula (money/core.scm), not through the shared function
+   (property "a frame that overdraws its proposer is never held: the receiver's own RCPAN check stands alone" (w)
+     (every (lambda (p)
+              (or (not (= (p-epoch p) (:epoch w)))
+                  (let ((delta (+ (:ondelta w) (p-off p))) (locked (if (p-clause p) (clause-amount (p-clause p)) 0)))
+                    (and (>= (- delta locked) (- credit-left)) (<= delta (+ (:collateral w) credit-right))))))
+            (all-proofs w)))
    (property "no frame is in flight: both sides have committed the same proof" (w)
      (or (:unacked w) (:dispute w) (pair? (:results w)) (equal? (tip-of w :left) (tip-of w :right))))
    ;; what the parties may rely on
+   ;; B2 (reviewer): the hasty carve-out below has a floor of its own. A responder that closes before T while
+   ;; the ack of its own frame is still on the way may lose that frame, but never a frame both sides acked.
+   (property "a hasty close still pays at least the newest frame both sides acked" (w)
+     (every (lambda (r) (or (not (:hasty r)) (>= (rank (:proof r)) (:acked r)))) (:results w)))
    (property "the responder is never worse off than the newest proof it held" (w)
      (every (lambda (r) (>= (rank (:proof r)) (:best-held r))) (:results w)))
    (property "a dispute pays what both sides had committed: the final proof ranks at least the newest frame proposed by T" (w)
@@ -549,7 +618,7 @@
           (>= (:collateral w) 0) (>= (get-in w (list :debt :left)) 0) (>= (get-in w (list :debt :right)) 0)))
    (property "Δ = ondelta + offdelta, less the clause if it paid" (w)
      (every (lambda (r)
-              (= (:delta r) (- (+ (:ondelta r) (p-off (:proof r)))
+              (= (:raw-delta r) (- (+ (:ondelta r) (p-off (:proof r)))
                                (if (equal? (:outcome r) :paid) (clause-amount (p-clause (:proof r))) 0))))
             (:results w)))
    (property "a clause pays exactly when its secret was public by the deadline" (w)
@@ -562,6 +631,26 @@
    ;; #37 / R3: the payee that acts before the deadline knowing the secret is paid
    (property "a payee that acted before the deadline knowing the secret is never left with the clause unpaid (#37)" (w)
      (every (lambda (r) (or (not (:knew-op r)) (not (equal? (:outcome r) :unpaid)))) (:results w)))
+   ;; H3, from the decision text and not through the clamp function
+   (property "retired-board evidence never draws on the retired side's reserve: retired Left settles at Δ >= 0, retired Right at Δ <= collateral (H3)" (w)
+     (every (lambda (r) (and (or (not (equal? (:retired r) :left)) (>= (:delta r) 0))
+                             (or (not (equal? (:retired r) :right)) (<= (:delta r) (:collateral r)))))
+            (:results w)))
+   (property "what the retired side is owed is paid as signed, whoever starts (H3)" (w)
+     (every (lambda (r) (and (or (not (equal? (:retired r) :left)) (< (:raw-delta r) 0) (= (:delta r) (:raw-delta r)))
+                             (or (not (equal? (:retired r) :right)) (> (:raw-delta r) (:collateral r)) (= (:delta r) (:raw-delta r)))))
+            (:results w)))
+   ;; A12 (coordinator, 00:49): two co-signed proofs exist at one nonce only with opposite proposer flags, and LEFT's proposal
+   ;; wins whoever starts or counters. Restated from the rule: proposers, then who ranks higher.
+   (property "two proofs of one nonce and epoch have opposite proposers, and Left's outranks Right's (A12)" (w)
+     (let ((ps (all-proofs w)))
+       (every (lambda (p)
+                (every (lambda (q)
+                         (or (not (and (= (p-nonce p) (p-nonce q)) (= (p-epoch p) (p-epoch q)) (not (equal? p q))))
+                             (and (not (equal? (p-proposer p) (p-proposer q)))
+                                  (or (not (equal? (p-proposer p) :left)) (outranks? p q)))))
+                       ps))
+              ps)))
    (property "a counter is registered strictly before T" (w)
      (every (lambda (r) (or (not (:counter-at r)) (< (:counter-at r) (:timeout r)))) (:results w)))
    (property "a timeout finalize consumes exactly one nonce; an adopted proof sets it" (w)
@@ -573,4 +662,28 @@
 (define (settled? w)
   (or (pair? (:results w))
       (and (not (:dispute w)) (> (+ (:now w) (apply + (windows))) max-time))))
-(define dispute (dict :init init :next next :invariants invariants :at-rest (list) :goal settled?))
+;; ---- step properties: the ledger's steps (money/ledger.scm), checked on the dispute page's own steps.
+;; The frames here are built from the ledger arithmetic (money/core.scm); these say what each frame and
+;; deposit DID, from the ledger page's formulas written out again, so the two pages cannot drift apart.
+(define (frame-rule? rname) (or (equal? rname "propose") (equal? rname "byz propose")))
+(define (payer-sign side) (if (equal? side :left) -1 1))
+(define steps
+  (list
+   (step-property "a frame moves Δ as the ledger does: a payment moves the payer's allocation, a lock or a lapse leaves Δ" (w rname side w2)
+     (or (not (frame-rule? rname)) (not (:unacked w2))
+         (let* ((op (cadr (list-ref script (:head w))))
+                (p (car (:unacked w2))) (old (tip-of w side)))
+           (case (car op)
+             ((:pay) (and (= (p-off p) (+ (p-off old) (* (payer-sign (cadr op)) (caddr op)))) (equal? (p-clause p) (p-clause old))))
+             ((:lock) (and (= (p-off p) (p-off old)) (p-clause p) (= (clause-amount (p-clause p)) (cadr op))))
+             ((:unlock-pay) (and (= (p-off p) (+ (p-off old) (* (payer-sign (cadr op)) (caddr op)))) (not (p-clause p))))
+             (else #f)))))
+   (step-property "a deposit moves one unit from the funder's reserve into the collateral; only a Left beneficiary's allocation rises" (w rname side w2)
+     (or (not (string-prefix? "deposit" rname))
+         (let ((beneficiary (cadr (:deposit w2))))
+           (and (= (:collateral w2) (+ (:collateral w) 1))
+                (= (get-in w2 (list :reserve side)) (- (get-in w (list :reserve side)) 1))
+                (= (get-in w2 (list :reserve (peer side))) (get-in w (list :reserve (peer side))))
+                (= (:ondelta w2) (+ (:ondelta w) (if (equal? beneficiary :left) 1 0)))))))))
+
+(define dispute (dict :init init :next next :invariants invariants :steps steps :at-rest (list) :goal settled?))

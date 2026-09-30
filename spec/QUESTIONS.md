@@ -77,13 +77,32 @@ and "a lock is expired only after the payee's own clock passed its deadline plus
 Planted bugs, one per case: `refuse-late` (a stale stamp is refused: the signed frame is stuck),
 `refuse-future` (a stamp ahead of the receiver's clock is refused) and `expire-by-frame-stamp` (the
 receiver decides expiry from the frame's stamp: a payer stamps the future and expires the lock at its
-own clock 2 while the payee's is 0). Capacity: 130 states, under a second.
+own clock 2 while the payee's is 0). Capacity: 1434 states (see the resolve refinement below).
 Consequence for the other pages: the dispute page's clock is the chain's (one clock, the deciding
 party's own for `horizon-ok?`, Q-D-20); the J batch page's deadlines are the chain's. An early expire is
 refused on CONTENT (a nack); a signed frame that is valid but early is not refused, it waits for the
 deciding party's clock. Not modelled: J-height deadlines (the same rule with the J clock), the payee's
 claim before its own deadline, the size of the reserve (a named parameter, not chosen here).
-Source: coordinator R-CLOCK (21:56).
+Refinement (#57, coordinator 01:11): a secret resolve is decided by J height, never by the frame's stamp. The
+page now has a chain height (`:jh`) both parties read, a resolve frame the payee proposes with any stamp
+(honest 0, or the latest one a proposer can write), and the payer's decision `resolve-late?`: late only when the
+chain height passed `resolve-deadline`. Property "a secret resolve is late only by J height: a resolve delivered
+within the deadline is never refused whatever the frame stamp says". Planted bug `resolve-late-by-stamp` (the
+payer also refuses a stamp past the deadline). The goal accepts a lock that expired or a secret that resolved.
+The lock expiry path keeps its own-clock rule. Capacity: 1434 states, 6225 transitions, 186 goals, 21 s.
+Source: coordinator R-CLOCK (21:56), #57 (01:11).
+
+**Q-A-10. A refused tx stays refused when its predecessor is rolled back (a6 of the round-2 review).**
+A validator refuses a tx that conflicts with the history before it, including the txs ahead of it in the SAME
+frame (bug `frame-order` checks a frame's txs against the committed history only, so a frame holding two
+conflicting txs slips through). The refusal is final with notice. If the predecessor is then rolled back (a
+cross-open that Left wins), the refused tx would have been valid: the sender resubmits it. Choice: no
+re-admission (a refusal is an event, not a state), stated as the property "a refused tx has a conflicting
+predecessor among the submitted txs": it checks the pair, not the state at the time of the check.
+Bound: `account/configs/same-side-conflict.scm` (Right's own txs "x" then "y" conflict, 3423 states) and a
+Byzantine frame rule (`byz-frame`: a proposer sends its whole mempool as one invalid frame), so the receiver's
+validation is the only thing between the frame and the history. Planted bug `frame-order`.
+Source: review of PR #41 round 2, a6.
 
 ## Money (`money/ledger.scm`)
 
@@ -164,6 +183,17 @@ Planted bug `late-ack` drops the assumption and the property fails (propose n1, 
 start n1R, two ticks, finalize on n1R). The window floor (H2, 60 s on testnet) has to be far above
 the worst message delay, and a proposer treats its unacked frame as enforceable by the peer only.
 Source: A:1466, design/account-model.md P5; review of PR #41 (the literal form fails).
+Round 2, B2: the carve-out has a floor now. "A hasty close still pays at least the newest frame both sides acked"
+is its own property (a responder that closes before T while the ack of its own frame is in flight may lose that
+frame, never an acked one). The killer needs a config without a cross-open (`dispute/configs/no-rival.scm`):
+with a rival on the table a shallower state trips "the responder is never worse off" first (that property is
+implied by this one and sits after it). Planted bug `hasty-stale`.
+Round 2, B6 (clock assumption, decision for the coordinator): `ack-in-window?` is `#t` on every page; the only
+killer is `late-ack`, which drops it. It is a CLIENT obligation, not a contract rule: the contract cannot see the
+ack, and the only contract-side lever is the window floor (H2, R-C11: the window is above LAG). Recommendation:
+keep it a client obligation and document it as a deployment requirement: window >= worst ack delay + LAG. If the
+coordinator prefers a contract rule, the candidate is "a counter may be registered until T + one message
+delay", which weakens the finalize timing for everyone; not recommended.
 
 **Q-D-4. Epoch advance and the pre-signed baseline (coordinator N1, revised 17:21).**
 Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872), with one exception: every frame
@@ -233,9 +263,11 @@ Source: coordinator decision H4, A:1216-1275, D:757-768.
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
 tokens. Model bounds: 5 scripted frames (one refused by RCPAN), one rival, one HTLC, two windows of 1,
-`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 4506 states,
-8204 transitions, 2110 goals, under 3 minutes alone (it was 9771 states before the payee's dispute ops
-carried the secret: a separate reveal at every time is no longer a separate branch). The review measured
+`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 5571 states,
+10196 transitions, 2562 goals, about 4 minutes alone (round 2: settlement, the post frame and the horizon are
+in; it was 9771 states before the payee's dispute ops carried the secret). Second bounds, all in
+`dispute/configs/`: `far-deadline` (N2), `no-rival` (B2), `retired-left` and `retired-right` (H3),
+`right-reserve`, `two-disputes` and `implicit-baseline` (Q-D-21). The review measured
 `max-time 3` with the HTLC deadline at 2 on the 3-frame script (10120 states, 331 s). Not modelled yet:
 N2 tolerance, H3, and a second dispute after a dispute (`max-disputes` 2). Secrets in calldata (Q-D-18)
 and the settlement branch with nonce continuity (Q-D-19) are in.
@@ -341,6 +373,59 @@ LOCAL policy (each party's own tolerance), not a value both sides must agree on;
 farther lock than its peer does simply gets refused by the peer at signing.
 Source: coordinator N2 (21:50); H1.
 
+**Q-D-21. Two disputes in a row leave no proof for the second new epoch (finding of `max-disputes` 2, round 2).**
+The base runs one dispute, so the pre-signed baseline (Q-D-4) was held but never presented. With `max-disputes` 2
+(`dispute/configs/two-disputes.scm`: a script of two frames, no settlement, a clock of 4 so both windows fit) the
+baseline IS presented, and the property "after an epoch advance each side still holds a valid proof of the new
+epoch" fails in five steps: propose n1, start n1R, finalize (epoch 1), start B3 (the baseline of epoch 1),
+finalize (epoch 2). A baseline is co-signed with every FRAME of the epoch before it; the second advance happens
+before any frame of epoch 1 exists, so nothing is co-signed for epoch 2. What is at stake is small (the first
+payout emptied the collateral and the baseline says offdelta 0) but not nothing: a unilateral deposit into
+epoch 2 (R2C needs no signature) has no proof to dispute with, and the counterparty can refuse to sign the first
+frame that would give one.
+Options: (a) co-sign baselines two epochs ahead (covers two advances, not three; the regress stays);
+(b) the implicit baseline: from the epoch after ANY advance the empty state (offdelta 0, no clause, one nonce above
+the chain nonce) is a valid proof for both sides without a signature, because every field of it is on chain
+(ondelta, collateral and the nonce are); a dispute from it settles at Delta = ondelta, which both sides agreed to at
+the advance, and a later signed frame outranks it through a counter as any newer proof does; (c) forbid a dispute
+from a baseline (no: it is the escape path for a deposit made after the advance).
+Recommendation (for the coordinator): (b). It removes the co-signed baselines and the nonce arithmetic they need
+(frame nonce + 3, the settlement baseline, the post-frame nonce), which produced two of the review's findings
+(Q-D-19), and it is the only option that holds for any number of disputes in a row. It needs a contract change
+(a start with no proof at the lowest valid nonce of the epoch). `dispute/configs/implicit-baseline.scm`
+(loaded after two-disputes) is the same bound with (b): the property holds. Until the coordinator decides, the
+spec keeps N1 as decided and the finding stays open; the two-dispute case is checked as a FINDING (its verdict is
+the expected failure), not as a pass.
+Source: review of PR #41 round 2 (item 6); coordinator N1.
+
+**Q-D-22. H3: retired-board evidence is capped at collateral, in one direction only (coordinator H3, modelled).**
+The page has a rotating side (`rotating-side`, `rotations`, `rotation-at`): its board rotates once at an
+off-chain height, and every proof it signed up to then is retired-grade evidence (a baseline counts by the frame
+it accompanies; a proof after the rotation is current). The proof that settles carries the grade, whoever starts
+(a counter replaces it). Finalization clamps only what the retired side would pay from reserves: retired Left
+settles at Delta >= 0, retired Right at Delta <= collateral. What the retired side is owed is never clamped.
+Properties, written from the decision text and not through the clamp: "retired-board evidence never draws on the
+retired side's reserve" and "what the retired side is owed is paid as signed, whoever starts". Bounds:
+`dispute/configs/retired-left.scm`, `retired-right.scm` (8514 states each; the board rotates after frame 4, so
+frame 4 (Delta -1) and frame 3 (Delta 3 over a collateral of 2) are retired). Planted bugs: `h3-no-clamp` (the
+contracts before H3) and `h3-symmetric` (the first, symmetric clamp of PR #42: a debtor erases what it owes a
+rotating entity). Not modelled: the seven-day grace window itself, the grade upgrade by re-registering the same
+body (self-inflicted and harmless), and re-signing every Account after a rotation (Option C, v2).
+Source: coordinator H3 (contracts-decisions.md, "Done: H3").
+
+**Q-D-23. Composition of the money pages (round 2).**
+The ledger page and the dispute page used to be two models of one arithmetic joined by the script. They now share
+`money/core.scm`: `ledger-pay` (a payment moves Delta against its payer), `ledger-rcpan-ok?` (the worst-case credit
+bound) and `ledger-deposit-ondelta` (a Left deposit raises ondelta, a Right one does not). The dispute page's
+frames are built from them and two step properties check what each frame and deposit DID against the ledger
+page's formulas written out again ("a frame moves Delta as the ledger does"; "a deposit moves one unit ..."); the
+receiver-side credit check is restated from the formula too. A wrong function in the core is killed on both pages
+(`core-pay-flipped`, `core-rcpan-no-floor`). What is still a script: the frame sequence itself (the dispute page
+plays five scripted txs; the frames page plays arbitrary submissions), because letting the dispute page draw its
+frames from the frames page multiplies both state spaces.
+Right's reserve: `dispute/configs/right-reserve.scm` gives Right a reserve of 1, so a Right-funded deposit (H4) and
+a shortfall paid from Right's reserve first can occur.
+
 ## Entity consensus (`entity/consensus.scm`)
 
 **Q-E-1. An own uncommitted proposal meets a different certified frame (R-E3, lessons B-E1).**
@@ -376,11 +461,36 @@ as the `forward` rule; committed txs leave the mempool at install.
 **Q-E-5. Not in this page.**
 Message loss and reordering beyond "delivered in any order" (the Account page covers loss), hashes and
 Hanko bytes, `heldQuorum` (signatures before the frame), J-prefix rounds inside consensus (27865-28300,
-see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm), the `locked` phase
-(with 3 validators and quorum 2 the second signer always commits; `quorum 3 of 3` would give a real
-locked state and make a conflict against a locked replica testable; not done), `notSuperseded` (leader
-votes and certificates). Bounds: two heights, one tx each for A and B, one view change. Capacity:
-6726 states, 29745 transitions, 2060 goals, about 4 minutes.
+see j/batch.scm), handover, the four-phase frame pipeline (entity/frame.scm), the view-change
+certificate and `notSuperseded` (leader votes; Q-E-2, Q-E-8). The `locked` phase is modelled at quorum 3 of 3
+(Q-E-8). Bounds: two heights, one tx each for A and B, one view change. Capacity:
+9330 states, 37603 transitions, 3072 goals (the log of signatures and the signature sets are part of the state).
+
+**Q-E-8. The locked phase, quorum 3 of 3 (round 2): safety holds, liveness does not (finding).**
+Under quorum 2 the second signer always commits, so xln.ts's `locked` phase (28773) never shows. With `quorum` 3
+(configs `entity/configs/quorum-3.scm`, one height, three validators) it does. A validator that signs a proposal
+without reaching quorum LOCKS on it, sends its precommit to every other validator and waits; a precommit waits
+(parked) until the replica holds the same frame; the frame commits where three precommits are held and the
+committer tells the rest. A locked replica ignores a different proposal (`resendPrecommit`: `unlikeHeld`), keeps
+its lock across a view change and, in the model as in og, a proposer keeps its proposal (29137). Properties added:
+"a locked replica holds its own signature on the frame it locked on", "a locked replica never meets a certified
+frame other than the one it signed" (with all three signatures needed it cannot: the replica's own is one of them),
+and "a frame is committed only with quorum distinct validators having signed it" (read from a log of signatures;
+planted bug `early-commit` commits one short and fails it). `quorum-3-safety.scm` drops the goal: every safety
+property holds.
+FINDING (liveness): with the goal, "can always still finish" fails in TWO steps: propose A, timeout B. B moves to
+view 1 before it has signed, so it will not sign A's view-0 proposal (it voted past that view: `notSuperseded`,
+28817), A keeps and cannot drop its signed proposal, and B's own view-1 proposal cannot get A's signature.
+Neither frame can collect three. Under quorum 2 this is R-E3 (a conflict resolved by one more signature); under
+3 of 3 there is no spare signature. In og the view-change certificate is what should resolve it: it needs all
+three votes at 3 of 3, drops a sub-quorum lock (`certifiedUnprepared`, 28979) and lets the new leader relay a
+prepared frame; but `applyLeaderVote` on a `proposed` replica keeps the proposal, so the proposer still cannot sign
+the new leader's frame. Not modelled here (the certificate; see Q-E-2). Recommendation (for the coordinator):
+v1 testnet runs quorum 2 of 3 (or single-signer boards); a 3-of-3 board needs the certificate rule "a proposer that
+records a certificate for a higher view drops its proposal and signature at that height", to be modelled with the
+certificate before any 3-of-3 board is allowed. The finding is checked as a finding (the case expects the failure).
+Bound: one height (the two-height quorum-3 run did not finish in 36 CPU-minutes).
+Source: review of PR #41 round 2 (item 6); xln.ts 28757-28780, 28817-28839, 28975-29050, 29137.
 
 **Q-E-6. View sync after R-E3 (found at two heights).**
 The replica that dropped its proposal installs the other leader's frame but stays in the old view;
@@ -478,6 +588,13 @@ One open HTLC deadline reverts the whole batch at finalize (H1), so a dispute fi
 with other ops: `pick-ops` returns the finalize alone. The contracts already allow one finalization per
 batch (B:16). Planted bug `bundle-finalize`: a deposit is held up by another Account's deadline.
 Source: coordinator decision N2, X:292, xln.ts 2854.
+Round 2 (j8): the H1 boundary is checked one tick either side of the deadline, with and without a public
+secret. A finalize before the deadline and AT the deadline second reverts (the payee has until the deadline,
+inclusive); one tick after lands; a public secret ends the wait at any time. The base page never reveals the
+secret, so the with-secret cases live in `j/configs/public-secret.scm` (`secret-reveals` 1, no abort).
+Properties: "a finalize lands only after the deadline or with the secret public" and "a finalize reverts only
+while the deadline is open and the secret is not public". Planted bugs `h1-at-deadline` (an off-by-one: a
+finalize lands at the deadline second) and `h1-ignores-secret` (the chain waits although the secret is public).
 
 **Q-J-6. Retry and nonce.**
 `retry` resends the sent batch at its own nonce (xln.ts `j_rebroadcast`); the chain refuses any batch
@@ -488,9 +605,10 @@ Reorg below finalized height (`J_HISTORY_FINALIZED_REORG` is a Runtime halt toda
 J-prefix attestation round, Hanko bytes, size and gas limits, several tokens, debt enforcement, watchers.
 Bounds: three ops (deposit, finalize on an Account with an open HTLC deadline, deposit), draft cap 2,
 one abort, time 0..2, deadline 1, no chain faults (`faults` 0). With one fault (the chain drops or
-reverts a batch) the page exceeds the 300 s budget. Capacity: 4891 states, 15651 transitions, about
-2 minutes; the R-J5 bound (one payment batch fails, no abort) is a second config,
-`j/configs/payment-failure.scm`: 4528 states, 13917 transitions, about 100 seconds.
+reverts a batch) the page exceeds the 300 s budget. Capacity (after the 01:16 rules; the signed batch
+now records its clock and secret, so states are finer): 12147 states, 38298 transitions, 11.5 minutes alone; the
+R-J5 bound (one payment batch fails, no abort) is a second config, `j/configs/payment-failure.scm`: 9810 states,
+30151 transitions (not timed alone).
 
 **Q-J-8. A stale or already applied dispute op is skipped, not a revert (R-J2, coordinator 18:57).**
 Before: any op that could not apply reverted the whole batch (Depository.processBatch is atomic and
@@ -549,10 +667,68 @@ nonce once the deadline passed. Properties: "a failed batch takes its nonce" (pa
 the re-queue. Planted bugs: `failure-no-nonce` (revert, no nonce, no event), `ignores-batch-failed`
 (the Entity never re-queues; "can always still finish" fails), `mixed-batch` (R-SPLIT broken);
 `bundle-finalize` (N2) now bundles a finalize with a counter, both dispute ops.
-Not modelled: a Runtime input kind for `BatchFailed` (the Runtime page treats every J fact as a good
-input); a reason code per failing op (the page has one: `reserve`); settlement and reveal ops (the
-page has one payment op, `r1`, and two dispute ops).
+Refinement (coordinator relay, 22:31, from the #54 review), modelled with ops `x1` (a deposit leg,
+externalTokenToReserve) and `stl-a` (a settlement whose counterparty signature is over account epoch 0):
+(1) a batch that carries a deposit leg reverts whole and takes no nonce, like a dispute batch; it never
+soft-fails, so a relayer that makes the token pull fail cannot burn the Entity's nonce. (2) A bad
+counterparty signature inside a batch (a settlement or C2R signed at an old account epoch) is a soft fail:
+`BatchFailed` with reason `signature`, the bad ops named, nonce consumed. Only a failure of the batch's
+own hanko authorisation reverts without taking the nonce. The class is "hard" (dispute ops, deposit legs)
+versus "soft" (payment, settlement, reserve); R-SPLIT is now about the two classes.
+What the Entity does with a bad-signature op (my choice, open): the op is RETURNED to its Account with
+notice instead of re-drafted, because a resend of the same signature fails again; the batch's other ops
+go back to the draft. A fresh signature is the Account's business (a new settlement at the new epoch).
+Properties: "a failed batch of payment, settlement and reserve ops takes its nonce", "a failed batch with a
+deposit leg or a dispute op reverts whole and takes no nonce", "deposit legs and dispute ops never share
+a batch with payment or settlement ops". Bounded run `j/configs/legs-and-signatures.scm` (a deposit leg, a
+reserve deposit, a settlement, one fault, the counterparty moves the epoch once); planted bugs `leg-soft`
+(a deposit-leg batch takes its nonce) and `bad-sig-hard` (a bad signature reverts without the nonce, what
+the contracts do today). Not modelled: a Runtime input kind for `BatchFailed` (the Runtime page treats every J fact as a good
+input); a reason code per failing op (the page has two: `reserve`, `signature`); reveal ops.
 Source: coordinator R-J5, R-SPLIT.
+
+**Q-J-11. Three more J rules (coordinator, 23:42, from the second #54 review): modelled.**
+(1) R-J2 extended: any dispute, reveal or ladder op whose precondition can never hold again is skipped with
+`DisputeOpSkipped` and the batch consumes its nonce. The page now also skips a finalize after a counter landed
+(the finalize was prepared for the initial proof; the counter path needs another op). A TRANSIENT failure (the H1
+deadline wait) still reverts whole, without the nonce.
+(2) R-COSIGN: a batch that carries a co-signed op (a settlement or C2R, `stl-a`) carries only ops of that one
+Account, because a counterparty's state change or a relayer's gas choice can fail it. `pick-ops` sends the
+co-signed op with the ops of its own Account only; the property "a batch with a co-signed op carries ops of that
+one Account only" reads every signed batch. Planted bug `cosign-bundle` (a settlement bundled with another
+Account's reserve deposit).
+(3) Gas (signed budget, coordinator 01:16): the batch carries a signed gas budget. A call that gets less gas than
+the budget is a plain revert: no nonce, no `BatchFailed`, whatever the batch carries. An ERC-1271 member gets a
+fixed gas stipend and the tx hard-reverts if it cannot be given. Once the budget is given, every failure of a
+soft batch is `BatchFailed` with the nonce spent. Property "gas below the signed budget is a plain revert: no
+nonce, no BatchFailed, whatever the batch carries"; the "failed payment batch takes its nonce" property and
+the H1 revert property skip gas reverts. Planted bug `gas-soft` (a gas revert takes the nonce). Bound:
+`j/configs/gas-starvation.scm` (one gas revert, a settlement whose signature can go bad).
+Question for the coordinator: does "every failure is BatchFailed once the budget is given" also cover a HARD batch
+(dispute ops, deposit legs)? The page keeps the earlier rule: a hard batch reverts whole, without the nonce.
+(4) A dispute start carries the Account epoch it was signed for (01:16, `ondeltaEpoch`). At another epoch it is
+skipped with `DisputeOpSkipped` and the nonce is consumed (R-J2 extended: the precondition can never hold again).
+Property "a dispute start lands only at the account epoch it was signed for; on a mismatch it is skipped".
+Planted bug `start-ignores-epoch`. Bound: `j/configs/epoch-start.scm` (an epoch move can land between the
+signing and the batch); 646 states. Also `j/configs/start-then-finalize.scm` (a start and a finalize in one
+batch, so a batch can fail half way); planted bug `partial-apply` uses it.
+(5) Runtime rules the page checks on the Entity's side of the batch (01:16): simulate before signing (a batch
+the chain would refuse is not signed), never sign a time-gated op early (a finalize is signed only after its gate
+opened), and split above the gas cap (`draft-cap`). Config `j/configs/simulate-first.scm` (317 states); planted
+bug `signs-before-gate`: property "a finalize is signed only after its gate opened when the Entity simulates
+first (Runtime rule)". Not checked: the estimator itself (a simulation on a stale head can still fail; that
+failure is the soft path above).
+Source: coordinator 23:42.
+
+**Q-J-12. A deposit leg travels alone (J6, coordinator 00:49): modelled.**
+`pick-ops` puts one deposit leg (`x1`, `x2`, one per token) in a batch of its own, and the Runtime signs a deposit
+batch only after it simulated it successfully. A token paused between the simulation and the landing makes the
+batch revert (a hard revert, no nonce: Q-J-10), and the entity's nonce stalls until the batch lands; that residual
+risk is ACCEPTED by the coordinator. The page's fault on a deposit batch is exactly this case and the batch is
+retried at its nonce. Property "a deposit leg travels alone in its batch (J6)"; bound `j/configs/two-legs.scm`
+(two legs, one fault, 327 states); planted bug `legs-bundled` (two legs in one batch: a paused token reverts the
+other token's deposit too). Not modelled: the simulation itself (a batch the Runtime never signs).
+Source: coordinator J6 (00:49).
 
 ## Runtime (`runtime/tick.scm`)
 
@@ -592,6 +768,11 @@ as "outputs leave only after their WAL row is committed" (planted bug `send-befo
 does not check is equivocation itself: the abstract output is a function of the input, so a
 re-applied input reproduces the same output. Making the state and the timestamp part of the output
 would make that visible. Not done.
+Round 2 (t1/t2): two properties on what the peer holds. "Outputs are received in row order": the peer's copy
+is always a prefix of the WAL's outputs (bug `flush-out-of-order` sends row 2 before row 1). "No committed
+output is forgotten": after a recovery every output of a committed row is still owed to the peer (bug
+`recover-forgets-outputs`). The goal now also requires every WAL output to be received. `:sent` is cleared at a
+crash (what was in flight is lost; only the WAL is durable).
 
 **Q-R-6. Not in the page.**
 The entity-height durability barrier, atomic cross-j pairs, the bounded drain of local commands (cycle
@@ -620,6 +801,11 @@ at one LAG. Planted bug `early-failback`. Source: relay 18:10 R2.
 A dispute H starts on the inbound Account carries every secret H knows for the payee locks of the
 proof it presents (lesson from #37). Choice: the start action publishes them all; a start that leaves
 one out is a spec violation. Planted bug `dispute-omits-secret`. Source: relay 18:10 R3; lessons #37.
+Round 2 (B4): the loss property, "H never pays B without being paid by A: a diligent hub cannot lose", kills the
+omission by itself (config `entity/configs/no-r3-property.scm` drops the R3 property and the bug still fails
+it). The hub starts a dispute only when a secret it knows is visible on the outbound side, and it waits
+`reveal-delay` = 2 x LAG after the start before it may treat the reveal as late (a reveal needs one LAG to
+arrive), so the property is not defeated by a reveal in flight.
 
 **Q-RT-7. MAX_LOCK_HORIZON at the hub (N2, coordinator 21:50).**
 The hub refuses to forward a lock whose inbound or onward deadline is beyond `max-lock-horizon`
@@ -759,3 +945,10 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R-CLOCK** (21:56): see Q-A-9.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
+- **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract
+  always lets LEFT's proposal win, whoever starts or counters. The dispute page has it as the property "two proofs of
+  one nonce and epoch have opposite proposers, and Left's outranks Right's" (killed by the existing
+  `tie-break-inverted`, now caught here before the older "an honest starter never ends on a losing proposal").
+- **J6** (00:49): see Q-J-12. **J2 extended, R-COSIGN, gas starvation** (23:42): see Q-J-11. **J5 refined** (22:31): Q-J-10.
+- **H3** modelled: Q-D-22. **Baselines and a second dispute**: Q-D-21 (open for the coordinator, recommendation given).
+  **Locked phase, quorum 3 of 3**: Q-E-8 (liveness finding, recommendation given).

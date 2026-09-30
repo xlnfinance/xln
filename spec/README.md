@@ -14,12 +14,14 @@ spec/
   lib/vocabulary.scm       `rule` and `property`: how a page names its parts
   lib/check.scm            `check`: breadth-first walk of every reachable world
   account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
-  account/clock.scm        a frame's timestamp carries no authority (R-CLOCK): own clock plus a reserve
+  account/clock.scm        a frame's timestamp carries no authority (R-CLOCK): own clock plus a reserve; a resolve is late by J height only
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
+  money/core.scm           the arithmetic both money pages share: payment, worst-case credit bound, deposit (composition)
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
-  dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, H1/H2
+  dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, settlement, H1-H4
   dispute/bugs/*.scm       planted dispute bugs
+  */configs/*.scm          second bounds and findings: extra files loaded after the page (dispute: retired boards, two disputes, ...)
   entity/consensus.scm     Entity consensus: leader, quorum, own proposal vs certified frame (R-E3)
   entity/bugs/*.scm        planted consensus bugs
   entity/frame.scm         the Entity frame: four phases, one view, hooks before txs, first-touch proposals
@@ -27,7 +29,7 @@ spec/
   runtime/tick.scm         the Runtime tick: apply, commit, flush, crash, replay; what may halt
   runtime/bugs/*.scm       planted Runtime bugs
   entity/routing.scm       a hub forwarding one HTLC: HOP margin (R1), fail-back wait (R2), a dispute publishes every known secret (R3)
-  j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, refusal when full
+  j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, R-J5/R-COSIGN/J6 batch rules, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
   entity-frame.check.scm   entry point: check the Entity frame page

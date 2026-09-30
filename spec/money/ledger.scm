@@ -16,7 +16,9 @@
 ;; dispute/dispute.scm). It defines the ledger transitions and the two properties every other
 ;; page relies on: credit holds, and money is conserved.
 ;;
-;; Needs lib/vocabulary.scm and lib/check.scm.
+;; The arithmetic (payment, credit bound, deposit) lives in money/core.scm, shared with the dispute page.
+;;
+;; Needs lib/vocabulary.scm, lib/check.scm and money/core.scm.
 
 ;; ---- model bounds
 (define/overridable start-reserve (s/number) 2)
@@ -40,12 +42,12 @@
 (define (worst-low w)  (- (total-delta w) (clause-sum w :left)))
 (define (worst-high w) (+ (total-delta w) (clause-sum w :right)))
 (define (rcpan-ok? w)
-  (and (>= (worst-low w) (- (:credit-left w)))
-       (<= (worst-high w) (+ (:collateral w) (:credit-right w)))))
+  (ledger-rcpan-ok? (total-delta w) (clause-sum w :left) (clause-sum w :right)
+                    (:collateral w) (:credit-left w) (:credit-right w)))
 
 ;; ---- transitions: each is a pure function world -> world, taken only when RCPAN still holds
 (define (add-offdelta w payer amount)
-  (update-in w (list :offdelta) (lambda (o) (if (equal? payer :left) (- o amount) (+ o amount)))))
+  (update-in w (list :offdelta) (lambda (o) (ledger-pay o payer amount))))
 
 (define (guarded name enabled? step)
   (rule name (w side)
@@ -84,7 +86,7 @@
 ;; A Left deposit raises ondelta with it: the deposit is Left's allocation (Account.sol:1251-1257).
 (define (move-collateral w side amount)
   (-> w (update-in (list :collateral) (lambda (c) (+ c amount)))
-        (update-in (list :ondelta) (lambda (o) (if (equal? side :left) (+ o amount) o)))
+        (update-in (list :ondelta) (lambda (o) (ledger-deposit-ondelta o side amount)))
         (update-in (list :reserve side) (lambda (r) (- r amount)))))
 (define r2c-rule
   (guarded "r2c 1" (lambda (w side) (>= (get-in w (list :reserve side)) 1)) (lambda (w side) (move-collateral w side 1))))

@@ -69,6 +69,10 @@
     (when (and (:forwarded w) (not (:b-reveal w)) (<= (:now w) (:d-out w))))
     (then (assoc-in w (list :b-reveal) (list mode (:now w))))))
 
+;; A separate reveal after a dispute start costs a second batch: dispute and reveal ops never share a batch
+;; (R-SPLIT) and the Entity keeps one batch in flight, so the reveal is signed after the start's event is
+;; read (one LAG) and lands one LAG after that. R3 is what saves it: the start carries the secret.
+(define (reveal-delay w) (if (:dispute w) (* 2 lag) lag))
 (define claim-off-chain
   (rule "H claims off chain" (w side)
     (when (and (visible-secret? w) (not (:a-silent w)) (not (:claimed w)) (not (:failed-back w)) (<= (:now w) d-in)))
@@ -77,13 +81,13 @@
 (define reveal-on-chain
   (rule "H reveals on chain" (w side)
     (when (and (visible-secret? w) (not (:claimed w)) (not (:failed-back w)) (not (:h-public-at w))))
-    (then (assoc-in w (list :h-public-at) (+ (:now w) lag)))))
+    (then (assoc-in w (list :h-public-at) (+ (:now w) (reveal-delay w))))))
 
 ;; R3: the start carries every secret H knows for the payee locks
 (define (start-publishes w) (cond ((:h-public-at w) (:h-public-at w)) ((visible-secret? w) (+ (:now w) lag)) (else #f)))
 (define start-dispute
   (rule "H starts a dispute on the inbound Account" (w side)
-    (when (and (:forwarded w) (not (:dispute w)) (not (:claimed w)) (not (:failed-back w))))
+    (when (and (:forwarded w) (not (:dispute w)) (not (:claimed w)) (not (:failed-back w)) (visible-secret? w)))
     (then (-> w (assoc-in (list :dispute) (list (:now w) (visible-secret? w)))
                 (assoc-in (list :h-public-at) (start-publishes w))))))
 
@@ -93,6 +97,9 @@
                (failback-ok? w) (not (visible-secret? w))))
     (then (assoc-in w (list :failed-back) #t))))
 
+;; POLICY, stated: H starts a dispute on the inbound Account to CLAIM the payee lock, so only once it
+;; sees the secret (a hub that disputes earlier can lose to the serial batches above; not the rule's
+;; concern here).
 ;; H's duty: it sees the secret and has neither claimed nor published nor given up
 (define (h-on-duty? w)
   (and (visible-secret? w) (not (:claimed w)) (not (:h-public-at w)) (not (:failed-back w)) (<= (:now w) d-in)))

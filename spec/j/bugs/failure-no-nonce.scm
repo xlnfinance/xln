@@ -3,4 +3,4 @@
 ;; above it would wait for a nonce the chain never reaches.
 (define (fail-batch w b fault?)
   (update-in w (list :failures)
-             (lambda (r) (append r (list (dict :ops (:ops b) :now (:now w) :nonce (:nonce b) :dispute? #f :stale-only? #f))))))
+             (lambda (r) (append r (list (dict :ops (:ops b) :now (:now w) :nonce (:nonce b) :took? #f :bad (list) :gas #f :secret (:secret w) :stale-only? #f))))))
