@@ -1,0 +1,18 @@
+{
+  "no-assign-member": "export const a = (o: { k: number }) => { o.k = 1; };\n",
+  "no-class": "export class C {}\n",
+  "no-comma-sequence": "export const a = (1, 2);\n",
+  "no-let": "export let a = 1;\n",
+  "no-loop": "export const a = () => { while (true) { break; } };\n",
+  "no-mutating-call": "export const a = (xs: number[]) => xs.push(1);\n",
+  "no-nested-ternary": "export const a = (x: number) => (x === 1 ? 1 : x === 2 ? 2 : 3);\n",
+  "no-og-source-ref": "// see core/foo.ts:12\nexport const a = 1;\n",
+  "no-problems-list": "export const a = (x: number) => [x > 1 ? 1 : undefined].filter((p) => p !== undefined);\n",
+  "no-string-error": "export type R = Result<number, string>;\n",
+  "no-throw": "export const a = () => { throw new Error(\"x\"); };\n",
+  "no-try": "export const a = () => { try { return 1; } catch (e) { return 2; } };\n",
+  "no-unknown-cast": "export const a = 1 as unknown as string;\n",
+  "no-boolean-param": "export const a = (mode: boolean) => mode;\n",
+  "no-literal-arg": "export const a = () => encode(1, true);\n",
+  "og-named": "export const ogThing = 1;\n"
+}
