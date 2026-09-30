@@ -14,11 +14,11 @@ import type {
   ContractDeployTransaction,
   ContractRunner,
 } from "ethers";
-import type { NonPayableOverrides } from "../../common";
+import type { NonPayableOverrides } from "../../../common";
 import type {
   MisbehavingShareDepository,
   MisbehavingShareDepositoryInterface,
-} from "../../mocks/MisbehavingShareDepository";
+} from "../../../mocks/fault/MisbehavingShareDepository";
 
 const _abi = [
   {

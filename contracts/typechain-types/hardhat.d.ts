@@ -110,6 +110,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ERC1271Mock__factory>;
     getContractFactory(
+      name: "MisbehavingShareDepository",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.MisbehavingShareDepository__factory>;
+    getContractFactory(
       name: "FeeOnTransferERC20",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.FeeOnTransferERC20__factory>;
@@ -117,10 +121,6 @@ declare module "hardhat/types/runtime" {
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadderHarness__factory>;
-    getContractFactory(
-      name: "MisbehavingShareDepository",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.MisbehavingShareDepository__factory>;
     getContractFactory(
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -287,6 +287,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ERC1271Mock>;
     getContractAt(
+      name: "MisbehavingShareDepository",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.MisbehavingShareDepository>;
+    getContractAt(
       name: "FeeOnTransferERC20",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -296,11 +301,6 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.HashLadderHarness>;
-    getContractAt(
-      name: "MisbehavingShareDepository",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.MisbehavingShareDepository>;
     getContractAt(
       name: "MockEntityProvider",
       address: string | ethers.Addressable,
@@ -454,6 +454,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC1271Mock>;
     deployContract(
+      name: "MisbehavingShareDepository",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.MisbehavingShareDepository>;
+    deployContract(
       name: "FeeOnTransferERC20",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.FeeOnTransferERC20>;
@@ -461,10 +465,6 @@ declare module "hardhat/types/runtime" {
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadderHarness>;
-    deployContract(
-      name: "MisbehavingShareDepository",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MisbehavingShareDepository>;
     deployContract(
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -631,6 +631,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC1271Mock>;
     deployContract(
+      name: "MisbehavingShareDepository",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.MisbehavingShareDepository>;
+    deployContract(
       name: "FeeOnTransferERC20",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -640,11 +645,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadderHarness>;
-    deployContract(
-      name: "MisbehavingShareDepository",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.MisbehavingShareDepository>;
     deployContract(
       name: "MockEntityProvider",
       args: any[],

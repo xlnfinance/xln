@@ -3,6 +3,8 @@
 /* eslint-disable */
 import type * as noReturnErc20MockSol from "./NoReturnERC20Mock.sol";
 export type { noReturnErc20MockSol };
+import type * as fault from "./fault";
+export type { fault };
 import type * as token from "./token";
 export type { token };
 export type { DepositoryDebtHarness } from "./DepositoryDebtHarness";
@@ -10,7 +12,6 @@ export type { ERC1271Mock } from "./ERC1271Mock";
 export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness";
 export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";
 export type { HashLadderHarness } from "./HashLadderHarness";
-export type { MisbehavingShareDepository } from "./MisbehavingShareDepository";
 export type { MockEntityProvider } from "./MockEntityProvider";
 export type { MockRevealRegistry } from "./MockRevealRegistry";
 export type { SupplyLivenessHarness } from "./SupplyLivenessHarness";
