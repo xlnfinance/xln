@@ -85,6 +85,7 @@ module chain {
     nonceBack: bool,      // the stored nonce went down
     appliedTwice: bool,   // one arena record settled twice
     freeDebt: bool,       // debt was booked while its debtor still had spendable reserve
+    debtBesideReserve: bool,   // a payout that booked debt left its debtor holding reserve: an older debt was not enforced first (`enforce` before every outflow)
     xWasOffline: bool,    // the honest party was offline while the current dispute was active (then it may lose); reset when it ends
     lostByAbsence: bool,  // some dispute settled a proof the honest party did not stand behind while it was absent (the exclusion is not vacuous)
     payBad: bool,         // a finalize paid something other than what the proof and the secret evidence are worth (see `netOf`)
@@ -100,7 +101,7 @@ module chain {
   }
 
   pure val NO_GHOST: Ghost = {
-    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, xWasOffline: false,
+    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, debtBesideReserve: false, xWasOffline: false,
     lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
     nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
   }
@@ -567,6 +568,7 @@ module chain {
         nonceBack: ghost.nonceBack or newNonce < acct.nonce,
         appliedTwice: ghost.appliedTwice or applied.get(useId),
         freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > m2.debt.get(debtorOf(d))),
+        debtBesideReserve: ghost.debtBesideReserve or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > 0),
         xWasOffline: false,                                    // per dispute: the next one is judged afresh
         lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, useId))),
         payBad: ghost.payBad or not(payOk),
@@ -633,6 +635,8 @@ module chain {
 
   // Debt is only what a payout could not cover: it is never booked while the debtor could still pay.
   val debt_only_when_broke: bool = not(ghost.freeDebt)
+  // Enforcement comes first: after a payout that leaves debt, the debtor holds no reserve at all (an older debt was paid out of it before the new shortfall was measured).
+  val debt_means_broke: bool = not(ghost.debtBesideReserve)
 
   // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
   // exactly what it says. Whatever is paid at once and whatever is booked as debt, the amounts are the proof's and the secret evidence's.
@@ -652,7 +656,7 @@ module chain {
   val nonce_rules: bool = not(ghost.nonceBad)
 
   val safe: bool = and {
-    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke,
+    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke,
     pay_exact, deposit_exact, windows_frozen, closes_on_time, nonce_rules
   }
 

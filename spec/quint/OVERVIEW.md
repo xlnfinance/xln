@@ -67,10 +67,10 @@ clause waits for the deadline (H1). The honest side answers within `REACT`; an a
 
 Properties: `p1_allowed` (what settles is a proof the honest side consented to or holds as its own latest), `p1_clause` (an honest
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
-`no_double_settle`, `debt_only_when_broke`, and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
+`no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor holds no reserve: the older debt was enforced first), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_frozen` (N3: one set of windows per Account, over unequal windows),
 `closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-31 scenario tests, 48 mutants.
+34 scenario tests, 50 mutants.
 
 ## Settlement (`settle.qnt`)
 

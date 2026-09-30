@@ -388,6 +388,22 @@
       "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
       "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: false }, acct' = acct,",
       "killedBy": "test:deadEpochSkipLeavesALiveDisputeAloneTest"
+    },
+    {
+      "id": "shortfall-skips-enforce",
+      "why": "a payout's shortfall is measured without first paying the older debt out of the reserve: the debtor keeps reserve beside a growing debt",
+      "file": "chain.qnt",
+      "old": "    val m = enforce(m0, debtor)\n    val pay",
+      "new": "    val m = m0\n    val pay",
+      "killedBy": "test:olderDebtIsEnforcedBeforeAShortfallTest"
+    },
+    {
+      "id": "spendable-ignores-debt",
+      "why": "spendable reserve is the whole reserve, not the reserve net of outstanding debt",
+      "file": "chain.qnt",
+      "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
+      "new": "pure def spendable(m: Money, s: Side): int = m.res.get(s)",
+      "killedBy": "test:spendableIsReserveNetOfDebtTest"
     }
   ]
 }

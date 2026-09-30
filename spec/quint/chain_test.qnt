@@ -300,4 +300,43 @@ module chain_test {
     .expect(and { dispute.on, acct.epoch == 1 })
     .then(startAtDeadEpoch(Right, 4))
     .expect(and { dispute.on, acct.epoch == 1, acct.nonce == 6, acct.ondelta == 0, ghost.staleSkips == 1 })
+
+  // ---- debt is enforced before an outflow (Depository._enforceDebts) -------------------------------------------------------
+
+  // A hand-made history: `s` holds `res` of reserve and owes `debt` to the other side (debt is a lazy claim: it was booked earlier, and reserve arrived since).
+  action withDebt(s: Side, res: int, debt: int): bool = all {
+    money' = { res: money.res.set(s, res), debt: money.debt.set(s, debt) },
+    total' = total - money.res.get(s) + res,
+    arena' = arena, honest' = honest, now' = now, acct' = acct, dispute' = dispute, registry' = registry, knows' = knows,
+    offline' = offline, applied' = applied, ghost' = ghost
+  }
+
+  // Left owes 1 and holds 2; a payout then leaves it 3 short. The old debt is paid out of the reserve first (1 to Right), then the reserve left (1) covers part of the new
+  // shortfall, and the rest (2) is booked: Left ends with nothing and owes 2, Right holds the collateral (1), the old debt (1) and the part paid (1).
+  // Without the enforcement Left would keep 1 of reserve and owe 3.
+  run olderDebtIsEnforcedBeforeAShortfallTest =
+    initFrom(BASE.set(1, pf(1, true, -3, true, true)), Left, 0, 0, 1)
+    .then(withDebt(Left, 2, 1))
+    .then(honestStart)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and {
+      money.res == Map(Left -> 0, Right -> 3),
+      money.debt == Map(Left -> 2, Right -> 0),
+      not(ghost.debtBesideReserve), debt_means_broke, safe
+    })
+
+  // Spendable reserve is reserve net of outstanding debt, never below zero (Depository._spendableReserve): the helper is pinned to the contract's definition.
+  pure val OWES_SOME: Money = { res: Map(Left -> 2, Right -> 5), debt: Map(Left -> 1, Right -> 0) }
+  pure val OWES_ALL: Money = { res: Map(Left -> 1, Right -> 0), debt: Map(Left -> 3, Right -> 0) }
+  run spendableIsReserveNetOfDebtTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .expect(and { spendable(OWES_SOME, Left) == 1, spendable(OWES_SOME, Right) == 5, spendable(OWES_ALL, Left) == 0 })
+
+  // Everything Left holds is owed: it cannot move any of it into the collateral.
+  run reserveThatIsOwedCannotBeDepositedTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withDebt(Left, 2, 2))
+    .then(r2c(Left, Left, 1))
+    .fail()
 }

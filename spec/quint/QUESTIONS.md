@@ -609,3 +609,10 @@ early gated batch and keeps the nonce), mutants `signs-before-gate`, `chain-igno
 so `SPLIT_AT_CAP` is not exercised by the search; the tests inject an over-cap batch to show what the chain does with it.
 (5) **Dispute start carries `ondeltaEpoch`** and is skipped on a mismatch (chain.qnt `startAtDeadEpoch`, ghost `staleSkips`, `deadEpochStartIsSkippedTest`, mutant `dead-epoch-start-applies`). The proof's own
 epoch is still checked (C1); the op-level epoch is the same fact where the Entity can read it as a skip. It is a stutter on chain state by design: nothing moves, the nonce stays.
+
+**C-debt. Debt is enforced before an outflow (final review, carried from the first review; closed 2026-09-30).** `Depository._enforceDebts` runs before R2R, R2C, R2E and `_settleShortfall`, and spendable reserve is
+reserve net of outstanding debt. Two chain mutants survived for two rounds because every property is stated on net worth, and enforcing a debt moves nothing in net worth. They are killed now:
+`shortfall-skips-enforce` by `olderDebtIsEnforcedBeforeAShortfallTest` (Left owes 1 and holds 2, then a payout leaves it 3 short: with enforcement Left ends with 0 and owes 2, without it Left keeps 1 and owes 3)
+and by the new ghost and property `debt_means_broke` (after a payout that leaves debt the debtor holds no reserve); `spendable-ignores-debt` by `spendableIsReserveNetOfDebtTest`, which pins the helper to the contract's
+definition. **Stated plainly:** the second is behaviourally equivalent inside the model, because `spendable` is only ever read on money that `enforce` has just cleaned (after enforcement the spendable reserve is the reserve), so
+the test pins the helper and not an outcome; `reserveThatIsOwedCannotBeDepositedTest` shows the outcome (a side whose whole reserve is owed cannot deposit it). The scenario test is the evidence for `debt_means_broke`; I have not established that simulation reaches an older debt within 16 steps (a run with the mutant planted timed out under load, so it is unmeasured).
