@@ -428,7 +428,9 @@ is the machine, not #54; run on a faster one or raise the timeout for that test.
 
 ### Shim budget pin
 
-`pure/diff/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits; the walk's largest has 3.
+`pure/diff/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits by that bound (conservative: the first reviewer measured a real limit of about 38); the walk's largest has 3.
+
+**Measured need (instrument on the BrowserVM submit, not committed):** whole `processBatch` execution gas, prelude included, over the four area walks (disputes, settlement, core, boards; 3 seeds each), `scenario.test.ts` and `scenario-cross-j.test.ts`: the largest is **396,485**, most batches about 376,000. The 14,000,000 budget is a ceiling about 35 times that need, chosen to fit og's fixed 15,000,000 tx gas, not a margin measured from the walks.
 
 ## Swallowed failures (fifth pass; stacked on #54)
 
