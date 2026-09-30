@@ -573,14 +573,20 @@ applied in order with the others, exactly once, across crashes (R2), and the fra
 the board's own consensus (v2: boards), the network beyond "a peer resends until acked", storage cost, and the offline Entity: a
 Runtime that is down misses windows, which chain.qnt models as `offline` (the honest party can lose).
 
+**J6a. NAMED DECISION: a token failure in a deposit leg is a hard revert and takes no nonce (`DEP_SOFT_FAILS = false`) (coordinator, 2026-09-30).** The rule "once the budget is given,
+every failure is `BatchFailed` with the nonce spent" covers gas failures (J7) and every non-deposit op. It does not reach a token failure inside a deposit leg. Reason: a deposit
+pulls the tokens from `msg.sender`, the relayer. If a token failure spent the nonce, a relayer with no allowance (or one that submits while the token is paused) could burn the
+Entity's nonce at will, which is the original #54 bug. So a batch with a deposit leg that fails on the token reverts whole and leaves its nonce open. The cost is the J6 stall (a token
+paused after the signing holds every batch above it, urgent ops included), which stays accepted. This is a decision, not an oversight: `dep_never_burns`, mutant `deposit-batch-soft-fails`,
+`failedDepositBatchRevertsWholeTest`. A gas failure inside a deposit batch is different (J7 (2)): the budget was given, so it spends the nonce like any other.
+
 **J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
 (1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the
 transaction and takes no nonce (`starve`, `underBudgetRelayerTakesNoNonceTest`, `no_burn`, mutant `no-gas-guard`). Once the budget is given every failure is `BatchFailed` with the nonce
 spent, out-of-gas and gas-burning callees included: `gasFail` (`gasFailInsideTheBudgetSpendsTheNonceTest`, mutants `gas-fail-keeps-the-nonce`, `gas-fail-not-read`). The Entity reads the event and
 signs what is still owed at a fresh nonce; an urgent op goes back into the draft at once (`gasFailOnAnUrgentBatchIsSignedAgainTest`).
-(2) **Choice I made:** "every failure" is read to cover an urgent batch too, and a batch with a deposit leg. A gas failure spends the nonce for all of them, and a token that stops
-working after signing (J6) still reverts the deposit batch whole and keeps the nonce, because that is not a gas failure. If the intent was that deposit batches also spend the nonce on a
-token failure, `DEP_SOFT_FAILS` is the switch and J6's stall disappears.
+(2) **Confirmed by the coordinator (2026-09-30):** "every failure" covers an urgent batch too, and a gas failure of a batch with a deposit leg. A token that stops working after signing (J6) still
+reverts the deposit batch whole and keeps the nonce; see J6a for the reason.
 (3) **Residual (`gasMissed`, witness `w_no_gas_missed`).** A callee that passes the Runtime's simulation and then burns the budget at the landing spends the nonce; if the burnt op is urgent, its retry
 costs a round and can pass its deadline. It is recorded apart from `missed`, like `hostage` (J6): no Entity behaviour can help, and only an urgent op with an external callee (a dispute op that
 verifies a counterparty board's ERC-1271 member) can be hit; a reveal makes no external call. The model is coarser (any batch), and `GAS_FAILS_MAX = 1` per run.

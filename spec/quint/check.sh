@@ -11,11 +11,30 @@ Q=./node_modules/.bin/quint
 SAMPLES=${SAMPLES:-500}
 MODULES=${MODULES:-account chain settle entity jbatch runtime}
 
+# quint test runs only the `run` definitions whose name ends in Test. A `run` without the suffix never executes and passes for ever, so
+# every file must declare only Test-suffixed runs, and the number of tests that ran must equal the number declared (an assertion with
+# nothing to check is a trap).
+run_tests() {
+  local f=$1
+  local bad declared out ran
+  bad=$(grep -E '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]+' "$f" | grep -vE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' || true)
+  if [ -n "$bad" ]; then
+    echo "FAIL $f: a run without the Test suffix never executes:"; echo "$bad"; exit 1
+  fi
+  declared=$(grep -cE '^[[:space:]]*run[[:space:]]+[A-Za-z0-9_]*Test\b' "$f" || true)
+  out=$($Q test "$f" --backend typescript --max-samples 10 2>&1) || { echo "$out"; exit 1; }
+  echo "$out" | tail -3
+  ran=$(echo "$out" | grep -cE '^[[:space:]]+ok ' || true)
+  if [ "$ran" != "$declared" ]; then
+    echo "FAIL $f: $declared tests declared, $ran ran"; exit 1
+  fi
+}
+
 echo "== params: the numbers the layers share"
-$Q test params_test.qnt --backend typescript
+run_tests params_test.qnt
 
 echo "== compose: what the Account layer co-signs, settled by the chain's payout"
-$Q test compose.qnt --backend typescript --max-samples 10
+run_tests compose.qnt
 
 for m in $MODULES; do
   echo "== $m: typecheck"
@@ -31,7 +50,7 @@ for m in $MODULES; do
   $Q typecheck "$m.qnt"
   if [ -f "${m}_test.qnt" ]; then
     echo "== $m: scenario tests"
-    $Q test "${m}_test.qnt" --backend typescript --max-samples 10
+    run_tests "${m}_test.qnt"
   fi
   echo "== $m: invariant '$inv' over $SAMPLES traces of $steps steps"
   $Q run "$m.qnt" --backend typescript --init $init --step $step --invariant $inv --max-steps $steps --max-samples "$SAMPLES" --seed 0x1 --verbosity 1 \

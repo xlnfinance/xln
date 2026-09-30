@@ -41,7 +41,7 @@ dispute ops in a batch (J2), a failed batch that takes its nonce (J5, with the d
 | `OVERVIEW.md` | the spec in one read: layers, data flow, state machines, properties, what it asks of the contracts |
 | `QUESTIONS.md` | every unclear point, the options, the choice made, the source |
 | `PROGRESS.md` | what is done per layer and what is next, for a successor after a context reset |
-| `check.sh` | everything that must pass before a change |
+| `check.sh` | everything that must pass before a change (it also fails on a `run` without the `Test` suffix, which `quint test` would skip) |
 
 ## Running
 

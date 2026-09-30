@@ -18,7 +18,7 @@ Handoff format: what is done per layer, what is next, how to pick up.
 
 Everything below was run on the head this file is committed with. `MUTANT_*` settings are the `mutants/run.py` environment.
 
-- `./check.sh` from `spec/quint/` (all modules, `SAMPLES=500`): params 3 tests, compose 3 tests; per module typecheck, scenario tests, `safe` by simulation, witnesses each violated.
+- `./check.sh` from `spec/quint/` (all modules, `SAMPLES=500`): params 3 tests, compose 3 tests; every test file must declare only `Test`-suffixed runs and the count that ran must equal the count declared (a run without the suffix never executes: `check.sh` fails on it); per module typecheck, scenario tests, `safe` by simulation, witnesses each violated.
 - Account: 36 scenario tests, `safe` (credit_holds, agreed, no_equivocation, both_signed, no_bad_accept, authority, nonce_climbs) over 1500 traces of 40 steps, 8 witnesses reached.
   `MUTANT_STEPS=40 MUTANT_SAMPLES=1500 python3 mutants/run.py account`: 44 of 44 killed (25 by scenario test, 19 by invariant).
 - Chain: 29 scenario tests, `safe` (11 properties) over traces of 16 steps, all witnesses reached. `MUTANT_STEPS=16 MUTANT_SAMPLES=1500 python3 mutants/run.py chain`: 46 of 46 killed (24 by scenario test, 22 by invariant;
