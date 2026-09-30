@@ -61,11 +61,18 @@ export const shippedDepositoryAbi = shipped[1]!["abi"] as readonly unknown[];
  * og's own decoding then compares the fork with itself. `load` evaluates a fresh copy of the module (an import with
  * its own query string) while the shipped set is installed; the set that was chosen is put back afterwards.
  */
-export const withShippedOg = async <T>(load: () => Promise<T>): Promise<T> => {
+export const withShippedOg = <T>(load: () => Promise<T>): Promise<T> => {
   installContracts("jurisdictions");
-  const loaded = await load().finally(() => installContracts(contractSet()));
-  return loaded;
+  return load().finally(() => installContracts(contractSet()));
 };
+
+/** og's dispute-evidence decoders (rpc-public) read the Depository interface once, at import. */
+export type RpcPublic = typeof import("../../core/jurisdiction/adapter/rpc-public.ts");
+export const RPC_PUBLIC = "../../core/jurisdiction/adapter/rpc-public.ts";
+
+/** A fresh copy of og's rpc-public, made while the shipped ABI is installed. */
+export const loadShippedRpcPublic = (): Promise<RpcPublic> =>
+  withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as RpcPublic);
 
 // Before og's modules load: some of them make their interfaces once, at import.
 installContracts();
