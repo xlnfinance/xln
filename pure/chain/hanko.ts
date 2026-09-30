@@ -8,7 +8,8 @@ import { A, arrayOf, encode, type Abi, type AbiFault } from "../kernel/abi.ts";
 import { bytesToHex, concat, hexToBytes, keccakHex } from "../kernel/bytes.ts";
 import { err, flatMap, map, ok, type Result } from "../kernel/result.ts";
 import { HALF_ORDER, addressOf, recoverPublicKey } from "../kernel/signature.ts";
-import type { Tagged } from "../kernel/tagged.ts";
+import { none, some, type Option } from "../kernel/option.ts";
+import { match, type Tagged } from "../kernel/tagged.ts";
 import { wordAt } from "../kernel/abi-read.ts";
 
 export type Delays = Readonly<{ boardChangeDelay: bigint; controlChangeDelay: bigint; dividendChangeDelay: bigint }>;
@@ -91,10 +92,10 @@ export const packSignatures = (sigs: readonly PackableSignature[]): Result<Uint8
 };
 
 /** How many signatures a packed blob of this length holds; nothing when no count fits exactly. */
-export const packedCount = (byteLength: number): number | null => {
-  if (byteLength === 0) return 0;
+export const packedCount = (byteLength: number): Option<number> => {
+  if (byteLength === 0) return some(0);
   const count = Math.floor((byteLength * 8) / 513);
-  return count === 0 || count * 64 + Math.ceil(count / 8) !== byteLength ? null : count;
+  return count === 0 || count * 64 + Math.ceil(count / 8) !== byteLength ? none : some(count);
 };
 
 export type UnpackedSignature = Readonly<{ r: Uint8Array; s: Uint8Array; recoveryBit: number }>;
@@ -125,7 +126,7 @@ export const recoverRawSigner = (digest: string, signature: string): Result<stri
   const s = raw.value.subarray(32, 64);
   if (!isLowS(s)) return err({ _tag: "high_s" });
   const key = recoverPublicKey(hash.value, raw.value.subarray(0, 32), s, bit);
-  return key === null ? err({ _tag: "no_signer" }) : ok(addressOf(key));
+  return match(key, { some: ({ value }) => ok(addressOf(value)), none: () => err({ _tag: "no_signer" }) });
 };
 
 export type LazyHankoFault = Tagged<"not_65_bytes" | "bad_recovery"> | PackFault | AbiFault;

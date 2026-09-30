@@ -45,8 +45,6 @@ export const abiBytesElement = (buf: Uint8Array, l: AbiLength, i: number): AbiLe
   lengthAt(l + WORD + Number(wordAt(buf, itemAt(l, i))));
 export const abiTupleElement = (buf: Uint8Array, l: AbiLength, i: number): AbiTuple =>
   tupleAt(l + WORD + Number(wordAt(buf, itemAt(l, i))));
-export const abiInlineTuple = (l: AbiLength, i: number, stride: number): AbiTuple =>
-  tupleAt(l + WORD + i * stride);
 export const abiStaticWord = (buf: Uint8Array, l: AbiLength, i: number): bigint =>
   wordAt(buf, itemAt(l, i));
 export const abiStaticBytes = (buf: Uint8Array, l: AbiLength, i: number): Uint8Array =>

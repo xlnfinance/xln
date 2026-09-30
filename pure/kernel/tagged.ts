@@ -12,7 +12,7 @@ export type Of<T extends { readonly _tag: string }, K extends T["_tag"]> =
   Extract<T, { readonly _tag: K }>;
 
 /** The closing arm of a `switch` over a union: it only type checks when every member has a case above it. */
-export const assertNever = (x: never): never => {
+const assertNever = (x: never): never => {
   throw new Error(`unreachable: ${String(x)}`);
 };
 

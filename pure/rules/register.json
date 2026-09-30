@@ -308,7 +308,22 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-J2 proof body (HankoCodec.proofBodyHash)"
+     "name": "R-J2 Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCooperativeUpdate)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 batch payload (HankoEncoding.encodeBatch) and the hashes the Depository emitted"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 transformer clause payload (DeltaTransformer.encodeBatch)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 dispute hashes (Account.sol, HankoCodec)"
     }
    ]
   },

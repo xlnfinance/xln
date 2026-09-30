@@ -1,16 +1,23 @@
 // Verifying a Hanko: who signed, which Entity the signatures speak for, and whether a board may speak for it.
 //
-// The checks run in the order the contract runs them, so the first refusal named here is the first one the contract
-// would revert with. A claim's board is checked against a registry the caller supplies (`BoardAuthorizer`): this
-// module knows the rules of a Hanko, not where boards are registered.
+// The verdict (accepted or refused) is what the contract gives, with two departures that only ever refuse more: a
+// Hanko whose bytes are not the canonical spelling is refused (`non_canonical`), and so is any member signature
+// (`member_signature`): the contract lets an ERC-1271 contract placeholder vote, this verifier does not, which suits
+// v1 boards (1-of-1 or 2-of-3 of plain keys, D10). Which refusal is named first is this module's own order, not a
+// claim about the contract's revert reason. A claim's board is checked against a registry the caller supplies
+// (`BoardAuthorizer`), which has no `currentOnly` switch: the Entity layer supplies one authorizer per use (batch
+// authentication takes the current board only, dispute evidence also the retired boards that still live).
 import { abiBytes, abiBytesElement, abiCursorOk, abiFits, abiLengthRef, abiLengthWord, abiRoot, abiStaticBytes,
   abiStaticWord, abiTupleBytes, abiTupleElement, abiTupleRef, abiWord, type AbiLength, type AbiTuple,
 } from "../kernel/abi-read.ts";
 import type { AbiFault } from "../kernel/abi.ts";
 import { bytesToHex, hexToBytes } from "../kernel/bytes.ts";
-import { err, everyResult, flatMap, foldResult, map, mapAccum, ok, traverse, type Result } from "../kernel/result.ts";
+import { none, orElse, some, type Option } from "../kernel/option.ts";
+import {
+  err, everyResult, flatMap, foldResult, map, mapAccum, mapErr, ok, traverse, type Result,
+} from "../kernel/result.ts";
 import { addressOf, recoverPublicKey } from "../kernel/signature.ts";
-import type { Tagged } from "../kernel/tagged.ts";
+import { match, type Tagged } from "../kernel/tagged.ts";
 import {
   addressAsId, boardHash, encodeHanko, isLowS, isZeroWord, lazyEntityId, packedCount, paddingClear,
   recoverRawSigner, unpackSignature, type Hanko, type HankoClaim, type RawFault,
@@ -48,6 +55,11 @@ const ADDRESS_MAX = (1n << 160n) - 1n;
 const refuse = (tag: HankoFault["_tag"]): Result<never, HankoFault> => err({ _tag: tag } as HankoFault);
 const unique = (xs: readonly string[]): boolean => new Set(xs).size === xs.length;
 const WORD_TEXT = /^0x[0-9a-f]{64}$/i;
+const EVEN_HEX = /^0[xX](?:[0-9a-fA-F]{2})*$/;
+
+/** The bytes of `text` when it has the expected shape, and the named refusal when it has not. */
+const hexBytes = (text: string, shape: RegExp, fault: HankoFault["_tag"]): Result<Uint8Array, HankoFault> =>
+  shape.test(text) ? mapErr(hexToBytes(text), () => ({ _tag: fault }) as HankoFault) : refuse(fault);
 const isAddressId = (id: string): boolean => {
   const v = BigInt(id);
   return v > 0n && v <= ADDRESS_MAX;
@@ -65,11 +77,11 @@ const wordsAt = (buf: Uint8Array, at: AbiTuple, slot: number): Result<bigint[], 
   return listOf(buf, list, (i) => abiStaticWord(buf, list, i));
 };
 
-/** The claim at a cursor; nothing when the cursor itself is out of range, which makes the whole Hanko empty. */
-const decodeClaim = (buf: Uint8Array, at: AbiTuple): Result<HankoClaim, HankoFault> | null => {
-  if (!abiCursorOk(at)) return null;
-  const claimOf = (entityIndexes: bigint[], weights: bigint[]): Result<HankoClaim, HankoFault> =>
-    ok({
+/** The claim at a cursor; none when the cursor itself is out of range, which makes the whole Hanko empty. */
+const decodeClaim = (buf: Uint8Array, at: AbiTuple): Result<Option<HankoClaim>, HankoFault> => {
+  if (!abiCursorOk(at)) return ok(none);
+  const claimOf = (entityIndexes: bigint[], weights: bigint[]): Result<Option<HankoClaim>, HankoFault> =>
+    ok(some({
       entityId: bytesToHex(abiTupleBytes(buf, at, 0)),
       entityIndexes,
       weights,
@@ -77,7 +89,7 @@ const decodeClaim = (buf: Uint8Array, at: AbiTuple): Result<HankoClaim, HankoFau
       boardChangeDelay: abiWord(buf, at, 128),
       controlChangeDelay: abiWord(buf, at, 160),
       dividendChangeDelay: abiWord(buf, at, 192),
-    });
+    }));
   return flatMap(wordsAt(buf, at, 32), (indexes) =>
     flatMap(wordsAt(buf, at, 64), (weights) => claimOf(indexes, weights)));
 };
@@ -94,10 +106,9 @@ const decodeHanko = (buf: Uint8Array): Result<Hanko, HankoFault> => {
   const placeholders = listOf(buf, placeholdersAt, (i) => bytesToHex(abiStaticBytes(buf, placeholdersAt, i)));
   return flatMap(placeholders, (placeholders) =>
     flatMap(listOf(buf, claimsAt, (i) => decodeClaim(buf, abiTupleElement(buf, claimsAt, i))), (decoded) => {
-      const firstBad = decoded.find((c) => c === null || !c.ok);
-      if (firstBad === null) return ok(EMPTY_HANKO);
-      if (firstBad !== undefined && !firstBad.ok) return firstBad;
-      const claims = decoded.flatMap((c) => (c !== null && c.ok ? [c.value] : []));
+      const firstStop = decoded.find((c) => !c.ok || c.value._tag === "none");
+      if (firstStop !== undefined) return firstStop.ok ? ok(EMPTY_HANKO) : firstStop;
+      const claims = decoded.flatMap((c) => (c.ok && c.value._tag === "some" ? [c.value.value] : []));
       const members = listOf(buf, membersAt, (i) => abiBytes(buf, abiBytesElement(buf, membersAt, i)));
       return flatMap(members, (memberSignatures): Result<Hanko, HankoFault> =>
         ok({ placeholders, packedSignatures: abiBytes(buf, signaturesAt), claims, memberSignatures }));
@@ -109,10 +120,11 @@ const decodeHanko = (buf: Uint8Array): Result<Hanko, HankoFault> => {
 /** The contract's size limits, checked claim by claim so the first oversized claim is the one named. */
 const withinLimits = (h: Hanko): Result<void, HankoFault> => {
   const members = h.memberSignatures;
-  const signatures = packedCount(h.packedSignatures.length);
+  const counted = packedCount(h.packedSignatures.length);
   if (members.length !== 0 && members.length !== h.placeholders.length) return refuse("member_signatures_shape");
   if (members.filter((s) => s.length > 0).length > MAX_MEMBER_SIGNATURES) return refuse("too_large");
-  if (signatures === null) return refuse("packed_length");
+  if (counted._tag === "none") return refuse("packed_length");
+  const signatures = counted.value;
   const entities = h.placeholders.length + signatures + h.claims.length;
   const tooMany = h.claims.length > MAX_CLAIMS || entities > MAX_ENTITIES
     || h.placeholders.length > MAX_ENTITIES || signatures > MAX_ENTITIES;
@@ -121,13 +133,12 @@ const withinLimits = (h: Hanko): Result<void, HankoFault> => {
     const total = sum + c.entityIndexes.length;
     return [total, total] as const;
   });
-  const issueOf = (c: HankoClaim, i: number): readonly (HankoFault["_tag"] | undefined)[] => {
+  const claimWithinLimits = (c: HankoClaim, i: number): Result<void, HankoFault> => {
     const n = c.entityIndexes.length;
-    const badShape = n === 0 || n !== c.weights.length || n > MAX_MEMBERS_PER_CLAIM;
-    return [badShape ? "claim_shape" : undefined, (membersSoFar[i] ?? 0) > MAX_TOTAL_MEMBERS ? "too_large" : undefined];
+    if (n === 0 || n !== c.weights.length || n > MAX_MEMBERS_PER_CLAIM) return refuse("claim_shape");
+    return (membersSoFar[i] ?? 0) > MAX_TOTAL_MEMBERS ? refuse("too_large") : ok(undefined);
   };
-  const issue = h.claims.flatMap(issueOf).find((tag) => tag !== undefined);
-  return issue === undefined ? ok(undefined) : refuse(issue);
+  return map(traverse(h.claims, claimWithinLimits), () => undefined);
 };
 
 /** A Hanko is canonical when re-encoding its decoded form gives back the same bytes. */
@@ -141,15 +152,16 @@ const isCanonical = (h: Hanko, bytes: Uint8Array): boolean => {
 
 /** The decoded Hanko, if its bytes are well formed, canonical and within the contract's limits. */
 const decodedHanko = (hanko: string): Result<Hanko, HankoFault> => {
-  const bytes = /^0[xX](?:[0-9a-fA-F]{2})*$/.test(hanko) ? hexToBytes(hanko) : null;
-  if (bytes === null || !bytes.ok) return refuse("decode");
-  if (bytes.value.length > MAX_HANKO_BYTES) return refuse("too_large");
-  const decoded = decodeHanko(bytes.value);
+  const read = hexBytes(hanko, EVEN_HEX, "decode");
+  if (!read.ok) return read;
+  const bytes = read.value;
+  if (bytes.length > MAX_HANKO_BYTES) return refuse("too_large");
+  const decoded = decodeHanko(bytes);
   if (!decoded.ok) return refuse("non_canonical");
   const env = decoded.value;
   const limits = withinLimits(env);
   if (!limits.ok) return limits;
-  if (!isCanonical(env, bytes.value)) return refuse("non_canonical");
+  if (!isCanonical(env, bytes)) return refuse("non_canonical");
   if (env.claims.length === 0) return refuse("claim_required");
   if (env.memberSignatures.some((s) => s.length > 0)) return refuse("member_signature");
   if (!unique(env.placeholders)) return refuse("duplicate_placeholder");
@@ -160,15 +172,15 @@ const decodedHanko = (hanko: string): Result<Hanko, HankoFault> => {
 // ---- signatures ----
 
 const recoverSigners = (digest: Uint8Array, packed: Uint8Array): Result<readonly string[], HankoFault> => {
-  const count = packedCount(packed.length) ?? 0;
+  const count = orElse(packedCount(packed.length), 0);
   if (!paddingClear(packed, count)) return refuse("packed_padding");
   const parts = Array.from({ length: count }, (_, i) => unpackSignature(packed, count, i));
   const nonCanonical = parts.some(({ r, s }) => isZeroWord(r) || isZeroWord(s) || !isLowS(s));
   if (nonCanonical) return refuse("signature_non_canonical");
   return foldResult(parts, [] as readonly string[], (signers, { r, s, recoveryBit }) => {
     const key = recoverPublicKey(digest, r, s, recoveryBit);
-    if (key === null) return refuse("recovery_failed");
-    const signer = addressOf(key).toLowerCase();
+    if (key._tag === "none") return refuse("recovery_failed");
+    const signer = addressOf(key.value).toLowerCase();
     return signers.includes(signer) ? refuse("duplicate_signer") : ok([...signers, signer]);
   });
 };
@@ -284,8 +296,12 @@ const acceptedClaims = <F>(
   });
 };
 
-/** The claim text as bytes32, lower case; nothing when it is not one. */
-const wordOfText = (text: string): string | null => (WORD_TEXT.test(text) ? text.toLowerCase() : null);
+/** The Entity the Hanko must speak for, as lower case bytes32: none when any Entity will do. */
+const requiredEntity = (target: Target): Result<Option<string>, HankoFault> =>
+  match(target, {
+    any: () => ok(none),
+    entity: ({ entityId }) => (WORD_TEXT.test(entityId) ? ok(some(entityId.toLowerCase())) : refuse("expected_entity")),
+  });
 
 /**
  * The contract's verdict on a Hanko envelope for `digest`: the Entity it speaks for, the addresses that signed and
@@ -295,10 +311,11 @@ const wordOfText = (text: string): string | null => (WORD_TEXT.test(text) ? text
 export const verifyHanko = <F = never>(
   hanko: string, digest: string, target: Target, authorize: BoardAuthorizer<F>,
 ): Result<HankoVerdict, HankoFault | F> => {
-  const expected = target._tag === "any" ? undefined : wordOfText(target.entityId);
-  if (expected === null) return refuse("expected_entity");
-  const digestBytes = /^0[xX][0-9a-fA-F]{64}$/.test(digest) ? hexToBytes(digest) : null;
-  if (digestBytes === null || !digestBytes.ok) return refuse("digest");
+  const required = requiredEntity(target);
+  if (!required.ok) return required;
+  const expected = required.value;
+  const digestBytes = hexBytes(digest, WORD_TEXT, "digest");
+  if (!digestBytes.ok) return digestBytes;
   return flatMap(decodedHanko(hanko), (env) =>
     flatMap(recoverSigners(digestBytes.value, env.packedSignatures), (signers) => {
       if (signers.length === 0) return refuse("signature_required");
@@ -306,7 +323,8 @@ export const verifyHanko = <F = never>(
       if (env.placeholders.some((p) => signerIds.includes(p))) return refuse("placeholder_signer");
       return flatMap(acceptedClaims(env, signerIds, authorize), (claims): Result<HankoVerdict, HankoFault | F> => {
         const last = claims.at(-1);
-        if (last === undefined || (expected !== undefined && last.entityId !== expected)) return refuse("target");
+        const named = expected._tag === "some" ? expected.value : last?.entityId;
+        if (last === undefined || last.entityId !== named) return refuse("target");
         return ok({ entityId: last.entityId, signers, firstMember: last.firstMember });
       });
     }));

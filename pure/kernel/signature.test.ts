@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
 import { hexToBytes } from "./bytes.ts";
+import { none, some } from "./option.ts";
 import { HALF_ORDER, addressOf, checksum, recoverPublicKey, signDigest } from "./signature.ts";
 
 const bytes = (hex: string): Uint8Array => {
@@ -16,7 +17,7 @@ describe("kernel/signature", () => {
     expect(sig.s <= HALF_ORDER).toBe(true);
     const r = bytes(`0x${sig.r.toString(16).padStart(64, "0")}`);
     const s = bytes(`0x${sig.s.toString(16).padStart(64, "0")}`);
-    expect(recoverPublicKey(bytes(digest), r, s, sig.recovery)).toEqual(sig.publicKey);
+    expect(recoverPublicKey(bytes(digest), r, s, sig.recovery)).toEqual(some(sig.publicKey));
   });
 
   test("the address equals ethers' for the same key, checksummed", () => {
@@ -32,8 +33,9 @@ describe("kernel/signature", () => {
 
   test("a recovery failure is nothing, not an exception", () => {
     const zero = new Uint8Array(32);
-    expect(recoverPublicKey(bytes(digest), zero, zero, 0)).toBeNull();
-    expect(recoverPublicKey(bytes(digest), bytes(`0x${"ff".repeat(32)}`), bytes(`0x${"ff".repeat(32)}`), 1)).toBeNull();
+    expect(recoverPublicKey(bytes(digest), zero, zero, 0)).toEqual(none);
+    const ones = bytes(`0x${"ff".repeat(32)}`);
+    expect(recoverPublicKey(bytes(digest), ones, ones, 1)).toEqual(none);
   });
 
   test("EIP-55: the specification's test addresses", () => {

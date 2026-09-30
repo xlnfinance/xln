@@ -3,6 +3,7 @@
 // A signature is low-s with a recovery bit, so a signed digest has exactly one valid spelling.
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { bytesToHex, concat, keccak256, utf8 } from "./bytes.ts";
+import { none, some, type Option } from "./option.ts";
 
 export type RawSignature = Readonly<{ r: bigint; s: bigint; recovery: number; publicKey: Uint8Array }>;
 
@@ -20,12 +21,12 @@ export const signDigest = (digest: Uint8Array, privateKey: Uint8Array): RawSigna
  */
 export const recoverPublicKey = (
   digest: Uint8Array, r: Uint8Array, s: Uint8Array, recoveryBit: number,
-): Uint8Array | null => {
+): Option<Uint8Array> => {
   try {
     const signature = secp256k1.Signature.fromCompact(concat([r, s])).addRecoveryBit(recoveryBit);
-    return signature.recoverPublicKey(digest).toRawBytes(false);
+    return some(signature.recoverPublicKey(digest).toRawBytes(false));
   } catch {
-    return null;
+    return none;
   }
 };
 

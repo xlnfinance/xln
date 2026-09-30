@@ -3,11 +3,11 @@ import { ethers } from "ethers";
 import { bytesToHex, concat, hexToBytes, keccak256, keccakHex, minimalBytes, utf8 } from "./bytes.ts";
 
 describe("kernel/bytes", () => {
-  test("hex round trips, either case, with or without the prefix", () => {
+  test("hex round trips, either case, and the prefix is required", () => {
     const parsed = hexToBytes("0xAbCd");
     expect(parsed.ok && bytesToHex(parsed.value)).toBe("0xabcd");
-    const bare = hexToBytes("00ff");
-    expect(bare.ok && [...bare.value]).toEqual([0, 255]);
+    expect(hexToBytes("00ff")).toEqual({ ok: false, error: { _tag: "no_prefix" } });
+    expect(hexToBytes(`${"ab".repeat(32)}`)).toEqual({ ok: false, error: { _tag: "no_prefix" } });
     const empty = hexToBytes("0x");
     expect(empty.ok && empty.value.length).toBe(0);
   });

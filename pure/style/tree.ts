@@ -58,8 +58,10 @@ const topLevelSpans = (text: string): readonly number[] => {
 const longDeclarations: readonly Hit[] = sources.flatMap((file) =>
   topLevelSpans(textOf(file)).filter((n) => n > MAX_DECLARATION_LINES).map((): Hit => ({ ruleId: "long-declaration", file })));
 
+// The legacy file declares every name the new tree moved out of it, so it cannot count as a user of one.
+const LEGACY = new Set(["xln.ts", "xln_run.ts"]);
 const everyFile = [...new Bun.Glob("**/*.ts").scanSync({ cwd: root })]
-  .filter((f) => !f.startsWith("node_modules/") && !f.startsWith("style/"));
+  .filter((f) => !f.startsWith("node_modules/") && !f.startsWith("style/") && !f.startsWith("legacy/") && !LEGACY.has(f));
 const words = new Map(everyFile.map((f) => [f, new Set(textOf(f).match(/[A-Za-z_$][\w$]*/g) ?? [])] as const));
 type Export = Readonly<{ name: string; isType: boolean }>;
 const exportsOf = (file: string): readonly Export[] =>

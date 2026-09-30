@@ -12,7 +12,7 @@ type Verdict = { readonly entityId: string; readonly success: boolean };
 
 const provider = EntityProvider__factory.createInterface();
 const rig = await boot("pure-hanko-live");
-const vm = rig.vm as any;
+const { vm } = rig;
 const entityProvider = createAddressFromString(rig.chain.addresses.entityProvider);
 
 const ask = async ({ hanko, digest }: Case): Promise<Verdict> => {
@@ -29,5 +29,6 @@ const ask = async ({ hanko, digest }: Case): Promise<Verdict> => {
 const cases: readonly Case[] = JSON.parse(await Bun.stdin.text());
 const verdicts = await cases.reduce<Promise<readonly Verdict[]>>(
   async (done, c) => [...(await done), await ask(c)], Promise.resolve([]));
-process.stdout.write(`\n@@VERDICTS@@${JSON.stringify(verdicts)}\n`);
+// Awaited: exiting right after a large unflushed write truncates the list (16,000 cases cut it short).
+await Bun.write(Bun.stdout, `\n@@VERDICTS@@${JSON.stringify(verdicts)}\n`);
 process.exit(0);

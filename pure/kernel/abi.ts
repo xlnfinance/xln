@@ -2,7 +2,7 @@
 //
 // The model is `Abi`, one member per Solidity type the contracts use. Building a tree cannot fail; `encode` checks
 // every leaf against its type (a uint16 above 65535, a bytes32 of 31 bytes) and names the first leaf that does not fit.
-import { bytesToHex, concat, hexBody, hexToBytes, type HexFault } from "./bytes.ts";
+import { bytesToHex, concat, digitsToBytes, hexBody, hexToBytes, type HexFault } from "./bytes.ts";
 import { err, flatMap, map, mapAccum, ok, traverse, type Result } from "./result.ts";
 import { match, type Tagged } from "./tagged.ts";
 
@@ -97,7 +97,7 @@ const encodeSequence = (vs: readonly Abi[]): Result<string, AbiFault> => {
 
 /** `abi.encode(...values)`. */
 export const encode = (values: readonly Abi[]): Result<Uint8Array, AbiFault> =>
-  flatMap(encodeSequence(values), (hex) => hexToBytes(hex));
+  flatMap(encodeSequence(values), digitsToBytes);
 
 export type Packed =
   | Tagged<"uint", { bits: UintBits; value: bigint }>
@@ -114,7 +114,7 @@ export const P = {
 } as const;
 
 const packedPart = (p: Packed): Result<Uint8Array, AbiFault> => match(p, {
-  uint: (x) => flatMap(uintDigits(x.value, x.bits, x.bits / 4), hexToBytes),
+  uint: (x) => flatMap(uintDigits(x.value, x.bits, x.bits / 4), digitsToBytes),
   bool: (x) => ok(Uint8Array.of(x.value ? 1 : 0)),
   address: (x) => sizedBytes(x.value, "address", 20),
   bytes32: (x) => sizedBytes(x.value, "bytes32", 32),
