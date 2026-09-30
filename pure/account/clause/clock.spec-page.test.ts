@@ -4,15 +4,19 @@
 // most one behind. Left pays, Right is the payee. A frame carries a stamp the proposer writes as it likes. The checker
 // found 2730 states, 10546 transitions and 260 finished worlds (the payee holds no secret: 173, 473, 3). This file
 // rebuilds the same rules on `Ledger`, `resolveClause` and `expireClause`, walks every state, and holds each world to
-// the page's four properties, written out again from the formula. Both walks' counts are pinned: a decision the
-// TypeScript takes and the page refuses, or the other way round, changes a count.
+// the page's properties, written out again from the formula: three restated (P2, P3, P4), and P1 (no frame refused
+// for its stamp) by construction. Both walks' counts are pinned: a decision the TypeScript takes and the page refuses,
+// or the other way round, changes a count.
 //
-// A stamp has nowhere to enter: no clause function takes one, so R-CLOCK (no frame refused for its age or its future
-// date) holds by the types, and a signed frame's exit is the liveness check below. The pay frame commits the lock with
-// the ledger's own `lock`: the page does not model the moment a lock is signed, which is N2 (clause.test.ts).
+// A stamp has nowhere to enter: the clause functions take a `JView`, which a bigint stamp is not, so R-CLOCK (no frame
+// refused for its age or its future date) holds by the types, and a signed frame's exit is the liveness check below.
+// P4 (the payee has revealed before an expiry commits) is the payee's duty, which this file's harness enforces by
+// blocking the chain tick and the expire frame; no clause function can see it, so the Runtime owns it (register: owed).
+// The pay frame commits the lock through the test seam `admitted`: the page does not model the moment a lock is signed,
+// which is N2 (clause.test.ts).
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
-import { holdOf, secretOf } from "../fixtures.ts";
+import { admitted, heightOf, holdOf, secretOf, viewOf } from "../fixtures.ts";
 import { allocation, emptyLedger, lock, setCredit } from "../ledger.ts";
 import type { AccountFault, Ledger, Side } from "../model.ts";
 import { expireClause, resolveClause } from "./clause.ts";
@@ -77,7 +81,8 @@ type Payee = Readonly<{ knowsSecret: boolean }>;
 
 /** The payee owes the on-chain reveal: it holds the secret, its resolve is uncommitted, its view nears the deadline. */
 const payeeDuty = (payee: Payee, w: World): boolean =>
-  payee.knowsSecret && committedIs(w, "pay") && !w.revealed && revealOnChainDue(params, DEADLINE, w.view.right);
+  payee.knowsSecret && committedIs(w, "pay") && !w.revealed &&
+  revealOnChainDue(params, heightOf(DEADLINE), viewOf(w.view.right));
 
 const tickChain = (payee: Payee): Rule => ({
   name: "chain height ticks",
@@ -116,7 +121,7 @@ const deliverResolve: Rule = {
   step: (w) => {
     const stamp = w.resolvePending ?? expect.unreachable("no resolve in flight");
     const cleared: World = { ...w, resolvePending: undefined };
-    const decided = resolveClause(w.ledger, w.view.left, "right", theLock.id, secret);
+    const decided = resolveClause(w.ledger, viewOf(w.view.left), "right", theLock.id, secret);
     if (decided.ok) return commit(cleared, "resolve", decided.value);
     if (decided.error._tag === "no_such_lock") return cleared;
     if (decided.error._tag !== "past_deadline") return faulted(decided.error);
@@ -133,8 +138,8 @@ const deliver = (payee: Payee): Rule => ({
   step: (w) => {
     const frame = w.pending ?? expect.unreachable("no frame in flight");
     const cleared: World = { ...w, pending: undefined };
-    if (frame.kind === "pay") return commit(cleared, "pay", unwrapOr(lock(w.ledger, theLock), faulted));
-    const expired = expireClause(w.ledger, params, w.view.right, theLock.id);
+    if (frame.kind === "pay") return commit(cleared, "pay", unwrapOr(lock(w.ledger, admitted(theLock)), faulted));
+    const expired = expireClause(w.ledger, params, viewOf(w.view.right), theLock.id);
     if (expired.ok && !payeeDuty(payee, w)) {
       return { ...commit(cleared, "expire", expired.value), expiredViews: { ...w.view } };
     }
@@ -228,7 +233,7 @@ describe("account/clause against the Arrival clock page", () => {
       w.resolveRefusals.forEach((r) => expect(r.view).toBeGreaterThan(DEADLINE)));
   });
 
-  test("R-HTLC-CLOCK c a payee that holds the secret has revealed it on chain before an expiry commits", () => {
+  test("R-HTLC-CLOCK c the replay harness blocks the expiry while the payee owes the on-chain reveal", () => {
     [...withSecret.worlds.values()].forEach((w) => {
       if (w.expiredViews !== undefined) expect(w.revealed).toBe(true);
     });

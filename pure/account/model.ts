@@ -6,6 +6,7 @@
 // never sees it. RCPAN is the rule that keeps credit true: in the worst case over every open hold, delta stays inside
 // [-limit.left, collateral + limit.right]. Every transition is a function Ledger -> Result<Ledger, AccountFault>.
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
+import type { HeightFault, JHeight } from "./clause/clock.ts";
 
 export type Side = "left" | "right";
 
@@ -24,7 +25,10 @@ export type Hashlock = string;
  * `hashlock` while the chain's height, in the deciding party's own view, is at or before `deadline`. The money rules
  * read only id, payer and amount; the clause rules (clause/) read the rest.
  */
-export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint; hashlock: Hashlock; deadline: bigint }>;
+export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint; hashlock: Hashlock; deadline: JHeight }>;
+
+/** A hold the clause rules have admitted: `lockClause` alone makes one, and the ledger opens no other (one door). */
+export type ClauseHold = Brand<Hold, "ClauseHold">;
 
 /**
  * `limit.left` is the credit extended TO Left (how far Left's allocation may fall below zero); Right is the side that
@@ -56,6 +60,7 @@ export type AccountFault =
   | Tagged<"bad_secret">
   | Tagged<"wrong_secret">
   | Tagged<"no_such_lock">
+  | HeightFault
   | Tagged<"deadline_past", { deadline: bigint; view: bigint }>
   | Tagged<"deadline_too_far", { deadline: bigint; latest: bigint }>
   | Tagged<"past_deadline", { deadline: bigint; view: bigint }>

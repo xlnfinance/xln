@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../../kernel/core/result.ts";
-import { hashlockOf, holdOf, secretOf } from "../fixtures.ts";
+import { hashlockOf, heightOf, holdOf, secretOf, viewOf } from "../fixtures.ts";
 import { allocation, deposit, emptyLedger, setCredit } from "../ledger.ts";
 import { holdId, type AccountFault, type Hold, type Ledger } from "../model.ts";
 import { cancelClause, expireClause, lockClause, resolveClause } from "./clause.ts";
@@ -15,11 +15,14 @@ const params: ClockParams = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unre
 
 /** Left holds 10 in the collateral. */
 const funded: Ledger = value(deposit(emptyLedger, "left", 10n));
-const VIEW = 100n;
+const VIEW = viewOf(100n);
 /** Left's clause on secret 1, due at J height 105. */
 const DEADLINE = 105n;
 const leftClause = holdOf("left", 4n, 1n, DEADLINE);
 const locked: Ledger = value(lockClause(funded, params, VIEW, "left", leftClause));
+
+const lockAtDeadline = (deadline: bigint) =>
+  lockClause(funded, params, VIEW, "left", { ...leftClause, deadline: heightOf(deadline) });
 
 describe("account/clause lock", () => {
   test("a payer opens a clause for its own funds and the money rules count it", () => {
@@ -35,6 +38,9 @@ describe("account/clause lock", () => {
     const bad = (hashlock: string) => lockClause(funded, params, VIEW, "left", { ...leftClause, hashlock });
     expect(bad("0x1234")).toEqual(refused({ _tag: "bad_hashlock" }));
     expect(bad(hashlockOf(secretOf(1)).toUpperCase().replace("0X", "0x"))).toEqual(refused({ _tag: "bad_hashlock" }));
+    const good = hashlockOf(secretOf(1));
+    [`${good}00`, `${good}zz`, `zz${good}`, ` ${good}`, `${good}\n`, good.slice(2), ""].forEach((hashlock) =>
+      expect(bad(hashlock)).toEqual(refused({ _tag: "bad_hashlock" })));
   });
 
   test("R-ONE-LOCK-PER-HASH a second lock on an open hashlock is refused, whichever slot or side it names", () => {
@@ -46,20 +52,18 @@ describe("account/clause lock", () => {
   });
 
   test("R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone", () => {
-    const freed = value(expireClause(locked, params, DEADLINE + 3n, leftClause.id));
+    const freed = value(expireClause(locked, params, viewOf(DEADLINE + 3n), leftClause.id));
     expect(lockClause(freed, params, VIEW, "left", { ...leftClause, id: holdId(2n) }).ok).toBe(true);
   });
 
   test("R-HORIZON-RESERVE and N2 a deadline is refused past the view plus the horizon plus the reserve", () => {
-    const at = (deadline: bigint) => lockClause(funded, params, VIEW, "left", { ...leftClause, deadline });
-    expect(at(112n).ok).toBe(true);
-    expect(at(113n)).toEqual(refused({ _tag: "deadline_too_far", deadline: 113n, latest: 112n }));
+    expect(lockAtDeadline(112n).ok).toBe(true);
+    expect(lockAtDeadline(113n)).toEqual(refused({ _tag: "deadline_too_far", deadline: 113n, latest: 112n }));
   });
 
   test("a deadline at or before the view is refused, one after it is admitted", () => {
-    const at = (deadline: bigint) => lockClause(funded, params, VIEW, "left", { ...leftClause, deadline });
-    expect(at(100n)).toEqual(refused({ _tag: "deadline_past", deadline: 100n, view: 100n }));
-    expect(at(101n).ok).toBe(true);
+    expect(lockAtDeadline(100n)).toEqual(refused({ _tag: "deadline_past", deadline: 100n, view: 100n }));
+    expect(lockAtDeadline(101n).ok).toBe(true);
   });
 
   test("R-A6 a clause beyond the payer's room is refused by the money rules", () => {
@@ -78,7 +82,7 @@ describe("account/clause resolve", () => {
   });
 
   test("R-HTLC-CLOCK a clause is live through its deadline height and refused one height later", () => {
-    const at = (view: bigint) => resolveClause(locked, view, "right", leftClause.id, secretOf(1));
+    const at = (view: bigint) => resolveClause(locked, viewOf(view), "right", leftClause.id, secretOf(1));
     expect(at(DEADLINE).ok).toBe(true);
     expect(at(DEADLINE + 1n)).toEqual(refused({ _tag: "past_deadline", deadline: DEADLINE, view: DEADLINE + 1n }));
   });
@@ -93,13 +97,15 @@ describe("account/clause resolve", () => {
     expect(wrong).toEqual(refused({ _tag: "wrong_secret" }));
     expect(resolveClause(locked, VIEW, "right", leftClause.id, secretOf(1, 31)))
       .toEqual(refused({ _tag: "bad_secret" }));
+    [0, 33, 64].forEach((length) => expect(resolveClause(locked, VIEW, "right", leftClause.id, secretOf(1, length)))
+      .toEqual(refused({ _tag: "bad_secret" })));
   });
 
   test("a clause that is not open cannot be resolved, cancelled or expired", () => {
     const none = holdId(9n);
     expect(resolveClause(locked, VIEW, "right", none, secretOf(9))).toEqual(refused({ _tag: "no_such_lock" }));
     expect(cancelClause(locked, "right", none)).toEqual(refused({ _tag: "no_such_lock" }));
-    expect(expireClause(locked, params, 1_000n, none)).toEqual(refused({ _tag: "no_such_lock" }));
+    expect(expireClause(locked, params, viewOf(1_000n), none)).toEqual(refused({ _tag: "no_such_lock" }));
   });
 
   test("a resolved clause is gone, and another clause stays open", () => {
@@ -119,7 +125,7 @@ describe("account/clause cancel and expire", () => {
   });
 
   test("R-HTLC-CLOCK an expiry needs the view strictly past the deadline plus the reserve", () => {
-    const at = (view: bigint) => expireClause(locked, params, view, leftClause.id);
+    const at = (view: bigint) => expireClause(locked, params, viewOf(view), leftClause.id);
     expect(at(DEADLINE).ok).toBe(false);
     expect(at(DEADLINE + 2n)).toEqual(refused({ _tag: "not_expired", deadline: DEADLINE, earliest: DEADLINE + 3n }));
     const after = value(at(DEADLINE + 3n));

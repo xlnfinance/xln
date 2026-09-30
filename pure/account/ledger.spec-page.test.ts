@@ -12,7 +12,7 @@ import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import { lockClause } from "./clause/clause.ts";
 import { clockParams, type ClockParams } from "./clause/clock.ts";
 import { deposit, emptyLedger, expire, pay, resolve, setCredit, withdraw } from "./ledger.ts";
-import { hashlockOf, holdOf as holdWith, secretOf } from "./fixtures.ts";
+import { hashlockOf, holdOf as holdWith, secretOf, viewOf } from "./fixtures.ts";
 import { holdId, other, type AccountFault, type HoldId, type Ledger, type Side } from "./model.ts";
 
 /** A broken guard lets the walk run away; the page's own space is 1440 states, and past this the walk is a failure. */
@@ -60,7 +60,7 @@ const rulesFor = (side: Side): readonly Rule[] => [
   })),
   ...HASHES.map((h): Rule => ({
     verb: "lock", arg: BigInt(h), side, enabled: (w) => w.ledger.holds.length < MAX_HOLDS,
-    step: (w) => lockClause(w.ledger, params, 0n, side, holdWith(side, 1n, freeSlot(w), 1n, h)),
+    step: (w) => lockClause(w.ledger, params, viewOf(0n), side, holdWith(side, 1n, freeSlot(w), 1n, h)),
   })),
   ...[0, 1].flatMap((i): readonly Rule[] => [
     {

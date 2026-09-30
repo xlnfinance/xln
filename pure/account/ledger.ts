@@ -4,7 +4,7 @@
 // already satisfies RCPAN: one that left it through an event outside these rules (a rebase on the J layer) is not this
 // file's to repair, and `room` then reads 0 rather than a negative number.
 import { err, flatMap, map, ok, type Result } from "../kernel/core/result.ts";
-import type { AccountFault, Hold, HoldId, Ledger, Side } from "./model.ts";
+import type { AccountFault, ClauseHold, Hold, HoldId, Ledger, Side } from "./model.ts";
 import { other } from "./model.ts";
 
 /** Amounts and credit limits are uint256 on the chain and in every signed message. */
@@ -79,7 +79,8 @@ const withinHoldSum = (l: Ledger, hold: Hold): Result<Hold, AccountFault> =>
 const admitted = (l: Ledger, hold: Hold): Result<Hold, AccountFault> =>
   flatMap(amountInRange(hold.amount), () => flatMap(slotFree(l, hold), () => withinHoldSum(l, hold)));
 
-export const lock = (l: Ledger, hold: Hold): Step =>
+/** Only a `ClauseHold` opens: the clause rules (clause/clause.ts `lockClause`) are the one door into the holds. */
+export const lock = (l: Ledger, hold: ClauseHold): Step =>
   flatMap(admitted(l, hold), () =>
     keptIfRcpan({ ...l, holds: [...l.holds, hold] }, lacksRoom(l, hold.payer, hold.amount)));
 

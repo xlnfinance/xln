@@ -1270,7 +1270,7 @@
   },
   {
    "id": "R-HTLC-CLOCK",
-   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG); a payee with an unacked resolve reveals on chain at deadline - LAG.",
+   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1383,7 +1383,28 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-HTLC-CLOCK c a payee that holds the secret has revealed it on chain before an expiry commits"
+     "name": "R-HTLC-CLOCK c the replay harness blocks the expiry while the payee owes the on-chain reveal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK c a payee that owes the reveal has revealed before an expiry commits, in the Runtime walk",
+     "owed": "Runtime cut (R1), walk-level"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a negative lag is refused, so no clause is ever live and expirable at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reveal is due a lag before the deadline, not a reserve before it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
     }
    ]
   },
@@ -2095,7 +2116,7 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "statement": "One clause is open per hashlock in an Account (the ts cell holds it per token ledger; the Account-wide count across tokens is owed by A3): a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
     "arrival": "owed: #41 (coordinator 09-30)",
@@ -2119,6 +2140,12 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone",
+     "owed": "A3"
     }
    ]
   }
