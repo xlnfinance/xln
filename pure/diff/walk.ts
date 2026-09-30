@@ -19,6 +19,8 @@ import { AREA, AREAS, type Area } from "./draws/areas.ts";
 import { finalizedDisputes } from "./draws/disputes.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { knownHalt } from "./rig/departures.ts";
+import { checkProperties, NOTHING_SIGNED, type Signed } from "./rig/properties.ts";
+import { enforceOne, type Enforced } from "./rig/enforce.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -55,7 +57,7 @@ export const walk = async (
     const more = untilCovered(FRAMES, () => covered() && owing().length === 0, FRAMES * 6);
     // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run; so does a departure
     // (departures.ts), after which the two states differ
-    const loop = async (i: number): Promise<readonly string[]> => {
+    const loop = async (i: number, signed: Signed): Promise<readonly string[]> => {
       if (!more(i) || coverage.halts > 0 || coverage.departures.length > 0) return [];
       const enabled = moves.filter(([, m]) => m.enabled(w));
       // favour the kinds committed least: weight 1 / (1 + times tried)
@@ -77,9 +79,16 @@ export const walk = async (
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
       const diffs = await lane.tick(step.runtimeTxs, step.users);
-      return diffs.length > 0 ? diffs : loop(i + 1);
+      // P2 and P4 hold of the rewrite whatever og did (rig/properties.ts)
+      const checked = checkProperties(lane.runtime(), signed);
+      const broken = checked.violations.map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);
+      return diffs.length > 0 || broken.length > 0 ? [...diffs, ...broken] : loop(i + 1, checked.signed);
     };
-    const diffs = await loop(0);
+    const walked = await loop(0, NOTHING_SIGNED);
+    // last, P1: one Account's dispute runs to finalize on the Depository, whose payout must match the Account
+    const clean = walked.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
+    const p1 = clean ? p1Lines(w.tag, coverage, await enforceOne(w)) : [];
+    const diffs = [...walked, ...p1];
     // an agreed halt ends the walk; one that is not a known og bug is a draw og refuses
     const unguarded = coverage.haltTexts
       .filter((h) => knownHalt(h) === undefined)
@@ -96,6 +105,13 @@ export const walk = async (
   } finally {
     await w.close();
   }
+};
+
+/** P1's broken lines, or the lane diffs its dispute ran into; the run's moves say whether it checked or skipped. */
+const p1Lines = (tag: string, coverage: Coverage, enforced: Enforced | readonly string[]): readonly string[] => {
+  if (!("_tag" in enforced)) return enforced;
+  coverage.actions[`P1:${enforced._tag}`] = 1;
+  return enforced._tag === "checked" ? enforced.lines.map((l) => `${tag} spoke ${enforced.spoke}: ${l}`) : [];
 };
 
 /** How many of an area's own moves a walk committed: its Entity tx kinds (drawn or arising) and its world moves. */
