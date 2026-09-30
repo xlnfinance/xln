@@ -11,6 +11,15 @@ import { Account__factory, DeltaTransformer__factory, EntityProvider__factory, H
 import { boot, claimsHanko, rawHanko, bodyHash, type Rig } from "./rig.ts";
 import { encodeInt512, encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
 
+/**
+ * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. The cell says
+ * so, which keeps "ok" meaning that a dispute opened; a revert stays as the rig reports it.
+ */
+const outcome = (rig: Rig, result: string): string => {
+  const skipped = (rig.last.events as { name: string; args: { reason: bigint } }[]).find((e) => e.name === "DisputeOpSkipped");
+  return result === "ok" && skipped !== undefined ? `ok, skipped (reason ${skipped.args.reason})` : result;
+};
+
 const coder = ethers.AbiCoder.defaultAbiCoder();
 
 // ---- deterministic sample values, derived from the ABI ----
@@ -191,7 +200,7 @@ export const lifecycleVectors = async (rig: Rig) => {
   const epoch2 = await rig.epochOf();
   const storedAfter = await rig.chain.getAccountInfo(L.id, R.id);
   const P9 = rig.body(-10n);
-  const at = async (nonce: number, epoch: bigint) => rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9));
+  const at = async (nonce: number, epoch: bigint) => outcome(rig, await rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9)));
   const reopen = {
     storedNonce: storedAfter.nonce.toString(), epoch: epoch2.toString(),
     startAtStoredNonce: await at(8, epoch2),
@@ -225,7 +234,7 @@ export const baselineVectors = async () => {
     const body = rig.body(offdelta);
     return { body, nonce, epoch, hash: rig.proofHash(epoch, nonce, true, body), sig: rig.proofSig(rig.L, epoch, nonce, true, body) };
   };
-  const startWith = (rig: Rig, b: ReturnType<typeof at>) => rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig);
+  const startWith = async (rig: Rig, b: ReturnType<typeof at>) => outcome(rig, await rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig));
   const timeout = (rig: Rig, nonce: number, body: ReturnType<Rig["body"]>) =>
     rig.finalize(rig.R, rig.L, { nonce, body, startedByLeft: false }, { nonce, proposerIsLeft: true, body, sig: "0x" });
   const record = (b: ReturnType<typeof at>) => ({ epoch: b.epoch.toString(), nonce: b.nonce, proofBodyHash: bodyHash(b.body), proofHash: b.hash });

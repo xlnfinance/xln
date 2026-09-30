@@ -62,6 +62,22 @@ library Account {
     bool proposerIsLeft,
     bytes32 proofbodyHash
   );
+  // J2: inside a batch a dispute op that is stale or already applied is skipped, not reverted, so it cannot take the
+  // rest of the batch (an urgent HTLC secret reveal) down with it. Same signature as Depository's event: this library
+  // executes by DELEGATECALL, so the log comes from Depository. `op` and `reason` are the DISPUTE_OP_* and
+  // DISPUTE_SKIP_* codes below; `nonce` is the op's own (start nonce, counter nonce, final nonce).
+  event DisputeOpSkipped(bytes32 indexed sender, bytes32 indexed counterentity, uint8 op, uint8 reason, uint256 nonce);
+  uint8 internal constant DISPUTE_OP_START = 0;
+  uint8 internal constant DISPUTE_OP_COUNTER = 1;
+  uint8 internal constant DISPUTE_OP_FINALIZE = 2;
+  uint8 internal constant DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED = 0; // start: the stored nonce already reached it
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_ACTIVE = 1;         // start: a dispute is already open on the Account
+  uint8 internal constant DISPUTE_SKIP_NO_ACTIVE_DISPUTE = 2;      // counter/finalize: none open (finalized, or never started)
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_MOVED = 3;          // counter/finalize: names another dispute's nonce
+  uint8 internal constant DISPUTE_SKIP_WINDOW_CLOSED = 4;          // counter: the challenge window already ended
+  uint8 internal constant DISPUTE_SKIP_COUNTER_NOT_NEWER = 5;      // counter: not newer than the state the dispute opened on
+  uint8 internal constant DISPUTE_SKIP_COUNTER_SUPERSEDED = 6;     // counter: a newer counter is already registered
+  uint8 internal constant DISPUTE_SKIP_COUNTER_REGISTERED = 7;     // counter: this exact body is already registered
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
@@ -1397,7 +1413,7 @@ library Account {
     address entityProvider
   ) external {
     for (uint256 i = 0; i < counterDisputes.length; i++) {
-      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider);
+      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider, true);
     }
   }
 
@@ -1466,25 +1482,38 @@ library Account {
         counterProofbody: params.finalProofbody,
         sig: params.sig
       }),
-      entityProvider
+      entityProvider,
+      false
     );
     return true;
   }
 
+  /// @dev `skipStale`: inside a batch (J2) a counter the dispute has moved past is skipped with DisputeOpSkipped; the
+  /// single-op watchtower entrypoint keeps reverting, because it has no batch to protect and returns success to its caller.
   function _registerCounterDispute(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     CounterDisputeProof memory params,
-    address entityProvider
+    address entityProvider,
+    bool skipStale
   ) private {
     _requireLiveAccountNonce(params.initialNonce);
     _requireLiveAccountNonce(params.counterNonce);
     bytes32 bodyHash = _validateProofBody(params.counterProofbody);
     bytes memory acctKey = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acctKey];
-    if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
-    if (block.timestamp >= account.disputeTimeout) revert E2();
-    if (params.initialNonce != account.nonce) revert E2();
+    if (account.disputeHash == bytes32(0)) {
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E5();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_NO_ACTIVE_DISPUTE);
+    }
+    if (block.timestamp >= account.disputeTimeout) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_WINDOW_CLOSED);
+    }
+    if (params.initialNonce != account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
+    }
     if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) {
       revert IDepositoryDelegateErrorAbi.E9();
     }
@@ -1494,12 +1523,18 @@ library Account {
     ) revert IDepositoryDelegateErrorAbi.E9();
     bool senderIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
     if (!senderIsNonstarter) revert E2();
-    if (params.counterNonce < account.nonce) revert E2();
+    if (params.counterNonce < account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+    }
     if (params.counterNonce == account.nonce) {
       // Equal nonce is not automatically stale: bilateral consensus resolves
       // simultaneous branches by LEFT proposer priority. Only a LEFT proof may
       // replace a RIGHT initial proof at the same nonce.
-      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) revert E2();
+      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+      }
     }
     (bool counterValid, bool counterRetired) = verifyDisputeProofHanko(
       entityProvider,
@@ -1517,10 +1552,16 @@ library Account {
 
     uint256 selectedNonce = account.disputeCounterNonce;
     if (selectedNonce != 0) {
-      if (params.counterNonce < selectedNonce) revert E2();
+      if (params.counterNonce < selectedNonce) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+      }
       if (params.counterNonce == selectedNonce) {
         if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
-          if (!params.proposerIsLeft) revert E2();
+          if (!params.proposerIsLeft) {
+            if (!skipStale) revert E2();
+            return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+          }
           // LEFT replaces RIGHT at equal nonce; continue to the atomic update.
         } else if (bodyHash != account.disputeCounterProofbodyHash) {
           revert IDepositoryDelegateErrorAbi.E9();
@@ -1528,6 +1569,7 @@ library Account {
           // The same body again. Current-board evidence of it is strictly stronger than a retired signature of it, so
           // a re-registration may upgrade the grade to none; it can never downgrade it.
           if (counterSide == 0) account.disputeRetiredSide = 0;
+          if (skipStale) _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_REGISTERED);
           return;
         }
       }
@@ -1560,6 +1602,10 @@ library Account {
       params.proposerIsLeft,
       bodyHash
     );
+  }
+
+  function _skipCounter(bytes32 entityId, CounterDisputeProof memory params, uint8 reason) private {
+    emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_COUNTER, reason, params.counterNonce);
   }
 
   // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
@@ -1769,8 +1815,18 @@ library Account {
     // branch unless self-dispute becomes a real operational problem.
 
     _requireStoredAccountNonce(_accounts[acct_key].nonce);
-    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-    if (params.nonce <= _accounts[acct_key].nonce) revert E2();
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater). J2: a start the Account already moved past (this very
+    // start applied, a settlement or finalize since) is skipped, not reverted. It is judged before the evidence
+    // signature on purpose: a stale start's signature is bound to an epoch or nonce the Account has left, so it would
+    // fail as a bad signature and revert the batch for a reason that is only staleness.
+    if (params.nonce <= _accounts[acct_key].nonce) {
+      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED, params.nonce);
+      return;
+    }
+    if (_accounts[acct_key].disputeHash != bytes32(0)) {
+      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, DISPUTE_SKIP_DISPUTE_ACTIVE, params.nonce);
+      return;
+    }
 
     bool startedByLeft = entityId < params.counterentity;
     // The proof author is consensus data, not a caller hint. The current
@@ -1828,8 +1884,6 @@ library Account {
     // so a rotation cannot be used by a debtor to forgive its own debt.
     (bool valid, bool retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
     if (!valid) revert E4();
-
-    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
 
     uint256 startTimestamp = block.timestamp;
     uint32 leftResponseSeconds = params.initialProofbody.leftResponseSeconds;

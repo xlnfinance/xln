@@ -8,6 +8,7 @@ import {ERC20Mock} from "../../../contracts/ERC20Mock.sol";
 import "../../../contracts/Types.sol";
 import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import {XlnHanko} from "./XlnHanko.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Deploys the J-layer under test with N lazy single-signer entities.
 abstract contract XlnFixture is Test {
@@ -81,5 +82,68 @@ abstract contract XlnFixture is Test {
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actorIndex], encoded, nonce);
     dep.processBatch(entity[actorIndex], encoded, _hanko(actorIndex, h), nonce);
     return true;
+  }
+
+  // ─────────────── J2: a stale or already-applied dispute op is skipped, not reverted ───────────────
+
+  /// @dev DisputeOpSkipped `op` and `reason` codes (Account.sol DISPUTE_OP_* and DISPUTE_SKIP_*).
+  uint8 internal constant OP_START = 0;
+  uint8 internal constant OP_COUNTER = 1;
+  uint8 internal constant OP_FINALIZE = 2;
+  uint8 internal constant SKIP_NONCE_NOT_ABOVE_STORED = 0;
+  uint8 internal constant SKIP_DISPUTE_ACTIVE = 1;
+  uint8 internal constant SKIP_NO_ACTIVE_DISPUTE = 2;
+  uint8 internal constant SKIP_DISPUTE_MOVED = 3;
+  uint8 internal constant SKIP_WINDOW_CLOSED = 4;
+  uint8 internal constant SKIP_COUNTER_NOT_NEWER = 5;
+  uint8 internal constant SKIP_COUNTER_SUPERSEDED = 6;
+  uint8 internal constant SKIP_COUNTER_REGISTERED = 7;
+
+  /// @dev Everything a skipped dispute op must leave alone on one pair and token.
+  struct PairState {
+    uint256 nonce;
+    bytes32 disputeHash;
+    uint256 reserveA;
+    uint256 reserveB;
+    uint256 collateral;
+  }
+
+  function _pairState(bytes32 a, bytes32 b, uint256 tokenId) internal view returns (PairState memory s) {
+    bytes memory key = XlnHanko.accountKey(a, b);
+    (s.nonce, s.disputeHash, , , , , , , , , , , , , , , ) = dep._accounts(key);
+    s.reserveA = dep._reserves(a, tokenId);
+    s.reserveB = dep._reserves(b, tokenId);
+    (s.collateral,) = dep._collaterals(key, tokenId);
+  }
+
+  /// @notice Submit `batch` from actor `actorIndex`, which must land with exactly one DisputeOpSkipped(op, reason, nonce)
+  /// naming `peer`, and leave the pair's nonce, dispute hash, both reserves and the collateral unchanged.
+  function _submitSkipped(
+    uint256 actorIndex, Batch memory batch, bytes32 peer, uint256 tokenId, uint8 op, uint8 reason, uint256 nonce
+  ) internal {
+    bytes32 me = entity[actorIndex];
+    PairState memory before_ = _pairState(me, peer, tokenId);
+    vm.recordLogs();
+    _submit(actorIndex, batch);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    bytes32 topic = keccak256("DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)");
+    uint256 seen;
+    for (uint256 i = 0; i < logs.length; i++) {
+      if (logs[i].topics[0] != topic) continue;
+      seen++;
+      assertEq(logs[i].topics[1], me, "skipped op: sender");
+      assertEq(logs[i].topics[2], peer, "skipped op: counterentity");
+      (uint8 gotOp, uint8 gotReason, uint256 gotNonce) = abi.decode(logs[i].data, (uint8, uint8, uint256));
+      assertEq(gotOp, op, "skipped op: kind");
+      assertEq(gotReason, reason, "skipped op: reason");
+      assertEq(gotNonce, nonce, "skipped op: nonce");
+    }
+    assertEq(seen, 1, "exactly one DisputeOpSkipped");
+    PairState memory after_ = _pairState(me, peer, tokenId);
+    assertEq(after_.nonce, before_.nonce, "skipped op: account nonce unchanged");
+    assertEq(after_.disputeHash, before_.disputeHash, "skipped op: dispute state unchanged");
+    assertEq(after_.reserveA, before_.reserveA, "skipped op: reserve unchanged");
+    assertEq(after_.reserveB, before_.reserveB, "skipped op: peer reserve unchanged");
+    assertEq(after_.collateral, before_.collateral, "skipped op: collateral unchanged");
   }
 }

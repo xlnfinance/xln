@@ -22,12 +22,12 @@
       "plus1": {
         "storedNonce": "9",
         "epoch": "1",
-        "start": "REVERT E2()"
+        "start": "ok, skipped (reason 0)"
       },
       "plus2": {
         "storedNonce": "9",
         "epoch": "1",
-        "start": "REVERT E2()"
+        "start": "ok, skipped (reason 0)"
       },
       "plus3": {
         "storedNonce": "9",
@@ -59,7 +59,7 @@
       "proofBodyHash": "0x6715fc413cafab416edb4209653a162411473d9ce5933576828b7166f896d994",
       "proofHash": "0xcd589e10b047a15df98bcce9228fea5dd2e8388d3d3731910b9954ecf8f01f6c"
     },
-    "startAtStoredNonce": "REVERT E2()",
+    "startAtStoredNonce": "ok, skipped (reason 0)",
     "startAboveStoredNonce": "ok"
   },
   "foldedOffdelta": {

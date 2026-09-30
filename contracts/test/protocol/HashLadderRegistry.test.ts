@@ -798,7 +798,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     })).to.be.revertedWithCustomError(accountErrorAbi, 'E9');
   });
 
-  it('rejects a RIGHT same-nonce branch when the initial proposer was LEFT', async function () {
+  it('skips a RIGHT same-nonce branch when the initial proposer was LEFT', async function () {
     const dispute = await openPullDispute({
       label: 'same-nonce-right-loses', fillRatio: 0x1111, starter: 'left', proposerIsLeft: true,
     });
@@ -824,12 +824,16 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         sig: rightSig,
       }] }),
     );
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account', await dispute.depository.getAddress(),
-    );
-    await expect(
-      send(dispute.depository, dispute.right.signer, signed),
-    ).to.be.revertedWithCustomError(accountErrorAbi, 'E2');
+    // J2: a counter that is not newer than the opening state (same nonce) is skipped (op 1, reason 5), not reverted;
+    // nothing is registered and the dispute is unchanged.
+    const before = await dispute.depository._accounts(dispute.acctKey);
+    const skipped = send(dispute.depository, dispute.right.signer, signed);
+    await expect(skipped).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 1n, 5n, dispute.disputeNonce);
+    await expect(skipped).to.not.emit(dispute.depository, 'CounterDisputeRegistered');
+    const after = await dispute.depository._accounts(dispute.acctKey);
+    expect([after.nonce, after.disputeHash, after.disputeTimeout])
+      .to.deep.equal([before.nonce, before.disputeHash, before.disputeTimeout]);
   });
 
   it('counts a registration written inside this dispute window', async function () {
@@ -968,19 +972,22 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.left.entityId, 1n)).to.equal(100_000n - 499n);
   });
 
-  it('cannot claim twice: a second finalization of the same dispute reverts', async function () {
+  it('cannot claim twice: a second finalization of the same dispute is skipped and pays nothing', async function () {
     const dispute = await openPullDispute({ label: 'registry-double', fillRatio: 0x0123 });
     await registerReveal(dispute, dispute.right, {});
     await minePastTimeout(dispute.depository, dispute.acctKey);
     await finalizeDispute(dispute, dispute.right);
-    // Account is a linked library, so its bubbled E5 selector is absent from
-    // Depository's generated ABI. Decode the exact revert with Account's ABI
-    // while still executing the real Depository call.
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account',
-      await dispute.depository.getAddress(),
-    );
+    const paid = [
+      await dispute.depository._reserves(dispute.right.entityId, 1n),
+      await dispute.depository._reserves(dispute.left.entityId, 1n),
+    ];
+    // J2: the second finalization finds no open dispute and is skipped (op 2, reason 2), not reverted; nothing is paid twice.
     await expect(finalizeDispute(dispute, dispute.right))
-      .to.be.revertedWithCustomError(accountErrorAbi, 'E5');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 2n, 2n, dispute.disputeNonce);
+    expect([
+      await dispute.depository._reserves(dispute.right.entityId, 1n),
+      await dispute.depository._reserves(dispute.left.entityId, 1n),
+    ]).to.deep.equal(paid);
   });
 });

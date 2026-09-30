@@ -24,8 +24,10 @@ describe("C1 ondelta epoch", () => {
     w.at(300);
     const attackEnd = await w.finalize(R, L, { nonce: 6, body: P6, startedByLeft: false }, { nonce: 6, proposerIsLeft: true, body: P6, sig: "0x" });
     const end = await w.reserves();
-    // The latest state both signed owes Right 30 in all; nothing beyond P5 may move.
-    expect({ attackStart, attackEnd: attackEnd.slice(0, 6), L: end.L, R: end.R }).toEqual({ attackStart: "REVERT E4()", attackEnd: expect.stringContaining("REVERT"), L: 970n, R: 1030n });
+    // The latest state both signed owes Right 30 in all; nothing beyond P5 may move. The start is rejected (E4: its epoch-0
+    // signature does not verify at epoch 1), so there is no dispute to finalize: J2 skips that finalize instead of reverting.
+    expect({ attackStart, attackEnd, L: end.L, R: end.R }).toEqual({ attackStart: "REVERT E4()", attackEnd: "ok", L: 970n, R: 1030n });
+    expect((w.last.events as { name: string }[]).map((e) => e.name)).toContain("DisputeOpSkipped");
   });
 
   test("an offline victim: a timeout at N leaves nonce N+1, so N+2 must not pay a second time", async () => {
@@ -45,8 +47,10 @@ describe("C1 ondelta epoch", () => {
     w.at(300);
     const secondEnd = await w.finalize(R, L, { nonce: 5, body: P5, startedByLeft: false }, { nonce: 5, proposerIsLeft: true, body: P5, sig: "0x" });
     const end = await w.reserves();
-    // P5 alone would pay Right 30; the 10 already paid may not be paid again on top of it.
-    expect({ second, secondEnd: secondEnd.slice(0, 6), R: end.R }).toEqual({ second: "REVERT E4()", secondEnd: expect.stringContaining("REVERT"), R: 1010n });
+    // P5 alone would pay Right 30; the 10 already paid may not be paid again on top of it. The second start is rejected
+    // (E4), so there is no dispute to finalize: J2 skips that finalize instead of reverting, and nothing moves.
+    expect({ second, secondEnd, R: end.R }).toEqual({ second: "REVERT E4()", secondEnd: "ok", R: 1010n });
+    expect((w.last.events as { name: string }[]).map((e) => e.name)).toContain("DisputeOpSkipped");
   });
 
   test("a proof signed at the new epoch works after the finalize", async () => {

@@ -246,8 +246,8 @@
   "reopen": {
     "storedNonce": "8",
     "epoch": "2",
-    "startAtStoredNonce": "REVERT E2()",
-    "startAtOldBaselineNonce": "REVERT E2()",
+    "startAtStoredNonce": "ok, skipped (reason 0)",
+    "startAtOldBaselineNonce": "ok, skipped (reason 0)",
     "settleAtStoredNonce": "REVERT E2()",
     "startAboveStoredNonce": "ok"
   }

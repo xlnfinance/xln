@@ -43,8 +43,8 @@ describe("vectors", () => {
     const { reopen } = committed("lifecycle");
     expect(reopen.storedNonce).toBe("8");
     expect(reopen.epoch).toBe("2");
-    expect(reopen.startAtStoredNonce).toBe("REVERT E2()");        // equal is not above
-    expect(reopen.startAtOldBaselineNonce).toBe("REVERT E2()");   // the old baseline nonce is below
+    expect(reopen.startAtStoredNonce).toBe("ok, skipped (reason 0)");        // equal is not above: skipped since J2 (was REVERT E2)
+    expect(reopen.startAtOldBaselineNonce).toBe("ok, skipped (reason 0)");   // the old baseline nonce is below: skipped since J2
     expect(reopen.settleAtStoredNonce).toBe("REVERT E2()");       // cooperative updates too
     expect(reopen.startAboveStoredNonce).toBe("ok");
   });
@@ -53,17 +53,17 @@ describe("vectors", () => {
     const { afterSettlement: s, afterTimeoutFinalize: f, foldedOffdelta: o } = committed("baseline");
     expect([s.baseline.epoch, s.settle, s.epoch, s.storedNonce, s.start]).toEqual(["1", "ok", "1", "5", "ok"]);
     expect([f.firstDisputeStart, f.finalize, f.epoch, f.storedNonce]).toEqual(["ok", "ok", "1", "8"]);
-    expect([f.baseline.epoch, f.startAtStoredNonce, f.startAboveStoredNonce]).toEqual(["1", "REVERT E2()", "ok"]);
+    expect([f.baseline.epoch, f.startAtStoredNonce, f.startAboveStoredNonce]).toEqual(["1", "ok, skipped (reason 0)", "ok"]);
     const payout = (r: { L: string; R: string; collateral: string }) => [r.L, r.R, r.collateral];
     expect(payout(o.folded)).toEqual(payout(o.unfolded));
     expect(payout(o.folded)).toEqual(["970", "1030", "0"]);
   });
 
-  test("baseline offsets: after a settlement F+1..F+3 all start a dispute; after a timeout finalize of the in-flight frame F+1 only F+3 does", () => {
+  test("baseline offsets: after a settlement F+1..F+3 all start a dispute; after a timeout finalize of the in-flight frame F+1 only F+3 does (F+1 and F+2 are skipped)", () => {
     const { baselineOffsets: o } = committed("baseline");
     expect(o.frameNonce).toBe(7);
     expect(Object.values(o.settlement).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["7", "1", "ok"], ["7", "1", "ok"], ["7", "1", "ok"]]);
-    expect(Object.values(o.timeoutFinalize).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["9", "1", "REVERT E2()"], ["9", "1", "REVERT E2()"], ["9", "1", "ok"]]);
+    expect(Object.values(o.timeoutFinalize).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["9", "1", "ok, skipped (reason 0)"], ["9", "1", "ok, skipped (reason 0)"], ["9", "1", "ok"]]);
   });
 
   test("lifecycle: production's own hashes match ours, and the epoch advances on settle and finalize", () => {

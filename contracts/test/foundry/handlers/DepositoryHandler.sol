@@ -178,6 +178,15 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     (c,) = dep._collaterals(XlnHanko.accountKey(e1, e2), tokenId);
   }
 
+  /// @dev J2: a stale or already-applied dispute op lands as a skip (DisputeOpSkipped), so "the batch succeeded" no longer
+  /// means "the op acted". A skipped op must leave this fingerprint alone: the Account (nonce, dispute hash), both reserves
+  /// and the collateral of the token.
+  function _pairFingerprint(bytes32 a, bytes32 b, uint256 tokenId) internal view returns (bytes32) {
+    return keccak256(abi.encode(
+      _accountNonce(a, b), _disputeHash(a, b), dep._reserves(a, tokenId), dep._reserves(b, tokenId), _collateral(a, b, tokenId)
+    ));
+  }
+
   // ═══════════════════════════ actions ═══════════════════════════
 
   /// @notice Admin flash-funding. The only source of new internal value besides
@@ -604,11 +613,17 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
 
     uint256 pi = pairIndex(from, cp);
     bool wasActive = disputes[pi].active && _disputeHash(me, other) != bytes32(0);
+    bytes32 before_ = _pairFingerprint(me, other, t);
 
     if (_submit(from, b)) {
+      // Oracle: a dispute must never be startable on top of a live one. J2: a start beside a live dispute lands as a skip,
+      // which must leave the pair untouched; the ghost keeps the dispute that is open.
+      if (wasActive) {
+        if (_pairFingerprint(me, other, t) != before_) disputeOverwriteViolations++;
+        _bump("disputeStartSkipped");
+        return;
+      }
       _bump("disputeStart");
-      // Oracle: a dispute must never be startable on top of a live one.
-      if (wasActive) disputeOverwriteViolations++;
       disputes[pi] = DisputeGhost({
         active: true,
         starter: from,
@@ -667,8 +682,17 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     bool wasActive = g.active && _disputeHash(me, other) != bytes32(0);
     bool wasEarly = vm.getBlockTimestamp() < g.startTimestamp + DISPUTE_WINDOW_SECONDS;
     if (byStarter && wasEarly && wasActive) starterEarlyFinalizeAttempts++;
+    bytes32 before_ = _pairFingerprint(me, other, g.tokenId);
 
     if (_submit(caller, b)) {
+      // Oracle 2: the same dispute may not be finalized twice. J2: a finalize for a dispute that is no longer open lands as
+      // a skip, which must leave the pair untouched.
+      if (!wasActive) {
+        if (_pairFingerprint(me, other, g.tokenId) != before_) disputeDoubleFinalizeViolations++;
+        _bump("disputeFinalizeSkipped");
+        disputes[pi].active = false;
+        return;
+      }
       _bump("disputeFinalizeTimeout");
       // Oracle 1: the starter may not finalize before the delay elapsed.
       if (byStarter) {
@@ -677,8 +701,6 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       } else {
         counterpartyTimeoutFinalizes++;
       }
-      // Oracle 2: the same dispute may not be finalized twice.
-      if (!wasActive) disputeDoubleFinalizeViolations++;
       disputes[pi].active = false;
       _observeDebt();
     }
@@ -808,8 +830,9 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
       _bump("disputeFullCycle");
       starterTimeoutFinalizes++;
       _observeDebt();
-      // Step 3: the same dispute must not finalize a second time.
-      if (_submit(from, fin)) disputeDoubleFinalizeViolations++;
+      // Step 3: the same dispute must not finalize a second time. J2: the replay lands as a skip and moves nothing.
+      bytes32 closed = _pairFingerprint(me, other, t);
+      if (_submit(from, fin) && _pairFingerprint(me, other, t) != closed) disputeDoubleFinalizeViolations++;
     }
   }
 

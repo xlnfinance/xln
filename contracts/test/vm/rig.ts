@@ -188,24 +188,29 @@ export const boot = async (label: string, chainId = 31337) => {
     return sendRaw(who.id, encoded, signWith(who, hash), nonce);
   };
 
+  // The ops themselves, so a test can put several in one batch.
+  const startOp = (other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) => ({
+    counterentity: other.id, nonce, proposerIsLeft, proofbodyHash: bodyHash(b), initialProofbody: bodyStruct(b),
+    watchSeed: b.watchSeed, sig, starterInitialArguments: "0x", starterCounterArguments: "0x",
+    starterCounterProofCommitment: ethers.ZeroHash,
+  });
+  const finalizeOp = (other: Party, init: { nonce: number; body: Body; startedByLeft: boolean }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string },
+    args: { readonly starter?: string; readonly other?: string } = {}) => ({
+    counterentity: other.id, initialNonce: init.nonce, finalNonce: fin.nonce, proposerIsLeft: fin.proposerIsLeft,
+    initialProofbodyHash: bodyHash(init.body), finalProofbody: bodyStruct(fin.body), starterArguments: args.starter ?? "0x",
+    otherArguments: args.other ?? "0x", sig: fin.sig, startedByLeft: init.startedByLeft, cooperative: false,
+  });
+  const counterOp = (other: Party, init: { nonce: number; body: Body }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string }) => ({
+    counterentity: other.id, initialNonce: init.nonce, initialProofbodyHash: bodyHash(init.body), counterNonce: fin.nonce,
+    proposerIsLeft: fin.proposerIsLeft, counterProofbody: bodyStruct(fin.body), sig: fin.sig,
+  });
   const start = (who: Party, other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) =>
-    submit(who, { disputeStarts: [{
-      counterentity: other.id, nonce, proposerIsLeft, proofbodyHash: bodyHash(b), initialProofbody: bodyStruct(b),
-      watchSeed: b.watchSeed, sig, starterInitialArguments: "0x", starterCounterArguments: "0x",
-      starterCounterProofCommitment: ethers.ZeroHash,
-    }] });
+    submit(who, { disputeStarts: [startOp(other, nonce, proposerIsLeft, b, sig)] });
   const finalize = (who: Party, other: Party, init: { nonce: number; body: Body; startedByLeft: boolean }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string },
     args: { readonly starter?: string; readonly other?: string } = {}) =>
-    submit(who, { disputeFinalizations: [{
-      counterentity: other.id, initialNonce: init.nonce, finalNonce: fin.nonce, proposerIsLeft: fin.proposerIsLeft,
-      initialProofbodyHash: bodyHash(init.body), finalProofbody: bodyStruct(fin.body), starterArguments: args.starter ?? "0x",
-      otherArguments: args.other ?? "0x", sig: fin.sig, startedByLeft: init.startedByLeft, cooperative: false,
-    }] });
+    submit(who, { disputeFinalizations: [finalizeOp(other, init, fin, args)] });
   const counter = (who: Party, other: Party, init: { nonce: number; body: Body }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string }) =>
-    submit(who, { counterDisputes: [{
-      counterentity: other.id, initialNonce: init.nonce, initialProofbodyHash: bodyHash(init.body), counterNonce: fin.nonce,
-      proposerIsLeft: fin.proposerIsLeft, counterProofbody: bodyStruct(fin.body), sig: fin.sig,
-    }] });
+    submit(who, { counterDisputes: [counterOp(other, init, fin)] });
   const settle = (who: Party, other: Party, nonce: number, diffs: readonly CooperativeUpdateDiff[], sig: string) =>
     submit(who, { settlements: [{
       leftEntity: BigInt(who.id) < BigInt(other.id) ? who.id : other.id,
@@ -292,7 +297,7 @@ export const boot = async (label: string, chainId = 31337) => {
   const pair = accountOf(party(`${label}-a`), party(`${label}-b`), label);
 
   return {
-    chain, vm, domain, features, last, TOKEN, at, batchHash, sendRaw, submit, start, counter, finalize, settle,
+    chain, vm, domain, features, last, TOKEN, at, batchHash, sendRaw, submit, start, counter, finalize, settle, startOp, counterOp, finalizeOp,
     accountOf, registerNumbered, rotateBoard, ...pair, encodeJBatch, createEmptyBatch,
   };
 };
