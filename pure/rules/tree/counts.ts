@@ -1,9 +1,5 @@
-// What ast-grep cannot count in the new tree (kernel/, chain/): long lines, long declarations and exports nothing
-// uses, and the comparison of every hit with the registered exceptions. Text in, hits and rows out. Declarations and
-// names are read from the code of a file (comments and strings taken out, lines kept), so prose is neither a user of
-// a name nor the end of a declaration.
-import { TYPESCRIPT_LANGUAGE, lex } from "../names/source.ts";
-
+// What ast-grep cannot count in the new tree (kernel/, chain/) from a single rule: long lines, and the comparison of
+// every hit with the registered exceptions. Declarations and exports are read from syntax in syntax.ts.
 export type Hit = Readonly<{ ruleId: string; file: string }>;
 export type Row = Readonly<{ rule: string; file: string; now: number; allowed: number }>;
 export type Exceptions = Readonly<Record<string, Readonly<Record<string, number>>>>;
@@ -11,58 +7,8 @@ export type Exceptions = Readonly<Record<string, Readonly<Record<string, number>
 export const MAX_LINE = 120;
 export const MAX_DECLARATION_LINES = 50;
 
-export const codeOf = (text: string): string => lex(text, TYPESCRIPT_LANGUAGE).code;
-
 export const longLines = (file: string, text: string): readonly Hit[] =>
   text.split("\n").filter((line) => line.length > MAX_LINE).map((): Hit => ({ ruleId: "long-line", file }));
-
-const opensDeclaration = (line: string): boolean =>
-  /^(export (declare )?)?(async )?(const|let|var|function\*?|type|interface|enum) /.test(line);
-const endsDeclaration = (line: string): boolean => line.length > 0 && !" })];*".includes(line[0] ?? " ");
-
-// A declaration runs from its first line to the last line before the next line that starts in column 0.
-export const declarationSpans = (text: string): readonly number[] => {
-  const lines = codeOf(text).split("\n");
-  return lines.flatMap((line, start) => {
-    if (!opensDeclaration(line)) return [];
-    const next = lines.findIndex((other, index) => index > start && endsDeclaration(other));
-    return [(next < 0 ? lines.length : next) - start];
-  });
-};
-
-export const longDeclarations = (file: string, text: string): readonly Hit[] =>
-  declarationSpans(text).filter((span) => span > MAX_DECLARATION_LINES).map((): Hit => ({ ruleId: "long-declaration", file }));
-
-export type Export = Readonly<{ name: string; isType: boolean }>;
-
-const DECLARED = /^export (?:declare )?(?:async )?(const|let|var|function\*?|type|interface|enum) ([A-Za-z_$][\w$]*)/gm;
-const EXPORT_LIST = /^export \{([^}]*)\}/gm;
-
-// `export { a as b, c }` exports b and c. A name in an export list is a value unless it says `type`.
-const listed = (code: string): readonly Export[] =>
-  [...code.matchAll(EXPORT_LIST)].flatMap((found) =>
-    (found[1] ?? "").split(",").map((item) => item.trim()).filter((item) => item !== "").map((item) => {
-      const isType = item.startsWith("type ");
-      const words = item.replace(/^type /, "").split(/\s+as\s+/);
-      return { name: words.at(-1) ?? "", isType };
-    }));
-
-export const exportsOf = (text: string): readonly Export[] => {
-  const code = codeOf(text);
-  const declared = [...code.matchAll(DECLARED)].map((found) => ({ name: found[2] ?? "", isType: found[1] === "type" || found[1] === "interface" }));
-  return [...declared, ...listed(code)];
-};
-
-const mentions = (text: string, name: string): number => (codeOf(text).match(new RegExp(`\\b${name}\\b`, "g")) ?? []).length;
-
-// A value export needs a user in another file; a type export is also live when its own file names it in a signature.
-export const isLive = (own: string, { name, isType }: Export, others: readonly ReadonlySet<string>[]): boolean =>
-  others.some((words) => words.has(name)) || (isType && mentions(own, name) > 1);
-
-export const wordsOf = (text: string): ReadonlySet<string> => new Set(codeOf(text).match(/[A-Za-z_$][\w$]*/g) ?? []);
-
-export const deadExports = (file: string, text: string, others: readonly ReadonlySet<string>[]): readonly Hit[] =>
-  exportsOf(text).filter((each) => !isLive(text, each, others)).map((each): Hit => ({ ruleId: "unreachable", file: `${file} (${each.name})` }));
 
 const cell = (rule: string, file: string): string => `${rule}\t${file}`;
 

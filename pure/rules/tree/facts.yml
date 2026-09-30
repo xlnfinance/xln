@@ -1,0 +1,86 @@
+# What the tree gate reads from the syntax of a file: one rule per fact, every match a record (kind, range, captured
+# names). gate.ts joins them; nothing here reports a violation. `language` is rewritten to Tsx for .tsx sources.
+id: decl
+language: TypeScript
+severity: info
+message: a top-level statement that declares or exports
+rule:
+  inside: { kind: program }
+  any:
+    - { kind: export_statement }
+    - { kind: lexical_declaration }
+    - { kind: function_declaration }
+    - { kind: generator_function_declaration }
+    - { kind: class_declaration }
+    - { kind: type_alias_declaration }
+    - { kind: interface_declaration }
+    - { kind: enum_declaration }
+    - { kind: ambient_declaration }
+---
+id: value-name
+language: TypeScript
+severity: info
+message: a value declared by an export statement
+rule:
+  any:
+    - kind: variable_declarator
+      inside: { kind: lexical_declaration, inside: { kind: export_statement } }
+      has: { field: name, kind: identifier, pattern: $NAME }
+    - any: [{ kind: function_declaration }, { kind: generator_function_declaration }, { kind: class_declaration }, { kind: enum_declaration }]
+      inside: { kind: export_statement }
+      has: { field: name, pattern: $NAME }
+---
+id: type-name
+language: TypeScript
+severity: info
+message: a type declared by an export statement
+rule:
+  any: [{ kind: type_alias_declaration }, { kind: interface_declaration }]
+  inside: { kind: export_statement }
+  has: { field: name, pattern: $NAME }
+---
+id: unnamed-declarator
+language: TypeScript
+severity: info
+message: a declarator of an exported const that binds no single name (a destructuring pattern)
+rule:
+  kind: variable_declarator
+  inside: { kind: lexical_declaration, inside: { kind: export_statement } }
+  not: { has: { field: name, kind: identifier } }
+---
+id: specifier
+language: TypeScript
+severity: info
+message: an import or export specifier; $NAME is the name on the far side of any `as`
+rule:
+  any: [{ kind: import_specifier }, { kind: export_specifier }]
+  has: { field: name, pattern: $NAME }
+---
+id: specifier-exported
+language: TypeScript
+severity: info
+message: the name an export specifier exports (the last word of the specifier)
+rule:
+  kind: identifier
+  inside: { kind: export_specifier }
+  nthChild: { position: 1, reverse: true }
+---
+id: source
+language: TypeScript
+severity: info
+message: an import or export statement that names a module
+rule:
+  any: [{ kind: import_statement }, { kind: export_statement }]
+  has: { field: source, kind: string, pattern: $SOURCE }
+---
+id: namespace
+language: TypeScript
+severity: info
+message: import * as ns
+rule: { kind: namespace_import }
+---
+id: type-ref
+language: TypeScript
+severity: info
+message: a type named in a type position or at its declaration
+rule: { kind: type_identifier }
