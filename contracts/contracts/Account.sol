@@ -78,6 +78,7 @@ library Account {
   uint8 internal constant DISPUTE_SKIP_COUNTER_NOT_NEWER = 5;      // counter: not newer than the state the dispute opened on
   uint8 internal constant DISPUTE_SKIP_COUNTER_SUPERSEDED = 6;     // counter: a newer counter is already registered
   uint8 internal constant DISPUTE_SKIP_COUNTER_REGISTERED = 7;     // counter: this exact body is already registered
+  uint8 internal constant DISPUTE_SKIP_FINAL_EVIDENCE_OUTDATED = 8; // finalize: the window is over and the evidence is not the state that settles
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
@@ -681,6 +682,16 @@ library Account {
   function _retiredSide(bool retired, bytes32 submitter, bytes32 signer) private pure returns (uint8) {
     if (!retired) return 0;
     return signer < submitter ? 1 : 2;
+  }
+
+  /// @dev The counterparty's current-board signature over a fresh cooperative movement (C2R, settlement). Anything but a valid
+  /// signature by `expected` is E4, including a check that reverts (an empty or undecodable signature).
+  function _requireCounterpartySignature(address entityProvider, bytes memory sig, bytes32 hash, bytes32 expected) private view {
+    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      if (!valid || recoveredEntity != expected) revert E4();
+    } catch {
+      revert E4();
+    }
   }
 
   /// @dev Verifies historical bilateral evidence. Previous-board signatures must remain valid during the grace window or
@@ -1354,11 +1365,7 @@ library Account {
     // rotated-out board must never retain spending authority during its grace.
     // An empty or undecodable signature makes the check revert with no data; that is a bad counterparty signature (E4), the
     // same as in a settlement, and must not look like the empty revert of a frame that ran out of gas (see Depository.processBatch).
-    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-      if (!valid || recoveredEntity != c2r.counterparty) revert E4();
-    } catch {
-      revert E4();
-    }
+    _requireCounterpartySignature(entityProvider, c2r.sig, hash, c2r.counterparty);
 
     // Apply diffs
     uint tokenId = c2r.tokenId;
@@ -1520,7 +1527,9 @@ library Account {
       return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
     }
     if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) {
-      revert IDepositoryDelegateErrorAbi.E9();
+      // the dispute's opening state never changes: this counter answers another one (S1: permanent, so a skip in a batch)
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
     }
     if (
       params.counterProofbody.leftResponseSeconds != account.leftResponseSeconds ||
@@ -1569,7 +1578,9 @@ library Account {
           }
           // LEFT replaces RIGHT at equal nonce; continue to the atomic update.
         } else if (bodyHash != account.disputeCounterProofbodyHash) {
-          revert IDepositoryDelegateErrorAbi.E9();
+          // a rival body at the registered counter's nonce and side can never replace it (S1: permanent)
+          if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+          return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
         } else {
           // The same body again. Current-board evidence of it is strictly stronger than a retired signature of it, so
           // a re-registration may upgrade the grade to none; it can never downgrade it.
@@ -1669,11 +1680,7 @@ library Account {
     // Cooperative settlement creates a fresh financial state, so only the
     // counterparty's current board may authorize it. Historical board grace is
     // reserved for dispute evidence below.
-    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-      if (!valid || recoveredEntity != counterparty) revert E4();
-    } catch {
-      revert E4();
-    }
+    _requireCounterpartySignature(entityProvider, s.sig, hash, counterparty);
 
     // A settlement is one signed bilateral state transition. Check every
     // balance first so an expected state race rejects the whole settlement,

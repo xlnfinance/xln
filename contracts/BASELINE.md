@@ -234,14 +234,13 @@ finalize with the starter as its own counterentity, so it reverted for the wrong
 J5 (decisions doc, coordinator 21:01, refined 22:31 after the #54 review) runs the ops of a batch with no dispute, reveal,
 hash-ladder or external-deposit op through an external self-call in try/catch. A failing batch applies nothing, keeps its
 entity nonce spent, and emits `BatchFailed(entityId, nonce, reason)` instead of reverting. What still reverts and takes no
-nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, an
-op that fails with an **empty revert reason** (an out-of-gas frame returns none; an empty or malformed C2R counterparty signature is given an explicit E4 in `Account.processC2R` so it is not one), and any batch that carries a dispute, reveal,
+nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, a transaction that offers less than the gas floor to a batch that failed (`BatchGasStarved`; an empty revert reason is no longer one of these, see the second review below), and any batch that carries a dispute, reveal,
 hash-ladder or **deposit** op. A bad counterparty signature inside the ops (a settlement or C2R signed at an old account epoch)
 is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch-failed.test.ts` (13),
 `test/vm/j5-review-extra.test.ts` (8, the review's) and `test/foundry/J5Attacks.t.sol` (the review's 6, deposit tests flipped
 to the fixed behaviour).
 
-**Measured.** Depository 22772 bytes (J2: 22994), Account 24455 (J2: 24448; 121 bytes under 24576, see the C2R follow-up below). The self-call wrapper costs
+**Measured.** Depository 22772 bytes (J2: 22994), Account 24455 (J2: 24448; 121 bytes under 24576, see the C2R follow-up below; the second review below moves them to 23359 and 24400). The self-call wrapper costs
 gas, so `MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL` goes from 256 to 250: 256 pairs measured 15,059,370, over the 15M
 liveness budget. 250 pairs (4 entries of 63, 63, 62, 62) measure **14,763,601** execution gas
 (`BatchBounds.test_gas_maxReserveToCollateralProduct`, which also fails if the maximal batch stops landing);
@@ -265,8 +264,49 @@ each batch (every reserve, debt, collateral, offset, account nonce and dispute h
 reverted batch; it also seeds debts (`seedDebt`, on the `DepositoryDebtHarness`) and checks that a batch whose R2R legs overspend
 a debtor never lands (`invariant_debtorNeverOverspendsThroughABatch`). The review's planted partial-apply mutant k27 (a failing R2R
 returns instead of reverting) survived the old handler and is killed by this one. Mutants checked at this head: k27 (handler),
-deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason guard deleted (killed by the Hardhat C2R test until the follow-up below, which removed the last reachable op that failed with no reason; the guard is now defensive against out-of-gas frames only, the gas sweeps pass with or without it, and no test kills its deletion). The two bare `expectRevert()` calls in the lifecycle and fault-mode control tests name their selectors (E2,
-`TransformerExecutionFailed`).
+deposit legs dropped from the hard-fail set (3 of 4 `J5Attacks`), the empty-reason hard revert deleted (superseded: with the gas floor an empty reason is `BatchFailed(0)`).
+
+## After the second review of J5 (G1 gas, S1 stuck nonce, B1 co-signed veto)
+
+The second review of #54 (`review/j5-second-review-2026-09-29.md`, decisions in `plan/contracts-decisions.md`, J5 section) found one
+hole and two rule gaps.
+
+- **G1: a relayer's gas decided a signature check.** A starved ERC-1271 member four frames down read as an invalid hanko, `Account`
+  reverted E4, the parents still held about 6% of the gas (over the 1/32 guard), so a good co-signed C2R became `BatchFailed E4`
+  with the nonce spent. Both reviewers found it (first: burn 150K, 749 swept limits for a C2R; second: a 300k member, 538 limits).
+  Fixed by a **gas floor** (coordinator's choice over a 1/8 guard and a per-call stipend, both built and dropped): a failure is
+  reported only when the self-call started with at least `BATCH_GAS_FLOOR` = 15,000,000 * 64 / 63 + 2,000 = 15,240,095 gas, so it
+  cannot have been starvation at any depth; below it the transaction reverts `BatchGasStarved` and takes no nonce. Pinned by
+  `test/foundry/J5Starve.t.sol` (8) and `test/vm/j5-gas-floor.test.ts` (4: 20k, 100k, 300k members and a member that rejects under
+  500k gas; every limit 40k to 1.4M: never a `BatchFailed`, the estimateGas-style search lands). **Mutant:** deleting the floor
+  fails 5 of the 8 `J5StarveTest` tests. Cost: a failing batch with under ~15.24M gas reverts instead of being reported (relayers
+  estimate; the vm rig uses 16M).
+- **Empty revert reason** (was a hard revert): with the floor it cannot be starvation, so it is `BatchFailed(0x00000000)`, nonce
+  spent (a token paused forever no longer stalls the entity; `J5EmptyReasonTest`). The dead `payer` parameter of `applyBatch` is
+  gone (deposits revert whole, so nothing in the self-call reads the caller). The conservation fingerprint covers the whole
+  `_accounts` record, the debt queue and cursor and the active-debt count; the planted `ondeltaEpoch` residue mutant r3 now fails
+  `invariant_everyBatchConservesValue`. `test/vm/j5b-review-extra.test.ts` (the re-review's 12 probes of bad counterparty
+  signatures, and the wrong-entity C2R case).
+- **S1: a dispute-class batch that can never succeed pinned the entity nonce** (F1 forbids re-signing at it). Skips now cover what
+  another party's move made permanent: a finalize whose nonce or side is not the state that settles once the window is over (reason 8; the body hash is not compared, hashing a maximal proof body broke the MAX_SWAP_BOOK gas budget),
+  a finalize or counter naming another opening state (reason 3), a rival body at a registered counter's nonce and side (reason 6),
+  and every former `E12` of a hash-ladder registration (op 3: window closed or no dispute, reason 9; conflict or lower replay,
+  reason 10). Too early still reverts; bytes-only failures still revert. `test/vm/j5-stuck-nonce.test.ts` (7); the three E12
+  tests, the conflicting-counter test and the post-T finalize line in `test/protocol/HashLadderRegistry.test.ts` now assert the
+  skip; the Foundry `HashLadder` handler counts a `DisputeOpSkipped` registration as not landed (`XlnHanko.opSkipped`).
+- **B1: the counterparty (and the relayer) can fail a batch, not only the signer.** No contract change: R-COSIGN, a batch that
+  carries a co-signed op carries only ops for that one Account. `test/vm/j5-cosign-veto.test.ts` (2) pins the veto: R starts a
+  dispute, L's `[payment, co-signed C2R]` is `BatchFailed E6`, nonce spent, payment gone; control lands.
+
+- **J6 (deposit legs) and A12 (two co-signed proofs at one nonce), from the Quint model, no contract change.** Deposit legs stay in
+  the batch as a hard-revert leg (there is no direct deposit path; adding one was refused by the permission classifier and is
+  Arthur's call); rules for the Runtime: a deposit leg travels alone, and is signed only after a successful simulation at the
+  head; the residual stall (a token paused after the simulation) is accepted in writing. A12: two different co-signed proofs can
+  exist at one nonce only with opposite proposer flags; at one nonce LEFT's proposal outranks RIGHT's in a fixed order, whoever
+  starts and whoever counters. `test/a12/a12-two-cosigned-proofs.test.ts` (4) pins all three orderings and the same-flag case;
+  rule R-ONE-BODY for the Runtime.
+
+**Size.** Depository 23359, Account 24400 (176 bytes under 24576): the shared `_requireCounterpartySignature` replaced two copies of the try/catch and paid for S1's two counter skips. Account's next change still needs a size plan.
 
 Results after J5 (local runs, sandbox with forge 1.7.1, one file or suite per process; the three E4-flip tests re-run after the
 sweep and pass; code and tests as committed):

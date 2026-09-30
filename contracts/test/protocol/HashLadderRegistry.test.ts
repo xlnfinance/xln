@@ -24,6 +24,10 @@ import {
 const abi = ethers.AbiCoder.defaultAbiCoder();
 
 const DISPUTE_PROOF = 1;
+/** DisputeOpSkipped codes of a hash-ladder registration (HashLadderRegistry.sol). */
+const REVEAL_OP = 3n;
+const REVEAL_SKIP_WINDOW = 9n;
+const REVEAL_SKIP_CONFLICT = 10n;
 const MAX_FILL_RATIO = 65535n;
 const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('xln:test-watch-seed'));
 
@@ -430,11 +434,12 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('rejects a first Source write for a declared pair without an active dispute', async function () {
+  it('skips a first Source write for a declared pair without an active dispute (S1: op 3, reason 9), nothing recorded', async function () {
     const dispute = await openPullDispute({ label: 'registry-account-scope', fillRatio: 0x0123 });
     const falseCounterparty = ethers.zeroPadValue('0xbeef', 32);
     await expect(registerReveal(dispute, dispute.right, { counterpartyEntity: falseCounterparty }))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, falseCounterparty, REVEAL_OP, REVEAL_SKIP_WINDOW, BigInt(dispute.fillRatio));
 
     const ladder = ladderHashOf(dispute.pullProof);
     expect((await dispute.depository.getHashLadderReveal(
@@ -449,7 +454,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('single-shot: a higher ratio overwrite on the same ladder reverts', async function () {
+  it('single-shot: a higher ratio overwrite on the same ladder is skipped and changes nothing', async function () {
     const dispute = await openPullDispute({ label: 'registry-overwrite', fillRatio: 0x0123 });
     await registerReveal(dispute, dispute.right, { fillRatio: 0x0123 });
     const ladder = ladderHashOf(dispute.pullProof);
@@ -461,10 +466,12 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     );
     await time.increase(5);
     const higherProof = buildHashLadderProof('registry-overwrite', 0x0234);
+    // S1: a conflicting retry can never replace the immutable record, so inside a batch it is skipped (op 3, reason 10)
     await expect(registerReveal(dispute, dispute.right, {
       fillRatio: 0x0234,
       reveals: higherProof.reveals,
-    })).to.be.revertedWithCustomError(dispute.depository, 'E12');
+    })).to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_CONFLICT, 0x0234n);
     const [ratio, raisedAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId,
       dispute.left.entityId,
@@ -568,13 +575,14 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(100_000n);
   });
 
-  it('rejects a late first Source registration without consuming its immutable slot', async function () {
+  it('skips a late first Source registration without consuming its immutable slot', async function () {
     const dispute = await openPullDispute({ label: 'registry-late', fillRatio: 0x0123 });
     // Right is the Pull beneficiary, so its signed 60-second side window is the
     // Source deadline. A late first write must not poison the single-shot slot.
     await time.increase(WINDOW_SECONDS + 1);
     await expect(registerReveal(dispute, dispute.right, {}))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, REVEAL_OP, REVEAL_SKIP_WINDOW, BigInt(dispute.fillRatio));
     const [ratio, revealedAt] = await dispute.depository.getHashLadderReveal(
       dispute.right.entityId,
       dispute.left.entityId,
@@ -714,8 +722,10 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     // After full T the selected counter-proof settles; the starter can no
     // longer race the obsolete initial body.
     await minePastTimeout(dispute.depository, dispute.acctKey);
+    // S1: the obsolete initial-state finalize can never win now, so it is skipped (op 2, reason 8), not reverted
     await expect(finalizeDispute(dispute, dispute.right))
-      .to.be.revertedWithCustomError(dispute.depository, 'E2');
+      .to.emit(dispute.depository, 'DisputeOpSkipped')
+      .withArgs(dispute.right.entityId, dispute.left.entityId, 2n, 8n, dispute.disputeNonce);
     // Registration already authenticated the selected branch. If the
     // non-starter disappears, the starter must still be able to execute that
     // exact stored identity at T without possessing another inner signature.
@@ -788,14 +798,12 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const conflictingSig = buildSingleSignerHanko(
       dispute.right.entityId, conflictingDigest, dispute.right.privateKey,
     );
-    const accountErrorAbi = await ethers.getContractAt(
-      'Account', await dispute.depository.getAddress(),
-    );
+    // S1: a rival body at the registered counter's nonce and side can never replace it: skipped (op 1, reason 6)
     await expect(submit({
       ...leftCounter,
       counterProofbody: conflictingBody,
       sig: conflictingSig,
-    })).to.be.revertedWithCustomError(accountErrorAbi, 'E9');
+    })).to.emit(dispute.depository, 'DisputeOpSkipped');
   });
 
   it('skips a RIGHT same-nonce branch when the initial proposer was LEFT', async function () {

@@ -307,7 +307,7 @@ export interface DepositoryDebtHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "applyBatch",
-    values: [BytesLike, BytesLike, AddressLike]
+    values: [BytesLike, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "computeWatchtowerCounterDisputeHash",
@@ -1121,7 +1121,7 @@ export interface DepositoryDebtHarness extends BaseContract {
   >;
 
   applyBatch: TypedContractMethod<
-    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;
@@ -1378,7 +1378,7 @@ export interface DepositoryDebtHarness extends BaseContract {
   getFunction(
     nameOrSignature: "applyBatch"
   ): TypedContractMethod<
-    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;

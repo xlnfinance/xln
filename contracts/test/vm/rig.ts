@@ -160,7 +160,7 @@ export const boot = async (label: string, chainId = 31337) => {
       ? depositoryIface.encodeFunctionData("processBatch", [entity, encodedBatch, hanko, nonce])
       : depositoryIface.encodeFunctionData("processBatch", [encodedBatch, hanko, nonce]);
     try {
-      const done = await vm.executeTx({ to: domain.depository, data, gasLimit: 15_000_000n }, undefined, { emitEvents: true });
+      const done = await vm.executeTx({ to: domain.depository, data, gasLimit: 16_000_000n }, undefined, { emitEvents: true });
       last.events = done.events ?? [];
       return "ok";
     } catch {
@@ -173,7 +173,7 @@ export const boot = async (label: string, chainId = 31337) => {
     // A read-only call runs in the EVM's default block; the reason must be replayed at the test clock, or every
     // timing guard (dispute windows, reveal deadlines) reads the wrong time and names the wrong error.
     const block = vm.createBlock(vm.getBlockTimestamp());
-    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 15_000_000n, block });
+    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 16_000_000n, block });
     const returned = ethers.hexlify(result.execResult.returnValue ?? new Uint8Array());
     const parsed = returned === "0x" ? null : depositoryIface.parseError(returned) ?? forkAccount.createInterface().parseError(returned) ?? forkDeltaTransformer.createInterface().parseError(returned);
     return parsed ? `${parsed.name}(${parsed.args.join(",")})` : returned;

@@ -7,6 +7,7 @@ import {StdUtils} from "forge-std/StdUtils.sol";
 import "../../../contracts/Depository.sol";
 import "../../../contracts/HashLadder.sol";
 import "../../../contracts/Types.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 
 /// @notice Stateful handler for HashLadder.invariants.t.sol.
@@ -21,8 +22,8 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 ///   participant must not write this slot.
 /// - SOURCE SINGLE-SHOT: first Source write must land inside its signed
 ///   account window [S, S+W_owner]; exact retries are sticky no-ops (ratio AND
-///   revealedAt unchanged); different ratios are E12.
-/// - TARGET MONOTONE: lower replays are E12; equal/higher publications may
+///   revealedAt unchanged); different ratios are skipped (DisputeOpSkipped, S1).
+/// - TARGET MONOTONE: lower replays are skipped (S1); equal/higher publications may
 ///   refresh revealedAt; fillRatio never decreases.
 ///
 /// C4-hardening wave 2 (audit A5): the windows are deliberately ASYMMETRIC
@@ -32,7 +33,7 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 /// uses the writer's OWN side, so the over-accepting direction of any swap
 /// fires invariant 5d, and `checkWindowSides` binds the signed windows to the
 /// correct storage fields. `closeDispute` finalizes live disputes so the
-/// "dispute closed → first Source write is E12" branch executes and pairs
+/// "dispute closed → first Source write is skipped" branch executes and pairs
 /// can cycle start→reveal→close repeatedly.
 contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
@@ -125,8 +126,10 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
     vm.recordLogs();
     try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
-      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
-      return !XlnHanko.batchFailed(vm.getRecordedLogs());
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing; S1: so does a registration that is
+      // skipped (no dispute open, past its owner window, a conflicting retry, a lower Target replay): DisputeOpSkipped
+      Vm.Log[] memory logs = vm.getRecordedLogs();
+      return !XlnHanko.batchFailed(logs) && !XlnHanko.opSkipped(logs);
     } catch {
       return false;
     }
@@ -255,7 +258,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   /// @notice C4-hardening A5: finalizes a live dispute through the REAL
   ///         processBatch finalize path (pull-free body, so the non-starter
   ///         may accept immediately and the starter only after the timeout).
-  ///         After a close, a first Source write must hit the E12 branch.
+  ///         After a close, a first Source write must hit the skip branch (S1; it was E12).
   function closeDispute(uint256 pairSeed, uint256 bySeed) external {
     uint256 pi = pairSeed % PAIRS;
     if (!disputes[pi].active) {

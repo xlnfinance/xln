@@ -319,8 +319,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @dev J5: an authenticated batch without dispute or reveal ops whose ops failed. None of them was applied; the entity
   /// nonce is consumed. `reason` is the selector of the revert that stopped the batch (zero when it carried none).
   event BatchFailed(bytes32 indexed entityId, uint256 indexed nonce, bytes4 reason);
-  /// @dev J5: the batch failed with almost no gas left, which a relayer could have arranged. It reverts and takes no nonce.
+  /// @dev J5: the batch failed after the self-call got less than the batch gas floor, or with too little left to log the failure: the
+  ///      failure could be a relayer's gas choice. It reverts and takes no nonce.
   error BatchGasStarved();
+  /// @dev J5: the gas one batch may need, the budget every maximal batch is measured against (test/foundry/stress/BatchBounds.t.sol: the largest measures 14,763,601).
+  uint256 private constant BATCH_GAS_BUDGET = 15_000_000;
+  /// @dev J5: processBatch reports a failed batch only when it started the self-call with at least this much gas. The self-call gets 63/64
+  ///      of it, which is at least the budget, and no valid batch needs more, so a failure at or above the floor was not starvation.
+  ///      Tied to the budget: raise BATCH_GAS_BUDGET and the floor follows (the 2,000 covers the call itself).
+  uint256 private constant BATCH_GAS_FLOOR = BATCH_GAS_BUDGET * 64 / 63 + 2_000;
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
     bytes32 indexed entityId,
@@ -359,23 +366,24 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
     if (_revertsWhole(batch)) {
-      _processBatch(entityId, batch, msg.sender);
+      _processBatch(entityId, batch);
     } else {
       // J5: from here the batch is authenticated and its nonce is spent. When its ops fail, the failure is undone as one
       // unit (the external self-call reverts its own writes) and reported, so the nonce does not stay open and stall
       // every urgent batch above it. A batch that reverts whole (see _revertsWhole) keeps the J2 rule instead.
       uint256 gasBefore = gasleft();
-      try this.applyBatch(entityId, encodedBatch, msg.sender) {} catch (bytes memory reason) {
-        // a frame that ran out of gas returns no data, so an empty reason is never reported as a failure of the batch
-        if (reason.length < 4) {
-          assembly ("memory-safe") { revert(0, 0) }
-        }
-        // a call that ran out of gas deeper down can bubble up as an ordinary revert; a relayer must not turn a good batch
-        // into a failed one by withholding gas, so a failure that left under 1/32 of the gas (the 63/64 rule leaves the
-        // caller about 1/64) reverts. The batch's own hanko was checked above and reverted E4 without a nonce; a bad
-        // counterparty signature inside the ops (a settlement or C2R signed at an old account epoch) is a failure of the
-        // batch like any other, and spends the nonce, because under F1 the entity cannot sign a different batch at it.
-        if (gasleft() < gasBefore / 32) revert BatchGasStarved();
+      try this.applyBatch(entityId, encodedBatch) {} catch (bytes memory reason) {
+        // A failure is reported only when the self-call was given the whole batch budget (BATCH_GAS_FLOOR), so it cannot have run
+        // out of gas at any depth (the ERC-1271 member of a counterparty hanko four frames down included): a relayer choosing the
+        // gas can never turn a good batch into a failed one and burn its nonce. Below the floor the transaction reverts, takes no
+        // nonce, and is resubmitted with more gas (estimation finds it). The 1/32 check keeps the same promise for the tail: enough
+        // gas is left to log the failure. An empty reason is then a real empty revert (a paused or blacklisted token that does
+        // `revert()`), not starvation: it is a failure of the batch like any other, reported as BatchFailed(0x00000000), so a token
+        // paused forever cannot stall the entity under F1.
+        // The batch's own hanko was checked above and reverted E4 without a nonce; a bad counterparty signature inside the ops
+        // (a settlement or C2R signed at an old account epoch) is a failure of the batch like any other, and spends the nonce,
+        // because under F1 the entity cannot sign a different batch at it.
+        if (gasBefore < BATCH_GAS_FLOOR || gasleft() < gasBefore / 32) revert BatchGasStarved();
         emit BatchFailed(entityId, nonce, bytes4(reason));
         return;
       }
@@ -383,11 +391,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     emit HankoBatchProcessed(entityId, batchHash, nonce);
   }
 
-  /// @dev J5: the ops of an already authenticated batch, callable only by this contract (see processBatch). `payer` is
-  ///      the outer caller: inside this self-call msg.sender is the Depository, and external deposits pull from the payer.
-  function applyBatch(bytes32 entityId, bytes calldata encodedBatch, address payer) external {
+  /// @dev J5: the ops of an already authenticated batch, callable only by this contract (see processBatch). Inside this self-call
+  ///      msg.sender is the Depository, so nothing here may read the caller: a batch with an external deposit leg, the one op that
+  ///      pulls from the caller, never comes through (_revertsWhole) and runs in processBatch's own frame instead.
+  function applyBatch(bytes32 entityId, bytes calldata encodedBatch) external {
     if (msg.sender != address(this)) revert E2();
-    _processBatch(entityId, abi.decode(encodedBatch, (Batch)), payer);
+    _processBatch(entityId, abi.decode(encodedBatch, (Batch)));
   }
 
   /// @dev Batches that revert whole when an op fails, and take no nonce: those with a dispute, reveal or hash-ladder op (the J2
@@ -493,7 +502,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     _increaseReserve(entity, tokenId, amount);
   }
 
-  function _processBatch(bytes32 entityId, Batch memory batch, address payer) private {
+  function _processBatch(bytes32 entityId, Batch memory batch) private {
     // Implicit flash credit for the initiator (see Types.BatchScratch). No
     // reserve is ever inflated; a debt-free initiator may spend ahead of
     // holding and must be whole again before this function returns.
@@ -511,7 +520,7 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       if (params.entity == bytes32(0)) {
         params.entity = entityId;
       }
-      _externalTokenToReserve(params, payer);
+      _externalTokenToReserve(params);
     }
 
     // Process reserveToReserve transfers (the core functionality we need)
@@ -689,12 +698,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       params.contractAddress,
       params.externalTokenId
     );
-    _externalTokenToReserve(params, msg.sender);
+    _externalTokenToReserve(params);
   }
 
   // Internal version for batch processing (already inside nonReentrant context)
-  function _externalTokenToReserve(ExternalTokenToReserve memory params, address payer) internal {
-    bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(payer))) : params.entity;
+  function _externalTokenToReserve(ExternalTokenToReserve memory params) internal {
+    bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
     if (params.amount == 0) revert E1();
 
     bytes32 packedToken = _packTokenReference(params.tokenType, params.contractAddress, params.externalTokenId);
@@ -711,15 +720,15 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     if (params.tokenType == TypeERC20) {
       uint256 balanceBefore = IERC20(params.contractAddress).balanceOf(address(this));
-      _safeERC20TransferFrom(params.contractAddress, payer, address(this), params.amount);
+      _safeERC20TransferFrom(params.contractAddress, msg.sender, address(this), params.amount);
       uint256 balanceAfter = IERC20(params.contractAddress).balanceOf(address(this));
       params.amount = balanceAfter - balanceBefore;
       if (params.amount == 0) revert E3();
     } else if (params.tokenType == TypeERC721) {
-      NftCustody.depositERC721(params.contractAddress, payer, params.externalTokenId);
+      NftCustody.depositERC721(params.contractAddress, params.externalTokenId);
       params.amount = 1;
     } else if (params.tokenType == TypeERC1155) {
-      NftCustody.depositERC1155(params.contractAddress, payer, params.externalTokenId, params.amount);
+      NftCustody.depositERC1155(params.contractAddress, params.externalTokenId, params.amount);
     }
 
     _increaseReserve(targetEntity, params.internalTokenId, params.amount);
@@ -849,21 +858,47 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
     Account.decreaseReserve(_reserves, entity, tokenId, amount);
   }
 
-  /// @dev J2: inside a batch a finalize the Account has already moved past is skipped with DisputeOpSkipped, so it cannot
-  /// take the rest of the batch (an urgent secret reveal) down with it. Only "no dispute open" (finalized, or never started)
-  /// and "another dispute's nonce" are skips: too early, a wrong sender, mismatched evidence and everything else still revert
-  /// the batch. The watchtower entrypoint calls _disputeFinalizeInternal directly and keeps reverting.
+  /// @dev J2 + S1: inside a batch a finalize that can never succeed again is skipped with DisputeOpSkipped, so it cannot take the
+  /// rest of the batch (an urgent secret reveal) down with it, and cannot pin the entity's nonce (F1: a shown batch is final at its
+  /// nonce, so a batch that reverts for good would leave the entity no way forward). Skips are what ANOTHER party's move made
+  /// permanent: no dispute open (finalized, or never started); another dispute's nonce or opening state; and, once the window is
+  /// over and the stored dispute can no longer change, evidence that is not the state that settles (a counter that landed before T
+  /// outdated the state this finalize was signed on). Too early, a wrong sender, a bad signature and malformed evidence still
+  /// revert the batch: they depend on time or on the op's own bytes, not on someone else's move. The watchtower entrypoint calls
+  /// _disputeFinalizeInternal directly and keeps reverting.
   function _finalizeStale(bytes32 entityId, FinalDisputeProof memory params) private returns (bool) {
     AccountInfo storage account = _accounts[_accountKey(entityId, params.counterentity)];
+    uint8 reason;
     if (account.disputeHash == bytes32(0)) {
-      emit DisputeOpSkipped(entityId, params.counterentity, 2, 2, params.finalNonce);
-      return true;
+      reason = Account.DISPUTE_SKIP_NO_ACTIVE_DISPUTE;
+    } else if (
+      params.initialNonce != account.nonce ||
+      params.initialProofbodyHash != account.disputeInitialProofbodyHash ||
+      params.startedByLeft != account.disputeStartedByLeft
+    ) {
+      reason = Account.DISPUTE_SKIP_DISPUTE_MOVED;
+    } else if (block.timestamp >= account.disputeTimeout && _finalEvidenceOutdated(account, params)) {
+      reason = Account.DISPUTE_SKIP_FINAL_EVIDENCE_OUTDATED;
+    } else {
+      return false;
     }
-    if (params.initialNonce != account.nonce) {
-      emit DisputeOpSkipped(entityId, params.counterentity, 2, 3, params.finalNonce);
-      return true;
+    emit DisputeOpSkipped(entityId, params.counterentity, Account.DISPUTE_OP_FINALIZE, reason, params.finalNonce);
+    return true;
+  }
+
+  /// @dev After T nothing can change the stored dispute but its close, so the evidence either is the state that settles or never will
+  /// be. With a counter registered that is the counter's nonce and side; without one it is the opening nonce and proposer, unless
+  /// the finalize carries a counterparty signature (mutual consent), whose own checks stay real errors. Only nonce and side are
+  /// compared, never the body hash: hashing a maximal proof body here would spend gas the finalization budget does not have (the
+  /// MAX_SWAP_BOOK test pins that), so a second body at the same nonce and side (the signer equivocated) still reverts E9.
+  function _finalEvidenceOutdated(AccountInfo storage account, FinalDisputeProof memory params) private view returns (bool) {
+    if (account.disputeCounterNonce != 0) {
+      return
+        params.finalNonce != account.disputeCounterNonce ||
+        params.proposerIsLeft != account.disputeCounterProposerIsLeft;
     }
-    return false;
+    if (params.sig.length > 0) return false;
+    return params.finalNonce != account.nonce || params.proposerIsLeft != account.disputeInitialProposerIsLeft;
   }
 
   /// @notice Internal dispute finalize with full storage access

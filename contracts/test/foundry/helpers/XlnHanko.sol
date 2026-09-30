@@ -21,6 +21,14 @@ library XlnHanko {
     return false;
   }
 
+  /// @notice S1: a dispute-class op that can never succeed is skipped, not reverted: the batch returns and the nonce is spent.
+  ///         True when the recorded logs hold a DisputeOpSkipped.
+  function opSkipped(Vm.Log[] memory logs) internal pure returns (bool) {
+    bytes32 topic = keccak256("DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)");
+    for (uint256 i = 0; i < logs.length; i++) if (logs[i].topics[0] == topic) return true;
+    return false;
+  }
+
   /// @dev keccak256 of the canonical 1-of-1 board. This IS the entity id.
   function lazyEntityId(address signer) internal pure returns (bytes32) {
     bytes32[] memory members = new bytes32[](1);

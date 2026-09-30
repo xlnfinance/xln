@@ -21,7 +21,37 @@ import type {
 } from "./common";
 
 export interface HashLadderRegistryInterface extends Interface {
-  getEvent(nameOrSignatureOrTopic: "HashLadderRevealRegistered"): EventFragment;
+  getEvent(
+    nameOrSignatureOrTopic: "DisputeOpSkipped" | "HashLadderRevealRegistered"
+  ): EventFragment;
+}
+
+export namespace DisputeOpSkippedEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    op: BigNumberish,
+    reason: BigNumberish,
+    nonce: BigNumberish
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    op: bigint,
+    reason: bigint,
+    nonce: bigint
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    op: bigint;
+    reason: bigint;
+    nonce: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace HashLadderRevealRegisteredEvent {
@@ -109,6 +139,13 @@ export interface HashLadderRegistry extends BaseContract {
   ): T;
 
   getEvent(
+    key: "DisputeOpSkipped"
+  ): TypedContractEvent<
+    DisputeOpSkippedEvent.InputTuple,
+    DisputeOpSkippedEvent.OutputTuple,
+    DisputeOpSkippedEvent.OutputObject
+  >;
+  getEvent(
     key: "HashLadderRevealRegistered"
   ): TypedContractEvent<
     HashLadderRevealRegisteredEvent.InputTuple,
@@ -117,6 +154,17 @@ export interface HashLadderRegistry extends BaseContract {
   >;
 
   filters: {
+    "DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)": TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
+    >;
+    DisputeOpSkipped: TypedContractEvent<
+      DisputeOpSkippedEvent.InputTuple,
+      DisputeOpSkippedEvent.OutputTuple,
+      DisputeOpSkippedEvent.OutputObject
+    >;
+
     "HashLadderRevealRegistered(bytes32,bytes32,bytes32,uint16,bytes32,bytes32[4],bool,uint256)": TypedContractEvent<
       HashLadderRevealRegisteredEvent.InputTuple,
       HashLadderRevealRegisteredEvent.OutputTuple,

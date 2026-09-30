@@ -304,7 +304,7 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "applyBatch",
-    values: [BytesLike, BytesLike, AddressLike]
+    values: [BytesLike, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "computeWatchtowerCounterDisputeHash",
@@ -1094,7 +1094,7 @@ export interface Depository extends BaseContract {
   >;
 
   applyBatch: TypedContractMethod<
-    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;
@@ -1323,7 +1323,7 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "applyBatch"
   ): TypedContractMethod<
-    [entityId: BytesLike, encodedBatch: BytesLike, payer: AddressLike],
+    [entityId: BytesLike, encodedBatch: BytesLike],
     [void],
     "nonpayable"
   >;

@@ -164,7 +164,7 @@ describe("J5 the inner entry point is not a public door", () => {
     const { w, A, pay } = await world();
     const iface = forkDepository.createInterface();
     const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), reserveToReserve: [pay(1n)] } as never);
-    const data = iface.encodeFunctionData("applyBatch", [A.id, encoded, ethers.ZeroAddress]);
+    const data = iface.encodeFunctionData("applyBatch", [A.id, encoded]);
     const r = await w.vm.runReadOnlyCall({ to: w.vm.depositoryAddress, caller: w.vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 5_000_000n });
     expect(r.execResult.exceptionError?.error).toBe("revert");
     expect(iface.parseError(ethers.hexlify(r.execResult.returnValue))?.name).toBe("E2");

@@ -132,23 +132,35 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
-  /// @dev J5: everything a batch could move, folded into one hash: every actor's reserve and outstanding debt per token, every
-  ///      pair's collateral, ondelta, account nonce and dispute hash per token. A batch that failed soft must leave it equal.
+  /// @dev J5: everything a batch could move, folded into one hash: every actor's reserve and outstanding debt, debt-queue cursor and
+  ///      entries per token, the count of active debts, and per pair the collateral and offset per token plus the WHOLE account
+  ///      record (`_accounts` returns nonce, dispute hash, timers, counter fields, commitments, retired side and ondelta epoch: hashed
+  ///      as the raw returned bytes, so a field added later is covered without editing this). A batch that failed soft must leave
+  ///      it equal. (Hash-ladder records are not folded in: the batches this handler builds carry no ladder op, and
+  ///      HashLadder.invariants pins that registry.)
   function _fingerprint() internal view returns (bytes32 h) {
     for (uint256 k = 0; k < 3; k++) {
       uint256 t = TOKENS[k];
       for (uint256 i = 0; i < ACTORS; i++) {
         (uint256 high, uint256 middle, uint256 low) = dep.debtOutstanding(entityOf[i], t);
-        h = keccak256(abi.encode(h, dep._reserves(entityOf[i], t), high, middle, low));
+        h = keccak256(abi.encode(h, dep._reserves(entityOf[i], t), high, middle, low, dep._debtIndex(entityOf[i], t)));
+        for (uint256 d = 0; d < 8; d++) {
+          (bool ok, bytes memory entry) = address(dep).staticcall(abi.encodeCall(dep._debts, (entityOf[i], t, d)));
+          if (!ok) break;
+          h = keccak256(abi.encode(h, entry));
+        }
       }
       for (uint256 i = 0; i < ACTORS; i++) {
         for (uint256 j = i + 1; j < ACTORS; j++) {
           bytes memory key = XlnHanko.accountKey(entityOf[i], entityOf[j]);
           (uint256 collateral, Int512 memory ondelta) = dep._collaterals(key, t);
-          (uint256 accountNonce, bytes32 disputeHash, , , , , , , , , , , , , , , ) = dep._accounts(key);
-          h = keccak256(abi.encode(h, collateral, ondelta.high, ondelta.low, accountNonce, disputeHash));
+          (, bytes memory account) = address(dep).staticcall(abi.encodeCall(dep._accounts, (key)));
+          h = keccak256(abi.encode(h, collateral, ondelta.high, ondelta.low, account));
         }
       }
+    }
+    for (uint256 i = 0; i < ACTORS; i++) {
+      h = keccak256(abi.encode(h, dep.activeDebts(entityOf[i])));
     }
   }
 

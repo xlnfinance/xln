@@ -2253,9 +2253,11 @@ describe('Depository', () => {
         cooperative: false,
       };
       const final = await signFinalBatch(depository, left, finalization);
+      // S1: the dispute's starter side never changes, so a finalize naming the other side can never succeed: skipped (op 2,
+      // reason 3), not reverted, so it cannot pin the entity's nonce
       await expect(
         depository.connect(left.signer).processBatch(final.entityId, final.encodedBatch, final.hankoData, final.nonce),
-      ).to.be.revertedWithCustomError(depository, 'E9');
+      ).to.emit(depository, 'DisputeOpSkipped').withArgs(left.entityId, right.entityId, 2n, 3n, initialNonce);
     }
 
     {
