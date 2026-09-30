@@ -57,7 +57,7 @@ const diffOf = (d: any): SettlementDiff => ({
 });
 const deployed = (chainId: string, depository: string) => must(deployment(BigInt(chainId), depository));
 
-describe("proof body (HankoCodec.proofBodyHash)", () => {
+describe("R-J2 proof body (HankoCodec.proofBodyHash)", () => {
   test("every sample: the body hash equals the contract's, including the contract-produced clause", () => {
     vectorsFor("proofBodyHash").forEach((v) => {
       expect(must(proofBodyHash(bodyOf(v.args[0])))).toBe(v.returnData);
@@ -73,7 +73,7 @@ describe("proof body (HankoCodec.proofBodyHash)", () => {
   });
 });
 
-describe("transformer clause payload (DeltaTransformer.encodeBatch)", () => {
+describe("R-J2 transformer clause payload (DeltaTransformer.encodeBatch)", () => {
   test("small and wide samples equal the contract's bytes", () => {
     vectorsFor("encodeBatch").forEach((v) => {
       const j = v.args[0];
@@ -113,7 +113,7 @@ const cooperativeUpdateOf = (v: Vector) => {
   return { d: deployed(chainId, depository), at, message };
 };
 
-describe("Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCooperativeUpdate)", () => {
+describe("R-J2 Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCooperativeUpdate)", () => {
   test("dispute proof: payload and hash equal the contract's for small, wide and mixed", () => {
     vectorsFor("encodeDisputeProofHankoPayloadForDomain").forEach((v) => {
       const { d, at, message } = disputeProofOf(v);
@@ -136,7 +136,7 @@ describe("Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCoopera
     });
   });
 
-  test("the mixed sample has a distinct chain id, epoch and nonce, so swapping epoch and nonce (C1) fails", () => {
+  test("C1 the mixed sample has a distinct chain id, epoch and nonce, so swapping epoch and nonce fails", () => {
     ["computeDisputeProofHankoHashForDomain", "computeCooperativeUpdateHankoHashForDomain"].forEach((fn) => {
       const mixed = vectorsFor(fn).find((v) => v.label === "mixed")!;
       const [chainId, , , epoch, nonce] = mixed.args;
@@ -144,7 +144,7 @@ describe("Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCoopera
     });
   });
 
-  test("the epoch is bound: a different epoch is a different digest", () => {
+  test("C1 the epoch is bound: a different epoch is a different digest", () => {
     const mixed = vectorsFor("computeDisputeProofHankoHashForDomain").find((x) => x.label === "mixed")!;
     const { d, at, message } = disputeProofOf(mixed);
     expect(must(accountMessageHash(d, { ...at, ondeltaEpoch: at.ondeltaEpoch + 1n }, message)))
@@ -152,7 +152,7 @@ describe("Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCoopera
   });
 });
 
-describe("batch payload (HankoEncoding.encodeBatch) and the hashes the Depository emitted", () => {
+describe("R-J2 batch payload (HankoEncoding.encodeBatch) and the hashes the Depository emitted", () => {
   test("the packed payload equals the contract's under the codec's sample separator", () => {
     vectorsFor("encodeBatchHankoPayloadForDomain").forEach((v) => {
       const [separator, chainId, depository, entityId, encodedBatch, nonce] = v.args;
@@ -169,7 +169,7 @@ describe("batch payload (HankoEncoding.encodeBatch) and the hashes the Depositor
     });
   });
 
-  test("the same batch for another Entity or nonce is another digest (C2)", () => {
+  test("C2 the same batch for another Entity or nonce is another digest", () => {
     const l = committed("lifecycle");
     const d = deployed(l.chainId, l.depository);
     const b = l.settle;
@@ -179,7 +179,7 @@ describe("batch payload (HankoEncoding.encodeBatch) and the hashes the Depositor
   });
 });
 
-describe("the account key", () => {
+describe("R-J2 the account key", () => {
   test("lifecycle: the key is the two entity ids, lesser first", () => {
     const l = committed("lifecycle");
     expect(must(accountKey(l.left, l.right))).toBe(l.accountKey.toLowerCase());
@@ -190,7 +190,7 @@ describe("the account key", () => {
   });
 });
 
-describe("dispute hashes (Account.sol, HankoCodec)", () => {
+describe("R-J2 dispute hashes (Account.sol, HankoCodec)", () => {
   test("counterProofCommitment equals the contract's for small, wide and mixed", () => {
     vectorsFor("counterProofCommitment").forEach((v) => {
       const [nonce, proposerIsLeft, hash] = v.args;

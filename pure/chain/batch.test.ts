@@ -82,7 +82,7 @@ const batchOf = (j: Plain): Batch => ({
   disputeFinalizations: j.disputeFinalizations.map((d: Plain) => ({ ...d, finalProofbody: bodyOf(d.finalProofbody) })),
 });
 
-describe("encodeBatch equals the compiled ABI", () => {
+describe("R-J2 encodeBatch equals the compiled ABI", () => {
   (["small", "wide", "mixed"] as const).forEach((mode) => {
     test(`${mode} sample: every slot of every operation`, () => {
       const value = sample(batchParam, "batch", mode);
@@ -102,7 +102,7 @@ describe("encodeBatch equals the compiled ABI", () => {
   });
 });
 
-describe("the batches the deployed Depository accepted (contracts/vectors/lifecycle.json)", () => {
+describe("R-J2 the batches the deployed Depository accepted (contracts/vectors/lifecycle.json)", () => {
   const lifecyclePath = new URL("../../contracts/vectors/lifecycle.json", import.meta.url);
   const lifecycle = JSON.parse(readFileSync(lifecyclePath, "utf8"));
   (["deposit", "settle", "disputeStart", "disputeFinalize"] as const).forEach((step) => {

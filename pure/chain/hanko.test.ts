@@ -23,7 +23,7 @@ const isProviderVector = (v: { function: string }): boolean => v.function.starts
 const providerVectors = committed.vectors.filter(isProviderVector);
 const unregistered = () => ok(false);
 
-describe("Hanko verdicts the EntityProvider returned (contracts/vectors)", () => {
+describe("R-J2 Hanko verdicts the EntityProvider returned (contracts/vectors)", () => {
   const [rawVector, envelopeVector, rejectedVector] = providerVectors;
   const [rawHanko, digest] = rawVector.args as [string, string];
   const lazyId: string = rawVector.decoded.entityId;
@@ -153,7 +153,7 @@ const live = (cases: readonly Named[]): readonly { entityId: string; success: bo
   return JSON.parse(out.slice(out.indexOf("@@VERDICTS@@") + "@@VERDICTS@@".length));
 };
 
-describe("the verifier against the deployed EntityProvider", () => {
+describe("R-J2 the verifier against the deployed EntityProvider", () => {
   const verdicts = live(suite);
   const mine = (n: Named): Result<HankoVerdict, unknown> => verifyHankoSignature(n.hanko, n.digest, unregistered);
 

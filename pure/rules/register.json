@@ -296,7 +296,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "owed: thread 'Contracts under our control' tags the vector tests",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -304,6 +304,11 @@
      "layer": "contract",
      "name": "DisputeHashVector",
      "owed": "thread 'Contracts under our control' (contracts/test/dispute is not gated; move the vector test under vm/)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 proof body (HankoCodec.proofBodyHash)"
     }
    ]
   },
@@ -508,7 +513,7 @@
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -521,6 +526,11 @@
      "layer": "quint",
      "name": "c1-epoch-not-advanced",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "C1 the epoch is bound: a different epoch is a different digest"
     }
    ]
   },
@@ -533,13 +543,18 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "hold",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "contract",
      "name": "C2 batch hanko binds the entity"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "C2 the same batch for another Entity or nonce is another digest"
     }
    ]
   },
