@@ -945,6 +945,8 @@ Found in the reading of xln.ts against the spec (line numbers are pure/xln.ts). 
 xln.ts has no defined behavior or disagrees with the reading taken. Recommendation first; where a
 page already carries the rule, the page is named.
 
+**R-HOLD-CAP (coordinator 09-30, owed).** R-HOLD-CAP is per Account across tokens (32, the contract's per-body cap). It is owed when the multi-token Account is modelled.
+
 **Q-X-1. Hop deadlines against dispute windows.** xln.ts has constants (5085-5112) not tied to the
 Account response windows (657); `onwardDeadlineSafe` (22787) is the only check. Recommendation: the
 incoming deadline is at least the outgoing one plus the larger response window plus HOP, computed per
