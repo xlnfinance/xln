@@ -920,11 +920,10 @@ address with a directory. The directory is a HINT, never an authority: a stale e
 that receives a message for an entity it does not host refuses it (refusal `misrouted`, planted bug `misrouted-halts`), and the sender
 re-resolves when no ack comes (rule `refresh`; planted bug `no-refresh` leaves the stale entry for good and nothing ever arrives). An Account
 message goes to the peer Entity's current leader, so a view change makes the entry stale too.
-**OPEN for the coordinator: how a node FIRST learns a peer.** Options: (a) a static peer table in the node's configuration (entity id,
-runtime id, endpoint), shipped with the deployment manifest; (b) a signed profile published to a registry or relay (og gossip: entity
-to runtime id and endpoints, with a route index); (c) the address kept on chain with the entity registration.
-Recommendation for v1: (a). The scripted run has a fixed topology (A, H1, H2, B, C), a wrong entry is harmless (above), and (b) and (c) add
-a trust question (who may publish a profile for an entity) that v1 does not need. (b) is a v2 item. The page holds under any of the three.
+**Q-T-4 CLOSED (coordinator, 09-30 18:41): how a node FIRST learns a peer.** v1 uses a static peer table in the node's configuration (entity
+id, runtime id, endpoint), shipped with the deployment manifest. A signed profile published to a registry or relay (og gossip) and an address kept
+on chain with the entity registration are v2 items, because they add a trust question (who may publish a profile for an entity). The page holds under
+any of the three.
 Source: pure/xln.ts 11966 ("an Account message for a peer entity's leader"); og core/network/p2p/gossip, core/runtime/delivery.
 
 **Q-T-5. Authentication of a sender.**
@@ -954,19 +953,19 @@ follows the same rule; the page models the sender direction only.
 Order, exactly-once delivery, a receipt, a bound on delay. Consequences for the layers above: the Runtime never waits on a delivery; an input is admitted
 in the order the Host hands it over (R-CLOCK: the Host stamps it with its own clock, and a message's claimed time has no authority); an offline peer and a slow link
 look the same. v1 assumes diligent online parties (D5): safety does not need timely delivery, but the liveness of a payment and the dispute path do.
-**OPEN for the coordinator: when does a sender stop resending and go to the chain?** That is a Runtime timeout policy (a peer that does not ack within
-a stated time, well inside the dispute window, is treated as unreachable), not a transport property. Recommendation: name it in the Runtime slice (R1)
-as a parameter with the dispute window's bound, and give the testnet run a value measured with LAG (plan T2).
+**Q-T-8 CLOSED (coordinator, 09-30 18:41): when does a sender stop resending and go to the chain?** A Runtime parameter, RESEND_GIVEUP, named in the
+Runtime slice (R1), not a transport property. The bound is RESEND_GIVEUP + LAG < the dispute window (rule C11). For an HTLC, rule R-HTLC-CLOCK
+(contracts-decisions.md) already fixes the point: a payee whose resolve is unacked reveals on chain when its own view reaches deadline - LAG.
 
 **Q-T-9. Flooding and refusal cost.**
-Not in the page. A refusal costs the receiver a decode and a verification and the sender nothing. The bound is per authenticated source (Q-T-5 layer 1):
-a budget, dropped before verification once spent. It is Q-X-9 restated for the link; the recommendation there stands.
+**CLOSED (coordinator, 09-30 18:41):** in v1 each peer gets a bounded inbound queue and anything over the bound is dropped. The page already models loss, so
+no new property is needed. A refusal costs the receiver a decode and a verification and the sender nothing; per-source budgets beyond the queue bound are v2 (Q-X-9).
 
-**Q-T-10. Not in the page.**
-A second Account stream and the ordering between streams (none is promised, none is needed); a receiver crash (its state is its WAL; the same rule);
-several validators of one entity (one directory entry per replica); encryption, session fences and message size caps (an implementation of layer 1, and
-confidentiality, which is not a protocol property); the J watcher; a relay that stores and forwards (it is one more stranger on the link: a channel of the
-kind already assumed). Bounds: two frames, one crash, one forgery.
+**Q-T-10. Not in the page (scope note).**
+**CLOSED (coordinator, 09-30 18:41):** the page does not model a second Account stream and the ordering between streams (none is promised, none is needed);
+a receiver crash (its state is its WAL; the same rule); several validators of one entity (one directory entry per replica); encryption, session fences and
+message size caps (an implementation of layer 1, and confidentiality, which is not a protocol property); the J watcher; a relay that stores and forwards
+(one more stranger on the link, a channel of the kind already assumed); the bounded inbound queue (Q-T-9, it is loss). Bounds: two frames, one crash, one forgery.
 
 ## Checker (`lib/check.scm`)
 

@@ -36,6 +36,10 @@
 ;; WebSocket session fence are not modelled. Loss and duplication are unbounded (a message stays on the channel after a delivery),
 ;; so no budget of losses or duplicates hides a case.
 ;;
+;; In v1 each peer gets a bounded inbound queue and anything over the bound is dropped: that is loss, which the page already has.
+;; Not in the page: a second Account stream, a receiver crash, several validators, encryption and size caps, the J watcher, a
+;; relay (see spec/QUESTIONS.md, Q-T-10).
+;;
 ;; Needs lib/vocabulary.scm and lib/check.scm.
 
 (define/overridable max-frames (s/number) 2)
