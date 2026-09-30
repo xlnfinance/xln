@@ -6,7 +6,7 @@
 // the register gate.
 import { readFileSync } from "node:fs";
 import { existingFiles } from "../checks/folder-width.ts";
-import { astHits, astRun, factRules } from "./ast.ts";
+import { FACT_CANARIES, astHits, astRun, factRules } from "./ast.ts";
 import { compare, isOff, longLines, type Exceptions, type Hit, type Row } from "./counts.ts";
 import { isSource, syntaxHits } from "./syntax.ts";
 
@@ -48,7 +48,7 @@ export const treeStyle = (root: string, entries: readonly string[] = TREE): Tree
   if (listed.length === 0) return { rows: [{ rule: "git-listing", file: root, now: 1, allowed: 0 }], files: 0, failed: true };
   const sources = entries.flatMap((entry) => sourcesUnder(listed, entry));
   const style = astHits(root, sources);
-  const facts = astRun(root, factRules(), "decl", listed.filter(isUser));
+  const facts = astRun(root, factRules(), FACT_CANARIES, listed.filter(isUser));
   const syntax = syntaxHits(facts.found, new Set(listed), new Set(sources));
   const lines = sources.flatMap((file): readonly Hit[] => longLines(file, textOf(root, file)));
   const exceptions: Exceptions = JSON.parse(readFileSync(`${root}/style/tree-exceptions.json`, "utf8"));
