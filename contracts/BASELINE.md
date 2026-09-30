@@ -128,29 +128,49 @@ The inherited test asserted that 1,000 swaps fit 4,000,000 gas in the transforme
 
 `MAX_SWAP_BOOK = 382`, `PROCESS_BATCH_GAS_LIMIT = 5_000_000n` and `TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000n` are named in `test/helpers/hanko.ts`. The tests send the finalize with the stated limit: 382 finalizes, 383 reverts. The exact boundary moves with any compiler, optimizer or contract change; that is intended, update the constant and this table when it does. The `DeltaTransformer` twin asserts the transformer's own estimate plus the 2M reserve fits the limit. Gas grows faster than linearly past about 500 swaps. It depends on the fixture (one Account, two tokens, one transformer). og's runtime caps a book at 50 offers (`MAX_ACCOUNT_SWAP_OFFERS`), so neither number binds in v1; it is an input to the v2 order-book design.
 
-## Foundry suites (`test/foundry/`): stale, not run
+## Foundry suites (`test/foundry/`): ported, all pass
 
-`forge` is not installed in the environment that produced this baseline, so these suites were not run. They are stale by
-inspection, for the same reasons as the Hardhat suites plus the response-window floor:
+Ported to the fork and run with forge 1.7.1 (`bash contracts/scripts/setup-forge-std.sh` fetches forge-std; then
+`forge test` from `contracts/`). Result at SHA 289f801, one contract per process, 0 failures:
 
-- Every handler and fixture calls the three-argument `processBatch(encoded, hanko, nonce)` (`helpers/XlnFixture.sol`,
-  `handlers/*Handler.sol`, `Lifecycle.t.sol`, `stress/BatchBounds.t.sol`, `TransformerAllowance.invariants.t.sol`). The
-  fork's is `processBatch(entityId, encoded, hanko, nonce)`, so they do not compile.
-- `helpers/XlnHanko.sol` builds payloads with the old `HankoEncoding.encodeCooperativeUpdate` and `encodeDisputeProof`
-  (no `ondeltaEpoch`) and the old batch payload (no entity, domain V1).
-- `helpers/SettlementDeltasHarness.sol` builds proof bodies with response windows of 0, and the fixture and handlers use
-  `LEFT_RESPONSE_SECONDS` = `RIGHT_RESPONSE_SECONDS` = 50; every window below 60 s is now rejected with
-  `ResponseWindowTooShort(60)` (H2).
-- The invariants themselves (conservation, debt lifecycle, allowance, hash ladder) still describe the fork, except that
-  the H1 wait and the H3 clamp add revert and settlement paths the handlers do not yet drive.
+| suite | tests |
+|---|---|
+| Smoke | 1 |
+| Lifecycle | 26 |
+| stress/BatchBounds | 11 |
+| stress/DebtChunking | 6 |
+| math/WideMath | 30 |
+| math/WideTransformer | 6 |
+| TransformerFaultModes | 15 |
+| HalmosLemmas | 6 |
+| Depository.invariants | 16 |
+| DepositoryConservation.invariants | 9 |
+| DebtLifecycle.invariants | 11 |
+| HashLadder.invariants | 9 |
+| HankoThreshold.invariants | 7 |
+| TransformerAllowance.invariants | 8 |
+| ForkChanges (new: C1, C2, H1, H2) | 10 |
+| RetiredBoardH3 (new: H3) | 7 |
 
-Porting them is still open and needs `forge` (not installable in the sessions so far: the download host is refused): same new signatures, windows of at least 60 s, and handler actions for
-the H1 wait and the H3 clamp. Until then `test/vm/` is the gate and CI runs only that.
+What changed in the port: the four-argument `processBatch(entityId, encoded, hanko, nonce)`; `helpers/XlnHanko.sol` builds
+the epoch-bound cooperative and dispute payloads and the domain-bound batch payload; every response window is at least
+60 s (H2).
+
+Not covered by the Foundry suites (each is covered by `test/vm/` or is a known gap):
+
+- The H3 clamp has directed tests (`RetiredBoardH3`) but no fuzz action in the invariant handlers.
+- Two board rotations in a row are not driven.
+- Counter-proof grading in Solidity is not driven by a handler.
+- `disputeFinalizeCooperative` is dead in og, so it is not driven.
+- H1 (the finalize waits for the payment deadline unless the secret is public) is directed-tested in `ForkChanges` but not
+  reached by `TransformerAllowanceHandler`.
+- The suites were run before J2 (skip stale dispute ops, PR #49). After J2 lands they need a re-run, and any test that
+  asserts the old stale-op revert changes to expect the skip.
 
 ## Follow-ups (out of PR #40)
 
 1. ~~Port the old Hardhat suites~~ Done, see "After the port".
 2. **Repoint the walk.** `bun diff/walk.ts` still deploys `jurisdictions/`. Pointing it at `contracts/` needs the pure encoders plus a shim for og's own signing, because og's signers and adapter use the old payloads and ABI.
-3. **Port the Foundry suites** (section above), together with the Hardhat port.
+3. ~~Port the Foundry suites~~ Done, see "Foundry suites" above.
 4. H3 is no longer open: it is built in the follow-up branch, test `h3-retired-board-cap`.
 5. **Run the TRON deploy path end to end.** `deploy-chain-matrix.cjs` and `compile-tron.cjs` were copied from `jurisdictions/scripts/` and have never been run here; only the deploy gate in front of them is tested (it refuses the testnet floor on TRON mainnet). Run it against TRON Nile before relying on it.

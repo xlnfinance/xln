@@ -123,7 +123,7 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _totalInternal(uint256 tokenId) internal view returns (uint256 total) {
@@ -347,10 +347,10 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     address caller = vm.addr(pk[a]);
     bytes memory encoded = abi.encode(b);
     uint256 nonce = dep.entityNonces(entityOf[a]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[a], encoded, nonce);
     bytes memory hanko = _hanko(a, h);
     vm.prank(caller); // deposit legs pull transferFrom(msg.sender, ...)
-    try dep.processBatch(encoded, hanko, nonce) {
+    try dep.processBatch(entityOf[a], encoded, hanko, nonce) {
       acceptedBatches++;
       _bump("mixedBatch");
       _recordSubmitOutcome(a, nonce, encoded, hanko);
@@ -392,7 +392,7 @@ contract ConservationHandler is CommonBase, StdCheats, StdUtils {
     bytes memory encoded = lastEncoded[a];
     if (encoded.length == 0) return; // nothing accepted yet for this actor
     replayAttempts++;
-    try dep.processBatch(encoded, lastHanko[a], lastNonce[a]) {
+    try dep.processBatch(entityOf[a], encoded, lastHanko[a], lastNonce[a]) {
       replayViolations++;
     } catch {}
   }

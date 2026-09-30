@@ -5,6 +5,7 @@ import "../../../contracts/EntityTypes.sol";
 import "../../../contracts/HankoVerifier.sol";
 import "../../../contracts/HankoEncoding.sol";
 import "../../../contracts/Types.sol";
+import {Depository} from "../../../contracts/Depository.sol";
 
 /// @notice Solidity mirror of test/helpers/hanko.ts.
 /// @dev Lazy ("unregistered") entities are the cheapest authorization surface:
@@ -70,14 +71,18 @@ library XlnHanko {
   function batchHash(
     bytes32 domainSeparator,
     address depository,
+    bytes32 entityId,
     bytes memory encodedBatch,
     uint256 nonce
   ) internal view returns (bytes32) {
+    // C2: the payload binds the acting entity.
     return keccak256(HankoEncoding.encodeBatch(
-      domainSeparator, block.chainid, depository, encodedBatch, nonce
+      domainSeparator, block.chainid, depository, entityId, encodedBatch, nonce
     ));
   }
 
+  /// @dev C1: signs at the Account's CURRENT ondeltaEpoch, read from the depository. A proof or update signed for an
+  ///      earlier baseline is built with the `AtEpoch` variant and an explicit epoch.
   function cooperativeUpdateHash(
     address depository,
     bytes memory acctKey,
@@ -85,8 +90,20 @@ library XlnHanko {
     SettlementDiff[] memory diffs,
     uint256[] memory forgiveDebtsInTokenIds
   ) internal view returns (bytes32) {
+    return cooperativeUpdateHashAtEpoch(depository, acctKey, currentEpoch(depository, acctKey), nonce, diffs, forgiveDebtsInTokenIds);
+  }
+
+  function cooperativeUpdateHashAtEpoch(
+    address depository,
+    bytes memory acctKey,
+    uint256 ondeltaEpoch,
+    uint256 nonce,
+    SettlementDiff[] memory diffs,
+    uint256[] memory forgiveDebtsInTokenIds
+  ) internal view returns (bytes32) {
+    // C1: ondeltaEpoch sits right after the account key.
     return keccak256(HankoEncoding.encodeCooperativeUpdate(
-      block.chainid, depository, acctKey, nonce, diffs, forgiveDebtsInTokenIds
+      block.chainid, depository, acctKey, ondeltaEpoch, nonce, diffs, forgiveDebtsInTokenIds
     ));
   }
 
@@ -98,8 +115,21 @@ library XlnHanko {
     bytes32 proofbodyHash,
     bytes32 watchSeed
   ) internal view returns (bytes32) {
+    return disputeProofHashAtEpoch(depository, acctKey, currentEpoch(depository, acctKey), nonce, proposerIsLeft, proofbodyHash, watchSeed);
+  }
+
+  function disputeProofHashAtEpoch(
+    address depository,
+    bytes memory acctKey,
+    uint256 ondeltaEpoch,
+    uint256 nonce,
+    bool proposerIsLeft,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed
+  ) internal view returns (bytes32) {
+    // C1: ondeltaEpoch sits right after the account key.
     return keccak256(HankoEncoding.encodeDisputeProof(
-      block.chainid, depository, acctKey, nonce, proposerIsLeft, proofbodyHash, watchSeed
+      block.chainid, depository, acctKey, ondeltaEpoch, nonce, proposerIsLeft, proofbodyHash, watchSeed
     ));
   }
 
@@ -122,6 +152,18 @@ library XlnHanko {
     uint256 disputeStartTimestamp
   ) internal pure returns (bytes32) {
     return keccak256(abi.encode(args, startedByLeft, disputeStartTimestamp));
+  }
+
+  /// @dev The Account's on-chain ondeltaEpoch (advances on settlement, C2R and dispute finalize; not on R2C).
+  function currentEpoch(address depository, bytes memory acctKey) internal view returns (uint256) {
+    require(acctKey.length == 64, "acctKey");
+    bytes32 a;
+    bytes32 b;
+    assembly ("memory-safe") {
+      a := mload(add(acctKey, 32))
+      b := mload(add(acctKey, 64))
+    }
+    return Depository(depository).ondeltaEpoch(a, b);
   }
 
   function accountKey(bytes32 a, bytes32 b) internal pure returns (bytes memory) {

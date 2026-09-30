@@ -12,8 +12,8 @@ import {XlnHanko} from "./XlnHanko.sol";
 /// @notice Deploys the J-layer under test with N lazy single-signer entities.
 abstract contract XlnFixture is Test {
   uint256 internal constant ACTORS = 4;
-  uint32 internal constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 internal constant RIGHT_RESPONSE_SECONDS = 50;
+  uint32 internal constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 internal constant RIGHT_RESPONSE_SECONDS = 60;
   uint256 internal constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -78,8 +78,8 @@ abstract contract XlnFixture is Test {
   function _submit(uint256 actorIndex, Batch memory batch) internal returns (bool) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entity[actorIndex]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    dep.processBatch(encoded, _hanko(actorIndex, h), nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actorIndex], encoded, nonce);
+    dep.processBatch(entity[actorIndex], encoded, _hanko(actorIndex, h), nonce);
     return true;
   }
 }
