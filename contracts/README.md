@@ -19,8 +19,9 @@ before it and passes after it.
 | C2 | `processBatch(entityId, ...)`, batch hanko binds the entity, domain V2 | `c2-batch-entity` |
 | H1 | finalize reverts `PaymentRevealWindowActive(deadline)` for an unrevealed HTLC until its deadline, unless the secret is public | `h1-htlc-deadline` |
 | H2 | both response windows of every proof body must be at least `MIN_RESPONSE_SECONDS` (60 s, testnet only; mainnet needs hours), else `ResponseWindowTooShort` | `h2-window-floor` |
+| H3 | evidence signed by a retired board still counts, but a dispute settling on it cannot make the retired side pay from reserves (retired Left clamped at Δ ≥ 0, retired Right at Δ ≤ collateral); what the retired entity is owed is never clamped | `h3-retired-board-cap` |
 
-Decided but not yet built: H3 (cap retired-board evidence at collateral). Reasons and options: `plan/contracts-decisions.md`.
+Reasons and options: `plan/contracts-decisions.md`. `scripts/deploy-gate.cjs` refuses `MIN_RESPONSE_SECONDS` below 6 hours on any chain id that is not a named testnet, on every deploy path, reading the compiled build (`test/gate/`). The TRON deploy path (`deploy-chain-matrix.cjs` with `compile-tron.cjs`) has never been run end to end here; only the gate in front of it is tested. `deployTron` gates on its own because other scripts call it directly. **Do not use the root `bun run deploy:chains:mainnet` or `deploy:mainnets`, nor anything in `jurisdictions/`:** they deploy og's unfixed `jurisdictions/` contracts, with no response-window floor and no gate (`core/` and `jurisdictions/` are frozen, so we cannot make them refuse). Mainnet deploys go through `cd contracts && bun run deploy:chains:mainnet`. CI: the `contracts-fork` job rebuilds, checks `typechain-types` is current, and runs every `test/vm` and `test/gate` file (including the EIP-170 size check) in its own process.
 
 ---
 

@@ -958,6 +958,7 @@ export interface Depository extends BaseContract {
         string,
         string,
         boolean,
+        bigint,
         bigint
       ] & {
         nonce: bigint;
@@ -976,6 +977,7 @@ export interface Depository extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"
@@ -1170,6 +1172,7 @@ export interface Depository extends BaseContract {
         string,
         string,
         boolean,
+        bigint,
         bigint
       ] & {
         nonce: bigint;
@@ -1188,6 +1191,7 @@ export interface Depository extends BaseContract {
         starterCounterProofCommitment: string;
         disputeStartedByLeft: boolean;
         ondeltaEpoch: bigint;
+        disputeRetiredSide: bigint;
       }
     ],
     "view"
