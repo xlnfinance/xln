@@ -1933,6 +1933,81 @@
      "name": "R-IMPLICIT-BASELINE: a signed start is checked as before (a wrong signature is E4)"
     },
     {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an immediate close with a fresh signed body that SHORTENS a window is refused (E9), at each window on its own"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the same immediate close with a LONGER final body lands (windows may lengthen)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter's IMMEDIATE close ranks like a counter: Left-authored at stored + 1 closes, Right-authored at stored + 1 does not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: stored + 2 outranks the implicit proof at either author, through a counter and through an immediate close"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: after a timeout close the next implicit start is at the NEW stored + 1, a Right-authored proof there only ties and the first signed proof is at the new stored + 2"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter at the implicit nonce with Left authorship replaces it, and a later Right-authored counter at stored + 2 replaces THAT (ordering of several counters)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every NON-canonical unsigned start on a stale epoch, a stale nonce or an open dispute is SKIPPED, never reverted"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a stranger with no co-signed history (epoch 0) cannot open a dispute against any entity, funded or not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an implicit start that names NO token, or a subset, settles only what it names and still ends the epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the implicit proof cannot be replayed into a later epoch (its start is skipped once the Account has moved)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a canonical body with a non-empty signature that does not verify reverts at every length (1, 32, 64, 65 bytes), never taken as the implicit proof"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every token of the body is held to offdelta 0 (a nonzero in the middle of three is refused)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter has exactly 2 x floor to counter (119 s lands, 120 s is skipped), and the starter cannot finalize before it"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta above the collateral (Right took more than its share) is paid from RIGHT's reserves, in full, by an implicit dispute started by either side"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta below zero (Left took more than its claim) is paid from LEFT's reserves, in full"
+    },
+    {
      "kind": "bug",
      "layer": "arrival",
      "name": "a spec bug for the implicit start",
