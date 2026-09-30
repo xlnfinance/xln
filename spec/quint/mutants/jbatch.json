@@ -259,6 +259,22 @@
       "old": "    val pn = OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)",
       "new": "    val pn = pn0",
       "killedBy": "invariant:no_unfunded_signed"
+    },
+    {
+      "id": "gas-fail-burns-an-urgent-batch",
+      "why": "F16: an out-of-gas dispute, reveal or ladder batch is BatchFailed with the nonce spent, though the contract reverts it whole and keeps the nonce",
+      "file": "jbatch.qnt",
+      "old": "      b.ids.forall(i => isMoney(st, i)), not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "new": "      not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "killedBy": "test:gasFailOnAnUrgentBatchRevertsWholeAndKeepsTheNonceTest"
+    },
+    {
+      "id": "gas-fail-burns-a-deposit-batch",
+      "why": "F16: an out-of-gas batch with a deposit leg is BatchFailed with the nonce spent, though the contract reverts it whole",
+      "file": "jbatch.qnt",
+      "old": "      b.ids.forall(i => isMoney(st, i)), not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "new": "      b.ids.forall(i => isMoney(st, i)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "killedBy": "test:gasFailOnADepositBatchIsNotBatchFailedTest"
     }
   ],
   "init": "init",

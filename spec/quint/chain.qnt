@@ -669,9 +669,9 @@ module chain {
   // when its queue fitted in one call. With a longer queue reserve may remain, but it is all owed.
   val w_no_older_debt: bool = not(ghost.olderDebt)     // witness: the search reaches an older debt (init draws a debt)
   val debt_means_broke: bool = not(ghost.debtBesideReserve)
-  // the queue and the total describe the same debt
   // Depository._reserveToCollateral enforces first: a depositor whose queue fitted in one call owes nothing after it (it had reserve to pay with, or nothing spendable to deposit)
   val r2c_enforces_first: bool = not(ghost.r2cOwes)
+  // the queue and the total describe the same debt
   val debt_queue_sums: bool = sumOf(money.dq.get(Left)) == money.debt.get(Left) and sumOf(money.dq.get(Right)) == money.debt.get(Right)
 
   // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves

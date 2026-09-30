@@ -105,7 +105,7 @@ J5 refinement (coordinator, #54 review): a batch with a deposit leg reverts whol
 settlement signed at an old epoch) is a soft fail; only a failure of the batch's own authorisation reverts without taking the nonce (`only_signed_land`). The cost of the first
 is J6 (a stuck deposit batch holds the urgent ops behind it; a token failure in a deposit leg stays a hard revert on purpose, J6a). A deposit that cannot be signed while the token is paused is skipped, so the payments behind it still go out (J6b). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`, `no_unfunded_signed` (F14: a payment is signed only if the reserve covers it). 35 scenario tests, 32 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`, `no_unfunded_signed` (F14: a payment is signed only if the reserve covers it). 37 scenario tests, 34 mutants.
 
 ## Runtime (`runtime.qnt`)
 

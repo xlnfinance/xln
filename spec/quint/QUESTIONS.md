@@ -600,14 +600,17 @@ the token works, funding them. Property `no_unfunded_signed` (ghost `unfunded`, 
 
 **J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
 (1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the
-transaction and takes no nonce (`starve`, `underBudgetRelayerTakesNoNonceTest`, `no_burn`, mutant `no-gas-guard`). Once the budget is given every failure is `BatchFailed` with the nonce
-spent, out-of-gas and gas-burning callees included: `gasFail` (`gasFailInsideTheBudgetSpendsTheNonceTest`, mutants `gas-fail-keeps-the-nonce`, `gas-fail-not-read`). The Entity reads the event and
-signs what is still owed at a fresh nonce; an urgent op goes back into the draft at once (`gasFailOnAnUrgentBatchIsSignedAgainTest`).
-(2) **Confirmed by the coordinator (2026-09-30):** "every failure" covers an urgent batch too, and a gas failure of a batch with a deposit leg. A token that stops working after signing (J6) still
-reverts the deposit batch whole and keeps the nonce; see J6a for the reason.
-(3) **Residual (`gasMissed`, witness `w_no_gas_missed`).** A callee that passes the Runtime's simulation and then burns the budget at the landing spends the nonce; if the burnt op is urgent, its retry
-costs a round and can pass its deadline. It is recorded apart from `missed`, like `hostage` (J6): no Entity behaviour can help, and only an urgent op with an external callee (a dispute op that
-verifies a counterparty board's ERC-1271 member) can be hit; a reveal makes no external call. The model is coarser (any batch), and `GAS_FAILS_MAX = 1` per run.
+transaction and takes no nonce (`starve`, `underBudgetRelayerTakesNoNonceTest`, `no_burn`, mutant `no-gas-guard`). Once the budget is given, a **money-only** batch (payments, settlements, reserve ops) that
+fails inside it is `BatchFailed` with the nonce spent, out-of-gas and gas-burning callees included: `gasFail` (`gasFailInsideTheBudgetSpendsTheNonceTest`, mutants `gas-fail-keeps-the-nonce`, `gas-fail-not-read`).
+The Entity reads the event and signs what is still owed at a fresh nonce.
+(2) **F16, contract as built (reviewer, coordinator 2026-09-30; replaces an earlier confirmation that every failure is soft).** A batch with a dispute, reveal, hash-ladder or deposit op runs in
+`processBatch`'s own frame, so running out of gas there reverts the whole transaction and leaves the nonce unspent, exactly like an under-budget relayer (`starve`); only money-only batches take the soft
+path (`BatchGasStarved` / `BatchFailed`). That is the intended design: time-critical dispute ops must be resubmittable, not burned, and a deposit leg hard-reverts (J6, J6a). `gasFail` is guarded to
+money-only batches without a deposit leg; `gasFailOnAnUrgentBatchRevertsWholeAndKeepsTheNonceTest`, `outOfGasInAnUrgentBatchIsResubmittedAtTheSameNonceTest`, `gasFailOnADepositBatchIsNotBatchFailedTest`;
+mutants `gas-fail-burns-an-urgent-batch`, `gas-fail-burns-a-deposit-batch`. A token that stops working after signing (J6) still reverts the deposit batch whole and keeps the nonce; see J6a.
+(3) **The `gasMissed` residual is gone.** It recorded an urgent op whose batch was burnt by a gas failure and then missed its deadline on the retry; with (2) an urgent batch never burns its nonce that
+way, so the ghost (`gasMissed`, `burnt`) and the witness `w_no_gas_missed` are removed. What remains of the token residual is `hostage` and J6 (a deposit batch that cannot land holds the nonce), recorded apart
+from `missed`. `GAS_FAILS_MAX = 1` per run bounds the money-only case.
 (4) **Runtime rules, written and checked.** Sign a batch only after simulating it successfully at the head (deposit legs: `SIMULATE_DEPOSITS`; gated ops below). Never sign a time-gated op before its
 gate opens: ops carry `gate`, a dispute finalize's is the end of its window; `RESPECT_GATE`, property `gate_respected`, `gatedOpIsNotSignedBeforeItsGateTest`, `earlyGatedBatchRevertsTest` (the chain reverts an
 early gated batch and keeps the nonce), mutants `signs-before-gate`, `chain-ignores-the-gate`. Split any batch above the chain's tx gas cap: a settlement costs two units, everything else one,
@@ -635,4 +638,5 @@ mutants `r2c-skips-enforce` and `r2c-ignores-debt`.
 **Modelled out, and unable to break `debt_means_broke`:** (a) the public `Depository.enforceDebts(entity, token, maxIterations)`, callable by anyone; `maxIterations = 0` means no cap and drains the whole queue. It only
 moves reserve from a debtor to its creditors in queue order, which is what `enforce` does with a cap, so it can only bring a debtor closer to broke. (b) Forgiveness at the head of the queue (a cooperative settlement's
 `forgiveDebtsInTokenIds`, at most 32 token ids) and zero-amount entries, which the loop skips at the cost of one iteration. Both only remove debt or spend an iteration; neither creates debt beside reserve. I read the loop
-in `Account.sol`; I did not read the forgiveness path beyond the list of ids, so (b) is recorded from the review, not verified by me.
+in `Account.sol`. Forgiveness is listed by token id in the signed settlement, capped at 32 ids (`MAX_SETTLEMENT_FORGIVENESS_IDS`, `Account.sol:81`); a third-party head reverts the whole signed
+settlement with E2 (the reviewer verified this against the contract; I did not read that path myself).

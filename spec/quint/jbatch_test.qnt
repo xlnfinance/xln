@@ -295,14 +295,28 @@ module jbatch_test {
     .then(attempt(1))
     .expect(and { st.cnonce == 2, st.done.get(1), st.runs.get(1) == 1, safe })
 
-  // The same failure on an urgent batch: the reveal is signed again at a fresh nonce and lands within its deadline when the retry is prompt.
-  run gasFailOnAnUrgentBatchIsSignedAgainTest =
+  // F16 (contract as built): the same failure on an urgent batch reverts the whole transaction and keeps the nonce; there is no BatchFailed for it. The reveal lands on the next attempt, in time.
+  run gasFailOnAnUrgentBatchRevertsWholeAndKeepsTheNonceTest =
     initFrom(cat(6, 1, 6), 3)
     .then(arrive(2))
     .then(gasFail(0))
+    .fail()
+
+  run outOfGasInAnUrgentBatchIsResubmittedAtTheSameNonceTest =
+    initFrom(cat(6, 1, 6), 3)
+    .then(arrive(2))
+    .then(starve(0))
+    .expect(and { st.cnonce == 0, st.gh.reverts == 1, st.gh.failed == 0, st.failedEv.get(2) == 0, st.sub.length() == 1, safe })
     .then(tick)
-    .then(attempt(1))
-    .expect(and { st.cnonce == 2, st.done.get(2), st.runs.get(2) == 1, not(st.gh.missed), safe })
+    .then(attempt(0))
+    .expect(and { st.cnonce == 1, st.done.get(2), st.runs.get(2) == 1, not(st.gh.missed), safe })
+
+  // F16: a batch that carries a deposit leg reverts whole as well.
+  run gasFailOnADepositBatchIsNotBatchFailedTest =
+    initFrom(catD(1, 6, 6), 0)
+    .then(arrive(4))
+    .then(gasFail(0))
+    .fail()
 
   // A relayer that supplies less than the budget takes no nonce, and the batch lands later on a full budget.
   run underBudgetRelayerTakesNoNonceTest =

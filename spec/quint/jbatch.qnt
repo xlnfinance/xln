@@ -49,7 +49,7 @@ module jbatch {
   // reserve ops (Entity side: `plan`).
   // Signed gas budget (coordinator, 2026-09-30; replaces the gas floor): the signer sets each batch's gas budget from its own simulation, and it is inside
   // the signed bytes. A relayer that supplies less than the budget makes the transaction revert and no nonce is taken (`starve`): a good batch is never
-  // burnt. Once the budget is given, every failure is BatchFailed with the nonce spent, an out-of-gas or a gas-burning callee included (`gasFail`).
+  // burnt. Once the budget is given, a money-only batch that fails is BatchFailed with the nonce spent, an out-of-gas or a gas-burning callee included (`gasFail`); a batch with a dispute, reveal, ladder or deposit op reverts whole and keeps its nonce (F16).
   pure val GAS_GUARD = true
   // J5 refinement (coordinator, from the #54 review): a batch that carries a deposit leg (externalTokenToReserve) reverts whole, like a
   // dispute batch, and never soft-fails: a relayer or a paused token cannot burn its nonce. A bad counterparty signature inside a batch
@@ -91,8 +91,6 @@ module jbatch {
     hostage: bool,             // an urgent op went past its deadline behind a deposit batch that cannot land (the cost of revert-whole)
     early: bool,               // a batch with a time-gated op landed (or tried to) before its gate opened
     gasFails: int,             // batches that failed inside their budget (out of gas, a gas-burning callee)
-    burnt: Set[int],           // ops whose batch failed that way: their deadline may pass on the retry (J7), apart from `missed`
-    gasMissed: bool,           // a burnt urgent op went past its deadline
     unfunded: bool             // the Entity signed a payment batch the reserve (with the deposits ahead of it) did not cover at the moment it signed (F12)
   }
 
@@ -114,7 +112,7 @@ module jbatch {
     gh: Ghost
   }
 
-  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false, early: false, gasFails: 0, burnt: Set(), gasMissed: false, unfunded: false }
+  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false, early: false, gasFails: 0, unfunded: false }
 
   var st: S
 
@@ -358,18 +356,21 @@ module jbatch {
     }
   }
 
-  // The relayer gives the full signed budget and the batch still fails: it runs out of gas, or a callee burns it. Every such failure is BatchFailed with the
-  // nonce spent (coordinator, signed gas budget), the batch applies nothing, and the Entity reads the event and signs what is still owed at a fresh nonce.
+  // The relayer gives the full signed budget and the batch still fails: it runs out of gas, or a callee burns it. For a money-only batch (payment, settlement, reserve ops) that is
+  // BatchFailed with the nonce spent (coordinator, signed gas budget), the batch applies nothing, and the Entity reads the event and signs what is still owed at a fresh nonce.
+  // F16 (contract as built): a batch with a dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame, so running out of gas there reverts the whole transaction and leaves the
+  // nonce unspent, like `starve`: time-critical ops must be resubmittable, not burnt. That case is not this action.
   // The Runtime signed it only after a successful simulation at the head, so this needs the world to change between the simulation and the landing.
   action gasFail(j: int): bool = {
     val x = st.sub[j]
     val b = x.b
     val s1 = { ...st, cnonce: b.nonce,
                failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),
-               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails: st.gh.gasFails + 1, burnt: st.gh.burnt.union(b.ids) } }
+               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails: st.gh.gasFails + 1 } }
     all {
       j >= 0, j < st.sub.length(),
       b.nonce == st.cnonce + 1, b.ids.forall(i => gateOpen(st, i)),
+      b.ids.forall(i => isMoney(st, i)), not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path
       GAS_FAILS_MAX > st.gh.gasFails,
       st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })
     }
@@ -398,8 +399,7 @@ module jbatch {
   pure def lateIds(s: S): Set[int] = OPIDS.filter(i => and {
     not(isMoney(s, i)), s.ops.get(i).dl == s.now, not(s.done.get(i)), not(s.poisoned.get(i))
   })
-  pure def lateNow(s: S): bool = lateIds(s).filter(i => not(s.gh.burnt.contains(i))).size() > 0
-  pure def lateBurnt(s: S): bool = lateIds(s).filter(i => s.gh.burnt.contains(i)).size() > 0
+  pure def lateNow(s: S): bool = lateIds(s).size() > 0
 
   // a deposit batch that cannot land sits at the next nonce: it holds every batch above it, urgent ones too (revert-whole has this cost)
   pure def hostage(s: S): bool = anySub(s, x => alive(s, x) and x.b.nonce == s.cnonce + 1 and hasDep(s, x.b.ids) and not(s.ext))
@@ -407,7 +407,7 @@ module jbatch {
   action tick: bool = all {
     st.now <= MAXT, not(overdue(st)), not(arrivalDue(st)),
     st' = react({ ...st, now: st.now + 1,
-            gh: { ...st.gh, missed: st.gh.missed or (lateNow(st) and not(hostage(st))), hostage: st.gh.hostage or (lateNow(st) and hostage(st)), gasMissed: st.gh.gasMissed or lateBurnt(st) } })
+            gh: { ...st.gh, missed: st.gh.missed or (lateNow(st) and not(hostage(st))), hostage: st.gh.hostage or (lateNow(st) and hostage(st)) } })
   }
 
   action step = any {
@@ -476,7 +476,6 @@ module jbatch {
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0
   val w_no_gas_fail: bool = st.gh.gasFails == 0                   // a batch failed inside its budget (J7)
-  val w_no_gas_missed: bool = not(st.gh.gasMissed)               // ... and a burnt urgent op then went past its deadline (the accepted residual)
   val w_no_revert: bool = st.gh.reverts == 0
   val w_no_failed_batch: bool = st.gh.failed == 0                // a batch failed at its nonce (J5)
   val w_no_drop: bool = not(OPIDS.exists(i => st.dropped.get(i)))
