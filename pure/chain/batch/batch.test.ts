@@ -58,7 +58,8 @@ const revive = (value: Plain, p: ethers.ParamType): Plain => {
 type Layout = Readonly<{ label: string; input: Plain; encodedBatch: string; accepted: boolean; rejectedWith?: string }>;
 const batch = committed("batch");
 const layouts: readonly Layout[] = batch.layout.cases.filter((c: Plain) => c.input !== undefined);
-const accepted = layouts.filter((c) => c.accepted);
+/** Bytes the contract decodes: the accepted ones, and the one its bounds (E10) refuse after decoding. */
+const accepted = layouts.filter((c) => c.accepted || c.rejectedWith === "E10");
 const inputOf = (label: string): Plain => revive(layouts.find((c) => c.label === label)?.input, batchParam);
 
 describe("R-J2 encodeBatch equals the bytes the compiled ABI gave for each recorded input (batch.json)", () => {

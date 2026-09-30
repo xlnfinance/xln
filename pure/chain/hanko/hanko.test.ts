@@ -343,28 +343,45 @@ describe("R-J2 the verifier against every verdict in hanko.json (the deployed En
   const authorize = (id: string, board: string) => ok(id === board);
   const judged = (c: Case) => verifyHankoSignature(c.hanko, c.hash, authorize);
 
-  /** What the verifier names for each of the contract's reverts. One contract revert can be two of our reasons. */
-  const named: Readonly<Record<string, readonly string[]>> = {
-    InvalidHankoClaimOrder: ["claim_order", "entity_index"],
-    NonCanonicalHankoPlaceholder: ["placeholder_signer"],
-    UnusedHankoClaim: ["unused_claim"],
-    InvalidHankoPackedSignatureLength: ["packed_length"],
-    InvalidHankoPackedSignaturePadding: ["packed_padding"],
-    InvalidHankoFirstMember: ["first_member"],
-    DuplicateHankoSigner: ["duplicate_signer"],
-    UnusedHankoPlaceholder: ["unused_placeholder"],
-    UnusedHankoSignature: ["unused_signature"],
-    DuplicateHankoPlaceholder: ["duplicate_placeholder"],
-    DuplicateHankoEntityIndex: ["duplicate_entity_index"],
-    DuplicateHankoClaimEntity: ["duplicate_claim_entity"],
-    InvalidHankoWeight: ["weight"],
-    InvalidHankoThreshold: ["threshold"],
-    InvalidHankoClaimShape: ["claim_shape"],
-    InvalidHankoMemberSignatures: ["member_signatures_shape"],
-    HankoProofTooLarge: ["too_large"],
+  /** The reason the verifier gives for each of the contract's reverts. */
+  const named: Readonly<Record<string, string>> = {
+    InvalidHankoClaimOrder: "claim_order",
+    NonCanonicalHankoPlaceholder: "placeholder_signer",
+    UnusedHankoClaim: "unused_claim",
+    InvalidHankoPackedSignatureLength: "packed_length",
+    InvalidHankoPackedSignaturePadding: "packed_padding",
+    InvalidHankoFirstMember: "first_member",
+    DuplicateHankoSigner: "duplicate_signer",
+    UnusedHankoPlaceholder: "unused_placeholder",
+    UnusedHankoSignature: "unused_signature",
+    DuplicateHankoPlaceholder: "duplicate_placeholder",
+    DuplicateHankoEntityIndex: "duplicate_entity_index",
+    DuplicateHankoClaimEntity: "duplicate_claim_entity",
+    InvalidHankoWeight: "weight",
+    InvalidHankoThreshold: "threshold",
+    InvalidHankoClaimShape: "claim_shape",
+    InvalidHankoMemberSignatures: "member_signatures_shape",
+    HankoProofTooLarge: "too_large",
   };
-  /** A proof the contract refuses without a revert (success false): a missed quorum, or a signature not canonical. */
-  const soft = ["quorum", "threshold_power", "signature_non_canonical", "bad_recovery", "high_s"];
+  /**
+   * Where one contract verdict is two of our reasons, or the contract does not revert (success false), the case is
+   * named by the start of its label: a missed quorum, a threshold no weights can reach, a signature not canonical.
+   */
+  const exactly: readonly (readonly [string, string])[] = [
+    ["rejected: a member index past every placeholder", "entity_index"],
+    ["2-of-3 with only one signature", "quorum"],
+    ["weighted 3/1/1, threshold 3: the two light members", "quorum"],
+    ["nested: only one of B's members signed", "quorum"],
+    ["a nested claim that misses its threshold", "quorum"],
+    ["threshold above the total weight", "threshold_power"],
+    ["weights 5 and 4 both signed, threshold 10", "threshold_power"],
+    ["a high-s twin of a's signature", "signature_non_canonical"],
+    ["bare 65 bytes, v = 29", "bad_recovery"],
+    ["bare 65 bytes, high-s twin", "high_s"],
+  ];
+  const reasonFor = (c: Case): string | undefined =>
+    exactly.find(([start]) => c.label.startsWith(start))?.[1]
+    ?? (c.result.revertedWith === undefined ? undefined : named[c.result.revertedWith]);
 
   test("the vector holds both kinds of verdict and every revert the table names", () => {
     expect(cases.length).toBe(43);
@@ -384,8 +401,7 @@ describe("R-J2 the verifier against every verdict in hanko.json (the deployed En
     test(`refused: ${c.label}`, () => {
       const verdict = judged(c);
       expect(verdict.ok).toBe(false);
-      const reasons = c.result.revertedWith === undefined ? soft : named[c.result.revertedWith]!;
-      expect(reasons).toContain(verdict.ok ? "accepted" : verdict.error._tag);
+      expect(verdict.ok ? "accepted" : verdict.error._tag).toBe(reasonFor(c) ?? expect.unreachable(c.label));
     });
   });
 
