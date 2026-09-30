@@ -198,7 +198,7 @@
     "check:runtime-types:ts7": "bun node_modules/@typescript/native/bin/tsc -p tsconfig.runtime.json --noEmit --checkers 4",
     "check:runtime-types:ts5": "bun node_modules/typescript/bin/tsc -p tsconfig.runtime.json --noEmit",
     "check:runtime-doc-paths": "bun core/scripts/checks/architecture/check-runtime-doc-paths.ts",
-    "check:folder-width": "bun core/scripts/checks/architecture/check-folder-width.ts",
+    "check:folder-width": "bun pure/rules/checks/folder-width.ts",
     "check:state-machine-size": "bun core/scripts/checks/architecture/check-state-machine-size.ts",
     "check:single-runtime-mempool": "bun core/scripts/checks/consensus/check-single-runtime-mempool.ts",
     "check:frame-candidate-isolation": "bun core/scripts/checks/consensus/check-frame-candidate-isolation.ts",
