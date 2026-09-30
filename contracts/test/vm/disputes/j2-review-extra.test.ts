@@ -1,7 +1,7 @@
 // Review of PR 49 (J2): tests the author's file leaves out. Same rig, same conventions.
 //   1. every skip path leaves the Account (nonce, dispute hash, timeout), reserves and collateral untouched
 //   2. skip reasons the author's file never reaches: counter reason 3 (dispute moved) and reason 5 (not newer)
-//   3. counter real errors still revert the whole batch: bad hanko (E4), wrong initial body (E9), wrong windows (E9)
+//   3. counter real errors still revert the whole batch: bad hanko (E4), wrong initial body (E9); a counter with longer windows registers (R-IMPLICIT-BASELINE, windows may lengthen, never shorten)
 //   4. the window boundary: a counter at exactly the timeout is skipped, one second earlier it registers
 //   5. the practical case: the victim's start is skipped beside the attacker's open dispute, its counter registers
 // Run one file per process: `bun test contracts/test/vm/j2-review-extra.test.ts`.
@@ -199,8 +199,12 @@ describe("review: counter real errors still revert the whole batch (the permanen
     expect(await x.revealedAt()).not.toBe(0n);
   });
 
-  test("a counter body with different response windows (E9)", async () => {
-    await reverts((x) => ({ counterDisputes: [x.counterAt(1, 3, x.counterBody(30n, WINDOWS + 1))] }), "REVERT E9()");
+  test("a counter body with LONGER response windows registers: the clock is the dispute's, a newer proof may only not shorten it (shorter is E9, see implicit-baseline.test.ts)", async () => {
+    const x = await world();
+    await x.startDispute(1);
+    x.w.at(110);
+    expect(await x.w.submit(x.B, { counterDisputes: [x.counterAt(1, 3, x.counterBody(30n, WINDOWS + 1))], revealSecrets: [x.reveal] })).toBe("ok");
+    expect(x.skipped()).toEqual([]);
   });
 
   test("a second, different body at the registered counter's nonce and flag is skipped (S1, reason 6)", async () => {

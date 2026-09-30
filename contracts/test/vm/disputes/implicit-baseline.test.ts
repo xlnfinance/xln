@@ -115,7 +115,8 @@ describe("R-IMPLICIT-BASELINE dispute from the implicit proof", () => {
     expect(skippedOf(w)).toEqual([]);
     w.at(200);
     expect(await w.finalize(L, R, { nonce: 6, body: implicitBody(), startedByLeft: false }, { nonce: 6, proposerIsLeft: true, body: P6, sig: "0x" })).toBe("ok");
-    expect(await w.reserves()).toEqual({ L: 970n, R: 1030n, collateral: 0n, nonce: 7n });
+    // A signed branch adopts its own nonce (6), it does not add one.
+    expect(await w.reserves()).toEqual({ L: 970n, R: 1030n, collateral: 0n, nonce: 6n });
   });
 
   test("R-IMPLICIT-BASELINE: a counter may carry longer windows than the implicit proof's, and the final body may too", async () => {
@@ -143,6 +144,10 @@ describe("R-IMPLICIT-BASELINE dispute from the implicit proof", () => {
     const P5 = w.body(-30n, 60);
     w.at(20);
     expect(await w.counter(L, R, { nonce: 3, body: P3 }, { nonce: 5, proposerIsLeft: false, body: P5, sig: w.proofSig(R, e0, 5, false, P5) })).toBe("REVERT E9()");
+    // Each window is held on its own: shortening only Left's, or only Right's, is refused too.
+    const P5l = w.body(-30n, 60, 300), P5r = w.body(-30n, 300, 60);
+    expect(await w.counter(L, R, { nonce: 3, body: P3 }, { nonce: 5, proposerIsLeft: false, body: P5l, sig: w.proofSig(R, e0, 5, false, P5l) })).toBe("REVERT E9()");
+    expect(await w.counter(L, R, { nonce: 3, body: P3 }, { nonce: 5, proposerIsLeft: false, body: P5r, sig: w.proofSig(R, e0, 5, false, P5r) })).toBe("REVERT E9()");
     // The same counter at the dispute's own windows, and at longer ones, lands.
     const P5b = w.body(-30n, 300), P5c = w.body(-30n, 600);
     expect(await w.counter(L, R, { nonce: 3, body: P3 }, { nonce: 5, proposerIsLeft: false, body: P5b, sig: w.proofSig(R, e0, 5, false, P5b) })).toBe("ok");
@@ -180,6 +185,9 @@ describe("R-IMPLICIT-BASELINE what stays as it was", () => {
       nonceTooHigh: await bad(7, false, ok),
       leftAuthor: await bad(6, true, ok),
       offdelta: await bad(6, false, { ...ok, offdeltas: [1n] }),
+      offdeltaNegative: await bad(6, false, { ...ok, offdeltas: [-1n] }),
+      offdeltaHigh: await bad(6, false, { ...ok, offdeltas: [1n << 256n] }),
+      secondOffdelta: await bad(6, false, { ...ok, tokenIds: [1, 2], offdeltas: [0n, 1n] }),
       leftWindow: await bad(6, false, { ...ok, leftResponseSeconds: 61 }),
       rightWindow: await bad(6, false, { ...ok, rightResponseSeconds: 120 }),
       watchSeed: await bad(6, false, { ...ok, watchSeed: ethers.id("seed") }, { watchSeed: ethers.id("seed") }),
@@ -188,7 +196,7 @@ describe("R-IMPLICIT-BASELINE what stays as it was", () => {
       counterArguments: await bad(6, false, ok, { starterCounterArguments: "0x01" }),
       counterCommitment: await bad(6, false, ok, { starterCounterProofCommitment: ethers.id("c") }),
     }).toEqual({
-      nonceTooHigh: NOT_IMPLICIT, leftAuthor: NOT_IMPLICIT, offdelta: NOT_IMPLICIT, leftWindow: NOT_IMPLICIT, rightWindow: NOT_IMPLICIT,
+      nonceTooHigh: NOT_IMPLICIT, leftAuthor: NOT_IMPLICIT, offdelta: NOT_IMPLICIT, offdeltaNegative: NOT_IMPLICIT, offdeltaHigh: NOT_IMPLICIT, secondOffdelta: NOT_IMPLICIT, leftWindow: NOT_IMPLICIT, rightWindow: NOT_IMPLICIT,
       watchSeed: NOT_IMPLICIT, clause: NOT_IMPLICIT, starterArguments: NOT_IMPLICIT, counterArguments: NOT_IMPLICIT, counterCommitment: NOT_IMPLICIT,
     });
     // The canonical one still opens.

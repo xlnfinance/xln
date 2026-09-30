@@ -779,8 +779,8 @@ library Account {
       );
       if (storedHash != expectedHash) revert IDepositoryDelegateErrorAbi.E9();
       if (
-        params.finalProofbody.leftResponseSeconds != account.leftResponseSeconds ||
-        params.finalProofbody.rightResponseSeconds != account.rightResponseSeconds
+        params.finalProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+        params.finalProofbody.rightResponseSeconds < account.rightResponseSeconds
       ) revert IDepositoryDelegateErrorAbi.E9();
       bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
       // Dynamic `otherArguments` belong exclusively to the non-starter. A
@@ -1534,8 +1534,8 @@ library Account {
       return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
     }
     if (
-      params.counterProofbody.leftResponseSeconds != account.leftResponseSeconds ||
-      params.counterProofbody.rightResponseSeconds != account.rightResponseSeconds
+      params.counterProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+      params.counterProofbody.rightResponseSeconds < account.rightResponseSeconds
     ) revert IDepositoryDelegateErrorAbi.E9();
     bool senderIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
     if (!senderIsNonstarter) revert E2();
@@ -1665,7 +1665,7 @@ library Account {
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (s.nonce <= _accounts[acct_key].nonce) revert E2();
 
-    require(s.sig.length > 0, "Signature required for settlement");
+    if (s.sig.length == 0) revert E4();
     // A signed empty settlement would advance the account nonce without any
     // token snapshot for the watcher to finalize. Reject that invisible state
     // transition instead of manufacturing a dummy token event.
@@ -1809,6 +1809,27 @@ library Account {
 
   // ========== DISPUTE START ==========
 
+  /// @dev R-IMPLICIT-BASELINE (Q-D-21). From the epoch after any advance, the empty state of the Account is a valid dispute proof for both
+  /// sides without a signature, because every field of it is on chain: offdelta 0, no clause, and the nonce one above the stored one. A
+  /// dispute from it settles at Delta = ondelta, which both sides agreed to at the advance, and any signed frame of the epoch outranks it
+  /// through a counter. Two disputes in a row, and a deposit made after an advance, therefore always have a proof to dispute with.
+  /// Canonical means exactly: epoch >= 1 (epoch 0's first frames are its proofs); nonce = stored + 1; authored by Right, the lowest rank at
+  /// that nonce (a Left-authored signed proof of the same nonce outranks it); watchSeed 0; both windows at the floor, since no signed body
+  /// carries any policy; every offdelta 0, no clause, no starter arguments. The starter names the tokens it settles: a token left out keeps
+  /// its collateral and ondelta and is settled by a later dispute or a cooperative update, exactly as for a signed body that predates it.
+  function _requireImplicitBaseline(AccountInfo storage account, InitialDisputeProof memory params) private view {
+    ProofBody memory body = params.initialProofbody;
+    // _validateInitialDisputeProof has already held both windows to the floor, so their sum is 2 * floor only if each is the floor.
+    bool canonical = account.ondeltaEpoch != 0 && params.nonce == account.nonce + 1 && !params.proposerIsLeft
+      && body.watchSeed == bytes32(0) && uint256(body.leftResponseSeconds) + body.rightResponseSeconds == 2 * MIN_RESPONSE_SECONDS
+      && body.transformers.length == 0 && params.starterInitialArguments.length + params.starterCounterArguments.length == 0
+      && params.starterCounterProofCommitment == bytes32(0);
+    for (uint256 i = 0; canonical && i < body.offdeltas.length; i++) {
+      canonical = body.offdeltas[i].high == 0 && body.offdeltas[i].low == 0;
+    }
+    if (!canonical) revert IDepositoryDelegateErrorAbi.NotTheImplicitBaseline();
+  }
+
   function _disputeStart(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
@@ -1852,11 +1873,13 @@ library Account {
     // Hanko binds this bit into the bilateral proof. Both must identify the
     // same proposer or equal-nonce LEFT priority could be forged.
 
-    require(params.sig.length > 0, "Signature required for dispute");
+    // R-IMPLICIT-BASELINE (Q-D-21): with no signature the start is valid only as THE implicit proof of the epoch.
+    bool implicitBaseline = params.sig.length == 0;
+    if (implicitBaseline) _requireImplicitBaseline(account, params);
 
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
-      _accounts[acct_key].ondeltaEpoch,
+      account.ondeltaEpoch,
       params.nonce,
       params.proposerIsLeft,
       params.proofbodyHash,
@@ -1900,8 +1923,12 @@ library Account {
     // settle a shortfall against that side from reserves (_capRetiredSide). The retired quorum can never draw on its
     // entity's reserves or create debt for it, and the direction in which the retired entity is OWED is never clamped,
     // so a rotation cannot be used by a debtor to forgive its own debt.
-    (bool valid, bool retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
-    if (!valid) revert E4();
+    bool retired;
+    if (!implicitBaseline) {
+      bool valid;
+      (valid, retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
+      if (!valid) revert E4();
+    }
 
     uint256 startTimestamp = block.timestamp;
     uint32 leftResponseSeconds = params.initialProofbody.leftResponseSeconds;
@@ -1917,7 +1944,7 @@ library Account {
       startedByLeft,
       startTimestamp
     );
-    _accounts[acct_key].disputeHash = _encodeDisputeHash(
+    account.disputeHash = _encodeDisputeHash(
       params.nonce, startedByLeft,
       params.proposerIsLeft,
       timeout,
@@ -1932,23 +1959,23 @@ library Account {
       bytes32(0),
       false
     );
-    _accounts[acct_key].disputeTimeout = timeout;
-    _accounts[acct_key].disputeStartTimestamp = startTimestamp;
-    _accounts[acct_key].leftResponseSeconds = leftResponseSeconds;
-    _accounts[acct_key].rightResponseSeconds = rightResponseSeconds;
-    _accounts[acct_key].disputeInitialProofbodyHash = params.proofbodyHash;
-    _accounts[acct_key].disputeInitialProposerIsLeft = params.proposerIsLeft;
-    _accounts[acct_key].disputeCounterNonce = 0;
-    _accounts[acct_key].disputeCounterProofbodyHash = bytes32(0);
-    _accounts[acct_key].disputeCounterProposerIsLeft = false;
-    _accounts[acct_key].starterInitialArgumentsCommitment = initialArgumentsCommitment;
-    _accounts[acct_key].starterCounterArgumentsCommitment = counterArgumentsCommitment;
-    _accounts[acct_key].starterCounterProofCommitment = params.starterCounterProofCommitment;
-    _accounts[acct_key].disputeStartedByLeft = startedByLeft;
-    _accounts[acct_key].disputeRetiredSide = _retiredSide(retired, entityId, params.counterentity);
+    account.disputeTimeout = timeout;
+    account.disputeStartTimestamp = startTimestamp;
+    account.leftResponseSeconds = leftResponseSeconds;
+    account.rightResponseSeconds = rightResponseSeconds;
+    account.disputeInitialProofbodyHash = params.proofbodyHash;
+    account.disputeInitialProposerIsLeft = params.proposerIsLeft;
+    account.disputeCounterNonce = 0;
+    account.disputeCounterProofbodyHash = bytes32(0);
+    account.disputeCounterProposerIsLeft = false;
+    account.starterInitialArgumentsCommitment = initialArgumentsCommitment;
+    account.starterCounterArgumentsCommitment = counterArgumentsCommitment;
+    account.starterCounterProofCommitment = params.starterCounterProofCommitment;
+    account.disputeStartedByLeft = startedByLeft;
+    account.disputeRetiredSide = _retiredSide(retired, entityId, params.counterentity);
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
-    _accounts[acct_key].nonce = params.nonce;
+    account.nonce = params.nonce;
 
     emit DisputeStarted(
       entityId,

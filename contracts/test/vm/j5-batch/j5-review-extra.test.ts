@@ -4,7 +4,6 @@ import { ethers } from "ethers";
 import { boot } from "../rig.ts";
 
 const BATCH_FAILED = "BatchFailed";
-const ERROR_STRING = ethers.id("Error(string)").slice(0, 10);
 const E2 = ethers.id("E2()").slice(0, 10);
 const E4 = ethers.id("E4()").slice(0, 10);
 
@@ -50,12 +49,12 @@ describe("J5 review: settlement signatures commit to the account epoch, which mo
     void w;
   });
 
-  test("an unsigned settlement soft-fails with reason Error(string): its nonce is spent", async () => {
+  test("an unsigned settlement soft-fails with reason E4 (it was Error(string) before R-IMPLICIT-BASELINE freed the bytes): its nonce is spent", async () => {
     const { w, acct, events, nonceOf, diffs, settle } = await world("j5r-unsigned");
     const before = await nonceOf();
     expect(await settle(1, diffs(10n), await acct.epochOf(), "0x")).toBe("ok");
     expect(await nonceOf()).toBe(before + 1n);
-    expect(events(BATCH_FAILED).map((e) => String(e.args["reason"]))).toEqual([ERROR_STRING]);
+    expect(events(BATCH_FAILED).map((e) => String(e.args["reason"]))).toEqual([E4]);
     expect((await acct.reserves()).collateral).toBe(100n);
     void w;
   });
