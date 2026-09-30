@@ -4,13 +4,13 @@
 // one Entity's board: members by index (placeholders, then signers, then earlier claims) with weights and a threshold.
 // The last claim is the signing Entity; the claims before it are nested Entities that vote in it. A claim's board
 // hashes to its Entity id when the Entity is lazy (one signer, threshold 1); otherwise the board must be registered.
-import { A, arrayOf, encode, type Abi, type AbiFault } from "../kernel/abi.ts";
-import { bytesToHex, concat, hexToBytes, keccakHex } from "../kernel/bytes.ts";
-import { err, flatMap, map, ok, type Result } from "../kernel/result.ts";
-import { HALF_ORDER, addressOf, recoverPublicKey } from "../kernel/signature.ts";
-import { none, some, type Option } from "../kernel/option.ts";
-import { match, type Tagged } from "../kernel/tagged.ts";
-import { wordAt } from "../kernel/abi-read.ts";
+import { A, arrayOf, encode, type Abi, type AbiFault } from "../../kernel/encoding/abi.ts";
+import { bytesToHex, concat, hexToBytes, keccakHex } from "../../kernel/encoding/bytes.ts";
+import { err, flatMap, map, ok, type Result } from "../../kernel/core/result.ts";
+import { HALF_ORDER, addressOf, recoverPublicKey } from "../../kernel/crypto/signature.ts";
+import { none, some, type Option } from "../../kernel/core/option.ts";
+import { match, type Tagged } from "../../kernel/core/tagged.ts";
+import { wordAt } from "../../kernel/encoding/abi-read.ts";
 
 export type Delays = Readonly<{ boardChangeDelay: bigint; controlChangeDelay: bigint; dividendChangeDelay: bigint }>;
 

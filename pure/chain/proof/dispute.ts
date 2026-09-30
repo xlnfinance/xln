@@ -2,9 +2,9 @@
 //
 // The stored dispute is one hash over packed fields; the starter's arguments are committed, never stored. The same
 // functions let a watcher check that the record it read back is the dispute it expected.
-import { A, encode, encodePacked, P, type AbiFault, type Packed } from "../kernel/abi.ts";
-import { hexToBytes, keccakHex } from "../kernel/bytes.ts";
-import { all, flatMap, map, type Result } from "../kernel/result.ts";
+import { A, encode, encodePacked, P, type AbiFault, type Packed } from "../../kernel/encoding/abi.ts";
+import { hexToBytes, keccakHex } from "../../kernel/encoding/bytes.ts";
+import { all, flatMap, map, type Result } from "../../kernel/core/result.ts";
 
 /** A signed branch of the Account's history: who authored it, at which nonce, with which body. */
 export type Branch = Readonly<{ nonce: bigint; proposerIsLeft: boolean; proofBodyHash: string }>;

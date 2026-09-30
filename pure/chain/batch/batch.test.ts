@@ -4,13 +4,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
-import { DeltaTransformer__factory, DepositoryBounds__factory } from "../../contracts/typechain-types/index.ts";
-import { encode } from "../kernel/abi.ts";
-import { bytesToHex } from "../kernel/bytes.ts";
-import { unwrapOr, type Result } from "../kernel/result.ts";
+import { DeltaTransformer__factory, DepositoryBounds__factory } from "../../../contracts/typechain-types/index.ts";
+import { encode } from "../../kernel/encoding/abi.ts";
+import { bytesToHex } from "../../kernel/encoding/bytes.ts";
+import { unwrapOr, type Result } from "../../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type Batch } from "./batch.ts";
 import { encodeDeltaBatch } from "./clauses.ts";
-import { signedAmountAbi } from "./money.ts";
+import { signedAmountAbi } from "../money.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const batchParam = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;
@@ -107,7 +107,7 @@ describe("R-J2 encodeBatch equals the compiled ABI", () => {
 });
 
 describe("R-J2 the batches the deployed Depository accepted (contracts/vectors/lifecycle.json)", () => {
-  const lifecyclePath = new URL("../../contracts/vectors/lifecycle.json", import.meta.url);
+  const lifecyclePath = new URL("../../../contracts/vectors/lifecycle.json", import.meta.url);
   const lifecycle = JSON.parse(readFileSync(lifecyclePath, "utf8"));
   (["deposit", "settle", "disputeStart", "disputeFinalize"] as const).forEach((step) => {
     test(`${step}: decode the accepted bytes, encode them again, get the same bytes`, () => {

@@ -2,13 +2,13 @@
 //
 // contracts/vectors pins three verdicts (a bare signature, an envelope for the lazy Entity, an envelope for an
 // unregistered one). This file adds what the vectors do not cover, by asking the deployed bytecode in a child process
-// (chain/live/entity-provider.ts): boards of several signers, nested Entities, and a byte-level mutation of each.
+// (chain/hanko/live/entity-provider.ts): boards of several signers, nested Entities, and a byte-level mutation of each.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
-import { bytesToHex, hexToBytes } from "../kernel/bytes.ts";
-import { err, ok, unwrapOr, type Result } from "../kernel/result.ts";
-import { HALF_ORDER, addressOf, signDigest } from "../kernel/signature.ts";
+import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
+import { err, ok, unwrapOr, type Result } from "../../kernel/core/result.ts";
+import { HALF_ORDER, addressOf, signDigest } from "../../kernel/crypto/signature.ts";
 import {
   addressAsId, boardBytes, boardHash, encodeHanko, isLowS, lazyEntityId, lazyHanko, packSignatures, recoverRawSigner,
   type Board, type Hanko, type HankoClaim,
@@ -18,7 +18,8 @@ import { verifyHanko, verifyHankoSignature, type HankoVerdict } from "./hanko-ve
 const must = <T, E>(r: Result<T, E>): T => unwrapOr(r, (e) => expect.unreachable(JSON.stringify(e)));
 const bytes = (hex: string): Uint8Array => must(hexToBytes(hex));
 const notCanonical = (index: number) => ({ ok: false, error: { _tag: "non_canonical_signature", index } }) as const;
-const committed = JSON.parse(readFileSync(new URL("../../contracts/vectors/functions.json", import.meta.url), "utf8"));
+const vectorsPath = new URL("../../../contracts/vectors/functions.json", import.meta.url);
+const committed = JSON.parse(readFileSync(vectorsPath, "utf8"));
 const isProviderVector = (v: { function: string }): boolean => v.function.startsWith("verifyHankoSignature(");
 const providerVectors = committed.vectors.filter(isProviderVector);
 const unregistered = () => ok(false);
@@ -203,7 +204,7 @@ const suite: readonly Named[] = [
 const live = (cases: readonly Named[]): readonly { entityId: string; success: boolean }[] => {
   const child = Bun.spawnSync(["bun", `${import.meta.dir}/live/entity-provider.ts`], {
     stdin: new TextEncoder().encode(JSON.stringify(cases.map(({ hanko, digest: d }) => ({ hanko, digest: d })))),
-    cwd: `${import.meta.dir}/..`,
+    cwd: `${import.meta.dir}/../..`,
   });
   const out = child.stdout.toString();
   return JSON.parse(out.slice(out.indexOf("@@VERDICTS@@") + "@@VERDICTS@@".length));

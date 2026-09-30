@@ -4,8 +4,8 @@
 // reads a JSON list of {hanko, digest} from stdin, writes {entityId, success} per case to stdout.
 import { createAddressFromString } from "@ethereumjs/util";
 import { ethers } from "ethers";
-import { EntityProvider__factory } from "../../../contracts/typechain-types/index.ts";
-import { boot } from "../../../contracts/test/vm/rig.ts";
+import { EntityProvider__factory } from "../../../../contracts/typechain-types/index.ts";
+import { boot } from "../../../../contracts/test/vm/rig.ts";
 
 type Case = { readonly hanko: string; readonly digest: string };
 type Verdict = { readonly entityId: string; readonly success: boolean };

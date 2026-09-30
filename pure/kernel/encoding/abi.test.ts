@@ -1,7 +1,7 @@
 // The ABI encoder against ethers on random value trees, and the faults the encoder names.
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
-import { lcg31, seedOf, seedTag } from "../diff/seed.ts";
+import { lcg31, seedOf, seedTag } from "../../diff/seed.ts";
 import { A, P, arrayOf, encode, encodePacked, type Abi } from "./abi.ts";
 import { bytesToHex } from "./bytes.ts";
 

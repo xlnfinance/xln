@@ -2,10 +2,10 @@
 //
 // A payment moves an amount while its hash-lock is open, a swap exchanges two amounts, a pull moves an amount by the
 // ratio a hash ladder reveals. The payload is `abi.encode(Batch)`, which a proof body's clause carries as bytes.
-import { A, arrayOf, encode, type Abi, type AbiFault } from "../kernel/abi.ts";
-import { map, type Result } from "../kernel/result.ts";
-import { bytesToHex } from "../kernel/bytes.ts";
-import { signedAmountAbi } from "./money.ts";
+import { A, arrayOf, encode, type Abi, type AbiFault } from "../../kernel/encoding/abi.ts";
+import { map, type Result } from "../../kernel/core/result.ts";
+import { bytesToHex } from "../../kernel/encoding/bytes.ts";
+import { signedAmountAbi } from "../money.ts";
 
 export type Payment = Readonly<{ deltaIndex: bigint; amount: bigint; revealedUntilTimestamp: bigint; hash: string }>;
 export type Swap = Readonly<{
