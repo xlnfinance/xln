@@ -1,20 +1,20 @@
 # xln documentation
 
 This is the canonical documentation index. Architecture, security evidence,
-and launch status are separate surfaces and should not be scored as one thing.
+and launch status are separate surfaces and should be assessed independently.
 
 ## New to xln
 
-1. [constraints.md](constraints.md) — the constraints behind bilateral finance
-2. [competitors.md](competitors.md) — architecture matrix, DA analysis, and falsification tests
-3. [intro.md](intro.md) — xln in five minutes
+1. [intro.md](intro.md) — J/E/A, the 2050 MML goal and three account protections
+2. [core/10_UFT.md](core/10_UFT.md) — Unified Financial Theory and its implementation
+3. [constraints.md](constraints.md) — design constraints behind provable finance
 4. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
 5. [core/rjea-architecture.md](core/rjea-architecture.md) — canonical Runtime → Entity → Account → Jurisdiction cascade
 
 ## Theory
 
+- [competitors.md](competitors.md) — architectural claims, limits and falsification
 - [constraints.md](constraints.md)
-- [competitors.md](competitors.md)
 - [core/00_QA.md](core/00_QA.md)
 - [core/10_UFT.md](core/10_UFT.md)
 - [core/11_Jurisdiction_Machine.md](core/11_Jurisdiction_Machine.md)
@@ -43,6 +43,7 @@ and launch status are separate surfaces and should not be scored as one thing.
 
 ## Runtime and client
 
+- [wallet-journey-plan.md](wallet-journey-plan.md) — new-UI walkthrough and existing-frontend financial E2E requirements
 - [radapter.md](radapter.md)
 - [runtime/jadapter.md](runtime/jadapter.md)
 - [debug.md](debug.md)
@@ -55,8 +56,8 @@ and launch status are separate surfaces and should not be scored as one thing.
 - [security/](security/) — current security policy, required scans, and review briefs
 - [audit/advisor-scorecard.md](audit/advisor-scorecard.md) — evidence-based advisor history
 
-Security reports describe reviewed bytes and evidence freshness. They are not
-architecture ratings.
+Security reports describe reviewed bytes and evidence freshness. Architecture
+claims require their own supporting arguments and evidence.
 
 ## Operations
 
@@ -66,13 +67,15 @@ architecture ratings.
 
 ## Release and launch status
 
+- [launch-design.md](launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30) — minimum implementation tasks and accepted timing policy
+
 - [../todo.md](../todo.md) — active work and blockers
 - [status.md](status.md) — current operational status
 - [mainnet.md](mainnet.md) — real-user-fund release bar
 - [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) — executable acceptance loop
 - [releases/manifest.json](releases/manifest.json) — signed immutable release history
 
-Launch readiness is intentionally not imported into the architecture score in
+Launch readiness is assessed separately from the architecture comparison in
 [competitors.md](competitors.md).
 
-**Last updated:** 2026-08-23
+**Last updated:** 2026-09-30

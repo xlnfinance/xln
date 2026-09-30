@@ -1,132 +1,112 @@
-# 1.0 Unified Financial Theory: Reserve-Credit Provable Account Network
+# Unified Financial Theory: J/E/A and provable accounts
 
 **[← Index](../readme.md)** | **[Prev: Q&A](00_QA.md)** | **[Next: J-Machine →](11_Jurisdiction_Machine.md)**
 
-**Role:** flagship theory / whitepaper
-**Status:** active theory doc; use [../status.md](../status.md) and
-[../mainnet.md](../mainnet.md) for current implementation and launch truth
-**Audience:** readers who want the full XLN thesis, not just the short protocol
-path
+**Role:** financial theory and architecture thesis
+**Author:** Egor Homakov / h@xln.finance
+**Status:** theory; current implementation and release evidence are separate
 
-### Egor Homakov / h@xln.finance
+## Start with the existing economy
 
-### [Optional Q&A](00_QA.md)
+The world already organizes finance through jurisdictions, entities and accounts.
+UFT describes those relationships with one vocabulary:
 
-This document challenges fundamental assumptions about financial systems.
+- **J:** jurisdiction authority, registration, reserves and settlement enforcement.
+- **E:** people and organizations with authority rules and financial relationships.
+- **A:** bilateral accounts recording balances, obligations and agreed conditions.
 
-Traditionally, whitepapers are dry, boring and overloaded with formulas. 
-We're doing the opposite: just 3 invariants, ASCII diagrams, VR scenes, and yes - a soundtrack pairing.
+Fedwire, banks and customer accounts illustrate the model before any cryptocurrency
+terminology is introduced. Public programmable settlement networks are another
+implementation of J. Their replicated state machines make enforcement accessible;
+the financial abstraction does not depend on calling them blockchains.
 
+xln improves the existing model with replication, verifiable state and signed
+account evidence usable in a programmable jurisdiction. Runtime supplies the
+implementation's deterministic orchestration, commitment and delivery.
 
+## Mission: provable economic activity
 
+[MML](../intro.md#mission) is to make the accounts supporting **51% of world GDP
+provable by 2050**, with dispute on underlying programmable J-machines.
+The objective is enforceable account coverage, including activity that never needs
+individual J settlement. Useful completed operations are adoption evidence;
+their turnover is not itself a measurement of GDP coverage.
+The scope includes provable J reserves as well as enforceable account claims.
+Backing reserves and claims are separate views of financial rights, not additive
+economic output. Stock coverage and annual GDP attribution need separate measures.
 
+## The account invariant
 
+The financial range combines credit and collateral:
 
-Traditional finance is a mess of terminology and regulations.
+    Credit-only:       −Lₗ ≤ Δ ≤ Lᵣ
+    Collateral-only:     0 ≤ Δ ≤ C
+    RCPAN:             −Lₗ ≤ Δ ≤ C + Lᵣ
 
-We propose a new financial system - xln, redesigned from first principles. We
-believe humanity deserves a scalable, secure, and simple value network.
+Here Δ is Left's allocation; Left is chosen by canonical Entity-ID order.
+The exact code-field meanings and grant direction are in
+[the RCPAN invariant](12_invariant.md). The bound unifies fully collateralized
+and credit-bearing relationships without requiring every account to use credit.
 
+Credit policy belongs to the parties and operators. The runtime checks the
+agreed financial bounds before signing. The J machine enforces signed claims,
+collateral allocation and its reserve/debt rules; it does not underwrite borrowers
+or recreate the account's credit-limit policy as a second authority.
 
+## Three protections
 
+1. **Proof of the obligation:** retained signed evidence allows unilateral dispute.
+2. **Chosen collateral backing:** parties select secured exposure and acceptable
+   unsecured credit, with manual policy and soft/hard limits in the user experience.
+3. **Delta Transformers — security in motion:** signed programmable conditions
+   protect pending payments, swaps and other financial operations. Their dispute
+   execution is bounded by the signed allowances and evidence rules.
 
-triple-S manifesto:
+These mechanisms improve verifiability, secured recovery and conditional execution.
+They partially address the exposure associated with hub runs. They do not create
+liquidity for insolvent borrowers or eliminate maturity transformation: the
+unsecured remainder still depends on the counterparty's ability to repay.
+See the [Diamond–Dybvig background](https://www.nobelprize.org/prizes/economic-sciences/2022/popular-information/)
+and the actual [debt settlement rule](../../jurisdictions/contracts/Depository.sol).
 
-Scalable
-Secure
-Simple
+## Local activity, common enforcement
 
+Independent accounts agree on ordinary activity locally. Only the evidence and
+operations required for registration, collateral, net settlement and disputes
+reach J. A proof holder need not reconstruct unrelated parties' payment histories.
+Parties or their delegates must retain their own usable evidence.
 
+The scaling thesis is aggregate capacity across independent machines, with low
+J load relative to ordinary activity. One billion TPS is an ambition requiring
+production measurements. Concentrated hubs, routing, storage and simultaneous
+exits retain physical limits; there is no claim of infinite hardware capacity.
 
-UFT (Unified Financial Theory) is XLN's attempt to unify the parts of finance
-that traditional banking, payment channels, and crypto each captured only
-partially.
+Programmable bilateral finance includes payments, swaps, lending and conditional
+orders. A claim that a bilateral construction improves a particular shared-state
+product requires an equivalent economic outcome and explicit authority, liquidity
+and recovery assumptions. See [the comparison](../competitors.md).
 
-xln is mathematically impossible to compete with. 
-xln is first ever algorithmically enforceable debt. 
-xln solves Data Availability Paradox of Rollups, Plasma and Big Blockers by entirely sidestepping it. 
-xln solves Inbound Capacity Wall of state channels
-xln solves Diamond-Dybvig hub run problem.
+## Jurisdiction strategy
 
-Complex systems deserve rich explanations. Finance is music, not math alone.
+Ethereum, TRON and XLNC form the initial focus. Compatible EVM jurisdictions,
+including Base and Arbitrum, can share the same E/A financial machinery. Deployment
+and verification of each J boundary remain concrete work. EVM compatibility alone
+is not evidence of working withdrawals or identical finality.
 
-Core invariants:
-1. FCUAN: −Lₗ ≤ Δ ≤ Lᵣ
-2. FRPAN: 0 ≤ Δ ≤ C
-3. RCPAN ⊇ FCUAN+FRPAP: −Lₗ ≤ Δ ≤ C + Lᵣ
+Future central-bank programmable jurisdictions fit the same model when available;
+the launch does not wait for them. Independent verification on small consumer
+devices targets the specialized XLNC jurisdiction, not full Ethereum/TRON history.
+Bounded execution and state witnesses are candidate mechanisms; CPU, memory,
+storage, bandwidth and energy budgets must be demonstrated.
 
-Everything else is commentary.
+## Complementary work
 
-# Abstract
+Entity Board/Control/Dividend authority and Hanko signatures extend the same model
+to organizations: [Hanko](../architecture/hanko.md). Programmable account clauses
+extend its financial terms: [Delta Transformers](../counterfactual-transformers.md).
+Key derivation and recovery are a separate implementation component:
+[BrainVault](../../brainvault/readme.md).
 
-[pairing: Nils Frahm - Fundamental Values](https://www.youtube.com/watch?v=mOh73eWIk4Q)
-
-In this flagship whitepaper we propose a series of incremental upgrades and simplifications to the status-quo mental model of how financial & organizational double-layered networks work and reasoned about. 
-
-Unified Financial Theory (UFT) naturally integrates or solves at its core some of the most popular and long-standing monetary theories, including but not limited to:
-
-* **Board/Control/Dividend shares** - many companies use Class A/B shares with rigid 1:10 ratio of Dividend-shares (Economical) to Control-shares (Governance). We suggest to decouple them completely into Board shares (immediate executive power over an entity, non-transferrable), Control shares (publicly tradeable tokens, configurable 51%+ quorum can elect a new Board) and Dividend shares (publicly tradeable tokens that are subject to dividends or buybacks). 
-
-* **Algorithmic Index Funds** - in additional to classic index funds (such as Vanguard/BlackRock/StateStreet-ran in TradFi) which are tradeable through a proxy entity and bleed enormous rent-seeker fees, UFT allows personal programmable indexes in-wallet with automatic rebalances. Sovereign nature 
-
-* **The Quantity Theory of Value** - for centuries population was fooled by inflation, when a controlling party unilaterally increased supply of a fungible token. Not just fiat tokens are subject to this, even securities/shares can inflated by the majority decision, effectively stealing the value from the minority holders. We suggest to optionally cement a fixed (e.g. 100T) supply for all Control/Dividend shares for newly formed entities, establishing long term fairness axiom between the majority and minority shareholders. 
-
-* **All Deposit Insurance Schemes (DIS) are Underfunded and Morally Hazardous** - we sidestep the fundamental underfunded flaw (<1% of M2) of DIS schemes by shifting them from industry-forced to private & strictly optional open insurance & reinsurance markets. DIS all over the planet never were and never will be a sound solution due to their "shared pot" morally hazardous architecture.  . It's merely a double-layered smoke-screen to first pockets of commercial bank clients (through quarterly premiums paid by banks to DIS) and then straight to pockets of taxpayers (any "too-big-to-fail" top20 ) and cosmetic "calm-down" figure.
-
-* **The Coase theorem** - Unicast and permisionless nature of Xln allows transactional fees to race to the bottom: absolute zero or even negative (for auto-rebalancing of cross-hub accounts), allowing first truly frictionless Coasian xlnomy. This never was and never will be feasible with Broadcast O(n) design of big-blocker/sharding/rollups – no matter how optimized/parallelized their software or blobspace is overfloated and DAC trust assumptions increased – making Xln simply impossible to compete with in terms of speed and transactional cost.
-
-* **The "Diamond-Dybvig hub run problem"** – cannot be solved completely as long as counterparty risk exists, but greatly alleviated and contained in Xln. By giving the hub (banks+brokers+CEX superset) and its spokes (all users, companies and institutions connecting to the hubs) a new way to cryptographically dispute bilateral accounts, keep guaranteed 2-of-2 escrow collateral and enforce debts over the collateral limit (see enforceDebt() in Depository.sol), we achieve faster and more seamless way to pull liquidity both from the hub to its "libaility" spokes and from the hub's "asset" spokes to the hub. We believe that eventually total counterparty risk will be reduced to ~1-10% of what is currently exposed with unprovable & franctional reserve model.
-
-In parallel, we suggest a practical reference implementation of the theory: extensible layered network (xln): world's first financial substrate that is both most scalable, most secure and mentally simple at the same time.
-
-This way Xln solves Coase theorem by reaching an absolute theoretical minimum of transactional costs. 
-
-Infinite Unicast O(1) scalability: 1,000,000,000+ tps - same as the underlying Internet. Xln is a netting-account layer, same as banking/ACH, where only net collateral settlements and disputes between entities reach the broadcast J-machine level, keeping 99.99% of value transfers private, instant and practically free.
-
-Xln is also unprecedently secure: while every other Broadcast O(n) architecture (big-blockers/sharding/rollups) have long forgoten the maxima "full node on every laptop", RCPAN allows each and every consumer device will be a fully-verifying node of underlying Jurisdiction-machines (with current focus on EVM J-machines: all public EVM chains and future CBDCs)
-
-We will go carefully and incrementally, explaining the rationale & solutions layer by layer. We avoid any practical innovation in the first two chapters. 
-
-In the first chapter we focus exclusively on reducing the overengineered and incomprehendable terminology of both TradFi and DeFi into sound and elegant hierarchical replicated state machine (HRSM) tri-layer: Jurisdictions - Entities - Accounts (JEA). Any financial system under the sun can be expressed in JEA terms. 
-
-In second chapter we generalize all world's financial Unicast systems into two major categories: full-credit unprovable account networks (FCUAN: all banking, brokers and CEX) and full-reserve provable account networks (FRPAN: Lightning/Raiden/Hydra/other channel networks).
-
-In third chapter, we introduce our main innovation, the superset invariant **reserve-credit provable account network RCPAN ⊇ FCUAN+FRPAP**
-
-`−Lₗ ≤ Δ ≤ C + Lᵣ`
-
-xln is the first RCPAN (Reserve-Credit, Provable Account Network): credit where it scales, collateral where it secures—a principled hybrid of FCUAN and FRPAP.
-
-```
-FCUAN invariant:
-−leftCreditLimit ≤ Δ ≤ rightCreditLimit
-[---.---]
-
-FRPAP invariant:
-0 ≤ Δ ≤ collateral
-[.===]
-
-RCPAN (xln) superset invariant:
-−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
-[---.===---]
-```
-
-
-
-Last, but not least, we claim that the most important inter-human network, the financial layer, should not be dull and boring. **We see the world as a vibrant dance of colorful state machines.** We aim to develop as many visualizations as possible, with all sorts of mediums: 2D/3D/VR/ASCII/etc to deliver the semantic message of credit-collateral layout. Soon, it will feel natural and simple, just as using cash.
-
-The goal is to make finance visceral. Visual. Tangible, like water or sand. 
-
-Additional whitepapers that further complement UFT *(planned - not yet written)*:
-
-* **2.0 Cascade Security Model**: Extend credit+collateral RCPAN with on-jurisdiction reserves and opt-in insurance schemes (reserve→collateral→credit→insurance→reinsurance waterfall).
-
-* **3.0 Delta Transformers**: Bilateral DeFi primitives - programmable hooks `deltas → Transformer.apply() → deltas` enforceable via Depository.sol.
-
-* **4.0 Entity Machine & Hanko**: Board/Control/Dividend governance, hierarchical signatures, M&A mechanics. *(Partially documented in architecture/hanko.md)*
-
-* **5.0 BrainVault**: argon2id-based key derivation as alternative to seed phrases. *(Prototype exists, not documented)*
-
-* **6.0 RJEA Deep-Dive**: Runtime→Entity→Account→Jurisdiction implementation guide. *(See core/rjea-architecture.md)*  
-
-[1.1 Jurisdiction Machine](11_Jurisdiction_Machine.md)
+Optional insurance, automated portfolio policy and alternative ownership designs
+are further applications. Their economic benefits require their own analysis;
+they are not prerequisites for understanding J/E/A or the RCPAN bound.

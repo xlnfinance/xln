@@ -1,39 +1,48 @@
 # xln — Cross-Local Network
 
-**Provable bilateral credit with on-chain finality.**
+**Make existing financial accounts provable.**
 
-xln is a Reserve-Credit Provable Account Network (RCPAN). Independent Account
-machines exchange signed state off-chain; Entity authority governs those
-Accounts; Runtime provides deterministic orchestration and durable delivery;
-Jurisdictions provide collateral, settlement, disputes, and adversarial exit.
+xln starts with the structure of existing finance: Jurisdictions, Entities and
+bilateral Accounts (J/E/A). It makes their state replicable and verifiable, and
+their account obligations signed and disputable on programmable J-machines.
+The Reserve-Credit Provable Account Network (RCPAN) combines chosen credit,
+collateral and programmable conditions in one account model.
+
+**MML: by 2050, make the accounts supporting 51% of world GDP provable.**
+Ordinary payments and swaps update accounts locally; the underlying jurisdiction
+enforces registration, collateral, settlement and disputes. GDP coverage,
+economic turnover and technical throughput are separate measurements.
 
 ## Start here
 
-1. [Architecture comparison](docs/competitors.md) — adoption-independent
-   architecture matrix, DA analysis, scoring rubric, and falsification tests.
-2. [Unavoidable constraints](docs/constraints.md) — why scalable finance needs
-   bilateral unicast, credit, proofs, and enforceable settlement.
+1. [xln in five minutes](docs/intro.md) — existing finance, J/E/A, MML and the
+   three protections: proof, collateral and Delta Transformers.
+2. [Unified Financial Theory](docs/core/10_UFT.md) — the financial model and
+   its implementation through xln.
 3. [RCPAN invariant](docs/core/12_invariant.md) — the bilateral financial bound.
 4. [Runtime → Entity → Account → Jurisdiction](docs/core/rjea-architecture.md) —
    the canonical implementation model.
 5. [Documentation index](docs/readme.md) — theory, specs, runtime, security,
    operations, and release evidence.
 
-Architecture evaluation, audit-evidence freshness, and launch readiness are
-independent. Current operational status is linked separately below and does not
-change the architecture rubric.
+For comparisons, read [the architecture argument](docs/competitors.md).
+Implementation and release claims require evidence about the actual candidate.
 
 ## Repository map
 
 ```text
 xln/
 ├── core/             deterministic Runtime, Entity, Account, and boundaries
+├── rscore/           Rust implementation of the canonical financial machines
 ├── brainvault/       standalone deterministic wallet-derivation package
 ├── jurisdictions/    Solidity settlement and dispute contracts
-├── frontend/         xln.finance client; presentation and user input
+├── ui/               React wallet; presentation and user input
+├── frontend/         existing Svelte client; presentation and user input
 ├── tests/            browser and full-stack E2E evidence
 ├── docs/             canonical documentation and immutable release evidence
 ├── scripts/          build, release, and operator tools
+├── tools/            repository checks and evidence tooling
+├── ops/              deployment and operating configuration
 └── .archive/         historical source implementations; never live authority
 ```
 
@@ -82,11 +91,11 @@ changelog entries.
 
 ```text
 RuntimeInput
-  └─ RuntimeTx[]
-      └─ EntityInput
-          └─ EntityTx[]
-              └─ AccountInput
-                  └─ AccountTx[]
+  ├─ RuntimeTx[]
+  └─ routed EntityInput[]
+      └─ EntityTx[]
+          ├─ accountInput → exact child AccountInput
+          └─ financial intent → local AccountTx[] admission
 ```
 
 Each live replica follows one deterministic transition law:
@@ -98,7 +107,8 @@ Each live replica follows one deterministic transition law:
 - Runtime is the single writer and owns WAL commitment before external effects.
 - Entity certifies organization-level state and routes exact child inputs.
 - Account owns bilateral financial mutation, proposals, ACKs, and dispute proof.
-- Jurisdiction observes finalized chain facts and enforces exceptional exits.
+- Jurisdiction enforces registration, collateral, settlement and disputes;
+  J adapters bring verified jurisdiction observations into Runtime inputs.
 - Outputs move upward as deterministic data; network and chain I/O begin only
   after the enclosing Runtime frame is durable.
 
@@ -137,6 +147,7 @@ reading the current canonical path.
 ## Release and operational status
 
 - [Active work and blockers](todo.md)
+- [Minimum remaining work and accepted timing policy](docs/launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30)
 - [Current status](docs/status.md)
 - [Mainnet release bar](docs/mainnet.md)
 - [Mainnet acceptance gate](docs/mainnet-acceptance-gate.md)

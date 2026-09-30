@@ -1,111 +1,57 @@
-# bilaterality: not a feature, a necessity
+# Bilateral finance and local verification
 
-**bilaterality is not a design choice. it is the only topology that satisfies the scalability constraint.**
+J/E/A models finance through jurisdictions, entities and bilateral accounts.
+xln replicates and verifies those account relationships, retaining common
+programmable J enforcement when cooperation fails.
 
-broadcast O(n) has physical ceiling: validators cannot process infinite transactions. even with parallelization, sharding, compression - the bottleneck remains. every validator processes every transaction costs O(n).
+## Independent account state
 
-unicast O(1) has no ceiling: each bilateral relationship processes independently. 1 billion users = 500 billion bilateral accounts, all parallel, no coordination overhead.
+    Entity A ↔ Entity B: account AB
+    Entity A ↔ Entity C: account AC
+    Entity B ↔ Entity C: account BC
 
-**internet achieved billion-user scale through unicast (TCP connections). finance must follow same path.**
+AB and CD can progress independently when they share no execution dependency.
+An Entity that owns several accounts still has its own authority and commitment
+boundary; accounts on the same Runtime compete for that machine's resources.
+Routed operations coordinate the participating accounts and need real capacity.
 
-**inbound capacity solution:** bilateral credit is directional. when you extend credit to a hub (allowing hub to owe you), the hub can go negative on their side, which means you go positive = you received value without pre-funding. this solves lightning's inbound capacity wall, which requires counterparty to lock funds on your side before you can receive.
+The scaling property is locality: unrelated participants need not process or
+publish each account update. Adding independent machines can add aggregate
+capacity. More graph edges alone do not create throughput or liquidity; there is
+no claim of infinite capacity, zero coordination or perfect economic isolation.
 
----
+## Credit enables chosen inbound capacity
 
-## the insight
+A recipient can grant bounded credit to its hub, allowing the hub to owe it
+without equal pre-funding. Collateral can secure more of the relationship.
+The recipient chooses unsecured exposure; proof, collateral and Delta Transformers
+supply distinct protections. See [RCPAN](../core/12_invariant.md).
 
-traditional blockchains model state as one big table everyone fights over:
+## Live replica versus financial state
 
-```
-Global State = { A: 100, B: 50, C: 75, ... }
-                 ↑ single bottleneck, consensus on everything
-```
+An AccountReplica contains committed AccountState and the live candidate,
+proposal, ACK/resend and admission data needed for bilateral agreement.
+Historical signed frames belong to dedicated stores and are read on demand;
+consensus and ordinary UI refresh do not scan account history.
 
-xln realizes state is naturally a graph of pairwise relationships:
+Both parties verify the exact proposed transition and its signed evidence.
+Duplicate delivery is idempotent; conflicting evidence is rejected. Runtime
+publishes external effects only after WAL commitment. The implementation contract
+is [the canonical cascade](../core/rjea-architecture.md).
 
-```
-A ↔ B: { A_to_B: 20, B_to_A: 15 }
-A ↔ C: { A_to_C: 10, C_to_A: 5 }
-B ↔ C: { B_to_C: 8, C_to_B: 12 }
-       ↑ independent consensus domains, all parallel
-```
+## Shared publication and common enforcement
 
-## why this matters
+| Ordinary financial updates | xln account model                                          | Global shared-state model                                     |
+| -------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| Agreement                  | Participating accounts under Entity authority              | Shared ordering/execution domain                              |
+| Evidence retention         | Parties and their delegates retain usable account evidence | State recovery depends on the shared domain's data rules      |
+| Parallelism                | Independent relationships across independent machines      | Capacity supplied by the chosen shared execution/DA resources |
+| Exceptional enforcement    | Underlying programmable J                                  | Underlying settlement/security system                         |
 
-**no global bottleneck = no ceiling**
+A rollup can itself serve as an xln J. This does not put every xln account update
+through that rollup: the shared layer sees the J operations needed for enforcement.
+Failure of a shared hub or J can affect many relationships even though their
+account proofs remain separate.
 
-- each edge (bilateral account) is its own consensus domain
-- A↔B can settle while C↔D settles simultaneously
-- system scales with the mesh, not against it
-- adding entities increases capacity (more edges), not congestion
-
-**bilateral accounts are:**
-- **isolated**: failure in A↔B doesn't propagate to C↔D
-- **parallel**: all edges process transactions concurrently
-- **deterministic**: both sides compute identical state independently
-- **Byzantine-resistant**: requires collusion between both parties, not global majority
-
-## the architecture
-
-```
-Entity A:
-  accounts = {
-    B: AccountReplica(A, B),  ← independent replica
-    C: AccountReplica(A, C),  ← independent replica
-  }
-
-Entity B:
-  accounts = {
-    A: AccountReplica(B, A),  ← mirror of A's replica
-    C: AccountReplica(B, C),  ← independent replica
-  }
-```
-
-each `AccountReplica` maintains:
-- **deltas**: balance changes per entity (canonical state)
-- **frameHistory**: sequence of signed frames (audit trail)
-- **commitQueue**: pending transactions awaiting signatures
-
-both sides verify:
-```typescript
-const ourState = encode(accountMachine.deltas);
-const theirState = encode(theirExpectedDeltas);
-
-if (!buffersEqual(ourState, theirState)) {
-  throw new Error('BILATERAL CONSENSUS FAILURE');
-}
-```
-
-## comparison
-
-| architecture | bottleneck | scalability | isolation |
-|-------------|-----------|------------|-----------|
-| global ledger (bitcoin/ethereum) | entire chain | O(1) tps ceiling | none—global state |
-| sharding (eth2) | shard validators | O(n shards) | weak—cross-shard complexity |
-| bilateral mesh (xln) | individual edges | O(n²) edges | perfect—pairwise isolation |
-
-## why others don't do this
-
-most systems optimize for:
-- **single source of truth** (easier to reason about)
-- **global total ordering** (simpler consensus)
-- **broadcast efficiency** (one message to all)
-
-xln optimizes for:
-- **parallel execution** (independent state machines)
-- **relationship locality** (only parties involved need to agree)
-- **mesh scalability** (more connections = more capacity)
-
-the tradeoff: bilateral consensus requires both parties to sign every frame. but this is the feature, not the bug—it enforces mutual agreement at the relationship level, not global level.
-
-## the hive effect
-
-once you see state as a mesh of independent bilateral relationships, the system's effectiveness becomes obvious:
-
-- **10 entities** = 45 bilateral accounts (10 choose 2)
-- **100 entities** = 4,950 bilateral accounts
-- **1,000 entities** = 499,500 bilateral accounts
-
-each account is a separate consensus domain. no coordination overhead. pure parallel execution.
-
-**that's the scalability unlock.**
+The mission is [provable accounts supporting 51% of world GDP by 2050](../intro.md#mission).
+Measure actual adoption, usable recovery and production throughput separately.

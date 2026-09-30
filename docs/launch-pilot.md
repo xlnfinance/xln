@@ -176,9 +176,14 @@ milestones after the relevant L1/L2 evidence and `bun run check`.
 
 ## Economic measurement
 
-MML is unique economic value settled through provable Accounts over the trailing
-12 months divided by world GDP for an explicitly stated period and source. This
-is an adoption measure, not technical throughput or assets deposited.
+[MML](intro.md#mission), clarified by the owner on 2026-09-30, is to make the
+accounts supporting 51% of world GDP provable by 2050, with dispute on underlying
+programmable J-machines. It measures coverage, including activity that never
+needs individual J settlement. Payment turnover divided by GDP does not establish
+that coverage; the attribution method remains to be specified.
+
+The following operation measurements provide near-term adoption and reconciliation
+evidence. They are separate from GDP coverage, technical throughput and assets deposited.
 
 Use existing payment `lockId` and swap/order identities, with their owner/domain
 context, to reconcile end-user economic operations across Runtime records. Derive
@@ -194,9 +199,9 @@ Retries, route hops, sibling mirrors, duplicate ACKs and later on-chain netting 
 already counted activity contribute zero additional value.
 
 Exclude testnet/faucet activity, operator maintenance and liquidity rebalancing,
-self-owned transfers and manufactured incentive volume from commercial MML. Real
+self-owned transfers and manufactured incentive volume from commercial activity. Real
 customer swaps against an MM remain customer activity. Publish the valuation
 source and time, unique operation count, missing-evidence exclusions and
 reconciliation totals. Track user payments, same-j swaps, cross-j swaps, quote
 availability, accepted-quote completion, latency, cost, retention and contribution
-alongside MML so gross volume cannot hide an unusable product.
+alongside provability coverage so gross volume cannot hide an unusable product.

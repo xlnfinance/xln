@@ -1,50 +1,56 @@
-# 1.1 Jurisdiction Machine / J-machine
+# Jurisdiction, Entity and Account machines
 
-**Role:** conceptual model
-**Status:** active explanation doc; XLN implementation still assumes
-EVM-compatible J-machines, while TradFi systems here are mental-model examples
-**Audience:** readers who need the bridge between TradFi settlement structure
-and XLN's jurisdiction layer
+**Role:** financial model and terminology
+**Status:** J/E/A describes existing finance; current xln enforcement uses programmable Js
 
-**Note:** This chapter describes J-machines as a *conceptual model* for understanding financial systems. XLN implementation requires EVM-compatible J-machines (Ethereum, L2s, future CBDCs). TradFi J-machines (Fedwire, ECB TARGET2) are analyzed here as mental model, not integration targets until they deploy programmable settlement layers.
+## Jurisdiction
 
-## 1.1.1 TradFi J-machine
+A J-machine is the authority whose state and rules register financial rights and
+enforce settlement. Central-bank ledgers and systems such as Fedwire perform
+this role in the existing economy. Securities depositories and other registries
+cover related rights. J/E/A gives these functions a common abstraction; it does
+not assert that their institutions, access rules or legal mandates are identical.
 
-Imagine, the year is 2008. Blockchains/cryptocurrencies/DLT never existed. Forget about DAOs, BFT and payment channels, lets focus exclusively on the traditional financial world (TradFi). We are going to apply Occam's Razor and Duck Typing principle to each component of TradFi, to remove the legacy fluff and extract the essence.
+A programmable public settlement network is another implementation of J.
+Replication and verifiability change how its state is maintained and checked,
+while the financial role remains jurisdictional registration and enforcement.
 
-Let's start with our fundamental primitive: a replicated state machine.
+Current xln contracts need executable signature verification, reserves,
+collateral, signed conditional settlement and disputes. Ethereum, TRON and XLNC
+are the initial focus. Compatible EVM jurisdictions, including Base and Arbitrum,
+can implement that boundary through the same financial model. Fedwire integration
+is future work if a compatible programmable interface becomes available; using
+Fedwire to explain J does not claim that Depository is deployed there today.
 
-What is a state machine? It's an abstract concept from Automata theory. A state machine is a system that moves between defined states based on inputs — each tx (transaction) changes behavior predictably. It’s how you turn chaos into logic.
+## Entity
 
-Say, you have `{Alice: 10, Bob: 5}`. Tx `alice-bob pay 2` would turn it into `{Alice: 8, Bob: 7}`
+An E-machine represents a person or organization with authority rules, state and
+financial relationships. Banks, brokers, companies and individuals all fit this
+model. In the implementation, a hub is a Runtime with the hub role, serving
+financial relationships through its jurisdiction-specific Entities.
 
-TradFi can be expressed as a myriad of interconnected state machines. At first glance it seems that every country has their own unique financial system with different acronyms and legal quirks. But after a closer look, we immediately see a pattern: there always is a root sovereign settlement court state machine that rules all state machines beneath it: the Jurisdiction State Machine.
+xln makes Entity authority and state verifiable and replicable. Hanko signatures
+express authorization; the Entity transition certifies its own state and exact
+child Account inputs. The implementation is specified in
+[the canonical cascade](rjea-architecture.md).
 
-For historical reasons, tradfi J-machines are fragmented:
+## Account
 
-* the oldest component – Central Bank, where **the currency (fiat) token** is minted in a form of debt to commercial banks.
-* the second component, Real Time Gross Settlement (RTGS) appeared later with advances in computers and networking. It allows commercial banks to move high value instantly (real time) without trusting each other with netting accounts (ACH). Technically, an account in Fedwire is an account in Fed. Therefore RTGS === Central Bank.
-* the third is central securities depository. That's where other **tokens are minted and stored**.
-* plus multiple land registries where non-fungible tokens such as land and apartments are assigned to entities
+An A-machine is the bilateral relationship between two entities: balances,
+obligations, credit limits, collateral allocation and agreed programmable terms.
+The parties sign state and retain evidence usable for J enforcement when they
+stop cooperating. Not every account needs credit or collateral in the same ratio.
 
-This fragmentation brings nothing but pain and reconcillation hell.
+The [RCPAN invariant](12_invariant.md) covers both credit-bearing and fully
+collateralized policy. Proof, chosen collateral backing and Delta Transformers
+protect different parts of that relationship.
 
-Storing fiat token in one ledger and security tokens in another is like keeping count of bananas in one spreadsheat and using a whole another book for other fruits. The benefits are marginal, the downsides are glorious. 
+## Runtime and the mission
 
-Applying Occam's Razor, we suggest from now on to conceptually treat all fragmented tradfi central banks/RTGS/depositories as a unified J-machine. 
+Runtime coordinates the implementation, commits accepted inputs and dispatches
+external effects after durability. It does not replace J, E or A authority.
 
-## 1.1.2 TradFi Entity Machine
-
-Beneath the J-machine there always is a second layer graph-like hub & spoke network, where:
-* **spokes** are end users, merchants, companies, non-profits, institutions
-* **hubs** commercial banks, brokers
-
-We generalize all layer2 actors bounded to specific J-machine as E-machines. Think of it as your personal state machine that stores your financial history and relationships with others. Each E-machine can interact with J-machine (the broadcast layer) and with other entities through A-machines (unicast account layer).
-
-
-
-
-
-
-
-Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
+The objective is [MML: accounts supporting 51% of world GDP made provable by
+2050](../intro.md#mission). The core change is making existing financial
+relationships verifiable and disputable, while ordinary activity remains local
+to the parties rather than globally published operation by operation.

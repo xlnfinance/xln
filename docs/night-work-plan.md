@@ -1,5 +1,22 @@
 # Autonomous xln work
 
+## Mission clarification — owner update 2026-09-30
+
+[MML](intro.md#mission) means making the accounts supporting 51% of world GDP
+provable by 2050, with dispute on underlying programmable J-machines. This
+supersedes older definitions equating MML with settled turnover in this record.
+Unique completed economic operations remain near-term adoption evidence, not
+GDP-coverage estimates. The attribution method for coverage remains to be specified.
+
+Ethereum, TRON and XLNC are the initial J focus; Base, Arbitrum and other
+compatible EVM Js share the same financial architecture after their boundaries
+are verified. Preserve existing pay/swap/lending, recovery and platform
+deliverables. The new-UI walkthrough and existing-frontend failure E2E
+requirements are recorded in [wallet-journey-plan.md](wallet-journey-plan.md).
+The owner accepted the [exposure-based reaction schedule](launch-design.md#accepted-automatic-exposure-schedule).
+It differs from the current summed finalization clock. Implementation must
+preserve immutable signed policy and cross-J evidence portability.
+
 ## Active release objective — 2026-09-18
 
 Working method: `docs/improvement-loop.md`. Last deeper review: 2026-09-18
@@ -660,8 +677,7 @@ Native Runtime authority recovery now passes on the preserved ledger. Fixed the
 test harness to read authoritative frames from Runtime WAL, not the materialized
 state database. Recovered the interrupted import without clearing its frames.
 The original R4 frame/root and signed Foundation authority are retained; restart
-from R5 then commits R6 with fresh native RPC-attested observation through block
-35. The stored original evidence still observes block 25, correctly unchanged by
+from R5 then commits R6 with fresh native RPC-attested observation through block 35. The stored original evidence still observes block 25, correctly unchanged by
 idempotent repeated authority. Authenticated watcher scan reaches 35. An initial
 assertion incorrectly expected the immutable stored authority to advance; its
 failed log remains saved. No production fallback or financial code changed.
@@ -672,8 +688,8 @@ node stopped and stand free. Next native step: Entity financial transitions on
 this real native jurisdiction, then ETH↔Tron and lending. iPhone install/demo
 retains priority as soon as phone/signing and testnet rollout decisions permit it.
 
-Owner: Egor Homakov. MML: by 2050, 51% of world GDP runs on XLN bilateral
-lines. The immediate deliverable is an ETH ↔ Tron release with pay, swap and
+Owner: Egor Homakov. MML: by 2050, accounts supporting 51% of world GDP are
+provable through programmable J enforcement. The immediate deliverable is an ETH ↔ Tron release with pay, swap and
 base lending, recovery, and working web/iOS/Android/desktop apps; the existing
 extension remains a companion. This supersedes the September 7 lending exclusion.
 Use the existing capped-testnet acceptance policy as the preparation baseline.
@@ -992,13 +1008,14 @@ balances, fees, terminal receipts, swap and reload before broad parity gates.
 
 ## Egor MML objective — owner update 2026-09-10
 
-MML means useful unique economic value actually settled by the xln Runtime
-network. Measure completed user operations and settled amounts per asset without
+This older MML definition is superseded by the 2026-09-30 mission clarification.
+For near-term adoption evidence, measure completed user operations and amounts per asset without
 counting intermediate hops, retries, submitted traffic or duplicate receipts.
 Testnet nominal value proves functionality, not real mainnet economic value.
 Safety, determinism and recovery are constraints, not exchangeable for throughput.
 
 Execution hierarchy (supersedes older immediate priorities below):
+
 1. Deliver one usable React wallet journey through the real RAdapter: create/unlock,
    test funding, payment to a second wallet, swap, accurate receipt/history and
    reload. Verify both parties' balances and terminal outcomes. Fix the earliest
@@ -1341,6 +1358,7 @@ not by itself prove transaction-kind completeness or all adversarial scenario va
 One code/evidence packet at `ad0742a62`, job `cross-remainder-review-20260909-01`, completed
 GLM-5.3 low subscription; no retries. Result `/tmp/xln-cross-review-quorum-result.json`.
 USD0.25 reservation retained; cash unknown. Findings were independently checked:
+
 1. Claimed restored price substitution: disproved by the exact partial-fill snapshot test.
    Changing page price to8888 rejects with PAGES_ROOT_MISMATCH; committed page roots remain
    authoritative. Added this adversarial assertion to the existing regression.
@@ -1390,12 +1408,12 @@ invalidated by development hot reload. Commit verified milestones on main; prese
 Automation `xln-10` reports on this task every ten minutes and expires with this window.
 
 Acceptance evidence at 2026-09-08 22:27 UTC:
+
 - TS/Rust W1/W4/W8 exact replay: 6/6 engines, 111 frames; `.logs/qa/hlt/replays/1788905603729-parity.json`.
 - Real browser Cross-J: 1/1, 21.5s, both legs, no holds, reload recovery; `.logs/qa/wallet/cross-j-ts-20260908/`.
 - Real browser dispute: 1/1, 14.3s, early rejection and exact 100 USDC release; `.logs/qa/wallet/dispute-ts-20260908/`.
 - Browser evidence above uses the diagnostic UI against isolated production servers. It does not claim production-build coverage.
 - Final acceptance requires scenarios, E2E, parity and all applicable gates green; skips do not count as passes.
-
 
 ## Method review — 2026-09-08 22:40 UTC
 
@@ -1408,6 +1426,7 @@ Native live J/Move passed on the current binary: 5,000/5,000 payments and accoun
 
 HLT measured sequentially: 1,000 sovereign users, five processes, 8 workers, 20-second window,
 1,000 offered payments/s, real H1 WAL/fsync; one sample per engine, not saturation capacity.
+
 - TS: 20,000/20,000 completed, 672.65 payments/s, complete at 29,733ms, drain at 29,896ms.
   REJECT for TPS acceptance: the five-second drain deadline is 25,000ms.
 - Rust: 20,000/20,000 completed, 952.38 TPS, complete at 21,000ms, drain at 22,787ms; no pending ACKs.
@@ -1449,14 +1468,15 @@ Four more real browser checks passed: Manage/token lane/dispute (1), Move LEFT/R
 and tower restoration on a clean device (1). Move conserves all 100 USDC and drains pending
 work. Tower recovery compares the canonical Runtime root and Account proofs, then refuses
 an overwrite of existing local storage. Reports:
+
 - `/tmp/xln-ui-move-manage-r2-20260909/wallet-results.json` (3/3, 27.5s).
 - `/tmp/xln-ui-tower-restore-r3-20260909/wallet-results.json` (1/1, 18.8s).
-The Manage test had a case-sensitive stale label (90s wasted); fixed and bounded to 60s.
-The tower test dynamically imported core into Vite and triggered dependency optimization
-and a page reload. It now bundles the unchanged canonical hash helper before opening a
-wallet. A discarded plain serialization attempt could not preserve persistent collections;
-the final test hashes the original loaded state and retains every semantic assertion.
-Next: capacity, remaining browser scenarios and Svelte, exact new-binary parity, TS drain.
+  The Manage test had a case-sensitive stale label (90s wasted); fixed and bounded to 60s.
+  The tower test dynamically imported core into Vite and triggered dependency optimization
+  and a page reload. It now bundles the unchanged canonical hash helper before opening a
+  wallet. A discarded plain serialization attempt could not preserve persistent collections;
+  the final test hashes the original loaded state and retains every semantic assertion.
+  Next: capacity, remaining browser scenarios and Svelte, exact new-binary parity, TS drain.
 
 ## Historical owner scope — 2026-09-07 (superseded 2026-09-18)
 
@@ -1471,25 +1491,25 @@ TypeScript and the native Rust hub engine.
 ## Historical execution queue — 2026-09-07
 
 - [x] Close the HTLC boundary: 23/23 focused tests on canonical Paybook;
-  corrected duplicate TS self-cycle HtlcFinalized emission to outbound-only,
-  matching Rust. Money partition now 748/748, 29,500 assertions.
-  Preserve same-frame forwarding, secret propagation, timeouts and idempotence.
+      corrected duplicate TS self-cycle HtlcFinalized emission to outbound-only,
+      matching Rust. Money partition now 748/748, 29,500 assertions.
+      Preserve same-frame forwarding, secret propagation, timeouts and idempotence.
 - [ ] Build the fresh native xlnrs executable and reach the first live native
-  Cross-J boundary; run final bun run check after production evidence is exact. Native rejection and exact signed
-  duplicate execute currently pass 336/336 Rust runtime tests; TS settlement
-  52/52. Preserve outer-command nonce, rollback and ordered outputs.
+      Cross-J boundary; run final bun run check after production evidence is exact. Native rejection and exact signed
+      duplicate execute currently pass 336/336 Rust runtime tests; TS settlement
+      52/52. Preserve outer-command nonce, rollback and ordered outputs.
 - [ ] Run the actual existing Pay/Swap/Move/Dispute/Cross-J scenarios on TS and
-  native Rust H1. Prioritize native live Cross-J fill + restart next; previous
-  66-frame cross-J replay was exact in TS W1/W4 and Rust W1/W4 but does not replace
-  live native evidence. Exercise real J/TVM where the scenario requires it.
+      native Rust H1. Prioritize native live Cross-J fill + restart next; previous
+      66-frame cross-J replay was exact in TS W1/W4 and Rust W1/W4 but does not replace
+      live native evidence. Exercise real J/TVM where the scenario requires it.
 - [ ] Run production-mode browser E2E for the same feature flows, plus actual
-  crash/recovery and outbox drain. Fix first production divergence and replay
-  that exact artifact before expanding work. Remote-command E2E is now 1/1 green.
+      crash/recovery and outbox drain. Fix first production divergence and replay
+      that exact artifact before expanding work. Remote-command E2E is now 1/1 green.
 - [ ] Finish all unit/scenario/E2E partitions with bounded sequential runs,
-  compile production and cfg(test) Rust, replay one immutable production WAL
-  through all four engines with per-frame R/E/A roots and ordered outputs,
-  and run final bun run check. No completion claim with failing or skipped
-  required tests. Preserve unrelated shared-tree changes.
+      compile production and cfg(test) Rust, replay one immutable production WAL
+      through all four engines with per-frame R/E/A roots and ordered outputs,
+      and run final bun run check. No completion claim with failing or skipped
+      required tests. Preserve unrelated shared-tree changes.
 
 ## Method review — 2026-09-07 03:36 UTC
 
@@ -2070,6 +2090,7 @@ Use the single stand sequentially for continuation, receive UI and native Tron. 
 repeat a workload until its observed failure or implementation has changed.
 
 Owner decisions at 17:31 supersede earlier proposals in this file:
+
 - Native Tron may use any configured RPC, owned or external, optionally a quorum.
   Implement explicit RPC-attested native evidence; do not claim independent execution
   proof or require a managed local FullNode. The former trust-choice blocker is resolved.
@@ -2082,7 +2103,7 @@ Owner decisions at 17:31 supersede earlier proposals in this file:
 - Owner asks why the monetary ceiling is being removed; explain the existing removal
   request and arithmetic dependency. ABI migration is still not explicitly approved.
   Preserve states/funds/history and the already authorized removal of arbitrary caps.
-Paid calls remain held in the shared ledger. No spending or funding was executed.
+  Paid calls remain held in the shared ledger. No spending or funding was executed.
 
 Earlier reviews below are historical evidence, not authority over these newer decisions.
 Method review at 17:01: R7 is exact on all four current engine/worker combinations,
