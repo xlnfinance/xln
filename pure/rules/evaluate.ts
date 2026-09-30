@@ -83,7 +83,10 @@ const killerProblem = (id: string, { killer, verdict }: RowReport["killers"][num
   }
 };
 
-export const problemsOf = (report: RowReport): readonly Problem[] => [
+export const problemsOf = (report: RowReport): readonly Problem[] =>
+  report.row.retiredBy === undefined ? liveProblems(report) : [];
+
+const liveProblems = (report: RowReport): readonly Problem[] => [
   ...(report.row.killers.length === 0 ? [{ _tag: "NoKiller", id: report.row.id } as const] : []),
   ...LAYERS.flatMap((layer) => cellProblem(report, layer)),
   ...report.killers.flatMap((entry) => killerProblem(report.row.id, entry)),
@@ -95,11 +98,19 @@ const duplicateIds = (register: Register): readonly Problem[] =>
     .filter((id, index, ids) => ids.indexOf(id) !== index)
     .map((id) => ({ _tag: "DuplicateId", id }) as const);
 
+// A retired row must point at rows that are still live, so a rule is never retired into nothing.
+const retirementProblems = (register: Register): readonly Problem[] =>
+  register.flatMap((row) =>
+    (row.retiredBy ?? [])
+      .filter((successor) => !register.some((other) => other.id === successor && other.retiredBy === undefined))
+      .map((successor) => ({ _tag: "UnknownSuccessor", id: row.id, successor }) as const),
+  );
+
 export type Evaluation = Readonly<{ reports: readonly RowReport[]; problems: readonly Problem[] }>;
 
 export const evaluate = (register: Register, names: readonly Name[]): Evaluation => {
   const reports = register.map((row) => reportRow(row, names));
-  return { reports, problems: [...duplicateIds(register), ...reports.flatMap(problemsOf)] };
+  return { reports, problems: [...duplicateIds(register), ...retirementProblems(register), ...reports.flatMap(problemsOf)] };
 };
 
 export type LayerCount = Readonly<{ layer: Layer; held: number; owed: number; required: number }>;

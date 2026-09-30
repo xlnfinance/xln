@@ -30,6 +30,8 @@ export type Row = Readonly<{
   source: string;
   cells: Readonly<Record<Layer, Cell>>;
   killers: readonly Killer[];
+  // A retired rule is kept, pointing at its successors. It needs no killer and claims no layer.
+  retiredBy?: readonly string[];
 }>;
 
 export type Register = readonly Row[];
@@ -53,6 +55,7 @@ export type Problem =
   | Readonly<{ _tag: "MissingInLayer"; id: string; layer: Layer }>
   | Readonly<{ _tag: "OwedButPresent"; id: string; layer: Layer; by: string }>
   | Readonly<{ _tag: "NoKiller"; id: string }>
+  | Readonly<{ _tag: "UnknownSuccessor"; id: string; successor: string }>
   | Readonly<{ _tag: "KillerNotFound"; id: string; killer: Killer }>
   | Readonly<{ _tag: "KillerOwedButPresent"; id: string; killer: Killer; owed: string }>;
 
@@ -66,6 +69,8 @@ export const describeProblem = (problem: Problem): string => {
       return `${problem.id}: ${problem.layer} already carries the id; promote "owed: ${problem.by}" to "hold"`;
     case "NoKiller":
       return `${problem.id}: the row names no killer`;
+    case "UnknownSuccessor":
+      return `${problem.id}: retired_by names ${problem.successor}, which is not a live row`;
     case "KillerNotFound":
       return `${problem.id}: killer "${problem.killer.name}" (${problem.killer.kind}, ${problem.killer.layer}) is not among the names`;
     case "KillerOwedButPresent":

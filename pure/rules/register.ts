@@ -54,7 +54,7 @@ const parseCells = (where: string, raw: unknown): Result<Row["cells"], ParseErro
 const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
   const where = `rows[${index}]`;
   if (!isRaw(raw)) return fail(where, "row must be an object");
-  const { id, statement, source, layers, killers } = raw;
+  const { id, statement, source, layers, killers, retired_by: retiredBy } = raw;
   if (typeof id !== "string" || id === "") return fail(where, "row needs an id");
   if (typeof statement !== "string" || statement === "") return fail(id, "row needs a statement");
   if (typeof source !== "string" || source === "") return fail(id, "row needs a source decision");
@@ -63,7 +63,11 @@ const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
   const parsedKillers = collect(killers.map((killer, at) => parseKiller(`${id}.killers[${at}]`, killer)));
   if (!cells.ok) return cells;
   if (!parsedKillers.ok) return parsedKillers;
-  return pass({ id, statement, source, cells: cells.value, killers: parsedKillers.value });
+  if (retiredBy === undefined) return pass({ id, statement, source, cells: cells.value, killers: parsedKillers.value });
+  if (!Array.isArray(retiredBy) || retiredBy.length === 0 || !retiredBy.every((each) => typeof each === "string")) {
+    return fail(id, "retired_by must list the successor ids");
+  }
+  return pass({ id, statement, source, cells: cells.value, killers: parsedKillers.value, retiredBy });
 };
 
 export const parseRegister = (text: string): Result<Register, ParseError> => {

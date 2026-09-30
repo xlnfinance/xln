@@ -33,7 +33,7 @@ const killerText = (verdict: KillerVerdict): string => {
 };
 
 const killersText = (report: RowReport): string =>
-  report.killers.length === 0 ? "NONE" : report.killers.map((entry) => `${entry.killer.name} [${killerText(entry.verdict)}]`).join("; ");
+  report.row.retiredBy !== undefined ? `retired, see ${report.row.retiredBy.join(", ")}` : report.killers.length === 0 ? "NONE" : report.killers.map((entry) => `${entry.killer.name} [${killerText(entry.verdict)}]`).join("; ");
 
 const rowCells = (report: RowReport): readonly string[] =>
   LAYERS.map((layer) => cellText(report.cells[layer].verdict, report.cells[layer].hits));

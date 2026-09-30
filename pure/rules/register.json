@@ -1,4 +1,5 @@
 {
+ "policy": "Rule ids are descriptive names (R-SOMETHING), never bare numbers, so ids from different sources cannot collide. Review-finding ids (F1, G1, S1, B1, ...) name findings only and are never rules. A rule is retired with retired_by, not deleted.",
  "rows": [
   {
    "id": "R-E1",
@@ -48,22 +49,19 @@
   },
   {
    "id": "R-X2",
-   "statement": "Every deadline is judged at the Entity frame's timestamp, never wall-clock time (refined by R-CLOCK and R-HTLC-CLOCK; coordinator to say whether this row stays).",
+   "statement": "Every deadline is judged at the Entity frame's timestamp, never wall-clock time. RETIRED: refined into R-CLOCK and R-HTLC-CLOCK (J height, never the frame stamp).",
    "source": "lessons.md section 1",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "-",
+    "quint": "-",
     "contract": "-",
     "rig": "-",
     "ts": "-"
    },
-   "killers": [
-    {
-     "kind": "test",
-     "layer": "arrival",
-     "name": "to be named",
-     "owed": "spec thread: no killer named yet"
-    }
+   "killers": [],
+   "retired_by": [
+    "R-CLOCK",
+    "R-HTLC-CLOCK"
    ]
   },
   {
@@ -113,7 +111,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -133,7 +131,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -153,7 +151,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -173,7 +171,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -225,7 +223,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -265,7 +263,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -285,7 +283,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -296,7 +294,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44 (id not in a name yet)",
-    "contract": "owed: contracts thread tags the vector tests",
+    "contract": "owed: thread 'Contracts under our control' tags the vector tests",
     "rig": "-",
     "ts": "-"
    },
@@ -324,7 +322,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -370,7 +368,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -436,7 +434,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -456,7 +454,7 @@
      "kind": "test",
      "layer": "ts",
      "name": "to be named",
-     "owed": "v2"
+     "owed": "v2, no thread yet"
     }
    ]
   },
@@ -476,7 +474,7 @@
      "kind": "test",
      "layer": "ts",
      "name": "to be named",
-     "owed": "v2"
+     "owed": "v2, no thread yet"
     }
    ]
   },
@@ -496,7 +494,7 @@
      "kind": "test",
      "layer": "ts",
      "name": "to be named",
-     "owed": "v2"
+     "owed": "v2, no thread yet"
     }
    ]
   },
@@ -744,7 +742,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "owed: contracts thread tags the deposit tests J6",
+    "contract": "owed: thread 'Contracts under our control' tags the deposit tests J6",
     "rig": "-",
     "ts": "-"
    },
@@ -763,13 +761,13 @@
    ]
   },
   {
-   "id": "F1",
-   "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE). NOTE: review finding ids F1 to F3 of the third pass also use this id.",
+   "id": "R-FINAL-NONCE",
+   "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE).",
    "source": "contracts-decisions.md F1",
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "hold",
+    "contract": "owed: thread 'Contracts under our control' tags the stale-nonce test R-FINAL-NONCE (the finding F1's test does not count)",
     "rig": "-",
     "ts": "-"
    },
@@ -800,7 +798,7 @@
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44",
-    "contract": "owed: contracts thread names the J5Starve and J5Attacks tests F16",
+    "contract": "owed: thread 'Contracts under our control' names the J5Starve and J5Attacks tests F16",
     "rig": "-",
     "ts": "-"
    },
@@ -865,7 +863,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "to be named",
-     "owed": "spec thread: no killer named yet"
+     "owed": "thread 'Account spec comparison'"
     }
    ]
   },
@@ -928,7 +926,7 @@
    "layers": {
     "arrival": "-",
     "quint": "-",
-    "contract": "owed: contracts thread tags the deploy-gate tests N3",
+    "contract": "owed: thread 'Contracts under our control' tags the deploy-gate tests N3",
     "rig": "-",
     "ts": "-"
    },

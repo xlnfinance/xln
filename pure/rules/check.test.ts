@@ -128,6 +128,21 @@ describe("owed cells and killers are open work, and go red once they are already
   });
 });
 
+describe("a retired rule", () => {
+  const retired = row("R-OLD", { retiredBy: ["R-NEW"], killers: [], cells: row("x").cells });
+
+  test("needs no killer and claims no name, when its successor is live", () => {
+    const cells = { ...retired.cells, contract: { _tag: "absent" } } as const;
+    expect(evaluate([{ ...retired, cells }, row("R-NEW")], [name("title", "R-NEW killer test"), name("title", "killer test")]).problems).toEqual([]);
+  });
+
+  test("red when it points at a rule that is not a live row", () => {
+    const cells = { ...retired.cells, contract: { _tag: "absent" } } as const;
+    const { problems } = evaluate([{ ...retired, cells }], []);
+    expect(problems.map((problem) => problem._tag)).toEqual(["UnknownSuccessor"]);
+  });
+});
+
 describe("register.json", () => {
   const text = readFileSync(`${import.meta.dir}/register.json`, "utf8");
   const parsed = parseRegister(text);
@@ -148,9 +163,20 @@ describe("register.json", () => {
 
   test("seeds the ids the brief names", () => {
     const ids = parsed.ok ? parsed.value.map((each) => each.id) : [];
-    const seeded = ["C1", "C2", "H1", "H2", "H3", "H4", "J2", "J5", "J6", "F1", "A12", "N3", "R-SIMULATE", "R-SPLIT", "R-COSIGN", "R-NONCE", "R-DURABLE", "R-CLOCK", "R-FUNDED", "R2C-DEBT-FIRST"];
+    const seeded = ["C1", "C2", "H1", "H2", "H3", "H4", "J2", "J5", "J6", "R-FINAL-NONCE", "A12", "N3", "R-SIMULATE", "R-SPLIT", "R-COSIGN", "R-NONCE", "R-DURABLE", "R-CLOCK", "R-FUNDED", "R2C-DEBT-FIRST"];
     expect(seeded.filter((id) => !ids.includes(id))).toEqual([]);
     expect(ids.filter((id) => /^R-[EXAJRP]\d$/.test(id)).length).toBe(23);
+  });
+
+  test("carries the id policy: descriptive names, never bare numbers", () => {
+    expect(JSON.parse(text).policy).toContain("descriptive names");
+  });
+
+  test("F1 is a finding id, not a rule; the rule is R-FINAL-NONCE, and R-X2 is retired into R-CLOCK and R-HTLC-CLOCK", () => {
+    const rows = parsed.ok ? parsed.value : [];
+    expect(rows.some((each) => each.id === "F1")).toBe(false);
+    expect(rows.some((each) => each.id === "R-FINAL-NONCE")).toBe(true);
+    expect(rows.find((each) => each.id === "R-X2")?.retiredBy).toEqual(["R-CLOCK", "R-HTLC-CLOCK"]);
   });
 
   test("every row names a layer cell for every layer", () => {
