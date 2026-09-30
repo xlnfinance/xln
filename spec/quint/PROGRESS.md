@@ -62,6 +62,7 @@ Neither spec reads the other. Five leaks, all harmless but recorded:
 
 1. Account + chain: the link is checked as a predicate over Bodies (`compose.qnt`, C12); a joint state machine of the hub's two Accounts and the chain is still not built.
 2. Entity: an offline Entity.
+   R-HOLD-CAP is per Account across tokens (32, the contract's per-body cap). It is owed when the multi-token Account is modelled.
 3. Apalache on the J modules (`jbatch`, `runtime`, `settle`) where it finishes; v2 models (proposals are in V2.md).
 4. Contract-side items: J5 (a failed batch takes its nonce, `BatchFailed`), C11 (window floor above LAG) and J2 (tolerant dispute ops in a batch) accepted by the coordinator 2026-09-29; the contracts thread changes J2 test-first. The chain fact E6 is pinned on the real contracts (#47).
 

@@ -126,6 +126,7 @@ comes from routing) and is modelled as unconstrained, which over-approximates ho
 **A11. Not yet in this layer** (each tracked in PROGRESS.md): cooperative settlement and the on-chain epoch (N1:
 sign proofs only for the current epoch; pause payments until the new baseline proof is co-signed), account open
 (Q-A1), windows fixed at open (N3), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).
+R-HOLD-CAP is per Account across tokens (32, the contract's per-body cap). It is owed when the multi-token Account is modelled.
 
 **A12. A peer that acked a frame and then sends another for the same height. CLOSED by rank (coordinator, 2026-09-30).**
 Found by simulation. Right proposes frame 1; Left acks it and commits; the ack is lost. Left's key is then taken, and it sends Right another frame for height 1
