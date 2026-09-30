@@ -187,6 +187,7 @@ module account_core {
         else if (l.payer != author) Refused("not_own_funds")
         else if (l.amount < 1 or l.amount > MAX_AMOUNT) Refused("bad_amount")
         else if (b.locks.get(l.id).on) Refused("lock_exists")
+        else if (LOCK_SLOTS.exists(i => b.locks.get(i).on and b.locks.get(i).hashlock == l.hashlock)) Refused("lock_exists")   // R-ONE-LOCK-PER-HASH: one open clause per hashlock, whoever the payer
         else if (l.deadline <= now) Refused("deadline_past")
         else if (l.deadline > now + MAX_LOCK_HORIZON + CLOCK_RESERVE) Refused("deadline_too_far")
         else if (l.amount > room(b, l.payer)) Refused("insufficient_capacity")

@@ -39,6 +39,19 @@ module account_test {
     applyTx(funded, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 2 }), Left, 1) != Refused("deadline_past")
   })
 
+  // R-ONE-LOCK-PER-HASH (coordinator 09-30): an Account holds at most one open clause per hashlock, whoever the payer. The second lock is refused
+  // with lock_exists; the lock stays addressed by its slot id; a different hashlock still fits the other slot.
+  run oneLockPerHashlockTest = init.expect({
+    val one = HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 3 })
+    val locked = match applyTx(funded, one, Left, 1) { | Ok(b) => b | Refused(_) => GENESIS }
+    and {
+      lockCount(locked) == 1,
+      applyTx(locked, HtlcLock({ id: 2, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 3 }), Left, 1) == Refused("lock_exists"),
+      applyTx(locked, HtlcLock({ id: 2, payer: Right, amount: 1, hashlock: hashOf(1), deadline: 3 }), Right, 1) == Refused("lock_exists"),
+      match applyTx(locked, HtlcLock({ id: 2, payer: Left, amount: 1, hashlock: hashOf(2), deadline: 3 }), Left, 1) { | Ok(b) => lockCount(b) == 2 | Refused(_) => false }
+    }
+  })
+
   // Amounts and credit limits stay inside their bounds.
   run creditAndAmountBoundsTest = init.expect(and {
     applyTx(funded, SetCredit({ by: Left, limit: MAX_CREDIT + 1 }), Left, 1) == Refused("bad_credit"),

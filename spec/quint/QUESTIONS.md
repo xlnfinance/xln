@@ -121,6 +121,8 @@ represented by an integer and a hashlock by `hashOf(secret)`; who knows which se
 comes from routing) and is modelled as unconstrained, which over-approximates honest behaviour. Source:
 `account-model.md` section 4.
 
+**A15. R-ONE-LOCK-PER-HASH (coordinator 09-30).** An Account holds at most one open clause per hashlock, whoever the payer. `applyTx` refuses a second `HtlcLock` on an open hashlock with `lock_exists` (the slot id still addresses the lock). og refuses it (xln.ts 7457-7458); this model allowed it until now. `oneLockPerHashlockTest` pins it (second lock by either payer refused, a different hashlock still fits the other slot); mutant `duplicate-hashlock-allowed`.
+
 **A11. Not yet in this layer** (each tracked in PROGRESS.md): cooperative settlement and the on-chain epoch (N1:
 sign proofs only for the current epoch; pause payments until the new baseline proof is co-signed), account open
 (Q-A1), windows fixed at open (N3), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).

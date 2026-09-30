@@ -413,6 +413,14 @@
       "old": "refused: r.refused.concat(sel.dropped) }),",
       "new": "refused: r.refused }),",
       "killedBy": "test:deadTxIsRefusedWithNoticeTest"
+    },
+    {
+      "id": "duplicate-hashlock-allowed",
+      "why": "R-ONE-LOCK-PER-HASH: a second open lock on a hashlock that is already open is co-signed (one secret would then pay two clauses)",
+      "file": "account_core.qnt",
+      "old": "        else if (LOCK_SLOTS.exists(i => b.locks.get(i).on and b.locks.get(i).hashlock == l.hashlock)) Refused(\"lock_exists\")   // R-ONE-LOCK-PER-HASH: one open clause per hashlock, whoever the payer\n",
+      "new": "",
+      "killedBy": "test:oneLockPerHashlockTest"
     }
   ],
   "testSamples": 50
