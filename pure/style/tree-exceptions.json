@@ -1,0 +1,6 @@
+{
+  "no-mutating-call": { "kernel/result.ts": 1 },
+  "no-throw": { "kernel/tagged.ts": 1 },
+  "no-try": { "kernel/signature.ts": 1 },
+  "no-boolean-param": { "kernel/abi.ts": 2 }
+}
