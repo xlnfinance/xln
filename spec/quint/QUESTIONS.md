@@ -25,18 +25,24 @@ retransmission exists (`collision.ts:117`).
 Options: (a) refuse silently and count it; (b) send a reject message; (c) treat as dispute evidence and freeze.
 Choice: (a) for this layer. A frame is all-or-nothing: the first tx that does not apply refuses the whole frame, the
 receiver's state is untouched, and no message is sent. Two honest sides never refuse each other's frames in this
-model, so the case is only exercised by stale and duplicate frames. The Byzantine-peer case (a frame whose claimed
-state does not replay) is deferred to the dispute layer, where (c) applies. Source: R-X1, Q-E2, Q-A3.
+model, so the case is only exercised by stale and duplicate frames. The Byzantine-peer case is now modelled in `account.qnt`
+(a peer that proposes forged state, skipped heights, stamps from the future or the past, wrong acks): every such frame is
+refused and counted, the honest state does not move, and no side ever freezes on it. Option (c) stays available to the Entity
+(the refused frame plus the peer's earlier signature are evidence), but nothing in the Account depends on it. Source: R-X1, Q-E2, Q-A3.
 
 **A4. Frame shape (Q-A4).**
 Options: (a) propose-then-ack as separate messages; (b) each proposal carries the counter-signature of the last.
 Choice: (a). Piggybacking an ack on the next proposal (og's `ack_frame`) is a transport optimisation with no state
 effect, so it is not modelled. Source: `xln.ts:9556`.
 
-**A5. Who signs when.**
+**A5. Who signs when. CLOSED by R-CLOCK (A8) and the Byzantine model.**
 Choice: the proposer signs the frame and the resulting dispute proof when it proposes; the receiver signs both when it
 acks. A side commits a frame when the counterparty's signature over it exists. So an un-acked proposal already
 gives the counterparty a signed proof (design/account-model.md section 2, "signing a proposal is consent to it").
+The review asked what keeps a Byzantine proposer from making the honest side sign a state it never agreed to. Answer: the honest
+side signs only what it replayed itself (A6), on its own clock (A8), and `account.qnt` now runs a Byzantine side (`byz`) that
+proposes anything: `both_signed`, `no_bad_accept` and `authority` check the honest side (its committed state was signed by it, and
+came from frames that applied on its own tip). Mutants `accept-forged-state`, `accept-height-skip`, `ack-skips-proof-match` and `receiver-judges-by-the-frame-stamp` test that.
 
 **A6. No parent hash in the frame.**
 Options: (a) a frame names its parent by hash; (b) the receiver replays the txs on its own tip and compares the
@@ -50,17 +56,30 @@ flight / held) plus everything already queued, so a tx that could never apply ne
 proposal time the proposer still drops any tx that no longer applies (the peer's frame may have changed the state).
 Source: Q-E1 recommendation, B-X3.
 
-**A8. Clocks and deadlines (Q-X2, Q-P1).**
-Choice: each side has its own clock; the clocks never differ by more than `DRIFT` (an assumption, not a rule the
-protocol can enforce). A frame carries the proposer's timestamp; the receiver refuses it unless it is within
-`TOLERANCE` of its own clock and not before the previous frame. Every deadline rule reads the frame timestamp, never
-a wall clock: a secret is accepted iff `ts <= deadline`; an HTLC expires iff `ts > deadline`. There is no
-enforcement margin in the Account: a margin is Entity policy. Source: R-X2, `htlc-deadline.ts`.
-Open: `TOLERANCE >= DRIFT` is needed for two honest sides to accept each other; the model does not prove the
-Runtime keeps it.
+**A8. Clocks and deadlines (Q-X2, Q-P1). R-CLOCK (coordinator, 2026-09-29, from the first review) replaces the earlier rule.**
+Old rule (dropped): every deadline rule read the frame timestamp, and a frame had to be within `TOLERANCE` of the receiver's clock and
+not before the previous one. Found by the review: the proposer chooses that stamp, so a Byzantine proposer could stamp a resolve
+"before the deadline" long after it, or stamp an expiry early, and the receiver had no independent time.
+R-CLOCK: **a frame's timestamp is informational**. Every time decision uses the deciding side's own clock, plus a reserve where the two
+clocks' difference could hurt the other side. `CLOCK_RESERVE = DRIFT` (the clocks never differ by more than `DRIFT`, an assumption the
+protocol cannot enforce, QUESTIONS Q-X2).
+- Resolve needs `now <= deadline` (own clock, no reserve: a payee may take its money until its own clock says the deadline passed).
+- Expire needs `now > deadline + CLOCK_RESERVE` (a payer waits for the reserve, so it never takes back a lock whose payee still holds the
+  secret on a slower clock).
+- Lock admission: `deadline <= now + MAX_LOCK_HORIZON + CLOCK_RESERVE` (A9).
+- A frame stamped in the past or the future is accepted (odd stamps are harmless: `oddStampsAreAcceptedTest`, `oldFrameIsAcceptedAfterAnOutageTest`);
+  a resolve or expiry is refused or accepted by the receiver's own clock (`backdatedResolveIsRefusedTest`, `futureStampedExpiryIsRefusedTest`,
+  `expiryWaitsForTheReceiversOwnClockTest`). The replica no longer keeps `lastTs`, so an outage cannot wedge the account.
+A margin beyond the reserve is Entity policy (`HOP`, `ESC`). An expiry is a system tx the payer's Entity queues from its own clock
+(`expireOne` waits for `deadline + CLOCK_RESERVE`). Boundary tests: `lockDeadlineBoundariesTest`, `resolveAtTheDeadlineSecondTest`.
+Mutants: `resolve-after-deadline`, `expire-at-deadline`, `horizon-off`, `receiver-judges-by-the-frame-stamp`, `expiry-reserve-off`.
+The oracle `expiredEarly` states the goal, not the guard: no committed expiry while either clock is at or before the deadline (the payee may still resolve on its own clock). A first version of it added the reserve and
+flagged a correct expiry (receiver's clock 4, payee's 3, deadline 2); simulation found it the moment the Byzantine nonce frames became reachable.
+Open: the model does not prove the Runtime keeps `DRIFT` small; that is an operational assumption (NTP, refuse to sign when the
+local clock looks wrong).
 
 **A9. HTLC deadline horizon: `MAX_LOCK_HORIZON` (coordinator decision, N2, policy).**
-Choice: a side refuses a lock whose deadline is more than `MAX_LOCK_HORIZON` after the frame's timestamp (`deadline_too_far`). It is
+Choice: a side refuses a lock whose deadline is more than `MAX_LOCK_HORIZON` (plus `CLOCK_RESERVE`) after its own clock (`deadline_too_far`; R-CLOCK, A8). It is
 a per-side policy parameter, not a protocol constant; the contracts bound nothing here. The coordinator names the default 7 days, never
 below the 24 h async window, enforced in time and in J height, at lock admission and at forward. The model has one clock: a tick is a
 unit of time and of J height alike (`LAG` counts J inclusion in ticks), so the two bounds are one number here, and the second check would
@@ -76,7 +95,31 @@ comes from routing) and is modelled as unconstrained, which over-approximates ho
 
 **A11. Not yet in this layer** (each tracked in PROGRESS.md): cooperative settlement and the on-chain epoch (N1:
 sign proofs only for the current epoch; pause payments until the new baseline proof is co-signed), account open
-(Q-A1), windows fixed at open (N3), swaps, multiple tokens, a Byzantine peer.
+(Q-A1), windows fixed at open (N3), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).
+
+**A12. A peer that acked a frame and then sends another for the same height. OPEN (found by simulation, 2026-09-29).**
+Sequence: Right proposes frame 1; Left acks it and commits; the ack is lost. Left's key is then taken (or Left is malicious all along), and it sends
+Right a different frame for height 1 (`byzStamped` in `account.qnt`; any frame that replays is accepted). Right, still waiting for its ack, is the collision
+loser: it rolls its own frame back and takes Left's (rule 3 of `deliverProposal`). Now the two sides committed different bodies at height 1, and Left
+holds a co-signed proof of each at nonce 1 (branch Right-authored with Left's ack; branch Left-authored with Right's ack). Nothing at the Account layer
+can prevent it: Right cannot tell a lost ack from an equivocating peer. `agreed` therefore reads "the sides agree, or the peer signed two proofs for one
+height" (`peerSignedTwice`; witness `w_no_divergence` proves the case is reached). The proof is in Right's hands (two signatures of Left at one height),
+but what it is worth depends on the chain: two co-signed proofs at one nonce, the counterparty free to start a dispute with either, and a counter needs a
+strictly higher nonce. **Question for the contracts thread:** at equal nonce and different `authorIsLeft`, may a dispute with one be answered with the
+other? If not, Right's only defence is to sign a frame at nonce 2 at once (the honest side does that in the normal course), and the window between the two
+frames is the exposure. Options: (a) accept (the Byzantine peer that signs twice is provable, and the damage is bounded by the frame that had not
+been acked); (b) the loser keeps its own frame while the peer's ack for it may still come (never roll back once the peer is known to have seen the
+frame: needs an ack-or-timeout state); (c) the receiver refuses any frame at a height for which it holds a proposal of its own until a timeout. Proposed: (a) for
+v1 and record it; (b) is a larger change to collision handling and belongs with the proof-nonce rule below.
+
+**A13. The proof nonce is its own counter (N1, coordinator; found while doing it).**
+Choice: a frame carries a `nonce`, the proof nonce a dispute start would use; each replica keeps `pnonce`, the nonce of the frame it committed last. A receiver
+refuses a frame whose nonce is not above its `pnonce`, or leaps more than `MAX_NONCE_GAP`; signatures are keyed by (signer, nonce, branch). Within an epoch the
+nonce follows the tip by exactly one (`MAX_NONCE_GAP = 0`): a jump belongs to a co-signed rebase (`settle.qnt`, `BASELINE_GAP`), not to a frame. **Why not
+a free gap:** with `MAX_NONCE_GAP = 1` (mutant `proposer-may-skip-nonces`) a collision loser's abandoned proposal at nonce n+1 outranks the winner's frame at n, and
+the loser's next frame at n+1 signs a second proof under one key: `no_equivocation` fails, simulation finds it. The chain rule the model relies on is "a proof
+nonce is used once per key, and a start needs one above the stored nonce". Checked by `nonce_climbs`, `no_bad_accept` (independent oracle `wellFormed` states the nonce
+rule), mutants `accept-stale-proof-nonce`, `accept-proof-nonce-leap`, `commit-forgets-proof-nonce`. The Byzantine frames of kind 4 and 5 carry a stale and a leaping nonce.
 
 
 ---
@@ -444,6 +487,29 @@ batch with payment, settlement or reserve ops. This was already J3(1); it is now
 a good batch by starving the call. Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
 burns a payment batch that would have applied (`starvedBatchLandsLaterTest`). The starved call of an urgent batch only reverts whole, which
 leaves the batch valid for the honest relayer's next attempt.
+**Refinement (coordinator, from the #54 review, 2026-09-29).** Two rules. (1) A batch that carries a deposit leg (`externalTokenToReserve`) reverts whole, like a
+dispute batch, and never soft-fails: a paused token or a moved allowance cannot burn its nonce (`DEP_SOFT_FAILS = false`; mutant `deposit-batch-soft-fails`;
+`failedDepositBatchRevertsWholeTest`; property `dep_never_burns`). The deposit legs run first, so a deposit funds the payment behind it; the Entity lets a deposit go alone
+in its batch (`depositFundsThePaymentBehindItTest`), so a failing deposit cannot take a payment down with it. (2) A bad counterparty signature inside a batch is a
+soft fail: a settlement or C2R signed at an old account epoch (`Settle`, `poison`) takes the nonce, applies nothing and emits BatchFailed; the Entity drops it, because it needs
+a fresh co-signature, which is a new op (`staleSettlementFailsSoftTest`, mutant `bad-cp-signature-reverts`). Only a failure of the batch's own hanko authorisation reverts
+without taking the nonce (`forge`, `forgedBatchTakesNoNonceTest`; mutants `forged-batch-lands`, `bad-auth-takes-the-nonce`). The relayer that submits out of order is `attemptAny`
+(`outOfOrderRelayerIsRefusedTest`; mutant `chain-accepts-nonce-above-stored`, caught by `nonce_sequential`).
+**J2 extended, R-COSIGN, gas stipend (coordinator, second #54 review, 2026-09-29).** (1) Any dispute, reveal or hash-ladder op whose precondition can never hold again (a
+finalize after a counter landed, a start beside an open dispute) skips with `DisputeOpSkipped` and the batch consumes its nonce; a transient failure (a finalize before its
+window ends) still reverts the batch whole and leaves the nonce open. The model has the first (`poison`, TOLERANT); it does not model a transient failure of an urgent op, so the
+Entity rule that follows is written here and not checked: an urgent op is signed only when its precondition holds by the Entity's own clock plus `LAG` (else the batch would
+hold the nonce). (2) **R-COSIGN**: a batch that carries a co-signed op (a settlement or C2R) carries only ops for that one Account: a counterparty's state change or a
+relayer's gas choice can fail such a batch, so nothing unrelated may ride with it (`cosign_alone`; `coSignedOpsTravelAloneTest`, `coSignedOpsOfTwoAccountsDoNotShareABatchTest`;
+mutants `cosign-batch-carries-payments`, `cosign-batch-mixes-accounts`). (3) An ERC-1271 member gets a fixed gas stipend, and the transaction hard-reverts when the stipend
+cannot be given: gas starvation is a hard revert of the whole transaction, never `BatchFailed`. That is the model's `starve` with the guard (`starvedBatchLandsLaterTest`,
+`no_burn`, mutant `no-gas-guard`); the stipend is one more reason the guard is a rule and not a heuristic.
+**J6. The cost of revert-whole for deposits (found by the model, OPEN).** A deposit batch that cannot land keeps its nonce open, so every batch above it waits, an urgent op
+included (`stuckDepositBatchHoldsAnUrgentOpTest`: the reveal misses its deadline; the model records it as `hostage`, apart from `missed`, because no Entity behaviour can help:
+the token is not the Entity's). The rule the coordinator chose is right against a relayer that burns nonces, and this is what it costs against a paused token. Options: (a) accept
+and let the Entity keep deposit legs out of signed batches while any urgent op can arrive (use the direct external deposit, which takes no nonce, when the funds are already at hand);
+(b) a deposit that fails soft-fails only when the failure is the token's (a dead token cannot be fixed by waiting for a relayer); (c) accept as is. Proposed: (a), with the
+reason written into the Entity's packing rule. A witness is not possible by simulation (the sequence is too specific); the scenario test is the evidence.
 
 **J4. Nonces: what the contract's strict sequence costs.**
 Any signed batch is a nonce burner in the adversary's hands (F1), and a payment batch that reverts blocks every batch above it (E2, J5).

@@ -14,8 +14,8 @@ Where a rule is unclear, this spec picks the reading the sources best support an
 `plan/contracts-review.md` (flaws C1, C2, H1-H3), `plan/contracts-decisions.md`, `design/account-model.md`,
 `pure/xln.ts`, and the forked contracts under `contracts/` with their encoding vectors. The contracts are ours; this
 spec describes the **fixed** contracts (ondelta epoch, entity-bound batch payload, H1 finalize wait, H2 window floor,
-H3 clamp) and takes two contract changes as proposals, flagged in QUESTIONS.md: the window floor above LAG (C11) and tolerant
-dispute ops in a batch (J2). og is a reference, never the oracle.
+H3 clamp) and the contract changes the coordinator accepted, flagged in QUESTIONS.md: the window floor above LAG (C11), tolerant
+dispute ops in a batch (J2), a failed batch that takes its nonce (J5, with the deposit and bad-signature refinements). og is a reference, never the oracle.
 
 ## Layout
 
@@ -31,7 +31,7 @@ dispute ops in a batch (J2). og is a reference, never the oracle.
 | `entity.qnt` | Entity layer: a hub with two Accounts, the four-phase frame, routing, fail back, escalation, commands |
 | `entity_test.qnt` | scenario tests: forward with margin, fail back at once, escalation, secrets, late reveal, arrivals first, freeze, commands, collisions |
 | `jbatch.qnt` | J layer, the Entity's batch: strict nonce, atomic revert, urgent ops, forks and nonce burning, what a lost batch holds |
-| `jbatch_test.qnt` | scenario tests: payment lands, urgent behind a payment, fork winners, moved dispute, reverted payment kept, signed batch lands later |
+| `jbatch_test.qnt` | scenario tests: payment lands, urgent behind a payment, fork winners, moved dispute, reverted payment kept, signed batch lands later, deposit legs revert whole, stale settlement fails soft, forged and out-of-order batches |
 | `runtime.qnt` | Runtime layer: canonical frame order, idle gate, exactly-once J watching, durable before send, crash and restart |
 | `runtime_test.qnt` | scenario tests: three-step frame, crash before and after durable, chain event across a crash, canonical order |
 | `params_test.qnt` | the numbers the layers share (LAG, REACT, windows, HOP, ESC) and the entity's deadline arithmetic played on the real dispute game |
@@ -82,8 +82,14 @@ Apalache and Java 21 work.
 | id | property | module |
 |---|---|---|
 | P2 | credit holds: every committed and in-flight state satisfies RCPAN in the worst case over open clauses | `credit_holds` |
-| P4a | agreed: two sides never commit different bodies at one height | `agreed` |
+| P4a | agreed: two sides never commit different bodies at one height, unless the peer signed two proofs for one height (A12) | `agreed` |
 | P4b | no equivocation: a signer never signs two different proofs for one (nonce, branch) | `no_equivocation` |
 | P4c | both sign the same proof: at each side's head, both signatures over the proof of the committed body exist | `both_signed` |
+| P4d | a frame is held for an ack only if a correct receiver would accept it (state replays on its own tip and clock, next height, proof nonce above the last) | `no_bad_accept` |
+| P4e | a committed frame never spends the other side's funds, raises its own credit, or expires a lock early (R-CLOCK) | `authority` |
+| P4f | the proof nonce is its own counter, one above the last committed (N1) | `nonce_climbs` |
+
+The Account model runs a Byzantine side (one key taken at any moment): P4c to P4f are checked on the honest side only. Each of the
+independent oracles (`netOf`, `own`/`creditFor`, `creditHolds`, `wellFormed`) states the rule on the effect, not through the guard it checks.
 
 P1 (a dispute pays what both sides believed) and P3 (money is conserved) need the chain and belong to `chain.qnt`.

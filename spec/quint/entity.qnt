@@ -323,7 +323,7 @@ module entity {
   // Expire: anyone may remove a lock whose deadline has passed.
   pure def expireOne(s: S, l: int, k: int): S = {
     val lock = s.links.get(l).tip.locks.get(k)
-    if (lock.on and s.now > lock.deadline) sysQueue(s, l, HtlcExpire({ id: k })) else s
+    if (lock.on and s.now > lock.deadline + CLOCK_RESERVE) sysQueue(s, l, HtlcExpire({ id: k })) else s
   }
 
   // Route: a new inbound lock is forwarded with the deadline margin, or failed back in this same frame [R-P1].
@@ -693,7 +693,7 @@ module entity {
   // P2: credit holds on every committed state and on the state we plan against.
   val credit_holds: bool = LINKSET.forall(l => {
     val lk = st.links.get(l)
-    and { rcpan(lk.tip), rcpan(planOf(lk, ours(l), st.now)) }
+    and { creditHolds(lk.tip), creditHolds(planOf(lk, ours(l), st.now)) }
   })
 
   // P5: the hub is never out of pocket. Once an inbound deadline has passed, if the onward lock was paid, then the inbound lock

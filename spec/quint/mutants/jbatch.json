@@ -24,16 +24,16 @@
       "id": "drop-every-op-of-a-failed-batch",
       "why": "Q-J1: the Entity abandons all ops of a batch that reverted, but the signed batch can still land later",
       "file": "jbatch.qnt",
-      "old": "dropped: OPIDS.mapBy(i => st.dropped.get(i) or dead.contains(i)),",
-      "new": "dropped: OPIDS.mapBy(i => st.dropped.get(i) or x.b.ids.contains(i)),",
+      "old": "dropped: OPIDS.mapBy(i => s.dropped.get(i) or dead.contains(i)),",
+      "new": "dropped: OPIDS.mapBy(i => s.dropped.get(i) or x.b.ids.contains(i)),",
       "killedBy": "invariant:dropped_only_dead"
     },
     {
       "id": "entity-ignores-the-skip-event",
       "why": "J2: the Entity does not read DisputeOpSkipped, so a skipped start stays pending: it waits for a DisputeStarted that never comes and signs the op again",
       "file": "jbatch.qnt",
-      "old": "    val dead = if (TOLERANT) x.b.ids.filter(i => s1.skipped.get(i)) else",
-      "new": "    val dead = if (TOLERANT) x.b.ids.filter(i => false) else",
+      "old": "    val dead = (if (TOLERANT) x.b.ids.filter(i => s1.skipped.get(i)) else",
+      "new": "    val dead = (if (TOLERANT) x.b.ids.filter(i => false) else",
       "killedBy": "invariant:skip_read"
     },
     {
@@ -80,8 +80,8 @@
       "id": "entity-ignores-batch-failed",
       "why": "J5: the Entity does not read BatchFailed, so the failed payment is never queued again",
       "file": "jbatch.qnt",
-      "old": "        failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)),",
-      "new": "        failSeen: st.failSeen,",
+      "old": "      failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else s.failSeen.get(i)),",
+      "new": "      failSeen: s.failSeen,",
       "killedBy": "invariant:failed_read"
     },
     {
@@ -99,6 +99,78 @@
       "old": "pure val PAY_HELD_AFTER_ABORT = true",
       "new": "pure val PAY_HELD_AFTER_ABORT = false",
       "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "deposit-batch-soft-fails",
+      "why": "A batch with a deposit leg that fails takes its nonce and emits BatchFailed, like a payment batch: a paused token burns the nonce.",
+      "file": "jbatch.qnt",
+      "old": "pure val DEP_SOFT_FAILS = false",
+      "new": "pure val DEP_SOFT_FAILS = true",
+      "killedBy": "test:failedDepositBatchRevertsWholeTest"
+    },
+    {
+      "id": "deposit-ignores-the-token",
+      "why": "The chain lands a deposit leg although the token transfer fails.",
+      "file": "jbatch.qnt",
+      "old": "    not(hasDep(s, b.ids)) or s.ext,\n",
+      "new": "    true,\n",
+      "killedBy": "test:failedDepositBatchRevertsWholeTest"
+    },
+    {
+      "id": "deposit-runs-after-payments",
+      "why": "The payments of a batch run before its deposit legs, so a deposit cannot fund the payment behind it.",
+      "file": "jbatch.qnt",
+      "old": "payTotal(s, b.ids) <= s.reserve + depTotal(s, b.ids),",
+      "new": "payTotal(s, b.ids) <= s.reserve,",
+      "killedBy": "test:depositLegsRunBeforePaymentsTest"
+    },
+    {
+      "id": "bad-cp-signature-reverts",
+      "why": "A settlement with a stale counterparty signature reverts the batch whole (nonce stays open) instead of failing softly.",
+      "file": "jbatch.qnt",
+      "old": "b.ids.forall(i => isMoney(s, i)) and (DEP_SOFT_FAILS",
+      "new": "b.ids.forall(i => isMoney(s, i) and not(isSettle(s, i))) and (DEP_SOFT_FAILS",
+      "killedBy": "test:staleSettlementFailsSoftTest"
+    },
+    {
+      "id": "forged-batch-lands",
+      "why": "A batch with a bad hanko is executed and takes a nonce.",
+      "file": "jbatch.qnt",
+      "old": "    st' = react({ ...st, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "new": "    st' = react({ ...st, cnonce: st.cnonce + 1, gh: { ...st.gh, landed: st.gh.landed + 1, forgedLanded: true } })\n  }\n\n  // The token behind",
+      "killedBy": "invariant:only_signed_land"
+    },
+    {
+      "id": "bad-auth-takes-the-nonce",
+      "why": "A batch that fails its own authorisation reverts but still stores its nonce.",
+      "file": "jbatch.qnt",
+      "old": "    st' = react({ ...st, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "new": "    st' = react({ ...st, cnonce: st.cnonce + 1, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "killedBy": "invariant:nonce_sequential"
+    },
+    {
+      "id": "chain-accepts-nonce-above-stored",
+      "why": "The chain lands a batch whose nonce is anything above the stored one (a relayer skips ahead and strands the batches below).",
+      "file": "jbatch.qnt",
+      "old": "    b.nonce == s.cnonce + 1,\n    payTotal",
+      "new": "    b.nonce > s.cnonce,\n    payTotal",
+      "killedBy": "invariant:nonce_sequential"
+    },
+    {
+      "id": "cosign-batch-carries-payments",
+      "why": "R-COSIGN: a co-signed op (a settlement) shares its batch with unrelated payments, so a counterparty change or a gas choice that fails it takes the payments down too.",
+      "file": "jbatch.qnt",
+      "old": "[{ nonce: f, ids: coSigned(s, p) }]",
+      "new": "[{ nonce: f, ids: p }]",
+      "killedBy": "test:coSignedOpsTravelAloneTest"
+    },
+    {
+      "id": "cosign-batch-mixes-accounts",
+      "why": "R-COSIGN: co-signed ops of two Accounts share a batch.",
+      "file": "jbatch.qnt",
+      "old": "    cs.filter(i => acctOf(i) == a)\n",
+      "new": "    cs\n",
+      "killedBy": "test:coSignedOpsOfTwoAccountsDoNotShareABatchTest"
     }
   ],
   "init": "init",

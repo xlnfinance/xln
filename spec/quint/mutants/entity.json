@@ -45,7 +45,7 @@
       "id": "no-failback-when-tight",
       "why": "[R-P1] a lock that cannot be forwarded is left to expire",
       "file": "entity.qnt",
-      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
+      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0, os: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
       "new": "      else s\n",
       "killedBy": "test:tooTightFailsBackAtOnceTest"
     },
@@ -53,7 +53,7 @@
       "id": "no-failback-when-tight-invariant",
       "why": "same mutant, judged by the property",
       "file": "entity.qnt",
-      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
+      "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0, os: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
       "new": "      else s\n",
       "killedBy": "invariant:no_stranded"
     },

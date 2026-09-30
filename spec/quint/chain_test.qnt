@@ -132,6 +132,15 @@ module chain_test {
     .then(tick).then(tick)
     .then(finalizeWith(Right, 0, 0, false))
     .fail()
+  // The boundary: at the tick of the deadline itself the clause is still open (the contract reads `block.timestamp <= revealedUntil`), so
+  // finalize still waits; one tick later it does not (expiredClauseIsDroppedTest).
+  run finalizeStillWaitsAtTheDeadlineTickTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick).then(tick)
+    .expect(now == 4)
+    .then(finalizeWith(Right, 0, 0, false))
+    .fail()
   // Past the deadline the payer keeps its money: the clause is dropped, offdelta stays 0.
   run expiredClauseIsDroppedTest =
     initFrom(hub, Right, 1, 0, 2)
@@ -220,5 +229,48 @@ module chain_test {
     .then(startWith(Left, 1, false, 0, false))
     .then(tick).then(tick).then(tick).then(tick)
     .then(finalizeWith(Left, 0, 0, false))
-    .expect(and { ghost.xWasOffline, money.res == Map(Left -> 2, Right -> 0), safe })
+    .expect(and { ghost.lostByAbsence, not(ghost.xWasOffline), money.res == Map(Left -> 2, Right -> 0), safe })   // the exclusion ends with the dispute
+
+  // ---- boundaries and signatures the payout checks rest on -----------------------------------------------------------
+
+  // A counter-proof must carry the starter's signature: the starter consented to it, or the chain would settle what it never saw.
+  run counterNeedsTheStartersSignatureTest =
+    initFrom(BASE.set(1, pf(1, true, 2, true, true)).set(2, pf(2, false, 1, false, true)), Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(counterWith(Right, 2))                 // signed by Right alone
+    .fail()
+
+  // The honest side may take the whole REACT ticks to answer, and its counter still lands: the windows exceed REACT (C11).
+  run counterAtTheReactionDeadlineStillLandsTest =
+    initFrom(stale, Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(REACT.reps(_ => tick))
+    .then(honestCounter)
+    .expect(and { dispute.counter != 0, safe })
+
+  // A finalize-time secret of the non-starter counts on the deadline tick itself (the registry's rule is the same: `<= deadline`).
+  run nonStarterSecretAtTheDeadlineTickPaysTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(learn(Right))
+    .then(setOffline(true))
+    .then(tick).then(tick).then(tick)            // now is the clause's deadline
+    .then(setOffline(false))
+    .then(startWith(Left, 1, false, 0, false))
+    .then(finalizeWith(Right, 0, 0, true))
+    .expect(money.res == Map(Left -> 0, Right -> 3))
+
+  // Only the non-starter supplies finalize-time evidence: a starter that knows the secret cannot.
+  run starterCannotSupplyTheNonStartersEvidenceTest =
+    initFrom(hub, Right, 1, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(learn(Left))
+    .then(finalizeWith(Left, 0, 0, true))
+    .fail()
+
+  // A dispute start needs a nonce above the stored one: a proof at the stored nonce (here 0, the fresh Account's) is refused.
+  run startNeedsANonceAboveTheStoredOneTest =
+    initFrom(BASE.set(1, pf(0, true, 0, true, true)), Right, 0, 0, 2)
+    .then(startWith(Left, 1, false, 0, false))
+    .fail()
 }

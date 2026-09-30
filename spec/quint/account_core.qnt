@@ -9,11 +9,18 @@ module account_core {
   pure val MAX_AMOUNT = 3        // one payment or lock is between 1 and MAX_AMOUNT
   pure val MAX_CREDIT = 3        // a credit limit is between 0 and MAX_CREDIT
   pure val MAX_HEIGHT = 3        // frames per run; bounds the search
-  pure val MAX_FRAMES = 6        // frame arena size: every proposal, including the ones rolled back
+  pure val MAX_FRAMES = 8        // frame arena size: every proposal, including the ones rolled back
   pure val MAX_MEMPOOL = 2
   pure val MAX_CLOCK = 4         // logical seconds
   pure val DRIFT = 1             // the two clocks never differ by more than this (assumption, QUESTIONS.md Q-X2)
-  pure val TOLERANCE = 1         // a receiver refuses a frame whose timestamp is further than this from its own clock
+  pure val CLOCK_RESERVE = DRIFT // R-CLOCK: the reserve a deciding party adds to its own clock where the two clocks' difference could hurt the other side
+  // N1: the proof nonce is its own counter (a dispute proof carries it; the chain wants each start above the stored one), no longer the
+  // frame height. Within an epoch it follows the tip by one. A proposer that could skip nonces on its own would let an abandoned, signed
+  // proposal outrank the frame that was committed (a collision loser at nonce n+1 against the winner at n; the loser's next frame at n+1
+  // again signs a second proof under one key). The jump belongs to a co-signed rebase (settle.qnt `BASELINE_GAP`), not to a frame. So 0
+  // here; the mutant `proposer-may-skip-nonces` sets it to 1 and `no_equivocation` catches it.
+  pure val MAX_NONCE_GAP = 0
+  pure val MAX_NONCE = MAX_HEIGHT * (1 + MAX_NONCE_GAP)
   pure val MAX_LOCK_HORIZON = 4  // policy parameter (coordinator, N2: 7 days by default, never below the 24 h async window): a lock's deadline is at most this far after the frame that opens it, at admission and at forward (room for a two-hop chain)
   pure val LOCK_SLOTS = Set(1, 2) // open clauses per Account (the contract's bound is 32, see contracts-review.md)
   pure val SECRETS = Set(1, 2)   // the secrets that exist; a hashlock is hashOf(secret)
@@ -51,7 +58,7 @@ module account_core {
 
   // `prev` (the hash of the parent frame on the wire) is left out: a receiver replays `txs` on its own tip and compares
   // with `after`, which catches every fork a parent hash would (QUESTIONS.md Q-A6).
-  type Frame = { height: int, ts: int, author: Side, txs: List[Tx], after: Body }
+  type Frame = { height: int, nonce: int, ts: int, author: Side, txs: List[Tx], after: Body }   // ts: the proposer's clock when it built the frame; no decision reads it [R-CLOCK]
 
   // Frames live in one arena and are named by their id, the way the wire names them by hash. A message is a frame id:
   // a proposal goes to the author's peer, an ack goes to the author.
@@ -67,8 +74,8 @@ module account_core {
 
   type Replica = {
     height: int,
+    pnonce: int,               // the proof nonce of the last committed frame: the nonce a dispute start would carry [N1]
     tip: Body,                 // the last committed body
-    lastTs: int,
     lastFid: int,              // the last committed frame (0 = none), kept to answer a repeated propose with the same ack
     status: Status,
     mempool: List[Tx]
@@ -109,6 +116,17 @@ module account_core {
     delta(b) + holds(b, Right) <= COLLATERAL + b.limitRight
   }
 
+  // P2 stated on the outcomes and not through `rcpan`: whichever subset of the open clauses resolves in favour of its payee, the
+  // allocation stays inside [-limitLeft, COLLATERAL + limitRight]. Every subset is enumerated; the guards use `rcpan`, the properties
+  // use this, so a wrong `rcpan` does not weaken the check that is meant to catch it.
+  pure def creditHolds(b: Body): bool = LOCK_SLOTS.powerset().forall(chosen => {
+    val moved = chosen.fold(0, (acc, i) => {
+      val l = b.locks.get(i)
+      acc + (if (not(l.on)) 0 else if (l.payer == Left) -l.amount else l.amount)
+    })
+    and { b.offdelta + moved >= -b.limitLeft, b.offdelta + moved <= COLLATERAL + b.limitRight }
+  })
+
   pure def proofOf(b: Body): Proof = { offdelta: b.offdelta, locks: b.locks }
 
   pure val NO_LOCK: Lock = { on: false, payer: Left, amount: 0, hashlock: 0, deadline: 0 }
@@ -118,13 +136,14 @@ module account_core {
   pure def payee(l: Lock): Side = other(l.payer)
 
   // ---------------------------------------------------------------------------------------------------------
-  // The transition table. `author` proposes the frame, `ts` is the frame's timestamp.
+  // The transition table. `author` proposes the frame; `now` is the clock of the party that is deciding (the proposer when it builds the
+  // frame, the receiver when it checks it): never the frame's timestamp [R-CLOCK].
   // Every refusal is a value: nothing here can halt a Runtime [R-X1].
   // ---------------------------------------------------------------------------------------------------------
 
   pure def withLock(b: Body, id: int, l: Lock): Body = { ...b, locks: b.locks.set(id, l) }
 
-  pure def applyTx(b: Body, tx: Tx, author: Side, ts: int): Res = match tx {
+  pure def applyTx(b: Body, tx: Tx, author: Side, now: int): Res = match tx {
     | Pay(p) =>
         if (p.from != author) Refused("not_own_funds")
         else if (p.amount < 1 or p.amount > MAX_AMOUNT) Refused("bad_amount")
@@ -149,8 +168,8 @@ module account_core {
         else if (l.payer != author) Refused("not_own_funds")
         else if (l.amount < 1 or l.amount > MAX_AMOUNT) Refused("bad_amount")
         else if (b.locks.get(l.id).on) Refused("lock_exists")
-        else if (l.deadline <= ts) Refused("deadline_past")
-        else if (l.deadline > ts + MAX_LOCK_HORIZON) Refused("deadline_too_far")
+        else if (l.deadline <= now) Refused("deadline_past")
+        else if (l.deadline > now + MAX_LOCK_HORIZON + CLOCK_RESERVE) Refused("deadline_too_far")
         else if (l.amount > room(b, l.payer)) Refused("insufficient_capacity")
         else Ok(withLock(b, l.id, { on: true, payer: l.payer, amount: l.amount, hashlock: l.hashlock, deadline: l.deadline }))
     | HtlcResolve(r) =>
@@ -160,7 +179,7 @@ module account_core {
           val l = b.locks.get(r.id)
           if (payee(l) != author) Refused("not_payee")
           else if (hashOf(r.secret) != l.hashlock) Refused("wrong_secret")
-          else if (ts > l.deadline) Refused("past_deadline")
+          else if (now > l.deadline) Refused("past_deadline")
           else {
             val moved = match l.payer {
               | Left => b.offdelta - l.amount
@@ -177,20 +196,20 @@ module account_core {
     | HtlcExpire(r) =>
         if (not(LOCK_SLOTS.contains(r.id))) Refused("bad_slot")
         else if (not(b.locks.get(r.id).on)) Refused("no_such_lock")
-        else if (ts <= b.locks.get(r.id).deadline) Refused("not_expired")
+        else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused("not_expired")
         else Ok(withLock(b, r.id, NO_LOCK))
   }
 
   // A frame is all-or-nothing on the receiving side: the first refused tx refuses the frame [Q-E2, R-X1].
-  pure def replay(b: Body, txs: List[Tx], author: Side, ts: int): Res =
+  pure def replay(b: Body, txs: List[Tx], author: Side, now: int): Res =
     txs.foldl(Ok(b), (acc, tx) => match acc {
-      | Ok(cur) => applyTx(cur, tx, author, ts)
+      | Ok(cur) => applyTx(cur, tx, author, now)
       | Refused(why) => Refused(why)
     })
 
   // The proposer keeps only the txs that still apply, in order. A tx that no longer applies is dropped, not halted on.
-  pure def keepValid(b: Body, txs: List[Tx], author: Side, ts: int): { body: Body, txs: List[Tx] } =
-    txs.foldl({ body: b, txs: List() }, (acc, tx) => match applyTx(acc.body, tx, author, ts) {
+  pure def keepValid(b: Body, txs: List[Tx], author: Side, now: int): { body: Body, txs: List[Tx] } =
+    txs.foldl({ body: b, txs: List() }, (acc, tx) => match applyTx(acc.body, tx, author, now) {
       | Ok(nx) => { body: nx, txs: acc.txs.append(tx) }
       | Refused(_) => acc
     })
@@ -211,10 +230,10 @@ module account_core {
 
   pure val SIDES = Set(Left, Right)
   pure val BRANCHES = Set(true, false)
-  pure val NO_FRAME: Frame = { height: 0, ts: 0, author: Left, txs: List(), after: GENESIS }
+  pure val NO_FRAME: Frame = { height: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS }
 
   pure val EMPTY_REPLICA: Replica =
-    { height: 0, tip: GENESIS, lastTs: 0, lastFid: 0, status: Open, mempool: List() }
+    { height: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List() }
 
   // The state a side must plan against: the committed one, or the frame in flight / held [Q-E1: one view].
   pure def planning(r: Replica, frames: int -> Frame): Body = match r.status {
@@ -228,14 +247,15 @@ module account_core {
   pure def isProposed(r: Replica): bool = match r.status { | Proposed(_) => true | _ => false }
   pure def statusFid(r: Replica): int = match r.status { | Open => 0 | Proposed(f) => f | Received(f) => f }
 
-  // A frame the receiver accepts: the next height, on time, and replaying on its own tip to the claimed state.
+  // A frame the receiver accepts: the next height, and replaying on its own tip, at its own clock, to the claimed state. The frame's
+  // timestamp is not read: a frame is never refused for its age (a signed frame refused without an exit deadlocks the Account: exact
+  // retransmission must stay available after an arbitrary outage) or for its date, and no time rule trusts it [R-CLOCK].
   pure def acceptable(r: Replica, now: int, f: Frame, self: Side): bool = and {
     f.author != self,
     f.height == r.height + 1,
-    f.ts >= r.lastTs,
-    f.ts <= now + TOLERANCE,
-    f.ts + TOLERANCE >= now,
-    match replay(r.tip, f.txs, f.author, f.ts) {
+    f.nonce > r.pnonce,                                    // N1: a proof nonce above the last one, or the chain would refuse a start with it
+    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP,               // and not a leap that burns the counter
+    match replay(r.tip, f.txs, f.author, now) {
       | Ok(b) => b == f.after
       | Refused(_) => false
     }
@@ -252,19 +272,18 @@ module account_core {
   }
 
   // The frame a proposer would send now: its mempool cut down to the txs that still apply, on its tip.
-  pure def frameToPropose(r: Replica, now: int, s: Side): Frame = {
+  pure def frameToPropose(r: Replica, now: int, s: Side, gap: int): Frame = {
     val sel = keepValid(r.tip, r.mempool, s, now)
-    { height: r.height + 1, ts: now, author: s, txs: sel.txs, after: sel.body }
+    { height: r.height + 1, nonce: r.pnonce + 1 + gap, ts: now, author: s, txs: sel.txs, after: sel.body }
   }
 
   pure def canPropose(r: Replica, now: int, s: Side): bool = and {
     isOpen(r),
     r.height < MAX_HEIGHT,
-    now >= r.lastTs,
-    frameToPropose(r, now, s).txs.length() > 0
+    frameToPropose(r, now, s, 0).txs.length() > 0
   }
 
-  pure def sigKey(signer: Side, f: Frame): SigKey = (signer, f.height, f.author == Left)
+  pure def sigKey(signer: Side, f: Frame): SigKey = (signer, f.nonce, f.author == Left)
 
   // What a receiver does with a Propose. In order:
   //   1. it extends our tip and we are Open -> hold it for our ack.
@@ -299,6 +318,6 @@ module account_core {
 
   // Commit frame `f` (id `fid`) on a replica.
   pure def commit(r: Replica, fid: int, f: Frame): Replica =
-    { ...r, height: f.height, tip: f.after, lastTs: f.ts, lastFid: fid, status: Open }
+    { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open }
 
 }

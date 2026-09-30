@@ -91,7 +91,7 @@
       "file": "chain.qnt",
       "old": "      signedBy(r, dispute.starter),\n      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
       "new": "      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
-      "killedBy": "invariant:p1_allowed"
+      "killedBy": "test:counterNeedsTheStartersSignatureTest"
     },
     {
       "id": "start-unsigned-by-counterparty",
@@ -121,8 +121,8 @@
       "id": "clause-sign-flipped",
       "why": "a revealed clause moves offdelta the wrong way",
       "file": "chain.qnt",
-      "old": "| Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount",
-      "new": "| Left => r.offdelta + r.clause.amount | Right => r.offdelta - r.clause.amount",
+      "old": "      (match r.clause.payer { | Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount })\n    else r.offdelta",
+      "new": "      (match r.clause.payer { | Left => r.offdelta + r.clause.amount | Right => r.offdelta - r.clause.amount })\n    else r.offdelta",
       "killedBy": "test:revealedClausePaysTest"
     },
     {
@@ -161,9 +161,9 @@
       "id": "deposit-ignored-in-dispute",
       "why": "R2C forgets the collateral it added when a dispute is running",
       "file": "chain.qnt",
-      "old": "acct' = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
-      "new": "acct' = { ...acct, coll: acct.coll + (if (dispute.on) 0 else amt), ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },",
-      "killedBy": "invariant:p3_conserved"
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, coll: acct.coll + (if (dispute.on) 0 else amt), ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "killedBy": "invariant:deposit_exact"
     },
     {
       "id": "honest-starts-with-older-proof",
@@ -194,8 +194,8 @@
       "why": "C11: the honest side needs as long as both windows together: its counter can land only after the timeout",
       "file": "chain.qnt",
       "old": "pure val REACT = 2 * LAG ",
-      "new": "pure val REACT = 4 * LAG ",
-      "killedBy": "invariant:p1_allowed"
+      "new": "pure val REACT = 6 * LAG ",
+      "killedBy": "test:counterAtTheReactionDeadlineStillLandsTest"
     },
     {
       "id": "no-publish-tolerance",
@@ -211,7 +211,159 @@
       "file": "chain.qnt",
       "old": " and now >= knows.get(honest) + LAG\n",
       "new": " and now >= knows.get(honest) + LAG + 3\n",
-      "killedBy": "invariant:p1_clause"
+      "killedBy": "test:payeePublishesWithinLagTest"
+    },
+    {
+      "id": "h1-boundary-off",
+      "why": "H1 at the boundary: finalize stops waiting at the deadline tick itself (`now < deadline`), though the contract keeps the clause open through it (`block.timestamp <= revealedUntil`): the payee's secret at the last tick is refused",
+      "file": "chain.qnt",
+      "old": "      not(r.clause.on and not(revealed) and now <= r.clause.deadline),",
+      "new": "      not(r.clause.on and not(revealed) and now < r.clause.deadline),",
+      "killedBy": "test:finalizeStillWaitsAtTheDeadlineTickTest"
+    },
+    {
+      "id": "split-swapped",
+      "why": "the split hands Left's share to Right and the other way round",
+      "file": "chain.qnt",
+      "old": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }",
+      "new": "      { res: m.res.set(Right, m.res.get(Right) + d).set(Left, m.res.get(Left) + (coll - d)), debt: m.debt }",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "debt-forgiven",
+      "why": "a shortfall books no debt: the creditor loses what the debtor could not pay",
+      "file": "chain.qnt",
+      "old": "      debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay))",
+      "new": "      debt: m.debt.set(debtor, m.debt.get(debtor))",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "enforce-burns",
+      "why": "enforcing a debt takes the reserve from the debtor and does not give it to the creditor",
+      "file": "chain.qnt",
+      "old": "      res: m.res.set(debtor, m.res.get(debtor) - d1).set(c, m.res.get(c) + d1),",
+      "new": "      res: m.res.set(debtor, m.res.get(debtor) - d1),",
+      "killedBy": "invariant:p3_conserved"
+    },
+    {
+      "id": "payout-ignores-ondelta",
+      "why": "the payout forgets the ondelta of the epoch",
+      "file": "chain.qnt",
+      "old": "    val d = acct.ondelta + settledOffdelta(r, revealed)",
+      "new": "    val d = settledOffdelta(r, revealed)",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "late-secret-tolerated",
+      "why": "a secret one tick after the deadline still pays: the registry's cutoff is one tick late",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg <= r.clause.deadline + 1,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "registry-excludes-deadline-second",
+      "why": "a secret on the chain at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg < r.clause.deadline,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "starter-args-exclude-deadline-second",
+      "why": "the starter's start-time secret at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    starterArgs and d.t0 <= r.clause.deadline,",
+      "new": "    starterArgs and d.t0 < r.clause.deadline,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "other-args-exclude-deadline-second",
+      "why": "the non-starter's finalize-time secret at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    otherArgs and now <= r.clause.deadline",
+      "new": "    otherArgs and now < r.clause.deadline",
+      "killedBy": "test:nonStarterSecretAtTheDeadlineTickPaysTest"
+    },
+    {
+      "id": "reveal-without-knowing",
+      "why": "a starter puts a secret in its start arguments that nobody knows",
+      "file": "chain.qnt",
+      "old": "    initArgs implies knows.get(s) != 0,\n",
+      "new": "",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "nonstarter-args-by-starter",
+      "why": "the starter supplies finalize-time arguments as if it were the non-starter",
+      "file": "chain.qnt",
+      "old": "      otherArgs implies (isNonStarter and knows.get(f) != 0),",
+      "new": "      otherArgs implies (knows.get(f) != 0),",
+      "killedBy": "test:starterCannotSupplyTheNonStartersEvidenceTest"
+    },
+    {
+      "id": "r2c-credits-the-depositor",
+      "why": "a deposit raises ondelta when the depositor is Left, not when the credited side is",
+      "file": "chain.qnt",
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(s)) amt else 0) }",
+      "killedBy": "invariant:deposit_exact"
+    },
+    {
+      "id": "n3-counter-windows-unchecked",
+      "why": "a counter with other windows than the frozen ones is registered",
+      "file": "chain.qnt",
+      "old": "      r.wl == dispute.wl, r.wr == dispute.wr,        // N3: one set of windows per Account\n",
+      "new": "",
+      "killedBy": "invariant:windows_frozen"
+    },
+    {
+      "id": "n3-path2-windows-unchecked",
+      "why": "a newer proof with other windows than the frozen ones settles at once",
+      "file": "chain.qnt",
+      "old": "        r.wl == dispute.wl, r.wr == dispute.wr,\n        signedBy(r, dispute.starter),\n        rank(r) > rank(arena.get(dispute.rec0))\n      },",
+      "new": "        signedBy(r, dispute.starter),\n        rank(r) > rank(arena.get(dispute.rec0))\n      },",
+      "killedBy": "invariant:windows_frozen"
+    },
+    {
+      "id": "counter-at-timeout-allowed",
+      "why": "a counter is accepted at the tick the windows end",
+      "file": "chain.qnt",
+      "old": "      now < dispute.timeout,\n",
+      "new": "      now <= dispute.timeout,\n",
+      "killedBy": "test:counterAfterWindowRefusedTest"
+    },
+    {
+      "id": "starter-closes-one-tick-early",
+      "why": "the starter settles its initial proof one tick before both windows have run",
+      "file": "chain.qnt",
+      "old": "if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }",
+      "new": "if (path == 0) and { not(hasCounter), now + 1 >= dispute.timeout or isNonStarter }",
+      "killedBy": "invariant:closes_on_time"
+    },
+    {
+      "id": "start-nonce-not-strict",
+      "why": "a dispute may start with the stored nonce, not only above it",
+      "file": "chain.qnt",
+      "old": "      r.nonce > w.a.nonce,",
+      "new": "      r.nonce >= w.a.nonce,",
+      "killedBy": "test:startNeedsANonceAboveTheStoredOneTest"
+    },
+    {
+      "id": "unilateral-finalize-keeps-nonce",
+      "why": "a finalize on the initial proof stores the stored nonce, not one more",
+      "file": "chain.qnt",
+      "old": "    val newNonce = if (adopts) r.nonce else acct.nonce + 1",
+      "new": "    val newNonce = if (adopts) r.nonce else acct.nonce",
+      "killedBy": "invariant:nonce_rules"
+    },
+    {
+      "id": "offline-flag-sticky",
+      "why": "the honest party's absence in one dispute switches P1 off for every later one",
+      "file": "chain.qnt",
+      "old": "        xWasOffline: false,                                    // per dispute: the next one is judged afresh",
+      "new": "        xWasOffline: ghost.xWasOffline,",
+      "killedBy": "test:offlinePartyCanLoseTest"
     }
   ]
 }

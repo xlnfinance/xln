@@ -145,4 +145,129 @@ module jbatch_test {
     .expect(and { st.sub.length() == 2, st.sub[1].b.nonce == 2, st.sub[1].b.ids == Set(2), nonce_final, safe })
     .then(attempt(0)).then(attempt(1))
     .expect(and { st.done.get(2), st.runs.get(2) == 1, safe })
+
+  // op 1 a payment, op 2 a secret reveal, op 3 a dispute step, op 4 a deposit leg
+  pure def catD(arrDep: int, arrReveal: int, arrPay: int): int -> Op = Map(
+    1 -> { kind: Pay, amt: 1, arr: arrPay, dl: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: arrReveal, dl: arrReveal + LAG },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
+    4 -> { kind: Dep, amt: 1, arr: arrDep, dl: 0 }
+  )
+
+  // op 1 a settlement (it carries the counterparty's signature at an account epoch)
+  pure def catS(arrSettle: int): int -> Op = Map(
+    1 -> { kind: Settle, amt: 0, arr: arrSettle, dl: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
+    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0 }
+  )
+
+  // J5 refinement: the deposit leg runs first, so it funds the payment behind it. They do not share a batch: the deposit goes alone and
+  // the payment follows at the next nonce.
+  run depositFundsThePaymentBehindItTest =
+    initFrom(catD(1, 6, 1), 0)
+    .then(arriveDue)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(4) })
+    .then(attempt(0))
+    .expect(and { st.done.get(4), st.reserve == 1, st.sub.length() == 2, st.sub[1].b.ids == Set(1), st.sub[1].b.nonce == 2 })
+    .then(attempt(1))
+    .expect(and { st.done.get(1), st.reserve == 0, st.cnonce == 2, safe })
+
+  // J5 refinement: a batch with a deposit leg that cannot land (the token is paused) reverts whole and keeps its nonce open. It does
+  // not soft-fail: nobody can burn its nonce. When the token works again the same batch lands.
+  run failedDepositBatchRevertsWholeTest =
+    initFrom(catD(1, 6, 1), 0)
+    .then(arrive(4))
+    .then(extLose)
+    .then(attempt(0))
+    .expect(and { st.cnonce == 0, st.gh.reverts == 1, st.gh.failed == 0, not(st.gh.depBurned), st.failedEv.get(4) == 0, not(st.done.get(4)), safe })
+    .then(extBack)
+    .then(attempt(0))
+    .expect(and { st.cnonce == 1, st.done.get(4), safe })
+
+  // The cost of that rule: a deposit batch that cannot land holds every batch above it. An urgent op behind it misses its deadline, and the
+  // model records it apart (`hostage`), because the Entity cannot help it: the token is not the Entity's. The Entity can only keep deposit
+  // legs out of signed batches when it can (a direct deposit takes no nonce), or sign them only when nothing urgent can arrive.
+  run stuckDepositBatchHoldsAnUrgentOpTest =
+    initFrom(catD(1, 2, 6), 0)
+    .then(arrive(4))
+    .then(extLose)
+    .then(attempt(0))
+    .then(tick)                            // now 2
+    .then(arrive(2))                       // the reveal goes to nonce 2
+    .then(attempt(0)).then(attempt(1))     // both revert: nonce 1 is not landed, nonce 2 is not next
+    .then(tick)                            // now 3: the reveal's deadline
+    .then(tick)
+    .expect(and { st.gh.hostage, not(st.gh.missed), not(st.done.get(2)), st.cnonce == 0 })
+    .then(extBack)
+    .then(attempt(0)).then(attempt(1))
+    .expect(and { st.done.get(4), st.done.get(2), st.cnonce == 2 })
+
+  // J5 refinement: a settlement signed by the counterparty at an old account epoch (its signature is bad now) is a soft fail: the batch
+  // takes its nonce, applies nothing and emits BatchFailed. The Entity drops the settlement (it needs a fresh co-signature: a new op).
+  run staleSettlementFailsSoftTest =
+    initFrom(catS(1), 3)
+    .then(arrive(1))
+    .then(poison(1))
+    .then(attempt(0))
+    .expect(and { st.cnonce == 1, st.gh.failed == 1, st.failedEv.get(1) == 1, not(st.done.get(1)), st.dropped.get(1), safe })
+
+  // Only a failure of the batch's own authorisation reverts without taking the nonce.
+  run forgedBatchTakesNoNonceTest =
+    initFrom(catS(6), 3)
+    .then(forge)
+    .expect(and { st.cnonce == 0, st.gh.reverts == 1, not(st.gh.forgedLanded), safe })
+
+  // A relayer sends the higher batch first: the chain refuses it (E2), and the honest attempts still land both in order.
+  run outOfOrderRelayerIsRefusedTest =
+    initFrom(cat(1, 1, 6), 3)
+    .then(arrive(1)).then(arrive(2))
+    .then(attemptAny(1))
+    .expect(and { st.cnonce == 0, st.gh.reverts == 1, not(st.done.get(2)), safe })
+    .then(attempt(0)).then(attempt(1))
+    .expect(and { st.cnonce == 2, st.done.get(1), st.done.get(2), nonce_sequential, safe })
+
+  // The chain runs the deposit legs of a batch before its payments, whatever the Entity packs: a batch signed with both (a bad Entity, or
+  // an older one) still lands when the deposit covers the payment. The Entity itself never packs them together.
+  action signBoth: bool = st' = submit(st, [{ nonce: 1, ids: Set(1, 4) }])
+
+  run depositLegsRunBeforePaymentsTest =
+    initFrom(catD(1, 6, 6), 0)
+    .then(signBoth)
+    .then(attempt(0))
+    .expect(and { st.done.get(1), st.done.get(4), st.reserve == 0, st.cnonce == 1, st.gh.reverts == 0, safe })
+
+  // op 1 a settlement on Account 1, op 4 a settlement on Account 2
+  pure def catSS(arr: int): int -> Op = Map(
+    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
+    4 -> { kind: Settle, amt: 0, arr: arr, dl: 0 }
+  )
+
+  // R-COSIGN: a batch that carries a co-signed op carries ops for that one Account only. Two settlements on two Accounts, and a payment,
+  // reach the Entity together: each goes in a batch of its own, one after the other.
+  // op 1 a settlement, op 4 a payment, both reaching the Entity at once
+  pure def catSP(arr: int): int -> Op = Map(
+    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
+    4 -> { kind: Pay, amt: 1, arr: arr, dl: 0 }
+  )
+
+  // R-COSIGN: a batch that carries a co-signed op carries ops for that one Account only. A settlement and a payment reach the Entity together:
+  // the settlement goes alone, the payment follows at the next nonce.
+  run coSignedOpsTravelAloneTest =
+    initFrom(catSP(1), 3)
+    .then(arriveDue)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(1), cosign_alone })
+    .then(attempt(0))
+    .expect(and { st.done.get(1), st.sub.length() == 2, st.sub[1].b.ids == Set(4), cosign_alone, safe })
+
+  run coSignedOpsOfTwoAccountsDoNotShareABatchTest =
+    initFrom(catSS(1), 3)
+    .then(arriveDue)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(1), cosign_alone })
+    .then(attempt(0))
+    .expect(and { st.sub.length() == 2, st.sub[1].b.ids == Set(4), st.sub[1].b.nonce == 2, cosign_alone, safe })
 }

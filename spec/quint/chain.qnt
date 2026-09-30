@@ -85,9 +85,23 @@ module chain {
     nonceBack: bool,      // the stored nonce went down
     appliedTwice: bool,   // one arena record settled twice
     freeDebt: bool,       // debt was booked while its debtor still had spendable reserve
-    xWasOffline: bool,    // the honest party was offline while a dispute was active (then it may lose)
+    xWasOffline: bool,    // the honest party was offline while the current dispute was active (then it may lose); reset when it ends
+    lostByAbsence: bool,  // some dispute settled a proof the honest party did not stand behind while it was absent (the exclusion is not vacuous)
+    payBad: bool,         // a finalize paid something other than what the proof and the secret evidence are worth (see `netOf`)
+    depositBad: bool,     // a deposit into the collateral did something other than move the depositor's reserve into it
+    windowsMoved: bool,   // a proof settled or countered with windows other than the ones frozen at the start (N3)
+    earlyClose: bool,     // a proof settled by timeout before both windows had run
+    lateCounter: bool,    // a counter was registered after both windows had run
+    nonceBad: bool,       // the stored nonce after a start or a finalize is not the one the rules give
+    pubAt: int,           // ghost: the tick the secret first reached the chain (0 = never), kept apart from `registry`
     finalizes: int,
     lastApplied: int
+  }
+
+  pure val NO_GHOST: Ghost = {
+    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, xWasOffline: false,
+    lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
+    nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0
   }
 
   pure val NO_CLAUSE: Clause = { on: false, payer: Left, amount: 0, deadline: 0 }
@@ -178,9 +192,10 @@ module chain {
   pure val RECS = 1.to(NREC)
   pure val SLOTS = 0.to(NREC)     // slot 0 is the empty proof: "no proof" is a valid lookup
 
+  pure def mkProofW(live: bool, nonce: int, epoch: int, la: bool, off: int, c: Clause, sigL: bool, sigR: bool, wl: int, wr: int): SignedProof =
+    { live: live, nonce: nonce, epoch: epoch, leftAuthored: la, offdelta: off, clause: c, wl: wl, wr: wr, sigL: sigL, sigR: sigR }
   pure def mkProof(live: bool, nonce: int, epoch: int, la: bool, off: int, c: Clause, sigL: bool, sigR: bool): SignedProof =
-    { live: live, nonce: nonce, epoch: epoch, leftAuthored: la, offdelta: off, clause: c,
-      wl: MIN_WINDOW, wr: MIN_WINDOW, sigL: sigL, sigR: sigR }
+    mkProofW(live, nonce, epoch, la, off, c, sigL, sigR, MIN_WINDOW, MIN_WINDOW)
 
   // An honest history, chosen nondeterministically. Slots:
   //   1..3  both-signed states at nonces 1..k of epoch 0 (k = tip)
@@ -214,19 +229,26 @@ module chain {
     nondet resL = 0.to(RESERVE_MAX).oneOf()
     nondet resR = 0.to(RESERVE_MAX).oneOf()
     nondet coll = 0.to(2).oneOf()
+    // response windows vary: the tip's pair, the pending proposal's and the shadow's own, and epoch 1's; one below the floor is possible (H2)
+    nondet wl0 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr0 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wl4 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr4 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wl6 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr6 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
     // the clause, if any, rides in the tip and in the pending proposal (the same lock, still open)
     val clause: Clause = { on: cOn, payer: cPayer, amount: cAmt, deadline: cDl }
     val tipLeft = if (k == 1) la1 else if (k == 2) la2 else la3
     initFrom(
       Map(
         0 -> NO_PROOF,
-        1 -> mkProof(k >= 1, 1, 0, la1, o1, if (k == 1) clause else NO_CLAUSE, true, true),
-        2 -> mkProof(k >= 2, 2, 0, la2, o2, if (k == 2) clause else NO_CLAUSE, true, true),
-        3 -> mkProof(k >= 3, 3, 0, la3, o3, if (k == 3) clause else NO_CLAUSE, true, true),
-        4 -> mkProof(pendLive, k + 1, 0, isLeft(pendAuthor), pendOff, clause, isLeft(pendAuthor), not(isLeft(pendAuthor))),
-        5 -> mkProof(shadowLive and tipLeft, k, 0, false, shadowOff, clause, false, true),
-        6 -> mkProof(true, 6, 1, baseLa, baseOff, NO_CLAUSE, true, true),
-        7 -> mkProof(pend2Live, 7, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)))
+        1 -> mkProofW(k >= 1, 1, 0, la1, o1, if (k == 1) clause else NO_CLAUSE, true, true, wl0, wr0),
+        2 -> mkProofW(k >= 2, 2, 0, la2, o2, if (k == 2) clause else NO_CLAUSE, true, true, wl0, wr0),
+        3 -> mkProofW(k >= 3, 3, 0, la3, o3, if (k == 3) clause else NO_CLAUSE, true, true, wl0, wr0),
+        4 -> mkProofW(pendLive, k + 1, 0, isLeft(pendAuthor), pendOff, clause, isLeft(pendAuthor), not(isLeft(pendAuthor)), wl4, wr4),
+        5 -> mkProofW(shadowLive and tipLeft, k, 0, false, shadowOff, clause, false, true, wl4, wr4),
+        6 -> mkProofW(true, 6, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
+        7 -> mkProofW(pend2Live, 7, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
       ),
       hon, resL, resR, coll
     )
@@ -245,8 +267,7 @@ module chain {
     knows' = Map(Left -> 0, Right -> 0),
     offline' = false,
     applied' = SLOTS.mapBy(_ => false),
-    ghost' = { badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false,
-               xWasOffline: false, finalizes: 0, lastApplied: 0 }
+    ghost' = NO_GHOST
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -368,7 +389,7 @@ module chain {
     registry == 0,
     registry' = now,
     arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
-    dispute' = dispute, knows' = knows, offline' = offline, applied' = applied, ghost' = ghost
+    dispute' = dispute, knows' = knows, offline' = offline, applied' = applied, ghost' = { ...ghost, pubAt: now }
   }
 
   action setOffline(b: bool): bool = all {
@@ -381,12 +402,26 @@ module chain {
   // entity need not be the payer). Crediting Left also raises ondelta, so Left's allocation grows by the amount; crediting
   // Right raises only the collateral, which is Right's allocation. The contract does not block it during a dispute,
   // and it does not advance the epoch (no signature is involved), so every signed proof stays valid.
-  action r2c(s: Side, rcv: Side, amt: int): bool = all {
-    amt >= 1, spendable(enforce(money, s), s) >= amt,
-    money' = { ...enforce(money, s), res: enforce(money, s).res.set(s, enforce(money, s).res.get(s) - amt) },
-    acct' = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) },
-    arena' = arena, honest' = honest, now' = now, total' = total, dispute' = dispute, registry' = registry,
-    knows' = knows, offline' = offline, applied' = applied, ghost' = ghost
+  action r2c(s: Side, rcv: Side, amt: int): bool = {
+    val m1 = enforce(money, s)
+    val mNew = { ...m1, res: m1.res.set(s, m1.res.get(s) - amt) }
+    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }
+    // what a deposit does, stated on the effect: the collateral grows by the amount, Left's ondelta by the amount when Left is credited
+    // and not otherwise, the depositor's worth falls by the amount and nobody else's moves
+    val effectOk = and {
+      aNew.coll == acct.coll + amt,
+      aNew.ondelta == acct.ondelta + (match rcv { | Left => amt | Right => 0 }),
+      netOf(mNew, s) == netOf(money, s) - amt,
+      netOf(mNew, other(s)) == netOf(money, other(s))
+    }
+    all {
+      amt >= 1, spendable(m1, s) >= amt,
+      money' = mNew,
+      acct' = aNew,
+      arena' = arena, honest' = honest, now' = now, total' = total, dispute' = dispute, registry' = registry,
+      knows' = knows, offline' = offline, applied' = applied,
+      ghost' = { ...ghost, depositBad: ghost.depositBad or not(effectOk) }
+    }
   }
 
   // disputeStart. The stored nonce becomes the proof's nonce. The starter freezes its arguments now: whether it
@@ -402,7 +437,7 @@ module chain {
       initArgs: initArgs, counter: 0, ct: now, counterBranch: branch, counterArgs: counterArgs
     },
     acct' = { ...acct, nonce: arena.get(rid).nonce },
-    ghost' = { ...ghost, nonceBack: ghost.nonceBack or arena.get(rid).nonce < acct.nonce },
+    ghost' = { ...ghost, nonceBack: ghost.nonceBack or arena.get(rid).nonce <= acct.nonce },           // a start needs a nonce strictly above the stored one
     arena' = arena, honest' = honest, now' = now, money' = money, total' = total, registry' = registry,
     knows' = knows, offline' = offline, applied' = applied
   }
@@ -438,7 +473,10 @@ module chain {
       dispute.counter == 0 or rank(r) > rank(arena.get(dispute.counter)),
       dispute' = { ...dispute, counter: rid, ct: now },
       arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
-      registry' = registry, knows' = knows, offline' = offline, applied' = applied, ghost' = ghost
+      registry' = registry, knows' = knows, offline' = offline, applied' = applied,
+      ghost' = { ...ghost,
+                 lateCounter: ghost.lateCounter or now >= dispute.t0 + dispute.wl + dispute.wr,
+                 windowsMoved: ghost.windowsMoved or r.wl != dispute.wl or r.wr != dispute.wr }
     }
   }
 
@@ -448,6 +486,22 @@ module chain {
     not(offline),
     honestCounterId(arena, acct, dispute, honest) != 0,
     counterWith(honest, honestCounterId(arena, acct, dispute, honest))
+  }
+
+  // What a side is worth on the chain: its reserve, less what it owes, plus what the other side owes it. A payout moves it by exactly the
+  // side's allocation, whatever is paid at once and whatever is booked as debt; enforcing a debt moves nothing (reserve and debt fall together).
+  pure def netOf(m: Money, s: Side): int = m.res.get(s) - m.debt.get(s) + m.debt.get(other(s))
+
+  // Whether the clause is paid, from the facts (when the secret reached the chain, who knew it) and not from `revealedBy`, which is the
+  // mechanism this is checked against. The secret can come from the public registry by the deadline, from the starter's arguments frozen
+  // at the start (the starter must have known it), or from the non-starter's own arguments at the finalize (it must know it).
+  pure def paidTruth(r: SignedProof, g: Ghost, kn: Side -> int, d: Dispute, starterArgs: bool, otherArgs: bool, f: Side, t: int): bool = and {
+    r.clause.on,
+    or {
+      g.pubAt != 0 and g.pubAt <= r.clause.deadline,
+      and { starterArgs, kn.get(d.starter) != 0, d.t0 <= r.clause.deadline },
+      and { otherArgs, f != d.starter, kn.get(f) != 0, t <= r.clause.deadline }
+    }
   }
 
   // finalize. Paths: 0 the initial proof, 1 the registered counter-proof, 2 a newer signed proof presented by the
@@ -464,6 +518,14 @@ module chain {
     val m2 = payout(money, acct.coll, d)
     val adopts = path != 0
     val newNonce = if (adopts) r.nonce else acct.nonce + 1
+    // the checks: recomputed from the facts, not from the values the mechanism just used
+    val paid = paidTruth(r, ghost, knows, dispute, starterArgs, otherArgs, f, now)
+    val dTruth = acct.ondelta + (if (paid) (match r.clause.payer { | Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount }) else r.offdelta)
+    val payOk = and {
+      netOf(m2, Left) == netOf(money, Left) + dTruth,
+      netOf(m2, Right) == netOf(money, Right) + acct.coll - dTruth
+    }
+    val byTimeout = path == 1 or (path == 0 and not(isNonStarter))
     all {
       dispute.on,
       useId >= 1, r.live,
@@ -491,8 +553,16 @@ module chain {
         },
         nonceBack: ghost.nonceBack or newNonce < acct.nonce,
         appliedTwice: ghost.appliedTwice or applied.get(useId),
-        freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and spendable(m2, debtorOf(d)) > 0),
-        xWasOffline: ghost.xWasOffline,
+        freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > m2.debt.get(debtorOf(d))),
+        xWasOffline: false,                                    // per dispute: the next one is judged afresh
+        lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, useId))),
+        payBad: ghost.payBad or not(payOk),
+        depositBad: ghost.depositBad,
+        windowsMoved: ghost.windowsMoved or r.wl != dispute.wl or r.wr != dispute.wr,
+        earlyClose: ghost.earlyClose or (byTimeout and now < dispute.t0 + dispute.wl + dispute.wr),
+        lateCounter: ghost.lateCounter,
+        nonceBad: ghost.nonceBad or newNonce != (if (adopts) r.nonce else acct.nonce + 1) or (adopts and r.nonce < acct.nonce),
+        pubAt: ghost.pubAt,
         finalizes: ghost.finalizes + 1,
         lastApplied: useId
       },
@@ -550,7 +620,27 @@ module chain {
   // Debt is only what a payout could not cover: it is never booked while the debtor could still pay.
   val debt_only_when_broke: bool = not(ghost.freeDebt)
 
-  val safe: bool = and { p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke }
+  // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
+  // exactly what it says. Whatever is paid at once and whatever is booked as debt, the amounts are the proof's and the secret evidence's.
+  val pay_exact: bool = not(ghost.payBad)
+  val deposit_exact: bool = not(ghost.depositBad)
+
+  // N3: one set of windows per Account: the windows a dispute starts with are the ones every counter and every settled proof carries.
+  val windows_frozen: bool = and {
+    not(ghost.windowsMoved),
+    not(dispute.on) or dispute.counter == 0 or (arena.get(dispute.counter).wl == dispute.wl and arena.get(dispute.counter).wr == dispute.wr)
+  }
+
+  // Both windows run in full: nobody settles by timeout before them, nobody counters after them.
+  val closes_on_time: bool = not(ghost.earlyClose) and not(ghost.lateCounter)
+
+  // A start needs a nonce above the stored one; a finalize stores the adopted proof's nonce, or one more than the stored one.
+  val nonce_rules: bool = not(ghost.nonceBad)
+
+  val safe: bool = and {
+    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke,
+    pay_exact, deposit_exact, windows_frozen, closes_on_time, nonce_rules
+  }
 
   // Coverage witnesses: false on purpose, each must be violated by some trace.
   val w_no_dispute: bool = not(dispute.on)
@@ -560,5 +650,5 @@ module chain {
   val w_no_debt: bool = money.debt.get(Left) == 0 and money.debt.get(Right) == 0
   val w_no_clause_settled: bool = not(ghost.finalizes > 0 and arena.get(ghost.lastApplied).clause.on)
   // the exclusion for an absent honest party is not vacuous: some run settles a proof the honest party did not stand behind
-  val w_offline_can_lose: bool = not(ghost.xWasOffline and ghost.finalizes > 0 and not(allowed(arena, acct.epoch - 1, honest, ghost.lastApplied)))
+  val w_offline_can_lose: bool = not(ghost.lostByAbsence)
 }

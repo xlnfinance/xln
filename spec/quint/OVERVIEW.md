@@ -36,7 +36,7 @@ fails there.
 
 ## Account (`account_core.qnt`, `account.qnt`)
 
-State per replica: `height`, the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool. A Body is
+State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool. A Body is
 `{offdelta, limitLeft, limitRight, locks}`; a lock is a slot with payer, amount, hashlock, deadline.
 
 State machine of a replica: `Open` -- propose -> `Proposed(f)` -- ack -> `Open` (committed); `Open` -- peer's proposal -> `Received(f)`
@@ -44,8 +44,15 @@ State machine of a replica: `Open` -- propose -> `Proposed(f)` -- ack -> `Open` 
 Left's (A1). A lost proposal or ack is recovered by resend. A refusal is a value, never a halt. The transition table (`applyTx`) has
 six transactions: SetCredit, Pay, HtlcLock, HtlcResolve, HtlcCancel, HtlcExpire.
 
-Properties: `credit_holds` (RCPAN in the worst case over open clauses), `agreed` (no two committed bodies at one height),
-`no_equivocation`, `both_signed` (both signatures over the proof of the committed body). 14 mutants.
+Time (R-CLOCK, A8): a frame's timestamp is informational; every time decision uses the deciding side's own clock. Resolve needs `now <= deadline`,
+expire needs `now > deadline + CLOCK_RESERVE` (`CLOCK_RESERVE = DRIFT`), a lock's deadline is at most `now + MAX_LOCK_HORIZON + CLOCK_RESERVE` away (A9).
+
+A Byzantine peer is part of the model: one side's key is taken at any moment and it sends frames no correct proposer would (forged state, skipped
+height, expiry stamped from the future, resolve stamped in the past, stale or leaping proof nonce, a wrong ack). The honest side is checked.
+
+Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
+height, unless the peer signed two: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 34 scenario tests, 43 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
@@ -60,7 +67,10 @@ clause waits for the deadline (H1). The honest side answers within `REACT`; an a
 
 Properties: `p1_allowed` (what settles is a proof the honest side consented to or holds as its own latest), `p1_clause` (an honest
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
-`no_double_settle`, `debt_only_when_broke`. 26 mutants.
+`no_double_settle`, `debt_only_when_broke`, and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
+side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_frozen` (N3: one set of windows per Account, over unequal windows),
+`closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
+28 scenario tests, 45 mutants.
 
 ## Settlement (`settle.qnt`)
 
@@ -91,7 +101,11 @@ State: the chain's stored nonce and reserve, the signed batches the Entity submi
 Rules (J1 to J3, F1, F2, R-SPLIT): abandon an op only when it can never apply; urgent ops (dispute, reveal, hash ladder) never share a batch with payment, settlement or reserve ops (R-SPLIT); **a signed batch is final at its
 nonce: never sign other content at a signed nonce, every replacement goes to a fresh one** (F1); after an abort only urgent ops go back into the draft at once, a payment, deposit or reserve move only after the abandoned batch's nonce is used and BatchFailed is read (F2). J2 (accepted): dispute ops skip instead of reverting, and the chain emits `DisputeOpSkipped(sender, counterentity, op, reason, nonce)`; the Entity abandons the op on reading it.
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`. 12 mutants.
+J5 refinement (coordinator, #54 review): a batch with a deposit leg reverts whole and never soft-fails (`dep_never_burns`); a bad counterparty signature inside a batch (a
+settlement signed at an old epoch) is a soft fail; only a failure of the batch's own authorisation reverts without taking the nonce (`only_signed_land`). The cost of the first
+is J6 (a stuck deposit batch holds the urgent ops behind it). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
+
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`. 23 scenario tests, 21 mutants.
 
 ## Runtime (`runtime.qnt`)
 
