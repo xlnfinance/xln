@@ -1,15 +1,18 @@
 // A hub decides on its own clock whether to forward an inbound lock: one that ends beyond the lock horizon is not
 // forwarded and its payer is told `deadline_too_far`, not `deadline_unsafe` (the horizon is a different fault from an
-// onward lock that would not outlive the hub's own claim). End to end this is unreachable by any legal clock skew: the
-// Account admits a lock only within the horizon of its frame's clock, and a frame more than 30 s ahead of its receiver
-// is refused; so the decision is driven directly, on Bob's real Entity state, with the hub's clock set behind.
+// onward lock that would not outlive the hub's own claim). On this branch the check is live: the Account's fold admits
+// a lock within the horizon of its frame's clock, and a receiver accepts a frame up to 30 s ahead of its own clock, so
+// a proposer 20 s ahead gets a lock at its own horizon admitted that the hub, on its clock, must not forward (the last
+// test composes the three real checks). After R-CLOCK (#57) the receiver's scan holds the same horizon on the local
+// clock, and this decision is defense in depth. The decision is driven directly, on Bob's real Entity state.
 import { describe, expect, test } from "bun:test";
 import { x25519 } from "@noble/curves/ed25519";
 import { ALICE, BOB, CAROL, NOW, TERMS, UNREGISTERED_J, aliceAddr, bobAddr, carolAddr, unwrap, verifiers, withTestJurisdiction } from "../xln_run.ts";
 import {
-  HTLC_MIN_FORWARD_TIMELOCK_MS, HTLC_TIMELOCK_DELTA_MS, MAX_LOCK_HORIZON_MS, applyRuntime, convertOutput, createEntity,
+  ACCOUNT_NETWORK_ALLOWANCE_MS, HTLC_MIN_FORWARD_TIMELOCK_MS, HTLC_TIMELOCK_DELTA_MS, MAX_LOCK_HORIZON_BLOCKS,
+  MAX_LOCK_HORIZON_MS, applyAccountBody, applyRuntime, receiverClock, convertOutput, createEntity,
   createRuntime, forwardOutcome, replicaKey, spawn, tokenId,
-  type Address, type EntityId, type EntityReplica, type EntityTx, type HtlcEnvelope, type HtlcInboundView,
+  type AccountFrame, type Address, type EntityId, type EntityReplica, type EntityTx, type HtlcEnvelope, type HtlcInboundView,
   type PreparedHtlcBinding, type PreparedHtlcEntry, type RoutedEntityInput, type Runtime,
 } from "../xln.ts";
 
@@ -96,5 +99,45 @@ describe("a hub decides on its own clock whether to forward an inbound lock", ()
   test("a lock the onward delta would leave without margin is deadline_unsafe, a different fault", () => {
     const tight = BigInt(BOB_CLOCK) + BigInt(HTLC_TIMELOCK_DELTA_MS + HTLC_MIN_FORWARD_TIMELOCK_MS);
     expect(decide(BOB_CLOCK, tight, NEAR_HEIGHT)).toEqual({ kind: "reject", reason: "deadline_unsafe" });
+  });
+
+  /** The reviewer's composition: each check is the real one, and the skew sits inside what a receiver accepts. */
+  describe("a proposer 20 s ahead of its hub", () => {
+    const SKEW = 20_000n;
+    const hubNow = BigInt(BOB_CLOCK);
+    const frameTs = hubNow + SKEW;
+    const alice = (): { readonly state: Parameters<typeof applyAccountBody>[0]; readonly byLeft: boolean } => {
+      const account = viewAt(BOB_CLOCK).replicas.get(ALICE)!;
+      return { state: account.state, byLeft: account.state.account.id.left.toLowerCase() === ALICE.toLowerCase() };
+    };
+    const lockAt = (timelock: bigint) => ({
+      type: "htlc_lock" as const, lockId: "0x" + "ef".repeat(32), hashlock: "0x" + "ef".repeat(32), amount: 200n,
+      tokenId: unwrap(tokenId("1")), timelock, revealBeforeHeight: BigInt(NEAR_HEIGHT),
+    });
+    const foldsAt = (timelock: bigint): boolean => {
+      const { state, byLeft } = alice();
+      return applyAccountBody(state, lockAt(timelock), { byLeft, nowMs: frameTs, jHeight: 0n, accountHeight: 2n }).ok;
+    };
+    const frame = (timestamp: bigint): AccountFrame => ({
+      timestamp, jHeight: 0n, height: 2n, txs: [],
+      prevFrameHash: "0x" + "00".repeat(32), accountStateRoot: "0x" + "00".repeat(32), stateHash: "0x" + "00".repeat(32),
+    });
+    const atFrameHorizon = frameTs + BigInt(MAX_LOCK_HORIZON_MS);
+
+    test("the skew is inside what a receiver accepts (30 s)", () => {
+      expect(SKEW).toBeLessThan(ACCOUNT_NETWORK_ALLOWANCE_MS);
+      expect(receiverClock(frame(frameTs), hubNow).ok).toBe(true);
+      expect(receiverClock(frame(hubNow + ACCOUNT_NETWORK_ALLOWANCE_MS + 1n), hubNow).ok).toBe(false);
+    });
+
+    test("the Account's fold admits a lock at its frame's horizon and refuses one ms past it", () => {
+      expect(MAX_LOCK_HORIZON_BLOCKS).toBeGreaterThan(NEAR_HEIGHT);
+      expect(foldsAt(atFrameHorizon)).toBe(true);
+      expect(foldsAt(atFrameHorizon + 1n)).toBe(false);
+    });
+
+    test("that admitted lock is beyond the hub's horizon: the hub rejects it as deadline_too_far instead of forwarding", () => {
+      expect(decide(BOB_CLOCK, atFrameHorizon, NEAR_HEIGHT)).toEqual({ kind: "reject", reason: "deadline_too_far" });
+    });
   });
 });

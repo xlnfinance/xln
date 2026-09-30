@@ -94,6 +94,10 @@ describe("lock horizon: the deadline a party accepts is bounded", () => {
     expect(stricterDeparture(og(at.timestamp + 60_000, at.jHeight + MAX_LOCK_HORIZON_BLOCKS + 1), at)?.reason).toBe("deadline_too_far");
     expect(stricterDeparture(og(at.timestamp + MAX_LOCK_HORIZON_MS, at.jHeight + MAX_LOCK_HORIZON_BLOCKS), at)).toBeUndefined();
     expect(stricterDeparture({ type: "direct_payment" }, at)).toBeUndefined();
+    // only a lock is refused for its deadline: another tx type carrying far deadlines is not (mutant: drop the type guard)
+    const far = { timelock: BigInt(at.timestamp + MAX_LOCK_HORIZON_MS + 1), revealBeforeHeight: at.jHeight + MAX_LOCK_HORIZON_BLOCKS + 1 };
+    expect(stricterDeparture({ type: "htlc_resolve", data: far }, at)).toBeUndefined();
+    expect(stricterDeparture({ type: "htlc_lock", data: far }, at)?.reason).toBe("deadline_too_far");
   });
 });
 
