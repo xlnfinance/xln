@@ -138,6 +138,8 @@ export declare namespace DeltaTransformer {
 export interface DeltaTransformerInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "DECODE_GAS_BASE"
+      | "DECODE_GAS_PER_BYTE"
       | "applyBatch"
       | "containsPull"
       | "decodeArgumentsStrict"
@@ -149,6 +151,14 @@ export interface DeltaTransformerInterface extends Interface {
 
   getEvent(nameOrSignatureOrTopic: "SecretRevealed"): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "DECODE_GAS_BASE",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "DECODE_GAS_PER_BYTE",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "applyBatch",
     values: [
@@ -192,6 +202,14 @@ export interface DeltaTransformerInterface extends Interface {
     values: [BytesLike]
   ): string;
 
+  decodeFunctionResult(
+    functionFragment: "DECODE_GAS_BASE",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "DECODE_GAS_PER_BYTE",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "containsPull",
@@ -275,6 +293,10 @@ export interface DeltaTransformer extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  DECODE_GAS_BASE: TypedContractMethod<[], [bigint], "view">;
+
+  DECODE_GAS_PER_BYTE: TypedContractMethod<[], [bigint], "view">;
+
   applyBatch: TypedContractMethod<
     [
       deltas: Int768Struct[],
@@ -327,6 +349,12 @@ export interface DeltaTransformer extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "DECODE_GAS_BASE"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "DECODE_GAS_PER_BYTE"
+  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "applyBatch"
   ): TypedContractMethod<

@@ -1081,7 +1081,7 @@
    "layers": {
     "arrival": "-",
     "quint": "-",
-    "contract": "owed: #64",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },
@@ -1089,8 +1089,17 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "R-OOG",
-     "owed": "#64"
+     "name": "test_unpaid_aliased_cap"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_belowTheFloorTheCallRevertsBeforeItBurnsTheGas"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_floorCoversEveryFillRatioSize"
     }
    ]
   },
