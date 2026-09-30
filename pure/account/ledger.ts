@@ -19,7 +19,7 @@ export const emptyLedger: Ledger =
 export const allocation = (l: Ledger): bigint => l.ondelta + l.offdelta;
 
 /** What `side` has open in holds: what the ledger must still be able to cover if they all pay. */
-export const held = (l: Ledger, side: Side): bigint =>
+const held = (l: Ledger, side: Side): bigint =>
   l.holds.filter((h) => h.payer === side).reduce((sum, h) => sum + h.amount, 0n);
 
 /** RCPAN: in the worst case over every open hold, the allocation stays in [-limit.left, collateral + limit.right]. */
@@ -75,11 +75,13 @@ const withinHoldSum = (l: Ledger, hold: Hold): Result<Hold, AccountFault> =>
     ? err({ _tag: "hold_overflow", held: held(l, hold.payer), requested: hold.amount })
     : ok(hold));
 
+/** The checks on the hold itself, in order: its amount, a free slot, a sum that fits; capacity is RCPAN's. */
+const admitted = (l: Ledger, hold: Hold): Result<Hold, AccountFault> =>
+  flatMap(amountInRange(hold.amount), () => flatMap(slotFree(l, hold), () => withinHoldSum(l, hold)));
+
 export const lock = (l: Ledger, hold: Hold): Step =>
-  flatMap(amountInRange(hold.amount), () =>
-    flatMap(slotFree(l, hold), () =>
-      flatMap(withinHoldSum(l, hold), () =>
-        keptIfRcpan({ ...l, holds: [...l.holds, hold] }, lacksRoom(l, hold.payer, hold.amount)))));
+  flatMap(admitted(l, hold), () =>
+    keptIfRcpan({ ...l, holds: [...l.holds, hold] }, lacksRoom(l, hold.payer, hold.amount)));
 
 const holdAt = (l: Ledger, id: HoldId): Result<Hold, AccountFault> => {
   const hold = l.holds.find((h) => h.id === id);

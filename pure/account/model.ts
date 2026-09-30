@@ -11,8 +11,6 @@ export type Side = "left" | "right";
 
 export const other = (side: Side): Side => (side === "left" ? "right" : "left");
 
-export type TokenId = Brand<bigint, "TokenId">;
-
 /** The slot a hold sits in: the caller names it, it stays while the hold is open, and no two open holds share one. */
 export type HoldId = Brand<bigint, "HoldId">;
 
@@ -32,8 +30,6 @@ export type Ledger = Readonly<{
   limit: Readonly<Record<Side, bigint>>;
   holds: readonly Hold[];
 }>;
-
-export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger> }>;
 
 /** One case per refusal; none of them halts anything. */
 export type AccountFault =
