@@ -2,7 +2,7 @@
 // a test file calls them. A call counts only when every bracket around it belongs to an enclosing describe
 // (its argument list and its callback body), so a call under `if (false)`, in a helper nobody calls, in a
 // skipped describe, in a comment or in a string is not a test.
-import { MARK, SLASH_LANGUAGES, closeOf, depthsBefore, lex } from "./source.ts";
+import { MARK, TYPESCRIPT_LANGUAGE, closeOf, depthsBefore, lex } from "./source.ts";
 
 // Not preceded by `.` or an identifier character (so not re.test(, foo.it(, xit(); only `.only` may follow. The title
 // may sit in a wrapper call such as seedTag("...").
@@ -19,7 +19,7 @@ const callsIn = (code: string, strings: readonly string[]): readonly Call[] =>
   }));
 
 export const runnableTitles = (source: string): readonly string[] => {
-  const { code, strings } = lex(source, SLASH_LANGUAGES);
+  const { code, strings } = lex(source, TYPESCRIPT_LANGUAGE);
   const depths = depthsBefore(code);
   const calls = callsIn(code, strings);
   const describes = calls.filter((call) => call.kind === "describe").map((call) => ({ open: call.open, close: closeOf(depths, call.open) }));

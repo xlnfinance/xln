@@ -32,6 +32,13 @@ describe("TypeScript tests count only when they run", () => {
     expect(fileNamesOf("contracts/test/vm/x/r-real.test.ts", `it("a test", () => {});`)).toEqual(["r-real"]);
   });
 
+  test("a quote inside a regex literal does not start a string that swallows the comment after it", () => {
+    expect(titlesOf("const r = /\"/; // \"; it(\"R-RX1\", () => {});")).toEqual([]);
+    expect(titlesOf("const r = /`/; // `; it(\"R-RX2\", () => {});")).toEqual([]);
+    expect(titlesOf("const r = /[\"/]/g; it(\"R-RX3 real\", () => {});")).toEqual(["R-RX3 real"]);
+    expect(titlesOf("const half = total / 2; // \"; it(\"R-RX4\", () => {});")).toEqual([]);
+  });
+
   test("a comment right after code, with or without a space, hides the call", () => {
     expect(titlesOf(`foo();//it("R-C1 nospace", () => {});`)).toEqual([]);
     expect(titlesOf(`foo(); // it("R-C2 space", () => {});`)).toEqual([]);
@@ -124,5 +131,14 @@ describe("Quint names", () => {
   test("an invariant that a check script passes to quint counts", () => {
     const names = quintNames("spec/quint/check.sh", "quint run --invariant credit_holds x.qnt\nquint run --invariant=agreed y.qnt");
     expect(names.map((each) => each.text)).toEqual(["credit_holds", "agreed"]);
+  });
+
+  test("an invariant in a shell comment, an echo or a quoted string is not passed to quint", () => {
+    const script = "# quint run --invariant R_X1 x.qnt\necho '--invariant R_X2'\necho \"--invariant R_X3\"\nquint run --invariant R_X4 x.qnt # --invariant R_X5";
+    expect(quintNames("spec/quint/check.sh", script).map((each) => each.text)).toEqual(["R_X4"]);
+  });
+
+  test("a quoted invariant name is still the name", () => {
+    expect(quintNames("spec/quint/check.sh", 'quint run --invariant "R_Q1" x.qnt').map((each) => each.text)).toEqual(["R_Q1"]);
   });
 });
