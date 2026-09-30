@@ -52,5 +52,20 @@ export const installContracts = (which: ContractSet = contractSet()): ContractSe
   return which;
 };
 
+/** og's Depository ABI as jurisdictions/ shipped it, whatever is installed now: og-shaped calldata is built from it. */
+export const shippedDepositoryAbi = shipped[1]!["abi"] as readonly unknown[];
+
+/**
+ * Load og code that must see the shipped ABI. og's modules make their interfaces from these factories once, at import,
+ * so a module first evaluated after installContracts carries the fork's ABI for the rest of the process, and a test of
+ * og's own decoding then compares the fork with itself. `load` evaluates a fresh copy of the module (an import with
+ * its own query string) while the shipped set is installed; the set that was chosen is put back afterwards.
+ */
+export const withShippedOg = async <T>(load: () => Promise<T>): Promise<T> => {
+  installContracts("jurisdictions");
+  const loaded = await load().finally(() => installContracts(contractSet()));
+  return loaded;
+};
+
 // Before og's modules load: some of them make their interfaces once, at import.
 installContracts();

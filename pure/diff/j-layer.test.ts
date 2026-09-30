@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { seedOf, seedTag } from "./seed.ts";
 import { Interface } from "ethers";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
-import { Depository__factory as OgDepository__factory } from "../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory.ts";
+import { shippedDepositoryAbi, withShippedOg } from "./contracts.ts";
 import { EntityProvider__factory } from "../../contracts/typechain-types/factories/EntityProvider__factory.ts";
 import { DEPOSITORY_J_EVENTS, ENTITY_PROVIDER_J_EVENTS } from "../../core/jurisdiction/machine/event-catalog.ts";
 import { extractCanonicalDepositoryEventArgs } from "../../core/jurisdiction/adapter/events/depository-event-codec.ts";
 import { rawEventToJEvents } from "../../core/jurisdiction/adapter/events/j-event-payloads.ts";
-import { decodeDisputeFinalizationEvidenceCalldata, decodeDisputeProofBodyEvidenceCalldata, resolveDisputeFinalizationEvidence, resolveDisputeProofBodyEvidence } from "../../core/jurisdiction/adapter/rpc-public.ts";
 import { computeBatchHankoHash, createEmptyBatch, decodeJBatch, encodeJBatch, getOpenOutgoingDebtTotals, simulateDraftBatchReserveAvailability } from "../../core/jurisdiction/machine/batch/index.ts";
 import { handleR2R } from "../../core/entity/tx/handlers/j-batch/r2r.ts";
 import { handleR2C } from "../../core/entity/tx/handlers/j-batch/r2c.ts";
@@ -47,7 +46,14 @@ const addr = () => pick([`0x${"ab".repeat(20)}`, "0x5FbDB2315678afecb367f032d93F
 /** The Depository we control (contracts/): the rewrite decodes its calldata. */
 const DEPOSITORY = new Interface(Depository__factory.abi);
 /** og's decoders are frozen with og's Depository (jurisdictions/); they are fed og-shaped calldata for the same batch. */
-const OG_DEPOSITORY = new Interface(OgDepository__factory.abi);
+const OG_DEPOSITORY = new Interface(shippedDepositoryAbi as never);
+/**
+ * og's dispute-evidence decoders read the Depository interface once, at import. In the one-process suite an earlier
+ * file has already loaded rpc-public with the fork installed, so the decoders are loaded fresh, with the shipped ABI.
+ */
+const RPC_PUBLIC = "../../core/jurisdiction/adapter/rpc-public.ts";
+const { decodeDisputeFinalizationEvidenceCalldata, decodeDisputeProofBodyEvidenceCalldata, resolveDisputeFinalizationEvidence, resolveDisputeProofBodyEvidence } =
+  await withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as typeof import("../../core/jurisdiction/adapter/rpc-public.ts"));
 const PROCESS_BATCH_ENTITY = `0x${"e1".repeat(32)}`;
 const PROVIDER = new Interface(EntityProvider__factory.abi);
 const COORDS = { blockNumber: 7, blockHash: W("0b"), transactionHash: W("0c"), logIndex: 3 };
