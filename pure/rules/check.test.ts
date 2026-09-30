@@ -2,9 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { evaluate, layerCounts } from "./evaluate.ts";
 import { LAYERS, describeProblem, type Name, type Register, type Row } from "./model.ts";
-import { carries, arrivalNames, quintNames, testFileNames } from "./names.ts";
+import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
 import { parseCell, parseRegister } from "./register.ts";
+import { readBase } from "./base.ts";
+import { ratchet } from "./ratchet.ts";
 import { scanNames } from "./scan.ts";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const name = (kind: Name["kind"], text: string, layer: Name["layer"] = "contract"): Name => ({ layer, kind, text, file: "f" });
 
@@ -13,11 +17,13 @@ const row = (id: string, overrides: Partial<Row> = {}): Row => ({
   statement: "s",
   source: "src",
   cells: { arrival: { _tag: "absent" }, quint: { _tag: "absent" }, contract: { _tag: "hold" }, rig: { _tag: "absent" }, ts: { _tag: "absent" } },
-  killers: [{ kind: "test", layer: "contract", name: "killer test" }],
+  killers: [{ kind: "test", layer: "contract", name: "the killer test" }],
   ...overrides,
 });
 
-const killerName = name("title", "J5 killer test");
+// The row carries J5 in its contract layer through `carrier`, and its killer is the whole name `the killer test`.
+const carrier = name("title", "J5 holds");
+const killerName = name("title", "the killer test");
 
 describe("an id is carried by a check's name, not by prose around it", () => {
   test("a title carries the id as a token", () => expect(carries("J5", name("title", "J5 a failing batch consumes its nonce"))).toBe(true));
@@ -33,8 +39,8 @@ describe("an id is carried by a check's name, not by prose around it", () => {
 });
 
 describe("names come from titles, functions, properties and mutants, never comments", () => {
-  test("mocha titles, including .skip and template literals", () => {
-    const text = "// describe('J9 in a comment')\ndescribe('C1 epoch', () => { it.skip(\"H1 waits\", () => {}); test(`J2 skip`, () => {}); });";
+  test("mocha titles, including template literals", () => {
+    const text = "// describe('J9 in a comment')\ndescribe('C1 epoch', () => { it(\"H1 waits\", () => {}); test(`J2 skip`, () => {}); });";
     const texts = testFileNames("contract", "x/c1.test.ts", text).map((n) => n.text);
     expect(texts).toContain("C1 epoch");
     expect(texts).toContain("H1 waits");
@@ -67,63 +73,74 @@ describe("the gate is red when an id is missing from a layer that must hold it",
   const register: Register = [row("J5")];
 
   test("green when a contract name carries the id", () => {
-    expect(evaluate(register, [killerName]).problems).toEqual([]);
+    expect(evaluate(register, [carrier, killerName]).problems).toEqual([]);
   });
 
   test("red: no contract name carries the id", () => {
-    const { problems } = evaluate(register, [name("title", "killer test")]);
+    const { problems } = evaluate(register, [killerName]);
     expect(problems.map((problem) => problem._tag)).toEqual(["MissingInLayer"]);
     expect(describeProblem(problems[0]!)).toContain("J5");
   });
 
   test("a name in another layer does not satisfy the layer", () => {
-    const { problems } = evaluate(register, [name("title", "J5 killer test", "ts"), name("title", "killer test")]);
+    const { problems } = evaluate(register, [name("title", "J5 holds", "ts"), killerName]);
     expect(problems.map((problem) => problem._tag)).toEqual(["MissingInLayer"]);
   });
 
   test("red: a row with no killer", () => {
-    const { problems } = evaluate([row("J5", { killers: [] })], [killerName]);
+    const { problems } = evaluate([row("J5", { killers: [] })], [carrier]);
     expect(problems.map((problem) => problem._tag)).toEqual(["NoKiller"]);
   });
 
   test("red: a named killer that no name matches", () => {
-    const { problems } = evaluate(register, [name("title", "J5 something else")]);
+    const { problems } = evaluate(register, [carrier]);
     expect(problems.map((problem) => problem._tag)).toEqual(["KillerNotFound"]);
   });
 
   test("a killer is matched by the kind it claims: a test title is not a planted bug", () => {
-    const asBug = row("J5", { killers: [{ kind: "bug", layer: "contract", name: "killer test" }] });
-    expect(evaluate([asBug], [killerName]).problems.map((problem) => problem._tag)).toEqual(["KillerNotFound"]);
+    const asBug = row("J5", { killers: [{ kind: "bug", layer: "contract", name: "the killer test" }] });
+    expect(evaluate([asBug], [carrier, killerName]).problems.map((problem) => problem._tag)).toEqual(["KillerNotFound"]);
+  });
+
+  test("red: a killer is the whole name, not a fragment of one", () => {
+    const fragment = row("J5", { killers: [{ kind: "test", layer: "contract", name: "J5" }] });
+    expect(evaluate([fragment], [carrier]).problems.map((problem) => problem._tag)).toEqual(["KillerNotFound"]);
   });
 
   test("red: the same id listed twice", () => {
-    expect(evaluate([row("J5"), row("J5")], [killerName]).problems.map((problem) => problem._tag)).toContain("DuplicateId");
+    expect(evaluate([row("J5"), row("J5")], [carrier, killerName]).problems.map((problem) => problem._tag)).toContain("DuplicateId");
   });
 });
 
 describe("owed cells and killers are open work, and go red once they are already satisfied", () => {
   const owedCell = { ...row("J5").cells, arrival: { _tag: "owed", by: "#41" } } as const;
   const owedKiller = { kind: "bug", layer: "arrival", name: "no-h1", owed: "#41" } as const;
-  const owing = row("J5", { cells: owedCell, killers: [{ kind: "test", layer: "contract", name: "killer test" }, owedKiller] });
+  const owing = row("J5", { cells: owedCell, killers: [{ kind: "test", layer: "contract", name: "the killer test" }, owedKiller] });
 
   test("owed and absent: no problem, counted as owed", () => {
-    const evaluation = evaluate([owing], [killerName]);
+    const evaluation = evaluate([owing], [carrier, killerName]);
     expect(evaluation.problems).toEqual([]);
     expect(layerCounts(evaluation.reports).find((count) => count.layer === "arrival")).toEqual({ layer: "arrival", held: 0, owed: 1, required: 1 });
   });
 
   test("red: the owed cell is already carried, so it must be promoted to hold", () => {
-    const { problems } = evaluate([owing], [killerName, name("property", "J5 holds", "arrival")]);
+    const { problems } = evaluate([owing], [carrier, killerName, name("property", "J5 holds", "arrival")]);
     expect(problems.map((problem) => problem._tag)).toEqual(["OwedButPresent"]);
   });
 
   test("red: the owed killer exists, so its owed mark must go", () => {
-    const { problems } = evaluate([owing], [killerName, name("bug", "no-h1", "arrival")]);
+    const { problems } = evaluate([owing], [carrier, killerName, name("bug", "no-h1", "arrival")]);
     expect(problems.map((problem) => problem._tag)).toEqual(["KillerOwedButPresent"]);
   });
 
+  test("red: a killer in a layer the row does not claim", () => {
+    const stray = row("J5", { killers: [{ kind: "test", layer: "ts", name: "the killer test" }] });
+    const { problems } = evaluate([stray], [carrier, name("title", "the killer test", "ts")]);
+    expect(problems.map((problem) => problem._tag)).toEqual(["KillerInUnclaimedLayer"]);
+  });
+
   test("an absent cell never fails, even when a name in that layer carries the id", () => {
-    const { problems } = evaluate([row("J5")], [killerName, name("property", "J5 holds", "ts")]);
+    const { problems } = evaluate([row("J5")], [carrier, killerName, name("property", "J5 holds", "ts")]);
     expect(problems).toEqual([]);
   });
 });
@@ -133,7 +150,7 @@ describe("a retired rule", () => {
 
   test("needs no killer and claims no name, when its successor is live", () => {
     const cells = { ...retired.cells, contract: { _tag: "absent" } } as const;
-    expect(evaluate([{ ...retired, cells }, row("R-NEW")], [name("title", "R-NEW killer test"), name("title", "killer test")]).problems).toEqual([]);
+    expect(evaluate([{ ...retired, cells }, row("R-NEW")], [name("title", "R-NEW holds"), name("title", "the killer test")]).problems).toEqual([]);
   });
 
   test("red when it points at a rule that is not a live row", () => {
@@ -194,6 +211,17 @@ describe("the real tree", () => {
     expect(evaluate(register, names).problems.map(describeProblem)).toEqual([]);
   });
 
+  test("every live row claims at least one layer (a row with every cell absent is never checked)", () => {
+    const unclaimed = register.filter((each) => each.retiredBy === undefined && LAYERS.every((layer) => each.cells[layer]._tag === "absent"));
+    expect(unclaimed.map((each) => each.id)).toEqual([]);
+  });
+
+  test("a --layer-root that does not exist is an error, not an empty layer", () => {
+    const run = Bun.spawnSync(["bun", "rules/check.ts", "--layer-root", "arrival=/no/such/dir"], { cwd: `${import.meta.dir}/..` });
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr.toString()).toContain("no such directory");
+  });
+
   test("the gate turns red when the names carrying C1 disappear from the contract tests", () => {
     const without = names.filter((each) => !(each.layer === "contract" && carries("C1", each)));
     const { problems } = evaluate(register, without);
@@ -201,8 +229,83 @@ describe("the real tree", () => {
   });
 
   test("the gate turns red when a killer test is renamed", () => {
-    const renamed = names.map((each) => (each.text.startsWith("C1 ondelta epoch") ? { ...each, text: "ondelta epoch" } : each));
+    const renamed = names.map((each) => (each.text === "C1 ondelta epoch" ? { ...each, text: "ondelta epoch" } : each));
     const { problems } = evaluate(register, renamed);
     expect(problems.some((problem) => problem._tag === "KillerNotFound" && problem.id === "C1")).toBe(true);
+  });
+});
+
+describe("the register may only grow (ratchet against the base register)", () => {
+  const held = row("H1");
+  const base: Register = [held, row("H2")];
+  const tags = (now: Register): readonly string[] => ratchet(base, now).problems.map((problem) => problem._tag);
+
+  test("an unchanged register is fine, and so is a new row", () => {
+    expect(tags([held, row("H2"), row("H9")])).toEqual([]);
+  });
+
+  test("red: a row deleted", () => expect(tags([held])).toEqual(["RowRemoved"]));
+
+  test("red: every hold cell set to absent", () => {
+    const flat = { arrival: { _tag: "absent" }, quint: { _tag: "absent" }, contract: { _tag: "absent" }, rig: { _tag: "absent" }, ts: { _tag: "absent" } } as const;
+    expect(tags([row("H1", { cells: flat }), row("H2", { cells: flat })])).toEqual(["CellWeakened", "CellWeakened"]);
+  });
+
+  test("red: hold weakened to owed; owed weakened to absent", () => {
+    const owedContract = { ...held.cells, contract: { _tag: "owed", by: "someone" } } as const;
+    expect(tags([row("H1", { cells: owedContract }), row("H2")])).toEqual(["CellWeakened"]);
+    const owingBase = [row("H1", { cells: owedContract })];
+    const gone = ratchet(owingBase, [row("H1", { cells: { ...held.cells, contract: { _tag: "absent" } } })]);
+    expect(gone.problems.map((problem) => problem._tag)).toEqual(["CellWeakened"]);
+  });
+
+  test("growing is fine: owed becomes hold, absent becomes owed", () => {
+    const owedContract = { ...held.cells, contract: { _tag: "owed", by: "someone" } } as const;
+    expect(ratchet([row("H1", { cells: owedContract })], [held]).problems).toEqual([]);
+  });
+
+  test("red: a killer the base named (not owed) disappears; an owed one may change", () => {
+    const withOwed = row("H1", { killers: [{ kind: "test", layer: "contract", name: "the killer test" }, { kind: "bug", layer: "arrival", name: "x", owed: "#41" }] });
+    const dropsReal = row("H1", { killers: [{ kind: "bug", layer: "arrival", name: "x", owed: "#41" }] });
+    expect(ratchet([withOwed], [dropsReal]).problems.map((problem) => problem._tag)).toEqual(["KillerDropped"]);
+    expect(ratchet([withOwed], [row("H1")]).problems).toEqual([]);
+  });
+
+  test("retiring a rule is allowed only into live successors, and is printed", () => {
+    const retired = row("H2", { retiredBy: ["H1"], killers: [] });
+    const result = ratchet(base, [held, retired]);
+    expect(result.problems).toEqual([]);
+    expect(result.retirements).toEqual(["H2 retired into H1"]);
+    expect(evaluate([held, row("H2", { retiredBy: ["H7"], killers: [] })], [carrier, killerName]).problems.map((problem) => problem._tag)).toContain("UnknownSuccessor");
+  });
+
+  test("retiring a rule into another retired rule is red", () => {
+    const chain = [row("A", { retiredBy: ["B"], killers: [] }), row("B", { retiredBy: ["C"], killers: [] }), row("C")];
+    expect(evaluate(chain, [carrier, killerName]).problems.map((problem) => problem._tag)).toContain("UnknownSuccessor");
+  });
+});
+
+describe("the base register is read from git, and a git failure is red", () => {
+  const repo = mkdtempSync(`${tmpdir()}/rules-base-`);
+  const sh = (...args: string[]): void => void Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo });
+  const rowsJson = JSON.stringify({ rows: [{ id: "H1", statement: "s", source: "s", layers: { contract: "hold" }, killers: [{ kind: "test", layer: "contract", name: "t" }] }] });
+
+  test("a base without the register is the introducing commit; a base with it is parsed; a bad ref is an error", () => {
+    sh("init", "-q", "-b", "main");
+    writeFileSync(`${repo}/a.txt`, "a");
+    sh("add", "-A");
+    sh("commit", "-q", "-m", "one");
+    sh("branch", "base");
+    const introduced = readBase(repo, "base");
+    expect(introduced.ok && introduced.value._tag).toBe("Introduced");
+    mkdirSync(`${repo}/pure/rules`, { recursive: true });
+    writeFileSync(`${repo}/pure/rules/register.json`, rowsJson);
+    sh("add", "-A");
+    sh("commit", "-q", "-m", "two");
+    sh("branch", "base2");
+    sh("commit", "-q", "--allow-empty", "-m", "three");
+    const based = readBase(repo, "base2");
+    expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
+    expect(readBase(repo, "no-such-ref").ok).toBe(false);
   });
 });

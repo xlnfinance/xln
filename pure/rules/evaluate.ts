@@ -1,6 +1,6 @@
 // The gate's judgment: a register and the names found in each layer in, problems and a matrix out.
-import { carries } from "./names.ts";
-import { LAYERS, type Killer, type Layer, type Name, type Problem, type Register, type Row } from "./model.ts";
+import { carries } from "./names/names.ts";
+import { LAYERS, byLayer, type Killer, type Layer, type Name, type Problem, type Register, type Row } from "./model.ts";
 
 export type CellVerdict = "held" | "owed" | "missing" | "stale-owed" | "unclaimed" | "unclaimed-but-present";
 
@@ -28,18 +28,16 @@ const cellVerdict = (row: Row, layer: Layer, hits: number): CellVerdict => {
 };
 
 const killerKinds: Readonly<Record<Killer["kind"], readonly Name["kind"][]>> = {
-  test: ["title", "function", "file", "run", "def", "property"],
+  test: ["title", "function", "file", "run", "invariant", "property"],
   bug: ["bug"],
   mutant: ["mutant"],
 };
 
-// A killer is found when a name of the right kind in its layer contains the killer's name.
+// A killer is found when a name of the right kind in its layer IS the killer's name, whole: a substring would let
+// an unrelated name that contains "j5" stand in for a killer called J5.
 const killerExists = (killer: Killer, names: readonly Name[]): boolean =>
   names.some(
-    (name) =>
-      name.layer === killer.layer &&
-      killerKinds[killer.kind].includes(name.kind) &&
-      name.text.toLowerCase().includes(killer.name.toLowerCase()),
+    (name) => name.layer === killer.layer && killerKinds[killer.kind].includes(name.kind) && name.text === killer.name,
   );
 
 const killerVerdict = (killer: Killer, names: readonly Name[]): KillerVerdict => {
@@ -50,12 +48,10 @@ const killerVerdict = (killer: Killer, names: readonly Name[]): KillerVerdict =>
 
 export const reportRow = (row: Row, names: readonly Name[]): RowReport => ({
   row,
-  cells: Object.fromEntries(
-    LAYERS.map((layer) => {
-      const hits = hitsFor(row.id, layer, names);
-      return [layer, { verdict: cellVerdict(row, layer, hits), hits }];
-    }),
-  ) as RowReport["cells"],
+  cells: byLayer((layer) => {
+    const hits = hitsFor(row.id, layer, names);
+    return { verdict: cellVerdict(row, layer, hits), hits };
+  }),
   killers: row.killers.map((killer) => ({ killer, verdict: killerVerdict(killer, names) })),
 });
 
@@ -72,7 +68,9 @@ const cellProblem = (report: RowReport, layer: Layer): readonly Problem[] => {
   }
 };
 
-const killerProblem = (id: string, { killer, verdict }: RowReport["killers"][number]): readonly Problem[] => {
+const killerProblem = (row: Row, { killer, verdict }: RowReport["killers"][number]): readonly Problem[] => {
+  const id = row.id;
+  if (row.cells[killer.layer]._tag === "absent") return [{ _tag: "KillerInUnclaimedLayer", id, killer }];
   switch (verdict) {
     case "missing":
       return [{ _tag: "KillerNotFound", id, killer }];
@@ -89,7 +87,7 @@ export const problemsOf = (report: RowReport): readonly Problem[] =>
 const liveProblems = (report: RowReport): readonly Problem[] => [
   ...(report.row.killers.length === 0 ? [{ _tag: "NoKiller", id: report.row.id } as const] : []),
   ...LAYERS.flatMap((layer) => cellProblem(report, layer)),
-  ...report.killers.flatMap((entry) => killerProblem(report.row.id, entry)),
+  ...report.killers.flatMap((entry) => killerProblem(report.row, entry)),
 ];
 
 const duplicateIds = (register: Register): readonly Problem[] =>

@@ -1,5 +1,5 @@
 // register.json to a typed Register. The file is data the coordinator edits, so it is parsed, not trusted.
-import { LAYERS, type Cell, type Killer, type KillerKind, type Layer, type Register, type Row } from "./model.ts";
+import { LAYERS, byLayer, type Cell, type Killer, type KillerKind, type Layer, type Register, type Row } from "./model.ts";
 
 export type Result<T, E> = Readonly<{ ok: true; value: T }> | Readonly<{ ok: false; error: E }>;
 
@@ -47,8 +47,13 @@ const parseCells = (where: string, raw: unknown): Result<Row["cells"], ParseErro
   if (!isRaw(raw)) return fail(where, "layers must be an object");
   const unknownLayer = Object.keys(raw).find((key) => !isLayer(key));
   if (unknownLayer !== undefined) return fail(where, `unknown layer ${unknownLayer}`);
-  const cells = collect(LAYERS.map((layer) => parseCell(`${where}.${layer}`, raw[layer] ?? "-")));
-  return cells.ok ? pass(Object.fromEntries(LAYERS.map((layer, index) => [layer, cells.value[index]])) as Row["cells"]) : cells;
+  const parsed = byLayer((layer) => parseCell(`${where}.${layer}`, raw[layer] ?? "-"));
+  const failed = LAYERS.map((layer) => parsed[layer]).find((each) => !each.ok);
+  if (failed !== undefined && !failed.ok) return failed;
+  return pass(byLayer((layer) => {
+    const each = parsed[layer];
+    return each.ok ? each.value : { _tag: "absent" };
+  }));
 };
 
 const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
@@ -70,8 +75,19 @@ const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
   return pass({ id, statement, source, cells: cells.value, killers: parsedKillers.value, retiredBy });
 };
 
+// The boundary where a JSON parse may throw (registered in style/README): bad text is a BadRegister, not a crash.
+const parseJson = (text: string): Result<unknown, ParseError> => {
+  try {
+    return pass(JSON.parse(text));
+  } catch (cause) {
+    return fail("register", `not JSON: ${String(cause)}`);
+  }
+};
+
 export const parseRegister = (text: string): Result<Register, ParseError> => {
-  const parsed: unknown = JSON.parse(text);
+  const json = parseJson(text);
+  if (!json.ok) return json;
+  const parsed = json.value;
   if (!isRaw(parsed) || !Array.isArray(parsed["rows"])) return fail("register", 'the file must be { "rows": [...] }');
   return collect(parsed["rows"].map(parseRow));
 };

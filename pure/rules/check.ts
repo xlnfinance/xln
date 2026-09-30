@@ -3,13 +3,16 @@
 //   --who <id>               list the names that carry an id, per layer
 //   --names-json             dump every name the scanners read, as JSON (to write or audit register rows)
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
+//   --base <ref>             the ref the register may only grow from (default origin/main)
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, or a row has
 // no killer. See plan/first-moves.md, brief 3.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
-import { carries } from "./names.ts";
+import { carries } from "./names/names.ts";
 import { LAYERS, type Layer } from "./model.ts";
+import { readBase } from "./base.ts";
 import { parseRegister } from "./register.ts";
+import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
 
@@ -26,6 +29,13 @@ const overrides = Object.fromEntries(
     return LAYERS.includes(layer as Layer) && dir !== undefined ? [[layer, dir]] : [];
   }),
 ) as Partial<Record<Layer, string>>;
+
+// A layer root that was asked for and is not there would read as an empty layer and leave every owed cell owed.
+const missingRoot = Object.entries(overrides).find(([, dir]) => !existsSync(dir));
+if (missingRoot !== undefined) {
+  console.error(`FAIL --layer-root ${missingRoot[0]}=${missingRoot[1]}: no such directory`);
+  process.exit(1);
+}
 
 const parsed = parseRegister(readFileSync(`${here}/register.json`, "utf8"));
 if (!parsed.ok) {
@@ -46,6 +56,14 @@ if (who !== undefined) {
   process.exit(0);
 }
 
-const evaluation = evaluate(parsed.value, names);
+const base = readBase(repoRoot, flagValues("--base")[0] ?? "origin/main");
+if (!base.ok) {
+  console.error(`FAIL ${base.error.detail}`);
+  process.exit(1);
+}
+const grown = base.value._tag === "Base" ? ratchet(base.value.register, parsed.value) : { problems: [], retirements: [] };
+const checked = evaluate(parsed.value, names);
+const evaluation = { ...checked, problems: [...checked.problems, ...grown.problems] };
 console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
+grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
 process.exit(evaluation.problems.length === 0 ? 0 : 1);

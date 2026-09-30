@@ -45,6 +45,8 @@ const summaryLines = (evaluation: Evaluation): readonly string[] =>
 
 export const renderMarkdown = (evaluation: Evaluation): string =>
   [
+    "Named-killer matrix: a killer is found when a check of that name exists. The gate reads names; it does not run Arrival, Quint or the mutants, so `found` means the named killer exists, not that the bug is killed.",
+    "",
     `| id | ${LAYERS.join(" | ")} | killers |`,
     `|---|${LAYERS.map(() => "---").join("|")}|---|`,
     ...evaluation.reports.map((report) => `| ${report.row.id} | ${rowCells(report).join(" | ")} | ${killersText(report)} |`),

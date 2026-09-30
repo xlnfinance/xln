@@ -46,7 +46,7 @@ export type NameKind =
   | "bug"
   | "mutant"
   | "run"
-  | "def";
+  | "invariant";
 
 export type Name = Readonly<{ layer: Layer; kind: NameKind; text: string; file: string }>;
 
@@ -56,7 +56,11 @@ export type Problem =
   | Readonly<{ _tag: "OwedButPresent"; id: string; layer: Layer; by: string }>
   | Readonly<{ _tag: "NoKiller"; id: string }>
   | Readonly<{ _tag: "UnknownSuccessor"; id: string; successor: string }>
+  | Readonly<{ _tag: "RowRemoved"; id: string }>
+  | Readonly<{ _tag: "CellWeakened"; id: string; layer: Layer; from: Cell["_tag"]; to: Cell["_tag"] }>
+  | Readonly<{ _tag: "KillerDropped"; id: string; killer: Killer }>
   | Readonly<{ _tag: "KillerNotFound"; id: string; killer: Killer }>
+  | Readonly<{ _tag: "KillerInUnclaimedLayer"; id: string; killer: Killer }>
   | Readonly<{ _tag: "KillerOwedButPresent"; id: string; killer: Killer; owed: string }>;
 
 export const describeProblem = (problem: Problem): string => {
@@ -73,14 +77,29 @@ export const describeProblem = (problem: Problem): string => {
       return `${problem.id}: retired_by names ${problem.successor}, which is not a live row`;
     case "KillerNotFound":
       return `${problem.id}: killer "${problem.killer.name}" (${problem.killer.kind}, ${problem.killer.layer}) is not among the names`;
+    case "KillerInUnclaimedLayer":
+      return `${problem.id}: killer "${problem.killer.name}" is in the ${problem.killer.layer} layer, which this row does not claim`;
+    case "RowRemoved":
+      return `${problem.id}: the row was in the base register and is gone (retire it with retired_by instead)`;
+    case "CellWeakened":
+      return `${problem.id}: the ${problem.layer} cell went from ${problem.from} to ${problem.to}; a claim may only grow`;
+    case "KillerDropped":
+      return `${problem.id}: killer "${problem.killer.name}" (${problem.killer.kind}, ${problem.killer.layer}) was in the base register and is gone`;
     case "KillerOwedButPresent":
       return `${problem.id}: killer "${problem.killer.name}" exists now; drop its "owed: ${problem.owed}"`;
     default:
-      return assertNever(problem);
+      return unhandled(problem);
   }
 };
 
-export const assertNever = (value: never): never => {
-  // The type system makes this unreachable; reaching it is a broken build, not a peer input.
-  throw new Error(`unhandled variant: ${JSON.stringify(value)}`);
-};
+// The compiler proves this unreachable; if a variant is ever added without a case, the text says which.
+const unhandled = (problem: never): string => `unhandled problem ${JSON.stringify(problem)}`;
+
+// A record with one entry per layer, built from a function of the layer: no cast, and a new layer is a type error.
+export const byLayer = <T>(of: (layer: Layer) => T): Readonly<Record<Layer, T>> => ({
+  arrival: of("arrival"),
+  quint: of("quint"),
+  contract: of("contract"),
+  rig: of("rig"),
+  ts: of("ts"),
+});

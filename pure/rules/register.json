@@ -302,7 +302,8 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "DisputeHashVector"
+     "name": "DisputeHashVector",
+     "owed": "thread 'Contracts under our control' (contracts/test/dispute is not gated; move the vector test under vm/)"
     }
    ]
   },
@@ -447,7 +448,7 @@
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
     {
@@ -467,7 +468,7 @@
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
     {
@@ -487,7 +488,7 @@
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: v2 (no thread yet)"
    },
    "killers": [
     {
@@ -557,7 +558,7 @@
     {
      "kind": "test",
      "layer": "rig",
-     "name": "every dispute window stays above LAG (C11)"
+     "name": "every dispute window stays above LAG (C11): the contracts' floor and the default terms"
     },
     {
      "kind": "mutant",
@@ -638,7 +639,7 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "H3 a retired board cannot be made to pay from reserves"
+     "name": "H3 a retired board cannot be made to pay from reserves, and is never denied what it is owed"
     },
     {
      "kind": "bug",
@@ -773,11 +774,6 @@
    },
    "killers": [
     {
-     "kind": "test",
-     "layer": "contract",
-     "name": "the old batch lands, the same-nonce replacement is dead, a fresh-nonce replacement lands"
-    },
-    {
      "kind": "mutant",
      "layer": "quint",
      "name": "resign-at-a-signed-nonce",
@@ -788,6 +784,12 @@
      "layer": "arrival",
      "name": "resign-at-nonce",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "a test tagged R-FINAL-NONCE",
+     "owed": "thread 'Contracts under our control' (the finding F1's test does not count)"
     }
    ]
   },
@@ -829,7 +831,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "hold",
+    "contract": "owed: thread 'Contracts under our control': a12-two-cosigned-proofs.test.ts sits in contracts/test/a12, a folder no gate runs; move it under vm/ or add the folder to a gate",
     "rig": "-",
     "ts": "-"
    },
@@ -837,7 +839,8 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "A12 two different co-signed proofs at one nonce"
+     "name": "A12 two different co-signed proofs at one nonce",
+     "owed": "thread 'Contracts under our control' (a12 folder is not gated)"
     },
     {
      "kind": "mutant",
@@ -1093,7 +1096,7 @@
    "source": "contracts-decisions.md (memory, #62)",
    "layers": {
     "arrival": "owed: #41",
-    "quint": "-",
+    "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -1119,7 +1122,7 @@
    "source": "contracts-decisions.md (memory)",
    "layers": {
     "arrival": "owed: #41",
-    "quint": "-",
+    "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
     "ts": "-"

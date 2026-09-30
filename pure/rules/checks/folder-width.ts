@@ -1,51 +1,111 @@
-// check:folder-width on tracked files only. og's core/scripts/checks/architecture/check-folder-width.ts walks the
-// disk, so a dev machine's gitignored folders (contracts/.typechain-hardhat, contracts/lib/forge-std) count and
-// the check passes only with them moved aside. This one asks git, so the answer is the same on a clean clone
-// and on a used checkout. It reuses og's limits, debt table and report, and reads og's exclusion lists from og's
-// source text, so the two cannot drift.   bun pure/rules/folder-width.ts   (from the repository root)
-import { readFileSync } from "node:fs";
+// check:folder-width, ours: at most 10 direct source files per folder, with a recorded debt for the wide ones.
+// It asks git which files exist (tracked plus untracked-but-not-ignored), so the answer is the same on a clean
+// clone and on a used checkout: a dev machine's gitignored folders (contracts/.typechain-hardhat,
+// contracts/lib/forge-std) are not counted, and a new file is counted before it is staged. og's version walks
+// the disk and lives at core/scripts/checks/architecture/check-folder-width.ts, frozen at 566c850; this file
+// stands alone and does not read it.   bun pure/rules/checks/folder-width.ts   (npm run check:folder-width)
+import { existsSync } from "node:fs";
 import { dirname, extname } from "node:path";
-import {
-  FOLDER_WIDTH_DEBT,
-  MAX_DIRECT_SOURCE_FILES,
-  SOURCE_FILE_EXTENSIONS,
-  evaluateFolderWidths,
-  type FolderWidth,
-} from "../../../core/scripts/checks/architecture/check-folder-width.ts";
 
-const repoRoot = `${import.meta.dir}/../../..`;
-const ogSource = readFileSync(`${repoRoot}/core/scripts/checks/architecture/check-folder-width.ts`, "utf8");
+export const MAX_DIRECT_SOURCE_FILES = 10;
 
-// The quoted strings of `const <name>: ... = new Set([ ... ]);` in og's file.
-export const quotedSet = (source: string, name: string): ReadonlySet<string> => {
-  const body = new RegExp(`const ${name}\\b[^=]*=\\s*new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(source)?.[1] ?? "";
-  return new Set([...body.matchAll(/'([^']*)'/g)].map((found) => found[1] ?? ""));
+export type FolderWidth = Readonly<{ path: string; files: number }>;
+
+export const SOURCE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".cjs", ".css", ".cts", ".go", ".java", ".js", ".jsx", ".kt", ".kts", ".mjs", ".mts", ".py", ".rs", ".scss",
+  ".sh", ".sol", ".svelte", ".swift", ".ts", ".tsx",
+]);
+
+export const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set(["build", "coverage", "dist", "node_modules"]);
+
+// Generated output and vendored code: og's list at 566c850, plus contracts' generated folders and the vendored
+// spec/arrival (a verbatim copy of here-build/arrival).
+export const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
+  ".agents", ".archive", ".claude", ".codex", ".crush", ".e2e-mesh-db", ".logs", ".obsidian", ".playwright-mcp",
+  ".tmp", ".vscode", ".xln-db", "brainvault",
+  "contracts/artifacts", "contracts/cache", "contracts/typechain-types",
+  "data/tmp", "db",
+  "frontend/.svelte-kit", "frontend/.svelte-kit-dev-http", "frontend/.svelte-kit-dev-https",
+  "frontend/android/app/src/main/assets/public", "frontend/ios/App/App/public",
+  "jurisdictions/artifacts", "jurisdictions/build-tron", "jurisdictions/cache", "jurisdictions/db-tmp",
+  "jurisdictions/forge-cache", "jurisdictions/forge-out", "jurisdictions/lib", "jurisdictions/.typechain-hardhat",
+  "jurisdictions/typechain-types",
+  "packages/npm/xlnfinance/app", "packages/npm/xlnfinance/dist",
+  "reports", "spec/arrival", "ui",
+]);
+
+// Folders allowed to be wider than the maximum, at exactly this width. A change in either direction is red, so
+// debt is paid down on purpose and never grows by accident.
+export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
+  "contracts/contracts": 16,
+  "core/__tests__/runtime/ingress": 11,
+  "core/__tests__/runtime/observability": 11,
+  "core/entity/tx/handlers/account": 11,
+  "core/orchestrator/process": 12,
+  "core/rscore/ts-worker": 13,
+  "core/scripts/e2e/harness": 11,
+  "core/scripts/operations/hlt": 12,
+  "frontend/src/lib/stores": 11,
+  "jurisdictions/contracts": 16,
+  "rscore/crates/entity-kernel/src": 12,
+  "rscore/crates/entity-kernel/src/consensus": 11,
+  "rscore/crates/entity-kernel/tests": 11,
+  "scripts/dev": 12,
+  "tools": 11,
 };
 
-const excludedPaths = quotedSet(ogSource, "EXCLUDED_REPOSITORY_PATHS");
-const generatedNames = quotedSet(ogSource, "GENERATED_DIRECTORY_NAMES");
-
 const isCounted = (directory: string): boolean =>
-  !directory.split("/").some((segment) => generatedNames.has(segment)) &&
-  ![...excludedPaths].some((excluded) => directory === excluded || directory.startsWith(`${excluded}/`));
+  !directory.split("/").some((segment) => GENERATED_DIRECTORY_NAMES.has(segment)) &&
+  ![...EXCLUDED_REPOSITORY_PATHS].some((excluded) => directory === excluded || directory.startsWith(`${excluded}/`));
 
-// Direct source files per directory, from a list of tracked paths.
-export const widthsOf = (trackedFiles: readonly string[]): readonly FolderWidth[] => {
-  const counts = trackedFiles
-    .filter((file) => SOURCE_FILE_EXTENSIONS.has(extname(file)))
-    .map((file) => dirname(file))
-    .filter(isCounted)
-    .reduce<ReadonlyMap<string, number>>((byDirectory, directory) => new Map([...byDirectory, [directory, (byDirectory.get(directory) ?? 0) + 1]]), new Map());
-  return [...counts].map(([path, files]) => ({ path, files })).sort((left, right) => left.path.localeCompare(right.path));
+// Direct source files per directory, from a list of paths that exist.
+export const widthsOf = (files: readonly string[]): readonly FolderWidth[] => {
+  const directories = files.filter((file) => SOURCE_FILE_EXTENSIONS.has(extname(file))).map((file) => dirname(file)).filter(isCounted);
+  return [...Map.groupBy(directories, (directory) => directory)]
+    .map(([path, members]) => ({ path, files: members.length }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+};
+
+export const evaluateFolderWidths = (
+  widths: readonly FolderWidth[],
+  debt: Readonly<Record<string, number>> = FOLDER_WIDTH_DEBT,
+  maximum: number = MAX_DIRECT_SOURCE_FILES,
+): readonly string[] => {
+  const byPath = new Map(widths.map((entry) => [entry.path, entry.files]));
+  const tooWide = widths
+    .filter(({ files }) => files > maximum)
+    .flatMap(({ path, files }) => {
+      const allowance = debt[path];
+      if (allowance === undefined) return [`FOLDER_TOO_WIDE ${path}:${files} > ${maximum}`];
+      return files === allowance ? [] : [`FOLDER_WIDTH_DEBT_CHANGED ${path}:${files} != ${allowance}`];
+    });
+  const stale = Object.entries(debt).flatMap(([path, allowance]) => {
+    const files = byPath.get(path);
+    if (files === undefined) return [`STALE_FOLDER_WIDTH_DEBT ${path}:missing allowance=${allowance}`];
+    return files <= maximum ? [`STALE_FOLDER_WIDTH_DEBT ${path}:${files} <= ${maximum}`] : [];
+  });
+  return [...tooWide, ...stale].sort();
+};
+
+const existingFiles = (repo: string): readonly string[] => {
+  const listing = Bun.spawnSync(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: repo });
+  if (listing.exitCode !== 0) return [];
+  // A file deleted in the working tree but still tracked does not exist, so it is not counted.
+  return [...new Set(listing.stdout.toString().split("\0").filter((file) => file !== ""))].filter((file) => existsSync(`${repo}/${file}`));
 };
 
 const run = (): number => {
-  const listing = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: repoRoot, stdout: "pipe" });
-  const tracked = listing.stdout.toString().split("\0").filter((file) => file !== "");
-  const widths = widthsOf(tracked);
-  const errors = evaluateFolderWidths(widths, FOLDER_WIDTH_DEBT, MAX_DIRECT_SOURCE_FILES);
+  const repo = `${import.meta.dir}/../../..`;
+  const files = existingFiles(repo);
+  if (files.length === 0) {
+    console.error("FAIL git listed no files (is this a git checkout?)");
+    return 1;
+  }
+  const widths = widthsOf(files);
+  const errors = evaluateFolderWidths(widths);
   errors.forEach((error) => console.error(`- ${error}`));
-  console.log(errors.length === 0 ? `FOLDER_WIDTH_OK tracked dirs=${widths.length} sourceFiles=${widths.reduce((sum, entry) => sum + entry.files, 0)} max=${MAX_DIRECT_SOURCE_FILES}` : "FOLDER_WIDTH_INVARIANT_FAILED");
+  const total = widths.reduce((sum, entry) => sum + entry.files, 0);
+  console.log(errors.length === 0 ? `FOLDER_WIDTH_OK dirs=${widths.length} sourceFiles=${total} max=${MAX_DIRECT_SOURCE_FILES}` : "FOLDER_WIDTH_INVARIANT_FAILED");
   return errors.length === 0 ? 0 : 1;
 };
 
