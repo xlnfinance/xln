@@ -21,15 +21,29 @@ const stageRules = (root: string): string => {
   return stage;
 };
 
+// A planted file the rules must flag: if ast-grep answers "nothing" for it, the scan did not run and every clean
+// answer for the real directories is worthless (a stub binary, a wrong PATH, a crash that leaves an empty list).
+const CANARY = "export const canary = () => { throw new Error(\"canary\"); };\n";
+
+const plantCanary = (stage: string): string => {
+  mkdirSync(`${stage}/canary`);
+  writeFileSync(`${stage}/canary/canary.ts`, CANARY);
+  return `${stage}/canary`;
+};
+
 export const astHits = (root: string, dirs: readonly string[]): AstScan => {
   const stage = stageRules(root);
+  const canary = plantCanary(stage);
   const scan = Bun.spawnSync(
-    ["ast-grep", "scan", "--config", `${stage}/sgconfig.yml`, "--json=compact", ...dirs.map((dir) => `${root}/${dir}`)],
-    { cwd: stage },
+    ["ast-grep", "scan", "--config", `${stage}/sgconfig.yml`, "--json=compact", canary, ...dirs.map((dir) => `${root}/${dir}`)],
+    { cwd: stage, env: process.env },
   );
   const found: readonly Hit[] = JSON.parse(scan.stdout.toString().split("\n")[0] || "[]");
+  const isCanary = (hit: Hit): boolean => resolve(stage, hit.file).startsWith(`${canary}/`);
+  // Exit 0 is clean and 1 is "found errors"; anything else (2, a signal, which leaves the code null) is a failed scan.
+  const ran = (scan.exitCode === 0 || scan.exitCode === 1) && found.some((hit) => hit.ruleId === "no-throw" && isCanary(hit));
   return {
-    hits: found.map((hit) => ({ ruleId: hit.ruleId, file: relative(root, resolve(stage, hit.file)) })),
-    failed: scan.exitCode > 1,
+    hits: found.filter((hit) => !isCanary(hit)).map((hit) => ({ ruleId: hit.ruleId, file: relative(root, resolve(stage, hit.file)) })),
+    failed: !ran,
   };
 };

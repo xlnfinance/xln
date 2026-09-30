@@ -36,6 +36,8 @@ Not mechanically checked: the relief test itself, honest names, function bodies 
 
 `bun rules/check.ts` (from `pure/`) runs the register gate and then this one (`--style-only` runs only this one; code in `rules/tree/`). It runs every legacy rule plus the rules in `style/tree-rules/` over `kernel/` and `chain/`, and counts what ast-grep cannot: lines over 120 characters, declarations over 50 lines, and exports that no other file under `pure/` names (a test counts as a user; `rules/` and `style/` do not). Every count starts at **zero**; there is no baseline to ratchet. The only way to allow a hit is a row in `style/tree-exceptions.json` (rule, file, count) with its reason below. A row must be used exactly: more hits than the row allows fails, and so do fewer, so an exception cannot outlive its cause.
 
+Two guards keep the gate from passing by doing nothing. A canary file with a `throw` is scanned along with the trees and must come back as a `no-throw` hit, and ast-grep must exit 0 or 1; a stub, a missing binary or a killed scan fails the gate. And every directory under `pure/` must be in `TREE` (`rules/tree/gate.ts`) or in `NOT_GATED`, so a new layer directory (`account/`, `entity/`, ...) is a failing `unlisted-dir` row until it is gated; when a directory joins `TREE`, also add it to `pure/tsconfig.json` `include`.
+
 New rules:
 
 - `no-boolean-param`: a positional boolean parameter; pass a record with a named field.

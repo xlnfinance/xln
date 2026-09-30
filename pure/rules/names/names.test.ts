@@ -18,7 +18,7 @@ describe("TypeScript tests count only when they run", () => {
     expect(titlesOf(`describe("R-A block", () => { it("R-B leaf", () => {}); it.only("R-C only", () => {}); });`)).toEqual(["R-A block", "R-B leaf", "R-C only"]);
   });
 
-  test("it.skip, test.todo, it.skipIf and xit do not count", () => {
+  test("R-GATE-REGISTER it.skip, test.todo, it.skipIf and xit do not count", () => {
     const source = `it.skip("R-S1", () => {}); test.todo("R-S2"); test.skipIf(true)("R-S3", () => {}); xit("R-S4", () => {});`;
     expect(titlesOf(source)).toEqual([]);
   });

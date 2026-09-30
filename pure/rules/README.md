@@ -48,6 +48,10 @@ Never add a rule here that a decision did not make: the register records decisio
 - `bun rules/checks/frozen.ts` fails when the tree differs from og at `566c850` under `core/` or `jurisdictions/` in any way (edit, delete, rename out, mode change, untracked file, non-ASCII path). The allowlist is empty for good; a failing git is red.
 - `bun pure/rules/checks/folder-width.ts` is the root `check:folder-width`, and `bun rules/check.ts` runs it too: og's limits and debt table (copied at `566c850`, plus `contracts/contracts` and the generated contracts folders), on the files git lists (tracked plus untracked, never ignored), so a dev machine's gitignored folders (`contracts/.typechain-hardhat`, `contracts/lib/forge-std`) do not widen a folder. It does not read og's script.
 
+## The gate's own tests are registered
+
+Rows `R-GATE-REGISTER`, `R-GATE-FROZEN`, `R-GATE-STYLE`, `R-GATE-WIDTH` and `R-GATE-COMPOSE` hold the gate's fools as named ts killers (the ts layer reads `pure/rules/` tests too). A skipped or deleted fool is a missing name, so the register gate is red. `rules/checks/compose.ts` turns the parts into one exit code, and `compose.test.ts` runs the real command over a scratch copy of `pure/` with a planted throw and a folder of 11 files.
+
 ## Known reds that are og's
 
 - `tests/unit/runtime-folder-width.test.ts` (root) imports og's `core/scripts/checks/architecture/check-folder-width.ts`, which this branch keeps at `566c850`. Main carries a seven-line edit to that file (the generated `spec/arrival` and contracts folders excluded, `contracts/contracts` debt of 16); the revert takes it out, so the test "the repository has only the exact declared source-folder debt" fails with `FOLDER_TOO_WIDE spec/arrival/...`. It fails on og's side by design: `frozen.ts` has no exceptions, because "og is untouched" is worth nothing as a gate with one. No gate of ours loads it (`gate:rules`, `bun test` in `pure/`, `check:folder-width`, `tsc`, `style/check.ts` read `pure/`, `core/`/`jurisdictions/` by git, and nothing under `tests/unit/`). If a runner ever picks it up, exclude it in our gate config, never in og.

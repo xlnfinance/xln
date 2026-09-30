@@ -1,6 +1,6 @@
 // Each test plants a fool in a scratch tree and asks the gate whether it notices.
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { compare, declarationSpans, deadExports, isOff, longLines, wordsOf } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
@@ -88,5 +88,41 @@ describe("the tree gate over a scratch tree", () => {
     const file = { "a.ts": "export const a = () => { throw new Error('x'); };\n", ...used("a") };
     expect(failing(file, { "no-throw": { "kernel/a.ts": 1 } })).toEqual([]);
     expect(failing({ "a.ts": "export const a = 1;\n", ...used("a") }, { "no-throw": { "kernel/a.ts": 1 } })).toEqual(["no-throw kernel/a.ts"]);
+  });
+});
+
+describe("the gate cannot be satisfied by doing nothing", () => {
+  const clean = { "a.ts": "export const a = 1;\n", ...used("a") };
+
+  // Runs the gate with `ast-grep` replaced by a script, and puts PATH back afterwards.
+  const withStub = (script: string): boolean => {
+    const bin = mkdtempSync(`${tmpdir()}/stub-bin-`);
+    writeFileSync(`${bin}/ast-grep`, `#!/bin/sh\n${script}\n`);
+    chmodSync(`${bin}/ast-grep`, 0o755);
+    const before = process.env["PATH"];
+    process.env["PATH"] = `${bin}:${before}`;
+    try {
+      return treeStyle(scratch(clean)).failed;
+    } finally {
+      process.env["PATH"] = before;
+    }
+  };
+
+  test("R-GATE-STYLE an ast-grep that exits 0 and prints nothing fails the gate", () => expect(withStub("exit 0")).toBe(true));
+  test("an ast-grep killed by a signal fails the gate", () => expect(withStub("kill -9 $$")).toBe(true));
+  test("an ast-grep that exits 2 fails the gate", () => expect(withStub("exit 2")).toBe(true));
+
+  // A scan that prints the canary's hit and then dies is still a failed scan: the answer is not to be trusted.
+  const PRINTS_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"}]"';
+  test("an ast-grep that prints the canary hit but exits 2 fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nexit 2`)).toBe(true));
+  test("an ast-grep that prints the canary hit and is then killed fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nkill -9 $$`)).toBe(true));
+  test("an ast-grep that prints the canary hit and exits 0 passes a clean tree", () => expect(withStub(`${PRINTS_CANARY}\nexit 0`)).toBe(false));
+  test("the real ast-grep passes a clean tree", () => expect(treeStyle(scratch(clean)).failed).toBe(false));
+
+  test("a directory under pure/ that is neither gated nor named as outside the gate is a failing row", () => {
+    const root = scratch(clean);
+    mkdirSync(`${root}/account`);
+    writeFileSync(`${root}/account/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
+    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir account");
   });
 });

@@ -16,7 +16,7 @@ describe("frozen gate: paths", () => {
     expect(frozenTouches(paths)).toEqual(["core/runtime.ts", "jurisdictions/contracts/Depository.sol"]);
   });
 
-  test("the allowlist is empty for good", () => expect(ALLOWED_DRIFT).toEqual([]));
+  test("R-GATE-FROZEN the allowlist is empty for good", () => expect(ALLOWED_DRIFT).toEqual([]));
 });
 
 // A scratch repository standing in for og: a pinned commit with files under both frozen roots.
@@ -147,7 +147,7 @@ describe("folder width report over a real git checkout (the part the single gate
     return repo;
   };
 
-  test("a folder of 11 untracked source files is red and names the folder", () => {
+  test("R-GATE-WIDTH a folder of 11 untracked source files is red and names the folder", () => {
     const report = folderWidthReport(checkout(11), {});
     expect(report.failed).toBe(true);
     expect(report.lines).toContain("FOLDER_TOO_WIDE w:11 > 10");

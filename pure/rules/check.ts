@@ -5,6 +5,7 @@
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
 //   --base <ref>             the ref the register may only grow from (default origin/main)
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
+//   --width-only             run only folder width (rules/checks/folder-width.ts)
 // Runs the register gate, the style gate of the new tree and folder width (rules/checks/folder-width.ts): one
 // command, one exit code.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
@@ -18,6 +19,7 @@ import { parseRegister } from "./register.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
+import { gateExit } from "./checks/compose.ts";
 import { folderWidthReport } from "./checks/folder-width.ts";
 import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
@@ -26,19 +28,21 @@ const repoRoot = `${here}/../..`;
 
 const args = process.argv.slice(2);
 
-const runStyle = (): number => {
+// Each returns whether its part passed.
+const runStyle = (): boolean => {
   const style = treeStyle(`${here}/..`);
   console.log(renderTreeStyle(style));
-  return style.failed ? 1 : 0;
+  return !style.failed;
 };
 
-const runFolderWidth = (): number => {
+const runFolderWidth = (): boolean => {
   const report = folderWidthReport(repoRoot);
   report.lines.forEach((line) => console.log(line));
-  return report.failed ? 1 : 0;
+  return !report.failed;
 };
 
-if (args.includes("--style-only")) process.exit(runStyle());
+if (args.includes("--style-only")) process.exit(gateExit({ register: true, style: runStyle(), width: true }));
+if (args.includes("--width-only")) process.exit(gateExit({ register: true, style: true, width: runFolderWidth() }));
 
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
@@ -86,7 +90,10 @@ const checked = evaluate(parsed.value, names);
 const evaluation = { ...checked, problems: [...checked.problems, ...grown.problems] };
 console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
 grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
-const registerFailed = evaluation.problems.length > 0;
 // The matrix is for review/; the other gates run with the plain gate.
-const others = args.includes("--matrix") ? [] : [runStyle(), runFolderWidth()];
-process.exit(registerFailed || others.includes(1) ? 1 : 0);
+const matrixOnly = args.includes("--matrix");
+process.exit(gateExit({
+  register: evaluation.problems.length === 0,
+  style: matrixOnly || runStyle(),
+  width: matrixOnly || runFolderWidth(),
+}));

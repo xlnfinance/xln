@@ -1550,6 +1550,211 @@
      "owed": "#44"
     }
    ]
+  },
+  {
+   "id": "R-GATE-REGISTER",
+   "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-REGISTER it.skip, test.todo, it.skipIf and xit do not count"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "describe.skip drops itself and the tests inside it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an empty test file named after a rule carries nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: the owed cell is already carried, so it must be promoted to hold"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a named killer that no name matches"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a row deleted"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: hold weakened to owed; owed weakened to absent"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-FROZEN",
+   "statement": "Nothing under core/ or jurisdictions/ differs from og 566c850 in any way, with an empty allowlist, and a failing git is red.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-FROZEN the allowlist is empty for good"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rename out of core/ is caught: the old path is listed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a deletion, a mode change, a dirty edit and an untracked file are caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing git is red, never ok: an unknown pin is an error"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-STYLE",
+   "statement": "The new tree sits at zero on every style rule except registered exceptions used exactly; a scan that did not run cannot pass, and a new directory under pure/ is gated until it is named as outside the gate.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-STYLE an ast-grep that exits 0 and prints nothing fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ast-grep killed by a signal fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ast-grep that prints the canary hit but exits 2 fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a directory under pure/ that is neither gated nor named as outside the gate is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw, a dead export and a positional boolean each fail by name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an exception fails unless its count is exactly used: too many hits, or a stale row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a bare true, false or undefined passed to a function is a hit"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-WIDTH",
+   "statement": "No folder holds more than ten direct source files except at its recorded debt, counted on the files git lists, and a directory that is not a git checkout is red.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-WIDTH a folder of 11 untracked source files is red and names the folder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "too wide without debt is red; the debt must match exactly; an unused debt is stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a directory that is not a git checkout is red, not an empty pass"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-COMPOSE",
+   "statement": "bun rules/check.ts is one command whose exit code is red when the register, the style gate or folder width is red, each alone.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-COMPOSE a failing register alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing style gate alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing folder width alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw planted in kernel/ exits 1 and names the file"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw planted in chain/ exits 1 (chain is inside the gate)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a folder of 11 source files exits 1 and names the folder"
+    }
+   ]
   }
  ]
 }
