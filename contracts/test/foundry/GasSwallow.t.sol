@@ -6,7 +6,7 @@ import "../../contracts/DeltaTransformer.sol";
 import "../../contracts/EntityProvider.sol";
 import "../../contracts/EntityTypes.sol";
 
-/// @notice Out-of-gas is never evidence (contracts-decisions.md, "Swallowed failures"). DeltaTransformer._decodeArguments guards its
+/// @notice R-OOG: out-of-gas is never evidence (contracts-decisions.md, "Swallowed failures"). DeltaTransformer._decodeArguments guards its
 ///         swallowing try/catch with `gasleft() >= 50_000 + 8 * length`. This measures what the decode really costs, for both array
 ///         shapes of the evidence, up to the size Account lets through (64 KiB per side), and fails if the guard is ever smaller than
 ///         the need: a decode that runs out of gas below the guard would read as "no evidence" at a gas limit the relayer chose.
@@ -57,12 +57,12 @@ contract GasSwallowTest is Test {
     assertLe(need * 64 / 63, guard, string.concat(shape, ": the guard is below what the decode needs"));
   }
 
-  function test_guardCoversEveryFillRatioSize() public view {
+  function test_R_OOG_guardCoversEveryFillRatioSize() public view {
     uint256[5] memory sizes = [uint256(0), 1, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
     for (uint256 i = 0; i < sizes.length; i++) _assertGuardCovers(_ratios(sizes[i]), "fillRatios");
   }
 
-  function test_guardCoversEverySecretSize() public view {
+  function test_R_OOG_guardCoversEverySecretSize() public view {
     uint256[5] memory sizes = [uint256(0), 1, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
     for (uint256 i = 0; i < sizes.length; i++) _assertGuardCovers(_secrets(sizes[i]), "secrets");
   }
@@ -126,7 +126,7 @@ contract HankoMemberGasSwallowTest is Test {
     return (true, entity, valid);
   }
 
-  function test_starvedMemberIsInvalidAtTheVerifierAndARevertAtTheConsumer() public {
+  function test_R_OOG_starvedMemberIsInvalidAtTheVerifierAndARevertAtTheConsumer() public {
     bytes32 hash = keccak256("member-gas");
     bytes memory h = _hanko(claimedEntity);
     (bool okFull, bytes32 entityFull, bool validFull) = _verify(h, hash, 8_000_000);

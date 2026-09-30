@@ -1,4 +1,4 @@
-// Out-of-gas is never a normal outcome (contracts-decisions.md, "Swallowed failures"). Every try/catch and every low-level call in the deployed
+// R-OOG: out-of-gas is never a normal outcome (contracts-decisions.md, "Swallowed failures"). Every try/catch and every low-level call in the deployed
 // contracts is a place where a failed callee can be read as something else, and a callee that fails for want of gas is the relayer's choice. Each
 // one was audited once (the table in the decisions doc says what became of it). This fails when a new one appears or an audited one goes away, so
 // the next one is audited too: add its row to the decisions doc, put a gas guard or a test on it, then update the count here.
@@ -35,7 +35,7 @@ const AUDITED: Readonly<Record<string, number>> = {
   "HankoVerifier.sol": 1,
 };
 
-describe("swallowed failures: every try/catch and low-level call is audited", () => {
+describe("R-OOG swallowed failures: every try/catch and low-level call is audited", () => {
   test("the deployed contracts have exactly the audited sites", () => {
     const found = Object.fromEntries(
       sources(root)

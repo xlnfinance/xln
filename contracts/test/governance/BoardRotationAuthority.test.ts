@@ -259,7 +259,7 @@ describe('EntityProvider settled CONTROL governance', function () {
     return outcomes;
   };
 
-  it('never turns a gas-starved control-lane read into a pass', async function () {
+  it('R-OOG: never turns a gas-starved control-lane read into a pass', async function () {
     this.timeout(300_000);
     const majority = await sweep(await fixture(60n), 'gas-majority');
     const firstPass = majority.findIndex((o) => o.ok);

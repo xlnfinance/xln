@@ -91,6 +91,6 @@ describe("relayer gas vs a finalize that reads swallowed evidence", () => {
     expect(seen.get("UNPAID")?.n ?? 0).toBe(0);
     expect(seen.get("OTHER")?.n ?? 0).toBe(0);
   };
-  test(`starter evidence = the secret + ${N} junk secrets: every tx gas limit is PAID or reverts, never UNPAID`, () => scanShape(N, "secrets"), 3_000_000);
-  test(`starter evidence = the secret + ${N_RATIOS} junk fill ratios (the cap): every tx gas limit is PAID or reverts, never UNPAID`, () => scanShape(N_RATIOS, "ratios"), 3_000_000);
+  test(`R-OOG: starter evidence = the secret + ${N} junk secrets: every tx gas limit is PAID or reverts, never UNPAID`, () => scanShape(N, "secrets"), 3_000_000);
+  test(`R-OOG: starter evidence = the secret + ${N_RATIOS} junk fill ratios (the cap): every tx gas limit is PAID or reverts, never UNPAID`, () => scanShape(N_RATIOS, "ratios"), 3_000_000);
 });
