@@ -6,22 +6,27 @@ import "../../contracts/DeltaTransformer.sol";
 import "../../contracts/EntityProvider.sol";
 import "../../contracts/EntityTypes.sol";
 
-/// @notice R-OOG: out-of-gas is never evidence (contracts-decisions.md, "Swallowed failures"). DeltaTransformer._decodeArguments guards its
-///         swallowing try/catch with `gasleft() >= 50_000 + 8 * length`. This measures what the decode really costs, for both array
-///         shapes of the evidence, up to the size Account lets through (64 KiB per side), and fails if the guard is ever smaller than
-///         the need: a decode that runs out of gas below the guard would read as "no evidence" at a gas limit the relayer chose.
-///         The fill-ratio shape (uint16[], validated and copied per element) is the dearer one per byte, and the one the vm scan
-///         (`j5-fifth-transformer-gas.test.ts`) does not use.
+/// @notice R-OOG: out-of-gas is never evidence (contracts-decisions.md, "Swallowed failures"). DeltaTransformer._decodeArguments has two checks:
+///         the BOUND is the post-catch check (a caught failure that left the caller 1/64 of its gas was starved: revert), proved end to end by
+///         GasGuardUnpaidTest and ReviewBApplyBatchScan. The pre-call floor `DECODE_GAS_BASE + DECODE_GAS_PER_BYTE * length` is a fast path: it
+///         makes a starved plain decode revert before it burns the gas. This file binds both to the DEPLOYED contract (constants read from it,
+///         never copied here): the floor covers what a plain decode costs with 10% to spare, at every size and both array shapes up to 64 KiB
+///         (a floor within 10% of the need, or below it, is not a fast path: starved calls burn the gas before the post-catch check reverts them),
+///         and with the floor present a starved call is cheap (measured through applyBatch).
 contract GasSwallowTest is Test {
   DeltaTransformer internal decoder;
 
-  uint256 internal constant GUARD_BASE = 50_000;
-  uint256 internal constant GUARD_PER_BYTE = 8;
   /// Account.sol:362 MAX_DISPUTE_STARTER_ARGUMENT_BYTES: a side's arguments (the `bytes[]` wrapper holding this evidence) are at most 64 KiB.
   uint256 internal constant MAX_EVIDENCE_BYTES = 64 * 1024;
+  bytes32 internal constant SECRET = keccak256("gas-swallow-secret");
 
   function setUp() public {
     decoder = new DeltaTransformer();
+    vm.warp(2000);
+  }
+
+  function _floor(uint256 length) internal view returns (uint256) {
+    return decoder.DECODE_GAS_BASE() + decoder.DECODE_GAS_PER_BYTE() * length;
   }
 
   function _ratios(uint256 n) internal pure returns (bytes memory) {
@@ -49,22 +54,46 @@ contract GasSwallowTest is Test {
     return hi;
   }
 
-  /// The try frame hands the callee 63/64 of what is left at the call, so the guard covers the decode when guard * 63/64 is above the need.
-  function _assertGuardCovers(bytes memory evidence, string memory shape) internal view {
+  /// The try frame hands the callee 63/64 of what is left at the call; the floor must cover that need with 10% to spare.
+  function _assertFloorCovers(bytes memory evidence, string memory shape) internal view {
     uint256 need = _decodeNeed(evidence);
-    uint256 guard = GUARD_BASE + GUARD_PER_BYTE * evidence.length;
+    uint256 floor = _floor(evidence.length);
     console.log(shape, evidence.length, need);
-    assertLe(need * 64 / 63, guard, string.concat(shape, ": the guard is below what the decode needs"));
+    assertGe(floor * 100, need * 64 / 63 * 110, string.concat(shape, ": the floor is not 10% above what the decode needs"));
   }
 
-  function test_R_OOG_guardCoversEveryFillRatioSize() public view {
-    uint256[5] memory sizes = [uint256(0), 1, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
-    for (uint256 i = 0; i < sizes.length; i++) _assertGuardCovers(_ratios(sizes[i]), "fillRatios");
+  function test_R_OOG_floorCoversEveryFillRatioSize() public view {
+    uint256[5] memory sizes = [uint256(1), 10, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
+    for (uint256 i = 0; i < sizes.length; i++) _assertFloorCovers(_ratios(sizes[i]), "fillRatios");
   }
 
-  function test_R_OOG_guardCoversEverySecretSize() public view {
-    uint256[5] memory sizes = [uint256(0), 1, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
-    for (uint256 i = 0; i < sizes.length; i++) _assertGuardCovers(_secrets(sizes[i]), "secrets");
+  function test_R_OOG_floorCoversEverySecretSize() public view {
+    uint256[5] memory sizes = [uint256(1), 10, 100, 1700, (MAX_EVIDENCE_BYTES - 128) / 32];
+    for (uint256 i = 0; i < sizes.length; i++) _assertFloorCovers(_secrets(sizes[i]), "secrets");
+  }
+
+  function _applyBatch(uint256 gas_, bytes memory evidence) internal view returns (bool ok, uint256 burned) {
+    DeltaTransformer.Payment[] memory pays = new DeltaTransformer.Payment[](1);
+    pays[0] = DeltaTransformer.Payment({deltaIndex: 0, amount: SignedAmount(false, 50), revealedUntilTimestamp: 1000, hash: keccak256(abi.encode(SECRET))});
+    bytes memory batch = decoder.encodeBatch(DeltaTransformer.Batch({payment: pays, swap: new DeltaTransformer.Swap[](0), pull: new DeltaTransformer.Pull[](0)}));
+    Int768[] memory deltas = new Int768[](1);
+    uint256[] memory ids = new uint256[](1);
+    bytes memory data = abi.encodeCall(decoder.applyBatch, (deltas, ids, batch, evidence, "", 500, 500, bytes32(uint256(1)), bytes32(uint256(2)), 0, 0, 0, 0));
+    address target = address(decoder);
+    uint256 before_ = gasleft();
+    (ok,) = target.staticcall{gas: gas_}(data);
+    burned = before_ - gasleft();
+  }
+
+  /// A limit just under the floor is refused BEFORE the decode burns the gas: the call costs a few tens of thousands, not the limit. Without the floor
+  /// the starved self-call burns 63/64 of the limit before the post-catch check reverts it, so a deleted (or weakened) floor fails here.
+  function test_R_OOG_belowTheFloorTheCallRevertsBeforeItBurnsTheGas() public view {
+    bytes memory evidence = _ratios((MAX_EVIDENCE_BYTES - 128) / 32);
+    uint256 limit = _floor(evidence.length) - 10_000;
+    (bool ok, uint256 burned) = _applyBatch(limit, evidence);
+    console.log("limit / burned", limit, burned);
+    assertFalse(ok, "a call below the floor reverts");
+    assertLt(burned, limit / 4, "the floor refuses the call before the decode burns the gas");
   }
 }
 

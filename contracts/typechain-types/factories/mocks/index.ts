@@ -8,6 +8,7 @@ export { ERC1271Mock__factory } from "./ERC1271Mock__factory";
 export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarness__factory";
 export { FeeOnTransferERC20__factory } from "./FeeOnTransferERC20__factory";
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";
+export { MisbehavingShareDepository__factory } from "./MisbehavingShareDepository__factory";
 export { MockEntityProvider__factory } from "./MockEntityProvider__factory";
 export { MockRevealRegistry__factory } from "./MockRevealRegistry__factory";
 export { SupplyLivenessHarness__factory } from "./SupplyLivenessHarness__factory";

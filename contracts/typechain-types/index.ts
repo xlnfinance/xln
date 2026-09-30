@@ -68,6 +68,8 @@ export type { FeeOnTransferERC20 } from "./mocks/FeeOnTransferERC20";
 export { FeeOnTransferERC20__factory } from "./factories/mocks/FeeOnTransferERC20__factory";
 export type { HashLadderHarness } from "./mocks/HashLadderHarness";
 export { HashLadderHarness__factory } from "./factories/mocks/HashLadderHarness__factory";
+export type { MisbehavingShareDepository } from "./mocks/MisbehavingShareDepository";
+export { MisbehavingShareDepository__factory } from "./factories/mocks/MisbehavingShareDepository__factory";
 export type { MockEntityProvider } from "./mocks/MockEntityProvider";
 export { MockEntityProvider__factory } from "./factories/mocks/MockEntityProvider__factory";
 export type { MockRevealRegistry } from "./mocks/MockRevealRegistry";
