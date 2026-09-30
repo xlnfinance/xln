@@ -24,7 +24,7 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
-import { haltDeparture } from "./departures.ts";
+import { afterStricter, haltDeparture, stricterDeparture, type FarLock, type FrameDiff, type OgAccountTx, type OgFrameClock } from "./departures.ts";
 import {
   canonicalEntityHashes,
   convertOutput,
@@ -583,11 +583,11 @@ export const createLane = (cfg: LaneConfig): Lane => {
     if (!committed.ok) return [`${label} rewrite refused the frame: ${stableJson(committed.error)}`];
     const c = committed.value;
     const after = c === null ? rt : c.runtime;
-    const diffs: string[] = [];
+    const found: FrameDiff[] = [];
     const cmp = (what: string, og: unknown, rw: unknown): void => {
       leafDiffs(plain(og), plain(rw), "", [], 1000)
         .slice(0, Number(process.env["SCN_DIFFS"] ?? 6))
-        .forEach((d) => diffs.push(`${label} ${what}${d}`));
+        .forEach((d) => found.push({ what, text: `${label} ${what}${d}` }));
     };
     cmp("height", env.state.height, Number(after.height));
     cmp("timestamp", env.state.timestamp, Number(after.timestamp));
@@ -652,6 +652,20 @@ export const createLane = (cfg: LaneConfig): Lane => {
         proposal?.frame.accountTxs.forEach((a) => coverage.accountTxs.add(a.type));
       }),
     );
+    // og accepted a tx the rewrite refuses on purpose (departures.ts): the states differ from here, so the walk ends
+    const far = [...ogRouted, ...ogRemote]
+      .flatMap((routed) => routed.entityTxs ?? [])
+      .flatMap((tx): readonly FarLock[] => {
+        const input = tx.type === "accountInput"
+          ? (tx.data as { fromEntityId: string; proposal?: { frame: OgFrameClock & { accountTxs: OgAccountTx[] } } })
+          : undefined;
+        const frame = input?.proposal?.frame;
+        return (frame?.accountTxs ?? []).flatMap((a) => {
+          const departure = stricterDeparture(a, frame!);
+          const proposer = names[ids.indexOf(input!.fromEntityId as EntityId)] ?? input!.fromEntityId.slice(-4);
+          return departure === undefined ? [] : [{ departure, lockId: String(a.data?.lockId), proposerName: proposer }];
+        });
+      })[0];
     if (rec !== undefined) coverage.frames += 1;
     if (c !== null) {
       input.entityInputs.forEach(({ input: i }) =>
@@ -663,7 +677,7 @@ export const createLane = (cfg: LaneConfig): Lane => {
     // og's own queue precedes its I/O results: the post-commit submit and the watcher run after the host re-queues
     const firstIo = ogQueued.findIndex((tx) => IO_TXS.has(tx.type));
     cmp("queueOrder", ogQueued.slice(firstIo < 0 ? ogQueued.length : firstIo).every((tx) => IO_TXS.has(tx.type)), true);
-    if (tracing() && diffs.length > 0) {
+    if (tracing() && found.length > 0) {
       console.log(`OG ROUTED ${routedLine(ogRouted)}\nRW ROUTED ${routedLine(rwRouted)}`);
       console.log(`OG REMOTE ${routedLine(ogRemote)}\nRW REMOTE ${routedLine(c?.runtimeOutputs ?? [])}`);
       if (c !== null && c.rejected.length > 0) console.log("RW REJECTED", stableJson(c.rejected).slice(0, 3000));
@@ -704,7 +718,10 @@ export const createLane = (cfg: LaneConfig): Lane => {
         });
       pending = slotted(continuations);
     }
-    return diffs;
+    if (far === undefined) return found.map((d) => d.text);
+    const reported = [...afterStricter(found, far, after)];
+    if (reported.length === 0) coverage.departures.push(`${label} ${far.departure.name}`);
+    return reported;
   };
 
   const drain = (): Outgoing => {

@@ -248,7 +248,7 @@ describe(seedTag("account-tx: direct_payment envelope (route, deliveryMode, trus
 const HEX_SECRET = word("5a");
 const ogLockTx = (patch: Record<string, unknown> = {}) => ({
   type: "htlc_lock",
-  data: { lockId: hashHtlcSecret(HEX_SECRET), hashlock: hashHtlcSecret(HEX_SECRET), timelock: 10n ** 15n, revealBeforeHeight: 5, amount: 5n, tokenId: 1, ...patch },
+  data: { lockId: hashHtlcSecret(HEX_SECRET), hashlock: hashHtlcSecret(HEX_SECRET), timelock: 10n ** 8n, revealBeforeHeight: 5, amount: 5n, tokenId: 1, ...patch },
 }) as any;
 const ogClock = (ts = 1, jh = 0) => ({ committedTimestamp: ts, enforcementTimestamp: ts, enforcementJHeight: jh });
 const lockedOg = async () => {
@@ -267,7 +267,7 @@ const pick3 = <X,>(xs: readonly X[]): X => xs[ri(xs.length)] as X;
 const selfRng = prng(0x5e1f);
 const pickSelf = (): string => (selfRng() < 0.5 ? A : B);
 const secretOf = (i: number) => `0x${i.toString(16).padStart(64, "0")}`;
-const rwLock = (secret: string, patch: Record<string, unknown> = {}) => ({ type: "htlc_lock", lockId: hashHtlcSecret(secret), hashlock: hashHtlcSecret(secret), timelock: 10n ** 15n, revealBeforeHeight: 5n, amount: 5n, tokenId: "1", ...patch });
+const rwLock = (secret: string, patch: Record<string, unknown> = {}) => ({ type: "htlc_lock", lockId: hashHtlcSecret(secret), hashlock: hashHtlcSecret(secret), timelock: 10n ** 8n, revealBeforeHeight: 5n, amount: 5n, tokenId: "1", ...patch });
 
 describe(seedTag("account-tx: htlc"), () => {
   test("MATCH: hashlock = keccak256(bytes32 secret); a non-32-byte secret is refused by both", async () => {
