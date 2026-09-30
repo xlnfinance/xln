@@ -4,8 +4,8 @@
 // different values never share an encoding. Maps, sets and object fields are ordered by the encoding of their keys,
 // and an undefined field is absent.
 import { bytesToHex, concat, minimalBytes, utf8 } from "./bytes.ts";
-import { err, flatMap, map, ok, traverse, type Result } from "./result.ts";
-import type { Tagged } from "./tagged.ts";
+import { err, flatMap, map, ok, traverse, type Result } from "../core/result.ts";
+import type { Tagged } from "../core/tagged.ts";
 
 export type CanonicalValueFault = Tagged<"non_finite_number" | "unsupported_type" | "invalid_utf8">;
 export type Rlp = Uint8Array | readonly Rlp[];

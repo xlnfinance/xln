@@ -7,19 +7,19 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
-import { bytesToHex, hexToBytes } from "../kernel/bytes.ts";
-import { unwrapOr, type Result } from "../kernel/result.ts";
+import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
+import { unwrapOr, type Result } from "../../kernel/core/result.ts";
 import { deployment, accountKey } from "./deployment.ts";
-import { encodeDeltaBatch, type DeltaBatch } from "./clauses.ts";
+import { encodeDeltaBatch, type DeltaBatch } from "../batch/clauses.ts";
 import { argumentsCommitment, counterProofCommitment, disputeRecordHash, finalizationEvidenceHash } from "./dispute.ts";
-import type { SettlementDiff } from "./money.ts";
+import type { SettlementDiff } from "../money.ts";
 import {
   accountMessageHash, accountMessagePayload, batchHash, batchPayloadUnder, type AccountMessage,
 } from "./payload.ts";
 import { proofBodyBytes, proofBodyHash, type ProofBody } from "./proof.ts";
 
 const committed = (name: string) =>
-  JSON.parse(readFileSync(new URL(`../../contracts/vectors/${name}.json`, import.meta.url), "utf8"));
+  JSON.parse(readFileSync(new URL(`../../../contracts/vectors/${name}.json`, import.meta.url), "utf8"));
 type Vector = { function: string; label: string; args: any[]; returnData: string; decoded: any };
 const vectorsFor = (fn: string): Vector[] => {
   const found = committed("functions").vectors.filter((v: Vector) => v.function.startsWith(`${fn}(`));

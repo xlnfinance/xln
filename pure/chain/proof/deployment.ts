@@ -2,9 +2,9 @@
 //
 // The contracts bind every signed payload to the chain id and to their own address, so a signature for one deployment
 // can never be replayed on another. A `Deployment` is that pair, validated once; the payload encoders take it whole.
-import { err, flatMap, ok, type Result } from "../kernel/result.ts";
-import { checksum } from "../kernel/signature.ts";
-import type { Tagged } from "../kernel/tagged.ts";
+import { err, flatMap, ok, type Result } from "../../kernel/core/result.ts";
+import { checksum } from "../../kernel/crypto/signature.ts";
+import type { Tagged } from "../../kernel/core/tagged.ts";
 
 export type Deployment = Readonly<{ chainId: bigint; depository: string }>;
 export type DeploymentFault = Tagged<"bad_chain_id" | "bad_depository" | "bad_checksum" | "zero_depository">;

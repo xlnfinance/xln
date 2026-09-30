@@ -9,15 +9,15 @@
 // authentication takes the current board only, dispute evidence also the retired boards that still live).
 import { abiBytes, abiBytesElement, abiCursorOk, abiFits, abiLengthRef, abiLengthWord, abiRoot, abiStaticBytes,
   abiStaticWord, abiTupleBytes, abiTupleElement, abiTupleRef, abiWord, type AbiLength, type AbiTuple,
-} from "../kernel/abi-read.ts";
-import type { AbiFault } from "../kernel/abi.ts";
-import { bytesToHex, hexToBytes } from "../kernel/bytes.ts";
-import { none, orElse, some, type Option } from "../kernel/option.ts";
+} from "../../kernel/encoding/abi-read.ts";
+import type { AbiFault } from "../../kernel/encoding/abi.ts";
+import { bytesToHex, hexToBytes } from "../../kernel/encoding/bytes.ts";
+import { none, orElse, some, type Option } from "../../kernel/core/option.ts";
 import {
   err, everyResult, flatMap, foldResult, map, mapAccum, mapErr, ok, traverse, type Result,
-} from "../kernel/result.ts";
-import { addressOf, recoverPublicKey } from "../kernel/signature.ts";
-import { match, type Tagged } from "../kernel/tagged.ts";
+} from "../../kernel/core/result.ts";
+import { addressOf, recoverPublicKey } from "../../kernel/crypto/signature.ts";
+import { match, type Tagged } from "../../kernel/core/tagged.ts";
 import {
   addressAsId, boardHash, encodeHanko, isLowS, isZeroWord, lazyEntityId, packedCount, paddingClear,
   recoverRawSigner, unpackSignature, type Hanko, type HankoClaim, type RawFault,

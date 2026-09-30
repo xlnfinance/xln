@@ -3,12 +3,12 @@
 // Every payload starts with the deployment it is for. An Account message also carries the Account's key, its ondelta
 // epoch and a nonce, so a signature binds one Account, one baseline and one moment in its history (C1). A batch
 // payload carries the acting Entity (C2).
-import { A, encode, encodePacked, P, type AbiFault } from "../kernel/abi.ts";
-import { bytesToHex, keccak256, keccakHex, utf8 } from "../kernel/bytes.ts";
-import { map, type Result } from "../kernel/result.ts";
-import { match, type Tagged } from "../kernel/tagged.ts";
+import { A, encode, encodePacked, P, type AbiFault } from "../../kernel/encoding/abi.ts";
+import { bytesToHex, keccak256, keccakHex, utf8 } from "../../kernel/encoding/bytes.ts";
+import { map, type Result } from "../../kernel/core/result.ts";
+import { match, type Tagged } from "../../kernel/core/tagged.ts";
 import type { Deployment } from "./deployment.ts";
-import { settlementDiffsAbi, type SettlementDiff } from "./money.ts";
+import { settlementDiffsAbi, type SettlementDiff } from "../money.ts";
 
 /** Types.sol `MessageType`: the word an Account message opens with. */
 const MESSAGE_TYPE = { cooperative_update: 0n, dispute_proof: 1n } as const;

@@ -44,7 +44,7 @@ New rules:
 
 ## Registered exceptions in the new tree
 
-- `no-mutating-call`, `kernel/result.ts`: `mapAccumResult` fills one array that it created and hands out once after the last push. `[...ys, y]` makes every fold and `traverse` quadratic. Same reason as the legacy exception above.
-- `no-throw`, `kernel/tagged.ts`: `assertNever`, the exhaustiveness backstop of `match`. It is reachable only when a value outside its declared type reaches a table, which TypeScript forbids; a return value there would hide the bug.
-- `no-try`, `kernel/signature.ts`: `recoverPublicKey` calls the curve library, which throws on a malformed signature. The catch is the one place a thrown fault becomes a `Result`; no pure expression tells a recoverable signature from an unrecoverable one without attempting the recovery.
-- `no-boolean-param`, `kernel/abi.ts` (2): `A.bool` and `P.bool` are value constructors: the boolean is the ABI value being encoded, not a mode switch on behaviour.
+- `no-mutating-call`, `kernel/core/result.ts`: `mapAccumResult` fills one array that it created and hands out once after the last push. `[...ys, y]` makes every fold and `traverse` quadratic. Same reason as the legacy exception above.
+- `no-throw`, `kernel/core/tagged.ts`: `assertNever`, the exhaustiveness backstop of `match`. It is reachable only when a value outside its declared type reaches a table, which TypeScript forbids; a return value there would hide the bug.
+- `no-try`, `kernel/crypto/signature.ts`: `recoverPublicKey` calls the curve library, which throws on a malformed signature. The catch is the one place a thrown fault becomes a `Result`; no pure expression tells a recoverable signature from an unrecoverable one without attempting the recovery.
+- `no-boolean-param`, `kernel/encoding/abi.ts` (2): `A.bool` and `P.bool` are value constructors: the boolean is the ABI value being encoded, not a mode switch on behaviour.

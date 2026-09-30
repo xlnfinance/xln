@@ -2,11 +2,11 @@
 //
 // The fork's batch opens with the signed gas budget (J5). Each operation list keeps the contract's name and field
 // order, because the ABI encoding is positional: moving a field changes every byte after it.
-import { A, arrayOf, encode, type Abi, type AbiFault } from "../kernel/abi.ts";
-import { bytesToHex } from "../kernel/bytes.ts";
-import { map, type Result } from "../kernel/result.ts";
-import { settlementDiffsAbi, type SettlementDiff } from "./money.ts";
-import { proofBodyAbi, type ProofBody } from "./proof.ts";
+import { A, arrayOf, encode, type Abi, type AbiFault } from "../../kernel/encoding/abi.ts";
+import { bytesToHex } from "../../kernel/encoding/bytes.ts";
+import { map, type Result } from "../../kernel/core/result.ts";
+import { settlementDiffsAbi, type SettlementDiff } from "../money.ts";
+import { proofBodyAbi, type ProofBody } from "../proof/proof.ts";
 
 export type ReserveToReserve = Readonly<{ receivingEntity: string; tokenId: bigint; amount: bigint }>;
 export type EntityAmount = Readonly<{ entity: string; amount: bigint }>;

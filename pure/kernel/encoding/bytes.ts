@@ -4,8 +4,8 @@
 // Nothing here throws. Text that is not hex is a value the caller can see: HexFault.
 import { bytesToHex as nobleHex, concatBytes, hexToBytes as nobleBytes } from "@noble/hashes/utils";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { err, ok, type Result } from "./result.ts";
-import type { Tagged } from "./tagged.ts";
+import { err, ok, type Result } from "../core/result.ts";
+import type { Tagged } from "../core/tagged.ts";
 
 export type DigitsFault = Tagged<"odd_length", { digits: number }> | Tagged<"not_hex">;
 export type HexFault = Tagged<"no_prefix"> | DigitsFault;
