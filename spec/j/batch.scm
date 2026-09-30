@@ -81,6 +81,19 @@
 ;; cap (here `draft-cap` stands for the cap). `simulate-first` 1 makes `seal` simulate the batch it is about to sign
 ;; (bug `signs-before-gate`).
 ;;
+;; DEPOSITS AND FUNDED PAYMENTS (coordinator, 09-30 13:50; J6 family): a deposit leg travels alone and hard-reverts if
+;; its token fails (a paused token, `pauses` times). The Entity simulates at the head before it signs, so a deposit
+;; that cannot land (the token is paused) is NOT SIGNED: it is skipped and waits in the draft. Of the payments, only
+;; those the CURRENT reserve already covers, in order, go out; the rest wait with the deposit. An unfunded payment
+;; would soft-fail and burn a nonce every round (bugs `unfunded-payments`, `signs-paused-deposit`).
+;;
+;; DEBTS (coordinator, 09-30 13:50): the chain keeps an entity's debts as a queue. A reserve credit (a deposit leg) and
+;; the permissionless `enforceDebts` call pay them FIRST IN, FIRST OUT, at most `enforce-cap` debts cleared per call (the
+;; contract's cap is 32). The kept property: the SPENDABLE reserve nets ALL outstanding debt, the ones beyond the cap
+;; included, so a reserve op (r2c) applies only against reserve minus every outstanding debt (bugs `spends-owed-reserve`,
+;; `debts-lifo`, `debts-uncapped`). Debts arise elsewhere (a dispute shortfall, dispute/dispute.scm); here they are
+;; given in the initial world.
+;;
 ;; Faults: the chain may fail a batch that has no dispute op for a reason outside the batch (a reserve spent
 ;; elsewhere, a token pull refused), `faults` times, and drop a submitted batch, `drops` times. The
 ;; counterparty may move Account A to a new epoch elsewhere, `epoch-moves` times (a signature over epoch 0
@@ -101,6 +114,11 @@
 (define/overridable gas-starves (s/number) 0)
 ;; 1: the Entity signs a batch only after it simulated successfully at the head (Runtime rule, 01:16)
 (define/overridable simulate-first (s/number) 0)
+;; the token of deposit legs is paused for a while, `pauses` times (a paused token reverts a deposit leg)
+(define/overridable pauses (s/number) 0)
+(define/overridable leg-amount (s/number) 1)
+;; the contract clears at most 32 debts per call; a bound with a small cap shows what stays owed
+(define/overridable enforce-cap (s/number) 32)
 (define/overridable a-deadline (s/number) 1)
 (define/overridable max-time   (s/number) 2)
 (define/overridable ops (s/array (s/string)) (list "r1" "fin-a" "cnt-a"))
@@ -124,7 +142,9 @@
         :nonce 0 :reserve 3 :collateral 0 :applied (list) :skipped (list) :processed (list)
         :inbox (list) :events (list) :failures (list) :faults faults :drops drops
         :secret #f :finalized (list) :epoch 0 :moves 0 :returned (list) :gas gas-starves :starts (list)
-        :signed-max 0 :signed (list) :abandoned (list)))
+        :signed-max 0 :signed (list) :abandoned (list)
+        :paused #f :pauses 0 :seed 3 :debts (list) :debt0 0 :enforcements (list) :paid 0
+        :unfunded (list) :paused-signed (list)))
 
 ;; ---- the chain
 (define (batch nonce hash ops) (dict :nonce nonce :hash hash :ops ops))
@@ -146,22 +166,52 @@
 ;; tick before the deadline and the deadline second itself both wait; one tick after does not; a public
 ;; secret ends the wait at any time (bugs `h1-at-deadline`, `h1-ignores-secret`).
 (define (h1-wait-over? w) (or (:secret w) (> (:now w) a-deadline)))
+;; ---- debts (a queue of (dict :id :amount), oldest first) and the spendable reserve
+(define (total-debt w) (reduce (lambda (d acc) (+ acc (:amount d))) 0 (:debts w)))
+(define (net-reserve w) (max 0 (- (:reserve w) (total-debt w))))
+;; the reserve the ENTITY treats as spendable when it signs; the chain applies a reserve op only against `net-reserve`, so
+;; the Entity that counts owed money as its own signs a payment that fails (bug `spends-owed-reserve`: the raw reserve)
+(define (spendable w) (net-reserve w))
+;; the order the chain pays debts in: first in, first out (bug `debts-lifo`)
+(define (debt-order debts) debts)
+;; how many debts one call clears (bug `debts-uncapped`)
+(define (call-cap) enforce-cap)
+(define (finish-enforce w cleared updated reserve)
+  (if (= reserve (:reserve w))
+      w
+      (-> w (assoc-in (list :reserve) reserve)
+            (update-in (list :paid) (lambda (p) (+ p (- (:reserve w) reserve))))
+            (update-in (list :enforcements)
+                       (lambda (e) (append e (list (dict :queue (map (lambda (d) (:id d)) (:debts w)) :cleared cleared)))))
+            (assoc-in (list :debts)
+                      (map (lambda (d) (or (find (lambda (u) (= (:id u) (:id d))) updated) d))
+                           (filter (lambda (d) (not (member (:id d) cleared))) (:debts w)))))))
+(define (enforce w)
+  (let loop ((todo (debt-order (:debts w))) (reserve (:reserve w)) (n 0) (cleared (list)) (updated (list)))
+    (if (or (null? todo) (>= n (call-cap)) (<= reserve 0))
+        (finish-enforce w cleared updated reserve)
+        (let* ((d (car todo)) (pay (min reserve (:amount d))))
+          (if (= pay (:amount d))
+              (loop (cdr todo) (- reserve pay) (+ n 1) (append cleared (list (:id d))) updated)
+              (loop (cdr todo) (- reserve pay) (+ n 1) cleared
+                    (append updated (list (dict :id (:id d) :amount (- (:amount d) pay))))))))))
+
 ;; an op can apply now, given the reserve left after the earlier ops of the batch; a stale op is
 ;; skipped, so it is always fine
 (define (op-ok? w op reserve)
   (cond ((stale-op? w op) #t)
         ((finalize? op) (h1-wait-over? w))
         ((counter? op) #t)
-        ((leg? op) #t)
+        ((leg? op) (not (:paused w)))
         ((settle? op) (sig-ok? w op))
         (else (>= reserve 1))))
 (define (batch-ok? w ops)
-  (let loop ((rest ops) (reserve (:reserve w)) (applied (:applied w)))
+  (let loop ((rest ops) (reserve (net-reserve w)) (applied (:applied w)))
     (cond ((null? rest) #t)
           ((not (op-ok? (assoc-in w (list :applied) applied) (car rest) reserve)) #f)
           (else (loop (cdr rest)
                       (cond ((and (r2c? (car rest)) (not (member (car rest) applied))) (- reserve 1))
-                            ((leg? (car rest)) (+ reserve 1))
+                            ((leg? (car rest)) (+ reserve leg-amount))
                             (else reserve))
                       (if (stale-op? (assoc-in w (list :applied) applied) (car rest)) applied (append applied (list (car rest)))))))))
 (define (apply-op w op)
@@ -171,8 +221,8 @@
                (update-in (list :collateral) (lambda (c) (+ c 1)))
                (update-in (list :applied) (lambda (a) (append a (list op))))))
         ((leg? op)
-         (-> w (update-in (list :reserve) (lambda (r) (+ r 1)))
-               (update-in (list :applied) (lambda (a) (append a (list op))))))
+         (enforce (-> w (update-in (list :reserve) (lambda (r) (+ r leg-amount)))
+                        (update-in (list :applied) (lambda (a) (append a (list op)))))))
         ((start? op)
          (-> w (update-in (list :starts) (lambda (l) (append l (list (:epoch w)))))
                (update-in (list :applied) (lambda (a) (append a (list op))))))
@@ -289,16 +339,38 @@
           (cosigned (filter (lambda (op) (equal? (account-of op) (account-of cosigned))) draft))
           (else draft))))
 
+;; What the Entity may sign now (coordinator, 09-30 13:50): a deposit whose token is live (it simulates at the head; a paused
+;; token means it is skipped and waits), and of the payments (r2c ops) only those the current SPENDABLE reserve covers, in
+;; order. The rest wait in the draft with the deposit (bug `unfunded-payments` lets every payment through).
+(define (deposit-signable? w) (not (:paused w)))
+(define (fundable w draft)
+  (let loop ((rest draft) (avail (spendable w)) (acc (list)))
+    (cond ((null? rest) acc)
+          ((leg? (car rest))
+           (loop (cdr rest) avail (if (deposit-signable? w) (append acc (list (car rest))) acc)))
+          ((r2c? (car rest))
+           (if (>= avail 1)
+               (loop (cdr rest) (- avail 1) (append acc (list (car rest))))
+               (loop (cdr rest) avail acc)))
+          (else (loop (cdr rest) avail (append acc (list (car rest))))))))
+(define (sendable w) (fundable w (:draft w)))
+;; restated from the state, not through the functions above (a planted bug redefines those): what a batch signed now
+;; would carry that the reserve net of debt does not cover, and a deposit signed while its token is paused
+(define (unfunded-ops w ops) (if (> (length (filter r2c? ops)) (net-reserve w)) (filter r2c? ops) (list)))
+(define (paused-legs w ops) (if (:paused w) (filter leg? ops) (list)))
+
 ;; F1: a fresh nonce is above every nonce the Entity ever signed (bug `resign-at-nonce`: chain + 1)
 (define (fresh-nonce w) (+ (:signed-max w) 1))
 
 (define (simulated-ok? w ops) (or (= simulate-first 0) (batch-ok? w ops)))
 (define seal
   (rule "seal" (w side)
-    (when (and (equal? (:phase w) :idle) (pair? (:draft w)) (simulated-ok? w (pick-ops (:draft w)))))
-    (then (let* ((ops (pick-ops (:draft w)))
+    (when (and (equal? (:phase w) :idle) (pair? (sendable w)) (simulated-ok? w (pick-ops (sendable w)))))
+    (then (let* ((ops (pick-ops (sendable w)))
                  (b (batch (fresh-nonce w) (str "h" (+ (:seals w) 1)) ops)))
             (-> (submit w b)
+                (update-in (list :unfunded) (lambda (l) (append l (unfunded-ops w ops))))
+                (update-in (list :paused-signed) (lambda (l) (append l (paused-legs w ops))))
                 (assoc-in (list :phase) :inflight)
                 (assoc-in (list :sent) b)
                 (assoc-in (list :signed-max) (max (:signed-max w) (:nonce b)))
@@ -382,6 +454,20 @@
     (when (< (:moves w) epoch-moves))
     (then (-> w (update-in (list :epoch) (lambda (e) (+ e 1)))
                 (update-in (list :moves) (lambda (m) (+ m 1)))))))
+;; the token of deposit legs is paused, then resumes
+(define pause
+  (rule "token paused" (w side)
+    (when (and (< (:pauses w) pauses) (not (:paused w))))
+    (then (-> w (assoc-in (list :paused) #t) (update-in (list :pauses) (lambda (n) (+ n 1)))))))
+(define resume
+  (rule "token resumed" (w side)
+    (when (:paused w))
+    (then (assoc-in w (list :paused) #f))))
+;; anyone can call the chain's debt enforcement: it pays the oldest debts from the reserve, up to the cap
+(define enforce-call
+  (rule "enforceDebts" (w side)
+    (when (and (pair? (:debts w)) (> (:reserve w) 0)))
+    (then (enforce w))))
 (define tick
   (rule "tick" (w side)
     (when (< (:now w) max-time))
@@ -389,7 +475,7 @@
 
 (define (rules-for w)
   (let ((is (iota (length (:inbox w)))))
-    (append (list queue seal retry abort observe tick reveal-secret epoch-move)
+    (append (list queue seal retry abort observe tick reveal-secret epoch-move pause resume enforce-call)
             (map push-nth (iota (length (:abandoned w))))
             (map (lambda (i) (process-nth i #f)) is)
             (map (lambda (i) (process-nth i #t)) is)
@@ -461,6 +547,19 @@
             (op-list)))
    (property "a deadline revert never blocks another Account's ops: a reverted finalize goes alone" (w)
      (every (lambda (r) (or (not (member "fin-a" (:ops r))) (= (length (:ops r)) 1))) (:failures w)))
+   (property "the spendable reserve nets all outstanding debt: a payment is signed only against the reserve net of every debt, so none spends owed money or burns a nonce (09-30 13:50)" (w)
+     (null? (:unfunded w)))
+   (property "a deposit whose token is paused is not signed: it is skipped and waits with the payments it funds (09-30 13:50)" (w)
+     (null? (:paused-signed w)))
+   (property "debts are cleared oldest first (09-30 13:50)" (w)
+     (every (lambda (e) (equal? (:cleared e) (take (:queue e) (length (:cleared e))))) (:enforcements w)))
+   (property "one enforcement call clears at most the cap of debts (32 in the contract) (09-30 13:50)" (w)
+     (every (lambda (e) (<= (length (:cleared e)) enforce-cap)) (:enforcements w)))
+   (property "a debt leaves the queue only when paid: debts paid and debts outstanding equal the debts the entity started with" (w)
+     (= (+ (:paid w) (total-debt w)) (:debt0 w)))
+   (property "the reserve is conserved: seed and deposits equal reserve, collateral and debts paid" (w)
+     (= (+ (:seed w) (* leg-amount (length (filter leg? (:applied w)))))
+        (+ (:reserve w) (:collateral w) (:paid w))))
    (property "collateral is exactly what the applied r2c ops moved" (w)
      (= (:collateral w) (length (filter r2c? (:applied w)))))))
 

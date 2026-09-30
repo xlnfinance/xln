@@ -732,6 +732,34 @@ Source: coordinator J6 (00:49).
 
 ## Runtime (`runtime/tick.scm`)
 
+**Q-J-13. Deposits, funded payments and debt enforcement (coordinator, 09-30 13:50): modelled.**
+(1) A deposit leg that cannot be signed is skipped. The token of a deposit can be paused (`pauses` times); a deposit leg
+against a paused token hard-reverts. The Entity simulates at the head, so it does not sign that deposit: the leg waits in
+the draft. Of the payments (r2c ops) only those the CURRENT spendable reserve already covers go out, in order; the rest
+wait with the deposit. Why: an unfunded payment soft-fails (R-J5) and burns a nonce, and the Entity would do it again
+every round. Properties: "a deposit whose token is paused is not signed: it is skipped and waits with the payments it
+funds" and (the payment half) the one named after the debt rule below. Planted bugs `signs-paused-deposit` (the deposit
+is signed anyway; it reverts and stalls the nonce) and `unfunded-payments` (every payment is signed whatever the
+reserve). Bound: `j/configs/paused-deposit.scm` (reserve 0, deposit then payment, one pause); 983 states.
+(2) Debt enforcement. The J page keeps an entity's debts as a queue; a reserve credit (a deposit leg) and the
+permissionless `enforceDebts` call pay them first in, first out, at most `enforce-cap` debts cleared per call (32 in the
+contract; the bounds use 1). Properties: "debts are cleared oldest first", "one enforcement call clears at most the cap of
+debts", "a debt leaves the queue only when paid" and "the reserve is conserved". The property the coordinator named is
+"the spendable reserve nets all outstanding debt": the reserve a payment may spend is the reserve minus EVERY outstanding
+debt, the ones beyond the cap included, so a payment is signed only against that net and none spends owed money. The chain
+applies a reserve op only against the net reserve; an Entity that counts the raw reserve signs a payment that fails and
+burns its nonce. Planted bugs `spends-owed-reserve`, `debts-lifo`, `debts-uncapped`, `debts-cleared-unpaid`. Bounds:
+`j/configs/debts.scm` (two debts of 1, cap 1, a deposit of 2: one debt stays owed behind a reserve of 1, so the payment
+waits; 117 states) and `j/configs/debts-funded.scm` (a deposit of 3: the net reserve is 1, so the payment lands whether or
+not the second enforcement call ran first; 317 states).
+Open for the coordinator: (a) the page pays a debt in full or leaves a partial payment at the head of the queue (the
+contract's partial-payment rule is not written down here); (b) which call enforces debts besides the deposit credit
+(here any caller, any time); (c) the DISPUTE page books at most one debt per side at a finalize and never enforces
+it, and its R2C during a dispute checks the raw reserve. The queue and its cap live in the J page only, because a dispute
+finalize is the only place a debt is created and the payout ledger keeps one number per side. Not modelled: gas of
+the enforcement call, debts in several tokens, forgiving a debt (Q-X-4).
+Source: coordinator 09-30 13:50.
+
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
 Choice: only after the frame's WAL row is committed (xln.ts `commitRuntimeFrame` 42045, outputs leave
 after the row). A crash between apply and commit must not leave a peer with an output of a frame
