@@ -1,5 +1,6 @@
 // Test helper: a scratch tree the gate can be run over, with the real rule folders and planted files.
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { isOff } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
@@ -11,11 +12,15 @@ export const scratch = (files: Readonly<Record<string, string>>, exceptions: obj
   const root = mkdtempSync(`${tmpdir()}/tree-gate-`);
   cpSync(`${pureRoot}/style/rules`, `${root}/style/rules`, { recursive: true });
   cpSync(`${pureRoot}/style/tree-rules`, `${root}/style/tree-rules`, { recursive: true });
+  cpSync(`${pureRoot}/style/canaries.json`, `${root}/style/canaries.json`);
   writeFileSync(`${root}/style/tree-exceptions.json`, JSON.stringify(exceptions));
   mkdirSync(`${root}/kernel`);
   mkdirSync(`${root}/chain`);
   mkdirSync(`${root}/account`);
-  Object.entries(files).forEach(([file, text]) => writeFileSync(`${root}/kernel/${file}`, text));
+  Object.entries(files).forEach(([file, text]) => {
+    mkdirSync(dirname(`${root}/kernel/${file}`), { recursive: true });
+    writeFileSync(`${root}/kernel/${file}`, text);
+  });
   Object.entries(rootFiles).forEach(([file, text]) => writeFileSync(`${root}/${file}`, text));
   // The gate lists files with git (tracked plus untracked-not-ignored), so a scratch tree is a repository.
   Bun.spawnSync(["git", "init", "-q"], { cwd: root });
