@@ -233,6 +233,18 @@ describe("the real tree", () => {
     const { problems } = evaluate(register, renamed);
     expect(problems.some((problem) => problem._tag === "KillerNotFound" && problem.id === "C1")).toBe(true);
   });
+
+  // The gate's own tests are registered (R-GATE-...): skipping or deleting one is a missing name, so the gate is red.
+  test("the gate turns red when a gate test is skipped or deleted", () => {
+    const gateRows = register.filter((each) => each.id.startsWith("R-GATE-"));
+    const killers = gateRows.flatMap((row) => row.killers.map((killer) => ({ row, name: killer.name })));
+    expect(killers.length).toBeGreaterThan(20);
+    const missing = killers.filter(({ row, name }) => {
+      const without = names.filter((each) => each.text !== name);
+      return !evaluate([row], without).problems.some((problem) => problem._tag === "KillerNotFound" && problem.id === row.id);
+    });
+    expect(missing.map(({ name }) => name)).toEqual([]);
+  });
 });
 
 describe("the register may only grow (ratchet against the base register)", () => {

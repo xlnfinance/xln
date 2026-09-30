@@ -1,5 +1,5 @@
 // The amounts the contracts read: a sign and a magnitude for one movement, two words for a running total.
-import { A, arrayOf, type Abi } from "../kernel/abi.ts";
+import { A, arrayOf, type Abi } from "../kernel/encoding/abi.ts";
 
 /** Types.sol `SignedAmount{bool negative; uint256 magnitude}`: zero is never negative. */
 export const signedAmountAbi = (n: bigint): Abi => A.tuple([A.bool(n < 0n), A.u256(n < 0n ? -n : n)]);

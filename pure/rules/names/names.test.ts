@@ -18,7 +18,7 @@ describe("TypeScript tests count only when they run", () => {
     expect(titlesOf(`describe("R-A block", () => { it("R-B leaf", () => {}); it.only("R-C only", () => {}); });`)).toEqual(["R-A block", "R-B leaf", "R-C only"]);
   });
 
-  test("it.skip, test.todo, it.skipIf and xit do not count", () => {
+  test("R-GATE-REGISTER it.skip, test.todo, it.skipIf and xit do not count", () => {
     const source = `it.skip("R-S1", () => {}); test.todo("R-S2"); test.skipIf(true)("R-S3", () => {}); xit("R-S4", () => {});`;
     expect(titlesOf(source)).toEqual([]);
   });
@@ -37,6 +37,10 @@ describe("TypeScript tests count only when they run", () => {
     expect(titlesOf("const r = /`/; // `; it(\"R-RX2\", () => {});")).toEqual([]);
     expect(titlesOf("const r = /[\"/]/g; it(\"R-RX3 real\", () => {});")).toEqual(["R-RX3 real"]);
     expect(titlesOf("const half = total / 2; // \"; it(\"R-RX4\", () => {});")).toEqual([]);
+  });
+
+  test("a regex literal right after an arrow is a regex, not a division", () => {
+    expect(titlesOf("const f = (x: string) => /\"/g.test(x); // \"; it(\"R-RX5\", () => {});")).toEqual([]);
   });
 
   test("a comment right after code, with or without a space, hides the call", () => {

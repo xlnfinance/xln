@@ -431,3 +431,35 @@ is the machine, not #54; run on a faster one or raise the timeout for that test.
 `pure/diff/rig/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/rig/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits by that bound (conservative: the first reviewer measured a real limit of about 38); the walk's largest has 3.
 
 **Measured need (instrument on the BrowserVM submit, not committed):** whole `processBatch` execution gas, prelude included, over the four area walks (disputes, settlement, core, boards; 3 seeds each), `scenario.test.ts` and `scenario-cross-j.test.ts`: the largest is **396,485**, most batches about 376,000. The 14,000,000 budget is a ceiling about 35 times that need, chosen to fit og's fixed 15,000,000 tx gas, not a margin measured from the walks.
+
+## Swallowed failures (fifth pass; stacked on #54)
+
+Coordinator 13:55, from the second reviewer's fourth pass (`review/j5-second/0005-transformer-decode-gas-guard.patch`, `j5-fifth-transformer-gas.test.ts`).
+Decisions and the 12-site table: `plan/contracts-decisions.md`, "Swallowed failures".
+
+- **The hole.** `DeltaTransformer._decodeArguments` decodes the party's evidence in a try/catch and reads any failure as "no evidence". A decode that ran
+  out of gas was one, so a finalize that should pay could land unpaid at a transaction gas limit the relayer chose. The reviewer's scan with 1,700 junk
+  secrets: 53 of the limits (step 1,000) gave logs that were neither the paid ones nor a revert. A dispute batch reverts whole, so the transformer runs
+  in `processBatch`'s own frame and the relayer's limit matters (inside `applyBatch` the signed budget fixes it).
+- **The first fix was not a bound (round 2).** The pre-call floor `gasleft() >= 50,000 + 8 * length` covers a plain decode (at the 64 KiB a side may pass,
+  fill ratios need 490,518 gas, secrets 359,702, against 574,288), but both reviewers broke the claim that it covers everything Account lets through:
+  the two arrays of `Arguments` may be read from the same words (913,630 to 930,713 needed, valid evidence landed unpaid at limits 580k to 950k), and
+  memory already in use makes the decode dearer (negative margin at 800 payments with 64 KiB of counterparty evidence). **The bound is now the check after
+  the catch**: a callee that ran out of gas took 63/64 of what it was handed, so if `gasleft() <= gasBefore / 64 + 1,000` the decode was starved and the call
+  reverts `DecodeGasBudgetUnavailable`. No size, shape or memory assumption. The floor stays as a fast path (a starved plain decode reverts before it burns the gas).
+  Price, accepted: a decode that fails for real after using more than 63/64 of its gas reverts instead of reading as "no evidence".
+- **Killers.** `GasGuardUnpaid.t.sol` (aliased evidence, 27 unpaid limits at df2801a, none now), `ReviewB.t.sol` (overlapped evidence through `applyBatch`,
+  19 unpaid at df2801a), `GasSwallow.t.sol` (constants read from the contract: the floor must sit 10% above the plain need at every size; the floor at 7, 6 or
+  5 gas a byte, at base 0, or deleted each fail; the post-catch check deleted fails the first two), `j5-fifth-transformer-gas.test.ts` (both shapes, step 1,000,
+  about 9 minutes for both).
+- **The audit (11 project sites, plus OpenZeppelin).** One hole (this one) and one fault-isolation gap: the control-lane reads of a listed Depository were
+  uncapped and copied the answer, so one that burned its gas or returned a bomb bricked the lane at every limit up to 16M (`ControlLaneFaultIsolation.test.ts`; the
+  read is now `staticcall{gas: 100,000}` into a one-word buffer). The ERC-1271 member call is a real swallow at the verifier and a revert at every consumer:
+  `HankoMemberGasSwallowTest` (a member costing 900k) shows (0, false) answered at every sampled limit in the window below the least gas that verifies,
+  and `entityTransferTokens` reverting and moving nothing below its least gas. The rest revert or were guarded. `test/gate/swallowed-failures.test.ts` reads the
+  compiled AST (build-info) and compares places (source, function, opcode), OpenZeppelin included (the receiver-hook try/catch rethrows; `Math.tryModExp` is
+  never called); it fails on a stale build.
+- **Runtime notes (no contract change), in `plan/contracts-decisions.md`:** the decode revert reaches the submitter as the generic `TransformerExecutionFailed`
+  (accepted); `HANKO_PRELUDE_GAS` 4.9M excludes ERC-1271 member gas (up to 8 x 1,000,000) so R-SIMULATE must simulate the prelude for boards with contract members.
+- Folder width: `contracts/test/foundry` has 17 files and `contracts/test/vm` 23 (the limit is 10). The record of those counts is og's `check-folder-width.ts`, which we do not edit, so `check:folder-width` stays red here until the subfolder split (#61) lands.
+
