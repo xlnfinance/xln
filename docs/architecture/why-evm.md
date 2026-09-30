@@ -64,6 +64,8 @@ and swaps remain in accounts. Expensive discretionary J operations encourage
 that separation. Small blocks and bounded execution/evidence/state costs establish
 its verification budget; gas price alone does not.
 
-The small-device objective targets independent XLNC verification, not full
-Ethereum/TRON verification. See [the XLNC proposal](../xlnc-soft-mainnet.md) for
-witness-based verification, consensus and emergency-dispute capacity choices.
+The small-device objective targets ordinary stateful XLNC full nodes, not full
+Ethereum/TRON verification. XLNC reduces block gas capacity by roughly 10–20
+times and serves rebalances and disputes; it introduces no ZK or state-witness
+protocol. See [the XLNC proposal](../xlnc-soft-mainnet.md) for synchronization,
+consensus and emergency-dispute capacity measurements.

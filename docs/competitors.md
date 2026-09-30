@@ -123,12 +123,12 @@ must count unique committed economic operations under the
 [production measurement contract](../AGENTS.md). Replay throughput and submitted
 traffic do not establish it.
 
-Local programmable-rule verification on small devices is an objective. Running
-account logic, verifying selected J evidence and independently verifying an entire
-J history are different workloads. A smartwatch claim needs a specified workload
-and measured CPU, memory, storage, network and energy costs. Low J transaction
-load helps a specialized XLNC design; it does not make Ethereum's entire history
-small by itself.
+XLNC's selected direction is an ordinary stateful EVM J with roughly 10–20 times
+less block gas capacity, serving rebalances and disputes. Phone/laptop full nodes
+and five-minute catch-up of the last two days are measurement targets. Account
+execution and full J verification have separate resource budgets; measure CPU,
+memory, disk, bandwidth and energy with the selected conventional client.
+See [XLNC](xlnc-soft-mainnet.md) and the [mechanism research](research/channel-mechanisms.md).
 
 ## What would falsify the architecture claim
 

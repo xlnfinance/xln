@@ -96,8 +96,9 @@ is not evidence of working withdrawals or identical finality.
 Future central-bank programmable jurisdictions fit the same model when available;
 the launch does not wait for them. Independent verification on small consumer
 devices targets the specialized XLNC jurisdiction, not full Ethereum/TRON history.
-Bounded execution and state witnesses are candidate mechanisms; CPU, memory,
-storage, bandwidth and energy budgets must be demonstrated.
+XLNC uses conventional stateful EVM execution with lower block gas capacity;
+it needs no ZK execution or state-witness protocol. CPU, memory, storage,
+bandwidth, energy and synchronization budgets must be demonstrated.
 
 ## Complementary work
 

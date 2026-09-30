@@ -76,9 +76,10 @@ and authority rules meet those requirements.
 
 Ordinary account updates avoid global per-payment publication. Aggregate capacity
 can grow across independent accounts; one billion TPS requires measurements.
-The small-device full-verification target is XLNC, pronounced “excellence”, not
-the full Ethereum/TRON machines. A compact J with bounded execution and authenticated
-state witnesses is the proposed route; its resource budget remains to be measured.
+The small-device full-node target is XLNC, pronounced “excellence”, not the full
+Ethereum/TRON machines. Owner direction: a conventional stateful EVM jurisdiction
+with roughly 10–20 times less block gas capacity, serving rebalances and disputes.
+Phone/laptop operation and five-minute catch-up are acceptance targets to measure.
 
 ## Read next
 

@@ -14,6 +14,7 @@ and launch status are separate surfaces and should be assessed independently.
 ## Theory
 
 - [competitors.md](competitors.md) — architectural claims, limits and falsification
+- [research/channel-mechanisms.md](research/channel-mechanisms.md) — pinned Lightning, Raiden, Hydra, Interledger and generalized-account mechanisms compared with production xln
 - [constraints.md](constraints.md)
 - [core/00_QA.md](core/00_QA.md)
 - [core/10_UFT.md](core/10_UFT.md)
