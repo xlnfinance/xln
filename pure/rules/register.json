@@ -1900,6 +1900,41 @@
      "kind": "test",
      "layer": "ts",
      "name": "an ast-grep that answers the style canary but never the fact canary fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file that is deleted, with its exception row and its use gone, turns the gate red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule that no longer matches its canary is silent, and the gate is red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a canary that does not trigger its own rule is silent, even when that rule reports on another rule's canary"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file without a canary is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "every rule reports on its canary in both languages, so the real tree is clean"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an import without an extension, or of a directory, resolves to the file or to its index"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an interface that is not exported is measured like one that is"
     }
    ]
   },
@@ -1978,6 +2013,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "the register part alone turns the command red: a scratch copy has no contract tests to carry the ids"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored folder planted before the copy stays out of it, and what git lists comes along"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the real pure/ copies without the ignored folders a seeds run leaves in it"
     }
    ]
   },

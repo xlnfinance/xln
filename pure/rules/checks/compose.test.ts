@@ -1,7 +1,9 @@
 // The composition of the single gate command: each part alone must be able to turn it red.
 import { describe, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname } from "node:path";
+import { existingFiles } from "./folder-width.ts";
 import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
@@ -15,11 +17,19 @@ describe("the gate exits 1 when any one part fails", () => {
 
 const pureRoot = `${import.meta.dir}/../..`;
 
+// Copies the files git lists under `from` (tracked plus untracked-not-ignored, as the gate reads them) into `to`, so a
+// local db-* folder that a test run left behind, or any other ignored junk, cannot get into a scratch copy.
+const copyListed = (from: string, to: string): void =>
+  existingFiles(from).forEach((file) => {
+    mkdirSync(dirname(`${to}/${file}`), { recursive: true });
+    copyFileSync(`${from}/${file}`, `${to}/${file}`);
+  });
+
 // A scratch checkout holding a copy of the gate's own code and trees, run as the real command is.
 const scratchPure = (plant: Readonly<Record<string, string>>): string => {
   const repo = mkdtempSync(`${tmpdir()}/gate-run-`);
-  // The whole of pure/ but node_modules: the dead-export count reads every file that could use a name.
-  cpSync(pureRoot, `${repo}/pure`, { recursive: true, filter: (source) => !source.includes("/node_modules") });
+  // The whole of pure/ as git lists it: the dead-export count reads every file that could use a name.
+  copyListed(pureRoot, `${repo}/pure`);
   Object.entries(plant).forEach(([file, text]) => {
     mkdirSync(`${repo}/pure/${file.split("/").slice(0, -1).join("/")}`, { recursive: true });
     writeFileSync(`${repo}/pure/${file}`, text);
@@ -32,6 +42,34 @@ const run = (repo: string, flag: string): Readonly<{ code: number | null; out: s
   const done = Bun.spawnSync(["bun", `${repo}/pure/rules/check.ts`, flag], { cwd: `${repo}/pure` });
   return { code: done.exitCode, out: done.stdout.toString() + done.stderr.toString() };
 };
+
+describe("the scratch copy holds what git lists and nothing else", () => {
+  const source = (): string => {
+    const root = mkdtempSync(`${tmpdir()}/copy-source-`);
+    mkdirSync(`${root}/kernel`);
+    mkdirSync(`${root}/db-tmp`);
+    writeFileSync(`${root}/.gitignore`, "db-*\n");
+    writeFileSync(`${root}/kernel/a.ts`, "export const a = 1;\n");
+    writeFileSync(`${root}/db-tmp/junk.ts`, "export const junk = 1;\n");
+    Bun.spawnSync(["git", "init", "-q"], { cwd: root });
+    return root;
+  };
+
+  test("an ignored folder planted before the copy stays out of it, and what git lists comes along", () => {
+    const from = source();
+    const to = mkdtempSync(`${tmpdir()}/copy-dest-`);
+    copyListed(from, to);
+    expect(existsSync(`${to}/kernel/a.ts`)).toBe(true);
+    expect(existsSync(`${to}/.gitignore`)).toBe(true);
+    expect(existsSync(`${to}/db-tmp`)).toBe(false);
+  });
+
+  test("the real pure/ copies without the ignored folders a seeds run leaves in it", () => {
+    const repo = scratchPure({});
+    expect(existsSync(`${repo}/pure/node_modules`)).toBe(false);
+    expect(run(repo, "--style-only").out).not.toContain("unlisted-dir db-");
+  });
+});
 
 describe("the real command over a scratch copy", () => {
   const THROWS = "export const bad = () => { throw new Error('x'); };\n";
