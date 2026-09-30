@@ -98,6 +98,14 @@ describe("vectors", () => {
       const within = ops <= 50 && (counts.disputeStarts ?? 0) <= 8 && (counts.disputeFinalizations ?? 0) <= 1 && pairs.every((n) => n <= 64) && pairs.reduce((a, b) => a + b, 0) <= 250;
       expect([c.label, c.accepted]).toEqual([c.label, within]);
     }
+    // the mixed sample earns its name: no two number slots of one struct hold the same value, so swapping two of them changes the bytes
+    const structsOf = (value: unknown): Record<string, unknown>[] =>
+      Array.isArray(value) ? value.flatMap(structsOf) : value && typeof value === "object" ? [value as Record<string, unknown>, ...Object.values(value).flatMap(structsOf)] : [];
+    const mixed = (layout.cases as LayoutCase[]).find((c) => c.label === "every array, mixed values")!;
+    for (const struct of structsOf(mixed.input)) {
+      const numbers = Object.values(struct).filter((v) => typeof v === "string" && /^-?\d+$/.test(v));
+      expect(new Set(numbers).size).toBe(numbers.length);
+    }
     // every recorded input is what the bytes encode (numbers as decimal strings), so an encoder elsewhere can build the same bytes from it
     const batchType = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;
     for (const c of (layout.cases as LayoutCase[]).filter((k) => k.input && !k.label.includes("past") && !/\(u?int\d+|bool\)/.test(k.label))) expect([c.label, coder.encode([batchType], [c.input])]).toEqual([c.label, c.encodedBatch]);
