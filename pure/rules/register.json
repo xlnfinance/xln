@@ -2103,7 +2103,7 @@
   },
   {
    "id": "R-HOLD-CAP",
-   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds the per-token check; the Account-level count is owed by A3 (the first AccountState transition).",
+   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds both halves: the per-token check (ledger.ts) and the Account-level count (state.ts, applied by tx.ts).",
    "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
    "layers": {
     "arrival": "-",
@@ -2121,8 +2121,17 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused",
-     "owed": "A3"
+     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a token that holds 32 alone refuses its own 33rd, and the other token is refused too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a hold that resolves, cancels or expires frees its place in the count, in any token"
     }
    ]
   },
@@ -2171,7 +2180,7 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account (the ts cell holds it per token ledger; the Account-wide count across tokens is owed by A3): a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
     "arrival": "owed: #41 (coordinator 09-30)",
@@ -2199,8 +2208,7 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone",
-     "owed": "A3"
+     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone"
     }
    ]
   },

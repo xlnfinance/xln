@@ -12,6 +12,11 @@ export type Side = "left" | "right";
 
 export const other = (side: Side): Side => (side === "left" ? "right" : "left");
 
+/** A token of the Account; each has its own Ledger. */
+export type TokenId = Brand<bigint, "TokenId">;
+
+export const tokenId = (n: bigint): TokenId => n as TokenId;
+
 /** The slot a hold sits in: the caller names it, it stays while the hold is open, and no two open holds share one. */
 export type HoldId = Brand<bigint, "HoldId">;
 
@@ -41,6 +46,12 @@ export type Ledger = Readonly<{
   limit: Readonly<Record<Side, bigint>>;
   holds: readonly Hold[];
 }>;
+
+/**
+ * Everything one Account agrees on: a Ledger per token it has used. A token with no entry reads as the empty ledger.
+ * The caps that span tokens (open holds, open hashlocks) are the Account's, so they are read here and not in a Ledger.
+ */
+export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger> }>;
 
 /** One case per refusal; none of them halts anything. */
 export type AccountFault =
