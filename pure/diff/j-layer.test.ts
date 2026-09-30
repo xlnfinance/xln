@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { seedOf, seedTag } from "./seed.ts";
 import { Interface } from "ethers";
-import { Depository__factory } from "../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory.ts";
-import { EntityProvider__factory } from "../../jurisdictions/typechain-types/factories/EntityProvider__factory.ts";
+import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
+import { Depository__factory as OgDepository__factory } from "../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory.ts";
+import { EntityProvider__factory } from "../../contracts/typechain-types/factories/EntityProvider__factory.ts";
 import { DEPOSITORY_J_EVENTS, ENTITY_PROVIDER_J_EVENTS } from "../../core/jurisdiction/machine/event-catalog.ts";
 import { extractCanonicalDepositoryEventArgs } from "../../core/jurisdiction/adapter/events/depository-event-codec.ts";
 import { rawEventToJEvents } from "../../core/jurisdiction/adapter/events/j-event-payloads.ts";
@@ -43,7 +44,11 @@ const W = (b: string) => `0x${b.repeat(32 / (b.length / 2))}`;
 const U256 = (1n << 256n) - 1n, SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 const b32 = () => W(pick(["11", "22", "aB", "00", "fe"]));
 const addr = () => pick([`0x${"ab".repeat(20)}`, "0x5FbDB2315678afecb367f032d93F642f64180aa3", `0x${"01".repeat(20)}`]);
+/** The Depository we control (contracts/): the rewrite decodes its calldata. */
 const DEPOSITORY = new Interface(Depository__factory.abi);
+/** og's decoders are frozen with og's Depository (jurisdictions/); they are fed og-shaped calldata for the same batch. */
+const OG_DEPOSITORY = new Interface(OgDepository__factory.abi);
+const PROCESS_BATCH_ENTITY = `0x${"e1".repeat(32)}`;
 const PROVIDER = new Interface(EntityProvider__factory.abi);
 const COORDS = { blockNumber: 7, blockHash: W("0b"), transactionHash: W("0c"), logIndex: 3 };
 
@@ -160,11 +165,16 @@ const ogBatchOf = (b: Batch): any => {
     disputeFinalizations: b.disputeFinalizations.map((f) => ({ ...f, initialNonce: n(f.initialNonce), finalNonce: n(f.finalNonce), finalProofbody: ogProof(f.finalProofbody) })),
   };
 };
-const processBatchCalldata = (b: Batch) => DEPOSITORY.encodeFunctionData("processBatch", [encodeBatch(b), "0x", 1n]);
+/** The same batch as calldata for each Depository: the fork's takes the acting Entity first (C2), og's does not. */
+const processBatchCalldata = (b: Batch) => ({
+  og: OG_DEPOSITORY.encodeFunctionData("processBatch", [encodeBatch(b), "0x", 1n]),
+  rw: DEPOSITORY.encodeFunctionData("processBatch", [PROCESS_BATCH_ENTITY, encodeBatch(b), "0x", 1n]),
+});
 
 describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProofBodyEvidenceCalldata / decodeJBatch)"), () => {
   test("MATCH: processBatch and watchtowerCounterDispute selectors equal the Depository ABI's", () => {
     expect(PROCESS_BATCH_SELECTOR).toBe(DEPOSITORY.getFunction("processBatch")!.selector);
+    expect(PROCESS_BATCH_SELECTOR).not.toBe(OG_DEPOSITORY.getFunction("processBatch")!.selector);
     expect(WATCHTOWER_COUNTER_DISPUTE_SELECTOR).toBe(DEPOSITORY.getFunction("watchtowerCounterDispute")!.selector);
   });
 
@@ -193,11 +203,11 @@ describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProof
       const b = randomBatch();
       const ogOk = (() => { try { encodeJBatch(ogBatchOf(b)); decodeJBatch(encodeBatch(b)); return true; } catch { return false; } })();
       if (!ogOk) continue;
-      const calldata = processBatchCalldata(b);
+      const { og: ogCalldata, rw: calldata } = processBatchCalldata(b);
       expect(encodeJBatch(ogBatchOf(b))).toBe(encodeBatch(b));
-      const og = decodeDisputeProofBodyEvidenceCalldata(calldata), rw = disputeProofEvidence(calldata);
+      const og = decodeDisputeProofBodyEvidenceCalldata(ogCalldata), rw = disputeProofEvidence(calldata);
       expect(rw.map((c) => ({ ...c, proofbody: lowerProof(c.proofbody) }))).toEqual(og.map((c: any) => ({ ...c, nonce: BigInt(c.nonce), ...(c.initialNonce === undefined ? {} : { initialNonce: BigInt(c.initialNonce) }), proofbody: rwProof(c.proofbody) })));
-      const ogFin = decodeDisputeFinalizationEvidenceCalldata(calldata), rwFin = finalizationEvidence(calldata);
+      const ogFin = decodeDisputeFinalizationEvidenceCalldata(ogCalldata), rwFin = finalizationEvidence(calldata);
       expect(rwFin).toEqual(ogFin.map((f: any) => ({ ...f, initialNonce: BigInt(f.initialNonce), finalNonce: BigInt(f.finalNonce) })));
       // Each start's DisputeStarted log resolves to the same body (og resolveDisputeProofBodyEvidence), with a proposer flip refused by both.
       for (const s of b.disputeStarts) {
@@ -233,14 +243,17 @@ describe(seedTag("dispute calldata evidence (og rpc-public.ts decodeDisputeProof
     for (let i = 0; i < 10; i++) {
       const f = { counterentity: b32(), initialNonce: BigInt(1 + ri(9)), finalNonce: BigInt(1 + ri(9)), proposerIsLeft: rng() < 0.5, initialProofbodyHash: b32(), finalProofbody: proofBody(), starterArguments: "0x", otherArguments: "0x01", sig: "0x02", startedByLeft: rng() < 0.5, cooperative: false };
       const calldata = DEPOSITORY.encodeFunctionData("watchtowerCounterDispute", [W("33"), { ...f, finalProofbody: ogProof(f.finalProofbody) }, 5n, 6n, "0x"]);
-      const og = decodeDisputeProofBodyEvidenceCalldata(calldata), rw = disputeProofEvidence(calldata);
+      const ogCalldata = OG_DEPOSITORY.encodeFunctionData("watchtowerCounterDispute", [W("33"), { ...f, finalProofbody: ogProof(f.finalProofbody) }, 5n, 6n, "0x"]);
+      expect(calldata).toBe(ogCalldata);
+      const og = decodeDisputeProofBodyEvidenceCalldata(ogCalldata), rw = disputeProofEvidence(calldata);
       expect(rw.map((c) => ({ ...c, proofbody: lowerProof(c.proofbody) }))).toEqual(og.map((c: any) => ({ ...c, nonce: BigInt(c.nonce), initialNonce: BigInt(c.initialNonce), proofbody: rwProof(c.proofbody) })));
-      expect(finalizationEvidence(calldata)).toEqual(decodeDisputeFinalizationEvidenceCalldata(calldata).map((x: any) => ({ ...x, initialNonce: BigInt(x.initialNonce), finalNonce: BigInt(x.finalNonce) })));
+      expect(finalizationEvidence(calldata)).toEqual(decodeDisputeFinalizationEvidenceCalldata(ogCalldata).map((x: any) => ({ ...x, initialNonce: BigInt(x.initialNonce), finalNonce: BigInt(x.finalNonce) })));
     }
     // Unknown or unsupported calldata: both refuse.
-    for (const bad of ["0xdeadbeef", DEPOSITORY.encodeFunctionData("processBatch", ["0x", "0x", 1n])]) {
-      expect(() => decodeDisputeProofBodyEvidenceCalldata(bad)).toThrow();
-      expect(() => disputeProofEvidence(bad)).toThrow();
+    const empty = { og: OG_DEPOSITORY.encodeFunctionData("processBatch", ["0x", "0x", 1n]), rw: DEPOSITORY.encodeFunctionData("processBatch", [PROCESS_BATCH_ENTITY, "0x", "0x", 1n]) };
+    for (const bad of [{ og: "0xdeadbeef", rw: "0xdeadbeef" }, empty]) {
+      expect(() => decodeDisputeProofBodyEvidenceCalldata(bad.og)).toThrow();
+      expect(() => disputeProofEvidence(bad.rw)).toThrow();
     }
   });
 });

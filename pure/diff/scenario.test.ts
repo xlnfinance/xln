@@ -181,6 +181,8 @@ const runScenario = async (seed: number, plan: Plan): Promise<Coverage> => {
       return a?.status === "disputed" && a.activeDispute === undefined;
     };
     coverage.disputesFinalized = disputing !== undefined && closed(disputing, HUB) && closed(HUB, disputing) ? 1 : 0;
+    // a batch the chain refused is only a log line on og's side; the shim records it, so every run asserts none
+    expect(w.refusals()).toEqual([]);
     return coverage;
   } finally {
     await w.close();

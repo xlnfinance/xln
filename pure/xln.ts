@@ -1725,16 +1725,17 @@ export const decodeBatch = (encoded: string): Batch => {
   };
 };
 const selectorOf = (sig: string): string => keccak256Hex(utf8(sig)).slice(0, 10);
-const PROCESS_BATCH = ["bytes", "bytes", "uint"] as const;
+// The fork's processBatch takes the acting Entity first (C2); the batch is its second argument.
+const PROCESS_BATCH = ["b32", "bytes", "bytes", "uint"] as const;
 const WATCHTOWER_COUNTER: readonly AbiType[] = ["b32", S_FINAL, "uint", "uint", "bytes"];
-export const PROCESS_BATCH_SELECTOR = selectorOf("processBatch(bytes,bytes,uint256)");
+export const PROCESS_BATCH_SELECTOR = selectorOf("processBatch(bytes32,bytes,bytes,uint256)");
 export const WATCHTOWER_COUNTER_DISPUTE_SELECTOR =
   selectorOf(`watchtowerCounterDispute(${WATCHTOWER_COUNTER.map(abiSig).join(",")})`);
 type DisputeCall = Tagged<"batch", { batch: Batch }> | Tagged<"watchtower", { proof: DisputeFinalization }>;
 const decodeDisputeCall = (selector: string, args: Uint8Array, code: string): DisputeCall | undefined => {
   switch (selector) {
     case PROCESS_BATCH_SELECTOR: {
-      const encoded = str(abiSequence(args, PROCESS_BATCH, 0)[0]);
+      const encoded = str(abiSequence(args, PROCESS_BATCH, 0)[1]);
       if (encoded === "0x") throw new Error(`${code}_BATCH_CALLDATA_MISSING`);
       return { _tag: "batch", batch: decodeBatch(encoded) };
     }
@@ -3149,6 +3150,42 @@ export const encodeBatchHash = (
   { _tag: "bytes32", value: DEPOSITORY_BATCH_HANKO_DOMAIN },
   { _tag: "uint256", value: depositoryDomain(i.chainId, i.depository) },
   { _tag: "address", value: i.depository },
+  { _tag: "bytes", value: i.encodedBatch },
+  { _tag: "uint256", value: BigInt(i.nonce) },
+]));
+// ---- the fork's payloads (contracts/, the Depository we control): pinned by contracts/vectors ----
+// C1 binds the Account's ondeltaEpoch straight after the account key in the two Account payloads; C2 binds the acting
+// Entity into the batch payload and moves its domain to V2. The og encoders above stay as og's frozen jurisdictions/
+// computes them, which is what the differential walk compares against; a runtime cut to the spec calls these.
+export const FORK_DEPOSITORY_BATCH_HANKO_DOMAIN = keccak256Hex(utf8("XLN_DEPOSITORY_HANKO_V2"));
+type ForkMessageHeader = Readonly<SignedMessageHeader & { ondeltaEpoch: string }>;
+const forkMessageHeader = (i: ForkMessageHeader): readonly Abi[] => [
+  A.uint(BigInt(i.messageType)),
+  A.uint(depositoryDomain(i.chainId, i.contractAddress)),
+  A.address(i.contractAddress),
+  A.bytes(i.accountKey),
+  A.uint(BigInt(i.ondeltaEpoch)),
+  A.uint(BigInt(i.nonce)),
+];
+export const encodeForkDisputeProofHash = (
+  i: ForkMessageHeader & Readonly<{ proposerIsLeft: boolean; proofbodyHash: Word; watchSeed: Word }>,
+): string => keccak256Hex(abiEncode([
+  ...forkMessageHeader(i), A.bool(i.proposerIsLeft), A.b32(i.proofbodyHash), A.b32(i.watchSeed),
+]));
+export const encodeForkCooperativeUpdateHash = (
+  i: ForkMessageHeader & Readonly<{ diffs: readonly DiffText[]; forgiveDebtsInTokenIds: readonly string[] }>,
+): string => keccak256Hex(abiEncode([
+  ...forkMessageHeader(i),
+  arr(i.diffs, (d) => diffAbi(diffOfText(d))),
+  arr(i.forgiveDebtsInTokenIds, (id) => A.uint(BigInt(id))),
+]));
+export const encodeForkBatchHash = (
+  i: Readonly<{ chainId: number; depository: string; entityId: Word; encodedBatch: string; nonce: string }>,
+): string => keccak256Hex(encodePacked([
+  { _tag: "bytes32", value: FORK_DEPOSITORY_BATCH_HANKO_DOMAIN },
+  { _tag: "uint256", value: depositoryDomain(i.chainId, i.depository) },
+  { _tag: "address", value: i.depository },
+  { _tag: "bytes32", value: i.entityId },
   { _tag: "bytes", value: i.encodedBatch },
   { _tag: "uint256", value: BigInt(i.nonce) },
 ]));

@@ -50,6 +50,7 @@ describe("openAccount refusals, og processRuntime vs the rewrite", () => {
         const texts = w.coverage.haltTexts;
         if (og === "commits") expect(texts).toEqual([]);
         else expect(texts.map((t) => t.slice(0, og.length))).toEqual([og]);
+        expect(w.refusals()).toEqual([]);
       } finally {
         await w.close();
       }

@@ -2,6 +2,7 @@
 // rewrite's Runtime (runtimeWake + commitRuntimeFrame) driven with identical inputs, compared after every frame.
 // diff/scenario.test.ts runs one lane; diff/scenario-cross-j.test.ts runs two, relaying each lane's remote outputs
 // into the other the way og's direct Runtime transport does.
+import { installContracts } from "./contracts.ts";
 import {
   enqueueRuntimeInput,
   getRuntimeWalDb,
@@ -96,6 +97,7 @@ export const holdAccountWorkers = (
 };
 
 export const bootChain = async (chainId = 31337): Promise<JAdapter> => {
+  installContracts();
   const chain = await createJAdapter({ mode: "browservm", chainId } as never);
   await chain.deployStack();
   chain.setQuietLogs?.(true);
