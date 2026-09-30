@@ -254,3 +254,43 @@ describe("hex helpers used by the vectors", () => {
     });
   });
 });
+
+describe("R-J2 dispute hashes with a different value in every slot (re-derived with ethers from Account.sol)", () => {
+  // The committed vectors sample encodeDisputeHash with equal response windows and the lifecycle finalizes with empty
+  // arguments, so a swap of the two windows, or of the three evidence hashes, is invisible there. These samples make
+  // every slot distinct. They are the test author's reading of the packed layout, not contract output: a mixed
+  // contract-produced vector is owed to the contracts thread.
+  const word = (n: number): string => ethers.zeroPadValue(ethers.toBeHex(n), 32);
+  const record = {
+    nonce: 11n, startedByLeft: true, initialProposerIsLeft: false, timeout: 1_700_000_013n,
+    leftResponseSeconds: 61n, rightResponseSeconds: 62n, proofBodyHash: word(3), startTimestamp: 1_700_000_005n,
+    starterInitialArguments: "0x0a0b", starterCounterArguments: "0x0c0d0e", starterCounterProofCommitment: word(9),
+  };
+  const commitment = (args: string): string =>
+    ethers.keccak256(coder.encode(["bytes", "bool", "uint256"], [args, record.startedByLeft, record.startTimestamp]));
+
+  test("the stored hash: packed in the contract's order, with its two argument commitments", () => {
+    const expected = ethers.keccak256(ethers.solidityPacked(
+      ["uint256", "bool", "bool", "uint256", "uint32", "uint32", "bytes32", "uint256", "bytes32", "bytes32", "bytes32",
+        "uint256", "bytes32", "bool"],
+      [record.nonce, record.startedByLeft, record.initialProposerIsLeft, record.timeout, record.leftResponseSeconds,
+        record.rightResponseSeconds, record.proofBodyHash, record.startTimestamp,
+        commitment(record.starterInitialArguments),
+        commitment(record.starterCounterArguments), record.starterCounterProofCommitment,
+        0n, ethers.ZeroHash, false]));
+    expect(must(disputeRecordHash(record))).toBe(expected);
+  });
+
+  test("the finalization evidence: three different hashes in the contract's order", () => {
+    const evidence = {
+      initialProofBodyHash: word(5), finalNonce: 13n, proposerIsLeft: true, startedByLeft: false,
+      starterArguments: "0x0102", otherArguments: "0x030405", sig: "0x060708090a",
+    };
+    const hashOf = (hex: string): string => ethers.keccak256(hex);
+    const expected = ethers.keccak256(coder.encode(
+      ["bytes32", "uint256", "bool", "bool", "bytes32", "bytes32", "bytes32"],
+      [evidence.initialProofBodyHash, evidence.finalNonce, evidence.proposerIsLeft, evidence.startedByLeft,
+        hashOf(evidence.starterArguments), hashOf(evidence.otherArguments), hashOf(evidence.sig)]));
+    expect(must(finalizationEvidenceHash(evidence))).toBe(expected);
+  });
+});

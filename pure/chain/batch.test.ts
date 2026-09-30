@@ -4,9 +4,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
-import { DepositoryBounds__factory } from "../../contracts/typechain-types/index.ts";
+import { DeltaTransformer__factory, DepositoryBounds__factory } from "../../contracts/typechain-types/index.ts";
+import { encode } from "../kernel/abi.ts";
+import { bytesToHex } from "../kernel/bytes.ts";
 import { unwrapOr, type Result } from "../kernel/result.ts";
 import { emptyBatch, encodeBatch, type Batch } from "./batch.ts";
+import { encodeDeltaBatch } from "./clauses.ts";
+import { signedAmountAbi } from "./money.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const batchParam = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;
@@ -119,6 +123,12 @@ describe("R-J2 the batches the deployed Depository accepted (contracts/vectors/l
 });
 
 describe("a value the contract would refuse to decode is refused here", () => {
+  test("a token type past uint8, inside an external token deposit", () => {
+    const value = sample(batchParam, "tokenType", "small") as Plain;
+    const [deposit] = value.externalTokenToReserve;
+    const tooBig = { ...value, externalTokenToReserve: [{ ...deposit, tokenType: 256n }] };
+    expect(encodeBatch(batchOf(tooBig))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint8" } });
+  });
   test("a gas budget past uint64", () => {
     expect(encodeBatch(emptyBatch(1n << 64n))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint64" } });
   });
@@ -128,5 +138,39 @@ describe("a value the contract would refuse to decode is refused here", () => {
     const witness = { ...registration.witness, fillRatio: 65_536n };
     const tooBig = { ...value, hashLadderRegistrations: [{ ...registration, witness }] };
     expect(encodeBatch(batchOf(tooBig))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint16" } });
+  });
+});
+
+describe("R-J2 the transformer clause payload equals the compiled DeltaTransformer ABI in every slot", () => {
+  const clauseParam = DeltaTransformer__factory.createInterface().getFunction("encodeBatch")!.inputs[0]!;
+  const clauseOf = (j: Plain) => ({
+    payments: j.payment.map((p: Plain) => ({ ...p, amount: signed(p.amount) })),
+    swaps: j.swap,
+    pulls: j.pull.map((p: Plain) => ({ ...p, amount: signed(p.amount) })),
+  });
+  (["small", "wide", "mixed"] as const).forEach((mode) => {
+    test(`${mode} sample`, () => {
+      const value = sample(clauseParam, "clause", mode);
+      expect(must(encodeDeltaBatch(clauseOf(value)))).toBe(coder.encode([clauseParam], [value]));
+    });
+  });
+});
+
+describe("R-J2 a zero amount is never negative (WideMath.NonCanonicalSign)", () => {
+  const signedParam = ethers.ParamType.from("tuple(bool negative, uint256 magnitude)");
+  [0n, 1n, -1n, (1n << 256n) - 1n, -((1n << 256n) - 1n)].forEach((n) => {
+    test(`${n}`, () => {
+      const encoded = must(encode([signedAmountAbi(n)]));
+      expect(bytesToHex(encoded)).toBe(coder.encode([signedParam], [{ negative: n < 0n, magnitude: n < 0n ? -n : n }]));
+    });
+  });
+  test("a settlement diff of zeros encodes as positive zeros", () => {
+    const value = sample(batchParam, "zeros", "small") as Plain;
+    const zero = { negative: false, magnitude: 0n };
+    const diff = {
+      ...value.settlements[0].diffs[0], leftDiff: zero, rightDiff: zero, collateralDiff: zero, ondeltaDiff: zero,
+    };
+    const zeroed = { ...value, settlements: [{ ...value.settlements[0], diffs: [diff] }] };
+    expect(must(encodeBatch(batchOf(zeroed)))).toBe(coder.encode([batchParam], [zeroed]));
   });
 });

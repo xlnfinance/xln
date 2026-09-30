@@ -10,7 +10,7 @@ import { bytesToHex, hexToBytes } from "../kernel/bytes.ts";
 import { err, ok, unwrapOr, type Result } from "../kernel/result.ts";
 import { HALF_ORDER, addressOf, signDigest } from "../kernel/signature.ts";
 import {
-  addressAsId, boardBytes, boardHash, encodeHanko, lazyEntityId, lazyHanko, packSignatures, recoverRawSigner,
+  addressAsId, boardBytes, boardHash, encodeHanko, isLowS, lazyEntityId, lazyHanko, packSignatures, recoverRawSigner,
   type Board, type Hanko, type HankoClaim,
 } from "./hanko.ts";
 import { verifyHanko, verifyHankoSignature, type HankoVerdict } from "./hanko-verify.ts";
@@ -97,6 +97,44 @@ function recoverSigHex(n: number): Result<string, never> {
   return ok(sig.serialized);
 }
 
+
+const twoOfTwo = board([idOf(1), idOf(1)], [1n, 1n], 2n);
+/** Placeholders [3, 2], signer [1]: index 0 is 3, 1 is 2, 2 is the signer. The board lists ids in claim order. */
+const orderedTwoOfThree = board([idOf(3), idOf(1), idOf(2)], [1n, 1n, 1n], 2n);
+const placeholderDoesNotVote = hankoOf([1], [idOf(3), idOf(2)], [claimOf(orderedTwoOfThree, [0n, 2n, 1n])]);
+const nestedFirst = (() => {
+  const inner = claimOf(lone, [0n]);
+  const outer = board([inner.entityId, idOf(2)], [1n, 1n], 1n);
+  return hankoOf([1, 2], [], [inner, claimOf(outer, [2n, 1n])]);
+})();
+const heavy = (weight: bigint): string => {
+  const b = board([idOf(1)], [weight > 65_535n ? 65_535n : weight], 1n);
+  return hankoOf([1], [], [{ ...claimOf(b, [0n]), weights: [weight] }]);
+};
+const withDelays = (boardChangeDelay: bigint, controlChangeDelay: bigint, dividendChangeDelay: bigint): string => {
+  const b = { ...lone, boardChangeDelay: 1n, controlChangeDelay: 2n, dividendChangeDelay: 3n };
+  return hankoOf([1], [], [{ ...claimOf(b, [0n]), boardChangeDelay, controlChangeDelay, dividendChangeDelay }]);
+};
+const dirtyPadding = (): string => {
+  const packed = must(packSignatures([signatureOf(1)]));
+  const dirty = Uint8Array.from(packed, (byte, i) => (i === packed.length - 1 ? byte | 0x02 : byte));
+  const claims = [claimOf(lone, [0n])];
+  return must(encodeHanko({ placeholders: [], packedSignatures: dirty, claims, memberSignatures: [] }));
+};
+const selfClaim = (): string => hankoOf([1], [], [{
+  ...claimOf(lone, [0n]), entityIndexes: [0n, 1n], weights: [1n, 1n], threshold: 1n,
+}]);
+const emptyMembers = (): string => must(encodeHanko({
+  placeholders: [idOf(3)], packedSignatures: must(packSignatures([signatureOf(1), signatureOf(2)])),
+  claims: [claimOf(board([idOf(3), idOf(1), idOf(2)], [1n, 1n, 1n], 2n), [0n, 1n, 2n])],
+  memberSignatures: [new Uint8Array()],
+}));
+const memberSignature = (): string => must(encodeHanko({
+  placeholders: [idOf(3)], packedSignatures: must(packSignatures([signatureOf(1), signatureOf(2)])),
+  claims: [claimOf(board([idOf(3), idOf(1), idOf(2)], [1n, 1n, 1n], 2n), [0n, 1n, 2n])],
+  memberSignatures: [bytes("0x1234")],
+}));
+
 const flipByte = (hex: string, at: number): string => {
   const b = Uint8Array.from(bytes(hex));
   const flipped = Uint8Array.from(b, (x, i) => (i === at ? x ^ 0x01 : x));
@@ -127,6 +165,24 @@ const structural: readonly Named[] = [
     hanko: hankoOf([1], [], [claimOf(board([idOf(1)], [1n], 2n), [0n])]),
   },
   { name: "no signature", hanko: hankoOf([], [idOf(1)], [claimOf(lone, [0n])]), digest },
+  // The cases below are built so the claim's Entity id is the hash of the board the claim really names; a mismatched
+  // id would be refused for its authority and never reach the rule under test.
+  { name: "a placeholder does not vote: 2 of 3 signed by one", hanko: placeholderDoesNotVote, digest },
+  { name: "the same signature twice", hanko: hankoOf([1, 1], [], [claimOf(twoOfTwo, [0n, 1n])]), digest },
+  {
+    name: "an unused placeholder, claim built over the signer", digest,
+    hanko: hankoOf([1], [idOf(2)], [claimOf(lone, [1n])]),
+  },
+  { name: "a nested claim as first member", hanko: nestedFirst, digest },
+  { name: "a weight of 65536", hanko: heavy(65_536n), digest },
+  { name: "a weight of 65535", hanko: heavy(65_535n), digest },
+  { name: "delays in the board", hanko: withDelays(1n, 2n, 3n), digest },
+  { name: "delays swapped", hanko: withDelays(3n, 2n, 1n), digest },
+  { name: "a padding bit set in the recovery byte", hanko: dirtyPadding(), digest },
+  { name: "a claim that names itself", hanko: selfClaim(), digest },
+  { name: "the same placeholder twice", hanko: hankoOf([1], [idOf(2), idOf(2)], [claimOf(lone, [2n])]), digest },
+  { name: "member signatures, all empty", hanko: emptyMembers(), digest },
+  { name: "member signature for an externally owned placeholder", hanko: memberSignature(), digest },
   { name: "no claim", hanko: hankoOf([1], [], []), digest },
 ];
 
@@ -181,6 +237,37 @@ describe("R-J2 the verifier against the deployed EntityProvider", () => {
     expect(stricter.map(([, fault]) => fault)).toEqual(stricter.map(() => '{"_tag":"non_canonical"}'));
   });
 
+  /** The rule each case is built to reach: the verdict the contract gives and the first refusal named here. */
+  const reached: Readonly<Record<string, string | null>> = {
+    "a placeholder does not vote: 2 of 3 signed by one": "quorum",
+    "the same signature twice": "duplicate_signer",
+    "an unused placeholder, claim built over the signer": "unused_placeholder",
+    "a nested claim as first member": "first_member",
+    "a weight of 65536": "weight",
+    "a weight of 65535": null,
+    "delays in the board": null,
+    "delays swapped": "authority",
+    "a padding bit set in the recovery byte": "packed_padding",
+    "a claim that names itself": "claim_order",
+    "the same placeholder twice": "duplicate_placeholder",
+    "threshold above total weight": "threshold_power",
+    "member signatures, all empty": null,
+    "member signature for an externally owned placeholder": "member_signature",
+  };
+
+  test("each new case reaches the rule it names; the contract accepts exactly the cases this verifier does", () => {
+    const got = Object.keys(reached).map((name) => {
+      const i = suite.findIndex((n) => n.name === name);
+      const r = mine(suite[i]!);
+      return [name, r.ok ? null : (r.error as { _tag: string })._tag, verdicts[i]!.success] as const;
+    });
+    expect(got.map(([name, fault]) => [name, fault])).toEqual(Object.entries(reached));
+    const acceptedByContract = got.filter(([, , accepted]) => accepted).map(([name]) => name);
+    const acceptedHere = got.filter(([, fault]) => fault === null).map(([name]) => name);
+    expect(acceptedByContract).toEqual(acceptedHere);
+    expect(acceptedHere).toEqual(["a weight of 65535", "delays in the board", "member signatures, all empty"]);
+  });
+
   test("the structural cases are judged as the contract judges them", () => {
     const expected = structural.map((n, i) => [n.name, verdicts[i]!.success]);
     const got = structural.map((n) => [n.name, mine(n).ok]);
@@ -212,5 +299,31 @@ describe("boards and signatures", () => {
     const sig = signDigest(bytes(digest), bytes(keyOf(1)));
     expect(addressOf(sig.publicKey)).toBe(new ethers.Wallet(keyOf(1)).address);
     expect(err("x")).toEqual({ ok: false, error: "x" });
+  });
+});
+
+describe("R-J2 what only this verifier decides", () => {
+  test("a Hanko for another Entity than the one required is refused as the wrong target", () => {
+    const other = { _tag: "entity", entityId: ethers.id("someone else") } as const;
+    const refused = verifyHanko(validNested, digest, other, unregistered);
+    expect(refused).toEqual({ ok: false, error: { _tag: "target" } });
+  });
+
+  test("the last claim is the Entity named, and naming it is accepted", () => {
+    const last = must(boardHash(nestedOuter));
+    const accepted = verifyHanko(validNested, digest, { _tag: "entity", entityId: last }, unregistered);
+    expect(accepted.ok && accepted.value.entityId).toBe(last);
+  });
+
+  test("a raw signature with recovery byte 2 names no bit", () => {
+    const raw = new ethers.SigningKey(keyOf(1)).sign(digest).serialized;
+    const two = `${raw.slice(0, -2)}02`;
+    expect(recoverRawSigner(digest, two)).toEqual({ ok: false, error: { _tag: "bad_recovery" } });
+  });
+
+  test("s equal to half the curve order is low, one more is high", () => {
+    const word = (v: bigint): Uint8Array => bytes(`0x${v.toString(16).padStart(64, "0")}`);
+    expect(isLowS(word(HALF_ORDER))).toBe(true);
+    expect(isLowS(word(HALF_ORDER + 1n))).toBe(false);
   });
 });
