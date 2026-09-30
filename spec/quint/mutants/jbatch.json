@@ -160,8 +160,8 @@
       "id": "cosign-batch-carries-payments",
       "why": "R-COSIGN: a co-signed op (a settlement) shares its batch with unrelated payments, so a counterparty change or a gas choice that fails it takes the payments down too.",
       "file": "jbatch.qnt",
-      "old": "[{ nonce: f, ids: coSigned(s, p) }]",
-      "new": "[{ nonce: f, ids: p }]",
+      "old": "[{ nonce: f, ids: coSigned(s, pn) }]",
+      "new": "[{ nonce: f, ids: pn }]",
       "killedBy": "test:coSignedOpsTravelAloneTest"
     },
     {
@@ -227,6 +227,30 @@
       "old": "      st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })\n    }\n  }\n\n  // The Entity gives a signed draft up",
       "new": "      st' = react({ ...s1, failSeen: st.failSeen })\n    }\n  }\n\n  // The Entity gives a signed draft up",
       "killedBy": "test:gasFailInsideTheBudgetSpendsTheNonceTest"
+    },
+    {
+      "id": "payments-wait-behind-a-paused-deposit",
+      "why": "F8: a queued deposit that cannot be signed (token paused) freezes every payment behind it",
+      "file": "jbatch.qnt",
+      "old": "      else if (nothingAlive(s) and pn.size() > 0) [{ nonce: f, ids: firstChunk(s, pn) }]",
+      "new": "      else if (nothingAlive(s) and pn.size() > 0 and p.size() == pn.size()) [{ nonce: f, ids: firstChunk(s, pn) }]",
+      "killedBy": "test:paymentGoesOutBehindAPausedDepositTest"
+    },
+    {
+      "id": "first-chunk-takes-everything",
+      "why": "F10: the split at the gas cap returns every op",
+      "file": "jbatch.qnt",
+      "old": "    if (not(SPLIT_AT_CAP)) ids\n",
+      "new": "    if (true) ids\n",
+      "killedBy": "test:firstChunkSplitsAtTheCapTest"
+    },
+    {
+      "id": "first-chunk-skips-the-full-check",
+      "why": "F10: a cheaper op behind one that does not fit jumps the queue (the chunk is not a prefix)",
+      "file": "jbatch.qnt",
+      "old": "      if (not(ids.contains(i)) or acc.full) acc\n",
+      "new": "      if (not(ids.contains(i))) acc\n",
+      "killedBy": "test:firstChunkIsAPrefixTest"
     }
   ],
   "init": "init",

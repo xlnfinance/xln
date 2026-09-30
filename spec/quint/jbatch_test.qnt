@@ -345,4 +345,31 @@ module jbatch_test {
     .expect(st.sub.length() == 2)
     .then(attemptAny(1))
     .expect(st.cnonce == 0).expect(st.gh.reverts >= 1).expect(not(within_cap))
+
+  // `firstChunk` is never exercised by the search (QUESTIONS J7 says so); a direct check of the pure function pins its behaviour.
+  // Ops 1 and 4 are both settlements (cost 2 each, cap 2): one fits, the other goes to the next batch. Ops 1 and 4 as payments (cost 1) both fit.
+  run firstChunkSplitsAtTheCapTest =
+    initFrom(catSS(1), 0)
+    .expect(and { firstChunk(st, Set(1, 4)) == Set(1), firstChunk(st, Set(4)) == Set(4), firstChunk(st, Set(1, 2, 4)) == Set(1) })
+  run firstChunkKeepsCheapOpsTogetherTest =
+    initFrom(cat(1, 7, 7), 0)
+    .expect(and { firstChunk(st, Set(1, 4)) == Set(1, 4), firstChunk(st, Set(1, 2, 3, 4)) == Set(1, 2) })
+  // the chunk is a prefix: an op that does not fit closes it, a cheaper op behind it does not jump the queue
+  run firstChunkIsAPrefixTest =
+    initFrom(Map(1 -> { kind: Pay, amt: 1, arr: 1, dl: 0, gate: 0 }, 2 -> { kind: Settle, amt: 0, arr: 1, dl: 0, gate: 0 },
+                 3 -> { kind: Pay, amt: 1, arr: 1, dl: 0, gate: 0 }, 4 -> { kind: Pay, amt: 1, arr: 1, dl: 0, gate: 0 }), 0)
+    .expect(firstChunk(st, Set(1, 2, 3)) == Set(1))
+
+  // F8 (final review): a deposit that cannot be signed while the token is paused does not freeze the payments queued behind it. The payment goes out alone; the deposit is signed
+  // at the next nonce once the token works and nothing is outstanding. Only the deposit waits.
+  run paymentGoesOutBehindAPausedDepositTest =
+    initFrom(catD(1, 7, 1), 3)
+    .then(extLose)
+    .then(arrive(4)).then(arrive(1))
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(1), st.sub[0].b.nonce == 1 })
+    .then(extBack)
+    .then(attempt(0))
+    .expect(and { st.cnonce == 1, st.done.get(1), st.sub.length() == 2, st.sub[1].b.ids == Set(4), st.sub[1].b.nonce == 2, safe })
+    .then(attempt(1))
+    .expect(and { st.cnonce == 2, st.done.get(4), safe })
 }

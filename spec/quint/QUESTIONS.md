@@ -74,13 +74,15 @@ A margin beyond the reserve is Entity policy (`HOP`, `ESC`). An expiry is a syst
 (`expireOne` waits for `deadline + CLOCK_RESERVE`). Boundary tests: `lockDeadlineBoundariesTest`, `resolveAtTheDeadlineSecondTest`.
 Mutants: `resolve-after-deadline`, `expire-at-deadline`, `horizon-off`, `receiver-judges-by-the-frame-stamp`, `expiry-reserve-off`.
 **The #57 sequence (coordinator, 2026-09-30).** A secret resolve is late only by the chain's J height, never by the co-signed frame clock; a payer's cancel and timeout keep the
-frame-expiry rule plus the payer's own local expiry check; a frame's `jHeight` is claimed by its proposer and is untrusted. The model has no J height at all (the Account does not
-read the chain), so the first half holds by construction: the only clock a resolve or an expiry is judged by is the deciding side's own (R-CLOCK), and the second half is
-`expireOne`'s reserve rule. What was missing is the sequence itself, now a test: a payer co-signs a frame stamped 100 ahead of every clock (`byzStampedQueued`, the frame that carries the
-lock), it is committed (`refusals == 0`), and the payee's held reveal is proposed and framed as usual (`futureStampedFrameDoesNotBlockTheRevealTest`). Mutant `future-stamp-refused`
-(the dropped stamp-window rule) blocks it and is killed by that test. The frame's `jHeight` field is not modelled: a proposer-claimed J height would be one more informational
-field, and any decision that read it would fail the same way `receiver-judges-by-the-frame-stamp` does. (The hub variant, one hub carrying several such frames, is Entity-level and
-uses the same Account rule.)
+frame-expiry rule plus the payer's own local expiry check; a frame's `jHeight` is claimed by its proposer and is untrusted. What the model says is weaker than the first sentence, and
+it is not the same rule: the Account layer judges lateness by the **deciding side's own clock** (a resolve is refused at `now > deadline`, with no reserve; an expiry is refused until
+`now > deadline + CLOCK_RESERVE`). J height decides only in chain.qnt (the secret's registration against the deadline, `d.t0 <= deadline`). So "late only by J height" is the chain's
+rule; at the Account layer an honest payer whose clock is a tick ahead can refuse a resolve that was on time by the payee's clock. That costs a dispute, not funds (F1), and the reserve
+is what keeps the payer from taking back a lock whose payee still holds the secret. The frame's `jHeight` field is not modelled: a proposer-claimed J height would be one more
+informational field, and any decision that read it would fail the way `receiver-judges-by-the-frame-stamp` does. What was missing is the sequence itself, now a test: a payer co-signs a
+frame stamped 100 ahead of every clock (`byzStampedQueued`, the frame that carries the lock), it is committed (`refusals == 0`), and the payee's held reveal is proposed as usual
+(`futureStampedFrameDoesNotBlockTheRevealTest`). Mutant `future-stamp-refused` (the dropped stamp-window rule) blocks it and is killed by that test. (The hub variant, one hub carrying
+several such frames, is Entity-level and uses the same Account rule.)
 The oracle `expiredEarly` states the goal, not the guard: no committed expiry while either clock is at or before the deadline (the payee may still resolve on its own clock). A first version of it added the reserve and
 flagged a correct expiry (receiver's clock 4, payee's 3, deadline 2); simulation found it the moment the Byzantine nonce frames became reachable.
 Open: the model does not prove the Runtime keeps `DRIFT` small; that is an operational assumption (NTP, refuse to sign when the
@@ -112,6 +114,9 @@ Resolution: at one proof nonce the chain ranks a proof by `nonce * 2 + leftAutho
 Right signed that Left-authored frame itself under the Left-priority rule, so nobody honest is hurt: the frame Right holds is the one the chain settles, and Left's earlier
 Right-authored proof cannot beat it. In the model `agreed` excuses exactly this (a later Left-authored commit over an earlier Right-authored one, only with a Byzantine peer:
 `mismatch`), not the reverse order and not two honest sides. Test `equivocatingLeftIsSupersededByRankTest`; mutant `supersession-reversed`; witness `w_no_supersede`.
+**Final review F9 (coordinator 2026-09-30):** the exemption compares ranks, not only authors: a later Left-authored commit is excused only when its nonce is not below the earlier Right-authored one's
+(`mismatch`), so `agreed` stands on its own and does not lean on `MAX_NONCE_GAP = 0` (A13 still fixes the gap at 0 for `no_equivocation`). A consequence to state plainly: with the correct model
+the four widenings of the exemption are equivalent mutants (only one order of authors ever commits twice at a height), so `agreed` bites only under injected faults.
 Restricting the exemption to a Byzantine peer is not checkable by mutant: two honest sides never reach that ordering (honest Left never proposes a second frame for a height it committed),
 so dropping the restriction is an equivalent mutant, and the restriction is a statement of intent.
 
@@ -579,6 +584,12 @@ pulls the tokens from `msg.sender`, the relayer. If a token failure spent the no
 Entity's nonce at will, which is the original #54 bug. So a batch with a deposit leg that fails on the token reverts whole and leaves its nonce open. The cost is the J6 stall (a token
 paused after the signing holds every batch above it, urgent ops included), which stays accepted. This is a decision, not an oversight: `dep_never_burns`, mutant `deposit-batch-soft-fails`,
 `failedDepositBatchRevertsWholeTest`. A gas failure inside a deposit batch is different (J7 (2)): the budget was given, so it spends the nonce like any other.
+
+**J6b. Decision (final review F8, coordinator 2026-09-30): a deposit that cannot be signed now is skipped, not waited for.** While the token is paused the Runtime does not sign the deposit
+(J6 rule 2), and it no longer holds the payments queued behind it either: `plan` falls through to the payment branches with the deposit leg removed, so the payments go out
+alone (rule 1, a deposit travels alone, is kept) and only the deposit stalls; it is signed at the next nonce once the token works and nothing is outstanding. Before, an `else if`
+returned no batch at all, so a paused token froze the whole Entity (and, with one nonce per Entity, other tokens' payments) with no timeout. `paymentGoesOutBehindAPausedDepositTest`;
+mutant `payments-wait-behind-a-paused-deposit`. J6a and J6 cover a different case (the nonce stall after signing).
 
 **J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
 (1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the

@@ -52,7 +52,7 @@ height, expiry stamped from the future, resolve stamped in the past, stale or le
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
 height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 36 scenario tests, 45 mutants.
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 36 scenario tests, 46 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
@@ -70,7 +70,7 @@ payee that learned the secret `LAG` before the deadline is paid), `p3_conserved`
 `no_double_settle`, `debt_only_when_broke`, and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_frozen` (N3: one set of windows per Account, over unequal windows),
 `closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-29 scenario tests, 46 mutants.
+31 scenario tests, 48 mutants.
 
 ## Settlement (`settle.qnt`)
 
@@ -103,9 +103,9 @@ nonce: never sign other content at a signed nonce, every replacement goes to a f
 
 J5 refinement (coordinator, #54 review): a batch with a deposit leg reverts whole and never soft-fails (`dep_never_burns`); a bad counterparty signature inside a batch (a
 settlement signed at an old epoch) is a soft fail; only a failure of the batch's own authorisation reverts without taking the nonce (`only_signed_land`). The cost of the first
-is J6 (a stuck deposit batch holds the urgent ops behind it). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
+is J6 (a stuck deposit batch holds the urgent ops behind it; a token failure in a deposit leg stays a hard revert on purpose, J6a). A deposit that cannot be signed while the token is paused is skipped, so the payments behind it still go out (J6b). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`. 30 scenario tests, 28 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`. 34 scenario tests, 31 mutants.
 
 ## Runtime (`runtime.qnt`)
 

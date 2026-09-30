@@ -365,6 +365,14 @@
       "old": "    f.height == r.height + 1,\n    f.nonce > r.pnonce, ",
       "new": "    f.height == r.height + 1,\n    f.ts <= now + DRIFT,\n    f.nonce > r.pnonce, ",
       "killedBy": "test:futureStampedFrameDoesNotBlockTheRevealTest"
+    },
+    {
+      "id": "proposer-may-skip-nonces-seen-by-agreed",
+      "why": "F9: the same free nonce gap, caught by `agreed` itself (the A12 exemption compares proof ranks), not only by no_equivocation",
+      "file": "account_core.qnt",
+      "old": "  pure val MAX_NONCE_GAP = 0\n",
+      "new": "  pure val MAX_NONCE_GAP = 1\n",
+      "killedBy": "invariant:agreed"
     }
   ],
   "testSamples": 50

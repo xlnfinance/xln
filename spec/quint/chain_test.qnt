@@ -282,4 +282,22 @@ module chain_test {
     initFrom(BASE.set(1, pf(0, true, 0, true, true)), Right, 0, 0, 2)
     .then(startWith(Left, 1, false, 0, false))
     .fail()
+
+  // "nothing moves" is asserted for the whole chain state, and with a dispute open in the live epoch (the skip must not touch it).
+  run deadEpochSkipMovesNothingTest =
+    initFrom(BASE.set(1, pf(1, true, 0, true, true)).set(4, pf(4, true, -2, true, false)), Left, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(honestFinalize)
+    .then(startAtDeadEpoch(Right, 4))
+    .expect(and { acct.nonce == 2, acct.epoch == 1, acct.coll == 0, acct.ondelta == 0, acct.via == 0, not(dispute.on), ghost.staleSkips == 1 })
+  run deadEpochSkipLeavesALiveDisputeAloneTest =
+    initFrom(BASE.set(1, pf(1, true, 0, true, true)).set(4, pf(4, true, -2, true, false)), Left, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(honestFinalize)
+    .then(startWith(Right, 6, false, 0, false))
+    .expect(and { dispute.on, acct.epoch == 1 })
+    .then(startAtDeadEpoch(Right, 4))
+    .expect(and { dispute.on, acct.epoch == 1, acct.nonce == 6, acct.ondelta == 0, ghost.staleSkips == 1 })
 }

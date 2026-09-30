@@ -288,7 +288,9 @@ module account {
   // over an earlier Right-authored commit is not a disagreement: it is the frame the chain settles. The reverse order is one.
   pure def mismatch(fc: int -> int, frames: int -> Frame, f: Frame, byzOn: bool): bool = and {
     fc.get(f.height) != 0, frames.get(fc.get(f.height)).after != f.after,
-    not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right)
+    // A12: the chain ranks a proof by nonce, then Left over Right. So a later Left-authored commit over an earlier Right-authored one is no fork only when its nonce is
+    // not below the earlier one's; the exemption compares ranks and does not lean on MAX_NONCE_GAP = 0 (final review F9).
+    not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right and f.nonce >= frames.get(fc.get(f.height)).nonce)
   }
 
   // The receiver, holding a validated frame, signs the frame and the resulting proof, commits, and answers.

@@ -214,6 +214,7 @@ module jbatch {
   pure def plan(s: S): List[Batch] = {
     val u = urgentPending(s)
     val p = payQueued(s)
+    val pn = p.filter(i => not(isDep(s, i)))       // the payment legs without a deposit
     val q = u.union(p)
     val f = topSigned(s) + 1
     if (STRAT == 0) (if (nothingAlive(s) and q.size() > 0) [{ nonce: s.cnonce + 1, ids: q }] else [])
@@ -226,12 +227,14 @@ module jbatch {
       // a deposit leg reverts its batch whole (J5 refinement), so it travels alone: the payments behind it wait for the next round. The Runtime
       // signs a deposit batch only after simulating it successfully (`s.ext`: the token works now, J6); a token paused between the simulation and the
       // landing stalls the nonce, a residual risk the coordinator accepted.
-      else if (nothingAlive(s) and p.filter(i => isDep(s, i)).size() > 0)
-        (if (s.ext or not(SIMULATE_DEPOSITS)) [{ nonce: f, ids: p.filter(i => isDep(s, i)) }] else [])
+      else if (nothingAlive(s) and p.filter(i => isDep(s, i)).size() > 0 and (s.ext or not(SIMULATE_DEPOSITS)))
+        [{ nonce: f, ids: p.filter(i => isDep(s, i)) }]
       // R-COSIGN (coordinator, #54 review): a batch that carries a co-signed op (a settlement or C2R) carries ops for that one Account only.
       // A counterparty's state change or a relayer's gas choice can fail such a batch, so nothing unrelated may ride with it.
-      else if (nothingAlive(s) and p.filter(i => isSettle(s, i)).size() > 0) [{ nonce: f, ids: coSigned(s, p) }]
-      else if (nothingAlive(s) and p.size() > 0) [{ nonce: f, ids: firstChunk(s, p) }]
+      // F8 (final review): a deposit that cannot be signed now (the token is paused) is skipped, not waited for: the payments queued behind it still go out, without it.
+      // Only that deposit stalls, and it is signed the moment the token works again.
+      else if (nothingAlive(s) and pn.filter(i => isSettle(s, i)).size() > 0) [{ nonce: f, ids: coSigned(s, pn) }]
+      else if (nothingAlive(s) and pn.size() > 0) [{ nonce: f, ids: firstChunk(s, pn) }]
       else []
     }
   }

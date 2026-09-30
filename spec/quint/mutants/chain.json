@@ -372,6 +372,22 @@
       "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
       "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: true }, acct' = acct,",
       "killedBy": "test:deadEpochStartIsSkippedTest"
+    },
+    {
+      "id": "dead-epoch-skip-pays-out",
+      "why": "F11: a skipped dead-epoch start moves the ondelta",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = { ...acct, ondelta: acct.ondelta + 1 },",
+      "killedBy": "test:deadEpochSkipMovesNothingTest"
+    },
+    {
+      "id": "dead-epoch-skip-closes-dispute",
+      "why": "F11: a skipped dead-epoch start closes a dispute that is open in the live epoch",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: false }, acct' = acct,",
+      "killedBy": "test:deadEpochSkipLeavesALiveDisputeAloneTest"
     }
   ]
 }
