@@ -1,4 +1,4 @@
-// The gate for the new tree (kernel/, chain/): every rule of the legacy ratchet, at zero.
+// The gate for the new tree (kernel/, chain/, account/): every rule of the legacy ratchet, at zero.
 //
 // style/check.ts ratchets xln.ts down from its baseline and only scans that file. The new directories start at zero on
 // every rule, so a hit here is a failure and the only way to allow one is a registered exception: a rule, a file and a
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 
 const root = `${import.meta.dir}/..`;
-const TREE = ["kernel", "chain"] as const;
+const TREE = ["kernel", "chain", "account"] as const;
 const MAX_LINE = 120;
 const MAX_DECLARATION_LINES = 50;
 

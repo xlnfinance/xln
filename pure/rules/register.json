@@ -104,7 +104,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -112,6 +112,11 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A2 a withdrawal cannot take more than the collateral, on either side"
     }
    ]
   },
@@ -184,7 +189,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -204,6 +209,26 @@
      "layer": "arrival",
      "name": "core-rcpan-no-floor",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a payment moves the payer's allocation and stops at the payer's room"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a hold counts against its payer's room before it pays, and lapsing gives the room back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 credit holds in every state: RCPAN in the worst case over the open holds"
     }
    ]
   },
@@ -1547,6 +1572,71 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "payout-forgets-the-debt",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SETTLE-CREDIT",
+   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner A1 cut)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal that leaves the allocation above the collateral is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a Left withdrawal that leaves Left past its credit is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal counts the open holds as paid"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-ignores-credit",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-CREDIT-REVOKE-FLOOR",
+   "statement": "A credit limit cannot be lowered below what the counterparty is currently using, open holds counted as used; the refusal is credit_below_usage.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30; rig finding (2) lending credit revoked below used",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner v2 lending)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CREDIT-REVOKE-FLOOR an open hold is used credit too, and Right's side has its own floor"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "credit-drop-unchecked",
      "owed": "#44"
     }
    ]
