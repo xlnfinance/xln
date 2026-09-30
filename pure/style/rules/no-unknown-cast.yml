@@ -1,0 +1,8 @@
+id: no-unknown-cast
+language: TypeScript
+severity: error
+message: as unknown as; parse the value into the type instead of asserting it
+rule:
+  kind: as_expression
+  has: { kind: as_expression, has: { kind: predefined_type, regex: '^unknown$' } }
+files: [xln.ts]
