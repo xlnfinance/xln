@@ -14,4 +14,20 @@ The rules encode the rewrite's pure style: lines of at most 120 characters (`lon
 - `concat`: `joined.set(p, offset)` fills the fresh output buffer.
 - `committedView` and the prepared-body memo: `views.set` and two `preparedBodies.add` fill module-level `WeakMap`/`WeakSet` caches of pure results.
 
+- `rules/` (the register gate; `style/check.ts` scans only `xln.ts`, so these are listed here rather than counted): `depthsBefore` in `rules/names/source.ts` fills one local `Int32Array` inside the reduce that builds it and hands it out once, like `mapAccumResult`; `parseJson` in `rules/register.ts` and `parseMutants` in `rules/names/names.ts` are the two `try`/`catch` boundaries around `JSON.parse`, which turn bad text into a `Result` or an empty list. The gate's edges (`check.ts`, `base.ts`, `scan.ts`, `checks/*.ts`) read files, call git and exit; they hold no state.
+
 A new exception must be listed here, with why no pure expression does the same work at the same cost.
+
+## Guide rules the ratchet also counts
+
+These map Arthur's elegant-code guide (project files, style/arthur-elegant-code-guide.md) onto ast-grep. They start at today's counts and can only go down; each hit is a place that fails the relief test until it is reshaped.
+
+- `no-comma-sequence`: the comma operator packs several steps into one expression (guide: one const per statement, named flow steps).
+- `no-nested-ternary`: a ternary inside a ternary (name the cases with `switch (true)` or a small function).
+- `no-try`: `try`/`catch` (guide: Result, not throw); a boundary that must catch is registered here like the other exceptions.
+- `no-unknown-cast`: `as unknown as` (parse into the type, do not assert it; guide: make invalid states unrepresentable).
+- `no-string-error`: `Result<T, string>` (an error is a tagged union, not text).
+- `no-problems-list`: an array of `cond ? undefined : "text"` filtered for defined (use named checks that return a tagged error).
+- `no-og-source-ref`: a comment that points at og source lines (`file.ts:123`); state the rule in our words and cite the spec property.
+
+Not mechanically checked: the relief test itself, honest names, function bodies that fit one sentence, comments that say why, positional boolean and `undefined` arguments (`review/pure-style-drift.md` proposes counting those), and everything outside `xln.ts`.

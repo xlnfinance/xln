@@ -2,7 +2,7 @@
 
 og spec: `core/jurisdiction/machine/board-registry`, `core/hanko/signing.ts`, `core/entity/command`,
 `core/entity/tx/handlers/{entity-provider-action,control-board-proposal}.ts`, `core/entity/tx/j-events-{board,entity-provider-action}.ts`,
-`core/entity/tx/state-effects/board-rotation-hanko-refresh.ts`, `core/runtime/registration/*`. Tests: `pure/diff/boards.test.ts` (all MATCH, og run live).
+`core/entity/tx/state-effects/board-rotation-hanko-refresh.ts`, `core/runtime/registration/*`. Tests: `pure/diff/boards/boards.test.ts` (all MATCH, og run live).
 
 | ID | Behaviour | og | Status | Notes |
 |----|-----------|----|--------|-------|

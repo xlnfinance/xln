@@ -171,8 +171,8 @@ Not covered by the Foundry suites (each is covered by `test/vm/` or is a known g
 J2 turns a dispute op the Account has moved past into a `DisputeOpSkipped` event instead of a revert. Seven ported tests
 asserted the old revert; each now asserts the skip (the event with its op, reason and nonce) and that the Account nonce,
 dispute state, reserves and collateral did not change. Real errors (bad signature, malformed or mismatched evidence, the
-wrong sender on a live dispute, an early finalize) still revert and are pinned by `test/vm/j2-skip-stale-dispute-ops.test.ts`
-(12) and `test/vm/j2-review-extra.test.ts` (16; the review's 16 tests, which also kill the 28 planted mutants).
+wrong sender on a live dispute, an early finalize) still revert and are pinned by `test/vm/disputes/j2-skip-stale-dispute-ops.test.ts`
+(12) and `test/vm/disputes/j2-review-extra.test.ts` (16; the review's 16 tests, which also kill the 28 planted mutants).
 
 | test | was | now |
 |---|---|---|
@@ -236,8 +236,8 @@ hash-ladder or external-deposit op through an external self-call in try/catch. A
 entity nonce spent, and emits `BatchFailed(entityId, nonce, reason)` instead of reverting. What still reverts and takes no
 nonce: a failure of the batch's own hanko (E4 in the outer check), a wrong nonce, malformed or oversize batches, the bounds, a transaction that offers less than the gas floor to a batch that failed (`BatchGasStarved`; an empty revert reason is no longer one of these, see the second review below), and any batch that carries a dispute, reveal,
 hash-ladder or **deposit** op. A bad counterparty signature inside the ops (a settlement or C2R signed at an old account epoch)
-is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch-failed.test.ts` (13),
-`test/vm/j5-review-extra.test.ts` (8, the review's) and `test/foundry/J5Attacks.t.sol` (the review's 6, deposit tests flipped
+is a failure of the batch like any other: `BatchFailed` with E4, nonce spent. Pinned by `test/vm/j5-batch/j5-batch-failed.test.ts` (13),
+`test/vm/j5-batch/j5-review-extra.test.ts` (8, the review's) and `test/foundry/j5/J5Attacks.t.sol` (the review's 6, deposit tests flipped
 to the fixed behaviour).
 
 **Measured.** Depository 22772 bytes (J2: 22994), Account 24455 (J2: 24448; 121 bytes under 24576, see the C2R follow-up below; the second review below moves them to 23359 and 24400). The self-call wrapper costs
@@ -277,7 +277,7 @@ hole and two rule gaps.
   Fixed by a **gas floor** (coordinator's choice over a 1/8 guard and a per-call stipend, both built and dropped): a failure is
   reported only when the self-call started with at least `BATCH_GAS_FLOOR` = 15,000,000 * 64 / 63 + 2,000 = 15,240,095 gas, so it
   cannot have been starvation at any depth; below it the transaction reverts `BatchGasStarved` and takes no nonce. Pinned by
-  `test/foundry/J5Starve.t.sol` (8) and `test/vm/j5-gas-floor.test.ts` (4: 20k, 100k, 300k members and a member that rejects under
+  `test/foundry/j5/J5Starve.t.sol` (8) and `test/vm/j5-gas-floor.test.ts` (4: 20k, 100k, 300k members and a member that rejects under
   500k gas; every limit 40k to 1.4M: never a `BatchFailed`, the estimateGas-style search lands). **Mutant:** deleting the floor
   fails 5 of the 8 `J5StarveTest` tests. Cost: a failing batch with under ~15.24M gas reverts instead of being reported (relayers
   estimate; the vm rig uses 16M).
@@ -285,17 +285,17 @@ hole and two rule gaps.
   spent (a token paused forever no longer stalls the entity; `J5EmptyReasonTest`). The dead `payer` parameter of `applyBatch` is
   gone (deposits revert whole, so nothing in the self-call reads the caller). The conservation fingerprint covers the whole
   `_accounts` record, the debt queue and cursor and the active-debt count; the planted `ondeltaEpoch` residue mutant r3 now fails
-  `invariant_everyBatchConservesValue`. `test/vm/j5b-review-extra.test.ts` (the re-review's 12 probes of bad counterparty
+  `invariant_everyBatchConservesValue`. `test/vm/j5-batch/j5b-review-extra.test.ts` (the re-review's 12 probes of bad counterparty
   signatures, and the wrong-entity C2R case).
 - **S1: a dispute-class batch that can never succeed pinned the entity nonce** (F1 forbids re-signing at it). Skips now cover what
   another party's move made permanent: a finalize whose nonce or side is not the state that settles once the window is over (reason 8; the body hash is not compared, hashing a maximal proof body broke the MAX_SWAP_BOOK gas budget),
   a finalize or counter naming another opening state (reason 3), a rival body at a registered counter's nonce and side (reason 6),
   and every former `E12` of a hash-ladder registration (op 3: window closed or no dispute, reason 9; conflict or lower replay,
-  reason 10). Too early still reverts; bytes-only failures still revert. `test/vm/j5-stuck-nonce.test.ts` (7); the three E12
+  reason 10). Too early still reverts; bytes-only failures still revert. `test/vm/j5-batch/j5-stuck-nonce.test.ts` (7); the three E12
   tests, the conflicting-counter test and the post-T finalize line in `test/protocol/HashLadderRegistry.test.ts` now assert the
   skip; the Foundry `HashLadder` handler counts a `DisputeOpSkipped` registration as not landed (`XlnHanko.opSkipped`).
 - **B1: the counterparty (and the relayer) can fail a batch, not only the signer.** No contract change: R-COSIGN, a batch that
-  carries a co-signed op carries only ops for that one Account. `test/vm/j5-cosign-veto.test.ts` (2) pins the veto: R starts a
+  carries a co-signed op carries only ops for that one Account. `test/vm/j5-batch/j5-cosign-veto.test.ts` (2) pins the veto: R starts a
   dispute, L's `[payment, co-signed C2R]` is `BatchFailed E6`, nonce spent, payment gone; control lands.
 
 - **J6 (deposit legs) and A12 (two co-signed proofs at one nonce), from the Quint model, no contract change.** Deposit legs stay in
@@ -387,17 +387,17 @@ callee burns all its gas (INVALID, endless loop, empty revert, revert with a rea
 ## Fourth round of J5 (coordinator, from the two reviews at 0aeb766): what the reserve is for, boundary tests, gap tests, prelude with intrinsic gas
 
 - **Reserve stays (30,000); its comment and this file now say what it is for:** the callee gets the whole signed budget at every gas limit the
-  check accepts. New tests: `test/vm/j5-gas-exact.test.ts` (second reviewer: an ERC-1271 member burning about 600k, budget bisected to the exact
-  need, every limit from the check up lands; P part: post-call need 2,052 against 44,413 held) and `test/foundry/J5BudgetBoundary.t.sol` (first
+  check accepts. New tests: `test/vm/j5-gas/j5-gas-exact.test.ts` (second reviewer: an ERC-1271 member burning about 600k, budget bisected to the exact
+  need, every limit from the check up lands; P part: post-call need 2,052 against 44,413 held) and `test/foundry/j5/J5BudgetBoundary.t.sol` (first
   reviewer: an NFT that reports its own `gas()`; the callee sees exactly the budget at the lowest passing limit and at a much higher one, and
   the limit below reverts). Mutants: reserve 0 is killed by both; the self-call getting budget + 100k is killed only by `J5BudgetBoundary`.
-- **Budget attacks** (`test/vm/j5-fourth-budget.test.ts`, 4): another budget under the same signature is E4 with no nonce; uint64 max and
+- **Budget attacks** (`test/vm/j5-gas/j5-fourth-budget.test.ts`, 4): another budget under the same signature is E4 with no nonce; uint64 max and
   budgets over the cap are `BatchGasStarved` with no nonce and no overflow; 500,000 lands, 499,999 and 0 are E10; a revert-whole batch ignores the
   budget but keeps the minimum; a member that reads `gasleft()` sees the signed budget, never the relayer's limit, so a simulation at another
   budget disagrees (R-SIMULATE, decisions doc).
 - **No upper bound on `gasBudget`** (accepted): a budget no chain can land never lands, the nonce stays open, the entity signs another batch at
   it. Self-inflicted, costs nothing.
-- **Gap-killing tests** (first reviewer): `test/vm/j5e-review-outdated.test.ts` (4: every branch of the outdated-finalize-evidence decision;
+- **Gap-killing tests** (first reviewer): `test/vm/j5-batch/j5e-review-outdated.test.ts` (4: every branch of the outdated-finalize-evidence decision;
   killed t07, t08, t09, t11) and the lower-Target ladder replay in `test/protocol/HashLadderRegistry.test.ts` (skip with reason 10, nothing
   changes; killed l03).
 - **Prelude constant includes intrinsic gas.** `j5-gas-prelude.test.ts` adds `21,000 + 16 * calldata bytes` (an upper bound) to the rig's
@@ -405,7 +405,7 @@ callee burns all its gas (INVALID, endless loop, empty revert, revert with a rea
   the gate total from 5,137,937 to 5,437,937 (the earlier label 5,137,943 was wrong by 6: 4,600,000 + 507,937 + 30,000). Headroom under the
   EIP-7825 cap is still about 11.3M; no gate decision changes.
 
-### The rewrite's fork shim (`pure/diff/fork-shim.ts`, `pure/diff/contracts.ts`): the two new ABI fields
+### The rewrite's fork shim (`pure/diff/rig/fork-shim.ts`, `pure/diff/rig/contracts.ts`): the two new ABI fields
 
 #50 and #55 are on main, so the shim that lets og's frozen Runtime talk to the fork's Depository now also speaks the J5 ABI:
 - `encodeForkBatch` re-encodes og's batch (after `rebindBatch` re-signed it for the epochs on chain) with the fork's `Batch` type: `gasBudget` in
@@ -414,7 +414,7 @@ callee burns all its gas (INVALID, endless loop, empty revert, revert with a rea
 - The calldata view (og reads dispute evidence back out of the transaction) shows og the batch it sealed, not the fork's bytes, because og
   decodes with its own ABI (`J_DISPUTE_PROOFBODY_CALLDATA_DECODE_FAILED` otherwise).
 - `installContracts` also swaps `DepositoryBounds`, `HashLadderRegistry` and `NftCustody`, so the linked bounds check reads the fork's `Batch`.
-- Results (local, sandbox): `pure/diff/scenario-cross-j.test.ts` 9 of 9 (8 of 9 failed before, every batch refused with a bare revert);
+- Results (local, sandbox): `pure/diff/cross-j/scenario-cross-j.test.ts` 9 of 9 (8 of 9 failed before, every batch refused with a bare revert);
   `bun diff/walk.ts --area disputes|settlement|core|boards --seeds 3`: 3 walks each, 0 failed (disputes failed 3 of 3 with the calldata error
   before the view fix); `bunx tsc -p pure` clean; `bun style/check.ts` at baseline.
 
@@ -428,7 +428,7 @@ is the machine, not #54; run on a faster one or raise the timeout for that test.
 
 ### Shim budget pin
 
-`pure/diff/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits by that bound (conservative: the first reviewer measured a real limit of about 38); the walk's largest has 3.
+`pure/diff/rig/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/rig/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits by that bound (conservative: the first reviewer measured a real limit of about 38); the walk's largest has 3.
 
 **Measured need (instrument on the BrowserVM submit, not committed):** whole `processBatch` execution gas, prelude included, over the four area walks (disputes, settlement, core, boards; 3 seeds each), `scenario.test.ts` and `scenario-cross-j.test.ts`: the largest is **396,485**, most batches about 376,000. The 14,000,000 budget is a ceiling about 35 times that need, chosen to fit og's fixed 15,000,000 tx gas, not a margin measured from the walks.
 

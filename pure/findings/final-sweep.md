@@ -1,7 +1,7 @@
 # final-sweep: the last recorded divergences and the final audit
 
 og = core/ + jurisdictions/ at 566c850 is the authority. The branch starts from claude/project-thread-nkes8j at 10f74e5 (426 pass).
-Tests: `pure/diff/final-sweep.test.ts`, plus the edited tests named below. Every MATCH test runs og live.
+Tests: `pure/diff/runtime/final-sweep.test.ts`, plus the edited tests named below. Every MATCH test runs og live.
 Result: `bun test` 434 pass, 0 fail (28 files). tsc is clean.
 
 ## Fixes (one commit each)

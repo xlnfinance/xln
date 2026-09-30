@@ -36,8 +36,6 @@ const GENERATED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
   'node_modules',
 ]);
 
-// Generated output, plus spec/arrival, a verbatim vendor of here-build/arrival.
-// contracts/typechain-types is generated like jurisdictions/typechain-types.
 const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.agents',
   '.archive',
@@ -52,9 +50,6 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   '.vscode',
   '.xln-db',
   'brainvault',
-  'contracts/artifacts',
-  'contracts/cache',
-  'contracts/typechain-types',
   'data/tmp',
   'db',
   'frontend/.svelte-kit',
@@ -74,7 +69,6 @@ const EXCLUDED_REPOSITORY_PATHS: ReadonlySet<string> = new Set([
   'packages/npm/xlnfinance/app',
   'packages/npm/xlnfinance/dist',
   'reports',
-  'spec/arrival',
   'ui',
 ]);
 
@@ -84,7 +78,6 @@ export type FolderWidth = Readonly<{
 }>;
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
-  'contracts/contracts': 16,
   'core/__tests__/runtime/ingress': 11,
   'core/__tests__/runtime/observability': 11,
   'core/entity/tx/handlers/account': 11,
@@ -94,7 +87,6 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'core/scripts/operations/hlt': 12,
   'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
-  'pure/diff': 53,
   'rscore/crates/entity-kernel/src': 12,
   'rscore/crates/entity-kernel/src/consensus': 11,
   'rscore/crates/entity-kernel/tests': 11,

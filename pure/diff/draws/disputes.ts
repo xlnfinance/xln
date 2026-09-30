@@ -1,7 +1,7 @@
 // Watchtower and dispute draws. Owner: the "watchtower and disputes" area thread.
 import { arises, drawn, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { activePairs, batchRoom, one, pairs, pick, queued, quiet, sealed, tx } from "./world-view.ts";
-import type { World } from "../world.ts";
+import type { World } from "../rig/world.ts";
 
 // ---- one dispute per run (og entity/tx/handlers/dispute) ----
 

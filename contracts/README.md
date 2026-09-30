@@ -7,7 +7,7 @@ before it and passes after it.
 
 - Build: `contracts/scripts/build.sh` compiles with Hardhat and regenerates the committed `typechain-types/`.
 - Tests that run the real stack in BrowserVM live in `test/vm/` (bun). They load this fork's bytecode into og's BrowserVM
-  through `test/vm/rig.ts`, without editing `core/`. Run one file per process: `bun test contracts/test/vm/<file>`.
+  through `test/vm/rig.ts`, without editing `core/`. Run one file per process: `bun test contracts/test/vm/<area>/<file>`.
 - The inherited Hardhat mocha suites under `test/` are unchanged copies. Several fail on this toolchain before any change
   (chai matcher version, missing og fixture); the baseline counts are in `BASELINE.md`.
 
