@@ -357,3 +357,26 @@ j5-review-extra 8, j5-stuck-nonce 9, j5b-review-extra 12, vectors 8. gate: contr
 (J5Starve 8, J5Budget 1+4+6+4, BatchBounds 13 with the two new minimum-budget tests). Vectors regenerated (`lifecycle.json` only).
 Mutants killed: budget ignored (`j5-gas-budget`, `j5-gas-callee`), `64/63` dropped (`j5-gas-budget`), minimum budget removed
 (`BatchBounds`). The Foundry J5 suites alone do not kill the first two; the vm tests do.
+
+### Post-call gas of the failure path (coordinator 02:20: does the 30,000 reserve pay for anything?)
+
+Measured on the real `Depository.processBatch` with a temporary probe (removed; source is unchanged), a withdrawal whose token
+callee burns all its gas (INVALID, endless loop, empty revert, revert with a reason), budget 500,000:
+- **Gas used after the self-call returns, through the end of the `BatchFailed` log: 1,957** (same for all four callee modes). That
+  covers the 4-byte reason read (`returndatacopy`, mask) and the LOG3.
+- **No storage write and no cold slot after the call.** The nonce write (`entityNonces[entityId] = nonce`) happens before the
+  self-call and its slot is warm afterwards; the failure path writes nothing. The success path emits `HankoBatchProcessed` and writes
+  nothing either.
+- **What the caller keeps.** The EVM lets the callee take at most 63/64 of what is left, so after a callee that burns everything the
+  caller holds at least `gasleft_at_call / 64`: 7,936 at the smallest allowed budget (500,000 * 64/63 / 64) even with no reserve, 37,936
+  with the 30,000 reserve added to the requirement. So the margin is 4.05x without the reserve and 19x with it.
+- **Boundary sweep** (`BatchGasStarved` vs `BatchFailed` at every limit from 20 below the first non-starved limit to 400 above it,
+  callee INVALID, budget 500,000): the real build and the requirement lowered by 0, 4,000, 6,000 and 7,000 gas (a check below the budget
+  itself, which hands the callee less than 63/64 of the left gas) all give 0 out-of-gas, 0 unreported returns, 400 of 400 reported.
+- **Reading.** The reserve does not decide any outcome: what protects the post-call code is the EVM's retained 1/64 plus the 500,000
+  minimum budget, and the 30,000 only raises the requirement by 30,003 gas (first non-starved limit 577,475 with it, 547,472 without).
+  There is no limit at which a reserve of 0 and a reserve of 30,000 differ except which of two clean outcomes the transaction takes.
+  So a killing test for the reserve cannot exist except one that pins the constant. The invariant that does matter is
+  `MIN_BATCH_GAS_BUDGET / 64 > post-call gas` (7,936 > 1,957); a test on that invariant would kill a lowered minimum budget as well.
+  Recommendation to the reviewers: drop the reserve (one constant and one addend) and pin that invariant instead; keeping it costs 30k
+  of requirement and nothing else.
