@@ -1640,6 +1640,68 @@
      "owed": "#44"
     }
    ]
+  },
+  {
+   "id": "R-HOLD-CAP",
+   "statement": "A ledger carries at most 32 open holds and refuses the 33rd with too_many_holds; a dispute proof with more reverts (E10).",
+   "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound"
+    }
+   ]
+  },
+  {
+   "id": "R-LOCK-EXISTS",
+   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (A2 adds the same refusal for an open hashlock).",
+   "source": "Review B of PR 73; Quint HtlcLock lock_exists",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again"
+    }
+   ]
+  },
+  {
+   "id": "R-HOLD-SLOT",
+   "statement": "A hold is addressed by the slot it sits in, never by position: resolving or expiring one hold leaves every other hold in its slot and in its order.",
+   "source": "Review B of PR 73 (coordinator decision 09-30); Quint HtlcResolve{id}, the contract's slot ids",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT a hold keeps its slot while others come and go"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
+    }
+   ]
   }
  ]
 }

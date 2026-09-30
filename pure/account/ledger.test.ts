@@ -1,14 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result, unwrapOr } from "../kernel/core/result.ts";
+import { holdOf } from "./fixtures.ts";
 import {
-  allocation, deposit, emptyLedger, expire, lock, MAX_AMOUNT, pay, resolve, room, setCredit, withdraw,
+  allocation, deposit, emptyLedger, expire, lock, MAX_AMOUNT, MAX_HOLDS, pay, resolve, room, setCredit, withdraw,
 } from "./ledger.ts";
-import type { AccountFault, Ledger } from "./model.ts";
+import { holdId, type AccountFault, type Hold, type Ledger } from "./model.ts";
 
 const refused = (fault: AccountFault): Result<never, AccountFault> => err(fault);
 
 const value = (r: Result<Ledger, AccountFault>): Ledger =>
   unwrapOr(r, (fault) => expect.unreachable(`refused: ${fault._tag}`));
+
+/** Opens the holds in order; every one must be admitted. */
+const lockAll = (l: Ledger, ...holds: readonly Hold[]): Ledger =>
+  holds.reduce((acc, hold) => value(lock(acc, hold)), l);
 
 /** Left holds `n` of the collateral (none when `n` is 0), with `credit` extended to Left. */
 const leftHolds = (n: bigint, credit = 0n): Ledger =>
@@ -24,7 +29,7 @@ describe("account/ledger", () => {
   });
 
   test("R-A6 Right's room is the collateral and credit above the allocation, less Right's own holds", () => {
-    const l = value(lock(value(deposit(emptyLedger, "right", 10n)), "right", 4n));
+    const l = lockAll(value(deposit(emptyLedger, "right", 10n)), holdOf("right", 4n));
     expect(room(l, "right")).toBe(6n);
     expect(pay(l, "right", 7n)).toEqual(refused({ _tag: "insufficient_capacity", available: 6n, requested: 7n }));
     expect(room(value(setCredit(l, "left", 3n)), "right")).toBe(9n);
@@ -43,30 +48,30 @@ describe("account/ledger", () => {
     [0n, -1n, MAX_AMOUNT + 1n].forEach((amount) => {
       const badAmount = refused({ _tag: "bad_amount", amount });
       expect(pay(l, "left", amount)).toEqual(badAmount);
-      expect(lock(l, "left", amount)).toEqual(badAmount);
+      expect(lock(l, holdOf("left", amount))).toEqual(badAmount);
       expect(deposit(l, "left", amount)).toEqual(badAmount);
       expect(withdraw(l, "left", amount)).toEqual(badAmount);
     });
   });
 
   test("R-A6 a hold counts against its payer's room before it pays, and lapsing gives the room back", () => {
-    const held = value(lock(leftHolds(10n), "left", 4n));
+    const held = lockAll(leftHolds(10n), holdOf("left", 4n));
     expect(allocation(held)).toBe(10n);
     expect(room(held, "left")).toBe(6n);
     expect(pay(held, "left", 7n)).toEqual(refused({ _tag: "insufficient_capacity", available: 6n, requested: 7n }));
-    expect(lock(held, "left", 7n).ok).toBe(false);
-    expect(room(value(expire(held, 0)), "left")).toBe(10n);
+    expect(lock(held, holdOf("left", 7n, 2n)).ok).toBe(false);
+    expect(room(value(expire(held, holdId(1n))), "left")).toBe(10n);
   });
 
   test("R-A6 resolving a hold moves the payer's allocation by its amount and needs no new room", () => {
-    const held = value(lock(value(lock(leftHolds(10n), "left", 4n)), "left", 6n));
-    const after = value(resolve(held, 0));
+    const held = lockAll(leftHolds(10n), holdOf("left", 4n, 1n), holdOf("left", 6n, 2n));
+    const after = value(resolve(held, holdId(1n)));
     expect(allocation(after)).toBe(6n);
-    expect(after.holds).toEqual([{ payer: "left", amount: 6n }]);
-    const second = value(resolve(held, 1));
-    expect([allocation(second), second.holds]).toEqual([4n, [{ payer: "left", amount: 4n }]]);
-    expect(resolve(held, 2)).toEqual(refused({ _tag: "no_such_hold", index: 2 }));
-    expect(expire(held, -1)).toEqual(refused({ _tag: "no_such_hold", index: -1 }));
+    expect(after.holds).toEqual([holdOf("left", 6n, 2n)]);
+    const second = value(resolve(held, holdId(2n)));
+    expect([allocation(second), second.holds]).toEqual([4n, [holdOf("left", 4n, 1n)]]);
+    expect(resolve(held, holdId(3n))).toEqual(refused({ _tag: "no_such_hold", id: holdId(3n) }));
+    expect(expire(held, holdId(0n))).toEqual(refused({ _tag: "no_such_hold", id: holdId(0n) }));
   });
 
   test("R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using", () => {
@@ -78,7 +83,7 @@ describe("account/ledger", () => {
   });
 
   test("R-CREDIT-REVOKE-FLOOR an open hold is used credit too, and Right's side has its own floor", () => {
-    const held = value(lock(leftHolds(0n, 5n), "left", 3n));
+    const held = lockAll(leftHolds(0n, 5n), holdOf("left", 3n));
     expect(setCredit(held, "right", 2n)).toEqual(refused({ _tag: "credit_below_usage" }));
     expect(setCredit(held, "right", 3n).ok).toBe(true);
     const owed = value(pay(value(setCredit(leftHolds(10n), "left", 4n)), "right", 4n));
@@ -106,7 +111,7 @@ describe("account/ledger", () => {
   });
 
   test("R-SETTLE-CREDIT a withdrawal counts the open holds as paid", () => {
-    const held = value(lock(value(deposit(emptyLedger, "right", 10n)), "right", 4n));
+    const held = lockAll(value(deposit(emptyLedger, "right", 10n)), holdOf("right", 4n));
     expect(withdraw(held, "right", 7n)).toEqual(refused({ _tag: "settlement_breaks_credit" }));
     expect(withdraw(held, "right", 6n).ok).toBe(true);
   });
@@ -124,27 +129,56 @@ describe("account/ledger", () => {
   test("R-A6 the largest amount, 2^256-1, is taken by every transition that takes one", () => {
     const funded = value(setCredit(value(deposit(emptyLedger, "left", MAX_AMOUNT)), "right", MAX_AMOUNT));
     expect(pay(funded, "left", MAX_AMOUNT).ok).toBe(true);
-    expect(lock(funded, "left", MAX_AMOUNT).ok).toBe(true);
+    expect(lock(funded, holdOf("left", MAX_AMOUNT)).ok).toBe(true);
     expect(withdraw(funded, "left", MAX_AMOUNT).ok).toBe(true);
     expect(deposit(emptyLedger, "right", MAX_AMOUNT).ok).toBe(true);
   });
 
   test("R-A6 one side's holds cannot add up past 2^256-1, even with credit to cover them", () => {
     const funded = value(setCredit(value(deposit(emptyLedger, "left", MAX_AMOUNT)), "right", MAX_AMOUNT));
-    const nearly = value(lock(funded, "left", MAX_AMOUNT - 1n));
-    expect(lock(nearly, "left", 2n)).toEqual(refused({ _tag: "hold_overflow", held: MAX_AMOUNT - 1n, requested: 2n }));
-    expect(lock(nearly, "left", 1n).ok).toBe(true);
-    expect(lock(value(lock(funded, "left", 1n)), "right", MAX_AMOUNT).ok).toBe(false);
+    const nearly = lockAll(funded, holdOf("left", MAX_AMOUNT - 1n, 1n));
+    const overflow = refused({ _tag: "hold_overflow", held: MAX_AMOUNT - 1n, requested: 2n });
+    expect(lock(nearly, holdOf("left", 2n, 2n))).toEqual(overflow);
+    expect(lock(nearly, holdOf("left", 1n, 2n)).ok).toBe(true);
+    expect(lock(lockAll(funded, holdOf("left", 1n)), holdOf("right", MAX_AMOUNT, 2n)).ok).toBe(false);
   });
 
   test("R-A6 payments and resolved holds move offdelta, which both sides sign, never ondelta", () => {
     const l = leftHolds(10n, 5n);
     const paidOut = value(pay(l, "left", 12n));
     expect([paidOut.offdelta, paidOut.ondelta]).toEqual([-12n, 10n]);
-    const resolved = value(resolve(value(lock(l, "left", 4n)), 0));
+    const resolved = value(resolve(lockAll(l, holdOf("left", 4n)), holdId(1n)));
     expect([resolved.offdelta, resolved.ondelta]).toEqual([-4n, 10n]);
     const rightPays = value(pay(value(deposit(emptyLedger, "right", 10n)), "right", 3n));
     expect([rightPays.offdelta, rightPays.ondelta]).toEqual([3n, 0n]);
+  });
+
+  test("R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order", () => {
+    const held = lockAll(leftHolds(10n), holdOf("left", 4n, 1n), holdOf("left", 6n, 2n));
+    expect(value(expire(held, holdId(1n))).holds).toEqual([holdOf("left", 6n, 2n)]);
+    expect(value(expire(held, holdId(2n))).holds).toEqual([holdOf("left", 4n, 1n)]);
+  });
+
+  test("R-HOLD-SLOT a hold keeps its slot while others come and go", () => {
+    const held = lockAll(leftHolds(10n), holdOf("left", 1n, 1n), holdOf("left", 2n, 2n), holdOf("left", 3n, 3n));
+    const afterFirst = value(resolve(held, holdId(1n)));
+    const afterSecond = value(resolve(afterFirst, holdId(2n)));
+    expect(afterSecond.holds).toEqual([holdOf("left", 3n, 3n)]);
+    expect(allocation(afterSecond)).toBe(7n);
+  });
+
+  test("R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again", () => {
+    const held = lockAll(leftHolds(10n), holdOf("left", 4n, 1n));
+    expect(lock(held, holdOf("right", 1n, 1n))).toEqual(refused({ _tag: "lock_exists", id: holdId(1n) }));
+    expect(lock(value(expire(held, holdId(1n))), holdOf("left", 1n, 1n)).ok).toBe(true);
+  });
+
+  test("R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound", () => {
+    const slots = Array.from({ length: MAX_HOLDS }, (_, i) => holdOf("left", 1n, BigInt(i)));
+    const full = lockAll(leftHolds(100n), ...slots);
+    expect(full.holds.length).toBe(32);
+    expect(lock(full, holdOf("left", 1n, 32n))).toEqual(refused({ _tag: "too_many_holds", max: 32 }));
+    expect(lock(value(expire(full, holdId(7n))), holdOf("left", 1n, 32n)).ok).toBe(true);
   });
 
   test("a Left deposit is Left's allocation and a Right deposit is Right's", () => {

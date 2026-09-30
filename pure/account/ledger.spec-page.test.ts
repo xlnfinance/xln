@@ -8,8 +8,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Result } from "../kernel/core/result.ts";
 import { deposit, emptyLedger, expire, lock, pay, resolve, setCredit, withdraw } from "./ledger.ts";
-import type { AccountFault, Ledger, Side } from "./model.ts";
-import { other } from "./model.ts";
+import { holdOf as holdWith } from "./fixtures.ts";
+import { holdId, other, type AccountFault, type HoldId, type Ledger, type Side } from "./model.ts";
 
 /** A broken guard lets the walk run away; the page's own space is 820 states, and past this the walk is a failure. */
 const WALK_LIMIT = 5_000;
@@ -34,7 +34,14 @@ const heldBy = (l: Ledger, side: Side): bigint =>
   l.holds.filter((h) => h.payer === side).reduce((sum, h) => sum + h.amount, 0n);
 const creditFor = (l: Ledger, by: Side): bigint => l.limit[other(by)];
 
-const holdOf = (w: World, i: number): Side | undefined => w.ledger.holds[i]?.payer;
+const payerAt = (w: World, i: number): Side | undefined => w.ledger.holds[i]?.payer;
+
+/** The slot of the i-th open hold: the page names holds by position, the ledger by slot. */
+const slotAt = (w: World, i: number): HoldId => w.ledger.holds[i]?.id ?? expect.unreachable(`no hold at ${i}`);
+
+/** The first free slot, from 1: the page has no slots, so any free one does. */
+const freeSlot = (w: World): HoldId =>
+  [1n, 2n].map(holdId).find((id) => !w.ledger.holds.some((h) => h.id === id)) ?? expect.unreachable("no free slot");
 
 const rulesFor = (side: Side): readonly Rule[] => [
   ...[1n, 2n].map((arg): Rule =>
@@ -45,11 +52,17 @@ const rulesFor = (side: Side): readonly Rule[] => [
   })),
   {
     verb: "lock", arg: 1n, side, enabled: (w) => w.ledger.holds.length < MAX_HOLDS,
-    step: (w) => lock(w.ledger, side, 1n),
+    step: (w) => lock(w.ledger, holdWith(side, 1n, freeSlot(w))),
   },
   ...[0, 1].flatMap((i): readonly Rule[] => [
-    { verb: "resolve", arg: BigInt(i), side, enabled: (w) => holdOf(w, i) === side, step: (w) => resolve(w.ledger, i) },
-    { verb: "expire", arg: BigInt(i), side, enabled: (w) => holdOf(w, i) === side, step: (w) => expire(w.ledger, i) },
+    {
+      verb: "resolve", arg: BigInt(i), side, enabled: (w) => payerAt(w, i) === side,
+      step: (w) => resolve(w.ledger, slotAt(w, i)),
+    },
+    {
+      verb: "expire", arg: BigInt(i), side, enabled: (w) => payerAt(w, i) === side,
+      step: (w) => expire(w.ledger, slotAt(w, i)),
+    },
   ]),
   { verb: "r2c", arg: 1n, side, enabled: (w) => w.reserve[side] >= 1n, step: (w) => deposit(w.ledger, side, 1n) },
   { verb: "c2r", arg: 1n, side, enabled: (w) => w.ledger.collateral >= 1n, step: (w) => withdraw(w.ledger, side, 1n) },
@@ -57,8 +70,10 @@ const rulesFor = (side: Side): readonly Rule[] => [
 
 const RULES: readonly Rule[] = SIDES.flatMap(rulesFor);
 
+/** A world as the page sees it: holds by payer and amount in order, without the slots the ledger adds. */
 const keyOf = (w: World): string =>
-  JSON.stringify([w.ledger, w.reserve], (_, v) => (typeof v === "bigint" ? `${v}n` : v));
+  JSON.stringify([{ ...w.ledger, holds: w.ledger.holds.map((h) => [h.payer, h.amount]) }, w.reserve],
+    (_, v) => (typeof v === "bigint" ? `${v}n` : v));
 
 /** What a rule moves between the payer's reserve and the collateral: a deposit draws the reserve down. */
 const reserveDraw: Readonly<Record<Verb, bigint>> =
@@ -89,6 +104,9 @@ type Taken = Readonly<{ from: World; rule: Rule; before: Ledger; after: Ledger }
 const taken: readonly Taken[] = walked.attempts.flatMap((a) =>
   (a.outcome.ok ? [{ from: a.from, rule: a.rule, before: a.from.ledger, after: a.outcome.value }] : []));
 
+/** The holds that remain when the i-th is gone: exactly it, none other. */
+const without = (l: Ledger, i: bigint): Ledger["holds"] => l.holds.filter((_, at) => BigInt(at) !== i);
+
 const payerSign = (side: Side): bigint => (side === "left" ? -1n : 1n);
 
 /** What each step did, from the formula and not from the ledger's helpers. One row per verb of the page. */
@@ -102,14 +120,13 @@ const stepChecks: Readonly<Record<Verb, (t: Taken) => void>> = {
     expect([delta(after), after.collateral, after.holds.length, after.holds.at(-1)?.payer])
       .toEqual([delta(before), before.collateral, before.holds.length + 1, rule.side]),
   resolve: ({ rule, before, after }) => {
-    const payer = before.holds[Number(rule.arg)]?.payer ?? rule.side;
-    const amount = before.holds[Number(rule.arg)]?.amount ?? 0n;
-    expect([delta(after), after.collateral, after.holds.length])
-      .toEqual([delta(before) + payerSign(payer) * amount, before.collateral, before.holds.length - 1]);
+    const named = before.holds[Number(rule.arg)] ?? expect.unreachable("resolve of a missing hold");
+    expect([delta(after), after.collateral, after.holds])
+      .toEqual([delta(before) + payerSign(named.payer) * named.amount, before.collateral, without(before, rule.arg)]);
   },
-  expire: ({ before, after }) =>
-    expect([delta(after), after.collateral, after.holds.length])
-      .toEqual([delta(before), before.collateral, before.holds.length - 1]),
+  expire: ({ rule, before, after }) =>
+    expect([delta(after), after.collateral, after.holds])
+      .toEqual([delta(before), before.collateral, without(before, rule.arg)]),
   r2c: ({ rule, before, after }) => movesCollateral(rule, before, after, 1n),
   c2r: ({ rule, before, after }) => movesCollateral(rule, before, after, -1n),
 };

@@ -13,8 +13,13 @@ export const other = (side: Side): Side => (side === "left" ? "right" : "left");
 
 export type TokenId = Brand<bigint, "TokenId">;
 
+/** The slot a hold sits in: the caller names it, it stays while the hold is open, and no two open holds share one. */
+export type HoldId = Brand<bigint, "HoldId">;
+
+export const holdId = (n: bigint): HoldId => n as HoldId;
+
 /** An open hold, what the spec calls a conditional clause: `payer` owes `amount` if its payee claims it in time. */
-export type Hold = Readonly<{ payer: Side; amount: bigint }>;
+export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint }>;
 
 /**
  * `limit.left` is the credit extended TO Left (how far Left's allocation may fall below zero); Right is the side that
@@ -36,7 +41,9 @@ export type AccountFault =
   | Tagged<"bad_credit", { limit: bigint }>
   | Tagged<"insufficient_capacity", { available: bigint; requested: bigint }>
   | Tagged<"hold_overflow", { held: bigint; requested: bigint }>
+  | Tagged<"lock_exists", { id: HoldId }>
+  | Tagged<"too_many_holds", { max: number }>
   | Tagged<"credit_below_usage">
-  | Tagged<"no_such_hold", { index: number }>
+  | Tagged<"no_such_hold", { id: HoldId }>
   | Tagged<"withdrawal_beyond_collateral", { collateral: bigint; requested: bigint }>
   | Tagged<"settlement_breaks_credit">;
