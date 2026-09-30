@@ -32,7 +32,7 @@ const isGateTest = (file: string): boolean =>
 export const scans: readonly LayerScan[] = [
   testsIn("contract", "contracts/test", isGateTest),
   testsIn("rig", "pure/diff", hasTestShape),
-  testsIn("ts", "pure", (file) => hasTestShape(file) && !/^(?:diff|rules)\//.test(file)),
+  testsIn("ts", "pure", (file) => hasTestShape(file) && !/^diff\//.test(file)),
   {
     layer: "arrival",
     root: "spec",

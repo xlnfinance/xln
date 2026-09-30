@@ -7,11 +7,14 @@ import { none, some, type Option } from "../core/option.ts";
 
 export type RawSignature = Readonly<{ r: bigint; s: bigint; recovery: number; publicKey: Uint8Array }>;
 
+// The curve library's `toRawBytes` takes a positional flag; every key in this tree is the 65-byte uncompressed point.
+const COMPRESSED = false;
+
 export const HALF_ORDER = secp256k1.CURVE.n >> 1n;
 
 export const signDigest = (digest: Uint8Array, privateKey: Uint8Array): RawSignature => {
   const signature = secp256k1.sign(digest, privateKey, { prehash: false, lowS: true });
-  const publicKey = signature.recoverPublicKey(digest).toRawBytes(false);
+  const publicKey = signature.recoverPublicKey(digest).toRawBytes(COMPRESSED);
   return { r: signature.r, s: signature.s, recovery: signature.recovery, publicKey };
 };
 
@@ -24,7 +27,7 @@ export const recoverPublicKey = (
 ): Option<Uint8Array> => {
   try {
     const signature = secp256k1.Signature.fromCompact(concat([r, s])).addRecoveryBit(recoveryBit);
-    return some(signature.recoverPublicKey(digest).toRawBytes(false));
+    return some(signature.recoverPublicKey(digest).toRawBytes(COMPRESSED));
   } catch {
     return none;
   }
