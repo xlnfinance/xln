@@ -28,9 +28,9 @@ const planted = (page, name, file, violated, config) => ({
   expect: (r) => assert.equal(r.violated, violated),
 });
 
-const PREFIX = "the receiver holds a prefix of the sender's committed frames: nothing forged, repeated, reordered or unpersisted was applied (P4)";
+const PREFIX = "the receiver's frames are never contradicted by the sender's committed frames: no equivocation, and nothing forged, repeated or reordered was applied (P4, R-DURABLE)";
 const BELIEF = "the sender never believes the peer holds more than the peer applied: only a genuine ack moves the belief";
-const HALT = "no peer message halts a node: a refusal changes nothing and never stops the Runtime (R-X1)";
+const HALT = "no peer message halts a node: a refusal changes nothing and never stops the Runtime (R-X1; a halt is also a dead end for liveness)";
 const cases = [
   { page: "account", name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3651, transitions: 11335, goals: 16 }) },
   { page: "account", name: "account frames, Right's txs conflict with each other", extra: ["account/configs/same-side-conflict.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 3423, transitions: 10383, goals: 24 }) },
@@ -177,8 +177,9 @@ const cases = [
   planted("money", "deposit from nowhere", "deposit-from-nowhere", "r2c / c2r: one unit between the payer's reserve and the collateral; a Left deposit is Left's allocation"),
   planted("money", "the shared payment arithmetic moves Δ the wrong way (money/core.scm)", "core-pay-flipped", "pay n: the payer's allocation falls by n; nothing else moves"),
   planted("money", "the shared credit bound has no lower side (money/core.scm)", "core-rcpan-no-floor", "credit holds: RCPAN in the worst case over the open clauses"),
-  { page: "transport", name: "transport link", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4508, transitions: 29302, goals: 896 }) },
-  planted("transport", "a frame is sent before its row is committed (R-DURABLE)", "send-before-persist", PREFIX),
+  { page: "transport", name: "transport link", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3536, transitions: 24328, goals: 512 }) },
+  planted("transport", "a frame is sent before its row is committed, and the sender crashes: an equivocation (R-DURABLE)", "send-before-persist", PREFIX),
+  planted("transport", "the receiver acks a frame before its row is committed, and crashes (R-DURABLE)", "ack-before-persist", BELIEF),
   planted("transport", "the receiver trusts the sender field of a frame", "trust-frame-sender", PREFIX),
   planted("transport", "the receiver applies a duplicate frame (exactly-once assumed)", "apply-duplicate", PREFIX),
   planted("transport", "the receiver applies a frame from the future (order assumed)", "apply-future", PREFIX),
@@ -189,6 +190,10 @@ const cases = [
   planted("transport", "a frame to a stale address halts the wrong node", "misrouted-halts", HALT),
   planted("transport", "a duplicate frame is not answered", "no-reack", "can always still finish"),
   planted("transport", "a stale directory entry is never refreshed", "no-refresh", "can always still finish"),
+  planted("transport", "a frame from the future halts the receiver, seen by liveness alone (flag property removed)", "halt-on-future", "can always still finish", "transport/configs/no-halt-property.scm"),
+  planted("transport", "a forged frame halts the receiver, seen by liveness alone", "forged-halts", "can always still finish", "transport/configs/no-halt-property.scm"),
+  planted("transport", "a frame to a stale address halts the wrong node, seen by liveness alone", "misrouted-halts", "can always still finish", "transport/configs/no-halt-property.scm"),
+  { page: "account", name: "account frames under a link that reorders (Q-T-2)", extra: ["account/configs/reorder.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 7483, transitions: 34819, goals: 16 }) },
   { page: "transport", name: "transport link, WITNESS: a frame from the future is refused", extra: ["transport/configs/witness-future.scm"], expect: (r) => assert.equal(r.violated, "witness T-future: a message is refused as future") },
   { page: "transport", name: "transport link, WITNESS: a forged message is refused", extra: ["transport/configs/witness-forged.scm"], expect: (r) => assert.equal(r.violated, "witness T-forged: a message is refused as forged") },
   { page: "transport", name: "transport link, WITNESS: a misrouted frame is refused", extra: ["transport/configs/witness-misrouted.scm"], expect: (r) => assert.equal(r.violated, "witness T-misrouted: a message is refused as misrouted") },

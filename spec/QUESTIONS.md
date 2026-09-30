@@ -904,7 +904,10 @@ Choice: the weakest channel there is. It may lose a message, deliver it any numb
 bound, misroute, and carry messages a stranger wrote. The page has no budget of losses or duplicates: a delivery leaves the
 message on the link, so it can be delivered again, and a drop is a separate move. This replaces the FIFO link with bounded loss of the
 Account page (Q-A-6) as the stated assumption; the Account page stays correct under the weaker one because a frame from the future
-is refused (its `prev` hash), but its model has not been widened. Entity consensus already keeps its network as a set.
+is refused (its `prev` hash). Evidence (round of the PR #65 review, F8): the Account page with a link that may deliver any of the first four queued
+messages, `account/configs/reorder.scm`, checks clean at its own bounds (7,483 states, 34,819 transitions, 16 goals; the base page has 3,651 states).
+Entity consensus already keeps its network as a set. The page's own coverage of "liveness": "can always still finish" means no reachable dead end,
+not progress under fairness; under unbounded loss that is the most one can say.
 Source: lessons R-X1; design/account-model.md P4; og core/network/p2p/ws-protocol.ts header ("best-effort", "dumb pipe").
 
 **Q-T-3. No receipts and no rejections at the transport.**
@@ -936,18 +939,22 @@ planted bugs `trust-frame-sender` (a stranger's frame is applied) and `trust-ack
 Requirement on the Host, not on the page: layer (1) must exist (spam, charging), and a replayed link frame must be harmless (it is, by Q-T-6).
 
 **Q-T-6. What a receiver does with a refused or a duplicate message (R-X1).**
-Choice: apply the next frame; answer a duplicate with the ack of the head (Q-A-2; planted bug `no-reack`); refuse a frame from the future
-(Q-A-1, planted bug `halt-on-future` is og's behavior); refuse what fails the sender check (`forged-halts`); refuse what is addressed to another
+Choice: take the next frame and ack it once its row is committed (Q-T-7); answer a duplicate with the ack of the head (Q-A-2; planted bug `no-reack`); refuse a frame from the future
+(Q-A-1; planted bug `halt-on-future` is the pattern of og's peer-reachable halts, whose real triggers are content races, see review/og-issues-halts-2026-09-28.md); refuse what fails the sender check (`forged-halts`); refuse what is addressed to another
 entity (`misrouted-halts`). A message that does not decode, or breaks a size or count cap, is refused before the Runtime sees it. NO peer message
-halts a node; only a local invariant does. Planted bugs `apply-duplicate` (an exactly-once assumption) and `apply-future` (an ordering
+halts a node; only a local invariant does. On the page a halted node takes no further step, so each halt bug is a dead end that liveness sees even with the
+flag property removed (`transport/configs/no-halt-property.scm`). Planted bugs `apply-duplicate` (an exactly-once assumption) and `apply-future` (an ordering
 assumption) are the two promises the link must not be trusted for.
 
-**Q-T-7. Persistence before send (R-DURABLE) is the boundary with the Runtime.**
-Choice: the Host sends only the outputs of a committed WAL row, and after a crash it sends again the outputs of every committed row
-whose receipt it does not hold (Runtime page Q-R-7, `recover-forgets-outputs`). This page makes the equivocation visible, which the Runtime page could
-not: the receiver's frames must be a prefix of the sender's WAL, so a frame the sender has not committed (and may build again differently
-after a crash) may not be applied by anyone. Planted bug `send-before-persist`: the peer applies a frame the sender has not committed. The receiver's own ack is an output of its own committed frame and
-follows the same rule; the page models the sender direction only.
+**Q-T-7. Persistence before send (R-DURABLE) is the boundary with the Runtime, on both sides.**
+Choice: the Host sends only the outputs of a committed WAL row, and after a crash it sends again the outputs of every committed row whose receipt it
+does not hold (Runtime page Q-R-7, `recover-forgets-outputs`). This page makes the equivocation visible, which the Runtime page could not: the body of
+a frame carries the sender's crash count, so a frame built again after a crash is another frame, and the safety claim is "the receiver's frames are never
+contradicted by the sender's committed frames". Planted bug `send-before-persist`: the frame leaves before its row is committed, the sender crashes and
+commits another frame at that height, and the peer holds one that contradicts it. The receiver has its own rule, stated and modelled: a frame it takes is held
+(`:bstaged`) and is acked only after its row is committed (rule `b persist`); a receiver crash (`b crash`) loses a held frame. Planted bug `ack-before-persist`:
+the ack leaves on arrival, the receiver crashes, and the sender believes the peer holds a frame it forgot and never resends it (the belief property fails; with that
+property removed liveness still fails on the stuck sender).
 
 **Q-T-8. What the transport must NOT promise.**
 Order, exactly-once delivery, a receipt, a bound on delay. Consequences for the layers above: the Runtime never waits on a delivery; an input is admitted
@@ -962,10 +969,12 @@ Runtime slice (R1), not a transport property. The bound is RESEND_GIVEUP + LAG <
 no new property is needed. A refusal costs the receiver a decode and a verification and the sender nothing; per-source budgets beyond the queue bound are v2 (Q-X-9).
 
 **Q-T-10. Not in the page (scope note).**
-**CLOSED (coordinator, 09-30 18:41):** the page does not model a second Account stream and the ordering between streams (none is promised, none is needed);
-a receiver crash (its state is its WAL; the same rule); several validators of one entity (one directory entry per replica); encryption, session fences and
-message size caps (an implementation of layer 1, and confidentiality, which is not a protocol property); the J watcher; a relay that stores and forwards
-(one more stranger on the link, a channel of the kind already assumed); the bounded inbound queue (Q-T-9, it is loss). Bounds: two frames, one crash, one forgery.
+**CLOSED (coordinator, 09-30 18:41; bounds accepted 09-30 20:46):** the page does not model a second Account stream and the ordering between streams (none is promised,
+none is needed); several validators of one entity (one directory entry per replica); encryption, session fences and message size caps (an implementation of layer 1, and
+confidentiality, which is not a protocol property); the J watcher; a relay that stores and forwards (one more stranger on the link, a channel of the kind already assumed);
+the bounded inbound queue (Q-T-9, it is loss); a directory that goes stale again after a refresh (liveness would hold, refresh is always enabled). A receiver crash IS modelled (Q-T-7).
+Bounds, accepted: two frames, one crash of each node, one forgery in total (so no run has a forged frame and a forged ack, two crashes of one node or a third frame). A three-frame
+pipeline, where cumulative acks cross over three heights, is where exhaustive search runs out (a three-frame run did not finish in about 30 minutes); it goes to Quint later.
 
 ## Checker (`lib/check.scm`)
 
