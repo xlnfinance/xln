@@ -24,7 +24,8 @@ import type { JAdapter } from "../../core/jurisdiction/adapter/types.ts";
 import { deliveryAccepted } from "../../core/protocol/payments/delivery-result.ts";
 import { ANVIL_KEYS, MORE_ANVIL_KEYS, signDigestHex, signerAddress, unwrap, verifiers } from "../xln_run.ts";
 import { accountLines, inputsLine, routedLine, tracing } from "./scenario-trace.ts";
-import { haltDeparture } from "./departures.ts";
+import { haltDeparture, KNOWN_DIVERGENCES } from "./departures.ts";
+import type { KnownDivergence } from "./departures.ts";
 import {
   canonicalEntityHashes,
   convertOutput,
@@ -157,13 +158,19 @@ export const treeClone = <T>(v: T): T => {
 /** Plain JSON view (bigints tagged), so og and rewrite values compare structurally. */
 export const plain = (v: unknown): unknown => JSON.parse(stableJson(v));
 /** The first differing leaves of two plain values, as `path: og=… rw=…`. */
-export const leafDiffs = (a: unknown, b: unknown, at = "", out: string[] = []): string[] => {
-  if (out.length >= Number(process.env["SCN_DIFFS"] ?? 6)) return out;
+export const leafDiffs = (
+  a: unknown,
+  b: unknown,
+  at = "",
+  out: string[] = [],
+  limit = Number(process.env["SCN_DIFFS"] ?? 6),
+): string[] => {
+  if (out.length >= limit) return out;
   const both = a !== null && b !== null && typeof a === "object" && typeof b === "object";
   if (both) {
     const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
     keys.forEach((k) =>
-      leafDiffs((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`, out),
+      leafDiffs((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`, out, limit),
     );
     return out;
   }
@@ -186,6 +193,8 @@ export type Coverage = {
   haltTexts: string[];
   /** Frames og halted on where the rewrite departs on purpose (departures.ts); the two states differ from then on. */
   departures: string[];
+  /** Frames whose og events show a registered divergence (departures.ts KNOWN_DIVERGENCES), by name; its hash paths are masked from then on. */
+  divergences: string[];
   /** Disputes both sides saw finalized on chain (the Account stays frozen, its active dispute cleared). */
   disputesFinalized: number;
   actions: Record<string, number>;
@@ -199,6 +208,7 @@ export const emptyCoverage = (): Coverage => ({
   halts: 0,
   haltTexts: [],
   departures: [],
+  divergences: [],
   disputesFinalized: 0,
   actions: {},
   accountTxs: new Set(),
@@ -384,6 +394,9 @@ export const createLane = (cfg: LaneConfig): Lane => {
   let pending: readonly RoutedEntityInput[] = [];
   /** The inputs the rewrite's entity-height barrier requeued last frame: og holds them at the front of its mempool. */
   let deferred: readonly RoutedEntityInput[] = [];
+  /** og's certified head hash per replica, and the registered divergences its events showed so far. */
+  const ogHeads = new Map<string, string>();
+  let divergent: readonly KnownDivergence[] = [];
   let arrived: readonly RoutedEntityInput[] = [];
   let sent: { og: OgEnvelope[]; rw: readonly Shipped[] } = { og: [], rw: [] };
   /**
@@ -578,8 +591,23 @@ export const createLane = (cfg: LaneConfig): Lane => {
     const c = committed.value;
     const after = c === null ? rt : c.runtime;
     const diffs: string[] = [];
+    // og's newly certified frames show a registered divergence in their events; from then on the paths that follow from
+    // it are masked (departures.ts KNOWN_DIVERGENCES), every other path is still compared
+    const certified = [...env.state.eReplicas.values()].flatMap((r) => {
+      const frame = r.certifiedFrameHead?.frame;
+      return frame === undefined ? [] : [{ key: `${r.entityId}:${r.signerId}`, hash: String(frame.hash), events: frame.events ?? [] }];
+    });
+    const fresh = certified.filter((h) => ogHeads.get(h.key) !== h.hash);
+    certified.forEach((h) => ogHeads.set(h.key, h.hash));
+    const caused = KNOWN_DIVERGENCES.filter((k) => fresh.some((h) => h.events.some((e) => k.causedBy(e as never))));
+    caused.forEach((k) => coverage.divergences.push(`${label} ${k.name}`));
+    divergent = [...new Set([...divergent, ...caused])];
+    const masked = (path: string): boolean => divergent.some((k) => k.follows(path));
     const cmp = (what: string, og: unknown, rw: unknown): void => {
-      leafDiffs(plain(og), plain(rw)).forEach((d) => diffs.push(`${label} ${what}${d}`));
+      leafDiffs(plain(og), plain(rw), "", [], 1000)
+        .filter((d) => !masked(`${what}${d.slice(0, d.indexOf(": og="))}`))
+        .slice(0, Number(process.env["SCN_DIFFS"] ?? 6))
+        .forEach((d) => diffs.push(`${label} ${what}${d}`));
     };
     cmp("height", env.state.height, Number(after.height));
     cmp("timestamp", env.state.timestamp, Number(after.timestamp));

@@ -15,7 +15,8 @@ import { seedOf, untilCovered } from "./seed.ts";
 import { tracing } from "./scenario-trace.ts";
 import type { Coverage } from "./lane.ts";
 import { openWorld } from "./world.ts";
-import { AREAS, type Area } from "./draws/areas.ts";
+import { AREA, AREAS, type Area } from "./draws/areas.ts";
+import { finalizedDisputes } from "./draws/disputes.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { knownHalt } from "./departures.ts";
 import { stableJson } from "../xln.ts";
@@ -32,7 +33,12 @@ export type Walked = { readonly coverage: Coverage; readonly diffs: readonly str
  * One walk over the given drawn rows and world moves; it stops at the first diff, an og halt both sides agree on, or a
  * departure.
  */
-export const walk = async (seed: number, moves: readonly Drawn[], world: readonly NamedWorldMove[]): Promise<Walked> => {
+export const walk = async (
+  seed: number,
+  moves: readonly Drawn[],
+  world: readonly NamedWorldMove[],
+  area?: Area,
+): Promise<Walked> => {
   const w = await openWorld(seed, "model");
   const { lane, coverage } = w;
   const tried = new Map<string, number>();
@@ -44,7 +50,9 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
     const funded = await lane.tick([], []);
     if (funded.length > 0) return { coverage, diffs: funded };
     const covered = () => moves.every(([k]) => coverage.entityTxs.has(k));
-    const more = untilCovered(FRAMES, covered, FRAMES * 6);
+    // a lifecycle an area's draws opened (a dispute) keeps the walk going past its floor until the lifecycle closes
+    const owing = () => world.filter(([, m]) => m.owed?.(w) === true);
+    const more = untilCovered(FRAMES, () => covered() && owing().length === 0, FRAMES * 6);
     // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run; so does a departure
     // (departures.ts), after which the two states differ
     const loop = async (i: number): Promise<readonly string[]> => {
@@ -59,8 +67,12 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
       // no Entity tx drawn: one of the enabled world moves, uniformly
       const open = world.filter(([, m]) => m.enabled(w));
       const around = chosen === undefined ? open[w.ri(open.length)] : undefined;
-      const step = chosen !== undefined ? chosen[1].draw(w) : await (around?.[1].draw(w) ?? { runtimeTxs: [], users: [] });
-      const name = chosen?.[0] ?? around?.[0] ?? "world";
+      // an owed world move that is enabled goes first: it closes what an earlier draw opened
+      const due = owing().find(([, m]) => m.enabled(w));
+      const step = due !== undefined
+        ? await due[1].draw(w)
+        : chosen !== undefined ? chosen[1].draw(w) : await (around?.[1].draw(w) ?? { runtimeTxs: [], users: [] });
+      const name = due?.[0] ?? chosen?.[0] ?? around?.[0] ?? "world";
       tried.set(name, (tried.get(name) ?? 0) + 1);
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
@@ -72,12 +84,24 @@ export const walk = async (seed: number, moves: readonly Drawn[], world: readonl
     const unguarded = coverage.haltTexts
       .filter((h) => knownHalt(h) === undefined)
       .map((h) => `${w.tag} og halted on a drawn input, not a known og halt: ${h}`);
+    // the walk ended (floor, or cap) with a lifecycle still open: a dispute that never finalized
+    const unclosed = owing().map(([n]) => `${w.tag} the walk ended with ${n} still owed: its lifecycle never closed`);
+    // a walk of an area draws that area's moves: none committed, and the area is unchecked whatever the diffs say
+    const own = area === undefined || area === "core" ? undefined : ownMoves(area, coverage);
+    const silent = own === 0 ? [`${w.tag} the walk committed none of ${area}'s moves, so it checked nothing of that area`] : [];
+    // a disputes walk finalizes its dispute on both sides: a walk that only prepared one never checked the payout
+    const unfinalized = area === "disputes" && finalizedDisputes(w) === 0 ? [`${w.tag} no dispute finalized on both sides`] : [];
     const refused = w.refusals().map((r) => `${w.tag} the chain refused a batch og submitted: ${r}`);
-    return { coverage, diffs: [...diffs, ...unguarded, ...refused] };
+    return { coverage, diffs: [...diffs, ...unguarded, ...unclosed, ...silent, ...unfinalized, ...refused] };
   } finally {
     await w.close();
   }
 };
+
+/** How many of an area's own moves a walk committed: its Entity tx kinds (drawn or arising) and its world moves. */
+export const ownMoves = (area: Area, c: Coverage): number =>
+  [...c.entityTxs].filter((k) => (AREA as Record<string, Area>)[k] === area).length
+  + Object.keys(c.actions).filter((n) => n.startsWith(`${area}:`)).length;
 
 /** The drawn kinds a walk over these rows never committed. */
 export const uncovered = (moves: readonly Drawn[], seen: ReadonlySet<string>): readonly string[] =>
@@ -85,7 +109,7 @@ export const uncovered = (moves: readonly Drawn[], seen: ReadonlySet<string>): r
 
 export const walkLine = (seed: number, c: Coverage): string =>
   `seed 0x${seed.toString(16)}: ${c.frames} Runtime frames, halts ${stableJson(c.haltTexts)}, departures `
-  + `${stableJson(c.departures)}, moves ${stableJson(c.actions)}\n  committed kinds ${[...c.entityTxs].sort().join(",")}; `
+  + `${stableJson(c.departures)}, divergences ${stableJson(c.divergences)}, moves ${stableJson(c.actions)}\n  committed kinds ${[...c.entityTxs].sort().join(",")}; `
   + `Account txs ${[...c.accountTxs].sort().join(",")}`;
 
 // ---- the command ----
@@ -111,7 +135,7 @@ const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(scopeOf(ar
 
 /** One walk in this process: 0 when the lane agreed on every frame. */
 const one = async (area: Area | undefined, seed: number): Promise<number> => {
-  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)));
+  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)), area);
   console.log(walkLine(seed, coverage));
   diffs.forEach((d) => console.log(`  DIFF ${d}`));
   console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs] })}`);
