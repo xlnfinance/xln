@@ -1,10 +1,10 @@
 // The proof body: the state two parties sign and a dispute settles from.
 //
 // Its hash is what a dispute start, a counter-dispute and a finalization compare (Types.sol `ProofBody`).
-import { A, arrayOf, encode, type Abi, type AbiFault } from "../kernel/abi.ts";
-import { keccakHex } from "../kernel/bytes.ts";
-import { map, type Result } from "../kernel/result.ts";
-import { int512Abi } from "./money.ts";
+import { A, arrayOf, encode, type Abi, type AbiFault } from "../../kernel/encoding/abi.ts";
+import { keccakHex } from "../../kernel/encoding/bytes.ts";
+import { map, type Result } from "../../kernel/core/result.ts";
+import { int512Abi } from "../money.ts";
 
 /** How much of a delta a clause may move in each direction, by the index of the delta in the body. */
 export type Allowance = Readonly<{ deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint }>;

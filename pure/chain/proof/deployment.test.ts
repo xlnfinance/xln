@@ -1,6 +1,6 @@
 // Which Depository a signature is for: the address and chain id a payload binds (C1, C2 bind the digest to them).
 import { describe, expect, test } from "bun:test";
-import { checksum } from "../kernel/signature.ts";
+import { checksum } from "../../kernel/crypto/signature.ts";
 import { deployment } from "./deployment.ts";
 
 const LOWER = "0x5fbdb2315678afecb367f032d93f642f64180aa3";

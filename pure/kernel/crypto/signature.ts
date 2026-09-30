@@ -2,8 +2,8 @@
 //
 // A signature is low-s with a recovery bit, so a signed digest has exactly one valid spelling.
 import { secp256k1 } from "@noble/curves/secp256k1";
-import { bytesToHex, concat, keccak256, utf8 } from "./bytes.ts";
-import { none, some, type Option } from "./option.ts";
+import { bytesToHex, concat, keccak256, utf8 } from "../encoding/bytes.ts";
+import { none, some, type Option } from "../core/option.ts";
 
 export type RawSignature = Readonly<{ r: bigint; s: bigint; recovery: number; publicKey: Uint8Array }>;
 

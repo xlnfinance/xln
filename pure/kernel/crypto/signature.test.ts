@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
-import { hexToBytes } from "./bytes.ts";
-import { none, some } from "./option.ts";
+import { hexToBytes } from "../encoding/bytes.ts";
+import { none, some } from "../core/option.ts";
 import { HALF_ORDER, addressOf, checksum, recoverPublicKey, signDigest } from "./signature.ts";
 
 const bytes = (hex: string): Uint8Array => {

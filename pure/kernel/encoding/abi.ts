@@ -3,8 +3,8 @@
 // The model is `Abi`, one member per Solidity type the contracts use. Building a tree cannot fail; `encode` checks
 // every leaf against its type (a uint16 above 65535, a bytes32 of 31 bytes) and names the first leaf that does not fit.
 import { bytesToHex, concat, digitsToBytes, hexBody, hexToBytes, type HexFault } from "./bytes.ts";
-import { err, flatMap, map, mapAccum, ok, traverse, type Result } from "./result.ts";
-import { match, type Tagged } from "./tagged.ts";
+import { err, flatMap, map, mapAccum, ok, traverse, type Result } from "../core/result.ts";
+import { match, type Tagged } from "../core/tagged.ts";
 
 export type UintBits = 8 | 16 | 32 | 64 | 256;
 export type Abi =

@@ -4,7 +4,7 @@
 // head cannot be read as a length word. Reads past the end are zero words, as the EVM's calldata reads are; a caller
 // that must refuse a short buffer asks `abiFits` first.
 import { bytesToHex } from "./bytes.ts";
-import type { Brand } from "./tagged.ts";
+import type { Brand } from "../core/tagged.ts";
 
 /** A cursor at the head of a tuple. */
 export type AbiTuple = Brand<number, "AbiTuple">;
