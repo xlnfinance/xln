@@ -455,5 +455,5 @@ Decisions and the 12-site table: `plan/contracts-decisions.md`, "Swallowed failu
   `BoardRotationAuthority.test.ts`; that sweep does not reach starvation inside the reads, which rests on the monotone argument). The rest revert or were
   guarded. `test/gate/swallowed-failures.test.ts` counts the sites per file (Account 5, DeltaTransformer 2, Depository 2, EntityProvider 2, HankoVerifier 1)
   and fails on a change.
-- Folder-width debt: `contracts/test/foundry` 17, `contracts/test/vm` 23.
+- Folder width: `contracts/test/foundry` has 17 files and `contracts/test/vm` 23 (the limit is 10). The record of those counts is og's `check-folder-width.ts`, which we do not edit, so `check:folder-width` stays red here until the subfolder split (#61) lands.
 
