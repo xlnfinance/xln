@@ -94,6 +94,16 @@
 ;; `debts-lifo`, `debts-uncapped`). Debts arise elsewhere (a dispute shortfall, dispute/dispute.scm); here they are
 ;; given in the initial world.
 ;;
+;; R-FUNDED (coordinator, 09-30 15:23; generalizes J6c): the planner signs a reserve payment only if the spendable reserve
+;; covers it at signing, in EVERY situation, not only behind a paused deposit. Oldest first, skipping one that does not fit
+;; (a payment has a cost: r1 costs 1, r2 costs 2). No signed batch carries an unfunded payment; it would soft-fail, burn its
+;; nonce and be re-signed every round (bugs `unfunded-payments`, `funding-blocks-behind-misfit`).
+;; R2C-DEBT-FIRST (coordinator, 09-30 15:23): a reserve-to-collateral op enforces the outstanding debt BEFORE the reserve is
+;; used, in as many internal calls as it takes: after it, the debt queue is empty or the spendable reserve is zero (bug
+;; `r2c-skips-enforcement`). Pinned against contracts/ at f996ff5: a part-paid claim stays at the head of the queue, reduced
+;; in place, and the cursor does not advance (bug `partial-moves-back`); the spendable reserve nets the WHOLE outstanding
+;; debt; one internal call visits at most 32 claims (`enforce-cap`, cleared or part-paid; bug `debts-uncapped`).
+;;
 ;; Faults: the chain may fail a batch that has no dispute op for a reason outside the batch (a reserve spent
 ;; elsewhere, a token pull refused), `faults` times, and drop a submitted batch, `drops` times. The
 ;; counterparty may move Account A to a new epoch elsewhere, `epoch-moves` times (a signature over epoch 0
@@ -130,10 +140,12 @@
 (define (counter? op) (equal? op "cnt-a"))
 (define (leg? op) (string-prefix? "x" op))
 (define (settle? op) (equal? op "stl-a"))
-(define (r2c? op) (equal? op "r1"))
+(define (r2c? op) (or (equal? op "r1") (equal? op "r2")))
+;; a reserve payment (r2c) moves its cost from the reserve into collateral
+(define (cost op) (if (equal? op "r2") 2 1))
 ;; the Account an op belongs to; `stl-a` is co-signed (R-COSIGN). A deposit leg belongs to none.
 (define (cosigned? op) (settle? op))
-(define (account-of op) (cond ((equal? op "r1") :b) ((leg? op) :none) (else :a)))
+(define (account-of op) (cond ((r2c? op) :b) ((leg? op) :none) (else :a)))
 
 (define init
   (dict :now 0
@@ -143,7 +155,7 @@
         :inbox (list) :events (list) :failures (list) :faults faults :drops drops
         :secret #f :finalized (list) :epoch 0 :moves 0 :returned (list) :gas gas-starves :starts (list)
         :signed-max 0 :signed (list) :abandoned (list)
-        :paused #f :pauses 0 :seed 3 :debts (list) :debt0 0 :enforcements (list) :paid 0
+        :paused #f :pauses 0 :seed 3 :debts (list) :debt0 0 :enforcements (list) :paid 0 :after-r2c (list) :skipped-unfit (list)
         :unfunded (list) :paused-signed (list)))
 
 ;; ---- the chain
@@ -176,16 +188,23 @@
 (define (debt-order debts) debts)
 ;; how many debts one call clears (bug `debts-uncapped`)
 (define (call-cap) enforce-cap)
+;; the queue after a call: cleared claims leave, a part-paid claim is reduced IN PLACE and stays at the head (bug
+;; `partial-moves-back`: it goes to the back)
+(define (requeue-debts debts cleared updated)
+  (map (lambda (d) (or (find (lambda (u) (= (:id u) (:id d))) updated) d))
+       (filter (lambda (d) (not (member (:id d) cleared))) debts)))
 (define (finish-enforce w cleared updated reserve)
   (if (= reserve (:reserve w))
       w
-      (-> w (assoc-in (list :reserve) reserve)
-            (update-in (list :paid) (lambda (p) (+ p (- (:reserve w) reserve))))
-            (update-in (list :enforcements)
-                       (lambda (e) (append e (list (dict :queue (map (lambda (d) (:id d)) (:debts w)) :cleared cleared)))))
-            (assoc-in (list :debts)
-                      (map (lambda (d) (or (find (lambda (u) (= (:id u) (:id d))) updated) d))
-                           (filter (lambda (d) (not (member (:id d) cleared))) (:debts w)))))))
+      (let ((queue (requeue-debts (:debts w) cleared updated)))
+        (-> w (assoc-in (list :reserve) reserve)
+              (update-in (list :paid) (lambda (p) (+ p (- (:reserve w) reserve))))
+              (update-in (list :enforcements)
+                         (lambda (e) (append e (list (dict :queue (map (lambda (d) (:id d)) (:debts w)) :cleared cleared
+                                                           :visited (+ (length cleared) (length updated))
+                                                           :partial (if (pair? updated) (:id (car updated)) #f)
+                                                           :head-after (if (pair? queue) (:id (car queue)) #f))))))
+              (assoc-in (list :debts) queue)))))
 (define (enforce w)
   (let loop ((todo (debt-order (:debts w))) (reserve (:reserve w)) (n 0) (cleared (list)) (updated (list)))
     (if (or (null? todo) (>= n (call-cap)) (<= reserve 0))
@@ -196,6 +215,13 @@
               (loop (cdr todo) (- reserve pay) (+ n 1) cleared
                     (append updated (list (dict :id (:id d) :amount (- (:amount d) pay))))))))))
 
+;; as many internal calls as it takes: until the queue is empty or a call pays nothing (the reserve is gone)
+(define (enforce-all w)
+  (let ((w1 (enforce w)))
+    (if (= (:reserve w1) (:reserve w)) w (enforce-all w1))))
+;; R2C-DEBT-FIRST: a reserve payment enforces the whole queue before it uses the reserve (bug `r2c-skips-enforcement`)
+(define (r2c-enforce w) (enforce-all w))
+
 ;; an op can apply now, given the reserve left after the earlier ops of the batch; a stale op is
 ;; skipped, so it is always fine
 (define (op-ok? w op reserve)
@@ -204,22 +230,26 @@
         ((counter? op) #t)
         ((leg? op) (not (:paused w)))
         ((settle? op) (sig-ok? w op))
-        (else (>= reserve 1))))
+        (else (>= reserve (cost op)))))
 (define (batch-ok? w ops)
   (let loop ((rest ops) (reserve (net-reserve w)) (applied (:applied w)))
     (cond ((null? rest) #t)
           ((not (op-ok? (assoc-in w (list :applied) applied) (car rest) reserve)) #f)
           (else (loop (cdr rest)
-                      (cond ((and (r2c? (car rest)) (not (member (car rest) applied))) (- reserve 1))
+                      (cond ((and (r2c? (car rest)) (not (member (car rest) applied))) (- reserve (cost (car rest))))
                             ((leg? (car rest)) (+ reserve leg-amount))
                             (else reserve))
                       (if (stale-op? (assoc-in w (list :applied) applied) (car rest)) applied (append applied (list (car rest)))))))))
 (define (apply-op w op)
   (cond ((stale-op? w op) (update-in w (list :skipped) (lambda (s) (append s (list op)))))
         ((r2c? op)
-         (-> w (update-in (list :reserve) (lambda (r) (- r 1)))
-               (update-in (list :collateral) (lambda (c) (+ c 1)))
-               (update-in (list :applied) (lambda (a) (append a (list op))))))
+         (let* ((w0 (r2c-enforce w))
+                (w1 (-> w0 (update-in (list :reserve) (lambda (r) (- r (cost op))))
+                           (update-in (list :collateral) (lambda (c) (+ c (cost op))))
+                           (update-in (list :applied) (lambda (a) (append a (list op)))))))
+           (update-in w1 (list :after-r2c)
+                      (lambda (l) (append l (list (dict :empty? (null? (:debts w1)) :net (net-reserve w1)
+                                                        :calls (- (length (:enforcements w1)) (length (:enforcements w))))))))))
         ((leg? op)
          (enforce (-> w (update-in (list :reserve) (lambda (r) (+ r leg-amount)))
                         (update-in (list :applied) (lambda (a) (append a (list op)))))))
@@ -349,14 +379,23 @@
           ((leg? (car rest))
            (loop (cdr rest) avail (if (deposit-signable? w) (append acc (list (car rest))) acc)))
           ((r2c? (car rest))
-           (if (>= avail 1)
-               (loop (cdr rest) (- avail 1) (append acc (list (car rest))))
+           (if (>= avail (cost (car rest)))
+               (loop (cdr rest) (- avail (cost (car rest))) (append acc (list (car rest))))
                (loop (cdr rest) avail acc)))
           (else (loop (cdr rest) avail (append acc (list (car rest))))))))
 (define (sendable w) (fundable w (:draft w)))
 ;; restated from the state, not through the functions above (a planted bug redefines those): what a batch signed now
 ;; would carry that the reserve net of debt does not cover, and a deposit signed while its token is paused
-(define (unfunded-ops w ops) (if (> (length (filter r2c? ops)) (net-reserve w)) (filter r2c? ops) (list)))
+(define (unfunded-ops w ops)
+  (let loop ((rest (filter r2c? ops)) (avail (net-reserve w)) (bad (list)))
+    (cond ((null? rest) bad)
+          ((> (cost (car rest)) avail) (loop (cdr rest) avail (append bad (list (car rest)))))
+          (else (loop (cdr rest) (- avail (cost (car rest))) bad)))))
+;; for the witness of R-FUNDED: a payment skipped for lack of reserve while a later one is signed
+(define (skipped-unfit w draft ops)
+  (filter (lambda (d) (and (r2c? d) (not (member d ops))
+                           (some (lambda (o) (and (r2c? o) (> (position o draft) (position d draft)))) ops)))
+          draft))
 (define (paused-legs w ops) (if (:paused w) (filter leg? ops) (list)))
 
 ;; F1: a fresh nonce is above every nonce the Entity ever signed (bug `resign-at-nonce`: chain + 1)
@@ -371,6 +410,7 @@
             (-> (submit w b)
                 (update-in (list :unfunded) (lambda (l) (append l (unfunded-ops w ops))))
                 (update-in (list :paused-signed) (lambda (l) (append l (paused-legs w ops))))
+                (update-in (list :skipped-unfit) (lambda (l) (append l (skipped-unfit w (:draft w) ops))))
                 (assoc-in (list :phase) :inflight)
                 (assoc-in (list :sent) b)
                 (assoc-in (list :signed-max) (max (:signed-max w) (:nonce b)))
@@ -547,21 +587,25 @@
             (op-list)))
    (property "a deadline revert never blocks another Account's ops: a reverted finalize goes alone" (w)
      (every (lambda (r) (or (not (member "fin-a" (:ops r))) (= (length (:ops r)) 1))) (:failures w)))
-   (property "the spendable reserve nets all outstanding debt: a payment is signed only against the reserve net of every debt, so none spends owed money or burns a nonce (09-30 13:50)" (w)
+   (property "no signed batch carries an unfunded payment: each payment fits the spendable reserve, which nets all outstanding debt (R-FUNDED)" (w)
      (null? (:unfunded w)))
    (property "a deposit whose token is paused is not signed: it is skipped and waits with the payments it funds (09-30 13:50)" (w)
      (null? (:paused-signed w)))
-   (property "debts are cleared oldest first (09-30 13:50)" (w)
+   (property "debts are cleared oldest first" (w)
      (every (lambda (e) (equal? (:cleared e) (take (:queue e) (length (:cleared e))))) (:enforcements w)))
-   (property "one enforcement call clears at most the cap of debts (32 in the contract) (09-30 13:50)" (w)
-     (every (lambda (e) (<= (length (:cleared e)) enforce-cap)) (:enforcements w)))
+   (property "one enforcement call visits at most the cap of claims, cleared or part-paid (32 in the contract)" (w)
+     (every (lambda (e) (<= (:visited e) enforce-cap)) (:enforcements w)))
+   (property "a part-paid claim stays at the head of the queue, reduced in place (contracts f996ff5)" (w)
+     (every (lambda (e) (or (not (:partial e)) (equal? (:partial e) (:head-after e)))) (:enforcements w)))
+   (property "after a reserve-to-collateral op, the debt queue is empty or the spendable reserve is zero (R2C-DEBT-FIRST)" (w)
+     (every (lambda (r) (or (:empty? r) (= (:net r) 0))) (:after-r2c w)))
    (property "a debt leaves the queue only when paid: debts paid and debts outstanding equal the debts the entity started with" (w)
      (= (+ (:paid w) (total-debt w)) (:debt0 w)))
    (property "the reserve is conserved: seed and deposits equal reserve, collateral and debts paid" (w)
      (= (+ (:seed w) (* leg-amount (length (filter leg? (:applied w)))))
         (+ (:reserve w) (:collateral w) (:paid w))))
    (property "collateral is exactly what the applied r2c ops moved" (w)
-     (= (:collateral w) (length (filter r2c? (:applied w)))))))
+     (= (:collateral w) (reduce (lambda (op acc) (+ acc (cost op))) 0 (filter r2c? (:applied w)))))))
 
 ;; done: every op is applied, skipped or refused, the entity has nothing in flight and knows it
 (define (finished? w)

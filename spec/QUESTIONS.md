@@ -743,8 +743,8 @@ is signed anyway; it reverts and stalls the nonce) and `unfunded-payments` (ever
 reserve). Bound: `j/configs/paused-deposit.scm` (reserve 0, deposit then payment, one pause); 983 states.
 (2) Debt enforcement. The J page keeps an entity's debts as a queue; a reserve credit (a deposit leg) and the
 permissionless `enforceDebts` call pay them first in, first out, at most `enforce-cap` debts cleared per call (32 in the
-contract; the bounds use 1). Properties: "debts are cleared oldest first", "one enforcement call clears at most the cap of
-debts", "a debt leaves the queue only when paid" and "the reserve is conserved". The property the coordinator named is
+contract; the bounds use 1). Properties: "debts are cleared oldest first", "one enforcement call visits at most the cap of
+claims", "a debt leaves the queue only when paid" and "the reserve is conserved". The property the coordinator named is
 "the spendable reserve nets all outstanding debt": the reserve a payment may spend is the reserve minus EVERY outstanding
 debt, the ones beyond the cap included, so a payment is signed only against that net and none spends owed money. The chain
 applies a reserve op only against the net reserve; an Entity that counts the raw reserve signs a payment that fails and
@@ -759,6 +759,28 @@ it, and its R2C during a dispute checks the raw reserve. The queue and its cap l
 finalize is the only place a debt is created and the payout ledger keeps one number per side. Not modelled: gas of
 the enforcement call, debts in several tokens, forgiving a debt (Q-X-4).
 Source: coordinator 09-30 13:50.
+(3) R-FUNDED and R2C-DEBT-FIRST (coordinator, 09-30 15:23, decided from the Quint review; pinned against contracts/ at
+f996ff5). R-FUNDED generalizes (1): the planner signs a reserve payment only if the spendable reserve covers it at signing,
+in every situation, not only behind a paused deposit; oldest first, skipping one that does not fit (a payment now has a cost:
+`r1` costs 1, `r2` costs 2). Property "no signed batch carries an unfunded payment: each payment fits the spendable reserve,
+which nets all outstanding debt (R-FUNDED)" (the sentence the coordinator asked for: the spendable reserve nets all outstanding
+debt). Bounds: `j/configs/unfunded-alone.scm` (no deposit in play: nothing may be signed; 6 states) and
+`j/configs/funded-order.scm` (reserve 1, r2 does not fit, r1 does: r1 goes out, r2 waits; 39 states). Planted bugs
+`unfunded-payments` (killed in both `paused-deposit` and `unfunded-alone`) and `funding-blocks-behind-misfit` (stops at the
+first misfit: r1 waits for ever, "can always still finish"). Witness: `funded-order-witness.scm` adds an invariant that the
+skipping case never happens; the check must fail on it, so the case is reachable and the property is not vacuous.
+R2C-DEBT-FIRST: a reserve-to-collateral op enforces the outstanding debt BEFORE the reserve is used, in as many internal calls
+as it takes (each visits at most the cap, `enforce-cap`; 32 in the contract). Property "after a reserve-to-collateral op, the
+debt queue is empty or the spendable reserve is zero". Bound `j/configs/r2c-debt-first.scm` (reserve 4, two debts of 1, cap 1:
+the payment enforces in two internal calls, then spends; 108 states) with witness `r2c-debt-first-witness.scm` (a payment that
+enforces in two internal calls). Planted bug `r2c-skips-enforcement`. Part-paid claim: it stays at the head of the queue,
+reduced in place, and the cursor does not advance; property "a part-paid claim stays at the head of the queue, reduced in
+place", bound `j/configs/debts-partial.scm` (debts 2 and 1, a deposit of 1: the oldest is part-paid; 36 states), witness
+`debts-partial-witness.scm`, planted bug `partial-moves-back` (re-queued at the back). The cap property now counts claims
+VISITED, cleared or part-paid, per internal call. The spendable reserve nets the WHOLE outstanding debt (as asked).
+Not modelled: the exact visit order inside an internal call beyond FIFO with the head kept, a payment whose cost is not a whole
+unit, and what the chain does with a reserve op that arrives with less than its cost (it fails soft, R-J5).
+Source: coordinator 09-30 15:23.
 
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
 Choice: only after the frame's WAL row is committed (xln.ts `commitRuntimeFrame` 42045, outputs leave
