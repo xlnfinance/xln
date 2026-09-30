@@ -4,8 +4,12 @@
 //   --names-json             dump every name the scanners read, as JSON (to write or audit register rows)
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
 //   --base <ref>             the ref the register may only grow from (default origin/main)
-// Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, or a row has
-// no killer. See plan/first-moves.md, brief 3.
+//   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
+//   --width-only             run only folder width (rules/checks/folder-width.ts)
+// Runs the register gate, the style gate of the new tree and folder width (rules/checks/folder-width.ts): one
+// command, one exit code.
+// Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
+// no killer, the new tree breaks a style rule, or a folder holds more than its allowed source files. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -15,11 +19,31 @@ import { parseRegister } from "./register.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
+import { gateExit } from "./checks/compose.ts";
+import { folderWidthReport } from "./checks/folder-width.ts";
+import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
 const here = import.meta.dir;
 const repoRoot = `${here}/../..`;
 
 const args = process.argv.slice(2);
+
+// Each returns whether its part passed.
+const runStyle = (): boolean => {
+  const style = treeStyle(`${here}/..`);
+  console.log(renderTreeStyle(style));
+  return !style.failed;
+};
+
+const runFolderWidth = (): boolean => {
+  const report = folderWidthReport(repoRoot);
+  report.lines.forEach((line) => console.log(line));
+  return !report.failed;
+};
+
+if (args.includes("--style-only")) process.exit(gateExit({ register: true, style: runStyle(), width: true }));
+if (args.includes("--width-only")) process.exit(gateExit({ register: true, style: true, width: runFolderWidth() }));
+
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
 
@@ -66,4 +90,10 @@ const checked = evaluate(parsed.value, names);
 const evaluation = { ...checked, problems: [...checked.problems, ...grown.problems] };
 console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
 grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
-process.exit(evaluation.problems.length === 0 ? 0 : 1);
+// The matrix is for review/; the other gates run with the plain gate.
+const matrixOnly = args.includes("--matrix");
+process.exit(gateExit({
+  register: evaluation.problems.length === 0,
+  style: matrixOnly || runStyle(),
+  width: matrixOnly || runFolderWidth(),
+}));

@@ -82,5 +82,12 @@ export const RPC_PUBLIC = "../../../core/jurisdiction/adapter/rpc-public.ts";
 export const loadShippedRpcPublic = (): Promise<RpcPublic> =>
   withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as RpcPublic);
 
+// og's batch codec reads the Batch tuple from the DepositoryBounds factory once, at import (DEPOSITORY_BATCH_PARAM), and
+// everything that decodes or hashes og's batch bytes (the fork shim, j-layer, og's own handlers) goes through that copy.
+// It must be evaluated before the fork is installed, or it carries the fork's Batch (gasBudget first) for the rest of
+// the process, and whether a file passes then depends on which file happened to load it first. This module imports it, so
+// its evaluation precedes installContracts() below however the importing file orders its own imports.
+import "../../../core/jurisdiction/machine/batch/index.ts";
+
 // Before og's modules load: some of them make their interfaces once, at import.
 installContracts();

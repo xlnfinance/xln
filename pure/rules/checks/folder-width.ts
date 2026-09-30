@@ -94,19 +94,23 @@ const existingFiles = (repo: string): readonly string[] => {
   return [...new Set(listing.stdout.toString().split("\0").filter((file) => file !== ""))].filter((file) => existsSync(`${repo}/${file}`));
 };
 
-const run = (): number => {
-  const repo = `${import.meta.dir}/../../..`;
+export type FolderWidthReport = Readonly<{ failed: boolean; lines: readonly string[] }>;
+
+// The whole check over a checkout: what `bun rules/check.ts` prints and how it exits.
+export const folderWidthReport = (repo: string, debt: Readonly<Record<string, number>> = FOLDER_WIDTH_DEBT): FolderWidthReport => {
   const files = existingFiles(repo);
-  if (files.length === 0) {
-    console.error("FAIL git listed no files (is this a git checkout?)");
-    return 1;
-  }
+  if (files.length === 0) return { failed: true, lines: ["FAIL git listed no files (is this a git checkout?)"] };
   const widths = widthsOf(files);
-  const errors = evaluateFolderWidths(widths);
-  errors.forEach((error) => console.error(`- ${error}`));
+  const errors = evaluateFolderWidths(widths, debt);
   const total = widths.reduce((sum, entry) => sum + entry.files, 0);
-  console.log(errors.length === 0 ? `FOLDER_WIDTH_OK dirs=${widths.length} sourceFiles=${total} max=${MAX_DIRECT_SOURCE_FILES}` : "FOLDER_WIDTH_INVARIANT_FAILED");
-  return errors.length === 0 ? 0 : 1;
+  const summary = errors.length === 0 ? `FOLDER_WIDTH_OK dirs=${widths.length} sourceFiles=${total} max=${MAX_DIRECT_SOURCE_FILES}` : "FOLDER_WIDTH_INVARIANT_FAILED";
+  return { failed: errors.length > 0, lines: [...errors, summary] };
+};
+
+const run = (): number => {
+  const report = folderWidthReport(`${import.meta.dir}/../../..`);
+  report.lines.forEach((line) => console.log(line));
+  return report.failed ? 1 : 0;
 };
 
 if (import.meta.main) process.exit(run());

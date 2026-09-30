@@ -43,6 +43,11 @@ contract DeltaTransformer {
   error PullRevealWindowActive(uint256 disputeTimeout);
   /// An unrevealed Payment whose deadline is still open. Finalization waits (H1) instead of settling it as unpaid.
   error PaymentRevealWindowActive(uint256 revealedUntilTimestamp);
+  /// The gas left cannot pay for decoding the evidence: revert, never a silent "no evidence".
+  error DecodeGasBudgetUnavailable();
+  /// The fast-path floor of the decode guard (see _decodeArguments): base, and per byte of evidence.
+  uint256 public constant DECODE_GAS_BASE = 50_000;
+  uint256 public constant DECODE_GAS_PER_BYTE = 8;
   error PullRevealRegistryUnavailable(address caller);
   error InvalidPullAmount();
   event SecretRevealed(bytes32 indexed hashlock, bytes32 secret);
@@ -250,9 +255,18 @@ contract DeltaTransformer {
     // to "no evidence". We deliberately use an external self-call because a
     // direct abi.decode revert cannot be caught inside Solidity. This keeps the
     // contract strict for signed ProofBody data and soft for adversarial args.
+    // R-OOG (out-of-gas is never a normal outcome). Gas is not evidence: a decode that runs out of gas must not read as "no evidence" (the catch below would then
+    // settle as if the party had shown nothing, at a gas limit the relayer chose). Two checks, and only the second is the bound:
+    // 1. A fast path: demand up front what a plain decode can cost (8 a byte + 50,000), so a starved call reverts before it burns the gas.
+    //    It is NOT sound alone: two arrays may be read from the same words, and memory already in use makes the decode dearer.
+    // 2. The bound: a call that ran out of gas leaves the caller about 1/64 of what it had, a call that returned (even a revert) leaves more.
+    //    So a caught failure that left 1/64 is a decode that was starved, never "malformed evidence": revert, whatever the size or the memory.
+    if (gasleft() < DECODE_GAS_BASE + DECODE_GAS_PER_BYTE * encoded.length) revert DecodeGasBudgetUnavailable();
+    uint256 gasBefore = gasleft();
     try this.decodeArgumentsStrict(encoded) returns (Arguments memory decoded) {
       return decoded;
     } catch {
+      if (gasleft() <= gasBefore / 64 + 1_000) revert DecodeGasBudgetUnavailable();
       return _emptyArguments();
     }
   }

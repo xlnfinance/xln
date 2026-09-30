@@ -1,0 +1,9 @@
+id: og-named
+language: TypeScript
+severity: error
+message: og vocabulary outside rig/og; name the thing by the spec's model
+rule:
+  any:
+    - { kind: identifier, regex: '^og([A-Z].*)?$' }
+    - { kind: property_identifier, regex: '^og([A-Z].*)?$' }
+    - { kind: type_identifier, regex: '^og([A-Z].*)?$' }
