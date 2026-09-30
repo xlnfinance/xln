@@ -782,6 +782,36 @@ Not modelled: the exact visit order inside an internal call beyond FIFO with the
 unit, and what the chain does with a reserve op that arrives with less than its cost (it fails soft, R-J5).
 Source: coordinator 09-30 15:23.
 
+**Q-J-14. Gas by batch kind and settlement debt forgiveness (coordinator, 09-30 16:12, pinned against the contracts in #54): modelled.**
+(1) Gas failure is split by batch kind. A money-only batch (payments, settlements, no deposit leg) takes the soft path: given
+less gas than `budget*64/63 + 30,000` it emits `BatchGasStarved`, the transaction succeeds, NO nonce is spent, the signed
+batch can be sent again. From the floor up any failure is `BatchFailed` and consumes the nonce. A batch that carries a
+dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame: out of gas reverts the whole transaction, nothing
+is emitted, the nonce stays unspent. Rules `gas-nth` (level 0: one below the floor; level 1: the floor itself, which runs).
+Properties: "gas below the floor spends no nonce, whatever the batch carries", "a money-only batch starved of gas emits
+BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing" and "a batch given at
+least the floor is never gas-starved". The Entity reads BatchGasStarved as a J fact: the batch did not run, so it stays sent
+and is resent at its own nonce. Planted bugs `gas-soft` (a gas revert takes the nonce), `starved-silent`,
+`hard-starved-event`, `starved-at-floor`. Bound `j/configs/gas-kinds.scm` (a deposit and a payment, two gas events;
+2365 states) with a witness. This replaces the 01:16 wording "a gas revert is plain, whatever the batch carries" for money-only
+batches: the nonce is still unspent, but the chain now says so. It answers the Q-J-11 question about hard batches (they revert
+whole and keep the nonce).
+(2) Settlement debt forgiveness. A settlement (`stl-a`) may list claim ids to forgive (`forgive`). It deletes only the HEAD claim
+of the debt queue, and only if its creditor is the settling counterparty; a third party's claim at the head reverts the whole
+settlement (nothing of it applies: BatchFailed, reason "forgiveness", the settlement goes back to its Account like a bad
+signature); at most `forgive-cap` ids (32 in the contract). Properties: "a settlement deletes only the head claim of the queue,
+and only when its creditor is the settling counterparty", "a settlement whose forgiveness reaches a third party's claim at the
+head never lands: it reverts whole" and "a settlement that lands lists at most the cap of claim ids". Planted bugs
+`forgives-third-party`, `forgives-past-head`, `forgiveness-skips-third-party`, `forgive-uncapped`. Bounds and witnesses:
+`j/configs/forgive-head.scm`, `forgive-third-head.scm`, `forgive-cap.scm`, `forgive-past-head.scm`. Debts now carry a creditor
+(`:cp` the settling counterparty, `:third` anyone else). The debt accounting property counts forgiven debts.
+Open for the coordinator: how the contract reads "at most 32 ids" (the page reverts a settlement that lists more; the other
+reading is that only the first 32 are walked); what it does with a listed id that is not the head (the page stops the walk and
+leaves the rest: only the head claim is ever deleted, no revert); whether the forgiven amount is credited to anyone (the page
+only removes the claim); how a forgiven partly-paid head claim is counted. Not modelled: gas amounts beyond the floor, the
+size of the debt queue beyond the bound.
+Source: coordinator 09-30 16:12.
+
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
 Choice: only after the frame's WAL row is committed (xln.ts `commitRuntimeFrame` 42045, outputs leave
 after the row). A crash between apply and commit must not leave a peer with an output of a frame
