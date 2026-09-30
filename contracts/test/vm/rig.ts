@@ -16,6 +16,9 @@ import {
   EntityProvider__factory as ogEntityProvider,
   HankoVerifier__factory as ogHankoVerifier,
   DeltaTransformer__factory as ogDeltaTransformer,
+  DepositoryBounds__factory as ogDepositoryBounds,
+  HashLadderRegistry__factory as ogHashLadderRegistry,
+  NftCustody__factory as ogNftCustody,
 } from "../../../jurisdictions/typechain-types/index.ts";
 import {
   Account__factory as forkAccount,
@@ -23,10 +26,13 @@ import {
   EntityProvider__factory as forkEntityProvider,
   HankoVerifier__factory as forkHankoVerifier,
   DeltaTransformer__factory as forkDeltaTransformer,
+  DepositoryBounds__factory as forkDepositoryBounds,
+  HashLadderRegistry__factory as forkHashLadderRegistry,
+  NftCustody__factory as forkNftCustody,
 } from "../../typechain-types/index.ts";
 import { createJAdapter } from "../../../core/jurisdiction/adapter/index.ts";
 import type { JAdapter } from "../../../core/jurisdiction/adapter/types.ts";
-import { encodeJBatch, createEmptyBatch } from "../../../core/jurisdiction/machine/batch/index.ts";
+import { createEmptyBatch } from "../../../core/jurisdiction/machine/batch/index.ts";
 import { PROOF_BODY_ABI } from "../../../core/protocol/dispute/proof-body.ts";
 import { encodeInt512, SIGNED_AMOUNT_ABI_COMPONENTS } from "../../../core/protocol/crypto/abi-money.ts";
 import { encodeCooperativeUpdateDiff, type CooperativeUpdateDiff } from "../../../core/hanko/onchain-domain.ts";
@@ -35,11 +41,27 @@ process.env["SECP256K1_PREBUILD"] = process.env["SECP256K1_PREBUILD"] ?? "/nonex
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 
+/**
+ * The fork's Batch carries a signed gasBudget (J5) that og's core encoder does not know, so the rig encodes with the fork's own ABI
+ * (read from the fork's DepositoryBounds.assertBatch) and the same settlement-diff mapping core applies. A test patches `gasBudget`
+ * like any other batch field; unset it is BATCH_GAS_BUDGET, the measured maximum batch (BatchBounds.t.sol), with the rig's 16M tx limit.
+ */
+export const BATCH_GAS_BUDGET = 15_000_000n;
+const FORK_BATCH_PARAM = forkDepositoryBounds.createInterface().getFunction("assertBatch")!.inputs[0]!;
+export const encodeJBatch = (batch: { readonly settlements: readonly { readonly diffs: readonly CooperativeUpdateDiff[] }[]; readonly gasBudget?: bigint }): string =>
+  coder.encode([FORK_BATCH_PARAM], [{
+    gasBudget: BATCH_GAS_BUDGET,
+    ...batch,
+    settlements: batch.settlements.map((settlement) => ({ ...settlement, diffs: settlement.diffs.map(encodeCooperativeUpdateDiff) })),
+  }]);
+
 /** Point og's factories at the fork. Static bytecode/abi feed BrowserVM.init; linkBytecode feeds its library linking. */
 const useFork = (): void => {
   const pairs = [
     [ogAccount, forkAccount], [ogDepository, forkDepository], [ogEntityProvider, forkEntityProvider],
     [ogHankoVerifier, forkHankoVerifier], [ogDeltaTransformer, forkDeltaTransformer],
+    // The linked libraries too: the bounds check reads the fork's Batch (gasBudget), and the registry and custody are the fork's code.
+    [ogDepositoryBounds, forkDepositoryBounds], [ogHashLadderRegistry, forkHashLadderRegistry], [ogNftCustody, forkNftCustody],
   ] as const;
   pairs.forEach(([og, fork]) => {
     const target = og as unknown as Record<string, unknown>;
@@ -160,7 +182,7 @@ export const boot = async (label: string, chainId = 31337) => {
       ? depositoryIface.encodeFunctionData("processBatch", [entity, encodedBatch, hanko, nonce])
       : depositoryIface.encodeFunctionData("processBatch", [encodedBatch, hanko, nonce]);
     try {
-      const done = await vm.executeTx({ to: domain.depository, data, gasLimit: 15_000_000n }, undefined, { emitEvents: true });
+      const done = await vm.executeTx({ to: domain.depository, data, gasLimit: 16_000_000n }, undefined, { emitEvents: true });
       last.events = done.events ?? [];
       return "ok";
     } catch {
@@ -173,7 +195,7 @@ export const boot = async (label: string, chainId = 31337) => {
     // A read-only call runs in the EVM's default block; the reason must be replayed at the test clock, or every
     // timing guard (dispute windows, reveal deadlines) reads the wrong time and names the wrong error.
     const block = vm.createBlock(vm.getBlockTimestamp());
-    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 15_000_000n, block });
+    const result = await vm.runReadOnlyCall({ to: vm.depositoryAddress, caller: vm.deployerAddress, data: ethers.getBytes(data), gasLimit: 16_000_000n, block });
     const returned = ethers.hexlify(result.execResult.returnValue ?? new Uint8Array());
     const parsed = returned === "0x" ? null : depositoryIface.parseError(returned) ?? forkAccount.createInterface().parseError(returned) ?? forkDeltaTransformer.createInterface().parseError(returned);
     return parsed ? `${parsed.name}(${parsed.args.join(",")})` : returned;
@@ -189,8 +211,8 @@ export const boot = async (label: string, chainId = 31337) => {
   };
 
   // The ops themselves, so a test can put several in one batch.
-  const startOp = (other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) => ({
-    counterentity: other.id, nonce, proposerIsLeft, proofbodyHash: bodyHash(b), initialProofbody: bodyStruct(b),
+  const startOp = (other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string, ondeltaEpoch = 0n) => ({
+    counterentity: other.id, nonce, ondeltaEpoch, proposerIsLeft, proofbodyHash: bodyHash(b), initialProofbody: bodyStruct(b),
     watchSeed: b.watchSeed, sig, starterInitialArguments: "0x", starterCounterArguments: "0x",
     starterCounterProofCommitment: ethers.ZeroHash,
   });
@@ -204,8 +226,8 @@ export const boot = async (label: string, chainId = 31337) => {
     counterentity: other.id, initialNonce: init.nonce, initialProofbodyHash: bodyHash(init.body), counterNonce: fin.nonce,
     proposerIsLeft: fin.proposerIsLeft, counterProofbody: bodyStruct(fin.body), sig: fin.sig,
   });
-  const start = (who: Party, other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string) =>
-    submit(who, { disputeStarts: [startOp(other, nonce, proposerIsLeft, b, sig)] });
+  const start = (who: Party, other: Party, nonce: number, proposerIsLeft: boolean, b: Body, sig: string, ondeltaEpoch = 0n) =>
+    submit(who, { disputeStarts: [startOp(other, nonce, proposerIsLeft, b, sig, ondeltaEpoch)] });
   const finalize = (who: Party, other: Party, init: { nonce: number; body: Body; startedByLeft: boolean }, fin: { nonce: number; proposerIsLeft: boolean; body: Body; sig: string },
     args: { readonly starter?: string; readonly other?: string } = {}) =>
     submit(who, { disputeFinalizations: [finalizeOp(other, init, fin, args)] });

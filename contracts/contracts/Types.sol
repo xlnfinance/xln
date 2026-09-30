@@ -170,6 +170,9 @@ struct ProofBody {
 struct InitialDisputeProof {
   bytes32 counterentity;
   uint nonce;              // Unified nonce at time of signing
+  // S1: the Account's ondelta epoch the proof was signed at. The signature binds it (C1); carrying it lets the Account judge
+  // staleness BEFORE the signature, as it judges the nonce: another epoch is a skip, the same epoch makes a bad signature a real error.
+  uint ondeltaEpoch;
   bool proposerIsLeft;     // Signed branch author; LEFT wins equal-nonce collisions
   bytes32 proofbodyHash;
   // Reveal the exact signed body at start. A hash-only start can otherwise
@@ -344,6 +347,10 @@ struct CollateralToReserve {
 }
 
 struct Batch {
+  // J5: the gas the batch's ops may use, chosen by the signer from its own simulation at the head plus a margin (Runtime rule).
+  // processBatch gives the ops exactly this much (and requires the transaction to carry it), so the outcome does not depend on the
+  // relayer's gas limit. Ignored by batches that revert whole (no self-call), but bounded for every batch (DepositoryBounds).
+  uint64 gasBudget;
   ReserveToReserve[] reserveToReserve;
   ReserveToCollateral[] reserveToCollateral;
   CollateralToReserve[] collateralToReserve;  // C2R shortcut (expands to Settlement)

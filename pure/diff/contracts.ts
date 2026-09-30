@@ -8,6 +8,9 @@ import {
   EntityProvider__factory as ogEntityProvider,
   HankoVerifier__factory as ogHankoVerifier,
   DeltaTransformer__factory as ogDeltaTransformer,
+  DepositoryBounds__factory as ogDepositoryBounds,
+  HashLadderRegistry__factory as ogHashLadderRegistry,
+  NftCustody__factory as ogNftCustody,
 } from "../../jurisdictions/typechain-types/index.ts";
 import {
   Account__factory as forkAccount,
@@ -15,6 +18,9 @@ import {
   EntityProvider__factory as forkEntityProvider,
   HankoVerifier__factory as forkHankoVerifier,
   DeltaTransformer__factory as forkDeltaTransformer,
+  DepositoryBounds__factory as forkDepositoryBounds,
+  HashLadderRegistry__factory as forkHashLadderRegistry,
+  NftCustody__factory as forkNftCustody,
 } from "../../contracts/typechain-types/index.ts";
 
 export type ContractSet = "contracts" | "jurisdictions";
@@ -25,6 +31,8 @@ export const contractSet = (): ContractSet =>
 const PAIRS = [
   [ogAccount, forkAccount], [ogDepository, forkDepository], [ogEntityProvider, forkEntityProvider],
   [ogHankoVerifier, forkHankoVerifier], [ogDeltaTransformer, forkDeltaTransformer],
+  // The linked libraries too (J5): the bounds check reads the fork's Batch, which starts with the signed gasBudget; the registry and custody are the fork's code.
+  [ogDepositoryBounds, forkDepositoryBounds], [ogHashLadderRegistry, forkHashLadderRegistry], [ogNftCustody, forkNftCustody],
 ] as const;
 
 const FIELDS = ["bytecode", "abi", "linkBytecode", "createInterface", "connect"] as const;

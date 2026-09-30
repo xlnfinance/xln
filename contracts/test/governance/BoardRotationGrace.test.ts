@@ -20,6 +20,7 @@ import {
   singleSignerLazyEntityId,
   submitBatch,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { mine, time } = networkHelpers;
@@ -435,13 +436,19 @@ describe('EntityProvider board rotation grace', function () {
       c2r(buildSingleSignerHanko(entityId, c2rDigest, oldBoardKey)),
       2n,
     );
-    await expect(send(oldC2r))
-      .to.be.revertedWithCustomError(depository, 'E4');
+    // J5: the old board's signature on the counterparty's C2R leg is a bad counterparty signature inside the ops: the batch fails
+    // (E4 reported, outer nonce 2 spent, nothing applied), and the same intent re-signed by the current board goes at nonce 3
+    await expectBatchFailed(
+      depository,
+      foundation,
+      { entityId: oldC2r.signerEntity, encodedBatch: oldC2r.encodedBatch, hankoData: oldC2r.hanko, nonce: oldC2r.nonce },
+      'E4',
+    );
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
 
     const currentC2r = await signOuterBatch(
       c2r(buildSingleSignerHanko(entityId, c2rDigest, currentBoardKey)),
-      2n,
+      3n,
     );
     await expect(send(currentC2r))
       .to.emit(depository, 'AccountSettled');
@@ -472,15 +479,19 @@ describe('EntityProvider board rotation grace', function () {
     });
     const oldSettlement = await signOuterBatch(
       settlement(buildSingleSignerHanko(entityId, settlementDigest, oldBoardKey)),
-      3n,
+      4n,
     );
-    await expect(send(oldSettlement))
-      .to.be.revertedWithCustomError(depository, 'E4');
+    await expectBatchFailed(
+      depository,
+      foundation,
+      { entityId: oldSettlement.signerEntity, encodedBatch: oldSettlement.encodedBatch, hankoData: oldSettlement.hanko, nonce: oldSettlement.nonce },
+      'E4',
+    );
     expect((await depository._accounts(accountKey)).nonce).to.equal(1n);
 
     const currentSettlement = await signOuterBatch(
       settlement(buildSingleSignerHanko(entityId, settlementDigest, currentBoardKey)),
-      3n,
+      5n,
     );
     await expect(send(currentSettlement))
       .to.emit(depository, 'AccountSettled');
@@ -495,6 +506,7 @@ describe('EntityProvider board rotation grace', function () {
       disputeNonce,
       initialProofbodyHash,
     );
+    const startEpoch = await epochOfAccountKey(depository, accountKey);
     const disputeStart = (sig: string) => emptyBatch({
       disputeStarts: [{
         counterentity: entityId,
@@ -505,19 +517,20 @@ describe('EntityProvider board rotation grace', function () {
         sig,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: startEpoch,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     });
     const oldStart = await signOuterBatch(
       disputeStart(buildSingleSignerHanko(entityId, startDigest, oldBoardKey)),
-      4n,
+      6n,
     );
     await expect(send(oldStart))
       .to.emit(depository, 'DisputeStarted');
     const openedAccount = await depository._accounts(accountKey);
     expect(openedAccount.disputeHash).to.not.equal(ethers.ZeroHash);
     expect(openedAccount.nonce).to.equal(disputeNonce);
-    expect(await depository.entityNonces(initiator)).to.equal(4n);
+    expect(await depository.entityNonces(initiator)).to.equal(6n);
 
     // The same boundary applies when historical proof finalizes an active
     // dispute: evidence survives rotation; direct money authority does not.
@@ -543,6 +556,7 @@ describe('EntityProvider board rotation grace', function () {
           sig: buildSingleSignerHanko(peer, historicalStartHash, peerKey),
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }),
@@ -628,6 +642,7 @@ describe('EntityProvider board rotation grace', function () {
         ),
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));

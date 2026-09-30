@@ -174,7 +174,7 @@ describe("review: every skip leaves the Account, reserves and collateral untouch
   });
 });
 
-describe("review: counter real errors still revert the whole batch", () => {
+describe("review: counter real errors still revert the whole batch (the permanent ones became skips, S1)", () => {
   const reverts = async (patch: (x: Awaited<ReturnType<typeof world>>) => Record<string, unknown>, expected: string) => {
     const x = await world();
     await x.startDispute(1);
@@ -188,31 +188,39 @@ describe("review: counter real errors still revert the whole batch", () => {
     await reverts((x) => ({ counterDisputes: [x.counterAt(1, 3, x.counterBody(30n), x.B)] }), "REVERT E4()");
   });
 
-  test("a counter naming a different initial body (E9)", async () => {
-    await reverts((x) => ({ counterDisputes: [x.counterAt(1, 3, x.counterBody(30n), x.A, x.acct.body(5n))] }), "REVERT E9()");
+  // S1 (second review of J5): the three cases below are permanent for the open dispute (its opening state and its registered counter
+  // never change), and a batch that reverts for good would pin the entity's nonce under F1, so they are skips now, not reverts.
+  test("a counter naming a different initial body is skipped (S1, reason 3), the reveal beside it lands", async () => {
+    const x = await world();
+    await x.startDispute(1);
+    x.w.at(110);
+    expect(await x.w.submit(x.B, { counterDisputes: [x.counterAt(1, 3, x.counterBody(30n), x.A, x.acct.body(5n))], revealSecrets: [x.reveal] })).toBe("ok");
+    expect(x.skipped()).toEqual([{ op: OP.counter, reason: REASON.disputeMoved, nonce: 3n }]);
+    expect(await x.revealedAt()).not.toBe(0n);
   });
 
   test("a counter body with different response windows (E9)", async () => {
     await reverts((x) => ({ counterDisputes: [x.counterAt(1, 3, x.counterBody(30n, WINDOWS + 1))] }), "REVERT E9()");
   });
 
-  test("a second, different body at the registered counter's nonce and flag (E9)", async () => {
+  test("a second, different body at the registered counter's nonce and flag is skipped (S1, reason 6)", async () => {
     const x = await world();
     await x.startDispute(1);
     x.w.at(110);
     expect(await x.w.submit(x.B, { counterDisputes: [x.counterAt(1, 3, x.counterBody(30n))] })).toBe("ok");
     x.w.at(112);
-    expect(await x.w.submit(x.B, { counterDisputes: [x.counterAt(1, 3, x.counterBody(40n))], revealSecrets: [x.reveal] })).toBe("REVERT E9()");
-    expect(await x.revealedAt()).toBe(0n);
+    expect(await x.w.submit(x.B, { counterDisputes: [x.counterAt(1, 3, x.counterBody(40n))], revealSecrets: [x.reveal] })).toBe("ok");
+    expect(x.skipped()).toEqual([{ op: OP.counter, reason: REASON.counterSuperseded, nonce: 3n }]);
+    expect(await x.revealedAt()).not.toBe(0n);
   });
 
-  test("a finalize naming the wrong initial body reverts (E9), it is not a skip", async () => {
+  test("a finalize naming the wrong initial body is skipped (S1, reason 3), the reveal beside it lands", async () => {
     const x = await world();
     await x.startDispute(1);
     x.w.at(100 + 2 * WINDOWS + 1);
-    const result = await x.w.submit(x.A, { disputeFinalizations: [x.finalizeOwn(1, x.acct.body(5n))], revealSecrets: [x.reveal] });
-    expect(result).toBe("REVERT E9()");
-    expect(await x.revealedAt()).toBe(0n);
+    expect(await x.w.submit(x.A, { disputeFinalizations: [x.finalizeOwn(1, x.acct.body(5n))], revealSecrets: [x.reveal] })).toBe("ok");
+    expect(x.skipped()).toEqual([{ op: OP.finalize, reason: REASON.disputeMoved, nonce: 1n }]);
+    expect(await x.revealedAt()).not.toBe(0n);
   });
 
   test("a malformed op beside a stale one reverts the batch (validated before anything runs)", async () => {

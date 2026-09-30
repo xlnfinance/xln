@@ -12,8 +12,8 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
-  submitBatch,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 
 const { ethers } = await hre.network.getOrCreate('hardhat');
 
@@ -95,7 +95,7 @@ describe('Depository current-debt forgiveness', () => {
     await expect(harness._debts(debtor, tokenId, 0n)).to.revert(ethers);
   });
 
-  it('reverts the whole settlement when a third-party FIFO head blocks bilateral forgiveness', async () => {
+  it('fails the whole settlement (BatchFailed E2) when a third-party FIFO head blocks bilateral forgiveness', async () => {
     const [owner, peer, thirdParty] = await ethers.getSigners();
     const entityProvider = await deployEntityProvider(owner!.address);
     const Account = await ethers.getContractFactory('Account');
@@ -164,9 +164,9 @@ describe('Depository current-debt forgiveness', () => {
     const batchHash = await computeDepositoryBatchHash(harness, left.entityId, encodedBatch, 1n);
     const hanko = buildSingleSignerHanko(left.entityId, batchHash, left.privateKey);
 
-    await expect(submitBatch(harness, owner!, left.entityId, { encodedBatch, hankoData: hanko, nonce: 1n }))
-      .to.be.revertedWithCustomError(harness, 'E2');
-    expect(await harness.entityNonces(left.entityId)).to.equal(0n);
+    // J5: the batch fails E2 soft as one unit: the outer nonce is spent, the settlement and its forgiveness do not apply
+    await expectBatchFailed(harness, owner, { entityId: left.entityId, encodedBatch, hankoData: hanko, nonce: 1n }, 'E2');
+    expect(await harness.entityNonces(left.entityId)).to.equal(1n);
     expect((await harness._accounts(accountKey)).nonce).to.equal(0n);
     expect(await harness._debtIndex(left.entityId, tokenId)).to.equal(0n);
     expectUint512((await harness._debts(left.entityId, tokenId, 0n)).amount, blockedAmount);

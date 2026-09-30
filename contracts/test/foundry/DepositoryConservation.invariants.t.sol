@@ -6,6 +6,8 @@ import {XlnFixture} from "./helpers/XlnFixture.sol";
 import {XlnHanko} from "./helpers/XlnHanko.sol";
 import {ConservationHandler} from "./handlers/ConservationHandler.sol";
 import {ERC20Mock} from "../../contracts/ERC20Mock.sol";
+import {Depository} from "../../contracts/Depository.sol";
+import {DepositoryDebtHarness} from "../../contracts/mocks/DepositoryDebtHarness.sol";
 import "../../contracts/Types.sol";
 
 /// @notice Task C4, targets 1 + 3: value conservation through *composed*
@@ -24,6 +26,12 @@ contract DepositoryConservationInvariants is XlnFixture {
 
   uint256[3] internal TOKENS = [uint256(1), uint256(2), uint256(3)];
 
+  /// @dev The handler seeds debts (`seedDebt`) so that debtors spend through batches: a debtor gets no implicit flash credit,
+  ///      and a batch in which it overspends must fail, never land partly applied.
+  function _newDepository() internal override returns (Depository) {
+    return new DepositoryDebtHarness(address(ep), address(deltaTransformer));
+  }
+
   function setUp() public {
     _deployXln(); // registers `erc20` as internal token 1
 
@@ -35,10 +43,11 @@ contract DepositoryConservationInvariants is XlnFixture {
 
     targetContract(address(handler));
 
-    bytes4[] memory selectors = new bytes4[](3);
+    bytes4[] memory selectors = new bytes4[](4);
     selectors[0] = handler.mint.selector;
     selectors[1] = handler.mixedBatch.selector;
     selectors[2] = handler.replayLast.selector;
+    selectors[3] = handler.seedDebt.selector;
     targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
   }
 
@@ -104,15 +113,14 @@ contract DepositoryConservationInvariants is XlnFixture {
 
   // ═══════════════ invariant 3: entity nonce ═══════════════
 
-  /// @notice INVARIANT 3a (Depository.sol:339). entityNonces[e] equals exactly
-  ///         the number of batches accepted for e, i.e. it advanced by +1 on
-  ///         every accepted batch and never moved otherwise.
+  /// @notice INVARIANT 3a (Depository.sol:339). entityNonces[e] equals exactly the number of batches that consumed a
+  ///         nonce for e: accepted ones, and (J5) ones that failed soft. It advanced by +1 on each, never otherwise.
   function invariant_entityNonceMatchesAcceptedCount() public view {
     for (uint256 i = 0; i < ACTORS; i++) {
       assertEq(
         dep.entityNonces(entity[i]),
         handler.ghostEntityNonce(i),
-        "entityNonces desynced from accepted-batch ghost"
+        "entityNonces desynced from consumed-nonce ghost"
       );
     }
   }
@@ -169,10 +177,16 @@ contract DepositoryConservationInvariants is XlnFixture {
 
   // ═══════════════ coverage report ═══════════════
 
+  /// @notice A debtor gets no implicit flash credit: a batch whose R2R legs overspend its spendable reserve never lands.
+  function invariant_debtorNeverOverspendsThroughABatch() public view {
+    assertEq(handler.debtorOverspendViolations(), 0, "a batch that overspends a debtor landed");
+  }
+
   function invariant_callSummary() public view {
     console.log("mint              ", handler.callCount("mint"));
     console.log("mixedBatch        ", handler.callCount("mixedBatch"));
     console.log("-- accepted batches ", handler.acceptedBatches());
+    console.log("-- failed soft batches", handler.failedBatches());
     console.log("-- rejected batches ", handler.rejectedBatches());
     console.log("-- replay attempts  ", handler.replayAttempts());
     console.log("-- minted t1/t2/t3  ", handler.ghostMinted(1), handler.ghostMinted(3));

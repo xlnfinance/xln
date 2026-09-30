@@ -6,6 +6,7 @@
 import { ethers } from "ethers";
 import { computeBatchHankoHash, decodeJBatch, encodeJBatch, type JBatch } from "../../core/jurisdiction/machine/batch/index.ts";
 import { Depository__factory } from "../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
+import { DepositoryBounds__factory } from "../../contracts/typechain-types/factories/DepositoryBounds__factory.ts";
 import { PROOF_BODY_ABI } from "../../core/protocol/dispute/proof-body.ts";
 import { SIGNED_AMOUNT_ABI_COMPONENTS } from "../../core/protocol/crypto/abi-money.ts";
 import { encodeCooperativeUpdateDiff, encodeCooperativeUpdateHankoPayload, encodeDisputeProofHankoPayload } from "../../core/hanko/onchain-domain.ts";
@@ -160,6 +161,32 @@ export const rebindBatch = (
   };
 };
 
+/**
+ * J5: the fork's Batch carries a signed gas budget (first field) and each dispute start the Account epoch its signature was made at
+ * (`ondeltaEpoch`). og's Batch has neither, so the shim adds both when it re-encodes: the epoch is the one `rebindBatch` just
+ * signed the start for, and the budget is the shim's own. og's BrowserVM sends every processBatch with a 15,000,000 gas limit, and the
+ * Depository wants budget * 64 / 63 + 30,000 (BATCH_POST_CALL_RESERVE) plus the hanko prelude on top of it, so the shim signs
+ * 14,000,000: room for the prelude of a board of a few dozen signers, and far above what any batch the walks build costs. Measured (whole
+ * processBatch execution gas, prelude included, over the four area walks on 3 seeds, scenario.test.ts and scenario-cross-j.test.ts): the largest is
+ * 396,485, so the budget is a ceiling about 35 times the need, not a measured margin. fork-shim-budget.test.ts pins the other side, the tx limit.
+ */
+export const SHIM_GAS_BUDGET = 14_000_000n;
+const FORK_BATCH_PARAM = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;
+
+/** og's batch (already re-signed for the epochs on chain now) in the fork's ABI: the budget in front, the epoch in every dispute start. */
+export const encodeForkBatch = (
+  batch: JBatch,
+  entityId: string,
+  epochOf: (left: string, right: string) => bigint,
+  gasBudget: bigint = SHIM_GAS_BUDGET,
+): string =>
+  coder.encode([FORK_BATCH_PARAM], [{
+    gasBudget,
+    ...batch,
+    settlements: batch.settlements.map((settlement) => ({ ...settlement, diffs: settlement.diffs.map(encodeCooperativeUpdateDiff) })),
+    disputeStarts: batch.disputeStarts.map((start) => ({ ...start, ondeltaEpoch: epochOf(entityId, start.counterentity) })),
+  }]);
+
 /** Chain digest to og's digest, for every batch this process submitted; og's event codec reads it back. */
 const seen: Map<string, string>[] = [];
 let viewInstalled = false;
@@ -183,11 +210,14 @@ const installBatchHashView = (): void => {
   } as typeof ethers.Interface.prototype.parseLog;
 };
 
+/** The batch og sealed, by the fork-encoded batch the chain got (J5: the fork's bytes carry a gas budget and epochs og's do not). */
+const ogBatchOf = new Map<string, string>();
 let calldataInstalled = false;
 /**
  * og reads dispute evidence back out of the chain's own transaction calldata (rpc-public.ts), by parsing it with a
  * Depository interface and taking the batch as the first argument of processBatch. The fork's call carries the acting
- * Entity first, so og's parse of it is shown the same call in og's shape: the entity dropped from the arguments.
+ * Entity first, so og's parse of it is shown the same call in og's shape: the entity dropped from the arguments, and the
+ * batch as og sealed it (og decodes it with its own ABI, which has no gasBudget and no ondeltaEpoch).
  */
 const installCalldataView = (): void => {
   if (calldataInstalled) return;
@@ -198,7 +228,9 @@ const installCalldataView = (): void => {
   ethers.Interface.prototype.parseTransaction = function (this: ethers.Interface, tx: { data: string; value?: ethers.BigNumberish }) {
     if (tx.data.slice(0, 10).toLowerCase() !== selector) return parse.call(this, tx);
     const call = parse.call(fork, tx)!;
-    return { name: call.name, args: ethers.Result.fromItems(call.args.slice(1), ["encodedBatch", "hankoData", "nonce"]), fragment: call.fragment, selector: call.selector, signature: call.signature, value: call.value };
+    const [encodedBatch, ...rest] = call.args.slice(1);
+    const shown = ogBatchOf.get(String(encodedBatch).toLowerCase()) ?? encodedBatch;
+    return { name: call.name, args: ethers.Result.fromItems([shown, ...rest], ["encodedBatch", "hankoData", "nonce"]), fragment: call.fragment, selector: call.selector, signature: call.signature, value: call.value };
   } as typeof ethers.Interface.prototype.parseTransaction;
 };
 
@@ -263,9 +295,11 @@ export const shimBatchSubmission = (
       ...batch.disputeFinalizations.map((d) => d.counterentity),
     ];
     await Promise.all(others.map((other) => readEpoch(entityId, other)));
-    const rebound = rebindBatch(batch, entityId, (l, r) => epochs.get(accountKey(l, r)) ?? 0n, { chainId, depository }, signerFor);
-    const next = encodeJBatch(rebound);
+    const epochOf = (l: string, r: string): bigint => epochs.get(accountKey(l, r)) ?? 0n;
+    const rebound = rebindBatch(batch, entityId, epochOf, { chainId, depository }, signerFor);
+    const next = encodeForkBatch(rebound, entityId, epochOf);
     const digest = forkBatchHash(chainId, depository, entityId, next, nonce);
+    ogBatchOf.set(next.toLowerCase(), encodeJBatch(rebound));
     forkOf.set(old.toLowerCase(), digest);
     ogOf.set(digest.toLowerCase(), old);
     plans.set(planKey(encodedBatch, nonce), { entityId, encodedBatch: next, hanko: resign(hanko, old, digest, signerFor) });

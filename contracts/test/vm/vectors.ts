@@ -7,17 +7,25 @@
 //   lifecycle.json  one account lifecycle run through the real Depository: the values production stores and emits.
 import { ethers } from "ethers";
 import { createAddressFromString } from "@ethereumjs/util";
-import { Account__factory, DeltaTransformer__factory, EntityProvider__factory, HankoCodec__factory } from "../../typechain-types/index.ts";
+import { Account__factory, Depository__factory, DeltaTransformer__factory, EntityProvider__factory, HankoCodec__factory } from "../../typechain-types/index.ts";
 import { boot, claimsHanko, rawHanko, bodyHash, type Rig } from "./rig.ts";
 import { encodeInt512, encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
 
 /**
- * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. The cell says
- * so, which keeps "ok" meaning that a dispute opened; a revert stays as the rig reports it.
+ * J2: a start the Account has already moved past lands ("ok") but is skipped with a DisputeOpSkipped event. J5: a batch of
+ * payment, settlement or reserve ops that cannot apply lands ("ok") but is a BatchFailed, its nonce spent. The cell says so,
+ * which keeps "ok" meaning that the ops applied; a revert stays as the rig reports it.
  */
+const depositoryErrors = Depository__factory.createInterface();
 const outcome = (rig: Rig, result: string): string => {
-  const skipped = (rig.last.events as { name: string; args: { reason: bigint } }[]).find((e) => e.name === "DisputeOpSkipped");
-  return result === "ok" && skipped !== undefined ? `ok, skipped (reason ${skipped.args.reason})` : result;
+  if (result !== "ok") return result;
+  const events = rig.last.events as { name: string; args: { reason: bigint | string } }[];
+  const skipped = events.find((e) => e.name === "DisputeOpSkipped");
+  if (skipped !== undefined) return `ok, skipped (reason ${skipped.args.reason})`;
+  const failed = events.find((e) => e.name === "BatchFailed");
+  if (failed === undefined) return result;
+  const error = depositoryErrors.parseError(String(failed.args.reason));
+  return `ok, batch failed (${error?.name ?? failed.args.reason})`;
 };
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
@@ -178,7 +186,7 @@ export const lifecycleVectors = async (rig: Rig) => {
 
   // Dispute at the new epoch: start by Right with Left's proof, finalize by timeout.
   const P7 = rig.body(-10n);
-  const startResult = await rig.start(R, L, 7, true, P7, rig.proofSig(L, epoch1, 7, true, P7));
+  const startResult = await rig.start(R, L, 7, true, P7, rig.proofSig(L, epoch1, 7, true, P7), epoch1);
   const startBatch = batchRecord(rig, startResult);
   const startEvents = rig.last.events;
   const stored = await rig.chain.getAccountInfo(L.id, R.id);
@@ -200,12 +208,12 @@ export const lifecycleVectors = async (rig: Rig) => {
   const epoch2 = await rig.epochOf();
   const storedAfter = await rig.chain.getAccountInfo(L.id, R.id);
   const P9 = rig.body(-10n);
-  const at = async (nonce: number, epoch: bigint) => outcome(rig, await rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9)));
+  const at = async (nonce: number, epoch: bigint) => outcome(rig, await rig.start(R, L, nonce, true, P9, rig.proofSig(L, epoch, nonce, true, P9), epoch));
   const reopen = {
     storedNonce: storedAfter.nonce.toString(), epoch: epoch2.toString(),
     startAtStoredNonce: await at(8, epoch2),
     startAtOldBaselineNonce: await at(7, epoch1),
-    settleAtStoredNonce: await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs)),
+    settleAtStoredNonce: outcome(rig, await rig.settle(L, R, 8, diffs, rig.coopSig(R, epoch2, 8, diffs))),
     startAboveStoredNonce: await at(9, epoch2),
   };
   return {
@@ -234,7 +242,7 @@ export const baselineVectors = async () => {
     const body = rig.body(offdelta);
     return { body, nonce, epoch, hash: rig.proofHash(epoch, nonce, true, body), sig: rig.proofSig(rig.L, epoch, nonce, true, body) };
   };
-  const startWith = async (rig: Rig, b: ReturnType<typeof at>) => outcome(rig, await rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig));
+  const startWith = async (rig: Rig, b: ReturnType<typeof at>) => outcome(rig, await rig.start(rig.R, rig.L, b.nonce, true, b.body, b.sig, b.epoch));
   const timeout = (rig: Rig, nonce: number, body: ReturnType<Rig["body"]>) =>
     rig.finalize(rig.R, rig.L, { nonce, body, startedByLeft: false }, { nonce, proposerIsLeft: true, body, sig: "0x" });
   const record = (b: ReturnType<typeof at>) => ({ epoch: b.epoch.toString(), nonce: b.nonce, proofBodyHash: bodyHash(b.body), proofHash: b.hash });
@@ -253,7 +261,7 @@ export const baselineVectors = async () => {
   const b = await boot("baseline-finalize");
   await b.fundedAccount();
   const dispute = b.body(-10n);
-  const first = await b.start(b.R, b.L, 7, true, dispute, b.proofSig(b.L, await b.epochOf(), 7, true, dispute));
+  const first = await b.start(b.R, b.L, 7, true, dispute, b.proofSig(b.L, await b.epochOf(), 7, true, dispute), await b.epochOf());
   const baselineB = at(b, 9, (await b.epochOf()) + 1n);
   const atStored = at(b, 8, baselineB.epoch);
   b.at(130);
@@ -302,7 +310,7 @@ export const baselineVectors = async () => {
       await rig.settle(rig.L, rig.R, F, diffs, rig.coopSig(rig.R, await rig.epochOf(), F, diffs));
     } else {
       const inFlight = rig.body(-10n);
-      await rig.start(rig.R, rig.L, F + 1, true, inFlight, rig.proofSig(rig.L, await rig.epochOf(), F + 1, true, inFlight));
+      await rig.start(rig.R, rig.L, F + 1, true, inFlight, rig.proofSig(rig.L, await rig.epochOf(), F + 1, true, inFlight), await rig.epochOf());
       rig.at(130);
       await timeout(rig, F + 1, inFlight);
     }

@@ -45,7 +45,7 @@ describe("vectors", () => {
     expect(reopen.epoch).toBe("2");
     expect(reopen.startAtStoredNonce).toBe("ok, skipped (reason 0)");        // equal is not above: skipped since J2 (was REVERT E2)
     expect(reopen.startAtOldBaselineNonce).toBe("ok, skipped (reason 0)");   // the old baseline nonce is below: skipped since J2
-    expect(reopen.settleAtStoredNonce).toBe("REVERT E2()");       // cooperative updates too
+    expect(reopen.settleAtStoredNonce).toBe("ok, batch failed (E2)");   // cooperative updates too: since J5 a failed batch, its outer nonce spent (was REVERT E2)
     expect(reopen.startAboveStoredNonce).toBe("ok");
   });
 

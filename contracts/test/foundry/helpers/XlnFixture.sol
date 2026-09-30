@@ -34,10 +34,15 @@ abstract contract XlnFixture is Test {
 
   uint256 internal constant FOUNDATION_PK = uint256(keccak256("xln.foundation"));
 
+  /// @dev The Depository under test; a suite that needs a debt it cannot reach through disputes overrides this with a harness.
+  function _newDepository() internal virtual returns (Depository) {
+    return new Depository(address(ep), address(deltaTransformer));
+  }
+
   function _deployXln() internal {
     ep = new EntityProvider(vm.addr(FOUNDATION_PK));
     deltaTransformer = new DeltaTransformer();
-    dep = new Depository(address(ep), address(deltaTransformer));
+    dep = _newDepository();
     vm.prank(vm.addr(FOUNDATION_PK));
     ep.bindShareDepository(address(dep));
 
@@ -82,6 +87,44 @@ abstract contract XlnFixture is Test {
     bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actorIndex], encoded, nonce);
     dep.processBatch(entity[actorIndex], encoded, _hanko(actorIndex, h), nonce);
     return true;
+  }
+
+  // ─────────────── J5: a batch that cannot apply fails soft ───────────────
+
+  /// @notice Submit `batch` from actor `actorIndex`; it must return normally with exactly one BatchFailed(entity, nonce,
+  /// reason), no HankoBatchProcessed, and the entity nonce consumed. Callers assert that the state did not move.
+  function _submitFailed(uint256 actorIndex, Batch memory batch, bytes4 reason) internal {
+    bytes32 me = entity[actorIndex];
+    uint256 nonceBefore = dep.entityNonces(me);
+    vm.recordLogs();
+    _submit(actorIndex, batch);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    bytes32 failedTopic = keccak256("BatchFailed(bytes32,uint256,bytes4)");
+    bytes32 processedTopic = keccak256("HankoBatchProcessed(bytes32,bytes32,uint256)");
+    uint256 failed;
+    for (uint256 i = 0; i < logs.length; i++) {
+      assertTrue(logs[i].topics[0] != processedTopic, "a failed batch must not emit HankoBatchProcessed");
+      if (logs[i].topics[0] != failedTopic) continue;
+      failed++;
+      assertEq(logs[i].topics[1], me, "BatchFailed: entity");
+      assertEq(uint256(logs[i].topics[2]), nonceBefore + 1, "BatchFailed: nonce");
+      assertEq(abi.decode(logs[i].data, (bytes4)), reason, "BatchFailed: reason");
+    }
+    assertEq(failed, 1, "exactly one BatchFailed");
+    assertEq(dep.entityNonces(me), nonceBefore + 1, "a failed batch consumes its nonce");
+  }
+
+  /// @notice `_submitFailed`, and the pair (`actorIndex`, `peer`) on `tokenId` did not move: account nonce, dispute hash,
+  /// both reserves, collateral.
+  function _submitFailedUnmoved(uint256 actorIndex, Batch memory batch, bytes4 reason, bytes32 peer, uint256 tokenId) internal {
+    PairState memory before_ = _pairState(entity[actorIndex], peer, tokenId);
+    _submitFailed(actorIndex, batch, reason);
+    PairState memory after_ = _pairState(entity[actorIndex], peer, tokenId);
+    assertEq(after_.nonce, before_.nonce, "failed batch: account nonce unchanged");
+    assertEq(after_.disputeHash, before_.disputeHash, "failed batch: dispute state unchanged");
+    assertEq(after_.reserveA, before_.reserveA, "failed batch: reserve unchanged");
+    assertEq(after_.reserveB, before_.reserveB, "failed batch: peer reserve unchanged");
+    assertEq(after_.collateral, before_.collateral, "failed batch: collateral unchanged");
   }
 
   // ─────────────── J2: a stale or already-applied dispute op is skipped, not reverted ───────────────

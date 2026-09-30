@@ -6,7 +6,7 @@
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
 const { buildFoundationTokenListing, foundationEntityId } = require("./foundation-hanko.cjs");
-const { assertResponseFloor } = require("./deploy-gate.cjs");
+const { assertDeployGate } = require("./deploy-gate.cjs");
 
 const DEFAULT_HARDHAT_MNEMONIC = "test test test test test test test test test test test junk";
 
@@ -49,11 +49,11 @@ async function main() {
   // Deploy gate, before any RPC call when the network config names its chain id, and again on the id the node reports.
   const configuredChainId = connection.networkConfig?.chainId;
   if (configuredChainId !== undefined) {
-    assertResponseFloor([{ id: connection.networkName, chainId: Number(configuredChainId) }]);
+    assertDeployGate([{ id: connection.networkName, chainId: Number(configuredChainId) }]);
   }
   console.log("🚀 Deploying XLN Contract Stack...\n");
   const network = await ethers.provider.getNetwork();
-  assertResponseFloor([{ id: connection.networkName, chainId: Number(network.chainId) }]);
+  assertDeployGate([{ id: connection.networkName, chainId: Number(network.chainId) }]);
   const [deployer] = await ethers.getSigners();
   const foundationRecipient = ethers.getAddress(
     process.env.XLN_FOUNDATION_ADDRESS || deployer.address

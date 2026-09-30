@@ -72,6 +72,8 @@ const MEMBERS: readonly Member[] = [
   { name: "B", board: [0, 1, 2], threshold: 2n, kind: "lazy" },
 ];
 export const NAMES = MEMBERS.map((m) => m.name);
+/** The most signers any Entity of this world has: the outer hanko check of its batches grows with it (see fork-shim-budget.test.ts). */
+export const MAX_BOARD_SIGNERS = Math.max(...MEMBERS.map((m) => m.board.length));
 /**
  * The 2-of-3 board is opt-in: a world asks for it with `openWorld(seed, name, { board: true })`, and the walk's command
  * line with WALK_BOARD=1. Its first Entity frame needs og's frame preparation

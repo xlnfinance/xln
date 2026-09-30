@@ -56,6 +56,7 @@ contract DebtChunkingTest is XlnFixture {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[1],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(entity[0], entity[1])),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
