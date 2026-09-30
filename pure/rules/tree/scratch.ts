@@ -14,6 +14,7 @@ export const scratch = (files: Readonly<Record<string, string>>, exceptions: obj
   writeFileSync(`${root}/style/tree-exceptions.json`, JSON.stringify(exceptions));
   mkdirSync(`${root}/kernel`);
   mkdirSync(`${root}/chain`);
+  mkdirSync(`${root}/account`);
   Object.entries(files).forEach(([file, text]) => writeFileSync(`${root}/kernel/${file}`, text));
   Object.entries(rootFiles).forEach(([file, text]) => writeFileSync(`${root}/${file}`, text));
   // The gate lists files with git (tracked plus untracked-not-ignored), so a scratch tree is a repository.
