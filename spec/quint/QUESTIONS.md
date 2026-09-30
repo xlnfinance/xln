@@ -591,10 +591,12 @@ alone (rule 1, a deposit travels alone, is kept) and only the deposit stalls; it
 returned no batch at all, so a paused token froze the whole Entity (and, with one nonce per Entity, other tokens' payments) with no timeout. `paymentGoesOutBehindAPausedDepositTest`;
 mutant `payments-wait-behind-a-paused-deposit`. J6a and J6 cover a different case (the nonce stall after signing).
 
-**J6c. Decision (final review F12, coordinator 2026-09-30): while a deposit is skipped, sign only the payments the current reserve already covers, in order.** J6b let every payment behind a skipped
-deposit go out. With the token paused and reserve 0 that signs a payment the deposit was meant to fund: it fails soft (J5), takes its nonce, and is signed again every round, burning a nonce each time. Now `plan`
-takes, while a deposit is skipped, the payments the reserve covers, oldest first (`payTotal <= s.reserve`, in id order); the rest wait with the deposit, and the deposit goes first once the token works, funding them.
-`unfundedPaymentWaitsForThePausedDepositTest`; mutant `unfunded-payment-signed-behind-paused-deposit`. `paymentGoesOutBehindAPausedDepositTest` (reserve 3) still shows a covered payment going out.
+**J6c. Decision (final review F12, F14; coordinator 2026-09-30): the planner signs a payment only if the reserve covers it, always.** J6b let every payment behind a skipped
+deposit go out. With the token paused and reserve 0 that signs a payment the deposit was meant to fund: it fails soft (J5), takes its nonce, and is signed again every round, burning a nonce each time. F14 made this
+the general rule (R-SIMULATE: a payment the simulation would fail is not signed), not only a rule for a skipped deposit: after a drain the same loop appeared with no deposit in sight. `plan` takes the payment legs the reserve
+covers, oldest first, skipping one that does not fit (`payTotal <= s.reserve`, walked in id order, so a later, smaller payment can go out while an earlier one waits); the rest wait for a refill, and a deposit goes first when
+the token works, funding them. Property `no_unfunded_signed` (ghost `unfunded`, set in `submit`); the two tests that rode the old loop now expect "not signed again until the refill"; mutant `unfunded-payment-is-signed`.
+`paymentGoesOutBehindAPausedDepositTest` (reserve 3) still shows a covered payment going out.
 
 **J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
 (1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the
@@ -625,5 +627,12 @@ the test pins the helper and not an outcome; `reserveThatIsOwedCannotBeDeposited
 was stronger than the contract. The model now keeps the queue (`Money.dq`, oldest first; `debt` stays the total, `debt_queue_sums`) and scales the bound down to `DEBT_ENFORCE_MAX = 2` so a search meets a queue longer
 than one call clears (`init` draws up to three claims; witness `w_no_long_queue`; `w_no_older_debt`, F13). What the contract keeps, and what `debt_means_broke` now states: spendable reserve nets ALL outstanding debt, the
 unreached tail included (`spendable`), so after a payout that leaves debt nothing is spendable; and a debtor is broke (no reserve at all) once its queue fits in one call. With a longer queue reserve may remain, all of it owed
-(`enforcementReachesOnlyOneCallsWorthOfClaimsTest`; mutants `enforce-has-no-call-bound`, `spendable-ignores-the-queue-tail`). A part-paid claim stays at the head with what is left (my reading of the loop; not checked against the
-contract source, which I do not read here).
+(`enforcementReachesOnlyOneCallsWorthOfClaimsTest`; mutants `enforce-has-no-call-bound`, `spendable-ignores-the-queue-tail`). A part-paid claim stays at the head with what is left: **checked** against `contracts/contracts/Account.sol` `enforceDebts` (the `else` branch stores the remainder and leaves `cursor`
+where it is; only a fully paid claim advances it).
+**F15 (final review, coordinator 2026-09-30): a deposit enforces first.** `Depository._reserveToCollateral` runs `_enforceDebts` before it moves reserve, so a depositor whose queue fitted in one call owes nothing after
+the deposit, and what a longer queue leaves is owed and cannot be deposited: property `r2c_enforces_first` (ghost `r2cOwes`), tests `depositPaysTheOlderDebtFirstTest` and `longQueueReserveCannotBeDepositedTest`,
+mutants `r2c-skips-enforce` and `r2c-ignores-debt`.
+**Modelled out, and unable to break `debt_means_broke`:** (a) the public `Depository.enforceDebts(entity, token, maxIterations)`, callable by anyone; `maxIterations = 0` means no cap and drains the whole queue. It only
+moves reserve from a debtor to its creditors in queue order, which is what `enforce` does with a cap, so it can only bring a debtor closer to broke. (b) Forgiveness at the head of the queue (a cooperative settlement's
+`forgiveDebtsInTokenIds`, at most 32 token ids) and zero-amount entries, which the loop skips at the cost of one iteration. Both only remove debt or spend an iteration; neither creates debt beside reserve. I read the loop
+in `Account.sol`; I did not read the forgiveness path beyond the list of ids, so (b) is recorded from the review, not verified by me.

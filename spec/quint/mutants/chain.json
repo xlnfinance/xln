@@ -420,6 +420,22 @@
       "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
       "new": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - sumOf(m.dq.get(s).slice(0, DEBT_ENFORCE_MAX)))",
       "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
+    },
+    {
+      "id": "r2c-skips-enforce",
+      "why": "a deposit does not pay the older debt first (Depository._reserveToCollateral enforces before it moves reserve)",
+      "file": "chain.qnt",
+      "old": "    val m1 = enforce(money, s)\n    val mNew",
+      "new": "    val m1 = money\n    val mNew",
+      "killedBy": "invariant:r2c_enforces_first"
+    },
+    {
+      "id": "r2c-ignores-debt",
+      "why": "a deposit may move reserve that a queued claim beyond one enforcement call still owns",
+      "file": "chain.qnt",
+      "old": "amt >= 1, spendable(m1, s) >= amt,",
+      "new": "amt >= 1, m1.res.get(s) >= amt,",
+      "killedBy": "test:longQueueReserveCannotBeDepositedTest"
     }
   ]
 }

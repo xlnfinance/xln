@@ -355,4 +355,18 @@ module chain_test {
       spendable(money, Left) == 0,
       not(ghost.debtBesideReserve), debt_means_broke, debt_queue_sums, p3_conserved, safe
     })
+
+  // F15: a deposit enforces first. Left holds 3 and owes 1: the claim is paid out of the 3 (Right gets 1) and then Left deposits 1 of the 2 that are left.
+  run depositPaysTheOlderDebtFirstTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withDebt(Left, 3, [1]))
+    .then(r2c(Left, Left, 1))
+    .expect(and { money.res == Map(Left -> 1, Right -> 1), money.debt == Map(Left -> 0, Right -> 0), money.dq == Map(Left -> [], Right -> []), ghost.r2cOwes == false, debt_queue_sums, safe })
+
+  // F15: what a long queue leaves is owed, not spendable. Left holds 3 and owes three claims of 1; one call pays two, the 1 that is left is owed to the third: it cannot be deposited.
+  run longQueueReserveCannotBeDepositedTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withDebt(Left, 3, [1, 1, 1]))
+    .then(r2c(Left, Left, 1))
+    .fail()
 }

@@ -67,10 +67,10 @@ clause waits for the deadline (H1). The honest side answers within `REACT`; an a
 
 Properties: `p1_allowed` (what settles is a proof the honest side consented to or holds as its own latest), `p1_clause` (an honest
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
-`no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
+`no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, `r2c_enforces_first` (a deposit enforces the older debt first, F15), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_frozen` (N3: one set of windows per Account, over unequal windows),
 `closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-35 scenario tests, 52 mutants.
+37 scenario tests, 54 mutants.
 
 ## Settlement (`settle.qnt`)
 
@@ -105,7 +105,7 @@ J5 refinement (coordinator, #54 review): a batch with a deposit leg reverts whol
 settlement signed at an old epoch) is a soft fail; only a failure of the batch's own authorisation reverts without taking the nonce (`only_signed_land`). The cost of the first
 is J6 (a stuck deposit batch holds the urgent ops behind it; a token failure in a deposit leg stays a hard revert on purpose, J6a). A deposit that cannot be signed while the token is paused is skipped, so the payments behind it still go out (J6b). The adversarial relayer sends any batch in any order (`attemptAny`) and forged batches (`forge`).
 
-Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`. 35 scenario tests, 32 mutants.
+Properties: `urgent_lands`, `dropped_only_dead`, `skip_read`, `failed_read`, `no_burn`, `nonce_final`, `pay_once`, `urgent_once`, `nonce_sequential`, `reserve_sound`, `dep_never_burns`, `only_signed_land`, `cosign_alone`, `gate_respected`, `within_cap`, `no_unfunded_signed` (F14: a payment is signed only if the reserve covers it). 35 scenario tests, 32 mutants.
 
 ## Runtime (`runtime.qnt`)
 

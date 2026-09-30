@@ -92,7 +92,8 @@ module jbatch {
     early: bool,               // a batch with a time-gated op landed (or tried to) before its gate opened
     gasFails: int,             // batches that failed inside their budget (out of gas, a gas-burning callee)
     burnt: Set[int],           // ops whose batch failed that way: their deadline may pass on the retry (J7), apart from `missed`
-    gasMissed: bool            // a burnt urgent op went past its deadline
+    gasMissed: bool,           // a burnt urgent op went past its deadline
+    unfunded: bool             // the Entity signed a payment batch the reserve (with the deposits ahead of it) did not cover at the moment it signed (F12)
   }
 
   type S = {
@@ -113,7 +114,7 @@ module jbatch {
     gh: Ghost
   }
 
-  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false, early: false, gasFails: 0, burnt: Set(), gasMissed: false }
+  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false, early: false, gasFails: 0, burnt: Set(), gasMissed: false, unfunded: false }
 
   var st: S
 
@@ -214,10 +215,10 @@ module jbatch {
   pure def plan(s: S): List[Batch] = {
     val u = urgentPending(s)
     val p = payQueued(s)
-    // the payment legs without a deposit; while a deposit is skipped, only the ones the reserve already covers, in order (an unfunded payment would fail on the chain and burn a nonce)
+    // the payment legs without a deposit, and of those only the ones the reserve at the head already covers, oldest first (R-SIMULATE: a payment the simulation would fail is not signed; signed unfunded it
+    // would fail soft, take its nonce, and be signed again at every round while the reserve stays short: F14, the general case of J6c)
     val pn0 = p.filter(i => not(isDep(s, i)))
-    val skipped = p.filter(i => isDep(s, i)).size() > 0 and not(s.ext)
-    val pn = if (not(skipped)) pn0 else OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)
+    val pn = OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)
     val q = u.union(p)
     val f = topSigned(s) + 1
     if (STRAT == 0) (if (nothingAlive(s) and q.size() > 0) [{ nonce: s.cnonce + 1, ids: q }] else [])
@@ -243,7 +244,9 @@ module jbatch {
   }
 
   pure def submit(s: S, bs: List[Batch]): S =
-    { ...s, sub: s.sub.concat(bs.foldl([], (acc, b) => acc.append({ b: b, at: s.now, tried: false, last: 0, aband: false }))) }
+    { ...s,
+      gh: { ...s.gh, unfunded: s.gh.unfunded or bs.foldl(false, (u, b) => u or payTotal(s, b.ids) > s.reserve + depTotal(s, b.ids)) },
+      sub: s.sub.concat(bs.foldl([], (acc, b) => acc.append({ b: b, at: s.now, tried: false, last: 0, aband: false }))) }
 
   pure def react(s: S): S = submit(s, plan(s))
 
@@ -465,7 +468,10 @@ module jbatch {
   val gate_respected: bool = not(st.gh.early)
   val within_cap: bool = st.sub.foldl(true, (ok, x) => ok and batchCost(st, x.b.ids) <= TX_GAS_CAP)
 
-  val safe: bool = and { gate_respected, within_cap, urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound, dep_never_burns, only_signed_land, cosign_alone }
+  // the Entity never signs a payment the reserve (with the deposits ahead of it in the batch) does not cover: it would fail soft, take its nonce and be signed again
+  val no_unfunded_signed: bool = not(st.gh.unfunded)
+
+  val safe: bool = and { no_unfunded_signed, gate_respected, within_cap, urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound, dep_never_burns, only_signed_land, cosign_alone }
 
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0

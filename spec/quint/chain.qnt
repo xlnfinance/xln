@@ -85,6 +85,7 @@ module chain {
     nonceBack: bool,      // the stored nonce went down
     appliedTwice: bool,   // one arena record settled twice
     freeDebt: bool,       // debt was booked while its debtor still had spendable reserve
+    r2cOwes: bool,             // a deposit left its depositor owing although its whole queue fitted in one enforcement call: `enforce` did not run first (F15)
     olderDebt: bool,           // a shortfall payout met a debtor who already owed and held reserve (older debt to enforce first)
     debtBesideReserve: bool,   // a payout that booked debt left its debtor holding reserve: an older debt was not enforced first (`enforce` before every outflow)
     xWasOffline: bool,    // the honest party was offline while the current dispute was active (then it may lose); reset when it ends
@@ -102,7 +103,7 @@ module chain {
   }
 
   pure val NO_GHOST: Ghost = {
-    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
+    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, r2cOwes: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
     lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
     nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
   }
@@ -444,7 +445,7 @@ module chain {
       acct' = aNew,
       arena' = arena, honest' = honest, now' = now, total' = total, dispute' = dispute, registry' = registry,
       knows' = knows, offline' = offline, applied' = applied,
-      ghost' = { ...ghost, depositBad: ghost.depositBad or not(effectOk) }
+      ghost' = { ...ghost, depositBad: ghost.depositBad or not(effectOk), r2cOwes: ghost.r2cOwes or (money.dq.get(s).length() <= DEBT_ENFORCE_MAX and mNew.debt.get(s) > 0) }
     }
   }
 
@@ -601,6 +602,7 @@ module chain {
         lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, useId))),
         payBad: ghost.payBad or not(payOk),
         depositBad: ghost.depositBad,
+        r2cOwes: ghost.r2cOwes,
         windowsMoved: ghost.windowsMoved or r.wl != dispute.wl or r.wr != dispute.wr,
         earlyClose: ghost.earlyClose or (byTimeout and now < dispute.t0 + dispute.wl + dispute.wr),
         lateCounter: ghost.lateCounter,
@@ -668,6 +670,8 @@ module chain {
   val w_no_older_debt: bool = not(ghost.olderDebt)     // witness: the search reaches an older debt (init draws a debt)
   val debt_means_broke: bool = not(ghost.debtBesideReserve)
   // the queue and the total describe the same debt
+  // Depository._reserveToCollateral enforces first: a depositor whose queue fitted in one call owes nothing after it (it had reserve to pay with, or nothing spendable to deposit)
+  val r2c_enforces_first: bool = not(ghost.r2cOwes)
   val debt_queue_sums: bool = sumOf(money.dq.get(Left)) == money.debt.get(Left) and sumOf(money.dq.get(Right)) == money.debt.get(Right)
 
   // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
@@ -688,7 +692,7 @@ module chain {
   val nonce_rules: bool = not(ghost.nonceBad)
 
   val safe: bool = and {
-    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums,
+    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums, r2c_enforces_first,
     pay_exact, deposit_exact, windows_frozen, closes_on_time, nonce_rules
   }
 

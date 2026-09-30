@@ -41,8 +41,9 @@ module jbatch_test {
     .then(attempt(1))                      // the reveal lands at nonce 2
     .expect(and { st.done.get(2), not(st.done.get(1)), st.gh.failed == 1, st.failedEv.get(1) == 1, st.failSeen.get(1) == 1, st.cnonce == 2, not(st.dropped.get(1)), nonce_final, safe })
     .then(tick)
-    .expect(and { st.sub.length() == 3, st.sub[2].b.nonce == 3, st.sub[2].b.ids == Set(1) })
+    .expect(and { st.sub.length() == 2, not(st.gh.unfunded) })       // F14: the reserve is still 0, so the payment is not signed again unfunded
     .then(refill(1))
+    .expect(and { st.sub.length() == 3, st.sub[2].b.nonce == 3, st.sub[2].b.ids == Set(1) })
     .then(attempt(2))
     .expect(and { st.done.get(1), st.runs.get(1) == 1, st.cnonce == 3, safe })
 
@@ -134,7 +135,9 @@ module jbatch_test {
     .then(abort(0))
     .expect(and { st.sub.length() == 1 })   // the batch is still alive: nothing new is signed
     .then(attempt(0))                      // fails at nonce 1, BatchFailed is read
-    .expect(and { st.gh.failed == 1, st.failSeen.get(1) == 1, st.sub.length() == 2, st.sub[1].b.nonce == 2, st.sub[1].b.ids == Set(1), safe })
+    .expect(and { st.gh.failed == 1, st.failSeen.get(1) == 1, st.sub.length() == 1, safe })      // F14: not signed again while the reserve is 0
+    .then(refill(1))
+    .expect(and { st.sub.length() == 2, st.sub[1].b.nonce == 2, st.sub[1].b.ids == Set(1), safe })
 
   // An urgent op is idempotent (it runs once or is skipped): after an abort it goes back into the draft at once, at a fresh nonce. If
   // both copies land the reveal has still run once.
