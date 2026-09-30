@@ -2,7 +2,8 @@
 pragma solidity ^0.8.24;
 
 /// Test-only (reviewer B, RB-7, PR 64): a listed share Depository that misbehaves on the CONTROL-lane reads of EntityProvider._requireReserveControlMajority.
-/// mode 0: reverts. mode 1: returns 2 MiB of zeros (return bomb). mode 2: burns all its gas (invalid opcode).
+/// mode 0: reverts. mode 1: returns as much as its gas pays for (return bomb). mode 2: burns all its gas (invalid opcode).
+/// mode 3: a plain wrong answer, not a fault: _status is 0 and every _reserves read is 2^256-1 (reviewer A, F5: the sum must not overflow).
 contract MisbehavingShareDepository {
   address public immutable entityProvider;
   uint256 public immutable mode;
@@ -21,6 +22,7 @@ contract MisbehavingShareDepository {
     assembly ("memory-safe") {
       if eq(m, 0) { revert(0, 0) }
       if eq(m, 2) { invalid() }
+      if eq(m, 3) { mstore(0, 0) return(0, 0x20) }
     }
     // mode 1: return as much as this frame's gas pays for (memory cost 3w + w^2/512 <= 0.9 gas), so the caller, who holds only
     // 1/64 of the gas, can never afford to copy it
@@ -38,6 +40,7 @@ contract MisbehavingShareDepository {
   }
 
   function _reserves(bytes32, uint256) external view returns (uint256) {
+    if (mode == 3) return type(uint256).max;
     return this._status();
   }
 

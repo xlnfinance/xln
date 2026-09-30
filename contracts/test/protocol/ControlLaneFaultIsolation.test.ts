@@ -1,5 +1,5 @@
 // R-OOG fault isolation (reviewer B, RB-7, PR 64). Audit row "EntityProvider._requireReserveControlMajority ... By design (fault isolation: one broken Depository
-// must not brick the lane)". Claim tested: a listed Depository that burns gas or returns a large payload cannot brick the lane.
+// must not brick the lane)". Claim tested: a listed Depository that burns gas, returns a large payload or answers with the largest word cannot brick the lane.
 import { expect } from 'chai';
 import hre from 'hardhat';
 
@@ -62,13 +62,22 @@ const propose = async (fx: Awaited<ReturnType<typeof fixture>>, gasLimit: bigint
   await (await fx.provider.commitBoard(encoded)).wait();
   const boardHash = boardHashOf(encoded);
   const digest = await fx.provider.computeBoardProposalHash(TARGET_ID, boardHash, CONTROL, 1n);
-  const hanko = buildSingleSignerHanko(HOLDER_A_ID, digest, deriveHardhatPrivateKey(3));
-  return fx.provider.proposeBoard.staticCall(TARGET_ID, boardHash, CONTROL, [hanko], { gasLimit }).then(() => true, () => false);
+  // two shareholders vote (sorted by entity id), so a Depository's per-shareholder reads are summed
+  const hankos = [
+    buildSingleSignerHanko(HOLDER_A_ID, digest, deriveHardhatPrivateKey(3)),
+    buildSingleSignerHanko(HOLDER_B_ID, digest, deriveHardhatPrivateKey(4)),
+  ];
+  return fx.provider.proposeBoard.staticCall(TARGET_ID, boardHash, CONTROL, hankos, { gasLimit }).then(() => true, () => false);
 };
 
 describe('R-OOG control lane: a listed Depository that misbehaves on the reads', function () {
   this.timeout(300_000);
-  for (const [name, mode] of [['reverts', 0], ['burns all its gas', 2], ['returns as much as its gas pays for (return bomb)', 1]] as const) {
+  for (const [name, mode] of [
+    ['reverts', 0],
+    ['burns all its gas', 2],
+    ['returns as much as its gas pays for (return bomb)', 1],
+    ['answers 2^256-1 to every reserve read (reviewer A, F5: the sum over shareholders must not overflow)', 3],
+  ] as const) {
     it(`${name}: the lane still passes at every gas limit up to the block cap`, async function () {
       const fx = await fixture(mode);
       const results: Record<string, boolean> = {};

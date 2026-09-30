@@ -817,6 +817,9 @@ contract EntityProvider is ERC1155 {
       (bool statusOk, uint256 status) =
         _readDepositoryWord(depository, abi.encodeWithSelector(IEntityShareDepository._status.selector));
       if (!statusOk || status == 2) continue;
+      // A Depository can never report more weight than the shares it holds, so each read is clamped to that BEFORE it is summed: a
+      // Depository that answers 2^256-1 must not overflow the sum and brick the lane.
+      uint256 held = balanceOf(depository, controlTokenId);
       uint256 depositorySupport = 0;
       bool readOk = true;
       for (uint256 i = 0; i < shareholders.length; i++) {
@@ -825,11 +828,9 @@ contract EntityProvider is ERC1155 {
           abi.encodeWithSelector(IEntityShareDepository._reserves.selector, shareholders[i], internalTokenId)
         );
         if (!ok) { readOk = false; break; }
-        depositorySupport += reserve;
+        depositorySupport += reserve < held ? reserve : held;
       }
       if (!readOk) continue;
-      // A Depository can never report more weight than the shares it holds.
-      uint256 held = balanceOf(depository, controlTokenId);
       totalSupport += depositorySupport < held ? depositorySupport : held;
     }
     if (!anyRegistered) revert ShareDepositoryRequired();
