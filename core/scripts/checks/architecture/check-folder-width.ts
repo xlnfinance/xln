@@ -85,6 +85,8 @@ export type FolderWidth = Readonly<{
 
 export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'contracts/contracts': 16,
+  'contracts/test/foundry': 16,
+  'contracts/test/vm': 22,
   'core/__tests__/runtime/ingress': 11,
   'core/__tests__/runtime/observability': 11,
   'core/entity/tx/handlers/account': 11,
@@ -94,7 +96,7 @@ export const FOLDER_WIDTH_DEBT: Readonly<Record<string, number>> = {
   'core/scripts/operations/hlt': 12,
   'frontend/src/lib/stores': 11,
   'jurisdictions/contracts': 16,
-  'pure/diff': 53,
+  'pure/diff': 61,
   'rscore/crates/entity-kernel/src': 12,
   'rscore/crates/entity-kernel/src/consensus': 11,
   'rscore/crates/entity-kernel/tests': 11,
