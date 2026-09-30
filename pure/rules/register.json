@@ -2108,6 +2108,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused"
     }
    ]
   },
