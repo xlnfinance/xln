@@ -13,7 +13,7 @@ export const other = (side: Side): Side => (side === "left" ? "right" : "left");
 
 export type TokenId = Brand<bigint, "TokenId">;
 
-/** An open conditional payment, seen from the money: `payer` owes `amount` if its payee claims it in time. */
+/** An open hold, what the spec calls a conditional clause: `payer` owes `amount` if its payee claims it in time. */
 export type Hold = Readonly<{ payer: Side; amount: bigint }>;
 
 /**
@@ -35,6 +35,7 @@ export type AccountFault =
   | Tagged<"bad_amount", { amount: bigint }>
   | Tagged<"bad_credit", { limit: bigint }>
   | Tagged<"insufficient_capacity", { available: bigint; requested: bigint }>
+  | Tagged<"hold_overflow", { held: bigint; requested: bigint }>
   | Tagged<"credit_below_usage">
   | Tagged<"no_such_hold", { index: number }>
   | Tagged<"withdrawal_beyond_collateral", { collateral: bigint; requested: bigint }>

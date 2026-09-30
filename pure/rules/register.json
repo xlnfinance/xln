@@ -1578,7 +1578,7 @@
   },
   {
    "id": "R-SETTLE-CREDIT",
-   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed.",
+   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",

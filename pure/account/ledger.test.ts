@@ -121,6 +121,32 @@ describe("account/ledger", () => {
     expect(withdraw(right, "right", 10n).ok).toBe(true);
   });
 
+  test("R-A6 the largest amount, 2^256-1, is taken by every transition that takes one", () => {
+    const funded = value(setCredit(value(deposit(emptyLedger, "left", MAX_AMOUNT)), "right", MAX_AMOUNT));
+    expect(pay(funded, "left", MAX_AMOUNT).ok).toBe(true);
+    expect(lock(funded, "left", MAX_AMOUNT).ok).toBe(true);
+    expect(withdraw(funded, "left", MAX_AMOUNT).ok).toBe(true);
+    expect(deposit(emptyLedger, "right", MAX_AMOUNT).ok).toBe(true);
+  });
+
+  test("R-A6 one side's holds cannot add up past 2^256-1, even with credit to cover them", () => {
+    const funded = value(setCredit(value(deposit(emptyLedger, "left", MAX_AMOUNT)), "right", MAX_AMOUNT));
+    const nearly = value(lock(funded, "left", MAX_AMOUNT - 1n));
+    expect(lock(nearly, "left", 2n)).toEqual(refused({ _tag: "hold_overflow", held: MAX_AMOUNT - 1n, requested: 2n }));
+    expect(lock(nearly, "left", 1n).ok).toBe(true);
+    expect(lock(value(lock(funded, "left", 1n)), "right", MAX_AMOUNT).ok).toBe(false);
+  });
+
+  test("R-A6 payments and resolved holds move offdelta, which both sides sign, never ondelta", () => {
+    const l = leftHolds(10n, 5n);
+    const paidOut = value(pay(l, "left", 12n));
+    expect([paidOut.offdelta, paidOut.ondelta]).toEqual([-12n, 10n]);
+    const resolved = value(resolve(value(lock(l, "left", 4n)), 0));
+    expect([resolved.offdelta, resolved.ondelta]).toEqual([-4n, 10n]);
+    const rightPays = value(pay(value(deposit(emptyLedger, "right", 10n)), "right", 3n));
+    expect([rightPays.offdelta, rightPays.ondelta]).toEqual([3n, 0n]);
+  });
+
   test("a Left deposit is Left's allocation and a Right deposit is Right's", () => {
     const left = value(deposit(emptyLedger, "left", 7n));
     const right = value(deposit(emptyLedger, "right", 7n));
