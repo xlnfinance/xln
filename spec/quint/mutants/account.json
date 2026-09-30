@@ -357,6 +357,14 @@
       "old": "not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right)",
       "new": "not(byzOn and f.author == Right and frames.get(fc.get(f.height)).author == Left)",
       "killedBy": "test:equivocatingLeftIsSupersededByRankTest"
+    },
+    {
+      "id": "future-stamp-refused",
+      "why": "the dropped stamp-window rule: a frame stamped ahead of the receiver's clock is refused, so a payer that stamps a day ahead blocks the payee's held reveal (#57)",
+      "file": "account_core.qnt",
+      "old": "    f.height == r.height + 1,\n    f.nonce > r.pnonce, ",
+      "new": "    f.height == r.height + 1,\n    f.ts <= now + DRIFT,\n    f.nonce > r.pnonce, ",
+      "killedBy": "test:futureStampedFrameDoesNotBlockTheRevealTest"
     }
   ],
   "testSamples": 50

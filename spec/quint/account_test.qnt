@@ -341,4 +341,18 @@ module account_test {
     .then(deliverProposal(Right, 2))              // Right is the collision loser: it rolls back and takes Left's frame
     .then(ackReceived(Right))
     .expect(and { replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip != replica.get(Right).tip, not(diverged), superseded, safe })
+
+  // #57 sequence (coordinator): a payer co-signs a frame stamped far ahead of every clock, and the payee's held reveal follows. The stamp decides
+  // nothing (R-CLOCK): the payee's resolve is judged by its own clock (0 <= deadline 2) and is proposed and would be accepted. The frame's stamp is
+  // informational, and a J height a proposer claims is untrusted for the same reason (the model has no J height; A8).
+  run futureStampedFrameDoesNotBlockTheRevealTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(enqueueTx(Left, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 2 })))
+    .then(turnByzantine(Left)).then(byzStampedQueued(Left))
+    .then(deliverProposal(Right, 2)).then(ackReceived(Right))                       // the future-stamped lock frame is committed
+    .expect(and { replica.get(Right).height == 2, frames.get(2).ts > 50, refusals == 0, replica.get(Right).tip.locks.get(1).on })
+    .then(enqueueTx(Right, HtlcResolve({ id: 1, secret: 1 })))                      // the held reveal arrives
+    .then(propose(Right))
+    .expect(and { isProposed(replica.get(Right)), frames.get(3).txs == [HtlcResolve({ id: 1, secret: 1 })], safe })
 }

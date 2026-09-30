@@ -47,9 +47,9 @@ module jbatch {
   // J5 as built: only a batch with no dispute, reveal or hash-ladder op gets that treatment; a mixed batch that fails still reverts whole
   // and keeps its nonce open. So the Entity splits its batches (R-SPLIT): urgent ops never share a batch with payment, settlement or
   // reserve ops (Entity side: `plan`).
-  // chain: a batch failure is reported (BatchFailed, nonce spent) only when the self-call got at least BATCH_GAS_FLOOR; below the floor the transaction
-  // reverts and takes no nonce, so a relayer that starves a good batch cannot burn its nonce. With the floor, an empty revert reason at or above it is
-  // BatchFailed(0) and spends the nonce (the same soft failure as any other). This replaces the earlier 1/32 rule and the ERC-1271 stipend.
+  // Signed gas budget (coordinator, 2026-09-30; replaces the gas floor): the signer sets each batch's gas budget from its own simulation, and it is inside
+  // the signed bytes. A relayer that supplies less than the budget makes the transaction revert and no nonce is taken (`starve`): a good batch is never
+  // burnt. Once the budget is given, every failure is BatchFailed with the nonce spent, an out-of-gas or a gas-burning callee included (`gasFail`).
   pure val GAS_GUARD = true
   // J5 refinement (coordinator, from the #54 review): a batch that carries a deposit leg (externalTokenToReserve) reverts whole, like a
   // dispute batch, and never soft-fails: a relayer or a paused token cannot burn its nonce. A bad counterparty signature inside a batch
@@ -57,6 +57,13 @@ module jbatch {
   // authorisation reverts without taking the nonce (`forge`).
   pure val DEP_SOFT_FAILS = false
   pure val SIMULATE_DEPOSITS = true       // J6: a deposit batch is signed only when it simulates successfully
+  // Runtime rules (coordinator, 2026-09-30): sign a batch only after simulating it successfully at the head (SIGN_AFTER_SIMULATION, which the model
+  // reads as `ext` for a deposit leg and as the gate for a time-gated op); never sign a time-gated op before its gate opens (RESPECT_GATE); split any
+  // batch above the chain's tx gas cap (SPLIT_AT_CAP).
+  pure val RESPECT_GATE = true
+  pure val SPLIT_AT_CAP = true
+  pure val GAS_FAILS_MAX = 1              // in-budget gas failures per run (see QUESTIONS J7)
+  pure val TX_GAS_CAP = 2                 // gas units one transaction may spend; a batch that costs more can never land
   // Entity: after it gives a signed draft up, a payment, deposit or reserve move in it stays "in flight" until the batch's nonce is used
   // (and BatchFailed read, if it failed): the signed batch can still land, and such an op runs every time. Only urgent ops (dispute step,
   // reveal, hash ladder), which run once or are skipped, go back into the draft at once [coordinator rule, F1].
@@ -70,7 +77,7 @@ module jbatch {
   // chain (cannot revert). Disp: a dispute start, counter or finalize (reverts when the dispute moved: `poisoned`). Reveal and Disp are
   // urgent; a batch that lands a second time skips an urgent op that already ran.
   type Kind = | Pay | Reveal | Disp | Dep | Settle
-  type Op = { kind: Kind, amt: int, arr: int, dl: int }         // it reaches the Entity at `arr`; on the chain by `dl` (0 = no deadline)
+  type Op = { kind: Kind, amt: int, arr: int, dl: int, gate: int }   // it reaches the Entity at `arr`; on the chain by `dl` (0 = no deadline); not before `gate` (a time gate: a dispute finalize waits for its window)
   type Batch = { nonce: int, ids: Set[int] }
   type Sub = { b: Batch, at: int, tried: bool, last: int, aband: bool }       // submitted at `at`; `last` = the tick of its latest attempt; `aband`: the Entity gave the draft up (the signed copy is still out there)
 
@@ -81,7 +88,11 @@ module jbatch {
     burned: bool,              // a batch that would have applied was failed at its nonce (a starved relayer call)
     depBurned: bool,           // a batch with a deposit leg failed softly and took its nonce (J5 refinement: it must revert whole)
     forgedLanded: bool,        // a batch that the Entity did not sign took a nonce
-    hostage: bool              // an urgent op went past its deadline behind a deposit batch that cannot land (the cost of revert-whole)
+    hostage: bool,             // an urgent op went past its deadline behind a deposit batch that cannot land (the cost of revert-whole)
+    early: bool,               // a batch with a time-gated op landed (or tried to) before its gate opened
+    gasFails: int,             // batches that failed inside their budget (out of gas, a gas-burning callee)
+    burnt: Set[int],           // ops whose batch failed that way: their deadline may pass on the retry (J7), apart from `missed`
+    gasMissed: bool            // a burnt urgent op went past its deadline
   }
 
   type S = {
@@ -102,7 +113,7 @@ module jbatch {
     gh: Ghost
   }
 
-  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false }
+  pure val NO_GHOST: Ghost = { landed: 0, missed: false, reverts: 0, forks: 0, failed: 0, burned: false, depBurned: false, forgedLanded: false, hostage: false, early: false, gasFails: 0, burnt: Set(), gasMissed: false }
 
   var st: S
 
@@ -121,6 +132,10 @@ module jbatch {
   pure def hasDep(s: S, ids: Set[int]): bool = ids.exists(i => isDep(s, i))
   // the Account a co-signed op belongs to: ops 1 and 2 are on Account 1, ops 3 and 4 on Account 2
   pure def acctOf(i: int): int = if (i <= 2) 1 else 2
+  // gas a batch costs: a co-signed settlement costs two units (a second signature check), everything else one
+  pure def cost(s: S, i: int): int = match s.ops.get(i).kind { | Settle => 2 | _ => 1 }
+  pure def batchCost(s: S, ids: Set[int]): int = ids.fold(0, (m, i) => m + cost(s, i))
+  pure def gateOpen(s: S, i: int): bool = s.now >= s.ops.get(i).gate
 
   pure def anySub(s: S, f: Sub => bool): bool = s.sub.foldl(false, (a, x) => a or f(x))
   pure def alive(s: S, x: Sub): bool = x.b.nonce > s.cnonce          // its nonce is not used yet: it can still land
@@ -139,6 +154,8 @@ module jbatch {
 
   pure def applies(s: S, b: Batch): bool = and {
     b.nonce == s.cnonce + 1,
+    b.ids.forall(i => gateOpen(s, i)),                         // a time-gated op fails its batch (a revert: it may hold later) before its gate
+    batchCost(s, b.ids) <= TX_GAS_CAP,                        // a batch above the chain's gas cap can never land: the transaction itself runs out, so the failure cannot be caught (no nonce)
     payTotal(s, b.ids) <= s.reserve + depTotal(s, b.ids),      // the deposit legs run first and fund the payments behind them
     not(hasDep(s, b.ids)) or s.ext,
     b.ids.forall(i => not(isSettle(s, i) and s.poisoned.get(i))),   // a counterparty signature at a dead epoch
@@ -159,18 +176,18 @@ module jbatch {
         done: OPIDS.mapBy(i => s.done.get(i) or ran.contains(i)),
         runs: OPIDS.mapBy(i => s.runs.get(i) + (if (ran.contains(i)) 1 else 0)),
         gh: { ...s.gh, landed: s.gh.landed + 1 } }
-    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and b.ids.forall(i => isMoney(s, i)) and (DEP_SOFT_FAILS or not(hasDep(s, b.ids))))   // R-SPLIT: never for a batch with an urgent op; J5: never for one with a deposit leg
+    } else if (NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and batchCost(s, b.ids) <= TX_GAS_CAP and b.ids.forall(i => isMoney(s, i)) and (DEP_SOFT_FAILS or not(hasDep(s, b.ids))))   // R-SPLIT: never for a batch with an urgent op; J5: never for one with a deposit leg
       // the transaction itself succeeds: the failure is caught, its effects are undone, the nonce is stored and BatchFailed is emitted
       { ...s, cnonce: b.nonce,
         failedEv: OPIDS.mapBy(i => s.failedEv.get(i) + (if (b.ids.contains(i) and isMoney(s, i)) 1 else 0)),
         gh: { ...s.gh, landed: s.gh.landed + 1, failed: s.gh.failed + 1, depBurned: s.gh.depBurned or hasDep(s, b.ids) } }
-    else { ...s, gh: { ...s.gh, reverts: s.gh.reverts + 1 } }
+    else { ...s, gh: { ...s.gh, reverts: s.gh.reverts + 1, early: s.gh.early or b.ids.exists(i => not(gateOpen(s, i))) } }
 
   // ---------------------------------------------------------------------------------------------------------
   // The Entity: what it signs
   // ---------------------------------------------------------------------------------------------------------
 
-  pure def urgentPending(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and not(isMoney(s, i)))
+  pure def urgentPending(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and not(isMoney(s, i)) and (gateOpen(s, i) or not(RESPECT_GATE)))
   // a payment whose batch failed is queued again only once the Entity has read the BatchFailed event
   pure def payQueued(s: S): Set[int] = OPIDS.filter(i => pending(s, i) and isMoney(s, i) and not(inFlight(s, i)) and s.failSeen.get(i) == s.failedEv.get(i))
 
@@ -186,6 +203,14 @@ module jbatch {
     cs.filter(i => acctOf(i) == a)
   }
 
+  // The largest prefix of ids (ascending) whose gas fits one transaction; the rest goes into the next batch (SPLIT_AT_CAP).
+  pure def firstChunk(s: S, ids: Set[int]): Set[int] =
+    if (not(SPLIT_AT_CAP)) ids
+    else OPIDS.fold({ ids: Set(), c: 0, full: false }, (acc, i) =>
+      if (not(ids.contains(i)) or acc.full) acc
+      else if (acc.c + cost(s, i) <= TX_GAS_CAP) { ids: acc.ids.union(Set(i)), c: acc.c + cost(s, i), full: false }
+      else { ...acc, full: true }).ids
+
   pure def plan(s: S): List[Batch] = {
     val u = urgentPending(s)
     val p = payQueued(s)
@@ -196,7 +221,7 @@ module jbatch {
       // F1: every batch goes to a nonce nobody has signed. An urgent op that is in no live batch gets a batch of its own (no payment
       // in it); payments wait until nothing is outstanding. A batch that is no longer wanted still lands as a no-op and takes its
       // own nonce, which costs nothing: the batches above it land right behind it in the same round.
-      val fresh = u.filter(i => not(inFlight(s, i)))
+      val fresh = firstChunk(s, u.filter(i => not(inFlight(s, i))))
       if (fresh.size() > 0) [{ nonce: f, ids: fresh }]
       // a deposit leg reverts its batch whole (J5 refinement), so it travels alone: the payments behind it wait for the next round. The Runtime
       // signs a deposit batch only after simulating it successfully (`s.ext`: the token works now, J6); a token paused between the simulation and the
@@ -206,7 +231,7 @@ module jbatch {
       // R-COSIGN (coordinator, #54 review): a batch that carries a co-signed op (a settlement or C2R) carries ops for that one Account only.
       // A counterparty's state change or a relayer's gas choice can fail such a batch, so nothing unrelated may ride with it.
       else if (nothingAlive(s) and p.filter(i => isSettle(s, i)).size() > 0) [{ nonce: f, ids: coSigned(s, p) }]
-      else if (nothingAlive(s) and p.size() > 0) [{ nonce: f, ids: p }]
+      else if (nothingAlive(s) and p.size() > 0) [{ nonce: f, ids: firstChunk(s, p) }]
       else []
     }
   }
@@ -234,6 +259,7 @@ module jbatch {
     nondet a1 = 1.to(2).oneOf()
     nondet a2 = 1.to(3).oneOf()
     nondet a3 = 1.to(3).oneOf()
+    nondet g3 = 0.to(1).oneOf()
     nondet a4 = 1.to(3).oneOf()
     nondet m1 = 1.to(2).oneOf()
     nondet m4 = 1.to(2).oneOf()
@@ -242,10 +268,10 @@ module jbatch {
     st' = {
       now: 1,
       ops: Map(
-        1 -> { kind: (if (k1 == 2) Settle else Pay), amt: m1, arr: a1, dl: 0 },
-        2 -> { kind: Reveal, amt: 0, arr: a2, dl: a2 + LAG },
-        3 -> { kind: Disp, amt: 0, arr: a3, dl: a3 + LAG },
-        4 -> { kind: (if (k4 == 1) Dep else if (k4 >= 2) Settle else Pay), amt: m4, arr: a4, dl: 0 }
+        1 -> { kind: (if (k1 == 2) Settle else Pay), amt: m1, arr: a1, dl: 0, gate: 0 },
+        2 -> { kind: Reveal, amt: 0, arr: a2, dl: a2 + LAG, gate: 0 },
+        3 -> { kind: Disp, amt: 0, arr: a3, dl: a3 + g3 + LAG, gate: a3 + g3 },
+        4 -> { kind: (if (k4 == 1) Dep else if (k4 >= 2) Settle else Pay), amt: m4, arr: a4, dl: 0, gate: 0 }
       ),
       arrived: OPIDS.mapBy(_ => false), dropped: OPIDS.mapBy(_ => false), sub: [],
       cnonce: 0, ext: true, reserve: RESERVE_MAX,
@@ -323,6 +349,23 @@ module jbatch {
     }
   }
 
+  // The relayer gives the full signed budget and the batch still fails: it runs out of gas, or a callee burns it. Every such failure is BatchFailed with the
+  // nonce spent (coordinator, signed gas budget), the batch applies nothing, and the Entity reads the event and signs what is still owed at a fresh nonce.
+  // The Runtime signed it only after a successful simulation at the head, so this needs the world to change between the simulation and the landing.
+  action gasFail(j: int): bool = {
+    val x = st.sub[j]
+    val b = x.b
+    val s1 = { ...st, cnonce: b.nonce,
+               failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),
+               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails: st.gh.gasFails + 1, burnt: st.gh.burnt.union(b.ids) } }
+    all {
+      j >= 0, j < st.sub.length(),
+      b.nonce == st.cnonce + 1, b.ids.forall(i => gateOpen(st, i)),
+      GAS_FAILS_MAX > st.gh.gasFails,
+      st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })
+    }
+  }
+
   // The Entity gives a signed draft up (a rolled-back frame, a restart that lost the outbox): the signed batch is not recalled.
   action abort(j: int): bool = {
     val x = st.sub[j]
@@ -343,17 +386,19 @@ module jbatch {
   pure def overdue(s: S): bool = anySub(s, x => not(x.tried) and s.now >= x.at + LAG)
   pure def arrivalDue(s: S): bool = OPIDS.exists(i => not(s.arrived.get(i)) and s.ops.get(i).arr <= s.now)
   // an urgent op whose deadline is this tick and is still owed when the clock moves on
-  pure def lateNow(s: S): bool = OPIDS.exists(i => and {
+  pure def lateIds(s: S): Set[int] = OPIDS.filter(i => and {
     not(isMoney(s, i)), s.ops.get(i).dl == s.now, not(s.done.get(i)), not(s.poisoned.get(i))
   })
+  pure def lateNow(s: S): bool = lateIds(s).filter(i => not(s.gh.burnt.contains(i))).size() > 0
+  pure def lateBurnt(s: S): bool = lateIds(s).filter(i => s.gh.burnt.contains(i)).size() > 0
 
   // a deposit batch that cannot land sits at the next nonce: it holds every batch above it, urgent ones too (revert-whole has this cost)
   pure def hostage(s: S): bool = anySub(s, x => alive(s, x) and x.b.nonce == s.cnonce + 1 and hasDep(s, x.b.ids) and not(s.ext))
 
   action tick: bool = all {
     st.now <= MAXT, not(overdue(st)), not(arrivalDue(st)),
-    st' = { ...st, now: st.now + 1,
-            gh: { ...st.gh, missed: st.gh.missed or (lateNow(st) and not(hostage(st))), hostage: st.gh.hostage or (lateNow(st) and hostage(st)) } }
+    st' = react({ ...st, now: st.now + 1,
+            gh: { ...st.gh, missed: st.gh.missed or (lateNow(st) and not(hostage(st))), hostage: st.gh.hostage or (lateNow(st) and hostage(st)), gasMissed: st.gh.gasMissed or lateBurnt(st) } })
   }
 
   action step = any {
@@ -366,6 +411,7 @@ module jbatch {
     extLose,
     extBack,
     { nondet j = 0.to(9).oneOf() starve(j) },
+    { nondet j = 0.to(9).oneOf() gasFail(j) },
     { nondet j = 0.to(9).oneOf() abort(j) },
     { nondet i = OPIDS.oneOf() poison(i) },
     { nondet a = 1.to(2).oneOf() drain(a) },
@@ -409,10 +455,16 @@ module jbatch {
     and { x.b.ids.forall(i => isSettle(st, i)), x.b.ids.forall(i => acctOf(i) == acctOf(x.b.ids.fold(3, (m, j) => if (j < m) j else m))) }
   })
 
-  val safe: bool = and { urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound, dep_never_burns, only_signed_land, cosign_alone }
+  // Runtime rules: nothing is signed before its gate opens, and no signed batch is above the chain's gas cap.
+  val gate_respected: bool = not(st.gh.early)
+  val within_cap: bool = st.sub.foldl(true, (ok, x) => ok and batchCost(st, x.b.ids) <= TX_GAS_CAP)
+
+  val safe: bool = and { gate_respected, within_cap, urgent_lands, dropped_only_dead, skip_read, failed_read, no_burn, nonce_final, pay_once, urgent_once, nonce_sequential, reserve_sound, dep_never_burns, only_signed_land, cosign_alone }
 
   // Coverage witnesses (false on purpose: `quint run --invariant` must find a violating trace)
   val w_no_landing: bool = st.gh.landed == 0
+  val w_no_gas_fail: bool = st.gh.gasFails == 0                   // a batch failed inside its budget (J7)
+  val w_no_gas_missed: bool = not(st.gh.gasMissed)               // ... and a burnt urgent op then went past its deadline (the accepted residual)
   val w_no_revert: bool = st.gh.reverts == 0
   val w_no_failed_batch: bool = st.gh.failed == 0                // a batch failed at its nonce (J5)
   val w_no_drop: bool = not(OPIDS.exists(i => st.dropped.get(i)))

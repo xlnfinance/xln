@@ -121,6 +121,15 @@ module chain_test {
     .then(startWith(Right, 6, false, 0, false))
     .expect(dispute.on and acct.epoch == 1)
 
+  // A start that names a dead epoch is skipped: nothing moves, the nonce stays, and it is counted. The same start at the live epoch begins the dispute.
+  run deadEpochStartIsSkippedTest =
+    initFrom(BASE.set(1, pf(1, true, 0, true, true)).set(4, pf(4, true, -2, true, false)), Left, 0, 0, 2)
+    .then(honestStart)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(honestFinalize)
+    .then(startAtDeadEpoch(Right, 4))
+    .expect(and { not(dispute.on), acct.epoch == 1, ghost.staleSkips == 1, p3_conserved, nonce_monotone })
+
   // ---- H1: an HTLC settled on chain is judged by the secret, and finalize waits for the deadline ------------------
 
   val hub = BASE.set(1, withClause(pf(1, true, 0, true, true), Left, 1, 4))

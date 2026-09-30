@@ -242,6 +242,22 @@ module account {
     }
   }
 
+  // The same, carrying what the author has queued: the frame its own replica would propose, with the stamp far ahead of every clock. It is a
+  // valid replay, so the receiver commits it; only the stamp is odd. (Used by a scenario test, not by the step: byzPropose already draws stamps.)
+  action byzStampedQueued(a: Side): bool = {
+    val rcv = other(a)
+    val f: Frame = { ...frameToPropose(replica.get(a), clock.get(a), a, 0), ts: clock.get(rcv) + 100 }
+    all {
+      isByz(a), f.txs.length() > 0, f.height <= MAX_HEIGHT, nextFid <= MAX_FRAMES,
+      frames' = frames.set(nextFid, f),
+      nextFid' = nextFid + 1,
+      proposals' = proposals.union(Set(nextFid)),
+      signed' = signed,
+      replica' = replica, acks' = acks, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
+      equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    }
+  }
+
   // The Byzantine side answers the honest side's frame in flight with an ack. Correct: it signs the proof of the frame. Otherwise it
   // signs a different proof for the same (nonce, branch) and the honest side must not commit on it.
   action byzAck(a: Side, correct: bool): bool = {

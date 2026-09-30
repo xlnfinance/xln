@@ -95,13 +95,14 @@ module chain {
     nonceBad: bool,       // the stored nonce after a start or a finalize is not the one the rules give
     pubAt: int,           // ghost: the tick the secret first reached the chain (0 = never), kept apart from `registry`
     finalizes: int,
-    lastApplied: int
+    lastApplied: int,
+    staleSkips: int       // dispute starts that named a dead ondelta epoch and were skipped (DisputeOpSkipped), moving nothing
   }
 
   pure val NO_GHOST: Ghost = {
     badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, xWasOffline: false,
     lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
-    nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0
+    nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
   }
 
   pure val NO_CLAUSE: Clause = { on: false, payer: Left, amount: 0, deadline: 0 }
@@ -442,6 +443,18 @@ module chain {
     knows' = knows, offline' = offline, applied' = applied
   }
 
+  // A dispute start now carries the ondelta epoch of the Account it was signed for (coordinator, 2026-09-30) and is skipped when the Account is
+  // in another epoch: DisputeOpSkipped, no revert, no nonce change, nothing else moves. (It can never hold again: a finalize only advances the epoch.)
+  // The proof's own epoch is still checked by `canStart` (C1); this is the same fact stated on the op, so the Entity can read it as a skip.
+  action startAtDeadEpoch(s: Side, rid: int): bool = all {
+    rid >= 1, arena.get(rid).live, arena.get(rid).epoch != acct.epoch,
+    ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },
+    dispute' = dispute, acct' = acct, arena' = arena, honest' = honest, now' = now, money' = money, total' = total, registry' = registry,
+    knows' = knows, offline' = offline, applied' = applied
+  }
+
+  action adversaryStartAtDeadEpoch: bool = { nondet rid = RECS.oneOf() startAtDeadEpoch(other(honest), rid) }
+
   action adversaryStart: bool = {
     nondet rid = RECS.oneOf()
     nondet initArgs = Set(true, false).oneOf()
@@ -564,7 +577,8 @@ module chain {
         nonceBad: ghost.nonceBad or newNonce != (if (adopts) r.nonce else acct.nonce + 1) or (adopts and r.nonce < acct.nonce),
         pubAt: ghost.pubAt,
         finalizes: ghost.finalizes + 1,
-        lastApplied: useId
+        lastApplied: useId,
+        staleSkips: ghost.staleSkips
       },
       arena' = arena, honest' = honest, now' = now, total' = total, registry' = registry, knows' = knows,
       offline' = offline
@@ -594,7 +608,7 @@ module chain {
     publish(Left), publish(Right),
     setOffline(true), setOffline(false),
     { nondet a = 1.to(2).oneOf() nondet who = SIDES.oneOf() nondet rcv = SIDES.oneOf() r2c(who, rcv, a) },
-    adversaryStart, honestStart,
+    adversaryStart, adversaryStartAtDeadEpoch, honestStart,
     adversaryCounter, honestCounter,
     adversaryFinalize, honestFinalize
   }

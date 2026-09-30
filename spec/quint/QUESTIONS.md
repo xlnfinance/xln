@@ -73,6 +73,14 @@ protocol cannot enforce, QUESTIONS Q-X2).
 A margin beyond the reserve is Entity policy (`HOP`, `ESC`). An expiry is a system tx the payer's Entity queues from its own clock
 (`expireOne` waits for `deadline + CLOCK_RESERVE`). Boundary tests: `lockDeadlineBoundariesTest`, `resolveAtTheDeadlineSecondTest`.
 Mutants: `resolve-after-deadline`, `expire-at-deadline`, `horizon-off`, `receiver-judges-by-the-frame-stamp`, `expiry-reserve-off`.
+**The #57 sequence (coordinator, 2026-09-30).** A secret resolve is late only by the chain's J height, never by the co-signed frame clock; a payer's cancel and timeout keep the
+frame-expiry rule plus the payer's own local expiry check; a frame's `jHeight` is claimed by its proposer and is untrusted. The model has no J height at all (the Account does not
+read the chain), so the first half holds by construction: the only clock a resolve or an expiry is judged by is the deciding side's own (R-CLOCK), and the second half is
+`expireOne`'s reserve rule. What was missing is the sequence itself, now a test: a payer co-signs a frame stamped 100 ahead of every clock (`byzStampedQueued`, the frame that carries the
+lock), it is committed (`refusals == 0`), and the payee's held reveal is proposed and framed as usual (`futureStampedFrameDoesNotBlockTheRevealTest`). Mutant `future-stamp-refused`
+(the dropped stamp-window rule) blocks it and is killed by that test. The frame's `jHeight` field is not modelled: a proposer-claimed J height would be one more informational
+field, and any decision that read it would fail the same way `receiver-judges-by-the-frame-stamp` does. (The hub variant, one hub carrying several such frames, is Entity-level and
+uses the same Account rule.)
 The oracle `expiredEarly` states the goal, not the guard: no committed expiry while either clock is at or before the deadline (the payee may still resolve on its own clock). A first version of it added the reserve and
 flagged a correct expiry (receiver's clock 4, payee's 3, deadline 2); simulation found it the moment the Byzantine nonce frames became reachable.
 Open: the model does not prove the Runtime keeps `DRIFT` small; that is an operational assumption (NTP, refuse to sign when the
@@ -478,7 +486,7 @@ Model: `NONCE_ON_FAIL`, `failedEv`, `failSeen`; `urgent_lands` holds under it.
 A mixed batch that fails still reverts whole and keeps its nonce open. So the Entity's rule: dispute, reveal and hash-ladder ops never share a
 batch with payment, settlement or reserve ops. This was already J3(1); it is now also the chain's line: `urgent-batch-carries-payments`
 (the Entity mixes them) breaks `urgent_lands` because the failed mixed batch reverts, loses the urgent op and holds every batch above it.
-**Gas guard (now a floor).** A batch failure is reported only when the self-call got at least `BATCH_GAS_FLOOR`; below it the transaction reverts and takes no nonce, so a relayer cannot burn a good batch by starving the call. (Was: under 1/32 of the gas.) Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
+**Gas guard (now a floor; replaced by the signed budget, J7).** A batch failure is reported only when the self-call got at least `BATCH_GAS_FLOOR`; below it the transaction reverts and takes no nonce, so a relayer cannot burn a good batch by starving the call. (Was: under 1/32 of the gas.) Model: `starve` (a relayer call with too little gas), `GAS_GUARD`, property `no_burn`; mutant `no-gas-guard`
 burns a payment batch that would have applied (`starvedBatchLandsLaterTest`). The starved call of an urgent batch only reverts whole, which
 leaves the batch valid for the honest relayer's next attempt.
 **Refinement (coordinator, from the #54 review, 2026-09-29).** Two rules. (1) A batch that carries a deposit leg (`externalTokenToReserve`) reverts whole, like a
@@ -564,3 +572,23 @@ applied in order with the others, exactly once, across crashes (R2), and the fra
 **R6. Not modelled here.** Several Entities in one Runtime (they share nothing but the process: the properties are per Entity),
 the board's own consensus (v2: boards), the network beyond "a peer resends until acked", storage cost, and the offline Entity: a
 Runtime that is down misses windows, which chain.qnt models as `offline` (the honest party can lose).
+
+**J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
+(1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the
+transaction and takes no nonce (`starve`, `underBudgetRelayerTakesNoNonceTest`, `no_burn`, mutant `no-gas-guard`). Once the budget is given every failure is `BatchFailed` with the nonce
+spent, out-of-gas and gas-burning callees included: `gasFail` (`gasFailInsideTheBudgetSpendsTheNonceTest`, mutants `gas-fail-keeps-the-nonce`, `gas-fail-not-read`). The Entity reads the event and
+signs what is still owed at a fresh nonce; an urgent op goes back into the draft at once (`gasFailOnAnUrgentBatchIsSignedAgainTest`).
+(2) **Choice I made:** "every failure" is read to cover an urgent batch too, and a batch with a deposit leg. A gas failure spends the nonce for all of them, and a token that stops
+working after signing (J6) still reverts the deposit batch whole and keeps the nonce, because that is not a gas failure. If the intent was that deposit batches also spend the nonce on a
+token failure, `DEP_SOFT_FAILS` is the switch and J6's stall disappears.
+(3) **Residual (`gasMissed`, witness `w_no_gas_missed`).** A callee that passes the Runtime's simulation and then burns the budget at the landing spends the nonce; if the burnt op is urgent, its retry
+costs a round and can pass its deadline. It is recorded apart from `missed`, like `hostage` (J6): no Entity behaviour can help, and only an urgent op with an external callee (a dispute op that
+verifies a counterparty board's ERC-1271 member) can be hit; a reveal makes no external call. The model is coarser (any batch), and `GAS_FAILS_MAX = 1` per run.
+(4) **Runtime rules, written and checked.** Sign a batch only after simulating it successfully at the head (deposit legs: `SIMULATE_DEPOSITS`; gated ops below). Never sign a time-gated op before its
+gate opens: ops carry `gate`, a dispute finalize's is the end of its window; `RESPECT_GATE`, property `gate_respected`, `gatedOpIsNotSignedBeforeItsGateTest`, `earlyGatedBatchRevertsTest` (the chain reverts an
+early gated batch and keeps the nonce), mutants `signs-before-gate`, `chain-ignores-the-gate`. Split any batch above the chain's tx gas cap: a settlement costs two units, everything else one,
+`TX_GAS_CAP = 2`; a batch above it can never land, the transaction itself runs out so the failure cannot be caught and takes no nonce (`overCapBatchNeverLandsTest`, mutants `over-cap-batch-lands`,
+`over-cap-batch-soft-fails`); `firstChunk` splits, property `within_cap`. **Limit, stated plainly:** with four ops the Entity's other rules (deposit alone, R-COSIGN) already keep every batch under the cap,
+so `SPLIT_AT_CAP` is not exercised by the search; the tests inject an over-cap batch to show what the chain does with it.
+(5) **Dispute start carries `ondeltaEpoch`** and is skipped on a mismatch (chain.qnt `startAtDeadEpoch`, ghost `staleSkips`, `deadEpochStartIsSkippedTest`, mutant `dead-epoch-start-applies`). The proof's own
+epoch is still checked (C1); the op-level epoch is the same fact where the Entity can read it as a skip. It is a stutter on chain state by design: nothing moves, the nonce stays.

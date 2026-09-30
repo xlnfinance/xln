@@ -72,8 +72,8 @@
       "id": "chain-accepts-old-nonces",
       "why": "E2: the chain accepts a nonce at or below the stored one, so a signed batch sent again runs its payment again",
       "file": "jbatch.qnt",
-      "old": "    b.nonce == s.cnonce + 1,\n    payTotal",
-      "new": "    b.nonce <= s.cnonce + 1,\n    payTotal",
+      "old": "    b.nonce == s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "new": "    b.nonce <= s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
       "killedBy": "invariant:pay_once"
     },
     {
@@ -152,8 +152,8 @@
       "id": "chain-accepts-nonce-above-stored",
       "why": "The chain lands a batch whose nonce is anything above the stored one (a relayer skips ahead and strands the batches below).",
       "file": "jbatch.qnt",
-      "old": "    b.nonce == s.cnonce + 1,\n    payTotal",
-      "new": "    b.nonce > s.cnonce,\n    payTotal",
+      "old": "    b.nonce == s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "new": "    b.nonce > s.cnonce,\n    b.ids.forall(i => gateOpen(s, i)),",
       "killedBy": "invariant:nonce_sequential"
     },
     {
@@ -179,6 +179,54 @@
       "old": "  pure val SIMULATE_DEPOSITS = true",
       "new": "  pure val SIMULATE_DEPOSITS = false",
       "killedBy": "test:depositIsNotSignedWhileTheTokenIsPausedTest"
+    },
+    {
+      "id": "signs-before-gate",
+      "why": "the Runtime signs a time-gated op before its gate opens",
+      "file": "jbatch.qnt",
+      "old": "  pure val RESPECT_GATE = true",
+      "new": "  pure val RESPECT_GATE = false",
+      "killedBy": "test:gatedOpIsNotSignedBeforeItsGateTest"
+    },
+    {
+      "id": "chain-ignores-the-gate",
+      "why": "the chain runs a gated op before its gate opens",
+      "file": "jbatch.qnt",
+      "old": "    b.ids.forall(i => gateOpen(s, i)),                         // a time-gated op fails",
+      "new": "    true,                         // a time-gated op fails",
+      "killedBy": "test:earlyGatedBatchRevertsTest"
+    },
+    {
+      "id": "over-cap-batch-lands",
+      "why": "the chain has no gas cap: a batch above it lands",
+      "file": "jbatch.qnt",
+      "old": "    batchCost(s, b.ids) <= TX_GAS_CAP,                        // a batch above",
+      "new": "    true,                        // a batch above",
+      "killedBy": "test:overCapBatchNeverLandsTest"
+    },
+    {
+      "id": "over-cap-batch-soft-fails",
+      "why": "a batch above the gas cap fails softly and takes its nonce, though the transaction itself ran out of gas",
+      "file": "jbatch.qnt",
+      "old": "NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and batchCost(s, b.ids) <= TX_GAS_CAP and",
+      "new": "NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and",
+      "killedBy": "test:overCapBatchNeverLandsTest"
+    },
+    {
+      "id": "gas-fail-keeps-the-nonce",
+      "why": "a batch that fails inside its budget does not take its nonce",
+      "file": "jbatch.qnt",
+      "old": "    val s1 = { ...st, cnonce: b.nonce,\n               failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),\n               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails",
+      "new": "    val s1 = { ...st, cnonce: st.cnonce,\n               failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),\n               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails",
+      "killedBy": "test:gasFailInsideTheBudgetSpendsTheNonceTest"
+    },
+    {
+      "id": "gas-fail-not-read",
+      "why": "the Entity never reads the BatchFailed of a gas failure: the payment is not signed again",
+      "file": "jbatch.qnt",
+      "old": "      st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })\n    }\n  }\n\n  // The Entity gives a signed draft up",
+      "new": "      st' = react({ ...s1, failSeen: st.failSeen })\n    }\n  }\n\n  // The Entity gives a signed draft up",
+      "killedBy": "test:gasFailInsideTheBudgetSpendsTheNonceTest"
     }
   ],
   "init": "init",

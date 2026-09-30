@@ -364,6 +364,14 @@
       "old": "        xWasOffline: false,                                    // per dispute: the next one is judged afresh",
       "new": "        xWasOffline: ghost.xWasOffline,",
       "killedBy": "test:offlinePartyCanLoseTest"
+    },
+    {
+      "id": "dead-epoch-start-applies",
+      "why": "a dispute start that names a dead ondelta epoch begins a dispute instead of being skipped",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: true }, acct' = acct,",
+      "killedBy": "test:deadEpochStartIsSkippedTest"
     }
   ]
 }

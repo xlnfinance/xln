@@ -5,10 +5,10 @@ module jbatch_test {
 
   // op 1 a payment, op 2 a secret reveal, op 3 a dispute step, op 4 a payment
   pure def cat(arrPay: int, arrReveal: int, arrDisp: int): int -> Op = Map(
-    1 -> { kind: Pay, amt: 1, arr: arrPay, dl: 0 },
-    2 -> { kind: Reveal, amt: 0, arr: arrReveal, dl: arrReveal + LAG },
-    3 -> { kind: Disp, amt: 0, arr: arrDisp, dl: arrDisp + LAG },
-    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0 }
+    1 -> { kind: Pay, amt: 1, arr: arrPay, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: arrReveal, dl: arrReveal + LAG, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: arrDisp, dl: arrDisp + LAG, gate: 0 },
+    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0, gate: 0 }
   )
 
   // The plainest case: one payment, one batch, one nonce.
@@ -148,18 +148,18 @@ module jbatch_test {
 
   // op 1 a payment, op 2 a secret reveal, op 3 a dispute step, op 4 a deposit leg
   pure def catD(arrDep: int, arrReveal: int, arrPay: int): int -> Op = Map(
-    1 -> { kind: Pay, amt: 1, arr: arrPay, dl: 0 },
-    2 -> { kind: Reveal, amt: 0, arr: arrReveal, dl: arrReveal + LAG },
-    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
-    4 -> { kind: Dep, amt: 1, arr: arrDep, dl: 0 }
+    1 -> { kind: Pay, amt: 1, arr: arrPay, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: arrReveal, dl: arrReveal + LAG, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8, gate: 0 },
+    4 -> { kind: Dep, amt: 1, arr: arrDep, dl: 0, gate: 0 }
   )
 
   // op 1 a settlement (it carries the counterparty's signature at an account epoch)
   pure def catS(arrSettle: int): int -> Op = Map(
-    1 -> { kind: Settle, amt: 0, arr: arrSettle, dl: 0 },
-    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
-    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
-    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0 }
+    1 -> { kind: Settle, amt: 0, arr: arrSettle, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8, gate: 0 },
+    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0, gate: 0 }
   )
 
   // J5 refinement: the deposit leg runs first, so it funds the payment behind it. They do not share a batch: the deposit goes alone and
@@ -229,6 +229,7 @@ module jbatch_test {
 
   // The chain runs the deposit legs of a batch before its payments, whatever the Entity packs: a batch signed with both (a bad Entity, or
   // an older one) still lands when the deposit covers the payment. The Entity itself never packs them together.
+  action signOne(i: int): bool = st' = submit(st, [{ nonce: 1, ids: Set(i) }])
   action signBoth: bool = st' = submit(st, [{ nonce: 1, ids: Set(1, 4) }])
 
   run depositLegsRunBeforePaymentsTest =
@@ -239,20 +240,20 @@ module jbatch_test {
 
   // op 1 a settlement on Account 1, op 4 a settlement on Account 2
   pure def catSS(arr: int): int -> Op = Map(
-    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0 },
-    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
-    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
-    4 -> { kind: Settle, amt: 0, arr: arr, dl: 0 }
+    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8, gate: 0 },
+    4 -> { kind: Settle, amt: 0, arr: arr, dl: 0, gate: 0 }
   )
 
   // R-COSIGN: a batch that carries a co-signed op carries ops for that one Account only. Two settlements on two Accounts, and a payment,
   // reach the Entity together: each goes in a batch of its own, one after the other.
   // op 1 a settlement, op 4 a payment, both reaching the Entity at once
   pure def catSP(arr: int): int -> Op = Map(
-    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0 },
-    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8 },
-    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8 },
-    4 -> { kind: Pay, amt: 1, arr: arr, dl: 0 }
+    1 -> { kind: Settle, amt: 0, arr: arr, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: 7, dl: 8, gate: 0 },
+    4 -> { kind: Pay, amt: 1, arr: arr, dl: 0, gate: 0 }
   )
 
   // R-COSIGN: a batch that carries a co-signed op carries ops for that one Account only. A settlement and a payment reach the Entity together:
@@ -280,4 +281,68 @@ module jbatch_test {
     .expect(st.sub.length() == 0)
     .then(extBack)
     .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(4), safe })
+
+  // Signed gas budget (coordinator): the relayer gave the whole budget and the batch failed inside it (out of gas, a gas-burning callee). It is
+  // BatchFailed with the nonce spent and nothing applied; the payment is signed again at the next nonce once the Entity has read the event.
+  run gasFailInsideTheBudgetSpendsTheNonceTest =
+    initFrom(cat(1, 6, 6), 3)
+    .then(arrive(1))
+    .then(gasFail(0))
+    .expect(and { st.cnonce == 1, st.gh.failed == 1, st.gh.gasFails == 1, st.failedEv.get(1) == 1, not(st.done.get(1)), not(st.gh.burned), st.sub.length() == 2, st.sub[1].b.nonce == 2, safe })
+    .then(attempt(1))
+    .expect(and { st.cnonce == 2, st.done.get(1), st.runs.get(1) == 1, safe })
+
+  // The same failure on an urgent batch: the reveal is signed again at a fresh nonce and lands within its deadline when the retry is prompt.
+  run gasFailOnAnUrgentBatchIsSignedAgainTest =
+    initFrom(cat(6, 1, 6), 3)
+    .then(arrive(2))
+    .then(gasFail(0))
+    .then(tick)
+    .then(attempt(1))
+    .expect(and { st.cnonce == 2, st.done.get(2), st.runs.get(2) == 1, not(st.gh.missed), safe })
+
+  // A relayer that supplies less than the budget takes no nonce, and the batch lands later on a full budget.
+  run underBudgetRelayerTakesNoNonceTest =
+    initFrom(cat(1, 6, 6), 3)
+    .then(arrive(1))
+    .then(starve(0))
+    .expect(and { st.cnonce == 0, st.gh.reverts == 1, st.gh.failed == 0, safe })
+    .then(attempt(0))
+    .expect(and { st.cnonce == 1, st.done.get(1), safe })
+
+  // Time-gated op (Runtime rule): a dispute finalize is not signed before its gate opens, and is signed the tick it does.
+  pure def catGate(gate: int): int -> Op = Map(
+    1 -> { kind: Pay, amt: 1, arr: 7, dl: 0, gate: 0 },
+    2 -> { kind: Reveal, amt: 0, arr: 7, dl: 8, gate: 0 },
+    3 -> { kind: Disp, amt: 0, arr: 1, dl: gate + LAG, gate: gate },
+    4 -> { kind: Pay, amt: 1, arr: 7, dl: 0, gate: 0 }
+  )
+  run gatedOpIsNotSignedBeforeItsGateTest =
+    initFrom(catGate(2), 3)
+    .then(arrive(3))
+    .expect(and { st.sub.length() == 0, gate_respected })
+    .then(tick)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(3), gate_respected })
+    .then(attempt(0))
+    .expect(and { st.done.get(3), not(st.gh.early), safe })
+
+  // A gated batch that reaches the chain early reverts and keeps its nonce (the signed bytes of a batch signed early are injected here).
+  run earlyGatedBatchRevertsTest =
+    initFrom(catGate(3), 3)
+    .then(arrive(3))
+    .then(signOne(3))
+    .expect(and { st.sub.length() == 1 })
+    .then(attempt(0))
+    .expect(and { st.cnonce == 0, st.gh.reverts >= 1, st.gh.early, not(gate_respected) })
+
+  // The chain's gas cap: a batch above it can never land (a settlement costs two units, a payment one). The Entity never signs one; a batch injected
+  // here reverts and stays at its nonce for ever, which is why the Runtime splits (SPLIT_AT_CAP).
+  run overCapBatchNeverLandsTest =
+    initFrom(catSP(1), 3)
+    .then(arrive(1)).then(arrive(4))
+    .expect(within_cap)
+    .then(signBoth)
+    .expect(st.sub.length() == 2)
+    .then(attemptAny(1))
+    .expect(st.cnonce == 0).expect(st.gh.reverts >= 1).expect(not(within_cap))
 }
