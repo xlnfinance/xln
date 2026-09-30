@@ -7,7 +7,7 @@ export type Lexed = Readonly<{ code: string; strings: readonly string[] }>;
 export const SLASH_LANGUAGES = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`/g;
 // A regex literal is read as a token too, so a quote inside one (/"/) does not open a string. A slash starts a
 // regex only after an operator or an opening bracket (or `return`), never after an operand, so a division is left alone.
-const REGEX_LITERAL = String.raw`(?<=[=(,:\[!&|?{};]\s*|\breturn\s*)\/(?![/*])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+\/[a-z]*`;
+const REGEX_LITERAL = String.raw`(?<=[=(,:\[!&|?{};>]\s*|\breturn\s*)\/(?![/*])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+\/[a-z]*`;
 export const TYPESCRIPT_LANGUAGE = new RegExp(`${SLASH_LANGUAGES.source}|${REGEX_LITERAL}`, "g");
 export const SHELL_LANGUAGE = /(?<![^\s])#[^\n]*|"(?:\\.|[^"\\])*"|'[^']*'/g;
 export const SCHEME_LANGUAGE = /;[^\n]*|"(?:\\.|[^"\\])*"/g;

@@ -39,6 +39,10 @@ describe("TypeScript tests count only when they run", () => {
     expect(titlesOf("const half = total / 2; // \"; it(\"R-RX4\", () => {});")).toEqual([]);
   });
 
+  test("a regex literal right after an arrow is a regex, not a division", () => {
+    expect(titlesOf("const f = (x: string) => /\"/g.test(x); // \"; it(\"R-RX5\", () => {});")).toEqual([]);
+  });
+
   test("a comment right after code, with or without a space, hides the call", () => {
     expect(titlesOf(`foo();//it("R-C1 nospace", () => {});`)).toEqual([]);
     expect(titlesOf(`foo(); // it("R-C2 space", () => {});`)).toEqual([]);

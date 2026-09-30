@@ -34,9 +34,13 @@ Not mechanically checked: the relief test itself, honest names, function bodies 
 
 # The new tree gate (`kernel/`, `chain/`)
 
-`bun style/tree.ts` (from `pure/`) runs every legacy rule plus the rules in `style/tree-rules/` over `kernel/` and `chain/`, and counts what ast-grep cannot: lines over 120 characters, declarations over 50 lines, and exports that no other file under `pure/` names (a test counts as a user). Every count starts at **zero**; there is no baseline to ratchet. The only way to allow a hit is a row in `style/tree-exceptions.json` (rule, file, count) with its reason below. A row that is not fully used also fails, so an exception cannot outlive its cause.
+`bun rules/check.ts` (from `pure/`) runs the register gate and then this one (`--style-only` runs only this one; code in `rules/tree/`). It runs every legacy rule plus the rules in `style/tree-rules/` over `kernel/` and `chain/`, and counts what ast-grep cannot: lines over 120 characters, declarations over 50 lines, and exports that no other file under `pure/` names (a test counts as a user; `rules/` and `style/` do not). Every count starts at **zero**; there is no baseline to ratchet. The only way to allow a hit is a row in `style/tree-exceptions.json` (rule, file, count) with its reason below. A row must be used exactly: more hits than the row allows fails, and so do fewer, so an exception cannot outlive its cause.
 
-New rules: `no-boolean-param` (a positional boolean parameter: pass a record with a named field) and `og-named` (an identifier that names og's model; og belongs under `rig/og/` only).
+New rules:
+
+- `no-boolean-param`: a positional boolean parameter; pass a record with a named field.
+- `no-literal-arg`: a bare `true`, `false` or `undefined` directly in a call's arguments. The fix is a named constant (`toRawBytes(COMPRESSED)`) or a record with a named field. Allowed without a row, because the literal is data and not a flag: an argument of `ok(...)` or `some(...)`, of a `.bool(...)` constructor, and of the matchers `toBe`, `toEqual` and `toStrictEqual`.
+- `og-named`: an identifier that names og's model; og belongs under `rig/og/` only.
 
 ## Registered exceptions in the new tree
 
