@@ -126,8 +126,9 @@ export const layoutVectors = async (rig: Rig) => {
   const cases: unknown[] = [];
   // `input` is the value that was ABI encoded (numbers as decimal strings), so an encoder elsewhere can build the same bytes from it
   const record = async (label: string, batch: Record<string, unknown>, extra: { shape?: unknown; param?: ethers.ParamType; input?: boolean } = {}) => {
-    const probed = await probe(batch, extra.param);
-    cases.push({ label, ...(extra.input === false ? { shape: extra.shape } : { input: json(batch) }), ...probed });
+    const { encodedBatch, ...verdict } = await probe(batch, extra.param);
+    // a bound case is a count of small ops: `shape` says what it was, and the bytes (up to 190 KB of zeros and sample words) are not kept
+    cases.push({ label, ...(extra.input === false ? { shape: extra.shape } : { input: json(batch), encodedBatch }), ...verdict });
   };
   for (const field of OP_FIELDS) await record(`only ${field} (mixed values)`, batchWith("mixed", [field]));
   await record("every array, mixed values", batchWith("mixed", OP_FIELDS));

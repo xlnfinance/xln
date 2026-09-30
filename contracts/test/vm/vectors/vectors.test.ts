@@ -83,7 +83,7 @@ describe("vectors", () => {
   test("batch layout: every op array alone and all together decode on the deployed bytecode, in the field order of the Batch struct", () => {
     const { layout } = committed("batch");
     expect(layout.fields).toEqual(["gasBudget", "reserveToReserve", "reserveToCollateral", "collateralToReserve", "settlements", "disputeStarts", "counterDisputes", "disputeFinalizations", "externalTokenToReserve", "reserveToExternalToken", "revealSecrets", "hashLadderRegistrations"]);
-    type LayoutCase = { label: string; accepted: boolean; rejectedWith?: string; encodedBatch: string; input?: unknown; shape?: Record<string, number | number[]> };
+    type LayoutCase = { label: string; accepted: boolean; rejectedWith?: string; encodedBatch?: string; input?: unknown; shape?: Record<string, number | number[]> };
     // the label says what the deployed contract must have done: a case is rejected exactly when its label says so
     for (const c of layout.cases as LayoutCase[]) expect([c.label, c.accepted]).toEqual([c.label, !c.label.includes("rejected")]);
     const rejections = (layout.cases as LayoutCase[]).filter((c) => !c.accepted).map((c) => c.rejectedWith);
