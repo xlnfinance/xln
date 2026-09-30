@@ -166,7 +166,9 @@ export const rebindBatch = (
  * (`ondeltaEpoch`). og's Batch has neither, so the shim adds both when it re-encodes: the epoch is the one `rebindBatch` just
  * signed the start for, and the budget is the shim's own. og's BrowserVM sends every processBatch with a 15,000,000 gas limit, and the
  * Depository wants budget * 64 / 63 + 30,000 (BATCH_POST_CALL_RESERVE) plus the hanko prelude on top of it, so the shim signs
- * 14,000,000: room for the prelude of a board of a few dozen signers, and far above what any batch the walks build costs.
+ * 14,000,000: room for the prelude of a board of a few dozen signers, and far above what any batch the walks build costs. Measured (whole
+ * processBatch execution gas, prelude included, over the four area walks on 3 seeds, scenario.test.ts and scenario-cross-j.test.ts): the largest is
+ * 396,485, so the budget is a ceiling about 35 times the need, not a measured margin. fork-shim-budget.test.ts pins the other side, the tx limit.
  */
 export const SHIM_GAS_BUDGET = 14_000_000n;
 const FORK_BATCH_PARAM = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;

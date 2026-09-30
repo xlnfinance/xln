@@ -8,7 +8,8 @@ const WALK_SEED = process.env["WALK_SEED"];
 /** Walks that found what the default seeds never drew: og reads a finalization's evidence back from the chain's calldata, and the shim must show it the batch the chain ran
  *  (rebound signatures), not the one og sealed (0x21284588, 0x2128458a: a finalization with a co-signed proof; review of #54 at c0b8dfb). */
 const PINNED = [0x21284588, 0x2128458a];
-const SEEDS = WALK_SEED === undefined ? [...walkSeeds(3), ...PINNED] : [Number(WALK_SEED)];
+// A set: under SEEDX=12345 the default draw already contains 0x21284588 and 0x2128458a, and a walk run twice in one process meets its own persisted storage (same namespace).
+const SEEDS = WALK_SEED === undefined ? [...new Set([...walkSeeds(3), ...PINNED])] : [Number(WALK_SEED)];
 const ROWS = drawnIn("all");
 const WORLD = worldIn("all");
 
