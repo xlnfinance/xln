@@ -63,6 +63,47 @@ the actual reduced block gas limit before admitting obligations.
 This specification remains proposed. The first production artifact is the
 producer/verifier round trip below; unrelated core recovery work retains priority.
 
+## Measured prototype — 2026-09-30
+
+The ordinary stateful Besu 25.9.0 prototype now runs through
+`bun run xlnc:prototype <output-directory>` with `XLNC_BESU_BIN` and
+`JAVA_HOME` set. It uses Cancun EVM, a 6M block gas limit and one-second
+QBFT blocks. This is 10× below the existing local 60M *per-block* ceiling;
+its different block period prevents claiming 10× lower execution per second.
+
+One producer and one full verifier on the same laptop matched the block hash,
+state root and all four contract code hashes. Restart preserved the producer
+root. Non-dev deployment created no development tokens; a zero EIP-1559
+priority fee succeeded. This establishes a working local J prototype, not
+production consensus, phone resources, two-day catch-up or correlated exits.
+The complete first run produced `/tmp/xlnc-stateful-paid-gas-evidence/evidence.json`.
+Later repeats matched contracts and roots but hit the 60-second stand limit
+during node restart; the latest repeat is not green. Owned node process groups
+are now terminated on interruption; both repeats with this cleanup left no
+running node groups.
+
+Exit capacity is an open release blocker. The cold maximum-token zero-delta
+vector used 2,046,965 execution gas. A signed mixed proof with 128 tokens,
+32 payments, 32 swaps and 18 unrevealed pulls finalized but used **17,363,517**
+execution gas plus transaction intrinsic gas. Its regression deliberately fails
+the existing 15M envelope; it also cannot fit 6M. This is one valid expensive
+shape, not a universal upper bound. Current Account bounds must not be claimed
+compatible with the reduced ceiling. Changing admission or J capacity requires
+an owner decision; no contract limits were silently changed.
+
+The `htlc-ack-recovery` real-RPC scenario separately proves that a late
+preimage, withheld upstream ACK and WAL reopen reach an authenticated J dispute.
+It uses three real Entity/Account machines and preserves the transport partition.
+This verifies dispute start and retained evidence, not collateral payout or
+TS/Rust equivalence of this complete recording.
+
+Final verification remains partial: Rust native/parity and frontend build/type
+gates passed, but `bun run check` failed the English-source gate on existing
+Russian text in `project-module-map.md`. Manual localhost inspection loaded
+the landing page without console errors; `/app` raised Svelte `effect_orphan`
+in its unchanged layout. This browser failure has not been triaged and does
+not establish browser-runtime readiness.
+
 ## What already exists
 
 | Boundary     | Observation in code                                                                                             | Consequence                                                                                             |

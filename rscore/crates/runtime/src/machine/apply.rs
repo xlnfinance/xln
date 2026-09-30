@@ -963,22 +963,48 @@ fn derived_wake_jobs(
             due_at: timelock,
         })
         .collect::<Vec<_>>();
+    let lock_deadlines = replica
+        .accounts
+        .selected_htlc_deadlines(
+            state.accounts_root,
+            now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS),
+        )?
+        .1
+        .into_iter()
+        .map(|(account, hashlock, timelock)| {
+            (
+                (format!("0x{}", hex::encode(account.as_bytes())), hashlock),
+                timelock,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     for (_, entry) in state.entity.paybook.entries.iter() {
         let (Some(deadline), Some(started_at)) =
             (entry.secret_ack_deadline_at, entry.secret_ack_started_at)
         else {
             continue;
         };
+        let trigger_at = xln_rscore_entity_kernel::secret_ack_trigger_at(
+            deadline,
+            started_at,
+            entry
+                .inbound_entity
+                .as_ref()
+                .and_then(|counterparty| {
+                    lock_deadlines.get(&(counterparty.clone(), entry.hashlock.clone()))
+                })
+                .copied(),
+        );
         if entry.secret_ack_pending
             && entry.secret.is_some()
             && entry.inbound_entity.is_some()
             && deadline >= started_at
-            && deadline <= now
+            && trigger_at <= now
         {
             jobs.push(ScheduledWakeJob {
                 kind: ScheduledWakeJobKind::Hook,
                 id: format!("htlc-secret-ack:{}", entry.hashlock),
-                due_at: deadline,
+                due_at: trigger_at,
             });
         }
     }

@@ -2074,7 +2074,7 @@ fn apply_scheduled_wake(
         })
         .filter(|account| state.known_accounts.contains(account))
         .collect::<BTreeSet<_>>();
-    let dispute_views = accounts
+    let mut dispute_views = accounts
         .local_financial_views(
             dispute_account_ids
                 .iter()
@@ -2096,7 +2096,12 @@ fn apply_scheduled_wake(
     // Secret-ack deadlines are derived from paybook entries (frame-local
     // writes included). A deadline whose lock is still active needs a
     // dispute; one whose lock is gone just terminates the route.
-    let due_secret_acks = paybook.due_secret_acks(state, now)?;
+    let lock_deadlines = accounts
+        .expired_htlc_locks(now.saturating_add(xln_rscore_engine::HTLC_ENFORCEMENT_RESERVE_MS))?
+        .into_iter()
+        .map(|(account, hashlock, timelock)| ((account_text(account), hashlock), timelock))
+        .collect();
+    let due_secret_acks = paybook.due_secret_acks(state, now, &lock_deadlines)?;
     let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
     for (hashlock, counterparty) in &due_secret_acks {
         if state.known_accounts.contains(counterparty) {
@@ -2115,12 +2120,34 @@ fn apply_scheduled_wake(
         .iter()
         .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
         .collect::<BTreeSet<_>>();
-    let mut secret_acks_requiring_dispute = BTreeSet::new();
+    let mut secret_acks_requiring_dispute = Vec::new();
     for (hashlock, counterparty) in due_secret_acks {
-        if active_text.contains(&(counterparty, hashlock.clone())) {
-            secret_acks_requiring_dispute.insert(hashlock);
+        if active_text.contains(&(counterparty.clone(), hashlock.clone())) {
+            secret_acks_requiring_dispute.push((hashlock, counterparty));
         } else {
             terminate_route_in_frame(state, paybook, &hashlock)?;
+        }
+    }
+    let pending_accounts = secret_acks_requiring_dispute
+        .iter()
+        .map(|(_, account)| account.clone())
+        .collect::<BTreeSet<_>>();
+    for (account, view) in accounts.local_financial_views(
+        pending_accounts
+            .into_iter()
+            .map(|account| {
+                Ok((
+                    account_id(&account)?,
+                    xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                        dispute: true,
+                        ..Default::default()
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, ResidentEntityError>>()?,
+    )? {
+        if let Some(dispute) = view.dispute {
+            dispute_views.insert(account_text(account), dispute);
         }
     }
 
@@ -2187,6 +2214,19 @@ fn apply_scheduled_wake(
                 .is_none_or(|value| value != &CanonicalValue::String("ignore".into())),
         },
     )?;
+    for command in &execution.commands {
+        if let SchedulerCommand::DeferSecretAck { hashlock } = command {
+            let mut entry = paybook
+                .entry(state, hashlock)?
+                .cloned()
+                .ok_or_else(|| EntityKernelError::htlc("SECRET_ACK_DEFER_ROUTE_MISSING"))?;
+            entry.secret_ack_deadline_at = Some(
+                now.checked_add(1)
+                    .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
+            );
+            paybook.put(entry)?;
+        }
+    }
     state.crontab = Some(execution.crontab);
     Ok((execution.commands, execution.account_envelope_mutations))
 }
@@ -2752,6 +2792,37 @@ fn apply_resident_entity_round_core_attempt(
     // Routing them back through Runtime would consume the hook before its
     // expiry transition and let unrelated frames overtake the clear request.
     let mut scheduled_outputs = Vec::new();
+    for command in &scheduled_commands {
+        if let SchedulerCommand::PrepareSecretAckDisputes { counterparties } = command {
+            let entity_txs = counterparties
+                .iter()
+                .map(|counterparty| {
+                    crate::CanonicalEntityTx::from_frame_projection(
+                        crate::EntityTxKind::PrepareDispute,
+                        CanonicalValue::Object(vec![
+                            (
+                                "counterpartyEntityId".into(),
+                                CanonicalValue::String(counterparty.clone()),
+                            ),
+                            (
+                                "description".into(),
+                                CanonicalValue::String(
+                                    "auto-prepare-dispute-after-secret-ack-timeout".into(),
+                                ),
+                            ),
+                        ]),
+                    )
+                    .map(crate::LocalEntityOutputTx::Projected)
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| EntityKernelError::local("scheduledWake", error.to_string()))?;
+            scheduled_outputs.push(crate::LocalEntityOutput {
+                entity_id: state.entity_id.clone(),
+                target_signer_id: Some(request.expected_proposer_signer_id.clone()),
+                entity_txs,
+            });
+        }
+    }
     for command in &scheduled_commands {
         if let SchedulerCommand::CrossJOrderbookSweep { reason } = command {
             scheduled_outputs.push(crate::LocalEntityOutput {

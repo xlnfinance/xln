@@ -30,6 +30,7 @@
     "progress:note": "bun tools/progress-timeline.ts",
     "stand:status": "bun tools/stand-lock.ts status",
     "stand:run": "bun tools/stand-lock.ts run",
+    "xlnc:prototype": "bun tools/stand-lock.ts run --reason=xlnc-prototype --timeout-ms=60000 -- bun tools/xlnc/prototype.ts",
     "test:e2e:notify": "bun run test:e2e:fast && bash ./scripts/notify.sh 'E2E fast passed' 'XLN Agent' || bash ./scripts/notify.sh 'E2E fast failed' 'XLN Agent' 'See report' 'Basso'",
     "test:e2e": "bun run test:e2e:fast",
     "test:e2e:monitor": "bun core/scripts/e2e/harness/e2e-fail-fast-monitor.ts",

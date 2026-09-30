@@ -7,6 +7,7 @@ use super::types::*;
 
 const MAX_BATCH_BYTES: usize = 256 * 1024;
 const MAX_BATCH_OPS: usize = 50;
+pub(crate) const MAX_DISPUTE_STARTS: usize = 8;
 fn tuple(values: impl IntoIterator<Item = Token>) -> Token {
     Token::Tuple(values.into_iter().collect())
 }
@@ -105,7 +106,7 @@ fn validate_limits(batch: &JBatch) -> Result<(), JSubmitError> {
         return Err(JSubmitError::Batch("operation-limit"));
     }
     if batch.settlements.len() > 32
-        || batch.dispute_starts.len() > 8
+        || batch.dispute_starts.len() > MAX_DISPUTE_STARTS
         || batch.counter_disputes.len() > 8
         || batch.dispute_finalizations.len() > 1
         || batch.reveal_secrets.len() > 32

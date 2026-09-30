@@ -16,6 +16,12 @@ export type ScenarioMetadata = BrowserAvailability & {
 
 export const SCENARIOS: ScenarioMetadata[] = [
   {
+    id: 'htlc-ack-recovery', name: 'Late HTLC ACK Recovery',
+    description: 'Withheld upstream ACK, WAL reopen and real jurisdiction dispute', tags: ['htlc', 'dispute', 'recovery'],
+    browserSafe: false, browserUnsafeReason: 'Closes and reopens the durable Runtime WAL.',
+    run: async (env) => (await import('../payments/htlc-ack-recovery')).htlcAckRecovery(env),
+  },
+  {
     id: 'rebalance', name: 'Reserve Rebalance',
     description: 'Reserve rebalancing through the settlement pipeline', tags: ['settlement', 'rebalance'],
     browserSafe: false, browserUnsafeReason: 'Requires the external RPC settlement adapter.',

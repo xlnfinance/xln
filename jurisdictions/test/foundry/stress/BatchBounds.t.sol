@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {console} from "forge-std/Test.sol";
 import {XlnFixture} from "../helpers/XlnFixture.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
+import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import "../../../contracts/Types.sol";
 
 /// @notice Task item 5: does every MAX_BATCH_* cap actually bound *gas*, or only
@@ -250,25 +251,85 @@ contract BatchBoundsTest is XlnFixture {
   ///         timeout. MAX_DISPUTE_PROOF_TOKENS is 128 per proof and each
   ///         defensive finalization gets its own portable 15M transaction.
   function test_gas_disputeFinalizeWithMaxProofTokens() public {
-    uint256 tokenCount = 128;
+    _measureDefensiveFinalize(_proofBody(keccak256("seed"), 128, 0), "", "");
+  }
+
+  /// Real executable conditions plus cold, nonzero debt writes on all 128 tokens.
+  /// Pulls intentionally have no registry reveal: this measures their zero-fill
+  /// branch, not a proven upper bound for every custom transformer/reveal branch.
+  function test_gas_mixedDefensiveFinalizeWithMaxAccountDimensions() public {
+    ProofBody memory pb = _proofBody(keccak256("mixed-seed"), 128, 1);
+    DeltaTransformer.Batch memory conditions;
+    conditions.payment = new DeltaTransformer.Payment[](32);
+    conditions.swap = new DeltaTransformer.Swap[](32);
+    conditions.pull = new DeltaTransformer.Pull[](18);
+    DeltaTransformer.Arguments memory args;
+    args.secrets = new bytes32[](32);
+    args.fillRatios = new uint16[](32);
+    for (uint256 i = 0; i < 32; i++) {
+      args.secrets[i] = keccak256(abi.encode("mixed-secret", i));
+      args.fillRatios[i] = 65535;
+      conditions.payment[i] = DeltaTransformer.Payment({
+        deltaIndex: i,
+        amount: SignedAmount(false, 1),
+        revealedUntilTimestamp: block.timestamp + DISPUTE_WINDOW_SECONDS + 100,
+        hash: keccak256(abi.encode(args.secrets[i]))
+      });
+      conditions.swap[i] = DeltaTransformer.Swap({
+        ownerIsLeft: true,
+        addDeltaIndex: i + 32,
+        addAmount: 1,
+        subDeltaIndex: i + 64,
+        subAmount: 1
+      });
+    }
+    for (uint256 i = 0; i < 18; i++) {
+      conditions.pull[i] = DeltaTransformer.Pull({
+        deltaIndex: i + 96,
+        amount: SignedAmount(false, 1),
+        claimedRatio: 0,
+        fullHash: keccak256(abi.encode("full", i)),
+        partialRoot: keccak256(abi.encode("partial", i)),
+        targetRole: true
+      });
+    }
+    Allowance[] memory allowances = new Allowance[](128);
+    for (uint256 i = 0; i < 128; i++) {
+      allowances[i] = Allowance(i, 2, 2);
+    }
+    pb.transformers = new TransformerClause[](1);
+    pb.transformers[0] = TransformerClause(address(deltaTransformer), abi.encode(conditions), allowances);
+    bytes[] memory arguments = new bytes[](1);
+    arguments[0] = abi.encode(args);
+    _measureDefensiveFinalize(pb, abi.encode(arguments), abi.encode(arguments));
+  }
+
+  function _measureDefensiveFinalize(ProofBody memory pb, bytes memory starterArgs, bytes memory otherArgs)
+    internal
+  {
     bytes32 me = entity[0];
     bytes32 other = entity[1];
-    bytes32 seed = keccak256("seed");
-    ProofBody memory pb = _proofBody(seed, tokenCount, int256(0));
+    bytes32 seed = pb.watchSeed;
     bytes32 pbHash = keccak256(abi.encode(pb));
-    (uint256 accNonce, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(me, other));
+    (uint256 accNonce,,,,,,,,,,,,,,) = dep._accounts(XlnHanko.accountKey(me, other));
     uint256 nonce = accNonce + 1;
     bool proposerIsLeft = other < me;
 
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
-      initialProofbody: pb, watchSeed: seed,
-      sig: _hanko(1, XlnHanko.disputeProofHash(
-        address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, seed
-      )),
-      starterInitialArguments: "", starterCounterArguments: "",
+      counterentity: other,
+      nonce: nonce,
+      proposerIsLeft: proposerIsLeft,
+      proofbodyHash: pbHash,
+      initialProofbody: pb,
+      watchSeed: seed,
+      sig: _hanko(
+        1,
+        XlnHanko.disputeProofHash(address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, seed)
+      ),
+      starterInitialArguments: starterArgs,
+      starterCounterArguments: "",
       starterCounterProofCommitment: bytes32(0)
     });
     (bool startedOk, uint256 startGas,) = _rawSubmit(0, start);
@@ -280,15 +341,26 @@ contract BatchBoundsTest is XlnFixture {
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);
     fin.disputeFinalizations[0] = FinalDisputeProof({
-      counterentity: other, initialNonce: nonce, finalNonce: nonce,
+      counterentity: otherArgs.length == 0 ? other : me,
+      initialNonce: nonce,
+      finalNonce: nonce,
       proposerIsLeft: proposerIsLeft,
-      initialProofbodyHash: pbHash, finalProofbody: pb,
-      starterArguments: "", otherArguments: "", sig: "",
-      startedByLeft: me < other, cooperative: false
+      initialProofbodyHash: pbHash,
+      finalProofbody: pb,
+      starterArguments: starterArgs,
+      otherArguments: otherArgs,
+      sig: "",
+      startedByLeft: me < other,
+      cooperative: false
     });
-    (bool ok, uint256 gasUsed,) = _rawSubmit(0, fin);
+    vm.cool(address(dep));
+    vm.cool(address(ep));
+    vm.cool(address(deltaTransformer));
+    (bool ok, uint256 gasUsed, uint256 calldataBytes) = _rawSubmit(otherArgs.length == 0 ? 0 : 1, fin);
     console.log("disputeFinalize 1x128 ok:", ok);
     console.log("disputeFinalize 1x128 gas:", gasUsed);
+    console.log("disputeFinalize calldata bytes:", calldataBytes);
+    console.log("fits experimental 6M execution budget:", gasUsed < 6_000_000);
     assertTrue(ok, "max-token finalize must succeed");
     assertLt(gasUsed, LIVENESS_BUDGET, "max-token finalization exceeds the 15M liveness budget");
   }

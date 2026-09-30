@@ -11,6 +11,7 @@
     "core/__tests__/types/fints/**/*.ts",
     "scripts/**/*.ts",
     "tools/*.ts",
+    "tools/xlnc/prototype.ts",
     "tools/release-snapshot/assert-clean.ts",
     "tools/hlt-viz/*.ts",
     "tests/**/*.spec.ts",

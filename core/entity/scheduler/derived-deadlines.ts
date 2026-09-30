@@ -9,7 +9,8 @@
  */
 import type { EntityState } from '../types';
 import type { ScheduledHookBase } from './types';
-import { isSecretAckPendingPayment } from '../paybook/views';
+import { isSecretAckPendingPayment, type SecretAckPendingPayment } from '../paybook/views';
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../../account/consensus/dispute/deadline-policy';
 import { compareStableText } from '../../protocol/serialization';
 import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute/policy';
 
@@ -38,6 +39,19 @@ export const compareDeadlines = (
   right: Readonly<{ triggerAt: number; id: string }>,
 ): number => left.triggerAt - right.triggerAt || compareStableText(left.id, right.id);
 
+/** A peer withholding ACK cannot consume the signed lock's enforcement reserve. */
+const secretAckTriggerAt = (state: EntityState, entry: SecretAckPendingPayment): number => {
+  const account = state.accounts.get(entry.inboundEntity);
+  // The dispute lifecycle owns frozen locks; do not re-arm their past reserve every frame.
+  if (!account || !canProcessAccountTxForDisputeStatus(account.status)) return entry.secretAckDeadlineAt;
+  const lock = account.state.locks.get(entry.hashlock);
+  if (!lock) return entry.secretAckDeadlineAt;
+  const enforcementAt = lock.timelock - BigInt(HTLC_ENFORCEMENT_RESERVE_MS);
+  const ackAt = BigInt(entry.secretAckDeadlineAt);
+  const startedAt = BigInt(entry.secretAckStartedAt);
+  return Number(enforcementAt < startedAt ? startedAt : enforcementAt < ackAt ? enforcementAt : ackAt);
+};
+
 const htlcTimeoutAt = (timelock: bigint | number | undefined): number | null => {
   if (timelock === undefined || timelock === null) return null;
   const value = Number(timelock);
@@ -53,10 +67,7 @@ const htlcTimeoutAt = (timelock: bigint | number | undefined): number | null => 
  * same past timelock would re-arm every Runtime frame for the whole dispute
  * window. Its locks contribute no deadline until on-chain finality owns them.
  */
-export const collectDerivedDeadlines = (
-  state: EntityState,
-  now?: number,
-): DerivedDeadline[] => {
+export const collectDerivedDeadlines = (state: EntityState, now?: number): DerivedDeadline[] => {
   const due: DerivedDeadline[] = [];
   for (const [accountId, account] of state.accounts.entries()) {
     if (!canProcessAccountTxForDisputeStatus(account.status)) continue;
@@ -73,7 +84,7 @@ export const collectDerivedDeadlines = (
   }
   for (const entry of state.paybook.entries.values()) {
     if (!isSecretAckPendingPayment(entry)) continue;
-    const triggerAt = entry.secretAckDeadlineAt;
+    const triggerAt = secretAckTriggerAt(state, entry);
     if (now !== undefined && triggerAt > now) continue;
     due.push({
       id: `htlc-secret-ack:${entry.hashlock}`,
@@ -106,8 +117,8 @@ export const earliestDerivedDeadline = (state: EntityState): number | null => {
     }
   }
   for (const entry of state.paybook.entries.values()) {
-    if (isSecretAckPendingPayment(entry) && entry.secretAckDeadlineAt < earliest) {
-      earliest = entry.secretAckDeadlineAt;
+    if (isSecretAckPendingPayment(entry)) {
+      earliest = Math.min(earliest, secretAckTriggerAt(state, entry));
     }
   }
   for (const loan of state.lending?.loans.values() ?? []) {

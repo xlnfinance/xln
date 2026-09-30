@@ -32,7 +32,7 @@ describe('Paybook views', () => {
       secretAckDeadlineAt: 150,
     };
     expect(isSecretAckPendingPayment(payment)).toBe(true);
-    expect(isDisputeReadyPayment(payment, 149)).toBe(false);
-    expect(isDisputeReadyPayment(payment, 150)).toBe(true);
+    expect(isDisputeReadyPayment(payment, 149, 150)).toBe(false);
+    expect(isDisputeReadyPayment(payment, 150, 150)).toBe(true);
   });
 });

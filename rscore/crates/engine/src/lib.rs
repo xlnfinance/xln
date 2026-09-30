@@ -37,6 +37,7 @@ pub use consensus::incoming::apply::{
     apply_incoming_frame, apply_incoming_frame_with_authority, apply_standalone_dispute,
     classify_incoming_frame_without_mutation,
 };
+pub use consensus::incoming::deadline::HTLC_ENFORCEMENT_RESERVE_MS;
 pub use consensus::incoming::types::{
     AccountInputEnvelope, AccountInputEnvelopeRejection, AckFrameOutcome, AckFramePhase,
     BoardHankoRefreshInput, IncomingAck, IncomingFrame, StandaloneInputOutcome,
