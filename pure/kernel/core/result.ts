@@ -51,11 +51,15 @@ export const mapAccum = <S, X, Y>(
   return folded.ok ? folded.value : folded.error;
 };
 
+// Named seeds: a traversal carries no state, and an `every` starts true.
+const NO_STATE = undefined;
+const NO_FAILURE_YET = true;
+
 export const traverse = <X, Y, E>(
   xs: Iterable<X>, f: (x: X, i: number) => Result<Y, E>,
 ): Result<readonly Y[], E> => {
-  const collect = (_: undefined, x: X, i: number) => map(f(x, i), (y) => [undefined, y] as const);
-  return map(mapAccumResult(xs, undefined, collect), ([, ys]) => ys);
+  const collect = (_: undefined, x: X, i: number) => map(f(x, i), (y) => [NO_STATE, y] as const);
+  return map(mapAccumResult(xs, NO_STATE, collect), ([, ys]) => ys);
 };
 
 type Values<R> = { readonly [K in keyof R]: R[K] extends Result<infer V, unknown> ? V : never };
@@ -70,4 +74,4 @@ export const all = <R extends Record<string, Result<unknown, unknown>>>(results:
 
 /** `every` over a refusable predicate: the first `false` or the first refusal ends it. */
 export const everyResult = <X, E>(xs: Iterable<X>, pass: (x: X) => Result<boolean, E>): Result<boolean, E> =>
-  foldResult(xs, true, (all, x) => (all ? pass(x) : ok(false)));
+  foldResult(xs, NO_FAILURE_YET, (all, x) => (all ? pass(x) : ok(false)));

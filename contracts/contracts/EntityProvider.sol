@@ -764,6 +764,23 @@ contract EntityProvider is ERC1155 {
     if (totalSupport <= TOTAL_DIVIDEND_SUPPLY / 2) revert InsufficientShareSupport();
   }
 
+  /// @dev R-OOG / fault isolation: a listed Depository answers with one word, under a gas cap, and its answer is never copied. An
+  ///      uncapped read with a copied `bytes memory` lets one Depository burn 63/64 of the gas or return a payload the caller cannot
+  ///      afford to copy, and then every CONTROL action of every entity that parked shares there reverts at every gas limit.
+  uint256 private constant DEPOSITORY_READ_GAS = 100_000;
+
+  function _readDepositoryWord(address depository, bytes memory callData) private view returns (bool ok, uint256 word) {
+    uint256 gasLimit = DEPOSITORY_READ_GAS;
+    uint256 size;
+    assembly ("memory-safe") {
+      let data := add(callData, 0x20)
+      ok := staticcall(gasLimit, depository, data, mload(callData), data, 0x20)
+      size := returndatasize()
+      word := mload(data)
+    }
+    ok = ok && size == 32;
+  }
+
   function _requireReserveControlMajority(
     bytes32 targetEntityId,
     bytes32 digest,
@@ -797,21 +814,23 @@ contract EntityProvider is ERC1155 {
       // the CONTROL lane for every entity forever (the list is append-only).
       // A Depository that reverts, is mid-batch (_status == 2, reserves may be
       // flash-inflated) or returns malformed data simply contributes zero.
-      (bool statusOk, bytes memory statusData) =
-        depository.staticcall(abi.encodeWithSelector(IEntityShareDepository._status.selector));
-      if (!statusOk || statusData.length != 32 || abi.decode(statusData, (uint256)) == 2) continue;
+      (bool statusOk, uint256 status) =
+        _readDepositoryWord(depository, abi.encodeWithSelector(IEntityShareDepository._status.selector));
+      if (!statusOk || status == 2) continue;
+      // A Depository can never report more weight than the shares it holds, so each read is clamped to that BEFORE it is summed: a
+      // Depository that answers 2^256-1 must not overflow the sum and brick the lane.
+      uint256 held = balanceOf(depository, controlTokenId);
       uint256 depositorySupport = 0;
       bool readOk = true;
       for (uint256 i = 0; i < shareholders.length; i++) {
-        (bool ok, bytes memory data) = depository.staticcall(
+        (bool ok, uint256 reserve) = _readDepositoryWord(
+          depository,
           abi.encodeWithSelector(IEntityShareDepository._reserves.selector, shareholders[i], internalTokenId)
         );
-        if (!ok || data.length != 32) { readOk = false; break; }
-        depositorySupport += abi.decode(data, (uint256));
+        if (!ok) { readOk = false; break; }
+        depositorySupport += reserve < held ? reserve : held;
       }
       if (!readOk) continue;
-      // A Depository can never report more weight than the shares it holds.
-      uint256 held = balanceOf(depository, controlTokenId);
       totalSupport += depositorySupport < held ? depositorySupport : held;
     }
     if (!anyRegistered) revert ShareDepositoryRequired();
