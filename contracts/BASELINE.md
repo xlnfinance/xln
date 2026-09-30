@@ -404,3 +404,24 @@ callee burns all its gas (INVALID, endless loop, empty revert, revert with a rea
   execution-only measurement (a read-only call charges none): 4,832,492 at K=128, so `HANKO_PRELUDE_GAS` goes from 4,600,000 to 4,900,000 and
   the gate total from 5,137,937 to 5,437,937 (the earlier label 5,137,943 was wrong by 6: 4,600,000 + 507,937 + 30,000). Headroom under the
   EIP-7825 cap is still about 11.3M; no gate decision changes.
+
+### The rewrite's fork shim (`pure/diff/fork-shim.ts`, `pure/diff/contracts.ts`): the two new ABI fields
+
+#50 and #55 are on main, so the shim that lets og's frozen Runtime talk to the fork's Depository now also speaks the J5 ABI:
+- `encodeForkBatch` re-encodes og's batch (after `rebindBatch` re-signed it for the epochs on chain) with the fork's `Batch` type: `gasBudget` in
+  front (`SHIM_GAS_BUDGET` = 14,000,000: og's BrowserVM sends every processBatch with 15,000,000 gas, and the Depository needs
+  `budget * 64/63 + 30,000` plus the hanko prelude on top) and `ondeltaEpoch` in every dispute start (the epoch `rebindBatch` signed it for).
+- The calldata view (og reads dispute evidence back out of the transaction) shows og the batch it sealed, not the fork's bytes, because og
+  decodes with its own ABI (`J_DISPUTE_PROOFBODY_CALLDATA_DECODE_FAILED` otherwise).
+- `installContracts` also swaps `DepositoryBounds`, `HashLadderRegistry` and `NftCustody`, so the linked bounds check reads the fork's `Batch`.
+- Results (local, sandbox): `pure/diff/scenario-cross-j.test.ts` 9 of 9 (8 of 9 failed before, every batch refused with a bare revert);
+  `bun diff/walk.ts --area disputes|settlement|core|boards --seeds 3`: 3 walks each, 0 failed (disputes failed 3 of 3 with the calldata error
+  before the view fix); `bunx tsc -p pure` clean; `bun style/check.ts` at baseline.
+
+### Fourth-round gate (merged head)
+
+Local runs at the merge of main b471747 into the branch, one file or suite per process: Hardhat dispute, governance and protocol all passing except
+one test: `Depository-part-1` "keeps the dispute active when any signed transformer cannot execute exactly" times out at Hardhat's 40 s mocha
+limit on this machine, taking about 54 s (the out-of-gas mode alone about 52 s, mostly system time). It times out identically on main's own
+contracts here (checked in a clean worktree at b471747, same test alone), and the same file passed in 41 s in the earlier sandbox, so the cause
+is the machine, not #54; run on a faster one or raise the timeout for that test. vm 21 files, gate 2 files, `test/a12`, Foundry every suite: 0 failures.
