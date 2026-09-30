@@ -328,3 +328,92 @@ describe("R-J2 what only this verifier decides", () => {
     expect(isLowS(word(HALF_ORDER + 1n))).toBe(false);
   });
 });
+
+// ---- hanko.json: 43 Hankos, each judged by the deployed EntityProvider ----
+
+type Plain = any;
+
+describe("R-J2 the verifier against every verdict in hanko.json (the deployed EntityProvider's)", () => {
+  type Case = Readonly<{
+    label: string; hash: string; hanko: string; signers?: readonly string[];
+    result: Readonly<{ success: boolean; entityId: string; revertedWith?: string }>;
+  }>;
+  const vectors = JSON.parse(readFileSync(new URL("../../../contracts/vectors/hanko.json", import.meta.url), "utf8"));
+  const cases: readonly Case[] = vectors.cases;
+  const authorize = (id: string, board: string) => ok(id === board);
+  const judged = (c: Case) => verifyHankoSignature(c.hanko, c.hash, authorize);
+
+  /** What the verifier names for each of the contract's reverts. One contract revert can be two of our reasons. */
+  const named: Readonly<Record<string, readonly string[]>> = {
+    InvalidHankoClaimOrder: ["claim_order", "entity_index"],
+    NonCanonicalHankoPlaceholder: ["placeholder_signer"],
+    UnusedHankoClaim: ["unused_claim"],
+    InvalidHankoPackedSignatureLength: ["packed_length"],
+    InvalidHankoPackedSignaturePadding: ["packed_padding"],
+    InvalidHankoFirstMember: ["first_member"],
+    DuplicateHankoSigner: ["duplicate_signer"],
+    UnusedHankoPlaceholder: ["unused_placeholder"],
+    UnusedHankoSignature: ["unused_signature"],
+    DuplicateHankoPlaceholder: ["duplicate_placeholder"],
+    DuplicateHankoEntityIndex: ["duplicate_entity_index"],
+    DuplicateHankoClaimEntity: ["duplicate_claim_entity"],
+    InvalidHankoWeight: ["weight"],
+    InvalidHankoThreshold: ["threshold"],
+    InvalidHankoClaimShape: ["claim_shape"],
+    InvalidHankoMemberSignatures: ["member_signatures_shape"],
+    HankoProofTooLarge: ["too_large"],
+  };
+  /** A proof the contract refuses without a revert (success false): a missed quorum, or a signature not canonical. */
+  const soft = ["quorum", "threshold_power", "signature_non_canonical", "bad_recovery", "high_s"];
+
+  test("the vector holds both kinds of verdict and every revert the table names", () => {
+    expect(cases.length).toBe(43);
+    expect(new Set(cases.flatMap((c) => (c.result.revertedWith === undefined ? [] : [c.result.revertedWith]))))
+      .toEqual(new Set(Object.keys(named)));
+  });
+
+  cases.filter((c) => c.result.success).forEach((c) => {
+    test(`accepted: ${c.label}`, () => {
+      const verdict = must(judged(c));
+      expect(verdict.entityId).toBe(c.result.entityId);
+      if (c.signers !== undefined) expect(verdict.signers).toEqual(c.signers.map((s) => s.toLowerCase()));
+    });
+  });
+
+  cases.filter((c) => !c.result.success).forEach((c) => {
+    test(`refused: ${c.label}`, () => {
+      const verdict = judged(c);
+      expect(verdict.ok).toBe(false);
+      const reasons = c.result.revertedWith === undefined ? soft : named[c.result.revertedWith]!;
+      expect(reasons).toContain(verdict.ok ? "accepted" : verdict.error._tag);
+    });
+  });
+
+  const HANKO = ethers.ParamType.from("tuple(bytes32[] placeholders, bytes packedSignatures, "
+    + "tuple(bytes32 entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold, uint32 boardChangeDelay, "
+    + "uint32 controlChangeDelay, uint32 dividendChangeDelay)[] claims, bytes[] memberSignatures)");
+  const decoded = (hanko: string): Hanko => {
+    const [placeholders, packed, claims, members] = ethers.AbiCoder.defaultAbiCoder().decode([HANKO], hanko)[0];
+    return {
+      placeholders: [...placeholders],
+      packedSignatures: bytes(packed),
+      claims: claims.map(([entityId, indexes, weights, threshold, board, control, dividend]: Plain) => ({
+        entityId, entityIndexes: [...indexes], weights: [...weights], threshold,
+        boardChangeDelay: board, controlChangeDelay: control, dividendChangeDelay: dividend,
+      })),
+      memberSignatures: members.map((m: string) => bytes(m)),
+    };
+  };
+
+  cases.filter((c) => c.hanko.length > 132 && c.result.revertedWith === undefined).forEach((c) => {
+    test(`the envelope decodes and encodes back to its bytes: ${c.label}`, () => {
+      expect(must(encodeHanko(decoded(c.hanko)))).toBe(c.hanko);
+    });
+  });
+
+  test("a nested Entity acting through the Depository: the batch hash, signed, is accepted for that Entity", () => {
+    const acting = vectors.depository;
+    const verdict = must(verifyHankoSignature(acting.hanko, acting.batchHash, authorize));
+    expect(verdict.entityId).toBe(acting.entityId);
+  });
+});

@@ -349,6 +349,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-J2 dispute hashes (Account.sol, HankoCodec)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 encodeBatch equals the bytes the compiled ABI gave for each recorded input (batch.json)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 the verifier against every verdict in hanko.json (the deployed EntityProvider's)"
     }
    ]
   },
