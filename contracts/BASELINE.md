@@ -429,3 +429,29 @@ is the machine, not #54; run on a faster one or raise the timeout for that test.
 ### Shim budget pin
 
 `pure/diff/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits; the walk's largest has 3.
+
+## Swallowed failures (fifth pass; stacked on #54)
+
+Coordinator 13:55, from the second reviewer's fourth pass (`review/j5-second/0005-transformer-decode-gas-guard.patch`, `j5-fifth-transformer-gas.test.ts`).
+Decisions and the 12-site table: `plan/contracts-decisions.md`, "Swallowed failures".
+
+- **The hole.** `DeltaTransformer._decodeArguments` decodes the party's evidence in a try/catch and reads any failure as "no evidence". A decode that ran
+  out of gas was one, so a finalize that should pay could land unpaid at a transaction gas limit the relayer chose. The reviewer's scan with 1,700 junk
+  secrets: 53 of the limits (step 1,000) gave logs that were neither the paid ones nor a revert. The guard (`gasleft() >= 50,000 + 8 * length`, else
+  `DecodeGasBudgetUnavailable`) is the reviewer's patch unchanged; with it the same scan has none. A dispute batch reverts whole, so the transformer runs
+  in `processBatch`'s own frame and the relayer's limit matters (inside `applyBatch` the signed budget fixes it).
+- **The shape the reviewer did not scan.** Fill-ratio evidence (`uint16[]`, validated per element) costs more per byte than secrets. `GasSwallow.t.sol`
+  measures the least gas a decode needs (bisection over a raw staticcall) up to the 64 KiB a side may pass (`MAX_DISPUTE_STARTER_ARGUMENT_BYTES`; Account
+  rejects more): at the cap fill ratios need 490,474 gas and secrets 359,658, against 574,544 guarded, so the 8 gas a byte holds with 15% to spare (6 a
+  byte fails). Sizes above the cap are not reachable through Account and are not covered (the decode cost is superlinear there: 2,352,091 at 2^18 bytes
+  against a guard of 2,147,152, so the bound belongs to Account's size check). `j5-fifth-transformer-gas.test.ts` runs the same finalize scan for both
+  shapes (secrets N=1700, ratios N=2000, step 1,000, about 9 minutes for both). **Mutant:** deleting the guard fails the fill-ratio scan (311 limits with
+  changed logs) as it failed the secrets scan (53).
+- **The audit (12 sites).** One hole (this one). The ERC-1271 member call is a real swallow at the verifier and a revert at every consumer:
+  `HankoMemberGasSwallowTest` (a member costing 900k) shows (0, false) answered at every sampled limit in the window below the least gas that verifies,
+  and `entityTransferTokens` reverting and moving nothing below its least gas. The control-lane reads can only lower support (sweep in
+  `BoardRotationAuthority.test.ts`; that sweep does not reach starvation inside the reads, which rests on the monotone argument). The rest revert or were
+  guarded. `test/gate/swallowed-failures.test.ts` counts the sites per file (Account 5, DeltaTransformer 2, Depository 2, EntityProvider 2, HankoVerifier 1)
+  and fails on a change.
+- Folder-width debt: `contracts/test/foundry` 17, `contracts/test/vm` 23.
+

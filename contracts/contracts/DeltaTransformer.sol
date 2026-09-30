@@ -43,6 +43,8 @@ contract DeltaTransformer {
   error PullRevealWindowActive(uint256 disputeTimeout);
   /// An unrevealed Payment whose deadline is still open. Finalization waits (H1) instead of settling it as unpaid.
   error PaymentRevealWindowActive(uint256 revealedUntilTimestamp);
+  /// The gas left cannot pay for decoding the evidence: revert, never a silent "no evidence".
+  error DecodeGasBudgetUnavailable();
   error PullRevealRegistryUnavailable(address caller);
   error InvalidPullAmount();
   event SecretRevealed(bytes32 indexed hashlock, bytes32 secret);
@@ -250,6 +252,11 @@ contract DeltaTransformer {
     // to "no evidence". We deliberately use an external self-call because a
     // direct abi.decode revert cannot be caught inside Solidity. This keeps the
     // contract strict for signed ProofBody data and soft for adversarial args.
+    // Gas is not evidence: a decode that runs out of gas must not read as "no evidence" (the catch below would then settle as if the
+    // party had shown nothing, at a gas limit the relayer chose). Demand what the decode can cost (it grows with the bytes) first.
+    // 8 gas a byte covers the decode up to the 64 KiB Account lets through (MAX_DISPUTE_STARTER_ARGUMENT_BYTES): GasSwallow.t.sol measures the
+    // decode of both array shapes and keeps the guard above it, fill ratios (validated per element) being the dearer one, with 15% to spare.
+    if (gasleft() < 50_000 + 8 * encoded.length) revert DecodeGasBudgetUnavailable();
     try this.decodeArgumentsStrict(encoded) returns (Arguments memory decoded) {
       return decoded;
     } catch {

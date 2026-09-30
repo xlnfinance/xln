@@ -242,4 +242,32 @@ describe('EntityProvider settled CONTROL governance', function () {
       [buildSingleSignerHanko(ethers.zeroPadValue(ethers.toBeHex(1), 32), foundationDigest, deriveHardhatPrivateKey(0))],
     )).to.emit(fx.provider, 'BoardProposed');
   });
+
+  // Swallowed failures (contracts-decisions.md): _requireReserveControlMajority reads the Depository with low-level staticcalls and a
+  // read that fails counts as zero support, so a caller's gas limit can only LOWER the support it sees. That may turn a pass into a revert,
+  // never a revert into a pass. Sweep the gas limit of the same proposal: what passes is upward-closed, and a proposal without a majority
+  // never passes at any limit.
+  const sweep = async (fx: Awaited<ReturnType<typeof fixture>>, label: string): Promise<{ limit: bigint; ok: boolean }[]> => {
+    const boardHash = await nextBoard(label, fx.provider);
+    const hanko = await controlHanko(fx, HOLDER_A_ID, 3, boardHash);
+    const propose = fx.provider.proposeBoard;
+    const outcomes: { limit: bigint; ok: boolean }[] = [];
+    for (let limit = 60_000n; limit <= 400_000n; limit += 4_000n) {
+      const ok = await propose.staticCall(TARGET_ID, boardHash, CONTROL, [hanko], { gasLimit: limit }).then(() => true, () => false);
+      outcomes.push({ limit, ok });
+    }
+    return outcomes;
+  };
+
+  it('never turns a gas-starved control-lane read into a pass', async function () {
+    this.timeout(300_000);
+    const majority = await sweep(await fixture(60n), 'gas-majority');
+    const firstPass = majority.findIndex((o) => o.ok);
+    expect(firstPass, 'a 60% proposal must pass once it has the gas').to.be.greaterThan(0);
+    expect(majority.slice(firstPass).every((o) => o.ok), 'what passes is upward-closed').to.equal(true);
+    expect(majority.slice(0, firstPass).every((o) => !o.ok), 'below the first pass everything reverts').to.equal(true);
+
+    const half = await sweep(await fixture(50n), 'gas-half');
+    expect(half.some((o) => o.ok), 'exactly half never passes, at any gas limit').to.equal(false);
+  });
 });
