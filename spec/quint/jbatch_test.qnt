@@ -372,4 +372,16 @@ module jbatch_test {
     .expect(and { st.cnonce == 1, st.done.get(1), st.sub.length() == 2, st.sub[1].b.ids == Set(4), st.sub[1].b.nonce == 2, safe })
     .then(attempt(1))
     .expect(and { st.cnonce == 2, st.done.get(4), safe })
+  // J6c: the deposit funds the payment behind it (reserve 0). While the token is paused the payment is not signed unfunded; when the token is back the deposit goes, then the payment.
+  run unfundedPaymentWaitsForThePausedDepositTest =
+    initFrom(catD(1, 7, 1), 0)
+    .then(extLose)
+    .then(arrive(4)).then(arrive(1))
+    .expect(and { st.sub.length() == 0, st.gh.failed == 0 })
+    .then(extBack)
+    .expect(and { st.sub.length() == 1, st.sub[0].b.ids == Set(4) })
+    .then(attempt(0))
+    .expect(and { st.sub.length() == 2, st.sub[1].b.ids == Set(1), st.sub[1].b.nonce == 2 })
+    .then(attempt(1))
+    .expect(and { st.done.get(1), st.cnonce == 2, st.gh.failed == 0, safe })
 }

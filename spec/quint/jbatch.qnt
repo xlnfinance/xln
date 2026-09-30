@@ -214,7 +214,10 @@ module jbatch {
   pure def plan(s: S): List[Batch] = {
     val u = urgentPending(s)
     val p = payQueued(s)
-    val pn = p.filter(i => not(isDep(s, i)))       // the payment legs without a deposit
+    // the payment legs without a deposit; while a deposit is skipped, only the ones the reserve already covers, in order (an unfunded payment would fail on the chain and burn a nonce)
+    val pn0 = p.filter(i => not(isDep(s, i)))
+    val skipped = p.filter(i => isDep(s, i)).size() > 0 and not(s.ext)
+    val pn = if (not(skipped)) pn0 else OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)
     val q = u.union(p)
     val f = topSigned(s) + 1
     if (STRAT == 0) (if (nothingAlive(s) and q.size() > 0) [{ nonce: s.cnonce + 1, ids: q }] else [])

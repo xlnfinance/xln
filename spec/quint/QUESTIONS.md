@@ -591,6 +591,11 @@ alone (rule 1, a deposit travels alone, is kept) and only the deposit stalls; it
 returned no batch at all, so a paused token froze the whole Entity (and, with one nonce per Entity, other tokens' payments) with no timeout. `paymentGoesOutBehindAPausedDepositTest`;
 mutant `payments-wait-behind-a-paused-deposit`. J6a and J6 cover a different case (the nonce stall after signing).
 
+**J6c. Decision (final review F12, coordinator 2026-09-30): while a deposit is skipped, sign only the payments the current reserve already covers, in order.** J6b let every payment behind a skipped
+deposit go out. With the token paused and reserve 0 that signs a payment the deposit was meant to fund: it fails soft (J5), takes its nonce, and is signed again every round, burning a nonce each time. Now `plan`
+takes, while a deposit is skipped, the payments the reserve covers, oldest first (`payTotal <= s.reserve`, in id order); the rest wait with the deposit, and the deposit goes first once the token works, funding them.
+`unfundedPaymentWaitsForThePausedDepositTest`; mutant `unfunded-payment-signed-behind-paused-deposit`. `paymentGoesOutBehindAPausedDepositTest` (reserve 3) still shows a covered payment going out.
+
 **J7. Signed gas budget, gates, the gas cap, the epoch on a dispute start (coordinator, 2026-09-30). Modelled; one choice for the coordinator.**
 (1) **Budget replaces the floor.** The signer sets each batch's gas budget from its own simulation and it is inside the signed bytes. A relayer that supplies less reverts the
 transaction and takes no nonce (`starve`, `underBudgetRelayerTakesNoNonceTest`, `no_burn`, mutant `no-gas-guard`). Once the budget is given every failure is `BatchFailed` with the nonce
@@ -615,4 +620,10 @@ reserve net of outstanding debt. Two chain mutants survived for two rounds becau
 `shortfall-skips-enforce` by `olderDebtIsEnforcedBeforeAShortfallTest` (Left owes 1 and holds 2, then a payout leaves it 3 short: with enforcement Left ends with 0 and owes 2, without it Left keeps 1 and owes 3)
 and by the new ghost and property `debt_means_broke` (after a payout that leaves debt the debtor holds no reserve); `spendable-ignores-debt` by `spendableIsReserveNetOfDebtTest`, which pins the helper to the contract's
 definition. **Stated plainly:** the second is behaviourally equivalent inside the model, because `spendable` is only ever read on money that `enforce` has just cleaned (after enforcement the spendable reserve is the reserve), so
-the test pins the helper and not an outcome; `reserveThatIsOwedCannotBeDepositedTest` shows the outcome (a side whose whole reserve is owed cannot deposit it). The scenario test is the evidence for `debt_means_broke`; I have not established that simulation reaches an older debt within 16 steps (a run with the mutant planted timed out under load, so it is unmeasured).
+the test pins the helper and not an outcome; `reserveThatIsOwedCannotBeDepositedTest` shows the outcome (a side whose whole reserve is owed cannot deposit it).
+**The 32-claim bound (coordinator, 2026-09-30).** `_enforceDebts` pays at most 32 queued claims a call, oldest first, so `debt_means_broke` as first written (after a payout that leaves debt the debtor holds no reserve)
+was stronger than the contract. The model now keeps the queue (`Money.dq`, oldest first; `debt` stays the total, `debt_queue_sums`) and scales the bound down to `DEBT_ENFORCE_MAX = 2` so a search meets a queue longer
+than one call clears (`init` draws up to three claims; witness `w_no_long_queue`; `w_no_older_debt`, F13). What the contract keeps, and what `debt_means_broke` now states: spendable reserve nets ALL outstanding debt, the
+unreached tail included (`spendable`), so after a payout that leaves debt nothing is spendable; and a debtor is broke (no reserve at all) once its queue fits in one call. With a longer queue reserve may remain, all of it owed
+(`enforcementReachesOnlyOneCallsWorthOfClaimsTest`; mutants `enforce-has-no-call-bound`, `spendable-ignores-the-queue-tail`). A part-paid claim stays at the head with what is left (my reading of the loop; not checked against the
+contract source, which I do not read here).

@@ -85,6 +85,7 @@ module chain {
     nonceBack: bool,      // the stored nonce went down
     appliedTwice: bool,   // one arena record settled twice
     freeDebt: bool,       // debt was booked while its debtor still had spendable reserve
+    olderDebt: bool,           // a shortfall payout met a debtor who already owed and held reserve (older debt to enforce first)
     debtBesideReserve: bool,   // a payout that booked debt left its debtor holding reserve: an older debt was not enforced first (`enforce` before every outflow)
     xWasOffline: bool,    // the honest party was offline while the current dispute was active (then it may lose); reset when it ends
     lostByAbsence: bool,  // some dispute settled a proof the honest party did not stand behind while it was absent (the exclusion is not vacuous)
@@ -101,7 +102,7 @@ module chain {
   }
 
   pure val NO_GHOST: Ghost = {
-    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, debtBesideReserve: false, xWasOffline: false,
+    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
     lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
     nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
   }
@@ -123,19 +124,33 @@ module chain {
   pure def imin(a: int, b: int): int = if (a < b) a else b
   pure def imax(a: int, b: int): int = if (a > b) a else b
 
-  type Money = { res: Side -> int, debt: Side -> int }   // debt[s] is what s owes to the other side
+  // debt[s] is what s owes to the other side, in total; dq[s] is the same debt as the queue of separate claims Depository keeps, oldest first (debt[s] is its sum).
+  type Money = { res: Side -> int, debt: Side -> int, dq: Side -> List[int] }
+
+  // Depository._enforceDebts pays at most 32 queued debts per call, oldest first. The model scales that bound down so that a search meets a queue longer than one call can clear.
+  pure val DEBT_ENFORCE_MAX = 2
+
+  pure def sumOf(xs: List[int]): int = xs.foldl(0, (a, x) => a + x)
 
   // Debt is a lazy claim on future inflows: nothing is paid when reserve arrives, it is paid by `enforce`, which runs
   // before every outflow (Depository._enforceDebts before R2R, R2C, R2E and _settleShortfall). Spendable reserve is
-  // reserve net of outstanding debt (_spendableReserve).
+  // reserve net of ALL outstanding debt, the queued ones a call did not reach included (_spendableReserve).
   pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))
 
+  // Pay the first DEBT_ENFORCE_MAX claims in order, each with what the reserve still holds; a claim paid in full leaves the queue, a part-paid one stays, the rest are not touched.
   pure def enforce(m: Money, debtor: Side): Money = {
     val c = other(debtor)
-    val d1 = imin(m.debt.get(debtor), m.res.get(debtor))
+    val r = m.dq.get(debtor).foldl({ left: m.res.get(debtor), out: [], seen: 0 }, (acc, d) =>
+      if (acc.seen >= DEBT_ENFORCE_MAX) { ...acc, out: acc.out.append(d), seen: acc.seen + 1 }
+      else {
+        val pay = imin(d, acc.left)
+        { left: acc.left - pay, out: if (d - pay > 0) acc.out.append(d - pay) else acc.out, seen: acc.seen + 1 }
+      })
+    val paid = m.res.get(debtor) - r.left
     {
-      res: m.res.set(debtor, m.res.get(debtor) - d1).set(c, m.res.get(c) + d1),
-      debt: m.debt.set(debtor, m.debt.get(debtor) - d1)
+      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),
+      debt: m.debt.set(debtor, m.debt.get(debtor) - paid),
+      dq: m.dq.set(debtor, r.out)
     }
   }
 
@@ -146,7 +161,8 @@ module chain {
     val pay = imin(amount, spendable(m, debtor))
     {
       res: m.res.set(debtor, m.res.get(debtor) - pay).set(c, m.res.get(c) + pay),
-      debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay))
+      debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay)),
+      dq: m.dq.set(debtor, if (amount - pay > 0) m.dq.get(debtor).append(amount - pay) else m.dq.get(debtor))
     }
   }
 
@@ -154,13 +170,13 @@ module chain {
   // 0 < Δ < c: split. Δ >= c: Left takes the collateral and Right owes Δ - c.
   pure def payout(m: Money, coll: int, d: int): Money =
     if (d <= 0) {
-      val m1 = { res: m.res.set(Right, m.res.get(Right) + coll), debt: m.debt }
+      val m1 = { ...m, res: m.res.set(Right, m.res.get(Right) + coll) }
       if (d == 0) m1 else shortfall(m1, Left, -d)
     } else if (d >= coll) {
-      val m1 = { res: m.res.set(Left, m.res.get(Left) + coll), debt: m.debt }
+      val m1 = { ...m, res: m.res.set(Left, m.res.get(Left) + coll) }
       if (d == coll) m1 else shortfall(m1, Right, d - coll)
     } else {
-      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }
+      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }
     }
 
   // The side that owes when Δ leaves the collateral range (Left below 0, Right above the collateral is decided by the caller).
@@ -228,6 +244,11 @@ module chain {
     nondet pend2Author = SIDES.oneOf()
     nondet pend2Off = (-1).to(1).oneOf()
     nondet hon = SIDES.oneOf()
+    nondet debtor = SIDES.oneOf()
+    nondet dqLen = 0.to(3).oneOf()
+    nondet dq1 = 1.to(2).oneOf()
+    nondet dq2 = 1.to(2).oneOf()
+    nondet dq3 = 1.to(2).oneOf()
     nondet resL = 0.to(RESERVE_MAX).oneOf()
     nondet resR = 0.to(RESERVE_MAX).oneOf()
     nondet coll = 0.to(2).oneOf()
@@ -241,7 +262,7 @@ module chain {
     // the clause, if any, rides in the tip and in the pending proposal (the same lock, still open)
     val clause: Clause = { on: cOn, payer: cPayer, amount: cAmt, deadline: cDl }
     val tipLeft = if (k == 1) la1 else if (k == 2) la2 else la3
-    initFrom(
+    initFromD(
       Map(
         0 -> NO_PROOF,
         1 -> mkProofW(k >= 1, 1, 0, la1, o1, if (k == 1) clause else NO_CLAUSE, true, true, wl0, wr0),
@@ -252,17 +273,18 @@ module chain {
         6 -> mkProofW(true, 6, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
         7 -> mkProofW(pend2Live, 7, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
       ),
-      hon, resL, resR, coll
+      hon, resL, resR, coll, debtor, [dq1, dq2, dq3].slice(0, dqLen)      // an older debt: a queue of up to three claims, one more than a scaled call clears
     )
   }
 
   // The state before anything happened, for a given arena: scenario tests start here with a hand-made history.
-  action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = all {
+  action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = initFromD(ar, hon, resL, resR, coll, Left, [])
+  action initFromD(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool = all {
     arena' = SLOTS.mapBy(i => if (ar.keys().contains(i)) ar.get(i) else NO_PROOF),      // slots a history does not use stay empty
     honest' = hon,
     now' = 1,
     acct' = { nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 },
-    money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0) },
+    money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0).set(debtor, sumOf(queue)), dq: Map(Left -> [], Right -> []).set(debtor, queue) },
     total' = resL + resR + coll,
     dispute' = NO_DISPUTE,
     registry' = 0,
@@ -568,7 +590,13 @@ module chain {
         nonceBack: ghost.nonceBack or newNonce < acct.nonce,
         appliedTwice: ghost.appliedTwice or applied.get(useId),
         freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > m2.debt.get(debtorOf(d))),
-        debtBesideReserve: ghost.debtBesideReserve or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > 0),
+        olderDebt: ghost.olderDebt or ((d < 0 or d > acct.coll) and money.debt.get(debtorOf(d)) > 0 and money.res.get(debtorOf(d)) > 0),
+        // what the contract keeps (`_spendableReserve` nets all outstanding debt): a payout that leaves debt leaves the debtor nothing spendable; and when the debtor's queue fitted in
+        // one enforcement call it leaves it nothing at all
+        debtBesideReserve: ghost.debtBesideReserve or and {
+          d < 0 or d > acct.coll, m2.debt.get(debtorOf(d)) > 0,
+          spendable(m2, debtorOf(d)) > 0 or (money.dq.get(debtorOf(d)).length() <= DEBT_ENFORCE_MAX and m2.res.get(debtorOf(d)) > 0)
+        },
         xWasOffline: false,                                    // per dispute: the next one is judged afresh
         lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, useId))),
         payBad: ghost.payBad or not(payOk),
@@ -635,8 +663,12 @@ module chain {
 
   // Debt is only what a payout could not cover: it is never booked while the debtor could still pay.
   val debt_only_when_broke: bool = not(ghost.freeDebt)
-  // Enforcement comes first: after a payout that leaves debt, the debtor holds no reserve at all (an older debt was paid out of it before the new shortfall was measured).
+  // Enforcement comes first (Depository._enforceDebts, at most DEBT_ENFORCE_MAX claims a call, oldest first): after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all
+  // when its queue fitted in one call. With a longer queue reserve may remain, but it is all owed.
+  val w_no_older_debt: bool = not(ghost.olderDebt)     // witness: the search reaches an older debt (init draws a debt)
   val debt_means_broke: bool = not(ghost.debtBesideReserve)
+  // the queue and the total describe the same debt
+  val debt_queue_sums: bool = sumOf(money.dq.get(Left)) == money.debt.get(Left) and sumOf(money.dq.get(Right)) == money.debt.get(Right)
 
   // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
   // exactly what it says. Whatever is paid at once and whatever is booked as debt, the amounts are the proof's and the secret evidence's.
@@ -656,7 +688,7 @@ module chain {
   val nonce_rules: bool = not(ghost.nonceBad)
 
   val safe: bool = and {
-    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke,
+    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums,
     pay_exact, deposit_exact, windows_frozen, closes_on_time, nonce_rules
   }
 
@@ -666,6 +698,7 @@ module chain {
   val w_no_two_finalizes: bool = ghost.finalizes < 2
   val w_no_counter: bool = dispute.counter == 0
   val w_no_debt: bool = money.debt.get(Left) == 0 and money.debt.get(Right) == 0
+  val w_no_long_queue: bool = money.dq.get(Left).length() <= DEBT_ENFORCE_MAX and money.dq.get(Right).length() <= DEBT_ENFORCE_MAX      // witness: a queue beyond one call's reach exists
   val w_no_clause_settled: bool = not(ghost.finalizes > 0 and arena.get(ghost.lastApplied).clause.on)
   // the exclusion for an absent honest party is not vacuous: some run settles a proof the honest party did not stand behind
   val w_offline_can_lose: bool = not(ghost.lostByAbsence)

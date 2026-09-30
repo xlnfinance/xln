@@ -251,6 +251,14 @@
       "old": "      if (not(ids.contains(i)) or acc.full) acc\n",
       "new": "      if (not(ids.contains(i))) acc\n",
       "killedBy": "test:firstChunkIsAPrefixTest"
+    },
+    {
+      "id": "unfunded-payment-signed-behind-paused-deposit",
+      "why": "J6c: while a deposit is skipped, every payment goes out even if the reserve does not cover it; it fails soft, burns a nonce and is signed again every round",
+      "file": "jbatch.qnt",
+      "old": "    val pn = if (not(skipped)) pn0 else OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)",
+      "new": "    val pn = pn0",
+      "killedBy": "test:unfundedPaymentWaitsForThePausedDepositTest"
     }
   ],
   "init": "init",

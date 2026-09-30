@@ -40,7 +40,7 @@ module compose {
     b.offdelta + effect(b.locks.get(1), r1) + effect(b.locks.get(2), r2)
 
   // the chain settles Δ over the collateral with empty reserves: every shortfall becomes debt
-  pure val EMPTY: c::Money = { res: Map(c::Left -> 0, c::Right -> 0), debt: Map(c::Left -> 0, c::Right -> 0) }
+  pure val EMPTY: c::Money = { res: Map(c::Left -> 0, c::Right -> 0), debt: Map(c::Left -> 0, c::Right -> 0), dq: Map(c::Left -> [], c::Right -> []) }
   pure def settle(d: int): c::Money = c::payout(EMPTY, a::COLLATERAL, d)
 
   pure val OUTCOMES: Set[(bool, bool)] = Set((false, false), (false, true), (true, false), (true, true))

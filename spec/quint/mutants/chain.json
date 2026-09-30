@@ -129,8 +129,8 @@
       "id": "split-loses-money",
       "why": "the split payout forgets Right's share",
       "file": "chain.qnt",
-      "old": "res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt",
-      "new": "res: m.res.set(Left, m.res.get(Left) + d), debt: m.debt",
+      "old": "{ ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "{ ...m, res: m.res.set(Left, m.res.get(Left) + d) }",
       "killedBy": "invariant:p3_conserved"
     },
     {
@@ -225,8 +225,8 @@
       "id": "split-swapped",
       "why": "the split hands Left's share to Right and the other way round",
       "file": "chain.qnt",
-      "old": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }",
-      "new": "      { res: m.res.set(Right, m.res.get(Right) + d).set(Left, m.res.get(Left) + (coll - d)), debt: m.debt }",
+      "old": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "      { ...m, res: m.res.set(Right, m.res.get(Right) + d).set(Left, m.res.get(Left) + (coll - d)) }",
       "killedBy": "invariant:pay_exact"
     },
     {
@@ -241,8 +241,8 @@
       "id": "enforce-burns",
       "why": "enforcing a debt takes the reserve from the debtor and does not give it to the creditor",
       "file": "chain.qnt",
-      "old": "      res: m.res.set(debtor, m.res.get(debtor) - d1).set(c, m.res.get(c) + d1),",
-      "new": "      res: m.res.set(debtor, m.res.get(debtor) - d1),",
+      "old": "      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),",
+      "new": "      res: m.res.set(debtor, r.left),",
       "killedBy": "invariant:p3_conserved"
     },
     {
@@ -404,6 +404,22 @@
       "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
       "new": "pure def spendable(m: Money, s: Side): int = m.res.get(s)",
       "killedBy": "test:spendableIsReserveNetOfDebtTest"
+    },
+    {
+      "id": "enforce-has-no-call-bound",
+      "why": "one enforcement call clears the whole debt queue (Depository stops after 32 claims a call)",
+      "file": "chain.qnt",
+      "old": "  pure val DEBT_ENFORCE_MAX = 2",
+      "new": "  pure val DEBT_ENFORCE_MAX = 9",
+      "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
+    },
+    {
+      "id": "spendable-ignores-the-queue-tail",
+      "why": "spendable reserve nets only the claims one call reaches, not all outstanding debt",
+      "file": "chain.qnt",
+      "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
+      "new": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - sumOf(m.dq.get(s).slice(0, DEBT_ENFORCE_MAX)))",
+      "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
     }
   ]
 }
