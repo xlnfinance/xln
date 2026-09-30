@@ -21,17 +21,23 @@ const coder = ethers.AbiCoder.defaultAbiCoder();
 const BOARD_ABI = ["tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)"];
 const HANKO_ABI = ["tuple(bytes32[] placeholders, bytes packedSignatures, tuple(bytes32 entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)[] claims, bytes[] memberSignatures)"];
 
-const keyOf = (name: string): string => ethers.id(`hanko-multi-${name}`);
+// Test-only keys, derived from a name; the ones a run used are written out (`signerKeys`) so a builder elsewhere can sign the same digests (ECDSA here is deterministic, RFC 6979).
+const seenKeys = new Map<string, string>();
+const keyOf = (name: string): string => {
+  const key = ethers.id(`hanko-multi-${name}`);
+  seenKeys.set(name, key);
+  return key;
+};
 const addressOf = (name: string): string => new ethers.Wallet(keyOf(name)).address;
 const idOf = (name: string): string => ethers.zeroPadValue(addressOf(name), 32);
 
 /** A member of a claim: a named key that signed, a named key present only as a placeholder, or an earlier claim (by its index). */
 type Member = { readonly signed: string } | { readonly placeholder: string } | { readonly claim: number };
-type Claim = { readonly members: readonly { readonly member: Member; readonly weight: number }[]; readonly threshold: number };
+type Claim = { readonly members: readonly { readonly member: Member; readonly weight: number }[]; readonly threshold: number; readonly delays?: readonly [number, number, number] };
 type Shape = { readonly claims: readonly Claim[]; readonly signaturesInOrder?: readonly string[]; readonly extraPlaceholders?: readonly string[]; readonly packedOverride?: string };
 
-const boardId = (threshold: number, ids: readonly string[], weights: readonly number[]): string =>
-  ethers.keccak256(coder.encode(BOARD_ABI, [[threshold, ids, weights, 0, 0, 0]]));
+const boardId = (threshold: number, ids: readonly string[], weights: readonly number[], delays: readonly [number, number, number] = [0, 0, 0]): string =>
+  ethers.keccak256(coder.encode(BOARD_ABI, [[threshold, ids, weights, ...delays]]));
 
 /** Build the envelope for `hash` and report the entity id it claims (the last claim). */
 const build = (hash: string, shape: Shape) => {
@@ -44,7 +50,7 @@ const build = (hash: string, shape: Shape) => {
     if (!memo.has(index)) {
       const claim = shape.claims[index]!;
       const ids = claim.members.map(({ member }) => ("claim" in member ? idOfClaim(member.claim) : idOf("placeholder" in member ? member.placeholder : member.signed)));
-      memo.set(index, boardId(claim.threshold, ids, claim.members.map((m) => m.weight)));
+      memo.set(index, boardId(claim.threshold, ids, claim.members.map((m) => m.weight), claim.delays));
     }
     return memo.get(index)!;
   };
@@ -52,7 +58,7 @@ const build = (hash: string, shape: Shape) => {
   const claims = shape.claims.map((claim, index) => {
     const positions = claim.members.map(({ member }) =>
       "placeholder" in member ? placeholders.indexOf(member.placeholder) : "signed" in member ? placeholders.length + signers.indexOf(member.signed) : firstClaim + member.claim);
-    return [claimIds[index]!, positions, claim.members.map((m) => m.weight), claim.threshold, 0, 0, 0];
+    return [claimIds[index]!, positions, claim.members.map((m) => m.weight), claim.threshold, ...(claim.delays ?? [0, 0, 0])];
   });
   const sigs = signers.map((name) => ethers.Signature.from(rawHanko(hash, keyOf(name))));
   const recovery = new Uint8Array(Math.ceil(sigs.length / 8));
@@ -84,6 +90,7 @@ const absent = (name: string, weight = 1) => ({ member: { placeholder: name }, w
 const inner = (claim: number, weight = 1) => ({ member: { claim }, weight });
 
 export const hankoMultiVectors = async () => {
+  seenKeys.clear();
   const rig = await boot("hanko-multi");
   const hash = ethers.id("hanko-multi-hash");
   const cases: unknown[] = [];
@@ -142,6 +149,82 @@ export const hankoMultiVectors = async () => {
   const dupHanko = coder.encode(HANKO_ABI, [[[idOf("z")], packedTwice, [[dup.entityId, [1, 2], [1, 1], 1, 0, 0, 0]], []]]);
   cases.push({ label: "rejected: the same signature twice", expect: "revert", hash, hanko: dupHanko, result: await verify(rig, dupHanko, hash) });
 
+  // ---- added in review: what the first set leaves to the verifier's own reading of the rules ----
+  const ORDER = ethers.getBigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
+  type RawClaim = { entityId: string; indexes: number[]; weights: number[]; threshold: number; delays?: [number, number, number] };
+  const envelope = (placeholders: readonly string[], packed: string, claims: readonly RawClaim[], memberSignatures: readonly string[] = []): string =>
+    coder.encode(HANKO_ABI, [[placeholders, packed, claims.map((c) => [c.entityId, c.indexes, c.weights, c.threshold, ...(c.delays ?? [0, 0, 0])]), memberSignatures]]);
+  const partsOf = (hanko: string) => {
+    const d = coder.decode(HANKO_ABI, hanko)[0] as any;
+    return {
+      placeholders: [...d.placeholders] as string[], packed: d.packedSignatures as string,
+      claims: d.claims.map((c: any): RawClaim => ({ entityId: c.entityId, indexes: c.entityIndexes.map(Number), weights: c.weights.map(Number), threshold: Number(c.threshold), delays: [Number(c.boardChangeDelay), Number(c.controlChangeDelay), Number(c.dividendChangeDelay)] })),
+    };
+  };
+  const recordRaw = async (label: string, expect: string, hanko: string) => { cases.push({ label, expect, hash, hanko, result: await verify(rig, hanko, hash) }); };
+  const base = partsOf(build(hash, { claims: [twoOfThree] }).hanko);            // 2-of-3: a, b signed, c a placeholder; the claim's indexes are [1, 2, 0]
+
+  await record("a nested claim that misses its threshold fails the proof even when the outer claim is met without it: A = 1-of-2 [d, B], B = 2-of-3 [a, b?, c?]",
+    { claims: [{ members: [one("a"), absent("b"), absent("c")], threshold: 2 }, { members: [one("d"), inner(0)], threshold: 1 }] }, "success false");
+  await record("threshold above the total weight: 3 of two members of weight 1 (never satisfiable)", { claims: [{ members: [one("a"), one("b")], threshold: 3 }] }, "success false");
+  await record("weights 5 and 4 both signed, threshold 9: met exactly", { claims: [{ members: [one("a", 5), one("b", 4)], threshold: 9 }] }, "accepted");
+  await record("weights 5 and 4 both signed, threshold 10: one short", { claims: [{ members: [one("a", 5), one("b", 4)], threshold: 10 }] }, "success false");
+  await record("non-zero delays (1, 2, 3) are part of the board: 2-of-3 a, b signed, c a placeholder",
+    { claims: [{ members: [one("a"), one("b"), absent("c")], threshold: 2, delays: [1, 2, 3] }] }, "accepted as that board's entity");
+  await record("non-zero delays in a nested claim: B = 2-of-3 with delays (3, 2, 1) inside A = 2-of-2 [d, B] with delays (0, 7, 0)",
+    { claims: [{ members: [one("a"), one("b"), absent("c")], threshold: 2, delays: [3, 2, 1] }, { members: [one("d"), inner(0)], threshold: 2, delays: [0, 7, 0] }] }, "accepted as A");
+
+  // nine signers: the recovery bits spill into a second byte, with both parities on each side of the byte boundary
+  const nine = ((): string[] => {
+    for (let salt = 0; ; salt++) {
+      const names = Array.from({ length: 9 }, (_, i) => `nine${salt}-${i}`);
+      const vs = names.map((n) => ethers.Signature.from(rawHanko(hash, ethers.id(`hanko-multi-${n}`))).v);      // not keyOf: the keys tried and dropped are not recorded
+      if (vs[8] === 28 && vs.slice(0, 8).includes(28) && vs.slice(0, 8).includes(27)) return names;
+    }
+  })();
+  await record("five-of-nine, all nine signed: the recovery bits take two bytes", { claims: [{ members: nine.map((n) => one(n)), threshold: 5 }] }, "accepted");
+
+  const tailByte = (packed: string) => ethers.getBytes(packed).at(-1)!;
+  const withTail = (packed: string, tail: number) => ethers.hexlify(Uint8Array.from([...ethers.getBytes(packed).slice(0, -1), tail]));
+  await recordRaw("rejected: a padding bit set in the recovery byte (two signatures use two bits)", "revert",
+    envelope(base.placeholders, withTail(base.packed, tailByte(base.packed) | 0x80), base.claims));
+  await record("rejected: a placeholder no claim uses", { claims: [twoOfThree], extraPlaceholders: ["unused"] }, "revert");
+  await record("rejected: a signature no claim uses", { claims: [twoOfThree], signaturesInOrder: ["a", "b", "unused"] }, "revert");
+  await recordRaw("rejected: the same placeholder twice", "revert", envelope([base.placeholders[0]!, base.placeholders[0]!], base.packed, [{ ...base.claims[0]!, indexes: [2, 3, 0] }]));
+  await recordRaw("rejected: a claim names the same member index twice", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, indexes: [1, 1, 0] }]));
+  await recordRaw("rejected: two claims for the same entity id", "revert",
+    envelope(base.placeholders, base.packed, [base.claims[0]!, { ...base.claims[0]!, indexes: [1, 2, 3], weights: [1, 1, 1] }]));
+  await recordRaw("rejected: weight zero", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, weights: [1, 0, 1] }]));
+  await recordRaw("rejected: weight 65536 (past uint16)", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, weights: [1, 65536, 1] }]));
+  await recordRaw("rejected: threshold zero", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, threshold: 0 }]));
+  await recordRaw("rejected: threshold 65536 (past uint16)", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, threshold: 65536 }]));
+  await recordRaw("rejected: three member indexes and two weights", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, weights: [1, 1] }]));
+  await recordRaw("rejected: a claim with no members", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, indexes: [], weights: [] }]));
+  await recordRaw("rejected: a member index past every placeholder, signer and claim", "revert", envelope(base.placeholders, base.packed, [{ ...base.claims[0]!, indexes: [1, 2, 99] }]));
+  await recordRaw("rejected: member signature entries that do not match the placeholders (two entries, one placeholder)", "revert",
+    envelope(base.placeholders, base.packed, base.claims, ["0x", "0x"]));
+  await recordRaw("rejected: 257 placeholders", "revert",
+    envelope(Array.from({ length: 257 }, (_, i) => idOf(`crowd${i}`)), "0x", [{ entityId: base.claims[0]!.entityId, indexes: [0], weights: [1], threshold: 1 }]));
+
+  // a high-s twin of a valid signature recovers the same key; the verifier refuses it
+  const twin = (name: string) => {
+    const sig = ethers.Signature.from(rawHanko(hash, keyOf(name)));
+    return { r: sig.r, s: ethers.toBeHex(ORDER - BigInt(sig.s), 32), v: sig.v === 27 ? 28 : 27 };
+  };
+  const packTwo = (first: { r: string; s: string; v: number }, second: { r: string; s: string; v: number }) =>
+    ethers.concat([first.r, first.s, second.r, second.s, Uint8Array.from([(first.v === 28 ? 1 : 0) | (second.v === 28 ? 2 : 0)])]);
+  const sigB = ethers.Signature.from(rawHanko(hash, keyOf("b")));
+  await recordRaw("a high-s twin of a's signature: the proof fails (success false)", "success false",
+    envelope(base.placeholders, packTwo(twin("a"), sigB), base.claims));
+
+  // the bare 65-byte shape: the signer's own lazy entity
+  const bare = ethers.getBytes(rawHanko(hash, keyOf("a")));
+  await recordRaw("bare 65 bytes, v = 27 or 28: the signer's lazy entity", "accepted", ethers.hexlify(bare));
+  await recordRaw("bare 65 bytes, v written as 0 or 1: accepted as the same lazy entity", "accepted", ethers.hexlify(Uint8Array.from([...bare.slice(0, 64), bare[64]! - 27])));
+  await recordRaw("bare 65 bytes, v = 29: refused (success false)", "success false", ethers.hexlify(Uint8Array.from([...bare.slice(0, 64), 29])));
+  const highS = twin("a");
+  await recordRaw("bare 65 bytes, high-s twin: refused (success false)", "success false", ethers.hexlify(ethers.concat([highS.r, highS.s, Uint8Array.from([highS.v])])));
+
   // the nested entity acting: a batch signed by the three-level entity C moves C's reserve
   const c = threeDeep.entityId;
   await rig.chain.debugFundReserves(c, rig.TOKEN, 500n);
@@ -158,5 +241,6 @@ export const hankoMultiVectors = async () => {
     events: (rig.last.events as { name: string; args: unknown; logIndex: number }[]).map(({ name, args, logIndex }) => ({ name, args: JSON.parse(JSON.stringify(args, (_k, v) => (typeof v === "bigint" ? v.toString() : v))), logIndex })),
   };
   const wrong = await rig.sendRaw(c, encoded, build(ethers.id("another hash"), { claims: [nestedB, { members: [one("d"), inner(0)], threshold: 2 }, { members: [absent("e"), inner(1)], threshold: 1 }] }).hanko, nonce + 1n);
-  return { hash, cases, depository: { ...depository, signedForAnotherHash: wrong } };
+  const signerKeys = Object.fromEntries([...seenKeys].sort(([a], [b]) => (a < b ? -1 : 1)).map(([name, key]) => [name, { key, address: new ethers.Wallet(key).address }]));
+  return { hash, signerKeys, cases, depository: { ...depository, signedForAnotherHash: wrong } };
 };
