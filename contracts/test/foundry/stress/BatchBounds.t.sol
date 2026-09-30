@@ -52,6 +52,27 @@ contract BatchBoundsTest is XlnFixture {
 
   // ─────────── length caps ───────────
 
+  // ─────────── signed gas budget (J5) ───────────
+
+  function test_gasBudgetBelowTheMinimumIsRejected() public {
+    dep.mintToReserve(entity[0], T, 1_000);
+    Batch memory b = XlnHanko.emptyBatch();
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[1], tokenId: T, amount: 1 });
+    b.gasBudget = 499_999;
+    _expectBoundsRevert(0, b);
+  }
+
+  function test_gasBudgetAtTheMinimumIsAccepted() public {
+    dep.mintToReserve(entity[0], T, 1_000);
+    Batch memory b = XlnHanko.emptyBatch();
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[1], tokenId: T, amount: 1 });
+    b.gasBudget = 500_000;
+    (bool ok,,) = _rawSubmit(0, b);
+    assertTrue(ok, "the minimum budget must be accepted");
+  }
+
   function test_totalOpsCapRejectsFiftyOne() public {
     dep.mintToReserve(entity[0], T, 1_000);
     Batch memory b = XlnHanko.emptyBatch();
@@ -270,7 +291,8 @@ contract BatchBoundsTest is XlnFixture {
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
+      counterentity: other, nonce: nonce, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
+      proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
       initialProofbody: pb, watchSeed: seed,
       sig: _hanko(1, XlnHanko.disputeProofHash(
         address(dep), XlnHanko.accountKey(me, other), nonce, proposerIsLeft, pbHash, seed

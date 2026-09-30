@@ -146,6 +146,7 @@ export type ProofBodyStructOutput = [
 export type InitialDisputeProofStruct = {
   counterentity: BytesLike;
   nonce: BigNumberish;
+  ondeltaEpoch: BigNumberish;
   proposerIsLeft: boolean;
   proofbodyHash: BytesLike;
   initialProofbody: ProofBodyStruct;
@@ -159,6 +160,7 @@ export type InitialDisputeProofStruct = {
 export type InitialDisputeProofStructOutput = [
   counterentity: string,
   nonce: bigint,
+  ondeltaEpoch: bigint,
   proposerIsLeft: boolean,
   proofbodyHash: string,
   initialProofbody: ProofBodyStructOutput,
@@ -170,6 +172,7 @@ export type InitialDisputeProofStructOutput = [
 ] & {
   counterentity: string;
   nonce: bigint;
+  ondeltaEpoch: bigint;
   proposerIsLeft: boolean;
   proofbodyHash: string;
   initialProofbody: ProofBodyStructOutput;

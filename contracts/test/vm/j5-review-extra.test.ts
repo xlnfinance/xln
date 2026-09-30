@@ -90,7 +90,8 @@ describe("J5 review: a relayer starving the nested signature check of gas", () =
     const patch = kind === "c2r"
       ? { collateralToReserve: [{ counterparty: w.R.id, tokenId: w.TOKEN, amount: 10n, nonce: 1, sig }] }
       : { settlements: [{ leftEntity: w.L.id, rightEntity: w.R.id, diffs: d, forgiveDebtsInTokenIds: [], sig, nonce: 1 }] };
-    const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), ...patch } as never);
+    // a budget of 1M (the batch needs a fraction of it): the requirement is budget * 64/63 + the post-call reserve + the prelude, about 1.2M
+    const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), gasBudget: 1_000_000n, ...patch } as never);
     const nonce = (await w.chain.getEntityNonce(w.L.id)) + 1n;
     const iface = forkDepository.createInterface();
     const data = ethers.getBytes(iface.encodeFunctionData("processBatch", [w.L.id, encoded, signWith(w.L, w.batchHash(w.L.id, encoded, nonce)), nonce]));
@@ -101,9 +102,7 @@ describe("J5 review: a relayer starving the nested signature check of gas", () =
     };
     const full = await run(15_000_000n);
     expect(full).toMatchObject({ ok: true, failed: false, processed: true });
-    const intrinsic = 21_000n + 16n * BigInt(data.length);
-    const step = full.used / 300n;
-    const limits = Array.from({ length: 330 }, (_, i) => full.used + intrinsic + 20n * step - BigInt(i) * step);
+    const limits = Array.from({ length: 330 }, (_, i) => 200_000n + BigInt(i) * 4_000n);
     const outcomes = await limits.reduce<Promise<Awaited<ReturnType<typeof run>>[]>>(async (acc, limit) => [...(await acc), await run(limit)], Promise.resolve([]));
     return { full, outcomes };
   };

@@ -319,15 +319,14 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   /// @dev J5: an authenticated batch without dispute or reveal ops whose ops failed. None of them was applied; the entity
   /// nonce is consumed. `reason` is the selector of the revert that stopped the batch (zero when it carried none).
   event BatchFailed(bytes32 indexed entityId, uint256 indexed nonce, bytes4 reason);
-  /// @dev J5: the batch failed after the self-call got less than the batch gas floor, or with too little left to log the failure: the
-  ///      failure could be a relayer's gas choice. It reverts and takes no nonce.
+  /// @dev J5: processBatch was offered less gas than the batch signed for (its gasBudget, plus the gas to log a failure afterwards).
+  ///      The transaction reverts and takes no nonce: it is resubmitted with more gas, and estimation finds the limit.
   error BatchGasStarved();
-  /// @dev J5: the gas one batch may need, the budget every maximal batch is measured against (test/foundry/stress/BatchBounds.t.sol: the largest measures 14,763,601).
-  uint256 private constant BATCH_GAS_BUDGET = 15_000_000;
-  /// @dev J5: processBatch reports a failed batch only when it started the self-call with at least this much gas. The self-call gets 63/64
-  ///      of it, which is at least the budget, and no valid batch needs more, so a failure at or above the floor was not starvation.
-  ///      Tied to the budget: raise BATCH_GAS_BUDGET and the floor follows (the 2,000 covers the call itself).
-  uint256 private constant BATCH_GAS_FLOOR = BATCH_GAS_BUDGET * 64 / 63 + 2_000;
+  /// @dev J5: the fixed reserve that sits OUTSIDE the signed budget: what processBatch needs after the self-call returns (read the 4-byte
+  ///      reason, write the log, return), even when the ops burned their whole budget. The pre-call check demands budget * 64/63 + this.
+  ///      Measured at a small fraction of it, at the smallest allowed budget with a callee that burns everything
+  ///      (test/vm/j5-gas-budget.test.ts); the deploy gate reads the constant from the compiled build.
+  uint256 internal constant BATCH_POST_CALL_RESERVE = 30_000;
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
     bytes32 indexed entityId,
@@ -371,20 +370,34 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       // J5: from here the batch is authenticated and its nonce is spent. When its ops fail, the failure is undone as one
       // unit (the external self-call reverts its own writes) and reported, so the nonce does not stay open and stall
       // every urgent batch above it. A batch that reverts whole (see _revertsWhole) keeps the J2 rule instead.
-      uint256 gasBefore = gasleft();
-      try this.applyBatch(entityId, encodedBatch) {} catch (bytes memory reason) {
-        // A failure is reported only when the self-call was given the whole batch budget (BATCH_GAS_FLOOR), so it cannot have run
-        // out of gas at any depth (the ERC-1271 member of a counterparty hanko four frames down included): a relayer choosing the
-        // gas can never turn a good batch into a failed one and burn its nonce. Below the floor the transaction reverts, takes no
-        // nonce, and is resubmitted with more gas (estimation finds it). The 1/32 check keeps the same promise for the tail: enough
-        // gas is left to log the failure. An empty reason is then a real empty revert (a paused or blacklisted token that does
-        // `revert()`), not starvation: it is a failure of the batch like any other, reported as BatchFailed(0x00000000), so a token
-        // paused forever cannot stall the entity under F1.
-        // The batch's own hanko was checked above and reverted E4 without a nonce; a bad counterparty signature inside the ops
-        // (a settlement or C2R signed at an old account epoch) is a failure of the batch like any other, and spends the nonce,
-        // because under F1 the entity cannot sign a different batch at it.
-        if (gasBefore < BATCH_GAS_FLOOR || gasleft() < gasBefore / 32) revert BatchGasStarved();
-        emit BatchFailed(entityId, nonce, bytes4(reason));
+      //
+      // The ops run with EXACTLY the gas the batch signed for (batch.gasBudget), and the transaction must carry it (63/64 rule,
+      // plus the margin to log afterwards) or it reverts BatchGasStarved and takes no nonce. So a relayer's gas limit above that
+      // requirement changes nothing, and every failure the self-call reports (an out-of-gas frame, a callee that burns all its gas,
+      // an ERC-1271 member four frames down) is the signer's own budget or the batch's own doing: a failure of the batch like any
+      // other, BatchFailed with the nonce spent, because under F1 the entity cannot sign a different batch at it. The signer
+      // sets the budget from a simulation at the head (Runtime rule), so a batch that is sound at the head lands.
+      // The batch's own hanko was checked above and reverted E4 without a nonce; a bad counterparty signature inside the ops
+      // (a settlement or C2R signed at an old account epoch) is a failure of the batch like any other.
+      bytes memory call_ = abi.encodeCall(this.applyBatch, (entityId, encodedBatch));
+      uint256 budget = batch.gasBudget;
+      if (gasleft() < budget * 64 / 63 + BATCH_POST_CALL_RESERVE) revert BatchGasStarved();
+      bool applied;
+      bytes4 reason;
+      assembly ("memory-safe") {
+        applied := call(budget, address(), 0, add(call_, 32), mload(call_), 0, 0)
+        // Only the 4-byte selector is copied: a callee cannot bill this frame for a large revert payload (return bomb).
+        // A short reason is zero-padded, an empty one is 0x00000000 (a paused or blacklisted token that does `revert()`).
+        if iszero(applied) {
+          mstore(0, 0)
+          let size := returndatasize()
+          if gt(size, 4) { size := 4 }
+          returndatacopy(0, 0, size)
+          reason := and(mload(0), shl(224, 0xffffffff))
+        }
+      }
+      if (!applied) {
+        emit BatchFailed(entityId, nonce, reason);
         return;
       }
     }

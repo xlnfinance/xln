@@ -5,7 +5,7 @@ const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs'
 const path = require('node:path');
 
 const { buildFoundationTokenListing, foundationEntityId } = require('./foundation-hanko.cjs');
-const { assertResponseFloor, isNamedTestnet } = require('./deploy-gate.cjs');
+const { assertDeployGate, isNamedTestnet } = require('./deploy-gate.cjs');
 const { broadcastTronTransaction } = require('../../core/jurisdiction/adapter/operations/tron-broadcast.ts');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -346,7 +346,7 @@ const tronChainOf = (tronWeb) => {
 
 const deployTronContract = async (tronWeb, contractName, parameters = [], libraries = {}, preparedTransaction) => {
   // Exported and called directly by other scripts, so it gates on its own, before it builds or signs anything.
-  assertResponseFloor([tronChainOf(tronWeb)]);
+  assertDeployGate([tronChainOf(tronWeb)]);
   const artifact = loadTronArtifact(contractName);
   const bytecode = linkBytecode(artifact, libraries);
   const options = {
@@ -402,7 +402,7 @@ const deployTronContract = async (tronWeb, contractName, parameters = [], librar
 
 const deployTron = async (chain, options) => {
   // Exported and called directly by other scripts, so it gates on its own before any RPC or key.
-  assertResponseFloor([chain]);
+  assertDeployGate([chain]);
   const preflight = await preflightChain(chain);
   const { TronWeb } = require('tronweb');
   const readOnlyTronWeb = new TronWeb({
@@ -659,7 +659,7 @@ const main = async () => {
     if (options.skipCompile) throw new Error('Deploy gate: --skip-compile is refused for any chain that is not a named testnet');
     run('bunx', ['--bun', 'hardhat', 'compile']);
   }
-  assertResponseFloor(selected);
+  assertDeployGate(selected);
   assertFreshDeploymentTargets(options.profile, selected, options);
   const results = [];
   for (const chain of selected) {

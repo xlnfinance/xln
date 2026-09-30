@@ -83,6 +83,7 @@ contract ForkChangesTest is XlnFixture {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[counter],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), _key()),
       proposerIsLeft: counter == L,
       proofbodyHash: pbHash,
       initialProofbody: pb,

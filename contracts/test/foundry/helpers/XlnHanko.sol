@@ -14,6 +14,9 @@ import {Vm} from "forge-std/Vm.sol";
 ///      EntityProvider has no record for the id, so a single EOA key is a full
 ///      entity without any registration transaction.
 library XlnHanko {
+  /// @dev J5: the gas budget the Foundry helpers sign into every batch: the measured maximum batch (BatchBounds.t.sol: 14,763,601 of it).
+  uint64 internal constant BATCH_GAS_BUDGET = 15_000_000;
+
   /// @notice J5: a processBatch that returned may still have applied nothing. True when the recorded logs hold BatchFailed.
   function batchFailed(Vm.Log[] memory logs) internal pure returns (bool) {
     bytes32 topic = keccak256("BatchFailed(bytes32,uint256,bytes4)");
@@ -187,6 +190,7 @@ library XlnHanko {
   }
 
   function emptyBatch() internal pure returns (Batch memory batch) {
+    batch.gasBudget = BATCH_GAS_BUDGET;
     batch.reserveToReserve = new ReserveToReserve[](0);
     batch.reserveToCollateral = new ReserveToCollateral[](0);
     batch.collateralToReserve = new CollateralToReserve[](0);

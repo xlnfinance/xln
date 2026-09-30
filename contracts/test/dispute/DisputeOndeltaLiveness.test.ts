@@ -187,6 +187,7 @@ describe('dispute ondelta liveness', function () {
         sig: innerHanko,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
@@ -259,6 +260,7 @@ describe('dispute ondelta liveness', function () {
           sig: innerHanko,
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+          ondeltaEpoch: 0n,
           starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }));
@@ -336,6 +338,7 @@ describe('dispute ondelta liveness', function () {
         sig: dispute.innerHanko,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       })),
     }));
@@ -423,6 +426,7 @@ describe('dispute ondelta liveness', function () {
         sig: innerHanko,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
@@ -474,6 +478,7 @@ describe('dispute ondelta liveness', function () {
           sig: buildSingleSignerHanko(creditor.entityId, innerHash, creditor.privateKey),
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }));

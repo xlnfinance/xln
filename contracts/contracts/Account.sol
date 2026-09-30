@@ -79,6 +79,8 @@ library Account {
   uint8 internal constant DISPUTE_SKIP_COUNTER_SUPERSEDED = 6;     // counter: a newer counter is already registered
   uint8 internal constant DISPUTE_SKIP_COUNTER_REGISTERED = 7;     // counter: this exact body is already registered
   uint8 internal constant DISPUTE_SKIP_FINAL_EVIDENCE_OUTDATED = 8; // finalize: the window is over and the evidence is not the state that settles
+  // 9 and 10 are the reveal reasons (HashLadderRegistry.sol)
+  uint8 internal constant DISPUTE_SKIP_EPOCH_MOVED = 11;            // start: signed at an ondelta epoch the Account has left
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
@@ -1831,12 +1833,16 @@ library Account {
     // start applied, a settlement or finalize since) is skipped, not reverted. It is judged before the evidence
     // signature on purpose: a stale start's signature is bound to an epoch or nonce the Account has left, so it would
     // fail as a bad signature and revert the batch for a reason that is only staleness.
-    if (params.nonce <= _accounts[acct_key].nonce) {
-      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED, params.nonce);
-      return;
-    }
-    if (_accounts[acct_key].disputeHash != bytes32(0)) {
-      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, DISPUTE_SKIP_DISPUTE_ACTIVE, params.nonce);
+    AccountInfo storage account = _accounts[acct_key];
+    uint8 skipReason = 255;
+    if (params.nonce <= account.nonce) skipReason = DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED;
+    else if (account.disputeHash != bytes32(0)) skipReason = DISPUTE_SKIP_DISPUTE_ACTIVE;
+    // S1: the same for the epoch. A start signed at another ondelta epoch than the Account's fails its signature for good (epochs only
+    // grow), which would revert the batch and pin the entity's nonce; carried in the start, it is judged first and skipped.
+    // The signature below is then checked at the Account's own epoch, so a bad one is a real, bytes-only error.
+    else if (params.ondeltaEpoch != account.ondeltaEpoch) skipReason = DISPUTE_SKIP_EPOCH_MOVED;
+    if (skipReason != 255) {
+      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, skipReason, params.nonce);
       return;
     }
 

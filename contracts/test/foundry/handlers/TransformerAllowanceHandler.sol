@@ -289,6 +289,7 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: entityOf[cp],
       nonce: g.nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,

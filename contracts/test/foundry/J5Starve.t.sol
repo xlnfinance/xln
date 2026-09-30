@@ -9,10 +9,11 @@ import {ERC20Mock} from "../../contracts/ERC20Mock.sol";
 import {XlnHanko} from "./helpers/XlnHanko.sol";
 import "../../contracts/Types.sol";
 
-// G1 and the empty-reason policy of J5 (PR #54), from the re-review at d645df4 (review/pr-54/J5Starve.t.sol), adapted to the gas floor:
-// processBatch reports a failed batch only when the self-call started with at least BATCH_GAS_FLOOR (15,240,095), so a relayer choosing
-// the gas can never turn a good batch into a BatchFailed, however deep the starved frame sits. An empty revert reason is then a real
-// empty revert, reported as BatchFailed(0x00000000) with the nonce spent, so a paused or blacklisted token cannot stall the entity.
+// G1 and the empty-reason policy of J5 (PR #54), from the re-review at d645df4 (review/pr-54/J5Starve.t.sol), adapted to the signed gas budget:
+// the batch carries its own gasBudget, processBatch requires gasleft() >= budget * 64/63 + BATCH_POST_CALL_RESERVE before the self-call (else it
+// reverts BatchGasStarved and takes no nonce) and gives the ops exactly the budget, so a relayer choosing the gas can never turn a good batch
+// into a BatchFailed, however deep the starved frame sits. An empty revert reason is a real empty revert, reported as BatchFailed(0x00000000)
+// with the nonce spent, so a paused or blacklisted token cannot stall the entity.
 
 /// A stand-in EntityProvider whose hanko check costs a chosen amount of gas: a stand-in for a counterparty whose board is large
 /// (many signatures). hanko = abi.encode(entityId, gasToBurn). It is what the review needs to ask "can a relayer choose the gas so
@@ -66,8 +67,8 @@ contract J5EmptyReasonTest is Test {
     (ok, ret) = address(dep).call(abi.encodeCall(dep.processBatch, (A, abi.encode(b), abi.encode(A, uint256(0)), nonce)));
   }
 
-  /// A batch whose op fails with an empty reason for a reason unrelated to gas (a paused token): with the gas floor an empty reason
-  /// cannot be starvation, so it is a failure of the batch like any other: BatchFailed(0x00000000), nonce spent, nothing moves.
+  /// A batch whose op fails with an empty reason for a reason unrelated to gas (a paused token): the ops ran with their whole budget, so
+  /// an empty reason cannot be starvation, and it is a failure of the batch like any other: BatchFailed(0x00000000), nonce spent, nothing moves.
   function test_pausedNftWithdrawalIsABatchFailedWithReasonZero() public {
     Batch memory dp = XlnHanko.emptyBatch();
     dp.externalTokenToReserve = new ExternalTokenToReserve[](1);
@@ -110,6 +111,9 @@ contract J5StarveTest is Test {
   ERC20Mock erc20;
   bytes32 constant A = bytes32(uint256(1));
   bytes32 constant B = bytes32(uint256(2));
+  /// The budget these batches sign (they use under 700k), and what the transaction must carry for it: budget * 64/63 + BATCH_POST_CALL_RESERVE (30,000).
+  uint64 constant BUDGET = 1_000_000;
+  uint256 constant REQUIREMENT = uint256(BUDGET) * 64 / 63 + 30_000;
 
   function setUp() public {
     ep = new HeavyEntityProvider();
@@ -122,7 +126,7 @@ contract J5StarveTest is Test {
     EntityAmount[] memory pairs = new EntityAmount[](1);
     pairs[0] = EntityAmount({ entity: B, amount: 100 });
     b.reserveToCollateral[0] = ReserveToCollateral({ tokenId: 1, receivingEntity: A, pairs: pairs });
-    _send(b, 1, 0, 15_000_000);
+    _send(b, 1, 0, 16_000_000);
   }
 
   function _send(Batch memory b, uint256 nonce, uint256, uint256 g) internal returns (bool ok) {
@@ -132,6 +136,7 @@ contract J5StarveTest is Test {
 
   function _c2r(uint256 burn, bool settlement) internal view returns (bytes memory data) {
     Batch memory b = XlnHanko.emptyBatch();
+    b.gasBudget = BUDGET;
     bytes memory sig = abi.encode(B, burn);
     if (settlement) {
       b.settlements = new Settlement[](1);
@@ -168,7 +173,8 @@ contract J5StarveTest is Test {
     assertTrue(ok);
     assertFalse(XlnHanko.batchFailed(vm.getRecordedLogs()), "the good batch lands at full gas");
     vm.revertToState(snap0);
-    (uint256 soft, uint256 landed, uint256 first, uint256 reverted) = _sweep(data, used + 30_000, 2_000);
+    assertLt(used, BUDGET, "the budget is a ceiling above the need");
+    (uint256 soft, uint256 landed, uint256 first, uint256 reverted) = _sweep(data, REQUIREMENT + 200_000, 2_000);
     emit log_named_string("case", label);
     emit log_named_uint("  burn (heavy board stand-in)", burn);
     emit log_named_uint("  full gas used", used);
@@ -177,6 +183,8 @@ contract J5StarveTest is Test {
     emit log_named_uint("  landed", landed);
     emit log_named_uint("  reverted", reverted);
     assertEq(soft, 0, "a good batch was reported as BatchFailed because of the gas the relayer chose");
+    assertGt(landed, 0, "from the requirement up it lands");
+    assertGt(reverted, 0, "below it, it reverts");
   }
 
   function test_c2r_burn0() public { _run(0, false, "c2r"); }
@@ -186,41 +194,35 @@ contract J5StarveTest is Test {
   function test_settlement_burn150k() public { _run(150_000, true, "settlement"); }
   function test_settlement_burn400k() public { _run(400_000, true, "settlement"); }
 
-  /// A failing batch (the counterparty signature names the wrong entity: E4) at every gas limit below the floor never soft-fails: it
-  /// reverts and takes no nonce. This is the property the floor buys, for a check that burns 400k, at any depth.
-  function test_failingBatchNeverSoftFailsBelowTheFloor() public {
+  /// A failing batch (the counterparty signature names the wrong entity: E4) at every gas limit below the requirement never soft-fails: it
+  /// reverts and takes no nonce; from the requirement (plus the outer prelude) up it is reported, always. This is the property the signed budget
+  /// buys, for a check that burns 400k, at any depth.
+  function test_failingBatchNeverSoftFailsBelowTheRequirement() public {
     Batch memory b = XlnHanko.emptyBatch();
+    b.gasBudget = BUDGET;
     b.collateralToReserve = new CollateralToReserve[](1);
     b.collateralToReserve[0] = CollateralToReserve({ counterparty: B, tokenId: 1, amount: 10, nonce: 1, sig: abi.encode(bytes32(uint256(99)), uint256(400_000)) });
     bytes memory data = abi.encodeCall(dep.processBatch, (A, abi.encode(b), abi.encode(A, uint256(0)), 2));
-    uint256 soft;
     uint256 reverted;
-    for (uint256 g = 300_000; g <= 15_200_000; g += 100_000) {
+    uint256 reported;
+    for (uint256 g = 300_000; g <= REQUIREMENT + 400_000; g += 5_000) {
       uint256 snap = vm.snapshotState();
       vm.recordLogs();
       (bool ok, bytes memory ret) = address(dep).call{gas: g}(data);
-      if (ok && XlnHanko.batchFailed(vm.getRecordedLogs())) soft++;
-      else if (!ok) {
-        reverted++;
+      bool failedSoft = ok && XlnHanko.batchFailed(vm.getRecordedLogs());
+      if (g < REQUIREMENT) {
+        assertFalse(ok, "under the requirement the transaction reverts");
         assertTrue(ret.length == 0 || bytes4(ret) == Depository.BatchGasStarved.selector, "a revert is starvation, never a batch error");
         assertEq(dep.entityNonces(A), 1, "and takes no nonce");
+        reverted++;
+      } else if (g >= REQUIREMENT + 200_000) {
+        assertTrue(failedSoft, "with the budget carried the failure is reported");
+        assertEq(dep.entityNonces(A), 2, "and the nonce is spent");
+        reported++;
       }
       vm.revertToState(snap);
     }
-    assertEq(soft, 0, "a relayer picked a gas limit under the floor and the batch was reported failed");
     assertGt(reverted, 100);
-  }
-
-  /// With the whole budget offered the same failing batch is reported: BatchFailed(E4), nonce spent.
-  function test_failingBatchAtTheFloorIsReported() public {
-    Batch memory b = XlnHanko.emptyBatch();
-    b.collateralToReserve = new CollateralToReserve[](1);
-    b.collateralToReserve[0] = CollateralToReserve({ counterparty: B, tokenId: 1, amount: 10, nonce: 1, sig: abi.encode(bytes32(uint256(99)), uint256(400_000)) });
-    vm.recordLogs();
-    (bool ok,) = address(dep).call{gas: 15_600_000}(abi.encodeCall(dep.processBatch, (A, abi.encode(b), abi.encode(A, uint256(0)), 2)));
-    Vm.Log[] memory logs = vm.getRecordedLogs();
-    assertTrue(ok);
-    assertTrue(XlnHanko.batchFailed(logs));
-    assertEq(dep.entityNonces(A), 2);
+    assertGt(reported, 10);
   }
 }

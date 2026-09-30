@@ -506,6 +506,7 @@ describe('EntityProvider board rotation grace', function () {
       disputeNonce,
       initialProofbodyHash,
     );
+    const startEpoch = await epochOfAccountKey(depository, accountKey);
     const disputeStart = (sig: string) => emptyBatch({
       disputeStarts: [{
         counterentity: entityId,
@@ -516,6 +517,7 @@ describe('EntityProvider board rotation grace', function () {
         sig,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: startEpoch,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     });
@@ -554,6 +556,7 @@ describe('EntityProvider board rotation grace', function () {
           sig: buildSingleSignerHanko(peer, historicalStartHash, peerKey),
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }),
@@ -639,6 +642,7 @@ describe('EntityProvider board rotation grace', function () {
         ),
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));

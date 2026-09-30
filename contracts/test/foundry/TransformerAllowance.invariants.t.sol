@@ -236,6 +236,7 @@ contract TransformerAllowanceInvariants is XlnFixture {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[right],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: startProposerIsLeft,
       proofbodyHash: faultHash,
       initialProofbody: faultPb,

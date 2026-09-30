@@ -612,6 +612,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -798,6 +799,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -895,6 +897,7 @@ contract DepositoryHandler is CommonBase, StdCheats, StdUtils {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,

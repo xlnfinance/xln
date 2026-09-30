@@ -211,26 +211,26 @@ describe("J5 a stale dispute op is a dispute op: it shares no batch with a payme
 });
 
 describe("J5 a relayer cannot fail a good batch by starving it of gas", () => {
-  test("at every gas limit the batch either reverts or lands whole; never a BatchFailed", async () => {
+  test("at every gas limit the batch either reverts or lands whole, and landing is monotone in the limit; never a BatchFailed", async () => {
     const { w, A, pay } = await world();
     const iface = forkDepository.createInterface();
-    // forty small payments: enough work that the inner call's share of the gas matters
-    const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), reserveToReserve: Array.from({ length: 40 }, () => pay(1n)) } as never);
+    // forty small payments under a budget of 1M (they use a fraction of it): enough work that the inner call's share of the gas matters
+    const encoded = w.encodeJBatch({ ...w.createEmptyBatch(), gasBudget: 1_000_000n, reserveToReserve: Array.from({ length: 40 }, () => pay(1n)) } as never);
     const data = ethers.getBytes(iface.encodeFunctionData("processBatch", [A.id, encoded, signWith(A, w.batchHash(A.id, encoded, 1n)), 1n]));
     const run = async (gasLimit: bigint) => {
       const r = await w.vm.runReadOnlyCall({ to: w.vm.depositoryAddress, caller: w.vm.deployerAddress, data, gasLimit });
       const topics = (r.execResult.logs ?? []).map((l: [Uint8Array, Uint8Array[], Uint8Array]) => ethers.hexlify(l[1][0]!));
-      return { ok: r.execResult.exceptionError === undefined, failed: topics.includes(BATCH_FAILED), processed: topics.includes(BATCH_PROCESSED), used: BigInt(r.execResult.executionGasUsed) };
+      return { limit: gasLimit, ok: r.execResult.exceptionError === undefined, failed: topics.includes(BATCH_FAILED), processed: topics.includes(BATCH_PROCESSED), used: BigInt(r.execResult.executionGasUsed) };
     };
     const full = await run(15_000_000n);
     expect(full).toMatchObject({ ok: true, failed: false, processed: true });
-    // scan from well under the need to the need itself, densely near it (the EIP-150 window is about 1/64 of the gas)
-    const intrinsic = 21_000n + 16n * BigInt(data.length);
-    const step = full.used / 500n;
-    const limits = Array.from({ length: 300 }, (_, i) => full.used + intrinsic + 20n * step - BigInt(i) * step);
+    expect(full.used).toBeLessThan(1_000_000n); // the budget really is a ceiling, not the need
+    // scan from far under to well over the requirement (budget * 64/63 + the post-call reserve + the prelude)
+    const limits = Array.from({ length: 300 }, (_, i) => 400_000n + BigInt(i) * 3_400n);
     const outcomes = await limits.reduce<Promise<Awaited<ReturnType<typeof run>>[]>>(async (acc, limit) => [...(await acc), await run(limit)], Promise.resolve([]));
     expect(outcomes.filter((o) => o.ok && o.failed)).toEqual([]);
-    expect(outcomes.some((o) => o.ok && o.processed)).toBe(true);
-    expect(outcomes.some((o) => !o.ok)).toBe(true);
+    const firstOk = outcomes.findIndex((o) => o.ok);
+    expect(firstOk).toBeGreaterThan(0); // the low limits revert
+    expect(outcomes.slice(firstOk).every((o) => o.ok && o.processed)).toBe(true); // from the requirement up, every limit lands whole
   }, 300_000);
 });

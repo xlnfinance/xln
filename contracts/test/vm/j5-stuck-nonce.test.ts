@@ -14,8 +14,8 @@ import { DeltaTransformer__factory as forkTransformer } from "../../typechain-ty
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const WINDOWS = 60;
 /** `op` and `reason` of Account.sol DisputeOpSkipped. */
-const OP = { counter: 1n, finalize: 2n } as const;
-const REASON = { disputeMoved: 3n, counterSuperseded: 6n, finalizeEvidenceOutdated: 8n } as const;
+const OP = { start: 0n, counter: 1n, finalize: 2n } as const;
+const REASON = { disputeMoved: 3n, counterSuperseded: 6n, finalizeEvidenceOutdated: 8n, epochMoved: 11n } as const;
 
 const world = async () => {
   const w = await boot("j5-stuck");
@@ -145,5 +145,44 @@ describe("S1 a counter that can never register is skipped", () => {
     expect(await w.submit(B, { counterDisputes: [counterOp(rival, 2)], revealSecrets: [reveal] })).toBe("ok");
     expect(skipped()).toEqual([{ op: OP.counter, reason: REASON.counterSuperseded, nonce: 2n }]);
     expect(await revealedAt()).not.toBe(0n);
+  }, 300_000);
+});
+
+describe("S1' a start signed at an old account epoch is skipped, and does not pin the nonce", () => {
+  /** A signs a start on the newest state B signed (nonce 5, epoch e0) and hands the batch to its relayer B; B lands a finalize that advances the epoch first. */
+  const staleStart = async (declared: (e0: bigint, e1: bigint) => bigint) => {
+    const { w, A, B, acct, aIsLeft, body, skipped } = await world();
+    const e0 = await acct.epochOf();
+    const p5: Body = acct.body(-10n, WINDOWS);
+    const sig = acct.proofSig(B, e0, 5, !aIsLeft, p5);
+    // the declared epoch is only known once the finalize has moved it, but the bytes are signed now: build them after, from the same signature
+    w.at(100);
+    expect(await w.start(B, A, 1, aIsLeft, body, acct.proofSig(A, e0, 1, aIsLeft, body))).toBe("ok");
+    w.at(100 + 2 * WINDOWS + 1);
+    expect(await w.finalize(B, A, { nonce: 1, body, startedByLeft: !aIsLeft }, { nonce: 1, proposerIsLeft: aIsLeft, body, sig: "0x" })).toBe("ok");
+    const e1 = await acct.epochOf();
+    expect(e1).toBe(e0 + 1n); // the finalize advanced the epoch; the stored account nonce is now 2
+    const n = (await w.chain.getEntityNonce(A.id)) + 1n;
+    const held = w.encodeJBatch({ ...w.createEmptyBatch(), disputeStarts: [w.startOp(B, 5, !aIsLeft, p5, sig, declared(e0, e1))] } as never);
+    const heldSig = signWith(A, w.batchHash(A.id, held, n));
+    return { w, A, n, held, heldSig, skipped };
+  };
+
+  test("the reviewer's case: the released start is a skip (epoch moved), the nonce is spent and A moves on", async () => {
+    const { w, A, n, held, heldSig, skipped } = await staleStart((e0) => e0);
+    expect(await w.sendRaw(A.id, held, heldSig, n)).toBe("ok"); // before: REVERT E4() for good
+    expect(skipped()).toEqual([{ op: OP.start, reason: REASON.epochMoved, nonce: 5n }]);
+    expect(await w.chain.getEntityNonce(A.id)).toBe(n);
+    // the batch at n + 1 lands (before: E2 until the end of time), and the old bytes stay dead
+    expect(await w.submit(A, {})).toBe("ok");
+    expect(await w.sendRaw(A.id, held, heldSig, n)).toBe("REVERT E2()");
+    w.at(100 + 30 * 24 * 3600);
+    expect(await w.sendRaw(A.id, held, heldSig, n)).toBe("REVERT E2()");
+  }, 300_000);
+
+  test("a start that declares the CURRENT epoch over a signature made at the old one is a lie about its own bytes: E4, the nonce stays open", async () => {
+    const { w, A, n, held, heldSig } = await staleStart((_e0, e1) => e1);
+    expect(await w.sendRaw(A.id, held, heldSig, n)).toBe("REVERT E4()");
+    expect(await w.chain.getEntityNonce(A.id)).toBe(n - 1n); // bytes-only failure: the signer sees it by simulating, and nothing is pinned
   }, 300_000);
 });

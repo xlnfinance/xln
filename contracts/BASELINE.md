@@ -318,3 +318,42 @@ sweep and pass; code and tests as committed):
 - `test/vm/`: j5-batch-failed 13, j5-review-extra 8, j2-skip-stale-dispute-ops 12, j2-review-extra 16, c1-epoch 5,
   c2-batch-entity 3, h1-htlc-deadline 5, h2-window-floor 3, h3-retired-board-cap 11, h4-deposit-during-dispute 4, vectors 8;
   `test/gate/`: contract-size 5, deploy-gate 23.
+
+## After the third round of J5 (signed gas budget, epoch in the dispute start, deploy gate)
+
+The second reviewer's third pass and the first reviewer's re-review at 793e6bc (`review/j5-second-review-2026-09-29.md`,
+`review/pr-54-review-2026-09-29.md`) showed that a fixed gas floor is the wrong constant. Decisions are in
+`plan/contracts-decisions.md`, J5 section, "Signed gas budget" and "Third round of #54".
+
+- **Signed gas budget.** `Batch.gasBudget` (`uint64`, first field, so it is signed). `processBatch` requires
+  `gasleft() >= budget * 64 / 63 + BATCH_POST_CALL_RESERVE` (30,000, outside the budget), else `BatchGasStarved`, no nonce. The
+  self-call gets exactly `budget`, so once it started every failure inside it (out-of-gas and gas-burning callees included) is
+  `BatchFailed`. The floor, its tail check and the `gasBefore / 32` guard are deleted. `DepositoryBounds.assertBatch` rejects a
+  budget under `MIN_BATCH_GAS_BUDGET` (500,000) with E10; batches that revert whole ignore the budget but keep the minimum.
+- **Return bomb.** A bare assembly `call` reads only the first 4 bytes of the revert data; 1.5, 2 and 3 MB payloads give `BatchFailed`
+  with the nonce spent and the next batch landing (`j5-gas-callee`, `J5BloatTest`).
+- **Post-call reserve.** Measured post-call code stays under 30,000 / 5 gas even after a callee burns everything, at the smallest allowed
+  budget (`J5ReserveTest`, `J5BurnerTest`, `j5-gas-callee` R). At the minimum budget the retained 1/63 alone covers it, so the
+  reserve is belt and braces (removing it is not killed by a test, by design).
+- **Budget drift accepted.** A batch made dearer by a third party between simulation and inclusion becomes `BatchFailed`, nonce spent,
+  entity not stalled. Spec rule R-SIMULATE: sign only after a successful simulation at the head, add a named margin, never exceed the
+  chain's transaction gas cap, never sign a time-gated op before its gate opens.
+- **Epoch in the start (S1').** `InitialDisputeProof.ondeltaEpoch`; a start signed at an old epoch is skipped with
+  `DisputeOpSkipped` reason 11, judged before the signature. Declaring the current epoch over an old signature is a real E4.
+- **Deploy gate.** `assertDeployGate` = response-window floor, then `assertBatchGasCap`: required tx gas
+  `HANKO_PRELUDE_GAS (4,600,000) + ceil(500,000 * 64 / 63) + 30,000` = 5,137,943, checked against a per-chain cap table (EIP-7825's
+  16,777,216 for chain ids 1 and 11155111; unknown chains refused on a mainnet, allowed on a named testnet). Supported board size: 128
+  signing validators.
+- **Measured** (outer hanko check, EOA validators all signing; `j5-gas-prelude`): 1 validator 64,391 gas, 64 validators 1,348,965, 128
+  validators 4,522,148 (superlinear); a failing batch is reported at 602,327, 1,886,901 and 5,060,084. A board of 256 cannot be
+  registered in the rig. F2 (two 8-member ERC-1271 boards) needs 15,623,512 gas, fails at a 15M budget and lands from 16,343,968 at a
+  16M budget (`j5-gas-budget`).
+- **Sizes** (limit 24,576): Depository 23,116, Account 24,427 (149 under; the epoch skip cost 27 bytes).
+
+Results (local runs, sandbox, forge 1.7.1, one file or suite per process): Hardhat `test/dispute`, `test/governance`, `test/protocol` all
+green (three tests read the live epoch now: `Depository-part-1` 66, `BoardRotationGrace` 6). vm: c1-epoch 5, c2 3, h1 5, h2 3, h3 11, h4 4,
+j2-review-extra 16, j2-skip 12, j5-batch-failed 15, j5-cosign-veto 2, j5-gas-budget 6, j5-gas-callee 6, j5-gas-prelude 3,
+j5-review-extra 8, j5-stuck-nonce 9, j5b-review-extra 12, vectors 8. gate: contract-size 5, deploy-gate 29. Foundry: every suite ok
+(J5Starve 8, J5Budget 1+4+6+4, BatchBounds 13 with the two new minimum-budget tests). Vectors regenerated (`lifecycle.json` only).
+Mutants killed: budget ignored (`j5-gas-budget`, `j5-gas-callee`), `64/63` dropped (`j5-gas-budget`), minimum budget removed
+(`BatchBounds`). The Foundry J5 suites alone do not kill the first two; the vm tests do.

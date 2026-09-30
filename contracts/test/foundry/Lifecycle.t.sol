@@ -597,7 +597,7 @@ contract LifecycleTest is XlnFixture {
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: entity[right], nonce: nonce, proposerIsLeft: false, proofbodyHash: hash,
+      counterentity: entity[right], nonce: nonce, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(entity[left], entity[right])), proposerIsLeft: false, proofbodyHash: hash,
       initialProofbody: proof, watchSeed: proof.watchSeed, sig: _hanko(right, signedHash),
       starterInitialArguments: "", starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
     });
@@ -670,7 +670,8 @@ contract LifecycleTest is XlnFixture {
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
+      counterentity: other, nonce: nonce, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
+      proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash,
       initialProofbody: pb, watchSeed: seed, sig: _hanko(1, h),
       starterInitialArguments: "", starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
     });
@@ -709,6 +710,7 @@ contract LifecycleTest is XlnFixture {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -799,7 +801,8 @@ contract LifecycleTest is XlnFixture {
     Batch memory b = XlnHanko.emptyBatch();
     b.disputeStarts = new InitialDisputeProof[](1);
     b.disputeStarts[0] = InitialDisputeProof({
-      counterentity: other, nonce: nonce2, proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash2,
+      counterentity: other, nonce: nonce2, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(me, other)),
+      proposerIsLeft: proposerIsLeft, proofbodyHash: pbHash2,
       initialProofbody: pb, watchSeed: seed2, sig: _hanko(1, h),
       starterInitialArguments: "", starterCounterArguments: "",
       starterCounterProofCommitment: bytes32(0)
