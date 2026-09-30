@@ -85,7 +85,6 @@ export const walk = async (
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
       const diffs = await lane.tick(step.runtimeTxs, step.users);
-      await w.syncEpochs();
       // P2 and P4 hold of the rewrite whatever og did (rig/properties.ts)
       const checked = checkProperties(lane.runtime(), signed);
       const broken = checked.violations.map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);

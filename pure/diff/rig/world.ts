@@ -21,7 +21,7 @@ import {
 import { registrationEvidenceKey } from "../../../core/jurisdiction/machine/registration-evidence/index.ts";
 import { unwrap } from "../../xln_run.ts";
 import { contractSet } from "./contracts.ts";
-import { chainEpoch, NOTHING_SENT, shimBatchSubmission, type Sent } from "./fork-shim.ts";
+import { NOTHING_SENT, shimBatchSubmission, type Sent } from "./fork-shim.ts";
 import {
   bootChain,
   createLane,
@@ -161,10 +161,8 @@ export type World = {
   readonly sent: Sent;
   /** Whether this world draws a dispute only on an Account whose epoch has moved (see WorldOptions). */
   readonly disputeAfterEpoch: boolean;
-  /** The Account epoch the chain held at the last `syncEpochs` (C1; always 0 under og's own contracts, which have none). */
+  /** The Account epoch the chain's AccountEpochAdvanced events last said (C1; always 0 under og's own contracts, which have none). */
   readonly epochOf: (x: number, y: number) => bigint;
-  /** Read every Account's epoch from the chain; the walk calls it after each frame, so `epochOf` is current for the next draw. */
-  readonly syncEpochs: () => Promise<void>;
   readonly close: () => Promise<void>;
 };
 
@@ -316,14 +314,6 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
     ids.flatMap((_, x) => importsOf(x)),
     SPOKES.map((s) => user(s, [open(s, HUB, BigInt(1 + ri(20_000)))])),
   ];
-  const epochKey = (x: number, y: number): string => (x < y ? `${x}/${y}` : `${y}/${x}`);
-  const epochs = new Map<string, bigint>();
-  const syncEpochs = async (): Promise<void> => {
-    if (contractSet() !== "contracts") return;
-    const held = ids.flatMap((_, x) => ids.flatMap((__, y) => (x < y && hasAccount(x, y) ? [[x, y] as const] : [])));
-    const read = await Promise.all(held.map(async ([x, y]) => [epochKey(x, y), await chainEpoch(chain.getBrowserVM(), ids[x]!, ids[y]!)] as const));
-    read.forEach(([key, epoch]) => epochs.set(key, epoch));
-  };
   const close = async (): Promise<void> => {
     await accountWorkers.close();
     await closeRuntimeDb(env);
@@ -366,8 +356,7 @@ export const openWorld = async (seed: number, name: string, options: WorldOption
     refusals: () => sent(),
     sent,
     disputeAfterEpoch: options.disputeAfterEpoch === true,
-    epochOf: (x, y) => epochs.get(epochKey(x, y)) ?? 0n,
-    syncEpochs,
+    epochOf: (x, y) => sent.epochOf(ids[x]!, ids[y]!),
     close,
   };
 };

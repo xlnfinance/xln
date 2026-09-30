@@ -269,6 +269,8 @@ export type Refusals = (() => readonly string[]) & { readonly landed: () => numb
 export type Sent = Refusals & {
   readonly starts: () => readonly StartSent[];
   readonly peakGas: () => bigint;
+  /** The epoch of the Account between two Entities as the chain's AccountEpochAdvanced events last said (0 before the first). */
+  readonly epochOf: (a: string, b: string) => bigint;
 };
 
 /** What a world without the shim (og's own contracts) saw: nothing. */
@@ -276,6 +278,7 @@ export const NOTHING_SENT: Sent = Object.assign(() => [] as readonly string[], {
   landed: () => 0,
   starts: (): readonly StartSent[] => [],
   peakGas: (): bigint => 0n,
+  epochOf: (): bigint => 0n,
 });
 
 /**
@@ -343,6 +346,7 @@ export const shimBatchSubmission = (
   const refused: string[] = [];
   const starts: StartSent[] = [];
   const spent: bigint[] = [];
+  const advanced = new Map<string, bigint>();
   let landed = 0;
   // processBatch is one transaction, so the gas it spent is whatever the provider's last transaction spent when it returns
   let lastSpent = 0n;
@@ -372,6 +376,9 @@ export const shimBatchSubmission = (
         const result = await original(encodedBatch, hanko, nonce, ...rest);
         landed += 1;
         spent.push(lastSpent);
+        (result as readonly { name: string; args: Record<string, unknown> }[])
+          .filter((event) => event.name === "AccountEpochAdvanced")
+          .forEach((event) => advanced.set(accountKey(String(event.args["left"]), String(event.args["right"])), BigInt(String(event.args["ondeltaEpoch"]))));
         return result;
       } catch (error) {
         refused.push(`${method} refused: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`);
@@ -384,5 +391,6 @@ export const shimBatchSubmission = (
     landed: () => landed,
     starts: (): readonly StartSent[] => starts,
     peakGas: (): bigint => spent.reduce((most, gas) => (gas > most ? gas : most), 0n),
+    epochOf: (a: string, b: string): bigint => advanced.get(accountKey(a, b)) ?? 0n,
   });
 };
