@@ -29,11 +29,14 @@ spec/
   runtime/tick.scm         the Runtime tick: apply, commit, flush, crash, replay; what may halt
   runtime/bugs/*.scm       planted Runtime bugs
   entity/routing.scm       a hub forwarding one HTLC: HOP margin (R1), fail-back wait (R2), a dispute publishes every known secret (R3)
+  transport/link.scm       the node-to-node link (T0): a message, the weakest channel, addressing, sender check, refusal never halts, persist before send
+  transport/bugs/*.scm     planted link bugs; transport/configs/ has witnesses that each refusal path is reachable
   j/batch.scm              the J batch: atomic chain, sealing, abort and abandon (a signed batch is final at its nonce), skipped dispute ops, R-J5/R-COSIGN/J6 batch rules, paused-token deposits and funded payments, FIFO debt enforcement, refusal when full
   j/bugs/*.scm             planted J batch bugs
   account-frames.check.scm entry point: check the Account frames page
   entity-frame.check.scm   entry point: check the Entity frame page
   runtime.check.scm        entry point: check the Runtime page
+  transport.check.scm      entry point: check the transport link page
   j-batch.check.scm        entry point: check the J batch page
   entity-consensus.check.scm entry point: check the Entity consensus page
   entity-routing.check.scm entry point: check the routing page
