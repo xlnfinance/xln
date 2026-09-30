@@ -424,4 +424,4 @@ Local runs at the merge of main b471747 into the branch, one file or suite per p
 one test: `Depository-part-1` "keeps the dispute active when any signed transformer cannot execute exactly" times out at Hardhat's 40 s mocha
 limit on this machine, taking about 54 s (the out-of-gas mode alone about 52 s, mostly system time). It times out identically on main's own
 contracts here (checked in a clean worktree at b471747, same test alone), and the same file passed in 41 s in the earlier sandbox, so the cause
-is the machine, not #54; run on a faster one or raise the timeout for that test. vm 21 files, gate 2 files, `test/a12`, Foundry every suite: 0 failures.
+is the machine, not #54; run on a faster one or raise the timeout for that test. vm 20 files, gate 2 files, `test/a12` (4), Foundry every suite: 0 failures.
