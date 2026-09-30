@@ -16,8 +16,15 @@ export type HoldId = Brand<bigint, "HoldId">;
 
 export const holdId = (n: bigint): HoldId => n as HoldId;
 
-/** An open hold, what the spec calls a conditional clause: `payer` owes `amount` if its payee claims it in time. */
-export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint }>;
+/** keccak256 of a 32-byte secret: 0x and 64 lowercase hex digits. It names a clause: one is open per hashlock. */
+export type Hashlock = string;
+
+/**
+ * An open hold (the spec's conditional clause) in slot `id`: `payer` owes `amount` if its payee shows the preimage of
+ * `hashlock` while the chain's height, in the deciding party's own view, is at or before `deadline`. The money rules
+ * read only id, payer and amount; the clause rules (clause/) read the rest.
+ */
+export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint; hashlock: Hashlock; deadline: bigint }>;
 
 /**
  * `limit.left` is the credit extended TO Left (how far Left's allocation may fall below zero); Right is the side that
@@ -42,4 +49,14 @@ export type AccountFault =
   | Tagged<"credit_below_usage">
   | Tagged<"no_such_hold", { id: HoldId }>
   | Tagged<"withdrawal_beyond_collateral", { collateral: bigint; requested: bigint }>
-  | Tagged<"settlement_breaks_credit">;
+  | Tagged<"settlement_breaks_credit">
+  | Tagged<"not_own_funds">
+  | Tagged<"not_payee">
+  | Tagged<"bad_hashlock">
+  | Tagged<"bad_secret">
+  | Tagged<"wrong_secret">
+  | Tagged<"no_such_lock">
+  | Tagged<"deadline_past", { deadline: bigint; view: bigint }>
+  | Tagged<"deadline_too_far", { deadline: bigint; latest: bigint }>
+  | Tagged<"past_deadline", { deadline: bigint; view: bigint }>
+  | Tagged<"not_expired", { deadline: bigint; earliest: bigint }>;

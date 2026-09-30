@@ -1277,7 +1277,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1339,6 +1339,36 @@
      "layer": "quint",
      "name": "receiver-judges-by-the-frame-stamp",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reserve is at least the lag, and the horizon is positive"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline, expirable strictly past deadline plus reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK and R-DRIFT views within the lag never see a clause both live and expirable"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a payee reveals on chain once its view reaches the deadline minus the lag"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline height and refused one height later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK an expiry needs the view strictly past the deadline plus the reserve"
     }
    ]
   },
@@ -1506,7 +1536,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1520,6 +1550,16 @@
      "layer": "quint",
      "name": "resolve-by-payer",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL only the payee resolves"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL the payee cancels and the allocation stays; the payer cannot"
     }
    ]
   },
@@ -1558,7 +1598,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1566,6 +1606,16 @@
      "layer": "quint",
      "name": "horizon-off",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE and N2 a deadline is refused past the view plus the horizon plus the reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE the latest admitted deadline is the view plus the horizon plus the reserve"
     }
    ]
   },
@@ -1995,6 +2045,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-LOCK-EXISTS a hashlock is 0x and 64 lowercase hex digits, and one is open once"
     }
    ]
   },
