@@ -42,3 +42,27 @@ describe("og isolation: withShippedOg", () => {
     installContracts(contractSet());
   });
 });
+
+describe("og isolation: og's batch codec", () => {
+  // og's batch codec reads the Batch tuple once, at import. A file that imports contracts.ts before the codec used to
+  // get the fork's Batch (gasBudget first), so the same encoding came out longer than og's. One fresh process per
+  // import order: the order must not change what og's codec encodes.
+  const DIFF = import.meta.dir;
+  const BATCH = `${DIFF}/../../../core/jurisdiction/machine/batch/index.ts`;
+  const encodedEmptyBatchLength = (imports: readonly string[]): number => {
+    const script = [
+      ...imports.map((path) => `import ${JSON.stringify(path)};`),
+      `import { createEmptyBatch, encodeJBatch } from ${JSON.stringify(BATCH)};`,
+      "console.log(encodeJBatch(createEmptyBatch()).length);",
+    ].join("\n");
+    const run = Bun.spawnSync(["bun", "-e", script], { cwd: DIFF });
+    return Number(run.stdout.toString().trim());
+  };
+
+  test("encodes og's Batch whether the fork is installed before or after the codec is first imported", () => {
+    const codecOnly = encodedEmptyBatchLength([]);
+    const forkFirst = encodedEmptyBatchLength([`${DIFF}/contracts.ts`]);
+    expect(codecOnly).toBeGreaterThan(0);
+    expect(forkFirst).toBe(codecOnly);
+  });
+});
