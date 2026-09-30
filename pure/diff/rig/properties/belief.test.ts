@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { unwrap } from "../../../xln_run.ts";
 import { accountId, genesisReplica, tokenId } from "../../../xln.ts";
 import type { AccountReplica, EntityId, Runtime } from "../../../xln.ts";
-import { checkBelief, NOTHING_SEEN, type CollateralView, type Trail } from "./belief.ts";
+import { checkBelief, lagging, NOTHING_SEEN, type CollateralView, type Trail } from "./belief.ts";
 
 const L = `0x${"1".padStart(64, "0")}` as EntityId;
 const R = `0x${"2".padStart(64, "0")}` as EntityId;
@@ -55,4 +55,18 @@ test("P3: an Account that never learns a deposit stays clean until it does (lag 
   const a = await frame([100n, 0n], [0n, 0n], NOTHING_SEEN);
   const b = await frame([100n, 0n], [0n, 0n], a.trail);
   expect(b.violations).toEqual([]);
+});
+
+/** The same Account, whichever way its replica stands. */
+const withTag = (rt: Runtime, _tag: "open" | "disputed"): Runtime => {
+  const [entity] = [...rt.entities.values()];
+  const [peer, replica] = [...entity!.accountReplicas][0]!;
+  return ({ entities: new Map([[`${L}:a`, { ...entity!, accountReplicas: new Map([[peer, { ...replica, _tag }]]) }]]) }) as unknown as Runtime;
+};
+
+test("P3 at rest: an open Account behind the chain is red; a disputed one, which takes no more J events, is not", async () => {
+  const chain = chainHolding(100n, 0n);
+  expect(await lagging(chain, withTag(believing(0n, 0n), "open"))).toHaveLength(1);
+  expect(await lagging(chain, withTag(believing(0n, 0n), "disputed"))).toEqual([]);
+  expect(await lagging(chain, withTag(believing(100n, 0n), "open"))).toEqual([]);
 });

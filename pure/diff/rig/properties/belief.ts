@@ -72,9 +72,15 @@ export const checkBelief = async (vm: CollateralView, rt: Runtime, before: Trail
   }, { trail: before, violations: [] });
 };
 
-/** Every Account whose belief differs from the chain right now: what a run that has gone quiet must not leave behind. */
+/**
+ * Every open Account whose belief differs from the chain right now: what a run that has gone quiet must not leave behind. An Account that
+ * dispute froze or finalized takes no more J events (the chain still takes deposits into its pair: R2C during a dispute, decision H4), so
+ * only the dispute's payout (P1) speaks for it.
+ */
 export const lagging = async (vm: CollateralView, rt: Runtime): Promise<readonly string[]> => {
   const replicas = [...rt.entities.values()].flatMap((e) =>
-    [...e.accountReplicas].filter(([peer]) => e.state.id < peer).map(([peer, r]) => ({ at: `${e.state.id}→${peer}`, r })));
+    [...e.accountReplicas]
+      .filter(([peer, r]) => e.state.id < peer && r._tag === "open")
+      .map(([peer, r]) => ({ at: `${e.state.id}→${peer}`, r })));
   return (await Promise.all(replicas.map(async ({ at, r }) => beliefLines(`P3 ${at}`, r, await chainHolds(vm, r))))).flat();
 };
