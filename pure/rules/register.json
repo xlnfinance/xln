@@ -2110,6 +2110,26 @@
      "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
     }
    ]
+  },
+  {
+   "id": "R-HOLD-CAP-ACCOUNT",
+   "statement": "An Account's dispute proof carries the transformers of every token and Account.sol reverts E10 above 32 in one proof body, so the open-clause cap of 32 is counted over the whole Account, not per token ledger.",
+   "source": "Reviewer A of PR 73 (note on R-HOLD-CAP: per ledger is necessary, not sufficient)",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (LOCK_SLOTS is per Account body; confirm)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A3 (the first AccountState transition)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP-ACCOUNT holds across every token of one Account stay within 32",
+     "owed": "A3"
+    }
+   ]
   }
  ]
 }
