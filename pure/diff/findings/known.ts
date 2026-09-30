@@ -33,7 +33,7 @@ export const KNOWN_FINDINGS: readonly KnownFinding[] = [
   {
     id: "SETTLEMENT-IGNORES-CREDIT",
     basis: { _tag: "rule", id: "R-SETTLE-CREDIT" },
-    owner: "A1 settlement slice (Kernel and chain encoders)",
+    owner: "the Account cut (the cut PR that wires the new Account ledger into the walk deletes this entry; the ledger module merging alone does not)",
     summary: "A settlement is co-signed in which one side withdraws collateral beyond its own claim, so after it lands that side owes past the credit the other extended",
     sites: [
       { area: "disputes", seed: 0x30de2, expects: [SETTLEMENT_BREACH, DISPUTE_OWED, DISPUTE_UNFINALIZED, DISPUTE_NEVER_AT_MOVED_EPOCH] },
