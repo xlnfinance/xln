@@ -28,6 +28,38 @@
       "old": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }",
       "new": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + coll), debt: m.debt }",
       "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "settlement-ignores-credit",
+      "why": "R-SETTLE-CREDIT: the approver co-signs a withdrawal without checking the credit bound after it (the test rig's Q-X-3 case: Left at delta -7,000,031 against credit 18,092)",
+      "file": "account_core.qnt",
+      "old": "      d >= -b.limitLeft,\n      d <= coll + b.limitRight,\n      d - holds(b, Left) >= -b.limitLeft,\n      d + holds(b, Right) <= coll + b.limitRight\n    }",
+      "new": "      true\n    }",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-ignores-open-clauses",
+      "why": "R-SETTLE-CREDIT: the bound after the withdrawal is checked on the allocation only, not in the worst case over the open clauses",
+      "file": "account_core.qnt",
+      "old": "      d - holds(b, Left) >= -b.limitLeft,\n      d + holds(b, Right) <= coll + b.limitRight\n    }",
+      "new": "      true\n    }",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-checks-the-old-collateral",
+      "why": "R-SETTLE-CREDIT: the worst-case upper bound over the open clauses is read over the collateral before the withdrawal, so a withdrawal that leaves a Right-payer clause uncovered is co-signed",
+      "file": "account_core.qnt",
+      "old": "      d + holds(b, Right) <= coll + b.limitRight",
+      "new": "      d + holds(b, Right) <= COLLATERAL + b.limitRight",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-left-keeps-its-claim",
+      "why": "R-SETTLE-CREDIT: a Left withdrawal is treated as leaving Left's allocation where it was, so Left can withdraw beyond its own claim",
+      "file": "account_core.qnt",
+      "old": "    val d = delta(b) - (if (by == Left) w else 0)\n    and {\n      w >= 1",
+      "new": "    val d = delta(b)\n    and {\n      w >= 1",
+      "killedBy": "test:settlementKeepsCreditTest"
     }
   ],
   "init": "init",

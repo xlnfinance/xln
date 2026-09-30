@@ -80,7 +80,7 @@
     },
     {
       "id": "expire-at-deadline",
-      "why": "P5: a lock expires while the deadline second is still open",
+      "why": "P5: a lock expires while the deadline second is still open (R-HTLC-CLOCK b: the strict bound; pinned by a scenario test, since 1500 traces of 40 steps do not reach a lock, a drifted clock pair and an expiry together)",
       "file": "account_core.qnt",
       "old": "        else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
       "new": "        else if (now < b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
@@ -96,10 +96,10 @@
     },
     {
       "id": "no-reack-on-duplicate",
-      "why": "Q-A2: a repeated proposal for an already committed frame is not answered, so a lost ack is never recovered",
+      "why": "Q-A2 / R-REACK: a repeated proposal for an already committed frame is not answered, so a lost ack is never recovered",
       "file": "account_core.qnt",
-      "old": "          else if (r.lastFid == fid) { ...keep, ack: true }\n",
-      "new": "",
+      "old": "    if (repeatOfLast(r, fid)) { ...keep, ack: true }\n",
+      "new": "    if (false) { ...keep, ack: true }\n",
       "killedBy": "test:lostAckIsRecoveredByResendTest"
     },
     {
@@ -152,11 +152,11 @@
     },
     {
       "id": "expiry-reserve-off",
-      "why": "R-CLOCK: expiry needs only the deadline to have passed on the receiver's clock, without the reserve: a payee whose clock is a tick behind can still resolve",
+      "why": "R-HTLC-CLOCK b: expiry needs only the deadline to have passed on the receiver's own view, without the reserve: a payee whose view is a tick behind can still resolve (pinned by a scenario test; the invariant run over 1500 traces did not reach it)",
       "file": "account_core.qnt",
       "old": "else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
       "new": "else if (now <= b.locks.get(r.id).deadline) Refused(\"not_expired\")",
-      "killedBy": "invariant:authority"
+      "killedBy": "test:htlcExpireAndCancelTest"
     },
     {
       "id": "cancel-by-anyone",
@@ -373,6 +373,46 @@
       "old": "  pure val MAX_NONCE_GAP = 0\n",
       "new": "  pure val MAX_NONCE_GAP = 1\n",
       "killedBy": "invariant:agreed"
+    },
+    {
+      "id": "reack-open-only",
+      "why": "R-REACK (D-AC-1): a repeat of the committed frame is re-acked only while the receiver is Open, so a replica that already proposed its own next frame refuses it and one lost ack deadlocks both sides",
+      "file": "account_core.qnt",
+      "old": "    if (repeatOfLast(r, fid)) { ...keep, ack: true }\n",
+      "new": "    if (repeatOfLast(r, fid) and isOpen(r)) { ...keep, ack: true }\n",
+      "killedBy": "test:lostAckWhileHoldingOwnFrameTest"
+    },
+    {
+      "id": "accept-wrong-parent",
+      "why": "R-PARENT (D-AC-7): the receiver does not check that the frame extends its head, only its height and replay",
+      "file": "account_core.qnt",
+      "old": "    f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)\n",
+      "new": "",
+      "killedBy": "test:wrongParentIsRefusedTest"
+    },
+    {
+      "id": "propose-drops-silently",
+      "why": "R-NOTICE (D-AC-5): a tx that no longer applies is cut from the frame at propose and nobody is told",
+      "file": "account.qnt",
+      "old": "refused: r.refused.concat(keepValid(r.tip, r.mempool, s, clock.get(s)).dropped) }),",
+      "new": "refused: r.refused }),",
+      "killedBy": "test:deadTxBesideALiveOneIsNoticedAtProposeTest"
+    },
+    {
+      "id": "dead-tx-stays",
+      "why": "R-NOTICE (D-AC-5): a dead tx that can never apply stays in the mempool, neither proposed nor reported",
+      "file": "account.qnt",
+      "old": "      sel.dropped.length() > 0,\n",
+      "new": "      sel.dropped.length() > 100,\n",
+      "killedBy": "test:deadTxIsRefusedWithNoticeTest"
+    },
+    {
+      "id": "revise-loses-the-notice",
+      "why": "R-NOTICE (D-AC-5): the dead tx leaves the mempool but no notice is kept",
+      "file": "account.qnt",
+      "old": "refused: r.refused.concat(sel.dropped) }),",
+      "new": "refused: r.refused }),",
+      "killedBy": "test:deadTxIsRefusedWithNoticeTest"
     }
   ],
   "testSamples": 50

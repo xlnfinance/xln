@@ -52,7 +52,7 @@ height, expiry stamped from the future, resolve stamped in the past, stale or le
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
 height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 36 scenario tests, 46 mutants.
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 40 scenario tests, 51 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 

@@ -79,4 +79,30 @@ module compose {
     settledDelta(b, o._1, o._2) == b.offdelta + effect(b.locks.get(1), o._1) + effect(b.locks.get(2), o._2)))
 
   run clausesAreAdditiveTest = c::init.expect(ADDITIVE)
+  // R-SETTLE-CREDIT (coordinator 09-30, Q-X-3). A cooperative settlement withdraws collateral for one side. The approver's rule is
+  // `settlementOk`; this checks it against the chain: for every Body that holds RCPAN and every withdrawal it would co-sign, every outcome
+  // of the open clauses settles over the smaller collateral with no side owing more than the credit its counterparty granted. The test rig
+  // found the missing refusal (a co-signed settlement left Left at delta -7,000,031 against credit 18,092).
+  pure def settleAt(coll: int, d: int): c::Money = c::payout(EMPTY, coll, d)
+  pure def honouredAfter(b: a::Body, by: a::Side, w: int, o: (bool, bool)): bool = {
+    val coll = a::COLLATERAL - w
+    val d = settledDelta(b, o._1, o._2) - (if (by == a::Left) w else 0)
+    val m = settleAt(coll, d)
+    and {
+      m.debt.get(c::Left) <= b.limitLeft,
+      m.debt.get(c::Right) <= b.limitRight,
+      m.res.get(c::Left) + m.res.get(c::Right) == coll
+    }
+  }
+  pure val SIDES2: Set[a::Side] = Set(a::Left, a::Right)
+  pure val WITHDRAWALS: Set[int] = 1.to(a::COLLATERAL)
+  pure val SETTLEMENT_KEEPS_CREDIT: bool =
+    forallBodies(b => not(a::rcpan(b)) or SIDES2.forall(by => WITHDRAWALS.forall(w =>
+      not(a::settlementOk(b, by, w)) or OUTCOMES.forall(o => honouredAfter(b, by, w, o)))))
+  // the domain has both answers: a withdrawal inside the claim is co-signed, one beyond it is refused
+  pure val COVERS_BOTH_ANSWERS: bool =
+    existsBody(b => a::rcpan(b) and SIDES2.exists(by => WITHDRAWALS.exists(w => a::settlementOk(b, by, w)))) and
+    existsBody(b => a::rcpan(b) and SIDES2.exists(by => WITHDRAWALS.exists(w => not(a::settlementOk(b, by, w)))))
+
+  run settlementKeepsCreditTest = c::init.expect(and { COVERS_BOTH_ANSWERS, SETTLEMENT_KEEPS_CREDIT })
 }

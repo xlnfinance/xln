@@ -11,9 +11,9 @@ module account_core {
   pure val MAX_HEIGHT = 3        // frames per run; bounds the search
   pure val MAX_FRAMES = 8        // frame arena size: every proposal, including the ones rolled back
   pure val MAX_MEMPOOL = 2
-  pure val MAX_CLOCK = 4         // logical seconds
-  pure val DRIFT = 1             // the two clocks never differ by more than this (assumption, QUESTIONS.md Q-X2)
-  pure val CLOCK_RESERVE = DRIFT // R-CLOCK: the reserve a deciding party adds to its own clock where the two clocks' difference could hurt the other side
+  pure val MAX_CLOCK = 4         // J heights: `clock` is each party's own view of the J height [R-HTLC-CLOCK], never a timestamp a counterparty wrote
+  pure val DRIFT = 1             // the two views never differ by more than this: each lags the chain by at most LAG, so DRIFT = LAG (R-DRIFT; params_test pins it)
+  pure val CLOCK_RESERVE = DRIFT // R-HTLC-CLOCK b: the reserve, in J heights and at least LAG, that an expiry adds to the deciding party's own view
   // N1: the proof nonce is its own counter (a dispute proof carries it; the chain wants each start above the stored one), no longer the
   // frame height. Within an epoch it follows the tip by one. A proposer that could skip nonces on its own would let an abandoned, signed
   // proposal outrank the frame that was committed (a collision loser at nonce n+1 against the winner at n; the loser's next frame at n+1
@@ -58,7 +58,7 @@ module account_core {
 
   // `prev` (the hash of the parent frame on the wire) is left out: a receiver replays `txs` on its own tip and compares
   // with `after`, which catches every fork a parent hash would (QUESTIONS.md Q-A6).
-  type Frame = { height: int, nonce: int, ts: int, author: Side, txs: List[Tx], after: Body }   // ts: the proposer's clock when it built the frame; no decision reads it [R-CLOCK]
+  type Frame = { height: int, parent: int, nonce: int, ts: int, author: Side, txs: List[Tx], after: Body }   // parent: the id of the frame this one extends (0 = genesis), the wire's parent hash [R-PARENT]; ts: the proposer's view when it built the frame; no decision reads it [R-CLOCK]
 
   // Frames live in one arena and are named by their id, the way the wire names them by hash. A message is a frame id:
   // a proposal goes to the author's peer, an ack goes to the author.
@@ -74,6 +74,9 @@ module account_core {
 
   type Replica = {
     height: int,
+    refused: List[Tx],         // the txs this side proposed that no longer applied: refused with notice, never dropped silently [R-NOTICE]
+    submitted: int,            // ghost: txs ever admitted to the mempool
+    done: int,                 // ghost: own txs in frames this side has committed as their author
     pnonce: int,               // the proof nonce of the last committed frame: the nonce a dispute start would carry [N1]
     tip: Body,                 // the last committed body
     lastFid: int,              // the last committed frame (0 = none), kept to answer a repeated propose with the same ack
@@ -114,6 +117,22 @@ module account_core {
     delta(b) <= COLLATERAL + b.limitRight,
     delta(b) - holds(b, Left) >= -b.limitLeft,
     delta(b) + holds(b, Right) <= COLLATERAL + b.limitRight
+  }
+
+  // R-SETTLE-CREDIT (coordinator 09-30, Q-X-3): a party co-signs a settlement that withdraws `w` of collateral for `by` only if, after it,
+  // each side's position is still within the credit the other side extended: the bound a payment respects, taken over the smaller
+  // collateral. A Left withdrawal lowers Left's allocation (Δ) with the collateral; a Right withdrawal leaves Δ where it is. A
+  // withdrawal beyond one's own claim is refused. The contract accepts such a settlement (credit is off-chain, R-A6), so the approver is the only guard.
+  pure def settlementOk(b: Body, by: Side, w: int): bool = {
+    val coll = COLLATERAL - w
+    val d = delta(b) - (if (by == Left) w else 0)
+    and {
+      w >= 1, w <= COLLATERAL,
+      d >= -b.limitLeft,
+      d <= coll + b.limitRight,
+      d - holds(b, Left) >= -b.limitLeft,
+      d + holds(b, Right) <= coll + b.limitRight
+    }
   }
 
   // P2 stated on the outcomes and not through `rcpan`: whichever subset of the open clauses resolves in favour of its payee, the
@@ -207,11 +226,12 @@ module account_core {
       | Refused(why) => Refused(why)
     })
 
-  // The proposer keeps only the txs that still apply, in order. A tx that no longer applies is dropped, not halted on.
-  pure def keepValid(b: Body, txs: List[Tx], author: Side, now: int): { body: Body, txs: List[Tx] } =
-    txs.foldl({ body: b, txs: List() }, (acc, tx) => match applyTx(acc.body, tx, author, now) {
-      | Ok(nx) => { body: nx, txs: acc.txs.append(tx) }
-      | Refused(_) => acc
+  // The proposer keeps only the txs that still apply, in order. A tx that no longer applies is never halted on and never lost: it comes back in
+  // `dropped`, and the caller refuses it with notice [R-NOTICE].
+  pure def keepValid(b: Body, txs: List[Tx], author: Side, now: int): { body: Body, txs: List[Tx], dropped: List[Tx] } =
+    txs.foldl({ body: b, txs: List(), dropped: List() }, (acc, tx) => match applyTx(acc.body, tx, author, now) {
+      | Ok(nx) => { ...acc, body: nx, txs: acc.txs.append(tx) }
+      | Refused(_) => { ...acc, dropped: acc.dropped.append(tx) }
     })
 
   // A tx built from small independent picks. Every combination is tried, valid or not: refusals are behaviour too.
@@ -230,10 +250,10 @@ module account_core {
 
   pure val SIDES = Set(Left, Right)
   pure val BRANCHES = Set(true, false)
-  pure val NO_FRAME: Frame = { height: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS }
+  pure val NO_FRAME: Frame = { height: 0, parent: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS }
 
   pure val EMPTY_REPLICA: Replica =
-    { height: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List() }
+    { height: 0, refused: List(), submitted: 0, done: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List() }
 
   // The state a side must plan against: the committed one, or the frame in flight / held [Q-E1: one view].
   pure def planning(r: Replica, frames: int -> Frame): Body = match r.status {
@@ -252,6 +272,7 @@ module account_core {
   // retransmission must stay available after an arbitrary outage) or for its date, and no time rule trusts it [R-CLOCK].
   pure def acceptable(r: Replica, now: int, f: Frame, self: Side): bool = and {
     f.author != self,
+    f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)
     f.height == r.height + 1,
     f.nonce > r.pnonce,                                    // N1: a proof nonce above the last one, or the chain would refuse a start with it
     f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP,               // and not a leap that burns the counter
@@ -274,7 +295,7 @@ module account_core {
   // The frame a proposer would send now: its mempool cut down to the txs that still apply, on its tip.
   pure def frameToPropose(r: Replica, now: int, s: Side, gap: int): Frame = {
     val sel = keepValid(r.tip, r.mempool, s, now)
-    { height: r.height + 1, nonce: r.pnonce + 1 + gap, ts: now, author: s, txs: sel.txs, after: sel.body }
+    { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1 + gap, ts: now, author: s, txs: sel.txs, after: sel.body }
   }
 
   pure def canPropose(r: Replica, now: int, s: Side): bool = and {
@@ -287,19 +308,22 @@ module account_core {
 
   // What a receiver does with a Propose. In order:
   //   1. it extends our tip and we are Open -> hold it for our ack.
-  //   2. it is the frame we last committed (our ack was lost) -> send the same ack again (idempotent).
+  //   2. it is the frame we last committed (our ack was lost) -> send the same ack again (idempotent), in ANY state: a replica that has
+  //      already proposed its own next frame still re-acks, or one lost ack deadlocks both sides [R-REACK].
   //   3. we also proposed at this height (collision): Left keeps its frame and ignores Right's;
   //      Right discards its own frame, puts its txs back in the mempool, and takes Left's [R-A1].
   //   4. anything else is stale, from the future, or refused: dropped and counted.
   type Outcome = { r: Replica, ack: bool, rolled: bool, refused: bool }
 
+  pure def repeatOfLast(r: Replica, fid: int): bool = r.lastFid != 0 and r.lastFid == fid
+
   pure def onPropose(r: Replica, now: int, s: Side, fid: int, f: Frame, own: Frame): Outcome = {
     val keep: Outcome = { r: r, ack: false, rolled: false, refused: false }
     val refuse: Outcome = { ...keep, refused: true }
-    match r.status {
+    if (repeatOfLast(r, fid)) { ...keep, ack: true }
+    else match r.status {
       | Open =>
           if (acceptable(r, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } }
-          else if (r.lastFid == fid) { ...keep, ack: true }
           else refuse
       | Received(held) => if (held == fid) keep else refuse
       | Proposed(_) =>
@@ -317,7 +341,8 @@ module account_core {
   }
 
   // Commit frame `f` (id `fid`) on a replica.
-  pure def commit(r: Replica, fid: int, f: Frame): Replica =
-    { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open }
+  pure def commit(r: Replica, self: Side, fid: int, f: Frame): Replica =
+    { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open,
+      done: r.done + (if (f.author == self) f.txs.length() else 0) }
 
 }

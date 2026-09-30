@@ -18,7 +18,11 @@ tie-break picks Left's. P4b is therefore per (signer, nonce, branch), not per (s
 Options: (a) the proposer resends its frame, the receiver answers a repeat idempotently; (b) each proposal carries the
 previous ack so nothing is ever lost; (c) time-based retransmission in the spec.
 Choice: (a). `resend` is enabled while a frame is in flight; a receiver that already committed that frame answers
-with the same ack. When to resend is Runtime policy, not protocol. Source: `design/account-model.md` P4/P5, no og
+with the same ack, **in any replica state** (R-REACK, coordinator 09-30, from the Account comparison D-AC-1). This model first re-acked only while
+the receiver was Open: a receiver that had already proposed its own next frame refused the repeat, and one lost ack left both sides stuck (Right
+`Proposed(1)`, Left `Proposed(2)`, each refusing the other's frame). The Arrival spec re-acks whatever the state and its checker proves liveness;
+this model checks safety only, so the gap went unseen. Now `repeatOfLast` is checked before the status match; test `lostAckWhileHoldingOwnFrameTest`,
+mutant `reack-open-only`. When to resend is Runtime policy, not protocol. Source: `design/account-model.md` P4/P5, no og
 retransmission exists (`collision.ts:117`).
 
 **A3. Rejection of a peer frame (Q-A3).**
@@ -44,7 +48,12 @@ side signs only what it replayed itself (A6), on its own clock (A8), and `accoun
 proposes anything: `both_signed`, `no_bad_accept` and `authority` check the honest side (its committed state was signed by it, and
 came from frames that applied on its own tip). Mutants `accept-forged-state`, `accept-height-skip`, `ack-skips-proof-match` and `receiver-judges-by-the-frame-stamp` test that.
 
-**A6. No parent hash in the frame.**
+**A6. No parent hash in the frame. SUPERSEDED by R-PARENT (coordinator 09-30, D-AC-7): a frame names its parent and the receiver refuses a frame whose parent is not its head.**
+What stays true of the text below: the receiver also replays the txs on its own tip and compares the claimed body. What changed: `Frame.parent` (the id of
+the frame it extends, the stand-in for the wire's parent hash), `acceptable` requires `f.parent == r.lastFid`, the oracle `wellFormed` states it again, a
+Byzantine frame of kind 6 names a parent that is not the head, mutant `accept-wrong-parent`, test `wrongParentIsRefusedTest`. Reason: the Arrival spec and xln.ts
+(`prevFrameHash`, hashed into `stateHash`) both link frames by hash; two histories that reach the same body were accepted here and refused there.
+Old text, kept for the record:
 Options: (a) a frame names its parent by hash; (b) the receiver replays the txs on its own tip and compares the
 claimed state.
 Choice: (b). A frame built on a different tip either replays to a different state (refused) or to the same state
@@ -53,7 +62,13 @@ Choice: (b). A frame built on a different tip either replays to a different stat
 **A7. Same-view admission (Q-E1).**
 Choice: yes, one view. A local tx is admitted against the state the side is planning (committed state, or the frame in
 flight / held) plus everything already queued, so a tx that could never apply never enters the mempool. At
-proposal time the proposer still drops any tx that no longer applies (the peer's frame may have changed the state).
+proposal time the proposer still cuts any tx that no longer applies (the peer's frame may have changed the state).
+**R-NOTICE (coordinator 09-30, D-AC-5):** such a tx is refused with notice, never dropped silently. `keepValid` returns `dropped`; `propose` appends them to
+`Replica.refused` (the notice the Entity reads), and `reviseMempool` does the same for a mempool whose txs can no longer apply, so a dead tx does not sit in the
+mempool for ever (before this round a lone dead tx made `canPropose` false for good, unreported). Property `no_tx_lost`: every admitted tx is in a frame its side
+committed as author, in its mempool, in its frame in flight, or refused with notice. Mutants `propose-drops-silently`, `dead-tx-stays`, `revise-loses-the-notice`.
+Tests `deadTxIsRefusedWithNoticeTest`, `deadTxBesideALiveOneIsNoticedAtProposeTest`. Both guards stay, in this order (R-ADMIT): admission first, re-validation at propose.
+The Entity's own mempool (`entity.qnt` `proposeOn`) still counts drops in a ghost and does not hold a notice list: not changed here.
 Source: Q-E1 recommendation, B-X3.
 
 **A8. Clocks and deadlines (Q-X2, Q-P1). R-CLOCK (coordinator, 2026-09-29, from the first review) replaces the earlier rule.**
@@ -74,11 +89,14 @@ A margin beyond the reserve is Entity policy (`HOP`, `ESC`). An expiry is a syst
 (`expireOne` waits for `deadline + CLOCK_RESERVE`). Boundary tests: `lockDeadlineBoundariesTest`, `resolveAtTheDeadlineSecondTest`.
 Mutants: `resolve-after-deadline`, `expire-at-deadline`, `horizon-off`, `receiver-judges-by-the-frame-stamp`, `expiry-reserve-off`.
 **The #57 sequence (coordinator, 2026-09-30).** A secret resolve is late only by the chain's J height, never by the co-signed frame clock; a payer's cancel and timeout keep the
-frame-expiry rule plus the payer's own local expiry check; a frame's `jHeight` is claimed by its proposer and is untrusted. What the model says is weaker than the first sentence, and
-it is not the same rule: the Account layer judges lateness by the **deciding side's own clock** (a resolve is refused at `now > deadline`, with no reserve; an expiry is refused until
-`now > deadline + CLOCK_RESERVE`). J height decides only in chain.qnt (the secret's registration against the deadline, `d.t0 <= deadline`). So "late only by J height" is the chain's
-rule; at the Account layer an honest payer whose clock is a tick ahead can refuse a resolve that was on time by the payee's clock. That costs a dispute, not funds (F1), and the reserve
-is what keeps the payer from taking back a lock whose payee still holds the secret. The frame's `jHeight` field is not modelled: a proposer-claimed J height would be one more
+frame-expiry rule plus the payer's own local expiry check; a frame's `jHeight` is claimed by its proposer and is untrusted. **R-HTLC-CLOCK (coordinator 09-30, Account comparison D-AC-2, D-AC-3) settles what this model called weaker.** `clock` is now read as each party's OWN VIEW OF THE J
+HEIGHT (the `max(host.finalizedJHeight, ctx.jHeight)` door), never a wall clock and never a proposer-written field; each view lags the chain by at most LAG, so the two
+differ by at most `DRIFT = LAG` (`params_test` pins `DRIFT == LAG`). With that reading the Account layer's rules ARE the decided ones: (a) a lock is live through its deadline
+height, the payer accepts a resolve while its own view is `<= deadline` (`resolve-after-deadline`, `resolveAtTheDeadlineSecondTest`); (b) an expiry needs own view
+`> deadline + reserve`, strict, for the proposer and the acceptor (`expire-at-deadline` and `expiry-reserve-off`: killed by `htlcExpireAndCancelTest`; the oracle `expiredEarly` states the goal for the simulator, but 1500 traces of 40 steps did not reach a lock, a drifted clock pair and an expiry together, so the scenario test is the kill), and the reserve is at least LAG (`params_test`); (c) a payee whose resolve is unacked when its view reaches `deadline - LAG` reveals on-chain: that is
+`ESC >= LAG` in `entity.qnt` (escalate when `now + ESC >= deadline`). The earlier caveat, that an honest payer whose clock runs ahead can refuse an on-time resolve, is the view
+lag: it costs a dispute, not funds, and the reserve is what stops the payer taking back a lock whose payee still holds the secret. Not modelled: a chain height variable
+(the two views with the `DRIFT` bound stand for it), and the receiver's view as a value that can also stall. The frame's `jHeight` field is not modelled: a proposer-claimed J height would be one more
 informational field, and any decision that read it would fail the way `receiver-judges-by-the-frame-stamp` does. What was missing is the sequence itself, now a test: a payer co-signs a
 frame stamped 100 ahead of every clock (`byzStampedQueued`, the frame that carries the lock), it is committed (`refusals == 0`), and the payee's held reveal is proposed as usual
 (`futureStampedFrameDoesNotBlockTheRevealTest`). Mutant `future-stamp-refused` (the dropped stamp-window rule) blocks it and is killed by that test. (The hub variant, one hub carrying
@@ -129,6 +147,13 @@ the loser's next frame at n+1 signs a second proof under one key: `no_equivocati
 nonce is used once per key, and a start needs one above the stored nonce". Checked by `nonce_climbs`, `no_bad_accept` (independent oracle `wellFormed` states the nonce
 rule), mutants `accept-stale-proof-nonce`, `accept-proof-nonce-leap`, `commit-forgets-proof-nonce`. The Byzantine frames of kind 4 and 5 carry a stale and a leaping nonce.
 
+
+
+**A14. The link: an unordered set with free redelivery (recorded as a choice, coordinator 09-30, D-AC-8).**
+`proposals` and `acks` are sets; delivery does not consume a message, so any message in flight can be delivered any number of times in any order, and a lost message
+is one removed from the set. This was not written down as a question. It is the harsher model than the Arrival page's (FIFO, one loss, one duplicate), and stays: the Arrival
+checker showed that widening its link to deliver any of the first three messages keeps every property and liveness (7312 states), so the two models agree on what holds.
+Consequence for trace replay: a Quint trace may deliver out of order, and a replay on a FIFO page needs a bridge step (`review/account-comparison/`).
 
 ---
 
@@ -225,6 +250,16 @@ dispute replaces it). This is N1. Three rules make it hold, each killed by a mut
 (a) the honest side re-applies its signing rules when an ack arrives, not only when it offers: an offer signed before the
 chain moved is dropped; (b) a side that starts (or answers) a dispute stops signing at that moment, before it has read the block;
 (c) a payment signed for an epoch the chain has left is never committed by a payee.
+
+**S1a. R-SETTLE-CREDIT (Q-X-3, coordinator 09-30).** A party co-signs a settlement that withdraws collateral only if, after it, each side's
+position is still within the credit the other side extended: the payment bound, over the collateral that remains (a Left withdrawal lowers Left's
+allocation with the collateral; a Right withdrawal leaves it). The contract accepts a settlement that breaks it (credit is off-chain, R-A6), so the
+approver is the only guard. The rule is `settlementOk` in `account_core.qnt`; `settlementKeepsCreditTest` in `compose.qnt` settles every outcome of the open
+clauses of every RCPAN Body over the smaller collateral with the chain's `payout` and checks no side owes more than the credit granted. It also
+checks that the domain has both answers (a withdrawal inside the claim is co-signed, one beyond it is refused). Mutants: `settlement-ignores-credit`,
+`settlement-ignores-open-clauses`, `settlement-checks-the-old-collateral`, `settlement-left-keeps-its-claim` (all killed by that test). The test rig's case:
+a co-signed settlement left Left at delta -7,000,031 against credit 18,092. Not modelled here: the approval inside the settle.qnt state machine (it has
+no credit limits); the predicate is what the pure/ approval must implement.
 
 **S2. The update is signed by the side that does not submit it.**
 Depository `_settleDiffs` verifies the counterparty's current-board hanko over `(epoch, nonce, diffs, forgive)`; the submitter

@@ -4,6 +4,7 @@ module params_test {
   import chain as c from "./chain"
   import entity as e from "./entity"
   import jbatch as j from "./jbatch"
+  import account_core as a from "./account_core"
 
   // one meaning of LAG: ticks for a J transaction to be included and for a J event to be read
   // the dispute windows together (entity.DWIN) are chain's two floors
@@ -16,7 +17,11 @@ module params_test {
     c::REACT == 2 * e::LAG,
     e::HOP >= c::REACT,
     e::ESC >= c::LAG,
-    e::DWIN > c::REACT
+    e::DWIN > c::REACT,
+    // R-HTLC-CLOCK: the Account's clock is each party's own view of the J height. A view lags the chain by at most LAG, so two views differ by at most
+    // LAG (a::DRIFT), and an expiry waits for a reserve of at least LAG so that no party's view still shows the lock live.
+    a::DRIFT == c::LAG,
+    a::CLOCK_RESERVE >= c::LAG
   }
 
   run layersAgreeOnTheNumbersTest = e::init.expect(AGREE)

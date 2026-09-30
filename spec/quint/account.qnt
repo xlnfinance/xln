@@ -97,7 +97,7 @@ module account {
     all {
       not(isByz(s)),
       admits(r, planning(r, frames), clock.get(s), s, tx),
-      replica' = replica.set(s, { ...r, mempool: r.mempool.append(tx) }),
+      replica' = replica.set(s, { ...r, mempool: r.mempool.append(tx), submitted: r.submitted + 1 }),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
       clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
       rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
@@ -124,13 +124,29 @@ module account {
       not(isByz(s)),
       canPropose(r, clock.get(s), s),
       nextFid <= MAX_FRAMES,
-      replica' = replica.set(s, { ...r, status: Proposed(nextFid), mempool: List() }),
+      replica' = replica.set(s, { ...r, status: Proposed(nextFid), mempool: List(), refused: r.refused.concat(keepValid(r.tip, r.mempool, s, clock.get(s)).dropped) }),
       frames' = frames.set(nextFid, f),
       nextFid' = nextFid + 1,
       proposals' = proposals.union(Set(nextFid)),
       signed' = signed.set(sigKey(s, f), nextFid),
       equivocated' = (equivocated or clashes(signed, frames, sigKey(s, f), f)),
       acks' = acks, clock' = clock, firstCommit' = firstCommit, diverged' = diverged,
+      rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+    }
+  }
+
+  // R-NOTICE: a tx in the mempool that no longer applies on the committed head (a collision winner took its slot, credit was used up) is
+  // refused with notice and leaves the mempool, without waiting for a frame that could carry it. Never dropped silently, never stuck there.
+  action reviseMempool(s: Side): bool = {
+    val r = replica.get(s)
+    val sel = keepValid(r.tip, r.mempool, s, clock.get(s))
+    all {
+      not(isByz(s)),
+      isOpen(r),
+      sel.dropped.length() > 0,
+      replica' = replica.set(s, { ...r, mempool: sel.txs, refused: r.refused.concat(sel.dropped) }),
+      frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
+      clock' = clock, firstCommit' = firstCommit, diverged' = diverged, equivocated' = equivocated,
       rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
     }
   }
@@ -174,7 +190,7 @@ module account {
   // clock. The frame's timestamp is not part of it [R-CLOCK]. A frame that fails and is still held is a bug.
   pure def wellFormed(r: Replica, now: int, f: Frame): bool = {
     val replays = match replay(r.tip, f.txs, f.author, now) { | Ok(b) => b == f.after | Refused(_) => false }
-    and { f.height == r.height + 1, f.nonce > r.pnonce, f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP, replays }
+    and { f.parent == r.lastFid, f.height == r.height + 1, f.nonce > r.pnonce, f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP, replays }
   }
   pure def heldNow(before: Replica, after: Replica, fid: int): bool =
     isReceived(after) and statusFid(after) == fid and not(isReceived(before) and statusFid(before) == fid)
@@ -185,6 +201,7 @@ module account {
   // accepts, and every one of these is refused now (one that later fits its height is a frame like any other).
   //   0 a claimed state that is not the replay of the txs   1 a skipped height
   //   4 a proof nonce that is not above the last committed one   5 a proof nonce that leaps more than MAX_NONCE_GAP (N1)
+  //   6 a frame whose parent is not the receiver's head (R-PARENT)
   //   2 an expiry of an open lock, stamped far in the future, before the receiver's own clock is past the deadline and the reserve
   //   3 a resolve of an open lock with its secret, stamped in the past, after the receiver's own clock has passed the deadline
   // (Old and future stamps on frames that are otherwise correct are accepted, by R-CLOCK: `oldFrameIsAcceptedAfterAnOutageTest`.)
@@ -195,16 +212,17 @@ module account {
     val lock = r.tip.locks.get(id)
     val gone = { ...r.tip, locks: r.tip.locks.set(id, NO_LOCK) }
     val f: Frame =
-      if (kind == 0) { height: r.height + 1, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: { ...r.tip, offdelta: r.tip.offdelta + 1 } }
-      else if (kind == 1) { height: r.height + 2, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip }
-      else if (kind == 2) { height: r.height + 1, nonce: r.pnonce + 1, ts: now + 100, author: a, txs: [HtlcExpire({ id: id })], after: gone }
-      else if (kind == 3) { height: r.height + 1, nonce: r.pnonce + 1, ts: 0, author: a, txs: [HtlcResolve({ id: id, secret: secretOfHash(lock.hashlock) })],
+      if (kind == 0) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: { ...r.tip, offdelta: r.tip.offdelta + 1 } }
+      else if (kind == 1) { height: r.height + 2, parent: r.lastFid, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip }
+      else if (kind == 2) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: now + 100, author: a, txs: [HtlcExpire({ id: id })], after: gone }
+      else if (kind == 3) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: 0, author: a, txs: [HtlcResolve({ id: id, secret: secretOfHash(lock.hashlock) })],
              after: { ...gone, offdelta: if (lock.payer == Left) r.tip.offdelta - lock.amount else r.tip.offdelta + lock.amount } }
-      else if (kind == 4) { height: r.height + 1, nonce: r.pnonce, ts: now, author: a, txs: List(), after: r.tip }                            // N1: a proof nonce that is not above the last
-      else { height: r.height + 1, nonce: r.pnonce + 2 + MAX_NONCE_GAP, ts: now, author: a, txs: List(), after: r.tip }                       // N1: a leap
+      else if (kind == 4) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce, ts: now, author: a, txs: List(), after: r.tip }                            // N1: a proof nonce that is not above the last
+      else if (kind == 5) { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 2 + MAX_NONCE_GAP, ts: now, author: a, txs: List(), after: r.tip }   // N1: a leap
+      else { height: r.height + 1, parent: 99, nonce: r.pnonce + 1, ts: now, author: a, txs: List(), after: r.tip }                                      // R-PARENT: a frame that does not extend my head
     all {
       isByz(a), r.height < MAX_HEIGHT,          // the search bound: a frame above MAX_HEIGHT is outside the signature map
-      kind >= 0, kind <= 5,
+      kind >= 0, kind <= 6,
       LOCK_SLOTS.contains(id),
       if (kind == 2 or kind == 3) and { lock.on, if (kind == 2) now <= lock.deadline + CLOCK_RESERVE else and { now > lock.deadline, payee(lock) == a } } else true,
       nextFid <= MAX_FRAMES,
@@ -230,7 +248,7 @@ module account {
   action byzStamped(a: Side, future: bool): bool = {
     val rcv = other(a)
     val r = replica.get(rcv)
-    val f: Frame = { height: r.height + 1, nonce: r.pnonce + 1, ts: if (future) clock.get(rcv) + 100 else 0, author: a, txs: List(), after: r.tip }
+    val f: Frame = { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1, ts: if (future) clock.get(rcv) + 100 else 0, author: a, txs: List(), after: r.tip }
     all {
       isByz(a), r.height < MAX_HEIGHT, nextFid <= MAX_FRAMES,
       frames' = frames.set(nextFid, f),
@@ -302,7 +320,7 @@ module account {
     all {
       not(isByz(s)),
       isReceived(r),
-      replica' = replica.set(s, commit(r, fid, f)),
+      replica' = replica.set(s, commit(r, s, fid, f)),
       signed' = signed.set(sigKey(s, f), fid),
       equivocated' = (equivocated or clashes(signed, frames, sigKey(s, f), f)),
       firstCommit' = if (firstCommit.get(f.height) == 0) firstCommit.set(f.height, fid) else firstCommit,
@@ -325,7 +343,7 @@ module account {
       not(isByz(s)),
       acks.contains(fid),
       f.author == s,
-      replica' = if (fits) replica.set(s, commit(r, fid, f)) else replica,
+      replica' = if (fits) replica.set(s, commit(r, s, fid, f)) else replica,
       firstCommit' = if (fits and firstCommit.get(f.height) == 0) firstCommit.set(f.height, fid) else firstCommit,
       diverged' = (diverged or (fits and mismatch(firstCommit, frames, f, byz != 0))),
       frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, signed' = signed,
@@ -360,13 +378,14 @@ module account {
     tick(Left), tick(Right),
     enqueue(Left), enqueue(Right),
     propose(Left), propose(Right),
+    reviseMempool(Left), reviseMempool(Right),
     resend(Left), resend(Right),
     receiveProposal(Left), receiveProposal(Right),
     ackReceived(Left), ackReceived(Right),
     receiveAck(Left), receiveAck(Right),
     dropProposal, dropAck,
     { nondet a = SIDES.oneOf() turnByzantine(a) },
-    { nondet a = SIDES.oneOf() nondet kind = 0.to(5).oneOf() nondet id = LOCK_SLOTS.oneOf() byzPropose(a, kind, id) },
+    { nondet a = SIDES.oneOf() nondet kind = 0.to(6).oneOf() nondet id = LOCK_SLOTS.oneOf() byzPropose(a, kind, id) },
     { nondet a = SIDES.oneOf() nondet future = BRANCHES.oneOf() byzStamped(a, future) },
     { nondet a = SIDES.oneOf() nondet correct = BRANCHES.oneOf() byzAck(a, correct) }
   }
@@ -427,7 +446,15 @@ module account {
     }
   })
 
-  val safe: bool = and { credit_holds, agreed, no_equivocation, both_signed, no_bad_accept, authority, nonce_climbs }
+  // R-NOTICE: no admitted tx is lost. Every tx a side admitted to its mempool is in a frame it committed as author, in its mempool, in the frame it
+  // has in flight, or refused with notice. The count is the evidence: txs are values, and two equal ones are two txs.
+  val no_tx_lost: bool = SIDES.forall(s => {
+    val r = replica.get(s)
+    val inFlight = match r.status { | Proposed(fid) => frames.get(fid).txs.length() | _ => 0 }
+    isByz(s) or r.submitted == r.done + r.mempool.length() + inFlight + r.refused.length()
+  })
+
+  val safe: bool = and { credit_holds, agreed, no_equivocation, both_signed, no_bad_accept, authority, nonce_climbs, no_tx_lost }
 
   // Coverage witnesses: each is false on purpose, and `quint run --invariant` must find a violating trace.
   // A witness that cannot be violated means the path it names is unreachable in this model.
@@ -443,6 +470,7 @@ module account {
   })
   val w_no_supersede: bool = not(superseded)
   val w_no_byz_frame: bool = not(1.to(MAX_FRAMES).exists(i => and { i < nextFid, signed.get(sigKey(frames.get(i).author, frames.get(i))) != i }))
+  val w_no_notice: bool = SIDES.forall(s => replica.get(s).refused.length() == 0)
   val w_no_lock: bool = lockCount(replica.get(Left).tip) == 0
   val w_no_paid: bool = replica.get(Left).tip.offdelta == 0
 }

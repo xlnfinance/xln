@@ -355,4 +355,65 @@ module account_test {
     .then(enqueueTx(Right, HtlcResolve({ id: 1, secret: 1 })))                      // the held reveal arrives
     .then(propose(Right))
     .expect(and { isProposed(replica.get(Right)), frames.get(3).txs == [HtlcResolve({ id: 1, secret: 1 })], safe })
+
+  // ---- round of 09-30: the Account comparison decisions -------------------------------------------------------------
+
+  // R-REACK (D-AC-1). Right proposes frame 1, Left commits it and acks, the ack is lost. Left then proposes its own frame 2 and is Proposed when Right resends
+  // frame 1. Left must still re-ack it (before this round it refused, and both sides were stuck for ever). Afterwards both sides converge at height 2.
+  run lostAckWhileHoldingOwnFrameTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right))
+    .then(deliverProposal(Left, 1))
+    .then(ackReceived(Left))
+    .then(loseAck(1))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(propose(Left))                               // Left holds its own frame 2 and is Proposed
+    .then(resend(Right))
+    .then(deliverProposal(Left, 1))                    // the repeat of the frame Left committed: re-acked although Left is Proposed
+    .expect(and { acks.contains(1), refusals == 0, replica.get(Right).height == 0 })
+    .then(deliverAck(Right, 1))
+    .then(deliverProposal(Right, 2))
+    .then(ackReceived(Right))
+    .then(deliverAck(Left, 2))
+    .expect(and {
+      replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip,
+      replica.get(Left).tip.limitLeft == 2, replica.get(Left).tip.limitRight == 1, refusals == 0, safe
+    })
+
+  // R-NOTICE (D-AC-5). Height 1: Right grants Left credit. Height 2: both propose a lock in slot 1, Left wins, Right's lock goes back to its mempool and can
+  // never apply. Before this round it sat there for ever, unreported. Now the side refuses it with notice and the mempool is empty.
+  action deadTx = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(enqueueTx(Left, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 2 })))
+    .then(enqueueTx(Right, HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(2), deadline: 2 })))
+    .then(propose(Left)).then(propose(Right))
+    .then(deliverProposal(Left, 3)).then(deliverProposal(Right, 2)).then(ackReceived(Right)).then(deliverAck(Left, 2))
+
+  run deadTxIsRefusedWithNoticeTest = deadTx
+    .expect(and { replica.get(Right).mempool.length() == 1, not(canPropose(replica.get(Right), clock.get(Right), Right)), no_tx_lost })
+    .then(reviseMempool(Right))
+    .expect(and {
+      replica.get(Right).mempool.length() == 0, replica.get(Right).refused == [HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(2), deadline: 2 })],
+      replica.get(Right).submitted == 2, replica.get(Right).done == 1, no_tx_lost, safe
+    })
+
+  // R-NOTICE at propose: a mempool of a dead tx and a live one proposes the live one and refuses the dead one with notice.
+  run deadTxBesideALiveOneIsNoticedAtProposeTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(enqueueTx(Left, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 2 })))
+    .then(enqueueTx(Right, HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(2), deadline: 2 })))
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Left)).then(propose(Right))
+    .then(deliverProposal(Left, 3)).then(deliverProposal(Right, 2)).then(ackReceived(Right)).then(deliverAck(Left, 2))
+    .then(propose(Right))
+    .expect(and {
+      frames.get(4).txs == [Pay({ from: Right, amount: 1 })], replica.get(Right).refused.length() == 1, no_tx_lost, safe
+    })
+
+  // R-PARENT (D-AC-7). A frame at the next height whose parent is not the receiver's head is refused, although it would replay.
+  run wrongParentIsRefusedTest = init
+    .then(turnByzantine(Left)).then(byzPropose(Left, 6, 1)).then(deliverProposal(Right, 1))
+    .expect(and { refusals == 1, isOpen(replica.get(Right)), replica.get(Right).height == 0, no_bad_accept, safe })
 }
