@@ -59,7 +59,8 @@ const hubWorld = async () => {
     w.finalize(who, other, { nonce: 1, body: upBody, startedByLeft: up.L.id === A.id }, { nonce: 1, proposerIsLeft: upLeft, body: upBody, sig: "0x" }, args);
   const finalizeDown = (who: Party, other: Party, args = {}) =>
     w.finalize(who, other, { nonce: 1, body: downBody, startedByLeft: down.L.id === H.id }, { nonce: 1, proposerIsLeft: downLeft, body: downBody, sig: "0x" }, args);
-  return { w, A, H, B, net, openBoth, finalizeUp, finalizeDown, deadlineUp: T0 + 1000 };
+  const startUp = () => w.start(A, H, 1, upLeft, upBody, upByH);
+  return { w, A, H, B, net, openBoth, startUp, finalizeUp, finalizeDown, deadlineUp: T0 + 1000 };
 };
 
 describe("H1 unrevealed HTLC waits for its deadline", () => {
@@ -89,6 +90,29 @@ describe("H1 unrevealed HTLC waits for its deadline", () => {
     const { w, A, H, net, openBoth, finalizeUp, deadlineUp } = await hubWorld();
     await openBoth();
     w.at(deadlineUp - T0 + 1);
+    expect(await finalizeUp(A, H)).toBe("ok");
+    expect(await net()).toEqual({ A: 0n, H: 0n, B: 0n });
+  });
+
+  // The reveal time, not the dispute-start time, decides. Upstream deadline is T0 + 1000.
+  test("a secret revealed on chain before the deadline is paid even if the dispute starts after the deadline", async () => {
+    const { w, A, H, net, startUp, finalizeUp, deadlineUp } = await hubWorld();
+    w.at(900);
+    expect(await w.submit(H, { revealSecrets: [{ transformer: w.chain.addresses.deltaTransformer, secret }] })).toBe("ok");
+    w.at(deadlineUp - T0 + 100);
+    expect(await startUp()).toBe("ok");
+    w.at(deadlineUp - T0 + 300);
+    expect(await finalizeUp(A, H)).toBe("ok");
+    expect(await net()).toEqual({ A: -50n, H: 50n, B: 0n });
+  });
+
+  test("a secret revealed on chain after the deadline is not paid, even when the dispute is open at the reveal", async () => {
+    const { w, A, H, net, startUp, finalizeUp, deadlineUp } = await hubWorld();
+    w.at(100);
+    expect(await startUp()).toBe("ok");
+    w.at(deadlineUp - T0 + 50);
+    expect(await w.submit(H, { revealSecrets: [{ transformer: w.chain.addresses.deltaTransformer, secret }] })).toBe("ok");
+    w.at(deadlineUp - T0 + 300);
     expect(await finalizeUp(A, H)).toBe("ok");
     expect(await net()).toEqual({ A: 0n, H: 0n, B: 0n });
   });

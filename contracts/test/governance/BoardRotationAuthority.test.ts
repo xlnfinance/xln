@@ -13,6 +13,7 @@ import {
   encodeBatch,
   encodeSingleSignerBoard,
   singleSignerLazyEntityId,
+  submitBatch,
 } from '../helpers/hanko.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
@@ -88,12 +89,12 @@ async function fixture(splitA = 60n) {
     ],
   });
   const encodedBatch = encodeBatch(batch);
-  const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, 1n);
-  await depository.processBatch(
+  const batchHash = await computeDepositoryBatchHash(depository, TARGET_ID, encodedBatch, 1n);
+  await submitBatch(depository, signers[0]!, TARGET_ID, {
     encodedBatch,
-    buildSingleSignerHanko(TARGET_ID, batchHash, deriveHardhatPrivateKey(1)),
-    1n,
-  );
+    hankoData: buildSingleSignerHanko(TARGET_ID, batchHash, deriveHardhatPrivateKey(1)),
+    nonce: 1n,
+  });
   return { provider, depository, signers, supply, controlTokenId };
 }
 
