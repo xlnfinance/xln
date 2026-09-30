@@ -1,0 +1,9 @@
+id: no-string-error
+language: TypeScript
+severity: error
+message: a string is not an error; give the Result a tagged error union
+rule:
+  kind: type_arguments
+  inside: { kind: generic_type, has: { field: name, regex: '^Result$' } }
+  has: { kind: predefined_type, regex: '^string$', nthChild: { position: 2, reverse: false } }
+files: [xln.ts]
