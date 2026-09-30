@@ -141,7 +141,12 @@ const withinLimits = (h: Hanko): Result<void, HankoFault> => {
   return map(traverse(h.claims, claimWithinLimits), () => undefined);
 };
 
-/** A Hanko is canonical when re-encoding its decoded form gives back the same bytes. */
+/**
+ * A Hanko is canonical when re-encoding its decoded form gives back the same bytes. This check is load-bearing twice:
+ * it refuses the spellings the contract tolerates (trailing bytes, dirty padding), and it stops the decoder's leniency,
+ * which reads past the end as zero words where the contract's strict `abi.decode` reverts (619 of 16,000 byte flips
+ * in review). Without it this verifier would accept Hankos the contract refuses.
+ */
 const isCanonical = (h: Hanko, bytes: Uint8Array): boolean => {
   const delaysFit = (c: HankoClaim): boolean =>
     c.boardChangeDelay <= MAX_DELAY && c.controlChangeDelay <= MAX_DELAY && c.dividendChangeDelay <= MAX_DELAY;
