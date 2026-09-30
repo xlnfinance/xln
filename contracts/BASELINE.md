@@ -425,3 +425,7 @@ one test: `Depository-part-1` "keeps the dispute active when any signed transfor
 limit on this machine, taking about 54 s (the out-of-gas mode alone about 52 s, mostly system time). It times out identically on main's own
 contracts here (checked in a clean worktree at b471747, same test alone), and the same file passed in 41 s in the earlier sandbox, so the cause
 is the machine, not #54; run on a faster one or raise the timeout for that test. vm 20 files, gate 2 files, `test/a12` (4), Foundry every suite: 0 failures.
+
+### Shim budget pin
+
+`pure/diff/fork-shim-budget.test.ts` reads og's processBatch tx gas limit and the reserve from source and fails if the shim's 14,000,000 budget plus the reserve and the hanko prelude of the walk's largest board (`MAX_BOARD_SIGNERS` in `pure/diff/world.ts`) no longer fits the limit. The prelude bound is a chord between the measured points for 1 and 64 signers, so it is an upper bound. Today a board of up to 29 signers fits; the walk's largest has 3.
