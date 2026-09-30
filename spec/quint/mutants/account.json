@@ -354,8 +354,8 @@
       "id": "supersession-reversed",
       "why": "A12: a Right-authored frame is taken to supersede a Left-authored one at the same height, the reverse of the chain rank (Left wins at one nonce).",
       "file": "account.qnt",
-      "old": "not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right)",
-      "new": "not(byzOn and f.author == Right and frames.get(fc.get(f.height)).author == Left)",
+      "old": "not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right and f.nonce >= frames.get(fc.get(f.height)).nonce)",
+      "new": "not(byzOn and f.author == Right and frames.get(fc.get(f.height)).author == Left and f.nonce >= frames.get(fc.get(f.height)).nonce)",
       "killedBy": "test:equivocatingLeftIsSupersededByRankTest"
     },
     {
