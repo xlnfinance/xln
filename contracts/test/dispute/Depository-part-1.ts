@@ -2540,6 +2540,8 @@ describe('Depository', () => {
   });
 
   it('keeps the dispute active when any signed transformer cannot execute exactly', async function () {
+    // Eight failure modes, one of them burns about 13M gas: 34.8 s alone, over mocha's 40 s default under load.
+    this.timeout(180_000);
     const failureModes = [
       'no-code',
       'revert',
