@@ -4,6 +4,7 @@
 //   --names-json             dump every name the scanners read, as JSON (to write or audit register rows)
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
 //   --base <ref>             the ref the register may only grow from (default origin/main)
+//   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
 // Runs the register gate, the style gate of the new tree and folder width (rules/checks/folder-width.ts): one
@@ -41,59 +42,68 @@ const runFolderWidth = (): boolean => {
   return !report.failed;
 };
 
-if (args.includes("--style-only")) process.exit(gateExit({ register: true, style: runStyle(), width: true }));
-if (args.includes("--width-only")) process.exit(gateExit({ register: true, style: true, width: runFolderWidth() }));
-
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
 
-const overrides = Object.fromEntries(
-  flagValues("--layer-root").flatMap((pair) => {
-    const [layer, dir] = pair.split("=");
-    return LAYERS.includes(layer as Layer) && dir !== undefined ? [[layer, dir]] : [];
-  }),
-) as Partial<Record<Layer, string>>;
+// The register part: parse, scan names, evaluate, ratchet against the base. Returns whether it passed.
+const runRegister = (): boolean => {
+  const overrides = Object.fromEntries(
+    flagValues("--layer-root").flatMap((pair) => {
+      const [layer, dir] = pair.split("=");
+      return LAYERS.includes(layer as Layer) && dir !== undefined ? [[layer, dir]] : [];
+    }),
+  ) as Partial<Record<Layer, string>>;
 
-// A layer root that was asked for and is not there would read as an empty layer and leave every owed cell owed.
-const missingRoot = Object.entries(overrides).find(([, dir]) => !existsSync(dir));
-if (missingRoot !== undefined) {
-  console.error(`FAIL --layer-root ${missingRoot[0]}=${missingRoot[1]}: no such directory`);
-  process.exit(1);
-}
+  // A layer root that was asked for and is not there would read as an empty layer and leave every owed cell owed.
+  const missingRoot = Object.entries(overrides).find(([, dir]) => !existsSync(dir));
+  if (missingRoot !== undefined) {
+    console.error(`FAIL --layer-root ${missingRoot[0]}=${missingRoot[1]}: no such directory`);
+    process.exit(1);
+  }
 
-const parsed = parseRegister(readFileSync(`${here}/register.json`, "utf8"));
-if (!parsed.ok) {
-  console.error(`FAIL register.json ${parsed.error.where}: ${parsed.error.detail}`);
-  process.exit(1);
-}
+  const parsed = parseRegister(readFileSync(`${here}/register.json`, "utf8"));
+  if (!parsed.ok) {
+    console.error(`FAIL register.json ${parsed.error.where}: ${parsed.error.detail}`);
+    process.exit(1);
+  }
 
-const names = scanNames(repoRoot, overrides);
-const [who] = flagValues("--who");
+  const names = scanNames(repoRoot, overrides);
+  const [who] = flagValues("--who");
 
-if (args.includes("--names-json")) {
-  console.log(JSON.stringify(names));
-  process.exit(0);
-}
+  if (args.includes("--names-json")) {
+    console.log(JSON.stringify(names));
+    process.exit(0);
+  }
 
-if (who !== undefined) {
-  names.filter((name) => carries(who, name)).forEach((name) => console.log(`${name.layer.padEnd(9)} ${name.kind.padEnd(8)} ${name.text}  (${name.file})`));
-  process.exit(0);
-}
+  if (who !== undefined) {
+    names.filter((name) => carries(who, name)).forEach((name) => console.log(`${name.layer.padEnd(9)} ${name.kind.padEnd(8)} ${name.text}  (${name.file})`));
+    process.exit(0);
+  }
 
-const base = readBase(repoRoot, flagValues("--base")[0] ?? "origin/main");
-if (!base.ok) {
-  console.error(`FAIL ${base.error.detail}`);
-  process.exit(1);
-}
-const grown = base.value._tag === "Base" ? ratchet(base.value.register, parsed.value) : { problems: [], retirements: [] };
-const checked = evaluate(parsed.value, names);
-const evaluation = { ...checked, problems: [...checked.problems, ...grown.problems] };
-console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
-grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
-// The matrix is for review/; the other gates run with the plain gate.
+  const base = readBase(repoRoot, flagValues("--base")[0] ?? "origin/main");
+  if (!base.ok) {
+    console.error(`FAIL ${base.error.detail}`);
+    process.exit(1);
+  }
+  const grown = base.value._tag === "Base" ? ratchet(base.value.register, parsed.value) : { problems: [], retirements: [] };
+  const checked = evaluate(parsed.value, names);
+  const evaluation = { ...checked, problems: [...checked.problems, ...grown.problems] };
+  console.log(args.includes("--matrix") ? renderMarkdown(evaluation) : renderText(evaluation));
+  grown.retirements.forEach((line) => console.log(`NOTE ${line}`));
+  return evaluation.problems.length === 0;
+};
+
+type Part = "register" | "style" | "width";
+const ONLY: Readonly<Record<string, Part>> = { "--register-only": "register", "--style-only": "style", "--width-only": "width" };
+const only = args.map((arg) => ONLY[arg]).find((part) => part !== undefined);
 const matrixOnly = args.includes("--matrix");
-process.exit(gateExit({
-  register: evaluation.problems.length === 0,
-  style: matrixOnly || runStyle(),
-  width: matrixOnly || runFolderWidth(),
-}));
+
+// One table for every way in: a part runs when its --X-only flag names it, or (with no such flag) in the plain
+// command, where the matrix view keeps to the register. A part that does not run counts as passed.
+const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth };
+const passes = (part: Part): boolean => {
+  const wanted = only === undefined ? part === "register" || !matrixOnly : only === part;
+  return !wanted || PARTS[part]();
+};
+
+process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width") }));

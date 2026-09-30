@@ -50,6 +50,15 @@ describe("the real command over a scratch copy", () => {
     expect(out).toContain("chain/bad.ts");
   });
 
+  test("the register part alone turns the command red: a scratch copy has no contract tests to carry the ids", () => {
+    const repo = scratchPure({});
+    Bun.spawnSync(["git", "add", "-A"], { cwd: repo });
+    Bun.spawnSync(["git", "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "-m", "scratch"], { cwd: repo });
+    const done = Bun.spawnSync(["bun", `${repo}/pure/rules/check.ts`, "--register-only", "--base", "HEAD"], { cwd: `${repo}/pure` });
+    expect(done.exitCode).toBe(1);
+    expect(done.stdout.toString()).toContain("no contract name carries the id");
+  });
+
   test("a folder of 11 source files exits 1 and names the folder", () => {
     const files = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`w/f${index}.ts`, "export {};\n"]));
     const { code, out } = run(scratchPure(files), "--width-only");

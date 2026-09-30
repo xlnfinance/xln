@@ -1100,6 +1100,16 @@
      "kind": "test",
      "layer": "contract",
      "name": "test_R_OOG_floorCoversEveryFillRatioSize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_floorCoversEverySecretSize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-OOG swallowed failures: every try/catch and low-level call is audited"
     }
    ]
   },
@@ -1689,6 +1699,36 @@
      "kind": "test",
      "layer": "ts",
      "name": "a bare true, false or undefined passed to a function is a hit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored folder under pure/ (a local db-* from a test run) does not turn the gate red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored file under kernel/ is not counted, and the same file untracked-not-ignored is"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a name in a comment or a string of another file is not a user"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "async function, interface, enum, let and declared forms are exports too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a column-0 comment in the body does not end the declaration"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a template literal whose lines start in column 0 does not end the declaration"
     }
    ]
   },
@@ -1762,6 +1802,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "a folder of 11 source files exits 1 and names the folder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the register part alone turns the command red: a scratch copy has no contract tests to carry the ids"
     }
    ]
   }
