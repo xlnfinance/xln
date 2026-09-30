@@ -1,5 +1,8 @@
 # Autonomous xln work
 
+Latest owner-requested implementation handoff: [J/E/A continuation](jea-continuation.md).
+Its evidence is dated; root `todo.md` remains the only live release checklist.
+
 ## Mission clarification — owner update 2026-09-30
 
 [MML](intro.md#mission) means making the accounts supporting 51% of world GDP

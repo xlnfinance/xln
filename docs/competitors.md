@@ -128,7 +128,7 @@ less block gas capacity, serving rebalances and disputes. Phone/laptop full node
 and five-minute catch-up of the last two days are measurement targets. Account
 execution and full J verification have separate resource budgets; measure CPU,
 memory, disk, bandwidth and energy with the selected conventional client.
-See [XLNC](xlnc-soft-mainnet.md) and the [mechanism research](research/channel-mechanisms.md).
+See [XLNC](xlnc-soft-mainnet.md) and the [provable-account research](research/provable-account-mechanisms.md).
 
 ## What would falsify the architecture claim
 

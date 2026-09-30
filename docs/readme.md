@@ -14,7 +14,7 @@ and launch status are separate surfaces and should be assessed independently.
 ## Theory
 
 - [competitors.md](competitors.md) — architectural claims, limits and falsification
-- [research/channel-mechanisms.md](research/channel-mechanisms.md) — pinned Lightning, Raiden, Hydra, Interledger and generalized-account mechanisms compared with production xln
+- [research/provable-account-mechanisms.md](research/provable-account-mechanisms.md) — pinned Lightning, Raiden, Hydra, Interledger and generalized-account mechanisms compared with production xln
 - [constraints.md](constraints.md)
 - [core/00_QA.md](core/00_QA.md)
 - [core/10_UFT.md](core/10_UFT.md)
@@ -67,6 +67,8 @@ claims require their own supporting arguments and evidence.
 - [testnet-flow-coverage.md](testnet-flow-coverage.md)
 
 ## Release and launch status
+
+- [jea-continuation.md](jea-continuation.md) — September 30 implementation, verified E2E evidence and the next production boundary
 
 - [launch-design.md](launch-design.md#minimum-remaining-work--owner-alignment-2026-09-30) — minimum implementation tasks and accepted timing policy
 

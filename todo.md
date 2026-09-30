@@ -3,6 +3,9 @@
 This is the only live TODO/NEXT file. It is a fail-closed release status, not a
 product backlog; long-term work belongs in `docs/roadmap.md`.
 
+September 30 implementation and verification: [J/E/A continuation](docs/jea-continuation.md).
+The 138-target E2E snapshot and green full check are dated evidence, not mainnet acceptance.
+
 ## Adopted launch design — 2026-09-05
 
 Canonical product and evidence contract: [launch-design.md](docs/launch-design.md).

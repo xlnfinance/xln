@@ -68,7 +68,7 @@ producer/verifier round trip below; unrelated core recovery work retains priorit
 The ordinary stateful Besu 25.9.0 prototype now runs through
 `bun run xlnc:prototype <output-directory>` with `XLNC_BESU_BIN` and
 `JAVA_HOME` set. It uses Cancun EVM, a 6M block gas limit and one-second
-QBFT blocks. This is 10× below the existing local 60M *per-block* ceiling;
+QBFT blocks. This is 10× below the existing local 60M _per-block_ ceiling;
 its different block period prevents claiming 10× lower execution per second.
 
 One producer and one full verifier on the same laptop matched the block hash,
@@ -97,12 +97,14 @@ It uses three real Entity/Account machines and preserves the transport partition
 This verifies dispute start and retained evidence, not collateral payout or
 TS/Rust equivalence of this complete recording.
 
-Final verification remains partial: Rust native/parity and frontend build/type
-gates passed, but `bun run check` failed the English-source gate on existing
-Russian text in `project-module-map.md`. Manual localhost inspection loaded
-the landing page without console errors; `/app` raised Svelte `effect_orphan`
-in its unchanged layout. This browser failure has not been triaged and does
-not establish browser-runtime readiness.
+The earlier `0b25d54ca` checkpoint failed the English-source gate. At
+`1d39fe8e6`, `bun run check` passed, frozen core was unchanged, and the canonical
+Chromium catalog recorded 138/138 targets with zero skips through catalog runs
+and focused reruns. The final rebuilt ScenarioPlayer regression also passed.
+See [the implementation handoff](jea-continuation.md) and its committed evidence.
+The earlier manual localhost `/app` `effect_orphan` observation remains a separate,
+untriaged development observation; it was not reported by those isolated builds.
+These results do not close the XLNC exit-capacity or device-resource gates.
 
 ## What already exists
 
