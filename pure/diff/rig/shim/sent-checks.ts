@@ -1,6 +1,6 @@
 // Checks over what the fork shim handed the chain in one walk (fork-shim.ts Sent): the epoch every dispute start declared, and the gas
 // the heaviest batch spent against the shim's signed budget. The walk runs them after its last frame; sent-checks.test.ts turns each red.
-import type { Sent } from "./fork-shim.ts";
+import type { Sent } from "../fork-shim.ts";
 
 /** The shim's signed budget must be at least this many times the gas of the largest batch a walk sent (measured: about 35 times, fork-shim.ts). */
 export const GAS_HEADROOM = 8n;

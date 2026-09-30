@@ -3,9 +3,9 @@
 // missing-field mutants of the shim (m1 epoch always 0, m6 budget dropped, m7 epoch of the wrong pair) fail here by name.
 import { describe, expect, test } from "bun:test";
 import { ethers } from "ethers";
-import { createEmptyBatch } from "../../../core/jurisdiction/machine/batch/index.ts";
-import { DepositoryBounds__factory } from "../../../contracts/typechain-types/factories/DepositoryBounds__factory.ts";
-import { SHIM_GAS_BUDGET, encodeForkBatch } from "./fork-shim.ts";
+import { createEmptyBatch } from "../../../../core/jurisdiction/machine/batch/index.ts";
+import { DepositoryBounds__factory } from "../../../../contracts/typechain-types/factories/DepositoryBounds__factory.ts";
+import { SHIM_GAS_BUDGET, encodeForkBatch } from "../fork-shim.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const PARAM = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;

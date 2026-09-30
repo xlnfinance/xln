@@ -1,6 +1,6 @@
 // Each check over what the shim sent (sent-checks.ts) passes an honest walk and goes red on the planted state it exists to catch.
 import { describe, expect, test } from "bun:test";
-import type { StartSent } from "./fork-shim.ts";
+import type { StartSent } from "../fork-shim.ts";
 import { GAS_HEADROOM, gasHeadroomLines, startEpochLines } from "./sent-checks.ts";
 
 const BUDGET = 14_000_000n;

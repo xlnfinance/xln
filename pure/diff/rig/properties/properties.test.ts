@@ -1,8 +1,8 @@
 // Each property check passes an honest Account and goes red on the broken state it exists to catch.
 import { expect, test } from "bun:test";
-import { unwrap } from "../../xln_run.ts";
-import { accountId, genesisReplica, tokenId } from "../../xln.ts";
-import type { AccountReplica, DisputeHanko, EntityId, Runtime } from "../../xln.ts";
+import { unwrap } from "../../../xln_run.ts";
+import { accountId, genesisReplica, tokenId } from "../../../xln.ts";
+import type { AccountReplica, DisputeHanko, EntityId, Runtime } from "../../../xln.ts";
 import { checkProperties, NOTHING_SIGNED } from "./properties.ts";
 
 const L = `0x${"1".padStart(64, "0")}` as EntityId;

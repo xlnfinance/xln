@@ -1,0 +1,9 @@
+{
+  "sites": [
+    "SETTLEMENT-IGNORES-CREDIT@disputes:0x30de2",
+    "SETTLEMENT-IGNORES-CREDIT@settlement:0x30de5",
+    "SETTLEMENT-IGNORES-CREDIT@model:0x30de3",
+    "CREDIT-REVOKED-BELOW-USE@model:0x30de2",
+    "OG-J-PREFIX-RANGE-COUNT@disputes:0x30de6"
+  ]
+}

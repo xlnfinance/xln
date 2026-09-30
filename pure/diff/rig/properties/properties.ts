@@ -7,8 +7,8 @@
 //      two replicas of one Account at the same frame height hold the same deltas.
 //
 // A check reads only committed state: each Entity's Account replicas (their committed body and dispute witnesses).
-import { committedView, stableJson } from "../../xln.ts";
-import type { AccountReplica, DisputeHanko, EntityId, EntityReplica, Runtime } from "../../xln.ts";
+import { committedView, stableJson } from "../../../xln.ts";
+import type { AccountReplica, DisputeHanko, EntityId, EntityReplica, Runtime } from "../../../xln.ts";
 
 /** One Account as one Entity holds it. */
 type Held = { readonly self: EntityId; readonly peer: EntityId; readonly replica: AccountReplica };

@@ -8,9 +8,10 @@
 // halt a walk reaches fails it, even when the rewrite halts too, unless it is a known og bug (departures.ts
 // KNOWN_OG_HALTS): otherwise it is a draw whose guard is weaker than og's.
 //
-// The properties of rig/properties.ts (P2 credit-bounded, P4 agreed) run after every committed frame, and P1 (the chain pays what the
+// The properties of rig/properties/properties.ts (P2 credit-bounded, P4 agreed) and rig/properties/belief.ts (P3, the Account never believes a value
+// the chain did not hold, and at rest holds the chain's) run after every committed frame, and P1 (the chain pays what the
 // Account says) runs a dispute to finalize when the walk ends. The disputes walk draws settlements too and starts its dispute only on
-// an Account whose epoch has moved, so the start has to carry the epoch (C1); rig/sent-checks.ts checks what the fork shim sent.
+// an Account whose epoch has moved, so the start has to carry the epoch (C1); rig/shim/sent-checks.ts checks what the fork shim sent.
 //
 // One area, one walk per process (og worker fatals in one Bun process can crash it):
 //   bun diff/walk.ts --area orderbook --seeds 3      the core draws plus one area's, on the first 3 walk seeds
@@ -19,14 +20,17 @@ import { seedOf, untilCovered } from "./seed.ts";
 import { tracing } from "./og/scenario-trace.ts";
 import type { Coverage } from "./rig/lane.ts";
 import { SHIM_GAS_BUDGET } from "./rig/fork-shim.ts";
-import { gasHeadroomLines, startEpochLines } from "./rig/sent-checks.ts";
+import { gasHeadroomLines, startEpochLines } from "./rig/shim/sent-checks.ts";
 import { openWorld } from "./rig/world.ts";
 import { AREA, AREAS, type Area } from "./draws/areas.ts";
 import { finalizedDisputes } from "./draws/disputes.ts";
+import { judge } from "./findings/judge.ts";
+import { KNOWN_FINDINGS } from "./findings/known.ts";
 import { drawnIn, worldIn, type Drawn, type NamedWorldMove, type Scope } from "./draws/index.ts";
 import { knownHalt } from "./rig/departures.ts";
-import { checkProperties, NOTHING_SIGNED, type Signed } from "./rig/properties.ts";
-import { enforceOne, type Enforced } from "./rig/enforce.ts";
+import { checkProperties, NOTHING_SIGNED, type Signed } from "./rig/properties/properties.ts";
+import { checkBelief, NOTHING_SEEN, type Trail } from "./rig/properties/belief.ts";
+import { enforceOne, settleBelief, vmOf, type Enforced } from "./rig/properties/enforce.ts";
 import { stableJson } from "../xln.ts";
 
 /** The walk seeds, through seedOf like every stream in diff/ (SEEDX=0 walks 0x30de1, 0x30de2, ...). */
@@ -34,8 +38,11 @@ export const walkSeeds = (n: number): readonly number[] => Array.from({ length: 
 /** Committed Runtime frames per run before the walk draws only for coverage. */
 const FRAMES = 30;
 
-/** The lane's first disagreement, or none. */
-export type Walked = { readonly coverage: Coverage; readonly diffs: readonly string[] };
+/**
+ * The lane's first disagreement, or none. `known` holds the lines a registered finding expected (findings/known.ts): printed, not red.
+ * `diffs` holds everything else, including a registered expectation that did not appear.
+ */
+export type Walked = { readonly coverage: Coverage; readonly diffs: readonly string[]; readonly known: readonly string[] };
 
 /**
  * One walk over the given drawn rows and world moves; it stops at the first diff, an og halt both sides agree on, or a
@@ -53,17 +60,17 @@ export const walk = async (
   try {
     const [imports, opens] = w.importAll();
     const setup = [...w.evidence, ...(await lane.tick(imports, [])), ...(await lane.tick([], opens))];
-    if (setup.length > 0) return { coverage, diffs: setup };
+    if (setup.length > 0) return { coverage, diffs: setup, known: [] };
     await w.chain.debugFundReservesBatch(w.ids.map((entityId) => ({ entityId, tokenId: 1, amount: 10n ** 9n })));
     const funded = await lane.tick([], []);
-    if (funded.length > 0) return { coverage, diffs: funded };
+    if (funded.length > 0) return { coverage, diffs: funded, known: [] };
     const covered = () => moves.every(([k]) => coverage.entityTxs.has(k));
     // a lifecycle an area's draws opened (a dispute) keeps the walk going past its floor until the lifecycle closes
     const owing = () => world.filter(([, m]) => m.owed?.(w) === true);
     const more = untilCovered(FRAMES, () => covered() && owing().length === 0, FRAMES * 6);
     // a halted og Runtime refuses every later frame, so a halt both sides agree on ends the run; so does a departure
     // (departures.ts), after which the two states differ
-    const loop = async (i: number, signed: Signed): Promise<readonly string[]> => {
+    const loop = async (i: number, signed: Signed, trail: Trail): Promise<readonly string[]> => {
       if (!more(i) || coverage.halts > 0 || coverage.departures.length > 0) return [];
       const enabled = moves.filter(([, m]) => m.enabled(w));
       // favour the kinds committed least: weight 1 / (1 + times tried)
@@ -85,12 +92,17 @@ export const walk = async (
       coverage.actions[name] = (coverage.actions[name] ?? 0) + 1;
       if (tracing()) console.log(`frame ${lane.frames() + 1} ${name}`);
       const diffs = await lane.tick(step.runtimeTxs, step.users);
-      // P2 and P4 hold of the rewrite whatever og did (rig/properties.ts)
+      // P2 and P4 hold of the rewrite whatever og did (rig/properties/properties.ts)
       const checked = checkProperties(lane.runtime(), signed);
-      const broken = checked.violations.map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);
-      return diffs.length > 0 || broken.length > 0 ? [...diffs, ...broken] : loop(i + 1, checked.signed);
+      // P3: what each Account believes the chain holds is what it holds (rig/properties/belief.ts)
+      const believed = await checkBelief(vmOf(w), lane.runtime(), trail);
+      const broken = [...checked.violations, ...believed.violations].map((v) => `${w.tag} frame ${lane.frames()} ${name}: ${v}`);
+      return diffs.length > 0 || broken.length > 0 ? [...diffs, ...broken] : loop(i + 1, checked.signed, believed.trail);
     };
-    const walked = await loop(0, NOTHING_SIGNED);
+    const looped = await loop(0, NOTHING_SIGNED, NOTHING_SEEN);
+    // P3 at rest: a walk that ended clean leaves every Account holding what the chain holds
+    const quiet = looped.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
+    const walked = quiet ? (await settleBelief(w)).map((l) => `${w.tag} frame ${lane.frames()} at rest: ${l}`) : looped;
     // last, P1: one Account's dispute runs to finalize on the Depository, whose payout must match the Account
     const clean = walked.length === 0 && coverage.halts === 0 && coverage.departures.length === 0;
     const p1 = clean ? p1Lines(w.tag, coverage, await enforceOne(w)) : [];
@@ -108,11 +120,13 @@ export const walk = async (
     const unfinalized = area === "disputes" && finalizedDisputes(w) === 0 ? [`${w.tag} no dispute finalized on both sides`] : [];
     coverage.actions["C1:startsAtMovedEpoch"] = w.sent.starts().filter((s) => s.current > 0n).length;
     coverage.actions["J5:peakBatchGas"] = Number(w.sent.peakGas());
-    // C1 and J5 over what the shim handed the chain (rig/sent-checks.ts)
+    // C1 and J5 over what the shim handed the chain (rig/shim/sent-checks.ts)
     const sentScope = { tag: w.tag, disputes: area === "disputes", budget: SHIM_GAS_BUDGET };
     const sentLines = [...startEpochLines(sentScope, w.sent), ...gasHeadroomLines(sentScope, w.sent)];
     const refused = w.refusals().map((r) => `${w.tag} the chain refused a batch og submitted: ${r}`);
-    return { coverage, diffs: [...diffs, ...unguarded, ...unclosed, ...silent, ...unfinalized, ...sentLines, ...refused] };
+    const lines = [...diffs, ...unguarded, ...unclosed, ...silent, ...unfinalized, ...sentLines, ...refused];
+    const judged = judge(KNOWN_FINDINGS, area ?? "model", seed, lines);
+    return { coverage, diffs: [...judged.unknown, ...judged.stale], known: judged.known };
   } finally {
     await w.close();
   }
@@ -171,8 +185,9 @@ const rowsFor = (area: Area | undefined): readonly Drawn[] => drawnIn(scopeOf(ar
 
 /** One walk in this process: 0 when the lane agreed on every frame. */
 const one = async (area: Area | undefined, seed: number): Promise<number> => {
-  const { coverage, diffs } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)), area);
+  const { coverage, diffs, known } = await walk(seed, rowsFor(area), worldIn(scopeOf(area)), area);
   console.log(walkLine(seed, coverage));
+  known.forEach((k) => console.log(`  KNOWN ${k}`));
   diffs.forEach((d) => console.log(`  DIFF ${d}`));
   console.log(`WALKED ${JSON.stringify({ seed, diffs: diffs.length, kinds: [...coverage.entityTxs] })}`);
   return diffs.length > 0 ? 1 : 0;

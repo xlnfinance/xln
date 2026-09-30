@@ -17,9 +17,10 @@ describe("model: every drawn Entity tx kind, og processRuntime vs the rewrite, f
   const seen = new Set<string>();
   SEEDS.forEach((seed) => {
     test(`MATCH: model walk, seed 0x${seed.toString(16)}`, async () => {
-      const { coverage, diffs } = await walk(seed, ROWS, WORLD);
+      const { coverage, diffs, known } = await walk(seed, ROWS, WORLD);
       coverage.entityTxs.forEach((k) => seen.add(k));
       console.log(walkLine(seed, coverage));
+      known.forEach((k) => console.log(`KNOWN ${k}`));
       expect(diffs).toEqual([]);
     }, 900_000);
   });
