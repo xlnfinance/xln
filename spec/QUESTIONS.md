@@ -1035,7 +1035,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
-- **R-CLOCK** (21:56) and **R-HTLC-CLOCK** (09-30): see Q-A-9. **R-REACK**: Q-A-2. **R-SETTLE-CREDIT** (09-30): Q-X-3. **R-NET**: Q-A-6.
+- **R-CLOCK** (21:56) and **R-HTLC-CLOCK** (09-30): see Q-A-9. **R-REACK**: Q-A-2. **R-SETTLE-CREDIT** (09-30): Q-X-3. **R-ONE-LOCK-PER-HASH** (09-30, coordinator): an Account holds at most one open clause per hashlock, whoever the payer; a second lock on an open hashlock is refused (`lock_exists`) and a clause is still addressed by its slot. Page: `money/ledger.scm` (the lock rule takes a hashlock `h`; property "at most one open clause per hashlock"; planted bug `duplicate-hashlock`; 1440 states, 12918 transitions). The frames and clock pages carry one lock, so the rule does not bite there. Follows og (xln.ts 7457-7458). **R-NET**: Q-A-6.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
 - **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract

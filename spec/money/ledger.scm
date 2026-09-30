@@ -65,12 +65,15 @@
            (lambda (w side) (and (<= amount max-credit) (not (= (get-in w (list (credit-key side))) amount))))
            (lambda (w side) (assoc-in w (list (credit-key side)) amount))))
 
-;; lock: the payer commits `amount` to a conditional clause (an HTLC)
-(define lock-rule
-  (guarded "lock 1"
-           (lambda (w side) (< (length (:clauses w)) max-clauses))
+;; lock: the payer commits `amount` to a conditional clause (an HTLC) on a hashlock `h`.
+;; R-ONE-LOCK-PER-HASH (coordinator 09-30): an Account holds at most one open clause per hashlock, whoever the payer; a second lock on an open
+;; hashlock is refused (`lock_exists`). Clauses are addressed by position (the slot id).
+(define (hash-open? w h) (any (lambda (c) (= (:hash c) h)) (:clauses w)))
+(define (lock-rule h)
+  (guarded (str "lock 1 on " h)
+           (lambda (w side) (and (< (length (:clauses w)) max-clauses) (not (hash-open? w h))))
            (lambda (w side)
-             (update-in w (list :clauses) (lambda (cs) (append cs (list (dict :payer side :amount 1))))))))
+             (update-in w (list :clauses) (lambda (cs) (append cs (list (dict :payer side :amount 1 :hash h))))))))
 
 ;; the clause at position `i` (owned by `side`, the payer) pays out, or lapses
 (define (nth-clause w i) (list-ref (:clauses w) i))
@@ -96,7 +99,7 @@
   (guarded "c2r 1" (lambda (w side) (>= (:collateral w) 1)) (lambda (w side) (move-collateral w side -1))))
 
 (define (rules)
-  (list (pay-rule 1) (pay-rule 2) (credit-rule 0) (credit-rule 1) (credit-rule 2) lock-rule
+  (list (pay-rule 1) (pay-rule 2) (credit-rule 0) (credit-rule 1) (credit-rule 2) (lock-rule 1) (lock-rule 2)
         (clause-rule "resolve" 0 #t) (clause-rule "resolve" 1 #t)
         (clause-rule "expire" 0 #f) (clause-rule "expire" 1 #f)
         r2c-rule c2r-rule))
@@ -115,6 +118,9 @@
      (= (total-value w) (* 2 start-reserve)))
    (property "no reserve or collateral goes negative" (w)
      (and (>= (get-in w (list :reserve :left)) 0) (>= (get-in w (list :reserve :right)) 0) (>= (:collateral w) 0)))
+   ;; written from the clause list, not through `hash-open?`, so a wrong guard cannot hide itself
+   (property "at most one open clause per hashlock (R-ONE-LOCK-PER-HASH)" (w)
+     (let ((hs (map (lambda (c) (:hash c)) (:clauses w)))) (= (length hs) (length (delete-duplicates hs)))))
    (property "every open clause is within the payer's capacity" (w)
      (and (<= (clause-sum w :left) (+ (total-delta w) (:credit-left w)))
           (<= (clause-sum w :right) (- (+ (:collateral w) (:credit-right w)) (total-delta w)))))))
