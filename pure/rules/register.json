@@ -2046,7 +2046,7 @@
   },
   {
    "id": "R-LOCK-EXISTS",
-   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (A2 adds the same refusal for an open hashlock).",
+   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (R-ONE-LOCK-PER-HASH adds the refusal for an open hashlock).",
    "source": "Review B of PR 73; Quint HtlcLock lock_exists",
    "layers": {
     "arrival": "-",
@@ -2060,11 +2060,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again"
-    },
-    {
-     "kind": "test",
-     "layer": "ts",
-     "name": "R-LOCK-EXISTS a hashlock is 0x and 64 lowercase hex digits, and one is open once"
     }
    ]
   },
@@ -2089,6 +2084,30 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
+    }
+   ]
+  },
+  {
+   "id": "R-ONE-LOCK-PER-HASH",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
+   "layers": {
+    "arrival": "owed: #41 (coordinator 09-30)",
+    "quint": "owed: #44 (coordinator 09-30)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a second lock on an open hashlock is refused, whichever slot or side it names"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
     }
    ]
   }

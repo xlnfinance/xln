@@ -12,7 +12,7 @@
 // the ledger's own `lock`: the page does not model the moment a lock is signed, which is N2 (clause.test.ts).
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
-import { hashlockOf, holdOf, secretOf } from "../fixtures.ts";
+import { holdOf, secretOf } from "../fixtures.ts";
 import { allocation, emptyLedger, lock, setCredit } from "../ledger.ts";
 import type { AccountFault, Ledger, Side } from "../model.ts";
 import { expireClause, resolveClause } from "./clause.ts";
@@ -30,7 +30,6 @@ const STAMPS: readonly bigint[] = [0n, 1n, 2n, 3n];
 
 const params: ClockParams = unwrapOr(clockParams(LAG, RESERVE, MAX_JH), () => expect.unreachable("params"));
 const secret = secretOf(1);
-const hashlock = hashlockOf(secret);
 const theLock = holdOf("left", 1n, 1n, DEADLINE, 1);
 
 type Kind = "pay" | "expire" | "resolve";
@@ -117,7 +116,7 @@ const deliverResolve: Rule = {
   step: (w) => {
     const stamp = w.resolvePending ?? expect.unreachable("no resolve in flight");
     const cleared: World = { ...w, resolvePending: undefined };
-    const decided = resolveClause(w.ledger, w.view.left, "right", hashlock, secret);
+    const decided = resolveClause(w.ledger, w.view.left, "right", theLock.id, secret);
     if (decided.ok) return commit(cleared, "resolve", decided.value);
     if (decided.error._tag === "no_such_lock") return cleared;
     if (decided.error._tag !== "past_deadline") return faulted(decided.error);
@@ -135,7 +134,7 @@ const deliver = (payee: Payee): Rule => ({
     const frame = w.pending ?? expect.unreachable("no frame in flight");
     const cleared: World = { ...w, pending: undefined };
     if (frame.kind === "pay") return commit(cleared, "pay", unwrapOr(lock(w.ledger, theLock), faulted));
-    const expired = expireClause(w.ledger, params, w.view.right, hashlock);
+    const expired = expireClause(w.ledger, params, w.view.right, theLock.id);
     if (expired.ok && !payeeDuty(payee, w)) {
       return { ...commit(cleared, "expire", expired.value), expiredViews: { ...w.view } };
     }
