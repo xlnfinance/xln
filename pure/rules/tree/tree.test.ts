@@ -2,41 +2,13 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { compare, declarationSpans, deadExports, isOff, longLines, wordsOf } from "./counts.ts";
+import { compare, isOff, longLines } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
-
-const pureRoot = `${import.meta.dir}/../..`;
-
-// A root with the real rule folders, an exceptions file and the given files under kernel/.
-const scratch = (files: Readonly<Record<string, string>>, exceptions: object = {}): string => {
-  const root = mkdtempSync(`${tmpdir()}/tree-gate-`);
-  cpSync(`${pureRoot}/style/rules`, `${root}/style/rules`, { recursive: true });
-  cpSync(`${pureRoot}/style/tree-rules`, `${root}/style/tree-rules`, { recursive: true });
-  writeFileSync(`${root}/style/tree-exceptions.json`, JSON.stringify(exceptions));
-  mkdirSync(`${root}/kernel`);
-  mkdirSync(`${root}/chain`);
-  Object.entries(files).forEach(([file, text]) => writeFileSync(`${root}/kernel/${file}`, text));
-  return root;
-};
-
-const failing = (files: Readonly<Record<string, string>>, exceptions: object = {}): readonly string[] =>
-  treeStyle(scratch(files, exceptions)).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`);
-
-const used = (name: string): Readonly<Record<string, string>> => ({ [`${name}.test.ts`]: `import { ${name} } from "./${name}.ts"; ${name}();\n` });
+import { failing, offRows, pureRoot, scratch, used } from "./scratch.ts";
 
 describe("the counts ast-grep cannot make", () => {
   test("a line over 120 characters is a hit and 120 is not", () => {
     expect(longLines("a.ts", `${"x".repeat(121)}\n${"y".repeat(120)}`)).toEqual([{ ruleId: "long-line", file: "a.ts" }]);
-  });
-
-  test("a declaration runs to the next line that starts in column 0", () => {
-    const body = Array.from({ length: 60 }, (_, index) => `  const v${index} = ${index};`).join("\n");
-    expect(declarationSpans(`export const big = () => {\n${body}\n};\nexport const small = 1;`)).toEqual([62, 1]);
-  });
-
-  test("an export nothing else names is dead; a name in another file keeps it live", () => {
-    expect(deadExports("a.ts", "export const lonely = 1;", [wordsOf("const other = 2;")])).toHaveLength(1);
-    expect(deadExports("a.ts", "export const lonely = 1;", [wordsOf("lonely();")])).toHaveLength(0);
   });
 
   test("an exception fails unless its count is exactly used: too many hits, or a stale row", () => {
@@ -113,9 +85,12 @@ describe("the gate cannot be satisfied by doing nothing", () => {
   test("an ast-grep that exits 2 fails the gate", () => expect(withStub("exit 2")).toBe(true));
 
   // A scan that prints the canary's hit and then dies is still a failed scan: the answer is not to be trusted.
-  const PRINTS_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"}]"';
+  const PRINTS_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"},{\\"ruleId\\":\\"decl\\",\\"file\\":\\"$c/canary.ts\\"}]"';
   test("an ast-grep that prints the canary hit but exits 2 fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nexit 2`)).toBe(true));
   test("an ast-grep that prints the canary hit and is then killed fails the gate", () => expect(withStub(`${PRINTS_CANARY}\nkill -9 $$`)).toBe(true));
+  // The style scan and the fact scan each plant their own canary: one that answers only the style rules has not read the facts.
+  const PRINTS_STYLE_CANARY = 'for a in "$@"; do case "$a" in */canary) c="$a";; esac; done\necho "[{\\"ruleId\\":\\"no-throw\\",\\"file\\":\\"$c/canary.ts\\"}]"';
+  test("an ast-grep that answers the style canary but never the fact canary fails the gate", () => expect(withStub(PRINTS_STYLE_CANARY)).toBe(true));
   test("an ast-grep that prints the canary hit and exits 0 passes a clean tree", () => expect(withStub(`${PRINTS_CANARY}\nexit 0`)).toBe(false));
   test("the real ast-grep passes a clean tree", () => expect(treeStyle(scratch(clean)).failed).toBe(false));
 
@@ -124,5 +99,35 @@ describe("the gate cannot be satisfied by doing nothing", () => {
     mkdirSync(`${root}/account`);
     writeFileSync(`${root}/account/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
     expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir account");
+  });
+});
+
+describe("the gate reads the files git lists, never the disk", () => {
+  const clean = { "a.ts": "export const a = 1;\n", ...used("a") };
+  test("an ignored folder under pure/ (a local db-* from a test run) does not turn the gate red", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/.gitignore`, "db-*\n");
+    mkdirSync(`${root}/db-run`);
+    writeFileSync(`${root}/db-run/junk.ts`, "export const junk = () => { throw new Error('x'); };\n");
+    expect(offRows(root)).toEqual([]);
+  });
+
+  test("an ignored file under kernel/ is not counted, and the same file untracked-not-ignored is", () => {
+    const root = scratch(clean);
+    writeFileSync(`${root}/.gitignore`, "kernel/ignored.ts\n");
+    const long = `export const ignored = "${"x".repeat(130)}";\n`;
+    writeFileSync(`${root}/kernel/ignored.ts`, long);
+    expect(offRows(root)).toEqual([]);
+    writeFileSync(`${root}/kernel/seen.ts`, long.replace("ignored", "seen"));
+    expect(offRows(root)).toContain("long-line kernel/seen.ts");
+  });
+
+  test("a directory that is not a git checkout is a failing gate, not an empty pass", () => {
+    const root = mkdtempSync(`${tmpdir()}/tree-nogit-`);
+    cpSync(`${pureRoot}/style`, `${root}/style`, { recursive: true });
+    mkdirSync(`${root}/kernel`);
+    mkdirSync(`${root}/chain`);
+    // Named, because stale exception rows alone would also fail a scratch tree that has no sources.
+    expect(treeStyle(root).rows.map((row) => row.rule)).toContain("git-listing");
   });
 });

@@ -1,5 +1,6 @@
 // Turns source text into code with every comment and string taken out, so a name is only ever read from code
-// that exists. A string becomes a marker holding its index; a comment becomes one space.
+// that exists. A string becomes a marker holding its index; a comment becomes one space. Both keep the newlines they
+// held, so a line in the result is the line in the source.
 export type Lexed = Readonly<{ code: string; strings: readonly string[] }>;
 
 // Comments and strings in one pattern, so a // inside a string is not a comment and a quote inside a comment is
@@ -22,9 +23,10 @@ export const lex = (source: string, pattern: RegExp): Lexed => {
   const tokens = [...source.matchAll(pattern)];
   const stringTokens = tokens.filter((found) => isStringToken(found[0]));
   const indexAt = new Map(stringTokens.map((found, index) => [found.index, index]));
-  const code = source.replace(pattern, (token, offset: number) =>
-    isStringToken(token) ? `${MARK}${indexAt.get(offset)}${MARK}` : " ",
-  );
+  const code = source.replace(pattern, (token, offset: number) => {
+    const lines = "\n".repeat(token.split("\n").length - 1);
+    return isStringToken(token) ? `${MARK}${indexAt.get(offset)}${MARK}${lines}` : ` ${lines}`;
+  });
   return { code, strings: stringTokens.map((found) => unquote(found[0])) };
 };
 

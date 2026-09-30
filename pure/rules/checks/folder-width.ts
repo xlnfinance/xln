@@ -87,7 +87,9 @@ export const evaluateFolderWidths = (
   return [...tooWide, ...stale].sort();
 };
 
-const existingFiles = (repo: string): readonly string[] => {
+// The files that exist in a checkout, relative to `repo`: tracked plus untracked-not-ignored, minus deleted ones. Empty
+// when git fails, which every caller treats as red.
+export const existingFiles = (repo: string): readonly string[] => {
   const listing = Bun.spawnSync(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: repo });
   if (listing.exitCode !== 0) return [];
   // A file deleted in the working tree but still tracked does not exist, so it is not counted.

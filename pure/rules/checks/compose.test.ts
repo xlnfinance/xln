@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { gateExit } from "./compose.ts";
+import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
   const green = { register: true, style: true, width: true };
@@ -50,10 +50,33 @@ describe("the real command over a scratch copy", () => {
     expect(out).toContain("chain/bad.ts");
   });
 
+  test("the register part alone turns the command red: a scratch copy has no contract tests to carry the ids", () => {
+    const repo = scratchPure({});
+    Bun.spawnSync(["git", "add", "-A"], { cwd: repo });
+    Bun.spawnSync(["git", "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "-m", "scratch"], { cwd: repo });
+    const done = Bun.spawnSync(["bun", `${repo}/pure/rules/check.ts`, "--register-only", "--base", "HEAD"], { cwd: `${repo}/pure` });
+    expect(done.exitCode).toBe(1);
+    expect(done.stdout.toString()).toContain("no contract name carries the id");
+  });
+
   test("a folder of 11 source files exits 1 and names the folder", () => {
     const files = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`w/f${index}.ts`, "export {};\n"]));
     const { code, out } = run(scratchPure(files), "--width-only");
     expect(code).toBe(1);
     expect(out).toContain("FOLDER_TOO_WIDE pure/w:11 > 10");
   });
+});
+
+describe("which parts a command line runs", () => {
+  const PARTS: readonly Part[] = ["register", "style", "width"];
+  const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
+
+  test("R-GATE-COMPOSE the plain command runs every part", () => expect(ran()).toEqual(["register", "style", "width"]));
+  test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
+  test("each --X-only flag runs that part alone", () => {
+    expect(ran("--register-only")).toEqual(["register"]);
+    expect(ran("--style-only")).toEqual(["style"]);
+    expect(ran("--width-only")).toEqual(["width"]);
+  });
+  test("a flag that is not a part flag changes nothing", () => expect(ran("--base", "HEAD")).toEqual(["register", "style", "width"]));
 });
