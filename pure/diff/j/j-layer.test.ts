@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { seedOf, seedTag } from "../seed.ts";
 import { Interface } from "ethers";
 import { Depository__factory } from "../../../contracts/typechain-types/factories/Depository.sol/Depository__factory.ts";
-import { shippedDepositoryAbi, withShippedOg } from "../rig/contracts.ts";
+import { loadShippedRpcPublic, shippedDepositoryAbi } from "../rig/contracts.ts";
 import { EntityProvider__factory } from "../../../contracts/typechain-types/factories/EntityProvider__factory.ts";
 import { DEPOSITORY_J_EVENTS, ENTITY_PROVIDER_J_EVENTS } from "../../../core/jurisdiction/machine/event-catalog.ts";
 import { extractCanonicalDepositoryEventArgs } from "../../../core/jurisdiction/adapter/events/depository-event-codec.ts";
@@ -51,9 +51,9 @@ const OG_DEPOSITORY = new Interface(shippedDepositoryAbi as never);
  * og's dispute-evidence decoders read the Depository interface once, at import. In the one-process suite an earlier
  * file has already loaded rpc-public with the fork installed, so the decoders are loaded fresh, with the shipped ABI.
  */
-const RPC_PUBLIC = "../../../core/jurisdiction/adapter/rpc-public.ts";
-const { decodeDisputeFinalizationEvidenceCalldata, decodeDisputeProofBodyEvidenceCalldata, resolveDisputeFinalizationEvidence, resolveDisputeProofBodyEvidence } =
-  await withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as typeof import("../../../core/jurisdiction/adapter/rpc-public.ts"));
+const ogRpc = await loadShippedRpcPublic();
+const { decodeDisputeFinalizationEvidenceCalldata, decodeDisputeProofBodyEvidenceCalldata } = ogRpc;
+const { resolveDisputeFinalizationEvidence, resolveDisputeProofBodyEvidence } = ogRpc;
 const PROCESS_BATCH_ENTITY = `0x${"e1".repeat(32)}`;
 const PROVIDER = new Interface(EntityProvider__factory.abi);
 const COORDS = { blockNumber: 7, blockHash: W("0b"), transactionHash: W("0c"), logIndex: 3 };

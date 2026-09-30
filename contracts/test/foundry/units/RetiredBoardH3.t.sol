@@ -120,7 +120,7 @@ abstract contract RetiredBoardH3Base is XlnFixture {
     Batch memory start = XlnHanko.emptyBatch();
     start.disputeStarts = new InitialDisputeProof[](1);
     start.disputeStarts[0] = InitialDisputeProof({
-      counterentity: X, nonce: 1, proposerIsLeft: xIsLeft, proofbodyHash: pbHash, initialProofbody: pb,
+      counterentity: X, nonce: 1, ondeltaEpoch: epoch, proposerIsLeft: xIsLeft, proofbodyHash: pbHash, initialProofbody: pb,
       watchSeed: pb.watchSeed, sig: _hankoAs(X, signerKey, signed),
       starterInitialArguments: "", starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
     });

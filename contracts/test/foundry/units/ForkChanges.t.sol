@@ -83,6 +83,7 @@ contract ForkChangesTest is XlnFixture {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[counter],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), _key()),
       proposerIsLeft: counter == L,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -284,7 +285,8 @@ contract ForkChangesTest is XlnFixture {
     // Both stale artifacts carry a nonce above 5 and were signed before the settlement.
     (Batch memory staleStart, ) = _start(L, 7, stale, staleProofSigned);
     _submitExpectRevert(L, staleStart, abi.encodeWithSelector(E4.selector));
-    _submitExpectRevert(L, _settlementBatch(staleDiffs, 9, _hanko(R, staleSettlementSigned)), abi.encodeWithSelector(E4.selector));
+    // J5: a stale co-signed settlement is a bad counterparty signature inside the ops: the batch fails E4, its nonce is spent
+    _submitFailedUnmoved(L, _settlementBatch(staleDiffs, 9, _hanko(R, staleSettlementSigned)), E4.selector, entity[R], T);
 
     // Re-signed for the new baseline they are accepted.
     _submit(L, _startNow(L, 7, stale));
@@ -323,13 +325,13 @@ contract ForkChangesTest is XlnFixture {
     _submitSkipped(L, _startNow(L, 3, _body(0)), entity[R], T, OP_START, SKIP_NONCE_NOT_ABOVE_STORED, 3);
     _submitSkipped(L, _startNow(L, 2, _body(0)), entity[R], T, OP_START, SKIP_NONCE_NOT_ABOVE_STORED, 2);
 
-    // settlement at nonce == stored: E2 (signature is valid at the current epoch)
+    // settlement at nonce == stored: the batch fails E2 (J5; the signature is valid at the current epoch), nothing moves
     bytes32 sh3 = XlnHanko.cooperativeUpdateHash(address(dep), _key(), 3, diffs, new uint256[](0));
-    _submitExpectRevert(L, _settlementBatch(diffs, 3, _hanko(R, sh3)), abi.encodeWithSelector(E2.selector));
+    _submitFailedUnmoved(L, _settlementBatch(diffs, 3, _hanko(R, sh3)), E2.selector, entity[R], T);
 
-    // C2R at nonce == stored: E2
+    // C2R at nonce == stored: the batch fails E2, nothing moves
     bytes32 ch = XlnHanko.cooperativeUpdateHash(address(dep), _key(), 3, _c2rDiffs(1), new uint256[](0));
-    _submitExpectRevert(L, _c2rBatch(1, 3, ch), abi.encodeWithSelector(E2.selector));
+    _submitFailedUnmoved(L, _c2rBatch(1, 3, ch), E2.selector, entity[R], T);
 
     // the strictly greater nonce works
     _submit(L, _startNow(L, 4, _body(0)));

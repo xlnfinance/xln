@@ -8,6 +8,9 @@ import {
   EntityProvider__factory as ogEntityProvider,
   HankoVerifier__factory as ogHankoVerifier,
   DeltaTransformer__factory as ogDeltaTransformer,
+  DepositoryBounds__factory as ogDepositoryBounds,
+  HashLadderRegistry__factory as ogHashLadderRegistry,
+  NftCustody__factory as ogNftCustody,
 } from "../../../jurisdictions/typechain-types/index.ts";
 import {
   Account__factory as forkAccount,
@@ -15,6 +18,9 @@ import {
   EntityProvider__factory as forkEntityProvider,
   HankoVerifier__factory as forkHankoVerifier,
   DeltaTransformer__factory as forkDeltaTransformer,
+  DepositoryBounds__factory as forkDepositoryBounds,
+  HashLadderRegistry__factory as forkHashLadderRegistry,
+  NftCustody__factory as forkNftCustody,
 } from "../../../contracts/typechain-types/index.ts";
 
 export type ContractSet = "contracts" | "jurisdictions";
@@ -25,6 +31,8 @@ export const contractSet = (): ContractSet =>
 const PAIRS = [
   [ogAccount, forkAccount], [ogDepository, forkDepository], [ogEntityProvider, forkEntityProvider],
   [ogHankoVerifier, forkHankoVerifier], [ogDeltaTransformer, forkDeltaTransformer],
+  // The linked libraries too (J5): the bounds check reads the fork's Batch, which starts with the signed gasBudget; the registry and custody are the fork's code.
+  [ogDepositoryBounds, forkDepositoryBounds], [ogHashLadderRegistry, forkHashLadderRegistry], [ogNftCustody, forkNftCustody],
 ] as const;
 
 const FIELDS = ["bytecode", "abi", "linkBytecode", "createInterface", "connect"] as const;
@@ -61,11 +69,18 @@ export const shippedDepositoryAbi = shipped[1]!["abi"] as readonly unknown[];
  * og's own decoding then compares the fork with itself. `load` evaluates a fresh copy of the module (an import with
  * its own query string) while the shipped set is installed; the set that was chosen is put back afterwards.
  */
-export const withShippedOg = async <T>(load: () => Promise<T>): Promise<T> => {
+export const withShippedOg = <T>(load: () => Promise<T>): Promise<T> => {
   installContracts("jurisdictions");
-  const loaded = await load().finally(() => installContracts(contractSet()));
-  return loaded;
+  return load().finally(() => installContracts(contractSet()));
 };
+
+/** og's dispute-evidence decoders (rpc-public) read the Depository interface once, at import. */
+export type RpcPublic = typeof import("../../../core/jurisdiction/adapter/rpc-public.ts");
+export const RPC_PUBLIC = "../../../core/jurisdiction/adapter/rpc-public.ts";
+
+/** A fresh copy of og's rpc-public, made while the shipped ABI is installed. */
+export const loadShippedRpcPublic = (): Promise<RpcPublic> =>
+  withShippedOg(async () => (await import(`${RPC_PUBLIC}?shipped`)) as RpcPublic);
 
 // Before og's modules load: some of them make their interfaces once, at import.
 installContracts();

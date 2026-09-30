@@ -81,20 +81,22 @@ type Chains = readonly [JAdapter, JAdapter];
 type Coverages = { readonly coverage: Coverage; settled: boolean; materialized: boolean; readonly refusals: readonly string[]; readonly landed: readonly number[]; readonly unknownHalts: readonly string[] };
 
 /** og's script: reserves move on each chain, the users sign one cross-j route, the book owner clears it, the swap settles. */
-const SWAP: Script = { name: "swap", steps: ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"] };
+const SWAP: Script = { name: "swap", steps: ["enableHubs", "fund", "transfer", "broadcast", "open", "hubCredit", "swap", "clear"], pacing: "interleaved" };
 /** Each user deposits collateral into its Account with its hub, and the batch lands: no swap. */
-const DEPOSIT: Script = { name: "deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast"] };
+const DEPOSIT: Script = { name: "deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast"], pacing: "interleaved" };
 /** The deposits land first, then the swap is signed. */
-const SWAP_AFTER_DEPOSIT: Script = { name: "swap-after-deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast", "swap", "clear"] };
+const SWAP_AFTER_DEPOSIT: Script = { name: "swap-after-deposit", steps: ["enableHubs", "fund", "open", "hubCredit", "deposit", "depositBroadcast", "swap", "clear"], pacing: "interleaved" };
 /** The same steps, one per round, no background moves: the deposit is in flight when the swap is signed, on every seed. */
-const SWAP_AFTER_DEPOSIT_STRICT: Script = { ...SWAP_AFTER_DEPOSIT, name: "swap-after-deposit-strict", strict: true };
+const SWAP_AFTER_DEPOSIT_STRICT: Script = { ...SWAP_AFTER_DEPOSIT, name: "swap-after-deposit-strict", pacing: "in-order" };
 const LONE_LEG = "a lone cross-jurisdiction leg is retained, not halted on";
 
 /**
- * A named script: the name keeps one seed's run in each script on its own storage namespace. A strict script plays its
- * steps in order, one per round, and draws no background moves, so its timing does not depend on the seed.
+ * A named script: the name keeps one seed's run in each script on its own storage namespace. "in-order" plays the steps
+ * one per round and draws no background moves, so its timing does not depend on the seed; "interleaved" mixes random
+ * background moves between the steps.
  */
-type Script = { readonly name: string; readonly steps: readonly string[]; readonly strict?: boolean };
+type Pacing = "in-order" | "interleaved";
+type Script = { readonly name: string; readonly steps: readonly string[]; readonly pacing: Pacing };
 const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
   const rand = prng(seed);
   const ri = (n: number): number => Math.floor(rand() * n);
@@ -411,11 +413,19 @@ const runCrossJ = async (seed: number, script: Script): Promise<Coverages> => {
     return [...u, ...h];
   };
   const random = ["idle", "idle", "idle", "idle", "idle", "userCredit", "payToHub", "payFromHub"];
-  /** The next step: a strict script plays its queue in order and then idles; the others interleave random background moves. */
-  const nextKind = (queue: readonly string[]): string =>
-    script.strict === true
-      ? (queue[0] ?? "idle")
-      : queue.length > 0 && rand() < 0.6 ? queue[0]! : random[ri(random.length)]!;
+  /** In order: the queue's head, then idle. */
+  const inOrder = (queue: readonly string[]): string => queue[0] ?? "idle";
+  /** Interleaved: the queue's head 60% of the time while it lasts, otherwise a random background move. */
+  const interleaved = (queue: readonly string[]): string =>
+    queue.length > 0 && rand() < 0.6 ? queue[0]! : random[ri(random.length)]!;
+  const nextKind = (queue: readonly string[]): string => {
+    switch (script.pacing) {
+      case "in-order":
+        return inOrder(queue);
+      case "interleaved":
+        return interleaved(queue);
+    }
+  };
 
   try {
     const imports = (hosted: readonly number[]): RuntimeTx[] =>

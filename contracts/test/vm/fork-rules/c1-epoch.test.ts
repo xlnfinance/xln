@@ -1,7 +1,14 @@
 // C1 (contracts-review.md): after a dispute finalizes, a proof with a higher nonce that was signed earlier must not
 // settle its offdelta a second time. Runs the real Depository stack in BrowserVM.
 import { describe, expect, test } from "bun:test";
+import { ethers } from "ethers";
 import { boot } from "../rig.ts";
+
+/** `op` and `reason` of DisputeOpSkipped in the events of the last accepted transaction. */
+const skippedOf = (w: Awaited<ReturnType<typeof boot>>): { op: bigint; reason: bigint }[] =>
+  (w.last.events as { name: string; args: Record<string, unknown> }[]).filter((e) => e.name === "DisputeOpSkipped").map((e) => ({ op: BigInt(e.args["op"] as bigint), reason: BigInt(e.args["reason"] as bigint) }));
+/** Account.DISPUTE_OP_START and DISPUTE_SKIP_EPOCH_MOVED. */
+const START_EPOCH_MOVED = { op: 0n, reason: 11n };
 
 describe("C1 ondelta epoch", () => {
   test("a pre-finalize proof cannot start a second dispute that pays its offdelta again", async () => {
@@ -20,13 +27,19 @@ describe("C1 ondelta epoch", () => {
     expect(await w.reserves()).toEqual({ L: 970n, R: 1030n, collateral: 0n, nonce: 5n });
     // Attack: Right opens again with Left's unacked P6 (nonce 6 > stored 5) and times it out.
     w.at(100);
-    const attackStart = await w.start(R, L, 6, true, P6, p6ByL);
+    // S1 (J5, third round): the start carries the epoch its signature was made at, so the Account judges staleness before the signature:
+    // another epoch is a skip, not an E4 that would revert the batch and pin the entity's nonce.
+    const attackStart = await w.start(R, L, 6, true, P6, p6ByL, e0);
+    const startSkips = skippedOf(w);
+    // Declaring the CURRENT epoch over the old signature is a lie about the bytes: a real, bytes-only E4.
+    const lied = await w.start(R, L, 6, true, P6, p6ByL, await w.epochOf());
     w.at(300);
     const attackEnd = await w.finalize(R, L, { nonce: 6, body: P6, startedByLeft: false }, { nonce: 6, proposerIsLeft: true, body: P6, sig: "0x" });
     const end = await w.reserves();
-    // The latest state both signed owes Right 30 in all; nothing beyond P5 may move. The start is rejected (E4: its epoch-0
-    // signature does not verify at epoch 1), so there is no dispute to finalize: J2 skips that finalize instead of reverting.
-    expect({ attackStart, attackEnd, L: end.L, R: end.R }).toEqual({ attackStart: "REVERT E4()", attackEnd: "ok", L: 970n, R: 1030n });
+    // The latest state both signed owes Right 30 in all; nothing beyond P5 may move. The start is skipped (its epoch-0 proof is void at
+    // epoch 1), so there is no dispute to finalize: J2 skips that finalize instead of reverting.
+    expect({ attackStart, startSkips, lied, attackEnd, L: end.L, R: end.R })
+      .toEqual({ attackStart: "ok", startSkips: [START_EPOCH_MOVED], lied: "REVERT E4()", attackEnd: "ok", L: 970n, R: 1030n });
     expect((w.last.events as { name: string }[]).map((e) => e.name)).toContain("DisputeOpSkipped");
   });
 
@@ -43,13 +56,14 @@ describe("C1 ondelta epoch", () => {
     expect(await w.finalize(R, L, { nonce: 3, body: P3, startedByLeft: false }, { nonce: 3, proposerIsLeft: true, body: P3, sig: "0x" })).toBe("ok");
     const afterFirst = await w.reserves();
     expect(afterFirst.R - 1000n).toBe(10n);
-    const second = await w.start(R, L, 5, true, P5, p5ByL);
+    const second = await w.start(R, L, 5, true, P5, p5ByL, e0);
+    const secondSkips = skippedOf(w);
     w.at(300);
     const secondEnd = await w.finalize(R, L, { nonce: 5, body: P5, startedByLeft: false }, { nonce: 5, proposerIsLeft: true, body: P5, sig: "0x" });
     const end = await w.reserves();
     // P5 alone would pay Right 30; the 10 already paid may not be paid again on top of it. The second start is rejected
-    // (E4), so there is no dispute to finalize: J2 skips that finalize instead of reverting, and nothing moves.
-    expect({ second, secondEnd, R: end.R }).toEqual({ second: "REVERT E4()", secondEnd: "ok", R: 1010n });
+    // (skipped, epoch moved), so there is no dispute to finalize: J2 skips that finalize instead of reverting, and nothing moves.
+    expect({ second, secondSkips, secondEnd, R: end.R }).toEqual({ second: "ok", secondSkips: [START_EPOCH_MOVED], secondEnd: "ok", R: 1010n });
     expect((w.last.events as { name: string }[]).map((e) => e.name)).toContain("DisputeOpSkipped");
   });
 
@@ -67,7 +81,8 @@ describe("C1 ondelta epoch", () => {
     // Both sides re-sign after the finalize; the Account continues at the new epoch (offdelta restarts at 0).
     const Q = w.body(0n);
     w.at(140);
-    expect(await w.start(R, L, 5, true, Q, w.proofSig(L, e1, 5, true, Q))).toBe("ok");
+    expect(await w.start(R, L, 5, true, Q, w.proofSig(L, e1, 5, true, Q), e1)).toBe("ok");
+    expect(skippedOf(w)).toEqual([]); // it started: nothing was skipped
   });
 
   const withdraw = (tokenId: number, amount: bigint) =>
@@ -87,8 +102,14 @@ describe("C1 ondelta epoch", () => {
     const e1 = await w.epochOf();
     expect(e1).toBe(e0 + 1n);
     // Both artifacts carry a nonce above 5, and both were signed before the settlement.
-    expect(await w.start(R, L, 7, true, staleProof, proofByL)).toBe("REVERT E4()");
-    expect(await w.settle(L, R, 9, staleSettlement, settlementByR9)).toBe("REVERT E4()");
+    expect(await w.start(R, L, 7, true, staleProof, proofByL, e0)).toBe("ok");
+    expect(skippedOf(w)).toEqual([START_EPOCH_MOVED]);
+    // J5: a co-signed settlement made stale by a landed one is a bad counterparty signature inside the ops: the batch fails (E4
+    // reported, entity nonce spent, nothing applied) instead of reverting, so the entity is not stalled at that nonce
+    const nonceBefore = await w.chain.getEntityNonce(L.id);
+    expect(await w.settle(L, R, 9, staleSettlement, settlementByR9)).toBe("ok");
+    const failedReasons = (w.last.events as { name: string; args: Record<string, unknown> }[]).filter((e) => e.name === "BatchFailed").map((e) => String(e.args["reason"]));
+    expect({ failedReasons, spent: (await w.chain.getEntityNonce(L.id)) - nonceBefore }).toEqual({ failedReasons: [ethers.id("E4()").slice(0, 10)], spent: 1n });
     // The same artifacts re-signed for the new baseline are accepted.
     expect(await w.settle(L, R, 9, staleSettlement, w.coopSig(R, e1, 9, staleSettlement))).toBe("ok");
     expect(await w.epochOf()).toBe(e1 + 1n);
