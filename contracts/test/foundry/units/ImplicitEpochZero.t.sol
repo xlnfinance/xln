@@ -162,5 +162,35 @@ contract ImplicitEpochZeroTest is XlnFixture {
 
     assertEq(dep._reserves(entity[0], T) - reserveBefore, 900, "entity[0] takes the whole remaining collateral: the 400 owed to it is erased");
     assertEq(dep._reserves(entity[1], T), 0, "entity[1] keeps nothing of it, and was never charged the 400");
+    assertEq(dep.activeDebts(entity[1]), 0, "no debt of entity[1] to entity[0]: the 400 is gone, not deferred");
+  }
+
+  /// Control for the test above: the same signed proof, with no withdrawal in between, is honored at the dispute. entity[0] holds all the
+  /// collateral and the proof gives it 400 more, so it takes the 1000 and entity[1] owes it the 400 as a debt. That is what the withdrawal
+  /// erases, and what the Runtime avoids by co-signing a C2R only at offdelta 0.
+  function test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored() public {
+    _fundCollateral(1_000);
+    int256 owedToZero = entity[0] < entity[1] ? int256(400) : int256(-400);
+    uint256 nonce = _accountNonce(entity[0], entity[1]) + 2;
+    Batch memory start = _signedStart(nonce, owedToZero, 0);
+    assertTrue(_submit(0, start), "the signed proof of the current epoch opens");
+    uint256 reserveBefore = dep._reserves(entity[0], T);
+    Batch memory fin = XlnHanko.emptyBatch();
+    fin.disputeFinalizations = new FinalDisputeProof[](1);
+    ProofBody memory pb = start.disputeStarts[0].initialProofbody;
+    fin.disputeFinalizations[0] = FinalDisputeProof({
+      counterentity: entity[1], initialNonce: nonce, finalNonce: nonce,
+      proposerIsLeft: entity[1] < entity[0], initialProofbodyHash: keccak256(abi.encode(pb)), finalProofbody: pb, starterArguments: "", otherArguments: "",
+      sig: "", startedByLeft: entity[0] < entity[1], cooperative: false
+    });
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
+    assertTrue(_submit(0, fin), "starter finalizes the signed proof after the window");
+
+    assertEq(dep._reserves(entity[0], T) - reserveBefore, 1_000, "entity[0] takes all the collateral");
+    (bytes32 creditor, Uint512 memory owed) = dep._debts(entity[1], T, 0);
+    assertEq(dep.activeDebts(entity[1]), 1, "entity[1] owes the rest");
+    assertEq(creditor, entity[0], "to entity[0]");
+    assertEq(owed.high, 0, "the debt fits one word");
+    assertEq(owed.low, 400, "the 400 of the signed offdelta");
   }
 }
