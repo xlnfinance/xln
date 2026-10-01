@@ -12,6 +12,7 @@ import { openJBatch, queue, seal, type SealContext } from "../../pure/j/batch/jb
 import { processBatchCall, type SealedBatch } from "../../pure/j/batch/sealed.ts";
 import { requirement } from "../../pure/j/gas/gas.ts";
 import type { Gas, Simulation } from "../../pure/j/gas/simulate.ts";
+import type { ChainWorld } from "../../pure/host/ops.ts";
 import type { JOp } from "../../pure/j/op/ops.ts";
 import { signDigest } from "../../pure/kernel/crypto/signature.ts";
 import { bytesToHex, hexToBytes } from "../../pure/kernel/encoding/bytes.ts";
@@ -51,10 +52,11 @@ export const accountKeyOf = (a: Party, b: Party): string => must(accountKey(a.id
 export const leftOf = (a: Party, b: Party): Party => (BigInt(a.id) < BigInt(b.id) ? a : b);
 
 /** The chain's transaction gas cap (EIP-7825) and the outer Hanko check an entity's lazy board costs: the harness's choice. */
-const GAS: Gas = { txGasCap: 16_777_216n, prelude: 200_000n };
+export const GAS: Gas = { txGasCap: 16_777_216n, prelude: 200_000n };
 const REFUSAL_EVENTS = ["BatchFailed", "BatchGasStarved", "DisputeOpSkipped"];
 
 export type Chain = Readonly<{
+  rpc: string;
   provider: ethers.JsonRpcProvider;
   manifest: Manifest;
   chainId: bigint;
@@ -69,13 +71,19 @@ export const connect = async (rpc: string, manifest: Manifest): Promise<Chain> =
   const chainId = (await provider.getNetwork()).chainId;
   const depositoryAddress = manifest.contracts.depository.address;
   return {
-    provider, manifest, chainId,
+    rpc, provider, manifest, chainId,
     dep: must(deployment(chainId, depositoryAddress), "deployment"),
     depository: Depository__factory.connect(depositoryAddress, provider),
     token: ERC20Mock__factory.connect(manifest.token.address!, provider),
     tokenId: BigInt(manifest.token.tokenId!),
   };
 };
+
+/** What the chain says that an Entity's action does not: the one transformer a reveal may name, and the faucet token a `fund` may name. */
+export const worldOf = (chain: Chain): ChainWorld => ({
+  transformer: chain.manifest.contracts.deltaTransformer.address,
+  tokens: new Map([[chain.tokenId, { contractAddress: chain.manifest.token.address!, externalTokenId: 0n, tokenType: 0n }]]),
+});
 
 export const unit = (chain: Chain): bigint => 10n ** BigInt(chain.manifest.token.decimals);
 

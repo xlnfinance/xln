@@ -49,6 +49,36 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-SIMULATE a batch that would revert is held: nothing is journaled, nothing is sent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE the treasury holds each token's reserve and the whole debt of its three limbs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE a call that succeeds with no refusal event has room: the gas it used"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE a call that reverts is a revert, with the node's own reason"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE BatchFailed and DisputeOpSkipped refuse the batch though the call succeeded"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE the call is made from the key's address at the head, with the gas limit it is given"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE a simulation with no call, or a node that is down, is a fault and never a revert"
   }
  ]
 }

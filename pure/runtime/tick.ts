@@ -94,6 +94,7 @@ const foldId = (f: Fold): string => `${f.token}:${f.offdelta}`;
 
 const chainId = (action: JAction): string =>
   match(action, {
+    fund: (f) => `fund ${f.token} ${f.amount}`,
     reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}`,
     deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
     counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,

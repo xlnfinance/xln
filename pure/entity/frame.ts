@@ -229,8 +229,16 @@ const withdrawn = (w: Work, command: Extract<ChainCommand, { _tag: "withdraw" }>
   return asked(withFacts(w, peer, cosignFrozen(facts)), op);
 };
 
+/** The node's own tokens into its reserve: it names no peer and needs no Account, so it asks the chain at once. */
+const funded = (w: Work, command: Extract<ChainCommand, { _tag: "fund" }>): Work => {
+  const { token, amount } = command;
+  return amount >= 1n && amount <= MAX_AMOUNT
+    ? asked(w, { _tag: "fund", token, amount })
+    : refusedCommand(w, command, { _tag: "bad_fund", amount });
+};
+
 /** A command about the chain needs an Account with the peer, as an Account command does. */
-const chained = (w: Work, command: ChainCommand): Work => {
+const chained = (w: Work, command: Exclude<ChainCommand, { _tag: "fund" }>): Work => {
   const { peer } = command;
   if (!w.state.accounts.has(peer)) return refusedCommand(w, command, { _tag: "no_account", peer });
   switch (command._tag) {
@@ -247,6 +255,8 @@ const commanded = (rules: Rulebook, w: Work, command: Command): Work => {
   switch (command._tag) {
     case "open_account":
       return opened(w, command);
+    case "fund":
+      return funded(w, command);
     case "deposit":
     case "set_windows":
     case "withdraw":
