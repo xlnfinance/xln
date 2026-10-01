@@ -71,13 +71,15 @@ export const GAPS = {
     id: "on-chain-reveal", kind: "missing", layer: "Runtime",
     piece: "Payee's on-chain reveal when its resolve is unacked near the deadline (R-HTLC-CLOCK c), as a revealSecrets batch op. Not exercised: every resolve here is acked.",
     supplier: "#96 (cut slice 3a: chain actions and the payee's on-chain reveal)",
-    landed: () => has("runtime/chain.ts"),
+    // #96 puts the decision in pure/entity/frame.ts (revealOnChainDue, a `reveal` JAction); pure/runtime/chain.ts never exists in the stack.
+    landed: () => mentions("entity", /revealOnChainDue/),
   },
   swapTx: {
     id: "swap-tx", kind: "missing", layer: "Account",
     piece: "Swap inside an Account: AccountTx has pay, set_credit, lock, resolve, cancel, expire and nothing for swap offer, partial fill or cancel; the clause shape the ledger keeps for an open offer does not exist, so no proof body can carry a swap clause (R-SWAP-CLAUSE-WITH-FILL).",
-    supplier: "kernel thread swap step (on top of #97, not opened yet); spec: plan/swap-onchain.md",
-    landed: () => mentions("account", /swap/i),
+    supplier: "#111 (kernel thread swap step, on top of #97); spec: plan/swap-onchain.md",
+    // The word "swap" is already in pure/account/proof/body.ts (`swaps: []`) at #97, so look for the tx itself.
+    landed: () => mentions("account", /Tagged<"(swap|offer)"/),
   },
   disputeWithClause: {
     id: "dispute-with-clause", kind: "missing", layer: "Account + Runtime",
