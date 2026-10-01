@@ -39,11 +39,15 @@ const MAX_RESENDS = 1;
 const LINK_LIMIT = 12;
 
 /** How much the adversary may do in one walk: crashes per Host, and repeats of a message on the link. */
-type Bounds = Readonly<{ crashes: number; dups: number }>;
+type Bounds = Readonly<{ crashes: number; dups: number; crashers: readonly Name[] }>;
 
-const CRASHING: Bounds = { crashes: 1, dups: 0 };
-const REPEATING: Bounds = { crashes: 0, dups: 1 };
-const QUIET: Bounds = { crashes: 0, dups: 0 };
+const CRASHING: Bounds = { crashes: 1, dups: 0, crashers: NAMES };
+const REPEATING: Bounds = { crashes: 0, dups: 1, crashers: NAMES };
+const QUIET: Bounds = { crashes: 0, dups: 0, crashers: NAMES };
+
+/** Where the walk is large, one Host at a time may crash: Alice holds the retry, Bob the refusal he remembers. */
+const ONLY_ALICE: Bounds = { ...CRASHING, crashers: ["alice"] };
+const ONLY_BOB: Bounds = { ...CRASHING, crashers: ["bob"] };
 
 type Where = "script" | "link" | "timer";
 
@@ -228,7 +232,7 @@ const flushRule = (ops: Ops, name: Name): Rule => ({
 const crashRule = (ops: Ops, scn: Scenario, bounds: Bounds, name: Name): Rule => ({
   name: `${name} crashes and recovers`,
   kind: "adversary",
-  enabled: (w) => w.hosts[name].crashes < bounds.crashes,
+  enabled: (w) => bounds.crashers.includes(name) && w.hosts[name].crashes < bounds.crashes,
   step: (w) => {
     const host = w.hosts[name];
     return through(w, ops.recover(setupOf(scn, name), genesis(name), host.runtime.wal), (runtime) =>
@@ -442,12 +446,13 @@ describe("runtime/walk Alice and Bob open an Account and Alice pays", () => {
 });
 
 describe("runtime/walk Alice's view of the chain is ahead of Bob's and her lock waits for the heights to rise", () => {
-  const crashing = walk({ ...REAL_OPTIONS, scn: LOCKING });
+  const alice = walk({ ...REAL_OPTIONS, scn: LOCKING, bounds: ONLY_ALICE });
+  const bob = walk({ ...REAL_OPTIONS, scn: LOCKING, bounds: ONLY_BOB });
   const quiet = walk({ ...REAL_OPTIONS, scn: LOCKING, bounds: QUIET });
   const repeating = walk({ ...REAL_OPTIONS, scn: LOCKING, bounds: REPEATING });
 
   test("R-FRAME-REFUSAL no run is stuck while the heights rise: every world at rest has the lock open", () => {
-    [crashing, quiet, repeating].forEach((w) => {
+    [alice, bob, quiet, repeating].forEach((w) => {
       expect(texts(w)).toEqual([]);
       expect(w.atRest).toBeGreaterThan(0);
       expect(w.finished).toBe(w.atRest);
@@ -457,6 +462,6 @@ describe("runtime/walk Alice's view of the chain is ahead of Bob's and her lock 
   test("R-FRAME-REFUSAL the walk includes the refusal: its worlds are many and it ends before its limit", () => {
     expect(quiet.worlds).toBeGreaterThan(500);
     expect(repeating.worlds).toBeGreaterThan(5000);
-    expect(Math.max(crashing.worlds, quiet.worlds, repeating.worlds)).toBeLessThan(WALK_LIMIT);
+    expect(Math.max(alice.worlds, bob.worlds, quiet.worlds, repeating.worlds)).toBeLessThan(WALK_LIMIT);
   });
 });
