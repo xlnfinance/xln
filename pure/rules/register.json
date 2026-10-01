@@ -2766,6 +2766,45 @@
      "owed": "#44"
     }
    ]
+  },
+  {
+   "id": "R-PROOF-BODY",
+   "statement": "The proof body an Account signs is a function of its state and its terms: tokens ascending with their offdeltas, one transformer clause per open hold with one payment in (token, slot) order (the payer on the left moves the delta down), and a body the Account contract would refuse (more than MAX_HOLDS clauses, more than 128 tokens, response windows over a year, a value its types cannot carry) is refused before anyone signs it. Both replicas build the same bytes from the same state, so none of them comes from the wire.",
+   "source": "first-moves.md A4; Account.sol _validateProofBody; coordinator relay 10-01 on A4",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/proof R-PROOF-BODY the body an Account signs is a function of its state and terms"
+    }
+   ]
+  },
+  {
+   "id": "R-DEADLINE-TIMESTAMP",
+   "statement": "A hold's deadline is a J height (R-HTLC-CLOCK) and the contract judges a reveal by block timestamp in seconds (DeltaTransformer revealedUntilTimestamp). The body maps one to the other with an injected function, so what both parties sign is only as agreed as that function is. Open decision: what the function is (a table of anchors from the deploy manifest, or a seconds field both sign in the lock), and how the payee's reveal at deadline minus LAG stays inside it.",
+   "source": "Review A of PR 79 F6 (A2); A4b",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: decision (coordinator or Arthur)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "decision, then A4b2"
+    }
+   ]
   }
  ]
 }
