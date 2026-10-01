@@ -18,8 +18,12 @@ Source: lessons R-X1 (no peer input halts a Runtime), og issues 1, 3, 4, 6, 7, 8
 
 **Q-A-2. A duplicate of the frame at my head.**
 Options: (a) ignore it; (b) answer with the same ack again.
-Choice: (b). With (a), one lost ack wedges the proposer: the planted bug `no-reack` fails the
-liveness check "can always still finish" after a single loss.
+Choice: (b), in ANY state (R-REACK, coordinator 09-30, Account comparison D-AC-1): a repeat of the frame I last
+committed is re-acked whether I am Open or hold my own pending frame. With (a), one lost ack wedges the proposer:
+the planted bug `no-reack` fails the liveness check "can always still finish" after a single loss. Quint's first
+rule re-acked only while Open: a replica that had already proposed its next frame refused the repeat, so the lost
+ack was never re-sent (both sides wedged). Planted bug `reack-open-only` is that rule and fails the same check;
+Quint took this page's rule and added the mutant, the scenario test and the liveness check.
 Source: design/account-model.md P4 (loss and duplication), lessons Q-A2.
 
 **Q-A-3. Who resends, and when?**
@@ -47,9 +51,11 @@ Source: design/account-model.md section 5 (P4: no two proofs per nonce).
 
 **Q-A-6. The link.**
 Choice: FIFO with bounded loss and duplication (`max-losses`, `max-dups`, default 1 and 1).
-Reordering is not modelled: the `prev` hash makes a frame from the future refusable, so
-reordering can only add stale copies, which duplication already covers. A full reordering model
-is a later widening.
+Reordering is not in the base page: the `prev` hash makes a frame from the future refusable, so
+reordering can only add stale copies, which duplication already covers. Evidence (R-NET, D-AC-8): the config
+`account/configs/reorder.scm` lets the receiver take any of the first three messages of its inbox (Quint's
+network is a set and delivers any message in flight) and the page still checks clean: 7312 states, 33183
+transitions, 16 goals. The base stays FIFO; Quint records its set network as an explicit choice (its A14).
 Source: design/account-model.md P4 ("loss, duplication and simultaneous proposals").
 
 **Q-A-7. Frame protocol shape (lessons Q-A4).**
@@ -63,34 +69,36 @@ Choice: the lower entity id, as in the contract's `acct_key`. The page names sid
 `:right`; the rule "Left wins on an equal height" is the contract's equal-nonce rule.
 Source: Types.sol:150, Account.sol:361, Account.sol:732.
 
-**Q-A-9. A frame's timestamp carries no authority (R-CLOCK, coordinator 21:56).**
-Rule: no frame is refused for its age or its future date, because a signed frame refused without an exit
-deadlocks the Account (the proposer holds the frame, resends the same signed copy, and it is refused
-again). Every time-based decision (lock expiry, a deadline check, the N2 horizon) uses the deciding
-party's own clock plus a named reserve (`clock-reserve`), never a timestamp the counterparty wrote.
-Reason given: a late frame deadlocked an Account, and a future-dated frame let a payer expire a lock
-before the payee's own deadline. The frames page above has no time, so it holds under the rule by
-construction (it refuses only on height and on content, never on a stamp); the rule is checked in its own
-page, `account/clock.scm`: two clocks that only tick and drift apart freely, one lock, a pay frame and
-an expire frame, any stamp, any delay. Properties: "no frame is refused for its age or its future date"
-and "a lock is expired only after the payee's own clock passed its deadline plus the reserve".
-Planted bugs, one per case: `refuse-late` (a stale stamp is refused: the signed frame is stuck),
-`refuse-future` (a stamp ahead of the receiver's clock is refused) and `expire-by-frame-stamp` (the
-receiver decides expiry from the frame's stamp: a payer stamps the future and expires the lock at its
-own clock 2 while the payee's is 0). Capacity: 1434 states (see the resolve refinement below).
-Consequence for the other pages: the dispute page's clock is the chain's (one clock, the deciding
-party's own for `horizon-ok?`, Q-D-20); the J batch page's deadlines are the chain's. An early expire is
-refused on CONTENT (a nack); a signed frame that is valid but early is not refused, it waits for the
-deciding party's clock. Not modelled: J-height deadlines (the same rule with the J clock), the payee's
-claim before its own deadline, the size of the reserve (a named parameter, not chosen here).
-Refinement (#57, coordinator 01:11): a secret resolve is decided by J height, never by the frame's stamp. The
-page now has a chain height (`:jh`) both parties read, a resolve frame the payee proposes with any stamp
-(honest 0, or the latest one a proposer can write), and the payer's decision `resolve-late?`: late only when the
-chain height passed `resolve-deadline`. Property "a secret resolve is late only by J height: a resolve delivered
-within the deadline is never refused whatever the frame stamp says". Planted bug `resolve-late-by-stamp` (the
-payer also refuses a stamp past the deadline). The goal accepts a lock that expired or a secret that resolved.
-The lock expiry path keeps its own-clock rule. Capacity: 1434 states, 6225 transitions, 186 goals, 21 s.
-Source: coordinator R-CLOCK (21:56), #57 (01:11).
+**Q-A-9. Time in the Account layer: R-CLOCK and R-HTLC-CLOCK (coordinator 21:56 09-29 and 09-30, Account comparison D-AC-2..4).**
+R-CLOCK: no frame is refused for its age or its future date, because a signed frame refused without an exit
+deadlocks the Account (the proposer holds the frame, resends the same signed copy, and it is refused again), and a
+frame's stamp is never the time (a future-dated stamp let a payer expire a lock before the payee's own deadline).
+R-HTLC-CLOCK (09-30): every HTLC time judgment is in J HEIGHT, never by an Account clock or a frame stamp. Each party
+judges by its own view, the `max(host.finalizedJHeight, ctx.jHeight)` door of R-CLOCK (`:view` on the page); a view
+lags the chain by at most LAG, so two views differ by at most LAG (R-DRIFT; `max-drift`).
+(a) A lock is live through its deadline height. The payer accepts a resolve while its own view is <= deadline,
+whatever the stamp and the chain height. (Closes the xln.ts `htlc_timeout` hole: at jHeight == revealBeforeHeight the
+lock is still live.)
+(b) An expiry needs own view > deadline + reserve, strict; the payer when it proposes, the payee when it accepts.
+The reserve is in J heights and at least LAG (`clock-reserve`), so a party past deadline + reserve has a counterparty
+within LAG of it, which is past the deadline.
+(c) A payee whose resolve is still unacked when its own view reaches deadline - LAG reveals on-chain (C11 already
+makes the dispute window larger than LAG). Assumption (diligence, as on the other pages): a payee that owes the
+reveal does it before the chain moves on and before it decides an expire frame (`payee-duty?`).
+The page `account/clock.scm`: the chain height, two views that only catch up (bounded by LAG behind the chain), one
+lock with a deadline, a pay frame, an expire frame (the payer may propose it at any time, so the payee's check alone
+must hold), a resolve frame with any stamp, any delay. Properties: no frame refused for its age or date; an expiry
+commits only when both parties' views are strictly past the deadline; a resolve is refused only when the payer's own
+view is past the deadline; a payee holding the secret has revealed on-chain before an expiry commits.
+Planted bugs: `refuse-late`, `refuse-future`, `expire-by-frame-stamp`, `expire-at-deadline` (>= instead of >),
+`expire-no-reserve`, `resolve-late-by-stamp`, `resolve-by-chain-height`, `payee-idle`. Config `no-secret`: the payee
+holds no secret, the lock can only expire. Capacity: 2730 states, 10546 transitions, 260 goals.
+Quint: the same rule, its receiver reads a J-height view, never a proposer-written field; its bounded drift and its
+`expiredEarly` oracle stand (D-AC-4); this page carries `max-drift` and the both-views property as the oracle.
+Consequence for the other pages: the dispute page's clock is the chain's (Q-D-20); the J batch page's deadlines are
+the chain's. An early expire is refused on CONTENT (a nack); a signed frame that is valid but early is not refused.
+Not modelled: several locks, the on-chain dispute itself (the dispute page has it), a view that stalls.
+Source: coordinator R-CLOCK (21:56), #57 (01:11), R-HTLC-CLOCK (09-30).
 
 **Q-A-10. A refused tx stays refused when its predecessor is rolled back (a6 of the round-2 review).**
 A validator refuses a tx that conflicts with the history before it, including the txs ahead of it in the SAME
@@ -195,28 +203,34 @@ keep it a client obligation and document it as a deployment requirement: window 
 coordinator prefers a contract rule, the candidate is "a counter may be registered until T + one message
 delay", which weakens the finalize timing for everyone; not recommended.
 
-**Q-D-4. Epoch advance and the pre-signed baseline (coordinator N1, revised 17:21).**
-Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872), with one exception: every frame
-is co-signed together with a baseline proof for epoch + 1 (offdelta 0, no clauses). Without it the
-honest side has no valid proof between the epoch advancing and a new baseline being co-signed, and
-the counterparty can stretch that gap by refusing to sign. The baseline nonce must be above the chain
-nonce after ANY event that opens the next epoch (the settlement update, or a timeout finalize, which
-leaves the chain nonce at n0 + 1). Proof nonce and frame height are separate counters.
-Choice: baseline nonce = frame nonce + 3. A proposer is at most one frame behind (its ack is in
-flight) and a timeout finalize on the newest initial proof leaves the chain nonce one above it; +2
-is not enough (planted bug `baseline-too-low`: the proposer holds no valid proof after finalize).
-The offset depends on the frame protocol allowing one unacked frame: pipelining k frames needs +2+k.
-A cooperative settlement carries the same baseline in its Lock frame and folds offdelta into
-ondeltaDiff; v1 requires no open clauses for it (in the page since 21:35, see Q-D-19).
-Source: coordinator decision, A:872, A:1315, D:843-856.
+**Q-D-4. Epoch advance: no proof is pre-signed, the implicit proof takes its place (coordinator N1, revised 17:21; CLOSED by decision D2, R-IMPLICIT-BASELINE).**
+Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872). The N1 revision of 17:21 co-signed a baseline
+proof for epoch + 1 with every frame (nonce = frame nonce + 3), so that an epoch advance never left an honest side
+without a valid proof. That machinery is gone. Decision D2 (Q-D-21, contracts-decisions.md "R-IMPLICIT-BASELINE"):
+from ondelta epoch 1 a dispute may start from the IMPLICIT proof, which nobody signs because every field of it is on
+chain. The page carries it as `implicit-proofs`, the base of every epoch after the first (see Q-D-21 for the rule and
+the Right author). Nothing is co-signed ahead any more, so the nonce arithmetic it needed (frame + 3, the settlement
+baseline, the post-frame nonce above every baseline) is retired with its three planted bugs (`baseline-too-low`,
+`settle-nonce-high`, `settle-no-baseline`). What replaces the post-frame rule is the stored + 2 rule (Q-D-21).
+A cooperative settlement folds offdelta into ondeltaDiff; v1 requires no open clauses for it (in the page since
+21:35, see Q-D-19).
+Source: coordinator decision, A:872, A:1315, D:843-856; decision D2.
 
-**Q-D-5. Response windows (coordinator N3, floor H2).**
-The windows are constants of the Account, fixed at open; every proof carries the same values (A:1471-1474,
-GAP-5). The model has one pair of values and the floor check `window-floor-ok?`. The contract uses
-the windows only as a sum T = S + left + right (GAP-4): there is no per-side sub-window, and the
-non-starter may counter anywhere in [S, T). Options: (a) keep the sum; (b) give each side its own
-interval. Choice: (a), it is what the fixed contracts do.
-Source: A:1802-1805, A:1466, GAP-4, GAP-5.
+**Q-D-5. Response windows (coordinator N3, floor H2; revised by decision D2).**
+Each proof carries its own windows (the policy it was signed under); the floor is MIN_RESPONSE_SECONDS (60 s testnet, 6 h
+mainnet), and the implicit proof of an epoch names the floor. Inside an epoch the windows may LENGTHEN and never SHORTEN:
+a counter or a final body whose windows are below the started ones is refused (E9), so a policy that lowers its windows
+makes a newer frame uncounterable against a stale start with longer windows (review B, risk 5). The page: a proof is
+(nonce proposer off clause rival? epoch wl wr implicit?), `frame-extra` is the policy (the base signs at the floor, the
+config `window-policy` lengthens the later frames), `windows-keep-ok?` is the signing rule (neither side signs a frame
+that shortens the newest committed windows), `windows-ok?` the contract's E9 check on a counter and on the immediate
+close, and the property "windows never shorten inside an epoch" covers both; planted bug `counter-shortens-window` (with
+`window-policy`). Windows take two values at most (floor, floor + 1). The contract uses the windows only as a sum
+T = S + left + right (GAP-4): there is no per-side sub-window, and the non-starter may counter anywhere in [S, T).
+Options: (a) keep the sum; (b) give each side its own interval. Choice: (a), it is what the fixed contracts do. The floor
+is the real response guarantee: a Runtime must land its counter inside it (a Runtime duty to watch its own disputes
+within the floor window; watchtowers stay out of v1, D5).
+Source: A:1802-1805, A:1466, GAP-4, GAP-5; review B of PR 76 (finding 5); decision D2.
 
 **Q-D-6. Time.**
 An abstract integer clock, `tick` by one, bounded by `max-time` (default 2). A dispute may only
@@ -263,13 +277,17 @@ Source: coordinator decision H4, A:1216-1275, D:757-768.
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
 tokens. Model bounds: 5 scripted frames (one refused by RCPAN), one rival, one HTLC, two windows of 1,
-`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 5571 states,
-10196 transitions, 2562 goals, about 4 minutes alone (round 2: settlement, the post frame and the horizon are
-in; it was 9771 states before the payee's dispute ops carried the secret). Second bounds, all in
+`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 5397 states,
+9946 transitions, 2486 goals, about 4 minutes alone (round 2: settlement, the post frame and the horizon are
+in; it was 9771 states before the payee's dispute ops carried the secret; 5571 states before the implicit proof
+replaced the co-signed baselines, D2). The implicit-proof page adds `two-disputes` (5432 states, 7179 transitions,
+5333 goals, about 3 minutes: the second dispute starts from the implicit proof, a deposit of the new epoch is
+explored between the two) and `window-policy` (`max-time` 3, 12577 states, 23004 transitions, 5868 goals, about 11
+minutes). Second bounds, all in
 `dispute/configs/`: `far-deadline` (N2), `no-rival` (B2), `retired-left` and `retired-right` (H3),
-`right-reserve`, `two-disputes` and `implicit-baseline` (Q-D-21). The review measured
+`right-reserve`, `two-disputes` (Q-D-21) and `window-policy` (N3). The review measured
 `max-time 3` with the HTLC deadline at 2 on the 3-frame script (10120 states, 331 s). Not modelled yet:
-N2 tolerance, H3, and a second dispute after a dispute (`max-disputes` 2). Secrets in calldata (Q-D-18)
+N2 tolerance (H3 is in, Q-D-22; a second dispute after a dispute is in, `two-disputes`). Secrets in calldata (Q-D-18)
 and the settlement branch with nonce continuity (Q-D-19) are in.
 
 **Q-D-13. The proofs are built by the frame rules, not listed (review of PR #41).**
@@ -306,8 +324,8 @@ the assumption (a responder that may be late), which is what `no-floor` does.
 The contract lets the non-starter close before T (5b, 5c) while an ack of a frame it proposed is
 still on its way. Then it ends on the starter's older proof. The record marks it `:hasty` and the
 "pays what both sides had committed" property skips it; "after an epoch advance each side still
-holds a valid proof of the new epoch" covers it, and is what keeps the baseline nonce at frame + 3
-(planted bug `baseline-too-low`).
+holds a valid proof of the new epoch" covers it (the implicit proof is always there; planted bug
+`implicit-nonce-stale`: it carries the stored nonce itself, so it is not above it).
 
 **Q-D-17. Every dispute window is greater than LAG (R-C11, coordinator 18:57).**
 LAG is the time to read a J event and get an op included. The responder sees a start at S + LAG and
@@ -339,24 +357,16 @@ strictly above the stored nonce, the stored nonce is SET to it, offdelta is fold
 `ondeltaDiff`, and the epoch advances. The page adds `settle` (v1: no open clause; heights 1 and 2 of the
 script are offered), `post frame` (the first frame of the new epoch) and a dispute in the new epoch.
 Rules the page carries, each with a planted bug:
-- The settlement nonce is above the chain nonce and below the baselines already held for the epoch it opens
-  (frame height + 1; baselines sit at frame + 3). At the baseline nonce neither side holds a valid proof
-  (`settle-nonce-high`).
+- The settlement nonce is above the chain nonce (frame height + 1). It no longer has to stay below baselines: none is
+  co-signed (decision D2, Q-D-21).
 - A settlement moves no allocation: Δ and the money are the same before and after; offdelta folds into
   ondelta (`settle-drops-off`). It carries no open clause in v1 (`settle-with-clause`).
-- FINDING. The settlement must ALSO co-sign a baseline for the epoch AFTER the one it opens, at 3 above the
-  highest nonce valid in the new epoch (baselines included). Without it, a dispute in the new epoch before
-  another frame is signed leaves each side with no valid proof, and the counterparty can stretch the gap by
-  refusing to sign (`settle-no-baseline`, trace: propose, ack, settle, start on the old baseline, finalize).
-  The Lock frame carries the same baseline as every other frame (Q-D-4), and so must the settlement.
-- FINDING. Proof nonce and frame height are separate counters, and the first proof nonce of the new epoch
-  must clear every baseline of that epoch either side holds (baseline = old frame + 3, so it is above the
-  chain nonce the settlement leaves). If the runtime continues the frame counter from the chain nonce, a
-  baseline (offdelta 0) outranks the newest committed frame and a dispute pays from it
-  (`post-nonce-low`). Runtime rule: next proof nonce = 1 + the highest nonce of the epoch that any held
-  proof carries.
+- Proof nonce and frame height are separate counters. The settlement leaves the chain nonce at its own nonce, and the
+  first SIGNED proof of the new epoch takes nonce >= stored + 2 (Q-D-21): the page's `post-nonce` is chain + 2. At
+  chain + 1 a Right-authored frame only ties the implicit proof and a dispute pays the empty state, so Left's frame
+  is lost (planted bug `post-nonce-low`, the spec's killer for review B finding 3).
 Not modelled: several frames after a settlement, a settlement with open clauses (v2), several tokens, the
-finalize-then-continue path (the baseline check covers it, the frame after it is not walked).
+finalize-then-continue path (the implicit proof covers it, the frame after it is not walked).
 Source: Account.sol 1590-1690, 1354; coordinator N1 (revised), relay 21:35.
 
 **Q-D-20. MAX_LOCK_HORIZON (N2, coordinator 21:50).**
@@ -373,40 +383,59 @@ LOCAL policy (each party's own tolerance), not a value both sides must agree on;
 farther lock than its peer does simply gets refused by the peer at signing.
 Source: coordinator N2 (21:50); H1.
 
-**Q-D-21. Two disputes in a row leave no proof for the second new epoch (finding of `max-disputes` 2, round 2).**
-The base runs one dispute, so the pre-signed baseline (Q-D-4) was held but never presented. With `max-disputes` 2
-(`dispute/configs/two-disputes.scm`: a script of two frames, no settlement, a clock of 4 so both windows fit) the
-baseline IS presented, and the property "after an epoch advance each side still holds a valid proof of the new
-epoch" fails in five steps: propose n1, start n1R, finalize (epoch 1), start B3 (the baseline of epoch 1),
-finalize (epoch 2). A baseline is co-signed with every FRAME of the epoch before it; the second advance happens
-before any frame of epoch 1 exists, so nothing is co-signed for epoch 2. What is at stake is small (the first
-payout emptied the collateral and the baseline says offdelta 0) but not nothing: a unilateral deposit into
-epoch 2 (R2C needs no signature) has no proof to dispute with, and the counterparty can refuse to sign the first
-frame that would give one.
-Options: (a) co-sign baselines two epochs ahead (covers two advances, not three; the regress stays);
-(b) the implicit baseline: from the epoch after ANY advance the empty state (offdelta 0, no clause, one nonce above
-the chain nonce) is a valid proof for both sides without a signature, because every field of it is on chain
-(ondelta, collateral and the nonce are); a dispute from it settles at Delta = ondelta, which both sides agreed to at
-the advance, and a later signed frame outranks it through a counter as any newer proof does; (c) forbid a dispute
-from a baseline (no: it is the escape path for a deposit made after the advance).
-Recommendation (for the coordinator): (b). It removes the co-signed baselines and the nonce arithmetic they need
-(frame nonce + 3, the settlement baseline, the post-frame nonce), which produced two of the review's findings
-(Q-D-19), and it is the only option that holds for any number of disputes in a row. It needs a contract change
-(a start with no proof at the lowest valid nonce of the epoch). `dispute/configs/implicit-baseline.scm`
-(loaded after two-disputes) is the same bound with (b): the property holds. Until the coordinator decides, the
-spec keeps N1 as decided and the finding stays open; the two-dispute case is checked as a FINDING (its verdict is
-the expected failure), not as a pass.
-Source: review of PR #41 round 2 (item 6); coordinator N1.
+**Q-D-21. Two disputes in a row, and the implicit proof (finding of `max-disputes` 2, round 2; CLOSED by decision D2, R-IMPLICIT-BASELINE; the author is RIGHT).**
+Finding (round 2). The page used to co-sign a baseline with every frame. With `max-disputes` 2
+(`dispute/configs/two-disputes.scm`) the property "after an epoch advance each side still holds a valid proof of the
+new epoch" failed in five steps: the second advance happens before any frame of epoch 1 exists, so nothing was
+co-signed for epoch 2, and a unilateral deposit into epoch 2 (R2C needs no signature) had no proof to dispute with.
+Decision D2 (coordinator, contracts-decisions.md "R-IMPLICIT-BASELINE"; contract PR 76; Review A and Review B): from
+ondelta epoch 1 a dispute may start from the IMPLICIT proof: empty signature, and the body is the empty state of
+the Account, every field of it known on chain: offdelta 0, no clause, floor windows, nonce = stored + 1, authored by
+RIGHT, watchSeed 0, no starter arguments. It settles at Delta = ondelta. Any signed frame of the epoch outranks it through
+a counter. Epoch 0 is excluded (a fresh Account's first frames are its proofs). The spec's earlier draft wrote it
+with `:left`; that is superseded: at one nonce a Left-authored proof outranks a Right-authored one (A12; rank =
+2 * nonce + (Left ? 1 : 0)), so the Right-authored implicit proof has the lowest rank at stored + 1 and a signed Left
+proof of that nonce outranks it.
+Page: `implicit-proofs` is the base of epoch > 0 (nonce chain + 1, Right-authored, offdelta 0, no clause, the floor
+windows); the co-signed baselines are deleted. `two-disputes` is a plain pass (the second dispute starts from the
+implicit proof and is presented). Rules the page now carries, each with a planted bug:
+- **The first signed proof of an epoch takes nonce >= stored + 2** (review B finding 3, the trap). A Right-authored
+  signed proof at stored + 1 only TIES the implicit proof (same rank), a tie is a refused counter, and the dispute pays
+  the empty state: after a settlement (stored 5) Right signs the first frame at 6 with offdelta +40, opens the implicit
+  dispute at 6, Left's counter is skipped and at the timeout Delta = ondelta, so Left's 40 is lost. `post-nonce` is
+  chain + 2; planted bug `post-nonce-low` (chain + 1) is caught by "in the new epoch a dispute pays the newest committed
+  frame, never the implicit proof that ties it". `stored` is the value READ FROM THE CHAIN, never derived: a timeout
+  finalize leaves stored = initial + 1, a counter or signed branch leaves the proof's own nonce (R-IMPLICIT-NONCE-FROM-CHAIN,
+  a Runtime rule; the page's `chain-nonce` is that value and the property "a timeout finalize consumes exactly one nonce;
+  an adopted proof sets it" pins it).
+- **Windows may lengthen, never shorten, inside an epoch** (N3, E9; Q-D-5). The counter and the final body carry windows
+  at least the started ones; a body that shortens them is refused. Each proof carries its own windows; planted bug
+  `counter-shortens-window`.
+- **Floor windows are the real response guarantee.** The implicit proof names the floor (60 s on testnet, 6 h on mainnet),
+  so a side that starts from it gives its counterparty only the floor window to answer with a signed frame. Honest parties
+  are safe only if a Runtime lands the counter inside it: a Runtime duty to watch its own disputes within the floor
+  window (watchtowers stay out of v1, D5). Accepted risk, not a contract change.
+- **Deposits keep the epoch** (review B finding 2). Reserve-to-collateral does NOT advance the epoch: the epoch advances
+  only on a dispute finalize, a collateral-to-reserve withdrawal (co-signed) and a settlement. A deposit inside an epoch
+  keeps every signed frame valid, and an implicit dispute started afterwards settles at the NEW ondelta (a Left deposit
+  raises it by one). Page: the deposit rule is open inside an epoch after an advance (as well as during a dispute), the
+  step property "a deposit does not advance the epoch" and the property "a dispute from the implicit proof settles at the
+  chain's ondelta now"; planted bugs `deposit-advances-epoch` and `implicit-stale-ondelta`.
+- The implicit proof must carry a nonce above the stored one (planted bug `implicit-nonce-stale`, caught by "after an epoch
+  advance each side still holds a valid proof of the new epoch").
+Not modelled: the starter naming the tokens (one token), the seven contract reasons for refusing a non-canonical implicit
+proof (the page only builds the canonical one), a withdrawal (collateral-to-reserve) as an advance.
+Source: review of PR #41 round 2 (item 6); coordinator N1; decision D2; Review A and B of PR 76.
 
 **Q-D-22. H3: retired-board evidence is capped at collateral, in one direction only (coordinator H3, modelled).**
 The page has a rotating side (`rotating-side`, `rotations`, `rotation-at`): its board rotates once at an
-off-chain height, and every proof it signed up to then is retired-grade evidence (a baseline counts by the frame
-it accompanies; a proof after the rotation is current). The proof that settles carries the grade, whoever starts
+off-chain height, and every proof it signed up to then is retired-grade evidence (the implicit proof is unsigned,
+so never retired-grade; a proof after the rotation is current). The proof that settles carries the grade, whoever starts
 (a counter replaces it). Finalization clamps only what the retired side would pay from reserves: retired Left
 settles at Delta >= 0, retired Right at Delta <= collateral. What the retired side is owed is never clamped.
 Properties, written from the decision text and not through the clamp: "retired-board evidence never draws on the
 retired side's reserve" and "what the retired side is owed is paid as signed, whoever starts". Bounds:
-`dispute/configs/retired-left.scm`, `retired-right.scm` (8514 states each; the board rotates after frame 4, so
+`dispute/configs/retired-left.scm`, `retired-right.scm` (8340 states each; the board rotates after frame 4, so
 frame 4 (Delta -1) and frame 3 (Delta 3 over a collateral of 2) are retired). Planted bugs: `h3-no-clamp` (the
 contracts before H3) and `h3-symmetric` (the first, symmetric clamp of PR #42: a debtor erases what it owes a
 rotating entity). Not modelled: the seven-day grace window itself, the grade upgrade by re-registering the same
@@ -782,6 +811,36 @@ Not modelled: the exact visit order inside an internal call beyond FIFO with the
 unit, and what the chain does with a reserve op that arrives with less than its cost (it fails soft, R-J5).
 Source: coordinator 09-30 15:23.
 
+**Q-J-14. Gas by batch kind and settlement debt forgiveness (coordinator, 09-30 16:12, pinned against the contracts in #54): modelled.**
+(1) Gas failure is split by batch kind. A money-only batch (payments, settlements, no deposit leg) takes the soft path: given
+less gas than `budget*64/63 + 30,000` it emits `BatchGasStarved`, the transaction succeeds, NO nonce is spent, the signed
+batch can be sent again. From the floor up any failure is `BatchFailed` and consumes the nonce. A batch that carries a
+dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame: out of gas reverts the whole transaction, nothing
+is emitted, the nonce stays unspent. Rules `gas-nth` (level 0: one below the floor; level 1: the floor itself, which runs).
+Properties: "gas below the floor spends no nonce, whatever the batch carries", "a money-only batch starved of gas emits
+BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing" and "a batch given at
+least the floor is never gas-starved". The Entity reads BatchGasStarved as a J fact: the batch did not run, so it stays sent
+and is resent at its own nonce. Planted bugs `gas-soft` (a gas revert takes the nonce), `starved-silent`,
+`hard-starved-event`, `starved-at-floor`. Bound `j/configs/gas-kinds.scm` (a deposit and a payment, two gas events;
+2365 states) with a witness. This replaces the 01:16 wording "a gas revert is plain, whatever the batch carries" for money-only
+batches: the nonce is still unspent, but the chain now says so. It answers the Q-J-11 question about hard batches (they revert
+whole and keep the nonce).
+(2) Settlement debt forgiveness. A settlement (`stl-a`) may list claim ids to forgive (`forgive`). It deletes only the HEAD claim
+of the debt queue, and only if its creditor is the settling counterparty; a third party's claim at the head reverts the whole
+settlement (nothing of it applies: BatchFailed, reason "forgiveness", the settlement goes back to its Account like a bad
+signature); at most `forgive-cap` ids (32 in the contract). Properties: "a settlement deletes only the head claim of the queue,
+and only when its creditor is the settling counterparty", "a settlement whose forgiveness reaches a third party's claim at the
+head never lands: it reverts whole" and "a settlement that lands lists at most the cap of claim ids". Planted bugs
+`forgives-third-party`, `forgives-past-head`, `forgiveness-skips-third-party`, `forgive-uncapped`. Bounds and witnesses:
+`j/configs/forgive-head.scm`, `forgive-third-head.scm`, `forgive-cap.scm`, `forgive-past-head.scm`. Debts now carry a creditor
+(`:cp` the settling counterparty, `:third` anyone else). The debt accounting property counts forgiven debts.
+Open for the coordinator: how the contract reads "at most 32 ids" (the page reverts a settlement that lists more; the other
+reading is that only the first 32 are walked); what it does with a listed id that is not the head (the page stops the walk and
+leaves the rest: only the head claim is ever deleted, no revert); whether the forgiven amount is credited to anyone (the page
+only removes the claim); how a forgiven partly-paid head claim is counted. Not modelled: gas amounts beyond the floor, the
+size of the debt queue beyond the bound.
+Source: coordinator 09-30 16:12.
+
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
 Choice: only after the frame's WAL row is committed (xln.ts `commitRuntimeFrame` 42045, outputs leave
 after the row). A crash between apply and commit must not leave a peer with an output of a frame
@@ -904,14 +963,14 @@ Choice: the weakest channel there is. It may lose a message, deliver it any numb
 bound, misroute, and carry messages a stranger wrote. The page has no budget of losses or duplicates: a delivery leaves the
 message on the link, so it can be delivered again, and a drop is a separate move. This replaces the FIFO link with bounded loss of the
 Account page (Q-A-6) as the stated assumption; the Account page stays correct under the weaker one because a frame from the future
-is refused (its `prev` hash). Evidence (round of the PR #65 review, F8): the Account page with a link that may deliver any of the first four queued
-messages, `account/configs/reorder.scm`, checks clean at its own bounds (7,483 states, 34,819 transitions, 16 goals; the base page has 3,651 states).
+is refused (its `prev` hash). Evidence: the Account page with a link that may deliver any of the first three queued messages, `account/configs/reorder.scm` (Q-A-6), checks clean
+(7,312 states, 33,183 transitions, 16 goals; the base page has 3,651 states).
 Entity consensus already keeps its network as a set. The page's own coverage of "liveness": "can always still finish" means no reachable dead end,
 not progress under fairness; under unbounded loss that is the most one can say.
 Source: lessons R-X1; design/account-model.md P4; og core/network/p2p/ws-protocol.ts header ("best-effort", "dumb pipe").
 
 **Q-T-3. No receipts and no rejections at the transport.**
-Choice: none. A refused message is refused silently (Q-A-1); the only receipt is the Account ack, which is a consensus message, never
+Choice: none. The transport refuses silently (Q-A-1); the no-silent-refusal rule belongs to the Account and J layers, not here. The only receipt is the Account ack, which is a consensus message, never
 a transport one. A second acknowledgement layer would hold a second liveness state that can disagree with the first (og says the
 same in `ws-protocol.ts`: "Do not add entity-input delivery receipts or rejections here"). Cost: a sender whose message is refused
 keeps resending; the resend policy (backoff, a cap per peer) is the Host's, not the protocol's. Planted bug `assume-delivered`: a
@@ -998,6 +1057,8 @@ Found in the reading of xln.ts against the spec (line numbers are pure/xln.ts). 
 xln.ts has no defined behavior or disagrees with the reading taken. Recommendation first; where a
 page already carries the rule, the page is named.
 
+**R-HOLD-CAP (coordinator 09-30, owed).** R-HOLD-CAP is per Account across tokens (32, the contract's per-body cap). It is owed when the multi-token Account is modelled.
+
 **Q-X-1. Hop deadlines against dispute windows.** xln.ts has constants (5085-5112) not tied to the
 Account response windows (657); `onwardDeadlineSafe` (22787) is the only check. Recommendation: the
 incoming deadline is at least the outgoing one plus the larger response window plus HOP, computed per
@@ -1011,6 +1072,11 @@ the frame clock. Page: the fail-back wait R2 in entity/routing.scm.
 credit bound; the account-model document says it must (Q-L, money page). Settlement holds
 (`chargeSettlement` 4600) are stricter than the contract. Recommendation: refuse a setCredit that
 leaves the bound; keep the settlement hold as stated local policy, not protocol.
+DECIDED (coordinator 09-30, R-SETTLE-CREDIT): a party co-signs a settlement only if, after it, each side's position is still
+within the credit the other side extended (the bound a payment respects), so a withdrawal of collateral beyond one's own claim is
+refused. The test rig found it: a co-signed settlement left Left at delta -7,000,031 against credit 18,092
+(review/rig-properties-2026-09-30/REPORT.md). Page: money/ledger.scm holds every collateral move (`r2c`, `c2r`) to RCPAN; planted bug
+`settle-ignores-credit` (a C2R that skips the check) fails "credit holds".
 
 **Q-X-4. Debt.** Does the Entity act on it (forgive, repay order, revoke credit)? Recommendation: pure
 observation, and a forgiveness only inside a cooperative update. Page: dispute/dispute.scm keeps the
@@ -1018,7 +1084,7 @@ debt in the payout; the Entity side is not modelled.
 
 **Q-X-5. The Account after a dispute finalize.** `external_finality` (159-178) yields `disputed` from
 every phase; only preparing goes back to open. Recommendation: the Account closes to a fresh
-generation (N1: the new epoch needs a co-signed baseline) with clauses resolved by evidence. Page:
+generation (N1: from the new epoch a dispute may start from the implicit proof, D2) with clauses resolved by evidence. Page:
 dispute/dispute.scm ends at the epoch advance; the Account state after it is not modelled.
 
 **Q-X-6. entityCommand atomicity and nonce.** One command is all or nothing; the nonce is consumed on
@@ -1066,24 +1132,30 @@ Each line is what the first page would have to decide.
 
 ## Decided by the coordinator (rules the spec carries; not open)
 
-The N1 below is the FIRST version (15:19). The revised N1 (17:21) replaces it: a baseline proof for
-epoch + 1 is co-signed with every frame (offdelta 0, no clauses), nonce = frame nonce + 3, so an
-epoch advance never leaves an honest side without a valid proof and payments do not pause. See Q-D-4.
+The N1 below is the FIRST version (15:19). The revised N1 (17:21) replaced it with a baseline proof co-signed with
+every frame; decision D2 (R-IMPLICIT-BASELINE) replaces that in turn: from epoch 1 a dispute may start from the
+IMPLICIT proof (empty signature, Right-authored, nonce stored + 1), and the first signed proof of an epoch takes
+nonce >= stored + 2. See Q-D-4 and Q-D-21.
 
 Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 
 - **N1 (first version, replaced).** A party signs a proof only for the CURRENT on-chain
-  `ondeltaEpoch`; after an epoch advance payments pause until a new baseline is co-signed.
+  `ondeltaEpoch`; after an epoch advance payments pause until the epoch event is observed, then the first proof takes
+  nonce >= stored + 2 (decision D2, Q-D-21).
 - **N2. Deadlines.** One open HTLC deadline reverts a whole batch at finalize, so the runtime
   submits finalizes per Account, never bundled. A party refuses to sign an HTLC whose deadline is
   beyond its own tolerance (a named policy parameter, not a protocol constant).
-- **N3. Windows.** The response windows are fixed per Account at open; every proof of that Account
-  carries the same values. Both are at least MIN_RESPONSE_SECONDS (60 on testnet; contracts H2).
+- **N3. Windows.** Both response windows of a proof are at least MIN_RESPONSE_SECONDS (60 on testnet, 6 h on mainnet;
+  contracts H2). Each proof carries its own windows (D2 supersedes "every proof carries the same values"): they may
+  LENGTHEN and never SHORTEN inside an epoch, and the counter's and the final body's windows are at least the started
+  ones (E9). The floor is the real response guarantee (a Runtime duty to watch its own disputes within it). Page:
+  `windows-ok?`, `frame-extra`, the property "windows never shorten inside an epoch", planted bug
+  `counter-shortens-window`; Q-D-21.
 - **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
-- **R-CLOCK** (21:56): see Q-A-9.
+- **R-CLOCK** (21:56) and **R-HTLC-CLOCK** (09-30): see Q-A-9. **R-REACK**: Q-A-2. **R-SETTLE-CREDIT** (09-30): Q-X-3. **R-ONE-LOCK-PER-HASH** (09-30, coordinator): an Account holds at most one open clause per hashlock, whoever the payer; a second lock on an open hashlock is refused (`lock_exists`) and a clause is still addressed by its slot. Page: `money/ledger.scm` (the lock rule takes a hashlock `h`; property "at most one open clause per hashlock"; planted bug `duplicate-hashlock`; 1440 states, 12918 transitions). The frames and clock pages carry one lock, so the rule does not bite there. Follows og (xln.ts 7457-7458). **R-NET**: Q-A-6.
 - **H1.** Finalize waits until an unrevealed HTLC's deadline unless the secret is public.
 - **H3.** Retired-board evidence is capped at collateral.
 - **A12** (00:49): two co-signed proofs can exist at one nonce only with opposite proposer flags, and the contract
@@ -1091,5 +1163,8 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   one nonce and epoch have opposite proposers, and Left's outranks Right's" (killed by the existing
   `tie-break-inverted`, now caught here before the older "an honest starter never ends on a losing proposal").
 - **J6** (00:49): see Q-J-12. **J2 extended, R-COSIGN, gas starvation** (23:42): see Q-J-11. **J5 refined** (22:31): Q-J-10.
-- **H3** modelled: Q-D-22. **Baselines and a second dispute**: Q-D-21 (open for the coordinator, recommendation given).
+- **R-IMPLICIT-BASELINE** (decision D2; Review A and B of PR 76): the implicit proof, the Right author, the first signed
+  proof of an epoch >= stored + 2, windows lengthen and never shorten, floor windows are the response guarantee, deposits
+  keep the epoch. Page: Q-D-21 (closed). Quint #44 carries the same cells.
+- **H3** modelled: Q-D-22. **Baselines and a second dispute**: Q-D-21 (closed by D2).
   **Locked phase, quorum 3 of 3**: Q-E-8 (liveness finding, recommendation given).

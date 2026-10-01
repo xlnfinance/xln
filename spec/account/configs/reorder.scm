@@ -1,12 +1,15 @@
-;; The Account frames under a link that REORDERS (transport page Q-T-2): a replica may take any of the first four queued messages, not only the
-;; head. Loss and duplication are as in the base page. This is the evidence for "the Account page stays correct under the weaker channel".
-;; Loaded after account/frames.scm; it only changes `deliver`.
-(define (drop-nth l k) (append (take l k) (list-tail l (+ k 1))))
-(define (deliver-at k)
-  (rule (str "deliver " k) (w side)
-    (when (> (length (inbox-of w side)) k))
-    (then (let ((out (receive side (side w) (list-ref (inbox-of w side) k))))
+;; Not a bug: a WIDENING of the page's link. The page's `deliver` takes the head of the inbox (FIFO). Quint's network is a set and
+;; delivers any message in flight. This adds `deliver the n-th message` for n = 1 and 2, so the receiver may take any of the first three.
+(define (deliver-nth n)
+  (rule (str "deliver " n) (w side)
+    (when (> (length (inbox-of w side)) n))
+    (then (let* ((q (inbox-of w side))
+                 (m (list-ref q n))
+                 (out (receive side (side w) m)))
             (-> w (assoc-in (list side) (:replica out))
-                  (update-in (list :inbox side) (lambda (q) (drop-nth q k)))
+                  (assoc-in (list :inbox side) (append (take q n) (list-tail q (+ n 1))))
                   (enqueue (peer side) (:sent out)))))))
-(define rules (list submit propose (deliver-at 0) (deliver-at 1) (deliver-at 2) (deliver-at 3) resend lose duplicate byz-frame))
+(define rules (list submit propose deliver resend lose duplicate byz-frame (deliver-nth 1) (deliver-nth 2)))
+(define (next w) (successors rules sides w))
+(define account-frames
+  (dict :init init :next next :invariants invariants :at-rest at-rest :goal done?))

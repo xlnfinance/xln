@@ -104,6 +104,19 @@
 ;; in place, and the cursor does not advance (bug `partial-moves-back`); the spendable reserve nets the WHOLE outstanding
 ;; debt; one internal call visits at most 32 claims (`enforce-cap`, cleared or part-paid; bug `debts-uncapped`).
 ;;
+;; GAS SPLIT BY BATCH KIND (coordinator, 09-30 16:12, pinned against the contracts in #54). A money-only batch (payments,
+;; settlements, no deposit leg) takes the soft path: given less gas than `budget*64/63 + 30,000` it emits BatchGasStarved, the
+;; transaction succeeds, NO nonce is spent, and the signed batch can be sent again. From that floor up any failure is BatchFailed
+;; and consumes the nonce. A batch that carries a dispute, reveal, hash-ladder or deposit op runs in processBatch's own frame:
+;; out of gas reverts the whole transaction, nothing is emitted, the nonce stays unspent. Rules `gas-nth` with `signed-budget`
+;; (bugs `starved-silent`, `hard-starved-event`, `starved-at-floor`).
+;;
+;; SETTLEMENT DEBT FORGIVENESS (coordinator, 09-30 16:12): a settlement (`stl-a`) may carry a list of claim ids to forgive
+;; (`forgive`). It deletes only the HEAD claim of the debt queue, and only if its creditor is the settling counterparty (:cp),
+;; at most `forgive-cap` ids (32 in the contract), and a third party's claim at the head reverts the whole settlement: nothing
+;; of it applies (a soft failure, the settlement goes back to its Account). Bugs `forgives-third-party`, `forgives-past-head`,
+;; `forgiveness-skips-third-party`, `forgive-uncapped`.
+;;
 ;; Faults: the chain may fail a batch that has no dispute op for a reason outside the batch (a reserve spent
 ;; elsewhere, a token pull refused), `faults` times, and drop a submitted batch, `drops` times. The
 ;; counterparty may move Account A to a new epoch elsewhere, `epoch-moves` times (a signature over epoch 0
@@ -129,6 +142,11 @@
 (define/overridable leg-amount (s/number) 1)
 ;; the contract clears at most 32 debts per call; a bound with a small cap shows what stays owed
 (define/overridable enforce-cap (s/number) 32)
+;; the gas the signer budgeted; the chain's floor for a money-only batch is budget*64/63 + 30,000 (126 keeps it a whole number)
+(define/overridable signed-budget (s/number) 126)
+;; claim ids a settlement forgives, and the most it takes (32 in the contract)
+(define/overridable forgive (s/array (s/number)) (list))
+(define/overridable forgive-cap (s/number) 32)
 (define/overridable a-deadline (s/number) 1)
 (define/overridable max-time   (s/number) 2)
 (define/overridable ops (s/array (s/string)) (list "r1" "fin-a" "cnt-a"))
@@ -145,6 +163,12 @@
 (define (cost op) (if (equal? op "r2") 2 1))
 ;; the Account an op belongs to; `stl-a` is co-signed (R-COSIGN). A deposit leg belongs to none.
 (define (cosigned? op) (settle? op))
+(define (gas-floor) (+ (quotient (* signed-budget 64) 63) 30000))
+;; a batch is gas-starved when the relayer gave it less than the floor (bug `starved-at-floor`: at the floor too)
+(define (gas-starved? b supplied) (< supplied (gas-floor)))
+;; only a money-only batch survives to emit BatchGasStarved; a hard batch reverts whole and emits nothing (bugs
+;; `starved-silent`, `hard-starved-event`)
+(define (starved-event? w b) (not (some hard-op? (:ops b))))
 (define (account-of op) (cond ((r2c? op) :b) ((leg? op) :none) (else :a)))
 
 (define init
@@ -156,6 +180,7 @@
         :secret #f :finalized (list) :epoch 0 :moves 0 :returned (list) :gas gas-starves :starts (list)
         :signed-max 0 :signed (list) :abandoned (list)
         :paused #f :pauses 0 :seed 3 :debts (list) :debt0 0 :enforcements (list) :paid 0 :after-r2c (list) :skipped-unfit (list)
+        :settled (list) :forgiven (list) :forgiven-total 0
         :unfunded (list) :paused-signed (list)))
 
 ;; ---- the chain
@@ -215,6 +240,35 @@
               (loop (cdr todo) (- reserve pay) (+ n 1) cleared
                     (append updated (list (dict :id (:id d) :amount (- (:amount d) pay))))))))))
 
+;; ---- settlement debt forgiveness (coordinator, 09-30 16:12). The plan walks the listed ids from the head of the queue:
+;; a listed id that is not the head stops the walk (only the head claim is ever deleted); a head whose creditor is not the
+;; settling counterparty (:cp) makes the whole settlement revert; more ids than `forgive-cap` revert it too. Bugs
+;; `forgives-third-party`, `forgives-past-head`, `forgiveness-skips-third-party`, `forgive-uncapped`.
+(define (forgive-ids) (vector->list forgive))
+(define (forgive-walk queue ids)
+  (let loop ((ids ids) (queue queue) (removed (list)))
+    (cond ((or (null? ids) (null? queue) (not (= (car ids) (:id (car queue))))) (dict :ok? #t :removed removed))
+          ((not (equal? (:creditor (car queue)) :cp)) (dict :ok? #f :removed (list)))
+          (else (loop (cdr ids) (cdr queue) (append removed (list (car ids))))))))
+(define (forgive-plan w)
+  (if (> (length (forgive-ids)) forgive-cap)
+      (dict :ok? #f :removed (list))
+      (forgive-walk (:debts w) (forgive-ids))))
+(define (forgiveness-ok? w) (:ok? (forgive-plan w)))
+(define (settle-ok? w op) (and (sig-ok? w op) (forgiveness-ok? w)))
+;; the settlement takes the planned claims out of the queue, recording each as it goes, and how many it took
+(define (apply-forgiveness w)
+  (let loop ((ids (:removed (forgive-plan w))) (acc w))
+    (if (null? ids)
+        (update-in acc (list :settled) (lambda (l) (append l (list (dict :ids (forgive-ids) :count (length (:removed (forgive-plan w)))
+                                                                         :queue (map (lambda (d) (list (:id d) (:creditor d))) (:debts w)))))))
+        (let ((d (find (lambda (x) (= (:id x) (car ids))) (:debts acc))))
+          (loop (cdr ids)
+                (-> acc (update-in (list :forgiven) (lambda (l) (append l (list (dict :id (car ids) :creditor (:creditor d)
+                                                                                     :head? (equal? (:id (car (:debts acc))) (car ids)))))))
+                        (update-in (list :forgiven-total) (lambda (t) (+ t (:amount d))))
+                        (assoc-in (list :debts) (filter (lambda (x) (not (= (:id x) (car ids)))) (:debts acc)))))))))
+
 ;; as many internal calls as it takes: until the queue is empty or a call pays nothing (the reserve is gone)
 (define (enforce-all w)
   (let ((w1 (enforce w)))
@@ -229,7 +283,7 @@
         ((finalize? op) (h1-wait-over? w))
         ((counter? op) #t)
         ((leg? op) (not (:paused w)))
-        ((settle? op) (sig-ok? w op))
+        ((settle? op) (settle-ok? w op))
         (else (>= reserve (cost op)))))
 (define (batch-ok? w ops)
   (let loop ((rest ops) (reserve (net-reserve w)) (applied (:applied w)))
@@ -257,7 +311,7 @@
          (-> w (update-in (list :starts) (lambda (l) (append l (list (:epoch w)))))
                (update-in (list :applied) (lambda (a) (append a (list op))))))
         ((settle? op)
-         (-> w (update-in (list :epoch) (lambda (e) (+ e 1)))
+         (-> (apply-forgiveness w) (update-in (list :epoch) (lambda (e) (+ e 1)))
                (update-in (list :applied) (lambda (a) (append a (list op))))))
         (else (update-in w (list :applied) (lambda (a) (append a (list op)))))))
 
@@ -288,32 +342,41 @@
                                    (append f (list (dict :now (:now w) :secret (:secret w))))
                                    f)))
         (update-in (list :events)
-                   (lambda (e) (append e (list (dict :failed #f :nonce (:nonce b) :hash (:hash b)
+                   (lambda (e) (append e (list (dict :failed #f :starved #f :nonce (:nonce b) :hash (:hash b)
                                                      :ops (:applied landed) :skips (:skips landed)))))))))
 ;; A failed batch applies nothing. With a hard op it is a plain revert (nonce untouched, nothing emitted; the
 ;; batch stays signed and is retried). Without one (R-J5) it takes its nonce and emits BatchFailed, naming the
 ;; settlements whose counterparty signature is bad. The failure is recorded for the properties. It is
 ;; `stale-only?` when the batch would have landed had its stale ops been left out (R-J2).
 (define (has-dispute? ops) (some dispute-op? ops))
-(define (bad-sig-ops w ops) (filter (lambda (op) (and (settle? op) (not (sig-ok? w op)))) ops))
+(define (bad-sig-ops w ops) (filter (lambda (op) (and (settle? op) (not (settle-ok? w op)))) ops))
 ;; the decision the chain takes on a failed batch: revert whole and keep the nonce, or take it (bug
 ;; `bad-sig-hard` reverts on a bad signature too)
 (define (fail-hard? w ops bad) (some hard-op? ops))
 (define (gas-hard? w b) #t)   ; bug `gas-soft`: a gas revert takes the nonce like a soft failure
 (define (fail-batch w b fault?) (fail-with w b fault? #f))
+;; `gas?` is #f, or the gas the relayer supplied when the batch was starved
 (define (fail-with w b fault? gas?)
   (let* ((bad (bad-sig-ops w (:ops b)))
          (hard (or (and gas? (gas-hard? w b)) (fail-hard? w (:ops b) bad)))
+         (evented (and gas? (starved-event? w b)))
          (rec (dict :ops (:ops b) :now (:now w) :nonce (:nonce b) :took? (not hard) :bad bad :secret (:secret w) :gas gas?
+                    :evented (if evented #t #f)
                     :stale-only? (and (not fault?) (some (lambda (op) (stale-op? w op)) (:ops b))
                                       (batch-ok? w (filter (lambda (op) (not (stale-op? w op))) (:ops b)))))))
-    (let ((w1 (update-in w (list :failures) (lambda (r) (if (member rec r) r (append r (list rec)))))))
+    (let* ((w1 (update-in w (list :failures) (lambda (r) (if (member rec r) r (append r (list rec))))))
+           ;; BatchGasStarved: the transaction succeeded, the batch did not run, its nonce is untouched
+           (w2 (if evented
+                   (update-in w1 (list :events) (lambda (e) (append e (list (dict :failed #f :starved #t :nonce (:nonce b) :hash (:hash b))))))
+                   w1)))
       (if hard
-          w1
-          (-> w1 (assoc-in (list :nonce) (:nonce b))
+          w2
+          (-> w2 (assoc-in (list :nonce) (:nonce b))
                  (update-in (list :events)
-                            (lambda (e) (append e (list (dict :failed #t :nonce (:nonce b) :hash (:hash b) :bad bad
-                                                              :reason (if (pair? bad) "signature" "reserve")))))))))))
+                            (lambda (e) (append e (list (dict :failed #t :starved #f :nonce (:nonce b) :hash (:hash b) :bad bad
+                                                              :reason (cond ((null? bad) "reserve")
+                                                                            ((some (lambda (op) (not (sig-ok? w op))) bad) "signature")
+                                                                            (else "forgiveness"))))))))))))
 
 (define (process-batch w b fault?)
   (cond ((not (= (:nonce b) (+ (:nonce w) 1))) w)
@@ -329,13 +392,18 @@
     (then (let* ((b (list-ref (:inbox w) i))
                  (w1 (update-in w (list :inbox) (lambda (q) (remove-nth q i)))))
             (process-batch (if fault? (update-in w1 (list :faults) (lambda (f) (- f 1))) w1) b fault?)))))
-(define (gas-nth i)
-  (rule (str "gas-revert " i) (w side)
+;; the relayer gives the batch too little gas (level 0: one below the floor) or just enough (level 1: the floor itself)
+(define (gas-supplied level) (if (= level 0) (- (gas-floor) 1) (gas-floor)))
+(define (gas-nth i level)
+  (rule (str "gas " level " " i) (w side)
     (when (and (< i (length (:inbox w))) (> (:gas w) 0)
                (= (:nonce (list-ref (:inbox w) i)) (+ (:nonce w) 1))))
     (then (let* ((b (list-ref (:inbox w) i))
-                 (w1 (update-in w (list :inbox) (lambda (q) (remove-nth q i)))))
-            (fail-with (update-in w1 (list :gas) (lambda (g) (- g 1))) b #t #t)))))
+                 (w1 (-> w (update-in (list :inbox) (lambda (q) (remove-nth q i)))
+                           (update-in (list :gas) (lambda (g) (- g 1))))))
+            (if (gas-starved? b (gas-supplied level))
+                (fail-with w1 b #t (gas-supplied level))
+                (process-batch w1 b #f))))))
 (define (drop-nth i)
   (rule (str "drop " i) (w side)
     (when (and (< i (length (:inbox w))) (> (:drops w) 0)))
@@ -466,7 +534,9 @@
                       (lambda (r) (append r (filter (lambda (op) (and (member op dead-ops) (not (member op r)))) (:bad e))))))))
 
 (define (observe-event w e)
-  (if (:failed e) (observe-failure w e) (observe-landing w e)))
+  (cond ((:starved e) w)   ; BatchGasStarved: the batch did not run and its nonce is free; the Entity resends it
+        ((:failed e) (observe-failure w e))
+        (else (observe-landing w e))))
 (define (observe-landing w e)
   (let* ((w1 (-> w (update-in (list :chain-nonce) (lambda (n) (max n (:nonce e))))
                    (update-in (list :done) (lambda (d) (append d (filter (lambda (op) (not (member op d))) (event-ops e)))))
@@ -519,7 +589,8 @@
             (map push-nth (iota (length (:abandoned w))))
             (map (lambda (i) (process-nth i #f)) is)
             (map (lambda (i) (process-nth i #t)) is)
-            (map gas-nth is)
+            (map (lambda (i) (gas-nth i 0)) is)
+            (map (lambda (i) (gas-nth i 1)) is)
             (map drop-nth is))))
 (define (next w) (successors (rules-for w) sides w))
 
@@ -528,6 +599,11 @@
 (define (position x lst)
   (let loop ((rest lst) (i 0))
     (cond ((null? rest) -1) ((equal? (car rest) x) i) (else (loop (cdr rest) (+ i 1))))))
+(define (third-party-reached? queue ids)
+  (let loop ((ids ids) (q queue))
+    (cond ((or (null? ids) (null? q) (not (= (car ids) (car (car q))))) #f)
+          ((not (equal? (cadr (car q)) :cp)) #t)
+          (else (loop (cdr ids) (cdr q))))))
 (define invariants
   (list
    (property "the chain is atomic: every applied op came from a batch that succeeded" (w)
@@ -552,8 +628,15 @@
    (property "a finalize is signed only after its gate opened when the Entity simulates first (Runtime rule, 01:16)" (w)
      (or (= simulate-first 0)
          (every (lambda (s) (or (not (member "fin-a" (list-ref s 2))) (list-ref s 4) (> (list-ref s 3) a-deadline))) (:signed w))))
-   (property "gas below the signed budget is a plain revert: no nonce, no BatchFailed, whatever the batch carries" (w)
+   (property "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (contracts #54)" (w)
      (every (lambda (r) (or (not (:gas r)) (not (:took? r)))) (:failures w)))
+   ;; restated from the kinds of op, not through `starved-event?` (a planted bug redefines that one)
+   (property "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing (contracts #54)" (w)
+     (every (lambda (r) (or (not (:gas r))
+                            (equal? (:evented r) (not (some (lambda (op) (or (dispute-op? op) (leg? op))) (:ops r))))))
+            (:failures w)))
+   (property "a batch given at least the floor is never gas-starved: it runs, and a failure is BatchFailed with the nonce spent (contracts #54)" (w)
+     (every (lambda (r) (or (not (:gas r)) (< (:gas r) (+ (quotient (* signed-budget 64) 63) 30000)))) (:failures w)))
    (property "a deposit leg travels alone in its batch (J6)" (w)
      (every (lambda (s) (or (not (some (lambda (op) (string-prefix? "x" op)) (list-ref s 2))) (= (length (list-ref s 2)) 1)))
             (:signed w)))
@@ -599,8 +682,15 @@
      (every (lambda (e) (or (not (:partial e)) (equal? (:partial e) (:head-after e)))) (:enforcements w)))
    (property "after a reserve-to-collateral op, the debt queue is empty or the spendable reserve is zero (R2C-DEBT-FIRST)" (w)
      (every (lambda (r) (or (:empty? r) (= (:net r) 0))) (:after-r2c w)))
-   (property "a debt leaves the queue only when paid: debts paid and debts outstanding equal the debts the entity started with" (w)
-     (= (+ (:paid w) (total-debt w)) (:debt0 w)))
+   (property "a debt leaves the queue only when paid or forgiven: paid, forgiven and outstanding equal the debts the entity started with" (w)
+     (= (+ (:paid w) (:forgiven-total w) (total-debt w)) (:debt0 w)))
+   (property "a settlement deletes only the head claim of the queue, and only when its creditor is the settling counterparty (contracts #54)" (w)
+     (every (lambda (r) (and (:head? r) (equal? (:creditor r) :cp))) (:forgiven w)))
+   ;; restated from the queue snapshot, not through `forgive-walk` (a planted bug redefines that one)
+   (property "a settlement whose forgiveness reaches a third party's claim at the head never lands: it reverts whole (contracts #54)" (w)
+     (every (lambda (r) (not (third-party-reached? (:queue r) (:ids r)))) (:settled w)))
+   (property "a settlement that lands lists at most the cap of claim ids (32 in the contract) (contracts #54)" (w)
+     (every (lambda (r) (<= (length (:ids r)) forgive-cap)) (:settled w)))
    (property "the reserve is conserved: seed and deposits equal reserve, collateral and debts paid" (w)
      (= (+ (:seed w) (* leg-amount (length (filter leg? (:applied w)))))
         (+ (:reserve w) (:collateral w) (:paid w))))
