@@ -95,8 +95,31 @@ describe("the aggregate holds every One gate job", () => {
   });
 
   test("R-GATE-CI-CHECK-NAMES a need whose result one-gate never reads is named", () => {
-    expect(aggregateProblems("ci.yml", AGGREGATED.replace('&& test "${{ needs.gate-seeds.result }}" = success', ""))).toEqual([expect.stringContaining("CI_CHECK_UNREAD ci.yml one-gate needs gate-seeds but never reads needs.gate-seeds.result")]);
+    expect(aggregateProblems("ci.yml", AGGREGATED.replace('&& test "${{ needs.gate-seeds.result }}" = success', ""))).toEqual([expect.stringContaining("CI_CHECK_UNREAD ci.yml one-gate needs gate-seeds but never tests that needs.gate-seeds.result is success")]);
     expect(aggregateProblems("ci.yml", WORKFLOW)).toHaveLength(2);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES a result that is only mentioned, never compared with success, is not tested; an env variable mapped to it is", () => {
+    const unread = (text: string): readonly string[] => aggregateProblems("ci.yml", text).filter((problem) => problem.includes("CI_CHECK_UNREAD"));
+    const echoed = AGGREGATED.replace('test "${{ needs.gate-seeds.result }}" = success', 'echo "${{ needs.gate-seeds.result }}"');
+    expect(unread(echoed)).toEqual([expect.stringContaining("needs gate-seeds but never tests")]);
+    const viaEnv = AGGREGATED.replace('test "${{ needs.gate-seeds.result }}" = success', 'test "$SEEDS" = success').replace("    steps:\n      - run:", "    steps:\n      - env:\n          SEEDS: ${{ needs.gate-seeds.result }}\n        run:");
+    expect(viaEnv).toContain("SEEDS: ${{");
+    expect(unread(viaEnv)).toEqual([]);
+    expect(unread(viaEnv.replace('test "$SEEDS" = success', 'echo "$SEEDS"'))).toEqual([expect.stringContaining("needs gate-seeds but never tests")]);
+    expect(unread(viaEnv.replace('test "$SEEDS" = success', 'test "$OTHER" = success'))).toEqual([expect.stringContaining("needs gate-seeds but never tests")]);
+    expect(unread(viaEnv.replace('test "$SEEDS" = success', 'test "${SEEDS}" = success'))).toEqual([]);
+    expect(unread(viaEnv.replace('test "$SEEDS" = success', 'test "$SEEDS" = failure'))).toEqual([expect.stringContaining("needs gate-seeds but never tests")]);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES a gate job, or a step of one, with continue-on-error is named, false is not", () => {
+    const on = (value: string): readonly string[] => aggregateProblems("ci.yml", AGGREGATED.replace("  gate-seeds:\n", `  gate-seeds:\n    continue-on-error: ${value}\n`)).filter((problem) => problem.includes("CI_CHECK_CONTINUE_ON_ERROR"));
+    expect(on("true")).toEqual([expect.stringContaining("CI_CHECK_CONTINUE_ON_ERROR ci.yml gate job gate-seeds")]);
+    expect(on("${{ matrix.x }}")).toHaveLength(1);
+    expect(on("false")).toEqual([]);
+    const step = AGGREGATED.replace("  gate-seeds:\n", "  gate-seeds:\n    steps:\n      - run: x\n        continue-on-error: true\n");
+    expect(aggregateProblems("ci.yml", step).filter((problem) => problem.includes("CONTINUE_ON_ERROR"))).toHaveLength(1);
+    expect(aggregateProblems("ci.yml", AGGREGATED.replace("  unnamed:", "  gate-other:\n    continue-on-error: true\n  unnamed:"))).toEqual([]);
   });
 });
 
@@ -106,8 +129,11 @@ describe("the real workflow and the real list", () => {
   const planned = plannedChecks(json);
   const real = readdirSync(`${repo}/.github/workflows`).filter(isWorkflowFile).map((name) => ({ name, text: withoutComments(readFileSync(`${repo}/.github/workflows/${name}`, "utf8")) }));
 
-  test("R-GATE-CI-CHECK-NAMES every check the ruleset requires, and every one planned, is reported by a job of the real workflow", () => {
+  test("R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow", () => {
     expect(real.flatMap(({ name, text }) => checkProblems(name, text, required))).toEqual([]);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES every check planned for the ruleset is reported by a job of the real workflow", () => {
     expect(real.flatMap(({ name, text }) => checkProblems(name, text, planned))).toEqual([]);
   });
 

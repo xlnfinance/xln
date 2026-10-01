@@ -43,10 +43,20 @@ export const checkProblems = (name: string, workflow: string, required: readonly
   ];
 };
 
+// A need's result is tested when the aggregate compares it with success: `test "${{ needs.x.result }}" = success`, or the same through an
+// env variable mapped to it (`VAR: ${{ needs.x.result }}` and `test "$VAR" = success`). A mention that is never compared is not a test.
+const resultIsTested = (aggregate: string, id: string): boolean => {
+  const inline = `\\$\\{\\{\\s*needs\\.${id.replace(/[-.]/g, "\\$&")}\\.result\\s*\\}\\}`;
+  const vars = [...aggregate.matchAll(new RegExp(`^\\s*(\\w+):\\s*${inline}\\s*$`, "gm"))].map((match) => `\\$\\{?${match[1]}\\}?`);
+  return [inline, ...vars].some((ref) => new RegExp(`\\btest\\s+"${ref}"\\s+=\\s+success\\b`).test(aggregate));
+};
+
 // The aggregate is the one name to require, so nothing may sit outside it: every job named `One gate ...` is a need of `one-gate`,
-// and `one-gate` reads each need's result (a need whose result it never reads can fail and the aggregate still pass).
-//   CI_CHECK_UNAGGREGATED  a job named One gate ... that one-gate does not need
-//   CI_CHECK_UNREAD        a need of one-gate whose `needs.<job>.result` the job never reads
+// `one-gate` tests each need's result against success (a need it never compares can fail and the aggregate still pass), and no gate job
+// carries continue-on-error (its red would not fail the job, so it would not fail the aggregate either).
+//   CI_CHECK_UNAGGREGATED         a job named One gate ... that one-gate does not need
+//   CI_CHECK_UNREAD               a need of one-gate whose `needs.<job>.result` the job never tests against success
+//   CI_CHECK_CONTINUE_ON_ERROR    a gate job (or one of its steps) with continue-on-error other than false
 export const aggregateProblems = (name: string, workflow: string): readonly string[] => {
   const jobs = jobBlocks(workflow);
   const aggregate = jobs["one-gate"];
@@ -56,6 +66,7 @@ export const aggregateProblems = (name: string, workflow: string): readonly stri
     ...Object.entries(jobs)
       .filter(([id, job]) => id !== "one-gate" && /^ {4}name:\s*['"]?One gate\b/m.test(job) && !needs.includes(id))
       .map(([id]) => `CI_CHECK_UNAGGREGATED ${name} job ${id} is named One gate ... but one-gate does not need it: it could fail and the aggregate still pass`),
-    ...needs.filter((id) => !aggregate.includes(`needs.${id}.result`)).map((id) => `CI_CHECK_UNREAD ${name} one-gate needs ${id} but never reads needs.${id}.result`),
+    ...needs.filter((id) => !resultIsTested(aggregate, id)).map((id) => `CI_CHECK_UNREAD ${name} one-gate needs ${id} but never tests that needs.${id}.result is success`),
+    ...needs.filter((id) => /^\s*continue-on-error:\s*(?!false\s*$)\S/m.test(jobs[id] ?? "")).map((id) => `CI_CHECK_CONTINUE_ON_ERROR ${name} gate job ${id} has continue-on-error, so its red would not fail the aggregate`),
   ];
 };

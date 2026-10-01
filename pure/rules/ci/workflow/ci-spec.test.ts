@@ -7,7 +7,7 @@ import { specProblems } from "./ci-spec.ts";
 const repo = `${import.meta.dir}/../../../..`;
 const GUARD = "        if: steps.marker.outputs.cache-hit != 'true'";
 
-type Plant = Readonly<{ key?: string; path?: string; id?: string; unguarded?: boolean; suite?: string; recordFirst?: boolean; record?: string }>;
+type Plant = Readonly<{ key?: string; path?: string; id?: string; unguarded?: boolean; suite?: string; recordFirst?: boolean; record?: string; matrix?: string }>;
 
 // A workflow with one spec job behind one-gate.
 const workflow = (plant: Plant = {}): string => {
@@ -20,6 +20,9 @@ const workflow = (plant: Plant = {}): string => {
     "jobs:",
     "  gate-spec:",
     "    name: One gate (spec)",
+    "    strategy:",
+    "      matrix:",
+    `        shard: ${plant.matrix ?? "['0', '1', '2', '3']"}`,
     "    steps:",
     "      - name: Checkout",
     "        uses: actions/checkout@abc # v4",
@@ -28,7 +31,7 @@ const workflow = (plant: Plant = {}): string => {
     "        uses: actions/cache@abc # v4",
     "        with:",
     `          path: ${plant.path ?? ".spec-passed"}`,
-    `          key: ${plant.key ?? "${{ runner.os }}-arrival-${{ hashFiles('spec/**') }}"}`,
+    `          key: ${plant.key ?? "${{ runner.os }}-arrival-${{ matrix.shard }}-of-4-${{ hashFiles('spec/**') }}"}`,
     "      - name: Install",
     ...(plant.unguarded === true ? [] : [GUARD]),
     "        run: npm ci",
@@ -48,6 +51,17 @@ describe("a spec job that skips on a marker", () => {
     expect(problems({ suite: "bash check.sh", key: "${{ runner.os }}-quint-${{ hashFiles('spec/quint/**') }}", record: "mkdir -p .spec-passed && echo ok > .spec-passed/quint" })).toEqual([]);
   });
 
+  test("R-GATE-CI-SPEC an Arrival marker that leaves out the shard, or a matrix that does not match the n of SHARD=k/n, is named", () => {
+    const named = [expect.stringContaining("CI_SPEC_SHARDS ci.yml job gate-spec")];
+    expect(problems({ key: "${{ runner.os }}-arrival-of-4-${{ hashFiles('spec/**') }}" })).toEqual(named);
+    expect(problems({ key: "${{ runner.os }}-arrival-${{ matrix.shard }}-of-3-${{ hashFiles('spec/**') }}" })).toEqual(named);
+    expect(problems({ matrix: "['0', '1', '2']" })).toEqual(named);
+    expect(problems({ matrix: "['0', '1', '2', '3', '4']" })).toEqual(named);
+    expect(problems({ matrix: "['0', '1', '3', '3']" })).toEqual(named);
+    expect(problems({ matrix: "[0, 1, 2, 3]" })).toEqual([]);
+    expect(problems({ suite: 'SHARD="${{ matrix.shard }}/3" node test.mjs', matrix: "['0', '1', '2']" })).toEqual(named);
+  });
+
   test("R-GATE-CI-SPEC a job that runs no spec suite, and a workflow with no one-gate, are not judged", () => {
     expect(problems({ suite: "bun test" })).toEqual([]);
     expect(specProblems("o.yml", "jobs:\n  a:\n    steps:\n      - run: node test.mjs\n")).toEqual([]);
@@ -60,9 +74,9 @@ describe("a spec job that skips on a marker", () => {
   });
 
   test("R-GATE-CI-SPEC a key that does not hash the files the suite reads is named: too narrow for Arrival, none at all, another folder", () => {
-    expect(problems({ key: "${{ runner.os }}-arrival-${{ hashFiles('spec/quint/**') }}" })).toEqual([expect.stringContaining("CI_SPEC_MARKER_KEY ci.yml job gate-spec keys its marker on spec/quint/**, not on spec/**")]);
-    expect(problems({ key: "${{ runner.os }}-arrival" })).toEqual([expect.stringContaining("keys its marker on no hashFiles")]);
-    expect(problems({ key: "${{ hashFiles('pure/**') }}" })).toHaveLength(1);
+    expect(problems({ key: "${{ runner.os }}-arrival-${{ matrix.shard }}-of-4-${{ hashFiles('spec/quint/**') }}" })).toEqual([expect.stringContaining("CI_SPEC_MARKER_KEY ci.yml job gate-spec keys its marker on spec/quint/**, not on spec/**")]);
+    expect(problems({ key: "${{ runner.os }}-arrival-${{ matrix.shard }}-of-4-x" })).toEqual([expect.stringContaining("keys its marker on no hashFiles")]);
+    expect(problems({ key: "${{ matrix.shard }}-of-4-${{ hashFiles('pure/**') }}" })).toHaveLength(1);
     expect(problems({ suite: "bash check.sh", key: "${{ hashFiles('spec/quint/*.qnt') }}", record: "echo ok > .spec-passed/quint" })).toHaveLength(1);
   });
 

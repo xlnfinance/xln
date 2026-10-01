@@ -4354,7 +4354,22 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires, and every one planned, is reported by a job of the real workflow"
+     "name": "R-GATE-CI-CHECK-NAMES a result that is only mentioned, never compared with success, is not tested; an env variable mapped to it is"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a gate job, or a step of one, with continue-on-error is named, false is not"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES every check planned for the ruleset is reported by a job of the real workflow"
     },
     {
      "kind": "test",
@@ -4389,6 +4404,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-CI-SPEC a job that runs no spec suite, and a workflow with no one-gate, are not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC an Arrival marker that leaves out the shard, or a matrix that does not match the n of SHARD=k/n, is named"
     },
     {
      "kind": "test",
