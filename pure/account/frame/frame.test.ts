@@ -646,3 +646,83 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
     });
   });
 });
+
+describe("account/frame what Review B of PR 85 found in round 2", () => {
+  const rulesAt = (view: bigint) => accountRules({ ...judge, view: viewOf(view) });
+  const lock: AccountTx = { _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 1n, 101n, 1) };
+  const resolve: AccountTx = { _tag: "resolve", token: GOLD, id: holdId(1n), secret: secretOf(1) };
+  const expire: AccountTx = { _tag: "expire", token: GOLD, id: holdId(1n) };
+  const lockSent = propose(rulesAt(100n), queue(credited.left, lock));
+  const lockedRight = receive(rulesAt(100n), credited.right, only(lockSent.sent));
+  const locked = {
+    left: receive(rulesAt(100n), lockSent.replica, only(lockedRight.sent)).replica, right: lockedRight.replica,
+  };
+
+  test("R-FRAME-REFUSAL a refusal for the same attempt repeats the first one: the same tx and the same fault", () => {
+    const sent = propose(rulesAt(101n), queue(queue(locked.right, credit(7n)), resolve));
+    const first = receive(rulesAt(102n), locked.left, only(sent.sent));
+    const name = provisionalFrameHash(frameOf(only(sent.sent)));
+    expect(first.sent).toEqual([{ _tag: "refusal", hash: name, index: 1, fault: "past_deadline", mark: 0 }]);
+    const repeat = receive(rulesAt(100n), first.replica, only(sent.sent));
+    expect(repeat.sent).toEqual(first.sent);
+    expect(repeat.replica).toEqual(first.replica);
+  });
+
+  test("R-FRAME-REFUSAL a repeat of the frame at my head does not clear what I refused on top of it", () => {
+    const refused = propose(rulesAt(104n), queue(locked.left, expire));
+    const notYet = receive(rulesAt(103n), locked.right, only(refused.sent));
+    expect(notYet.outcome._tag).toBe("refused_invalid");
+    const reacked = receive(rulesAt(103n), notYet.replica, only(lockSent.sent));
+    expect(reacked.outcome).toEqual({ _tag: "re_acked" });
+    expect(reacked.replica.declined).toEqual(notYet.replica.declined);
+    expect(receive(rulesAt(104n), reacked.replica, only(refused.sent)).outcome._tag).toBe("refused_invalid");
+  });
+
+  test("R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet", () => {
+    const refusedAgain = (pair: { left: AccountReplica; right: AccountReplica }) => {
+      const sent = propose(rulesAt(104n), pair.right);
+      const refusal = receive(rulesAt(103n), pair.left, only(sent.sent));
+      return { left: refusal.replica, right: receive(rulesAt(104n), sent.replica, only(refusal.sent)).replica };
+    };
+    const start = { left: locked.left, right: queue(queue(locked.right, expire), credit(7n)) };
+    const burned = Array.from({ length: MAX_ATTEMPTS + 1 }).reduce<typeof start>(refusedAgain, start);
+    expect(burned.right.attempt).toBe(MAX_ATTEMPTS + 1);
+    expect(burned.right.refused.map((x) => x.fault._tag)).toEqual(["peer_refused"]);
+    // the peer's view has caught up: the frame at the next attempt is judged and committed, nothing waits on silence
+    const next = propose(rulesAt(110n), burned.right);
+    const heard = receive(rulesAt(110n), burned.left, only(next.sent));
+    expect([heard.outcome, frameOf(only(next.sent)).attempt]).toEqual([{ _tag: "accepted" }, MAX_ATTEMPTS + 1]);
+    const done = receive(rulesAt(110n), next.replica, only(heard.sent));
+    expect(done.outcome).toEqual({ _tag: "committed_own" });
+    expect([done.replica.pending, done.replica.mempool]).toEqual([undefined, []]);
+    // and the head moved: Left's next frame commits on Right
+    const leftFrame = propose(rulesAt(110n), queue(heard.replica, credit(9n)));
+    const again = receive(rulesAt(110n), done.replica, only(leftFrame.sent));
+    expect(again.outcome).toEqual({ _tag: "accepted" });
+  });
+
+  test("R-EVERY-REFUSAL-ANSWERED a Left proposer refused MAX_ATTEMPTS + 1 times does not block Right", () => {
+    const refusedAgain = (pair: { left: AccountReplica; right: AccountReplica }) => {
+      const sent = propose(rulesAt(104n), pair.left);
+      const refusal = receive(rulesAt(103n), pair.right, only(sent.sent));
+      return { right: refusal.replica, left: receive(rulesAt(104n), sent.replica, only(refusal.sent)).replica };
+    };
+    const start = { right: locked.right, left: queue(queue(locked.left, expire), credit(7n)) };
+    const burned = Array.from({ length: MAX_ATTEMPTS + 1 }).reduce<typeof start>(refusedAgain, start);
+    expect(burned.left.attempt).toBe(MAX_ATTEMPTS + 1);
+    // the views have caught up; both propose at once, Left's frame (attempt 9) and Right's own valid frame
+    const leftOut = propose(rulesAt(110n), burned.left);
+    const rightOut = propose(rulesAt(110n), queue(burned.right, credit(200n)));
+    const leftHears = receive(rulesAt(110n), leftOut.replica, only(rightOut.sent));
+    const rightHears = receive(rulesAt(110n), rightOut.replica, only(leftOut.sent));
+    expect([leftHears.outcome._tag, rightHears.outcome._tag]).toEqual(["kept_own", "accepted_over_own"]);
+    const leftDone = receive(rulesAt(110n), leftHears.replica, only(rightHears.sent));
+    expect(leftDone.outcome).toEqual({ _tag: "committed_own" });
+    const rightFrame = propose(rulesAt(110n), rightHears.replica);
+    const accepted = receive(rulesAt(110n), leftDone.replica, only(rightFrame.sent));
+    const rightDone = receive(rulesAt(110n), rightFrame.replica, only(accepted.sent));
+    const quiet = [accepted.replica, rightDone.replica].map((x) => [x.pending, x.mempool]);
+    expect(quiet).toEqual([[undefined, []], [undefined, []]]);
+    expect(accepted.replica.head).toBe(rightDone.replica.head);
+  });
+});

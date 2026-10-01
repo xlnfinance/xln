@@ -279,6 +279,8 @@ const quintHears = (w: World, s: Side, fid: number): Heard => {
 const KINDS = ["accepted", "accepted_over_own", "re_acked", "kept_own"] as const;
 const KNOWN = (quint: string) => `deliver: TS refuses a repeat of a declined frame, Quint says ${quint}`;
 
+const OTHERS = ["kept_own", "accepted", "accepted_over_own"];
+
 const onDeliver = (w: World, s: Side, r: Draw): World => {
   const cand = w.flying.filter((fid) => frameAt(w, fid).author !== s);
   const fid = cand[r(2, Math.max(cand.length, 1))];
@@ -286,8 +288,15 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   const quintSays = quintHears(w, s, fid);
   const heard = receive(rulesOf(w, s), w.t[s], msgAt(w, fid));
   const tsKind = KINDS.find((k) => k === heard.outcome._tag) ?? "refused";
-  const repeat = w.t[s].declined !== undefined;
+  // a repeat is a frame at the attempt this replica already refused on this head: a higher attempt is judged afresh
+  const earlier = w.t[s].declined;
+  const sent = msgAt(w, fid);
+  const repeat = earlier !== undefined && sent._tag === "frame" && sent.frame.attempt === earlier.attempt;
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
+  const sameRefusal = earlier === undefined ? [] : [{
+    _tag: "refusal", hash: hashOf(sent), index: earlier.index,
+    fault: rulesOf(w, s).tag(earlier.fault), mark: earlier.attempt,
+  }];
   const said: Heard = known ? { kind: tsKind, next: w.q[s], ack: false } : quintSays;
   const counted = bump(w, known ? KNOWN(quintSays.kind) : `deliver ${quintSays.kind}`);
   const ackSent = heard.sent.length === 1 && heard.sent[0]?._tag === "ack";
@@ -296,6 +305,9 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
     [tsKind === said.kind, `deliver-outcome q=${said.kind} ts=${heard.outcome._tag} ${s} ${fid}`],
     [said.ack === ackSent, `ack-presence ${said.kind} ${s}`],
     [!unknown, "ack-unknown"],
+    // the divergence is only this: the same refusal as the first time, and Quint's only other answers are these three
+    [!known || OTHERS.includes(quintSays.kind), `known-other q=${quintSays.kind}`],
+    [!known || J(heard.sent) === J(sameRefusal), `refusal-differs ${s} ${fid}`],
   ]);
   const moved = upd(checked, s, said.next, heard.replica);
   return said.ack ? { ...moved, acks: [...moved.acks, fid] } : moved;
@@ -362,5 +374,7 @@ describe("account/frame the frame rules agree with the Quint model", () => {
       "deliver kept_own", "deliver accepted_over_own", "submit accepted", "submit refused"]
       .forEach((k) => expect([k, seen(k) > 0]).toEqual([k, true]));
     ["kept_own", "accepted"].forEach((k) => expect([k, seen(KNOWN(k)) > 0]).toEqual([k, true]));
+    const known = Object.keys(total.stats).filter((k) => k.startsWith(KNOWN("")));
+    expect(known.toSorted()).toEqual(["kept_own", "accepted"].map(KNOWN).toSorted());
   });
 });

@@ -73,7 +73,9 @@ export type Replica<Tx, S, F> = Readonly<{
   mempool: readonly Tx[];
   pending: Proposed<Tx, S> | undefined;
   refused: readonly Refused<Tx, F>[];
+  /** Mine, as proposer: the refusals I have handled on this head, carried by my frames (not `declined.attempt`). */
   attempt: number;
+  /** The peer's side of the pairing: what I, as receiver, refused of its frames on this head. */
   declined: Declined<F> | undefined;
 }>;
 
