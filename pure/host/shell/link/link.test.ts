@@ -7,7 +7,7 @@ import { credit, open } from "../../../entity/fixtures.ts";
 import type { Outbound } from "../../../entity/model.ts";
 import { err, ok, unwrapOr } from "../../../kernel/core/result.ts";
 import { begin, persisted, receive } from "../../host.ts";
-import { entityOf, hostFor, meet, stamp, tell, turn, unhalted } from "../../fixtures.ts";
+import { entityOf, meet, stamp, tell, turn, unhalted } from "../../fixtures.ts";
 import {
   accept, answer, dial, finish, hear, keyOf, open as openRecord, seal, type Key, type Link, type Peer,
 } from "./link.ts";
@@ -188,7 +188,10 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
     const hash = `0x${"ab".repeat(32)}`;
     const forged = (tag: string) => ({
       from: ALICE, to: BOB,
-      msg: { _tag: "frame", frame: { author: "left", parent: hash, attempt: 0, slot: 1, txs: [{ _tag: tag }] } },
+      msg: {
+        _tag: "frame",
+        frame: { author: "left", parent: hash, attempt: 0, slot: 1, epoch: 0n, firstNonce: 0n, txs: [{ _tag: tag }] },
+      },
     }) as never;
     ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"].forEach((tag) => {
       expect(openRecord(responder, must(seal(initiator, forged(tag))).data))
@@ -214,7 +217,8 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
     const frame = proposed.link.find((m) => m.to === BOB) ?? expect.unreachable("frame");
     const bobsTurn = turn(receive(start.hosts.get(BOB) ?? expect.unreachable("bob"), frame).host, 600n);
     const reack = bobsTurn.sent.find((m) => m.to === ALICE) ?? expect.unreachable("ack");
-    return { proposed, frame, reack };
+    const bob = start.hosts.get(BOB) ?? expect.unreachable("bob");
+    return { proposed, frame, reack, bob };
   })();
 
   const aliceHost = world.proposed.hosts.get(ALICE) ?? expect.unreachable("alice");
@@ -238,7 +242,7 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
 
   test("R-LINK-AUTH a frame heard twice in one session, as one record and as two, changes the Account once", () => {
     const toBob = connect(KEY.alice, KEY.bob, [peer(KEY.alice, ALICE), peer(KEY.bob, BOB)]);
-    const bobHost = hostFor(BOB);
+    const bobHost = world.bob;
     const first = must(seal(toBob.initiator, world.frame));
     const second = must(seal(first.link, world.frame));
     const once = must(hear(bobHost, toBob.responder, first.data));
@@ -248,7 +252,25 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
     const bobOnce = turn(once.host, 700n).host;
     const bobTwice = turn(twice.host, 700n).host;
     const headAt = (host: typeof bobHost) => host.runtime.entities.get(BOB)?.accounts.get(ALICE)?.head;
+    expect(headAt(bobHost)).toBe(GENESIS);
+    expect(headAt(bobOnce)).toBeDefined();
     expect(headAt(bobOnce)).not.toBe(GENESIS);
     expect(headAt(bobTwice)).toBe(headAt(bobOnce));
+  });
+
+  test("R-FRAME-EPOCH a frame changed in epoch or first nonce after signing is refused, the Account stays", () => {
+    const toBob = connect(KEY.alice, KEY.bob, [peer(KEY.alice, ALICE), peer(KEY.bob, BOB)]);
+    const proposed = world.frame.msg._tag === "frame" ? world.frame.msg.frame : expect.unreachable("a frame");
+    const changed = (patch: Partial<typeof proposed>): Outbound =>
+      ({ ...world.frame, msg: { _tag: "frame", frame: { ...proposed, ...patch } } });
+    const headAt = (host: typeof world.bob) => host.runtime.entities.get(BOB)?.accounts.get(ALICE)?.head;
+    [{ epoch: proposed.epoch + 1n }, { firstNonce: proposed.firstNonce + 1n }].forEach((patch) => {
+      const heard = must(hear(world.bob, toBob.responder, must(seal(toBob.initiator, changed(patch))).data));
+      const bobsTurn = turn(heard.host, 700n);
+      expect(headAt(bobsTurn.host)).toBe(GENESIS);
+      expect(bobsTurn.sent.map((m) => m.msg._tag)).toEqual(["refusal"]);
+    });
+    const same = must(hear(world.bob, toBob.responder, must(seal(toBob.initiator, changed({}))).data));
+    expect(headAt(turn(same.host, 700n).host)).not.toBe(GENESIS);
   });
 });

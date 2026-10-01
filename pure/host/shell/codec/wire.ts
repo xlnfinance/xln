@@ -94,7 +94,11 @@ const readTx: Reader<AccountTx> = (at, v) => flatMap(tagOf(at, v), (tag) => {
   return keys === undefined ? bad(at, "a tx") : flatMap(record(at, v, ["_tag", ...keys]), (o) => txOf(tag, at, o));
 });
 
-const FRAME_KEYS = ["author", "parent", "attempt", "slot", "txs"];
+/** The chain's epoch and nonce are unsigned integers of the Depository's width. */
+const unsigned: Reader<bigint> = (at, v) =>
+  flatMap(big(at, v), (n) => (n >= 0n && n < 2n ** 256n ? ok(n) : bad(at, "unsigned 256-bit")));
+
+const FRAME_KEYS = ["author", "parent", "attempt", "slot", "epoch", "firstNonce", "txs"];
 
 const readFrame: Reader<Frame<AccountTx>> = (at, v) => flatMap(record(at, v, FRAME_KEYS), (o) => {
   const txs = o["txs"];
@@ -102,6 +106,7 @@ const readFrame: Reader<Frame<AccountTx>> = (at, v) => flatMap(record(at, v, FRA
   return all({
     author: field(at, o, "author", side), parent: field(at, o, "parent", hash),
     attempt: field(at, o, "attempt", count), slot: field(at, o, "slot", count),
+    epoch: field(at, o, "epoch", unsigned), firstNonce: field(at, o, "firstNonce", unsigned),
     txs: traverse(txs, (tx, i) => readTx(`${at}.txs[${i}]`, tx)),
   });
 });

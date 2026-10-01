@@ -18,6 +18,7 @@ const wire = (message: unknown): string => {
 };
 
 const hash = `0x${"ab".repeat(32)}`;
+const SIGNED_IN = { epoch: 1n, firstNonce: 3n };
 const HOLD: Hold = holdOf("left", 30n, 1n, 115n, 1);
 const OFFER: Offer = {
   id: HOLD.id, maker: "right", give: { token: GOLD, amount: 5n }, want: { token: GOLD, amount: 7n },
@@ -37,8 +38,13 @@ const ALL_TXS: readonly AccountTx[] = [
   { _tag: "lapse", id: HOLD.id },
 ];
 
-const framed = (txs: readonly unknown[]): unknown =>
-  ({ from: ALICE, to: BOB, msg: { _tag: "frame", frame: { author: "left", parent: hash, attempt: 0, slot: 1, txs } } });
+const BODY = { author: "left", parent: hash, attempt: 0, slot: 1, ...SIGNED_IN, txs: [] };
+
+/** A frame message whose body is the one above with `patch` laid over it. */
+const frameWith = (patch: Record<string, unknown>): unknown =>
+  ({ from: ALICE, to: BOB, msg: { _tag: "frame", frame: { ...BODY, ...patch } } });
+
+const framed = (txs: readonly unknown[]): unknown => frameWith({ txs });
 
 const badTx = (tx: unknown) => first(wire(framed([tx])));
 
@@ -93,10 +99,25 @@ describe("host/shell/wire what a stranger can write is refused at the first wron
     expect(first(wire({ ...base, extra: 1 }))).toMatchObject({ _tag: "bad_shape", at: "$" });
   });
 
+  test("the epoch and first nonce of a frame are unsigned bigints, both present, and cross unchanged", () => {
+    const wide = readWire(wire(frameWith({ epoch: 2n ** 255n, firstNonce: 0n })));
+    expect(wide).toMatchObject({ ok: true, value: { msg: { frame: { epoch: 2n ** 255n, firstNonce: 0n } } } });
+    ["epoch", "firstNonce"].forEach((key) => {
+      const at = `$.msg.frame.${key}`;
+      expect(first(wire(frameWith({ [key]: 1 })))).toEqual({ _tag: "bad_shape", at, want: "bigint" });
+      expect(first(wire(frameWith({ [key]: -1n })))).toMatchObject({ at, want: "unsigned 256-bit" });
+      expect(first(wire(frameWith({ [key]: 2n ** 256n })))).toMatchObject({ at });
+      expect(first(wire(frameWith({ [key]: undefined })))).toMatchObject({ _tag: "bad_shape" });
+    });
+    ["epoch", "firstNonce"].forEach((key) => {
+      const kept = Object.entries(BODY).filter(([name]) => name !== key);
+      const missing = { from: ALICE, to: BOB, msg: { _tag: "frame", frame: Object.fromEntries(kept) } };
+      expect(first(wire(missing))).toMatchObject({ _tag: "bad_shape", at: "$.msg.frame" });
+    });
+  });
+
   test("a hash, a hold slot, a token, a height, a count and a secret that are not what the type is", () => {
-    const body = { author: "left", parent: hash, attempt: 0, slot: 1, txs: [] };
-    const frame = (patch: Record<string, unknown>) =>
-      wire({ from: ALICE, to: BOB, msg: { _tag: "frame", frame: { ...body, ...patch } } });
+    const frame = (patch: Record<string, unknown>) => wire(frameWith(patch));
     expect(first(frame({ parent: "0xABC" }))).toMatchObject({ at: "$.msg.frame.parent", want: "hash" });
     expect(first(frame({ attempt: -1 }))).toMatchObject({ at: "$.msg.frame.attempt" });
     expect(first(frame({ slot: 1.5 }))).toMatchObject({ at: "$.msg.frame.slot" });
