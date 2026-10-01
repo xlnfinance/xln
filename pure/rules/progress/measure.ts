@@ -1,0 +1,223 @@
+// The progress report: how much of the register each column holds, and which goal milestones that makes true.
+// Read-only and pure: names, git and files are read in rules/progress.ts, and the gate (rules/check.ts) is unchanged.
+import { layerCounts, type CellVerdict, type RowReport } from "../evaluate.ts";
+import { LAYERS, type Layer, type Register, type Row } from "../model.ts";
+
+// One column of the register. `required` is what the column must carry (held plus owed plus a hold cell no name carries);
+// `unclaimed` is the live rules that do not claim this column at all, so a quiet column is not read as a finished one.
+export type Column = Readonly<{ layer: Layer; held: number; owed: number; required: number; unclaimed: number }>;
+
+const isLive = (row: Row): boolean => row.retiredBy === undefined;
+
+const isUnclaimed = (verdict: CellVerdict): boolean => verdict === "unclaimed" || verdict === "unclaimed-but-present";
+
+export const columnsOf = (reports: readonly RowReport[]): readonly Column[] => {
+  const live = reports.filter((report) => isLive(report.row));
+  return layerCounts(live).map(({ layer, held, owed, required }) => ({
+    layer,
+    held,
+    owed,
+    required,
+    unclaimed: live.filter((report) => isUnclaimed(report.cells[layer].verdict)).length,
+  }));
+};
+
+// A register read from another commit has no names to check, so its columns come from the cells: a `hold` cell counts as held
+// (the gate refuses a commit where no name carries it) and an `owed` cell as owed. On a green tree this equals `columnsOf`.
+export const registerColumns = (register: Register): readonly Column[] => {
+  const live = register.filter(isLive);
+  return LAYERS.map((layer) => {
+    const held = live.filter((row) => row.cells[layer]._tag === "hold").length;
+    const owed = live.filter((row) => row.cells[layer]._tag === "owed").length;
+    return { layer, held, owed, required: held + owed, unclaimed: live.filter((row) => row.cells[layer]._tag === "absent").length };
+  });
+};
+
+// Held over required, to one decimal; nothing when the column is not required to carry anything.
+export const percentOf = (held: number, required: number): number | undefined =>
+  required === 0 ? undefined : Math.round((1000 * held) / required) / 10;
+
+export const totalOf = (columns: readonly Column[]): Readonly<{ held: number; required: number }> => ({
+  held: columns.reduce((sum, column) => sum + column.held, 0),
+  required: columns.reduce((sum, column) => sum + column.required, 0),
+});
+
+// The live ids of `now` that `then` did not list at all, in register order. A rule retired since is not new, and neither is a
+// rule that was in `then` already, live or retired.
+export const addedSince = (then: Register, now: Register): readonly string[] => {
+  const before = new Set(then.map((row) => row.id));
+  return now.filter((row) => isLive(row) && !before.has(row.id)).map((row) => row.id);
+};
+
+// The ids live in `then` that are not live in `now`: retired since, or gone from the register (the gate refuses that, the report
+// still says so). Retiring a rule takes it out of the numerator and the denominator, so the report prints it next to the percents.
+export const retiredSince = (then: Register, now: Register): readonly string[] => {
+  const stillLive = new Set(now.filter(isLive).map((row) => row.id));
+  return then.filter((row) => isLive(row) && !stillLive.has(row.id)).map((row) => row.id);
+};
+
+export type Status = "done" | "not done" | "unchecked";
+
+// `by` says what the status rests on, so `[done]` is not read as "ran".
+export type Milestone = Readonly<{ name: string; status: Status; by?: string; detail: string }>;
+
+// What the Sepolia manifest says (contracts/deploy/sepolia.manifest.json, judged by contracts/deploy/manifest.ts): a deployed manifest is
+// recorded, or it is not (prepared, missing, unreadable or invalid).
+export type Deployment = Readonly<{ recorded: boolean; detail: string }>;
+
+// The spec milestones are read from origin/main, not from the checkout: the columns the register and the spec names give there.
+export type SpecAtMain = Readonly<{ ref: string; columns: readonly Column[] }>;
+
+const columnFor = (columns: readonly Column[], layer: Layer): Column =>
+  columns.find((column) => column.layer === layer) ?? { layer, held: 0, owed: 0, required: 0, unclaimed: 0 };
+
+// Everything the column must carry is carried (required is held plus owed plus missing, so nothing is owed), and it must carry
+// something: an empty column has not finished anything.
+const isComplete = (column: Column): boolean => column.required > 0 && column.held === column.required;
+
+const countsText = ({ held, required, owed, unclaimed }: Column): string =>
+  `${held} of ${required} held, ${owed} owed; ${unclaimed} of ${required + unclaimed} live rules claim no cell here`;
+
+const BY_NAMES = "by names, not by a run";
+
+// The spec columns finish only when every live rule claims a cell there: a rule retired or blanked out of the column cannot finish it.
+const specMilestone = (name: string, layer: Layer, main: SpecAtMain | undefined): Milestone => {
+  if (main === undefined) {
+    return { name, status: "unchecked", by: BY_NAMES, detail: "origin/main is not fetched here, so the spec cannot be read from main" };
+  }
+  const column = columnFor(main.columns, layer);
+  return {
+    name,
+    status: isComplete(column) && column.unclaimed === 0 ? "done" : "not done",
+    by: BY_NAMES,
+    detail: `${columnLabel(layer)} column on origin/main at ${main.ref}: ${countsText(column)}`,
+  };
+};
+
+// The checkout's columns finish when what they must carry is carried; the milestone prints how many live rules claim nothing there.
+const columnMilestone = (name: string, column: Column, note: string): Milestone => ({
+  name,
+  status: isComplete(column) ? "done" : "not done",
+  by: BY_NAMES,
+  detail: `${columnLabel(column.layer)} column: ${countsText(column)}${note}`,
+});
+
+export const SEPOLIA_STEPS = "open, pay, HTLC across hubs, swap, dispute";
+
+// A recorded deployment cannot be called done yet: the manifest's code hashes (the chain's runtime code, immutables and linked libraries
+// filled in) are not compared with the build, and a plain hash of the compiled artifact cannot match them (the Depository carries
+// immutables and links a library). Until a check compares them, a recorded deployment is unverified.
+const contractsMilestone = (contracts: Column, deployment: Deployment): Milestone => {
+  const complete = isComplete(contracts);
+  const status: Status = !complete || !deployment.recorded ? "not done" : "unchecked";
+  return {
+    name: "Contracts reviewed and deployed",
+    status,
+    by: "by the register's contract column and the manifest, not by a review or a build comparison",
+    detail: `contracts column: ${countsText(contracts)}; manifest: ${deployment.detail}${status === "unchecked" ? "; unverified: the manifest's code hashes are not compared with the current build" : ""}`,
+  };
+};
+
+// Six milestones, in the order of the goal. Each is decided by a check that already exists: a register column, or the manifest. The
+// last has none yet (no recorded run is read by anything), so it says unchecked rather than guessing.
+export const milestonesOf = (columns: readonly Column[], deployment: Deployment, main: SpecAtMain | undefined): readonly Milestone[] => [
+  specMilestone("Arrival on main", "arrival", main),
+  specMilestone("Quint on main", "quint", main),
+  contractsMilestone(columnFor(columns, "contract"), deployment),
+  columnMilestone("xln.ts cut to the spec", columnFor(columns, "ts"), " (every ts cell held)"),
+  columnMilestone("Walk checks the spec against the contracts", columnFor(columns, "rig"), " (the register does not say which contracts the walk ran on)"),
+  { name: "End-to-end run on Sepolia", status: "unchecked", detail: `${SEPOLIA_STEPS}: this report has no check for it` },
+];
+
+// The words the goal and the coordinator use for each register layer.
+const LABELS: Readonly<Record<Layer, string>> = {
+  arrival: "Arrival",
+  quint: "Quint",
+  ts: "ts code",
+  contract: "contracts",
+  rig: "walk",
+};
+
+const columnLabel = (layer: Layer): string => LABELS[layer];
+
+const DISPLAY_ORDER: readonly Layer[] = ["arrival", "quint", "ts", "contract", "rig"];
+
+const percentText = (held: number, required: number): string => {
+  const percent = percentOf(held, required);
+  return percent === undefined ? "-" : `${percent.toFixed(1)}%`;
+};
+
+const pad = (value: number, width: number): string => String(value).padStart(width);
+
+export type Since = Readonly<{ ref: string; added: readonly string[]; retired: readonly string[]; then: readonly Column[] }>;
+
+// The checkout the numbers other than the spec milestones come from: branch, commit, and how many files differ from it.
+export type Checkout = Readonly<{ branch: string; sha: string; changed: number }>;
+
+export type Report = Readonly<{
+  checkout: Checkout;
+  specFrom: string;
+  liveRules: number;
+  columns: readonly Column[];
+  milestones: readonly Milestone[];
+  since: Since | "no base" | undefined;
+  problems: number;
+}>;
+
+const MAX_LISTED = 10;
+
+const columnLine = (column: Column): string =>
+  `${columnLabel(column.layer).padEnd(10)} ${pad(column.held, 5)} ${pad(column.required, 8)} ${percentText(column.held, column.required).padStart(8)} ${pad(column.owed, 5)} ${pad(column.unclaimed, 9)}`;
+
+const totalLine = (columns: readonly Column[]): string => {
+  const { held, required } = totalOf(columns);
+  const owed = columns.reduce((sum, column) => sum + column.owed, 0);
+  return `${"Total".padEnd(10)} ${pad(held, 5)} ${pad(required, 8)} ${percentText(held, required).padStart(8)} ${pad(owed, 5)}`;
+};
+
+const countedRules = (ids: readonly string[], verb: string): string =>
+  `${ids.length} ${ids.length === 1 ? "rule" : "rules"} ${verb}${ids.length > 0 && ids.length <= MAX_LISTED ? ` (${ids.join(", ")})` : ""}`;
+
+const sinceLines = (since: Since | "no base", columns: readonly Column[]): readonly string[] =>
+  since === "no base"
+    ? ["", "Since: no commit to compare with (origin/main is not fetched here)"]
+    : [
+        "",
+        `Since ${since.ref}: ${countedRules(since.added, "added")}, ${countedRules(since.retired, "retired")}`,
+        ...DISPLAY_ORDER.map((layer) => {
+          const before = columnFor(since.then, layer);
+          const now = columnFor(columns, layer);
+          return `${columnLabel(layer).padEnd(10)} then ${percentText(before.held, before.required)} of ${before.required}, now ${percentText(now.held, now.required)} of ${now.required}`;
+        }),
+        "then is counted from the cells of that commit's register, now from the names; the two agree on a green tree",
+      ];
+
+const milestoneLine = ({ name, status, by, detail }: Milestone): string =>
+  `${`[${status}]`.padEnd(11)} ${name}${by === undefined ? "" : ` (${by})`}: ${detail}`;
+
+const summaryLine = (milestones: readonly Milestone[]): string => {
+  const count = (status: Status): number => milestones.filter((milestone) => milestone.status === status).length;
+  return `Milestones: ${count("done")} done, ${count("not done")} not done, ${count("unchecked")} unchecked, of ${milestones.length}`;
+};
+
+const treeState = (changed: number): string => (changed === 0 ? "clean" : `dirty (${changed} changed ${changed === 1 ? "file" : "files"})`);
+
+// The banner counts the register evaluation only (the missing names and stale waivers). The ratchet, style, folder width, contract-test
+// placement and forge parts of the composed gate are not run here.
+export const renderProgress = ({ checkout, specFrom, liveRules, columns, milestones, since, problems }: Report): string =>
+  [
+    `Progress on branch ${checkout.branch} at ${checkout.sha}, ${treeState(checkout.changed)}: ${liveRules} live rules in the register`,
+    `The Arrival and Quint milestones are read from ${specFrom}; every other number is from this checkout`,
+    ...(problems > 0
+      ? [`the register evaluation is red (${problems} problems); this report counts only the register, not the ratchet, style, folder width or forge parts: run bun rules/check.ts`]
+      : []),
+    "",
+    "Column      held  required  percent  owed  no cell here",
+    ...DISPLAY_ORDER.map((layer) => columnLine(columnFor(columns, layer))),
+    totalLine(columns),
+    ...(since === undefined ? [] : sinceLines(since, columns)),
+    "",
+    "Goal milestones",
+    ...milestones.map(milestoneLine),
+    summaryLine(milestones),
+  ].join("\n");

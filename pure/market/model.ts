@@ -82,7 +82,7 @@ export type Fill = Readonly<{
 }>;
 
 /** What happened to the lots of an order that did not trade. */
-export type Remainder =
+export type Unfilled =
   | Tagged<"none">
   | Tagged<"rested", { lots: bigint }>
   | Tagged<"dropped", { lots: bigint; why: DropReason }>;
@@ -91,7 +91,7 @@ export type Remainder =
 export type DropReason = "no_liquidity" | "own_order";
 
 /** The book after an order, every fill it made, and what became of the rest of it. */
-export type Placed = Readonly<{ book: Book; fills: readonly Fill[]; remainder: Remainder }>;
+export type Placed = Readonly<{ book: Book; fills: readonly Fill[]; unfilled: Unfilled }>;
 
 export type PlaceFault =
   | Tagged<"bad_lots", { lots: bigint }>
