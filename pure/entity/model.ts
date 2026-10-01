@@ -51,10 +51,11 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
 /**
  * What an Entity knows of the chain for one Account, from what its Host reports and from its own frames (never derived
  * from an earlier proof): the epoch and the stored nonce the chain is at, how many frames have been co-signed since the
- * epoch began, the windows its signed proofs carry, and whether a dispute the peer started is open against it.
+ * epoch began, the windows its signed proofs carry, whether a dispute the peer started is open against it, and whether
+ * the node has co-signed a settlement or a collateral-to-reserve that has not landed yet (`frozen`, R-COSIGN-FREEZE).
  */
 export type ChainFacts = Readonly<{
-  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean;
+  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean; frozen: boolean;
 }>;
 
 // What a frame takes in.
@@ -64,14 +65,23 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
  * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`;
- * `j_dispute_over` is that dispute countered or finalized.
+ * `j_dispute_over` is that dispute countered or finalized; `j_op_lapsed` is a co-signed settlement or withdrawal
+ * that can no longer land (its batch reverted, its signatures ran out).
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side }>
-  | Tagged<"j_dispute_over", { peer: EntityId }>;
+  | Tagged<"j_dispute_over", { peer: EntityId }>
+  | Tagged<"j_op_lapsed", { peer: EntityId }>;
 
-export type Arrival = PeerMessage | JEvent;
+/** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
+export type CosignOp =
+  | Tagged<"c2r", { token: TokenId; amount: bigint }>
+  | Tagged<"settle", { token: TokenId; amount: bigint }>;
+
+export type CosignAsk = Tagged<"cosign_ask", { from: EntityId; op: CosignOp }>;
+
+export type Arrival = PeerMessage | JEvent | CosignAsk;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
@@ -88,7 +98,8 @@ export type AccountCommand =
 /** A command that is about the chain, not the Account's frames. */
 export type ChainCommand =
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"set_windows", { peer: EntityId; windows: Windows }>;
+  | Tagged<"set_windows", { peer: EntityId; windows: Windows }>
+  | Tagged<"withdraw", { peer: EntityId; token: TokenId; amount: bigint }>;
 
 export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand;
 
@@ -105,7 +116,12 @@ export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<Account
 export type JAction =
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>;
+  | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
+  | Tagged<"c2r", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"settle", { peer: EntityId; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
+
+/** The offdelta of a token that a settlement folds into its ondelta, so that the epoch advance cannot erase it. */
+export type Fold = Readonly<{ token: TokenId; offdelta: bigint }>;
 
 export type EntityFault =
   | Tagged<"self_account">
@@ -114,11 +130,15 @@ export type EntityFault =
   | Tagged<"account_refused", { fault: AccountFault }>
   | Tagged<"deposit_before_cosign">
   | Tagged<"bad_windows", { windows: Windows }>
-  | Tagged<"windows_shorten", { current: Windows }>;
+  | Tagged<"windows_shorten", { current: Windows }>
+  | Tagged<"already_cosigned">
+  | Tagged<"frame_in_flight">
+  | Tagged<"unfolded_c2r", { folds: readonly Fold[] }>;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =
   | Tagged<"command_refused", { command: Command; fault: EntityFault }>
   | Tagged<"unknown_peer", { from: EntityId }>
+  | Tagged<"cosign_refused", { from: EntityId; op: CosignOp; fault: EntityFault }>
   | Tagged<"message_refused", { from: EntityId; outcome: Outcome<AccountFault> }>
   | Tagged<"tx_refused", { peer: EntityId; refused: Refused<AccountTx, AccountFault> }>;

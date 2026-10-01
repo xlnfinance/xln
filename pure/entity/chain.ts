@@ -4,13 +4,14 @@
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { ChainFacts, EntityFault, Windows } from "./model.ts";
 
-export const freshChain: ChainFacts = { epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false };
+export const freshChain: ChainFacts =
+  { epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false };
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.
  */
 export const epochAdvanced = (f: ChainFacts, epoch: bigint, stored: bigint): ChainFacts =>
-  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false });
+  (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false });
 
 /** One more frame is co-signed in this epoch. */
 export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames + 1n });
@@ -49,3 +50,8 @@ export const withWindows = (f: ChainFacts, windows: Windows): Result<ChainFacts,
     ? err({ _tag: "windows_shorten", current })
     : ok({ ...f, windows });
 };
+
+/** The node co-signed a settlement or a C2R: its Account proposes nothing until the operation lands or lapses. */
+export const cosignFrozen = (f: ChainFacts): ChainFacts => ({ ...f, frozen: true });
+
+export const cosignLapsed = (f: ChainFacts): ChainFacts => ({ ...f, frozen: false });

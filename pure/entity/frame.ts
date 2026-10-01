@@ -10,11 +10,14 @@ import type { AccountFault, AccountState } from "../account/model.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, proofNonce, withWindows,
+  cosignFrozen, cosignLapsed, depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, proofNonce,
+  withWindows,
 } from "./chain.ts";
+import { askedOf, cosignFault, foldsOf, withdrawalOf } from "./cosign.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
-  sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type EntityFault,
+  sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type CosignAsk,
+  type EntityFault,
   type EntityId, type EntityInput, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
   type PeerMessage,
 } from "./model.ts";
@@ -64,6 +67,8 @@ const waitingForJ = (w: Work, peer: EntityId, view: JView, heard: Heard<AccountT
     ? { ...w, state: { ...w.state, waiting: mapSet(w.state.waiting, peer, view) } }
     : w);
 
+const asked = (w: Work, action: JAction): Work => ({ ...w, chain: [...w.chain, action] });
+
 const factsOf = (w: Work, peer: EntityId): ChainFacts => w.state.chain.get(peer) ?? freshChain;
 
 const withFacts = (w: Work, peer: EntityId, facts: ChainFacts): Work =>
@@ -95,11 +100,34 @@ const observed = (w: Work, e: JEvent): Work => {
       return e.by === sideOf(w.state.id, e.peer) ? w : withFacts(w, e.peer, disputeOpened(facts, e.epoch));
     case "j_dispute_over":
       return withFacts(w, e.peer, disputeOver(facts));
+    case "j_op_lapsed":
+      return withFacts(w, e.peer, cosignLapsed(facts));
   }
 };
 
-const arrive = (rules: AccountRules, view: JView, w: Work, a: Arrival): Work =>
-  (a._tag === "peer_message" ? hearing(rules, view, w, a) : observed(w, a));
+/** The node co-signs a peer's ask while no signature of its own waits, and a C2R only with no offdelta to fold. */
+const cosigning = (w: Work, a: CosignAsk): Work => {
+  const account = w.state.accounts.get(a.from);
+  if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
+  const facts = factsOf(w, a.from);
+  const fault = cosignFault(account, facts, a.op.amount);
+  const action = askedOf(a.from, a.op, foldsOf(account.state));
+  if (fault !== undefined) return noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault });
+  return action.ok
+    ? asked(withFacts(w, a.from, cosignFrozen(facts)), action.value)
+    : noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault: action.error });
+};
+
+const arrive = (rules: AccountRules, view: JView, w: Work, a: Arrival): Work => {
+  switch (a._tag) {
+    case "peer_message":
+      return hearing(rules, view, w, a);
+    case "cosign_ask":
+      return cosigning(w, a);
+    default:
+      return observed(w, a);
+  }
+};
 
 // ---- phase 2: hooks
 
@@ -149,8 +177,6 @@ const queued = (rules: AccountRules, w: Work, command: AccountCommand): Work => 
     : refusedCommand(w, command, { _tag: "account_refused", fault: admitted.error });
 };
 
-const asked = (w: Work, action: JAction): Work => ({ ...w, chain: [...w.chain, action] });
-
 /** A deposit waits for the first co-signed frame of an Account at epoch 0 (R-NO-DEPOSIT-BEFORE-COSIGN). */
 const deposited = (w: Work, command: Extract<ChainCommand, { _tag: "deposit" }>): Work => {
   const { peer, token, amount } = command;
@@ -167,11 +193,30 @@ const windowed = (w: Work, command: Extract<ChainCommand, { _tag: "set_windows" 
   return next.ok ? withFacts(w, command.peer, next.value) : refusedCommand(w, command, next.error);
 };
 
+/** The node's own withdrawal: it co-signs it as it sends it, so the Account proposes nothing until it lands. */
+const withdrawn = (w: Work, command: Extract<ChainCommand, { _tag: "withdraw" }>): Work => {
+  const { peer, token, amount } = command;
+  const account = w.state.accounts.get(peer);
+  const facts = factsOf(w, peer);
+  const fault = account === undefined ? undefined : cosignFault(account, facts, amount);
+  if (account === undefined || fault !== undefined) {
+    return refusedCommand(w, command, fault ?? { _tag: "no_account", peer });
+  }
+  return asked(withFacts(w, peer, cosignFrozen(facts)), withdrawalOf(peer, token, amount, foldsOf(account.state)));
+};
+
 /** A command about the chain needs an Account with the peer, as an Account command does. */
 const chained = (w: Work, command: ChainCommand): Work => {
   const { peer } = command;
   if (!w.state.accounts.has(peer)) return refusedCommand(w, command, { _tag: "no_account", peer });
-  return command._tag === "deposit" ? deposited(w, command) : windowed(w, command);
+  switch (command._tag) {
+    case "deposit":
+      return deposited(w, command);
+    case "set_windows":
+      return windowed(w, command);
+    case "withdraw":
+      return withdrawn(w, command);
+  }
 };
 
 const commanded = (rules: AccountRules, w: Work, command: Command): Work => {
@@ -180,6 +225,7 @@ const commanded = (rules: AccountRules, w: Work, command: Command): Work => {
       return opened(w, command);
     case "deposit":
     case "set_windows":
+    case "withdraw":
       return chained(w, command);
     default:
       return queued(rules, w, command);
@@ -202,7 +248,7 @@ const paced = (w: Work, view: JView, peer: EntityId, account: AccountReplica): b
 
 const proposing = (rules: AccountRules, view: JView, w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
-  if (account === undefined || paced(w, view, peer, account)) return w;
+  if (account === undefined || paced(w, view, peer, account) || factsOf(w, peer).frozen) return w;
   const proposed = propose(rules, account);
   return sending(withReplica(w, peer, proposed.replica), peer, proposed.sent);
 };
@@ -267,7 +313,8 @@ const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
 };
 
 const isArrival = (i: EntityInput): i is Arrival =>
-  i._tag === "peer_message" || i._tag === "j_epoch" || i._tag === "j_dispute" || i._tag === "j_dispute_over";
+  i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
+  || i._tag === "j_dispute_over" || i._tag === "j_op_lapsed";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 

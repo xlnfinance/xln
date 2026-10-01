@@ -3,9 +3,9 @@
 // Account and Bob its Right; Bob extends credit and each frame he proposes is one more co-signed proof of the epoch.
 import { describe, expect, test } from "bun:test";
 import { viewOf } from "../account/fixtures.ts";
-import type { ChainFacts, Command, EntityId, JAction, JEvent } from "../entity/model.ts";
+import type { ChainFacts, Command, CosignOp, EntityId, JAction, JEvent } from "../entity/model.ts";
 import {
-  type Cluster, credit, entityOf, feed, GOLD, hostOf, open, restarted, rise, settle, start,
+  type Cluster, credit, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
 } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
@@ -184,5 +184,67 @@ describe("runtime/chain no deposit before the first co-signed frame, and windows
   test("R-WINDOWS-NEVER-SHORTEN a window of zero seconds, or beyond the proof's uint32, is refused", () => {
     expect(factsAt(feed(opened, ALICE, windows(0n, 60n)), ALICE, BOB)).toBeUndefined();
     expect(factsAt(feed(opened, ALICE, windows(60n, 2n ** 32n)), ALICE, BOB)).toBeUndefined();
+  });
+});
+
+// What a Host's Runtime does about collateral across the whole path: the payments of a real run, then a withdrawal
+// (R-C2R-FOLD), then the silence while the signature waits for the chain (R-COSIGN-FREEZE), through a crash.
+/** Bob extends credit to Alice, who has paid nothing: the Account's offdelta is zero on both Hosts. */
+const creditedOnly = settle(feed(opened, BOB, credit(ALICE, 100n)));
+
+/** Alice then pays Bob 10 of that credit, so that the offdelta is -10 on both Hosts. */
+const afterPayment = settle(feed(creditedOnly, ALICE, pay(BOB, 10n)));
+
+const withdraw = (amount: bigint): Command => ({ _tag: "withdraw", peer: BOB, token: GOLD, amount });
+
+const tags = (c: Cluster) => c.chain.map((a) => a._tag);
+
+const committed = (c: Cluster, id: EntityId) =>
+  hostOf(c, id).entities.get(id)?.accounts.get(id === ALICE ? BOB : ALICE)?.head;
+
+describe("runtime/chain R-C2R-FOLD a withdrawal after payments is a settlement that folds them", () => {
+  test("R-C2R-FOLD with no payment made a withdrawal goes as a C2R", () => {
+    expect(creditedOnly.chain).toEqual([]);
+    expect(tags(feed(creditedOnly, ALICE, withdraw(30n)))).toEqual(["c2r"]);
+  });
+
+  test("R-C2R-FOLD with a payment made the withdrawal is a settlement carrying the payment's offdelta", () => {
+    const sent = feed(afterPayment, ALICE, withdraw(30n));
+    expect(sent.chain).toEqual([{
+      _tag: "settle", peer: BOB, token: GOLD, amount: 30n, folds: [{ token: GOLD, offdelta: -10n }],
+    }]);
+  });
+
+  test("R-C2R-FOLD Bob, asked by Alice for a C2R after a payment, refuses it with notice and signs nothing", () => {
+    const op: CosignOp = { _tag: "c2r", token: GOLD, amount: 30n };
+    const asked = feed(afterPayment, BOB, { _tag: "cosign_ask", from: ALICE, op });
+    expect(asked.chain).toEqual([]);
+    const notices = hostOf(asked, BOB).wal.flatMap((row) => row.notices);
+    expect(notices.map((n) => n._tag)).toEqual(["cosign_refused"]);
+  });
+});
+
+describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed until the epoch moves", () => {
+  const signed = feed(afterPayment, ALICE, withdraw(30n));
+  const queued = feed(signed, ALICE, pay(BOB, 5n));
+
+  test("R-COSIGN-FREEZE a payment made after the signature is not proposed: Bob hears nothing", () => {
+    expect(queued.inflight).toEqual(signed.inflight);
+    expect(hostOf(queued, ALICE).entities.get(ALICE)?.accounts.get(BOB)?.mempool).toHaveLength(1);
+  });
+
+  test("R-COSIGN-FREEZE once the chain has moved the epoch on, the payment goes out and both sides commit it", () => {
+    const landed = settle(feed(queued, ALICE, epochOf(BOB, 1n, 6n)));
+    expect(committed(landed, ALICE)).toBe(committed(landed, BOB));
+    expect(committed(landed, ALICE)).not.toBe(committed(queued, ALICE));
+  });
+
+  test("R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again", () => {
+    const back = restarted(queued, ALICE);
+    const account = hostOf(back, ALICE).entities.get(ALICE)?.accounts.get(BOB);
+    expect(account?.pending).toBeUndefined();
+    expect(account?.mempool).toHaveLength(1);
+    expect(tags(back)).toEqual(["settle", "settle"]);
+    expect(hostOf(back, ALICE).entities.get(ALICE)?.chain.get(BOB)?.frozen).toBe(true);
   });
 });

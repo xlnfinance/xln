@@ -9,7 +9,7 @@ import { provisionalFrameHash } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
-import type { EntityId, EntityInput, EntityState, JAction, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, Fold, JAction, Outbound } from "../entity/model.ts";
 import type { Frame } from "../entity/frame.ts";
 import { ownView } from "../account/clause/clock.ts";
 import type { EntityBatch, Halt, NewHeight, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
@@ -90,11 +90,15 @@ export const messageId = (msg: Msg<AccountTx>): string =>
 
 const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${messageId(o.msg)}`);
 
+const foldId = (f: Fold): string => `${f.token}:${f.offdelta}`;
+
 const chainId = (action: JAction): string =>
   match(action, {
     reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}`,
     deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
     counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
+    c2r: (c) => `c2r ${c.peer} ${c.token} ${c.amount}`,
+    settle: (s) => `settle ${s.peer} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,
   });
 
 const chainIds = (row: Row): readonly string[] => row.chain.map(chainId);

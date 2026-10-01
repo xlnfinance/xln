@@ -3056,14 +3056,53 @@
     "quint": "owed: spec thread",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: Entity/Runtime cut slice 3"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "ts",
-     "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
-     "owed": "Entity/Runtime cut slice 3"
+     "name": "R-C2R-FOLD a withdrawal from an Account with no offdelta goes as a C2R"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD a withdrawal with an offdelta goes as a settlement that folds it, never as a C2R"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD the settlement folds the offdelta of every token, not only the withdrawn one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD an offdelta in another token alone is enough: the shortcut would erase it too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD a peer's ask for a C2R is refused with notice while there is an offdelta, and signs nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD a peer's C2R is signed with nothing to fold, a peer's settlement always"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD with no payment made a withdrawal goes as a C2R"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD with a payment made the withdrawal is a settlement carrying the payment's offdelta"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-C2R-FOLD Bob, asked by Alice for a C2R after a payment, refuses it with notice and signs nothing"
     }
    ]
   },
@@ -3076,14 +3115,68 @@
     "quint": "owed: spec thread",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: Entity/Runtime cut slice 3"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "ts",
-     "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
-     "owed": "Entity/Runtime cut slice 3"
+     "name": "R-COSIGN-FREEZE a tx queued after the signature waits: no frame goes to the peer"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a signature given to a peer's ask freezes the Account just as the node's own does"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE without a signature the same tx is proposed at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE only the Account the signature is about stops: the others still propose"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE the chain moving the epoch on, landed or superseded, ends it and the queue goes out"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a report of an epoch already known, or about another Account, does not end it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE an operation that can no longer land ends it too, or the Account would wait for ever"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a second signature while one waits is refused with notice, whoever asks"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE nothing is signed over a frame still in flight: its ack may move the offdelta"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a payment made after the signature is not proposed: Bob hears nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE once the chain has moved the epoch on, the payment goes out and both sides commit it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again"
     }
    ]
   },
