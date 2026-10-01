@@ -303,7 +303,7 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
   const sameRefusal = earlier === undefined ? [] : [{
     _tag: "refusal", hash: nameOf(sent), index: earlier.index,
-    fault: rulesOf(w, s).tag(earlier.fault), mark: earlier.attempt,
+    fault: rulesOf(w, s).tag(earlier.fault), mark: earlier.attempt, floor: w.t[s].signed,
   }];
   const said: Heard = known ? { kind: tsKind, next: w.q[s], ack: false } : quintSays;
   const counted = bump(w, known ? KNOWN(quintSays.kind) : `deliver ${quintSays.kind}`);

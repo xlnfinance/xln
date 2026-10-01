@@ -85,11 +85,14 @@ const start = (page: Page): World => ({
 
 type Rule = Readonly<{ name: string; enabled: (w: World) => boolean; step: (w: World) => World }>;
 
-const msgKey = (m: M): string => JSON.stringify(m);
+/** The page has no nonce slots: a slot and a floor are not part of a world's identity, whatever they say. */
+const bare = (x: unknown): string =>
+  JSON.stringify(x, (key, value) => (key === "slot" || key === "floor" ? undefined : value));
+const msgKey = (m: M): string => bare(m);
 const replicaKey = (r: R) => [r.head, r.mempool, r.pending?.frame ?? null, r.refused.map((x) => x.tx)];
 /** The page's world identity: what the page keeps (a refusal's fault is derived, so it is not part of the identity). */
 const keyOf = (w: World): string =>
-  JSON.stringify([replicaKey(w.left), replicaKey(w.right), w.inbox, w.unsent, w.lost, w.dups, w.byz]);
+  bare([replicaKey(w.left), replicaKey(w.right), w.inbox, w.unsent, w.lost, w.dups, w.byz]);
 
 const withReplica = (w: World, side: Side, r: R): World => ({ ...w, [side]: r });
 
@@ -174,8 +177,9 @@ const byzFrame = (page: Page, side: Side): Rule => ({
   name: `byz frame ${side}`,
   enabled: (w) => w.byz < page.maxByz && w[side].mempool.length > 0 && invalidAlone(page, w[side].mempool),
   step: (w) => {
+    const slot = w[other(side)].used + (side === "left" ? 2 : 1);
     const forged: M = {
-      _tag: "frame", frame: { author: side, parent: w[side].head, attempt: 0, txs: w[side].mempool },
+      _tag: "frame", frame: { author: side, parent: w[side].head, attempt: 0, slot, txs: w[side].mempool },
     };
     return { ...enqueue(w, other(side), [forged]), byz: w.byz + 1 };
   },
@@ -308,8 +312,10 @@ describe("account/frame against the page's second bounds", () => {
     // The page counts 3423, 10383 and 24. The TypeScript counts fewer because it refuses an equivocating proposer's
     // second frame at an attempt it has already refused (R-FRAME-REFUSAL: the attempt number is not on the page yet):
     // the forged frame refused at attempt 0, the genuine one at attempt 0 is refused too. An honest proposer never
-    // sends two frames at one attempt on one head, so only a world with a forger loses states.
-    expect(counts(SAME_SIDE, walks.sameSide)).toEqual([3167, 9603, 22]);
+    // sends two frames at one attempt on one head, so only a world with a forger loses states. The count is above what
+    // it was before the frames carried nonce slots: a collision after a refusal is won by the higher slot, so Right
+    // wins some (R-PROOF-NONCE-ABOVE-SIGNED), and the walk reaches the worlds where it does.
+    expect(counts(SAME_SIDE, walks.sameSide)).toEqual([3206, 9697, 22]);
     expect(walks.sameSide.edges.some((e) => e.rule.startsWith("byz frame"))).toBe(true);
     [...walks.sameSide.worlds.values()].forEach((w) =>
       properties.forEach((holds) => expect(holds(SAME_SIDE, w)).toBe(true)));

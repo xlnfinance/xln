@@ -1,6 +1,6 @@
 // R-FRAME-HASH-SIGNED and R-PROOF-NONCE on the frame round: the head a frame gives once it commits is the digest its
-// signers sign, the ack carries it, and frame number n signs at the nonce the first signed frame's plus n - 1, so
-// nothing skips a nonce. The content name stays what a refusal and a repeat are matched by.
+// signers sign, the ack carries it, and a frame signs at a nonce slot above every slot spent (two slots an attempt,
+// Left's the higher), so no two frames share a nonce. The content name stays what refusals and repeats are matched by.
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
@@ -40,11 +40,13 @@ const round = (r: R, left: AccountReplica, right: AccountReplica, tx: AccountTx)
 describe("account/proof R-FRAME-HASH-SIGNED the head a frame gives is the digest its signers sign", () => {
   const first = round(rules, funded("left"), funded("right"), lock);
 
-  test("both replicas hold the digest of the state the frame made, by its author, at its height", () => {
-    const head = digestOf(signing, 1, "left", first.done.replica);
+  test("both replicas hold the digest of the state the frame made, by its author, at its slot", () => {
+    // Left's first frame is slot 2: the slot below it is Right's at the same attempt
+    const head = digestOf(signing, 2, "left", first.done.replica);
     expect([first.done.outcome, first.heard.outcome]).toEqual([{ _tag: "committed_own" }, { _tag: "accepted" }]);
     expect([first.done.replica.head, first.heard.replica.head]).toEqual([head, head]);
     expect([first.done.replica.height, first.heard.replica.height]).toEqual([1, 1]);
+    expect([first.done.replica.used, first.heard.replica.used]).toEqual([2, 2]);
     expect(first.sent.replica.pending?.head).toBe(head);
   });
 
@@ -65,19 +67,21 @@ describe("account/proof R-FRAME-HASH-SIGNED the head a frame gives is the digest
     expect(repeat.replica).toEqual(first.heard.replica);
   });
 
-  test("R-PROOF-NONCE the next frame signs at the next nonce: nothing skips one, and another height differs", () => {
+  test("R-PROOF-NONCE a frame signs above every slot spent: Left's next is slot 4, no other slot is its digest", () => {
     const second = round(rules, first.done.replica, first.heard.replica, pay(1n));
     const next = { ...signing, firstNonce: signing.firstNonce + 1n };
-    expect(second.done.replica.height).toBe(2);
-    expect(second.done.replica.head).toBe(digestOf(next, 1, "left", second.done.replica));
-    expect(second.done.replica.head).toBe(digestOf(signing, 2, "left", second.done.replica));
-    expect(digestOf(signing, 1, "left", second.done.replica)).not.toBe(second.done.replica.head);
+    expect([second.done.replica.height, second.done.replica.used]).toEqual([2, 4]);
+    expect(second.done.replica.head).toBe(digestOf(signing, 4, "left", second.done.replica));
+    expect(second.done.replica.head).toBe(digestOf(next, 3, "left", second.done.replica));
+    const head = second.done.replica.head;
+    expect([1, 2, 3, 5].map((slot) => digestOf(signing, slot, "left", second.done.replica) === head))
+      .toEqual([false, false, false, false]);
   });
 
   test("the author is bound: Right's frame on the same state signs another digest than Left's would", () => {
     const right = round(rules, funded("right"), funded("left"), pay(1n));
     expect(right.heard.replica.head).toBe(digestOf(signing, 1, "right", right.heard.replica));
-    expect(right.heard.replica.head).not.toBe(digestOf(signing, 1, "left", right.heard.replica));
+    expect(right.heard.replica.head).not.toBe(digestOf(signing, 2, "left", right.heard.replica));
   });
 });
 
@@ -118,25 +122,25 @@ describe("account/proof R-RETRY-NEW-NONCE a retried frame is signed at a nonce n
   const accepted = receive(at(102n), refused.replica, only(again.sent));
   const done = receive(at(102n), again.replica, only(accepted.sent));
 
-  test("R-RETRY-NEW-NONCE the retry is signed one nonce above the refused attempt, at another digest", () => {
+  test("R-RETRY-NEW-NONCE the retry is signed two slots above the refused attempt, at another digest", () => {
     expect(refused.outcome._tag).toBe("refused_invalid");
-    expect(first.replica.pending?.head).toBe(digestOf(signing, 1, "left", done.replica));
-    expect(again.replica.pending?.head).toBe(digestOf(signing, 2, "left", done.replica));
+    expect(first.replica.pending?.head).toBe(digestOf(signing, 2, "left", done.replica));
+    expect(again.replica.pending?.head).toBe(digestOf(signing, 4, "left", done.replica));
     expect(again.replica.pending?.head).not.toBe(first.replica.pending?.head);
   });
 
-  test("both replicas commit the retry at that nonce and count the one the refused attempt burned", () => {
+  test("both replicas commit the retry at that slot and spend it, and the refused attempt with it", () => {
     const head = again.replica.pending?.head ?? expect.unreachable("pending");
     expect([accepted.replica.head, done.replica.head]).toEqual([head, head]);
-    expect([accepted.replica.height, accepted.replica.burned]).toEqual([1, 1]);
-    expect([done.replica.height, done.replica.burned]).toEqual([1, 1]);
+    expect([accepted.replica.height, accepted.replica.used]).toEqual([1, 4]);
+    expect([done.replica.height, done.replica.used]).toEqual([1, 4]);
   });
 
-  test("the next frame signs above every nonce used before it, whatever its own attempt", () => {
+  test("the next frame signs above every slot spent, whatever its own attempt", () => {
     const next = round(at(102n), done.replica, accepted.replica, pay(1n));
-    expect(next.done.replica.head).toBe(digestOf(signing, 3, "left", next.done.replica));
+    expect(next.done.replica.head).toBe(digestOf(signing, 6, "left", next.done.replica));
     expect(next.heard.replica.head).toBe(next.done.replica.head);
-    expect([next.done.replica.height, next.done.replica.burned]).toEqual([2, 1]);
+    expect([next.done.replica.height, next.done.replica.used]).toEqual([2, 6]);
   });
 
   test("a nonce the contract would refuse is not signed: no digest at the ceiling, a refusal with notice", () => {

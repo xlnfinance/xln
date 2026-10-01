@@ -25,10 +25,9 @@ const NONCE_CEILING = BigInt(Number.MAX_SAFE_INTEGER);
 
 /**
  * The digest of the frame at nonce slot `slot` (the first is 1, signed at `firstNonce`): `author` proposed it and
- * `after` is the state it made. A slot is the frames committed before it, the nonces their refused attempts burned and
- * the frame's own attempt, so a retried frame is signed at a nonce of its own (R-RETRY-NEW-NONCE): the contract takes
- * any nonce above the stored one, and the peer, holding the refused attempt's signature, never holds two proofs of one
- * nonce to choose between. A slot whose nonce the contract would refuse (not below `NONCE_CEILING`) has no digest.
+ * `after` is the state it made. The round gives a frame a slot above every slot either side has signed (R-PROOF-NONCE-
+ * ABOVE-SIGNED), so a retried frame is signed at a nonce of its own (R-RETRY-NEW-NONCE): the contract takes any nonce
+ * above the stored one. A slot whose nonce the contract would refuse (not below `NONCE_CEILING`) has no digest.
  */
 export const frameDigest = (
   c: SigningContext, slot: number, author: Side, after: AccountState,

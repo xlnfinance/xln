@@ -24,7 +24,8 @@ const pay: AccountTx = { _tag: "pay", token: GOLD, amount: 1n };
 const refusedAt = (attempt: number, mark: number) => {
   const proposed = propose(rules, queue({ ...funded("left"), attempt }, pay));
   const frame = proposed.replica.pending?.frame ?? expect.unreachable("nothing pending");
-  const refusal: Msg<AccountTx> = { _tag: "refusal", hash: rules.name(frame), index: 0, fault: "not_expired", mark };
+  const hash = rules.name(frame);
+  const refusal: Msg<AccountTx> = { _tag: "refusal", hash, index: 0, fault: "not_expired", mark, floor: 0 };
   return receive(rules, proposed.replica, refusal).replica;
 };
 

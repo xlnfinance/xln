@@ -7,7 +7,7 @@ import { keccak256, bytesToHex, utf8 } from "../../kernel/encoding/bytes.ts";
 import { err, flatMap, map, mapErr, ok, type Result } from "../../kernel/core/result.ts";
 import { rlp, type Rlp } from "../../kernel/encoding/rlp.ts";
 import { match } from "../../kernel/core/tagged.ts";
-import type { AccountFault, AccountState, Hold, Side } from "../model.ts";
+import type { AccountFault, AccountState, Hold, Side, TokenId } from "../model.ts";
 import { emptyAccount } from "../state.ts";
 import { unsignable } from "../proof/body.ts";
 import { frameDigest, type SigningContext, type SigningFault } from "../proof/signing.ts";
@@ -36,7 +36,22 @@ const txItem = (tx: AccountTx): Rlp =>
 
 /** What a frame says, not what it signs: a refusal and a repeat name a frame by it (R-FRAME-REFUSAL, R-REACK). */
 export const frameName = (f: Frame<AccountTx>): FrameHash =>
-  bytesToHex(keccak256(rlp([utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), f.txs.map(txItem)]))) as FrameHash;
+  bytesToHex(keccak256(rlp([
+    utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), text(BigInt(f.slot)), f.txs.map(txItem),
+  ]))) as FrameHash;
+
+/** A lock this side signed and the peer may still hold live: the proof it is in is signed and unsuperseded. */
+export type LiveLock = Readonly<{ token: TokenId; hold: Hold; slot: number }>;
+
+/**
+ * R-SIGNED-IS-LIVE: the locks in proofs this side has signed that no committed frame above them has superseded. A
+ * refusal or a yield does not end them: the peer holds the signature and may start a dispute with it, so what a lock
+ * held upstream (a payer's funds) may be released on is a higher-slot frame without it committing, or the lock's own
+ * deadline plus the reserve having passed, never the refusal. The Runtime reads this to hold and release (cut thread).
+ */
+export const liveLocks = (r: AccountReplica): readonly LiveLock[] =>
+  r.unsuperseded.flatMap(({ slot, txs }) =>
+    txs.flatMap((tx) => (tx._tag === "lock" ? [{ token: tx.token, hold: tx.hold, slot }] : [])));
 
 /**
  * The faults that pass with the peer's view of the chain: it finds an expiry not yet due or a lock's deadline too far
@@ -59,8 +74,8 @@ const signable = (signing: SigningContext, after: AccountState): Result<AccountS
 export const accountRules = (judge: Judge, signing: SigningContext): AccountRules => ({
   apply: (s, author, tx) => flatMap(applyTx(s, judge, author, tx), (after) => signable(signing, after)),
   name: frameName,
-  seal: (f, after, height) =>
-    map(mapErr(frameDigest(signing, height, f.author, after), unsigned), (digest) => digest as FrameHash),
+  seal: (f, after) =>
+    map(mapErr(frameDigest(signing, f.slot, f.author, after), unsigned), (digest) => digest as FrameHash),
   tag: (fault) => fault._tag,
   retryable: (tag) => RETRYABLE.includes(tag),
 });

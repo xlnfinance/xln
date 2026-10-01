@@ -66,7 +66,7 @@
   },
   {
    "id": "R-A1",
-   "statement": "Same-height collision: Left wins; Right rolls back and re-proposes its txs at the next height.",
+   "statement": "Same-height collision: the frame with the higher proof slot wins, and at the first collision on a head that is Left's, so Left wins; the loser rolls back and re-proposes its txs at the next height.",
    "source": "lessons.md section 2",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1655,7 +1655,7 @@
   },
   {
    "id": "R-FRAME-REFUSAL",
-   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; The higher proof slot wins simultaneous proposals (R-A1: Left's, at the first collision on a head). The refusal also carries the refuser's floor, the highest slot it has signed (R-PROOF-NONCE-ABOVE-SIGNED). A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
    "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
@@ -1931,7 +1931,7 @@
   },
   {
    "id": "R-PROOF-NONCE",
-   "statement": "The proof nonce is its own counter; a committed frame signs at the nonce above the one before it, and only the refused attempts of a retry (R-RETRY-NEW-NONCE) leave a gap; signatures are one per (signer, nonce, author side).",
+   "statement": "The proof nonce is its own counter; a committed frame signs at a slot above every slot either side signed, in its author's lane (Left's an even distance above the committed slot, Right's an odd one), so no two frames of one Account ever share a nonce (a gap appears wherever the other side's slot, or an abandoned attempt's, goes unused); signatures are one per (signer, nonce, author side).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1956,13 +1956,13 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-PROOF-NONCE the next frame signs at the next nonce: nothing skips one, and another height differs"
+     "name": "R-PROOF-NONCE a frame signs above every slot spent: Left's next is slot 4, no other slot is its digest"
     }
    ]
   },
   {
    "id": "R-RETRY-NEW-NONCE",
-   "statement": "A refused frame is retried at a fresh proof nonce: the frame at attempt a is signed at the nonce above every nonce a committed frame or an earlier attempt used (slot = frames committed + nonces burned + attempt + 1), never a second different proof at one nonce, because the peer holds the proposer's signature on the refused attempt's proof. The contract takes any nonce above the stored one (start nonce > stored, counter nonce >= the opening nonce, finalize by a newer signed proof), so a gap costs nothing; a nonce not below the JS-safe ceiling has no digest.",
+   "statement": "A refused frame is retried at a fresh proof nonce: the retry's slot is above every slot its proposer signed and above the floor the refusal names, never a second different proof at one nonce, because the peer holds the proposer's signature on the refused attempt's proof. The contract takes any nonce above the stored one (start nonce > stored, counter nonce >= the opening nonce, finalize by a newer signed proof), so a gap costs nothing; a nonce not below the JS-safe ceiling has no digest.",
    "source": "contracts-decisions.md, R-RETRY-NEW-NONCE (coordinator 10-01 05:18); Account.sol _disputeStart, _registerCounterDispute",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1975,7 +1975,65 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-RETRY-NEW-NONCE the retry is signed one nonce above the refused attempt, at another digest"
+     "name": "R-RETRY-NEW-NONCE the retry is signed two slots above the refused attempt, at another digest"
+    }
+   ]
+  },
+  {
+   "id": "R-PROOF-NONCE-ABOVE-SIGNED",
+   "statement": "Every committed frame's proof nonce is strictly above every proof nonce either side signed before it committed, yielded and refused attempts included, and no two different proofs share a nonce, so the Left-beats-Right tie rule never decides. Mechanism: a frame carries its slot; the slot is in its author's lane (Left's an even distance above the committed slot, Right's an odd one) and above the highest slot its proposer signed and the highest it knows the peer signed (`signed`, `peerSigned`, learned from the peer's frames and from the floor a refusal carries); a collision is won by the higher slot (R-A1: at the first collision on a head, Left's); a receiver acks no slot at or below one it signed (a stale refusal naming its floor), believes a peer slot only in the peer's lane, above the committed slot and at most one lane step above what it knows (else a bad-slot refusal), and believes a refusal's floor on the same terms, so one frame cannot spend the nonce space. The peer's proofs of frames that were children of the committed head (signed after it) are above it by nature: R-SIGNED-IS-LIVE.",
+   "source": "coordinator 10-01 05:44 and 06:20 (Review A and Review B of PR 97); contracts-decisions.md, A4b section",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED no signed proof outlives a collision above the commit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED every proof has a slot of its own, above all signed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED one signer, one proof per nonce, the commit above the rest"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED a receiver believes only a slot an honest peer could take"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-PROOF-NONCE-ABOVE-SIGNED a proposer believes only a floor an honest peer could sign"
+    }
+   ]
+  },
+  {
+   "id": "R-SIGNED-IS-LIVE",
+   "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED, past which it proposes nothing more) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty.",
+   "source": "coordinator 10-01 05:55 (Review A of PR 97, second finding)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-SIGNED-IS-LIVE a lock in a signed proof stays live until a higher frame commits"
     }
    ]
   },
@@ -2839,7 +2897,7 @@
   },
   {
    "id": "R-SIGNED-MESSAGES",
-   "statement": "A frame's content name and a refusal are signed under digests of their own, tagged with their kind and scoped to the deployment and the Account, so a signature on one is never valid as the other, as a dispute proof, or on another Account; every field is written as text and the fields cannot be shifted into one another, so a digest exists whatever a peer put on the wire. The Runtime signs these and checks the signature before the receiver's refusal memory or the proposer's rollback is consulted (R-FRAME-REFUSAL rests on an authenticated peer).",
+   "statement": "A frame's content name and a refusal are signed under digests of their own, tagged with their kind and scoped to the chain, the Depository, both entities of the Account (smaller id first) and the epoch, and a frame's digest also names its proof nonce, so a signature on one is never valid as the other, as a dispute proof, on another Account, in another epoch or at another nonce; every field is written as text and the fields cannot be shifted into one another, so a digest exists whatever a peer put on the wire. The Runtime signs these and checks the signature before the receiver's refusal memory or the proposer's rollback is consulted (R-FRAME-REFUSAL rests on an authenticated peer).",
    "source": "Review B of PR 85 (finding 5, note 5); coordinator 10-01 04:24 (A4b: signed bytes for frames and refusals)",
    "layers": {
     "arrival": "-",
@@ -2853,6 +2911,25 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/proof R-SIGNED-MESSAGES a frame and a refusal are signed under digests of their own"
+    }
+   ]
+  },
+  {
+   "id": "R-FRAME-SIGNATURE-NAMES-ACCOUNT",
+   "statement": "The bytes a frame signature covers name the Account fully (chain id, Depository address, both entity ids in canonical order, the epoch) and the proof nonce: a frame signed for one Account is refused when replayed into another Account of the same signer, into another epoch, or at another nonce, because the verifier recovers another signer.",
+   "source": "coordinator 10-01 06:25 (Review A of PR 93: a frame's hash did not name its Account)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/proof R-FRAME-SIGNATURE-NAMES-ACCOUNT a frame signed for one Account is no other Account's"
     }
    ]
   },
