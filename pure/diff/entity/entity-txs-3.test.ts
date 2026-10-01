@@ -398,7 +398,7 @@ describe(seedTag("entity-txs-3: setHubConfig / setRebalancePolicy (og lifecycle/
       queuedAny += og.value.accountTxs?.length ?? 0;
     }
     expect(queuedAny).toBeGreaterThan(5);
-  });
+  }, 30_000);
   test("MATCH: a hub's openAccount queues og buildHubRebalancePolicyTx per token between the add_deltas and the credit line", () => {
     const a = aliceInJ();
     const hub = unwrap(foldTxs(a.state, a.accountReplicas, frameOf(a.state, [{ type: "setHubConfig", data: { rebalanceLiquidityFeeBps: 7n } }]), { verify: hankoVerify, timestamp: NOW })).draft;

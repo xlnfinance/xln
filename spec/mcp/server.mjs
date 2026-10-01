@@ -21,7 +21,7 @@ const SPEC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(SPEC, "arrival/packages/arrival-cli/dist/cli.js");
 const CARD = path.join(SPEC, "arrival/packages/arrival/docs/llm-agent-card.md");
 const README = path.join(SPEC, "README.md");
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 600_000;
 
 /** A path the caller gave, resolved inside spec/ — anything that escapes is refused. */
 const inSpec = (file) => {
