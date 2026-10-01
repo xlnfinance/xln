@@ -277,7 +277,7 @@ const quintHears = (w: World, s: Side, fid: number): Heard => {
 };
 
 const KINDS = ["accepted", "accepted_over_own", "re_acked", "kept_own"] as const;
-const KNOWN = "deliver: TS answers a repeat of a declined frame with the refusal (Quint has no refusal)";
+const KNOWN = (quint: string) => `deliver: TS refuses a repeat of a declined frame, Quint says ${quint}`;
 
 const onDeliver = (w: World, s: Side, r: Draw): World => {
   const cand = w.flying.filter((fid) => frameAt(w, fid).author !== s);
@@ -289,7 +289,7 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   const repeat = w.t[s].declined !== undefined;
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
   const said: Heard = known ? { kind: tsKind, next: w.q[s], ack: false } : quintSays;
-  const counted = bump(w, known ? KNOWN : `deliver ${quintSays.kind}`);
+  const counted = bump(w, known ? KNOWN(quintSays.kind) : `deliver ${quintSays.kind}`);
   const ackSent = heard.sent.length === 1 && heard.sent[0]?._tag === "ack";
   const unknown = heard.sent.some((m) => m._tag === "ack" && fidsOf(w, m.hash).length === 0);
   const checked = ensure(counted, [
@@ -361,6 +361,6 @@ describe("account/frame the frame rules agree with the Quint model", () => {
     ["propose", "ack commits", "ack ignored", "deliver accepted", "deliver re_acked", "deliver refused",
       "deliver kept_own", "deliver accepted_over_own", "submit accepted", "submit refused"]
       .forEach((k) => expect([k, seen(k) > 0]).toEqual([k, true]));
-    expect(seen(KNOWN)).toBeGreaterThan(0);
+    ["kept_own", "accepted"].forEach((k) => expect([k, seen(KNOWN(k)) > 0]).toEqual([k, true]));
   });
 });
