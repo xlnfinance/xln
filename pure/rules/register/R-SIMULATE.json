@@ -7,7 +7,7 @@
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: signing after a simulation is the planner's duty; the chain's gas behaviour is J5 and F16",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -19,6 +19,31 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "signs-before-gate"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE nothing is signed before the Host has answered a simulation of the exact batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE the final simulation runs at the final budget (a gasleft() reader answers by budget)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE never sign above the chain's transaction gas cap: split instead"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE reaches seal: nothing is signed before the Host has simulated the batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE gas numbers are the deployed contract's"
   }
  ]
 }

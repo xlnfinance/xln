@@ -1,10 +1,10 @@
 // Reviewer A: tests that kill the fit.ts mutants the PR's own tests let live (PR 114, head 533895352).
 import { describe, expect, test } from "bun:test";
-import { openJBatch, queue, type JBatch } from "./batch/jbatch.ts";
-import { MAX_ENCODED_BYTES } from "./op/limits.ts";
-import type { JOp } from "./op/ops.ts";
-import { encodedBytes } from "./plan/fit.ts";
-import { ME, LEFT_PEER, RIGHT_PEER, bigStart, idOf, reserveToReserve, settle } from "./fixtures.ts";
+import { openJBatch, queue, type JBatch } from "../batch/jbatch.ts";
+import { MAX_ENCODED_BYTES } from "../op/limits.ts";
+import type { JOp } from "../op/ops.ts";
+import { encodedBytes } from "../plan/fit.ts";
+import { ME, LEFT_PEER, RIGHT_PEER, bigStart, idOf, reserveToReserve, settle } from "../fixtures.ts";
 
 const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
   ops.reduce((acc, op) => {
