@@ -84,6 +84,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # deploy-dry-run.test.ts starts anvil.
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.7.1
+
       # The committed typechain-types are the fork's ABI and bytecode: a source change without a rebuild fails here.
       - name: Build contracts/ and check the committed typechain is current
         run: |

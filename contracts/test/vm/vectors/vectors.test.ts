@@ -14,7 +14,7 @@ type Vector = { function: string; label: string; args: any[]; returnData: string
 const vectorsFor = (fn: string): Vector[] => committed("functions").vectors.filter((v: Vector) => v.function.startsWith(`${fn}(`));
 const word = (returnData: string): string => ethers.hexlify(coder.decode(["bytes"], returnData)[0] as string);
 
-describe("vectors", () => {
+describe("R-J2 vectors", () => {
   test("committed files equal a fresh run against the deployed bytecode", async () => {
     const fresh = JSON.parse(JSON.stringify(await allVectors()));
     expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline"), batch: committed("batch"), hanko: committed("hanko") });
@@ -68,11 +68,13 @@ describe("vectors", () => {
     expect(Object.values(o.timeoutFinalize).map((r: any) => [r.storedNonce, r.epoch, r.start])).toEqual([["9", "1", "ok, skipped (reason 0)"], ["9", "1", "ok, skipped (reason 0)"], ["9", "1", "ok"]]);
   });
 
-  test("implicit baseline: the canonical unsigned proof opens and settles at ondelta; each departure from it is NotTheImplicitBaseline", () => {
+  test("implicit baseline: the canonical unsigned proof opens and settles at ondelta; each of 14 departures from it is NotTheImplicitBaseline", () => {
     const { implicitBaseline: i } = committed("baseline");
     expect([i.afterSettlement.settle, i.afterSettlement.epoch, i.afterSettlement.storedNonce]).toEqual(["ok", "1", "5"]);
     expect([i.implicitProof.nonce, i.implicitProof.proposerIsLeft, i.implicitProof.signature]).toEqual([6, false, "0x"]);
-    expect(Object.values(i.rejected)).toEqual(Array(6).fill("REVERT NotTheImplicitBaseline()"));
+    expect(Object.keys(i.rejected)).toHaveLength(14);
+    expect(Object.values(i.rejected)).toEqual(Array(14).fill("REVERT NotTheImplicitBaseline()"));
+    expect(i.disputeHashStored).toMatch(/^0x[0-9a-f]{64}$/);
     expect([i.start, i.finalize]).toEqual(["ok", "ok"]);
     expect(i.settled).toEqual({ L: "1000", R: "1000", collateral: "0", epoch: "2" });
   });

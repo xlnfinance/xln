@@ -7,11 +7,12 @@
 //   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
+//   --tests-only             run only contract-test placement: every contract test runs in a gate (rules/checks/contract-tests.ts)
 //   --findings-only          run only the known-findings ratchet (diff/findings/check.ts)
-// Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts) and the known-findings
-// ratchet of the rig (diff/findings/check.ts): one command, one exit code.
+// Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts), contract-test placement
+// (rules/checks/contract-tests.ts) and the known-findings ratchet of the rig (diff/findings/check.ts): one command, one exit code.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
-// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, or the rig registers more known findings than its baseline allows. See plan/first-moves.md, brief 3.
+// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, a contract test sits in no gate folder, or the rig registers more known findings than its baseline allows. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -22,6 +23,7 @@ import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
 import { gateExit, isWanted, selectionOf, type Part } from "./checks/compose.ts";
+import { contractTestsReport } from "./checks/contract-tests.ts";
 import { folderWidthReport } from "./checks/folder-width.ts";
 import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
@@ -39,6 +41,12 @@ const runStyle = (): boolean => {
 
 const runFolderWidth = (): boolean => {
   const report = folderWidthReport(repoRoot);
+  report.lines.forEach((line) => console.log(line));
+  return !report.failed;
+};
+
+const runContractTests = (): boolean => {
+  const report = contractTestsReport(repoRoot);
   report.lines.forEach((line) => console.log(line));
   return !report.failed;
 };
@@ -105,7 +113,7 @@ const runRegister = (): boolean => {
 const selection = selectionOf(args);
 
 // One table for every way in; `isWanted` says which parts the command line runs. A part that does not run counts as passed.
-const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth, findings: runFindings };
+const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth, tests: runContractTests, findings: runFindings };
 const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
 
-process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width"), findings: passes("findings") }));
+process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width"), tests: passes("tests"), findings: passes("findings") }));
