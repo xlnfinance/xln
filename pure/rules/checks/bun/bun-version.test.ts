@@ -4,9 +4,9 @@ import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { atLeast, bunReport, installLine, requiredBun } from "./bun-version.ts";
-import { existingFiles } from "./folder-width.ts";
+import { existingFiles } from "../folder-width.ts";
 
-const pureRoot = `${import.meta.dir}/../..`;
+const pureRoot = `${import.meta.dir}/../../..`;
 const pkg = (bun: string): string => `{ "name": "p", "engines": { "bun": "${bun}" } }`;
 
 describe("version order", () => {

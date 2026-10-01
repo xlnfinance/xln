@@ -2,7 +2,7 @@
 // ">=x.y.z"). Bun 1.3.11 segfaults when a Worker is terminated (og's Account workers, one pool per world), at a random
 // point of a long run: about 600 s into SEEDX=0 of the full suite with no failing test. 1.3.14 and the 1.4 line do not.
 // The check turns that into a red gate at the start. See review/seed0-crash/NOTES.md.   bun rules/check.ts --bun-only
-import type { Result } from "../register.ts";
+import type { Result } from "../../register.ts";
 
 export type Version = readonly [major: number, minor: number, patch: number];
 
