@@ -10,7 +10,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -18,6 +18,16 @@
      "layer": "quint",
      "name": "hooks-read-pre-arrival",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E1 a command sees what the arrivals of its own frame did, wherever the arrival sits among the inputs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E1 the ack of an arrival goes out ahead of the frame the commands propose"
     }
    ]
   },
@@ -30,7 +40,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -44,6 +54,26 @@
      "layer": "arrival",
      "name": "full-halts",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 no peer input halts the Runtime: strangers, stale acks and repeats are refused in place"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 an input for an Entity this Runtime does not host is refused with notice, as a row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 a message from a stranger is refused with notice and changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
     }
    ]
   },
@@ -326,7 +356,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -334,6 +364,16 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E4 Accounts propose in the order a command first touched them, then the rest by id"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-E4 an Account touched twice proposes once, with both txs in one frame"
     }
    ]
   },
@@ -1303,7 +1343,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1317,6 +1357,46 @@
      "layer": "quint",
      "name": "ack-before-persist",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a staged row sends nothing: its outputs leave once it is committed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE the outputs of committed rows leave once each, in row order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a crash before flush loses the belief, not the outputs: they all leave again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a crash between apply and commit loses the staged frame and nothing durable"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE every world nothing can move in is the finished one, and a finished world is reached"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a recovery that forgets the last row is caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE planted bug: a flush that never marks its rows sent repeats them without end"
     }
    ]
   },
@@ -1591,6 +1671,26 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE an Account opened twice, with oneself, or a command to a stranger is refused with notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a payment beyond the room is refused at the door with its fault, and nothing is queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a queued tx the Account refuses at propose is told to the Entity, and the Account forgets it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
     }
    ]
   },
@@ -1768,6 +1868,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NET planted bug: with no timer, a frame refused before its peer opened wedges"
     }
    ]
   },
