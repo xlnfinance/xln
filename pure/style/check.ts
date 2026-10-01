@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { unreachable } from "./reach.ts";
 
-const scan = Bun.spawnSync(["uvx", "--from", "ast-grep-cli", "ast-grep", "scan", "--json=compact", "xln.ts"], { cwd: `${import.meta.dir}/..` });
+const scan = Bun.spawnSync(["uvx", "--from", "ast-grep-cli==0.45.3", "ast-grep", "scan", "--json=compact", "xln.ts"], { cwd: `${import.meta.dir}/..` });
 const hits: readonly { ruleId: string }[] = JSON.parse(scan.stdout.toString().split("\n")[0] ?? "[]");
 const ruleCounts = hits.reduce<Record<string, number>>((acc, h) => ({ ...acc, [h.ruleId]: (acc[h.ruleId] ?? 0) + 1 }), {});
 // Line length is not an AST property, so it is counted here rather than by an ast-grep rule.

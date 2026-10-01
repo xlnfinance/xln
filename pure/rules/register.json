@@ -1158,6 +1158,16 @@
      "name": "J5 review: a dispute start or counter beside a failing payment reverts the whole batch (R-SPLIT)"
     },
     {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_revealBesideFailingPaymentRevertsWhole"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_counterBesideFailingPaymentRevertsWhole"
+    },
+    {
      "kind": "mutant",
      "layer": "quint",
      "name": "urgent-batch-carries-payments",
@@ -1765,6 +1775,12 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (frame exchange step)"
     }
    ]
   },
@@ -2454,6 +2470,105 @@
    ]
   },
   {
+   "id": "R-GATE-CI-DRIFT",
+   "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
+   "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the planted baseline agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
+    }
+   ]
+  },
+  {
    "id": "R-SETTLE-CREDIT",
    "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
@@ -2792,6 +2907,21 @@
      "layer": "quint",
      "name": "a mutant for the implicit start",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheCanonicalImplicitStart"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheImplicitStartAtAnyNonce"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_controlTheSameStartIsAcceptedAfterAnAdvance"
     }
    ]
   },
@@ -2869,6 +2999,171 @@
      "layer": "quint",
      "name": "a mutant that shortens the windows",
      "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-ONCHAIN",
+   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
+   "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_fullFillMovesTheWholeOrder"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyMakerGivesForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyTakerPaysForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65535IsOneOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65534IsZeroOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_zeroRatioMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_malformedArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheWantLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheGiveLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "swap-fill-rounds-up",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
+    }
+   ]
+  },
+  {
+   "id": "R-C2R-FOLD",
+   "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
+   "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "owed: the cut (Entity and Runtime)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+     "owed": "the cut (Entity and Runtime)"
     }
    ]
   }
