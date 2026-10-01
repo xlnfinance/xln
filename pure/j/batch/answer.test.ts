@@ -204,7 +204,7 @@ describe("landable: the signed batch the chain accepts next", () => {
 });
 
 // The Entity's J state as the Host reloads it, and the command its Account replays: a new object with the same bytes.
-describe("R-SAME-FRAME-SETTLE-PENDING a request replayed after a restart is the same request, wherever it cut", () => {
+describe("a request replayed after a restart is the same request, wherever it cut", () => {
   const replayed = (j: JBatch) => queue(j, settle(LEFT_PEER, -2n, 4n));
 
   test("between queue and seal: the replay is skipped and the batch carries the settlement once", () => {
