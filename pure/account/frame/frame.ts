@@ -10,8 +10,12 @@ import { other, type Side } from "../model.ts";
 /** The name of a frame: equal frames have equal hashes, so equal heads mean equal histories. */
 export type FrameHash = Brand<string, "FrameHash">;
 
-/** A frame names its parent by hash (R-PARENT): it is the next frame only on a replica whose head is that parent. */
-export type Frame<Tx> = Readonly<{ parent: FrameHash; txs: readonly Tx[] }>;
+/**
+ * A frame names its parent by hash (R-PARENT): it is the next frame only on a replica whose head is that parent. It
+ * names its author too, because a tx means what its author's side says: the same bytes written by the other side are
+ * another frame, and a frame handed back to its own author is not the peer's (Quint `acceptable`: `f.author != self`).
+ */
+export type Frame<Tx> = Readonly<{ author: Side; parent: FrameHash; txs: readonly Tx[] }>;
 
 export type Msg<Tx> = Tagged<"frame", { frame: Frame<Tx> }> | Tagged<"ack", { hash: FrameHash }>;
 
@@ -48,6 +52,7 @@ export type Outcome<F> =
   | Tagged<"re_acked">
   | Tagged<"kept_own">
   | Tagged<"refused_invalid", { fault: F }>
+  | Tagged<"refused_own">
   | Tagged<"refused_not_next">
   | Tagged<"committed_own">
   | Tagged<"ack_ignored">;
@@ -93,7 +98,7 @@ const NO_MESSAGES: readonly never[] = [];
 export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>): Out<Tx, S, F> => {
   if (r.pending !== undefined || r.mempool.length === 0) return { replica: r, sent: NO_MESSAGES };
   const split = splitValid(rules, r.side, r.state, r.mempool);
-  const frame = { parent: r.head, txs: split.valid };
+  const frame = { author: r.side, parent: r.head, txs: split.valid };
   const pending = split.valid.length === 0 ? undefined : { frame, after: split.state };
   const proposed = { ...r, mempool: [], refused: [...r.refused, ...split.refused], pending };
   return { replica: proposed, sent: pending === undefined ? NO_MESSAGES : [frameMsg(pending.frame)] };
@@ -119,10 +124,11 @@ const accept = <Tx, S, F>(r: Replica<Tx, S, F>, hash: FrameHash, after: S): Hear
 };
 
 const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Frame<Tx>): Heard<Tx, S, F> => {
+  if (f.author === r.side) return heard(r, NO_MESSAGES, { _tag: "refused_own" });
   if (f.parent === r.head) {
     // Same-height collision: LEFT WINS (R-A1). Left keeps its own frame and ignores the peer's; Right yields.
     if (r.pending !== undefined && r.side === "left") return heard(r, NO_MESSAGES, { _tag: "kept_own" });
-    const after = applyAll(rules, r.state, other(r.side), f.txs);
+    const after = applyAll(rules, r.state, f.author, f.txs);
     return after.ok
       ? accept(r, rules.hash(f), after.value)
       : heard(r, NO_MESSAGES, { _tag: "refused_invalid", fault: after.error });

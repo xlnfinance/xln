@@ -1730,7 +1730,7 @@
   },
   {
    "id": "R-AUTH",
-   "statement": "A committed frame never lowers what the other side has of its own to pay, and never changes the credit its author receives.",
+   "statement": "A committed frame never lowers what the other side has of its own to pay, and never changes the credit its author receives; a frame names its author, a frame handed back to its own author is refused, and the author is part of the frame hash (Quint acceptable: f.author != self).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-9",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
@@ -1750,6 +1750,21 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-AUTH a committed tx never lowers the other side's own funds or changes its author's credit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a frame handed back to its own author is refused, not read as the peer's"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH the same txs written by the other side are another frame and mean another thing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH R-REACK a frame with another author is not a repeat of the frame at my head"
     }
    ]
   },

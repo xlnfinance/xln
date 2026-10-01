@@ -165,7 +165,7 @@ const byzFrame = (page: Page, side: Side): Rule => ({
   name: `byz frame ${side}`,
   enabled: (w) => w.byz < page.maxByz && w[side].mempool.length > 0 && invalidAlone(page, w[side].mempool),
   step: (w) => {
-    const forged: M = { _tag: "frame", frame: { parent: w[side].head, txs: w[side].mempool } };
+    const forged: M = { _tag: "frame", frame: { author: side, parent: w[side].head, txs: w[side].mempool } };
     return { ...enqueue(w, other(side), [forged]), byz: w.byz + 1 };
   },
 });
@@ -302,7 +302,7 @@ describe("account/frame against the page's second bounds", () => {
   });
 
   test("R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold", () => {
-    expect(walks.reorder.worlds.size).toBe(7312);
+    expect(counts(REORDER, walks.reorder)).toEqual([7312, 33183, 16]);
     [...walks.reorder.worlds.values()].forEach((w) =>
       properties.forEach((holds) => expect(holds(REORDER, w)).toBe(true)));
     expect(canFinish(REORDER, walks.reorder).size).toBe(walks.reorder.worlds.size);

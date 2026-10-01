@@ -57,12 +57,13 @@ describe("account/frame the round", () => {
   });
 
   test("a frame is named by its parent and its txs: equal frames agree and any difference changes the name", () => {
-    const f = { parent: GENESIS, txs: [pay(1n)] };
+    const f = { author: "left" as const, parent: GENESIS, txs: [pay(1n)] };
     expect(provisionalFrameHash({ ...f })).toBe(provisionalFrameHash(f));
     expect(provisionalFrameHash({ ...f, txs: [pay(2n)] })).not.toBe(provisionalFrameHash(f));
     expect(provisionalFrameHash({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(provisionalFrameHash(f));
     expect(provisionalFrameHash({ ...f, parent: provisionalFrameHash(f) })).not.toBe(provisionalFrameHash(f));
-    expect(provisionalFrameHash({ parent: GENESIS, txs: [pay(-1n)] })).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(provisionalFrameHash({ ...f, author: "right" })).not.toBe(provisionalFrameHash(f));
+    expect(provisionalFrameHash({ author: "left", parent: GENESIS, txs: [pay(-1n)] })).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });
 
@@ -136,7 +137,7 @@ describe("account/frame refusals are values, never a halt", () => {
   test("R-ONE-BODY after my frame is acked, a different frame on the same parent gets no ack", () => {
     const acked = receive(rules, sent.replica, only(accepted.sent));
     expect(acked.outcome).toEqual({ _tag: "committed_own" });
-    const rival = { ...first, txs: [pay(6n)] };
+    const rival = { ...first, author: "right" as const, txs: [pay(6n)] };
     const heard = receive(rules, acked.replica, { _tag: "frame", frame: rival });
     expect(heard.outcome).toEqual({ _tag: "refused_not_next" });
     expect(heard.sent).toEqual([]);
@@ -170,6 +171,35 @@ describe("account/frame refusals are values, never a halt", () => {
 const pick = (i: number, k: number, n: number): number =>
   ((Math.imul(i + 1, 2654435761) ^ Math.imul(k + 7, 1597334677)) >>> 0) % n;
 
+describe("account/frame a frame has an author", () => {
+  const mine = proposing(emptyReplica("right"), credit(500n));
+  const echo = only(mine.sent);
+
+  test("R-AUTH a frame handed back to its own author is refused, not read as the peer's", () => {
+    const heard = receive(rules, mine.replica, echo);
+    expect(heard.outcome).toEqual({ _tag: "refused_own" });
+    expect(heard.replica).toEqual(mine.replica);
+    expect(heard.sent).toEqual([]);
+    expect(receive(rules, emptyReplica("right"), echo).outcome).toEqual({ _tag: "refused_own" });
+  });
+
+  test("R-AUTH the same txs written by the other side are another frame and mean another thing", () => {
+    const theirs = receive(rules, emptyReplica("left"), echo);
+    expect(theirs.outcome).toEqual({ _tag: "accepted" });
+    expect(ledgerOf(theirs.replica.state, GOLD).limit).toEqual({ left: 500n, right: 0n });
+    const asLeft = { ...frameOf(echo), author: "left" as const };
+    expect(provisionalFrameHash(asLeft)).not.toBe(theirs.replica.head);
+    expect(receive(rules, emptyReplica("right"), { _tag: "frame", frame: asLeft }).replica.state).not
+      .toEqual(theirs.replica.state);
+  });
+
+  test("R-AUTH R-REACK a frame with another author is not a repeat of the frame at my head", () => {
+    const accepted = receive(rules, emptyReplica("left"), echo);
+    const forged = receive(rules, accepted.replica, { _tag: "frame", frame: { ...frameOf(echo), author: "left" } });
+    expect(forged.outcome).toEqual({ _tag: "refused_own" });
+  });
+});
+
 describe("account/frame a peer cannot halt a replica", () => {
   const busy = proposing(credited.left, pay(5n)).replica;
   const targets: readonly AccountReplica[] = [credited.left, credited.right, busy, left, right];
@@ -180,7 +210,8 @@ describe("account/frame a peer cannot halt a replica", () => {
     const txs: readonly AccountTx[] = Array.from({ length: pick(i, 1, 4) }, (_, j) =>
       pay(amounts[pick(i, 10 + j, amounts.length)] ?? 1n));
     const parent = parents[pick(i, 2, parents.length)] ?? GENESIS;
-    return pick(i, 3, 4) === 0 ? { _tag: "ack", hash: parent } : { _tag: "frame", frame: { parent, txs } };
+    const author = pick(i, 5, 2) === 0 ? "left" : "right";
+    return pick(i, 3, 4) === 0 ? { _tag: "ack", hash: parent } : { _tag: "frame", frame: { author, parent, txs } };
   };
 
   test("R-X1 whatever a peer sends is answered with a replica, and a refusal changes nothing", () => {

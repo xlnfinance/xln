@@ -32,7 +32,7 @@ const txItem = (tx: AccountTx): Rlp =>
 
 /** A stand-in, not the signed bytes: A4 and T0 owe the real hash (R-FRAME-HASH-SIGNED). */
 export const provisionalFrameHash = (f: Frame<AccountTx>): FrameHash =>
-  bytesToHex(keccak256(rlp([utf8(f.parent), f.txs.map(txItem)]))) as FrameHash;
+  bytesToHex(keccak256(rlp([utf8(f.author), utf8(f.parent), f.txs.map(txItem)]))) as FrameHash;
 
 /** The rules a replica judges by: its own view of the J chain is in `judge` (R-HTLC-CLOCK). */
 export const accountRules = (judge: Judge): AccountRules =>
