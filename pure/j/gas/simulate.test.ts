@@ -80,7 +80,7 @@ describe("R-SIMULATE nothing is signed before the Host has answered a simulation
 describe("R-SIMULATE the final simulation runs at the final budget (a gasleft() reader answers by budget)", () => {
   test("a batch that lands at the probe budget and reverts at the sized one is held, not signed", () => {
     const ops = payments(1);
-    const probeBudget = maxBudget(GAS.txGasCap, GAS.prelude);
+    const probeBudget = maxBudget(GAS.txGasCap, carrying(GAS, ops));
     const step = settled(ops, (b) => b.gasBudget === probeBudget ? ok(b.digest) : reverts(b.digest, "0x00000004"));
     expect(step).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004" } });
   });
