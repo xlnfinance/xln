@@ -278,6 +278,13 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The Foundry suite (test/foundry) counts as gated, so it runs here through the gate's own forge part (pin script for forge-std,
+      # then forge test, with the skip and test-count checks), the same command as locally: `bun rules/check.ts --forge-only`.
+      - name: Run the Foundry suite through the gate
+        run: |
+          cd contracts && bun run forge:setup
+          cd ../pure && bun install --frozen-lockfile && bun rules/check.ts --forge-only
+
   build-xln:
     name: Runtime Checks
     runs-on: ubuntu-latest
