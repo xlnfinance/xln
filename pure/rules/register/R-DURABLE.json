@@ -129,6 +129,61 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE after a crash every committed chain action is asked again, once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the operations that make a row durable are its record, then a sync, in that order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE keep is not done until the disk says so, and the disk sees write then sync"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sync is never run before the write it covers, and nothing runs after a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows kept come back, in order, from a file opened again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash inside the last record leaves the rows before it, and the file is cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows of two Runtimes, kept and read from files, replay and ask the chain as before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE every row of two real Runtimes comes back equal, bigints and bytes and all"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows come back in order from a clean file, and an empty file has none"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a file cut anywhere inside its last record gives the rows before it, and says where they end"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a last record whole in length but wrong in its bytes is a tear, wherever the bit is"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bad record with a record after it is a damaged file: a fault, and no later row is believed"
   }
  ]
 }

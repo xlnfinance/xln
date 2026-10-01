@@ -51,7 +51,7 @@ const ack = (from: Outbound["from"], to: Outbound["to"]): Outbound =>
 const tagOf = (r: { ok: boolean; error?: { _tag: string } }) => (r.ok ? "ok" : r.error?._tag);
 
 describe("host/shell/link the peer is proved, then a record is sealed to it", () => {
-  test("a handshake between two Runtimes of the table leaves both up; records open in both directions", () => {
+  test("R-LINK-AUTH a handshake leaves both Runtimes up, and records open in both directions", () => {
     const { initiator, responder } = connect(KEY.alice, KEY.bob);
     const forth = must(seal(initiator, ack(ALICE, BOB)));
     const arrived = must(openRecord(responder, forth.data));
@@ -60,20 +60,20 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(must(openRecord(forth.link, back.data)).message).toEqual(ack(BOB, ALICE));
   });
 
-  test("a hello from a Runtime that is not in the table is refused, and nothing is answered", () => {
+  test("R-LINK-AUTH a hello from a Runtime that is not in the table is refused", () => {
     const hello = dial(KEY.stranger, peer(KEY.bob, BOB), nonce(1)).hello;
     const refused = err({ _tag: "unknown_runtime", runtime: KEY.stranger.runtime } as const);
     expect(answer(KEY.bob, TABLE, nonce(2), hello)).toEqual(refused);
   });
 
-  test("a reply signed by another key than the one the table names is refused: an impostor answering for Bob", () => {
+  test("R-LINK-AUTH an impostor answering for Bob, with another key than the table names, is refused", () => {
     const dialed = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
     const impostorTable = [peer(KEY.alice, ALICE), { ...peer(KEY.stranger, BOB), runtime: KEY.stranger.runtime }];
     const reply = must(answer(KEY.stranger, impostorTable, nonce(2), dialed.hello)).reply;
     expect(tagOf(finish(dialed.link, reply))).toBe("bad_signature");
   });
 
-  test("a reply to another challenge is refused: a reply of an earlier connection replayed to this one", () => {
+  test("R-LINK-AUTH a reply of an earlier connection, replayed to this one, is refused", () => {
     const old = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
     const oldReply = must(answer(KEY.bob, TABLE, nonce(2), old.hello)).reply;
     const now = dial(KEY.alice, peer(KEY.bob, BOB), nonce(5));
@@ -81,14 +81,14 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(tagOf(finish(old.link, oldReply))).toBe("ok");
   });
 
-  test("a reply Bob made for Mallory's connection is refused by Alice: the signature binds both ids", () => {
+  test("R-LINK-AUTH a reply Bob made for Mallory's connection is refused by Alice: both ids are bound", () => {
     const toMallory = dial(KEY.mallory, peer(KEY.bob, BOB), nonce(1));
     const forMallory = must(answer(KEY.bob, TABLE, nonce(2), toMallory.hello)).reply;
     const alices = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
     expect(tagOf(finish(alices.link, forMallory))).toBe("bad_signature");
   });
 
-  test("a finish by another key, a finish of another connection, and a reply passed off as one are refused", () => {
+  test("R-LINK-AUTH a finish by another key, of another connection, or a reply passed off as one, is refused", () => {
     const dialed = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
     const answered = must(answer(KEY.bob, TABLE, nonce(2), dialed.hello));
     const finished = must(finish(dialed.link, answered.reply));
@@ -102,7 +102,7 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(asFinish.ok && tagOf(accept(answered.link, asFinish.value))).toBe("unreadable");
   });
 
-  test("a finish made for a connection to Bob is refused by Carol, though she gave the same challenge", () => {
+  test("R-LINK-AUTH a finish made for a connection to Bob is refused by Carol with the same challenge", () => {
     const carol = keyFrom(5);
     const table = [...TABLE, peer(carol, entityOf(8))];
     const dialed = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
@@ -111,7 +111,7 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(tagOf(accept(atCarol.link, forBob))).toBe("bad_signature");
   });
 
-  test("a Runtime that dials its own address cannot be answered with its own reply passed off as the finish", () => {
+  test("R-LINK-AUTH a Runtime dialing itself cannot pass its reply off as the finish", () => {
     const self = [peer(KEY.alice, ALICE)];
     const dialed = dial(KEY.alice, peer(KEY.alice, ALICE), nonce(1));
     const answered = must(answer(KEY.alice, self, nonce(2), dialed.hello));
@@ -120,7 +120,7 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(asFinish.ok && tagOf(accept(answered.link, asFinish.value))).toBe("bad_signature");
   });
 
-  test("a record before the handshake is done, and a handshake move out of order, are refused", () => {
+  test("R-LINK-AUTH a record before the handshake is done, and a move out of order, are refused", () => {
     const dialed = dial(KEY.alice, peer(KEY.bob, BOB), nonce(1));
     const answered = must(answer(KEY.bob, TABLE, nonce(2), dialed.hello));
     const { initiator } = connect(KEY.alice, KEY.bob);
@@ -136,7 +136,7 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
   const { initiator, responder } = connect(KEY.alice, KEY.bob);
   const sealed = must(seal(initiator, ack(ALICE, BOB)));
 
-  test("a record altered in any way is refused: the MAC covers the count and the message", () => {
+  test("R-LINK-AUTH a record altered in any way is refused: the MAC covers the count and the message", () => {
     const text = sealed.data;
     expect(tagOf(openRecord(responder, text.replace('"n":1', '"n":2')))).toBe("bad_mac");
     expect(tagOf(openRecord(responder, text.replace("cdcd", "cdce")))).toBe("bad_mac");
@@ -144,20 +144,20 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
     expect(tagOf(openRecord(responder, '{"_tag":"data"}'))).toBe("unreadable");
   });
 
-  test("a record sealed by another Runtime, and a record turned back on its sender, are refused", () => {
+  test("R-LINK-AUTH a record sealed by another Runtime, or turned back on its sender, is refused", () => {
     const other = connect(KEY.mallory, KEY.bob).initiator;
     expect(tagOf(openRecord(responder, must(seal(other, ack(ALICE, BOB))).data))).toBe("bad_mac");
     expect(tagOf(openRecord(initiator, sealed.data))).toBe("bad_mac");
   });
 
-  test("a record heard twice is dropped the second time, and a later record is still heard", () => {
+  test("R-LINK-AUTH a record heard twice is dropped the second time, and a later record is still heard", () => {
     const heard = must(openRecord(responder, sealed.data));
     expect(openRecord(heard.link, sealed.data)).toEqual(err({ _tag: "replay", count: 1, heard: 1 }));
     const next = must(seal(sealed.link, ack(ALICE, BOB)));
     expect(tagOf(openRecord(heard.link, next.data))).toBe("ok");
   });
 
-  test("a sealed text that is not a message, or is from an Entity the peer does not speak for, is refused", () => {
+  test("R-LINK-AUTH a sealed text that is no message, or is not the peer's to send, is refused", () => {
     const junk = { from: ALICE, to: BOB, msg: { _tag: "ack", hash: "nothex" } } as never;
     expect(tagOf(openRecord(responder, must(seal(initiator, junk)).data))).toBe("unreadable");
     const claimed = must(seal(initiator, ack(MALLORY, BOB)));
@@ -165,7 +165,7 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
     expect(openRecord(responder, claimed.data)).toEqual(refused);
   });
 
-  test("a key that is not a private key is not a key", () => {
+  test("R-LINK-AUTH a key that is not a private key is not a key", () => {
     expect(keyOf(new Uint8Array(32))).toEqual(err({ _tag: "bad_key" }));
     expect(keyOf(new Uint8Array(5))).toEqual(err({ _tag: "bad_key" }));
     expect(keyOf(nonce(1)).ok).toBe(true);
@@ -188,7 +188,7 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
   const aliceHost = world.proposed.hosts.get(ALICE) ?? expect.unreachable("alice");
   const headOf = (host: typeof aliceHost) => host.runtime.entities.get(ALICE)?.accounts.get(BOB)?.head;
 
-  test("the ack of a real frame, sealed by Mallory's session as Bob's, is refused before Host.receive", () => {
+  test("R-LINK-AUTH a real frame's ack, sealed by Mallory's session as Bob's, is refused before Host.receive", () => {
     const fromMallory = connect(KEY.mallory, KEY.alice, [peer(KEY.alice, ALICE), peer(KEY.mallory, MALLORY)]);
     const forged = must(seal(fromMallory.initiator, world.reack));
     const heard = hear(aliceHost, fromMallory.responder, forged.data);
@@ -196,7 +196,7 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
     expect(unhalted(begin(aliceHost, stamp(500n))).effects).toEqual([]);
   });
 
-  test("the same ack on a session Bob's Runtime proved is delivered, and Alice's head moves", () => {
+  test("R-LINK-AUTH the same ack on a session Bob's Runtime proved is delivered, and Alice's head moves", () => {
     const fromBob = connect(KEY.bob, KEY.alice, [peer(KEY.alice, ALICE), peer(KEY.bob, BOB)]);
     const heard = must(hear(aliceHost, fromBob.responder, must(seal(fromBob.initiator, world.reack)).data));
     expect(heard.notices).toEqual([]);
@@ -204,7 +204,7 @@ describe("host/shell/link R-LINK-AUTH a stranger's message does not reach a Host
     expect(headOf(done.host)).not.toBe(headOf(aliceHost));
   });
 
-  test("a frame heard twice in one session, as one record and as two, changes the Account once", () => {
+  test("R-LINK-AUTH a frame heard twice in one session, as one record and as two, changes the Account once", () => {
     const toBob = connect(KEY.alice, KEY.bob, [peer(KEY.alice, ALICE), peer(KEY.bob, BOB)]);
     const bobHost = hostFor(BOB);
     const first = must(seal(toBob.initiator, world.frame));

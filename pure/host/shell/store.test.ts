@@ -17,7 +17,10 @@ import { recordOf } from "./wal.ts";
 const rows = walOf(aliceRun, ALICE);
 const last = rows[rows.length - 1] as Row;
 
-const scratch = (): string => `${mkdtempSync(`${tmpdir()}/wal-`)}/wal.log`;
+const scratch = (): string => {
+  const dir = mkdtempSync(`${tmpdir()}/wal-`);
+  return `${dir}/wal.log`;
+};
 
 const opened = async (path: string): Promise<Disk> => {
   const disk = await fileDisk(path);
