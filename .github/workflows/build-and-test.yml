@@ -175,13 +175,9 @@ jobs:
           cd pure
           bun install --frozen-lockfile
 
-      - name: Runner size
-        run: nproc
-
-      # Four worker processes, a test file in each at a time (the runner of Bun 1.4.0 and later). The same files and tests as a serial run.
       - name: Test
         working-directory: pure
-        run: bun test --parallel=4
+        run: bun test
 
   # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
   gate-seeds:

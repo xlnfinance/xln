@@ -171,7 +171,7 @@ describe("the real workflows", () => {
     expect(gate).toBeDefined();
     const commands = gateJobs(gate?.text ?? "").flatMap((job) => runCommands(jobBlocks(gate?.text ?? "")[job] ?? ""));
     expect(gateJobs(gate?.text ?? "").length).toBeGreaterThanOrEqual(4);
-    expect(commands).toContain("bun test --parallel=4");
+    expect(commands).toContain("bun test");
     expect(commands).toContain("bun rules/check.ts");
     expect(commands).toContain("bash check.sh");
     expect(commands.some((command) => command.endsWith("node test.mjs"))).toBe(true);
