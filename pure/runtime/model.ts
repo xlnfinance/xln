@@ -9,7 +9,7 @@
 import type { ClockParams, JHeight, JView } from "../account/clause/clock.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
-import type { EntityId, EntityInput, EntityState, Notice, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, JAction, Notice, Outbound } from "../entity/model.ts";
 
 /** The Host's clock in milliseconds, as it stamps an input: it orders frames and decides no deadline (R-CLOCK). */
 export type Timestamp = Brand<bigint, "Timestamp">;
@@ -34,7 +34,8 @@ export type RuntimeNotice = Notice | Tagged<"unknown_entity", { entity: EntityId
 
 /** One frame of the WAL. `stamp` is the frame's: the later of the Runtime's last stamp and the input's (never back). */
 export type Row = Readonly<{
-  height: bigint; stamp: Timestamp; input: Input; outputs: readonly Outbound[]; notices: readonly RuntimeNotice[];
+  height: bigint; stamp: Timestamp; input: Input; outputs: readonly Outbound[]; chain: readonly JAction[];
+  notices: readonly RuntimeNotice[];
 }>;
 
 /** What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. */

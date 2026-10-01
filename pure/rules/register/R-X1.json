@@ -44,6 +44,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a row refused for an Entity the Runtime does not host asks nothing of the chain"
   }
  ]
 }
