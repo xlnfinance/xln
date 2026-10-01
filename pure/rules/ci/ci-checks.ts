@@ -8,7 +8,7 @@ import { jobBlocks } from "./ci-steps.ts";
 const unquote = (value: string): string => value.trim().replace(/^(['"])(.*)\1$/, "$2");
 
 // The check names one job reports: one per combination of the matrix keys its name uses.
-const jobCheckNames = (id: string, job: string): readonly string[] => {
+export const jobCheckNames = (id: string, job: string): readonly string[] => {
   const name = unquote(/^ {4}name:\s*(.+)$/m.exec(job)?.[1] ?? id);
   const keys = [...new Set([...name.matchAll(/\$\{\{\s*matrix\.([\w-]+)\s*\}\}/g)].map((match) => match[1]!))];
   const values = (key: string): readonly string[] =>
