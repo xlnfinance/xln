@@ -1558,8 +1558,8 @@
     "arrival": "hold",
     "quint": "owed: #44",
     "contract": "owed: contracts thread (DebtForgiveness.test.ts holds the rule, but no name carries the id)",
-    "rig": "-",
-    "ts": "-"
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "n/a: a fact about the contract as built; the planner only lists the token ids the Account asks for"
    },
    "killers": [
     {
