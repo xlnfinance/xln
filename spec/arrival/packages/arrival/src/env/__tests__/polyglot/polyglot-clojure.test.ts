@@ -86,6 +86,17 @@ describe("@inhuman.tools/arrival/polyglot-clojure — stdlib completion (Bucket 
     expect(await str('(let ((d (dict "a" 1))) (assoc-in d (list "a") 99) (:a d))')).toBe("1");
   });
 
+  it("assoc-in — an existing key keeps its position, a new key goes last; nil mints a dict", async () => {
+    // the state-space checker builds worlds by assoc-in and reads them back in insertion order
+    expect(await str('(dict-keys (assoc-in (dict :a 1 :b 2 :c 3) (list :b) 7))')).toBe("(a b c)");
+    expect(await str('(dict-keys (assoc-in (dict :a 1 :b 2) (list :z) 7))')).toBe("(a b z)");
+    expect(await str('(:b (assoc-in (dict :a 1 :b 2 :c 3) (list :b) 7))')).toBe("7");
+    // a keyword and a string name the same slot
+    expect(await str('(dict-count (assoc-in (dict :a 1) (list "a") 4))')).toBe("1");
+    expect(await str('(:a (assoc-in (dict :a 1) (list "a") 4))')).toBe("4");
+    expect(await str('(get-in (assoc-in nil (list :q :r) 3) (list :q :r))')).toBe("3");
+  });
+
   it("zipmap — a dict pairing keys with vals at the same position", async () => {
     expect(await str('(:a (zipmap (list "a" "b") (list 1 2)))')).toBe("1");
     expect(await str('(:b (zipmap (list "a" "b") (list 1 2)))')).toBe("2");

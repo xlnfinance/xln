@@ -6,7 +6,7 @@
    "statement": "The Entity frame is a fixed pipeline: arrivals apply, then hooks and txs run over the post-arrival Accounts, then Account work is proposed.",
    "source": "lessons.md section 0",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -18,6 +18,11 @@
      "layer": "quint",
      "name": "hooks-read-pre-arrival",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "arrivals-in-place"
     }
    ]
   },
@@ -26,7 +31,7 @@
    "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts.",
    "source": "lessons.md section 1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -42,8 +47,12 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "full-halts",
-     "owed": "#41"
+     "name": "full-halts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "bad-halts"
     }
    ]
   },
@@ -252,8 +261,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "core-rcpan-no-floor",
-     "owed": "#41"
+     "name": "core-rcpan-no-floor"
     },
     {
      "kind": "test",
@@ -282,7 +290,7 @@
    "statement": "Txs a hook returns join the frame's Account work in a fixed order: the wake's approved txs first, then its returned Account txs; each Account is proposable at first touch.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -290,10 +298,9 @@
    },
    "killers": [
     {
-     "kind": "test",
+     "kind": "bug",
      "layer": "arrival",
-     "name": "to be named",
-     "owed": "thread 'Account spec comparison'"
+     "name": "txs-before-hooks"
     }
    ]
   },
@@ -322,7 +329,7 @@
    "statement": "The publication order of Account work is first-touch, never Account id.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -330,10 +337,9 @@
    },
    "killers": [
     {
-     "kind": "test",
+     "kind": "bug",
      "layer": "arrival",
-     "name": "to be named",
-     "owed": "thread 'Account spec comparison'"
+     "name": "sorted-proposals"
     }
    ]
   },
@@ -487,8 +493,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-hop-margin",
-     "owed": "#41"
+     "name": "no-hop-margin"
     },
     {
      "kind": "mutant",
@@ -513,8 +518,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "omits-secret",
-     "owed": "#41"
+     "name": "omits-secret"
     }
    ]
   },
@@ -682,7 +686,7 @@
    "statement": "An unrevealed HTLC settles as unpaid only at its deadline: a finalize waits until block.timestamp passes the payment deadline unless the secret is already public.",
    "source": "contracts-decisions.md H1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -703,8 +707,17 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-h1",
-     "owed": "#41"
+     "name": "no-h1"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-at-deadline"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-ignores-secret"
     }
    ]
   },
@@ -735,10 +748,10 @@
   },
   {
    "id": "H3",
-   "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed.",
+   "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed. The Arrival cell holds the one-way clamp only (spec/dispute/dispute.scm, bugs h3-no-clamp and h3-symmetric); the 7-day evidence window is on no spec page.",
    "source": "contracts-decisions.md H3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "hold",
     "rig": "-",
@@ -753,14 +766,12 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "h3-no-clamp",
-     "owed": "#41"
+     "name": "h3-no-clamp"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "h3-symmetric",
-     "owed": "#41"
+     "name": "h3-symmetric"
     }
    ]
   },
@@ -788,7 +799,7 @@
    "statement": "A stale or already-applied dispute op is skipped inside processBatch with DisputeOpSkipped; the rest of the batch lands; the runtime reads the skip event.",
    "source": "contracts-decisions.md J2",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -811,6 +822,16 @@
      "layer": "quint",
      "name": "entity-ignores-the-skip-event",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "stale-reverts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-skip"
     }
    ]
   },
@@ -819,7 +840,7 @@
    "statement": "A batch with no dispute, reveal, ladder or deposit op that cannot apply fails soft: nothing else moves, the nonce is consumed, BatchFailed is emitted; the signed gas budget makes the outcome the signer's.",
    "source": "contracts-decisions.md J5",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -842,6 +863,16 @@
      "layer": "quint",
      "name": "entity-ignores-batch-failed",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "failure-no-nonce"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-batch-failed"
     }
    ]
   },
@@ -850,7 +881,7 @@
    "statement": "A deposit leg hard-reverts on failure and travels alone in its batch.",
    "source": "contracts-decisions.md J6",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -872,6 +903,16 @@
      "layer": "quint",
      "name": "deposit-signed-without-simulation",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "legs-bundled"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "leg-soft"
     }
    ]
   },
@@ -896,8 +937,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resign-at-nonce",
-     "owed": "#41"
+     "name": "resign-at-nonce"
     },
     {
      "kind": "test",
@@ -952,7 +992,7 @@
    "statement": "Two co-signed proofs at one proof nonce: LEFT's proposal outranks RIGHT's, whoever presents first (accepted as is, pinned by tests).",
    "source": "contracts-decisions.md A12",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -969,6 +1009,11 @@
      "layer": "quint",
      "name": "supersession-reversed",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "tie-break-inverted"
     }
    ]
   },
@@ -1034,7 +1079,7 @@
    "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one.",
    "source": "contracts-decisions.md H1 open point; Arrival Q-D-20; Quint A9",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1044,8 +1089,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-horizon",
-     "owed": "#41"
+     "name": "no-horizon"
     },
     {
      "kind": "mutant",
@@ -1079,7 +1123,7 @@
    "statement": "Urgent ops go in a batch at a fresh nonce; signed batches never expire.",
    "source": "contracts-decisions.md J2/F1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -1089,8 +1133,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resign-at-nonce",
-     "owed": "#41"
+     "name": "resign-at-nonce"
     },
     {
      "kind": "mutant",
@@ -1102,10 +1145,10 @@
   },
   {
    "id": "R-SPLIT",
-   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops.",
+   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
    "source": "contracts-decisions.md J5 (spec rule)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -1132,6 +1175,11 @@
      "layer": "quint",
      "name": "urgent-batch-carries-payments",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "mixed-batch"
     }
    ]
   },
@@ -1140,7 +1188,7 @@
    "statement": "A batch with a co-signed op carries ops of that one Account only (a counterparty's state change can fail a batch, and failure burns the nonce).",
    "source": "contracts-decisions.md B1 / R-COSIGN",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1150,8 +1198,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "cosign-bundle",
-     "owed": "#41"
+     "name": "cosign-bundle"
     },
     {
      "kind": "mutant",
@@ -1176,8 +1223,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "signs-before-gate",
-     "owed": "#41"
+     "name": "signs-before-gate"
     },
     {
      "kind": "mutant",
@@ -1228,10 +1274,10 @@
   },
   {
    "id": "R-CLOCK",
-   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp.",
+   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
    "source": "contracts-decisions.md (memory, #57)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1241,14 +1287,23 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-by-frame-stamp",
-     "owed": "#41"
+     "name": "expire-by-frame-stamp"
     },
     {
      "kind": "mutant",
      "layer": "quint",
      "name": "receiver-judges-by-the-frame-stamp",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-late"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-future"
     }
    ]
   },
@@ -1257,7 +1312,7 @@
    "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit.",
    "source": "contracts-decisions.md (memory, #62)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1267,8 +1322,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "unfunded-payments",
-     "owed": "#41"
+     "name": "unfunded-payments"
     },
     {
      "kind": "mutant",
@@ -1283,7 +1337,7 @@
    "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
    "source": "contracts-decisions.md (memory)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1293,8 +1347,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "r2c-skips-enforcement",
-     "owed": "#41"
+     "name": "r2c-skips-enforcement"
     },
     {
      "kind": "mutant",
@@ -1345,8 +1398,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "reack-open-only",
-     "owed": "#41"
+     "name": "reack-open-only"
     },
     {
      "kind": "mutant",
@@ -1371,7 +1423,7 @@
    "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -1381,38 +1433,32 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-at-deadline",
-     "owed": "#41"
+     "name": "expire-at-deadline"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-no-reserve",
-     "owed": "#41"
+     "name": "expire-no-reserve"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resolve-by-chain-height",
-     "owed": "#41"
+     "name": "resolve-by-chain-height"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "payee-idle",
-     "owed": "#41"
+     "name": "payee-idle"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resolve-late-by-stamp",
-     "owed": "#41"
+     "name": "resolve-late-by-stamp"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-by-frame-stamp",
-     "owed": "#41"
+     "name": "expire-by-frame-stamp"
     },
     {
      "kind": "mutant",
@@ -1753,8 +1799,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "skip-revalidation",
-     "owed": "#41"
+     "name": "skip-revalidation"
     },
     {
      "kind": "mutant",
@@ -1799,8 +1844,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "commit-any-frame",
-     "owed": "#41"
+     "name": "commit-any-frame"
     },
     {
      "kind": "mutant",
@@ -1845,8 +1889,7 @@
     {
      "kind": "test",
      "layer": "arrival",
-     "name": "reorder",
-     "owed": "#41"
+     "name": "reorder"
     },
     {
      "kind": "test",
@@ -2377,6 +2420,105 @@
    ]
   },
   {
+   "id": "R-GATE-CI-DRIFT",
+   "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
+   "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the planted baseline agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
+    }
+   ]
+  },
+  {
    "id": "R-SETTLE-CREDIT",
    "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
@@ -2520,10 +2662,10 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
-    "arrival": "owed: #41 (coordinator 09-30)",
+    "arrival": "hold",
     "quint": "owed: #44 (coordinator 09-30)",
     "contract": "-",
     "rig": "-",
@@ -2564,6 +2706,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "duplicate-hashlock"
     }
    ]
   },
@@ -2799,8 +2946,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "counter-shortens-window",
-     "owed": "#41"
+     "name": "counter-shortens-window"
     },
     {
      "kind": "mutant",
@@ -2972,6 +3118,305 @@
      "layer": "ts",
      "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
      "owed": "the cut (Entity and Runtime)"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-PRICE-TIME",
+   "statement": "An order trades against the best-priced resting offers it reaches, the earlier offer first within a price, and every trade is at the resting offer's price.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME the best price fills first, and the earlier offer first within a price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a trade is at the resting offer's price, so the taker gets any improvement"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a seller meets the highest bids first, and a bid below its limit is out of reach"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a resting order joins behind the equal prices and in front of the worse ones"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-LOTS-CONSERVED",
+   "statement": "Every lot of an order is either filled (and leaves its maker's offer by the same lots), rests, or is dropped with a reason; no lot is created or lost.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a partial fill leaves the maker's rest in place, at the front of its price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a taker's unfilled lots rest, and the fills plus the rest are the order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED an offer that fills exactly leaves the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NEVER-CROSSED",
+   "statement": "After every order and cancel, the best buy in a hub book is priced below its best sell.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SELF-TRADE",
+   "statement": "An order never trades with an offer of its own owner: the sweep stops at it and the rest is dropped; an all-or-nothing order that would is refused.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SILENT-DROP",
+   "statement": "Every lot an order does not trade is named in its result (rested or dropped with a reason), and every refusal carries a tagged fault.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an id names one offer in the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-ALL-OR-NOTHING",
+   "statement": "An all-or-nothing order trades whole or is refused with the lots it could fill, and the book is unchanged.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-ALL-OR-NOTHING an order that cannot fill whole is refused with what it could fill"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-BOUNDED",
+   "statement": "A hub book holds at most maxOrders offers and an owner at most maxPerOwner; only an order that may rest needs room, and a cancel frees it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an owner holds at most maxPerOwner offers, and the book at most maxOrders"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an order that cannot rest needs no room, and a cancel gives the room back"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CANCEL-OWN",
+   "statement": "Only an offer's owner takes it back, and the book returns what it took.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CANCEL-OWN only the owner takes an offer back, and what it took is returned"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CLAUSE-LOCKSTEP",
+   "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-EXACT-AMOUNTS",
+   "statement": "Every amount of a fill is an exact integer (lots times the lot, lots times price times the tick) and fits a uint256; across the parties of one order, what is given in each token is what is gotten in it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS a buyer gives quote and gets base at the maker's price, each leg exact"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS the steps scale the amounts, and a clause is its lots at its own price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS what the parties give in each token is what they get in it"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-DISPUTE-HONORS",
+   "statement": "A dispute opened from any Account state the book produced pays each side what both signed: the moved offdeltas, plus (when the taker fills the open clauses in full) exactly the lots still open at the owners' own prices.",
+   "source": "Hub matching engine review B (PR 92), on Arthur's 10-01 02:53 swap decision (a dispute honors what was filled) and plan/swap-onchain.md",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a dispute from any state the book put an Account in pays what both believed"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a taker's partial ratio rounds each leg down, and the engine's remainder clause never needs one"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
     }
    ]
   },
