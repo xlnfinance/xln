@@ -3694,6 +3694,115 @@
      "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
     }
    ]
+  },
+  {
+   "id": "R-DEPLOY-VERIFY",
+   "statement": "A deployed manifest is checked against its chain by one read-only command (contracts/deploy/verify.ts: eth_chainId, eth_blockNumber, eth_getCode, no key, nothing behind --live): each contract's runtime code is rebuilt from the compiled artifact with its library links and immutables filled, compared byte for byte with the chain's code and by keccak256 with the manifest's codeHash; any difference, an artifact older than the sources it imports, or a node on another chain is not a match, and the exit code is 0 only when every contract matches. The gate runs it against a fake node; whether main still equals Sepolia is the command's answer, not a gate test.",
+   "source": "coordinator 10-01 08:23 (the progress report cannot call the Sepolia deployment done while nothing compares the deployed code with the current build)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY every contract and the faucet token match, with the manifest's code hashes"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the immutables and link slots are rebuilt from the manifest: the Depository holds 8+4 deploy addresses, the admin once, and 14 library links"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a library's own-address immutable is its deployed address; the token's immutable is its decimals"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one flipped byte of compiled code: that contract differs at that byte, as compiled code, and no other contract does"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a wrong admin in the Depository's immutable slot is named as the admin immutable"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a different library address in a link slot is named as that library's link slot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an address with no code, and code that is cut short or has a tail added, differ"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY code that equals the build but not the manifest's code hash differs too (the manifest names another deployment)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a manifest address that points at another contract's code differs, even though that code is a deployed contract of ours"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node on another chain is refused, not read"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an artifact older than its source is refused, not compared"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an immutable the check does not know the value of is an error, not a pass"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a matching chain prints nine matches and exits 0; only the three read methods are ever called"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one differing contract is printed as differ with its first differing byte, the others still match, and the exit is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node that cannot be read, and a node on the wrong chain, exit 2 and print no match"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY it never reads a key: the environment's DEPLOYER_PRIVATE_KEY does not reach its output, and its source holds no signer and no write call"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the EntityProvider the fake chain serves holds the manifest's deployer in both foundationDeployer slots"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a difference in the very last byte of any contract's code, the faucet token's included, is a differ at that byte"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import"
+    }
+   ]
   }
  ]
 }
