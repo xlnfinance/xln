@@ -81,6 +81,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "halt-on-refusal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-X1 a row refused for an Entity the Runtime does not host asks nothing of the chain"
     }
    ]
   },
@@ -1421,6 +1426,11 @@
      "name": "expire-by-frame-stamp"
     },
     {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-judges-by-the-frame-stamp"
+    },
+    {
      "kind": "bug",
      "layer": "arrival",
      "name": "refuse-late"
@@ -1474,11 +1484,6 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-CLOCK a new height of J moves the stamp: a later input stamped earlier does not go back"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "receiver-judges-by-the-frame-stamp"
     }
    ]
   },
@@ -1611,6 +1616,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "ack-before-persist"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DURABLE a flush after a crash asks for the rows in row order, each row's own actions in order"
     }
    ]
   },
@@ -1825,6 +1835,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "escalation-too-late"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a resolve names the hold of its own token: the same slot in another token is not it"
     }
    ]
   },
@@ -3533,6 +3548,26 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a repeated lapse of the first operation thaws nothing while the second is out"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE a report naming an operation never signed changes nothing, the right one thaws"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN-FREEZE the serial goes on when the epoch moves: the next operation is not the first again"
     },
     {
      "kind": "test",

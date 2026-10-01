@@ -97,8 +97,8 @@ const chainId = (action: JAction): string =>
     reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}`,
     deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
     counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
-    c2r: (c) => `c2r ${c.peer} ${c.token} ${c.amount}`,
-    settle: (s) => `settle ${s.peer} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,
+    c2r: (c) => `c2r ${c.peer} ${c.serial} ${c.token} ${c.amount}`,
+    settle: (s) => `settle ${s.peer} ${s.serial} ${s.token} ${s.amount} ${s.folds.map(foldId).join(",")}`,
   });
 
 const chainIds = (row: Row): readonly string[] => row.chain.map(chainId);

@@ -10,7 +10,8 @@ import type { AccountState } from "../account/model.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  cosignFrozen, cosignLapsed, depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, proofNonce,
+  cosignFrozen, cosignLapsed, depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, nextSerial,
+  proofNonce,
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
@@ -104,7 +105,7 @@ const observed = (w: Work, e: JEvent): Work => {
     case "j_dispute_over":
       return withFacts(w, e.peer, disputeOver(facts));
     case "j_op_lapsed":
-      return withFacts(w, e.peer, cosignLapsed(facts));
+      return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
   }
 };
 
@@ -114,7 +115,7 @@ const cosigning = (w: Work, a: CosignAsk): Work => {
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
   const facts = factsOf(w, a.from);
   const fault = cosignFault(account, facts, a.op.amount);
-  const action = askedOf(a.from, a.op, foldsOf(account.state));
+  const action = askedOf({ peer: a.from, serial: nextSerial(facts) }, a.op, foldsOf(account.state));
   if (fault !== undefined) return noting(w, { _tag: "cosign_refused", from: a.from, op: a.op, fault });
   return action.ok
     ? asked(withFacts(w, a.from, cosignFrozen(facts)), action.value)
@@ -205,7 +206,8 @@ const withdrawn = (w: Work, command: Extract<ChainCommand, { _tag: "withdraw" }>
   if (account === undefined || fault !== undefined) {
     return refusedCommand(w, command, fault ?? { _tag: "no_account", peer });
   }
-  return asked(withFacts(w, peer, cosignFrozen(facts)), withdrawalOf(peer, token, amount, foldsOf(account.state)));
+  const op = withdrawalOf({ peer, serial: nextSerial(facts) }, token, amount, foldsOf(account.state));
+  return asked(withFacts(w, peer, cosignFrozen(facts)), op);
 };
 
 /** A command about the chain needs an Account with the peer, as an Account command does. */

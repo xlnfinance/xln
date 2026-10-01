@@ -58,9 +58,12 @@ export type Windows = Readonly<{ left: bigint; right: bigint }>;
  * from an earlier proof): the epoch and the stored nonce the chain is at, how many frames have been co-signed since the
  * epoch began, the windows its signed proofs carry, whether a dispute the peer started is open against it, and whether
  * the node has co-signed a settlement or a collateral-to-reserve that has not landed yet (`frozen`, R-COSIGN-FREEZE).
+ * `cosigned` counts the operations the node has co-signed on this Account, for good: the `cosigned`-th is the serial
+ * its action carries, and the only one whose lapse ends a freeze.
  */
 export type ChainFacts = Readonly<{
   epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean; frozen: boolean;
+  cosigned: bigint;
 }>;
 
 // What a frame takes in.
@@ -71,13 +74,14 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`;
  * `j_dispute_over` is that dispute countered or finalized; `j_op_lapsed` is a co-signed settlement or withdrawal
- * that can no longer land (its batch reverted, its signatures ran out).
+ * that can no longer land (its batch reverted, its signatures ran out), named by the serial its action carried: a
+ * report of an operation that is not the one out (a repeat, or an older one) changes nothing.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side }>
   | Tagged<"j_dispute_over", { peer: EntityId }>
-  | Tagged<"j_op_lapsed", { peer: EntityId }>;
+  | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */
 export type CosignOp =
@@ -122,8 +126,8 @@ export type JAction =
   | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
   | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>
-  | Tagged<"c2r", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"settle", { peer: EntityId; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
+  | Tagged<"c2r", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint }>
+  | Tagged<"settle", { peer: EntityId; serial: bigint; token: TokenId; amount: bigint; folds: readonly Fold[] }>;
 
 /** The offdelta of a token that a settlement folds into its ondelta, so that the epoch advance cannot erase it. */
 export type Fold = Readonly<{ token: TokenId; offdelta: bigint }>;

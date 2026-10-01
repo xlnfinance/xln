@@ -257,7 +257,7 @@ const chainStep = (c: Chaos, w: World, step: number): World => {
   const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
   const op = signer === undefined ? undefined : outstanding(w.hosts[signer]);
   if (signer === undefined || op === undefined) return w;
-  const lapse: EntityInput = { _tag: "j_op_lapsed", peer: ID[PEER[signer]] };
+  const lapse: EntityInput = { _tag: "j_op_lapsed", peer: ID[PEER[signer]], serial: op.serial };
   switch (draw(c.seed, c.run, step, 9, 6)) {
     case 0: return NAMES.every((n) => idle(w.hosts[n])) ? landed(c.ops, w) : w;
     case 1: return NAMES.every((n) => idle(w.hosts[n])) ? risen(c.ops, told(c.ops, w, signer, lapse)) : w;

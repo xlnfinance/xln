@@ -27,18 +27,22 @@ export const cosignFault = (account: EntityReplica, facts: ChainFacts, amount: b
   return { _tag: "account_refused", fault: { _tag: "bad_amount", amount } };
 };
 
-const c2r = (peer: EntityId, token: TokenId, amount: bigint): JAction => ({ _tag: "c2r", peer, token, amount });
+/** The operation as it goes to the chain: with its serial, which the Host echoes if it lapses. */
+export type Serialed = Readonly<{ peer: EntityId; serial: bigint }>;
 
-const settle = (peer: EntityId, token: TokenId, amount: bigint, folds: readonly Fold[]): JAction =>
-  ({ _tag: "settle", peer, token, amount, folds });
+const c2r = ({ peer, serial }: Serialed, token: TokenId, amount: bigint): JAction =>
+  ({ _tag: "c2r", peer, serial, token, amount });
+
+const settle = ({ peer, serial }: Serialed, token: TokenId, amount: bigint, folds: readonly Fold[]): JAction =>
+  ({ _tag: "settle", peer, serial, token, amount, folds });
 
 /** The node's own withdrawal: the shortcut when there is nothing to fold, otherwise the settlement that folds it. */
-export const withdrawalOf = (peer: EntityId, token: TokenId, amount: bigint, folds: readonly Fold[]): JAction =>
-  (folds.length === 0 ? c2r(peer, token, amount) : settle(peer, token, amount, folds));
+export const withdrawalOf = (at: Serialed, token: TokenId, amount: bigint, folds: readonly Fold[]): JAction =>
+  (folds.length === 0 ? c2r(at, token, amount) : settle(at, token, amount, folds));
 
 /** A peer's ask: the shortcut only while there is nothing to fold; a settlement folds what the node's state says. */
-export const askedOf = (peer: EntityId, op: CosignOp, folds: readonly Fold[]): Result<JAction, EntityFault> =>
+export const askedOf = (at: Serialed, op: CosignOp, folds: readonly Fold[]): Result<JAction, EntityFault> =>
   match(op, {
-    c2r: (o) => (folds.length === 0 ? ok(c2r(peer, o.token, o.amount)) : err({ _tag: "unfolded_c2r", folds })),
-    settle: (o) => ok(settle(peer, o.token, o.amount, folds)),
+    c2r: (o) => (folds.length === 0 ? ok(c2r(at, o.token, o.amount)) : err({ _tag: "unfolded_c2r", folds })),
+    settle: (o) => ok(settle(at, o.token, o.amount, folds)),
   });
