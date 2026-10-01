@@ -136,6 +136,7 @@ Do not duplicate or weaken it.
 ## GIT AND SHARED WORKSPACE
 
 - Work and push on `main` only. No branch/worktree unless the owner explicitly requests it.
+- The testnet stage works through `development`, three lanes and promotion snapshots: `docs/process-lanes.md` says how, and applies there.
 - Preserve unrelated user changes. Checkpoint commits may use `wip:` when L1/L2 is not green.
 - Before a shared-tree commit, stop concurrent writers, run formatting and `git diff --check`.
 - Never push without the relevant L1/L2 evidence and `bun run check`.
