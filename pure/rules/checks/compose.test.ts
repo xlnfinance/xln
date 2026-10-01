@@ -8,13 +8,15 @@ import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 import { HARDHAT_ONLY } from "./contract-tests.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
-  const green = { register: true, style: true, width: true, tests: true };
+  const green = { register: true, style: true, width: true, tests: true, forge: true, bun: true };
 
   test("all parts passing is 0", () => expect(gateExit(green)).toBe(0));
   test("R-GATE-COMPOSE a failing register alone is 1", () => expect(gateExit({ ...green, register: false })).toBe(1));
   test("a failing style gate alone is 1", () => expect(gateExit({ ...green, style: false })).toBe(1));
   test("a failing folder width alone is 1", () => expect(gateExit({ ...green, width: false })).toBe(1));
   test("a failing contract-test placement alone is 1", () => expect(gateExit({ ...green, tests: false })).toBe(1));
+  test("R-GATE-FORGE a red Foundry suite alone is 1", () => expect(gateExit({ ...green, forge: false })).toBe(1));
+  test("a failing Bun version alone is 1", () => expect(gateExit({ ...green, bun: false })).toBe(1));
 });
 
 const pureRoot = `${import.meta.dir}/../..`;
@@ -132,16 +134,20 @@ describe("the real command over a scratch copy", () => {
 });
 
 describe("which parts a command line runs", () => {
-  const PARTS: readonly Part[] = ["register", "style", "width", "tests"];
+  const PARTS: readonly Part[] = ["register", "style", "width", "tests", "forge", "bun"];
   const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
 
-  test("R-GATE-COMPOSE the plain command runs every part", () => expect(ran()).toEqual(["register", "style", "width", "tests"]));
+  test("R-GATE-COMPOSE the plain command runs every part", () =>
+    expect(ran()).toEqual(["register", "style", "width", "tests", "forge", "bun"]));
   test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
   test("each --X-only flag runs that part alone", () => {
     expect(ran("--register-only")).toEqual(["register"]);
     expect(ran("--style-only")).toEqual(["style"]);
     expect(ran("--width-only")).toEqual(["width"]);
     expect(ran("--tests-only")).toEqual(["tests"]);
+    expect(ran("--forge-only")).toEqual(["forge"]);
+    expect(ran("--bun-only")).toEqual(["bun"]);
   });
-  test("a flag that is not a part flag changes nothing", () => expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests"]));
+  test("a flag that is not a part flag changes nothing", () =>
+    expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests", "forge", "bun"]));
 });

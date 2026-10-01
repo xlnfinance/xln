@@ -7,11 +7,15 @@
 //   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
+//   --forge-only             run only the Foundry suite (rules/checks/forge.ts): forge in PATH (export PATH=$PATH:/foundry), contracts/lib/forge-std checked out
 //   --tests-only             run only contract-test placement: every contract test runs in a gate (rules/checks/contract-tests.ts)
-// Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts) and contract-test
-// placement (rules/checks/contract-tests.ts): one command, one exit code.
+//   --bun-only               run only the Bun version check (rules/checks/bun/bun-version.ts)
+// Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts), contract-test
+// placement (rules/checks/contract-tests.ts), the Foundry suite (rules/checks/forge.ts) and the Bun version
+// (rules/checks/bun/bun-version.ts): one command, one exit code. The Bun version is judged first, so a Bun that is too old fails at
+// the start, not after the long parts.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
-// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, or a contract test sits in no gate folder. See plan/first-moves.md, brief 3.
+// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, a contract test sits in no gate folder, or a forge test is red. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -22,7 +26,9 @@ import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
 import { gateExit, isWanted, selectionOf, type Part } from "./checks/compose.ts";
+import { bunReport } from "./checks/bun/bun-version.ts";
 import { contractTestsReport } from "./checks/contract-tests.ts";
+import { forgeReport } from "./checks/forge.ts";
 import { folderWidthReport } from "./checks/folder-width.ts";
 import { renderTreeStyle, treeStyle } from "./tree/gate.ts";
 
@@ -44,8 +50,20 @@ const runFolderWidth = (): boolean => {
   return !report.failed;
 };
 
+const runBun = (): boolean => {
+  const report = bunReport(Bun.version, readFileSync(`${here}/../package.json`, "utf8"));
+  console.log(report.line);
+  return !report.failed;
+};
+
 const runContractTests = (): boolean => {
   const report = contractTestsReport(repoRoot);
+  report.lines.forEach((line) => console.log(line));
+  return !report.failed;
+};
+
+const runForgeSuite = (): boolean => {
+  const report = forgeReport(repoRoot);
   report.lines.forEach((line) => console.log(line));
   return !report.failed;
 };
@@ -104,7 +122,24 @@ const runRegister = (): boolean => {
 const selection = selectionOf(args);
 
 // One table for every way in; `isWanted` says which parts the command line runs. A part that does not run counts as passed.
-const PARTS: Readonly<Record<Part, () => boolean>> = { register: runRegister, style: runStyle, width: runFolderWidth, tests: runContractTests };
+const PARTS: Readonly<Record<Part, () => boolean>> = {
+  register: runRegister,
+  style: runStyle,
+  width: runFolderWidth,
+  tests: runContractTests,
+  forge: runForgeSuite,
+  bun: runBun,
+};
 const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
 
-process.exit(gateExit({ register: passes("register"), style: passes("style"), width: passes("width"), tests: passes("tests") }));
+// Object properties evaluate in order: bun first, then the quick parts, the Foundry suite last.
+process.exit(
+  gateExit({
+    bun: passes("bun"),
+    register: passes("register"),
+    style: passes("style"),
+    width: passes("width"),
+    tests: passes("tests"),
+    forge: passes("forge"),
+  }),
+);
