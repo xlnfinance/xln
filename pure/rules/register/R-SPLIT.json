@@ -1,13 +1,13 @@
 {
  "id": "R-SPLIT",
- "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Quint cell holds urgent ops apart from payments (urgent-batch-carries-payments); co-signed ops and deposits travel apart under R-COSIGN and J6, and reserve ops are not a kind in the model. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
+ "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Quint cell holds urgent ops apart from payments (urgent-batch-carries-payments); co-signed ops and deposits travel apart under R-COSIGN and J6, and reserve ops are not a kind in the model. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page. The TS builder has no hash-ladder registration op kind either: the split of that kind is not checked there (J builder backlog).",
  "source": "contracts-decisions.md J5 (spec rule)",
  "layers": {
   "arrival": "hold",
   "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -34,6 +34,11 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "mixed-batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SPLIT dispute, reveal and deposit ops never share a batch with payment, settlement or reserve ops"
   }
  ]
 }
