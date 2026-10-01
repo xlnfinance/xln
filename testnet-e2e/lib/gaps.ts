@@ -37,12 +37,6 @@ export const GAPS = {
     supplier: "transport thread: J watcher deposit and collateral events (slice 2); the cut thread: the Entity side that turns them into the Account's collateral and ondelta",
     landed: () => mentions("entity", /j_deposit|j_collateral/) || mentions("j", /deposit_confirmed|collateral_funded/),
   },
-  jActionOps: {
-    id: "j-action-ops", kind: "scaffold", layer: "Host",
-    piece: "The Host's `chain` effect to the J batch builder: a JAction (deposit, reveal, counter, c2r, settle) becomes a JOp, is queued, sealed and sent. The harness converts the two actions this run asks for (deposit to reserve_to_collateral, reveal to reveal_secret) by hand, and queues them itself.",
-    supplier: "transport thread, Host shell: the `chain` effect handed to pure/j/batch (the J builder thread owns the queue)",
-    landed: () => has("host/chain.ts") || has("host/shell/chain.ts"),
-  },
   jLoop: {
     id: "j-loop", kind: "scaffold", layer: "Host",
     piece: "The J loop: fetch blocks and logs, answer the watcher's readings by block hash (EIP-1898), hand the Runtime the J events and then the height, and move the cursor only after a committed j_height row holds the height. pure/j/watch.ts is the core; the harness runs the loop in memory against anvil, at depth 1.",
@@ -51,7 +45,7 @@ export const GAPS = {
   },
   hostShell: {
     id: "host-shell", kind: "scaffold", layer: "Host",
-    piece: "The Host's shell: a disk that keeps rows before outputs leave, a link between peers, a peer table (Q-T-4), and the keys that sign (R-LINK-AUTH). The harness keeps rows in an array, the link is a list that loses nothing, and it signs the digest of a frame head with a party's key when the chain needs the signature.",
+    piece: "The Host's shell: a disk that keeps rows before outputs leave, a link between peers, a peer table (Q-T-4), the keys that sign (R-LINK-AUTH), and the submit path to the chain: the `chain` effect queued in the J builder, the simulation answered at the head, the Hanko, the send, the events read back (the op itself is pure/host/ops.ts). The harness keeps rows in an array, the link is a list that loses nothing, it runs the submit path in lib/chain.ts, and it signs the digest of a frame head with a party's key when the chain needs the signature.",
     supplier: "transport thread: file and socket shell in pure/host/shell/",
     landed: () => has("host/shell"),
   },
@@ -59,7 +53,8 @@ export const GAPS = {
     id: "per-account-signing", kind: "missing", layer: "Runtime",
     piece: "One SigningContext per Account (R-FRAME-SIGNATURE-NAMES-ACCOUNT): a Runtime's Setup carries ONE for every Account of every Entity it hosts. All four Runtimes here sign under the alice-hubX Account's key and epoch, so only alice-hubX frames are valid proofs for the chain; hubX-hubY and hubY-bob frames name the wrong Account.",
     supplier: "the cut thread: per-Account context, before multi-hop",
-    landed: () => !/signing: SigningContext/.test(readFileSync(join(PURE, "runtime", "model.ts"), "utf8")),
+    // True when Setup no longer holds the one `signing: SigningContext` (a rename of the field does not trip it).
+    landed: () => !/export type Setup = Readonly<\{[^}]*\bsigning:\s*SigningContext\s*[;}]/.test(readFileSync(join(PURE, "runtime", "model.ts"), "utf8")),
   },
   ledgerRebase: {
     id: "ledger-rebase", kind: "missing", layer: "Entity",
