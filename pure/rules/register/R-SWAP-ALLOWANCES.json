@@ -1,0 +1,19 @@
+{
+ "id": "R-SWAP-ALLOWANCES",
+ "statement": "Each swap clause in the proof body carries an allowance on both tokens, sized to what remains (a Left maker's give lowers Left's delta, its want raises it; a Right maker's the inverse), or the finalize would revert (R-SWAP-ONCHAIN). The clause follows the payment clauses, swap clauses in slot order, deltaIndex = token position, and shrinks with every fill.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "owed: spec thread, swap page",
+  "quint": "owed: spec thread",
+  "contract": "owed: contracts review (R-SWAP-ONCHAIN: a finalize at the same ratio moves the same amounts as this rule; plan/swap-onchain.md)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-ALLOWANCES the clause carries an allowance for both tokens, sized to the rest"
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+{
+ "id": "R-SWAP-OFFER",
+ "statement": "Either side offers its own funds for the other's: `offer` names a maker, a give leg and a want leg in two different tokens (same_token), amounts in 1..MAX_AMOUNT, a slot of its own (offer_exists) and a deadline in range (N2). The maker's give is reserved against the maker in its token and the taker's want against the taker in the other, each only if its RCPAN still holds, so a fill can never fail on funds. An offer is one clause against R-HOLD-CAP together with the holds, across tokens.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "owed: spec thread, swap page",
+  "quint": "owed: spec thread",
+  "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved"
+  }
+ ]
+}

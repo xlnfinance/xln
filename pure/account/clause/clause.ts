@@ -6,7 +6,7 @@ import { err, flatMap, map, ok, type Result } from "../../kernel/core/result.ts"
 import { keccakHex } from "../../kernel/encoding/bytes.ts";
 import { expire, lock, resolve } from "../ledger.ts";
 import { other, type AccountFault, type ClauseHold, type Hold, type HoldId, type Ledger, type Side } from "../model.ts";
-import { expirableAt, latestDeadline, liveAt, type ClockParams, type JView } from "./clock.ts";
+import { expirableAt, latestDeadline, liveAt, type ClockParams, type JHeight, type JView } from "./clock.ts";
 
 type Step = Result<Ledger, AccountFault>;
 
@@ -39,11 +39,15 @@ const hashlockFree = (l: Ledger, hold: Hold): Result<Hold, AccountFault> => {
   return open === undefined ? ok(hold) : err({ _tag: "lock_exists", id: open.id });
 };
 
-const opensAt = (p: ClockParams, view: JView, hold: Hold): Result<Hold, AccountFault> => {
-  if (hold.deadline <= view) return err({ _tag: "deadline_past", deadline: hold.deadline, view });
+/** A new clause's deadline is after the party's own view and no further than the horizon (N2, R-HORIZON-RESERVE). */
+export const deadlineInRange = (p: ClockParams, view: JView, deadline: JHeight): Result<JHeight, AccountFault> => {
+  if (deadline <= view) return err({ _tag: "deadline_past", deadline, view });
   const latest = latestDeadline(p, view);
-  return hold.deadline > latest ? err({ _tag: "deadline_too_far", deadline: hold.deadline, latest }) : ok(hold);
+  return deadline > latest ? err({ _tag: "deadline_too_far", deadline, latest }) : ok(deadline);
 };
+
+const opensAt = (p: ClockParams, view: JView, hold: Hold): Result<Hold, AccountFault> =>
+  map(deadlineInRange(p, view, hold.deadline), () => hold);
 
 /** The checks on a new clause, in order: its own funds, a well-formed hashlock not open yet, a deadline in range. */
 const admittedLock = (
