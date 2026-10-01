@@ -11,8 +11,8 @@
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { FrameHash, Msg, Outcome, Refused, Replica } from "../account/frame/frame.ts";
-import type { JView } from "../account/clause/clock.ts";
-import type { AccountFault, AccountState, Hold, HoldId, Side, TokenId } from "../account/model.ts";
+import type { JHeight, JView } from "../account/clause/clock.ts";
+import type { AccountFault, AccountState, Hold, HoldId, Leg, Side, TokenId } from "../account/model.ts";
 import type { AccountTx } from "../account/tx.ts";
 
 /** A 32-byte id, `0x` and 64 lowercase hex digits: the text order of two ids is their numeric order, as the chain's. */
@@ -95,14 +95,22 @@ export type Arrival = PeerMessage | JEvent | CosignAsk;
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 
-/** A command that becomes a tx of the Account's next frame. */
+/**
+ * A command that becomes a tx of the Account's next frame. The swap commands (R-ENTITY-SWAP-COMMANDS) are a quote
+ * (`offer`, its maker always this node), the taker's fill (the first one accepts the quote), the maker's withdrawal
+ * (`retract`) and `lapse`, which anyone may ask once the offer is past due.
+ */
 export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
-  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>;
+  | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>
+  | Tagged<"offer", { peer: EntityId; id: HoldId; give: Leg; want: Leg; deadline: JHeight }>
+  | Tagged<"fill", { peer: EntityId; id: HoldId; ratio: number }>
+  | Tagged<"retract", { peer: EntityId; id: HoldId }>
+  | Tagged<"lapse", { peer: EntityId; id: HoldId }>;
 
 /** A command that is about the chain, not the Account's frames. */
 export type ChainCommand =
