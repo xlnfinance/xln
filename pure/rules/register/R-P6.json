@@ -1,0 +1,20 @@
+{
+ "id": "R-P6",
+ "statement": "A cancel for an unknown offer is dropped at the Account and never enters a frame (order book, v2).",
+ "source": "lessons.md section 6",
+ "layers": {
+  "arrival": "owed: v2 (no thread yet)",
+  "quint": "owed: v2 (no thread yet)",
+  "contract": "n/a: a cancel is dropped at the off-chain Account",
+  "rig": "owed: v2 (no thread yet)",
+  "ts": "owed: v2 (no thread yet)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "v2, no thread yet"
+  }
+ ]
+}

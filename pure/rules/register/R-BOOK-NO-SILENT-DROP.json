@@ -1,0 +1,29 @@
+{
+ "id": "R-BOOK-NO-SILENT-DROP",
+ "statement": "Every lot an order does not trade is named in its result (rested or dropped with a reason), and every refusal carries a tagged fault.",
+ "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+ "layers": {
+  "arrival": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "quint": "n/a: a hub-local matching engine: no peer sees the book, only the swap clauses it produces (R-SWAP-ONCHAIN)",
+  "contract": "n/a: an off-chain hub engine; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-BOOK-NO-SILENT-DROP an id names one offer in the book"
+  }
+ ]
+}

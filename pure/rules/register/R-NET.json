@@ -1,0 +1,29 @@
+{
+ "id": "R-NET",
+ "statement": "Arrival keeps a FIFO link with bounded loss and duplication (widening keeps every property); Quint keeps an unordered network with free redelivery as a recorded choice.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-8",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: what the network may do is a modelling choice of the specs",
+  "rig": "n/a: a modelling choice of the specs, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "reorder"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NET planted bug: with no timer, a frame refused before its peer opened wedges"
+  }
+ ]
+}

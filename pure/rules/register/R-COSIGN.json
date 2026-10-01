@@ -1,0 +1,29 @@
+{
+ "id": "R-COSIGN",
+ "statement": "A batch with a co-signed op carries ops of that one Account only (a counterparty's state change can fail a batch, and failure burns the nonce).",
+ "source": "contracts-decisions.md B1 / R-COSIGN",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: the chain applies a batch as given; keeping co-signed ops to one Account is the planner's choice (the burnt nonce is J5)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (J batch-planner slice)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "cosign-bundle"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "cosign-batch-mixes-accounts"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "cosign-batch-carries-payments"
+  }
+ ]
+}

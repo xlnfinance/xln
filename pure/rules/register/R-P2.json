@@ -1,0 +1,24 @@
+{
+ "id": "R-P2",
+ "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows. The Quint cell holds the hop margin HOP = 2 * LAG between the inbound and the onward deadline; the dispute-window term of the rule is not modelled.",
+ "source": "lessons.md section 6",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: the hop margin is off-chain policy; the chain's windows are H2",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "no-hop-margin"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forward-deadline-equal"
+  }
+ ]
+}

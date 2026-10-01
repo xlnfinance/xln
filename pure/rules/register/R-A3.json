@@ -1,0 +1,20 @@
+{
+ "id": "R-A3",
+ "statement": "A party signs a settlement approval only over a proof that no queued work can change; if queued work changes it, the approval expires and is signed again, never a halt.",
+ "source": "lessons.md section 2",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: when to sign a settlement approval is an off-chain decision",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Account slice)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "arrival",
+   "name": "to be named",
+   "owed": "thread 'Account spec comparison'"
+  }
+ ]
+}
