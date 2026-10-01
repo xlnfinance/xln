@@ -13,12 +13,12 @@
 ;;          epoch it was signed at (0). It applies while A is still at epoch 0 and moves A to epoch 1.
 ;;   fin-a  finalizes a dispute on Account A. It reverts while A's HTLC deadline is open (H1).
 ;;   cnt-a  a dispute op on Account A that stops being useful once A's dispute is finalized (a counter,
-;;          a second start). R-J2 (coordinator, 18:57; the contracts will change to match): a dispute op
+;;          a second start). J2 (coordinator, 18:57; the contracts will change to match): a dispute op
 ;;          that is STALE or already applied is SKIPPED with an event; it never reverts the batch, so the
 ;;          other ops of the batch (a secret reveal, a deposit) still land.
 ;;
 ;; A SIGNED BATCH IS FINAL AT ITS NONCE (coordinator R-NONCE, widened 20:14 after the J2 review). It
-;; never expires and processBatch is permissionless, so anyone can land it later; with R-J2 an
+;; never expires and processBatch is permissionless, so anyone can land it later; with J2 an
 ;; abandoned batch whose ops are all stale lands as a no-op and still takes its entity nonce. So the
 ;; Entity never signs different content at a nonce it has already signed, and always sends a
 ;; replacement at a FRESH nonce (above every nonce it ever signed). The chain still needs nonce + 1,
@@ -32,7 +32,7 @@
 ;;   retry      resend the sent batch at its own nonce.
 ;;   abort      give up waiting for the sent batch (xln.ts `j_abort_sent_batch`). The batch stays
 ;;              signed and may still land: it becomes ABANDONED. Only its dispute ops are requeued
-;;              (a dispute op is idempotent under R-J2: if the abandoned batch lands first, the copy
+;;              (a dispute op is idempotent under J2: if the abandoned batch lands first, the copy
 ;;              is skipped). A deposit is not idempotent and stays with the abandoned batch; requeueing
 ;;              it would apply it twice.
 ;;   push       land an abandoned batch (anyone can): the chain then accepts the next nonce.
@@ -56,7 +56,7 @@
 ;; revert without its nonce and stall every batch above it. Why the nonce matters: a signed batch is
 ;; final at its nonce, so a batch that reverted without taking it would block every urgent batch above it.
 ;;
-;; R-J2 EXTENDED (coordinator, 23:42): any dispute op whose precondition can never hold again is skipped with
+;; J2 EXTENDED (coordinator, 23:42): any dispute op whose precondition can never hold again is skipped with
 ;; DisputeOpSkipped, never a revert. Besides an op already applied and a counter after the finalize, that is a
 ;; finalize after a counter landed (the finalize was prepared for the initial proof; the counter path needs another).
 ;; The batch lands and takes its nonce. A transient failure (the H1 deadline wait) still reverts whole.
@@ -187,7 +187,7 @@
 (define (batch nonce hash ops) (dict :nonce nonce :hash hash :ops ops))
 
 ;; a dispute op is STALE once A's dispute is finalized, and a dispute op the chain already applied is
-;; already applied: both are skipped (R-J2). A deposit (r2c) is not idempotent and never skipped.
+;; already applied: both are skipped (J2). A deposit (r2c) is not idempotent and never skipped.
 (define (dispute-op? op) (or (finalize? op) (counter? op) (start? op)))
 ;; HARD ops revert the whole batch without its nonce when the batch fails (see the header)
 (define (hard-op? op) (or (dispute-op? op) (leg? op)))
@@ -323,7 +323,7 @@
 
 ;; the whole batch lands, the nonce advances. The event names the ops applied and, apart, each op
 ;; SKIPPED with its reason: the chain's DisputeOpSkipped(sender, counterentity, op, reason, nonce)
-;; (coordinator R-J2 addition, 19:52). The Entity must read it as a J fact, or a node whose op was
+;; (coordinator J2 addition, 19:52). The Entity must read it as a J fact, or a node whose op was
 ;; skipped waits for the effect of an op that will never come.
 (define (land w b)
   (let loop ((rest (:ops b)) (acc w) (applied (list)) (skips (list)))
@@ -347,7 +347,7 @@
 ;; A failed batch applies nothing. With a hard op it is a plain revert (nonce untouched, nothing emitted; the
 ;; batch stays signed and is retried). Without one (R-J5) it takes its nonce and emits BatchFailed, naming the
 ;; settlements whose counterparty signature is bad. The failure is recorded for the properties. It is
-;; `stale-only?` when the batch would have landed had its stale ops been left out (R-J2).
+;; `stale-only?` when the batch would have landed had its stale ops been left out (J2).
 (define (has-dispute? ops) (some dispute-op? ops))
 (define (bad-sig-ops w ops) (filter (lambda (op) (and (settle? op) (not (settle-ok? w op)))) ops))
 ;; the decision the chain takes on a failed batch: revert whole and keep the nonce, or take it (bug
@@ -492,7 +492,7 @@
     (then (submit w (:sent w)))))
 
 (define (not-done w ops) (filter (lambda (op) (not (member op (:done w)))) ops))
-;; what an abort puts back in the draft: dispute ops only (idempotent under R-J2). Bug
+;; what an abort puts back in the draft: dispute ops only (idempotent under J2). Bug
 ;; `requeue-deposit` puts back everything, so a deposit lands twice if the abandoned batch does.
 (define (requeuable w ops) (filter dispute-op? (not-done w ops)))
 
@@ -608,7 +608,7 @@
   (list
    (property "the chain is atomic: every applied op came from a batch that succeeded" (w)
      (every (lambda (op) (member op (:processed w))) (:applied w)))
-   (property "a stale or already applied dispute op is skipped, never a revert of the batch (R-J2)" (w)
+   (property "a stale or already applied dispute op is skipped, never a revert of the batch (J2)" (w)
      (every (lambda (r) (not (:stale-only? r))) (:failures w)))
    (property "only dispute ops are skipped: a deposit is never silently dropped" (w)
      (every dispute-op? (:skipped w)))
@@ -618,8 +618,8 @@
      (every (lambda (r) (or (:gas r) (some (lambda (op) (or (dispute-op? op) (leg? op))) (:ops r))
                             (and (:took? r) (<= (:nonce r) (:nonce w)))))
             (:failures w)))
-   ;; R-J2 extended, restated from the rule and not through `stale-op?` (a planted bug redefines that one)
-   (property "a finalize prepared for the initial proof never applies after a counter landed (R-J2 extended)" (w)
+   ;; J2 extended, restated from the rule and not through `stale-op?` (a planted bug redefines that one)
+   (property "a finalize prepared for the initial proof never applies after a counter landed (J2 extended)" (w)
      (let ((a (:applied w)))
        (not (and (member "cnt-a" a) (member "fin-a" a) (< (position "cnt-a" a) (position "fin-a" a))))))
    ;; a dispute start carries the account's ondeltaEpoch (01:16); restated from the rule, not through `stale-op?`

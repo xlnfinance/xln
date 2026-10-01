@@ -600,10 +600,10 @@ Source: xln.ts 2953-2972, 3036, 17961.
 `j_abort_sent_batch` requeues the ops. If the aborted batch lands afterwards, the requeued ops are
 drafted again and the next batch applies them a second time (a deposit twice). Choice (F1): an aborted
 batch is ABANDONED, not forgotten, and only its dispute ops are requeued: they are idempotent under
-R-J2 (a second copy is skipped as already applied). A deposit is not idempotent, so it is NOT requeued;
+J2 (a second copy is skipped as already applied). A deposit is not idempotent, so it is NOT requeued;
 it stays with the abandoned batch, which anyone can push. An event clears the ops it applied, whatever
 batch carried them. Planted bugs: `requeue-deposit` (an aborted batch requeues a deposit too: "no op is
-applied twice on chain" fails); `trust-the-draft` is removed, F1 plus R-J2 rule it out.
+applied twice on chain" fails); `trust-the-draft` is removed, F1 plus J2 rule it out.
 Source: xln.ts 3036-3062.
 
 **Q-J-4. A full batch is a refusal (lessons R-J3).**
@@ -639,7 +639,7 @@ now records its clock and secret, so states are finer): 12147 states, 38298 tran
 R-J5 bound (one payment batch fails, no abort) is a second config, `j/configs/payment-failure.scm`: 9810 states,
 30151 transitions (not timed alone).
 
-**Q-J-8. A stale or already applied dispute op is skipped, not a revert (R-J2, coordinator 18:57).**
+**Q-J-8. A stale or already applied dispute op is skipped, not a revert (J2, coordinator 18:57).**
 Before: any op that could not apply reverted the whole batch (Depository.processBatch is atomic and
 has no per-op failure). Now: a dispute op that is stale (its Account's dispute was finalized) or
 already applied is SKIPPED with an event and the other ops of the batch land. The H1 wait (a
@@ -659,11 +659,11 @@ open dispute (at most one per Account: the `start` rule is off while a dispute i
 counters the open one) and a counter after the window closed (the counter must land before T, see
 Q-D-17). The Runtime page treats every J fact, this one included, as a good input; a Runtime input
 kind for the skip fact is not modelled.
-Source: coordinator R-J2 and its addition; contracts D:329-575.
+Source: coordinator J2 and its addition; contracts D:329-575.
 
 **Q-J-9. A signed batch is final at its nonce (R-NONCE, widened by the coordinator at 20:14, F1): modelled.**
 Rule: `processBatch` is permissionless and a signed batch never expires, so anyone can land an
-abandoned batch later; with R-J2 an abandoned batch whose ops are all stale lands as a no-op and still
+abandoned batch later; with J2 an abandoned batch whose ops are all stale lands as a no-op and still
 takes its entity nonce. The Entity therefore never signs different content at a nonce it already
 signed, and always sends a replacement at a fresh nonce (above every nonce it ever signed).
 In the page: `:signed-max`, `:signed` (nonce and hash of every signature), `fresh-nonce`, `:abandoned`,
@@ -674,7 +674,7 @@ first. Properties: "a signed batch is final at its nonce: no nonce is signed twi
 property counts abandoned batches' ops as held. Planted bug `resign-at-nonce` (the replacement reuses
 the abandoned nonce) fails the first.
 Finding: requeueing a deposit after an abort is unsafe under F1 (the abandoned batch can still land), so
-only dispute ops are requeued (Q-J-3). Open for the contracts: nothing beyond R-J2's skip; a nonce
+only dispute ops are requeued (Q-J-3). Open for the contracts: nothing beyond J2's skip; a nonce
 gap (accept any nonce above the current one) would make a replacement independent of pushing the
 abandoned batch and is worth deciding.
 
@@ -717,7 +717,7 @@ input); a reason code per failing op (the page has two: `reserve`, `signature`);
 Source: coordinator R-J5, R-SPLIT.
 
 **Q-J-11. Three more J rules (coordinator, 23:42, from the second #54 review): modelled.**
-(1) R-J2 extended: any dispute, reveal or ladder op whose precondition can never hold again is skipped with
+(1) J2 extended: any dispute, reveal or ladder op whose precondition can never hold again is skipped with
 `DisputeOpSkipped` and the batch consumes its nonce. The page now also skips a finalize after a counter landed
 (the finalize was prepared for the initial proof; the counter path needs another op). A TRANSIENT failure (the H1
 deadline wait) still reverts whole, without the nonce.
@@ -736,7 +736,7 @@ the H1 revert property skip gas reverts. Planted bug `gas-soft` (a gas revert ta
 Question for the coordinator: does "every failure is BatchFailed once the budget is given" also cover a HARD batch
 (dispute ops, deposit legs)? The page keeps the earlier rule: a hard batch reverts whole, without the nonce.
 (4) A dispute start carries the Account epoch it was signed for (01:16, `ondeltaEpoch`). At another epoch it is
-skipped with `DisputeOpSkipped` and the nonce is consumed (R-J2 extended: the precondition can never hold again).
+skipped with `DisputeOpSkipped` and the nonce is consumed (J2 extended: the precondition can never hold again).
 Property "a dispute start lands only at the account epoch it was signed for; on a mismatch it is skipped".
 Planted bug `start-ignores-epoch`. Bound: `j/configs/epoch-start.scm` (an epoch move can land between the
 signing and the batch); 646 states. Also `j/configs/start-then-finalize.scm` (a start and a finalize in one
@@ -1060,7 +1060,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   ones (E9). The floor is the real response guarantee (a Runtime duty to watch its own disputes within it). Page:
   `windows-ok?`, `frame-extra`, the property "windows never shorten inside an epoch", planted bug
   `counter-shortens-window`; Q-D-21.
-- **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
+- **J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
 - **N2 bound: MAX_LOCK_HORIZON** (21:50): see Q-D-20, Q-RT-7.
