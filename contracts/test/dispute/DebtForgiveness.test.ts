@@ -3,7 +3,9 @@ import hre from 'hardhat';
 
 import {
   buildSingleSignerHanko,
+  accountEpoch,
   canonicalAccountKey,
+  computeCooperativeUpdateHash,
   computeDepositoryBatchHash,
   deployEntityProvider,
   deriveHardhatPrivateKey,
@@ -11,8 +13,21 @@ import {
   encodeBatch,
   singleSignerLazyEntityId,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 
 const { ethers } = await hre.network.getOrCreate('hardhat');
+
+// Debt amounts are exact wide integers now: Uint512 {high, low} and Uint768 {high, middle, low}. ethers returns them as
+// Result structs, which the chai bigint matcher cannot compare, so assert each limb.
+const expectUint512 = (value: { high: bigint; low: bigint }, expected: bigint) => {
+  expect(value.high).to.equal(expected >> 256n);
+  expect(value.low).to.equal(expected & ((1n << 256n) - 1n));
+};
+const expectUint768 = (value: { high: bigint; middle: bigint; low: bigint }, expected: bigint) => {
+  expect(value.high).to.equal(expected >> 512n);
+  expect(value.middle).to.equal((expected >> 256n) & ((1n << 256n) - 1n));
+  expect(value.low).to.equal(expected & ((1n << 256n) - 1n));
+};
 
 describe('Depository current-debt forgiveness', () => {
   it('clears only the exact FIFO cursor debt in O(1)', async () => {
@@ -61,26 +76,26 @@ describe('Depository current-debt forgiveness', () => {
       .to.deep.equal([true, false]);
     await expect(harness.harnessForgiveCurrent(debtor, creditorB, tokenId)).not.to.emit(harness, 'DebtForgiven');
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(0n);
-    expect((await harness._debts(debtor, tokenId, 0n)).amount).to.equal(5n);
+    expectUint512((await harness._debts(debtor, tokenId, 0n)).amount, 5n);
 
     await expect(harness.harnessForgiveCurrent(debtor, creditorA, tokenId))
       .to.emit(harness, 'DebtForgiven')
-      .withArgs(debtor, creditorA, tokenId, 5n, 0n);
+      .withArgs(debtor, creditorA, tokenId, [0n, 5n], 0n);
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(1n);
-    expect(await harness.debtOutstanding(debtor, tokenId)).to.equal(16n);
+    expectUint768(await harness.debtOutstanding(debtor, tokenId), 16n);
 
     await expect(harness.harnessForgiveCurrent(debtor, creditorA, tokenId)).not.to.emit(harness, 'DebtForgiven');
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(1n);
-    expect((await harness._debts(debtor, tokenId, 2n)).amount).to.equal(9n);
+    expectUint512((await harness._debts(debtor, tokenId, 2n)).amount, 9n);
 
     await harness.harnessForgiveCurrent(debtor, creditorB, tokenId);
     await harness.harnessForgiveCurrent(debtor, creditorA, tokenId);
     expect(await harness._debtIndex(debtor, tokenId)).to.equal(0n);
-    expect(await harness.debtOutstanding(debtor, tokenId)).to.equal(0n);
+    expectUint768(await harness.debtOutstanding(debtor, tokenId), 0n);
     await expect(harness._debts(debtor, tokenId, 0n)).to.revert(ethers);
   });
 
-  it('reverts the whole settlement when a third-party FIFO head blocks bilateral forgiveness', async () => {
+  it('fails the whole settlement (BatchFailed E2) when a third-party FIFO head blocks bilateral forgiveness', async () => {
     const [owner, peer, thirdParty] = await ethers.getSigners();
     const entityProvider = await deployEntityProvider(owner!.address);
     const Account = await ethers.getContractFactory('Account');
@@ -126,15 +141,15 @@ describe('Depository current-debt forgiveness', () => {
     await harness.harnessAddDebt(left.entityId, tokenId, blocker, blockedAmount);
 
     const accountKey = canonicalAccountKey(left.entityId, right.entityId);
-    const chainId = (await ethers.provider.getNetwork()).chainId;
-    const settlementHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      [
-        'uint8', 'uint256', 'address', 'bytes', 'uint256',
-        'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]',
-        'uint256[]',
-      ],
-      [0, chainId, await harness.getAddress(), accountKey, 1n, [], [tokenId]],
-    ));
+    const settlementHash = await computeCooperativeUpdateHash(
+      harness,
+      accountKey,
+      await accountEpoch(harness, left.entityId, right.entityId),
+      1n,
+      [],
+      [tokenId],
+      'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]',
+    );
     const batch = emptyBatch({
       settlements: [{
         leftEntity: left.entityId,
@@ -146,14 +161,14 @@ describe('Depository current-debt forgiveness', () => {
       }],
     });
     const encodedBatch = encodeBatch(batch);
-    const batchHash = await computeDepositoryBatchHash(harness, encodedBatch, 1n);
+    const batchHash = await computeDepositoryBatchHash(harness, left.entityId, encodedBatch, 1n);
     const hanko = buildSingleSignerHanko(left.entityId, batchHash, left.privateKey);
 
-    await expect(harness.processBatch(encodedBatch, hanko, 1n))
-      .to.be.revertedWithCustomError(harness, 'E2');
-    expect(await harness.entityNonces(left.entityId)).to.equal(0n);
+    // J5: the batch fails E2 soft as one unit: the outer nonce is spent, the settlement and its forgiveness do not apply
+    await expectBatchFailed(harness, owner, { entityId: left.entityId, encodedBatch, hankoData: hanko, nonce: 1n }, 'E2');
+    expect(await harness.entityNonces(left.entityId)).to.equal(1n);
     expect((await harness._accounts(accountKey)).nonce).to.equal(0n);
     expect(await harness._debtIndex(left.entityId, tokenId)).to.equal(0n);
-    expect((await harness._debts(left.entityId, tokenId, 0n)).amount).to.equal(blockedAmount);
+    expectUint512((await harness._debts(left.entityId, tokenId, 0n)).amount, blockedAmount);
   });
 });

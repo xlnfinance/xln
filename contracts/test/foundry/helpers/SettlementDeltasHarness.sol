@@ -216,8 +216,8 @@ contract SettlementDeltasHarness {
   {
     ProofBody memory pb;
     pb.watchSeed = bytes32("halmos");
-    pb.leftResponseSeconds = 0;
-    pb.rightResponseSeconds = 0;
+    pb.leftResponseSeconds = 60;
+    pb.rightResponseSeconds = 60;
     pb.offdeltas = new Int512[](1);
     pb.offdeltas[0] = WideMath.fromInt(offdelta);
     pb.tokenIds = new uint256[](1);
@@ -287,8 +287,8 @@ contract SettlementDeltasHarness {
     uint256[2] memory tokenIds = [uint256(7), uint256(9)];
     ProofBody memory pb;
     pb.watchSeed = bytes32("halmos");
-    pb.leftResponseSeconds = 0;
-    pb.rightResponseSeconds = 0;
+    pb.leftResponseSeconds = 60;
+    pb.rightResponseSeconds = 60;
     pb.offdeltas = new Int512[](2);
     pb.offdeltas[0] = WideMath.fromInt(offdelta0);
     pb.offdeltas[1] = WideMath.fromInt(offdelta1);

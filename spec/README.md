@@ -26,7 +26,7 @@ Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
 
 ```sh
 cd spec
-npm install            # or: bun install    (MCP server dependencies)
+npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # {:ok #t :states 313 :transitions 557}
 npm test               # the page passes; each planted bug fails with its property
@@ -141,3 +141,7 @@ npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
 
 If the server fails to start, the usual cause is a missing build: `arrival/packages/arrival-cli/dist/cli.js`
 must exist (`npm run setup`), and `spec/node_modules` must exist (`npm install`).
+
+Lockfiles: `package-lock.json` (npm) and `bun.lock` (bun) pin the same versions of the MCP server
+dependencies, so `npm install` gives the same tree on every boot. When you change `spec/package.json`,
+update both files.

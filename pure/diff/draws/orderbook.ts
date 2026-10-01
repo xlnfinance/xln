@@ -34,7 +34,7 @@
 import { deriveDelta } from "../../../core/account/utils.ts";
 import { tokenId, type EntityTx, type TokenId } from "../../xln.ts";
 import { unwrap } from "../../xln_run.ts";
-import { HUB, SPOKES, type World } from "../world.ts";
+import { HUB, SPOKES, type World } from "../rig/world.ts";
 import { arises, drawn, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { active, isLeft, pick, replica, type OgAccountReplica } from "./world-view.ts";
 

@@ -11,11 +11,16 @@ import {
   deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
-  encodeBatch,
   encodeBoard,
+  encodeForkBatch,
+  encodeBatch,
+  FORK_SETTLEMENT_DIFFS_ABI,
+  toForkSettlementDiffs,
   encodeSingleSignerBoard,
   singleSignerLazyEntityId,
+  submitBatch,
 } from '../helpers/hanko.ts';
+import { expectBatchFailed } from '../helpers/batch-failed.ts';
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate('hardhat');
 const { mine, time } = networkHelpers;
@@ -31,8 +36,6 @@ const BOARD_GRACE_SECONDS = 7 * 24 * 60 * 60;
 const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
 const WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes('board-rotation-watch-seed'));
-const SETTLEMENT_DIFFS_ABI =
-  'tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]';
 const PROOF_BODY_ABI =
   'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
@@ -43,8 +46,9 @@ const anchoredEntityMemberBoardHash = (anchor: string, memberEntityId: string): 
 
 const emptyProofBody = () => ({
   watchSeed: WATCH_SEED,
-  leftResponseSeconds: 2,
-  rightResponseSeconds: 3,
+  // H2: a proof body with a response window below 60 s is rejected (ResponseWindowTooShort(60)).
+  leftResponseSeconds: 60,
+  rightResponseSeconds: 61,
   offdeltas: [] as bigint[],
   tokenIds: [] as bigint[],
   transformers: [],
@@ -53,19 +57,29 @@ const emptyProofBody = () => ({
 const proofBodyHash = (body: ReturnType<typeof emptyProofBody>): string =>
   ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_ABI], [body]));
 
+// C1: proof and settlement payloads bind the Account's ondeltaEpoch, read at the moment of signing.
+const epochOfAccountKey = async (
+  depository: { ondeltaEpoch(a: string, b: string): Promise<bigint> },
+  accountKey: string,
+): Promise<bigint> => depository.ondeltaEpoch(
+  ethers.dataSlice(accountKey, 0, 32),
+  ethers.dataSlice(accountKey, 32, 64),
+);
+
 const disputeProofHash = async (
-  depository: { getAddress(): Promise<string> },
+  depository: { getAddress(): Promise<string>; ondeltaEpoch(a: string, b: string): Promise<bigint> },
   accountKey: string,
   nonce: bigint,
   bodyHash: string,
   proposerIsLeft = false,
 ): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
   [
     DISPUTE_PROOF,
     (await ethers.provider.getNetwork()).chainId,
     await depository.getAddress(),
     accountKey,
+    await epochOfAccountKey(depository, accountKey),
     nonce,
     proposerIsLeft,
     bodyHash,
@@ -74,19 +88,20 @@ const disputeProofHash = async (
 ));
 
 const cooperativeUpdateHash = async (
-  depository: { getAddress(): Promise<string> },
+  depository: { getAddress(): Promise<string>; ondeltaEpoch(a: string, b: string): Promise<bigint> },
   accountKey: string,
   nonce: bigint,
   diffs: unknown[],
 ): Promise<string> => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ['uint8', 'uint256', 'address', 'bytes', 'uint256', SETTLEMENT_DIFFS_ABI, 'uint256[]'],
+  ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', FORK_SETTLEMENT_DIFFS_ABI, 'uint256[]'],
   [
     COOPERATIVE_UPDATE,
     (await ethers.provider.getNetwork()).chainId,
     await depository.getAddress(),
     accountKey,
+    await epochOfAccountKey(depository, accountKey),
     nonce,
-    diffs,
+    toForkSettlementDiffs(diffs as Record<string, unknown>[]),
     [],
   ],
 ));
@@ -327,7 +342,7 @@ describe('EntityProvider board rotation grace', function () {
 
     const encodedBatch = encodeBatch(emptyBatch());
     const nonce = 1n;
-    const digest = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
+    const digest = await computeDepositoryBatchHash(depository, entityId, encodedBatch, nonce);
     const previousBoardHanko = buildSingleSignerHanko(
       entityId,
       digest,
@@ -339,11 +354,11 @@ describe('EntityProvider board rotation grace', function () {
       deriveHardhatPrivateKey(2),
     );
 
-    await expect(depository.processBatch(encodedBatch, previousBoardHanko, nonce))
+    await expect(submitBatch(depository, foundation, entityId, { encodedBatch, hankoData: previousBoardHanko, nonce }))
       .to.be.revertedWithCustomError(depository, 'E4');
     expect(await depository.entityNonces(entityId)).to.equal(0n);
 
-    await expect(depository.processBatch(encodedBatch, currentBoardHanko, nonce))
+    await expect(submitBatch(depository, foundation, entityId, { encodedBatch, hankoData: currentBoardHanko, nonce }))
       .to.emit(depository, 'HankoBatchProcessed')
       .withArgs(entityId, digest, nonce);
     expect(await depository.entityNonces(entityId)).to.equal(nonce);
@@ -377,13 +392,21 @@ describe('EntityProvider board rotation grace', function () {
       batch: unknown,
       nonce: bigint,
     ) => {
-      const encodedBatch = encodeBatch(batch);
-      const digest = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
+      const encodedBatch = encodeForkBatch(batch as Record<string, unknown>);
+      const digest = await computeDepositoryBatchHash(depository, signerEntity, encodedBatch, nonce);
       return {
         encodedBatch,
         hanko: buildSingleSignerHanko(signerEntity, digest, signerKey),
+        signerEntity,
+        nonce,
       };
     };
+    const send = (signed: Awaited<ReturnType<typeof signBatch>>) => submitBatch(
+      depository,
+      foundation,
+      signed.signerEntity,
+      { encodedBatch: signed.encodedBatch, hankoData: signed.hanko, nonce: signed.nonce },
+    );
     const signOuterBatch = (batch: unknown, nonce: bigint) =>
       signBatch(initiator, initiatorKey, batch, nonce);
 
@@ -395,7 +418,7 @@ describe('EntityProvider board rotation grace', function () {
         pairs: [{ entity: entityId, amount: 2n }],
       }],
     }), 1n);
-    await depository.processBatch(funding.encodedBatch, funding.hanko, 1n);
+    await send(funding);
 
     const initiatorIsLeft = BigInt(initiator) < BigInt(entityId);
     const c2rDiffs = [{
@@ -413,15 +436,21 @@ describe('EntityProvider board rotation grace', function () {
       c2r(buildSingleSignerHanko(entityId, c2rDigest, oldBoardKey)),
       2n,
     );
-    await expect(depository.processBatch(oldC2r.encodedBatch, oldC2r.hanko, 2n))
-      .to.be.revertedWithCustomError(depository, 'E4');
+    // J5: the old board's signature on the counterparty's C2R leg is a bad counterparty signature inside the ops: the batch fails
+    // (E4 reported, outer nonce 2 spent, nothing applied), and the same intent re-signed by the current board goes at nonce 3
+    await expectBatchFailed(
+      depository,
+      foundation,
+      { entityId: oldC2r.signerEntity, encodedBatch: oldC2r.encodedBatch, hankoData: oldC2r.hanko, nonce: oldC2r.nonce },
+      'E4',
+    );
     expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
 
     const currentC2r = await signOuterBatch(
       c2r(buildSingleSignerHanko(entityId, c2rDigest, currentBoardKey)),
-      2n,
+      3n,
     );
-    await expect(depository.processBatch(currentC2r.encodedBatch, currentC2r.hanko, 2n))
+    await expect(send(currentC2r))
       .to.emit(depository, 'AccountSettled');
     expect((await depository._accounts(accountKey)).nonce).to.equal(1n);
 
@@ -450,17 +479,21 @@ describe('EntityProvider board rotation grace', function () {
     });
     const oldSettlement = await signOuterBatch(
       settlement(buildSingleSignerHanko(entityId, settlementDigest, oldBoardKey)),
-      3n,
+      4n,
     );
-    await expect(depository.processBatch(oldSettlement.encodedBatch, oldSettlement.hanko, 3n))
-      .to.be.revertedWithCustomError(depository, 'E4');
+    await expectBatchFailed(
+      depository,
+      foundation,
+      { entityId: oldSettlement.signerEntity, encodedBatch: oldSettlement.encodedBatch, hankoData: oldSettlement.hanko, nonce: oldSettlement.nonce },
+      'E4',
+    );
     expect((await depository._accounts(accountKey)).nonce).to.equal(1n);
 
     const currentSettlement = await signOuterBatch(
       settlement(buildSingleSignerHanko(entityId, settlementDigest, currentBoardKey)),
-      3n,
+      5n,
     );
-    await expect(depository.processBatch(currentSettlement.encodedBatch, currentSettlement.hanko, 3n))
+    await expect(send(currentSettlement))
       .to.emit(depository, 'AccountSettled');
     expect((await depository._accounts(accountKey)).nonce).to.equal(2n);
 
@@ -473,6 +506,7 @@ describe('EntityProvider board rotation grace', function () {
       disputeNonce,
       initialProofbodyHash,
     );
+    const startEpoch = await epochOfAccountKey(depository, accountKey);
     const disputeStart = (sig: string) => emptyBatch({
       disputeStarts: [{
         counterentity: entityId,
@@ -483,19 +517,20 @@ describe('EntityProvider board rotation grace', function () {
         sig,
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: startEpoch,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     });
     const oldStart = await signOuterBatch(
       disputeStart(buildSingleSignerHanko(entityId, startDigest, oldBoardKey)),
-      4n,
+      6n,
     );
-    await expect(depository.processBatch(oldStart.encodedBatch, oldStart.hanko, 4n))
+    await expect(send(oldStart))
       .to.emit(depository, 'DisputeStarted');
     const openedAccount = await depository._accounts(accountKey);
     expect(openedAccount.disputeHash).to.not.equal(ethers.ZeroHash);
     expect(openedAccount.nonce).to.equal(disputeNonce);
-    expect(await depository.entityNonces(initiator)).to.equal(4n);
+    expect(await depository.entityNonces(initiator)).to.equal(6n);
 
     // The same boundary applies when historical proof finalizes an active
     // dispute: evidence survives rotation; direct money authority does not.
@@ -521,16 +556,13 @@ describe('EntityProvider board rotation grace', function () {
           sig: buildSingleSignerHanko(peer, historicalStartHash, peerKey),
           starterInitialArguments: '0x',
           starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
         }],
       }),
       1n,
     );
-    await expect(depository.processBatch(
-      historicalStart.encodedBatch,
-      historicalStart.hanko,
-      1n,
-    )).to.emit(depository, 'DisputeStarted');
+    await expect(send(historicalStart)).to.emit(depository, 'DisputeStarted');
 
     const historicalFinalHash = await disputeProofHash(
       depository,
@@ -557,11 +589,7 @@ describe('EntityProvider board rotation grace', function () {
       }),
       1n,
     );
-    await expect(depository.processBatch(
-      historicalFinal.encodedBatch,
-      historicalFinal.hanko,
-      1n,
-    )).to.emit(depository, 'DisputeFinalized');
+    await expect(send(historicalFinal)).to.emit(depository, 'DisputeFinalized');
     expect((await depository._accounts(historicalAccountKey)).nonce).to.equal(2n);
   });
 
@@ -581,7 +609,9 @@ describe('EntityProvider board rotation grace', function () {
     await provider.activateBoard(entityId);
 
     const { depository } = await deployDepositoryStack(await provider.getAddress());
-    const disputeDelay = 5n;
+    // The last-resort window must cover the rest of the dispute: with H2's 60 s floor it is the whole response window
+    // (left + right), not the 5 s the inherited proof bodies allowed.
+    const disputeDelay = BigInt(emptyProofBody().leftResponseSeconds + emptyProofBody().rightResponseSeconds);
 
     const counterentity = singleSignerLazyEntityId(outsider.address);
     const accountKey = canonicalAccountKey(entityId, counterentity);
@@ -612,27 +642,29 @@ describe('EntityProvider board rotation grace', function () {
         ),
         starterInitialArguments: '0x',
         starterCounterArguments: '0x',
+        ondeltaEpoch: 0n,
         starterCounterProofCommitment: '0x0000000000000000000000000000000000000000000000000000000000000000',
       }],
     }));
-    const startBatchHash = await computeDepositoryBatchHash(depository, startBatch, 1n);
-    await depository.processBatch(
-      startBatch,
-      buildSingleSignerHanko(counterentity, startBatchHash, deriveHardhatPrivateKey(4)),
-      1n,
-    );
+    const startBatchHash = await computeDepositoryBatchHash(depository, counterentity, startBatch, 1n);
+    await submitBatch(depository, foundation, counterentity, {
+      encodedBatch: startBatch,
+      hankoData: buildSingleSignerHanko(counterentity, startBatchHash, deriveHardhatPrivateKey(4)),
+      nonce: 1n,
+    });
 
     const finalNonce = 2n;
     const finalProofbody = emptyProofBody();
     const finalProofbodyHash = proofBodyHash(finalProofbody);
     const finalProposerIsLeft = BigInt(counterentity) < BigInt(entityId);
     const finalHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bool', 'bytes32', 'bytes32'],
+      ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
       [
         DISPUTE_PROOF,
         chainId,
         await depository.getAddress(),
         accountKey,
+        await epochOfAccountKey(depository, accountKey),
         finalNonce,
         finalProposerIsLeft,
         finalProofbodyHash,

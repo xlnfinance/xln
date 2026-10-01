@@ -5,6 +5,8 @@ import { buildAccountProofBody } from "../../../core/protocol/dispute/proof-buil
 import { createEmptyAccountJClaimAccumulator } from "../../../core/account/j-claims/j-claim-accumulator";
 import { buildPositionalSwapFillRatioBuckets } from "../../../core/protocol/transform/transformer-ordering";
 import { asOfferId } from "../../../core/orderbook/swap-keys.ts";
+import { MAX_SWAP_BOOK, PROCESS_BATCH_GAS_LIMIT, TRANSFORMER_POST_CALL_GAS_RESERVE } from "../helpers/hanko.ts";
+import { decodeInt768, encodeInt768, encodeSignedAmount } from "../../../core/protocol/crypto/abi-money.ts";
 import { deriveSwapOffdeltaChanges } from "../../../core/orderbook/swap-execution.ts";
 import type { AccountReplica, SwapOffer } from "../../../core/types/account.ts";
 
@@ -14,6 +16,12 @@ const MAX_FILL_RATIO = 65535n;
 const TEST_WATCH_SEED = `0x${"11".repeat(32)}`;
 const LEFT_ENTITY = `0x${"0a".repeat(32)}`;
 const RIGHT_ENTITY = `0x${"0b".repeat(32)}`;
+
+// The transformer boundary is wide-integer: deltas are Int768 {high, middle, low} and pull/payment amounts are
+// SignedAmount {negative, magnitude}. ethers returns Int768 results as tuple Results the chai bigint matcher cannot
+// compare, so the helpers below encode inputs and decode results with the canonical core codec.
+const toInt768 = (deltas: Array<bigint | number>) => deltas.map((delta) => encodeInt768(BigInt(delta)));
+const fromInt768 = (result: unknown[]): bigint[] => result.map((delta) => decodeInt768(delta));
 
 function makeSwapOffer(
   offerId: string,
@@ -191,8 +199,8 @@ describe("DeltaTransformer", function () {
     const currentTimestamp = await time.latest();
     const disputeStartTimestamp = Math.max(1, currentTimestamp - 2);
     const disputeTimeout = disputeStartTimestamp + 2;
-    return transformer.applyBatch.staticCall(
-      deltas,
+    return fromInt768(await transformer.applyBatch.staticCall(
+      toInt768(deltas),
       tokenIds,
       encodedBatch,
       leftArguments,
@@ -205,7 +213,7 @@ describe("DeltaTransformer", function () {
       disputeTimeout,
       1,
       1,
-    );
+    ));
   }
 
   async function applyViaRegistry(
@@ -230,9 +238,9 @@ describe("DeltaTransformer", function () {
     const totalWindow = timeoutTs - startTs;
     const leftResponseSeconds = disputeClock?.leftResponseSeconds ?? Math.floor(totalWindow / 2);
     const rightResponseSeconds = disputeClock?.rightResponseSeconds ?? totalWindow - leftResponseSeconds;
-    return registry.applyBatchViaRegistry.staticCall(
+    return fromInt768(await registry.applyBatchViaRegistry.staticCall(
       await transformer.getAddress(),
-      deltas,
+      toInt768(deltas),
       tokenIds,
       encodedBatch,
       leftArguments,
@@ -245,7 +253,7 @@ describe("DeltaTransformer", function () {
       timeoutTs,
       leftResponseSeconds,
       rightResponseSeconds,
-    );
+    ));
   }
 
   it("decodes swap fill ratios from uint16 calldata arguments", async function () {
@@ -305,7 +313,7 @@ describe("DeltaTransformer", function () {
 
     await expect(
       transformer.applyBatch.staticCall(
-        [0n, 0n],
+        toInt768([0n, 0n]),
         [1n],
         encodedBatch,
         "0x",
@@ -366,7 +374,7 @@ describe("DeltaTransformer", function () {
       pull: [
         {
           deltaIndex: 0,
-          amount: MAX_FILL_RATIO,
+          amount: encodeSignedAmount(MAX_FILL_RATIO),
           claimedRatio: 0,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
@@ -374,7 +382,7 @@ describe("DeltaTransformer", function () {
         },
         {
           deltaIndex: 1,
-          amount: -1234,
+          amount: encodeSignedAmount(-1234n),
           claimedRatio: 0,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
@@ -410,7 +418,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(MAX_FILL_RATIO),
         claimedRatio: 0,
         fullHash: lateProof.fullHash,
         partialRoot: lateProof.partialRoot,
@@ -443,7 +451,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(MAX_FILL_RATIO),
         claimedRatio: 0,
         fullHash: staleProof.fullHash,
         partialRoot: staleProof.partialRoot,
@@ -479,7 +487,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(MAX_FILL_RATIO),
         claimedRatio: 0,
         fullHash: targetProof.fullHash,
         partialRoot: targetProof.partialRoot,
@@ -526,7 +534,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(MAX_FILL_RATIO),
         claimedRatio: 0,
         fullHash: noneProof.fullHash,
         partialRoot: noneProof.partialRoot,
@@ -546,7 +554,7 @@ describe("DeltaTransformer", function () {
       swap: [],
       pull: [{
         deltaIndex: 0,
-        amount: MAX_FILL_RATIO,
+        amount: encodeSignedAmount(MAX_FILL_RATIO),
         claimedRatio: previouslyClaimed,
         fullHash: partialProof.fullHash,
         partialRoot: partialProof.partialRoot,
@@ -574,7 +582,7 @@ describe("DeltaTransformer", function () {
     const batch = {
       payment: [{
         deltaIndex: 0,
-        amount: 7,
+        amount: encodeSignedAmount(7n),
         revealedUntilTimestamp: deadline,
         hash,
       }],
@@ -595,16 +603,12 @@ describe("DeltaTransformer", function () {
     );
     expect(beforeDeadline[0]).to.equal(7n);
 
-    const afterDeadline = await applyCanonical(
-      transformer,
-      [0],
-      encodedBatch,
-      leftArguments,
-      "0x",
-      deadline + 1,
-      deadline + 1,
-    );
-    expect(afterDeadline[0]).to.equal(0n);
+    // H1: while the deadline is still open an unrevealed payment is not settled as unpaid; finalization waits, so a
+    // forwarding hub can still claim upstream with a secret that surfaces before the deadline. Argument timestamps
+    // past the deadline do not change that, only block.timestamp does.
+    await expect(
+      applyCanonical(transformer, [0], encodedBatch, leftArguments, "0x", deadline + 1, deadline + 1),
+    ).to.be.revertedWithCustomError(transformer, "PaymentRevealWindowActive").withArgs(deadline);
 
     await transformer.revealSecret(secretValue);
     const revealedAt = await transformer.hashToTimestamp(hash);
@@ -621,6 +625,32 @@ describe("DeltaTransformer", function () {
       deadline + 1,
     );
     expect(onChainReveal[0]).to.equal(7n);
+
+    // Once the deadline has passed, a secret that only arrives in stale (post-deadline) argument evidence and was
+    // never revealed on-chain settles as unpaid.
+    const lateSecret = ethers.encodeBytes32String("late-payment-secret");
+    const lateHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [lateSecret]));
+    const lateBatch = await transformer.encodeBatch({
+      payment: [{
+        deltaIndex: 0,
+        amount: encodeSignedAmount(7n),
+        revealedUntilTimestamp: deadline,
+        hash: lateHash,
+      }],
+      swap: [],
+      pull: [],
+    });
+    await time.increaseTo(deadline + 1);
+    const afterDeadline = await applyCanonical(
+      transformer,
+      [0],
+      lateBatch,
+      encodeTransformerArguments([], [lateSecret]),
+      "0x",
+      deadline + 1,
+      deadline + 1,
+    );
+    expect(afterDeadline[0]).to.equal(0n);
   });
 
   it("stores the first secret reveal timestamp and treats exact retries as no-ops", async function () {
@@ -757,10 +787,10 @@ describe("DeltaTransformer", function () {
       [...proofBody.runtimeProofBody.tokenIds],
     );
 
-    expect([...result]).to.deep.equal(expected);
+    expect(result).to.deep.equal(expected);
   });
 
-  it("fits the runtime maximum swap book inside the canonical transformer gas budget", async function () {
+  it("fits the largest supported swap book (MAX_SWAP_BOOK) inside the batch gas limit", async function () {
     const { transformer } = await loadFixture(deployFixture);
     const swap = {
       ownerIsLeft: true,
@@ -771,14 +801,14 @@ describe("DeltaTransformer", function () {
     };
     const encodedBatch = await transformer.encodeBatch({
       payment: [],
-      swap: Array.from({ length: 1_000 }, () => swap),
+      swap: Array.from({ length: MAX_SWAP_BOOK }, () => swap),
       pull: [],
     });
-    const rightArguments = encodeTransformerArguments(Array.from({ length: 1_000 }, () => 65_535));
+    const rightArguments = encodeTransformerArguments(Array.from({ length: MAX_SWAP_BOOK }, () => 65_535));
     const timestamp = await time.latest();
     const disputeStartTimestamp = Math.max(1, timestamp - 2);
     const gas = await transformer.applyBatch.estimateGas(
-      [0n, 0n],
+      toInt768([0n, 0n]),
       [1n, 2n],
       encodedBatch,
       "0x",
@@ -792,6 +822,7 @@ describe("DeltaTransformer", function () {
       1,
       1,
     );
-    expect(gas).to.be.lessThanOrEqual(4_000_000n);
+    // The transformer alone, plus the 2M Account.sol holds back after it, must fit the batch limit.
+    expect(gas + TRANSFORMER_POST_CALL_GAS_RESERVE).to.be.lessThanOrEqual(PROCESS_BATCH_GAS_LIMIT);
   });
 });

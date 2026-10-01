@@ -18,7 +18,7 @@
 // (LENDING_FUND_OWNED_BALANCE_INSUFFICIENT) without a throw.
 import { deriveDelta } from "../../../core/account/utils.ts";
 import { getAccountOutCapacity } from "../../../core/extensions/lending.ts";
-import { HUB, SPOKES, TOKEN, type World } from "../world.ts";
+import { HUB, SPOKES, TOKEN, type World } from "../rig/world.ts";
 import type { EntityTx } from "../../xln.ts";
 import { drawn, type Moves, type Step, type WorldMoves } from "./areas.ts";
 import { one, pick, quiet } from "./world-view.ts";

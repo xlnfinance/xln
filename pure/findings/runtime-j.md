@@ -1,6 +1,6 @@
 # runtime-j: J replica registry, cursors, J submit ledger, registration authority
 
-og is the authority: core/ and jurisdictions/ at 566c850. Every test is in `pure/diff/runtime-j.test.ts` and runs og live through `applyRuntimeTx(env, tx, { isReplay: true })`.
+og is the authority: core/ and jurisdictions/ at 566c850. Every test is in `pure/diff/j/runtime-j.test.ts` and runs og live through `applyRuntimeTx(env, tx, { isReplay: true })`.
 
 | ID | og | Rewrite | Finding | Test | Status |
 |---|---|---|---|---|---|

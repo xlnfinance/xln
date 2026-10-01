@@ -62,6 +62,25 @@ library Account {
     bool proposerIsLeft,
     bytes32 proofbodyHash
   );
+  // J2: inside a batch a dispute op that is stale or already applied is skipped, not reverted, so it cannot take the
+  // rest of the batch (an urgent HTLC secret reveal) down with it. Same signature as Depository's event: this library
+  // executes by DELEGATECALL, so the log comes from Depository. `op` and `reason` are the DISPUTE_OP_* and
+  // DISPUTE_SKIP_* codes below; `nonce` is the op's own (start nonce, counter nonce, final nonce).
+  event DisputeOpSkipped(bytes32 indexed sender, bytes32 indexed counterentity, uint8 op, uint8 reason, uint256 nonce);
+  uint8 internal constant DISPUTE_OP_START = 0;
+  uint8 internal constant DISPUTE_OP_COUNTER = 1;
+  uint8 internal constant DISPUTE_OP_FINALIZE = 2;
+  uint8 internal constant DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED = 0; // start: the stored nonce already reached it
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_ACTIVE = 1;         // start: a dispute is already open on the Account
+  uint8 internal constant DISPUTE_SKIP_NO_ACTIVE_DISPUTE = 2;      // counter/finalize: none open (finalized, or never started)
+  uint8 internal constant DISPUTE_SKIP_DISPUTE_MOVED = 3;          // counter/finalize: names another dispute's nonce
+  uint8 internal constant DISPUTE_SKIP_WINDOW_CLOSED = 4;          // counter: the challenge window already ended
+  uint8 internal constant DISPUTE_SKIP_COUNTER_NOT_NEWER = 5;      // counter: not newer than the state the dispute opened on
+  uint8 internal constant DISPUTE_SKIP_COUNTER_SUPERSEDED = 6;     // counter: a newer counter is already registered
+  uint8 internal constant DISPUTE_SKIP_COUNTER_REGISTERED = 7;     // counter: this exact body is already registered
+  uint8 internal constant DISPUTE_SKIP_FINAL_EVIDENCE_OUTDATED = 8; // finalize: the window is over and the evidence is not the state that settles
+  // 9 and 10 are the reveal reasons (HashLadderRegistry.sol)
+  uint8 internal constant DISPUTE_SKIP_EPOCH_MOVED = 11;            // start: signed at an ondelta epoch the Account has left
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, Uint512 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, Uint512 remainingAmount, uint256 newDebtIndex);
   // This signature intentionally matches Depository's public event ABI. The
@@ -649,7 +668,7 @@ library Account {
     bytes32 watchSeed,
     bytes memory hanko,
     bytes32 expectedEntity
-  ) private view returns (bool success) {
+  ) private view returns (bool success, bool retired) {
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
       ondeltaEpoch,
@@ -658,11 +677,38 @@ library Account {
       proofbodyHash,
       watchSeed
     );
-    // This verifies historical bilateral evidence. Previous-board signatures
-    // must remain valid during the grace window or a board rotation could erase
-    // an already signed account state before either side can enforce it.
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
-    return valid && recoveredEntity == expectedEntity;
+    return _historicalEvidence(entityProvider, hanko, hash, expectedEntity);
+  }
+
+  /// @dev The signer of dispute evidence is the counterentity of the entity submitting it. Left is the smaller entity id.
+  function _retiredSide(bool retired, bytes32 submitter, bytes32 signer) private pure returns (uint8) {
+    if (!retired) return 0;
+    return signer < submitter ? 1 : 2;
+  }
+
+  /// @dev The counterparty's current-board signature over a fresh cooperative movement (C2R, settlement). Anything but a valid
+  /// signature by `expected` is E4, including a check that reverts (an empty or undecodable signature).
+  function _requireCounterpartySignature(address entityProvider, bytes memory sig, bytes32 hash, bytes32 expected) private view {
+    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      if (!valid || recoveredEntity != expected) revert E4();
+    } catch {
+      revert E4();
+    }
+  }
+
+  /// @dev Verifies historical bilateral evidence. Previous-board signatures must remain valid during the grace window or
+  /// a board rotation could erase an already signed account state before either side can enforce it. `retired` says the
+  /// signature verifies only under a previous board; H3 settles such evidence clamped to the Account's collateral.
+  function _historicalEvidence(
+    address entityProvider,
+    bytes memory hanko,
+    bytes32 hash,
+    bytes32 expectedEntity
+  ) private view returns (bool valid, bool retired) {
+    (bytes32 currentEntity, bool currentValid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(hanko, hash);
+    if (currentValid && currentEntity == expectedEntity) return (true, false);
+    (bytes32 graceEntity, bool graceValid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return (graceValid && graceEntity == expectedEntity, true);
   }
 
   /// @notice Validate a finalization against durable dispute commitments and
@@ -733,8 +779,8 @@ library Account {
       );
       if (storedHash != expectedHash) revert IDepositoryDelegateErrorAbi.E9();
       if (
-        params.finalProofbody.leftResponseSeconds != account.leftResponseSeconds ||
-        params.finalProofbody.rightResponseSeconds != account.rightResponseSeconds
+        params.finalProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+        params.finalProofbody.rightResponseSeconds < account.rightResponseSeconds
       ) revert IDepositoryDelegateErrorAbi.E9();
       bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
       // Dynamic `otherArguments` belong exclusively to the non-starter. A
@@ -782,7 +828,7 @@ library Account {
           params.finalNonce == account.nonce &&
           (!params.proposerIsLeft || account.disputeInitialProposerIsLeft)
         ) revert E2();
-        if (!verifyDisputeProofHanko(
+        (bool finalValid, bool finalRetired) = verifyDisputeProofHanko(
           entityProvider,
           acct_key,
           account.ondeltaEpoch,
@@ -792,7 +838,9 @@ library Account {
           params.finalProofbody.watchSeed,
           params.sig,
           params.counterentity
-        )) revert E4();
+        );
+        if (!finalValid) revert E4();
+        account.disputeRetiredSide = _retiredSide(finalRetired, entityId, params.counterentity);
         // Pull-free mutual consent still closes immediately. A newer state
         // containing Pulls must have been locked by processCounterDisputes
         // before T; accepting it for the first time at T would recreate the
@@ -868,6 +916,7 @@ library Account {
     account.starterCounterArgumentsCommitment = bytes32(0);
     account.starterCounterProofCommitment = bytes32(0);
     account.disputeStartedByLeft = false;
+    // disputeRetiredSide is left for Depository, which reads it to clamp this settlement and then clears it.
     // Finalization pays the Account out (collateral and ondelta reset), so every proof signed for the old baseline dies.
     _advanceOndeltaEpoch(_accounts, entityId, params.counterentity);
   }
@@ -1316,8 +1365,9 @@ library Account {
 
     // C2R authorizes a fresh movement of funds, not historical evidence. A
     // rotated-out board must never retain spending authority during its grace.
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyCurrentHankoSignature(c2r.sig, hash);
-    if (!valid || recoveredEntity != c2r.counterparty) revert E4();
+    // An empty or undecodable signature makes the check revert with no data; that is a bad counterparty signature (E4), the
+    // same as in a settlement, and must not look like the empty revert of a frame that ran out of gas (see Depository.processBatch).
+    _requireCounterpartySignature(entityProvider, c2r.sig, hash, c2r.counterparty);
 
     // Apply diffs
     uint tokenId = c2r.tokenId;
@@ -1377,7 +1427,7 @@ library Account {
     address entityProvider
   ) external {
     for (uint256 i = 0; i < counterDisputes.length; i++) {
-      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider);
+      _registerCounterDispute(_accounts, entityId, counterDisputes[i], entityProvider, true);
     }
   }
 
@@ -1446,42 +1496,63 @@ library Account {
         counterProofbody: params.finalProofbody,
         sig: params.sig
       }),
-      entityProvider
+      entityProvider,
+      false
     );
     return true;
   }
 
+  /// @dev `skipStale`: inside a batch (J2) a counter the dispute has moved past is skipped with DisputeOpSkipped; the
+  /// single-op watchtower entrypoint keeps reverting, because it has no batch to protect and returns success to its caller.
   function _registerCounterDispute(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     CounterDisputeProof memory params,
-    address entityProvider
+    address entityProvider,
+    bool skipStale
   ) private {
     _requireLiveAccountNonce(params.initialNonce);
     _requireLiveAccountNonce(params.counterNonce);
     bytes32 bodyHash = _validateProofBody(params.counterProofbody);
     bytes memory acctKey = _accountKey(entityId, params.counterentity);
     AccountInfo storage account = _accounts[acctKey];
-    if (account.disputeHash == bytes32(0)) revert IDepositoryDelegateErrorAbi.E5();
-    if (block.timestamp >= account.disputeTimeout) revert E2();
-    if (params.initialNonce != account.nonce) revert E2();
+    if (account.disputeHash == bytes32(0)) {
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E5();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_NO_ACTIVE_DISPUTE);
+    }
+    if (block.timestamp >= account.disputeTimeout) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_WINDOW_CLOSED);
+    }
+    if (params.initialNonce != account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
+    }
     if (params.initialProofbodyHash != account.disputeInitialProofbodyHash) {
-      revert IDepositoryDelegateErrorAbi.E9();
+      // the dispute's opening state never changes: this counter answers another one (S1: permanent, so a skip in a batch)
+      if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_DISPUTE_MOVED);
     }
     if (
-      params.counterProofbody.leftResponseSeconds != account.leftResponseSeconds ||
-      params.counterProofbody.rightResponseSeconds != account.rightResponseSeconds
+      params.counterProofbody.leftResponseSeconds < account.leftResponseSeconds ||
+      params.counterProofbody.rightResponseSeconds < account.rightResponseSeconds
     ) revert IDepositoryDelegateErrorAbi.E9();
     bool senderIsNonstarter = account.disputeStartedByLeft != (entityId < params.counterentity);
     if (!senderIsNonstarter) revert E2();
-    if (params.counterNonce < account.nonce) revert E2();
+    if (params.counterNonce < account.nonce) {
+      if (!skipStale) revert E2();
+      return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+    }
     if (params.counterNonce == account.nonce) {
       // Equal nonce is not automatically stale: bilateral consensus resolves
       // simultaneous branches by LEFT proposer priority. Only a LEFT proof may
       // replace a RIGHT initial proof at the same nonce.
-      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) revert E2();
+      if (!params.proposerIsLeft || account.disputeInitialProposerIsLeft) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_NOT_NEWER);
+      }
     }
-    if (!verifyDisputeProofHanko(
+    (bool counterValid, bool counterRetired) = verifyDisputeProofHanko(
       entityProvider,
       acctKey,
       account.ondeltaEpoch,
@@ -1491,18 +1562,32 @@ library Account {
       params.counterProofbody.watchSeed,
       params.sig,
       params.counterentity
-    )) revert E4();
+    );
+    if (!counterValid) revert E4();
+    uint8 counterSide = _retiredSide(counterRetired, entityId, params.counterentity);
 
     uint256 selectedNonce = account.disputeCounterNonce;
     if (selectedNonce != 0) {
-      if (params.counterNonce < selectedNonce) revert E2();
+      if (params.counterNonce < selectedNonce) {
+        if (!skipStale) revert E2();
+        return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+      }
       if (params.counterNonce == selectedNonce) {
         if (params.proposerIsLeft != account.disputeCounterProposerIsLeft) {
-          if (!params.proposerIsLeft) revert E2();
+          if (!params.proposerIsLeft) {
+            if (!skipStale) revert E2();
+            return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
+          }
           // LEFT replaces RIGHT at equal nonce; continue to the atomic update.
         } else if (bodyHash != account.disputeCounterProofbodyHash) {
-          revert IDepositoryDelegateErrorAbi.E9();
+          // a rival body at the registered counter's nonce and side can never replace it (S1: permanent)
+          if (!skipStale) revert IDepositoryDelegateErrorAbi.E9();
+          return _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_SUPERSEDED);
         } else {
+          // The same body again. Current-board evidence of it is strictly stronger than a retired signature of it, so
+          // a re-registration may upgrade the grade to none; it can never downgrade it.
+          if (counterSide == 0) account.disputeRetiredSide = 0;
+          if (skipStale) _skipCounter(entityId, params, DISPUTE_SKIP_COUNTER_REGISTERED);
           return;
         }
       }
@@ -1510,6 +1595,8 @@ library Account {
     account.disputeCounterNonce = params.counterNonce;
     account.disputeCounterProofbodyHash = bodyHash;
     account.disputeCounterProposerIsLeft = params.proposerIsLeft;
+    // The registered counter-proof replaces the initial proof as the state that settles, so its grade replaces too.
+    account.disputeRetiredSide = counterSide;
     account.disputeHash = _encodeDisputeHash(
       account.nonce,
       account.disputeStartedByLeft,
@@ -1533,6 +1620,10 @@ library Account {
       params.proposerIsLeft,
       bodyHash
     );
+  }
+
+  function _skipCounter(bytes32 entityId, CounterDisputeProof memory params, uint8 reason) private {
+    emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_COUNTER, reason, params.counterNonce);
   }
 
   // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
@@ -1574,7 +1665,7 @@ library Account {
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (s.nonce <= _accounts[acct_key].nonce) revert E2();
 
-    require(s.sig.length > 0, "Signature required for settlement");
+    if (s.sig.length == 0) revert E4();
     // A signed empty settlement would advance the account nonce without any
     // token snapshot for the watcher to finalize. Reject that invisible state
     // transition instead of manufacturing a dummy token event.
@@ -1591,11 +1682,7 @@ library Account {
     // Cooperative settlement creates a fresh financial state, so only the
     // counterparty's current board may authorize it. Historical board grace is
     // reserved for dispute evidence below.
-    try IEntityProvider(entityProvider).verifyCurrentHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-      if (!valid || recoveredEntity != counterparty) revert E4();
-    } catch {
-      revert E4();
-    }
+    _requireCounterpartySignature(entityProvider, s.sig, hash, counterparty);
 
     // A settlement is one signed bilateral state transition. Check every
     // balance first so an expected state race rejects the whole settlement,
@@ -1722,6 +1809,28 @@ library Account {
 
   // ========== DISPUTE START ==========
 
+  /// @dev R-IMPLICIT-BASELINE (Q-D-21). From the epoch after any advance (a dispute finalize, a collateral-to-reserve withdrawal or a
+  /// settlement; a deposit does not advance the epoch), the empty state of the Account is a valid dispute proof for both
+  /// sides without a signature, because every field of it is on chain: offdelta 0, no clause, and the nonce one above the stored one. A
+  /// dispute from it settles at Delta = ondelta as it stands when the dispute settles (a deposit inside the epoch moves it), and any signed
+  /// frame of the epoch outranks it through a counter. Two disputes in a row, and a deposit made after an advance, therefore always have a proof to dispute with.
+  /// Canonical means exactly: epoch >= 1 (epoch 0's first frames are its proofs); nonce = stored + 1; authored by Right, the lowest rank at
+  /// that nonce (a Left-authored signed proof of the same nonce outranks it); watchSeed 0; both windows at the floor, since no signed body
+  /// carries any policy; every offdelta 0, no clause, no starter arguments. The starter names the tokens it settles: a token left out keeps
+  /// its collateral and ondelta and is settled by a later dispute or a cooperative update, exactly as for a signed body that predates it.
+  function _requireImplicitBaseline(AccountInfo storage account, InitialDisputeProof memory params) private view {
+    ProofBody memory body = params.initialProofbody;
+    // _validateInitialDisputeProof has already held both windows to the floor, so their sum is 2 * floor only if each is the floor.
+    bool canonical = account.ondeltaEpoch != 0 && params.nonce == account.nonce + 1 && !params.proposerIsLeft
+      && body.watchSeed == bytes32(0) && uint256(body.leftResponseSeconds) + body.rightResponseSeconds == 2 * MIN_RESPONSE_SECONDS
+      && body.transformers.length == 0 && params.starterInitialArguments.length + params.starterCounterArguments.length == 0
+      && params.starterCounterProofCommitment == bytes32(0);
+    for (uint256 i = 0; canonical && i < body.offdeltas.length; i++) {
+      canonical = body.offdeltas[i].high == 0 && body.offdeltas[i].low == 0;
+    }
+    if (!canonical) revert IDepositoryDelegateErrorAbi.NotTheImplicitBaseline();
+  }
+
   function _disputeStart(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
@@ -1742,8 +1851,22 @@ library Account {
     // branch unless self-dispute becomes a real operational problem.
 
     _requireStoredAccountNonce(_accounts[acct_key].nonce);
-    // NONCE CHECK: signedNonce > storedNonce (strictly greater)
-    if (params.nonce <= _accounts[acct_key].nonce) revert E2();
+    // NONCE CHECK: signedNonce > storedNonce (strictly greater). J2: a start the Account already moved past (this very
+    // start applied, a settlement or finalize since) is skipped, not reverted. It is judged before the evidence
+    // signature on purpose: a stale start's signature is bound to an epoch or nonce the Account has left, so it would
+    // fail as a bad signature and revert the batch for a reason that is only staleness.
+    AccountInfo storage account = _accounts[acct_key];
+    uint8 skipReason = 255;
+    if (params.nonce <= account.nonce) skipReason = DISPUTE_SKIP_NONCE_NOT_ABOVE_STORED;
+    else if (account.disputeHash != bytes32(0)) skipReason = DISPUTE_SKIP_DISPUTE_ACTIVE;
+    // S1: the same for the epoch. A start signed at another ondelta epoch than the Account's fails its signature for good (epochs only
+    // grow), which would revert the batch and pin the entity's nonce; carried in the start, it is judged first and skipped.
+    // The signature below is then checked at the Account's own epoch, so a bad one is a real, bytes-only error.
+    else if (params.ondeltaEpoch != account.ondeltaEpoch) skipReason = DISPUTE_SKIP_EPOCH_MOVED;
+    if (skipReason != 255) {
+      emit DisputeOpSkipped(entityId, params.counterentity, DISPUTE_OP_START, skipReason, params.nonce);
+      return;
+    }
 
     bool startedByLeft = entityId < params.counterentity;
     // The proof author is consensus data, not a caller hint. The current
@@ -1751,11 +1874,13 @@ library Account {
     // Hanko binds this bit into the bilateral proof. Both must identify the
     // same proposer or equal-nonce LEFT priority could be forged.
 
-    require(params.sig.length > 0, "Signature required for dispute");
+    // R-IMPLICIT-BASELINE (Q-D-21): with no signature the start is valid only as THE implicit proof of the epoch.
+    bool implicitBaseline = params.sig.length == 0;
+    if (implicitBaseline) _requireImplicitBaseline(account, params);
 
     bytes32 hash = _disputeProofHankoHash(
       acct_key,
-      _accounts[acct_key].ondeltaEpoch,
+      account.ondeltaEpoch,
       params.nonce,
       params.proposerIsLeft,
       params.proofbodyHash,
@@ -1793,11 +1918,18 @@ library Account {
     // its latest state within boardChangeDelay instead of relying on this path.
     // Do not narrow this to verifyCurrentHankoSignature without first replacing
     // the repudiation defence it provides.
-    (bytes32 recoveredEntity, bool valid) =
-      IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
-    if (!valid || recoveredEntity != params.counterentity) revert E4();
-
-    if (_accounts[acct_key].disputeHash != bytes32(0)) revert IDepositoryDelegateErrorAbi.E6();
+    //
+    // H3 caps the damage of the first attack without closing the second: evidence that verifies only under a retired
+    // board is accepted, and the dispute it starts records which side's board was retired; Depository then refuses to
+    // settle a shortfall against that side from reserves (_capRetiredSide). The retired quorum can never draw on its
+    // entity's reserves or create debt for it, and the direction in which the retired entity is OWED is never clamped,
+    // so a rotation cannot be used by a debtor to forgive its own debt.
+    bool retired;
+    if (!implicitBaseline) {
+      bool valid;
+      (valid, retired) = _historicalEvidence(entityProvider, params.sig, hash, params.counterentity);
+      if (!valid) revert E4();
+    }
 
     uint256 startTimestamp = block.timestamp;
     uint32 leftResponseSeconds = params.initialProofbody.leftResponseSeconds;
@@ -1813,7 +1945,7 @@ library Account {
       startedByLeft,
       startTimestamp
     );
-    _accounts[acct_key].disputeHash = _encodeDisputeHash(
+    account.disputeHash = _encodeDisputeHash(
       params.nonce, startedByLeft,
       params.proposerIsLeft,
       timeout,
@@ -1828,22 +1960,23 @@ library Account {
       bytes32(0),
       false
     );
-    _accounts[acct_key].disputeTimeout = timeout;
-    _accounts[acct_key].disputeStartTimestamp = startTimestamp;
-    _accounts[acct_key].leftResponseSeconds = leftResponseSeconds;
-    _accounts[acct_key].rightResponseSeconds = rightResponseSeconds;
-    _accounts[acct_key].disputeInitialProofbodyHash = params.proofbodyHash;
-    _accounts[acct_key].disputeInitialProposerIsLeft = params.proposerIsLeft;
-    _accounts[acct_key].disputeCounterNonce = 0;
-    _accounts[acct_key].disputeCounterProofbodyHash = bytes32(0);
-    _accounts[acct_key].disputeCounterProposerIsLeft = false;
-    _accounts[acct_key].starterInitialArgumentsCommitment = initialArgumentsCommitment;
-    _accounts[acct_key].starterCounterArgumentsCommitment = counterArgumentsCommitment;
-    _accounts[acct_key].starterCounterProofCommitment = params.starterCounterProofCommitment;
-    _accounts[acct_key].disputeStartedByLeft = startedByLeft;
+    account.disputeTimeout = timeout;
+    account.disputeStartTimestamp = startTimestamp;
+    account.leftResponseSeconds = leftResponseSeconds;
+    account.rightResponseSeconds = rightResponseSeconds;
+    account.disputeInitialProofbodyHash = params.proofbodyHash;
+    account.disputeInitialProposerIsLeft = params.proposerIsLeft;
+    account.disputeCounterNonce = 0;
+    account.disputeCounterProofbodyHash = bytes32(0);
+    account.disputeCounterProposerIsLeft = false;
+    account.starterInitialArgumentsCommitment = initialArgumentsCommitment;
+    account.starterCounterArgumentsCommitment = counterArgumentsCommitment;
+    account.starterCounterProofCommitment = params.starterCounterProofCommitment;
+    account.disputeStartedByLeft = startedByLeft;
+    account.disputeRetiredSide = _retiredSide(retired, entityId, params.counterentity);
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
-    _accounts[acct_key].nonce = params.nonce;
+    account.nonce = params.nonce;
 
     emit DisputeStarted(
       entityId,

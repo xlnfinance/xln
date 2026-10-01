@@ -8,12 +8,13 @@ import {ERC20Mock} from "../../../contracts/ERC20Mock.sol";
 import "../../../contracts/Types.sol";
 import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import {XlnHanko} from "./XlnHanko.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 /// @notice Deploys the J-layer under test with N lazy single-signer entities.
 abstract contract XlnFixture is Test {
   uint256 internal constant ACTORS = 4;
-  uint32 internal constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 internal constant RIGHT_RESPONSE_SECONDS = 50;
+  uint32 internal constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 internal constant RIGHT_RESPONSE_SECONDS = 60;
   uint256 internal constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -33,10 +34,15 @@ abstract contract XlnFixture is Test {
 
   uint256 internal constant FOUNDATION_PK = uint256(keccak256("xln.foundation"));
 
+  /// @dev The Depository under test; a suite that needs a debt it cannot reach through disputes overrides this with a harness.
+  function _newDepository() internal virtual returns (Depository) {
+    return new Depository(address(ep), address(deltaTransformer));
+  }
+
   function _deployXln() internal {
     ep = new EntityProvider(vm.addr(FOUNDATION_PK));
     deltaTransformer = new DeltaTransformer();
-    dep = new Depository(address(ep), address(deltaTransformer));
+    dep = _newDepository();
     vm.prank(vm.addr(FOUNDATION_PK));
     ep.bindShareDepository(address(dep));
 
@@ -78,8 +84,109 @@ abstract contract XlnFixture is Test {
   function _submit(uint256 actorIndex, Batch memory batch) internal returns (bool) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entity[actorIndex]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    dep.processBatch(encoded, _hanko(actorIndex, h), nonce);
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actorIndex], encoded, nonce);
+    dep.processBatch(entity[actorIndex], encoded, _hanko(actorIndex, h), nonce);
     return true;
+  }
+
+  // ─────────────── J5: a batch that cannot apply fails soft ───────────────
+
+  /// @notice Submit `batch` from actor `actorIndex`; it must return normally with exactly one BatchFailed(entity, nonce,
+  /// reason), no HankoBatchProcessed, and the entity nonce consumed. Callers assert that the state did not move.
+  function _submitFailed(uint256 actorIndex, Batch memory batch, bytes4 reason) internal {
+    bytes32 me = entity[actorIndex];
+    uint256 nonceBefore = dep.entityNonces(me);
+    vm.recordLogs();
+    _submit(actorIndex, batch);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    bytes32 failedTopic = keccak256("BatchFailed(bytes32,uint256,bytes4)");
+    bytes32 processedTopic = keccak256("HankoBatchProcessed(bytes32,bytes32,uint256)");
+    uint256 failed;
+    for (uint256 i = 0; i < logs.length; i++) {
+      assertTrue(logs[i].topics[0] != processedTopic, "a failed batch must not emit HankoBatchProcessed");
+      if (logs[i].topics[0] != failedTopic) continue;
+      failed++;
+      assertEq(logs[i].topics[1], me, "BatchFailed: entity");
+      assertEq(uint256(logs[i].topics[2]), nonceBefore + 1, "BatchFailed: nonce");
+      assertEq(abi.decode(logs[i].data, (bytes4)), reason, "BatchFailed: reason");
+    }
+    assertEq(failed, 1, "exactly one BatchFailed");
+    assertEq(dep.entityNonces(me), nonceBefore + 1, "a failed batch consumes its nonce");
+  }
+
+  /// @notice `_submitFailed`, and the pair (`actorIndex`, `peer`) on `tokenId` did not move: account nonce, dispute hash,
+  /// both reserves, collateral.
+  function _submitFailedUnmoved(uint256 actorIndex, Batch memory batch, bytes4 reason, bytes32 peer, uint256 tokenId) internal {
+    PairState memory before_ = _pairState(entity[actorIndex], peer, tokenId);
+    _submitFailed(actorIndex, batch, reason);
+    PairState memory after_ = _pairState(entity[actorIndex], peer, tokenId);
+    assertEq(after_.nonce, before_.nonce, "failed batch: account nonce unchanged");
+    assertEq(after_.disputeHash, before_.disputeHash, "failed batch: dispute state unchanged");
+    assertEq(after_.reserveA, before_.reserveA, "failed batch: reserve unchanged");
+    assertEq(after_.reserveB, before_.reserveB, "failed batch: peer reserve unchanged");
+    assertEq(after_.collateral, before_.collateral, "failed batch: collateral unchanged");
+  }
+
+  // ─────────────── J2: a stale or already-applied dispute op is skipped, not reverted ───────────────
+
+  /// @dev DisputeOpSkipped `op` and `reason` codes (Account.sol DISPUTE_OP_* and DISPUTE_SKIP_*).
+  uint8 internal constant OP_START = 0;
+  uint8 internal constant OP_COUNTER = 1;
+  uint8 internal constant OP_FINALIZE = 2;
+  uint8 internal constant SKIP_NONCE_NOT_ABOVE_STORED = 0;
+  uint8 internal constant SKIP_DISPUTE_ACTIVE = 1;
+  uint8 internal constant SKIP_NO_ACTIVE_DISPUTE = 2;
+  uint8 internal constant SKIP_DISPUTE_MOVED = 3;
+  uint8 internal constant SKIP_WINDOW_CLOSED = 4;
+  uint8 internal constant SKIP_COUNTER_NOT_NEWER = 5;
+  uint8 internal constant SKIP_COUNTER_SUPERSEDED = 6;
+  uint8 internal constant SKIP_COUNTER_REGISTERED = 7;
+
+  /// @dev Everything a skipped dispute op must leave alone on one pair and token.
+  struct PairState {
+    uint256 nonce;
+    bytes32 disputeHash;
+    uint256 reserveA;
+    uint256 reserveB;
+    uint256 collateral;
+  }
+
+  function _pairState(bytes32 a, bytes32 b, uint256 tokenId) internal view returns (PairState memory s) {
+    bytes memory key = XlnHanko.accountKey(a, b);
+    (s.nonce, s.disputeHash, , , , , , , , , , , , , , , ) = dep._accounts(key);
+    s.reserveA = dep._reserves(a, tokenId);
+    s.reserveB = dep._reserves(b, tokenId);
+    (s.collateral,) = dep._collaterals(key, tokenId);
+  }
+
+  /// @notice Submit `batch` from actor `actorIndex`, which must land with exactly one DisputeOpSkipped(op, reason, nonce)
+  /// naming `peer`, and leave the pair's nonce, dispute hash, both reserves and the collateral unchanged.
+  function _submitSkipped(
+    uint256 actorIndex, Batch memory batch, bytes32 peer, uint256 tokenId, uint8 op, uint8 reason, uint256 nonce
+  ) internal {
+    bytes32 me = entity[actorIndex];
+    PairState memory before_ = _pairState(me, peer, tokenId);
+    vm.recordLogs();
+    _submit(actorIndex, batch);
+    Vm.Log[] memory logs = vm.getRecordedLogs();
+    bytes32 topic = keccak256("DisputeOpSkipped(bytes32,bytes32,uint8,uint8,uint256)");
+    uint256 seen;
+    for (uint256 i = 0; i < logs.length; i++) {
+      if (logs[i].topics[0] != topic) continue;
+      seen++;
+      assertEq(logs[i].topics[1], me, "skipped op: sender");
+      assertEq(logs[i].topics[2], peer, "skipped op: counterentity");
+      (uint8 gotOp, uint8 gotReason, uint256 gotNonce) = abi.decode(logs[i].data, (uint8, uint8, uint256));
+      assertEq(gotOp, op, "skipped op: kind");
+      assertEq(gotReason, reason, "skipped op: reason");
+      assertEq(gotNonce, nonce, "skipped op: nonce");
+    }
+    assertEq(seen, 1, "exactly one DisputeOpSkipped");
+    PairState memory after_ = _pairState(me, peer, tokenId);
+    assertEq(after_.nonce, before_.nonce, "skipped op: account nonce unchanged");
+    assertEq(after_.disputeHash, before_.disputeHash, "skipped op: dispute state unchanged");
+    assertEq(after_.reserveA, before_.reserveA, "skipped op: reserve unchanged");
+    assertEq(after_.reserveB, before_.reserveB, "skipped op: peer reserve unchanged");
+    assertEq(after_.collateral, before_.collateral, "skipped op: collateral unchanged");
   }
 }

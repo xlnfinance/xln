@@ -1,0 +1,10 @@
+id: no-nested-ternary
+language: TypeScript
+severity: error
+message: nested ternary; name the cases with switch (true) or a small function
+rule:
+  kind: ternary_expression
+  any:
+    - has: { field: alternative, kind: ternary_expression }
+    - has: { field: consequence, kind: ternary_expression }
+files: [xln.ts]

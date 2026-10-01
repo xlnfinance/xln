@@ -7,6 +7,7 @@ import {StdUtils} from "forge-std/StdUtils.sol";
 import "../../../contracts/Depository.sol";
 import "../../../contracts/HashLadder.sol";
 import "../../../contracts/Types.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 
 /// @notice Stateful handler for HashLadder.invariants.t.sol.
@@ -21,24 +22,24 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 ///   participant must not write this slot.
 /// - SOURCE SINGLE-SHOT: first Source write must land inside its signed
 ///   account window [S, S+W_owner]; exact retries are sticky no-ops (ratio AND
-///   revealedAt unchanged); different ratios are E12.
-/// - TARGET MONOTONE: lower replays are E12; equal/higher publications may
+///   revealedAt unchanged); different ratios are skipped (DisputeOpSkipped, S1).
+/// - TARGET MONOTONE: lower replays are skipped (S1); equal/higher publications may
 ///   refresh revealedAt; fillRatio never decreases.
 ///
 /// C4-hardening wave 2 (audit A5): the windows are deliberately ASYMMETRIC
-/// (LEFT=50, RIGHT=70). HashLadderRegistry.registerReveal selects the owner
+/// (LEFT=60, RIGHT=90; H2 floors each window at 60 s). HashLadderRegistry.registerReveal selects the owner
 /// window by entity order (:68-70); with symmetric windows a side-selection
 /// bug (reading the counterparty's window) is unobservable. The ghost always
 /// uses the writer's OWN side, so the over-accepting direction of any swap
 /// fires invariant 5d, and `checkWindowSides` binds the signed windows to the
 /// correct storage fields. `closeDispute` finalizes live disputes so the
-/// "dispute closed → first Source write is E12" branch executes and pairs
+/// "dispute closed → first Source write is skipped" branch executes and pairs
 /// can cycle start→reveal→close repeatedly.
 contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6;
-  uint32 public constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 public constant RIGHT_RESPONSE_SECONDS = 70;
+  uint32 public constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 90;
   uint256 public constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -122,9 +123,13 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   function _submit(uint256 actor, Batch memory batch) internal returns (bool ok) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    try dep.processBatch(encoded, _hanko(actor, h), nonce) {
-      return true;
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    vm.recordLogs();
+    try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing; S1: so does a registration that is
+      // skipped (no dispute open, past its owner window, a conflicting retry, a lower Target replay): DisputeOpSkipped
+      Vm.Log[] memory logs = vm.getRecordedLogs();
+      return !XlnHanko.batchFailed(logs) && !XlnHanko.opSkipped(logs);
     } catch {
       return false;
     }
@@ -138,11 +143,11 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _disputeHash(bytes32 e1, bytes32 e2) internal view returns (bytes32 h) {
-    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (, h, , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function slotCount() external view returns (uint256) {
@@ -187,7 +192,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   // ═══════════════════════════ actions ═══════════════════════════
 
-  /// @notice Opens a 50s/70s (asymmetric) dispute so Source windows become
+  /// @notice Opens a 60s/90s (asymmetric) dispute so Source windows become
   ///         reachable and window side-selection becomes observable.
   function openDispute(uint256 fromSeed, uint256 cpSeed, uint256 seedNoise) external {
     (uint256 from, uint256 cp) = _distinct(fromSeed, cpSeed);
@@ -220,6 +225,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: other,
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -253,7 +259,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   /// @notice C4-hardening A5: finalizes a live dispute through the REAL
   ///         processBatch finalize path (pull-free body, so the non-starter
   ///         may accept immediately and the starter only after the timeout).
-  ///         After a close, a first Source write must hit the E12 branch.
+  ///         After a close, a first Source write must hit the skip branch (S1; it was E12).
   function closeDispute(uint256 pairSeed, uint256 bySeed) external {
     uint256 pi = pairSeed % PAIRS;
     if (!disputes[pi].active) {
@@ -446,7 +452,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   /// @dev Role-side assertion (audit A5): every live dispute stored the
   ///      signed asymmetric windows on the CORRECT AccountInfo fields —
-  ///      leftResponseSeconds=50 on the left entity's side, 70 on the right.
+  ///      leftResponseSeconds=60 on the left entity's side, 90 on the right.
   ///      A storage-side swap fires this check even when it would be
   ///      invisible under symmetric windows.
   function checkWindowSides() external view returns (uint256 violations) {
@@ -454,7 +460,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
       DisputeGhost memory g = disputes[pi];
       if (!g.active) continue;
       if (_disputeHash(entityOf[g.leftActor], entityOf[g.rightActor]) == bytes32(0)) continue;
-      (, , , , uint32 lrs, uint32 rrs, , , , , , , , , ) =
+      (, , , , uint32 lrs, uint32 rrs, , , , , , , , , , , ) =
         dep._accounts(XlnHanko.accountKey(entityOf[g.leftActor], entityOf[g.rightActor]));
       if (lrs != LEFT_RESPONSE_SECONDS || rrs != RIGHT_RESPONSE_SECONDS) violations++;
     }

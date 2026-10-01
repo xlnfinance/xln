@@ -32,8 +32,8 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6; // C(4,2)
-  uint32 public constant LEFT_RESPONSE_SECONDS = 50;
-  uint32 public constant RIGHT_RESPONSE_SECONDS = 50;
+  uint32 public constant LEFT_RESPONSE_SECONDS = 60;
+  uint32 public constant RIGHT_RESPONSE_SECONDS = 60;
   uint256 public constant DISPUTE_WINDOW_SECONDS =
     uint256(LEFT_RESPONSE_SECONDS) + uint256(RIGHT_RESPONSE_SECONDS);
 
@@ -122,9 +122,11 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
   function _submit(uint256 actor, Batch memory batch) internal returns (bool ok) {
     bytes memory encoded = abi.encode(batch);
     uint256 nonce = dep.entityNonces(entityOf[actor]) + 1;
-    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), encoded, nonce);
-    try dep.processBatch(encoded, _hanko(actor, h), nonce) {
-      return true;
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entityOf[actor], encoded, nonce);
+    vm.recordLogs();
+    try dep.processBatch(entityOf[actor], encoded, _hanko(actor, h), nonce) {
+      // J5: a batch whose ops fail returns normally with BatchFailed and applies nothing
+      return !XlnHanko.batchFailed(vm.getRecordedLogs());
     } catch {
       return false;
     }
@@ -157,11 +159,11 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
   }
 
   function _accountNonce(bytes32 e1, bytes32 e2) internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _disputeHash(bytes32 e1, bytes32 e2) internal view returns (bytes32 h) {
-    (, h, , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
+    (, h, , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(e1, e2));
   }
 
   function _proofBody(DisputeGhost memory g) internal view returns (ProofBody memory pb) {
@@ -287,6 +289,7 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     b.disputeStarts[0] = InitialDisputeProof({
       counterentity: entityOf[cp],
       nonce: g.nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -318,6 +321,9 @@ contract TransformerAllowanceHandler is CommonBase, StdCheats, StdUtils {
     }
     DisputeGhost memory g = disputes[pi];
     if (g.startTimestamp == 0) return;
+    // J2: a finalize for a dispute that is no longer open lands as a skip (DisputeOpSkipped), not a revert, and would be
+    // counted here as an accepted finalize with no delta. Only a live dispute is finalized by this handler.
+    if (!g.active || _disputeHash(entityOf[g.starter], entityOf[g.counter]) == bytes32(0)) return;
 
     bool byStarter = bySeed % 2 == 0;
     uint256 caller = byStarter ? g.starter : g.counter;

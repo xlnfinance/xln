@@ -9,6 +9,7 @@ import {
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
+  submitBatch,
 } from "../helpers/hanko.ts";
 
 const { ethers, networkHelpers } = await hre.network.getOrCreate("hardhat");
@@ -41,9 +42,9 @@ describe("canonical transformer secret reveal", function () {
     const batch = emptyBatch({ revealSecrets: [{ transformer, secret }] });
     const encodedBatch = encodeBatch(batch);
     const nonce = (await depository.entityNonces(entityId)) + 1n;
-    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
+    const batchHash = await computeDepositoryBatchHash(depository, entityId, encodedBatch, nonce);
     const hanko = buildSingleSignerHanko(entityId, batchHash, deriveHardhatPrivateKey(1));
-    return depository.connect(signer).processBatch(encodedBatch, hanko, nonce);
+    return submitBatch(depository, signer, entityId, { encodedBatch, hankoData: hanko, nonce });
   }
 
   it("records a reveal through the canonical transformer", async function () {

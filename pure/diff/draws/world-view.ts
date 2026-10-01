@@ -1,7 +1,7 @@
 // The world as draws see it: the Accounts, pairs and inputs every area's draws build on.
 import { batchOpCount, isBatchEmpty, J_BATCH_CONTRACT_LIMITS } from "../../../core/jurisdiction/machine/batch/index.ts";
 import { getReserveCandidateIssue } from "../../../core/entity/tx/handlers/j-batch/j-batch-reserve-admission.ts";
-import type { World } from "../world.ts";
+import type { World } from "../rig/world.ts";
 import type { EntityTx } from "../../xln.ts";
 import type { Step } from "./areas.ts";
 

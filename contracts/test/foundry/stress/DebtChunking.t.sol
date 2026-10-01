@@ -22,7 +22,7 @@ contract DebtChunkingTest is XlnFixture {
   }
 
   function _accountNonce() internal view returns (uint256 n) {
-    (n, , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
+    (n, , , , , , , , , , , , , , , , ) = dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
   }
 
   function _proofBody(Int512 memory offdelta) internal pure returns (ProofBody memory pb) {
@@ -56,6 +56,7 @@ contract DebtChunkingTest is XlnFixture {
     start.disputeStarts[0] = InitialDisputeProof({
       counterentity: entity[1],
       nonce: nonce,
+      ondeltaEpoch: XlnHanko.currentEpoch(address(dep), XlnHanko.accountKey(entity[0], entity[1])),
       proposerIsLeft: proposerIsLeft,
       proofbodyHash: pbHash,
       initialProofbody: pb,
@@ -68,7 +69,7 @@ contract DebtChunkingTest is XlnFixture {
       starterCounterProofCommitment: bytes32(0)
     });
     assertTrue(_submit(0, start), "dispute start failed");
-    (, , uint256 disputeTimeout, , , , , , , , , , , , ) =
+    (, , uint256 disputeTimeout, , , , , , , , , , , , , , ) =
       dep._accounts(XlnHanko.accountKey(entity[0], entity[1]));
     // disputeTimeout is absolute unix end; warp past it (seconds clock).
     vm.warp(disputeTimeout + 1);

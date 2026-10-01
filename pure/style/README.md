@@ -14,4 +14,41 @@ The rules encode the rewrite's pure style: lines of at most 120 characters (`lon
 - `concat`: `joined.set(p, offset)` fills the fresh output buffer.
 - `committedView` and the prepared-body memo: `views.set` and two `preparedBodies.add` fill module-level `WeakMap`/`WeakSet` caches of pure results.
 
+- `rules/` (the register gate; `style/check.ts` scans only `xln.ts`, so these are listed here rather than counted): `depthsBefore` in `rules/names/source.ts` fills one local `Int32Array` inside the reduce that builds it and hands it out once, like `mapAccumResult`; `parseJson` in `rules/register.ts` and `parseMutants` in `rules/names/names.ts` are the two `try`/`catch` boundaries around `JSON.parse`, which turn bad text into a `Result` or an empty list. The gate's edges (`check.ts`, `base.ts`, `scan.ts`, `checks/*.ts`) read files, call git and exit; they hold no state.
+
 A new exception must be listed here, with why no pure expression does the same work at the same cost.
+
+## Guide rules the ratchet also counts
+
+These map Arthur's elegant-code guide (project files, style/arthur-elegant-code-guide.md) onto ast-grep. They start at today's counts and can only go down; each hit is a place that fails the relief test until it is reshaped.
+
+- `no-comma-sequence`: the comma operator packs several steps into one expression (guide: one const per statement, named flow steps).
+- `no-nested-ternary`: a ternary inside a ternary (name the cases with `switch (true)` or a small function).
+- `no-try`: `try`/`catch` (guide: Result, not throw); a boundary that must catch is registered here like the other exceptions.
+- `no-unknown-cast`: `as unknown as` (parse into the type, do not assert it; guide: make invalid states unrepresentable).
+- `no-string-error`: `Result<T, string>` (an error is a tagged union, not text).
+- `no-problems-list`: an array of `cond ? undefined : "text"` filtered for defined (use named checks that return a tagged error).
+- `no-og-source-ref`: a comment that points at og source lines (`file.ts:123`); state the rule in our words and cite the spec property.
+
+Not mechanically checked: the relief test itself, honest names, function bodies that fit one sentence, comments that say why, positional boolean and `undefined` arguments (`review/pure-style-drift.md` proposes counting those), and everything outside `xln.ts`.
+
+# The new tree gate (`kernel/`, `chain/`, `account/`)
+
+`bun rules/check.ts` (from `pure/`) runs the register gate and then this one (`--style-only` runs only this one; code in `rules/tree/`). It runs every legacy rule plus the rules in `style/tree-rules/` over the gated sources (`.ts`, `.mts`, `.cts` and `.tsx` under `kernel/`, `chain/` and `account/`), and counts what ast-grep cannot: lines over 120 characters, declarations over 50 lines, and exports that no other file under `pure/` imports. The gate reads the files git lists (tracked plus untracked-not-ignored, like folder width), so a local `db-*` folder or build output that git ignores cannot turn it red on one machine; a directory where git lists nothing is a failing `git-listing` row. Declarations, exports and imports are read from syntax (`rules/tree/facts.yml` asks ast-grep for ranges and names; `rules/tree/syntax.ts` joins them), not from words or indentation: a declaration is its whole node, whatever its indentation or how many column-0 lines it holds; an export is used only by a file that imports it by that name and resolves to its file (a same-spelled local, a comment, a string or a bare package name is no user; a test counts as a user, `rules/`, `style/` and the legacy file do not); a type is also used by its own file outside its own declaration (never by itself). Exports are `const`, `let`, `var` (every declarator), `function`, `async function`, `function*`, `class`, `type`, `interface`, `enum` and `export { a as b }` lists. An export form the gate cannot name (`export default`, `export *`, `export declare`, a destructured `export const { a } = ...`) is an `unsupported-export` hit, and `import * as ns` of a gated file is a `namespace-import` hit (it would make every export of the file look used). Every count starts at **zero**; there is no baseline to ratchet. The only way to allow a hit is a row in `style/tree-exceptions.json` (rule, file, count) with its reason below. A row must be used exactly: more hits than the row allows fails, and so do fewer, so an exception cannot outlive its cause.
+
+Known limits: a use through `import("./x.ts")` or `require` is not an import the gate reads, so an export used only that way reads as dead; a type named only by another dead type of its own file is used until that other type is removed; an export used only by a file outside the listed sources (a script, a `.d.ts`, JSON) reads as dead.
+
+Three guards keep the gate from passing by doing nothing. Every rule file has a canary: `style/canaries.json` maps each rule id to a snippet that breaks it, and the scan plants one file per rule, in each language, and requires the rule to report on its own file (by the rule's id, not on another rule's canary); the fact rules have their own canary the same way. A rule that was deleted, disabled or narrowed to match nothing is a `canary-silent` row; a rule file without a canary is `canary-missing` (add its snippet to `style/canaries.json`); a canary whose rule file is gone is `canary-orphan`, so a rule cannot vanish together with its exception row and leave the gate green. ast-grep must also exit 0 or 1; a stub, a missing binary or a killed scan fails the gate. And every entry directly under `pure/` (a directory, or a single source file such as `entity.ts`) must be in `TREE` (`rules/tree/gate.ts`) or in `NOT_GATED`, so a new layer is a failing `unlisted-dir` or `unlisted-file` row until it is gated; when an entry joins `TREE`, also add it to `pure/tsconfig.json` `include`.
+
+New rules:
+
+- `no-boolean-param`: a positional boolean parameter; pass a record with a named field.
+- `no-literal-arg`: a bare `true`, `false` or `undefined` directly in a call's arguments. The fix is a named constant (`toRawBytes(COMPRESSED)`) or a record with a named field. Allowed without a row, because the literal is data and not a flag: an argument of `ok(...)` or `some(...)`, of a `.bool(...)` constructor, and of the matchers `toBe`, `toEqual` and `toStrictEqual`.
+- `og-named`: an identifier that names og's model; og belongs under `rig/og/` only.
+
+## Registered exceptions in the new tree
+
+- `no-mutating-call`, `kernel/core/result.ts`: `mapAccumResult` fills one array that it created and hands out once after the last push. `[...ys, y]` makes every fold and `traverse` quadratic. Same reason as the legacy exception above.
+- `no-throw`, `kernel/core/tagged.ts`: `assertNever`, the exhaustiveness backstop of `match`. It is reachable only when a value outside its declared type reaches a table, which TypeScript forbids; a return value there would hide the bug.
+- `no-try`, `kernel/crypto/signature.ts`: `recoverPublicKey` calls the curve library, which throws on a malformed signature. The catch is the one place a thrown fault becomes a `Result`; no pure expression tells a recoverable signature from an unrecoverable one without attempting the recovery.
+- `no-boolean-param`, `kernel/encoding/abi.ts` (2): `A.bool` and `P.bool` are value constructors: the boolean is the ABI value being encoded, not a mode switch on behaviour.
