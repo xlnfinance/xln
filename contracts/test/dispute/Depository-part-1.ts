@@ -1509,7 +1509,7 @@ describe('Depository', () => {
     };
     const unsignedBatch = emptyBatch({ settlements: [unsignedSettlement] });
     const unsigned = await signDepositoryBatch(depository, left.entityId, left.privateKey, unsignedBatch);
-    await expectBatchFailed(depository, left.signer, unsigned, 'Error');
+    await expectBatchFailed(depository, left.signer, unsigned, 'E4');
     expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
     expect(await depository.entityNonces(left.entityId)).to.equal(1n);  // the unsigned settlement failed soft and spent nonce 1
     const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, []);

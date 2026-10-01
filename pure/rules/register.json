@@ -2076,6 +2076,157 @@
      "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
     }
    ]
+  },
+  {
+   "id": "R-IMPLICIT-BASELINE",
+   "statement": "From ondelta epoch 1 the empty state (offdelta 0, no clause, nonce = stored + 1, Right author, floor windows) is a valid dispute start proof with no signature and settles at ondelta; signed frames outrank it through counters; a counter's windows may lengthen, never shorten.",
+   "source": "contracts-decisions.md Q-D-21 (D2), PR 'Implicit baseline'",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: after a settlement a side with no signed proof of the new epoch can start, and the dispute settles at ondelta"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: two disputes in a row, and a third, each starts from nothing (Q-D-21)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a signed frame of the epoch outranks it through a counter, and it settles instead"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: at its own nonce a Left-authored signed proof outranks it, a Right-authored one ties and does not (the Runtime starts a new epoch's proofs at stored + 2)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter may carry longer windows than the implicit proof's, and the final body may too"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter may never SHORTEN the dispute's windows (a signed start at 300 s, a counter at 60 s)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a start at a dead epoch is still skipped with reason 11, a stale nonce and an open dispute as before"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: only the canonical implicit proof starts without a signature"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: at epoch 0 there is no implicit proof (a fresh account's first frames are its proofs)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a signed start is checked as before (a wrong signature is E4)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an immediate close with a fresh signed body that SHORTENS a window is refused (E9), at each window on its own"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the same immediate close with a LONGER final body lands (windows may lengthen)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter's IMMEDIATE close ranks like a counter: Left-authored at stored + 1 closes, Right-authored at stored + 1 does not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: stored + 2 outranks the implicit proof at either author, through a counter and through an immediate close"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: after a timeout close the next implicit start is at the NEW stored + 1, a Right-authored proof there only ties and the first signed proof is at the new stored + 2"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter at the implicit nonce with Left authorship replaces it, and a later Right-authored counter at stored + 2 replaces THAT (ordering of several counters)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every NON-canonical unsigned start on a stale epoch, a stale nonce or an open dispute is SKIPPED, never reverted"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a stranger with no co-signed history (epoch 0) cannot open a dispute against any entity, funded or not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an implicit start that names NO token, or a subset, settles only what it names and still ends the epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the implicit proof cannot be replayed into a later epoch (its start is skipped once the Account has moved)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a canonical body with a non-empty signature that does not verify reverts at every length (1, 32, 64, 65 bytes), never taken as the implicit proof"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every token of the body is held to offdelta 0 (a nonzero in the middle of three is refused)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter has exactly 2 x floor to counter (119 s lands, 120 s is skipped), and the starter cannot finalize before it"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta above the collateral (Right took more than its share) is paid from RIGHT's reserves, in full, by an implicit dispute started by either side"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta below zero (Left took more than its claim) is paid from LEFT's reserves, in full"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "a spec bug for the implicit start",
+     "owed": "#41"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "a mutant for the implicit start",
+     "owed": "#44"
+    }
+   ]
   }
  ]
 }
