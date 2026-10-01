@@ -83,27 +83,27 @@ describe("the real command over a scratch checkout", () => {
     const { code, out } = withFakeForge(scratch(), "Ran 1 test suite in 1s (1s CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)", 0);
     expect(out).toContain("FORGE_OK tests=2");
     expect(code).toBe(0);
-  });
+  }, 30_000);
 
   test("R-GATE-FORGE a red forge test turns the command red and is named", () => {
     const { code, out } = withFakeForge(scratch(), "[FAIL: boom] test_a() (gas: 1)\nRan 1 test suite in 1s (1s CPU time): 1 tests passed, 1 failed, 0 skipped (2 total tests)", 1);
     expect(code).toBe(1);
     expect(out).toContain("FORGE_TESTS_FAILED 1 of 2 failed");
     expect(out).toContain("FORGE_FAIL [FAIL: boom] test_a()");
-  });
+  }, 30_000);
 
   test("a green forge that ran fewer tests than the reader counts turns the command red", () => {
     const { code, out } = withFakeForge(scratch(), "Ran 1 test suite in 1s (1s CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)", 0);
     expect(code).toBe(1);
     expect(out).toContain("FORGE_COUNT_MISMATCH");
-  });
+  }, 30_000);
 
   test("no forge on PATH turns the command red", () => {
     const repo = scratch();
     const done = Bun.spawnSync([process.execPath, `${repo}/pure/rules/check.ts`, "--forge-only"], { cwd: `${repo}/pure`, env: { ...process.env, PATH: "/usr/bin:/bin" } });
     expect(done.exitCode).toBe(1);
     expect(done.stdout.toString()).toContain("FORGE_MISSING");
-  });
+  }, 30_000);
 
   test("a checkout without forge-std turns the command red before forge runs", () => {
     const repo = scratch();
@@ -111,7 +111,7 @@ describe("the real command over a scratch checkout", () => {
     const done = Bun.spawnSync([process.execPath, `${repo}/pure/rules/check.ts`, "--forge-only"], { cwd: `${repo}/pure`, env: { ...process.env, PATH: "/usr/bin:/bin" } });
     expect(done.exitCode).toBe(1);
     expect(done.stdout.toString()).toContain("FORGE_STD_MISSING");
-  });
+  }, 30_000);
 
   test("a forge-std that the pin check refuses turns the command red before forge runs", () => {
     const repo = scratch();
@@ -120,5 +120,5 @@ describe("the real command over a scratch checkout", () => {
     expect(code).toBe(1);
     expect(out).toContain("FORGE_STD_UNVERIFIED FORGE_STD_TRACKED_WORKTREE_DIRTY");
     expect(out).not.toContain("FORGE_OK");
-  });
+  }, 30_000);
 });

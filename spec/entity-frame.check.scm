@@ -1,0 +1,5 @@
+;; Check the Entity frame page.   node arrival/packages/arrival-cli/dist/cli.js run entity-frame.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "entity/frame.scm")
+(check entity-frame)

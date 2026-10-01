@@ -1,0 +1,5 @@
+;; Check the Runtime tick page.   node arrival/packages/arrival-cli/dist/cli.js run runtime.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "runtime/tick.scm")
+(check runtime)
