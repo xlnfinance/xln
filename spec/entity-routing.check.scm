@@ -1,0 +1,5 @@
+;; Check the routing page.   node arrival/packages/arrival-cli/dist/cli.js run entity-routing.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "entity/routing.scm")
+(check routing)

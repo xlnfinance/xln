@@ -1,0 +1,6 @@
+;; Check the dispute page.   node arrival/packages/arrival-cli/dist/cli.js run dispute.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "money/core.scm")
+(require "dispute/dispute.scm")
+(check dispute)
