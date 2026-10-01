@@ -22,15 +22,22 @@ export type Frame<Tx> = Readonly<{ author: Side; parent: FrameHash; attempt: num
 /** A proposer that has had MAX_ATTEMPTS frames refused on one head stops retrying: that peer is not catching up. */
 export const MAX_ATTEMPTS = 8;
 
+/** The fault a receiver names when a frame's attempt is below what it has already refused on this head. */
+export const STALE_ATTEMPT = "stale_attempt";
+
 /**
  * `refusal` is R-FRAME-REFUSAL: the answer to a frame the receiver cannot apply. It names the frame, the index of the
  * first tx that does not apply and the tag of the fault, so the proposer can take the frame back and either retry the
- * tx later or drop it, instead of waiting.
+ * tx later or drop it, instead of waiting. `mark` is the receiver's memory for this head, the highest attempt it has
+ * refused: the proposer's next attempt is above it, so a proposer whose count is behind (a restart) catches up in one
+ * round trip.
  */
+type Refusal = Readonly<{ hash: FrameHash; index: number; fault: string; mark: number }>;
+
 export type Msg<Tx> =
   | Tagged<"frame", { frame: Frame<Tx> }>
   | Tagged<"ack", { hash: FrameHash }>
-  | Tagged<"refusal", { hash: FrameHash; index: number; fault: string }>;
+  | Tagged<"refusal", Refusal>;
 
 /**
  * What a frame is made of. `apply` is the author's tx on the judging replica's state, by that replica's view. `tag` is
@@ -95,8 +102,7 @@ export type Outcome<F> =
 export type Heard<Tx, S, F> = Out<Tx, S, F> & Readonly<{ outcome: Outcome<F> }>;
 
 const ack = <Tx>(hash: FrameHash): Msg<Tx> => ({ _tag: "ack", hash });
-const refusal = <Tx>(hash: FrameHash, index: number, fault: string): Msg<Tx> =>
-  ({ _tag: "refusal", hash, index, fault });
+const refusal = <Tx>(r: Refusal): Msg<Tx> => ({ _tag: "refusal", ...r });
 const frameMsg = <Tx>(frame: Frame<Tx>): Msg<Tx> => ({ _tag: "frame", frame });
 
 /** The txs one after another on a state; a tx that does not apply names its index and its fault. */
@@ -167,7 +173,8 @@ const accept = <Tx, S, F>(r: Replica<Tx, S, F>, hash: FrameHash, after: S): Hear
 const refuseWith = <Tx, S, F>(
   rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, name: FrameHash, d: Declined<F>,
 ): Heard<Tx, S, F> =>
-  heard(r, [refusal(name, d.index, rules.tag(d.fault))], { _tag: "refused_invalid", fault: d.fault });
+  heard(r, [refusal({ hash: name, index: d.index, fault: rules.tag(d.fault), mark: d.attempt })],
+    { _tag: "refused_invalid", fault: d.fault });
 
 /**
  * R-FRAME-REFUSAL: a frame that does not apply is answered with a refusal naming it, its first tx at fault and the
@@ -183,8 +190,12 @@ const decline = <Tx, S, F>(
   return refuseWith(rules, { ...r, declined: d }, name, d);
 };
 
-/** A peer's attempt is a whole number from 0 to MAX_ATTEMPTS, whatever its decoder let through: the memory needs it. */
-const wellNumbered = (attempt: number): boolean => Number.isInteger(attempt) && attempt >= 0 && attempt <= MAX_ATTEMPTS;
+/**
+ * A peer's attempt is a whole number it can count without loss, whatever its decoder let through. MAX_ATTEMPTS bounds
+ * the proposer's retries, not the receiver: the proposer keeps counting past it, and a frame at any such number is
+ * judged (the memory is one row whatever the number).
+ */
+const wellNumbered = (attempt: number): boolean => Number.isSafeInteger(attempt) && attempt >= 0;
 
 const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Frame<Tx>): Heard<Tx, S, F> => {
   if (f.author === r.side) return heard(r, NO_MESSAGES, { _tag: "refused_own" });
@@ -201,7 +212,8 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Fram
   if (declined !== undefined && f.attempt <= declined.attempt) {
     return f.attempt === declined.attempt
       ? refuseWith(rules, r, name, declined)
-      : heard(r, NO_MESSAGES, { _tag: "refused_stale" });
+      : heard(r, [refusal({ hash: name, index: 0, fault: STALE_ATTEMPT, mark: declined.attempt })],
+        { _tag: "refused_stale" });
   }
   // Same-height collision: LEFT WINS (R-A1). Left keeps its own frame and ignores the peer's; Right yields.
   if (r.pending !== undefined && r.side === "left") return heard(r, NO_MESSAGES, { _tag: "kept_own" });
@@ -222,22 +234,25 @@ const onAck = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, hash: Fra
  * R-FRAME-REFUSAL, the proposer's side: the refusal names my pending, unacked frame, so I take it back. A fault that
  * can pass with the peer's view of the chain (`retryable`) sends every tx back ahead of the mempool, to be proposed
  * again at the next attempt; any other fault drops the tx the peer named, with notice (R-NOTICE; it releases its payer,
- * R-REFUSED-RELEASES-PAYER), and queues the rest. After MAX_ATTEMPTS refusals on one head nothing is retried. A refusal
+ * R-REFUSED-RELEASES-PAYER), and queues the rest. After MAX_ATTEMPTS refusals on one head nothing is retried, except
+ * a stale attempt, which judged nothing and so costs no tx. The next attempt is above the receiver's mark. A refusal
  * for any other frame is ignored: one for a frame I have already committed (the peer answers a committed frame with the
  * ack, never a refusal), a stale or repeated one, or one whose index is not a tx of the frame.
  */
 const onRefusal = <Tx, S, F>(
-  rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, name: FrameHash, index: number, fault: string,
+  rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, { hash, index, fault, mark }: Refusal,
 ): Heard<Tx, S, F> => {
   const pending = r.pending;
   const named = Number.isInteger(index) ? pending?.frame.txs[index] : undefined;
-  if (pending === undefined || named === undefined || rules.hash(pending.frame) !== name) {
+  const counted = Number.isSafeInteger(mark) && mark >= 0 && mark < Number.MAX_SAFE_INTEGER;
+  if (pending === undefined || named === undefined || !counted || rules.hash(pending.frame) !== hash) {
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
-  const retry = rules.retryable(fault) && r.attempt < MAX_ATTEMPTS;
+  const retry = fault === STALE_ATTEMPT || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
   const kept = retry ? pending.frame.txs : pending.frame.txs.filter((_, i) => i !== index);
   const refused = retry ? r.refused : [...r.refused, { tx: named, fault: { _tag: "peer_refused", fault } as const }];
-  const rolled = { ...r, mempool: [...kept, ...r.mempool], pending: undefined, refused, attempt: r.attempt + 1 };
+  const attempt = Math.max(r.attempt, mark) + 1;
+  const rolled = { ...r, mempool: [...kept, ...r.mempool], pending: undefined, refused, attempt };
   return heard(rolled, NO_MESSAGES, { _tag: "rolled_back" });
 };
 
@@ -246,5 +261,5 @@ export const receive = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, 
   match(m, {
     frame: (x) => onFrame(rules, r, x.frame),
     ack: (x) => onAck(rules, r, x.hash),
-    refusal: (x) => onRefusal(rules, r, x.hash, x.index, x.fault),
+    refusal: (x) => onRefusal(rules, r, x),
   });

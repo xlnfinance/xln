@@ -1629,7 +1629,7 @@
   },
   {
    "id": "R-FRAME-REFUSAL",
-   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS refusals per head) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
    "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
@@ -1653,6 +1653,40 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    }
+   ]
+  },
+  {
+   "id": "R-EVERY-REFUSAL-ANSWERED",
+   "statement": "A frame of the peer's at my head that I do not judge afresh is answered with a refusal that names it and carries my mark for this head (the highest attempt I refused), never with silence: a frame that does not apply, a repeat of one I refused, and a frame whose attempt is below my mark (the fault stale_attempt) all get one. A stale answer judged nothing, so it costs the proposer no tx and no retry budget, and its next attempt is above the mark, so a proposer whose attempt count is behind (a restart that dropped it) catches up in one round trip and is never left pending. Silent on purpose, because there is no honest proposer to tell or nothing to take back: my own frame, an empty frame, a frame whose attempt is not a countable number, and a frame not at my head (R-REACK answers the one at my head with its ack).",
+   "source": "coordinator 10-01 02:52 on Review A of PR 85 (N1, N2)",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a frame at the mark is refused again, one below it is told the mark"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a proposer whose attempt count is behind is told the mark and commits next"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a stale answer costs no tx, whatever the retry budget"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
     }
    ]
   },
