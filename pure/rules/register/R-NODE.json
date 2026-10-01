@@ -1,0 +1,39 @@
+{
+ "id": "R-NODE",
+ "statement": "A node's whole state moves one event at a time: what it sends leaves only after the row that made it is durable, a message dropped for want of a connection or lost on the way is sent again by the timer when its Account waits at the same frame at two ticks, a peer that is down is dialed again, and the chain is read at each tick until the batch lands.",
+ "source": "plan/backlog/e2e.md S3; R-DURABLE; spec/transport/link.scm (resend timer)",
+ "layers": {
+  "arrival": "n/a: the Arrival specs run one Runtime's Host core, not the sockets under it",
+  "quint": "n/a: the Quint model takes the link as a channel that may lose, repeat or reorder; sockets are below it",
+  "contract": "n/a: connections and timers are off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NODE nodes that are connected open an Account and commit a frame together without waiting for a tick"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NODE a frame the link lost on its way out is sent again by the timer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NODE a peer that went away and came back from its WAL is dialed again and told what it missed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NODE a node dials a peer that is not there yet and connects when the peer is"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NODE a batch the chain has not answered is read again at each tick until it lands"
+  }
+ ]
+}

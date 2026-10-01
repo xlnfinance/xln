@@ -5,7 +5,7 @@
 //
 // This module reads no clock and holds no state of its own: the clock is the shell's `now`, and the Station it returns
 // is the whole state, so a crash is a Station thrown away and `start` run again over the same two files.
-import type { Command, EntityId, EntityState, Outbound } from "../../../entity/model.ts";
+import type { EntityId, EntityInput, EntityState, Outbound } from "../../../entity/model.ts";
 import type { Returned, Skipped } from "../../../j/batch/answer.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
@@ -110,11 +110,15 @@ const drained = async (shell: Shell, turn: Turn): Promise<Result<Turn, DriveFaul
     : drained(shell, framed.value);
 };
 
-/** A command for the Entity, run until the Host has nothing queued. */
+/** An input for the Entity, run until the Host has nothing queued. */
 export const command = (
-  shell: Shell, station: Station, to: EntityId, input: Command,
+  shell: Shell, station: Station, to: EntityId, input: EntityInput,
 ): Promise<Result<Turn, DriveFault>> =>
   drained(shell, nothing({ ...station, host: submit(station.host, { to, input }) }));
+
+/** The Host as it is, run until it has nothing queued: what the link or the J loop put in its queue is taken. */
+export const drain = (shell: Shell, station: Station): Promise<Result<Turn, DriveFault>> =>
+  drained(shell, nothing(station));
 
 /** The Station over the WAL and the journal as they are: new on empty files, and after a crash what they hold. */
 export const start = async (shell: Shell, boot: Boot): Promise<Result<Turn, DriveFault>> => {
