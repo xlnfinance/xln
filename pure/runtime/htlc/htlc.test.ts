@@ -1,12 +1,12 @@
 // A clause through the Runtime: Alice locks 30 for Bob on a hashlock, and the clause ends one of three ways: Bob shows
 // the secret (it pays), Bob gives it up (it lapses), or the deadline and its reserve pass (Alice takes it back). Both
-// Hosts see the same chain here; refusal.test.ts is where they differ.
+// Hosts see the same chain here; retry.test.ts is where they differ.
 import { describe, expect, test } from "bun:test";
-import { holdId } from "../account/model.ts";
-import { holdOf, secretOf, viewOf } from "../account/fixtures.ts";
-import { ledgerOf } from "../account/state.ts";
-import type { Command, EntityId } from "../entity/model.ts";
-import { type Cluster, credit, entityOf, feed, GOLD, hostOf, open, rise, settle, start } from "./fixtures.ts";
+import { holdId } from "../../account/model.ts";
+import { holdOf, secretOf, viewOf } from "../../account/fixtures.ts";
+import { ledgerOf } from "../../account/state.ts";
+import type { Command, EntityId } from "../../entity/model.ts";
+import { type Cluster, credit, entityOf, feed, GOLD, hostOf, open, rise, settle, start } from "../fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);

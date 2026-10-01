@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { emptyEntity, type EntityInput } from "../entity/model.ts";
+import { emptyEntity, type EntityInput, type Outbound } from "../entity/model.ts";
 import type { FrameHash } from "../account/frame/frame.ts";
 import type { Row } from "./model.ts";
 import { timestamp } from "./model.ts";
-import { apply, commit, flush, recover } from "./tick.ts";
-import { credit, entityOf, inputFor, open, pay, setup, stamp, started, tick, unhalted } from "./fixtures.ts";
+import { apply, commit, flush, messageId, recover } from "./tick.ts";
+import { credit, entityOf, GOLD, inputFor, open, pay, setup, stamp, started, tick, unhalted } from "./fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
@@ -152,5 +152,50 @@ describe("runtime/tick recovery", () => {
   test("the rows of refused inputs replay too", () => {
     const refused = tick(started(BOB), inputFor(entityOf(7), 1n, open(BOB))).runtime;
     expect(unhalted(recover(setup, genesis, refused.wal)).wal).toEqual(refused.wal);
+  });
+});
+
+describe("runtime/tick review A: stamps, and what a replay compares", () => {
+  test("a WAL whose rows share a stamp replays: a Host stamps in milliseconds, equal stamps are usual", () => {
+    const rt = [open(ALICE), credit(ALICE, 100n), credit(ALICE, 200n)]
+      .reduce((acc, c) => tick(acc, inputFor(BOB, 7n, c)).runtime, started(BOB));
+    expect(rt.wal.map((row) => row.stamp)).toEqual([7n, 7n, 7n].map(stamp));
+    expect(unhalted(recover(setup, genesis, rt.wal)).entities).toEqual(rt.entities);
+  });
+
+  test("a refused input moves the stamp like any other: a later input stamped earlier never sends the WAL back", () => {
+    const refused = tick(started(BOB), inputFor(entityOf(7), 100n, open(BOB))).runtime;
+    const later = tick(refused, inputFor(BOB, 50n, open(ALICE))).runtime;
+    expect(later.wal.map((row) => row.stamp)).toEqual([100n, 100n].map(stamp));
+    expect(unhalted(recover(setup, genesis, later.wal)).wal).toEqual(later.wal);
+  });
+
+  const withOutputs = (rows: readonly Row[], at: number, outputs: Row["outputs"]): readonly Row[] =>
+    rows.map((row, i) => (i === at ? { ...row, outputs } : row));
+
+  test("a recorded output replaced by another of the same count, or sent to another peer, halts the replay", () => {
+    const { runtime } = bobProposes();
+    const recorded = runtime.wal[1]?.outputs ?? expect.unreachable("no outputs");
+    const otherHash = `0x${"cd".repeat(32)}` as FrameHash;
+    const otherAck: Outbound = { from: BOB, to: ALICE, msg: { _tag: "ack", hash: otherHash } };
+    const elsewhere = recorded.map((o): Outbound => ({ ...o, to: CAROL }));
+    const halted = { ok: false, error: { _tag: "replay_diverged", height: 2n } } as const;
+    expect(recover(setup, genesis, withOutputs(runtime.wal, 1, [otherAck]))).toEqual(halted);
+    expect(recover(setup, genesis, withOutputs(runtime.wal, 1, elsewhere))).toEqual(halted);
+  });
+
+  test("messageId tells apart messages that differ in any one field", () => {
+    const h1 = `0x${"01".repeat(32)}` as FrameHash;
+    const h2 = `0x${"02".repeat(32)}` as FrameHash;
+    const refusal = { _tag: "refusal", hash: h1, index: 0, fault: "x", mark: 0 } as const;
+    const refusals = [
+      refusal, { ...refusal, hash: h2 }, { ...refusal, index: 1 }, { ...refusal, fault: "y" }, { ...refusal, mark: 1 },
+    ];
+    expect(new Set(refusals.map(messageId)).size).toBe(refusals.length);
+    expect(messageId({ _tag: "ack", hash: h1 })).not.toBe(messageId({ _tag: "ack", hash: h2 }));
+    const frame = (amount: bigint) => messageId({
+      _tag: "frame", frame: { author: "left", parent: h1, attempt: 0, txs: [{ _tag: "pay", token: GOLD, amount }] },
+    });
+    expect(frame(1n)).not.toBe(frame(2n));
   });
 });

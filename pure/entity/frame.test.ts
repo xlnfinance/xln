@@ -183,3 +183,102 @@ describe("entity/frame phases", () => {
     expect(run(bob, { _tag: "resend_due", peer: CAROL }).outputs).toEqual([]);
   });
 });
+
+describe("entity/frame review A: order inside a phase, and what the owner is told", () => {
+  const aliceWithBobAndCarol = (): EntityState => {
+    const state = opened(ALICE, BOB, CAROL);
+    const queued = (peer: typeof ALICE, limit: bigint) =>
+      queue(state.accounts.get(peer) ?? expect.unreachable("no account"), { _tag: "set_credit", token: GOLD, limit });
+    return { ...state, accounts: new Map([[BOB, queued(BOB, 1n)], [CAROL, queued(CAROL, 2n)]]) };
+  };
+
+  const framesFromBob = () => {
+    const first = creditFromBob(100n);
+    const toAliceFirst = run(aliceAndBob, toAlice(first.sent));
+    const acked = run(first.bob, peerMessage(ALICE, toAliceFirst.outputs[0]?.msg ?? expect.unreachable("no ack")));
+    const second = run(acked.state, credit(ALICE, 200n));
+    return { first: toAlice(first.sent), second: toAlice(second.outputs) };
+  };
+
+  test("R-E1 a hook sees the Accounts after the arrivals of its frame: an ack in it takes the resend away", () => {
+    const { bob, sent } = creditFromBob(100n);
+    const alice = run(aliceAndBob, toAlice(sent));
+    const ack = peerMessage(ALICE, alice.outputs[0]?.msg ?? expect.unreachable("no ack"));
+    const together = run(bob, { _tag: "resend_due", peer: ALICE }, ack);
+    expect(together.outputs).toEqual([]);
+    expect(together.state.accounts.get(ALICE)?.pending).toBeUndefined();
+  });
+
+  test("R-E1 arrivals fold in the order they came: two frames of one peer in one input both commit", () => {
+    const { first, second } = framesFromBob();
+    const framed = run(aliceAndBob, first, second);
+    expect(framed.notices).toEqual([]);
+    expect(framed.outputs.map((o) => o.msg._tag)).toEqual(["ack", "ack"]);
+    expect(ledgerOf(framed.state.accounts.get(BOB)?.state ?? expect.unreachable("no account"), GOLD).limit.left)
+      .toBe(200n);
+  });
+
+  test("R-E1 commands fold in the order they came: the last credit set is the one that stands", () => {
+    const framed = run(opened(ALICE, BOB), credit(BOB, 100n), credit(BOB, 200n));
+    expect(framed.state.accounts.get(BOB)?.pending?.frame.txs).toEqual([
+      { _tag: "set_credit", token: GOLD, limit: 100n }, { _tag: "set_credit", token: GOLD, limit: 200n },
+    ]);
+  });
+
+  test("R-E4 a command the door refused does not claim a place: Accounts propose by id", () => {
+    const framed = run(aliceWithBobAndCarol(), pay(CAROL, 5n));
+    expect(framed.notices.map((n) => n._tag)).toEqual(["command_refused"]);
+    expect(peers(framed.outputs)).toEqual([BOB, CAROL]);
+  });
+
+  test("R-E4 the Accounts no command touched propose by ascending id, after the touched ones", () => {
+    const state = opened(ALICE, BOB, CAROL, DAVE);
+    const waiting = (peer: typeof ALICE, limit: bigint) =>
+      queue(state.accounts.get(peer) ?? expect.unreachable("no account"), { _tag: "set_credit", token: GOLD, limit });
+    const queuedAll: EntityState = {
+      ...state, accounts: new Map([[BOB, waiting(BOB, 1n)], [CAROL, waiting(CAROL, 2n)], [DAVE, waiting(DAVE, 3n)]]),
+    };
+    expect(peers(run(queuedAll, credit(DAVE, 9n)).outputs)).toEqual([DAVE, BOB, CAROL]);
+  });
+
+  type Side = "left" | "right";
+  const frameOf = (author: Side, parent: FrameHash, attempt: number, txs: readonly AccountTx[]): EntityInput =>
+    peerMessage(BOB, { _tag: "frame", frame: { author, parent, attempt, txs } });
+
+  test("R-NOTICE every refusal of a peer's message reaches the owner with its peer and its outcome", () => {
+    const head = aliceAndBob.accounts.get(BOB)?.head ?? expect.unreachable("no account");
+    const overdraft: AccountTx = { _tag: "pay", token: GOLD, amount: 5n };
+    const heardWith = (input: EntityInput) => run(aliceAndBob, input).notices;
+    expect(heardWith(frameOf("right", head, 0, []))).toEqual([
+      { _tag: "message_refused", from: BOB, outcome: { _tag: "refused_empty" } },
+    ]);
+    expect(heardWith(frameOf("left", head, 0, [overdraft]))).toEqual([
+      { _tag: "message_refused", from: BOB, outcome: { _tag: "refused_own" } },
+    ]);
+    expect(heardWith(frameOf("right", head, -1, [overdraft]))).toEqual([
+      { _tag: "message_refused", from: BOB, outcome: { _tag: "refused_attempt" } },
+    ]);
+    expect(heardWith(frameOf("right", head, 0, [overdraft]))).toEqual([{
+      _tag: "message_refused",
+      from: BOB,
+      outcome: { _tag: "refused_invalid", fault: { _tag: "insufficient_capacity", available: 0n, requested: 5n } },
+    }]);
+  });
+
+  test("R-NOTICE every tx an Account refused is told, and so is every Account's", () => {
+    const state = aliceWithBobAndCarol();
+    const overdraft = (amount: bigint): AccountTx => ({ _tag: "pay", token: GOLD, amount });
+    const bob = queue(queue(state.accounts.get(BOB) ?? expect.unreachable("no account"), overdraft(5n)), overdraft(6n));
+    const carol = queue(state.accounts.get(CAROL) ?? expect.unreachable("no account"), overdraft(7n));
+    const framed = run({ ...state, accounts: new Map([[BOB, bob], [CAROL, carol]]) });
+    const told = framed.notices.map((n) => (n._tag === "tx_refused" ? [n.peer, n.refused.tx._tag] : [n._tag]));
+    expect(told).toEqual([[BOB, "pay"], [BOB, "pay"], [CAROL, "pay"]]);
+    expect([...framed.state.accounts.values()].map((a) => a.refused)).toEqual([[], []]);
+  });
+
+  test("an id is exactly 0x and 64 lowercase hex digits: nothing before, nothing after", () => {
+    expect(entityId(`${ALICE}00`).ok).toBe(false);
+    expect(entityId(`00${ALICE}`).ok).toBe(false);
+    expect(entityId(` ${ALICE}`).ok).toBe(false);
+  });
+});
