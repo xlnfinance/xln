@@ -1809,10 +1809,11 @@ library Account {
 
   // ========== DISPUTE START ==========
 
-  /// @dev R-IMPLICIT-BASELINE (Q-D-21). From the epoch after any advance, the empty state of the Account is a valid dispute proof for both
+  /// @dev R-IMPLICIT-BASELINE (Q-D-21). From the epoch after any advance (a dispute finalize, a collateral-to-reserve withdrawal or a
+  /// settlement; a deposit does not advance the epoch), the empty state of the Account is a valid dispute proof for both
   /// sides without a signature, because every field of it is on chain: offdelta 0, no clause, and the nonce one above the stored one. A
-  /// dispute from it settles at Delta = ondelta, which both sides agreed to at the advance, and any signed frame of the epoch outranks it
-  /// through a counter. Two disputes in a row, and a deposit made after an advance, therefore always have a proof to dispute with.
+  /// dispute from it settles at Delta = ondelta as it stands when the dispute settles (a deposit inside the epoch moves it), and any signed
+  /// frame of the epoch outranks it through a counter. Two disputes in a row, and a deposit made after an advance, therefore always have a proof to dispute with.
   /// Canonical means exactly: epoch >= 1 (epoch 0's first frames are its proofs); nonce = stored + 1; authored by Right, the lowest rank at
   /// that nonce (a Left-authored signed proof of the same nonce outranks it); watchSeed 0; both windows at the floor, since no signed body
   /// carries any policy; every offdelta 0, no clause, no starter arguments. The starter names the tokens it settles: a token left out keeps

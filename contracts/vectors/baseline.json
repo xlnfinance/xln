@@ -99,12 +99,21 @@
       "nonceAboveStoredPlusOne": "REVERT NotTheImplicitBaseline()",
       "authoredByLeft": "REVERT NotTheImplicitBaseline()",
       "offdeltaNotZero": "REVERT NotTheImplicitBaseline()",
+      "offdeltaNegative": "REVERT NotTheImplicitBaseline()",
+      "offdeltaHighWordNotZero": "REVERT NotTheImplicitBaseline()",
+      "secondOffdeltaNotZero": "REVERT NotTheImplicitBaseline()",
       "leftWindowNotTheFloor": "REVERT NotTheImplicitBaseline()",
       "rightWindowNotTheFloor": "REVERT NotTheImplicitBaseline()",
-      "watchSeedNotZero": "REVERT NotTheImplicitBaseline()"
+      "watchSeedNotZero": "REVERT NotTheImplicitBaseline()",
+      "transformerClause": "REVERT NotTheImplicitBaseline()",
+      "starterInitialArguments": "REVERT NotTheImplicitBaseline()",
+      "starterCounterArguments": "REVERT NotTheImplicitBaseline()",
+      "starterCounterCommitment": "REVERT NotTheImplicitBaseline()",
+      "epochZero": "REVERT NotTheImplicitBaseline()"
     },
     "start": "ok",
     "finalize": "ok",
+    "disputeHashStored": "0x8957a51db7611952c0839cc908adaf5b627af688f33802b8db27c84d269d1712",
     "settled": {
       "L": "1000",
       "R": "1000",

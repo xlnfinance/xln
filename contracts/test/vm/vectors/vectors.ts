@@ -351,24 +351,40 @@ export const implicitBaselineVectors = async () => {
   const epoch = await w.epochOf();
   const storedNonce = (await w.chain.getAccountInfo(w.L.id, w.R.id)).nonce;
   const body = { watchSeed: ethers.ZeroHash, leftResponseSeconds: 60, rightResponseSeconds: 60, offdeltas: [0n], tokenIds: [w.TOKEN] };
-  const reject = async (nonce: number, proposerIsLeft: boolean, b: typeof body) => outcome(w, await w.submit(w.R, { disputeStarts: [w.startOp(w.L, nonce, proposerIsLeft, b, "0x", epoch)] }));
+  const reject = async (nonce: number, proposerIsLeft: boolean, b: typeof body, patch: Record<string, unknown> = {}) =>
+    outcome(w, await w.submit(w.R, { disputeStarts: [{ ...w.startOp(w.L, nonce, proposerIsLeft, b, "0x", epoch), ...patch }] }));
+  const clause = { transformerAddress: ethers.ZeroAddress, encodedBatch: "0x", allowances: [] };
+  const seed = ethers.id("seed");
+  // Every way the contract refuses an unsigned start of an Account at epoch >= 1. Each departs from the canonical proof in one thing.
   const rejected = {
     nonceAboveStoredPlusOne: await reject(7, false, body),
     authoredByLeft: await reject(6, true, body),
     offdeltaNotZero: await reject(6, false, { ...body, offdeltas: [1n] }),
+    offdeltaNegative: await reject(6, false, { ...body, offdeltas: [-1n] }),
+    offdeltaHighWordNotZero: await reject(6, false, { ...body, offdeltas: [1n << 256n] }),
+    secondOffdeltaNotZero: await reject(6, false, { ...body, tokenIds: [1, 2], offdeltas: [0n, 1n] }),
     leftWindowNotTheFloor: await reject(6, false, { ...body, leftResponseSeconds: 61 }),
     rightWindowNotTheFloor: await reject(6, false, { ...body, rightResponseSeconds: 120 }),
-    watchSeedNotZero: await reject(6, false, { ...body, watchSeed: ethers.id("seed") }),
+    watchSeedNotZero: await reject(6, false, { ...body, watchSeed: seed }, { watchSeed: seed }),
+    transformerClause: await reject(6, false, { ...body, transformers: [clause] }),
+    starterInitialArguments: await reject(6, false, body, { starterInitialArguments: "0x01" }),
+    starterCounterArguments: await reject(6, false, body, { starterCounterArguments: "0x01" }),
+    starterCounterCommitment: await reject(6, false, body, { starterCounterProofCommitment: ethers.id("c") }),
   };
+  // Epoch 0: a fresh Account has no implicit proof.
+  const fresh = await boot("implicit-baseline-epoch0");
+  await fresh.fundedAccount();
+  const epochZero = outcome(fresh, await fresh.submit(fresh.R, { disputeStarts: [fresh.startOp(fresh.L, 1, false, body, "0x", await fresh.epochOf())] }));
   const start = outcome(w, await w.start(w.R, w.L, 6, false, body, "0x", epoch));
+  const disputeHash = (await w.chain.getAccountInfo(w.L.id, w.R.id)).disputeHash;
   w.at(200);
   const finalize = outcome(w, await w.finalize(w.R, w.L, { nonce: 6, body, startedByLeft: false }, { nonce: 6, proposerIsLeft: false, body, sig: "0x" }));
   const after = await w.reserves();
   return {
     afterSettlement: { settle, epoch: epoch.toString(), storedNonce: storedNonce.toString() },
     implicitProof: { epoch: epoch.toString(), nonce: 6, proposerIsLeft: false, proofBodyHash: bodyHash(body), proofHash: w.proofHash(epoch, 6, false, body), signature: "0x" },
-    rejected,
-    start, finalize,
+    rejected: { ...rejected, epochZero },
+    start, finalize, disputeHashStored: disputeHash,
     settled: { L: after.L.toString(), R: after.R.toString(), collateral: after.collateral.toString(), epoch: (await w.epochOf()).toString() },
   };
 };
