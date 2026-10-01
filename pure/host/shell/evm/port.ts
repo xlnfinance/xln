@@ -35,6 +35,8 @@ export type PortConfig = Readonly<{
   tokens: readonly bigint[];
   /** No batch of ours landed in a block before this one: where a search of the logs starts. */
   from: bigint;
+  /** A batch is answered only by a log this many blocks below the head (D9, R-WATCH-DEPTH); 0 on a local node. */
+  depth: bigint;
 }>;
 
 const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
@@ -120,7 +122,7 @@ type Reads = Readonly<{
   ) => Promise<Result<T, PortFault>>;
   view: <T>(call: string, data: Reply<string>, parse: (raw: unknown) => Reply<T>) => Promise<Result<T, PortFault>>;
   logs: (
-    call: string, topics: readonly string[], from: bigint, to: string,
+    call: string, topics: readonly string[], from: bigint, to: bigint,
   ) => Promise<Result<readonly Placed[], PortFault>>;
 }>;
 
@@ -136,8 +138,14 @@ const readsOf = (rpc: Rpc, cfg: PortConfig): Reads => {
       ? read(call, "eth_call", [{ to: cfg.depository, data: data.value }, "latest"], parse)
       : Promise.resolve(err(portFault(call, data.error.why))));
   const logs: Reads["logs"] = (call, topics, from, to) => {
-    const filter = { address: cfg.depository, fromBlock: hexQuantity(from), toBlock: to, topics };
-    return read(call, "eth_getLogs", [filter], (raw) => listOf(raw, placedOf));
+    const filter = { address: cfg.depository, fromBlock: hexQuantity(from), toBlock: hexQuantity(to), topics };
+    const asked = (log: Placed): boolean =>
+      log.address.toLowerCase() === cfg.depository.toLowerCase()
+      && log.block >= from && log.block <= to
+      && topics.every((topic, i) => log.topics[i]?.toLowerCase() === topic.toLowerCase());
+    return read(call, "eth_getLogs", [filter], (raw) =>
+      flatMap(listOf(raw, placedOf), (found) =>
+        (found.every(asked) ? ok(found) : err(bad("a log that is not the one asked for")))));
   };
   return { ask, read, view, logs };
 };
@@ -183,7 +191,7 @@ const sendOf = (reads: Reads, cfg: PortConfig): ChainPort["send"] => async (call
 const skipsOf = async (
   reads: Reads, cfg: PortConfig, landed: Placed,
 ): Promise<Result<readonly SkipFact[], PortFault>> => {
-  const found = await reads.logs("skips", [DISPUTE_SKIPPED, cfg.entity], landed.block, hexQuantity(landed.block));
+  const found = await reads.logs("skips", [DISPUTE_SKIPPED, cfg.entity], landed.block, landed.block);
   return flatMap(found, (all) => mapErr(
     traverse(all.filter((log) => log.transaction === landed.transaction), skipOf),
     (fault) => portFault("skips", fault.why),
@@ -191,15 +199,19 @@ const skipsOf = async (
 };
 
 const answerOf = (reads: Reads, cfg: PortConfig): ChainPort["answer"] => async (batch) => {
+  const head = await reads.read("answer head", "eth_blockNumber", [], quantity);
+  if (!head.ok) return head;
+  const settled = head.value - cfg.depth;
+  if (settled < cfg.from) return ok(undefined);
   const ours = [HANKO_PROCESSED, cfg.entity, batch.digest.toLowerCase()];
-  const landed = await reads.logs("answer", ours, cfg.from, "latest");
+  const landed = await reads.logs("answer", ours, cfg.from, settled);
   if (!landed.ok) return landed;
   const [first] = landed.value;
   if (first !== undefined) {
     return map(await skipsOf(reads, cfg, first), (skipped): JAnswer =>
       ({ _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped }));
   }
-  const failed = await reads.logs("answer", [BATCH_FAILED, cfg.entity, topicNumber(batch.nonce)], cfg.from, "latest");
+  const failed = await reads.logs("answer", [BATCH_FAILED, cfg.entity, topicNumber(batch.nonce)], cfg.from, settled);
   if (!failed.ok) return failed;
   const [refusal] = failed.value;
   if (refusal === undefined) return ok(undefined);

@@ -1,0 +1,29 @@
+{
+ "id": "R-SUBMIT-DEPTH",
+ "statement": "The Host answers a batch (landed or failed) only from logs at least `depth` blocks below the chain head (0 on a local node), so a reorg of the landing block cannot close a batch that is no longer on the chain; and a log that is not of the Depository, of the asked topics and inside the asked block range is refused, not read, so the port does not rely on the node honouring its filter.",
+ "source": "consolidation-plan.md D9 and Q-X-10 (act on J events only at depth); R-WATCH-DEPTH; Review A of PR 141, B1 and B2",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take the chain's answer to a batch as given",
+  "quint": "n/a: the Quint model takes the chain's answer to a batch as given",
+  "contract": "n/a: no contract code takes part; the Host reads the deployed Depository's events",
+  "rig": "owed: test rig (an anvil reorg is not available; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-DEPTH a landing block less than the depth below the head does not answer the batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-DEPTH a head that cannot be read is a fault, not an answer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-DEPTH a log of another contract, topics or range than asked is refused, not an answer"
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+{
+ "id": "R-SUBMIT-WEDGE",
+ "statement": "A batch the Host sent that the chain never answers (a deposit that reverts whole after a good simulation, a dropped transaction, a fee never mined, a gas limit below the requirement) does not wedge the submit path: the sent transaction's receipt is read, and the batch is re-simulated and held or re-sealed, so an urgent op queued behind it (a counter, a reveal) can still go.",
+ "source": "Review A of PR 141 (not blocking, owed before any Sepolia run); coordinator 10-01 20:49",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take the chain's answer to a batch as given",
+  "quint": "n/a: the Quint model takes the chain's answer to a batch as given",
+  "contract": "n/a: a deposit batch reverts whole by design (Depository `_revertsWhole`); the duty is the Host's",
+  "rig": "owed: test rig (a walk draw that sends a deposit whose allowance moved after the simulation; none is named yet)",
+  "ts": "owed: e2e builder, in the first step that exercises a failed batch (a receipt read of the sent transaction, then re-simulate and hold or re-seal; no timeout today, and no same-nonce fee bump for a stuck low-fee transaction)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SUBMIT-WEDGE a deposit that reverts whole after a good simulation does not leave the next fund queued for good",
+   "owed": "e2e builder, the first step that exercises a failed batch"
+  }
+ ]
+}

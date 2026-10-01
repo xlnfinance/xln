@@ -20,7 +20,7 @@ const KEY = unwrapOr(keyOf(SECRET), () => expect.unreachable("key"));
 const ENTITY = entityOf(1);
 const DEPOSITORY = "0xED34A147a0a480B0B006A4266E8bA0d6e995000C";
 const CONFIG: PortConfig =
-  { depository: DEPOSITORY, entity: ENTITY, chainId: 11155111n, key: KEY, tokens: [1n, 7n], from: 100n };
+  { depository: DEPOSITORY, entity: ENTITY, chainId: 11155111n, key: KEY, tokens: [1n, 7n], from: 100n, depth: 0n };
 const DIGEST = `0x${"ab".repeat(32)}`;
 const BATCH = { digest: DIGEST, nonce: 5n } as never as SealedBatch;
 const CALL: ProcessBatchCall = { entityId: ENTITY, encodedBatch: "0x1234", hankoData: "0xabcd", nonce: 5n };
@@ -44,7 +44,7 @@ const rpcOf = (node: Node, log: string): Rpc => (method, params) => {
   return Promise.resolve(answer === undefined ? err({ _tag: "rpc", reason: `no ${method}` }) : answer(params));
 };
 
-const portOf = (node: Node, log: string = logOf()) => chainPort(rpcOf(node, log), CONFIG);
+const portOf = (node: Node, log: string = logOf(), cfg: PortConfig = CONFIG) => chainPort(rpcOf(node, log), cfg);
 
 const askedOf = (log: string): readonly string[] =>
   readFileSync(log, "utf8").split("\n").filter((line) => line !== "");
@@ -84,6 +84,7 @@ describe("host/shell/evm the port reads the chain's state as the contract holds 
     expect(await portOf({ eth_call: () => ok("0x12") }).nonce()).toMatchObject({ ok: false, error: { call: "nonce" } });
     expect(await portOf({ eth_call: () => ok(words(1n, 2n)) }).nonce()).toMatchObject({ ok: false });
     expect(await portOf({ eth_call: () => ok(42) }).nonce()).toMatchObject({ ok: false });
+    expect(await portOf({ eth_call: () => ok(`0x${"12".repeat(33)}`) }).nonce()).toMatchObject({ ok: false });
     expect(await portOf({ eth_call: () => down }).nonce())
       .toEqual(err({ _tag: "port", call: "nonce", reason: "connection refused" }));
   });
@@ -170,47 +171,95 @@ describe("host/shell/evm what became of a batch is read from the Depository's lo
   const TX = `0x${"11".repeat(32)}`;
   const OTHER_TX = `0x${"22".repeat(32)}`;
   const COUNTER = `0x${"cd".repeat(32)}`;
-  const skip = (tx: string, reason: bigint) => logAt(7n, tx, [DISPUTE_SKIPPED, ENTITY, COUNTER], words(1n, reason, 9n));
+  const LANDED = logAt(110n, TX, [HANKO_PROCESSED, ENTITY, DIGEST], words(5n));
+  const FAILED = logAt(111n, TX, [BATCH_FAILED, ENTITY, topicNumber(5n)], `0x${"aabbccdd"}${"00".repeat(28)}`);
+  const skip = (tx: string, reason: bigint) =>
+    logAt(110n, tx, [DISPUTE_SKIPPED, ENTITY, COUNTER], words(1n, reason, 9n));
 
-  const logsFor = (topic0: string, found: readonly unknown[]): Node["eth_getLogs"] => (params) => {
-    const { topics } = params[0] as { topics: readonly string[] };
-    return ok(topics[0] === topic0 ? found : []);
+  type Filter = Readonly<{ address?: string; fromBlock: string; toBlock: string; topics: readonly string[] }>;
+  const at = (log: unknown): { block: bigint; topics: readonly string[]; address: string } => {
+    const { blockNumber, topics, address } = log as { blockNumber: string; topics: readonly string[]; address: string };
+    return { block: BigInt(blockNumber), topics, address };
   };
 
+  /** A node that keeps the filter it is given: the logs that match its address, topics and block range. */
+  const keeping = (held: readonly unknown[]): Node["eth_getLogs"] => (params) => {
+    const filter = params[0] as Filter;
+    return ok(held.filter((log) => {
+      const { block, topics, address } = at(log);
+      return (filter.address === undefined || filter.address.toLowerCase() === address)
+        && block >= BigInt(filter.fromBlock) && block <= BigInt(filter.toBlock)
+        && filter.topics.every((topic, i) => topic.toLowerCase() === topics[i]?.toLowerCase());
+    }));
+  };
+
+  const headAt = (head: bigint): Node["eth_blockNumber"] => () => ok(`0x${head.toString(16)}`);
+  const nodeOf = (head: bigint, held: readonly unknown[]): Node =>
+    ({ eth_blockNumber: headAt(head), eth_getLogs: keeping(held) });
+
   test("R-DURABLE a batch whose HankoBatchProcessed is on the chain has landed, with its own skips", async () => {
-    const landed = logAt(7n, TX, [HANKO_PROCESSED, ENTITY, DIGEST], words(5n));
     const log = logOf();
-    const getLogs: Node["eth_getLogs"] = (params) => {
-      const { topics } = params[0] as { topics: readonly string[] };
-      if (topics[0] === HANKO_PROCESSED) return ok([landed]);
-      return topics[0] === DISPUTE_SKIPPED ? ok([skip(TX, 3n), skip(OTHER_TX, 4n)]) : ok([]);
-    };
-    expect(await portOf({ eth_getLogs: getLogs }, log).answer(BATCH)).toEqual(ok({
+    const held = [LANDED, skip(TX, 3n), skip(OTHER_TX, 4n)];
+    expect(await portOf(nodeOf(120n, held), log).answer(BATCH)).toEqual(ok({
       _tag: "landed", nonce: 5n, batchHash: DIGEST, skipped: [{ op: 1, counterentity: COUNTER, reason: 3, nonce: 9n }],
     }));
-    const [first] = askedOf(log);
-    expect(first).toContain(`"fromBlock":"0x64"`);
-    expect(first).toContain(`"toBlock":"latest"`);
+    const [, first, second] = askedOf(log);
+    expect(first).toContain(`"address":"${DEPOSITORY}"`);
+    expect(first).toContain('"fromBlock":"0x64","toBlock":"0x78"');
     expect(first).toContain(DIGEST);
-    expect(askedOf(log)[1]).toContain('"fromBlock":"0x7","toBlock":"0x7"');
+    expect(second).toContain('"fromBlock":"0x6e","toBlock":"0x6e"');
   });
 
   test("R-J5 a BatchFailed at the batch's nonce is a failure, with the selector of the revert", async () => {
-    const failed = logAt(8n, TX, [BATCH_FAILED, ENTITY, topicNumber(5n)], `0x${"aabbccdd"}${"00".repeat(28)}`);
-    expect(await portOf({ eth_getLogs: logsFor(BATCH_FAILED, [failed]) }).answer(BATCH))
+    expect(await portOf(nodeOf(120n, [FAILED])).answer(BATCH))
       .toEqual(ok({ _tag: "failed", nonce: 5n, reason: "0xaabbccdd" }));
+    const otherNonce = logAt(111n, TX, [BATCH_FAILED, ENTITY, topicNumber(6n)], `0x${"aabbccdd"}${"00".repeat(28)}`);
+    expect(await portOf(nodeOf(120n, [otherNonce])).answer(BATCH)).toEqual(ok(undefined));
   });
 
   test("a batch the chain has said nothing about has no answer yet", async () => {
-    expect(await portOf({ eth_getLogs: () => ok([]) }).answer(BATCH)).toEqual(ok(undefined));
+    expect(await portOf(nodeOf(120n, [])).answer(BATCH)).toEqual(ok(undefined));
+  });
+
+  test("R-SUBMIT-DEPTH a landing block less than the depth below the head does not answer the batch", async () => {
+    const deep = { ...CONFIG, depth: 5n };
+    const landed = ok({ _tag: "landed", nonce: 5n, batchHash: DIGEST, skipped: [] } as const);
+    expect(await portOf(nodeOf(115n, [LANDED]), logOf(), deep).answer(BATCH)).toEqual(landed);
+    expect(await portOf(nodeOf(114n, [LANDED]), logOf(), deep).answer(BATCH)).toEqual(ok(undefined));
+    expect(await portOf(nodeOf(115n, [FAILED]), logOf(), deep).answer(BATCH)).toEqual(ok(undefined));
+    const log = logOf();
+    expect(await portOf(nodeOf(104n, [LANDED]), log, deep).answer(BATCH)).toEqual(ok(undefined));
+    expect(askedOf(log)).toEqual(["eth_blockNumber []"]);
+  });
+
+  test("R-SUBMIT-DEPTH a head that cannot be read is a fault, not an answer", async () => {
+    const noHead: Node = { eth_blockNumber: () => down, eth_getLogs: keeping([LANDED]) };
+    expect(await portOf(noHead).answer(BATCH))
+      .toEqual(err({ _tag: "port", call: "answer head", reason: "connection refused" }));
+  });
+
+  test("R-SUBMIT-DEPTH a log of another contract, topics or range than asked is refused, not an answer", async () => {
+    const foreign = { ...(LANDED as object), address: "0x1111111111111111111111111111111111111111" };
+    const honest = (found: readonly unknown[]): Node =>
+      ({ eth_blockNumber: headAt(120n), eth_getLogs: () => ok(found) });
+    expect(await portOf(honest([foreign])).answer(BATCH)).toMatchObject({ ok: false, error: { call: "answer" } });
+    const early = logAt(99n, TX, [HANKO_PROCESSED, ENTITY, DIGEST], words(5n));
+    expect(await portOf(honest([early])).answer(BATCH)).toMatchObject({ ok: false, error: { call: "answer" } });
+    const late = logAt(121n, TX, [HANKO_PROCESSED, ENTITY, DIGEST], words(5n));
+    expect(await portOf(honest([late])).answer(BATCH)).toMatchObject({ ok: false, error: { call: "answer" } });
+    const otherDigest = logAt(110n, TX, [HANKO_PROCESSED, ENTITY, COUNTER], words(5n));
+    expect(await portOf(honest([otherDigest])).answer(BATCH)).toMatchObject({ ok: false, error: { call: "answer" } });
+    const upper = logAt(110n, TX, [HANKO_PROCESSED, ENTITY, `0x${"AB".repeat(32)}`], words(5n));
+    expect(await portOf(nodeOf(120n, [upper])).answer(BATCH)).toMatchObject({ ok: true });
   });
 
   test("a node that is down, or logs that are not logs, are faults and not answers", async () => {
-    expect(await portOf({ eth_getLogs: () => down }).answer(BATCH))
+    const withLogs = (reply: Node["eth_getLogs"]): Node => ({ eth_blockNumber: headAt(120n), eth_getLogs: reply });
+    expect(await portOf(withLogs(() => down)).answer(BATCH))
       .toEqual(err({ _tag: "port", call: "answer", reason: "connection refused" }));
-    expect(await portOf({ eth_getLogs: () => ok("none") }).answer(BATCH)).toMatchObject({ ok: false });
-    expect(await portOf({ eth_getLogs: () => ok([{ topics: "x" }]) }).answer(BATCH)).toMatchObject({ ok: false });
-    const noData = logAt(8n, TX, [BATCH_FAILED, ENTITY, topicNumber(5n)], "0x12");
-    expect(await portOf({ eth_getLogs: logsFor(BATCH_FAILED, [noData]) }).answer(BATCH)).toMatchObject({ ok: false });
+    expect(await portOf(withLogs(() => ok("none"))).answer(BATCH)).toMatchObject({ ok: false });
+    expect(await portOf(withLogs(() => ok([{ topics: "x" }]))).answer(BATCH)).toMatchObject({ ok: false });
+    const noData = logAt(111n, TX, [BATCH_FAILED, ENTITY, topicNumber(5n)], "0x12");
+    expect(await portOf(withLogs(keeping([noData]))).answer(BATCH)).toMatchObject({ ok: false });
   });
 });

@@ -34,7 +34,7 @@ export class Seat {
     const key = must(keyOf(must(hexToBytes(party.key), "key bytes")), `${party.name}'s key`);
     const port = chainPort(httpRpc(chain.rpc), {
       depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
-      tokens: [chain.tokenId], from: BigInt(await chain.provider.getBlockNumber()),
+      tokens: [chain.tokenId], from: BigInt(await chain.provider.getBlockNumber()), depth: 0n,
     });
     const shell: Shell = {
       wal, io: { port, signer: lazySigner(entity, key), journal, gas: GAS },
