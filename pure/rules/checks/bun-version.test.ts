@@ -29,6 +29,7 @@ describe("the report", () => {
     expect(report.line).toContain(">=1.4.0");
     expect(report.line).toContain("1.3.11");
     expect(report.line).toContain('curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"');
+    expect(report.line).toContain("which bun");
   });
   test("the install line names the pinned version", () => expect(installLine("1.4.0")).toBe('curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"'));
   test("the pinned version and a newer one pass", () => {
@@ -39,9 +40,16 @@ describe("the report", () => {
     expect(requiredBun('{ "name": "p" }').ok).toBe(false);
     expect(requiredBun(pkg("^1.4.0")).ok).toBe(false);
     expect(requiredBun(pkg(">=1.4")).ok).toBe(false);
+    expect(requiredBun(pkg("<=1.4.0")).ok).toBe(false);
+    expect(requiredBun(pkg(">=1.4.0-beta")).ok).toBe(false);
+    expect(requiredBun(pkg(">=v1.4.0")).ok).toBe(false);
     expect(bunReport("1.4.2", '{ "name": "p" }').failed).toBe(true);
   });
-  test("a Bun version that is not x.y.z fails", () => expect(bunReport("canary", pkg(">=1.4.0")).failed).toBe(true));
+  test("a Bun version that is not x.y.z fails", () => {
+    expect(bunReport("canary", pkg(">=1.4.0")).failed).toBe(true);
+    expect(bunReport("1.4.0-canary.1", pkg(">=1.4.0")).failed).toBe(true);
+    expect(bunReport("v1.4.2", pkg(">=1.4.0")).failed).toBe(true);
+  });
   test("the real package.json asks for a Bun the running one satisfies", () => {
     const real = Bun.spawnSync(["cat", `${pureRoot}/package.json`]).stdout.toString();
     expect(requiredBun(real).ok).toBe(true);
@@ -62,7 +70,7 @@ describe("the real command", () => {
     return repo;
   };
   const run = (repo: string): Readonly<{ code: number | null; out: string }> => {
-    const done = Bun.spawnSync(["bun", `${repo}/pure/rules/check.ts`, "--bun-only"], { cwd: `${repo}/pure` });
+    const done = Bun.spawnSync([process.execPath, `${repo}/pure/rules/check.ts`, "--bun-only"], { cwd: `${repo}/pure` });
     return { code: done.exitCode, out: done.stdout.toString() + done.stderr.toString() };
   };
 

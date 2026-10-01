@@ -43,5 +43,5 @@ export const bunReport = (have: string, packageJson: string): BunReport => {
   const ok = haveVersion !== undefined && atLeast(haveVersion, versionOf(need.value)!);
   return ok
     ? { failed: false, line: `ok   bun ${have} satisfies >=${need.value}` }
-    : { failed: true, line: `FAIL bun ${have} is older than the required >=${need.value} (older Bun segfaults on Worker termination mid-run). Install it:  ${installLine(need.value)}` };
+    : { failed: true, line: `FAIL bun ${have} is older than the required >=${need.value} (older Bun segfaults on Worker termination mid-run). Install it:  ${installLine(need.value)}   then \`which bun\` must print ~/.bun/bin/bun` };
 };
