@@ -269,6 +269,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a length garbled to run past the file in a MIDDLE record is damage: no record is cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a write that faults half way stops the Disk: later rows refused, the tear cut at start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sync that faults stops the Disk too: not retried, nothing appended after it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the file disk stops at its first fault: a write on a closed file, then runs refused"
   }
  ]
 }

@@ -5,7 +5,7 @@ import { open, readFile, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Disk, DiskFault, DiskOp, Exec } from "../disk.ts";
-import { sequence } from "../disk.ts";
+import { failStop, sequence } from "../disk.ts";
 
 type Step = DiskFault["op"];
 
@@ -44,7 +44,7 @@ export const fileDisk = async (path: string): Promise<Result<Disk, DiskFault>> =
   const file = await attempt("open", open(path, "a+"));
   if (!file.ok) return file;
   const synced = await syncDirectory(path);
-  if (synced.ok) return ok(diskOf(path, file.value));
+  if (synced.ok) return ok(failStop(diskOf(path, file.value)));
   await attempt("close", file.value.close());
   return synced;
 };

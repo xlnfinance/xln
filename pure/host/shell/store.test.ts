@@ -8,7 +8,7 @@ import { emptyEntity } from "../../entity/model.ts";
 import type { Row } from "../../runtime/model.ts";
 import { reopen } from "../host.ts";
 import { BOUNDS, unhalted } from "../fixtures.ts";
-import { type Disk, type DiskOp, sequence } from "./disk.ts";
+import { type Disk, type DiskOp, failStop, sequence } from "./disk.ts";
 import { fileDisk } from "./node/file-disk.ts";
 import { aliceRun, ALICE, bobRun, BOB, walOf } from "./fixtures.ts";
 import { appendOps, keep, openWal } from "./store.ts";
@@ -136,6 +136,55 @@ describe("host/shell/store what a file gives back after a crash", () => {
     writeFileSync(path, garbled);
     expect(await readBack(path)).toMatchObject({ ok: false, error: { _tag: "corrupt", offset: sizes[0] } });
     expect(readFileSync(path).equals(Buffer.from(garbled))).toBe(true);
+  });
+
+  test("R-DURABLE a write that faults half way stops the Disk: later rows refused, the tear cut at start", async () => {
+    const path = scratch();
+    const real = await opened(path);
+    const half: Disk = {
+      ...real,
+      run: async (ops) => {
+        const write = ops[0];
+        if (write?._tag !== "write") return real.run(ops);
+        await real.run([{ _tag: "write", bytes: write.bytes.subarray(0, write.bytes.length >> 1) }]);
+        return err({ _tag: "disk", op: "write", reason: "ENOSPC" });
+      },
+    };
+    const stopped = failStop(half);
+    const [one, two, three] = rows as readonly [Row, Row, Row];
+    expect(await keep(stopped, one)).toEqual(err({ _tag: "disk", op: "write", reason: "ENOSPC" }));
+    expect(await keep(stopped, two)).toMatchObject({ ok: false, error: { _tag: "disk", op: "write" } });
+    const refused = { ok: false, error: { reason: "stopped after an earlier fault" } };
+    expect(await keep(stopped, three)).toMatchObject(refused);
+    expect(await stopped.read()).toMatchObject({ ok: true });
+    await real.close();
+    expect(await readBack(path)).toEqual(ok([]));
+    expect(statSync(path).size).toBe(0);
+  });
+
+  test("R-DURABLE a sync that faults stops the Disk too: not retried, nothing appended after it", async () => {
+    const path = scratch();
+    const real = await opened(path);
+    const syncFault: Disk = {
+      ...real,
+      run: async (ops) => {
+        await real.run(ops.filter((op) => op._tag !== "sync"));
+        return err({ _tag: "disk", op: "sync", reason: "EIO" });
+      },
+    };
+    const stopped = failStop(syncFault);
+    const [one, two] = rows as readonly [Row, Row];
+    expect(await keep(stopped, one)).toMatchObject({ ok: false, error: { op: "sync" } });
+    expect(await keep(stopped, two)).toMatchObject({ ok: false, error: { reason: "stopped after an earlier fault" } });
+    await real.close();
+  });
+
+  test("R-DURABLE the file disk stops at its first fault: a write on a closed file, then runs refused", async () => {
+    const disk = await opened(scratch());
+    await disk.close();
+    const [one, two] = rows as readonly [Row, Row];
+    expect(await keep(disk, one)).toMatchObject({ ok: false, error: { _tag: "disk", op: "write" } });
+    expect(await keep(disk, two)).toMatchObject({ ok: false, error: { reason: "stopped after an earlier fault" } });
   });
 
   test("a file that cannot be opened is a fault with the step that failed", async () => {
