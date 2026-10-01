@@ -88,6 +88,20 @@ export const KNOWN_FINDINGS: readonly KnownFinding[] = [
           { property: "lane", line: "WALK_SEED=0x2128458a frame=148 postStateHash.: og=true rw=false" }
         ],
       },
+      {
+        area: "model",
+        seed: 0x3d3941c7,
+        expects: [
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 entityHashes.3.hash: og=\"0x7e1d8c7e33aba66d49a2128aa918b64683cf20c409339cf7cbfa34265ea452ff\" rw=\"0xa95b613bbc594d838ba420bf3b59b17beca88518ef386794f47eee477cf433cf\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 meta[1].certifiedFrameHeadDigest: og=\"0x1ac284e9bc5a1a3e02393d453d3128b29db91bf3cf4684476a6ec5c1422b60cb\" rw=\"0x0be7654506d5467c4a6222a2e2d8fba2ed992a315371b6d2f0fe09380b8d5bd7\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 meta[1].entityHead.frameHash: og=\"0x5a60e792ee9d010d959204c7d49106c6bd4939b0d6878f38f7f42e7defcd5f19\" rw=\"0x8214c1fac841aa85a63baa360bd2ca5befc48221124e4e3c035c4de616d88967\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 head[H].frameHash: og=\"0x5a60e792ee9d010d959204c7d49106c6bd4939b0d6878f38f7f42e7defcd5f19\" rw=\"0x8214c1fac841aa85a63baa360bd2ca5befc48221124e4e3c035c4de616d88967\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 head[H].hankos.0: og=\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000 rw=\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 head[H].hashesToSign.0.hash: og=\"0x5a60e792ee9d010d959204c7d49106c6bd4939b0d6878f38f7f42e7defcd5f19\" rw=\"0x8214c1fac841aa85a63baa360bd2ca5befc48221124e4e3c035c4de616d88967\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 head[H].stateRoot: og=\"0x7e1d8c7e33aba66d49a2128aa918b64683cf20c409339cf7cbfa34265ea452ff\" rw=\"0xa95b613bbc594d838ba420bf3b59b17beca88518ef386794f47eee477cf433cf\"" },
+          { property: "lane", line: "WALK_SEED=0x3d3941c7 frame=191 postStateHash.: og=true rw=false" }
+        ],
+      },
     ],
   },
   {
