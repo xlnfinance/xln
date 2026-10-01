@@ -8,8 +8,10 @@ before it and passes after it.
 - Build: `contracts/scripts/build.sh` compiles with Hardhat and regenerates the committed `typechain-types/`.
 - Tests that run the real stack in BrowserVM live in `test/vm/` (bun). They load this fork's bytecode into og's BrowserVM
   through `test/vm/rig.ts`, without editing `core/`. Run one file per process: `bun test contracts/test/vm/<area>/<file>`.
-- The inherited Hardhat mocha suites under `test/` are unchanged copies. Several fail on this toolchain before any change
-  (chai matcher version, missing og fixture); the baseline counts are in `BASELINE.md`.
+- The inherited Hardhat mocha suites under `test/dispute`, `test/governance` and `test/protocol` are unchanged copies. Several fail on this toolchain before any
+  change (chai matcher version, missing og fixture); the baseline counts are in `BASELINE.md`. No gate runs them, so they are listed in
+  `pure/rules/checks/contract-tests.ts` (`HARDHAT_ONLY`). Every other contract test must sit where a gate runs it: `test/vm/<area>/`, `test/gate/` or
+  `test/foundry/` (`bun rules/check.ts --tests-only` in `pure/`, part of the one gate). `DisputeHashVector` and the A12 test were moved there.
 
 ## Changes from og (each has a BrowserVM test in `test/vm/`)
 

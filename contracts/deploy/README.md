@@ -18,7 +18,7 @@ export PATH=$PATH:/foundry                     # anvil
 bash contracts/scripts/build.sh                # the build the manifest is checked against
 bun contracts/deploy/dry-run.ts                # plain anvil, chain 31337
 bun contracts/deploy/dry-run.ts --fork https://ethereum-sepolia-rpc.publicnode.com   # anvil fork of Sepolia, chain 11155111
-bun test contracts/test/deploy/                # the refusals and the dry run, as tests (anvil needed, a missing anvil fails)
+bun test contracts/test/gate/deploy-guards.test.ts contracts/test/gate/deploy-dry-run.test.ts   # the refusals and the dry run, as tests (anvil needed, a missing anvil fails)
 ```
 
 The live deploy, once Arthur says so (the only command here that sends a transaction to a real network):
@@ -34,7 +34,7 @@ A node whose chain id is not the manifest's; an RPC that is not this machine wit
 
 ## Keys
 
-None are stored. `DEPLOYER_PRIVATE_KEY` is read from the environment. On a loopback node with no key set, anvil's public dev account #0 signs; on any other RPC no key means no deploy. The Foundation board is the 1-of-1 deployer, so the deployer key is also the key that lists the token.
+None are stored. `DEPLOYER_PRIVATE_KEY` is read from the environment, and only with `--live`. Without `--live` (every dry run, every test) anvil's public dev account #0 signs on the loopback node and the variable is ignored even when it is set; with `--live` and no key a loopback node still gets the dev account and any other RPC gets no deploy. The Foundation board is the 1-of-1 deployer, so the deployer key is also the key that lists the token.
 
 ## Smoke test on a live network
 

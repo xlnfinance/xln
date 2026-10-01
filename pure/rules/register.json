@@ -364,7 +364,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44 (id not in a name yet)",
-    "contract": "owed: thread 'Contracts under our control' tags the vector tests",
+    "contract": "hold",
     "rig": "-",
     "ts": "hold"
    },
@@ -372,8 +372,7 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "DisputeHashVector",
-     "owed": "thread 'Contracts under our control' (contracts/test/dispute is not gated; move the vector test under vm/)"
+     "name": "DisputeHashVector"
     },
     {
      "kind": "test",
@@ -853,7 +852,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "owed: thread 'Contracts under our control' tags the deposit tests J6",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },
@@ -862,6 +861,11 @@
      "kind": "test",
      "layer": "contract",
      "name": "test_relayerWithoutAllowanceCannotBurnTheNonceOfADepositBatch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_J6_depositBatchWithAFailingPaymentRevertsWhole"
     },
     {
      "kind": "mutant",
@@ -878,7 +882,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "owed: thread 'Contracts under our control' tags the stale-nonce test R-FINAL-NONCE (the finding F1's test does not count)",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },
@@ -898,8 +902,7 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "a test tagged R-FINAL-NONCE",
-     "owed": "thread 'Contracts under our control' (the finding F1's test does not count)"
+     "name": "R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts"
     }
    ]
   },
@@ -910,7 +913,7 @@
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44",
-    "contract": "owed: thread 'Contracts under our control' names the J5Starve and J5Attacks tests F16",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },
@@ -919,6 +922,16 @@
      "kind": "test",
      "layer": "contract",
      "name": "test_gasSweep_erc20Deposit_depthTwo"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_F16_gasSweep_erc721Deposit_depthThree"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "F16 V revert-whole batches ignore the budget but keep the minimum"
     },
     {
      "kind": "mutant",
@@ -941,7 +954,7 @@
    "layers": {
     "arrival": "owed: #41",
     "quint": "owed: #44",
-    "contract": "owed: thread 'Contracts under our control': a12-two-cosigned-proofs.test.ts sits in contracts/test/a12, a folder no gate runs; move it under vm/ or add the folder to a gate",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },
@@ -949,8 +962,7 @@
     {
      "kind": "test",
      "layer": "contract",
-     "name": "A12 two different co-signed proofs at one nonce",
-     "owed": "thread 'Contracts under our control' (a12 folder is not gated)"
+     "name": "A12 two different co-signed proofs at one nonce: LEFT's proposal outranks RIGHT's, whoever presents first"
     },
     {
      "kind": "mutant",
@@ -1050,7 +1062,7 @@
    "layers": {
     "arrival": "-",
     "quint": "-",
-    "contract": "owed: thread 'Contracts under our control' tags the deploy-gate tests N3",
+    "contract": "hold",
     "rig": "-",
     "ts": "-"
    },

@@ -66,7 +66,7 @@ export const smokeSet = async ({ rpcUrl, manifest: given, privateKey, salt = eth
   const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { cacheTimeout: -1 });
   const chainId = (await provider.getNetwork()).chainId;
   if (Number(chainId) !== manifest.chainId) throw new Error(`the node reports chain id ${chainId}, the manifest is for ${manifest.chainId}`);
-  const funder = new ethers.Wallet(privateKey ?? resolveDeployerKey(process.env, rpcUrl), provider);
+  const funder = new ethers.Wallet(privateKey ?? resolveDeployerKey(process.env, rpcUrl, live), provider);
   const depositoryAddress = manifest.contracts.depository.address;
   const depository = Depository__factory.connect(depositoryAddress, provider);
   const token = ERC20Mock__factory.connect(manifest.token.address!, provider);

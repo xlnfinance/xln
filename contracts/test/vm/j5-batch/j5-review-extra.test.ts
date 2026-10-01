@@ -20,7 +20,7 @@ const world = async (label: string) => {
 };
 
 describe("J5 review: settlement signatures commit to the account epoch, which moves on every settlement", () => {
-  test("a settlement signed before another one landed is a BatchFailed E4: the nonce is spent, and the re-signed one lands at the next", async () => {
+  test("R-FINAL-NONCE a settlement signed before another one landed is a BatchFailed E4: the nonce is spent, and the re-signed one lands at the next", async () => {
     const { w, acct, events, nonceOf, diffs, settle } = await world("j5r-epoch");
     const e0 = await acct.epochOf();
     expect(await settle(1, diffs(10n), e0)).toBe("ok"); // a good settlement lands; the epoch advances

@@ -66,7 +66,7 @@ contract J5AttacksTest is XlnFixture {
   }
 
   /// Two legs in one batch: the deposit leg puts the whole batch on the reverting side, the payment beside it included.
-  function test_relayerCannotBurnTheNonceOfADepositBatchWithAPaymentBesideIt() public {
+  function test_J6_relayerCannotBurnTheNonceOfADepositBatchWithAPaymentBesideIt() public {
     _fundOwner(400);
     Batch memory b = _depositBatch(200);
     b.reserveToReserve = new ReserveToReserve[](1);
@@ -79,7 +79,7 @@ contract J5AttacksTest is XlnFixture {
   }
 
   /// A deposit leg that fails for a state reason (the payment beside it overdraws) reverts too, and takes no nonce.
-  function test_depositBatchWithAFailingPaymentRevertsWhole() public {
+  function test_J6_depositBatchWithAFailingPaymentRevertsWhole() public {
     _fundOwner(400);
     Batch memory b = _depositBatch(200);
     b.reserveToReserve = new ReserveToReserve[](1);
@@ -177,7 +177,7 @@ contract J5GasDepthTest is XlnFixture {
     assertGt(landed, 0);
   }
 
-  function test_gasSweep_erc721Deposit_depthThree() public {
+  function test_F16_gasSweep_erc721Deposit_depthThree() public {
     Batch memory b = XlnHanko.emptyBatch();
     b.externalTokenToReserve = new ExternalTokenToReserve[](1);
     b.externalTokenToReserve[0] = ExternalTokenToReserve({ entity: entity[0], contractAddress: address(nft), externalTokenId: 7, tokenType: 1, internalTokenId: nftTokenId, amount: 1 });

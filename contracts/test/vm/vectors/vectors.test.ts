@@ -14,7 +14,7 @@ type Vector = { function: string; label: string; args: any[]; returnData: string
 const vectorsFor = (fn: string): Vector[] => committed("functions").vectors.filter((v: Vector) => v.function.startsWith(`${fn}(`));
 const word = (returnData: string): string => ethers.hexlify(coder.decode(["bytes"], returnData)[0] as string);
 
-describe("vectors", () => {
+describe("R-J2 vectors", () => {
   test("committed files equal a fresh run against the deployed bytecode", async () => {
     const fresh = JSON.parse(JSON.stringify(await allVectors()));
     expect(fresh).toEqual({ functions: committed("functions"), lifecycle: committed("lifecycle"), baseline: committed("baseline"), batch: committed("batch"), hanko: committed("hanko") });

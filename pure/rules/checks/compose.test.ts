@@ -5,14 +5,16 @@ import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { existingFiles } from "./folder-width.ts";
 import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
+import { HARDHAT_ONLY } from "./contract-tests.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
-  const green = { register: true, style: true, width: true };
+  const green = { register: true, style: true, width: true, tests: true };
 
   test("all parts passing is 0", () => expect(gateExit(green)).toBe(0));
   test("R-GATE-COMPOSE a failing register alone is 1", () => expect(gateExit({ ...green, register: false })).toBe(1));
   test("a failing style gate alone is 1", () => expect(gateExit({ ...green, style: false })).toBe(1));
   test("a failing folder width alone is 1", () => expect(gateExit({ ...green, width: false })).toBe(1));
+  test("a failing contract-test placement alone is 1", () => expect(gateExit({ ...green, tests: false })).toBe(1));
 });
 
 const pureRoot = `${import.meta.dir}/../..`;
@@ -97,6 +99,30 @@ describe("the real command over a scratch copy", () => {
     expect(done.stdout.toString()).toContain("no contract name carries the id");
   });
 
+  // The scratch copy holds pure/ only; the contract tests it is asked about are planted beside it, the Hardhat-only ones too.
+  const withContractTests = (extra: Readonly<Record<string, string>>): string => {
+    const repo = scratchPure({});
+    const test = 'import { describe, test } from "bun:test";\ndescribe("x", () => { test("y", () => {}); });\n';
+    Object.entries({ ...Object.fromEntries(HARDHAT_ONLY.map((file) => [file, test])), ...extra }).forEach(([file, text]) => {
+      mkdirSync(dirname(`${repo}/contracts/test/${file}`), { recursive: true });
+      writeFileSync(`${repo}/contracts/test/${file}`, text);
+    });
+    return repo;
+  };
+  const A_TEST = 'import { describe, test } from "bun:test";\ndescribe("x", () => { test("y", () => {}); });\n';
+
+  test("R-GATE-CONTRACT-TESTS a contract test in a folder no gate runs exits 1 and names the file", () => {
+    const { code, out } = run(withContractTests({ "deploy/guards.test.ts": A_TEST }), "--tests-only");
+    expect(code).toBe(1);
+    expect(out).toContain("UNGATED_CONTRACT_TEST contracts/test/deploy/guards.test.ts");
+  });
+
+  test("the same test under gate/ passes the tests part", () => {
+    const { code, out } = run(withContractTests({ "gate/deploy-guards.test.ts": A_TEST }), "--tests-only");
+    expect(out).toContain("CONTRACT_TESTS_OK");
+    expect(code).toBe(0);
+  });
+
   test("a folder of 11 source files exits 1 and names the folder", () => {
     const files = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`w/f${index}.ts`, "export {};\n"]));
     const { code, out } = run(scratchPure(files), "--width-only");
@@ -106,15 +132,16 @@ describe("the real command over a scratch copy", () => {
 });
 
 describe("which parts a command line runs", () => {
-  const PARTS: readonly Part[] = ["register", "style", "width"];
+  const PARTS: readonly Part[] = ["register", "style", "width", "tests"];
   const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
 
-  test("R-GATE-COMPOSE the plain command runs every part", () => expect(ran()).toEqual(["register", "style", "width"]));
+  test("R-GATE-COMPOSE the plain command runs every part", () => expect(ran()).toEqual(["register", "style", "width", "tests"]));
   test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
   test("each --X-only flag runs that part alone", () => {
     expect(ran("--register-only")).toEqual(["register"]);
     expect(ran("--style-only")).toEqual(["style"]);
     expect(ran("--width-only")).toEqual(["width"]);
+    expect(ran("--tests-only")).toEqual(["tests"]);
   });
-  test("a flag that is not a part flag changes nothing", () => expect(ran("--base", "HEAD")).toEqual(["register", "style", "width"]));
+  test("a flag that is not a part flag changes nothing", () => expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests"]));
 });
