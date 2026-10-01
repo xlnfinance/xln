@@ -1512,7 +1512,7 @@
   },
   {
    "id": "R-NOTICE",
-   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is rolled back with the frame and, once it is the one named, dropped with notice (fault peer_refused).",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1609,7 +1609,7 @@
   },
   {
    "id": "R-REFUSED-RELEASES-PAYER",
-   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
+   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused and the peer's fault tag); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
    "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
    "layers": {
     "arrival": "-",
@@ -1629,7 +1629,7 @@
   },
   {
    "id": "R-FRAME-REFUSAL",
-   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash and the first refused tx; the proposer, whose frame is pending and unacked, rolls it back, drops the refused tx and re-proposes the rest; a refusal for a committed frame is ignored; Left wins simultaneous proposals. Without it a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right. A replica that refused a frame remembers it while its head lasts and never commits it later, however its view of J moves, else the proposer (which dropped it) and the peer fork; the memory is bounded by the head and by the transport queue (Q-T-9).",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS refusals per head) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
    "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
@@ -1643,6 +1643,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a refused frame stays refused on its head"
     },
     {
      "kind": "test",

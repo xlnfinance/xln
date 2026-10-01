@@ -30,6 +30,8 @@ type World = Readonly<{
   log: Sided<readonly string[]>;
   time: bigint;
   drift: Sided<bigint>;
+  submitted: Sided<number>;
+  committed: Sided<number>;
 }>;
 
 const viewOfSide = (w: World, side: Side): bigint => w.time + w.drift[side];
@@ -41,6 +43,7 @@ const funded = (side: Side): AccountReplica =>
 const newWorld = (): World => ({
   rep: { left: funded("left"), right: funded("right") },
   net: [], log: { left: [], right: [] }, time: 100n, drift: { left: 0n, right: 0n },
+  submitted: { left: 0, right: 0 }, committed: { left: 0, right: 0 },
 });
 
 /** The tx a side writes at one step: its own locks, resolves and cancels, expiries, payments and credit. */
@@ -61,6 +64,10 @@ const txAt = (seed: number, run: number, step: number, side: Side, view: bigint)
   }
 };
 
+/** A tx has entered `side`'s mempool: from here it must end committed, or refused with notice. */
+const entered = (w: World, side: Side): World =>
+  ({ ...w, submitted: { ...w.submitted, [side]: w.submitted[side] + 1 } });
+
 const setRep = (w: World, side: Side, rep: AccountReplica): World => ({
   ...w,
   rep: { ...w.rep, [side]: rep },
@@ -79,7 +86,9 @@ const deliver = (w: World, i: number): World => {
   const flight = w.net[i];
   if (flight === undefined) return w;
   const heard = receive(rulesOf(w, flight.to), w.rep[flight.to], flight.msg);
-  const rest: World = { ...w, net: w.net.filter((_, j) => j !== i) };
+  const own = heard.outcome._tag === "committed_own" ? (w.rep[flight.to].pending?.frame.txs.length ?? 0) : 0;
+  const counted: World = { ...w, committed: { ...w.committed, [flight.to]: w.committed[flight.to] + own } };
+  const rest: World = { ...counted, net: w.net.filter((_, j) => j !== i) };
   return send(setRep(rest, flight.to, heard.replica), flight.to, heard.sent);
 };
 
@@ -127,9 +136,9 @@ const stepOf = (w: World, c: Chaos, step: number): World => {
   switch (true) {
     case k < 25: {
       const door = submit(rulesOf(moved, side), moved.rep[side], tx);
-      return door.ok ? setRep(moved, side, door.value) : moved;
+      return door.ok ? setRep(entered(moved, side), side, door.value) : moved;
     }
-    case k < 32: return setRep(moved, side, queue(moved.rep[side], tx));
+    case k < 32: return setRep(entered(moved, side), side, queue(moved.rep[side], tx));
     case k < 50: return doPropose(moved, side);
     case k < 80: return network(moved, c, step);
     case k < 90: return send(moved, side, resend(moved.rep[side]));
@@ -144,15 +153,18 @@ const drain = (w: World, fuel: number): World =>
 const idle = (w: World): boolean =>
   w.net.length === 0 && SIDES.every((s) => w.rep[s].pending === undefined && w.rep[s].mempool.length === 0);
 
-const settle = (w: World, rounds: number): boolean => {
-  if (idle(w)) return true;
-  if (rounds === 0) return false;
+/** Progress, not just quiet: every tx a side let in is committed, or refused with notice; none is both or neither. */
+const accounted = (w: World): boolean =>
+  SIDES.every((s) => w.submitted[s] === w.committed[s] + w.rep[s].refused.length);
+
+const settle = (w: World, rounds: number): World => {
+  if (idle(w) || rounds === 0) return w;
   const resent = SIDES.reduce((acc, s) => send(acc, s, resend(acc.rep[s])), w);
   const proposed = SIDES.reduce(doPropose, drain(resent, 400));
   return settle(proposed, rounds - 1);
 };
 
-type Summary = Readonly<{ runs: number; stuck: number; committed: number; collisions: number }>;
+type Summary = Readonly<{ runs: number; stuck: number; lost: number; committed: number; collisions: number }>;
 
 const runOne = (c: Chaos, steps: number) => {
   const start: World = { ...newWorld(), drift: { left: 0n, right: 0n } };
@@ -163,7 +175,9 @@ const runOne = (c: Chaos, steps: number) => {
   }, { w: start, collisions: 0 });
   const calm: World = { ...stepped.w, drift: { left: 0n, right: 0n } };
   const committed = Math.max(calm.log.left.length, calm.log.right.length);
-  return { stuck: settle(calm, 60) ? 0 : 1, committed, collisions: stepped.collisions };
+  const end = settle(calm, 60);
+  const lost = idle(end) && !accounted(end);
+  return { stuck: idle(end) ? 0 : 1, lost: lost ? 1 : 0, committed, collisions: stepped.collisions };
 };
 
 type Weather = Readonly<{ maxDrift: bigint; ticks: boolean }>;
@@ -176,6 +190,7 @@ const simulate = (seed: number, runs: number, steps: number, weather: Weather): 
   return {
     runs,
     stuck: each.reduce((n, r) => n + r.stuck, 0),
+    lost: each.reduce((n, r) => n + r.lost, 0),
     committed: each.reduce((n, r) => n + r.committed, 0),
     collisions: each.reduce((n, r) => n + r.collisions, 0),
   };
@@ -184,16 +199,18 @@ const simulate = (seed: number, runs: number, steps: number, weather: Weather): 
 describe("account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift", () => {
   test("R-FRAME-REFUSAL a frozen J: every run settles, and the round did real work", () => {
     const out = simulate(5, 300, 120, FROZEN);
-    expect(out.stuck).toBe(0);
+    expect([out.stuck, out.lost]).toEqual([0, 0]);
     expect(out.committed).toBeGreaterThan(300);
     expect(out.collisions).toBeGreaterThan(300);
   });
 
-  test("R-FRAME-REFUSAL J moves while frames are in flight, the views agree: 0 of 300 runs stuck", () => {
-    expect(simulate(5, 300, 120, MOVING).stuck).toBe(0);
+  test("R-FRAME-REFUSAL J moves while frames are in flight, the views agree: no run stuck or losing a tx", () => {
+    const out = simulate(5, 300, 120, MOVING);
+    expect([out.stuck, out.lost]).toEqual([0, 0]);
   });
 
-  test("R-FRAME-REFUSAL J moves and the two views drift apart by up to LAG: 0 of 300 runs stuck", () => {
-    expect(simulate(6, 300, 120, DRIFTING).stuck).toBe(0);
+  test("R-FRAME-REFUSAL J moves and the views drift apart by up to LAG: no run stuck or losing a tx", () => {
+    const out = simulate(6, 300, 120, DRIFTING);
+    expect([out.stuck, out.lost]).toEqual([0, 0]);
   });
 });

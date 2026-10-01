@@ -32,10 +32,21 @@ const txItem = (tx: AccountTx): Rlp =>
 
 /** A stand-in, not the signed bytes: A4 and T0 owe the real hash (R-FRAME-HASH-SIGNED). */
 export const provisionalFrameHash = (f: Frame<AccountTx>): FrameHash =>
-  bytesToHex(keccak256(rlp([utf8(f.author), utf8(f.parent), f.txs.map(txItem)]))) as FrameHash;
+  bytesToHex(keccak256(rlp([utf8(f.author), utf8(f.parent), text(BigInt(f.attempt)), f.txs.map(txItem)]))) as FrameHash;
+
+/**
+ * The faults that pass with the peer's view of the chain: it finds an expiry not yet due or a lock's deadline too far
+ * ahead, because its view lags mine. Every other fault stays (a view that is ahead only makes a late tx later).
+ */
+const RETRYABLE: readonly string[] = ["not_expired", "deadline_too_far"];
 
 /** The rules a replica judges by: its own view of the J chain is in `judge` (R-HTLC-CLOCK). */
 export const accountRules = (judge: Judge): AccountRules =>
-  ({ apply: (s, author, tx) => applyTx(s, judge, author, tx), hash: provisionalFrameHash });
+  ({
+    apply: (s, author, tx) => applyTx(s, judge, author, tx),
+    hash: provisionalFrameHash,
+    tag: (fault) => fault._tag,
+    retryable: (tag) => RETRYABLE.includes(tag),
+  });
 
 export const emptyReplica = (side: Side): AccountReplica => replica(side, GENESIS, emptyAccount);

@@ -286,7 +286,7 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   const quintSays = quintHears(w, s, fid);
   const heard = receive(rulesOf(w, s), w.t[s], msgAt(w, fid));
   const tsKind = KINDS.find((k) => k === heard.outcome._tag) ?? "refused";
-  const repeat = w.t[s].declined.some((d) => d.hash === hashOf(msgAt(w, fid)));
+  const repeat = w.t[s].declined !== undefined;
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
   const said: Heard = known ? { kind: tsKind, next: w.q[s], ack: false } : quintSays;
   const counted = bump(w, known ? KNOWN : `deliver ${quintSays.kind}`);
