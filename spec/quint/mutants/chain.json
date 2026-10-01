@@ -241,7 +241,7 @@
       "id": "enforce-burns",
       "why": "enforcing a debt takes the reserve from the debtor and does not give it to the creditor",
       "file": "chain.qnt",
-      "old": "      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),",
+      "old": "      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + r.toPeer),",
       "new": "      res: m.res.set(debtor, r.left),",
       "killedBy": "invariant:p3_conserved"
     },
@@ -418,7 +418,7 @@
       "why": "spendable reserve nets only the claims one call reaches, not all outstanding debt",
       "file": "chain.qnt",
       "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
-      "new": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - sumOf(m.dq.get(s).slice(0, DEBT_ENFORCE_MAX)))",
+      "new": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - claimsSum(m.dq.get(s).slice(0, DEBT_ENFORCE_MAX)))",
       "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
     },
     {
@@ -649,6 +649,126 @@
       "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr >= MIN_WINDOW\n  }",
       "killedBy": "invariant:safe",
       "init": "initE1"
+    },
+    {
+      "id": "enforce-pays-third-party-claims-to-the-peer",
+      "why": "R2C-DEBT-FIRST: a claim owed to a third party is paid to the other side of the Account as well as out of the Account (Arrival PR 108): the reserves grow",
+      "file": "chain.qnt",
+      "old": "toPeer: acc.toPeer + (if (d.third) 0 else pay)",
+      "new": "toPeer: acc.toPeer + pay",
+      "killedBy": "test:olderThirdPartyDebtIsPaidOutBeforeAShortfallTest"
+    },
+    {
+      "id": "enforce-skips-third-party-claims",
+      "why": "R2C-DEBT-FIRST: enforcement leaves a claim owed to a third party unpaid and goes on to the next: the older debts are paid in order, whoever they are owed to",
+      "file": "chain.qnt",
+      "old": "val pay = imin(d.amt, acc.left)\n        { left",
+      "new": "val pay = if (d.third) 0 else imin(d.amt, acc.left)\n        { left",
+      "killedBy": "test:olderThirdPartyDebtIsPaidOutBeforeAShortfallTest"
+    },
+    {
+      "id": "forgives-third-party",
+      "why": "R-SETTLE-FORGIVE: (Arrival PR 108 forgives-third-party): the creditor of the head claim is not checked, a settlement deletes a head claim owed to a third party",
+      "file": "chain.qnt",
+      "old": "pure def headOwedToPeer(q: List[Claim]): bool = q.length() > 0 and not(q.nth(0).third)",
+      "new": "pure def headOwedToPeer(q: List[Claim]): bool = q.length() > 0",
+      "killedBy": "test:aThirdPartyHeadIsNotForgivenAndTheSettlementRevertsTest"
+    },
+    {
+      "id": "forgives-third-party-invariant",
+      "why": "R-SETTLE-FORGIVE: same mutant, judged by the property alone (forgive_ok)",
+      "file": "chain.qnt",
+      "old": "pure def headOwedToPeer(q: List[Claim]): bool = q.length() > 0 and not(q.nth(0).third)",
+      "new": "pure def headOwedToPeer(q: List[Claim]): bool = q.length() > 0",
+      "killedBy": "invariant:forgive_ok"
+    },
+    {
+      "id": "forgives-one-direction",
+      "why": "R-SETTLE-FORGIVE: (forgives-one-direction): only Left's own debt is forgiven, the debt the other side owes is left",
+      "file": "chain.qnt",
+      "old": "val fR = headOwedToPeer(m.dq.get(Right))",
+      "new": "val fR = false",
+      "killedBy": "test:forgivenessWorksInTheOtherDirectionTest"
+    },
+    {
+      "id": "forgives-past-head",
+      "why": "R-SETTLE-FORGIVE: (forgives-past-head): the settlement deletes every claim owed to the other side, wherever it is in the queue, not the head only",
+      "file": "chain.qnt",
+      "old": "pure def forgiveHeadOnly(q: List[Claim]): List[Claim] = q.slice(1, q.length())",
+      "new": "pure def forgiveHeadOnly(q: List[Claim]): List[Claim] = q.foldl([], (a, x) => if (x.third) a.append(x) else a)",
+      "killedBy": "test:forgivenessTakesOnlyTheHeadOfEachSideTest"
+    },
+    {
+      "id": "forgive-blocked-lands",
+      "why": "R-SETTLE-FORGIVE: (forgive-blocked-lands): a listed token whose heads are all owed to third parties lands the settlement with nothing forgiven (it must revert)",
+      "file": "chain.qnt",
+      "old": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR or (m.dq.get(Left).length() == 0 and m.dq.get(Right).length() == 0)",
+      "new": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = true",
+      "killedBy": "test:aSettlementThatForgivesNothingRevertsTest"
+    },
+    {
+      "id": "forgive-blocked-lands-invariant",
+      "why": "R-SETTLE-FORGIVE: same mutant, judged by the property alone (forgive_ok)",
+      "file": "chain.qnt",
+      "old": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR or (m.dq.get(Left).length() == 0 and m.dq.get(Right).length() == 0)",
+      "new": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = true",
+      "killedBy": "invariant:forgive_ok"
+    },
+    {
+      "id": "reverts-on-either-block",
+      "why": "R-SETTLE-FORGIVE: (reverts-on-either-block): the settlement reverts when EITHER side's head claim is owed to a third party, even if the other head was forgiven (it reverts only when nothing was forgiven)",
+      "file": "chain.qnt",
+      "old": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR or (m.dq.get(Left).length() == 0 and m.dq.get(Right).length() == 0)",
+      "new": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = (fL or m.dq.get(Left).length() == 0) and (fR or m.dq.get(Right).length() == 0)",
+      "killedBy": "test:oneBlockedHeadDoesNotRevertTheSettlementTest"
+    },
+    {
+      "id": "reverts-when-no-debt",
+      "why": "R-SETTLE-FORGIVE: a listed token with no debt on either side reverts the settlement (it reverts only when a debt exists and nothing was forgiven)",
+      "file": "chain.qnt",
+      "old": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR or (m.dq.get(Left).length() == 0 and m.dq.get(Right).length() == 0)",
+      "new": "pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR",
+      "killedBy": "test:aSettlementWithNoDebtLandsTest"
+    },
+    {
+      "id": "forgive-uncapped",
+      "why": "R-SETTLE-FORGIVE: (forgive-uncapped): no cap on the token ids a settlement lists",
+      "file": "chain.qnt",
+      "old": "pure def forgiveOverCap(ids: List[int]): bool = ids.length() > FORGIVE_MAX",
+      "new": "pure def forgiveOverCap(ids: List[int]): bool = false",
+      "killedBy": "test:aSettlementOverTheCapRevertsTest"
+    },
+    {
+      "id": "forgive-cap-off-by-one",
+      "why": "R-SETTLE-FORGIVE: the cap itself reverts (more than the cap is the bound, the cap lands)",
+      "file": "chain.qnt",
+      "old": "pure def forgiveOverCap(ids: List[int]): bool = ids.length() > FORGIVE_MAX",
+      "new": "pure def forgiveOverCap(ids: List[int]): bool = ids.length() >= FORGIVE_MAX",
+      "killedBy": "test:aSettlementAtTheCapLandsTest"
+    },
+    {
+      "id": "forgive-repeat-ok",
+      "why": "R-SETTLE-FORGIVE: (forgive-repeat-ok): a token listed twice is accepted",
+      "file": "chain.qnt",
+      "old": "pure def repeatsAnId(ids: List[int]): bool = ids.indices().exists(i => ids.indices().exists(j => i < j and ids.nth(i) == ids.nth(j)))",
+      "new": "pure def repeatsAnId(ids: List[int]): bool = false",
+      "killedBy": "test:aTokenListedTwiceRevertsTest"
+    },
+    {
+      "id": "forgive-ignores-the-token-list",
+      "why": "R-SETTLE-FORGIVE: a settlement that does not list the debt token forgives it all the same",
+      "file": "chain.qnt",
+      "old": "else if (not(ids.indices().exists(i => ids.nth(i) == DEBT_TOKEN))) { lands: true, left: false, right: false }",
+      "new": "else if (false) { lands: true, left: false, right: false }",
+      "killedBy": "test:anUnlistedTokenIsLeftAloneTest"
+    },
+    {
+      "id": "forgive-keeps-the-total",
+      "why": "R-SETTLE-FORGIVE: the claims are deleted from the queue but the debt total is not reduced",
+      "file": "chain.qnt",
+      "old": "debt: m.debt.set(s, m.debt.get(s) - (claimsSum(q) - claimsSum(q2))) }",
+      "new": "debt: m.debt }",
+      "killedBy": "invariant:debt_queue_sums"
     }
   ]
 }

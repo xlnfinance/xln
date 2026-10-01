@@ -747,8 +747,30 @@ where it is; only a fully paid claim advances it).
 **F15 (final review, coordinator 2026-09-30): a deposit enforces first.** `Depository._reserveToCollateral` runs `_enforceDebts` before it moves reserve, so a depositor whose queue fitted in one call owes nothing after
 the deposit, and what a longer queue leaves is owed and cannot be deposited: property `r2c_enforces_first` (ghost `r2cOwes`), tests `depositPaysTheOlderDebtFirstTest` and `longQueueReserveCannotBeDepositedTest`,
 mutants `r2c-skips-enforce` and `r2c-ignores-debt`.
-**Modelled out, and unable to break `debt_means_broke`:** (a) the public `Depository.enforceDebts(entity, token, maxIterations)`, callable by anyone; `maxIterations = 0` means no cap and drains the whole queue. It only
-moves reserve from a debtor to its creditors in queue order, which is what `enforce` does with a cap, so it can only bring a debtor closer to broke. (b) Forgiveness at the head of the queue (a cooperative settlement's
-`forgiveDebtsInTokenIds`, at most 32 token ids) and zero-amount entries, which the loop skips at the cost of one iteration. Both only remove debt or spend an iteration; neither creates debt beside reserve. I read the loop
-in `Account.sol`. Forgiveness is listed by token id in the signed settlement, capped at 32 ids (`MAX_SETTLEMENT_FORGIVENESS_IDS`, `Account.sol:81`); a third-party head reverts the whole signed
-settlement with E2 (the reviewer verified this against the contract; I did not read that path myself).
+**Modelled out, and unable to break `debt_means_broke`:** the public `Depository.enforceDebts(entity, token, maxIterations)`, callable by anyone; `maxIterations = 0` means no cap and drains the whole queue. It only
+moves reserve from a debtor to its creditors in queue order, which is what `enforce` does with a cap, so it can only bring a debtor closer to broke; and zero-amount entries, which the loop skips at the cost of one
+iteration. Settlement forgiveness was listed here as modelled out; it is modelled now, as Q-F below.
+
+**Q-F. Older debts owed to third parties, and settlement debt forgiveness (Arrival PR 108, coordinator 2026-10-01): modelled for one token.** Three J-page rules, written on `chain.qnt` and `chain_test.qnt`.
+(1) The dispute payout enforces the debtor's older debts first, from its reserve, then pays the peer from the spendable reserve (reserve less ALL outstanding debt), then books the rest as debt
+(`Depository._settleShortfall`): `shortfall` calls `enforce`, then pays `imin(amount, spendable)`; this was modelled before (R2C-DEBT-FIRST, F13/F15: `olderDebtIsEnforcedBeforeAShortfallTest`, `debt_means_broke`,
+mutants `shortfall-skips-enforce` = #108's `shortfall-skips-enforcement`, `spendable-ignores-debt` = #108's `shortfall-ahead-of-debt`). What is new is that a claim of the queue may be owed to a THIRD PARTY (another
+Account of the entity): `Claim { amt, third }`, enforcement pays it out of the Account's reserves (`Money.out` counts what left, so `p3_conserved` counts it: reserves + collateral + out = total) and the peer gets none
+of it; `olderThirdPartyDebtIsPaidOutBeforeAShortfallTest`, mutants `enforce-pays-third-party-claims-to-the-peer` (the reserves grow) and `enforce-skips-third-party-claims`. `init` draws a third-party flag per claim and
+one claim on the other side too, so a settlement meets a head on each side.
+(2) R2C checks the spendable reserve: `r2c` enforces first and needs `spendable(m1, s) >= amt` (`r2c_enforces_first`, `reserveThatIsOwedCannotBeDepositedTest`, `longQueueReserveCannotBeDepositedTest`, mutants
+`r2c-skips-enforce`, `r2c-ignores-debt`); unchanged, listed so the three #108 items are in one place.
+(3) Debt forgiveness by token id, as the contract reads it (`_forgiveDebtsBetweenEntities`, `MAX_SETTLEMENT_FORGIVENESS_IDS`): `settleForgiving(ids)`. For a listed token it looks at the HEAD claim of each side's queue, in
+both directions: a head owed to the other side of the Account is deleted (and taken off the debt total; nobody is credited), a head owed to a third party is left. It reverts, and nothing moves, only when nothing was
+forgiven and a debt exists; more than `FORGIVE_MAX` ids (32 in the contract, 2 here) revert it, and so does a token listed twice; a listed id that is not the debt token changes nothing. `forgiveJudged` states the rule from
+the queues before and after (not through `forgivePlan`), `forgive_ok` is in `safe`; witnesses `w_no_forgiveness`, `w_no_forgive_revert`, `w_no_forgive_both`, `w_no_forgive_mixed`. Planted bugs, with #108's names:
+`forgives-third-party` (+ `-invariant`), `forgives-one-direction`, `forgives-past-head`, `forgive-blocked-lands` (+ `-invariant`), `reverts-on-either-block`, `forgive-uncapped`, `forgive-repeat-ok`; also
+`reverts-when-no-debt`, `forgive-cap-off-by-one`, `forgive-ignores-the-token-list`, `forgive-keeps-the-total`. Tests: `forgivenessTakesOnlyTheHeadOfEachSideTest`, `forgivenessWorksInTheOtherDirectionTest`,
+`aThirdPartyHeadIsNotForgivenAndTheSettlementRevertsTest`, `aSettlementThatForgivesNothingRevertsTest`, `oneBlockedHeadDoesNotRevertTheSettlementTest`, `aSettlementWithNoDebtLandsTest`, `anUnlistedTokenIsLeftAloneTest`,
+`aSettlementAtTheCapLandsTest`, `aSettlementOverTheCapRevertsTest`, `aTokenListedTwiceRevertsTest`.
+**Not modelled (needs the multi-token Account, or more of the settlement).** (a) More than one token: the contract's loop is per listed token, each with its own queues; the model has one token, so "a listed token without debts
+changes nothing" is the only per-token case, and the cap and no-repeat rules are checked on ids that name no other queue. (b) The forgiveness is not coupled to the settlement's own effect: `settleForgiving` changes the
+debt queues and the ghost only, the epoch update, the offdelta fold and the co-signature of `settle.qnt` ride separately, so the model does not show that a revert on forgiveness takes the whole settlement back (E2) or
+that it lands the fold and the forgiveness together; `settle.qnt` has no debt queue. (c) A part-paid head is forgiven for what is left (the claim is the queue entry, with its remaining amount); the J page says the same, I
+have not read the contract for it. (d) A third-party claim is only ever paid out or left: the model has no second Account of the entity, so what the third party does with it, and whether forgiving it there is possible,
+are outside. (e) The model draws a debt on each side from `init` (one claim on the non-debtor side), which `payout`'s shortfall does not create: after a dispute payout only the debtor's queue grows.

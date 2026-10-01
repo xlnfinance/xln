@@ -477,7 +477,7 @@ module chain_test {
 
   // A hand-made history: `s` holds `res` of reserve and owes `debt` to the other side (debt is a lazy claim: it was booked earlier, and reserve arrived since).
   action withDebt(s: Side, res: int, queue: List[int]): bool = all {
-    money' = { res: money.res.set(s, res), debt: money.debt.set(s, sumOf(queue)), dq: money.dq.set(s, queue) },
+    money' = { ...money, res: money.res.set(s, res), debt: money.debt.set(s, sumOf(queue)), dq: money.dq.set(s, claimsOf(queue)) },
     total' = total - money.res.get(s) + res,
     arena' = arena, honest' = honest, now' = now, acct' = acct, dispute' = dispute, registry' = registry, knows' = knows,
     offline' = offline, applied' = applied, ghost' = ghost
@@ -494,13 +494,13 @@ module chain_test {
     .then(honestFinalize)
     .expect(and {
       money.res == Map(Left -> 0, Right -> 3),
-      money.debt == Map(Left -> 2, Right -> 0), money.dq == Map(Left -> [2], Right -> []),
+      money.debt == Map(Left -> 2, Right -> 0), money.dq == Map(Left -> claimsOf([2]), Right -> []),
       not(ghost.debtBesideReserve), debt_means_broke, debt_queue_sums, safe
     })
 
   // Spendable reserve is reserve net of outstanding debt, never below zero (Depository._spendableReserve): the helper is pinned to the contract's definition.
-  pure val OWES_SOME: Money = { res: Map(Left -> 2, Right -> 5), debt: Map(Left -> 1, Right -> 0), dq: Map(Left -> [1], Right -> []) }
-  pure val OWES_ALL: Money = { res: Map(Left -> 1, Right -> 0), debt: Map(Left -> 3, Right -> 0), dq: Map(Left -> [3], Right -> []) }
+  pure val OWES_SOME: Money = { res: Map(Left -> 2, Right -> 5), debt: Map(Left -> 1, Right -> 0), dq: Map(Left -> claimsOf([1]), Right -> []), out: 0 }
+  pure val OWES_ALL: Money = { res: Map(Left -> 1, Right -> 0), debt: Map(Left -> 3, Right -> 0), dq: Map(Left -> claimsOf([3]), Right -> []), out: 0 }
   run spendableIsReserveNetOfDebtTest =
     initFrom(BASE, Left, 0, 0, 1)
     .expect(and { spendable(OWES_SOME, Left) == 1, spendable(OWES_SOME, Right) == 5, spendable(OWES_ALL, Left) == 0 })
@@ -523,7 +523,7 @@ module chain_test {
     .then(honestFinalize)
     .expect(and {
       money.res == Map(Left -> 1, Right -> 3),
-      money.debt == Map(Left -> 3, Right -> 0), money.dq == Map(Left -> [1, 2], Right -> []),
+      money.debt == Map(Left -> 3, Right -> 0), money.dq == Map(Left -> claimsOf([1, 2]), Right -> []),
       spendable(money, Left) == 0,
       not(ghost.debtBesideReserve), debt_means_broke, debt_queue_sums, p3_conserved, safe
     })
@@ -541,4 +541,115 @@ module chain_test {
     .then(withDebt(Left, 3, [1, 1, 1]))
     .then(r2c(Left, Left, 1))
     .fail()
+
+  // ---- older debts owed to third parties are enforced too, in order (R2C-DEBT-FIRST at the dispute payout; Arrival PR 108) --------------------------------------------------
+
+  // Left's older claim is owed to a third party (another Account of the entity), not to Right. Enforcement pays it first, out of the reserve, and the peer gets none of it: Left holds 2 and
+  // owes 1 to a third party; a payout then leaves it 3 short. The old claim is paid out (1 leaves the Account's reserves, kept in `out`), the reserve left (1) covers part of the new shortfall
+  // (Right gets it), and the rest (2) is booked to Right. Right ends with the collateral (1) and the part paid (1).
+  action withClaims(s: Side, res: int, queue: List[Claim]): bool = all {
+    money' = { ...money, res: money.res.set(s, res), debt: money.debt.set(s, claimsSum(queue)), dq: money.dq.set(s, queue) },
+    total' = total - money.res.get(s) + res,
+    arena' = arena, honest' = honest, now' = now, acct' = acct, dispute' = dispute, registry' = registry, knows' = knows,
+    offline' = offline, applied' = applied, ghost' = ghost
+  }
+  run olderThirdPartyDebtIsPaidOutBeforeAShortfallTest =
+    initFrom(BASE.set(1, pf(1, true, -3, true, true)), Left, 0, 0, 1)
+    .then(withClaims(Left, 2, [thirdClaim(1)]))
+    .then(honestStart)
+    .then(tick).then(tick).then(tick).then(tick)
+    .then(honestFinalize)
+    .expect(and {
+      money.res == Map(Left -> 0, Right -> 2), money.out == 1,
+      money.debt == Map(Left -> 2, Right -> 0), money.dq == Map(Left -> [peerClaim(2)], Right -> []),
+      p3_conserved, pay_exact, debt_queue_sums, safe
+    })
+
+  // ---- settlement debt forgiveness (R-SETTLE-FORGIVE; Arrival PR 108) --------------------------------------------------------------------------------------------------
+  // `withQueues` is a hand-made history: what each side owes, oldest claim first. Reserves stay 0 (forgiveness moves none).
+  action withQueues(qL: List[Claim], qR: List[Claim]): bool = all {
+    money' = { ...money, debt: Map(Left -> claimsSum(qL), Right -> claimsSum(qR)), dq: Map(Left -> qL, Right -> qR) },
+    total' = total, arena' = arena, honest' = honest, now' = now, acct' = acct, dispute' = dispute, registry' = registry, knows' = knows,
+    offline' = offline, applied' = applied, ghost' = ghost
+  }
+  pure def P(a: int): Claim = peerClaim(a)
+  pure def T(a: int): Claim = thirdClaim(a)
+
+  // Both directions at the token's head: the claim at the head of each queue that is owed to the other side goes, nothing behind it (Left's head 1 and Right's head 2 go; Left's third-party
+  // claim and Right's second claim stay). The totals follow.
+  run forgivenessTakesOnlyTheHeadOfEachSideTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1), T(2)], [P(2), P(1)]))
+    .then(settleForgiving([1]))
+    .expect(and {
+      money.dq == Map(Left -> [T(2)], Right -> [P(1)]), money.debt == Map(Left -> 2, Right -> 1),
+      ghost.forgiven == 1, ghost.forgiveBoth == 1, ghost.forgiveReverts == 0,
+      forgive_ok, debt_queue_sums, p3_conserved, safe
+    })
+
+  // Only the counterparty owes (nothing on Left's side): its head is forgiven all the same, the direction does not matter.
+  run forgivenessWorksInTheOtherDirectionTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([], [P(1), P(2)]))
+    .then(settleForgiving([1]))
+    .expect(and { money.dq == Map(Left -> [], Right -> [P(2)]), money.debt == Map(Left -> 0, Right -> 2), ghost.forgiven == 1, ghost.forgiveBoth == 0, forgive_ok, debt_queue_sums, safe })
+
+  // A head owed to a third party is not the Account's to forgive: with nothing else to forgive and a debt there, the settlement reverts and nothing moves.
+  run aThirdPartyHeadIsNotForgivenAndTheSettlementRevertsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([T(2), P(1)], []))
+    .then(settleForgiving([1]))
+    .expect(and {
+      money.dq == Map(Left -> [T(2), P(1)], Right -> []), money.debt == Map(Left -> 3, Right -> 0),
+      ghost.forgiven == 0, ghost.forgiveReverts == 1, forgive_ok, debt_queue_sums, safe
+    })
+
+  // Both heads are owed to third parties: nothing was forgiven and debts exist, so the settlement reverts (it does not land with nothing forgiven).
+  run aSettlementThatForgivesNothingRevertsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([T(1)], [T(2)]))
+    .then(settleForgiving([1]))
+    .expect(and { money.dq == Map(Left -> [T(1)], Right -> [T(2)]), ghost.forgiven == 0, ghost.forgiveReverts == 1, forgive_ok, safe })
+
+  // It reverts only when NOTHING was forgiven: Left's head is the Account's and goes, Right's head is a third party's and stays, and the settlement lands.
+  run oneBlockedHeadDoesNotRevertTheSettlementTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1)], [T(2)]))
+    .then(settleForgiving([1]))
+    .expect(and {
+      money.dq == Map(Left -> [], Right -> [T(2)]), money.debt == Map(Left -> 0, Right -> 2),
+      ghost.forgiven == 1, ghost.forgiveMixed == 1, ghost.forgiveReverts == 0, forgive_ok, debt_queue_sums, safe
+    })
+
+  // With no debt anywhere there is nothing to forgive and nothing blocked: the settlement lands.
+  run aSettlementWithNoDebtLandsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(settleForgiving([1]))
+    .expect(and { ghost.forgiveReverts == 0, ghost.forgiven == 0, forgive_ok, safe })
+
+  // A token that is not listed is not touched, whatever its debts: the settlement lands and nothing is forgiven.
+  run anUnlistedTokenIsLeftAloneTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1)], [P(2)]))
+    .then(settleForgiving([2]))
+    .expect(and { money.dq == Map(Left -> [P(1)], Right -> [P(2)]), ghost.forgiven == 0, ghost.forgiveReverts == 0, forgive_ok, safe })
+
+  // At most the cap of ids (32 in the contract, FORGIVE_MAX = 2 here): the cap itself lands, one more reverts and nothing moves.
+  run aSettlementAtTheCapLandsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1)], [P(2)]))
+    .then(settleForgiving([1, 2]))
+    .expect(and { money.dq == Map(Left -> [], Right -> []), ghost.forgiven == 1, ghost.forgiveReverts == 0, forgive_ok, safe })
+  run aSettlementOverTheCapRevertsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1)], [P(2)]))
+    .then(settleForgiving([1, 2, 3]))
+    .expect(and { money.dq == Map(Left -> [P(1)], Right -> [P(2)]), ghost.forgiven == 0, ghost.forgiveReverts == 1, forgive_ok, safe })
+
+  // A token listed twice reverts the settlement (it would be forgiven twice).
+  run aTokenListedTwiceRevertsTest =
+    initFrom(BASE, Left, 0, 0, 1)
+    .then(withQueues([P(1), P(1)], [P(2)]))
+    .then(settleForgiving([1, 1]))
+    .expect(and { money.dq == Map(Left -> [P(1), P(1)], Right -> [P(2)]), ghost.forgiven == 0, ghost.forgiveReverts == 1, forgive_ok, safe })
 }

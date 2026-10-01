@@ -76,8 +76,8 @@ Properties: `p1_allowed` (what settles is a proof the honest side consented to o
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
 `no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, `r2c_enforces_first` (a deposit enforces the older debt first, F15), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_never_shortened` (N3: windows may lengthen, never shorten, inside an epoch; over unequal windows),
-`closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-65 scenario tests, 74 mutants.
+`closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more), `forgive_ok` (R-SETTLE-FORGIVE: a settlement forgives the head claim of each side's debt queue that is owed to the other side of the Account, and nothing else, reverts only when nothing was forgiven and a debt exists or past the id cap or on a repeated id; one token). A queued claim is owed to the other side or to a third party; enforcement pays third parties out of the reserves (`Money.out`, counted by `p3_conserved`). The `offline` flag is per dispute.
+77 scenario tests, 95 mutants.
 
 ## Settlement (`settle.qnt`)
 
