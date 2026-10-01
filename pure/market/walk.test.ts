@@ -11,7 +11,8 @@ import {
 import { executions, clauseOf, type Execution } from "./settlement.ts";
 
 // The walk: a seeded stream of orders and cancels against the book and, side by side, the naive oracle. After every
-// step the book must agree with the oracle, hold its own invariants, and name the same refusal or the same remainder.
+// step the book must agree with the oracle, hold its own invariants, and name the same refusal
+// or the same unfilled part.
 // Small limits and a narrow price range make every outcome common: crossing, partial fills, own orders, full books.
 
 /** A tick of 7 and a lot of 1000, so no leg can pass for its lots by accident. */
@@ -35,32 +36,46 @@ const termsOf = (roll: number): Order["terms"] => {
   return roll < 85 ? "immediate" : "all_or_nothing";
 };
 
-const stepOf = (raw: readonly number[], i: number, book: Book): Step => {
+/** What the eight raw draws of one step decide, each under its own name. */
+const named = (raw: readonly number[]) => {
   const at = (k: number): number => raw[k] ?? 0;
+  return {
+    stepRoll: at(0) % 100,
+    ownerPick: at(1),
+    sidePick: at(2),
+    pricePick: at(3),
+    lotsPick: at(4),
+    termsPick: at(5),
+    targetPick: at(6),
+    oddityRoll: at(7) % 100,
+  };
+};
+
+const stepOf = (raw: readonly number[], i: number, book: Book): Step => {
+  const d = named(raw);
   const open = [...book.buys, ...book.sells];
-  const target = open[at(6) % Math.max(open.length, 1)];
-  const oddity = at(7) % 100;
-  const who = OWNERS[at(1) % OWNERS.length] ?? "o0";
-  if (at(0) % 100 >= 85) {
-    const id = at(6) % 7 === 0 ? "ghost" : (target?.id ?? "ghost");
-    return { kind: "cancel", id, who: at(5) % 5 === 0 ? who : (target?.owner ?? who) };
+  const target = open[d.targetPick % Math.max(open.length, 1)];
+  const who = OWNERS[d.ownerPick % OWNERS.length] ?? "o0";
+  if (d.stepRoll >= 85) {
+    const id = d.targetPick % 7 === 0 ? "ghost" : (target?.id ?? "ghost");
+    return { kind: "cancel", id, who: d.termsPick % 5 === 0 ? who : (target?.owner ?? who) };
   }
   return {
     kind: "place",
     draft: {
-      id: oddity < 3 && target !== undefined ? target.id : `n${i}`,
+      id: d.oddityRoll < 3 && target !== undefined ? target.id : `n${i}`,
       who,
-      side: at(2) % 2 === 0 ? "buy" : "sell",
-      price: oddity >= 3 && oddity < 5 ? 0n : BigInt(8 + (at(3) % 7)),
-      lots: oddity >= 5 && oddity < 7 ? 0n : BigInt(1 + (at(4) % 6)),
-      terms: termsOf(at(5) % 100),
+      side: d.sidePick % 2 === 0 ? "buy" : "sell",
+      price: d.oddityRoll >= 3 && d.oddityRoll < 5 ? 0n : BigInt(8 + (d.pricePick % 7)),
+      lots: d.oddityRoll >= 5 && d.oddityRoll < 7 ? 0n : BigInt(1 + (d.lotsPick % 6)),
+      terms: termsOf(d.termsPick % 100),
     },
   };
 };
 
-type Walk = Readonly<{ seed: number; i: number; book: Book; model: Model; seen: ReadonlyMap<string, bigint> }>;
+type WalkState = Readonly<{ seed: number; i: number; book: Book; model: Model; seen: ReadonlyMap<string, bigint> }>;
 
-const start = (seed: number): Walk =>
+const start = (seed: number): WalkState =>
   ({
     seed, i: 0, book: must(openBook(WALK_MARKET, WALK_LIMITS)), model: emptyModel(WALK_MARKET, WALK_LIMITS),
     seen: new Map(),
@@ -103,19 +118,19 @@ const executionsAreSound = (order: Order, placed: Placed): void => {
     expect(tokenTotal(xs, "gives", token)).toBe(tokenTotal(xs, "gets", token)));
   xs.forEach((x) => {
     const open = [...placed.book.buys, ...placed.book.sells].find((r) => r.id === x.order);
-    if (x.remaining._tag !== "open") return expect(open).toBeUndefined();
+    if (x.after._tag !== "open") return expect(open).toBeUndefined();
     const offer = open ?? expect.unreachable("an open clause has its offer in the book");
-    expect(x.remaining.clause).toEqual(clauseOf(WALK_MARKET, offer));
+    expect(x.after.clause).toEqual(clauseOf(WALK_MARKET, offer));
   });
 };
 
 const lotsAddUp = (order: Order, placed: Placed): void => {
   const filled = placed.fills.reduce((sum, f) => sum + f.lots, 0n);
-  const rest = placed.remainder._tag === "none" ? 0n : placed.remainder.lots;
+  const rest = placed.unfilled._tag === "none" ? 0n : placed.unfilled.lots;
   expect(filled + rest).toBe(order.lots);
 };
 
-const placeStep = (w: Walk, draft: Draft): Walk => {
+const placeStep = (w: WalkState, draft: Draft): WalkState => {
   const order = orderOf(draft);
   const expected: Expected = modelPlace(w.model, order);
   const placed = place(w.book, order);
@@ -125,23 +140,23 @@ const placeStep = (w: Walk, draft: Draft): Walk => {
   }
   const value = must(placed);
   expect(value.fills.map(tradeOf)).toEqual([...expected.trades]);
-  expect(value.remainder).toEqual(expected.remainder);
+  expect(value.unfilled).toEqual(expected.unfilled);
   sameBook(value.book, expected.model);
   neverCrossed(value.book);
   bounded(value.book);
   fillsAreSound(order, value);
   executionsAreSound(order, value);
   lotsAddUp(order, value);
-  const why = value.remainder._tag === "dropped" ? `:${value.remainder.why}` : "";
+  const why = value.unfilled._tag === "dropped" ? `:${value.unfilled.why}` : "";
   const partial = value.fills.some((f) => f.makerLotsLeft > 0n) ? "partial" : "whole";
   const fills = value.fills.length > 0 ? partial : "none";
   return {
     ...w, book: value.book, model: expected.model,
-    seen: bump(bump(w.seen, `remainder:${value.remainder._tag}${why}`, 1n), `fills:${fills}`, 1n),
+    seen: bump(bump(w.seen, `unfilled:${value.unfilled._tag}${why}`, 1n), `fills:${fills}`, 1n),
   };
 };
 
-const cancelStep = (w: Walk, id: string, who: string): Walk => {
+const cancelStep = (w: WalkState, id: string, who: string): WalkState => {
   const expected = modelCancel(w.model, id, who);
   const taken = cancel(w.book, { id: orderId(id), owner: owner(who) });
   if (typeof expected === "string") {
@@ -153,7 +168,7 @@ const cancelStep = (w: Walk, id: string, who: string): Walk => {
   return { ...w, book: value.book, model: expected, seen: bump(w.seen, "cancelled", 1n) };
 };
 
-const advance = (w: Walk): Walk => {
+const advance = (w: WalkState): WalkState => {
   const [seed, raw] = draws(w.seed);
   const step = stepOf(raw, w.i, w.book);
   const next = step.kind === "place" ? placeStep(w, step.draft) : cancelStep(w, step.id, step.who);
@@ -163,13 +178,13 @@ const advance = (w: Walk): Walk => {
 /** Every outcome the walk is for must have happened; the walk runs on past its nominal length until they have. */
 const OUTCOMES = [
   "refused:duplicate_order", "refused:bad_lots", "refused:bad_price", "refused:owner_full", "refused:book_full",
-  "refused:not_fillable", "refused:no_such_order", "refused:not_owner", "cancelled", "remainder:none",
-  "remainder:rested", "remainder:dropped:no_liquidity", "remainder:dropped:own_order", "fills:partial", "fills:whole",
+  "refused:not_fillable", "refused:no_such_order", "refused:not_owner", "cancelled", "unfilled:none",
+  "unfilled:rested", "unfilled:dropped:no_liquidity", "unfilled:dropped:own_order", "fills:partial", "fills:whole",
 ] as const;
 
-const covered = (w: Walk): boolean => OUTCOMES.every((k) => (w.seen.get(k) ?? 0n) > 0n);
+const covered = (w: WalkState): boolean => OUTCOMES.every((k) => (w.seen.get(k) ?? 0n) > 0n);
 
-const run = (w: Walk): Walk => (w.i < NOMINAL || (w.i < CAP && !covered(w)) ? run(advance(w)) : w);
+const run = (w: WalkState): WalkState => (w.i < NOMINAL || (w.i < CAP && !covered(w)) ? run(advance(w)) : w);
 
 describe(seedTag("market walk"), () => {
   test("R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle", () => {

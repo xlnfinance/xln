@@ -3,8 +3,9 @@ name: build-and-test
 on:
   push:
     branches: [main, develop]
+  # Every pull request, whatever base it targets or files it touches: the One gate checks are required, so a PR that never
+  # got them would sit blocked forever. rules/ci/ci-triggers.ts refuses a branches, paths or types filter here.
   pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -40,10 +41,23 @@ jobs:
           bun-version: 1.4.0
 
       # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
       - name: Setup ast-grep
-        run: |
-          pipx install uv==0.8.17
-          uv tool install ast-grep-cli==0.45.3
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
 
       - name: Cache dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -64,6 +78,20 @@ jobs:
         uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
           version: v1.7.1
+
+      # forge-std is a pinned git checkout (contracts/scripts/setup-forge-std.sh), which fetches from GitHub; the cached checkout is verified by the same script.
+      - name: Cache forge-std
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: contracts/lib/forge-std
+          key: ${{ runner.os }}-forge-std-${{ hashFiles('contracts/scripts/setup-forge-std.sh') }}
+
+      # Hardhat downloads the solc named in contracts/hardhat.config.ts when it compiles (the contracts/ part of the gate builds typechain).
+      - name: Cache solc
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/hardhat-nodejs
+          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
 
       - name: Setup forge-std
         run: cd contracts && bun run forge:setup
@@ -105,10 +133,23 @@ jobs:
           bun-version: 1.4.0
 
       # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
       - name: Setup ast-grep
-        run: |
-          pipx install uv==0.8.17
-          uv tool install ast-grep-cli==0.45.3
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
 
       - name: Cache dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -126,7 +167,7 @@ jobs:
 
       - name: Test
         working-directory: pure
-        run: bun test --timeout 600000
+        run: bun test
 
   # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
   gate-seeds:
@@ -154,10 +195,23 @@ jobs:
           bun-version: 1.4.0
 
       # rules/ calls `ast-grep` from PATH (also from its tests); style/check.ts runs the same version through `uvx --from ast-grep-cli==0.45.3`.
+      # The pins are the arguments of the script below; the cache key repeats them, and a new pin is a new key. The script uses what the
+      # cache restored (uvx finds the pinned ast-grep offline) and otherwise installs with retries, so a slow PyPI cannot turn a lane red.
+      - name: Cache uv and ast-grep
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/bin
+            ~/.local/share/uv
+            ~/.local/share/pipx
+            ~/.cache/uv
+          key: '${{ runner.os }}-uv-0.8.17-ast-grep-cli==0.45.3'
+
       - name: Setup ast-grep
-        run: |
-          pipx install uv==0.8.17
-          uv tool install ast-grep-cli==0.45.3
+        env:
+          PIP_DEFAULT_TIMEOUT: '120'
+          UV_HTTP_TIMEOUT: '120'
+        run: bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3
 
       - name: Cache dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -276,21 +330,28 @@ jobs:
         with:
           version: v1.7.1
 
-      # The committed typechain-types are the fork's ABI and bytecode: a source change without a rebuild fails here.
-      - name: Build contracts/ and check the committed typechain is current
-        run: |
-          bash contracts/scripts/build.sh
-          git diff --exit-code -- contracts/typechain-types
+      # Hardhat downloads the solc named in contracts/hardhat.config.ts when it compiles.
+      - name: Cache solc
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/hardhat-nodejs
+          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
 
-      # One test file per process: several BrowserVM stacks in one process exhaust memory.
-      - name: Run BrowserVM and deploy-gate tests, one file per process
+      - name: Cache forge-std
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: contracts/lib/forge-std
+          key: ${{ runner.os }}-forge-std-${{ hashFiles('contracts/scripts/setup-forge-std.sh') }}
+
+      # The contracts/ part of the gate, the same command as locally: `bun rules/check.ts --contracts-only` rebuilds the fork (the
+      # committed typechain-types are its ABI and bytecode: a source change without a rebuild is red) and runs every BrowserVM and
+      # deploy-gate test, one file per process (several BrowserVM stacks in one process exhaust memory). Not a loop written here again:
+      # a test run only in this workflow went red on GitHub alone once.
+      - name: Run the contracts/ part of the gate
         run: |
-          set -e
-          for f in contracts/test/vm/*/*.test.ts contracts/test/gate/*.test.ts; do
-            echo "::group::$f"
-            bun test "$f"
-            echo "::endgroup::"
-          done
+          cd pure
+          bun install --frozen-lockfile
+          bun rules/check.ts --contracts-only
 
       # The Foundry suite (test/foundry) counts as gated, so it runs here through the gate's own forge part (pin script for forge-std,
       # then forge test, with the skip and test-count checks), the same command as locally: `bun rules/check.ts --forge-only`.

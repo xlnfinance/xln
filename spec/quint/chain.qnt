@@ -1,0 +1,793 @@
+// XLN J layer for one Account and one token: the Depository as the two parties see it.
+//
+// What this module owns
+//   - On-chain facts about an Account: reserves, collateral, ondelta, the stored nonce, the ondelta epoch, debt,
+//     the public secret registry, and one active dispute.
+//   - The dispute game: start, counter, finalize (three paths), and the payout of the settled proof.
+//   - Two honest-party behaviours the game is designed around: answer a dispute inside the window, and publish a
+//     secret the moment it is known.
+//
+// What it does not own: how a proof came to be signed (account.qnt), how an Entity decides to act (entity.qnt).
+// Signed proofs enter as an arena of records chosen at the start of the run (`arena`), shaped like an honest Account
+// history: both-signed states at nonces 1..k, an unacked proposal at k+1, a rolled-back Right proposal at k, and the
+// same again for the epoch after a finalize. The chain rules then decide which of them can settle.
+// From ondelta epoch 1 a dispute may also start from the IMPLICIT proof (R-IMPLICIT-BASELINE, plan/contracts-decisions.md): no
+// signature, no arena slot, a body the chain synthesizes from its own state (`implicitProof`). It settles at Delta = ondelta, and any
+// signed frame of the epoch outranks it through a counter, except a Right-authored one at stored + 1, which only ties it (a tie is a
+// refused counter). So the first signed proof of an epoch takes nonce >= stored + 2 (the Runtime's rule, modelled in settle.qnt; the arena's
+// epoch-1 frames below sit at nonces 7 and 8, above stored + 2 for every nonce epoch 1 can open at).
+// Single token: the contract's starter names the tokens of an implicit start (multi-token is v2, V2.md); here the one token is named.
+//
+// It describes the FIXED contracts (plan/contracts-decisions.md): C1 proofs bind the ondelta epoch, C2 batch
+// authority is per entity (not visible in a one-Account model), H1 finalize waits for an open HTLC deadline unless
+// the secret is public, H2 both response windows have a floor. H3 (retired boards) is not modelled: it needs
+// board rotation, which lives in entity.qnt.
+//
+// Time is in ticks (1 tick = the response-window floor, 60 s on testnet). "Batch" atomicity: each action below is one
+// operation of one batch; a batch that reverts leaves no trace, which is the same as the action being disabled.
+// N2 (relay): finalizes are submitted per Account, never bundled, because one open deadline reverts a whole batch.
+
+module chain {
+  // ---------------------------------------------------------------------------------------------------------
+  // Parameters
+  // ---------------------------------------------------------------------------------------------------------
+
+  pure val MAXT = 6              // the clock runs 1..MAXT+1; 0 means "never" in registry and knows
+  pure val LAG = 1               // a J transaction needs this many ticks to be included, and a J event this many to be read
+                                 // (the same number as entity.LAG; the honest side's reaction time is derived from it)
+  pure val REACT = 2 * LAG       // an event on the chain to its answer on the chain: read it, then get the answer included
+  pure val MIN_WINDOW = 2        // H2: each response window, in ticks; the two windows together must exceed REACT (QUESTIONS C11)
+  pure val NONCE_TOP = 3         // the highest committed nonce of epoch 0
+  pure val SECRET = 1            // the one secret; every clause's hashlock is its hash
+  pure val RESERVE_MAX = 2       // initial reserve of each side
+
+  // ---------------------------------------------------------------------------------------------------------
+  // Domain model
+  // ---------------------------------------------------------------------------------------------------------
+
+  type Side = | Left | Right
+  pure def other(s: Side): Side = match s { | Left => Right | Right => Left }
+  pure val SIDES = Set(Left, Right)
+  pure def isLeft(s: Side): bool = match s { | Left => true | Right => false }
+
+  // A clause in a proof body: `payer` owes `amount` to the other side if the secret is shown by `deadline`.
+  // DeltaTransformer.Payment{amount, revealedUntilTimestamp, hash}; the sign is the payer's side.
+  type Clause = { on: bool, payer: Side, amount: int, deadline: int }
+
+  // A dispute proof a party signed: what the chain checks (Types.sol ProofBody + the signed hash fields).
+  //   epoch, nonce, leftAuthored   are inside the signed hash (HankoEncoding.sol:36, C1)
+  //   offdelta, clause, windows    are the ProofBody
+  //   sigL, sigR                   who signed it (the author always did; both if the frame was acked)
+  type SignedProof = {
+    live: bool, nonce: int, epoch: int, leftAuthored: bool,
+    offdelta: int, clause: Clause, wl: int, wr: int, sigL: bool, sigR: bool
+  }
+
+  // Equal nonces are ordered by author: Left wins (Types.sol equal-nonce rule, R-A1).
+  pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 1 else 0)
+  pure def signedBy(r: SignedProof, s: Side): bool = match s { | Left => r.sigL | Right => r.sigR }
+  pure def both(r: SignedProof): bool = r.sigL and r.sigR
+
+  // One active dispute (AccountInfo dispute* fields).
+  type Dispute = {
+    on: bool, starter: Side,
+    rec0: int,                // arena id of the initial proof (IMPLICIT: the implicit proof, held in p0)
+    p0: SignedProof,          // the initial proof itself: an arena record, or the implicit proof as it stood at the start
+    t0: int, timeout: int,    // start time, and start + both windows
+    wl: int, wr: int,         // windows frozen from the initial proof
+    initArgs: bool,           // the starter revealed the secret in its start arguments (frozen at start)
+    counter: int,             // arena id of the registered counter-proof (0 = none)
+    ct: int,                  // time of the newest step of the game (the start, then a counter): what the honest side reacts to
+    counterBranch: int,       // the one newer branch the starter named at start, with its own arguments
+    counterArgs: bool
+  }
+
+  // via: the cooperative update that opened the current epoch (0 = none: the epoch was opened by a finalize, or is the first).
+  type Acct = { nonce: int, epoch: int, coll: int, ondelta: int, via: int }
+
+  // Ghost flags: set at the moment a rule is broken, so each property is one boolean.
+  type Ghost = {
+    badApply: bool,       // a proof settled that P1 does not allow
+    clauseMiss: bool,     // an honest payee that learned the secret in time was not paid
+    nonceBack: bool,      // the stored nonce went down
+    appliedTwice: bool,   // one arena record settled twice
+    freeDebt: bool,       // debt was booked while its debtor still had spendable reserve
+    r2cOwes: bool,             // a deposit left its depositor owing although its whole queue fitted in one enforcement call: `enforce` did not run first (F15)
+    olderDebt: bool,           // a shortfall payout met a debtor who already owed and held reserve (older debt to enforce first)
+    debtBesideReserve: bool,   // a payout that booked debt left its debtor holding reserve: an older debt was not enforced first (`enforce` before every outflow)
+    xWasOffline: bool,    // the honest party was offline while the current dispute was active (then it may lose); reset when it ends
+    lostByAbsence: bool,  // some dispute settled a proof the honest party did not stand behind while it was absent (the exclusion is not vacuous)
+    payBad: bool,         // a finalize paid something other than what the proof and the secret evidence are worth (see `netOf`)
+    depositBad: bool,     // a deposit into the collateral did something other than move the depositor's reserve into it
+    windowsShortened: bool, // a proof settled or countered with a window shorter than the one frozen at the start (N3: windows may lengthen, never shorten)
+    earlyClose: bool,     // a proof settled by timeout before both windows had run
+    lateCounter: bool,    // a counter was registered after both windows had run
+    nonceBad: bool,       // the stored nonce after a start or a finalize is not the one the rules give
+    implicitSettles: int, // finalizes that settled the implicit proof
+    pubAt: int,           // ghost: the tick the secret first reached the chain (0 = never), kept apart from `registry`
+    finalizes: int,
+    lastApplied: int,
+    staleSkips: int       // dispute starts that named a dead ondelta epoch and were skipped (DisputeOpSkipped), moving nothing
+  }
+
+  pure val NO_GHOST: Ghost = {
+    badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, r2cOwes: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
+    lostByAbsence: false, payBad: false, depositBad: false, windowsShortened: false, earlyClose: false, lateCounter: false,
+    nonceBad: false, implicitSettles: 0, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
+  }
+
+  pure val NO_CLAUSE: Clause = { on: false, payer: Left, amount: 0, deadline: 0 }
+  pure val NO_PROOF: SignedProof = {
+    live: false, nonce: 0, epoch: 0, leftAuthored: false, offdelta: 0, clause: NO_CLAUSE, wl: 0, wr: 0,
+    sigL: false, sigR: false
+  }
+  pure val NO_DISPUTE: Dispute = {
+    on: false, starter: Left, rec0: 0, p0: NO_PROOF, t0: 0, timeout: 0, wl: 0, wr: 0, initArgs: false,
+    counter: 0, ct: 0, counterBranch: 0, counterArgs: false
+  }
+
+  // ---------------------------------------------------------------------------------------------------------
+  // What a proof settles to. Depository._applyAccountDelta and _settleShortfall.
+  // ---------------------------------------------------------------------------------------------------------
+
+  pure def imin(a: int, b: int): int = if (a < b) a else b
+  pure def imax(a: int, b: int): int = if (a > b) a else b
+
+  // debt[s] is what s owes to the other side, in total; dq[s] is the same debt as the queue of separate claims Depository keeps, oldest first (debt[s] is its sum).
+  type Money = { res: Side -> int, debt: Side -> int, dq: Side -> List[int] }
+
+  // Depository._enforceDebts pays at most 32 queued debts per call, oldest first. The model scales that bound down so that a search meets a queue longer than one call can clear.
+  pure val DEBT_ENFORCE_MAX = 2
+
+  pure def sumOf(xs: List[int]): int = xs.foldl(0, (a, x) => a + x)
+
+  // Debt is a lazy claim on future inflows: nothing is paid when reserve arrives, it is paid by `enforce`, which runs
+  // before every outflow (Depository._enforceDebts before R2R, R2C, R2E and _settleShortfall). Spendable reserve is
+  // reserve net of ALL outstanding debt, the queued ones a call did not reach included (_spendableReserve).
+  pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))
+
+  // Pay the first DEBT_ENFORCE_MAX claims in order, each with what the reserve still holds; a claim paid in full leaves the queue, a part-paid one stays, the rest are not touched.
+  pure def enforce(m: Money, debtor: Side): Money = {
+    val c = other(debtor)
+    val r = m.dq.get(debtor).foldl({ left: m.res.get(debtor), out: [], seen: 0 }, (acc, d) =>
+      if (acc.seen >= DEBT_ENFORCE_MAX) { ...acc, out: acc.out.append(d), seen: acc.seen + 1 }
+      else {
+        val pay = imin(d, acc.left)
+        { left: acc.left - pay, out: if (d - pay > 0) acc.out.append(d - pay) else acc.out, seen: acc.seen + 1 }
+      })
+    val paid = m.res.get(debtor) - r.left
+    {
+      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),
+      debt: m.debt.set(debtor, m.debt.get(debtor) - paid),
+      dq: m.dq.set(debtor, r.out)
+    }
+  }
+
+  // The debtor pays what it can from spendable reserve after enforcement; the rest becomes debt (_settleShortfall).
+  pure def shortfall(m0: Money, debtor: Side, amount: int): Money = {
+    val c = other(debtor)
+    val m = enforce(m0, debtor)
+    val pay = imin(amount, spendable(m, debtor))
+    {
+      res: m.res.set(debtor, m.res.get(debtor) - pay).set(c, m.res.get(c) + pay),
+      debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay)),
+      dq: m.dq.set(debtor, if (amount - pay > 0) m.dq.get(debtor).append(amount - pay) else m.dq.get(debtor))
+    }
+  }
+
+  // Δ = ondelta + offdelta is Left's allocation. Δ <= 0: Right takes the collateral and Left owes -Δ.
+  // 0 < Δ < c: split. Δ >= c: Left takes the collateral and Right owes Δ - c.
+  pure def payout(m: Money, coll: int, d: int): Money =
+    if (d <= 0) {
+      val m1 = { ...m, res: m.res.set(Right, m.res.get(Right) + coll) }
+      if (d == 0) m1 else shortfall(m1, Left, -d)
+    } else if (d >= coll) {
+      val m1 = { ...m, res: m.res.set(Left, m.res.get(Left) + coll) }
+      if (d == coll) m1 else shortfall(m1, Right, d - coll)
+    } else {
+      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }
+    }
+
+  // The side that owes when Δ leaves the collateral range (Left below 0, Right above the collateral is decided by the caller).
+  pure def debtorOf(d: int): Side = if (d <= 0) Left else Right
+
+  // The offdelta a proof settles to once the clause is resolved. A revealed clause moves offdelta by its amount
+  // towards the payee: a Left payer makes it smaller, a Right payer larger.
+  pure def settledOffdelta(r: SignedProof, revealed: bool): int =
+    if (r.clause.on and revealed)
+      (match r.clause.payer { | Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount })
+    else r.offdelta
+
+  // ---------------------------------------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------------------------------------
+
+  var arena: int -> SignedProof              // every signed proof that exists (slot 0 = none); fixed at init
+  var honest: Side                   // the party that follows the protocol; the other one is the adversary
+  var now: int
+  var acct: Acct
+  var money: Money
+  var total: int                     // reserves + collateral: constant, there are no outside deposits here
+  var dispute: Dispute
+  var registry: int                  // time the secret was published on chain (0 = not published)
+  var knows: Side -> int             // time each side learned the secret (0 = does not know it)
+  var offline: bool                  // the honest party is offline right now
+  var applied: int -> bool           // arena records that have settled
+  var ghost: Ghost
+
+  pure val FIRST_NONCE_E1 = 7     // the nonce of the first signed frame of epoch 1: the highest nonce epoch 1 can open at (NONCE_TOP + 1 + 1 = 5) plus 2
+  pure val NREC = 16
+  pure val RECS = 1.to(NREC)
+  pure val SLOTS = 0.to(NREC)     // slot 0 is the empty proof: "no proof" is a valid lookup
+
+  pure def mkProofW(live: bool, nonce: int, epoch: int, la: bool, off: int, c: Clause, sigL: bool, sigR: bool, wl: int, wr: int): SignedProof =
+    { live: live, nonce: nonce, epoch: epoch, leftAuthored: la, offdelta: off, clause: c, wl: wl, wr: wr, sigL: sigL, sigR: sigR }
+  pure def mkProof(live: bool, nonce: int, epoch: int, la: bool, off: int, c: Clause, sigL: bool, sigR: bool): SignedProof =
+    mkProofW(live, nonce, epoch, la, off, c, sigL, sigR, MIN_WINDOW, MIN_WINDOW)
+
+  // An honest history, chosen nondeterministically. Slots:
+  //   1..3  both-signed states at nonces 1..k of epoch 0 (k = tip)
+  //   4     an unacked proposal at k+1, signed only by its author
+  //   5     a Right proposal at nonce k that lost a collision to the Left-authored tip: signed only by Right
+  //   6     the first both-signed frame of epoch 1 (after any finalize), at nonce 7. Epoch 1 opens at a stored nonce of 2 to 5 (an initial
+  //         nonce is at most k + 1 = 4, a timeout finalize adds 1), so 7 is stored + 2 or more whichever way it opened: the Runtime's rule
+  //         for the first signed proof of an epoch. Authored by either side, since at stored + 2 or above neither ties the implicit proof.
+  //   7     an unacked proposal of epoch 1, at nonce 8
+  action init = {
+    nondet k = 1.to(NONCE_TOP).oneOf()
+    nondet la1 = Set(true, false).oneOf()
+    nondet la2 = Set(true, false).oneOf()
+    nondet la3 = Set(true, false).oneOf()
+    nondet o1 = (-3).to(3).oneOf()
+    nondet o2 = (-3).to(3).oneOf()
+    nondet o3 = (-3).to(3).oneOf()
+    nondet cOn = Set(true, false).oneOf()
+    nondet cPayer = SIDES.oneOf()
+    nondet cAmt = 1.to(2).oneOf()
+    nondet cDl = 1.to(MAXT).oneOf()
+    nondet pendLive = Set(true, false).oneOf()
+    nondet pendAuthor = SIDES.oneOf()
+    nondet pendOff = (-3).to(3).oneOf()
+    nondet shadowLive = Set(true, false).oneOf()
+    nondet shadowOff = (-3).to(3).oneOf()
+    nondet baseOff = (-1).to(1).oneOf()
+    nondet baseLa = Set(true, false).oneOf()
+    nondet pend2Live = Set(true, false).oneOf()
+    nondet pend2Author = SIDES.oneOf()
+    nondet pend2Off = (-1).to(1).oneOf()
+    nondet hon = SIDES.oneOf()
+    nondet debtor = SIDES.oneOf()
+    nondet dqLen = 0.to(3).oneOf()
+    nondet dq1 = 1.to(2).oneOf()
+    nondet dq2 = 1.to(2).oneOf()
+    nondet dq3 = 1.to(2).oneOf()
+    nondet resL = 0.to(RESERVE_MAX).oneOf()
+    nondet resR = 0.to(RESERVE_MAX).oneOf()
+    nondet coll = 0.to(2).oneOf()
+    // response windows vary: the tip's pair, the pending proposal's and the shadow's own, and epoch 1's; one below the floor is possible (H2)
+    nondet wl0 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr0 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wl4 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr4 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wl6 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    nondet wr6 = (MIN_WINDOW - 1).to(MIN_WINDOW + 1).oneOf()
+    // the clause, if any, rides in the tip and in the pending proposal (the same lock, still open)
+    val clause: Clause = { on: cOn, payer: cPayer, amount: cAmt, deadline: cDl }
+    val tipLeft = if (k == 1) la1 else if (k == 2) la2 else la3
+    initFromD(
+      Map(
+        0 -> NO_PROOF,
+        1 -> mkProofW(k >= 1, 1, 0, la1, o1, if (k == 1) clause else NO_CLAUSE, true, true, wl0, wr0),
+        2 -> mkProofW(k >= 2, 2, 0, la2, o2, if (k == 2) clause else NO_CLAUSE, true, true, wl0, wr0),
+        3 -> mkProofW(k >= 3, 3, 0, la3, o3, if (k == 3) clause else NO_CLAUSE, true, true, wl0, wr0),
+        4 -> mkProofW(pendLive, k + 1, 0, isLeft(pendAuthor), pendOff, clause, isLeft(pendAuthor), not(isLeft(pendAuthor)), wl4, wr4),
+        5 -> mkProofW(shadowLive and tipLeft, k, 0, false, shadowOff, clause, false, true, wl4, wr4),
+        6 -> mkProofW(true, FIRST_NONCE_E1, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
+        7 -> mkProofW(pend2Live, FIRST_NONCE_E1 + 1, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
+      ),
+      hon, resL, resR, coll, debtor, [dq1, dq2, dq3].slice(0, dqLen)      // an older debt: a queue of up to three claims, one more than a scaled call clears
+    )
+  }
+
+  // An Account that has just opened epoch 1 and holds NO signed frame of it (a settlement, a finalize or a withdrawal moved the epoch and nothing
+  // was signed since): the only proof anyone can start from is the implicit one. The stored nonce is whatever the opening event left (2 to 5,
+  // as for epoch 1 in `init`), the collateral and ondelta are what the event left, and the arena holds no proof at all. From here the simulation
+  // reaches every body the chain must refuse (the adversary tries the canonical body and its one-field variants, `adversaryStartImplicit`) and
+  // every outcome of the one start that is allowed, so `safe` alone judges the implicit-proof rules (no scenario test needed).
+  action initE1 = {
+    nondet st = 2.to(5).oneOf()
+    nondet hon = SIDES.oneOf()
+    nondet resL = 0.to(RESERVE_MAX).oneOf()
+    nondet resR = 0.to(RESERVE_MAX).oneOf()
+    nondet coll = 1.to(2).oneOf()
+    nondet od = 0.to(coll).oneOf()
+    initAt({ nonce: st, epoch: 1, coll: coll, ondelta: od, via: 0 }, Map(0 -> NO_PROOF), hon, resL, resR, coll, Left, [])
+  }
+
+  // The state before anything happened, for a given arena: scenario tests start here with a hand-made history.
+  action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = initFromD(ar, hon, resL, resR, coll, Left, [])
+  action initFromD(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool =
+    initAt({ nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 }, ar, hon, resL, resR, coll, debtor, queue)
+  action initAt(a: Acct, ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool = all {
+    arena' = SLOTS.mapBy(i => if (ar.keys().contains(i)) ar.get(i) else NO_PROOF),      // slots a history does not use stay empty
+    honest' = hon,
+    now' = 1,
+    acct' = a,
+    money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0).set(debtor, sumOf(queue)), dq: Map(Left -> [], Right -> []).set(debtor, queue) },
+    total' = resL + resR + coll,
+    dispute' = NO_DISPUTE,
+    registry' = 0,
+    knows' = Map(Left -> 0, Right -> 0),
+    offline' = false,
+    applied' = SLOTS.mapBy(_ => false),
+    ghost' = NO_GHOST
+  }
+
+  // ---------------------------------------------------------------------------------------------------------
+  // P1: what may settle. The honest party's belief is the both-signed proof of the current epoch with the
+  // highest (nonce, Left-wins) rank. It has also signed, and so consented to, any newer proof of its own.
+  // ---------------------------------------------------------------------------------------------------------
+
+  pure def tipRank(ar: int -> SignedProof, e: int): int =
+    RECS.fold(0, (m, i) => if (ar.get(i).live and ar.get(i).epoch == e and both(ar.get(i))) imax(m, rank(ar.get(i))) else m)
+
+  // The implicit proof (no signature) is what the honest party believes only while it holds no both-signed proof of the epoch at all: a signed
+  // frame of the epoch is newer than the empty state, and a tie with it (a Right-authored frame at stored + 1) is the trap the Runtime rule prevents.
+  // It must also be the canonical body: any other unsigned body is one the honest party never agreed to.
+  pure def allowed(ar: int -> SignedProof, e: int, x: Side, r: SignedProof): bool = and {
+    r.live, r.epoch == e,
+    or {
+      both(r) and rank(r) == tipRank(ar, e),
+      signedBy(r, x) and not(both(r)) and rank(r) > tipRank(ar, e),
+      and {
+        not(r.sigL), not(r.sigR), e >= 1, tipRank(ar, e) == 0,
+        not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW
+      }
+    }
+  }
+
+  // The tip the honest party would use: the highest both-signed proof of the epoch.
+  pure def tipId(ar: int -> SignedProof, e: int): int =
+    RECS.fold(0, (m, i) =>
+      if (ar.get(i).live and ar.get(i).epoch == e and both(ar.get(i)) and rank(ar.get(i)) == tipRank(ar, e)) i else m)
+
+  // ---------------------------------------------------------------------------------------------------------
+  // Chain operations. Each guard is the contract's revert condition.
+  // ---------------------------------------------------------------------------------------------------------
+
+  pure def windowsOk(r: SignedProof): bool = r.wl >= MIN_WINDOW and r.wr >= MIN_WINDOW        // H2
+
+  // The implicit proof of an epoch (R-IMPLICIT-BASELINE): the empty state of the Account, synthesized from chain state. Nonce stored + 1,
+  // authored by Right (so a Left-authored signed proof of the same nonce outranks it, and a Right-authored one only ties it), offdelta 0,
+  // no clause, both windows exactly the floor, and no signature. It lives in no arena slot.
+  pure val IMPLICIT = -1          // the id a dispute carries for it (rec0), not an arena slot
+  pure def implicitProof(a: Acct): SignedProof =
+    { live: true, nonce: a.nonce + 1, epoch: a.epoch, leftAuthored: false, offdelta: 0, clause: NO_CLAUSE, wl: MIN_WINDOW, wr: MIN_WINDOW, sigL: false, sigR: false }
+
+  // What the chain accepts as the implicit proof: an empty signature over exactly the canonical body, from epoch 1 on (epoch 0 has none).
+  pure def isImplicit(r: SignedProof, a: Acct): bool = and {
+    a.epoch >= 1,
+    not(r.sigL), not(r.sigR),
+    r.live, r.epoch == a.epoch, r.nonce == a.nonce + 1,
+    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW
+  }
+
+  // disputeStart: `s` starts with proof `r`, which the counterparty must have signed, or which is the implicit proof (no signature at all).
+  pure def canStart(w: { ar: int -> SignedProof, a: Acct, d: Dispute }, s: Side, r: SignedProof): bool = and {
+    r.live,
+    not(w.d.on),
+    r.nonce > w.a.nonce,
+    r.epoch == w.a.epoch,             // C1
+    or { signedBy(r, other(s)), isImplicit(r, w.a) },
+    windowsOk(r)
+  }
+
+  // some start is open to `s`: a signed proof of the arena, or the implicit proof
+  pure def canStartAny(w: { ar: int -> SignedProof, a: Acct, d: Dispute }, s: Side): bool =
+    or { RECS.exists(i => canStart(w, s, w.ar.get(i))), canStart(w, s, implicitProof(w.a)) }
+
+  // the initial proof of a dispute, or a registered one: an arena record, or the implicit proof the dispute started with
+  pure def proofOf(ar: int -> SignedProof, d: Dispute, id: int): SignedProof = if (id == IMPLICIT) d.p0 else ar.get(id)
+
+  // The secret evidence the settled proof is judged by: public registry, the starter's frozen arguments, and the
+  // non-starter's arguments at finalize time (Depository/DeltaTransformer.applyPayment).
+  pure def revealedBy(r: SignedProof, reg: int, now: int, d: Dispute, starterArgs: bool, otherArgs: bool): bool = or {
+    reg != 0 and reg <= r.clause.deadline,
+    starterArgs and d.t0 <= r.clause.deadline,
+    otherArgs and now <= r.clause.deadline
+  }
+
+  // ---------------------------------------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------------------------------------
+
+  // The honest party must get to act before the clock passes an instant at which the adversary could otherwise
+  // finalize a stale proof. Modelled as urgency: time does not advance while an honest response is enabled and the
+  // honest party is online. If it is offline, time advances and it may lose (ghost.xWasOffline records that).
+  pure def honestCounterId(ar: int -> SignedProof, a: Acct, d: Dispute, x: Side): int = {
+    val t = tipId(ar, a.epoch)
+    val r = ar.get(t)
+    if (t != 0 and d.on and d.starter != x and signedBy(r, d.starter) and r.epoch == a.epoch
+        and rank(r) > rank(d.p0)
+        and (d.counter == 0 or rank(r) > rank(ar.get(d.counter)))) t
+    else 0
+  }
+
+  pure def payeeOf(c: Clause): Side = other(c.payer)
+
+  // A secret the honest party publishes the moment it knows it: nobody has, and some live proof of this epoch has an open
+  // clause it is the payee of. (Publishing costs a transaction; an implementation may wait until a counterparty stalls, at the
+  // price of the deadline tolerance: `d` below is the whole tolerance, zero here.)
+  pure def honestCanPublish(ar: int -> SignedProof, a: Acct, d: Dispute, x: Side, k: Side -> int, reg: int, now: int): bool = and {
+    k.get(x) != 0, reg == 0,
+    RECS.exists(i => and {
+      ar.get(i).live, ar.get(i).epoch == a.epoch, ar.get(i).clause.on,
+      payeeOf(ar.get(i).clause) == x, ar.get(i).clause.deadline >= now
+    })
+  }
+
+  // The honest party has something it must do. It may do it at once (the model is generous in that), and it must have done
+  // it REACT ticks after the event it answers (for a counter: the start or the last counter) or LAG ticks after it learned
+  // the secret (it needs no read: it learned it off-chain). Time does not pass beyond that.
+  val respondDue: bool = or {
+    honestCounterId(arena, acct, dispute, honest) != 0,
+    honestCanPublish(arena, acct, dispute, honest, knows, registry, now)
+  }
+
+  val mustAct: bool = or {
+    honestCounterId(arena, acct, dispute, honest) != 0 and now >= dispute.ct + REACT,
+    honestCanPublish(arena, acct, dispute, honest, knows, registry, now) and now >= knows.get(honest) + LAG
+  }
+
+  val urgent: bool = not(offline) and mustAct
+
+  action tick: bool = all {
+    now <= MAXT,
+    not(urgent),
+    now' = now + 1,
+    // a tick that passes while the honest party is offline and owed a response is the one way it may lose
+    ghost' = { ...ghost, xWasOffline: ghost.xWasOffline or (offline and respondDue) },
+    arena' = arena, honest' = honest, acct' = acct, money' = money, total' = total, dispute' = dispute,
+    registry' = registry, knows' = knows, offline' = offline, applied' = applied
+  }
+
+  // A side learns the secret (from downstream, from the payer, ...).
+  action learn(s: Side): bool = all {
+    knows.get(s) == 0,
+    knows' = knows.set(s, now),              // the clock starts at 1, so 0 stays "unknown"
+    arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
+    dispute' = dispute, registry' = registry, offline' = offline, applied' = applied, ghost' = ghost
+  }
+
+  // Anyone who knows the secret can publish it (SecretReveal; Depository processBatch revealSecrets).
+  action publish(s: Side): bool = all {
+    knows.get(s) != 0,
+    registry == 0,
+    registry' = now,
+    arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
+    dispute' = dispute, knows' = knows, offline' = offline, applied' = applied, ghost' = { ...ghost, pubAt: now }
+  }
+
+  action setOffline(b: bool): bool = all {
+    offline' = b,
+    arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
+    dispute' = dispute, registry' = registry, knows' = knows, applied' = applied, ghost' = ghost
+  }
+
+  // R2C: `s` moves its own reserve into the Account's collateral, crediting `rcv` (Account.sol processR2C: the receiving
+  // entity need not be the payer). Crediting Left also raises ondelta, so Left's allocation grows by the amount; crediting
+  // Right raises only the collateral, which is Right's allocation. The contract does not block it during a dispute,
+  // and it does not advance the epoch (no signature is involved), so every signed proof stays valid.
+  action r2c(s: Side, rcv: Side, amt: int): bool = {
+    val m1 = enforce(money, s)
+    val mNew = { ...m1, res: m1.res.set(s, m1.res.get(s) - amt) }
+    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }
+    // what a deposit does, stated on the effect: the collateral grows by the amount, Left's ondelta by the amount when Left is credited
+    // and not otherwise, the depositor's worth falls by the amount and nobody else's moves
+    val effectOk = and {
+      aNew.coll == acct.coll + amt,
+      aNew.ondelta == acct.ondelta + (match rcv { | Left => amt | Right => 0 }),
+      netOf(mNew, s) == netOf(money, s) - amt,
+      netOf(mNew, other(s)) == netOf(money, other(s))
+    }
+    all {
+      amt >= 1, spendable(m1, s) >= amt,
+      money' = mNew,
+      acct' = aNew,
+      arena' = arena, honest' = honest, now' = now, total' = total, dispute' = dispute, registry' = registry,
+      knows' = knows, offline' = offline, applied' = applied,
+      ghost' = { ...ghost, depositBad: ghost.depositBad or not(effectOk), r2cOwes: ghost.r2cOwes or (money.dq.get(s).length() <= DEBT_ENFORCE_MAX and mNew.debt.get(s) > 0) }
+    }
+  }
+
+  // disputeStart. The stored nonce becomes the proof's nonce. The starter freezes its arguments now: whether it
+  // reveals the secret, and, for one named newer branch, its arguments for that branch.
+  action startWith(s: Side, rid: int, initArgs: bool, branch: int, counterArgs: bool): bool = all {
+    rid >= 1,
+    startCore(s, rid, arena.get(rid), initArgs, branch, counterArgs)
+  }
+
+  // A start from the implicit proof: the starter sends an empty signature and a body, and the chain accepts it only if the body is exactly the
+  // canonical one (`isImplicit`). No arguments and no counter-proof commitment ride with it (the body names no clause and no newer branch).
+  action startImplicit(s: Side, body: SignedProof, initArgs: bool, branch: int, counterArgs: bool): bool =
+    startCore(s, IMPLICIT, body, initArgs, branch, counterArgs)
+
+  action startCore(s: Side, rid: int, r: SignedProof, initArgs: bool, branch: int, counterArgs: bool): bool = all {
+    canStart({ ar: arena, a: acct, d: dispute }, s, r),
+    initArgs implies knows.get(s) != 0,
+    counterArgs implies knows.get(s) != 0,
+    (not(r.sigL) and not(r.sigR)) implies (not(initArgs) and branch == 0 and not(counterArgs)),     // an implicit start carries no arguments
+    branch == 0 or (branch >= 1 and arena.get(branch).live and rank(arena.get(branch)) > rank(r)),
+    dispute' = {
+      on: true, starter: s, rec0: rid, p0: r, t0: now, timeout: now + r.wl + r.wr,
+      wl: r.wl, wr: r.wr,
+      initArgs: initArgs, counter: 0, ct: now, counterBranch: branch, counterArgs: counterArgs
+    },
+    acct' = { ...acct, nonce: r.nonce },
+    ghost' = { ...ghost, nonceBack: ghost.nonceBack or r.nonce <= acct.nonce },           // a start needs a nonce strictly above the stored one
+    arena' = arena, honest' = honest, now' = now, money' = money, total' = total, registry' = registry,
+    knows' = knows, offline' = offline, applied' = applied
+  }
+
+  // A dispute start now carries the ondelta epoch of the Account it was signed for (coordinator, 2026-09-30) and is skipped when the Account is
+  // in another epoch: DisputeOpSkipped, no revert, no nonce change, nothing else moves. (It can never hold again: a finalize only advances the epoch.)
+  // The proof's own epoch is still checked by `canStart` (C1); this is the same fact stated on the op, so the Entity can read it as a skip.
+  action startAtDeadEpoch(s: Side, rid: int): bool = all {
+    rid >= 1, arena.get(rid).live, arena.get(rid).epoch != acct.epoch,
+    ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },
+    dispute' = dispute, acct' = acct, arena' = arena, honest' = honest, now' = now, money' = money, total' = total, registry' = registry,
+    knows' = knows, offline' = offline, applied' = applied
+  }
+
+  action adversaryStartAtDeadEpoch: bool = { nondet rid = RECS.oneOf() startAtDeadEpoch(other(honest), rid) }
+
+  action adversaryStart: bool = {
+    nondet rid = RECS.oneOf()
+    nondet initArgs = Set(true, false).oneOf()
+    nondet branch = 0.to(NREC).oneOf()
+    nondet cArgs = Set(true, false).oneOf()
+    startWith(other(honest), rid, initArgs, branch, cArgs)
+  }
+
+  // The adversary may also start from the implicit proof, with the canonical body or with one field off (a body the chain must refuse):
+  // 0 canonical; 1 nonce stored + 2; 2 nonce stored; 3 Left-authored; 4 offdelta 1; 5 a clause; 6 a window above the floor; 7 the other window above it.
+  action adversaryStartImplicit: bool = {
+    nondet v = 0.to(7).oneOf()
+    val b = implicitProof(acct)
+    val body = if (v == 1) { ...b, nonce: b.nonce + 1 }
+               else if (v == 2) { ...b, nonce: b.nonce - 1 }
+               else if (v == 3) { ...b, leftAuthored: true }
+               else if (v == 4) { ...b, offdelta: 1 }
+               else if (v == 5) { ...b, clause: { on: true, payer: Left, amount: 1, deadline: 2 } }
+               else if (v == 6) { ...b, wl: MIN_WINDOW + 1 }
+               else if (v == 7) { ...b, wr: MIN_WINDOW + 1 }
+               else b
+    startImplicit(other(honest), body, false, 0, false)
+  }
+
+  // The honest party starts with its tip and reveals every secret it knows (R-P3: a dispute start carries every
+  // secret the starter knows for the locks in its proof). With no signed proof of an epoch it has, it starts from the implicit one.
+  action honestStart: bool = all {
+    not(offline),
+    if (tipId(arena, acct.epoch) != 0) startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)
+    else startImplicit(honest, implicitProof(acct), false, 0, false)
+  }
+
+  // counter: the non-starter registers a newer state before T. An equal nonce is replaced only by a Left-authored
+  // proof over a Right-authored one, which is exactly a higher rank.
+  action counterWith(s: Side, rid: int): bool = {
+    val r = arena.get(rid)
+    all {
+      dispute.on, dispute.starter != s,
+      now < dispute.timeout,
+      rid >= 1, r.live,
+      r.epoch == acct.epoch,                         // C1
+      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)
+      signedBy(r, dispute.starter),
+      rank(r) > rank(dispute.p0),                    // a Right-authored proof at stored + 1 only ties the implicit proof: refused
+      dispute.counter == 0 or rank(r) > rank(arena.get(dispute.counter)),
+      dispute' = { ...dispute, counter: rid, ct: now },
+      arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
+      registry' = registry, knows' = knows, offline' = offline, applied' = applied,
+      ghost' = { ...ghost,
+                 lateCounter: ghost.lateCounter or now >= dispute.t0 + dispute.wl + dispute.wr,
+                 windowsShortened: ghost.windowsShortened or r.wl < dispute.wl or r.wr < dispute.wr }
+    }
+  }
+
+  action adversaryCounter: bool = { nondet rid = RECS.oneOf() counterWith(other(honest), rid) }
+
+  action honestCounter: bool = all {
+    not(offline),
+    honestCounterId(arena, acct, dispute, honest) != 0,
+    counterWith(honest, honestCounterId(arena, acct, dispute, honest))
+  }
+
+  // What a side is worth on the chain: its reserve, less what it owes, plus what the other side owes it. A payout moves it by exactly the
+  // side's allocation, whatever is paid at once and whatever is booked as debt; enforcing a debt moves nothing (reserve and debt fall together).
+  pure def netOf(m: Money, s: Side): int = m.res.get(s) - m.debt.get(s) + m.debt.get(other(s))
+
+  // Whether the clause is paid, from the facts (when the secret reached the chain, who knew it) and not from `revealedBy`, which is the
+  // mechanism this is checked against. The secret can come from the public registry by the deadline, from the starter's arguments frozen
+  // at the start (the starter must have known it), or from the non-starter's own arguments at the finalize (it must know it).
+  pure def paidTruth(r: SignedProof, g: Ghost, kn: Side -> int, d: Dispute, starterArgs: bool, otherArgs: bool, f: Side, t: int): bool = and {
+    r.clause.on,
+    or {
+      g.pubAt != 0 and g.pubAt <= r.clause.deadline,
+      and { starterArgs, kn.get(d.starter) != 0, d.t0 <= r.clause.deadline },
+      and { otherArgs, f != d.starter, kn.get(f) != 0, t <= r.clause.deadline }
+    }
+  }
+
+  // finalize. Paths: 0 the initial proof, 1 the registered counter-proof, 2 a newer signed proof presented by the
+  // non-starter that closes at once. `otherArgs` is the finalizer's own secret evidence (non-starter only).
+  action finalizeWith(f: Side, path: int, rid: int, otherArgs: bool): bool = {
+    val hasCounter = dispute.counter != 0
+    val useId = if (path == 0) dispute.rec0 else if (path == 1) dispute.counter else rid
+    val r = proofOf(arena, dispute, useId)
+    val isImpl = path == 0 and useId == IMPLICIT
+    val isNonStarter = f != dispute.starter
+    val branchArgs = dispute.counterArgs and useId == dispute.counterBranch
+    val starterArgs = if (path == 0) dispute.initArgs else branchArgs
+    val revealed = revealedBy(r, registry, now, dispute, starterArgs, otherArgs)
+    val d = acct.ondelta + settledOffdelta(r, revealed)
+    val m2 = payout(money, acct.coll, d)
+    val adopts = path != 0
+    val newNonce = if (adopts) r.nonce else acct.nonce + 1
+    // the checks: recomputed from the facts, not from the values the mechanism just used
+    val paid = paidTruth(r, ghost, knows, dispute, starterArgs, otherArgs, f, now)
+    val dTruth = acct.ondelta + (if (paid) (match r.clause.payer { | Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount }) else r.offdelta)
+    val payOk = and {
+      netOf(m2, Left) == netOf(money, Left) + dTruth,
+      netOf(m2, Right) == netOf(money, Right) + acct.coll - dTruth
+    }
+    val byTimeout = path == 1 or (path == 0 and not(isNonStarter))
+    all {
+      dispute.on,
+      useId >= 1 or isImpl, r.live,
+      otherArgs implies (isNonStarter and knows.get(f) != 0),
+      // the three paths' own conditions
+      if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }
+      else if (path == 1) and { hasCounter, now >= dispute.timeout }
+      else and {
+        not(hasCounter), isNonStarter, r.epoch == acct.epoch,
+        r.wl >= dispute.wl, r.wr >= dispute.wr,
+        signedBy(r, dispute.starter),
+        rank(r) > rank(dispute.p0)
+      },
+      // H1: an unrevealed clause whose deadline is still open makes finalize revert
+      not(r.clause.on and not(revealed) and now <= r.clause.deadline),
+      money' = m2,
+      acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0, via: 0 },     // C1: finalize advances the epoch
+      dispute' = NO_DISPUTE,
+      applied' = if (useId >= 1) applied.set(useId, true) else applied,
+      ghost' = {
+        badApply: ghost.badApply or (not(allowed(arena, acct.epoch, honest, r)) and not(ghost.xWasOffline)),
+        clauseMiss: ghost.clauseMiss or and {
+          r.clause.on, payeeOf(r.clause) == honest, knows.get(honest) != 0, knows.get(honest) + LAG <= r.clause.deadline,
+          not(ghost.xWasOffline), not(revealed)
+        },
+        nonceBack: ghost.nonceBack or newNonce < acct.nonce,
+        appliedTwice: ghost.appliedTwice or (useId >= 1 and applied.get(useId)),
+        freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > m2.debt.get(debtorOf(d))),
+        olderDebt: ghost.olderDebt or ((d < 0 or d > acct.coll) and money.debt.get(debtorOf(d)) > 0 and money.res.get(debtorOf(d)) > 0),
+        // what the contract keeps (`_spendableReserve` nets all outstanding debt): a payout that leaves debt leaves the debtor nothing spendable; and when the debtor's queue fitted in
+        // one enforcement call it leaves it nothing at all
+        debtBesideReserve: ghost.debtBesideReserve or and {
+          d < 0 or d > acct.coll, m2.debt.get(debtorOf(d)) > 0,
+          spendable(m2, debtorOf(d)) > 0 or (money.dq.get(debtorOf(d)).length() <= DEBT_ENFORCE_MAX and m2.res.get(debtorOf(d)) > 0)
+        },
+        xWasOffline: false,                                    // per dispute: the next one is judged afresh
+        lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, r))),
+        payBad: ghost.payBad or not(payOk),
+        depositBad: ghost.depositBad,
+        r2cOwes: ghost.r2cOwes,
+        windowsShortened: ghost.windowsShortened or r.wl < dispute.wl or r.wr < dispute.wr,
+        earlyClose: ghost.earlyClose or (byTimeout and now < dispute.t0 + dispute.wl + dispute.wr),
+        lateCounter: ghost.lateCounter,
+        nonceBad: ghost.nonceBad or newNonce != (if (adopts) r.nonce else acct.nonce + 1) or (adopts and r.nonce < acct.nonce),
+        pubAt: ghost.pubAt,
+        finalizes: ghost.finalizes + 1,
+        lastApplied: if (useId >= 1) useId else 0,
+        implicitSettles: ghost.implicitSettles + (if (isImpl) 1 else 0),
+        staleSkips: ghost.staleSkips
+      },
+      arena' = arena, honest' = honest, now' = now, total' = total, registry' = registry, knows' = knows,
+      offline' = offline
+    }
+  }
+
+  action adversaryFinalize: bool = {
+    nondet path = 0.to(2).oneOf()
+    nondet rid = RECS.oneOf()
+    nondet oa = Set(true, false).oneOf()
+    finalizeWith(other(honest), path, rid, oa)
+  }
+
+  // The honest party closes when it can: the counter-proof if one is registered, else the initial proof, carrying
+  // every secret it knows if it is the non-starter.
+  // It never closes on a proof it does not stand behind: with a stale initial proof it registers the counter first.
+  action honestFinalize: bool = all {
+    not(offline),
+    dispute.on,
+    allowed(arena, acct.epoch, honest, proofOf(arena, dispute, if (dispute.counter != 0) dispute.counter else dispute.rec0)),
+    finalizeWith(honest, if (dispute.counter != 0) 1 else 0, 0, dispute.starter != honest and knows.get(honest) != 0)
+  }
+
+  action step = any {
+    tick,
+    learn(Left), learn(Right),
+    publish(Left), publish(Right),
+    setOffline(true), setOffline(false),
+    { nondet a = 1.to(2).oneOf() nondet who = SIDES.oneOf() nondet rcv = SIDES.oneOf() r2c(who, rcv, a) },
+    adversaryStart, adversaryStartImplicit, adversaryStartAtDeadEpoch, honestStart,
+    adversaryCounter, honestCounter,
+    adversaryFinalize, honestFinalize
+  }
+
+  // ---------------------------------------------------------------------------------------------------------
+  // Properties
+  // ---------------------------------------------------------------------------------------------------------
+
+  // P1 enforceable: every proof that settles is one the honest party consented to or holds as its own latest state, of
+  // the epoch the chain is in, unless the honest party was offline during the dispute.
+  val p1_allowed: bool = not(ghost.badApply)
+
+  // P1 for clauses: an honest payee that learned the secret before the deadline is paid, unless it was offline.
+  val p1_clause: bool = not(ghost.clauseMiss)
+
+  // P3 conserving: reserves plus collateral never change except by the deposits made at init.
+  val p3_conserved: bool = money.res.get(Left) + money.res.get(Right) + acct.coll == total
+
+  // The stored nonce never goes down, and no arena record settles twice.
+  val nonce_monotone: bool = not(ghost.nonceBack)
+  val no_double_settle: bool = not(ghost.appliedTwice)
+
+  // Debt is only what a payout could not cover: it is never booked while the debtor could still pay.
+  val debt_only_when_broke: bool = not(ghost.freeDebt)
+  // Enforcement comes first (Depository._enforceDebts, at most DEBT_ENFORCE_MAX claims a call, oldest first): after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all
+  // when its queue fitted in one call. With a longer queue reserve may remain, but it is all owed.
+  val w_no_older_debt: bool = not(ghost.olderDebt)     // witness: the search reaches an older debt (init draws a debt)
+  val debt_means_broke: bool = not(ghost.debtBesideReserve)
+  // Depository._reserveToCollateral enforces first: a depositor whose queue fitted in one call owes nothing after it (it had reserve to pay with, or nothing spendable to deposit)
+  val r2c_enforces_first: bool = not(ghost.r2cOwes)
+  // the queue and the total describe the same debt
+  val debt_queue_sums: bool = sumOf(money.dq.get(Left)) == money.debt.get(Left) and sumOf(money.dq.get(Right)) == money.debt.get(Right)
+
+  // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
+  // exactly what it says. Whatever is paid at once and whatever is booked as debt, the amounts are the proof's and the secret evidence's.
+  val pay_exact: bool = not(ghost.payBad)
+  val deposit_exact: bool = not(ghost.depositBad)
+
+  // N3: windows may lengthen but never shorten inside an epoch: the windows a dispute starts with (the floor, for an implicit start) are the
+  // least that every counter and every settled proof carries. The clock itself stays frozen from the initial body (`timeout`).
+  val windows_never_shortened: bool = and {
+    not(ghost.windowsShortened),
+    not(dispute.on) or dispute.counter == 0 or (arena.get(dispute.counter).wl >= dispute.wl and arena.get(dispute.counter).wr >= dispute.wr)
+  }
+
+  // Both windows run in full: nobody settles by timeout before them, nobody counters after them.
+  val closes_on_time: bool = not(ghost.earlyClose) and not(ghost.lateCounter)
+
+  // A start needs a nonce above the stored one; a finalize stores the adopted proof's nonce, or one more than the stored one.
+  val nonce_rules: bool = not(ghost.nonceBad)
+
+  val safe: bool = and {
+    p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums, r2c_enforces_first,
+    pay_exact, deposit_exact, windows_never_shortened, closes_on_time, nonce_rules
+  }
+
+  // Coverage witnesses: false on purpose, each must be violated by some trace.
+  val w_no_dispute: bool = not(dispute.on)
+  val w_no_finalize: bool = ghost.finalizes == 0
+  val w_no_two_finalizes: bool = ghost.finalizes < 2
+  val w_no_counter: bool = dispute.counter == 0
+  val w_no_implicit_start: bool = not(dispute.on and dispute.rec0 == IMPLICIT)
+  val w_no_implicit_counter: bool = not(dispute.on and dispute.rec0 == IMPLICIT and dispute.counter != 0)      // a signed frame of the epoch outranks the implicit proof
+  val w_no_implicit_settled: bool = ghost.implicitSettles == 0
+  val w_no_debt: bool = money.debt.get(Left) == 0 and money.debt.get(Right) == 0
+  val w_no_long_queue: bool = money.dq.get(Left).length() <= DEBT_ENFORCE_MAX and money.dq.get(Right).length() <= DEBT_ENFORCE_MAX      // witness: a queue beyond one call's reach exists
+  val w_no_clause_settled: bool = not(ghost.finalizes > 0 and arena.get(ghost.lastApplied).clause.on)
+  // the exclusion for an absent honest party is not vacuous: some run settles a proof the honest party did not stand behind
+  val w_offline_can_lose: bool = not(ghost.lostByAbsence)
+}
