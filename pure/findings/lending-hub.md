@@ -1,6 +1,6 @@
 # lending-hub: the hub's committed `lending` book, lending timing, REB_STEP debug effects, Htlc* jurisdictionId
 
-Spec: og (core/) is the authority. Tests are in `pure/diff/lending-hub.test.ts`. Every test is a MATCH test that runs og live, or checks against og's own helpers.
+Spec: og (core/) is the authority. Tests are in `pure/diff/books/lending-hub.test.ts`. Every test is a MATCH test that runs og live, or checks against og's own helpers.
 
 | ID | Item | og source | Rewrite | Test | Status |
 |---|---|---|---|---|---|

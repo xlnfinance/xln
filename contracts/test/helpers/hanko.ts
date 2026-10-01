@@ -1,0 +1,496 @@
+import hre from "hardhat";
+
+const { ethers } = await hre.network.getOrCreate("hardhat");
+
+export const DEFAULT_HARDHAT_MNEMONIC = "test test test test test test test test test test test junk";
+
+export const BATCH_ABI = [
+  'tuple(' +
+    'uint64 gasBudget,' +
+    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
+    'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
+    'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
+    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
+    'tuple(bytes32 counterentity, uint256 nonce, uint256 ondeltaEpoch, bool proposerIsLeft, bytes32 proofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterCounterArguments, bytes32 starterCounterProofCommitment)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, bytes32 initialProofbodyHash, uint256 counterNonce, bool proposerIsLeft, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) counterProofbody, bytes sig)[] counterDisputes,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bool proposerIsLeft, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, uint32 leftResponseSeconds, uint32 rightResponseSeconds, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 entity, address contractAddress, uint256 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
+    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
+    'tuple(bytes32 counterpartyEntity, bool targetRole, bytes32 fullHash, bytes32 partialRoot, tuple(uint16 fillRatio, bytes32 fullSecret, bytes32[4] reveals) witness)[] hashLadderRegistrations' +
+  ')'
+];
+
+/** abi.encode(HankoBytes): placeholders, packedSignatures, claims, memberSignatures. One envelope only. */
+export const HANKO_ABI = [
+  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[],bytes[])',
+];
+const BOARD_ABI = [
+  'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)'
+];
+
+const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes("XLN_DEPOSITORY_HANKO_V2"));
+
+export const addressEntityId = (address: string): string => ethers.zeroPadValue(address, 32);
+
+export const canonicalAccountKey = (left: string, right: string): string => {
+  const [first, second] = BigInt(left) < BigInt(right) ? [left, right] : [right, left];
+  return ethers.solidityPacked(['bytes32', 'bytes32'], [first, second]);
+};
+
+export const singleSignerLazyEntityId = (address: string): string => {
+  const signerEntityId = addressEntityId(address);
+  const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
+    1,
+    [signerEntityId],
+    [1],
+    0,
+    0,
+    0,
+  ]]);
+  return ethers.keccak256(encodedBoard);
+};
+
+export const deriveHardhatPrivateKey = (index: number): string =>
+  ethers.HDNodeWallet.fromPhrase(DEFAULT_HARDHAT_MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).privateKey;
+
+export const deployEntityProvider = async (foundationRecipient: string) => {
+  const HankoVerifier = await ethers.getContractFactory('HankoVerifier');
+  const hankoVerifier = await HankoVerifier.deploy();
+  await hankoVerifier.waitForDeployment();
+  const EntityProvider = await ethers.getContractFactory('EntityProvider', {
+    libraries: { HankoVerifier: await hankoVerifier.getAddress() },
+  });
+  const entityProvider = await EntityProvider.deploy(foundationRecipient);
+  await entityProvider.waitForDeployment();
+  return entityProvider;
+};
+
+/**
+ * Deploy the one production Depository graph used by every test.
+ *
+ * Keeping this graph in one helper is security-relevant: a test that links
+ * only Account, supplies the retired global delay constructor argument, or
+ * points Depository at a non-canonical DeltaTransformer is not exercising the
+ * contract that can be deployed to mainnet. The transformer address remains
+ * an immutable settlement-logic boundary even though registry writes are
+ * independent public evidence.
+ */
+export const deployDepositoryStack = async (
+  entityProviderAddress: string,
+  options: { bindShareDepository?: boolean } = {},
+) => {
+  const AccountFactory = await ethers.getContractFactory('Account');
+  const account = await AccountFactory.deploy();
+  await account.waitForDeployment();
+
+  const DepositoryBoundsFactory = await ethers.getContractFactory('DepositoryBounds');
+  const depositoryBounds = await DepositoryBoundsFactory.deploy();
+  await depositoryBounds.waitForDeployment();
+
+  const HashLadderRegistryFactory = await ethers.getContractFactory('HashLadderRegistry');
+  const hashLadderRegistry = await HashLadderRegistryFactory.deploy();
+  await hashLadderRegistry.waitForDeployment();
+
+  const NftCustodyFactory = await ethers.getContractFactory('NftCustody');
+  const nftCustody = await NftCustodyFactory.deploy();
+  await nftCustody.waitForDeployment();
+
+  const DeltaTransformerFactory = await ethers.getContractFactory('DeltaTransformer');
+  const deltaTransformer = await DeltaTransformerFactory.deploy();
+  await deltaTransformer.waitForDeployment();
+
+  const DepositoryFactory = await ethers.getContractFactory('Depository', {
+    libraries: {
+      Account: await account.getAddress(),
+      DepositoryBounds: await depositoryBounds.getAddress(),
+      HashLadderRegistry: await hashLadderRegistry.getAddress(),
+      NftCustody: await nftCustody.getAddress(),
+    },
+  });
+  const depository = await DepositoryFactory.deploy(
+    entityProviderAddress,
+    await deltaTransformer.getAddress(),
+  );
+  await depository.waitForDeployment();
+  if (options.bindShareDepository !== false) {
+    const entityProvider = await ethers.getContractAt('EntityProvider', entityProviderAddress);
+    await (await entityProvider.bindShareDepository(await depository.getAddress())).wait();
+  }
+
+  return { account, depositoryBounds, hashLadderRegistry, nftCustody, deltaTransformer, depository };
+};
+
+export const encodeBatch = (batch: unknown): string =>
+  ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [batch]);
+
+/** J5: the gas budget every test batch signs unless it says otherwise: the measured maximum batch (BatchBounds.t.sol: 14,763,601). */
+export const BATCH_GAS_BUDGET = 15_000_000n;
+
+export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  gasBudget: BATCH_GAS_BUDGET,
+  reserveToReserve: [],
+  reserveToCollateral: [],
+  collateralToReserve: [],
+  settlements: [],
+  disputeStarts: [],
+  counterDisputes: [],
+  disputeFinalizations: [],
+  externalTokenToReserve: [],
+  reserveToExternalToken: [],
+  revealSecrets: [],
+  hashLadderRegistrations: [],
+  ...overrides,
+});
+
+/**
+ * The fork's batch hash (C2): the payload binds the ACTING entity, so a signature for one entity's batch is not valid
+ * for another. abi: packed(domain V2, chainId, depository, entityId, encodedBatch, nonce).
+ */
+export const computeDepositoryBatchHash = async (
+  depository: { getAddress(): Promise<string> },
+  entityId: string,
+  encodedBatch: string,
+  nonce: bigint,
+): Promise<string> => {
+  const chainId = BigInt((await ethers.provider.getNetwork()).chainId);
+  return ethers.keccak256(ethers.solidityPacked(
+    ['bytes32', 'uint256', 'address', 'bytes32', 'bytes', 'uint256'],
+    [BATCH_DOMAIN_SEPARATOR, chainId, await depository.getAddress(), ethers.zeroPadValue(entityId, 32), encodedBatch, nonce]
+  ));
+};
+
+type BatchSubmitter = {
+  processBatch(entityId: string, encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown>;
+};
+
+/** processBatch(entityId, encodedBatch, hanko, nonce) with the acting entity first (C2). */
+export const submitBatch = (
+  depository: { connect(runner: unknown): unknown },
+  signer: unknown,
+  entityId: string,
+  signed: { encodedBatch: string; hankoData: string; nonce: bigint },
+) =>
+  (depository.connect(signer) as BatchSubmitter).processBatch(
+    ethers.zeroPadValue(entityId, 32), signed.encodedBatch, signed.hankoData, signed.nonce,
+  );
+
+const PROOF_KIND_COOPERATIVE_UPDATE = 0;
+const PROOF_KIND_DISPUTE = 1;
+
+/** The Account's on-chain ondeltaEpoch (C1). Advances on settlement, C2R and finalize; not on R2C. */
+export const accountEpoch = async (
+  depository: { ondeltaEpoch(a: string, b: string): Promise<bigint> },
+  left: string,
+  right: string,
+): Promise<bigint> => depository.ondeltaEpoch(left, right);
+
+/** Cooperative-update payload hash (C1): the epoch sits right after the account key. */
+export const computeCooperativeUpdateHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  epoch: bigint,
+  nonce: bigint,
+  diffs: unknown[],
+  forgiveDebtsInTokenIds: bigint[],
+  diffsAbi: string,
+): Promise<string> => {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', diffsAbi, 'uint256[]'],
+    [PROOF_KIND_COOPERATIVE_UPDATE, chainId, await depository.getAddress(), accountKey, epoch, nonce, diffs, forgiveDebtsInTokenIds],
+  ));
+};
+
+/** Dispute-proof payload hash (C1): the epoch sits right after the account key. */
+export const computeDisputeProofHash = async (
+  depository: { getAddress(): Promise<string> },
+  accountKey: string,
+  epoch: bigint,
+  nonce: bigint,
+  proposerIsLeft: boolean,
+  proofbodyHash: string,
+  watchSeed: string,
+): Promise<string> => {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'uint256', 'bool', 'bytes32', 'bytes32'],
+    [PROOF_KIND_DISPUTE, chainId, await depository.getAddress(), accountKey, epoch, nonce, proposerIsLeft, proofbodyHash, watchSeed],
+  ));
+};
+
+export const buildSingleSignerHanko = (entityId: string, hash: string, privateKey: string): string => {
+  return buildClaimsHanko(hash, [privateKey], [], [[
+    ethers.zeroPadValue(entityId, 32),
+    [0],
+    [1],
+    1,
+  ]]);
+};
+
+/**
+ * 65-byte r||s||v signature: HankoVerifier's shortcut for the signer's own lazy
+ * 1-of-1 entity (id = singleSignerLazyEntityId(signer)). Same verdict as the
+ * full envelope for that board at a fraction of the calldata.
+ */
+export const buildRawSignerHanko = (hash: string, privateKey: string): string =>
+  new ethers.SigningKey(privateKey).sign(ethers.getBytes(hash)).serialized;
+
+export const buildFoundationAction = async (
+  provider: {
+    entityActionNonces(entityId: string): Promise<bigint>;
+    computeFoundationActionHash(actionType: string, argumentsHash: string, actionNonce: bigint): Promise<string>;
+  },
+  actionType: string,
+  argumentsHash: string,
+  privateKey = deriveHardhatPrivateKey(0),
+): Promise<{ hankoData: string; actionNonce: bigint }> => {
+  const foundationId = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+  const actionNonce = await provider.entityActionNonces(foundationId) + 1n;
+  const actionHash = await provider.computeFoundationActionHash(actionType, argumentsHash, actionNonce);
+  return {
+    hankoData: buildSingleSignerHanko(foundationId, actionHash, privateKey),
+    actionNonce,
+  };
+};
+
+export const buildClaimsHanko = (
+  hash: string,
+  privateKeys: string[],
+  placeholders: string[],
+  claims: Array<[
+    entityId: string,
+    entityIndexes: Array<number | bigint>,
+    weights: Array<number | bigint>,
+    threshold: number | bigint,
+    delays?: readonly [number | bigint, number | bigint, number | bigint],
+  ]>,
+  memberSignatures: string[] = [],
+): string => {
+  const signatures = privateKeys.map((privateKey) =>
+    new ethers.SigningKey(privateKey).sign(ethers.getBytes(hash))
+  );
+  const recoveryBits = new Uint8Array(Math.ceil(signatures.length / 8));
+  signatures.forEach((signature, index) => {
+    if (signature.v === 28) recoveryBits[Math.floor(index / 8)]! |= 1 << (index % 8);
+  });
+  const packedSignatures = ethers.concat([
+    ...signatures.flatMap((signature) => [signature.r, signature.s]),
+    ethers.hexlify(recoveryBits),
+  ]);
+  return ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
+    placeholders.map((entityId) => ethers.zeroPadValue(entityId, 32)),
+    packedSignatures,
+    claims.map(([entityId, entityIndexes, weights, threshold, delays = [0, 0, 0]]) => [
+      ethers.zeroPadValue(entityId, 32),
+      entityIndexes,
+      weights,
+      threshold,
+      ...delays,
+    ]),
+    memberSignatures,
+  ]]);
+};
+
+// ── boards & listing (post "deploy once" redesign) ──
+
+/** abi.encode(Board) for a 1-of-1 EOA board; registration takes the preimage now. */
+export const encodeSingleSignerBoard = (address: string): string =>
+  ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[1, [addressEntityId(address)], [1], 0, 0, 0]]);
+
+export const encodeBoard = (
+  threshold: number,
+  entityIds: string[],
+  votingPowers: number[],
+  delays: readonly [number, number, number] = [0, 0, 0],
+): string =>
+  ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
+    threshold,
+    entityIds.map((id) => ethers.zeroPadValue(id, 32)),
+    votingPowers,
+    ...delays,
+  ]]);
+
+export const boardHashOf = (encodedBoard: string): string => ethers.keccak256(encodedBoard);
+
+export const FOUNDATION_ENTITY_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+
+/**
+ * List an external token through the Foundation lane. Depository.registerExternalToken
+ * is callable only by the EntityProvider; the deployer key has no listing power.
+ */
+export const foundationListExternalToken = async (
+  provider: {
+    getAddress(): Promise<string>;
+    entityActionNonces(entityId: string): Promise<bigint>;
+    computeFoundationActionHash(actionType: string, argumentsHash: string, actionNonce: bigint): Promise<string>;
+    FOUNDATION_REGISTER_TOKEN(): Promise<string>;
+    foundationRegisterExternalToken(
+      depository: string, tokenType: number, contractAddress: string, externalTokenId: bigint | number,
+      hankoData: string, actionNonce: bigint,
+    ): Promise<{ wait(): Promise<unknown> }>;
+  },
+  depositoryAddress: string,
+  tokenType: number,
+  contractAddress: string,
+  externalTokenId: bigint | number = 0,
+  privateKey = deriveHardhatPrivateKey(0),
+): Promise<void> => {
+  const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['address', 'uint8', 'address', 'uint256'],
+    [depositoryAddress, tokenType, contractAddress, externalTokenId],
+  ));
+  const authorization = await buildFoundationAction(
+    provider,
+    await provider.FOUNDATION_REGISTER_TOKEN(),
+    argumentsHash,
+    privateKey,
+  );
+  await (await provider.foundationRegisterExternalToken(
+    depositoryAddress, tokenType, contractAddress, externalTokenId, authorization.hankoData, authorization.actionNonce,
+  )).wait();
+};
+
+/** Register a numbered 1-of-1 entity and return its number. */
+export const registerSingleSignerEntity = async (
+  provider: {
+    registerNumberedEntity(encodedBoard: string): Promise<{ wait(): Promise<unknown> }>;
+    nextNumber(): Promise<bigint>;
+  },
+  address: string,
+): Promise<bigint> => {
+  await (await provider.registerNumberedEntity(encodeSingleSignerBoard(address))).wait();
+  return (await provider.nextNumber()) - 1n;
+};
+
+// ── entity treasuries ──
+
+export const ENTITY_TREASURY_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_TREASURY_V1'));
+
+/** Mirror of EntityTypes.entityTreasury(N): the ERC1155 holder of entity N's shares. */
+export const entityTreasuryAddress = (entityNumber: bigint | number): string =>
+  ethers.getAddress(ethers.dataSlice(ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(['bytes32', 'uint256'], [ENTITY_TREASURY_DOMAIN, entityNumber]),
+  ), 12));
+
+/** Move shares out of entity N's treasury with a 1-of-1 board Hanko (default: Foundation, signer 0). */
+export const entityTransferFromTreasury = async (
+  provider: {
+    entityActionNonces(entityId: string): Promise<bigint>;
+    computeEntityTransferHankoHash(
+      entityNumber: bigint | number, to: string, tokenId: bigint, amount: bigint, actionNonce: bigint,
+    ): Promise<string>;
+    entityTransferTokens(
+      entityNumber: bigint | number, to: string, tokenId: bigint, amount: bigint, hankoData: string,
+    ): Promise<{ wait(): Promise<unknown> }>;
+  },
+  to: string,
+  tokenId: bigint,
+  amount: bigint,
+  entityNumber: bigint | number = 1n,
+  privateKey = deriveHardhatPrivateKey(0),
+): Promise<void> => {
+  const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+  const actionNonce = await provider.entityActionNonces(entityId) + 1n;
+  const hash = await provider.computeEntityTransferHankoHash(entityNumber, to, tokenId, amount, actionNonce);
+  await (await provider.entityTransferTokens(
+    entityNumber, to, tokenId, amount, buildSingleSignerHanko(entityId, hash, privateKey),
+  )).wait();
+};
+
+// ── wide money (Int512 / SignedAmount) batch encoding ──
+//
+// The fork's money is not int256: ProofBody.offdeltas is Int512[] {int256 high, uint256 low} and SettlementDiff carries
+// SignedAmount {bool negative, uint256 magnitude} in each of its four amount fields. BATCH_ABI above keeps the retired
+// int256 shape (it is byte-identical for every batch without diffs and proof bodies), so a batch with a non-empty settlement
+// diff or a proof body must be encoded with the wide shape below. Callers keep passing plain bigints; this converts them.
+
+const INT256_WORD_MASK = (1n << 256n) - 1n;
+const toSignedAmount = (value: unknown) =>
+  typeof value === 'bigint'
+    ? { negative: value < 0n, magnitude: value < 0n ? -value : value }
+    : value;
+const toInt512 = (value: unknown) =>
+  typeof value === 'bigint' ? { high: value >> 256n, low: value & INT256_WORD_MASK } : value;
+
+/** BATCH_ABI with the fork's wide money shapes for settlement diffs and proof-body offdeltas. */
+export const FORK_BATCH_ABI = [
+  BATCH_ABI[0]
+    .replace(
+      'int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff',
+      'tuple(bool negative,uint256 magnitude) leftDiff,tuple(bool negative,uint256 magnitude) rightDiff,'
+        + 'tuple(bool negative,uint256 magnitude) collateralDiff,tuple(bool negative,uint256 magnitude) ondeltaDiff',
+    )
+    .replaceAll('int256[] offdeltas', 'tuple(int256 high,uint256 low)[] offdeltas'),
+];
+if (FORK_BATCH_ABI[0].includes('int256 leftDiff') || FORK_BATCH_ABI[0].includes('int256[] offdeltas')) {
+  throw new Error('FORK_BATCH_ABI: BATCH_ABI money fields were not widened');
+}
+
+type MoneyBatchRecord = Record<string, any>;
+const widenProofbody = (body: MoneyBatchRecord): MoneyBatchRecord =>
+  ({ ...body, offdeltas: (body['offdeltas'] as unknown[]).map(toInt512) });
+
+/** encodeBatch for the fork: bigint diffs and offdeltas become SignedAmount / Int512 structs. */
+export const encodeForkBatch = (batch: MoneyBatchRecord): string => {
+  const wide: MoneyBatchRecord = {
+    ...batch,
+    settlements: (batch['settlements'] as MoneyBatchRecord[]).map((settlement) => ({
+      ...settlement,
+      diffs: (settlement['diffs'] as MoneyBatchRecord[]).map((diff) => ({
+        ...diff,
+        leftDiff: toSignedAmount(diff['leftDiff']),
+        rightDiff: toSignedAmount(diff['rightDiff']),
+        collateralDiff: toSignedAmount(diff['collateralDiff']),
+        ondeltaDiff: toSignedAmount(diff['ondeltaDiff']),
+      })),
+    })),
+    disputeStarts: (batch['disputeStarts'] as MoneyBatchRecord[]).map((start) => ({
+      ...start,
+      initialProofbody: widenProofbody(start['initialProofbody']),
+    })),
+    counterDisputes: (batch['counterDisputes'] as MoneyBatchRecord[]).map((counter) => ({
+      ...counter,
+      counterProofbody: widenProofbody(counter['counterProofbody']),
+    })),
+    disputeFinalizations: (batch['disputeFinalizations'] as MoneyBatchRecord[]).map((finalization) => ({
+      ...finalization,
+      finalProofbody: widenProofbody(finalization['finalProofbody']),
+    })),
+  };
+  return ethers.AbiCoder.defaultAbiCoder().encode(FORK_BATCH_ABI, [wide]);
+};
+
+/** Wide-money settlement diff list ABI for computeCooperativeUpdateHash (pair with toForkSettlementDiffs). */
+export const FORK_SETTLEMENT_DIFFS_ABI =
+  'tuple(uint256 tokenId,tuple(bool negative,uint256 magnitude) leftDiff,tuple(bool negative,uint256 magnitude) rightDiff,'
+  + 'tuple(bool negative,uint256 magnitude) collateralDiff,tuple(bool negative,uint256 magnitude) ondeltaDiff)[]';
+
+/** bigint diff amounts -> SignedAmount structs, for the cooperative-update hash payload. */
+export const toForkSettlementDiffs = (diffs: MoneyBatchRecord[]): MoneyBatchRecord[] =>
+  diffs.map((diff) => ({
+    ...diff,
+    leftDiff: toSignedAmount(diff['leftDiff']),
+    rightDiff: toSignedAmount(diff['rightDiff']),
+    collateralDiff: toSignedAmount(diff['collateralDiff']),
+    ondeltaDiff: toSignedAmount(diff['ondeltaDiff']),
+  }));
+
+/** ProofBody ABI type with Int512[] offdeltas, for hashing a proof body the way Account does. */
+export const FORK_PROOF_BODY_ABI =
+  'tuple(bytes32 watchSeed,uint32 leftResponseSeconds,uint32 rightResponseSeconds,tuple(int256 high,uint256 low)[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+
+/** bigint offdeltas -> Int512 structs. */
+export const toForkProofBody = (body: MoneyBatchRecord): MoneyBatchRecord => widenProofbody(body);
+
+/**
+ * Our own batch gas limit for one processBatch (ours to set, not og's core/config PROCESS_BATCH_GAS_LIMIT), and the gas
+ * Account.sol holds back after the transformer call (TRANSFORMER_POST_CALL_GAS_RESERVE): the transformer gets gasleft()
+ * minus that reserve, so a transaction's limit must cover the transformer's use PLUS the reserve.
+ * MAX_SWAP_BOOK is the largest swap book whose non-starter dispute finalize succeeds when SENT with PROCESS_BATCH_GAS_LIMIT
+ * (Depository-part-1.ts, bisected): 382 swaps finalize, 383 revert TransformerExecutionFailed. A v2 order-book input,
+ * see BASELINE.md.
+ */
+export const PROCESS_BATCH_GAS_LIMIT = 5_000_000n;
+export const TRANSFORMER_POST_CALL_GAS_RESERVE = 2_000_000n;
+export const MAX_SWAP_BOOK = 382;

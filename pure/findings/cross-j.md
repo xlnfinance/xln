@@ -1,6 +1,6 @@
 # cross-j: og cross-jurisdiction extension, HTLC envelope and Account outputs vs pure/xln.ts
 
-Tests: `pure/diff/cross-j.test.ts`. Run from `pure/` with `bun test diff/cross-j.test.ts`: 15 pass, 0 fail.
+Tests: `pure/diff/cross-j/cross-j.test.ts`. Run from `pure/` with `bun test diff/cross-j/cross-j.test.ts`: 15 pass, 0 fail.
 
 Every test is `MATCH:` and runs against live og (`core/`, HEAD 566c850). There are three kinds of test:
 
@@ -27,7 +27,7 @@ All randomness comes from a seeded mulberry32.
 
 ## Wave 3: entity-cross-j (Entity HTLC onion routing, Account outputs above the Account)
 
-Tests: `pure/diff/entity-cross-j.test.ts`. Run from `pure/` with `bun test diff/entity-cross-j.test.ts`: 13 pass, 0 fail. Every test is `MATCH:` against live og at HEAD 566c850, with seeded mulberry32 randomness. og throwing counts as a reject; accepted values must be equal as `stableJson`, or as key-sorted JSON where og and the rewrite build objects in different key orders.
+Tests: `pure/diff/cross-j/entity-cross-j.test.ts`. Run from `pure/` with `bun test diff/cross-j/entity-cross-j.test.ts`: 13 pass, 0 fail. Every test is `MATCH:` against live og at HEAD 566c850, with seeded mulberry32 randomness. og throwing counts as a reject; accepted values must be equal as `stableJson`, or as key-sorted JSON where og and the rewrite build objects in different key orders.
 
 | Item | og source | rewrite | Status |
 |---|---|---|---|
@@ -44,10 +44,10 @@ Tests: `pure/diff/entity-cross-j.test.ts`. Run from `pure/` with `bun test diff/
 | Route discovery for `htlcPayment` with an empty route | `infra-context.ts` `getNetworkGraph().findPaths` | `findPaths` (gossip graph + PathFinder port) | FIXED. See entity-lane.md. |
 | HTLC runtime events (`HtlcForwardAccepted`, `HtlcReceived`, `HtlcFinalized`, `HtlcFailed`) and `request_collateral_committed` | `candidateEffects` `runtimeEvent` | emitted | FIXED (runtime-final.md RF-6, RF-7): `RuntimeStep.events`. Was: The rewrite's Runtime step has no event channel. og events are observability, not consensus state. Adding a channel means threading it through every `Draft` constructor, which is the runtime region. |
 | Book cancel on `swap_cancel_requested` | `consensus/frame/application.ts` `collectSwapEvents` → `processOrderbookCancels` | the effect is consumed; there is no book to cancel in | FIXED (consensus-final.md): a cancel request removes the resting offer (book-admission.test.ts "a cancel request removes a resting offer"). |
-| Secret-ACK deadline dispute (scheduler due hook), `persistVerifiedPaymentSecret` on dispute paths | `entity/scheduler/due-hooks.ts`, `tx/handlers/account/dispute-input.ts` | the deadline is recorded (`secretAckPending` / `secretAckDeadlineAt`); no hook acts on it | FIXED. The due hook is MATCHed in scheduler-disputes. og handleUnsafeAccountFrame (persistVerifiedPaymentSecret, upstream resolve, ACK deadline, prepareDispute, broadcast latch) is ported as `unsafeAccountFrame` (b21994f). MATCH: 200 random unsafe frames (disputes-final.md, MATCH in diff/disputes-final.test.ts). |
+| Secret-ACK deadline dispute (scheduler due hook), `persistVerifiedPaymentSecret` on dispute paths | `entity/scheduler/due-hooks.ts`, `tx/handlers/account/dispute-input.ts` | the deadline is recorded (`secretAckPending` / `secretAckDeadlineAt`); no hook acts on it | FIXED. The due hook is MATCHed in scheduler-disputes. og handleUnsafeAccountFrame (persistVerifiedPaymentSecret, upstream resolve, ACK deadline, prepareDispute, broadcast latch) is ported as `unsafeAccountFrame` (b21994f). MATCH: 200 random unsafe frames (disputes-final.md, MATCH in diff/disputes/disputes-final.test.ts). |
 | Keypair check when no inbound lock | og `assertEntityEncryptionKeypair` runs whenever a frame has HTLC txs, including resolve-only frames | the key is required only when an enveloped inbound lock must be decrypted | FIXED (consensus-final.md): the Entity encryption keypair is checked on every proposal and replay (consensus-final.test.ts keypair MATCH, 200 frames). |
 | Entity cross-j handlers and collections | `entity/tx/handlers/cross-j/*` | `crossPrepare` / `crossMaterialize` / `crossRegister`, the `runtimeOutput` lane, both collections in the root | FIXED. Setup, lane and collections as before; clear / pullClose / sweep (cross-j-final.md); salvage and sibling dispute (disputes-final.md); book-order txs (cross-book.md). |
-| `flushDeferredHashLadderReveals` | `tx/j-events-htlc/index.ts` | not called | FIXED. See cross-j-final.md row 13 (disputes-final.md, MATCH in diff/disputes-final.test.ts). |
+| `flushDeferredHashLadderReveals` | `tx/j-events-htlc/index.ts` | not called | FIXED. See cross-j-final.md row 13 (disputes-final.md, MATCH in diff/disputes/disputes-final.test.ts). |
 
 ## Remaining (earlier waves, statuses updated)
 

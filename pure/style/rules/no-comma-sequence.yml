@@ -1,0 +1,6 @@
+id: no-comma-sequence
+language: TypeScript
+severity: error
+message: comma operator packs statements into one expression; name each step with its own const
+rule: { kind: sequence_expression }
+files: [xln.ts]

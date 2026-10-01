@@ -1,0 +1,6 @@
+id: no-og-source-ref
+language: TypeScript
+severity: error
+message: a comment pointing at og source lines; state the rule in our words and cite the spec property or rule id
+rule: { kind: comment, regex: '\.ts:[0-9]+' }
+files: [xln.ts]

@@ -1,0 +1,39 @@
+[profile.default]
+src = "contracts"
+out = "forge-out"
+libs = ["lib"]
+test = "test/foundry"
+cache_path = "forge-cache"
+solc_version = "0.8.36"
+optimizer = true
+optimizer_runs = 1
+via_ir = true
+# Keep invariant-test gas headroom independent of public-network block limits.
+# Production bytecode size is checked separately against EIP-170.
+evm_version = "cancun"
+bytecode_hash = "none"
+gas_limit = 300000000
+block_gas_limit = 300000000
+# node_modules is hoisted to the monorepo root; solc needs it whitelisted.
+allow_paths = ["../node_modules"]
+remappings = [
+  "@openzeppelin/=../node_modules/@openzeppelin/",
+  "forge-std/=lib/forge-std/src/",
+]
+ignored_warnings_from = ["lib"]
+fs_permissions = [{ access = "read", path = "./forge-out" }]
+
+[profile.default.invariant]
+runs = 128
+depth = 64
+fail_on_revert = false
+call_override = false
+dictionary_weight = 40
+shrink_run_limit = 2000
+
+# Deeper sweep: `FOUNDRY_PROFILE=deep forge test --match-path 'test/foundry/**'`
+[profile.deep.invariant]
+runs = 1024
+depth = 128
+fail_on_revert = false
+shrink_run_limit = 20000

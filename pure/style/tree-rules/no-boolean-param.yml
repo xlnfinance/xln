@@ -1,0 +1,9 @@
+id: no-boolean-param
+language: TypeScript
+severity: error
+message: a positional boolean; pass a record with a named field, or name the two cases with a union
+rule:
+  kind: required_parameter
+  has:
+    kind: type_annotation
+    has: { kind: predefined_type, regex: '^boolean$' }
