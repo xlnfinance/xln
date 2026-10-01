@@ -1696,6 +1696,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE Bob's frame with an attempt of -1 is refused to Alice with the outcome, and changes nothing"
     }
    ]
   },
@@ -1728,7 +1733,7 @@
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: Entity/Runtime cut"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1736,6 +1741,21 @@
      "layer": "ts",
      "name": "to be named",
      "owed": "Entity/Runtime cut"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REFUSED-RELEASES-PAYER a lock waiting to be retried holds Alice's capacity against a payment"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REFUSED-RELEASES-PAYER MAX_ATTEMPTS refusals drop the lock with a notice and leave nothing queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REFUSED-RELEASES-PAYER the capacity is Alice's again and a payment commits on both sides"
     }
    ]
   },
@@ -1765,6 +1785,61 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FRAME-REFUSAL a retryable refusal takes Alice's frame back, queues her tx and raises her attempt"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "retry pacing: Alice waits at the view she was refused at, and proposes again only when it is higher"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "retry pacing: a retry that Bob refuses again waits at the new view with the attempt raised again"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the view only rises: a lower height from the Host leaves Alice's view where it was"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "once Bob's view has caught up the retry commits on both sides and the wait and the attempt are gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "Alice restarted after a refusal has the same attempt, the same wait and the same queued tx"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "Alice restarted keeps waiting: the same view proposes nothing, a higher one proposes with her attempt"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "Bob restarted after his view caught up still refuses the frame he refused, and says the same thing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the head moving ends the wait: Bob's own frame commits and Alice proposes her queued lock at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FRAME-REFUSAL no run is stuck while the heights rise: every world at rest has the lock open"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FRAME-REFUSAL the walk includes the refusal: its worlds are many and it ends before its limit"
     }
    ]
   },
@@ -1819,6 +1894,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "Alice lost the refusal and what she re-sent: her resend timer brings it back and the round goes on"
     }
    ]
   },
