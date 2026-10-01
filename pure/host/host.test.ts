@@ -19,7 +19,7 @@ const CAROL = entityOf(3);
 const peer = (from: EntityId, to: EntityId, msg: Msg<AccountTx>): Outbound => ({ from, to, msg });
 
 const frameOf = (parent: FrameHash, txs: readonly AccountTx[]): Msg<AccountTx> => {
-  const frame: Frame<AccountTx> = { author: "left", parent, attempt: 0, txs };
+  const frame: Frame<AccountTx> = { author: "left", parent, attempt: 0, slot: 2, txs };
   return { _tag: "frame", frame };
 };
 

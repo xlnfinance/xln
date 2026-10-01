@@ -8,7 +8,7 @@
 // cover. After the random phase the adversary stops and every run must settle.
 import { describe, expect, test } from "bun:test";
 import { draw } from "../account/fixtures.ts";
-import { GENESIS, provisionalFrameHash } from "../account/frame/account.ts";
+import { frameName, GENESIS } from "../account/frame/account.ts";
 import type { Frame, Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { credit, GOLD, open, pay } from "../entity/fixtures.ts";
@@ -113,7 +113,8 @@ const commandAt = (c: Chaos, w: World, step: number, name: Name): EntityInput =>
 };
 
 const payFrame = (parent: typeof GENESIS, attempt: number): Msg<AccountTx> => {
-  const frame: Frame<AccountTx> = { author: "left", parent, attempt, txs: [{ _tag: "pay", token: GOLD, amount: 1n }] };
+  const txs: readonly AccountTx[] = [{ _tag: "pay", token: GOLD, amount: 1n }];
+  const frame: Frame<AccountTx> = { author: "left", parent, attempt, slot: 2, txs };
   return { _tag: "frame", frame };
 };
 
@@ -178,7 +179,7 @@ const replacer = (_key: string, v: unknown): unknown => {
 const canon = (x: unknown): string => JSON.stringify(x, replacer);
 
 const hashesOf = (msg: Msg<AccountTx>): readonly string[] =>
-  (msg._tag === "frame" ? [provisionalFrameHash(msg.frame)] : []);
+  (msg._tag === "frame" ? [frameName(msg.frame)] : []);
 
 /** Every frame a durable row of this node holds: the ones it took in, and the ones it made. */
 const framesHeld = (node: Node): ReadonlySet<string> =>
@@ -200,11 +201,11 @@ const leaks = (w: World): readonly string[] =>
     return known ? [] : ["an output of a row that is not durable is on the link"];
   });
 
-/** R-DURABLE: a side's head is a frame the peer holds durably; no ack ever got ahead of the peer's disk. */
+/** R-DURABLE: a side's last frame is one the peer holds durably; frames are named by what they say, not by head. */
 const believes = (w: World): readonly string[] =>
   NAMES.flatMap((n) => {
-    const head = accountOf(w, n)?.head;
-    const held = head === undefined || head === GENESIS || framesHeld(w.nodes[PEER[n]]).has(head);
+    const last = accountOf(w, n)?.last;
+    const held = last === undefined || framesHeld(w.nodes[PEER[n]]).has(last);
     return held ? [] : [`${n} holds a head its peer has not made durable`];
   });
 
