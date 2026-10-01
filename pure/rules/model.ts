@@ -5,12 +5,14 @@ export type Layer = "arrival" | "quint" | "contract" | "rig" | "ts";
 
 export const LAYERS: readonly Layer[] = ["arrival", "quint", "contract", "rig", "ts"];
 
-// A cell says what one layer owes one rule.
-//   absent  the layer does not hold this rule (or no slice has claimed it yet); nothing is checked
-//   hold    a name in this layer must carry the id; the gate fails when none does
-//   owed    the layer must hold it, but a named PR or slice brings the name; shown as open, never hidden
+// A cell says what one layer owes one rule. A live rule states every layer; the gate fails on `unstated`.
+//   unstated  nobody has said what this layer owes the rule ("-" in the file, or no entry); red on a live row
+//   na        the layer has no part in this rule, and the cell says why in one line; a name that carries the id here is red
+//   hold      a name in this layer must carry the id; the gate fails when none does
+//   owed      the layer must hold it, but a named PR or slice brings the name; shown as open, never hidden
 export type Cell =
-  | Readonly<{ _tag: "absent" }>
+  | Readonly<{ _tag: "unstated" }>
+  | Readonly<{ _tag: "na"; reason: string }>
   | Readonly<{ _tag: "hold" }>
   | Readonly<{ _tag: "owed"; by: string }>;
 
@@ -54,6 +56,8 @@ export type Problem =
   | Readonly<{ _tag: "DuplicateId"; id: string }>
   | Readonly<{ _tag: "MissingInLayer"; id: string; layer: Layer }>
   | Readonly<{ _tag: "OwedButPresent"; id: string; layer: Layer; by: string }>
+  | Readonly<{ _tag: "UnstatedCell"; id: string; layer: Layer }>
+  | Readonly<{ _tag: "NotApplicableButPresent"; id: string; layer: Layer; reason: string }>
   | Readonly<{ _tag: "NoKiller"; id: string }>
   | Readonly<{ _tag: "UnknownSuccessor"; id: string; successor: string }>
   | Readonly<{ _tag: "RowRemoved"; id: string }>
@@ -71,6 +75,10 @@ export const describeProblem = (problem: Problem): string => {
       return `${problem.id}: no ${problem.layer} name carries the id (cell is "hold")`;
     case "OwedButPresent":
       return `${problem.id}: ${problem.layer} already carries the id; promote "owed: ${problem.by}" to "hold"`;
+    case "UnstatedCell":
+      return `${problem.id}: the ${problem.layer} cell is not stated; say "hold", "owed: <who brings it>" or "n/a: <why this layer has no part in the rule>"`;
+    case "NotApplicableButPresent":
+      return `${problem.id}: the ${problem.layer} cell says "n/a: ${problem.reason}", but a ${problem.layer} name carries the id; make the cell "hold"`;
     case "NoKiller":
       return `${problem.id}: the row names no killer`;
     case "UnknownSuccessor":
@@ -78,7 +86,7 @@ export const describeProblem = (problem: Problem): string => {
     case "KillerNotFound":
       return `${problem.id}: killer "${problem.killer.name}" (${problem.killer.kind}, ${problem.killer.layer}) is not among the names`;
     case "KillerInUnclaimedLayer":
-      return `${problem.id}: killer "${problem.killer.name}" is in the ${problem.killer.layer} layer, which this row does not claim`;
+      return `${problem.id}: killer "${problem.killer.name}" is in the ${problem.killer.layer} layer, where this row holds nothing (the cell is n/a or unstated)`;
     case "RowRemoved":
       return `${problem.id}: the row was in the base register and is gone (retire it with retired_by instead)`;
     case "CellWeakened":

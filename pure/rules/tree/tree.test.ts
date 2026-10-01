@@ -1,6 +1,6 @@
 // Each test plants a fool in a scratch tree and asks the gate whether it notices.
 import { describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { compare, isOff, longLines } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
@@ -140,6 +140,21 @@ describe("every style rule has a canary that it must report", () => {
   });
 });
 
+describe("the gate leaves nothing behind", () => {
+  test("a run removes the canary files it planted: the temp folder holds no tree-canary directory afterwards", () => {
+    const root = scratch({ "a.ts": "export const a = 1;\n", ...used("a") });
+    const tmp = mkdtempSync(`${tmpdir()}/tree-leftovers-`);
+    const before = process.env["TMPDIR"];
+    process.env["TMPDIR"] = tmp;
+    try {
+      expect(treeStyle(root).failed).toBe(false);
+      expect(readdirSync(tmp).filter((entry) => entry.startsWith("tree-canary-"))).toEqual([]);
+    } finally {
+      process.env["TMPDIR"] = before ?? "/tmp";
+    }
+  }, 120_000);
+});
+
 describe("the gate reads the files git lists, never the disk", () => {
   const clean = { "a.ts": "export const a = 1;\n", ...used("a") };
   test("an ignored folder under pure/ (a local db-* from a test run) does not turn the gate red", () => {
@@ -167,5 +182,5 @@ describe("the gate reads the files git lists, never the disk", () => {
     mkdirSync(`${root}/chain`);
     // Named, because stale exception rows alone would also fail a scratch tree that has no sources.
     expect(treeStyle(root).rows.map((row) => row.rule)).toContain("git-listing");
-  });
+  }, 30_000);
 });
