@@ -7,7 +7,7 @@
   "quint": "owed: spec thread, new Quint branch",
   "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -19,6 +19,26 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "unfunded-payment-is-signed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUNDED the spendable reserve nets every outstanding debt"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUNDED oldest first, and one that does not fit waits while a younger one that fits goes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUNDED every reserve outflow is judged, not only a payment to another entity"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FUNDED the reserve is judged in the order the contract applies the ops"
   }
  ]
 }

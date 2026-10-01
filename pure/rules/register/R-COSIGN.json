@@ -7,7 +7,7 @@
   "quint": "hold",
   "contract": "n/a: the chain applies a batch as given; keeping co-signed ops to one Account is the planner's choice (the burnt nonce is J5)",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (J batch-planner slice)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -24,6 +24,11 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "cosign-batch-carries-payments"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN a batch with a co-signed op carries ops of that one Account only"
   }
  ]
 }

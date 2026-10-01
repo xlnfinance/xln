@@ -116,10 +116,16 @@ const retirementProblems = (register: Register): readonly Problem[] =>
       .map((successor) => ({ _tag: "UnknownSuccessor", id: row.id, successor }) as const),
   );
 
+// A name that carries a longer id ("R-COSIGN-FREEZE x") belongs to that rule, not to the shorter one it begins with ("R-COSIGN").
+const apart = (id: string, register: Register, names: readonly Name[]): readonly Name[] => {
+  const longer = register.map((row) => row.id).filter((other) => other.startsWith(`${id}-`));
+  return names.filter((name) => !longer.some((other) => carries(other, name)));
+};
+
 export type Evaluation = Readonly<{ reports: readonly RowReport[]; problems: readonly Problem[] }>;
 
 export const evaluate = (register: Register, names: readonly Name[]): Evaluation => {
-  const reports = register.map((row) => reportRow(row, names));
+  const reports = register.map((row) => reportRow(row, apart(row.id, register, names)));
   return { reports, problems: [...duplicateIds(register), ...retirementProblems(register), ...reports.flatMap(problemsOf)] };
 };
 
