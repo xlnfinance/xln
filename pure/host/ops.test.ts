@@ -2,7 +2,7 @@
 // own ops, and the builder accepts them and encodes them as the contract reads them. The reveal is the one Bob's
 // Runtime asks for in runtime/htlc/reveal.test.ts, taken out of a real WAL row.
 import { describe, expect, test } from "bun:test";
-import { holdOf, secretOf, viewOf } from "../account/fixtures.ts";
+import { holdOf, secretOf, tokenOf, viewOf } from "../account/fixtures.ts";
 import { holdId } from "../account/model.ts";
 import { encodeBatch } from "../chain/batch/batch.ts";
 import type { Command, JAction } from "../entity/model.ts";
@@ -72,5 +72,20 @@ describe("host/ops an Entity's action is the Depository's op", () => {
     expect(needing.map((a) => opOf(ALICE, a, WORLD))).toEqual(
       needing.map((a) => ({ ok: false, error: { _tag: "needs_signature", action: a._tag } })),
     );
+  });
+
+  test("a deposit of token 7 names token 7 in the funding, not the faucet token's id", () => {
+    expect(opOf(ALICE, { _tag: "deposit", peer: BOB, token: tokenOf(7n), amount: 5n }, WORLD)).toEqual({
+      ok: true,
+      value: { _tag: "reserve_to_collateral", funding: { tokenId: 7n, receivingEntity: ALICE, pairs: [{ entity: BOB, amount: 5n }] } },
+    });
+  });
+
+  test("a reveal carries the secret's 32 bytes in their order", () => {
+    const secret = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+    const reveal: JAction = { _tag: "reveal", peer: BOB, token: GOLD, id: holdId(1n), hashlock: "0x00", secret };
+    const made = opOf(BOB, reveal, WORLD);
+    const hex = Array.from(secret, (b) => b.toString(16).padStart(2, "0")).join("");
+    expect(made.ok && made.value._tag === "reveal_secret" ? made.value.reveal.secret : "no op").toBe(`0x${hex}`);
   });
 });
