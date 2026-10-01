@@ -1,6 +1,8 @@
 // The link between two Runtimes: the peer is proved once, every record after it is sealed to the proof, and a message
 // reaches a Host only as the proved peer's own (Q-T-5, R-LINK-AUTH). The forged ack and the replay go through the
 // shell's receive path, handshake and sealed record first and Host.receive after, with real Hosts.
+import { hmac } from "@noble/hashes/hmac";
+import { sha256 } from "@noble/hashes/sha256";
 import { describe, expect, test } from "bun:test";
 import { GENESIS } from "../../../account/frame/account.ts";
 import { credit, open } from "../../../entity/fixtures.ts";
@@ -11,6 +13,7 @@ import { entityOf, meet, stamp, tell, turn, unhalted } from "../../fixtures.ts";
 import {
   accept, answer, dial, finish, hear, keyOf, open as openRecord, seal, type Key, type Link, type Peer,
 } from "./link.ts";
+import { bytesToHex, concat, utf8 } from "../../../kernel/encoding/bytes.ts";
 import { decodeValue, encodeValue } from "../codec/value.ts";
 
 const ALICE = entityOf(1);
@@ -182,6 +185,18 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
     const huge = "x".repeat(8 * 1024 * 1024);
     const refused = { ok: false, error: { _tag: "unreadable", fault: { _tag: "too_big" } } };
     expect(openRecord(responder, huge)).toMatchObject(refused);
+  });
+
+  test("R-X1 a frame with a bigint of hundreds of thousands of digits is refused, not thrown, link lives", () => {
+    const hash = `0x${"ab".repeat(32)}`;
+    const body = `{"from":"${ALICE}","to":"${BOB}","msg":{"_tag":"frame","frame":{"author":"left","parent":"${hash}",`
+      + `"attempt":0,"slot":1,"epoch":{"$n":"${"9".repeat(400_000)}"},"firstNonce":{"$n":"0"},"txs":[]}}}`;
+    const link = initiator._tag === "up" ? initiator : expect.unreachable("up");
+    const count = Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? 1 : 0));
+    const mac = hmac(sha256, link.session.mac, concat([Uint8Array.of(1), count, utf8(body)]));
+    const record = JSON.stringify({ _tag: "data", n: 1, body, mac: { $x: bytesToHex(mac) } });
+    expect(openRecord(responder, record)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    expect(tagOf(openRecord(responder, sealed.data))).toBe("ok");
   });
 
   test("R-X1 a tx tag that every object has is no message: refused, and the link still hears the next record", () => {

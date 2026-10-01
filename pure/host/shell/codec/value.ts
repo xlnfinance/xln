@@ -20,6 +20,12 @@ export type ValueFault =
  */
 export const MAX_DEPTH = 64;
 
+/**
+ * How long a bigint's text may be: a u256 is 78 digits, and a sign and a little room make 80. BigInt on a text of
+ * hundreds of thousands of digits throws, so the reader asks for the length before it asks for the number.
+ */
+export const MAX_BIGINT_TEXT = 80;
+
 type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
 
 const RESERVED = /^\$[nxu]$/;
@@ -35,12 +41,17 @@ const entriesOf = (at: string, v: object, depth: number): Result<Json, ValueFaul
   return flatMap(fields, (pairs) => ok(Object.fromEntries(pairs)));
 };
 
+const bigintText = (at: string, v: bigint): Result<Json, ValueFault> => {
+  const digits = v.toString();
+  return digits.length > MAX_BIGINT_TEXT ? err({ _tag: "bad_tag", at }) : ok({ $n: digits });
+};
+
 const tagged = (at: string, v: unknown, depth: number): Result<Json, ValueFault> => {
   if (depth > MAX_DEPTH) return err({ _tag: "too_deep", at });
   switch (true) {
     case v === null || typeof v === "boolean" || typeof v === "string": return ok(v);
     case typeof v === "number": return Number.isFinite(v) ? ok(v) : err({ _tag: "unsupported", at, kind: "number" });
-    case typeof v === "bigint": return ok({ $n: v.toString() });
+    case typeof v === "bigint": return bigintText(at, v);
     case v === undefined: return ok({ $u: 0 });
     case v instanceof Uint8Array: return ok({ $x: bytesToHex(v) });
     case Array.isArray(v): return traverse(v, (x, i) => tagged(`${at}[${i}]`, x, depth + 1));
@@ -77,7 +88,9 @@ const read = (at: string, j: unknown, depth: number): Result<unknown, ValueFault
 };
 
 const bigintAt = (at: string, digits: unknown): Result<bigint, ValueFault> =>
-  (typeof digits === "string" && /^-?\d+$/.test(digits) ? ok(BigInt(digits)) : err({ _tag: "bad_tag", at }));
+  (typeof digits === "string" && digits.length <= MAX_BIGINT_TEXT && /^-?\d+$/.test(digits)
+    ? ok(BigInt(digits))
+    : err({ _tag: "bad_tag", at }));
 
 const bytesAt = (at: string, hex: unknown): Result<Uint8Array, ValueFault> => {
   const bytes = typeof hex === "string" ? hexToBytes(hex) : err({ _tag: "no_prefix" } as const);

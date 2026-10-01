@@ -1,7 +1,7 @@
 // The text of a row and back: nothing changes in the round trip, and what has no exact text is refused at the write.
 import { describe, expect, test } from "bun:test";
 import { aliceRun, ALICE, BOB, bobRun, walOf } from "../fixtures.ts";
-import { decodeValue, encodeValue, MAX_DEPTH } from "./value.ts";
+import { decodeValue, encodeValue, MAX_BIGINT_TEXT, MAX_DEPTH } from "./value.ts";
 
 const roundTrip = (v: unknown) => {
   const text = encodeValue(v);
@@ -70,4 +70,17 @@ describe("host/shell/value what has no exact text is refused, at the place it is
     expect(encodeValue(deep)).toMatchObject({ ok: false, error: { _tag: "too_deep" } });
   });
 
+  test("R-X1 a bigint of hundreds of thousands of digits is a fault, not a throw, and the bound is exact", () => {
+    const text = (n: number): string => `{"$n":"${"9".repeat(n)}"}`;
+    expect(decodeValue(text(400_000))).toEqual({ ok: false, error: { _tag: "bad_tag", at: "$" } });
+    expect(decodeValue(text(MAX_BIGINT_TEXT + 1))).toMatchObject({ ok: false, error: { _tag: "bad_tag" } });
+    expect(decodeValue(text(MAX_BIGINT_TEXT)).ok).toBe(true);
+    expect(decodeValue(`{"$n":"-${"9".repeat(MAX_BIGINT_TEXT - 1)}"}`).ok).toBe(true);
+    expect(decodeValue(`{"$n":"-${"9".repeat(MAX_BIGINT_TEXT)}"}`)).toMatchObject({ ok: false });
+  });
+
+  test("R-X1 a bigint past the bound is refused at the write: no row is stored that cannot be read", () => {
+    expect(encodeValue(10n ** BigInt(MAX_BIGINT_TEXT))).toMatchObject({ ok: false, error: { _tag: "bad_tag" } });
+    expect(encodeValue(2n ** 256n - 1n).ok).toBe(true);
+  });
 });

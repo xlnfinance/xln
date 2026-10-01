@@ -88,6 +88,21 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-X1 a bigint of hundreds of thousands of digits is a fault, not a throw, and the bound is exact"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a bigint past the bound is refused at the write: no row is stored that cannot be read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a frame with a bigint of hundreds of thousands of digits is refused, not thrown, link lives"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-X1 a hello, a reply and a finish nested thousands deep or far over the bound are refused, not thrown"
   },
   {
