@@ -24,6 +24,11 @@ const leftHolds = (n: bigint, credit = 0n): Ledger =>
   value(setCredit(n === 0n ? emptyLedger : value(deposit(emptyLedger, "left", n)), "right", credit));
 
 describe("account/ledger", () => {
+  test("the largest amount is the literal 2^256 - 1, the contract's uint256 ceiling", () => {
+    expect(MAX_AMOUNT).toBe(2n ** 256n - 1n);
+    expect(MAX_AMOUNT).toBe(115792089237316195423570985008687907853269984665640564039457584007913129639935n);
+  });
+
   test("R-A6 a payment moves the payer's allocation and stops at the payer's room", () => {
     const l = leftHolds(10n, 5n);
     expect(allocation(value(pay(l, "left", 12n)))).toBe(-2n);

@@ -5,7 +5,7 @@ import { holdOf, secretOf, viewOf } from "../fixtures.ts";
 import { holdId, tokenId, type AccountFault } from "../model.ts";
 import { ledgerOf } from "../state.ts";
 import { type AccountTx, type Judge } from "../tx.ts";
-import { accountRules, emptyReplica, frameHash, GENESIS, type AccountReplica } from "./account.ts";
+import { accountRules, emptyReplica, provisionalFrameHash, GENESIS, type AccountReplica } from "./account.ts";
 import { propose, queue, receive, resend, submit, type FrameHash, type Msg } from "./frame.ts";
 
 const GOLD = tokenId(1n);
@@ -58,11 +58,11 @@ describe("account/frame the round", () => {
 
   test("a frame is named by its parent and its txs: equal frames agree and any difference changes the name", () => {
     const f = { parent: GENESIS, txs: [pay(1n)] };
-    expect(frameHash({ ...f })).toBe(frameHash(f));
-    expect(frameHash({ ...f, txs: [pay(2n)] })).not.toBe(frameHash(f));
-    expect(frameHash({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(frameHash(f));
-    expect(frameHash({ ...f, parent: frameHash(f) })).not.toBe(frameHash(f));
-    expect(frameHash({ parent: GENESIS, txs: [pay(-1n)] })).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(provisionalFrameHash({ ...f })).toBe(provisionalFrameHash(f));
+    expect(provisionalFrameHash({ ...f, txs: [pay(2n)] })).not.toBe(provisionalFrameHash(f));
+    expect(provisionalFrameHash({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(provisionalFrameHash(f));
+    expect(provisionalFrameHash({ ...f, parent: provisionalFrameHash(f) })).not.toBe(provisionalFrameHash(f));
+    expect(provisionalFrameHash({ parent: GENESIS, txs: [pay(-1n)] })).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });
 
@@ -82,7 +82,7 @@ describe("account/frame same-height collision", () => {
     expect(rightHears.outcome).toEqual({ _tag: "accepted_over_own" });
     expect(rightHears.replica.pending).toBeUndefined();
     expect(rightHears.replica.mempool).toEqual([credit(500n)]);
-    expect(rightHears.replica.head).toBe(frameHash(frameOf(only(sentLeft.sent))));
+    expect(rightHears.replica.head).toBe(provisionalFrameHash(frameOf(only(sentLeft.sent))));
     expect(rightHears.sent).toEqual([{ _tag: "ack", hash: rightHears.replica.head }]);
   });
 
@@ -127,7 +127,8 @@ describe("account/frame refusals are values, never a halt", () => {
     expect(stale.outcome).toEqual({ _tag: "refused_not_next" });
     expect(stale.sent).toEqual([]);
     expect(stale.replica).toEqual(accepted.replica);
-    const future = receive(rules, credited.right, { _tag: "frame", frame: { ...first, parent: frameHash(first) } });
+    const next = { ...first, parent: provisionalFrameHash(first) };
+    const future = receive(rules, credited.right, { _tag: "frame", frame: next });
     expect(future.outcome).toEqual({ _tag: "refused_not_next" });
     expect(future.replica).toEqual(credited.right);
   });
@@ -152,7 +153,8 @@ describe("account/frame refusals are values, never a halt", () => {
   });
 
   test("an ack of something I did not propose changes nothing", () => {
-    const stray = receive(rules, sent.replica, { _tag: "ack", hash: frameHash({ ...first, txs: [pay(1n)] }) });
+    const other = provisionalFrameHash({ ...first, txs: [pay(1n)] });
+    const stray = receive(rules, sent.replica, { _tag: "ack", hash: other });
     expect(stray.outcome).toEqual({ _tag: "ack_ignored" });
     expect(stray.replica).toEqual(sent.replica);
     expect(receive(rules, credited.left, { _tag: "ack", hash: GENESIS }).outcome).toEqual({ _tag: "ack_ignored" });
