@@ -1,6 +1,6 @@
 // Deploy the frozen contract set (contracts/, the fork of jurisdictions/) from a manifest and write the result back as a manifest.
 //
-//   bun contracts/deploy/deploy-set.ts --rpc http://127.0.0.1:8545 [--manifest deploy/sepolia.manifest.json] [--out <path>] [--live]
+//   bun contracts/deploy/deploy-set.ts --rpc http://127.0.0.1:8545 [--manifest deploy/sepolia.prepared.manifest.json] [--out <path>] [--live]
 //
 // What it refuses, before anything is sent (each is a test in test/deploy/guards.test.ts):
 //   - a node whose chain id is not the manifest's (a fork of Sepolia reports Sepolia's id, so a dry run on a fork passes the same gates);
@@ -9,7 +9,7 @@
 //   - an RPC that is not this machine without --live. A live deploy waits for the owner's word; nothing here broadcasts by itself.
 // The key comes from DEPLOYER_PRIVATE_KEY and is never written anywhere. On a loopback node with no key set, anvil's public dev account #0 signs.
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { ethers } from "ethers";
 import {
@@ -34,7 +34,7 @@ const foundation = require("../scripts/foundation-hanko.cjs") as {
 };
 
 /** Anvil's public dev account #0 (the mnemonic "test test ... junk"). Only ever used against a loopback node. */
-const ANVIL_DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+export const ANVIL_DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const EIP_170_CODE_LIMIT = 24_576;
 
 export const isLoopback = (rpcUrl: string): boolean => ["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(rpcUrl).hostname);
@@ -175,10 +175,21 @@ export const deploySet = async ({ rpcUrl, manifest, live = false, privateKey, lo
   return deployedManifest(result);
 };
 
+/** The input of a deploy: the prepared manifest. The result goes to the deployed record next to it (sepolia.prepared.manifest.json -> sepolia.manifest.json). */
+export const PREPARED_SEPOLIA = resolve(import.meta.dir, "sepolia.prepared.manifest.json");
+export const recordPathOf = (preparedPath: string): string => preparedPath.replace(/\.prepared\.manifest\.json$/, ".manifest.json");
+
+/** The live record is never written over: a second deploy would replace the only account of the first one. Judged from the file alone, before any network call. */
+export const assertRecordFree = (out: string): void => {
+  if (!existsSync(out)) return;
+  const held = parseManifest(JSON.parse(readFileSync(out, "utf8")));
+  if (held.ok && held.value.status === "deployed") throw new Error(`${out} already holds a deployed manifest (the live record): refusing to write over it`);
+};
+
 type Args = { readonly rpc: string | null; readonly manifest: string; readonly out: string | null; readonly live: boolean };
 const parseArgs = (argv: readonly string[]): Args => {
   const value = (flag: string): string | null => { const at = argv.indexOf(flag); return at >= 0 ? argv[at + 1] ?? null : null; };
-  return { rpc: value("--rpc") ?? process.env["XLN_DEPLOY_RPC"] ?? null, manifest: value("--manifest") ?? resolve(import.meta.dir, "sepolia.manifest.json"), out: value("--out"), live: argv.includes("--live") };
+  return { rpc: value("--rpc") ?? process.env["XLN_DEPLOY_RPC"] ?? null, manifest: value("--manifest") ?? PREPARED_SEPOLIA, out: value("--out"), live: argv.includes("--live") };
 };
 
 if (import.meta.main) {
@@ -186,7 +197,8 @@ if (import.meta.main) {
   if (args.rpc === null) throw new Error("--rpc <url> (or XLN_DEPLOY_RPC) is required");
   // The manifest in the repository is the prepared one: a dry run must not overwrite it with a throw-away chain's addresses.
   if (args.out === null && !args.live) throw new Error("--out <path> is required for a dry run (only --live writes back to the manifest)");
-  const out = args.out ?? args.manifest;
+  const out = args.out ?? recordPathOf(args.manifest);
+  assertRecordFree(out);
   const verdict = parseManifest(JSON.parse(readFileSync(args.manifest, "utf8")));
   if (!verdict.ok) throw new Error(`manifest: ${verdict.problems.join("; ")}`);
   const result = await deploySet({ rpcUrl: args.rpc, manifest: verdict.value, live: args.live, log: console.log });

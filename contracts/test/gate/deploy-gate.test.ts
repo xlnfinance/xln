@@ -138,7 +138,7 @@ describe("every deploy path runs the gate", () => {
   const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
   // The Sepolia deploy (deploy/) takes a manifest: a mainnet one must be refused by the gate before any RPC call (the RPC here is a closed port).
   const mainnetDir = mkdtempSync(path.join(tmpdir(), "xln-gate-manifest-"));
-  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.manifest.json"), "utf8")) as Record<string, unknown>;
+  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.prepared.manifest.json"), "utf8")) as Record<string, unknown>;
   const mainnetPrepared = { ...sepolia, network: "ethereum-mainnet", chainId: 1 };
   const address = "0x1111111111111111111111111111111111111111", hash = `0x${"22".repeat(32)}`;
   const placed = { address, deploymentBlock: 1, transactionHash: hash, gasUsed: "1", codeHash: hash };
@@ -177,7 +177,7 @@ describe("every deploy path runs the gate", () => {
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
   const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts",
-    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json"];
+    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json", "deploy/sepolia.prepared.manifest.json"];
   const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {

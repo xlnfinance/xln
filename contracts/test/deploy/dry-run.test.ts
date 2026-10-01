@@ -6,11 +6,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ethers } from "ethers";
 import { CONTRACT_NAMES, deployedManifest, type Manifest } from "../../deploy/manifest.ts";
-import { deploySet } from "../../deploy/deploy-set.ts";
+import { ANVIL_DEV_KEY as DEV_KEY, deploySet } from "../../deploy/deploy-set.ts";
 import { dryRun, startAnvil } from "../../deploy/dry-run.ts";
 import { smokeSet } from "../../deploy/smoke.ts";
 
-const prepared = JSON.parse(readFileSync(path.join(import.meta.dir, "..", "..", "deploy", "sepolia.manifest.json"), "utf8")) as Manifest;
+const prepared = JSON.parse(readFileSync(path.join(import.meta.dir, "..", "..", "deploy", "sepolia.prepared.manifest.json"), "utf8")) as Manifest;
 const peers = [{ entityId: `0x${"cd".repeat(32)}`, endpoint: "wss://hub.example.org/ws" }];
 const local: Manifest = { ...prepared, network: "anvil-local", chainId: 31337, peers };
 const ANVIL_DEV_KEY = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -20,7 +20,7 @@ let node: Awaited<ReturnType<typeof startAnvil>>;
 let deployed: Manifest & { readonly contracts: NonNullable<Manifest["contracts"]> };
 beforeAll(async () => {
   node = await startAnvil(null);
-  deployed = deployedManifest(await deploySet({ rpcUrl: node.url, manifest: local }));
+  deployed = deployedManifest(await deploySet({ rpcUrl: node.url, manifest: local, privateKey: DEV_KEY }));
 }, 600_000);
 afterAll(() => { node?.stop(); });
 
@@ -53,19 +53,19 @@ describe("deploy on a local anvil", () => {
   });
 
   test("the smoke test passes: deposit, open, signed batch, dispute start and finalize, from the implicit proof and from a signed one; and again with other entities", async () => {
-    const first = await smokeSet({ rpcUrl: node.url, manifest: deployed, salt: "one" });
+    const first = await smokeSet({ rpcUrl: node.url, manifest: deployed, salt: "one", privateKey: DEV_KEY });
     const steps = first.steps.map((entry) => entry.step);
     for (const word of ["deposit", "reserve to collateral", "dispute start", "dispute finalize", "implicit", "signed"]) {
       expect(steps.some((step) => step.includes(word)), word).toBe(true);
     }
     expect(first.final.epoch).toBe("3");
-    const second = await smokeSet({ rpcUrl: node.url, manifest: deployed, salt: "two" });
+    const second = await smokeSet({ rpcUrl: node.url, manifest: deployed, salt: "two", privateKey: DEV_KEY });
     expect(second.entities.left).not.toBe(first.entities.left);
     expect(second.final.epoch).toBe("3");
   }, 300_000);
 
   test("a smoke test refuses a node on another chain than the manifest's", async () => {
-    await expect(smokeSet({ rpcUrl: node.url, manifest: { ...deployed, chainId: 11155111 } })).rejects.toThrow("chain id");
+    await expect(smokeSet({ rpcUrl: node.url, manifest: { ...deployed, chainId: 11155111 }, privateKey: DEV_KEY })).rejects.toThrow("chain id");
   });
 });
 
@@ -77,5 +77,18 @@ describe("dryRun", () => {
     expect(run.manifest.status).toBe("deployed");
     expect(run.smoke.final.epoch).toBe("3");
     expect(JSON.stringify(prepared)).toBe(before);
+  }, 600_000);
+
+  test("signs with anvil's key even when DEPLOYER_PRIVATE_KEY is set (the key exported for a live deploy never reaches a throw-away node)", async () => {
+    const other = `0x${"11".repeat(32)}`;
+    const kept = process.env["DEPLOYER_PRIVATE_KEY"];
+    process.env["DEPLOYER_PRIVATE_KEY"] = other;
+    try {
+      const run = await dryRun({ prepared, fork: null });
+      expect(run.manifest.deployer).toBe(ethers.getAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"));
+      expect(run.manifest.deployer).not.toBe(new ethers.Wallet(other).address);
+    } finally {
+      if (kept === undefined) delete process.env["DEPLOYER_PRIVATE_KEY"]; else process.env["DEPLOYER_PRIVATE_KEY"] = kept;
+    }
   }, 600_000);
 });
