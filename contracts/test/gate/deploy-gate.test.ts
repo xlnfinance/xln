@@ -1,16 +1,33 @@
 // N3: the deploy gate refuses the testnet response-window floor on any chain that is not a named testnet, on every
 // deploy path, reading the floor from the compiled build.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { buildFingerprint, removeSandboxes, runInSandbox, sandboxOf } from "../helpers/project-sandbox.ts";
 // @ts-expect-error CommonJS script without types
 import gate from "../../scripts/deploy-gate.cjs";
 // @ts-expect-error CommonJS script without types
 import matrixModule from "../../scripts/deploy-chain-matrix.cjs";
 
 const contractsRoot = path.join(import.meta.dir, "..", "..");
+// Scripts that may compile (hardhat run, the matrix) run in a private copy: they must never rewrite the build the other tests read.
+const scriptCwd = () => sandboxOf(contractsRoot);
+// Whatever else happens, this file must leave the real build exactly as it found it (a compile run in the real project would rewrite it mid-run).
+const buildBefore = existsSync(path.join(contractsRoot, "artifacts")) ? buildFingerprint(contractsRoot) : null;
+afterAll(() => {
+  removeSandboxes();
+  if (buildBefore !== null) expect(buildFingerprint(contractsRoot), "the real artifacts/ or .typechain-hardhat changed while the gate tests ran").toBe(buildBefore);
+});
+
+describe("the real build the gate tests read", () => {
+  // Sources moved since the last build: every test below that reads the build fails. This one says why, once, with the command.
+  test("matches the sources on disk (if not: bash scripts/build.sh)", () => {
+    const problem = (() => { try { gate.readCompiledFloor(); return null; } catch (error) { return error instanceof Error ? error.message : String(error); } })();
+    expect(problem, "the build in artifacts/ is stale: run `bash scripts/build.sh`, then run the gate tests again").toBeNull();
+  });
+});
 const literal = (value: string, subdenomination: string | null = null) => ({ nodeType: "Literal", kind: "number", value, subdenomination });
 const constantAst = (value: unknown) => ({ nodeType: "SourceUnit", nodes: [{ nodeType: "ContractDefinition", nodes: [{ nodeType: "VariableDeclaration", name: "MIN_RESPONSE_SECONDS", constant: true, value }] }] });
 const named = (chainId: number, id = "chain") => ({ id, chainId });
@@ -114,9 +131,8 @@ describe("the batch gas budget fits the chain's transaction gas cap (J5)", () =>
 });
 
 describe("every deploy path runs the gate", () => {
-  const run = (args: string[], command = "bun") => spawnSync(command, args, {
-    cwd: contractsRoot, encoding: "utf8", timeout: 240_000,
-    env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
+  const run = (args: string[], command = "bun") => runInSandbox(contractsRoot, command, args, {
+    env: { DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
   });
   const stack = (network: string) => () => run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", network], "bunx");
   const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
@@ -241,7 +257,7 @@ describe("every deploy path runs the gate", () => {
     try {
       const output = await new Promise<{ status: number | null; text: string }>((resolve) => {
         const child = spawn("bunx", ["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", "stack-manager"], {
-          cwd: contractsRoot,
+          cwd: scriptCwd(),
           env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", XLN_STACK_MANAGER_RPC_URL: `http://127.0.0.1:${server.port}`, XLN_STACK_MANAGER_CHAIN_ID: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
         });
         let text = "";
