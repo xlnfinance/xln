@@ -1,0 +1,49 @@
+{
+ "id": "R-WINDOWS-NEVER-SHORTEN",
+ "statement": "Inside an epoch the response windows of a dispute never decrease: a counter and a signed final body may carry longer windows than the dispute started with, never shorter ones (E9).",
+ "source": "contracts-decisions.md R-IMPLICIT-BASELINE item 5 (coordinator 09-30)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Runtime slice: the windows of a counter)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: TRAP a policy that lowers its windows inside an epoch: the stale start with the long windows cannot be answered (E9)"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: the survivor of the author's mutation run is not equivalent: the immediate-close path (a signed final body, no registered counter) is guarded by the FINAL window check alone"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "counter-shortens-window"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "r-windows-never-shorten-counter-shortens-left-window"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "r-windows-never-shorten-counter-shortens-right-window"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "r-windows-never-shorten-path2-shortens-left-window"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "r-windows-never-shorten-path2-shortens-right-window"
+  }
+ ]
+}

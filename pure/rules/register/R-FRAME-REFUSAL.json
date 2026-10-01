@@ -1,0 +1,70 @@
+{
+ "id": "R-FRAME-REFUSAL",
+ "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right. The Quint cell holds the refusal, the retry budget, the receiver's mark and the attempt number; the Runtime's duties (persisting the attempt count and the mark, spacing the retries) and the signed refusals of A4b are not in it.",
+ "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
+ "layers": {
+  "arrival": "owed: spec thread (Account spec comparison)",
+  "quint": "hold",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-REFUSAL a refused frame stays refused on its head"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "A4 (frame exchange step)"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "proposer-ignores-refusal"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "receiver-commits-a-refused-frame"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "refused-frame-judged-afresh-at-same-attempt"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "stale-attempt-silent"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "mark-kept-across-head-moves"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "retryable-fault-drops-the-tx"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "retry-budget-unbounded"
+  }
+ ]
+}

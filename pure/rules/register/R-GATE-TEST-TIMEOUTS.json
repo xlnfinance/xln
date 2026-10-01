@@ -1,0 +1,114 @@
+{
+ "id": "R-GATE-TEST-TIMEOUTS",
+ "statement": "A heavy test or hook (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout (the third argument of a test, the second of a hook), so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
+ "source": "coordinator 10-01 06:52 (two threads hit Bun's 5 s default on the rules tests and the chaos explorers and worked around it by hand with a flag)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a test that starts a bun, forge, ast-grep, quint or uvx process, or process.execPath, is heavy"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS git, cat and rm are cheap: a test that only runs them is not heavy"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a test that opens og's world or lane, walks or calls an explorer is heavy; a name that only starts like one is not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a heavy call in a comment or a string is not a call"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a test is heavy through a helper of its own file, even two helpers away, and not through a cheap one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a third argument is a timeout: a number, a constant or an object, with or without a trailing comma"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS commas inside the callback, its parameters and its default values are not arguments"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a test in a loop or a describe is read, it() and test.only() too, test.skip() and test.each() are not"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout is red and named with its file and line"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a .test.tsx and a .test.mts file are test files too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout is green, and a file that is not a test file is not read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a tree git does not list is red, not an empty pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS every heavy test of pure/ names its own timeout"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS the check is not vacuous: the real compose and forge tests are read as heavy, each with its timeout"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout alone is 1"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS a heavy test with no timeout exits 1 and names the file and line"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-TEST-TIMEOUTS the same test with a timeout passes the timeouts part"
+  }
+ ]
+}

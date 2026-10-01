@@ -2,8 +2,9 @@
 //   --base <ref>   the ref whose baseline may not be exceeded (default origin/main)
 //   --update       drop from baseline.json the sites the table no longer holds and lower the line counts it now expects less of (it never adds or raises one)
 // Exit 1 when the table holds a site, or more lines at a site, than the baseline allows, the baseline holds more than the base commit's,
-// a finding repeats a site, names a rule that is not a live row of pure/rules/register.json, or an entry is empty.
+// a finding repeats a site, names a rule that is not a live row of pure/rules/register/, or an entry is empty.
 import { readFileSync, writeFileSync } from "node:fs";
+import { readRegisterFolder } from "../../rules/layout/store.ts";
 import { KNOWN_FINDINGS } from "./known.ts";
 import { ratchet, siteLines, type Baseline } from "./ratchet.ts";
 
@@ -19,10 +20,14 @@ const git = (...argv: readonly string[]) => {
 };
 const parse = (text: string): Baseline => (JSON.parse(text) as { sites: Baseline }).sites;
 /** The ids of the register's rows that are not retired. */
-const liveRules = (): readonly string[] =>
-  (JSON.parse(readFileSync(`${here}/../../rules/register.json`, "utf8")) as { rows: readonly { id: string; retired_by?: unknown }[] }).rows
-    .filter((row) => row.retired_by === undefined)
-    .map((row) => row.id);
+const liveRules = (): readonly string[] => {
+  const parsed = readRegisterFolder(`${here}/../../rules/register`);
+  if (!parsed.ok) {
+    console.log(`FAIL register/ ${parsed.error.where}: ${parsed.error.detail}`);
+    process.exit(1);
+  }
+  return parsed.value.filter((row) => row.retiredBy === undefined).map((row) => row.id);
+};
 
 /** The baseline at the merge base: undefined when that commit has none; a git failure is a failure. */
 const baseBaseline = (): Baseline | undefined => {

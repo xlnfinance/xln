@@ -24,7 +24,7 @@ import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
 import { LAYERS, type Layer } from "./model.ts";
 import { readBase } from "./base.ts";
-import { parseRegister } from "./register.ts";
+import { readRegisterFolder } from "./layout/store.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { scanNames } from "./scan.ts";
@@ -112,9 +112,9 @@ const runRegister = (): boolean => {
     process.exit(1);
   }
 
-  const parsed = parseRegister(readFileSync(`${here}/register.json`, "utf8"));
+  const parsed = readRegisterFolder(`${here}/register`);
   if (!parsed.ok) {
-    console.error(`FAIL register.json ${parsed.error.where}: ${parsed.error.detail}`);
+    console.error(`FAIL register/ ${parsed.error.where}: ${parsed.error.detail}`);
     process.exit(1);
   }
 

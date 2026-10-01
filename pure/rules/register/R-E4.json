@@ -1,0 +1,29 @@
+{
+ "id": "R-E4",
+ "statement": "The publication order of Account work is first-touch, never Account id.",
+ "source": "lessons.md section 3",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the publication order of Account work is off-chain Entity logic",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "sorted-proposals"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E4 Accounts propose in the order a command first touched them, then the rest by id"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E4 an Account touched twice proposes once, with both txs in one frame"
+  }
+ ]
+}

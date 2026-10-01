@@ -1,0 +1,37 @@
+{
+ "id": "R-PROOF-NONCE",
+ "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
+  "rig": "owed: test rig (P4b every signature made counts, including a proposal later rolled back; P4f the proof nonce climbs by one)",
+  "ts": "owed: A4 (the frame nonce is the signed body's)"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "proposer-may-skip-nonces"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "baseline-too-low",
+   "owed": "spec thread, next Arrival page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "A4"
+  },
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a second proof signed for a rolled-back frame, and a nonce that skips, are red",
+   "owed": "test rig"
+  }
+ ]
+}

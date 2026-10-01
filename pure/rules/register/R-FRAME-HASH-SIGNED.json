@@ -1,0 +1,20 @@
+{
+ "id": "R-FRAME-HASH-SIGNED",
+ "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
+ "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
+ "layers": {
+  "arrival": "owed: spec thread (an Arrival page for the bytes both sides sign)",
+  "quint": "owed: spec thread (a Quint model for the signed frame)",
+  "contract": "n/a: frame hashes are off-chain; the chain verifies proof signatures, not frame hashes",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: A4 (signed bytes) and T0 (wire)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "A4 (signed bytes) and T0 (wire)"
+  }
+ ]
+}

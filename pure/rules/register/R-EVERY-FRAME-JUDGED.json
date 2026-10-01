@@ -1,0 +1,20 @@
+{
+ "id": "R-EVERY-FRAME-JUDGED",
+ "statement": "Every committed frame of a walk is judged by P2, P4 and P-BELIEF, including the frames of the dispute lifecycle (P1's ticks) and the at-rest settle ticks; no frame of a walk goes unjudged.",
+ "source": "Review A of PR 69, F4 (core 0x30de1: 34 of 41 frames judged, disputes 0x30de1: 136 of 143; the capacity probe's frames are judged since #69)",
+ "layers": {
+  "arrival": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "quint": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "contract": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol",
+  "rig": "owed: test rig",
+  "ts": "n/a: a rig oracle rule; it judges the rewrite and does not constrain the protocol"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a fault planted on a frame of P1's lifecycle or of the at-rest ticks is red",
+   "owed": "test rig"
+  }
+ ]
+}
