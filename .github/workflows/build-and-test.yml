@@ -8,8 +8,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Pull requests cancel their own older run. A push to main or development is never cancelled (a full run always finishes): a newer push
-# waits as the one pending run, and replaces an older pending one. rules/ci/split/ci-split.ts pins this.
+# Pull requests cancel their own earlier run. A push to main or development is never cancelled (a full run always finishes): a newer push
+# waits as the one pending run, and replaces an earlier pending one. rules/ci/split/ci-split.ts pins this.
 concurrency:
   group: build-and-test-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
