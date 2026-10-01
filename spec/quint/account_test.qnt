@@ -164,6 +164,7 @@ module account_test {
     .then(deliverAck(Left, 1))
     .expect(and {
       rollbacks == 1,
+      refusals == 0, replica.get(Left).mark == NoMark,      // the winner ignores the loser's frame: no refusal is sent and no mark is kept (a refusal would be the nonce door, not the rank rule)
       replica.get(Left).height == 1, replica.get(Right).height == 1,
       replica.get(Left).tip == replica.get(Right).tip,
       replica.get(Right).tip.limitRight == 1,      // Left's frame won
@@ -1002,6 +1003,21 @@ module account_test {
     .then(cosign(Left))
     .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
     .then(propose(Left)).fail()
+
+  // One frame in flight per Account: a side with a frame proposed and unanswered proposes nothing more, whatever it has queued. A second proposal at the
+  // same height would sign a second, different proof for the one nonce (P4; mutant `propose-while-in-flight`).
+  run noSecondProposalWhileOneIsInFlightTest = bothHoldCredit
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left))
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left)).fail()
+
+  // A proposer never skips a proof nonce on its own (MAX_NONCE_GAP = 0, N1, A18): the first frame of an Account signs at nonce 1, whatever the schedule draws
+  // (mutants `proposer-may-skip-nonces`, `proposer-may-skip-nonces-seen-by-agreed`).
+  run firstFrameSignsAtNonceOneTest = bothHoldCredit
+    .then(enqueueTx(Left, Pay({ from: Left, amount: 1 })))
+    .then(propose(Left))
+    .expect(frames.get(1).nonce == 1)
 
   // A fold is co-signed at a head with nothing in flight: not with a frame proposed, not with one held (the frame would commit after the fold was signed).
   run cosignRefusedWhileAFrameIsInFlightTest = bothHoldCredit

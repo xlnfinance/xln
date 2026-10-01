@@ -12,7 +12,7 @@
       "file": "account_core.qnt",
       "old": "if (proofRank(f) < proofRank(own)) keep",
       "new": "if (false) keep",
-      "killedBy": "invariant:agreed"
+      "killedBy": "test:collisionLeftWinsTest"
     },
     {
       "id": "pay-ignores-capacity",
@@ -44,7 +44,7 @@
       "file": "account_core.qnt",
       "old": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    isOpen(r),",
       "new": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    true,",
-      "killedBy": "invariant:no_equivocation"
+      "killedBy": "test:noSecondProposalWhileOneIsInFlightTest"
     },
     {
       "id": "ack-matches-any-frame",
@@ -284,7 +284,7 @@
       "file": "account_core.qnt",
       "old": "if (proofRank(f) < proofRank(own)) keep",
       "new": "if (s == Right and proofRank(f) < proofRank(own)) keep",
-      "killedBy": "invariant:agreed"
+      "killedBy": "test:collisionLeftWinsTest"
     },
     {
       "id": "propose-empty-frame",
@@ -340,7 +340,7 @@
       "file": "account_core.qnt",
       "old": "  pure val MAX_NONCE_GAP = 0\n",
       "new": "  pure val MAX_NONCE_GAP = 1\n",
-      "killedBy": "invariant:no_equivocation"
+      "killedBy": "test:firstFrameSignsAtNonceOneTest"
     },
     {
       "id": "commit-forgets-proof-nonce",
@@ -380,7 +380,7 @@
       "file": "account_core.qnt",
       "old": "  pure val MAX_NONCE_GAP = 0\n",
       "new": "  pure val MAX_NONCE_GAP = 1\n",
-      "killedBy": "invariant:agreed"
+      "killedBy": "test:firstFrameSignsAtNonceOneTest"
     },
     {
       "id": "reack-open-only",
