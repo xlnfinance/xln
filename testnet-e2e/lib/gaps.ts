@@ -64,7 +64,7 @@ export const GAPS = {
   htlcRoute: {
     id: "htlc-route", kind: "scaffold", layer: "Entity",
     piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
-    supplier: "cut stack #93 to #106 (Runtime htlc); hold duty is the A4b Runtime slice after #97",
+    supplier: "no owner yet: the cut stack's htlc tests lock and resolve across one Account only (Review B of #113); hold duty is the A4b Runtime slice after #97",
     landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
   },
   onChainReveal: {

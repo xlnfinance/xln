@@ -21,6 +21,11 @@ export const assertLoopback = (rpc: string): void => {
   if (!isLoopback(rpc)) throw new Error(`refusing ${rpc}: the e2e run sends transactions and only a loopback node may receive them`);
 };
 
+/** Children get PATH and HOME and nothing else, so a key exported in the shell can never reach them. */
+export const scrubbedEnv = (): Record<string, string> =>
+  Object.fromEntries((["PATH", "HOME", "SSL_CERT_FILE", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"] as const)
+    .flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])));
+
 const anvilBinary = (): string => {
   const candidates = [process.env.ANVIL, "/opt/foundry/anvil", "/foundry/anvil"].filter((c): c is string => !!c);
   return candidates.find((c) => existsSync(c)) ?? "anvil";
@@ -50,7 +55,7 @@ export type Anvil = Readonly<{ url: string; stop: () => void }>;
 export const startAnvil = async (fork: string | null): Promise<Anvil> => {
   const port = await freePort();
   const args = ["--host", "127.0.0.1", "--port", String(port), "--silent", ...(fork === null ? [] : ["--fork-url", fork])];
-  const child = spawn(anvilBinary(), args, { stdio: "ignore" });
+  const child = spawn(anvilBinary(), args, { stdio: "ignore", env: scrubbedEnv() });
   const state: { failure: Error | null } = { failure: null };
   child.once("error", (error) => { state.failure = new Error(`anvil did not start (${error.message}); install Foundry (see testnet-e2e/README.md)`); });
   const url = `http://127.0.0.1:${port}`;

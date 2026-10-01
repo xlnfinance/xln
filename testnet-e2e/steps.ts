@@ -12,7 +12,7 @@ import type { ProofBody } from "../pure/chain/proof/proof.ts";
 import { proofBodyHash } from "../pure/chain/proof/proof.ts";
 import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
-import { startAnvil, assertLoopback, type Anvil } from "./lib/anvil.ts";
+import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
   accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendBatch,
   unit, type Chain, type Manifest, type Party,
@@ -59,6 +59,8 @@ const fork: Step<World> = {
     const rpc = w.options.rpc ?? (w.anvil = await startAnvil(w.options.fork)).url;
     const chain = await connect(rpc, w.manifest);
     w.chain = chain;
+    // Only an anvil node answers this; a tunnel on 127.0.0.1 to a real node would fail here, before any transaction.
+    await chain.provider.send("anvil_nodeInfo", []).catch(() => { throw new Error(`${rpc} is not an anvil node (anvil_nodeInfo): this run only sends to a throw-away node`); });
     const block = await chain.provider.getBlockNumber();
     const mode = w.options.rpc !== null ? `existing loopback node ${rpc}` : `anvil fork of ${new URL(w.options.fork).hostname}`;
     w.facts = { mode, chainId: chain.chainId.toString(), block: block.toString() };
@@ -71,10 +73,11 @@ const fork: Step<World> = {
     }))).filter((n) => n !== null);
     if (wrong.length > 0) throw new Error(`deployed code differs from the manifest's code hash for: ${wrong.join(", ")}`);
     checks.push(`${CONTRACT_NAMES.length} of ${CONTRACT_NAMES.length} contracts hold the code hash the manifest records (contracts/deploy/sepolia.manifest.json)`);
-    const verify = Bun.spawnSync(["bun", "contracts/deploy/verify.ts", "--rpc", rpc], { cwd: REPO });
+    const verify = Bun.spawnSync(["bun", "contracts/deploy/verify.ts", "--rpc", rpc], { cwd: REPO, env: scrubbedEnv() });
     const verdict = ({ 0: "equals", 1: "DIFFERS from", 2: "could not be compared with" } as Record<number, string>)[verify.exitCode] ?? `exit ${verify.exitCode}`;
     checks.push(`contracts/deploy/verify.ts: the code on the node ${verdict} this checkout's build (exit ${verify.exitCode})`);
     if (verify.exitCode === 1) throw new Error("verify.ts: the deployed code differs from this build");
+    if (verify.exitCode !== 0) throw new Error("verify.ts could not compare the deployed code with a build: run `bash contracts/scripts/build.sh` first, a run that did not compare it is not DONE");
     return { checks, gaps: [] };
   },
 };
@@ -133,21 +136,28 @@ const open: Step<World> = {
     const chain = chainOf(w);
     const { alice, hubX, hubY, bob } = partiesOf(w);
     const legs = [["ax", alice, hubX], ["xy", hubX, hubY], ["yb", hubY, bob]] as const;
+    // Fundings in order. bob also funds 20 against hubY, so that one Account has a deposit from each side
+    // (the four ids sort alice < hubX < hubY < bob, so every first funder is Left and bob is Right).
+    const fundings = [
+      ...legs.map(([key, funder, peer]) => ({ key, funder, peer, amount: COLLATERAL * unit(chain) })),
+      { key: "yb" as const, funder: bob, peer: hubY, amount: 20n * unit(chain) },
+    ];
     const t = token(chain);
-    const opened = await legs.reduce<Promise<{ pairs: Record<string, Pair>; checks: string[] }>>(async (done, [key, funder, peer]) => {
+    const opened = await fundings.reduce<Promise<{ pairs: Record<string, Pair>; checks: string[] }>>(async (done, { key, funder, peer, amount }) => {
       const acc = await done;
       await sendBatch(chain, funder, {
-        reserveToCollateral: [{ tokenId: chain.tokenId, receivingEntity: funder.id, pairs: [{ entity: peer.id, amount: COLLATERAL * unit(chain) }] }],
+        reserveToCollateral: [{ tokenId: chain.tokenId, receivingEntity: funder.id, pairs: [{ entity: peer.id, amount }] }],
       }, `fund ${funder.name}-${peer.name}`);
       const left = leftOf(funder, peer);
       const right = left === funder ? peer : funder;
-      const pair = creditDeposit(openPair(left, right), t, funder.id === left.id ? "left" : "right", COLLATERAL * unit(chain));
+      const side: Side = funder.id === left.id ? "left" : "right";
+      const pair = creditDeposit(acc.pairs[key] ?? openPair(left, right), t, side, amount);
       const onChain = await collateralOf(chain, funder, peer);
       const ledger = ledgerIn(pair, t);
       if (onChain.collateral !== ledger.collateral || onChain.ondelta !== ledger.ondelta) {
         throw new Error(`${key}: the ledger says collateral ${ledger.collateral} ondelta ${ledger.ondelta}, the Depository says ${onChain.collateral} and ${onChain.ondelta}`);
       }
-      const line = `${funder.name} funds ${fmt(chain, onChain.collateral)} against ${peer.name} (${funder === left ? "funder is Left" : "funder is Right"}); the Account's ledger and the Depository agree: collateral ${onChain.collateral}, ondelta ${onChain.ondelta}`;
+      const line = `${funder.name} funds ${fmt(chain, amount)} against ${peer.name} (funder is ${side === "left" ? "Left" : "Right"}); the Account's ledger and the Depository agree: collateral ${onChain.collateral}, ondelta ${onChain.ondelta}`;
       return { pairs: { ...acc.pairs, [key]: pair }, checks: [...acc.checks, line] };
     }, Promise.resolve({ pairs: {}, checks: [] }));
     w.pairs = opened.pairs as World["pairs"];
