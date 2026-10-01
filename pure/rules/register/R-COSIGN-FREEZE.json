@@ -1,13 +1,13 @@
 {
  "id": "R-COSIGN-FREEZE",
- "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded: the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands.",
+ "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state.",
  "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page",
   "quint": "owed: spec thread, new Quint branch",
   "contract": "n/a: the freeze is the node's off-chain duty after it signs; the contract only sees the landed batch",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (Entity and Runtime)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -15,6 +15,116 @@
    "layer": "ts",
    "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
    "owed": "Entity/Runtime cut slice 3"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a tx queued after the signature waits: no frame goes to the peer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a signature given to a peer's ask freezes the Account just as the node's own does"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE without a signature the same tx is proposed at once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE only the Account the signature is about stops: the others still propose"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE the chain moving the epoch on, landed or superseded, ends it and the queue goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a report of an epoch already known, or about another Account, does not end it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE an operation that can no longer land ends it too, or the Account would wait for ever"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a second signature while one waits is refused with notice, whoever asks"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE nothing is signed over a frame still in flight: its ack may move the offdelta"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a peer's frame is refused with the frozen fault, naming the frame and its first tx"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE the same frame on an Account that is not frozen is taken and acked"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE the refusal can pass: Bob takes the frame back, keeps its tx, drops nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE after a lapse Bob's retry at the next attempt commits, the refused frame stays refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a refusal that is not about the freeze is no more retryable than before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a payment made after the signature is not proposed: Bob hears nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE once the chain has moved the epoch on, the payment goes out and both sides commit it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a frame Bob proposes while Alice's signature is out is refused, his retry then commits"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a Host that crashes after the signature comes back frozen and asks for it again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a repeated lapse of the first operation thaws nothing while the second is out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE a report naming an operation never signed changes nothing, the right one thaws"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE the serial goes on when the epoch moves: the next operation is not the first again"
   }
  ]
 }

@@ -7,7 +7,7 @@
   "quint": "owed: spec thread, new Quint branch",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (Entity and Runtime)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -31,6 +31,51 @@
    "layer": "ts",
    "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
    "owed": "Entity/Runtime cut slice 3"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a withdrawal from an Account with no offdelta goes as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a withdrawal with an offdelta goes as a settlement that folds it, never as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD the settlement folds the offdelta of every token, not only the withdrawn one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD an offdelta in another token alone is enough: the shortcut would erase it too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a peer's ask for a C2R is refused with notice while there is an offdelta, and signs nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a peer's C2R is signed with nothing to fold, a peer's settlement always"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD with no payment made a withdrawal goes as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD with a payment made the withdrawal is a settlement carrying the payment's offdelta"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD Bob, asked by Alice for a C2R after a payment, refuses it with notice and signs nothing"
   }
  ]
 }
