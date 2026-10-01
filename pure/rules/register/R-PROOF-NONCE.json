@@ -6,7 +6,7 @@
   "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "owed: test rig (P4b every signature made counts, including a proposal later rolled back; P4f the proof nonce climbs by one)",
   "ts": "owed: A4 (the frame nonce is the signed body's)"
  },
  "killers": [
@@ -20,6 +20,12 @@
    "layer": "ts",
    "name": "to be named",
    "owed": "A4"
+  },
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a second proof signed for a rolled-back frame, and a nonce that skips, are red",
+   "owed": "test rig"
   },
   {
    "kind": "bug",

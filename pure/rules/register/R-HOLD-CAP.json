@@ -5,7 +5,7 @@
  "layers": {
   "arrival": "owed: spec thread (an Arrival page for the hold cap)",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
-  "contract": "owed: contracts thread (a test carrying the id; the E10 revert at 32 transformers is the contract side)",
+  "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
  },
@@ -29,6 +29,26 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-HOLD-CAP a hold that resolves, cancels or expires frees its place in the count, in any token"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aStartWithThirtyThreeTransformersRevertsAndWithThirtyTwoLands"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aCounterWithThirtyThreeTransformersReverts"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aFinalizationWithThirtyThreeTransformersReverts"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_theClausesOfAllTheTokensOfABodyCountTogether"
   }
  ]
 }

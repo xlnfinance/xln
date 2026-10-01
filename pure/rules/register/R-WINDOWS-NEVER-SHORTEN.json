@@ -7,7 +7,7 @@
   "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (Runtime slice: the windows of a counter)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -44,6 +44,26 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "r-windows-never-shorten-path2-shortens-right-window"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WINDOWS-NEVER-SHORTEN each window is held on its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WINDOWS-NEVER-SHORTEN windows may lengthen in an epoch and not shorten once a proof carries them"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WINDOWS-NEVER-SHORTEN before a proof carries them, and in a new epoch, the policy may be set freely"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WINDOWS-NEVER-SHORTEN a window of zero seconds, or beyond the proof's uint32, is refused"
   }
  ]
 }
