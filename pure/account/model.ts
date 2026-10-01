@@ -81,4 +81,5 @@ export type AccountFault =
   | Tagged<"deadline_past", { deadline: bigint; view: bigint }>
   | Tagged<"deadline_too_far", { deadline: bigint; latest: bigint }>
   | Tagged<"past_deadline", { deadline: bigint; view: bigint }>
-  | Tagged<"not_expired", { deadline: bigint; earliest: bigint }>;
+  | Tagged<"not_expired", { deadline: bigint; earliest: bigint }>
+  | Tagged<"unsignable", { fault: string }>;

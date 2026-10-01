@@ -7,6 +7,7 @@ import { err } from "../kernel/core/result.ts";
 import { accountRules } from "../account/frame/account.ts";
 import type { Rules } from "../account/frame/frame.ts";
 import type { AccountState, Side } from "../account/model.ts";
+import type { SigningContext } from "../account/proof/signing.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import type { PeerFault } from "./model.ts";
 
@@ -18,11 +19,12 @@ const FROZEN = "frozen";
 /** `self` is the side of the replica that judges; `frozen` is whether its node's signature is out on this Account. */
 export type Standing = Readonly<{ self: Side; frozen: boolean }>;
 
-export const entityRules = (judge: Judge, { self, frozen }: Standing): EntityRules => {
-  const base = accountRules(judge);
+export const entityRules = (judge: Judge, signing: SigningContext, { self, frozen }: Standing): EntityRules => {
+  const base = accountRules(judge, signing);
   return {
     apply: (state, author, tx) => (frozen && author !== self ? err({ _tag: FROZEN }) : base.apply(state, author, tx)),
-    hash: base.hash,
+    name: base.name,
+    seal: base.seal,
     tag: (fault) => fault._tag,
     retryable: (tag) => tag === FROZEN || base.retryable(tag),
   };

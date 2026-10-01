@@ -4,7 +4,7 @@
 // and a restart on either side loses nothing of the round: the WAL replays the attempt, the wait and what was declined.
 import { describe, expect, test } from "bun:test";
 import { holdOf, viewOf } from "../account/fixtures.ts";
-import { provisionalFrameHash } from "../account/frame/account.ts";
+import { frameName } from "../account/frame/account.ts";
 import { type FrameHash, MAX_ATTEMPTS } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import { type Command, emptyEntity, type EntityId } from "../entity/model.ts";
@@ -188,13 +188,14 @@ describe("runtime/tick review A: a new height is a frame of every Entity", () =>
   test("a Runtime that hosts two Entities gives both the frame of a new height, in id order", () => {
     const hosted = startRuntime({ ...setup, view: viewOf(110n) }, [emptyEntity(CAROL), emptyEntity(ALICE)]);
     const retryable = (owner: EntityId, hash: FrameHash) => inputFor(owner, 0n, {
-      _tag: "peer_message", from: BOB, msg: { _tag: "refusal", hash, index: 0, fault: "deadline_too_far", mark: 0 },
+      _tag: "peer_message", from: BOB,
+      msg: { _tag: "refusal", hash, index: 0, fault: "deadline_too_far", mark: 0, floor: 0 },
     });
     const waiting = [ALICE, CAROL].reduce((rt, owner) => {
       const opened = tick(rt, inputFor(owner, 1n, open(BOB))).runtime;
       const asked = tick(opened, inputFor(owner, 2n, credit(BOB, 5n))).runtime;
       const pending = asked.entities.get(owner)?.accounts.get(BOB)?.pending ?? expect.unreachable("no pending");
-      return tick(asked, retryable(owner, provisionalFrameHash(pending.frame))).runtime;
+      return tick(asked, retryable(owner, frameName(pending.frame))).runtime;
     }, hosted);
     expect([...waiting.entities.values()].map((e) => e.waiting.size)).toEqual([1, 1]);
     const risen = tick(waiting, heightAt(9n, 111n));

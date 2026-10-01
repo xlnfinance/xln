@@ -1,0 +1,19 @@
+{
+ "id": "R-SIGNED-IS-LIVE",
+ "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED, past which it proposes nothing more) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty.",
+ "source": "coordinator 10-01 05:55 (Review A of PR 97, second finding)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread (slots, floors and higher slot wins, from #97)",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-SIGNED-IS-LIVE a lock in a signed proof stays live until a higher frame commits"
+  }
+ ]
+}

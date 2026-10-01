@@ -4,6 +4,7 @@ import { expect } from "bun:test";
 import { heightOf } from "../account/fixtures.ts";
 import { credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
 import { emptyEntity, type EntityId, type EntityInput, type JAction, type Outbound } from "../entity/model.ts";
+import { signing } from "../account/fixtures.ts";
 import { unwrapOr } from "../kernel/core/result.ts";
 import type { Result } from "../kernel/core/result.ts";
 import type { JView } from "../account/clause/clock.ts";
@@ -12,7 +13,7 @@ import { apply, commit, flush, recover, startRuntime } from "./tick.ts";
 
 export { credit, entityOf, GOLD, open, pay };
 
-export const setup: Setup = { clock: judge.clock, view: judge.view };
+export const setup: Setup = { clock: judge.clock, view: judge.view, signing };
 
 export const stamp = (ms: bigint): Timestamp => ms as Timestamp;
 

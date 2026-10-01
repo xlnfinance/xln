@@ -7,6 +7,7 @@
 // A bad input from a peer is refused in place with a notice and never halts (R-X1). A Halt is a broken local
 // invariant: the list is closed, and each case names the invariant.
 import type { ClockParams, JHeight, JView } from "../account/clause/clock.ts";
+import type { SigningContext } from "../account/proof/signing.ts";
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { EntityId, EntityInput, EntityState, JAction, Notice, Outbound } from "../entity/model.ts";
@@ -38,8 +39,13 @@ export type Row = Readonly<{
   notices: readonly RuntimeNotice[];
 }>;
 
-/** What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. */
-export type Setup = Readonly<{ clock: ClockParams; view: JView }>;
+/**
+ * What a Runtime is started with and keeps: the clock's parameters and its own view of the J chain. `signing` is ONE
+ * interim SigningContext for every Account of every Entity this Runtime hosts. R-FRAME-SIGNATURE-NAMES-ACCOUNT needs
+ * one per Account and per epoch (chain, depository, both entity ids, epoch, first nonce = stored + 2 from the chain);
+ * until the cut supplies them, two Accounts of one Entity sign frames under the same key and epoch.
+ */
+export type Setup = Readonly<{ clock: ClockParams; view: JView; signing: SigningContext }>;
 
 /**
  * `entities` is the state after the staged row, if there is one. `wal` is what is durable. `sent` is how many rows of

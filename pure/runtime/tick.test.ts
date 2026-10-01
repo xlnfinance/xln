@@ -204,14 +204,16 @@ describe("runtime/tick review A: stamps, and what a replay compares", () => {
   test("messageId tells apart messages that differ in any one field", () => {
     const h1 = `0x${"01".repeat(32)}` as FrameHash;
     const h2 = `0x${"02".repeat(32)}` as FrameHash;
-    const refusal = { _tag: "refusal", hash: h1, index: 0, fault: "x", mark: 0 } as const;
+    const refusal = { _tag: "refusal", hash: h1, index: 0, fault: "x", mark: 0, floor: 0 } as const;
     const refusals = [
       refusal, { ...refusal, hash: h2 }, { ...refusal, index: 1 }, { ...refusal, fault: "y" }, { ...refusal, mark: 1 },
+      { ...refusal, floor: 1 },
     ];
     expect(new Set(refusals.map(messageId)).size).toBe(refusals.length);
     expect(messageId({ _tag: "ack", hash: h1 })).not.toBe(messageId({ _tag: "ack", hash: h2 }));
     const frame = (amount: bigint) => messageId({
-      _tag: "frame", frame: { author: "left", parent: h1, attempt: 0, txs: [{ _tag: "pay", token: GOLD, amount }] },
+      _tag: "frame",
+      frame: { author: "left", parent: h1, attempt: 0, slot: 2, txs: [{ _tag: "pay", token: GOLD, amount }] },
     });
     expect(frame(1n)).not.toBe(frame(2n));
   });

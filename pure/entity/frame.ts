@@ -7,6 +7,7 @@ import type { JView } from "../account/clause/clock.ts";
 import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountState } from "../account/model.ts";
+import type { SigningContext } from "../account/proof/signing.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
@@ -331,11 +332,14 @@ const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
 
 /**
  * The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told, then
- * what the Entity owes the chain.
+ * what the Entity owes the chain. `signing` is one interim context for all of the Entity's Accounts; a per-Account,
+ * per-epoch one is owed by the Runtime (the cut), see Setup.signing and R-FRAME-SIGNATURE-NAMES-ACCOUNT.
  */
-export const entityFrame = (judge: Judge, state: EntityState, inputs: readonly EntityInput[]): Frame => {
+export const entityFrame = (
+  judge: Judge, signing: SigningContext, state: EntityState, inputs: readonly EntityInput[],
+): Frame => {
   const rules: Rulebook = (w, peer) =>
-    entityRules(judge, { self: sideOf(w.state.id, peer), frozen: factsOf(w, peer).frozen });
+    entityRules(judge, signing, { self: sideOf(w.state.id, peer), frozen: factsOf(w, peer).frozen });
   const arrived = arrivalsOf(inputs).reduce((w, a) => arrive(rules, judge.view, w, a), start(state));
   const afterHooks = hooksOf(inputs).reduce(hooked, arrived);
   const afterCommands = commandsOf(inputs).reduce((w, c) => commanded(rules, w, c), afterHooks);

@@ -8,13 +8,13 @@
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { draw, holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
+import { draw, holdOf, secretOf, signing, tokenOf, viewOf } from "../fixtures.ts";
 import { emptyLedger } from "../ledger.ts";
 import { holdId, other, type Ledger, type Side } from "../model.ts";
 import { emptyAccount, ledgerOf, withLedger } from "../state.ts";
 import type { AccountTx } from "../tx.ts";
-import { accountRules, GENESIS, provisionalFrameHash, type AccountReplica } from "./account.ts";
-import { propose, queue, receive, replica, resend, submit, type Msg } from "./frame.ts";
+import { accountRules, GENESIS, frameName, type AccountReplica } from "./account.ts";
+import { propose, queue, receive, replica, resend, submit, type FrameHash, type Msg } from "./frame.ts";
 
 const COLLATERAL = 2n;
 const MAX_AMOUNT = 5n;
@@ -120,7 +120,8 @@ type Q = Readonly<{
 }>;
 type World = Readonly<{
   q: Sided<Q>; t: Sided<AccountReplica>; clock: Sided<bigint>;
-  frames: readonly Frame[]; wire: readonly Msg<AccountTx>[]; flying: readonly number[]; acks: readonly number[];
+  frames: readonly Frame[]; wire: readonly Msg<AccountTx>[]; heads: readonly FrameHash[];
+  flying: readonly number[]; acks: readonly number[];
   stats: Readonly<Record<string, number>>; bad: readonly string[];
 }>;
 type Draw = (k: number, n: number) => number;
@@ -131,15 +132,16 @@ const START: AccountReplica["state"] = withLedger(emptyAccount, GOLD, { ...empty
 const newWorld = (): World => ({
   q: { left: open(), right: open() },
   t: { left: replica("left", GENESIS, START), right: replica("right", GENESIS, START) },
-  clock: { left: 0n, right: 0n }, frames: [], wire: [], flying: [], acks: [], stats: {}, bad: [],
+  clock: { left: 0n, right: 0n }, frames: [], wire: [], heads: [], flying: [], acks: [], stats: {}, bad: [],
 });
 
-const rulesOf = (w: World, s: Side) => accountRules({ clock: PARAMS, view: viewOf(w.clock[s]) });
+const rulesOf = (w: World, s: Side) => accountRules({ clock: PARAMS, view: viewOf(w.clock[s]) }, signing);
 const frameAt = (w: World, fid: number): Frame => w.frames[fid - 1] ?? expect.unreachable("no such frame");
 const msgAt = (w: World, fid: number): Msg<AccountTx> => w.wire[fid - 1] ?? expect.unreachable("no such message");
-const hashOf = (m: Msg<AccountTx>) => (m._tag === "frame" ? provisionalFrameHash(m.frame) : GENESIS);
-const fidsOf = (w: World, hash: string): readonly number[] =>
-  w.wire.flatMap((m, i) => (m._tag === "frame" && hashOf(m) === hash ? [i + 1] : []));
+const nameOf = (m: Msg<AccountTx>) => (m._tag === "frame" ? frameName(m.frame) : GENESIS);
+/** The head a frame gave when it was proposed: the signed digest, the hash its ack carries. */
+const headOf = (w: World, fid: number): FrameHash => w.heads[fid - 1] ?? expect.unreachable("no such head");
+const fidsOf = (w: World, hash: string): readonly number[] => w.heads.flatMap((h, i) => (h === hash ? [i + 1] : []));
 const key = (w: World, fid: number): string =>
   (fid === 0 ? "" : `${key(w, frameAt(w, fid).parent)}<${J(frameAt(w, fid).txs)}`);
 
@@ -226,16 +228,22 @@ const onPropose = (w: World, s: Side): World => {
   const revised: Q = { ...q, mempool: sel.txs, refused: [...q.refused, ...sel.dropped] };
   const out = propose(rulesOf(w, s), w.t[s]);
   const sent = out.sent[0];
+  const head = out.replica.pending?.head;
   if (q.height >= 99 || sel.txs.length === 0) {
     const quiet = upd(w, s, revised, out.replica);
     const counted = q.mempool.length > 0 ? bump(quiet, "propose all refused") : quiet;
     return ensure(counted, [[out.sent.length === 0, `propose-sent ${s}`]]);
   }
-  if (out.sent.length !== 1 || sent === undefined) return note(w, `propose-sent ${s}`);
+  if (out.sent.length !== 1 || sent === undefined || head === undefined) {
+    return note(w, `propose-sent ${s}`);
+  }
   const fid = w.frames.length + 1;
   const frame: Frame = { height: q.height + 1, parent: q.lastFid, author: s, txs: sel.txs, after: sel.body };
   const next = upd(w, s, { ...revised, proposed: fid, mempool: [] }, out.replica);
-  const logged = { ...next, frames: [...w.frames, frame], wire: [...w.wire, sent], flying: [...w.flying, fid] };
+  const logged = {
+    ...next, frames: [...w.frames, frame], wire: [...w.wire, sent], heads: [...w.heads, head],
+    flying: [...w.flying, fid],
+  };
   return bump(logged, "propose");
 };
 
@@ -291,11 +299,11 @@ const onDeliver = (w: World, s: Side, r: Draw): World => {
   // a repeat is the very frame this replica already refused on this head; any other frame is judged afresh or stale
   const earlier = w.t[s].declined;
   const sent = msgAt(w, fid);
-  const repeat = earlier !== undefined && sent._tag === "frame" && hashOf(sent) === earlier.hash;
+  const repeat = earlier !== undefined && sent._tag === "frame" && nameOf(sent) === earlier.hash;
   const known = repeat && heard.outcome._tag === "refused_invalid" && quintSays.kind !== "refused";
   const sameRefusal = earlier === undefined ? [] : [{
-    _tag: "refusal", hash: hashOf(sent), index: earlier.index,
-    fault: rulesOf(w, s).tag(earlier.fault), mark: earlier.attempt,
+    _tag: "refusal", hash: nameOf(sent), index: earlier.index,
+    fault: rulesOf(w, s).tag(earlier.fault), mark: earlier.attempt, floor: w.t[s].signed,
   }];
   const said: Heard = known ? { kind: tsKind, next: w.q[s], ack: false } : quintSays;
   const counted = bump(w, known ? KNOWN(quintSays.kind) : `deliver ${quintSays.kind}`);
@@ -319,7 +327,7 @@ const onAck = (w: World, s: Side, r: Draw): World => {
   if (fid === undefined) return w;
   const q = w.q[s];
   const fits = q.proposed === fid;
-  const heard = receive(rulesOf(w, s), w.t[s], { _tag: "ack", hash: hashOf(msgAt(w, fid)) });
+  const heard = receive(rulesOf(w, s), w.t[s], { _tag: "ack", hash: headOf(w, fid) });
   const tsFits = heard.outcome._tag === "committed_own";
   const counted = bump(w, fits ? "ack commits" : "ack ignored");
   const checked = ensure(counted, [[fits === tsFits, `ack-fits q=${fits} ts=${heard.outcome._tag} ${s} ${fid}`]]);

@@ -10,7 +10,7 @@
 // SEEDX picks the seed, RUNS and STEPS the size; the planted bugs at the end must each turn the explorer red.
 import { describe, expect, test } from "bun:test";
 import { draw } from "../account/fixtures.ts";
-import { provisionalFrameHash } from "../account/frame/account.ts";
+import { frameName } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
@@ -133,22 +133,23 @@ const stampsOf = (w: World): readonly string[] =>
     return before !== undefined && before.stamp > row.stamp ? [`${n}'s stamp went back at row ${row.height}`] : [];
   }));
 
-/** Every frame either WAL says it sent, by name, with its parent: both sides' frames are all in these two WALs. */
+/** Every frame either WAL says it sent, by content name, with its parent head: both sides' frames are in these WALs. */
 const parents = (w: World): ReadonlyMap<string, string> =>
   new Map(NAMES.flatMap((n) => w.hosts[n].runtime.wal.flatMap((row: Row) => row.outputs.flatMap((o) =>
-    (o.msg._tag === "frame" ? [[provisionalFrameHash(o.msg.frame), o.msg.frame.parent] as const] : [])))));
+    (o.msg._tag === "frame" ? [[frameName(o.msg.frame), o.msg.frame.parent] as const] : [])))));
 
-const ancestors = (up: ReadonlyMap<string, string>, head: string): readonly string[] => {
-  const parent = up.get(head);
-  return parent === undefined ? [head] : [head, ...ancestors(up, parent)];
-};
+type Replica = NonNullable<ReturnType<typeof accountOf>>;
 
-/** The committed heads (of the Hosts that are between frames) lie on one chain: neither side forked off. */
+/** `x` has committed one frame more than `y`: the frame `x` committed last has `y`'s head as its parent. */
+const oneAhead = (up: ReadonlyMap<string, string>, x: Replica, y: Replica): boolean =>
+  x.last !== undefined && up.get(x.last) === y.head;
+
+/** The committed heads (of the Hosts that are between frames) are one chain: the same head, or one frame apart. */
 const oneChain = (w: World): readonly string[] => {
-  const a = idle(w.hosts.alice) ? accountOf(w, "alice")?.head : undefined;
-  const b = idle(w.hosts.bob) ? accountOf(w, "bob")?.head : undefined;
+  const a = idle(w.hosts.alice) ? accountOf(w, "alice") : undefined;
+  const b = idle(w.hosts.bob) ? accountOf(w, "bob") : undefined;
   const up = parents(w);
-  const forked = a !== undefined && b !== undefined && !ancestors(up, a).includes(b) && !ancestors(up, b).includes(a);
+  const forked = a !== undefined && b !== undefined && a.head !== b.head && !oneAhead(up, a, b) && !oneAhead(up, b, a);
   return forked ? ["the two sides committed different frames"] : [];
 };
 

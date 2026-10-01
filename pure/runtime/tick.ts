@@ -5,7 +5,7 @@
 import { mapSet } from "../kernel/core/collections.ts";
 import { err, foldResult, ok, type Result } from "../kernel/core/result.ts";
 import { match } from "../kernel/core/tagged.ts";
-import { provisionalFrameHash } from "../account/frame/account.ts";
+import { frameName } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
@@ -22,7 +22,7 @@ export const startRuntime = (setup: Setup, entities: readonly EntityState[]): Ru
 const later = (a: Timestamp, b: Timestamp): Timestamp => (a > b ? a : b);
 
 const frameOf = (rt: Runtime, entity: EntityState, inputs: readonly EntityInput[]): Frame =>
-  entityFrame({ clock: rt.setup.clock, view: rt.view }, entity, inputs);
+  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.signing, entity, inputs);
 
 /** The frame an input makes on the Runtime as it stands: the entities' next states and the row that records it. */
 const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime => {
@@ -83,9 +83,9 @@ export const flush = (rt: Runtime): Flushed => {
 /** What names a message to whoever compares two runs of the same frame: not the bytes, which are the transport's. */
 export const messageId = (msg: Msg<AccountTx>): string =>
   match(msg, {
-    frame: (m) => `frame ${provisionalFrameHash(m.frame)}`,
+    frame: (m) => `frame ${frameName(m.frame)}`,
     ack: (m) => `ack ${m.hash}`,
-    refusal: (m) => `refusal ${m.hash} ${m.index} ${m.fault} ${m.mark}`,
+    refusal: (m) => `refusal ${m.hash} ${m.index} ${m.fault} ${m.mark} ${m.floor}`,
   });
 
 const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${messageId(o.msg)}`);

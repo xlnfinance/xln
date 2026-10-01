@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { holdOf, tokenOf, viewOf } from "../fixtures.ts";
+import { holdOf, signing, tokenOf, viewOf } from "../fixtures.ts";
 import { emptyLedger } from "../ledger.ts";
 import { type Ledger, type Side } from "../model.ts";
 import { emptyAccount, openHolds, withLedger } from "../state.ts";
@@ -13,7 +13,7 @@ import { accountRules, emptyReplica, type AccountReplica } from "./account.ts";
 import { propose, queue, receive, type Msg } from "./frame.ts";
 
 const clock = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params"));
-const at = (view: bigint) => accountRules({ clock, view: viewOf(view) });
+const at = (view: bigint) => accountRules({ clock, view: viewOf(view) }, signing);
 const GOLD = tokenOf(1n);
 const FUNDED: Ledger = { ...emptyLedger, collateral: 300n, ondelta: 150n, limit: { left: 60n, right: 60n } };
 const funded = (side: Side): AccountReplica =>
