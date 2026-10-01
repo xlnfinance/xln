@@ -55,12 +55,6 @@ export const GAPS = {
     supplier: "transport thread: file and socket shell in pure/host/shell/",
     landed: () => has("host/shell"),
   },
-  perAccountSigning: {
-    id: "per-account-signing", kind: "missing", layer: "Runtime",
-    piece: "One SigningContext per Account (R-FRAME-SIGNATURE-NAMES-ACCOUNT): a Runtime's Setup carries ONE for every Account of every Entity it hosts. All four Runtimes here sign under the alice-hubX Account's key and epoch, so only alice-hubX frames are valid proofs for the chain; hubX-hubY and hubY-bob frames name the wrong Account.",
-    supplier: "the cut thread: per-Account context, before multi-hop",
-    landed: () => !/signing: SigningContext/.test(readFileSync(join(PURE, "runtime", "model.ts"), "utf8")),
-  },
   ledgerRebase: {
     id: "ledger-rebase", kind: "missing", layer: "Entity",
     piece: "After a finalized dispute the Entity learns the new epoch (j_epoch) and that the dispute is over, but nothing rebases the Account: its ledger still says offdelta and collateral as they were, its frame counter is not reset to the new epoch's base, and the settlement fold into ondelta is not there.",
