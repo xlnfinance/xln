@@ -124,8 +124,9 @@ comes from routing) and is modelled as unconstrained, which over-approximates ho
 **A15. R-ONE-LOCK-PER-HASH (coordinator 09-30).** An Account holds at most one open clause per hashlock, whoever the payer. `applyTx` refuses a second `HtlcLock` on an open hashlock with `lock_exists` (the slot id still addresses the lock). og refuses it (xln.ts 7457-7458); this model allowed it until now. `oneLockPerHashlockTest` pins it (second lock by either payer refused, a different hashlock still fits the other slot); mutant `duplicate-hashlock-allowed`.
 
 **A11. Not yet in this layer** (each tracked in PROGRESS.md): cooperative settlement and the on-chain epoch (N1:
-sign proofs only for the current epoch; pause payments until the new baseline proof is co-signed), account open
-(Q-A1), windows fixed at open (N3), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).
+sign proofs only for the current epoch; pause payments until the epoch event is read, then the first proof of the epoch takes the chain's stored
+nonce + 2, R-IMPLICIT-BASELINE; settle.qnt), account open
+(Q-A1), windows that never shorten inside an epoch (N3, C13), swaps, multiple tokens. A Byzantine peer is modelled (A3, A5, A12).
 R-HOLD-CAP is per Account across tokens (32, the contract's per-body cap). It is owed when the multi-token Account is modelled.
 
 **A12. A peer that acked a frame and then sends another for the same height. CLOSED by rank (coordinator, 2026-09-30).**
@@ -144,7 +145,8 @@ so dropping the restriction is an equivalent mutant, and the restriction is a st
 **A13. The proof nonce is its own counter (N1, coordinator; found while doing it).**
 Choice: a frame carries a `nonce`, the proof nonce a dispute start would use; each replica keeps `pnonce`, the nonce of the frame it committed last. A receiver
 refuses a frame whose nonce is not above its `pnonce`, or leaps more than `MAX_NONCE_GAP`; signatures are keyed by (signer, nonce, branch). Within an epoch the
-nonce follows the tip by exactly one (`MAX_NONCE_GAP = 0`): a jump belongs to a co-signed rebase (`settle.qnt`, `BASELINE_GAP`), not to a frame. **Why not
+nonce follows the tip by exactly one (`MAX_NONCE_GAP = 0`); the one jump is the first proof of a new epoch, stored + 2 by rule (R-IMPLICIT-BASELINE, `settle.qnt` `FIRST_GAP`, C13),
+chosen from the chain's stored nonce and not by a frame's proposer. **Why not
 a free gap:** with `MAX_NONCE_GAP = 1` (mutant `proposer-may-skip-nonces`) a collision loser's abandoned proposal at nonce n+1 outranks the winner's frame at n, and
 the loser's next frame at n+1 signs a second proof under one key: `no_equivocation` fails, simulation finds it. The chain rule the model relies on is "a proof
 nonce is used once per key, and a start needs one above the stored nonce". Checked by `nonce_climbs`, `no_bad_accept` (independent oracle `wellFormed` states the nonce
@@ -165,7 +167,7 @@ Consequence for trace replay: a Quint trace may deliver out of order, and a repl
 **C1. Scope: one Account, one token, signed proofs as an arena.**
 The chain model does not run the Account protocol; it takes an honest-shaped history of signed proofs as given at
 init (both-signed states at nonces 1..k, an unacked proposal at k+1, a Right proposal that lost a collision at k, the
-baseline of the next epoch and one proposal on it) and lets the chain rules decide which can settle. Composition with
+first signed frame of the next epoch at nonce 7 and one proposal on it at 8; from epoch 1 a dispute may also start from the implicit proof, C13) and lets the chain rules decide which can settle. Composition with
 `account.qnt` (real histories) is the next step. Choice made because the dispute game is the hard part and the arena
 makes Apalache-sized checking possible.
 
@@ -180,8 +182,9 @@ party. The honest party can lose only if it is offline while a response is due (
 Contracts: a finalize of the initial proof stores nonce n0+1; adopting a counter-proof or newer proof stores that nonce.
 Both are followed. Consequence, not written anywhere in the sources: the stored nonce after a finalize can exceed the
 height of the next off-chain frame, and `disputeStart` requires proof nonce > stored nonce. So the first proof of a new
-epoch must carry a nonce above the chain's (a baseline), not the frame height. Decision: off-chain frame height and proof nonce are separate counters, and the baseline proof that reopens an Account
-after an epoch-advancing event carries a nonce strictly above the chain's stored nonce for that Account.
+epoch must carry a nonce above the chain's, not the frame height. Decision: off-chain frame height and proof nonce are separate counters. Superseded in
+its second half by R-IMPLICIT-BASELINE (C13): there is no co-signed baseline any more, and the first signed proof of the epoch carries the stored nonce + 2, the stored nonce
+read from the chain (a timeout finalize leaves initial + 1, a counter or a signed branch the proof's own nonce, an update its own).
 
 **C4. R2C is allowed during a dispute. CLOSED (coordinator: accepted as is, recorded as H4 in contracts-decisions.md).**
 Account.sol `processR2C` has no dispute check. The model follows the contract: a deposit made during a dispute changes
@@ -249,7 +252,7 @@ from the chain. Source: R-P2, H2.
 **S1. The Account state machine gains a lock.**
 A cooperative update is agreed in an ordinary frame (the "Lock" frame: the diffs, `dl`, `dr`, and the nonce of the update).
 From the moment it commits, the Account accepts no payment until the epoch that update opens is read from the chain (or a
-dispute replaces it). This is N1. Three rules make it hold, each killed by a mutant:
+dispute replaces it); the first proof after that takes the stored nonce + 2 (R-IMPLICIT-BASELINE, C13). This is N1. Three rules make it hold, each killed by a mutant:
 (a) the honest side re-applies its signing rules when an ack arrives, not only when it offers: an offer signed before the
 chain moved is dropped; (b) a side that starts (or answers) a dispute stops signing at that moment, before it has read the block;
 (c) a payment signed for an epoch the chain has left is never committed by a payee.
@@ -270,42 +273,18 @@ is authorised by its own batch. So one signature is enough to execute, and whoev
 any time until the epoch or nonce moves. The update dies with any other epoch event (finalize, another update); it cannot
 execute during a dispute. Source: `Account.sol:1540-1650`.
 
-**S3. CLOSED (coordinator, 17:20Z): option (b) adopted. N1 as decided leaves a window in which the honest side has no proof for the epoch.**
-After an update executes, every earlier proof is dead (C1) and the baseline of the new epoch is co-signed only after the
-event is read. Until then the honest side cannot start a dispute (no proof), and the counterparty can extend the window for as
-long as it declines to co-sign. It is a hostage situation, not theft: the counterparty's own share is frozen too. Reachable in
-the model (`rebaseLeavesAWindowWithoutAProofTest`; property `hostage_free` fails when `presign = false`).
-Options:
- (a) accept it and bound it by policy (settle only what you can afford to have frozen);
- (b) pre-sign the baseline of epoch+1 in the Lock frame, and make the update fold the Account's offdelta into ondelta
-     (`ondeltaDiff = -dl + offdelta`). Then every epoch starts from "offdelta 0, no clauses". That baseline is correct whichever
-     event opens the epoch: an update (offdelta folded) or a finalize (everything paid out, so it pays nothing). Checked:
-     `hostage_free` holds, custody moves without moving anyone's claim (`claims_conserved`), and the pre-signed proof is
-     harmless after a finalize (`presignBaselineAfterFinalizeIsHarmlessTest`). No contract change: the contract's
-     `ondeltaDiff` is an independent signed field.
- (c) a contract change: every epoch starts with an implicit both-signed baseline (offdelta 0, no clauses, at the stored nonce).
-     Not modelled: (b) reaches the same end with no contract change, and the spec would have to carry a rule the chain does
-     not have today.
-Cost of (b): one exception to "sign only for the current epoch", and a settlement may carry no open clause (a clause would
-be dropped by the fold; R-A3 already forbids settling over queued work).
-Choice: (b); the model has both modes (`mode` = presign, otherwise the rebase of N1 as first decided).
-Decision, as it now reads in N1 (revised 17:36Z, replacing the first S3 note): a party signs proofs only for the current epoch,
-with one exception: EVERY frame also carries a co-signed baseline of epoch+1 (offdelta 0, no clauses). A finalize can open a
-new epoch with no settlement Lock before it, and the honest side would be left without a disputable proof again. A settlement
-still requires no open clauses in v1 (lifting that is a v2 proposal: settle.qnt proofs carry no clauses, so this is not a guard
-here and the Entity layer enforces it with R-A3), and the update folds offdelta into `ondeltaDiff`.
-The baseline's nonce is a chain nonce, never the frame height, and the smallest one that survives every opening event is
-**frame nonce + 3**. Derivation (chain.qnt): an update stores its own nonce; a finalize on path 1 or 2 stores the adopted
-proof's nonce; a timeout finalize (path 0) stores the nonce of the proof the dispute started with, plus 1. A counterparty
-can start or adopt what the honest side has signed: every co-signed proof, and its own unacked proposal at tip + 1. So the
-largest stored nonce is (tip + 1) + 1 = tip + 2, and a start needs a nonce strictly above it: tip + 3.
-`baselineNonceIsTipPlusThreeTest` runs that schedule (Left starts with Right's unacked proposal and lets the window run out:
-stored 4, baseline 5); with a gap of 2 the baseline is dead (`baseline-gap-two`, killed by the test and by `baseline_clears`),
-with a gap of 1 an update already kills it (`baseline-gap-one`). `baselineRidesEveryFrameTest` runs the case with no
-settlement at all (`pay-frame-without-baseline` is killed by it and by `hostage_free`). `hostage_free` holds in this mode
-and fails in the rebase mode (witness `w_hostage`), so the window is gone rather than merely unreached.
-Not modelled: an unacked baseline of epoch+1 signed only by the honest side can also be presented by the counterparty; every
-baseline pays offdelta 0 on an emptied Account, so presenting any of them pays the same.
+**S3. SUPERSEDED by R-IMPLICIT-BASELINE (coordinator 09-30, C13). Was: N1 as decided leaves a window in which the honest side has no proof for the epoch.**
+History: after an update executes every earlier proof is dead (C1), and with a co-signed baseline the honest side had no proof for the new epoch until the baseline was signed (a hostage
+situation, not theft). Three answers were weighed: (a) bound it by policy; (b) co-sign a baseline of epoch + 1 with every frame at nonce + 3 and fold the offdelta into the ondelta (adopted
+on 09-29, with `presign` and `rebase` modes, `BASELINE_GAP`, `baseline_clears`); (c) a contract change: every epoch starts with an implicit baseline. **(c) is what was decided**, in a form that needs
+no signature at all: the implicit proof of C13 (empty state, Right-authored, at stored + 1). This module's baseline machinery is gone: `BASELINE_GAP`, `baselineOf`, the `presign` mode, the Rebase frame and
+`baseline_clears`, and their tests and mutants. What stays from (b): the update still folds the agreed offdelta into the ondelta (`ondeltaDiff = -dl + offdelta`), now always, because the implicit
+proof pays offdelta 0 over the new ondelta, so what both agreed is exactly what it pays (`settlementOpensNextEpochTest`, `claims_conserved`; mutants `update-does-not-fold`, `fold-wrong-sign`). A settlement
+still requires no open clauses in v1 (the fold would drop one; R-A3 forbids settling over queued work, enforced in the Entity layer).
+Result: `hostage_free` holds in every state (the honest side can start from a signed proof of the epoch or from the implicit one, `settlementOpensNextEpochTest` checks it before the side has even
+read the chain); the cost is a new rule for the first signed proof of the epoch, nonce >= stored + 2 (the trap, C13), judged by `first_proof_at_stored_plus_two`. `firstProofReadsTheStoredNonceFromTheChainTest`
+runs the schedule where the stored nonce is not the Account's own tip plus anything (Left starts with Right's unacked proposal at 3 and lets the window run out: stored 4, the first proof of the new epoch at 6); the mutant
+`first-proof-nonce-derived-from-the-tip` is killed by it (R-IMPLICIT-NONCE-FROM-CHAIN).
 
 **S3b. A party that starts a dispute uses its newest co-signed proof (coordinator, 17:36Z).**
 An older proof, or a proposal it has not seen countersigned, is presentable on chain and can be the one that settles, so the
@@ -313,9 +292,9 @@ starter never picks by convenience: `honestStart` uses `tipId`. `starterUsesNewe
 `honest-starts-with-older-proof` (chain.json) pin it: with nobody answering, the older proof would be paid.
 
 **S4. Fund only into an Account you hold a proof for.**
-Found by simulation: after a finalize opened epoch 1 the Account has no proof; a deposit into it is a stake nobody can
-enforce. Rule: a side runs R2C only when it holds a both-signed proof of the current epoch that a dispute could start with.
-This is the "open" protocol of Q-A1 stated as an order of operations: co-sign the baseline, then fund.
+Found by simulation: after a finalize opened epoch 1 (under the old N1) the Account had no proof; a deposit into it is a stake nobody can
+enforce. Rule: a side runs R2C only when it holds a proof a dispute could start with: a both-signed one of the current epoch, or, from epoch 1, the implicit proof (C13), which is always there. At epoch 0
+that is the first co-signed frame (R-NO-DEPOSIT-BEFORE-COSIGN). This is the "open" protocol of Q-A1 stated as an order of operations: co-sign the first frame, then fund.
 
 **S5. Lag between the chain and a side.**
 Each side reads the chain with a delay. The model lets it act on a stale view but requires the honest side to read the chain
@@ -439,6 +418,26 @@ open clauses and with debt, and RCPAN without the open clauses (`weakRcpan`) is 
 `payout-forgets-the-debt`, `payout-pays-the-collateral-twice`. Not covered: a wait that differs per clause in the chain model itself (the
 single clause has one deadline); the maximum-of-deadlines is the contract's line, stated here and checked by `finalizeWaitsForDeadlineTest`
 for one clause.
+
+**C13. R-IMPLICIT-BASELINE: the empty state of an epoch is a dispute proof with no signature (coordinator 09-30, decision D2; plan/contracts-decisions.md).**
+From ondelta epoch 1 a dispute may start from the IMPLICIT proof: empty signature, and a body the chain knows entirely from its own state (`implicitProof`): the
+epoch of the Account, nonce stored + 1, authored by Right, offdelta 0, no clause, both windows exactly the floor `MIN_WINDOW`; no starter arguments and no counter-proof commitment.
+It needs no signature and no arena slot, and settles at Delta = ondelta. Any signed frame of the epoch outranks it through a counter, with one exception that the rank rule produces
+(A12: rank = 2 * nonce + (Left ? 1 : 0)): at nonce stored + 1 a Left-authored frame outranks the implicit proof (`leftAuthoredFrameOutranksImplicitTest`) and a Right-authored one only TIES
+it, and a tie is a refused counter (`rightAuthoredFrameAtStoredPlusOneTiesAndIsRefusedTest`). **The trap:** after a settlement (stored 2) Right signs the first frame of the epoch at 3
+with offdelta +2, opens the implicit dispute at 3, Left's counter ties and is refused, and at the timeout Delta = ondelta: Left's 2 is lost (`theTrapLosesTheFramesValueTest` asserts
+the payout and that `p1_allowed` flags it). **The rule that closes it, for the Runtime and the specs: the first signed proof of a new epoch takes nonce >= stored + 2**, with the stored nonce READ from the
+chain; at stored + 2 the same Right-authored frame counters (`rightAuthoredFrameAtStoredPlusTwoCountersTest`). In `chain.qnt` the arena's epoch-1 frames sit at nonces 7 and 8, above stored + 2 for every nonce epoch 1 can open at (2 to 5);
+in `settle.qnt` the rule is `FIRST_GAP`, enforced by the honest side as author and as acker and judged by the ghost `firstLow` / property `first_proof_at_stored_plus_two`.
+Windows (counter and final) may LENGTHEN but never shorten inside an epoch (the contract refuses a body that shortens them, E9); the clock stays frozen from the initial body. This replaces N3's
+"one set of windows" (`windows_frozen`) by `windows_never_shortened`; an implicit start names the floor, so a signed counter must be allowed to carry longer windows.
+A deposit (reserve to collateral) does NOT advance the epoch (only a dispute finalize, a co-signed collateral-to-reserve withdrawal and a settlement do): every signed frame of the epoch
+stays valid, and an implicit dispute started after a deposit settles at the NEW ondelta (`depositInsideTheEpochKeepsTheFramesTest`, `depositThenImplicitSettlesAtTheNewOndeltaTest`).
+Epoch 0 has no implicit proof (`epoch0RefusesAnImplicitStartTest`): a fresh Account's first frames are its proofs. Two disputes in a row each have a proof (`twoImplicitDisputesInARowTest`).
+Single token: the contract's starter names the tokens of an implicit start (a token it omits keeps its collateral); that needs multi-token Accounts and is v2 (V2.md).
+Not modelled: that the non-starter reads the implicit body from the start calldata (the event carries only the hash): a J-watcher duty of the Entity/Runtime layers. The honest side's counter
+needs windows at least the dispute's; `honestCounterId` does not check it, so a tip with shorter windows than an implicit start's leaves time stopped rather than a visible loss (the Runtime never signs below the floor).
+Mutants: see `mutants/chain.json` (`implicit-*`, `n3-*`, `deposit-advances-the-epoch`) and `mutants/settle.json` (`first-proof-*`, `acker-signs-first-proof-*`).
 
 **E11. Found while writing it.**
 (a) The first version treated any lock in OUT slot k as the onward lock: peer 2's own lock in that slot broke `deadline_chain`

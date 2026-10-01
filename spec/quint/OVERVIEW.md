@@ -17,10 +17,10 @@ mutants that prove each property bites. The files are the spec; this page is the
 
 | layer | module | owns | consumes | produces |
 |---|---|---|---|---|
-| Account | `account_core`, `account` | the bilateral state (offdelta, credit limits, HTLC locks), the frame protocol between two replicas | transactions from its Entity, the peer's proposals and acks | committed bodies; a co-signed dispute proof per frame (+ the epoch baseline, S3) |
+| Account | `account_core`, `account` | the bilateral state (offdelta, credit limits, HTLC locks), the frame protocol between two replicas | transactions from its Entity, the peer's proposals and acks | committed bodies; a co-signed dispute proof per frame (no baseline of the next epoch: the chain's implicit proof stands in, C13) |
 | Entity | `entity` | what one Entity does with its Accounts: routing, deadlines, escalation, freezing, commands | peer frames, acks, J events, signed commands, the tick | Account transactions, J ops (dispute start, counter, reveal, finalize) |
 | J, one Account | `chain` | the dispute game and the payout of one Account on the Depository | J ops | reserves, collateral, epoch, debt, the secret registry |
-| J, settlement | `settle` | the off-chain epoch lifecycle over the chain (cooperative update, rebase, presign + fold) | frames, the chain's view | the next epoch's baseline |
+| J, settlement | `settle` | the off-chain epoch lifecycle over the chain (cooperative update with fold, the first signed proof of an epoch at stored + 2) | frames, the chain's view | the first proof of the next epoch |
 | J, batch | `jbatch` | how the Entity's ops reach the chain: strict nonce, atomic revert, urgent ops, the skip event of a dead dispute op | ops | landed batches, `DisputeOpSkipped` |
 | Runtime | `runtime` | frame order, the idle gate, durability, J watching, the halt list | inputs from all sources | frames that are durable before they leave |
 
@@ -59,6 +59,9 @@ height, except that with a Byzantine peer a Left-authored frame supersedes a Rig
 State: the Account (`nonce, epoch, coll, ondelta`), money (reserves and debt per side), the dispute (starter, initial proof, windows,
 counter), the secret registry, an arena of signed proofs (`nonce, epoch, leftAuthored, offdelta, clause, windows, signatures`).
 Rank of a proof is `nonce * 2 + leftAuthored` (Left wins a tie).
+R-IMPLICIT-BASELINE (C13): from epoch 1 a dispute may start from the implicit proof, which is in no arena slot: no signature, a body synthesized from chain state (nonce stored + 1, Right-authored,
+offdelta 0, no clause, windows at the floor), settling at Delta = ondelta. A signed frame of the epoch outranks it through a counter, except a Right-authored one at stored + 1, which only ties it (a tie is a
+refused counter). A deposit keeps the epoch. Counter and final windows may lengthen, never shorten. Single token: the starter's token naming is v2.
 
 State machine: `NoDispute` -- start(proof) -> `Active` -- counter(newer proof of the starter) -> `Active` -- finalize (three paths:
 timeout on the initial proof, timeout on the counter, the non-starter adopting a newer proof at once) -> `NoDispute` with the epoch
@@ -68,16 +71,17 @@ clause waits for the deadline (H1). The honest side answers within `REACT`; an a
 Properties: `p1_allowed` (what settles is a proof the honest side consented to or holds as its own latest), `p1_clause` (an honest
 payee that learned the secret `LAG` before the deadline is paid), `p3_conserved` (money is conserved), `nonce_monotone`,
 `no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, `r2c_enforces_first` (a deposit enforces the older debt first, F15), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
-side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_frozen` (N3: one set of windows per Account, over unequal windows),
+side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_never_shortened` (N3: windows may lengthen, never shorten, inside an epoch; over unequal windows),
 `closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-37 scenario tests, 54 mutants.
+65 scenario tests, 74 mutants.
 
 ## Settlement (`settle.qnt`)
 
-The off-chain epoch: frames are Pay, Lock or Rebase; a cooperative update folds a settlement into the next epoch. Every frame
-co-signs a baseline of epoch + 1 at nonce + 3 (S3, `BASELINE_GAP`), so after a finalize the honest side already holds a proof of the new
-epoch. Properties: `no_dead_commit`, `no_lost_pay`, `claims_conserved`, `book_enforceable`, `hostage_free`, `baseline_clears`.
-20 mutants.
+The off-chain epoch: frames are Pay or Lock; a cooperative update folds the agreed offdelta into the ondelta and opens the next epoch. There is no baseline of the next epoch to co-sign
+(R-IMPLICIT-BASELINE, C13; S3 superseded): from epoch 1 the chain's implicit proof is the proof to dispute with. The Runtime's rule that goes with it: the first signed proof of a new epoch takes the
+stored nonce + 2 (`FIRST_GAP`), the stored nonce read from the chain, and the epoch's own counter is gapless after it; the honest side signs and acks by that rule. Properties: `no_dead_commit`, `no_lost_pay`, `claims_conserved`, `book_enforceable`,
+`hostage_free`, `first_proof_at_stored_plus_two`.
+16 scenario tests, 22 mutants.
 
 ## Entity (`entity.qnt`)
 

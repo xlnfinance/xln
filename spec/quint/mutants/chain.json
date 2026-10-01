@@ -9,7 +9,7 @@
       "id": "c1-start-epoch-unchecked",
       "why": "C1: a dispute may start with a proof of an earlier epoch",
       "file": "chain.qnt",
-      "old": "      r.epoch == w.a.epoch,             // C1\n",
+      "old": "    r.epoch == w.a.epoch,             // C1\n",
       "new": "",
       "killedBy": "invariant:p1_allowed"
     },
@@ -17,7 +17,7 @@
       "id": "c1-start-epoch-unchecked-test",
       "why": "C1: same mutant, judged by the scenario",
       "file": "chain.qnt",
-      "old": "      r.epoch == w.a.epoch,             // C1\n",
+      "old": "    r.epoch == w.a.epoch,             // C1\n",
       "new": "",
       "killedBy": "test:oldEpochProofIsDeadTest"
     },
@@ -89,16 +89,16 @@
       "id": "counter-unsigned-by-starter",
       "why": "a counter-proof need not be signed by the starter",
       "file": "chain.qnt",
-      "old": "      signedBy(r, dispute.starter),\n      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
-      "new": "      rank(r) > rank(arena.get(dispute.rec0)),\n      dispute.counter == 0",
+      "old": "      signedBy(r, dispute.starter),\n      rank(r) > rank(dispute.p0),",
+      "new": "      rank(r) > rank(dispute.p0),",
       "killedBy": "test:counterNeedsTheStartersSignatureTest"
     },
     {
       "id": "start-unsigned-by-counterparty",
       "why": "a dispute may start with a proof the counterparty never signed",
       "file": "chain.qnt",
-      "old": "      signedBy(r, other(s)),\n      windowsOk(r)",
-      "new": "      windowsOk(r)",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },\n",
+      "new": "",
       "killedBy": "invariant:p1_allowed"
     },
     {
@@ -203,7 +203,7 @@
       "file": "chain.qnt",
       "old": "knows.get(honest) + LAG <= r.clause.deadline,",
       "new": "knows.get(honest) <= r.clause.deadline,",
-      "killedBy": "invariant:p1_clause"
+      "killedBy": "test:secretLearnedAtTheDeadlineTickIsNotOwedTest"
     },
     {
       "id": "publish-not-forced",
@@ -311,19 +311,19 @@
     },
     {
       "id": "n3-counter-windows-unchecked",
-      "why": "a counter with other windows than the frozen ones is registered",
+      "why": "a counter that shortens the windows is registered (no window check at all)",
       "file": "chain.qnt",
-      "old": "      r.wl == dispute.wl, r.wr == dispute.wr,        // N3: one set of windows per Account\n",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
       "new": "",
-      "killedBy": "invariant:windows_frozen"
+      "killedBy": "invariant:windows_never_shortened"
     },
     {
       "id": "n3-path2-windows-unchecked",
-      "why": "a newer proof with other windows than the frozen ones settles at once",
+      "why": "a newer proof that shortens the windows settles at once (no window check at all)",
       "file": "chain.qnt",
-      "old": "        r.wl == dispute.wl, r.wr == dispute.wr,\n        signedBy(r, dispute.starter),\n        rank(r) > rank(arena.get(dispute.rec0))\n      },",
-      "new": "        signedBy(r, dispute.starter),\n        rank(r) > rank(arena.get(dispute.rec0))\n      },",
-      "killedBy": "invariant:windows_frozen"
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "",
+      "killedBy": "invariant:windows_never_shortened"
     },
     {
       "id": "counter-at-timeout-allowed",
@@ -345,8 +345,8 @@
       "id": "start-nonce-not-strict",
       "why": "a dispute may start with the stored nonce, not only above it",
       "file": "chain.qnt",
-      "old": "      r.nonce > w.a.nonce,",
-      "new": "      r.nonce >= w.a.nonce,",
+      "old": "    r.nonce > w.a.nonce,",
+      "new": "    r.nonce >= w.a.nonce,",
       "killedBy": "test:startNeedsANonceAboveTheStoredOneTest"
     },
     {
@@ -436,6 +436,166 @@
       "old": "amt >= 1, spendable(m1, s) >= amt,",
       "new": "amt >= 1, m1.res.get(s) >= amt,",
       "killedBy": "test:longQueueReserveCannotBeDepositedTest"
+    },
+    {
+      "id": "n3-counter-shortens-left-window",
+      "why": "a counter may shorten the left window",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wr >= dispute.wr,\n",
+      "killedBy": "test:counterThatShortensTheLeftWindowIsRefusedTest"
+    },
+    {
+      "id": "n3-counter-shortens-right-window",
+      "why": "a counter may shorten the right window",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wl >= dispute.wl,\n",
+      "killedBy": "test:counterThatShortensTheRightWindowIsRefusedTest"
+    },
+    {
+      "id": "n3-counter-windows-frozen",
+      "why": "a counter must carry exactly the started windows: lengthening is refused (the contract's old `!=` check)",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wl == dispute.wl, r.wr == dispute.wr,\n",
+      "killedBy": "test:counterThatLengthensTheWindowsLandsTest"
+    },
+    {
+      "id": "n3-path2-shortens-left-window",
+      "why": "a newer proof closes at once although it shortens the left window",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wr >= dispute.wr,\n",
+      "killedBy": "test:nonStarterCannotCloseWithAShorterWindowTest"
+    },
+    {
+      "id": "n3-path2-shortens-right-window",
+      "why": "a newer proof closes at once although it shortens the right window",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wl >= dispute.wl,\n",
+      "killedBy": "test:nonStarterCannotCloseWithAShorterRightWindowTest"
+    },
+    {
+      "id": "n3-path2-windows-frozen",
+      "why": "an immediate close must carry exactly the started windows: lengthening is refused",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wl == dispute.wl, r.wr == dispute.wr,\n",
+      "killedBy": "test:nonStarterClosesWithALongerWindowTest"
+    },
+    {
+      "id": "implicit-start-refused",
+      "why": "R-IMPLICIT-BASELINE: a dispute cannot start from the implicit proof",
+      "file": "chain.qnt",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },\n",
+      "new": "    signedBy(r, other(s)),\n",
+      "killedBy": "test:newEpochImplicitStartsTest"
+    },
+    {
+      "id": "implicit-in-epoch-0",
+      "why": "epoch 0 has an implicit proof",
+      "file": "chain.qnt",
+      "old": "    a.epoch >= 1,\n    not(r.sigL), not(r.sigR),",
+      "new": "    not(r.sigL), not(r.sigR),",
+      "killedBy": "test:epoch0RefusesAnImplicitStartTest"
+    },
+    {
+      "id": "implicit-signature-ignored",
+      "why": "a signed proof with a canonical-looking body counts as the implicit proof, whoever signed it",
+      "file": "chain.qnt",
+      "old": "    not(r.sigL), not(r.sigR),\n    r.live,",
+      "new": "    r.live,",
+      "killedBy": "test:aBodySignedOnlyByItsStarterIsNotImplicitTest"
+    },
+    {
+      "id": "implicit-nonce-unchecked",
+      "why": "the implicit proof may carry any nonce above the stored one",
+      "file": "chain.qnt",
+      "old": "r.live, r.epoch == a.epoch, r.nonce == a.nonce + 1,",
+      "new": "r.live, r.epoch == a.epoch,",
+      "killedBy": "test:implicitAboveStoredPlusOneIsRefusedTest"
+    },
+    {
+      "id": "implicit-left-authored-allowed",
+      "why": "the implicit proof may be Left-authored (it would then outrank a Right-authored frame)",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitAuthoredByLeftIsRefusedTest"
+    },
+    {
+      "id": "implicit-offdelta-unchecked",
+      "why": "the implicit proof may carry an offdelta",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithNonzeroOffdeltaIsRefusedTest"
+    },
+    {
+      "id": "implicit-clause-allowed",
+      "why": "the implicit proof may carry a clause",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithAClauseIsRefusedTest"
+    },
+    {
+      "id": "implicit-left-window-longer",
+      "why": "the implicit proof may name a longer left window than the floor",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl >= MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithALongerLeftWindowIsRefusedTest"
+    },
+    {
+      "id": "implicit-right-window-longer",
+      "why": "the implicit proof may name a longer right window than the floor",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr >= MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithALongerRightWindowIsRefusedTest"
+    },
+    {
+      "id": "implicit-with-starter-arguments",
+      "why": "an implicit start may carry starter arguments",
+      "file": "chain.qnt",
+      "old": "(not(initArgs) and branch == 0 and not(counterArgs))",
+      "new": "(branch == 0 and not(counterArgs))",
+      "killedBy": "test:implicitWithStarterArgumentsIsRefusedTest"
+    },
+    {
+      "id": "implicit-with-counter-commitment",
+      "why": "an implicit start may name a newer branch",
+      "file": "chain.qnt",
+      "old": "(not(initArgs) and branch == 0 and not(counterArgs))",
+      "new": "(not(initArgs) and not(counterArgs))",
+      "killedBy": "test:implicitWithACounterCommitmentIsRefusedTest"
+    },
+    {
+      "id": "implicit-tie-is-a-counter",
+      "why": "a counter that only ties the initial proof (equal rank) is registered: the Right-authored frame at stored + 1 beats the implicit proof",
+      "file": "chain.qnt",
+      "old": "      rank(r) > rank(dispute.p0),",
+      "new": "      rank(r) >= rank(dispute.p0),",
+      "killedBy": "test:rightAuthoredFrameAtStoredPlusOneTiesAndIsRefusedTest"
+    },
+    {
+      "id": "implicit-allowed-over-a-signed-frame",
+      "why": "the honest party is taken to stand behind the implicit proof although it holds a both-signed frame of the epoch (the trap goes unseen)",
+      "file": "chain.qnt",
+      "old": "        not(r.sigL), not(r.sigR), e >= 1, tipRank(ar, e) == 0,",
+      "new": "        not(r.sigL), not(r.sigR), e >= 1,",
+      "killedBy": "test:theTrapLosesTheFramesValueTest"
+    },
+    {
+      "id": "deposit-advances-the-epoch",
+      "why": "a deposit opens a new epoch (it does not: only a finalize, a co-signed withdrawal and a settlement do)",
+      "file": "chain.qnt",
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, epoch: acct.epoch + 1, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "killedBy": "test:depositInsideTheEpochKeepsTheFramesTest"
     }
   ]
 }

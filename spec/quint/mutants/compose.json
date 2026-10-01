@@ -25,8 +25,8 @@
       "id": "payout-pays-the-collateral-twice",
       "why": "P3: the collateral is released to the winner and again to the other side",
       "file": "chain.qnt",
-      "old": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)), debt: m.debt }",
-      "new": "      { res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + coll), debt: m.debt }",
+      "old": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + coll) }",
       "killedBy": "test:accountCreditHoldsOnTheChainTest"
     },
     {

@@ -24,9 +24,9 @@ dispute ops in a batch (J2), a failed batch that takes its nonce (J5, with the d
 | `account.qnt` | Account layer: the state machine (propose, receive, ack, resend, loss) over `account_core.qnt`, and its properties |
 | `account_test.qnt` | scenario tests: exact schedules with exact expected results |
 | `chain.qnt` | J layer for one Account: reserves, collateral, epoch, debt, the dispute game (start, counter, three finalize paths), payout |
-| `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, H1 wait, H2 floor, debt, deposits, absent party |
-| `settle.qnt` | off-chain epoch lifecycle over `chain.qnt`: Pay, Lock and Rebase frames, the N1 pause, the cooperative update, baseline nonce floor |
-| `settle_test.qnt` | scenario tests: pause while locked, presign vs rebase, forged baseline, dead-epoch payment, update dies with a finalize |
+| `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, the implicit proof of an epoch (R-IMPLICIT-BASELINE: start, outrank, the tie trap, deposits, non-canonical bodies), N3 windows never shorten, H1 wait, H2 floor, debt, deposits, absent party |
+| `settle.qnt` | off-chain epoch lifecycle over `chain.qnt`: Pay and Lock frames, the N1 pause, the cooperative update (folds the offdelta), the first signed proof of an epoch at stored + 2 |
+| `settle_test.qnt` | scenario tests: pause while locked, the next epoch opens with no ceremony, first proof at stored + 2 (the trap refused), dead-epoch payment, update dies with a finalize |
 | `account_core.qnt` | the pure part of the Account layer (types, transition table, replica rules); `account.qnt` and `entity.qnt` build on it |
 | `entity.qnt` | Entity layer: a hub with two Accounts, the four-phase frame, routing, fail back, escalation, commands |
 | `entity_test.qnt` | scenario tests: forward with margin, fail back at once, escalation, secrets, late reveal, arrivals first, freeze, commands, collisions |

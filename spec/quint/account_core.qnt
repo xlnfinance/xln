@@ -17,8 +17,10 @@ module account_core {
   // N1: the proof nonce is its own counter (a dispute proof carries it; the chain wants each start above the stored one), no longer the
   // frame height. Within an epoch it follows the tip by one. A proposer that could skip nonces on its own would let an abandoned, signed
   // proposal outrank the frame that was committed (a collision loser at nonce n+1 against the winner at n; the loser's next frame at n+1
-  // again signs a second proof under one key). The jump belongs to a co-signed rebase (settle.qnt `BASELINE_GAP`), not to a frame. So 0
-  // here; the mutant `proposer-may-skip-nonces` sets it to 1 and `no_equivocation` catches it.
+  // again signs a second proof under one key). So 0 here; the mutant `proposer-may-skip-nonces` sets it to 1 and `no_equivocation` catches it.
+  // The only jump is not a frame's: by R-IMPLICIT-BASELINE the first signed proof of a new ondelta epoch takes the chain's stored nonce + 2
+  // (settle.qnt `FIRST_GAP`: a Right-authored proof at stored + 1 only ties the implicit proof of the epoch, chain.qnt `implicitProof`), and the
+  // epoch's own counter is gapless after it. That first nonce is read from the chain when an epoch opens, never derived from the Account's own frames.
   pure val MAX_NONCE_GAP = 0
   pure val MAX_NONCE = MAX_HEIGHT * (1 + MAX_NONCE_GAP)
   pure val MAX_LOCK_HORIZON = 4  // policy parameter (coordinator, N2: 7 days by default, never below the 24 h async window): a lock's deadline is at most this far after the frame that opens it, at admission and at forward (room for a two-hop chain)

@@ -36,7 +36,7 @@ module params_test {
     { ...c::mkProof(true, 1, 0, true, 0, c::NO_CLAUSE, true, true),
       clause: { on: true, payer: c::Left, amount: 1, deadline: D_IN } }
   pure val HUB: int -> c::SignedProof = c::SLOTS.mapBy(_ => c::NO_PROOF).set(1, CLAUSE_PROOF)
-    .set(6, c::mkProof(true, 6, 1, true, 0, c::NO_CLAUSE, true, true))
+    .set(6, c::mkProof(true, c::FIRST_NONCE_E1, 1, true, 0, c::NO_CLAUSE, true, true))
 
   run hopMarginPaysTheHubTest =
     c::initFrom(HUB, c::Right, 1, 0, 2)

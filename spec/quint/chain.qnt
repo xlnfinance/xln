@@ -11,6 +11,12 @@
 // Signed proofs enter as an arena of records chosen at the start of the run (`arena`), shaped like an honest Account
 // history: both-signed states at nonces 1..k, an unacked proposal at k+1, a rolled-back Right proposal at k, and the
 // same again for the epoch after a finalize. The chain rules then decide which of them can settle.
+// From ondelta epoch 1 a dispute may also start from the IMPLICIT proof (R-IMPLICIT-BASELINE, plan/contracts-decisions.md): no
+// signature, no arena slot, a body the chain synthesizes from its own state (`implicitProof`). It settles at Delta = ondelta, and any
+// signed frame of the epoch outranks it through a counter, except a Right-authored one at stored + 1, which only ties it (a tie is a
+// refused counter). So the first signed proof of an epoch takes nonce >= stored + 2 (the Runtime's rule, modelled in settle.qnt; the arena's
+// epoch-1 frames below sit at nonces 7 and 8, above stored + 2 for every nonce epoch 1 can open at).
+// Single token: the contract's starter names the tokens of an implicit start (multi-token is v2, V2.md); here the one token is named.
 //
 // It describes the FIXED contracts (plan/contracts-decisions.md): C1 proofs bind the ondelta epoch, C2 batch
 // authority is per entity (not visible in a one-Account model), H1 finalize waits for an open HTLC deadline unless
@@ -65,7 +71,8 @@ module chain {
   // One active dispute (AccountInfo dispute* fields).
   type Dispute = {
     on: bool, starter: Side,
-    rec0: int,                // arena id of the initial proof
+    rec0: int,                // arena id of the initial proof (IMPLICIT: the implicit proof, held in p0)
+    p0: SignedProof,          // the initial proof itself: an arena record, or the implicit proof as it stood at the start
     t0: int, timeout: int,    // start time, and start + both windows
     wl: int, wr: int,         // windows frozen from the initial proof
     initArgs: bool,           // the starter revealed the secret in its start arguments (frozen at start)
@@ -92,10 +99,11 @@ module chain {
     lostByAbsence: bool,  // some dispute settled a proof the honest party did not stand behind while it was absent (the exclusion is not vacuous)
     payBad: bool,         // a finalize paid something other than what the proof and the secret evidence are worth (see `netOf`)
     depositBad: bool,     // a deposit into the collateral did something other than move the depositor's reserve into it
-    windowsMoved: bool,   // a proof settled or countered with windows other than the ones frozen at the start (N3)
+    windowsShortened: bool, // a proof settled or countered with a window shorter than the one frozen at the start (N3: windows may lengthen, never shorten)
     earlyClose: bool,     // a proof settled by timeout before both windows had run
     lateCounter: bool,    // a counter was registered after both windows had run
     nonceBad: bool,       // the stored nonce after a start or a finalize is not the one the rules give
+    implicitSettles: int, // finalizes that settled the implicit proof
     pubAt: int,           // ghost: the tick the secret first reached the chain (0 = never), kept apart from `registry`
     finalizes: int,
     lastApplied: int,
@@ -104,8 +112,8 @@ module chain {
 
   pure val NO_GHOST: Ghost = {
     badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, r2cOwes: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
-    lostByAbsence: false, payBad: false, depositBad: false, windowsMoved: false, earlyClose: false, lateCounter: false,
-    nonceBad: false, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
+    lostByAbsence: false, payBad: false, depositBad: false, windowsShortened: false, earlyClose: false, lateCounter: false,
+    nonceBad: false, implicitSettles: 0, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
   }
 
   pure val NO_CLAUSE: Clause = { on: false, payer: Left, amount: 0, deadline: 0 }
@@ -114,7 +122,7 @@ module chain {
     sigL: false, sigR: false
   }
   pure val NO_DISPUTE: Dispute = {
-    on: false, starter: Left, rec0: 0, t0: 0, timeout: 0, wl: 0, wr: 0, initArgs: false,
+    on: false, starter: Left, rec0: 0, p0: NO_PROOF, t0: 0, timeout: 0, wl: 0, wr: 0, initArgs: false,
     counter: 0, ct: 0, counterBranch: 0, counterArgs: false
   }
 
@@ -207,6 +215,7 @@ module chain {
   var applied: int -> bool           // arena records that have settled
   var ghost: Ghost
 
+  pure val FIRST_NONCE_E1 = 7     // the nonce of the first signed frame of epoch 1: the highest nonce epoch 1 can open at (NONCE_TOP + 1 + 1 = 5) plus 2
   pure val NREC = 16
   pure val RECS = 1.to(NREC)
   pure val SLOTS = 0.to(NREC)     // slot 0 is the empty proof: "no proof" is a valid lookup
@@ -220,8 +229,10 @@ module chain {
   //   1..3  both-signed states at nonces 1..k of epoch 0 (k = tip)
   //   4     an unacked proposal at k+1, signed only by its author
   //   5     a Right proposal at nonce k that lost a collision to the Left-authored tip: signed only by Right
-  //   6     the both-signed baseline of epoch 1 (after any finalize), at a nonce above anything the chain can hold
-  //   7     an unacked proposal of epoch 1
+  //   6     the first both-signed frame of epoch 1 (after any finalize), at nonce 7. Epoch 1 opens at a stored nonce of 2 to 5 (an initial
+  //         nonce is at most k + 1 = 4, a timeout finalize adds 1), so 7 is stored + 2 or more whichever way it opened: the Runtime's rule
+  //         for the first signed proof of an epoch. Authored by either side, since at stored + 2 or above neither ties the implicit proof.
+  //   7     an unacked proposal of epoch 1, at nonce 8
   action init = {
     nondet k = 1.to(NONCE_TOP).oneOf()
     nondet la1 = Set(true, false).oneOf()
@@ -271,8 +282,8 @@ module chain {
         3 -> mkProofW(k >= 3, 3, 0, la3, o3, if (k == 3) clause else NO_CLAUSE, true, true, wl0, wr0),
         4 -> mkProofW(pendLive, k + 1, 0, isLeft(pendAuthor), pendOff, clause, isLeft(pendAuthor), not(isLeft(pendAuthor)), wl4, wr4),
         5 -> mkProofW(shadowLive and tipLeft, k, 0, false, shadowOff, clause, false, true, wl4, wr4),
-        6 -> mkProofW(true, 6, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
-        7 -> mkProofW(pend2Live, 7, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
+        6 -> mkProofW(true, FIRST_NONCE_E1, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
+        7 -> mkProofW(pend2Live, FIRST_NONCE_E1 + 1, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
       ),
       hon, resL, resR, coll, debtor, [dq1, dq2, dq3].slice(0, dqLen)      // an older debt: a queue of up to three claims, one more than a scaled call clears
     )
@@ -303,13 +314,17 @@ module chain {
   pure def tipRank(ar: int -> SignedProof, e: int): int =
     RECS.fold(0, (m, i) => if (ar.get(i).live and ar.get(i).epoch == e and both(ar.get(i))) imax(m, rank(ar.get(i))) else m)
 
-  pure def allowed(ar: int -> SignedProof, e: int, x: Side, rid: int): bool = {
-    val r = ar.get(rid)
-    and {
-      r.live, r.epoch == e,
-      or {
-        both(r) and rank(r) == tipRank(ar, e),
-        signedBy(r, x) and not(both(r)) and rank(r) > tipRank(ar, e)
+  // The implicit proof (no signature) is what the honest party believes only while it holds no both-signed proof of the epoch at all: a signed
+  // frame of the epoch is newer than the empty state, and a tie with it (a Right-authored frame at stored + 1) is the trap the Runtime rule prevents.
+  // It must also be the canonical body: any other unsigned body is one the honest party never agreed to.
+  pure def allowed(ar: int -> SignedProof, e: int, x: Side, r: SignedProof): bool = and {
+    r.live, r.epoch == e,
+    or {
+      both(r) and rank(r) == tipRank(ar, e),
+      signedBy(r, x) and not(both(r)) and rank(r) > tipRank(ar, e),
+      and {
+        not(r.sigL), not(r.sigR), e >= 1, tipRank(ar, e) == 0,
+        not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW
       }
     }
   }
@@ -325,18 +340,37 @@ module chain {
 
   pure def windowsOk(r: SignedProof): bool = r.wl >= MIN_WINDOW and r.wr >= MIN_WINDOW        // H2
 
-  // disputeStart: `s` starts with proof `rid`, which the counterparty must have signed.
-  pure def canStart(w: { ar: int -> SignedProof, a: Acct, d: Dispute }, s: Side, rid: int): bool = {
-    val r = w.ar.get(rid)
-    and {
-      rid >= 1, r.live,
-      not(w.d.on),
-      r.nonce > w.a.nonce,
-      r.epoch == w.a.epoch,             // C1
-      signedBy(r, other(s)),
-      windowsOk(r)
-    }
+  // The implicit proof of an epoch (R-IMPLICIT-BASELINE): the empty state of the Account, synthesized from chain state. Nonce stored + 1,
+  // authored by Right (so a Left-authored signed proof of the same nonce outranks it, and a Right-authored one only ties it), offdelta 0,
+  // no clause, both windows exactly the floor, and no signature. It lives in no arena slot.
+  pure val IMPLICIT = -1          // the id a dispute carries for it (rec0), not an arena slot
+  pure def implicitProof(a: Acct): SignedProof =
+    { live: true, nonce: a.nonce + 1, epoch: a.epoch, leftAuthored: false, offdelta: 0, clause: NO_CLAUSE, wl: MIN_WINDOW, wr: MIN_WINDOW, sigL: false, sigR: false }
+
+  // What the chain accepts as the implicit proof: an empty signature over exactly the canonical body, from epoch 1 on (epoch 0 has none).
+  pure def isImplicit(r: SignedProof, a: Acct): bool = and {
+    a.epoch >= 1,
+    not(r.sigL), not(r.sigR),
+    r.live, r.epoch == a.epoch, r.nonce == a.nonce + 1,
+    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW
   }
+
+  // disputeStart: `s` starts with proof `r`, which the counterparty must have signed, or which is the implicit proof (no signature at all).
+  pure def canStart(w: { ar: int -> SignedProof, a: Acct, d: Dispute }, s: Side, r: SignedProof): bool = and {
+    r.live,
+    not(w.d.on),
+    r.nonce > w.a.nonce,
+    r.epoch == w.a.epoch,             // C1
+    or { signedBy(r, other(s)), isImplicit(r, w.a) },
+    windowsOk(r)
+  }
+
+  // some start is open to `s`: a signed proof of the arena, or the implicit proof
+  pure def canStartAny(w: { ar: int -> SignedProof, a: Acct, d: Dispute }, s: Side): bool =
+    or { RECS.exists(i => canStart(w, s, w.ar.get(i))), canStart(w, s, implicitProof(w.a)) }
+
+  // the initial proof of a dispute, or a registered one: an arena record, or the implicit proof the dispute started with
+  pure def proofOf(ar: int -> SignedProof, d: Dispute, id: int): SignedProof = if (id == IMPLICIT) d.p0 else ar.get(id)
 
   // The secret evidence the settled proof is judged by: public registry, the starter's frozen arguments, and the
   // non-starter's arguments at finalize time (Depository/DeltaTransformer.applyPayment).
@@ -357,7 +391,7 @@ module chain {
     val t = tipId(ar, a.epoch)
     val r = ar.get(t)
     if (t != 0 and d.on and d.starter != x and signedBy(r, d.starter) and r.epoch == a.epoch
-        and rank(r) > rank(ar.get(d.rec0))
+        and rank(r) > rank(d.p0)
         and (d.counter == 0 or rank(r) > rank(ar.get(d.counter)))) t
     else 0
   }
@@ -452,17 +486,28 @@ module chain {
   // disputeStart. The stored nonce becomes the proof's nonce. The starter freezes its arguments now: whether it
   // reveals the secret, and, for one named newer branch, its arguments for that branch.
   action startWith(s: Side, rid: int, initArgs: bool, branch: int, counterArgs: bool): bool = all {
-    canStart({ ar: arena, a: acct, d: dispute }, s, rid),
+    rid >= 1,
+    startCore(s, rid, arena.get(rid), initArgs, branch, counterArgs)
+  }
+
+  // A start from the implicit proof: the starter sends an empty signature and a body, and the chain accepts it only if the body is exactly the
+  // canonical one (`isImplicit`). No arguments and no counter-proof commitment ride with it (the body names no clause and no newer branch).
+  action startImplicit(s: Side, body: SignedProof, initArgs: bool, branch: int, counterArgs: bool): bool =
+    startCore(s, IMPLICIT, body, initArgs, branch, counterArgs)
+
+  action startCore(s: Side, rid: int, r: SignedProof, initArgs: bool, branch: int, counterArgs: bool): bool = all {
+    canStart({ ar: arena, a: acct, d: dispute }, s, r),
     initArgs implies knows.get(s) != 0,
     counterArgs implies knows.get(s) != 0,
-    branch == 0 or (arena.get(branch).live and rank(arena.get(branch)) > rank(arena.get(rid))),
+    (not(r.sigL) and not(r.sigR)) implies (not(initArgs) and branch == 0 and not(counterArgs)),     // an implicit start carries no arguments
+    branch == 0 or (branch >= 1 and arena.get(branch).live and rank(arena.get(branch)) > rank(r)),
     dispute' = {
-      on: true, starter: s, rec0: rid, t0: now, timeout: now + arena.get(rid).wl + arena.get(rid).wr,
-      wl: arena.get(rid).wl, wr: arena.get(rid).wr,
+      on: true, starter: s, rec0: rid, p0: r, t0: now, timeout: now + r.wl + r.wr,
+      wl: r.wl, wr: r.wr,
       initArgs: initArgs, counter: 0, ct: now, counterBranch: branch, counterArgs: counterArgs
     },
-    acct' = { ...acct, nonce: arena.get(rid).nonce },
-    ghost' = { ...ghost, nonceBack: ghost.nonceBack or arena.get(rid).nonce <= acct.nonce },           // a start needs a nonce strictly above the stored one
+    acct' = { ...acct, nonce: r.nonce },
+    ghost' = { ...ghost, nonceBack: ghost.nonceBack or r.nonce <= acct.nonce },           // a start needs a nonce strictly above the stored one
     arena' = arena, honest' = honest, now' = now, money' = money, total' = total, registry' = registry,
     knows' = knows, offline' = offline, applied' = applied
   }
@@ -487,12 +532,28 @@ module chain {
     startWith(other(honest), rid, initArgs, branch, cArgs)
   }
 
+  // The adversary may also start from the implicit proof, with the canonical body or with one field off (a body the chain must refuse):
+  // 0 canonical; 1 nonce stored + 2; 2 nonce stored; 3 Left-authored; 4 offdelta 1; 5 a clause; 6 a window above the floor; 7 the other window above it.
+  action adversaryStartImplicit: bool = {
+    nondet v = 0.to(7).oneOf()
+    val b = implicitProof(acct)
+    val body = if (v == 1) { ...b, nonce: b.nonce + 1 }
+               else if (v == 2) { ...b, nonce: b.nonce - 1 }
+               else if (v == 3) { ...b, leftAuthored: true }
+               else if (v == 4) { ...b, offdelta: 1 }
+               else if (v == 5) { ...b, clause: { on: true, payer: Left, amount: 1, deadline: 2 } }
+               else if (v == 6) { ...b, wl: MIN_WINDOW + 1 }
+               else if (v == 7) { ...b, wr: MIN_WINDOW + 1 }
+               else b
+    startImplicit(other(honest), body, false, 0, false)
+  }
+
   // The honest party starts with its tip and reveals every secret it knows (R-P3: a dispute start carries every
-  // secret the starter knows for the locks in its proof).
+  // secret the starter knows for the locks in its proof). With no signed proof of an epoch it has, it starts from the implicit one.
   action honestStart: bool = all {
     not(offline),
-    tipId(arena, acct.epoch) != 0,
-    startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)
+    if (tipId(arena, acct.epoch) != 0) startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)
+    else startImplicit(honest, implicitProof(acct), false, 0, false)
   }
 
   // counter: the non-starter registers a newer state before T. An equal nonce is replaced only by a Left-authored
@@ -504,16 +565,16 @@ module chain {
       now < dispute.timeout,
       rid >= 1, r.live,
       r.epoch == acct.epoch,                         // C1
-      r.wl == dispute.wl, r.wr == dispute.wr,        // N3: one set of windows per Account
+      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)
       signedBy(r, dispute.starter),
-      rank(r) > rank(arena.get(dispute.rec0)),
+      rank(r) > rank(dispute.p0),                    // a Right-authored proof at stored + 1 only ties the implicit proof: refused
       dispute.counter == 0 or rank(r) > rank(arena.get(dispute.counter)),
       dispute' = { ...dispute, counter: rid, ct: now },
       arena' = arena, honest' = honest, now' = now, acct' = acct, money' = money, total' = total,
       registry' = registry, knows' = knows, offline' = offline, applied' = applied,
       ghost' = { ...ghost,
                  lateCounter: ghost.lateCounter or now >= dispute.t0 + dispute.wl + dispute.wr,
-                 windowsMoved: ghost.windowsMoved or r.wl != dispute.wl or r.wr != dispute.wr }
+                 windowsShortened: ghost.windowsShortened or r.wl < dispute.wl or r.wr < dispute.wr }
     }
   }
 
@@ -546,7 +607,8 @@ module chain {
   action finalizeWith(f: Side, path: int, rid: int, otherArgs: bool): bool = {
     val hasCounter = dispute.counter != 0
     val useId = if (path == 0) dispute.rec0 else if (path == 1) dispute.counter else rid
-    val r = arena.get(useId)
+    val r = proofOf(arena, dispute, useId)
+    val isImpl = path == 0 and useId == IMPLICIT
     val isNonStarter = f != dispute.starter
     val branchArgs = dispute.counterArgs and useId == dispute.counterBranch
     val starterArgs = if (path == 0) dispute.initArgs else branchArgs
@@ -565,31 +627,31 @@ module chain {
     val byTimeout = path == 1 or (path == 0 and not(isNonStarter))
     all {
       dispute.on,
-      useId >= 1, r.live,
+      useId >= 1 or isImpl, r.live,
       otherArgs implies (isNonStarter and knows.get(f) != 0),
       // the three paths' own conditions
       if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }
       else if (path == 1) and { hasCounter, now >= dispute.timeout }
       else and {
         not(hasCounter), isNonStarter, r.epoch == acct.epoch,
-        r.wl == dispute.wl, r.wr == dispute.wr,
+        r.wl >= dispute.wl, r.wr >= dispute.wr,
         signedBy(r, dispute.starter),
-        rank(r) > rank(arena.get(dispute.rec0))
+        rank(r) > rank(dispute.p0)
       },
       // H1: an unrevealed clause whose deadline is still open makes finalize revert
       not(r.clause.on and not(revealed) and now <= r.clause.deadline),
       money' = m2,
       acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0, via: 0 },     // C1: finalize advances the epoch
       dispute' = NO_DISPUTE,
-      applied' = applied.set(useId, true),
+      applied' = if (useId >= 1) applied.set(useId, true) else applied,
       ghost' = {
-        badApply: ghost.badApply or (not(allowed(arena, acct.epoch, honest, useId)) and not(ghost.xWasOffline)),
+        badApply: ghost.badApply or (not(allowed(arena, acct.epoch, honest, r)) and not(ghost.xWasOffline)),
         clauseMiss: ghost.clauseMiss or and {
           r.clause.on, payeeOf(r.clause) == honest, knows.get(honest) != 0, knows.get(honest) + LAG <= r.clause.deadline,
           not(ghost.xWasOffline), not(revealed)
         },
         nonceBack: ghost.nonceBack or newNonce < acct.nonce,
-        appliedTwice: ghost.appliedTwice or applied.get(useId),
+        appliedTwice: ghost.appliedTwice or (useId >= 1 and applied.get(useId)),
         freeDebt: ghost.freeDebt or ((d < 0 or d > acct.coll) and m2.debt.get(debtorOf(d)) > 0 and m2.res.get(debtorOf(d)) > m2.debt.get(debtorOf(d))),
         olderDebt: ghost.olderDebt or ((d < 0 or d > acct.coll) and money.debt.get(debtorOf(d)) > 0 and money.res.get(debtorOf(d)) > 0),
         // what the contract keeps (`_spendableReserve` nets all outstanding debt): a payout that leaves debt leaves the debtor nothing spendable; and when the debtor's queue fitted in
@@ -599,17 +661,18 @@ module chain {
           spendable(m2, debtorOf(d)) > 0 or (money.dq.get(debtorOf(d)).length() <= DEBT_ENFORCE_MAX and m2.res.get(debtorOf(d)) > 0)
         },
         xWasOffline: false,                                    // per dispute: the next one is judged afresh
-        lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, useId))),
+        lostByAbsence: ghost.lostByAbsence or (ghost.xWasOffline and not(allowed(arena, acct.epoch, honest, r))),
         payBad: ghost.payBad or not(payOk),
         depositBad: ghost.depositBad,
         r2cOwes: ghost.r2cOwes,
-        windowsMoved: ghost.windowsMoved or r.wl != dispute.wl or r.wr != dispute.wr,
+        windowsShortened: ghost.windowsShortened or r.wl < dispute.wl or r.wr < dispute.wr,
         earlyClose: ghost.earlyClose or (byTimeout and now < dispute.t0 + dispute.wl + dispute.wr),
         lateCounter: ghost.lateCounter,
         nonceBad: ghost.nonceBad or newNonce != (if (adopts) r.nonce else acct.nonce + 1) or (adopts and r.nonce < acct.nonce),
         pubAt: ghost.pubAt,
         finalizes: ghost.finalizes + 1,
-        lastApplied: useId,
+        lastApplied: if (useId >= 1) useId else 0,
+        implicitSettles: ghost.implicitSettles + (if (isImpl) 1 else 0),
         staleSkips: ghost.staleSkips
       },
       arena' = arena, honest' = honest, now' = now, total' = total, registry' = registry, knows' = knows,
@@ -630,7 +693,7 @@ module chain {
   action honestFinalize: bool = all {
     not(offline),
     dispute.on,
-    allowed(arena, acct.epoch, honest, if (dispute.counter != 0) dispute.counter else dispute.rec0),
+    allowed(arena, acct.epoch, honest, proofOf(arena, dispute, if (dispute.counter != 0) dispute.counter else dispute.rec0)),
     finalizeWith(honest, if (dispute.counter != 0) 1 else 0, 0, dispute.starter != honest and knows.get(honest) != 0)
   }
 
@@ -640,7 +703,7 @@ module chain {
     publish(Left), publish(Right),
     setOffline(true), setOffline(false),
     { nondet a = 1.to(2).oneOf() nondet who = SIDES.oneOf() nondet rcv = SIDES.oneOf() r2c(who, rcv, a) },
-    adversaryStart, adversaryStartAtDeadEpoch, honestStart,
+    adversaryStart, adversaryStartImplicit, adversaryStartAtDeadEpoch, honestStart,
     adversaryCounter, honestCounter,
     adversaryFinalize, honestFinalize
   }
@@ -679,10 +742,11 @@ module chain {
   val pay_exact: bool = not(ghost.payBad)
   val deposit_exact: bool = not(ghost.depositBad)
 
-  // N3: one set of windows per Account: the windows a dispute starts with are the ones every counter and every settled proof carries.
-  val windows_frozen: bool = and {
-    not(ghost.windowsMoved),
-    not(dispute.on) or dispute.counter == 0 or (arena.get(dispute.counter).wl == dispute.wl and arena.get(dispute.counter).wr == dispute.wr)
+  // N3: windows may lengthen but never shorten inside an epoch: the windows a dispute starts with (the floor, for an implicit start) are the
+  // least that every counter and every settled proof carries. The clock itself stays frozen from the initial body (`timeout`).
+  val windows_never_shortened: bool = and {
+    not(ghost.windowsShortened),
+    not(dispute.on) or dispute.counter == 0 or (arena.get(dispute.counter).wl >= dispute.wl and arena.get(dispute.counter).wr >= dispute.wr)
   }
 
   // Both windows run in full: nobody settles by timeout before them, nobody counters after them.
@@ -693,7 +757,7 @@ module chain {
 
   val safe: bool = and {
     p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums, r2c_enforces_first,
-    pay_exact, deposit_exact, windows_frozen, closes_on_time, nonce_rules
+    pay_exact, deposit_exact, windows_never_shortened, closes_on_time, nonce_rules
   }
 
   // Coverage witnesses: false on purpose, each must be violated by some trace.
@@ -701,6 +765,9 @@ module chain {
   val w_no_finalize: bool = ghost.finalizes == 0
   val w_no_two_finalizes: bool = ghost.finalizes < 2
   val w_no_counter: bool = dispute.counter == 0
+  val w_no_implicit_start: bool = not(dispute.on and dispute.rec0 == IMPLICIT)
+  val w_no_implicit_counter: bool = not(dispute.on and dispute.rec0 == IMPLICIT and dispute.counter != 0)      // a signed frame of the epoch outranks the implicit proof
+  val w_no_implicit_settled: bool = ghost.implicitSettles == 0
   val w_no_debt: bool = money.debt.get(Left) == 0 and money.debt.get(Right) == 0
   val w_no_long_queue: bool = money.dq.get(Left).length() <= DEBT_ENFORCE_MAX and money.dq.get(Right).length() <= DEBT_ENFORCE_MAX      // witness: a queue beyond one call's reach exists
   val w_no_clause_settled: bool = not(ghost.finalizes > 0 and arena.get(ghost.lastApplied).clause.on)

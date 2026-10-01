@@ -13,16 +13,16 @@
       "id": "no-pause-while-locked",
       "why": "N1: payments continue after an update is locked",
       "file": "settle.qnt",
-      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
-      "new": "sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "old": "    a.locked == 0, sv.epoch == p.epoch,\n",
+      "new": "    sv.epoch == p.epoch,\n",
       "killedBy": "test:paymentsPauseWhileLockedTest"
     },
     {
       "id": "no-pause-while-locked-invariant",
       "why": "same mutant, judged by the property",
       "file": "settle.qnt",
-      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
-      "new": "sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "old": "    a.locked == 0, sv.epoch == p.epoch,\n",
+      "new": "    sv.epoch == p.epoch,\n",
       "killedBy": "invariant:no_lost_pay",
       "step": "wfocus"
     },
@@ -30,77 +30,17 @@
       "id": "payment-at-dead-epoch",
       "why": "N1: a payment is acked although the side has read that the chain left the proof's epoch",
       "file": "settle.qnt",
-      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
-      "new": "a.locked == 0, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "old": "    a.locked == 0, sv.epoch == p.epoch,\n",
+      "new": "    a.locked == 0,\n",
       "killedBy": "test:deadEpochPaymentIsRefusedTest"
     },
     {
       "id": "payment-at-dead-epoch-invariant",
       "why": "same mutant, judged by the property",
       "file": "settle.qnt",
-      "old": "a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
-      "new": "a.locked == 0, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,\n          absI(p.offdelta) <= OFFMAX",
+      "old": "    a.locked == 0, sv.epoch == p.epoch,\n",
+      "new": "    a.locked == 0,\n",
       "killedBy": "invariant:no_dead_commit"
-    },
-    {
-      "id": "forged-baseline-accepted",
-      "why": "a Rebase is acked whatever offdelta it carries",
-      "file": "settle.qnt",
-      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
-      "new": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1",
-      "killedBy": "test:forgedBaselineIsRefusedTest"
-    },
-    {
-      "id": "forged-baseline-invariant",
-      "why": "same mutant, judged by the property",
-      "file": "settle.qnt",
-      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
-      "new": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1",
-      "killedBy": "invariant:book_enforceable",
-      "step": "wfocus",
-      "samples": 20000,
-      "steps": 30
-    },
-    {
-      "id": "baseline-nonce-at-frame-height",
-      "why": "decision N1 addendum: the baseline nonce follows the Account's own counter, not the chain's",
-      "file": "settle.qnt",
-      "old": "p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk",
-      "new": "p.epoch == sv.epoch, p.nonce == tp.nonce + 1, p.offdelta == bk",
-      "killedBy": "test:rebaseClosesTheWindowTest",
-      "also": [
-        {
-          "file": "settle.qnt",
-          "old": "| KRebase(r) => mkProof(true, sv.nonce + 1, sv.epoch, la, r.off, NO_CLAUSE, la, not(la))",
-          "new": "| KRebase(r) => mkProof(true, tp.nonce + 1, sv.epoch, la, r.off, NO_CLAUSE, la, not(la))"
-        }
-      ]
-    },
-    {
-      "id": "presign-without-fold",
-      "why": "the update does not fold offdelta into ondelta, so the pre-signed baseline (offdelta 0) is wrong",
-      "file": "settle.qnt",
-      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
-      "new": "val dOn = -u.dl",
-      "killedBy": "test:presignSettlementOpensNextEpochTest"
-    },
-    {
-      "id": "presign-without-fold-invariant",
-      "why": "same mutant, judged by the property",
-      "file": "settle.qnt",
-      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
-      "new": "val dOn = -u.dl",
-      "killedBy": "invariant:claims_conserved",
-      "step": "wfocus"
-    },
-    {
-      "id": "fold-wrong-sign",
-      "why": "the folded offdelta is subtracted",
-      "file": "settle.qnt",
-      "old": "val dOn = -u.dl + (if (mode) u.fold else 0)",
-      "new": "val dOn = -u.dl - (if (mode) u.fold else 0)",
-      "killedBy": "invariant:claims_conserved",
-      "step": "wfocus"
     },
     {
       "id": "update-ignores-epoch",
@@ -127,61 +67,150 @@
       "killedBy": "test:disputeStarterStopsSigningTest"
     },
     {
-      "id": "finalize-keeps-book",
-      "why": "the agreed offdelta survives a finalize that paid everything out",
+      "id": "update-does-not-fold",
+      "why": "the update does not fold the agreed offdelta into the ondelta, so the implicit proof of the new epoch (offdelta 0) pays something else than both agreed",
       "file": "settle.qnt",
-      "old": "    book' = 0,\n    seen' = seen, acc' = acc, prop' = prop,",
-      "new": "    book' = book,\n    seen' = seen, acc' = acc, prop' = prop,",
-      "killedBy": "test:presignBaselineAfterFinalizeIsHarmlessTest"
+      "old": "val dOn = -u.dl + u.fold ",
+      "new": "val dOn = -u.dl ",
+      "killedBy": "test:settlementOpensNextEpochTest"
+    },
+    {
+      "id": "update-does-not-fold-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "settle.qnt",
+      "old": "val dOn = -u.dl + u.fold ",
+      "new": "val dOn = -u.dl ",
+      "killedBy": "invariant:claims_conserved",
+      "step": "wfocus"
+    },
+    {
+      "id": "fold-wrong-sign",
+      "why": "the folded offdelta is subtracted",
+      "file": "settle.qnt",
+      "old": "val dOn = -u.dl + u.fold ",
+      "new": "val dOn = -u.dl - u.fold ",
+      "killedBy": "invariant:claims_conserved",
+      "step": "wfocus"
     },
     {
       "id": "lock-proof-nonce-reused",
       "why": "the locked state's proof reuses the tip's nonce",
       "file": "settle.qnt",
-      "old": "| KLock(_) => mkProof(true, tp.nonce + 1, tp.epoch, la, tp.offdelta, NO_CLAUSE, la, not(la))",
-      "new": "| KLock(_) => mkProof(true, tp.nonce, tp.epoch, la, tp.offdelta, NO_CLAUSE, la, not(la))",
-      "killedBy": "test:presignSettlementOpensNextEpochTest"
+      "old": "| KLock(_) => mkProof(true, n, e, la, base, NO_CLAUSE, la, not(la))",
+      "new": "| KLock(_) => mkProof(true, tp.nonce, e, la, base, NO_CLAUSE, la, not(la))",
+      "killedBy": "test:settlementOpensNextEpochTest"
+    },
+    {
+      "id": "finalize-keeps-book",
+      "why": "the agreed offdelta survives a finalize that paid everything out",
+      "file": "settle.qnt",
+      "old": "    book' = 0,\n    seen' = seen, acc' = acc, prop' = prop,",
+      "new": "    book' = book,\n    seen' = seen, acc' = acc, prop' = prop,",
+      "killedBy": "test:finalizeResetsTheBookTest"
     },
     {
       "id": "finalize-stores-high-nonce",
-      "why": "a finalize that adopts no proof stores a nonce above the pre-signed baseline",
+      "why": "a finalize that adopts no proof stores a nonce far above the one the rules give: the first proof of the new epoch is then not stored + 2",
       "file": "chain.qnt",
       "old": "val newNonce = if (adopts) r.nonce else acct.nonce + 1",
       "new": "val newNonce = if (adopts) r.nonce else acct.nonce + 5",
-      "killedBy": "test:presignBaselineStartsAfterStaleFinalizeTest"
+      "killedBy": "test:firstProofReadsTheStoredNonceFromTheChainTest"
     },
     {
-      "id": "pay-frame-without-baseline",
-      "why": "a payment frame does not co-sign the next epoch's baseline (only settlements would)",
+      "id": "first-proof-at-stored-plus-one",
+      "why": "R-IMPLICIT-BASELINE: the Runtime signs the first proof of an epoch at the stored nonce + 1 (a Right-authored one only ties the implicit proof)",
       "file": "settle.qnt",
-      "old": ".set(np, baselineOf(p, isLeft(prop.author)))",
-      "new": ".set(np, NO_PROOF)",
-      "killedBy": "test:baselineRidesEveryFrameTest"
+      "old": "val n = if (first) sv.nonce + FIRST_GAP else tp.nonce + 1",
+      "new": "val n = if (first) sv.nonce + 1 else tp.nonce + 1",
+      "killedBy": "invariant:first_proof_at_stored_plus_two",
+      "step": "wfocus",
+      "also": [
+        {
+          "file": "settle.qnt",
+          "old": "p.nonce >= sv.nonce + FIRST_GAP",
+          "new": "p.nonce >= sv.nonce + 1"
+        }
+      ]
     },
     {
-      "id": "baseline-gap-two",
-      "why": "the baseline is two above its frame: a start with the unacked proposal stores tip + 2 and kills it",
+      "id": "first-proof-at-stored-plus-one-test",
+      "why": "same mutant, judged by the scenario",
       "file": "settle.qnt",
-      "old": "pure val BASELINE_GAP = 3",
-      "new": "pure val BASELINE_GAP = 2",
-      "killedBy": "test:baselineNonceIsTipPlusThreeTest"
+      "old": "val n = if (first) sv.nonce + FIRST_GAP else tp.nonce + 1",
+      "new": "val n = if (first) sv.nonce + 1 else tp.nonce + 1",
+      "killedBy": "test:firstProofOfTheEpochIsStoredPlusTwoTest",
+      "also": [
+        {
+          "file": "settle.qnt",
+          "old": "p.nonce >= sv.nonce + FIRST_GAP",
+          "new": "p.nonce >= sv.nonce + 1"
+        }
+      ]
     },
     {
-      "id": "baseline-gap-two-invariant",
-      "why": "same mutant, judged by the property",
+      "id": "acker-signs-first-proof-at-stored-plus-one",
+      "why": "the honest side signs, as acker, the first proof of an epoch that the other side offers at the stored nonce + 1",
       "file": "settle.qnt",
-      "old": "pure val BASELINE_GAP = 3",
-      "new": "pure val BASELINE_GAP = 2",
-      "killedBy": "invariant:baseline_clears",
+      "old": "p.nonce >= sv.nonce + FIRST_GAP",
+      "new": "p.nonce >= sv.nonce + 1",
+      "killedBy": "invariant:first_proof_at_stored_plus_two",
       "step": "wfocus"
     },
     {
-      "id": "baseline-gap-one",
-      "why": "the baseline is one above its frame: not above what an update stores",
+      "id": "acker-signs-first-proof-at-stored-plus-one-test",
+      "why": "same mutant, judged by the scenario",
       "file": "settle.qnt",
-      "old": "pure val BASELINE_GAP = 3",
-      "new": "pure val BASELINE_GAP = 1",
-      "killedBy": "test:presignSettlementOpensNextEpochTest"
+      "old": "p.nonce >= sv.nonce + FIRST_GAP",
+      "new": "p.nonce >= sv.nonce + 1",
+      "killedBy": "test:firstProofAtStoredPlusOneIsRefusedTest"
+    },
+    {
+      "id": "first-proof-nonce-derived-from-the-tip",
+      "why": "the first proof of an epoch takes its nonce from the Account's own tip (2 + 2) instead of the stored nonce read from the chain (R-IMPLICIT-NONCE-FROM-CHAIN)",
+      "file": "settle.qnt",
+      "old": "val n = if (first) sv.nonce + FIRST_GAP else tp.nonce + 1",
+      "new": "val n = if (first) tp.nonce + FIRST_GAP else tp.nonce + 1",
+      "killedBy": "test:firstProofReadsTheStoredNonceFromTheChainTest",
+      "also": [
+        {
+          "file": "settle.qnt",
+          "old": "p.nonce >= sv.nonce + FIRST_GAP",
+          "new": "p.nonce >= tp.nonce + FIRST_GAP"
+        }
+      ]
+    },
+    {
+      "id": "first-proof-offdelta-from-the-old-epoch",
+      "why": "the first proof of an epoch continues from the old epoch's offdelta, which the update already folded into the ondelta",
+      "file": "settle.qnt",
+      "old": "val base = if (first) 0 else tp.offdelta",
+      "new": "val base = tp.offdelta",
+      "killedBy": "test:firstProofOfTheEpochIsStoredPlusTwoTest"
+    },
+    {
+      "id": "first-proof-offdelta-unchecked",
+      "why": "the honest side signs a first proof whose offdelta does not continue from what both agreed",
+      "file": "settle.qnt",
+      "old": "p.offdelta == bk + (match k { | KPay(x) => payDelta(x.from, x.amt) | KLock(_) => 0 }) }",
+      "new": "true }",
+      "killedBy": "test:firstProofWithAForgedOffdeltaIsRefusedTest"
+    },
+    {
+      "id": "observe-keeps-the-lock",
+      "why": "a side that reads the new epoch keeps the dead lock: payments never resume",
+      "file": "settle.qnt",
+      "old": "acc' = if (acct.epoch > arena.get(acc.tip).epoch) { ...acc, locked: 0 } else acc,",
+      "new": "acc' = acc,",
+      "killedBy": "test:firstProofOfTheEpochIsStoredPlusTwoTest"
+    },
+    {
+      "id": "implicit-start-disabled",
+      "why": "the chain refuses an implicit start: an Account whose update opened a new epoch has no proof to close with (the honest side is hostage)",
+      "file": "chain.qnt",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },\n",
+      "new": "    signedBy(r, other(s)),\n",
+      "killedBy": "invariant:hostage_free",
+      "step": "wfocus"
     }
   ]
 }

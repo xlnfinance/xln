@@ -4,43 +4,48 @@
 // Every proof binds the epoch (C1), so a boundary kills all older proofs. This module is the off-chain side of that
 // rule: the Account state machine that stops signing for a dying epoch (N1) and gets the next epoch started.
 //
+// R-IMPLICIT-BASELINE (plan/contracts-decisions.md, replaces the co-signed baselines of the old N1): the new epoch needs no ceremony. From
+// epoch 1 on the chain itself offers a proof to dispute with, the implicit proof (empty state, nonce stored + 1, authored by Right, no
+// signature; chain.qnt `implicitProof`), settling at Delta = ondelta. A cooperative update therefore folds the offdelta into the ondelta (what
+// both sides agreed is then exactly what the implicit proof pays), and a finalize pays everything out. The Runtime rule that goes with it:
+// the first signed proof of a new epoch takes nonce >= stored + 2, with the stored nonce READ from the chain (a timeout finalize leaves
+// initial + 1, a counter or a signed branch the proof's own nonce, an update its own); the epoch's own counter is gapless after that.
+// Why +2: a Right-authored proof at stored + 1 only TIES the implicit proof, a tie is a refused counter, and the starter of the implicit dispute
+// would settle at ondelta and lose the frame (the trap, chain_test `theTrapLosesTheFramesValueTest`).
+//
 // Scope, stated as a proposal where the sources are silent (each point is in QUESTIONS.md, section S):
 //   - The frame protocol is abstracted to propose (author signs one proof) and ack (the other signs it): collisions,
 //     loss and resend are account.qnt's job. The proof nonce is its own counter, decoupled from frame height.
 //   - The Account offdelta changes only by payments. A cooperative update ("Lock" frame, then the update itself) moves
-//     custody: a diff (dl, dr) of the two reserves, the collateral moves by -(dl+dr), and ondelta by -dl (plus the
-//     folded offdelta in fold mode).
-//   - Two ways to open the next epoch, chosen at init (`presign`):
-//       presign = false  N1 as decided: after the epoch event is observed, both sides co-sign a baseline proof (Rebase
-//                        frame). Until then the Account has no proof for the epoch.
-//       presign = true   the Lock frame also co-signs the baseline of epoch+1, and the update folds offdelta into
-//                        ondelta, so that baseline is always "offdelta 0, no clauses": correct whichever event opens
-//                        the epoch (an update or a finalize, which pays everything out).
+//     custody: a diff (dl, dr) of the two reserves, the collateral moves by -(dl+dr), and ondelta by -dl plus the
+//     folded offdelta.
 //   - Each side sees the chain with a lag: `seen` is what it last observed; the honest side observes before time
 //     passes (that is the lag bound: it must be shorter than the response window, see QUESTIONS S6).
+//   - Single token (multi-token Accounts, where the starter of an implicit dispute names the tokens, are v2: V2.md).
 //
 // Properties (all in `wsafe`):
 //   no_dead_commit    no payment is committed in an epoch the chain already left
 //   no_lost_pay       an update never executes over a state that has changed since it was signed
 //   claims_conserved  an update moves custody without changing what either side would be paid if the Account closed
 //   book_enforceable  the honest side's newest proof of the chain's epoch pays exactly what both agreed
-//   hostage_free      (presign only) the honest side can always close the Account, whatever the other side does
-//   baseline_clears   (presign only) the pre-signed baseline is above every nonce either epoch-opening event can store
+//   hostage_free      the honest side can always close the Account, whatever the other side does (a signed proof, or the implicit one)
+//   first_proof_at_stored_plus_two  the honest side never signs the first proof of an epoch below stored + 2
 module settle {
   import chain.* from "./chain"
 
   pure val OFFMAX = 3
   pure val NUPD = 5
+  pure val FIRST_GAP = 2        // the first signed proof of an epoch is at stored + 2 or above (R-IMPLICIT-BASELINE: a Right-authored one at stored + 1 only ties the implicit proof)
 
-  type Kind = | KPay({ from: Side, amt: int }) | KLock({ dl: int, dr: int }) | KRebase({ off: int })
+  type Kind = | KPay({ from: Side, amt: int }) | KLock({ dl: int, dr: int })
   type Prop = { on: bool, author: Side, pid: int, kind: Kind }
   type View = { epoch: int, nonce: int, dispute: bool }
   // A cooperative update: signed by the side that does not submit it. `fold` is the offdelta it folds into ondelta.
   type Upd = { live: bool, epoch: int, nonce: int, dl: int, dr: int, fold: int, sigL: bool, sigR: bool }
-  // tip: newest both-signed proof the Account has; next: the pre-signed baseline of the next epoch (presign);
+  // tip: newest both-signed proof the Account has (it may be of an epoch the chain has left: the new epoch's first frame replaces it);
   // locked: the pending update (0 = the Account is open for payments)
-  type Acc = { tip: int, next: int, locked: int }
-  type WG = { deadCommit: bool, lostPay: bool, claimBroken: bool, execs: int, commits: int, rebases: int }
+  type Acc = { tip: int, locked: int }
+  type WG = { deadCommit: bool, lostPay: bool, claimBroken: bool, firstLow: bool, execs: int, commits: int }
 
   var seen: Side -> View
   var acc: Acc
@@ -49,11 +54,10 @@ module settle {
   var np: int                   // next free arena slot
   var upds: int -> Upd
   var nu: int
-  var mode: bool                // presign
   var wg: WG
 
   pure val NO_UPD: Upd = { live: false, epoch: 0, nonce: 0, dl: 0, dr: 0, fold: 0, sigL: false, sigR: false }
-  pure val NO_PROP: Prop = { on: false, author: Left, pid: 0, kind: KRebase({ off: 0 }) }
+  pure val NO_PROP: Prop = { on: false, author: Left, pid: 0, kind: KLock({ dl: 0, dr: 0 }) }
 
   pure def absI(x: int): int = if (x < 0) -x else x
   pure def payDelta(from: Side, amt: int): int = match from { | Left => -amt | Right => amt }
@@ -63,55 +67,47 @@ module settle {
   pure def paidToHonest(k: Kind, hon: Side): bool = match k { | KPay(x) => x.from != hon | _ => false }
   pure def isPay(k: Kind): bool = match k { | KPay(_) => true | _ => false }
   pure def isLock(k: Kind): bool = match k { | KLock(_) => true | _ => false }
-  pure def isRebase(k: Kind): bool = match k { | KRebase(_) => true | _ => false }
 
-  // The proof a proposal carries, built from the author's own knowledge of the tip and the chain.
+  // The proof a proposal carries, built from the author's own knowledge of the tip and the chain. The first proof of an epoch the author
+  // has read past its tip (tp is of an older epoch) takes the chain's stored nonce + FIRST_GAP and starts the offdelta from 0 (an update folded
+  // it into the ondelta, a finalize paid everything out); every later one follows the tip by one.
+  pure def isFirst(tp: SignedProof, sv: View): bool = tp.epoch < sv.epoch
   pure def proofFor(k: Kind, author: Side, tp: SignedProof, sv: View): SignedProof = {
     val la = isLeft(author)
+    val first = isFirst(tp, sv)
+    val n = if (first) sv.nonce + FIRST_GAP else tp.nonce + 1
+    val e = if (first) sv.epoch else tp.epoch
+    val base = if (first) 0 else tp.offdelta
     match k {
-      | KPay(x) => mkProof(true, tp.nonce + 1, tp.epoch, la, tp.offdelta + payDelta(x.from, x.amt), NO_CLAUSE, la, not(la))
-      | KLock(_) => mkProof(true, tp.nonce + 1, tp.epoch, la, tp.offdelta, NO_CLAUSE, la, not(la))
-      | KRebase(r) => mkProof(true, sv.nonce + 1, sv.epoch, la, r.off, NO_CLAUSE, la, not(la))
+      | KPay(x) => mkProof(true, n, e, la, base + payDelta(x.from, x.amt), NO_CLAUSE, la, not(la))
+      | KLock(_) => mkProof(true, n, e, la, base, NO_CLAUSE, la, not(la))
     }
   }
+
+  // The first proof of an epoch signed below stored + 2, while the chain is in that epoch and no dispute runs (so its stored nonce is the one the
+  // epoch opened at): the ghost the Runtime's rule is judged by.
+  pure def lowFirst(p: SignedProof, tp: SignedProof, a: Acct, d: Dispute): bool =
+    p.epoch > tp.epoch and p.epoch == a.epoch and not(d.on) and p.nonce < a.nonce + FIRST_GAP
 
   // What the chain would pay each side if the Account closed on this state: the yardstick for "custody moved, claims did not".
   pure def closesTo(m: Money, coll: int, ondelta: int, off: int): Money = payout(m, coll, ondelta + off)
 
   // ---------------------------------------------------------------------------------------------------------
-  // The baseline of the next epoch, co-signed with EVERY frame (N1, revised): a finalize can open a new epoch with no
-  // settlement in sight, and then the honest side needs a proof of that epoch at once. Its nonce is a chain nonce and has to
-  // be above whatever the opening event stores. The events and what they store (chain.qnt):
-  //   an update          its own nonce
-  //   a finalize by path 1 or 2   the nonce of the proof it adopts
-  //   a timeout finalize (path 0) the nonce of the proof the dispute STARTED with, plus 1 (the start stored that nonce)
-  // The proofs a counterparty can start or adopt are the ones the honest side has signed: the co-signed ones, and at most one
-  // proposal of its own that is still unacked (nonce tip + 1). So the largest stored nonce is tip + 1 + 1 and the smallest
-  // baseline that is still above it is tip + 3. Two is the nonce of a baseline that fails when a start uses the proposal.
-  // ---------------------------------------------------------------------------------------------------------
-  pure val BASELINE_GAP = 3
-  pure def baselineOf(p: SignedProof, la: bool): SignedProof = mkProof(true, p.nonce + BASELINE_GAP, p.epoch + 1, la, 0, NO_CLAUSE, true, true)
-
-  // ---------------------------------------------------------------------------------------------------------
   // The rule of the Account state machine (N1). A side runs it before it signs (as author) and before it acks.
-  //   Pay, Lock  the Account is open, both the side and the proof are in the same epoch, the proof nonce follows the tip
-  //   Rebase     an epoch event was observed, the Account is locked or closed, the baseline is signed for the epoch
-  //              seen, above the stored nonce, and carries exactly the offdelta both agreed
+  //   Pay, Lock  the Account is open, both the side and the proof are in the same epoch; the proof nonce follows the tip, or, for the first
+  //              proof of an epoch (the tip is of an older epoch), it is at least the stored nonce the side read + FIRST_GAP, and its
+  //              offdelta starts from the agreed book (0: the epoch event folded or paid out everything)
   // ---------------------------------------------------------------------------------------------------------
   pure def rulesOk(sv: View, a: Acc, tp: SignedProof, bk: int, p: SignedProof, k: Kind, m: Money, coll: int): bool = and {
     not(sv.dispute),                           // a side that has started or answered a dispute knows it at once (cHonestDisputes)
+    a.locked == 0, sv.epoch == p.epoch,
+    if (p.epoch == tp.epoch) p.nonce == tp.nonce + 1
+    else and { p.epoch > tp.epoch, p.nonce >= sv.nonce + FIRST_GAP, p.offdelta == bk + (match k { | KPay(x) => payDelta(x.from, x.amt) | KLock(_) => 0 }) },
     match k {
-      | KPay(x) => and {
-          a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,
-          absI(p.offdelta) <= OFFMAX
-        }
+      | KPay(x) => absI(p.offdelta) <= OFFMAX
       | KLock(l) => and {
-          a.locked == 0, sv.epoch == p.epoch, p.epoch == tp.epoch, p.nonce == tp.nonce + 1,
           m.res.get(Left) + l.dl >= 0, m.res.get(Right) + l.dr >= 0, coll - (l.dl + l.dr) >= 0,
           l.dl != 0 or l.dr != 0
-        }
-      | KRebase(r) => and {
-          sv.epoch > tp.epoch, p.epoch == sv.epoch, p.nonce == sv.nonce + 1, p.offdelta == bk
         }
     }
   }
@@ -122,19 +118,18 @@ module settle {
 
   action winit: bool = {
     nondet hon = SIDES.oneOf()
-    nondet pre = Set(true, false).oneOf()
     nondet resL = 0.to(2).oneOf()
     nondet resR = 0.to(2).oneOf()
     nondet cl = 0.to(2).oneOf()
     nondet cr = 0.to(2).oneOf()
-    sinit(hon, pre, resL, resR, cl, cr)
+    sinit(hon, resL, resR, cl, cr)
   }
 
-  // Both sides hold a both-signed baseline at nonce 1 of epoch 0; `cl` / `cr` is what each side has put into collateral.
-  action sinit(hon: Side, pre: bool, resL: int, resR: int, cl: int, cr: int): bool = {
+  // Both sides hold a both-signed proof at nonce 1 of epoch 0; `cl` / `cr` is what each side has put into collateral.
+  action sinit(hon: Side, resL: int, resR: int, cl: int, cr: int): bool = {
     val base = mkProof(true, 1, 0, true, 0, NO_CLAUSE, true, true)
     all {
-      arena' = SLOTS.mapBy(i => if (i == 1) base else if (i == 2 and pre) baselineOf(base, true) else NO_PROOF),
+      arena' = SLOTS.mapBy(i => if (i == 1) base else NO_PROOF),
       honest' = hon,
       now' = 1,
       acct' = { nonce: 0, epoch: 0, coll: cl + cr, ondelta: cl, via: 0 },
@@ -147,14 +142,13 @@ module settle {
       applied' = SLOTS.mapBy(_ => false),
       ghost' = NO_GHOST,
       seen' = SIDES.mapBy(_ => { epoch: 0, nonce: 0, dispute: false }),
-      acc' = { tip: 1, next: if (pre) 2 else 0, locked: 0 },
+      acc' = { tip: 1, locked: 0 },
       book' = 0,
       prop' = NO_PROP,
-      np' = if (pre) 3 else 2,
+      np' = 2,
       upds' = 0.to(NUPD - 1).mapBy(_ => NO_UPD),
       nu' = 1,
-      mode' = pre,
-      wg' = { deadCommit: false, lostPay: false, claimBroken: false, execs: 0, commits: 0, rebases: 0 }
+      wg' = { deadCommit: false, lostPay: false, claimBroken: false, firstLow: false, execs: 0, commits: 0 }
     }
   }
 
@@ -168,11 +162,21 @@ module settle {
   }
 
   // author signs one proof and offers it; the other side has not answered
-  action offPropose(author: Side, k: Kind): bool = {
+  action offPropose(author: Side, k: Kind): bool = offProposeAdj(author, k, 0)
+
+  // The same, with the nonce of the proof lowered by `adj` (an adversary that offers the first proof of an epoch at stored + 1, or a repeat of the tip's
+  // nonce). The honest side follows its rule and never lowers it.
+  action offProposeAdj(author: Side, k: Kind, adj: int): bool = offProposeX(author, k, adj, 0)
+
+  // ... and with the offdelta of the proof moved by `dOff` (a forged first frame that does not continue from what both agreed).
+  action offProposeX(author: Side, k: Kind, adj: int, dOff: int): bool = {
     val tp = arena.get(acc.tip)
     val sv = seen.get(author)
-    val p = proofFor(k, author, tp, sv)
+    val p0 = proofFor(k, author, tp, sv)
+    val p = { ...p0, nonce: p0.nonce - adj, offdelta: p0.offdelta + dOff }
     all {
+      (author == honest) implies dOff == 0,
+      adj >= 0, (author == honest) implies adj == 0,
       not(prop.on), np < NREC, nu < NUPD,
       match k { | KPay(x) => x.from == author | _ => true },
       (author == honest) implies rulesOk(sv, acc, tp, book, p, k, money, acct.coll),
@@ -180,7 +184,8 @@ module settle {
       prop' = { on: true, author: author, pid: np, kind: k },
       np' = np + 1,
       keepChain,
-      seen' = seen, acc' = acc, book' = book, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+      seen' = seen, acc' = acc, book' = book, upds' = upds, nu' = nu,
+      wg' = { ...wg, firstLow: wg.firstLow or (author == honest and lowFirst(p, tp, acct, dispute)) }
     }
   }
 
@@ -188,7 +193,7 @@ module settle {
   action abandon: bool = all {
     prop.on, prop' = NO_PROP,
     keepChain,
-    arena' = arena, seen' = seen, acc' = acc, book' = book, np' = np, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+    arena' = arena, seen' = seen, acc' = acc, book' = book, np' = np, upds' = upds, nu' = nu, wg' = wg
   }
 
   // Whoever is honest applies the rules again when the answer arrives: as the acker to what it is asked to sign, as the
@@ -202,66 +207,48 @@ module settle {
     all {
       prop.on, isPay(prop.kind),
       ackable(prop, seen, acc, arena.get(acc.tip), book, p, money, acct.coll, honest),
-      arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true }).set(np, baselineOf(p, isLeft(prop.author)))
-               else arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
-      np' = if (mode) np + 1 else np,
-      acc' = { ...acc, tip: prop.pid, next: if (mode) np else acc.next },
+      arena' = arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
+      acc' = { ...acc, tip: prop.pid },
       book' = p.offdelta,
       prop' = NO_PROP,
-      wg' = { ...wg, deadCommit: wg.deadCommit or (p.epoch != acct.epoch and paidToHonest(prop.kind, honest)), commits: wg.commits + 1 },
+      wg' = { ...wg, deadCommit: wg.deadCommit or (p.epoch != acct.epoch and paidToHonest(prop.kind, honest)), commits: wg.commits + 1,
+              firstLow: wg.firstLow or (acker == honest and lowFirst(p, arena.get(acc.tip), acct, dispute)) },
+      np' = np,
       keepChain,
-      seen' = seen, upds' = upds, nu' = nu, mode' = mode
+      seen' = seen, upds' = upds, nu' = nu
     }
   }
 
-  // A Lock commits the update the two sides intend to execute. From here payments pause. In presign mode the frame co-signs
-  // the baseline of the next epoch, as every frame does.
+  // A Lock commits the update the two sides intend to execute. From here payments pause.
   action ackLock: bool = {
     val p = arena.get(prop.pid)
     val acker = other(prop.author)
     val lk = match prop.kind { | KLock(l) => l | _ => { dl: 0, dr: 0 } }
     val u: Upd = { live: true, epoch: p.epoch, nonce: p.nonce + 1, dl: lk.dl, dr: lk.dr, fold: p.offdelta,
                    sigL: false, sigR: false }
-    val baseline = baselineOf(p, isLeft(prop.author))
     all {
       prop.on, isLock(prop.kind),
       ackable(prop, seen, acc, arena.get(acc.tip), book, p, money, acct.coll, honest),
-      arena' = if (mode) arena.set(prop.pid, { ...p, sigL: true, sigR: true }).set(np, baseline)
-               else arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
-      np' = if (mode) np + 1 else np,
-      acc' = { tip: prop.pid, next: if (mode) np else 0, locked: nu },
+      arena' = arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
+      np' = np,
+      acc' = { tip: prop.pid, locked: nu },
       upds' = upds.set(nu, u),
       nu' = nu + 1,
       prop' = NO_PROP,
-      wg' = { ...wg, commits: wg.commits + 1 },
+      wg' = { ...wg, commits: wg.commits + 1, firstLow: wg.firstLow or (acker == honest and lowFirst(p, arena.get(acc.tip), acct, dispute)) },
       keepChain,
-      seen' = seen, book' = book, mode' = mode
+      seen' = seen, book' = book
     }
   }
 
-  action ackRebase: bool = {
-    val p = arena.get(prop.pid)
-    val acker = other(prop.author)
-    all {
-      prop.on, isRebase(prop.kind),
-      ackable(prop, seen, acc, arena.get(acc.tip), book, p, money, acct.coll, honest),
-      arena' = arena.set(prop.pid, { ...p, sigL: true, sigR: true }),
-      acc' = { tip: prop.pid, next: 0, locked: 0 },
-      prop' = NO_PROP,
-      wg' = { ...wg, commits: wg.commits + 1, rebases: wg.rebases + 1 },
-      keepChain,
-      seen' = seen, book' = book, np' = np, upds' = upds, nu' = nu, mode' = mode
-    }
-  }
-
-  // A side reads the chain. In presign mode the pre-signed baseline becomes the tip the moment the epoch it was signed
-  // for is the chain's, by whichever event.
+  // A side reads the chain. Once the epoch it reads is past the tip's, a pending lock is dead (the update executed, or a finalize killed it) and
+  // payments may resume: the next proof is the first of the new epoch.
   action observe(s: Side): bool = all {
     seen.get(s) != viewOf(acct, dispute),
     seen' = seen.set(s, viewOf(acct, dispute)),
-    acc' = if (mode and acc.next != 0 and arena.get(acc.next).epoch == acct.epoch) { tip: acc.next, next: 0, locked: 0 } else acc,
+    acc' = if (acct.epoch > arena.get(acc.tip).epoch) { ...acc, locked: 0 } else acc,
     keepChain,
-    arena' = arena, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+    arena' = arena, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, wg' = wg
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -276,7 +263,7 @@ module settle {
       (s == honest) implies (acc.locked == uid and not(seen.get(s).dispute)),
       upds' = upds.set(uid, match s { | Left => { ...u, sigL: true } | Right => { ...u, sigR: true } }),
       keepChain,
-      arena' = arena, seen' = seen, acc' = acc, book' = book, prop' = prop, np' = np, nu' = nu, mode' = mode, wg' = wg
+      arena' = arena, seen' = seen, acc' = acc, book' = book, prop' = prop, np' = np, nu' = nu, wg' = wg
     }
   }
 
@@ -285,9 +272,9 @@ module settle {
   action execUpd(x: Side, uid: int): bool = {
     val u = upds.get(uid)
     val dColl = -(u.dl + u.dr)
-    val dOn = -u.dl + (if (mode) u.fold else 0)
+    val dOn = -u.dl + u.fold                            // the offdelta both agreed is folded into the ondelta: the implicit proof of the new epoch pays exactly that
     val m2: Money = { res: money.res.set(Left, money.res.get(Left) + u.dl).set(Right, money.res.get(Right) + u.dr), debt: money.debt, dq: money.dq }
-    val offAfter = if (mode) 0 else book
+    val offAfter = 0
     val a2: Acct = { nonce: u.nonce, epoch: acct.epoch + 1, coll: acct.coll + dColl, ondelta: acct.ondelta + dOn, via: uid }
     all {
       uid >= 1, uid < NUPD, u.live,
@@ -306,7 +293,7 @@ module settle {
               execs: wg.execs + 1 },
       arena' = arena, honest' = honest, now' = now, total' = total, dispute' = dispute, registry' = registry,
       knows' = knows, offline' = offline, applied' = applied, ghost' = ghost,
-      seen' = seen, acc' = acc, prop' = prop, np' = np, upds' = upds, nu' = nu, mode' = mode
+      seen' = seen, acc' = acc, prop' = prop, np' = np, upds' = upds, nu' = nu
     }
   }
 
@@ -314,14 +301,14 @@ module settle {
   // The chain's own actions, with the honest side reading the chain first
   // ---------------------------------------------------------------------------------------------------------
 
-  // the honest side holds a both-signed proof of the chain's epoch that a dispute could start with
-  val startable: bool = RECS.exists(i => canStart({ ar: arena, a: acct, d: dispute }, honest, i))
+  // the honest side can start a dispute: it holds a signed proof of the chain's epoch to start with, or (from epoch 1) the implicit proof is there
+  val startable: bool = canStartAny({ ar: arena, a: acct, d: dispute }, honest)
 
   // the honest side is up to date on what matters for signing: the epoch and whether a dispute runs (the nonce it reads on observe)
   val fresh: bool = seen.get(honest).epoch == acct.epoch and seen.get(honest).dispute == dispute.on
 
   action keepSettle: bool = all {
-    seen' = seen, acc' = acc, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+    seen' = seen, acc' = acc, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, wg' = wg
   }
 
   action cNeutral(a: bool): bool = all { a, keepSettle }
@@ -330,13 +317,13 @@ module settle {
   action cHonestDisputes(a: bool): bool = all {
     fresh, a,
     seen' = seen.set(honest, { ...seen.get(honest), dispute: true }),
-    acc' = acc, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+    acc' = acc, book' = book, prop' = prop, np' = np, upds' = upds, nu' = nu, wg' = wg
   }
   // a finalize pays everything out: the new epoch starts from nothing
   action cFinalize(a: bool): bool = all {
     a,
     book' = 0,
-    seen' = seen, acc' = acc, prop' = prop, np' = np, upds' = upds, nu' = nu, mode' = mode, wg' = wg
+    seen' = seen, acc' = acc, prop' = prop, np' = np, upds' = upds, nu' = nu, wg' = wg
   }
 
   action wstep = any {
@@ -346,25 +333,23 @@ module settle {
     cNeutral(setOffline(true)), cNeutral(setOffline(false)),
     // a side funds its own share; the honest side does so only into an Account it holds a proof for (S: fund after open)
     { nondet a = 1.to(2).oneOf() nondet who = SIDES.oneOf() cNeutral(all { who != honest or startable, r2c(who, who, a) }) },
-    cNeutral(adversaryStart), cHonestDisputes(honestStart),
+    cNeutral(adversaryStart), cNeutral(adversaryStartImplicit), cHonestDisputes(honestStart),
     cNeutral(adversaryCounter), cHonestDisputes(honestCounter),
     cFinalize(adversaryFinalize), cFinalize(all { fresh, honestFinalize }),
-    { nondet who = SIDES.oneOf() nondet a = 1.to(2).oneOf() offPropose(who, KPay({ from: who, amt: a })) },
-    { nondet who = SIDES.oneOf() nondet l = (-1).to(1).oneOf() nondet r = (-1).to(1).oneOf() offPropose(who, KLock({ dl: l, dr: r })) },
-    { nondet who = SIDES.oneOf() nondet o = (-1).to(1).oneOf() offPropose(who, KRebase({ off: o })) },
-    ackPay, ackLock, ackRebase, abandon,
+    { nondet who = SIDES.oneOf() nondet a = 1.to(2).oneOf() nondet adj = 0.to(1).oneOf() offProposeAdj(who, KPay({ from: who, amt: a }), adj) },
+    { nondet who = SIDES.oneOf() nondet l = (-1).to(1).oneOf() nondet r = (-1).to(1).oneOf() nondet adj = 0.to(1).oneOf() offProposeAdj(who, KLock({ dl: l, dr: r }), adj) },
+    ackPay, ackLock, abandon,
     observe(Left), observe(Right),
     { nondet who = SIDES.oneOf() nondet uid = 1.to(NUPD - 1).oneOf() signUpd(who, uid) },
     { nondet who = SIDES.oneOf() nondet uid = 1.to(NUPD - 1).oneOf() all { who != honest or fresh, execUpd(who, uid) } }
   }
 
   // The settlement lifecycle alone, without the chain's dispute noise: random search reaches deep schedules (pay, lock,
-  // sign, execute, read, rebase) far more often. Used to hunt mutants; the full `wstep` is the one that must stay green.
+  // sign, execute, read, first frame of the new epoch) far more often. Used to hunt mutants; the full `wstep` is the one that must stay green.
   action wfocus = any {
-    { nondet who = SIDES.oneOf() nondet a = 1.to(2).oneOf() offPropose(who, KPay({ from: who, amt: a })) },
-    { nondet who = SIDES.oneOf() nondet l = (-1).to(1).oneOf() nondet r = (-1).to(1).oneOf() offPropose(who, KLock({ dl: l, dr: r })) },
-    { nondet who = SIDES.oneOf() nondet o = (-1).to(1).oneOf() offPropose(who, KRebase({ off: o })) },
-    ackPay, ackLock, ackRebase,
+    { nondet who = SIDES.oneOf() nondet a = 1.to(2).oneOf() nondet adj = 0.to(1).oneOf() offProposeAdj(who, KPay({ from: who, amt: a }), adj) },
+    { nondet who = SIDES.oneOf() nondet l = (-1).to(1).oneOf() nondet r = (-1).to(1).oneOf() nondet adj = 0.to(1).oneOf() offProposeAdj(who, KLock({ dl: l, dr: r }), adj) },
+    ackPay, ackLock,
     observe(Left), observe(Right),
     { nondet who = SIDES.oneOf() signUpd(who, 1) },
     { nondet who = SIDES.oneOf() execUpd(who, 1) },
@@ -385,25 +370,10 @@ module settle {
     t == 0 or arena.get(t).offdelta == book
   }
 
-  // The pre-signed baseline (presign) is usable whichever event opens its epoch. A start needs a proof nonce above the stored
-  // one, and the events store at most: an update its nonce; a finalize the nonce of what it adopts, or, for a timeout, the
-  // nonce the dispute started with plus 1. What can be started or adopted is what the honest side has signed. So before the
-  // event the baseline must clear the highest nonce the honest side has signed for the epoch, plus 1, and the update's
-  // nonce; after it, the stored nonce (a dispute that started with the baseline itself has stored its nonce). The frame
-  // height of the Account has no part in this: only chain nonces do.
-  def signedNonce(e: int): int = RECS.fold(0, (m, i) =>
-    if (arena.get(i).live and arena.get(i).epoch == e and signedBy(arena.get(i), honest)) imax(m, arena.get(i).nonce) else m)
-
-  val baseline_clears: bool = or {
-    acc.next == 0,
-    {
-      val b = arena.get(acc.next)
-      val u = upds.get(acc.locked)
-      if (acct.epoch == b.epoch) dispute.on or b.nonce > acct.nonce            // a start stores the nonce of the proof it used
-      else if (acct.epoch > b.epoch) true
-      else and { b.nonce > signedNonce(b.epoch - 1) + 1, b.nonce > acct.nonce + 1, b.nonce > u.nonce }
-    }
-  }
+  // R-IMPLICIT-BASELINE, the Runtime's rule: the first signed proof of an epoch takes nonce >= stored + 2 (stored read from the chain). The
+  // honest side never signs one lower (as author or as acker), whatever the other side offers: a Right-authored proof at stored + 1 only ties the
+  // implicit proof, and the starter of the implicit dispute would settle at the ondelta and lose the frame.
+  val first_proof_at_stored_plus_two: bool = not(wg.firstLow)
 
   // what the honest side would hold in the Account if it closed on the agreed offdelta (debt ignored)
   val honestStake: int = {
@@ -417,17 +387,17 @@ module settle {
     dispute.on,
     startable
   }
-  val hostage_free: bool = not(mode) or exit_ok
+  val hostage_free: bool = exit_ok
 
-  val wsafe: bool = and { safe, no_dead_commit, no_lost_pay, claims_conserved, book_enforceable, hostage_free, baseline_clears }
+  val wsafe: bool = and { safe, no_dead_commit, no_lost_pay, claims_conserved, book_enforceable, hostage_free, first_proof_at_stored_plus_two }
 
   // coverage: each must be violated by some run
   val w_no_lock: bool = acc.locked == 0
   val w_no_update: bool = wg.execs == 0
   val w_no_second_epoch: bool = acct.epoch < 2
-  val w_no_rebase: bool = wg.rebases == 0
   val w_no_payment: bool = book == 0
-  val w_no_adoption: bool = not(mode and wg.execs > 0 and acct.epoch > 0 and arena.get(acc.tip).epoch == acct.epoch)
-  // in the N1-as-decided mode a settled Account can be left without a proof for its epoch: a state that cannot close
-  val w_hostage: bool = mode or exit_ok
+  // a frame of the new epoch is signed after an update: the first proof of the epoch exists
+  val w_no_first_frame_of_the_epoch: bool = not(wg.execs > 0 and acct.epoch > 0 and arena.get(acc.tip).epoch == acct.epoch)
+  // the first frame of a new epoch is offered by the other side below stored + 2 and the honest side refuses it: the rule bites
+  val w_no_refused_low_first_frame: bool = not(prop.on and acct.epoch > 0 and arena.get(prop.pid).epoch == acct.epoch and arena.get(acc.tip).epoch < acct.epoch and arena.get(prop.pid).nonce < acct.nonce + FIRST_GAP and prop.author != honest)
 }
