@@ -400,7 +400,11 @@ describe("the real tree", () => {
     expect(out).toContain("The Arrival and Quint milestones are read from");
   }, 30_000);
   test("--since HEAD adds and retires no rules; a ref that is not there is an error, never an empty answer", () => {
-    expect(run("--skip-verify", "--since", "HEAD").stdout.toString()).toContain("0 rules added, 0 rules retired");
+    // "Adds no rules" holds only while the register is what HEAD has: a merge or an edit under way that adds a rule makes this a different report.
+    const edited = Bun.spawnSync(["git", "diff", "--quiet", "HEAD", "--", "rules/register.json"], { cwd: `${import.meta.dir}/../..` }).exitCode !== 0;
+    const since = run("--skip-verify", "--since", "HEAD").stdout.toString();
+    expect(since).toContain(edited ? "Since " : "0 rules added, 0 rules retired");
+    expect(since).toContain("0 rules retired");
     // Without --skip-verify on purpose: a bad ref is refused before the verifier is asked, so it never waits for a node.
     const missing = run("--since", "no-such-ref-anywhere");
     expect(missing.exitCode).toBe(1);
