@@ -46,8 +46,9 @@ export type Leg = Readonly<{ token: TokenId; amount: bigint }>;
 
 /**
  * An open swap offer (R-SWAP-*): `maker` gives `give` for `want`, in whole or in parts, until its `deadline` in J
- * height (off-chain only: the chain's clause has no expiry). It is a clause of its own, in a slot of its own among
- * the offers of the Account. `give` and `want` are what remains: every fill shrinks them (R-SWAP-CLAUSE-WITH-FILL).
+ * height (off-chain only: the chain's clause has no expiry), in a slot of its own among the quotes and offers of the
+ * Account. It is a quote until the taker's first fill and a clause of the proof body after it (R-SWAP-CONSENT).
+ * `give` and `want` are what remains: every fill shrinks them (R-SWAP-CLAUSE-WITH-FILL).
  */
 export type Offer = Readonly<{ id: HoldId; maker: Side; give: Leg; want: Leg; deadline: JHeight }>;
 
@@ -66,11 +67,17 @@ export type Ledger = Readonly<{
 }>;
 
 /**
- * Everything one Account agrees on: a Ledger per token it has used, and the swap offers that span two of them. A token
- * with no entry reads as the empty ledger. The caps that span tokens (open clauses, open hashlocks) are the Account's,
- * so they are read here and not in a Ledger.
+ * Everything one Account agrees on: a Ledger per token it has used, and the swap quotes and offers that span two of
+ * them. A token with no entry reads as the empty ledger. The caps that span tokens (open clauses, open hashlocks) are
+ * the Account's, so they are read here and not in a Ledger.
  */
-export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger>; offers: readonly Offer[] }>;
+export type AccountState = Readonly<{
+  ledgers: ReadonlyMap<TokenId, Ledger>;
+  /** Quotes (R-SWAP-CONSENT): offers no taker has filled; each reserves only its maker's give and is no clause. */
+  quotes: readonly Offer[];
+  /** Accepted offers: a taker has filled at least once; each reserves both legs and is a clause of the proof body. */
+  offers: readonly Offer[];
+}>;
 
 /** One case per refusal; none of them halts anything. */
 export type AccountFault =
@@ -98,6 +105,7 @@ export type AccountFault =
   | Tagged<"unsignable", { fault: string }>
   | Tagged<"same_token", { token: TokenId }>
   | Tagged<"offer_exists", { id: HoldId }>
+  | Tagged<"too_many_quotes", { max: number }>
   | Tagged<"no_such_offer", { id: HoldId }>
   | Tagged<"not_maker">
   | Tagged<"not_taker">
