@@ -4,13 +4,17 @@ on:
   push:
     branches: [main, develop]
   # Every pull request, whatever base it targets or files it touches: the One gate checks are required, so a PR that never
-  # got them would sit blocked forever. rules/ci/ci-triggers.ts refuses a branches, paths or types filter here.
+  # got them would sit blocked forever. rules/ci/workflow/ci-triggers.ts refuses a branches, paths or types filter here.
   pull_request:
+  # The full set once a night on main: the spec jobs then ignore their pass marker, and og's informational suites run (they are not run on PRs).
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
 
+# A newer push cancels the older run of the same PR; a run on main is never cancelled, so its spec markers are saved.
 concurrency:
   group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
@@ -231,11 +235,101 @@ jobs:
         working-directory: pure
         run: SEEDS="${{ matrix.seed }}" bun run test:seeds
 
+  # The spec suites, the same commands a contributor runs in spec/ (spec/README.md). Each job keeps a marker in the Actions cache keyed on
+  # a hash of the files it reads, saved only when the job passed: a run over the same spec files reads the marker and skips the work, and
+  # still reports success, so a PR that leaves spec/ alone costs about a minute and a required check is never missing.
+  gate-quint:
+    name: One gate (quint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Marker of a pass on these files
+        id: marker
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .spec-passed
+          key: ${{ runner.os }}-node-22.13.0-quint-${{ hashFiles('spec/quint/**') }}
+
+      - name: Install Quint
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/quint
+        run: npm ci
+
+      # Typecheck, scenario tests, invariants and witnesses by simulation, every module (spec/quint/check.sh).
+      - name: Quint spec
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/quint
+        run: bash check.sh
+
+      - name: Record the pass
+        if: steps.marker.outputs.cache-hit != 'true'
+        run: mkdir -p .spec-passed && echo ok > .spec-passed/quint
+
+  # The Arrival spec: `node test.mjs` in spec/ runs every page and every planted bug, 167 cases. One case (J batch with deposit legs) takes
+  # about 85 minutes alone, so it is shard 0 by itself and shards 1 to 3 split the rest (spec/tools/shard.mjs). Memory is why the pool is two wide.
+  gate-arrival:
+    name: One gate (arrival shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['0', '1', '2', '3']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Marker of a pass on these files
+        id: marker
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .spec-passed
+          key: ${{ runner.os }}-node-22.13.0-arrival-${{ matrix.shard }}-of-4-${{ hashFiles('spec/**') }}
+
+      - name: Install the spec's dependencies
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec
+        run: npm ci
+
+      - name: Build Arrival
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec/arrival
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Arrival spec, shard ${{ matrix.shard }} of 4
+        if: steps.marker.outputs.cache-hit != 'true'
+        working-directory: spec
+        env:
+          TEST_JOBS: '2'
+        run: SHARD="${{ matrix.shard }}/4" node test.mjs
+
+      - name: Record the pass
+        if: steps.marker.outputs.cache-hit != 'true'
+        run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival
+
   # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped.
   one-gate:
     name: One gate
     if: ${{ always() }}
-    needs: [gate-static, gate-tests, gate-seeds, contracts-fork]
+    needs: [gate-static, gate-tests, gate-seeds, contracts-fork, gate-quint, gate-arrival]
     runs-on: ubuntu-latest
     steps:
       - name: Every part passed
@@ -244,14 +338,17 @@ jobs:
           TESTS: ${{ needs.gate-tests.result }}
           SEEDS: ${{ needs.gate-seeds.result }}
           FORK: ${{ needs.contracts-fork.result }}
+          QUINT: ${{ needs.gate-quint.result }}
+          ARRIVAL: ${{ needs.gate-arrival.result }}
         run: |
-          echo "static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK"
-          test "$STATIC" = success && test "$TESTS" = success && test "$SEEDS" = success && test "$FORK" = success
+          echo "static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK quint=$QUINT arrival=$ARRIVAL"
+          test "$STATIC" = success && test "$TESTS" = success && test "$SEEDS" = success && test "$FORK" = success && test "$QUINT" = success && test "$ARRIVAL" = success
 
   # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
   # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.
   contracts-test:
     name: Contracts (og, known red, informational)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -449,6 +546,7 @@ jobs:
 
   e2e-tests:
     name: E2E Tests (og, informational)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # og's Playwright suite is og's: its first run in CI failed one test (e2e-radapter-remote-part-2 "runtime dropdown

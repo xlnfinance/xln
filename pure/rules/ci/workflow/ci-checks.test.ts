@@ -1,10 +1,10 @@
 // The checks the ruleset requires are the checks the workflow reports: the readers, each planted rename, and the real files.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { isWorkflowFile, withoutComments } from "./ci-drift.ts";
-import { checkProblems, reportedChecks, requiredChecks } from "./ci-checks.ts";
+import { isWorkflowFile, withoutComments } from "../ci-drift.ts";
+import { aggregateProblems, checkProblems, plannedChecks, reportedChecks, requiredChecks } from "./ci-checks.ts";
 
-const repo = `${import.meta.dir}/../../..`;
+const repo = `${import.meta.dir}/../../../..`;
 
 const WORKFLOW = [
   "name: ci",
@@ -53,6 +53,8 @@ describe("the readers", () => {
     expect(requiredChecks('{ "contexts": ["a", 1, "b"] }')).toEqual(["a", "b"]);
     expect(requiredChecks('{ "contexts": "a" }')).toEqual([]);
     expect(requiredChecks("{}")).toEqual([]);
+    expect(plannedChecks('{ "contexts": ["a"], "planned": ["p", 2] }')).toEqual(["p"]);
+    expect(plannedChecks('{ "contexts": ["a"] }')).toEqual([]);
   });
 });
 
@@ -75,14 +77,46 @@ describe("planted drift is a problem", () => {
   });
 });
 
+describe("the aggregate holds every One gate job", () => {
+  const AGGREGATED = WORKFLOW.replace("    steps: []\n  gate-seeds:", "    steps: []\n  gate-seeds:").replace("needs: [gate-a, gate-seeds]\n    steps: []", "needs: [gate-a, gate-seeds]\n    steps:\n      - run: test \"${{ needs.gate-a.result }}\" = success && test \"${{ needs.gate-seeds.result }}\" = success");
+
+  test("R-GATE-CI-CHECK-NAMES a one-gate that needs every One gate (...) job and reads each result agrees", () => {
+    expect(aggregateProblems("ci.yml", AGGREGATED)).toEqual([]);
+    expect(aggregateProblems("o.yml", "jobs:\n  a:\n    name: One gate (x)\n")).toEqual([]);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES a One gate (...) job that one-gate does not need is named, so adding a job cannot leave it out", () => {
+    const plant = AGGREGATED.replace("  unnamed:", "  gate-new:\n    name: One gate (new)\n    steps: []\n  unnamed:");
+    expect(aggregateProblems("ci.yml", plant)).toEqual([expect.stringContaining("CI_CHECK_UNAGGREGATED ci.yml job gate-new")]);
+    expect(aggregateProblems("ci.yml", plant.replace("name: One gate (new)", 'name: "One gate (new)"'))).toHaveLength(1);
+    expect(aggregateProblems("ci.yml", plant.replace("name: One gate (new)", "name: Other"))).toEqual([]);
+    expect(aggregateProblems("ci.yml", plant.replace("name: One gate (new)", "name: One gate extra"))).toHaveLength(1);
+    expect(aggregateProblems("ci.yml", plant.replace("name: One gate (new)", "name: One gated"))).toEqual([]);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES a need whose result one-gate never reads is named", () => {
+    expect(aggregateProblems("ci.yml", AGGREGATED.replace('&& test "${{ needs.gate-seeds.result }}" = success', ""))).toEqual([expect.stringContaining("CI_CHECK_UNREAD ci.yml one-gate needs gate-seeds but never reads needs.gate-seeds.result")]);
+    expect(aggregateProblems("ci.yml", WORKFLOW)).toHaveLength(2);
+  });
+});
+
 describe("the real workflow and the real list", () => {
-  const required = requiredChecks(readFileSync(`${repo}/.github/required-checks.json`, "utf8"));
+  const json = readFileSync(`${repo}/.github/required-checks.json`, "utf8");
+  const required = requiredChecks(json);
+  const planned = plannedChecks(json);
   const real = readdirSync(`${repo}/.github/workflows`).filter(isWorkflowFile).map((name) => ({ name, text: withoutComments(readFileSync(`${repo}/.github/workflows/${name}`, "utf8")) }));
 
-  test("R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow", () => expect(real.flatMap(({ name, text }) => checkProblems(name, text, required))).toEqual([]));
+  test("R-GATE-CI-CHECK-NAMES every check the ruleset requires, and every one planned, is reported by a job of the real workflow", () => {
+    expect(real.flatMap(({ name, text }) => checkProblems(name, text, required))).toEqual([]);
+    expect(real.flatMap(({ name, text }) => checkProblems(name, text, planned))).toEqual([]);
+  });
+
+  test("R-GATE-CI-CHECK-NAMES the real one-gate needs every One gate (...) job and reads every result", () => expect(real.flatMap(({ name, text }) => aggregateProblems(name, text))).toEqual([]));
 
   test("R-GATE-CI-CHECK-NAMES the check is not vacuous: five names are required, and the real One gate workflow reports them", () => {
     expect(required).toHaveLength(5);
+    expect(planned).toEqual(["One gate"]);
+    expect(planned).toContain("One gate");
     expect(required).toContain("One gate (bun test)");
     const gate = real.find(({ text }) => reportedChecks(text).length > 0);
     expect(gate).toBeDefined();

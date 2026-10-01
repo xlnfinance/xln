@@ -3890,8 +3890,8 @@
   },
   {
    "id": "R-GATE-CI-STEPS",
-   "statement": "Every command of a job behind GitHub's `One gate` is a command of the local gate or listed set-up (installs, cd, the ast-grep script), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
-   "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop)",
+   "statement": "Every command of a job behind GitHub's `One gate` is a command of the gate or listed set-up (installs, cd, the ast-grep script, the spec dependencies and build, the spec pass marker), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds, the Quint check.sh, the Arrival node test.mjs) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
+   "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop); 10:12 (Quint and Arrival join required CI)",
    "layers": {
     "arrival": "-",
     "quint": "-",
@@ -3929,6 +3929,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-CI-STEPS any other command in a gate job is named, a gate flag that is not a part flag included"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS set-up is exact too: a cd into a substitution, an install that adds a package, a script given other arguments"
     },
     {
      "kind": "test",
@@ -4102,8 +4107,8 @@
   },
   {
    "id": "R-GATE-CI-CHECK-NAMES",
-   "statement": "Every check the ruleset requires on the default branch (the five One gate checks, listed in .github/required-checks.json) is reported by a job of the gate workflow under exactly that name, a matrix job once per value: renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports and a PR that waits on it forever.",
-   "source": "coordinator 10-01 09:32 (the five One gate checks are now required through a ruleset)",
+   "statement": "The aggregate `One gate` is the one name to require, and nothing can sit outside it: every job named One gate ... is a need of the aggregate, which reads each need's result, so a new gate job needs no ruleset change; the five names the ruleset requires today (.github/required-checks.json) and the planned `One gate` are each reported by a job of the gate workflow under exactly that name (a matrix job once per value), so renaming a job, or dropping a seed from the matrix, is red in the drift tests instead of leaving a required check that never reports.",
+   "source": "coordinator 10-01 09:32 (the five One gate checks are required through a ruleset); 10:12 (one aggregate name)",
    "layers": {
     "arrival": "-",
     "quint": "-",
@@ -4160,12 +4165,130 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires is reported by a job of the real workflow"
+     "name": "R-GATE-CI-CHECK-NAMES a one-gate that needs every One gate (...) job and reads each result agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a One gate (...) job that one-gate does not need is named, so adding a job cannot leave it out"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES a need whose result one-gate never reads is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES every check the ruleset requires, and every one planned, is reported by a job of the real workflow"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-CHECK-NAMES the real one-gate needs every One gate (...) job and reads every result"
     },
     {
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-CI-CHECK-NAMES the check is not vacuous: five names are required, and the real One gate workflow reports them"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-SPEC",
+   "statement": "A spec job behind One gate (Quint, the Arrival shards) skips its work only on a marker of a pass in the Actions cache, and only soundly: the marker is keyed on a hash of every file the suite reads (spec/** for Arrival, spec/quint/** for Quint), every working step is guarded by the marker's cache-hit, and the pass is recorded by the last step after the suite, so it is saved only when the whole job passed. A PR that leaves spec/ alone reads main's marker and reports green without the 20 to 90 minutes; the nightly run ignores the marker.",
+   "source": "process.md 10-01 (a check slower than 30 minutes runs for PRs that touch its own files, and nightly on main)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC a marker keyed on the spec files, every working step guarded, the pass recorded last, agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC a job that runs no spec suite, and a workflow with no one-gate, are not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC no marker step is named, whichever part of it is missing: the id, the cache action, the path"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC a key that does not hash the files the suite reads is named: too narrow for Arrival, none at all, another folder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC a run step with no guard is named with its first line"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC a pass recorded before the suite, or not recorded, or recorded by a step that is not last, is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC the spec check is part of the drift check"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC the real spec jobs skip soundly"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SPEC the check is not vacuous: the real workflow has a quint job and an arrival job that it judges"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-SPEC-SHARDS",
+   "statement": "The Arrival suite runs in CI as shards (SHARD=k/n node test.mjs): the shards together run every case exactly once, the heavy case (about 85 minutes alone) is shard 0 by itself, every other shard has cases of its own, n = 2 and a malformed SHARD are refused, and a shard with no case to run fails.",
+   "source": "coordinator 10-01 09:42 (Arrival in required CI)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-SPEC-SHARDS the shards together run each case exactly once, for one shard and for three or more"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-SPEC-SHARDS the heavy case is shard 0 alone, and every other shard has cases of its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-SPEC-SHARDS no SHARD is the whole suite, and a shard that is not k/n with 0 <= k < n, or n = 2, is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-SPEC-SHARDS the shard of a case does not move when other cases are added after it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-SPEC-SHARDS test.mjs runs the cases of its shard only, and has a heavy case to put in shard 0"
     }
    ]
   }

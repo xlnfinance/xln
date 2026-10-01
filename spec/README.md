@@ -61,6 +61,8 @@ npm test               # 167 cases, one child process each (pool of TEST_JOBS=4)
                        # Wall time 88.7 minutes on 4 cores (the J batch case with deposit legs alone takes 85); every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 
+CI runs the suite in four shards, `SHARD=k/4 node test.mjs` (k = 0..3, `tools/shard.mjs`): shard 0 is the heavy J batch case alone, shards 1 to 3 split the rest. `SHARD=k/n` needs n = 1 or n >= 3.
+
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
 `(require "lib/check.scm")` resolves against the directory of the entry file, so run from `spec/`.
 

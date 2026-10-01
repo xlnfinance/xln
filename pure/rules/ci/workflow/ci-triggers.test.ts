@@ -1,10 +1,11 @@
 // The workflow behind One gate starts on every pull request and cannot skip a gate job: each way it could not, planted, and the real workflow.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "./ci-drift.ts";
+import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "../ci-drift.ts";
+import { jobBlocks } from "./ci-steps.ts";
 import { triggerProblems } from "./ci-triggers.ts";
 
-const repo = `${import.meta.dir}/../../..`;
+const repo = `${import.meta.dir}/../../../..`;
 const workflowDir = `${repo}/.github/workflows`;
 
 const workflow = (on: readonly string[], gateJob: readonly string[] = [], oneGate: readonly string[] = ["    if: ${{ always() }}"]): string =>
@@ -85,6 +86,13 @@ describe("the real workflows", () => {
   const real = readdirSync(workflowDir).filter(isWorkflowFile).map((name) => ({ name, text: withoutComments(readFileSync(`${workflowDir}/${name}`, "utf8")) }));
 
   test("R-GATE-CI-TRIGGERS the real workflows start on every pull request and cannot skip a gate job", () => expect(real.flatMap(({ name, text }) => triggerProblems(name, text))).toEqual([]));
+
+  test("R-GATE-CI-TRIGGERS the nightly run exists, a run on main is never cancelled, and og's informational suites run only nightly or by hand", () => {
+    const gate = real.find(({ text }) => text.includes("one-gate:"))?.text ?? "";
+    expect(gate).toMatch(/^\s+schedule:\s*\n\s+- cron:/m);
+    expect(gate).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}");
+    ["contracts-test", "e2e-tests"].forEach((job) => expect(jobBlocks(gate)[job], job).toContain("if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"));
+  });
 
   test("R-GATE-CI-TRIGGERS the check is not vacuous: the real One gate workflow is judged, and its pull_request trigger is there", () => {
     const gate = real.find(({ text }) => text.includes("one-gate:"));

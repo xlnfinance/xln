@@ -13,6 +13,9 @@ export const GATE_COMMANDS: readonly RegExp[] = [
   /^bun style\/check\.ts$/,
   /^bun test$/,
   /^(?:SEEDS="[^"]*" )?bun run test:seeds$/,
+  // The spec suites, run from spec/ (spec/README.md): the Quint check and the Arrival cases (a shard of them in CI).
+  /^bash check\.sh$/,
+  /^(?:SHARD="[^"]*" )?node test\.mjs$/,
 ];
 
 // What a gate job may run besides the gate: it puts tools and dependencies in place and moves around.
@@ -21,6 +24,13 @@ export const SETUP_COMMANDS: readonly RegExp[] = [
   /^bun install --frozen-lockfile$/,
   /^bun run forge:setup$/,
   /^bash \.github\/scripts\/setup-ast-grep\.sh uv==\S+ ast-grep-cli==\S+$/,
+  // The spec jobs: dependencies, the Arrival build, and the marker of a pass kept in the Actions cache.
+  /^npm ci$/,
+  /^corepack enable$/,
+  /^pnpm install --frozen-lockfile$/,
+  /^pnpm build$/,
+  /^mkdir -p \.spec-passed$/,
+  /^echo ok > \.spec-passed\/(?:quint|arrival)$/,
 ];
 
 // The gate commands every workflow with a `one-gate` job must run somewhere in its gate jobs (the plain `bun rules/check.ts` runs every part).
@@ -31,6 +41,8 @@ const REQUIRED: readonly Readonly<{ command: string; pattern: RegExp }>[] = [
   { command: "bun style/check.ts", pattern: GATE_COMMANDS[3]! },
   { command: "bun test", pattern: GATE_COMMANDS[4]! },
   { command: "bun run test:seeds", pattern: GATE_COMMANDS[5]! },
+  { command: "bash check.sh", pattern: GATE_COMMANDS[6]! },
+  { command: "node test.mjs", pattern: GATE_COMMANDS[7]! },
 ];
 
 const JOB_START = /^ {2}([\w-]+):\s*$/;
@@ -83,7 +95,7 @@ export const stepProblems = (name: string, workflow: string): readonly string[] 
   const missingJobs = names.filter((job) => blocks[job] === undefined).map((job) => `CI_DRIFT_GATE_JOB ${name} one-gate needs ${job}, which is not a job of this workflow`);
   const ungated = commands
     .filter(({ command }) => !isOneOf(command, GATE_COMMANDS) && !isOneOf(command, SETUP_COMMANDS))
-    .map(({ job, command }) => `CI_DRIFT_UNGATED_STEP ${name} job ${job} runs \`${command}\`, which no local gate command covers: route it through bun rules/check.ts (a part) or list it as set-up in rules/ci/ci-steps.ts`);
+    .map(({ job, command }) => `CI_DRIFT_UNGATED_STEP ${name} job ${job} runs \`${command}\`, which no local gate command covers: route it through bun rules/check.ts (a part) or list it as set-up in rules/ci/workflow/ci-steps.ts`);
   const dropped = REQUIRED.filter(({ pattern }) => !commands.some(({ command }) => pattern.test(command))).map(({ command }) => `CI_DRIFT_GATE_MISSING ${name} no gate job runs \`${command}\`, which the local gate runs`);
   return [...missingJobs, ...ungated, ...dropped];
 };

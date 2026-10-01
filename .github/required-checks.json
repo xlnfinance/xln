@@ -1,10 +1,14 @@
 {
- "source": "ruleset 'one gate' (id 24299958) on the default branch, required_status_checks of review/branch-protection/after.json, 10-01 09:31. Change the ruleset and this list together: pure/rules/ci/ci-checks.ts pins the workflow's job names to it.",
+ "source": "ruleset 'one gate' (id 24299958) on the default branch, required_status_checks of review/branch-protection/after.json, 10-01 09:31. Change the ruleset and this list together: pure/rules/ci/workflow/ci-checks.ts pins the workflow's job names to it.",
  "contexts": [
   "One gate (tsc, rules, frozen, style)",
   "One gate (bun test)",
   "One gate (seed 0)",
   "One gate (seed 12345)",
   "One gate (seed 987654)"
- ]
+ ],
+ "planned": [
+  "One gate"
+ ],
+ "planned_note": "The one name to require: the aggregate job `One gate` needs every gate job (rules/ci/workflow/ci-checks.ts keeps it that way), so a new gate job never needs a ruleset change. Arthur replaces the five contexts with it; move it to contexts once the ruleset says so. The workflow must report it already."
 }

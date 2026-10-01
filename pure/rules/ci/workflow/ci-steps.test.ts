@@ -1,10 +1,10 @@
 // The jobs behind `One gate` run the local gate's commands and nothing else of substance: each reader, each planted drift, and the real workflow.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "./ci-drift.ts";
+import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "../ci-drift.ts";
 import { gateJobs, jobBlocks, runCommands, stepProblems } from "./ci-steps.ts";
 
-const repo = `${import.meta.dir}/../../..`;
+const repo = `${import.meta.dir}/../../../..`;
 const workflowDir = `${repo}/.github/workflows`;
 
 const GATE = [
@@ -14,6 +14,8 @@ const GATE = [
   "      - run: bun style/check.ts",
   "      - run: bun test",
   '      - run: SEEDS="${{ matrix.seed }}" bun run test:seeds',
+  "      - run: bash check.sh",
+  '      - run: SHARD="${{ matrix.shard }}/4" node test.mjs',
 ];
 
 // A workflow with a gate job holding `steps`, another job that is not behind `one-gate`, and the `one-gate` job.
@@ -75,6 +77,11 @@ describe("planted drift is a problem", () => {
       "          cd pure && bun install --frozen-lockfile",
       "      - run: cd contracts && bun run forge:setup",
       "      - run: bun rules/check.ts --forge-only",
+      "      - run: |",
+      "          corepack enable",
+      "          pnpm install --frozen-lockfile && pnpm build",
+      "      - run: npm ci",
+      "      - run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival",
     ];
     expect(problems([...setup, ...GATE])).toEqual([]);
   });
@@ -95,7 +102,7 @@ describe("planted drift is a problem", () => {
   });
 
   test("R-GATE-CI-STEPS set-up is exact too: a cd into a substitution, an install that adds a package, a script given other arguments", () => {
-    ["cd $(curl x)", "bun install --no-save left-pad", "bun rules/checks/frozen.ts --all", "bun style/check.ts --fix", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 evil-package", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3 extra"].forEach((command) =>
+    ["cd $(curl x)", "bun install --no-save left-pad", "bun rules/checks/frozen.ts --all", "bun style/check.ts --fix", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 evil-package", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3 extra", "npm install", "npm ci --force", "pnpm install", "pnpm build --filter x", "corepack prepare", "bash check.sh --all", "node test.mjs 3", "SHARD=x node test.mjs 3", "echo ok > .spec-passed/other", "echo ok > .spec-passed/arrival.sh", "mkdir -p .spec-passed/x"].forEach((command) =>
       expect(problems([...GATE, `      - run: ${command}`])).toHaveLength(1),
     );
   });
@@ -129,7 +136,7 @@ describe("planted drift is a problem", () => {
       pureScripts: '"test:seeds": "for s in ${SEEDS:-0 12345 987654}; do :; done"',
       styleCheck: '["uvx", "--from", "ast-grep-cli==0.45.3", "ast-grep"]',
     };
-    expect(ciDriftProblems(files)).toEqual([expect.stringContaining("CI_DRIFT_UNGATED_STEP ci.yml job gate runs `npm run lint`")]);
+    expect(ciDriftProblems(files).filter((problem) => problem.startsWith("CI_DRIFT_UNGATED_STEP"))).toEqual([expect.stringContaining("CI_DRIFT_UNGATED_STEP ci.yml job gate runs `npm run lint`")]);
   });
 });
 
@@ -146,5 +153,7 @@ describe("the real workflows", () => {
     expect(commands).toContain("bun test");
     expect(commands).toContain("bun rules/check.ts");
     expect(commands).toContain("bun rules/check.ts --contracts-only");
+    expect(commands).toContain("bash check.sh");
+    expect(commands.some((command) => command.endsWith("node test.mjs"))).toBe(true);
   });
 });
