@@ -1,0 +1,5 @@
+;; Check the J batch page.   node arrival/packages/arrival-cli/dist/cli.js run j-batch.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "j/batch.scm")
+(check j-batch)

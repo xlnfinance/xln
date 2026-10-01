@@ -1,0 +1,5 @@
+;; Check the Entity consensus page.   node arrival/packages/arrival-cli/dist/cli.js run entity-consensus.check.scm   (from spec/)
+(require "lib/vocabulary.scm")
+(require "lib/check.scm")
+(require "entity/consensus.scm")
+(check entity-consensus)
