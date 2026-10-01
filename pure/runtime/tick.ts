@@ -4,6 +4,7 @@
 // staged row. A tick reads no clock and draws no number: the Host brings the stamp, and a replay uses the row's own.
 import { mapSet } from "../kernel/core/collections.ts";
 import { err, foldResult, ok, type Result } from "../kernel/core/result.ts";
+import { match } from "../kernel/core/tagged.ts";
 import { provisionalFrameHash } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
@@ -48,10 +49,15 @@ export type Flushed = Readonly<{ runtime: Runtime; leaving: readonly Outbound[] 
 export const flush = (rt: Runtime): Flushed =>
   ({ runtime: { ...rt, sent: rt.wal.length }, leaving: rt.wal.slice(rt.sent).flatMap((row) => row.outputs) });
 
-const msgId = (msg: Msg<AccountTx>): string =>
-  (msg._tag === "ack" ? `ack ${msg.hash}` : `frame ${provisionalFrameHash(msg.frame)}`);
+/** What names a message to whoever compares two runs of the same frame: not the bytes, which are the transport's. */
+export const messageId = (msg: Msg<AccountTx>): string =>
+  match(msg, {
+    frame: (m) => `frame ${provisionalFrameHash(m.frame)}`,
+    ack: (m) => `ack ${m.hash}`,
+    refusal: (m) => `refusal ${m.hash} ${m.index} ${m.fault} ${m.mark}`,
+  });
 
-const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${msgId(o.msg)}`);
+const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${messageId(o.msg)}`);
 
 const sameOutputs = (a: Row, b: Row): boolean => outputIds(a).join("\n") === outputIds(b).join("\n");
 

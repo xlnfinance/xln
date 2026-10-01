@@ -6,7 +6,6 @@
 // heads mean equal states; every world nothing can leave is the finished one, and a finished world is reachable.
 // The bugs planted in `Ops` and in the timer must each turn one of those red.
 import { describe, expect, test } from "bun:test";
-import { provisionalFrameHash } from "../account/frame/account.ts";
 import { ledgerOf } from "../account/state.ts";
 import { credit, entityOf, GOLD, open, pay } from "../entity/fixtures.ts";
 import {
@@ -15,7 +14,7 @@ import {
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import type { Halt, Input, Row, Runtime } from "./model.ts";
-import { apply, commit, flush, recover, startRuntime } from "./tick.ts";
+import { apply, commit, flush, messageId, recover, startRuntime } from "./tick.ts";
 import { setup, stamp } from "./fixtures.ts";
 import type { Result } from "../kernel/core/result.ts";
 
@@ -226,17 +225,14 @@ const canon = (x: unknown): string => JSON.stringify(x, plain);
 
 // ---- the properties
 
-const msgKey = (m: Msg<AccountTx>): string =>
-  (m._tag === "ack" ? `ack ${m.hash}` : `frame ${provisionalFrameHash(m.frame)}`);
-
 const outputKeys = (h: Host): ReadonlySet<string> =>
-  new Set(h.runtime.wal.flatMap((row: Row) => row.outputs).map((o) => msgKey(o.msg)));
+  new Set(h.runtime.wal.flatMap((row: Row) => row.outputs).map((o) => messageId(o.msg)));
 
 /** A message on the link into `to` was written by its peer, and must be an output of a row its peer's WAL holds. */
 const leaked = (w: World): readonly string[] =>
   NAMES.flatMap((to) => {
     const written = outputKeys(w.hosts[PEER[to]]);
-    return w.link[to].filter((m) => !written.has(msgKey(m))).map(() => `${to}'s link holds an output no WAL has`);
+    return w.link[to].filter((m) => !written.has(messageId(m))).map(() => `${to}'s link holds an output no WAL has`);
   });
 
 const unrecovered = (ops: Ops, w: World): readonly string[] =>

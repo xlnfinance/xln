@@ -8,7 +8,8 @@
 // the TypeScript takes and the page refuses, or the other way round, changes a count. Two second bounds follow the
 // page's
 // configs: a conflict inside Right's own frame (same-side-conflict) and a link that may deliver any of its first three
-// messages (reorder, R-NET).
+// messages (reorder, R-NET). The page has no refusal step (R-FRAME-REFUSAL: the spec thread is adding it), so the walk
+// leaves a refusal message out of the link: what a refusal does is the liveness simulation's and frame.test.ts's.
 import { describe, expect, test } from "bun:test";
 import { err, ok, type Result } from "../../kernel/core/result.ts";
 import type { Tagged } from "../../kernel/core/tagged.ts";
@@ -49,6 +50,8 @@ const rulesFor = (page: Page): Rules<Tx, History, Fault> => ({
     return pair === undefined ? ok([...before, tx]) : err({ _tag: "conflict", tx, predecessor: pair[0] });
   },
   hash: (f) => `${JSON.stringify(f.txs)}<${f.parent}` as FrameHash,
+  tag: (fault) => fault._tag,
+  retryable: () => false,
 });
 
 const GENESIS = "" as FrameHash;
@@ -112,6 +115,9 @@ const proposeRule = (page: Page, side: Side): Rule => ({
   },
 });
 
+/** The page's link carries frames and acks only. */
+const pageMessages = (sent: readonly Msg<Tx>[]): readonly Msg<Tx>[] => sent.filter((m) => m._tag !== "refusal");
+
 const take = (w: World, side: Side, n: number): World => {
   const q = w.inbox[side];
   return { ...w, inbox: { ...w.inbox, [side]: [...q.slice(0, n), ...q.slice(n + 1)] } };
@@ -123,7 +129,7 @@ const deliver = (page: Page, side: Side, n: number): Rule => ({
   enabled: (w) => w.inbox[side].length > n,
   step: (w) => {
     const heard = receive(rulesFor(page), w[side], w.inbox[side][n] ?? expect.unreachable("no such message"));
-    return enqueue(withReplica(take(w, side, n), side, heard.replica), other(side), heard.sent);
+    return enqueue(withReplica(take(w, side, n), side, heard.replica), other(side), pageMessages(heard.sent));
   },
 });
 
@@ -165,7 +171,9 @@ const byzFrame = (page: Page, side: Side): Rule => ({
   name: `byz frame ${side}`,
   enabled: (w) => w.byz < page.maxByz && w[side].mempool.length > 0 && invalidAlone(page, w[side].mempool),
   step: (w) => {
-    const forged: M = { _tag: "frame", frame: { author: side, parent: w[side].head, txs: w[side].mempool } };
+    const forged: M = {
+      _tag: "frame", frame: { author: side, parent: w[side].head, attempt: 0, txs: w[side].mempool },
+    };
     return { ...enqueue(w, other(side), [forged]), byz: w.byz + 1 };
   },
 });
@@ -294,7 +302,11 @@ describe("account/frame against the Arrival frames page", () => {
 
 describe("account/frame against the page's second bounds", () => {
   test("same-side conflict: a frame whose own earlier tx makes a later one invalid is refused whole", () => {
-    expect(counts(SAME_SIDE, walks.sameSide)).toEqual([3423, 10383, 24]);
+    // The page counts 3423, 10383 and 24. The TypeScript counts fewer because it refuses an equivocating proposer's
+    // second frame at an attempt it has already refused (R-FRAME-REFUSAL: the attempt number is not on the page yet):
+    // the forged frame refused at attempt 0, the genuine one at attempt 0 is refused too. An honest proposer never
+    // sends two frames at one attempt on one head, so only a world with a forger loses states.
+    expect(counts(SAME_SIDE, walks.sameSide)).toEqual([3167, 9603, 22]);
     expect(walks.sameSide.edges.some((e) => e.rule.startsWith("byz frame"))).toBe(true);
     [...walks.sameSide.worlds.values()].forEach((w) =>
       properties.forEach((holds) => expect(holds(SAME_SIDE, w)).toBe(true)));

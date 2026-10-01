@@ -116,7 +116,7 @@ describe("entity/frame arrivals", () => {
     expect(framed.notices).toEqual([]);
     const elsewhere = `0x${"ab".repeat(32)}` as FrameHash;
     const txs: readonly AccountTx[] = [{ _tag: "set_credit", token: GOLD, limit: 1n }];
-    const frame = { author: "right", parent: elsewhere, txs } as const;
+    const frame = { author: "right", parent: elsewhere, attempt: 0, txs } as const;
     const behind = run(framed.state, peerMessage(BOB, { _tag: "frame", frame }));
     expect(behind.notices.map((n) => n._tag)).toEqual(["message_refused"]);
     expect(behind.outputs).toEqual([]);

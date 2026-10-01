@@ -39,6 +39,7 @@ const refusal = (outcome: Outcome<AccountFault>): Outcome<AccountFault> | undefi
     case "refused_invalid":
     case "refused_own":
     case "refused_empty":
+    case "refused_attempt":
     case "refused_not_next":
       return outcome;
     default:
