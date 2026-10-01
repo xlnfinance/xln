@@ -26,7 +26,7 @@ A killer may carry `"owed": "<who>"` the same way as an owed cell.
 
 The gate is a naming gate: it never runs the specs, the mutants or the tests, so `found` means a named killer exists, not that the bug is killed. Walks and mutant runs are the other half.
 
-**The register only grows.** `bun rules/check.ts` also compares the register with the one at the merge base with `origin/main` (`--base <ref>`): a row may not vanish, a cell may not drop from `hold` or `stale` to `owed`, from `owed` to `n/a`, or from any stated cell back to `-`, and a killer the base named (not owed) may not disappear. A claim (`hold`, `owed`) outranks `n/a`, so a rule cannot leave a column's denominator by giving a reason; `n/a` to `owed` or `hold` is growth. A rule is retired with `retired_by`, into live rows, and the gate prints the retirement. A git failure is red.
+**The register only grows.** `bun rules/check.ts` also compares the register with the one at the merge base with the base ref (`--base <ref>`; by default the target branch of a pull request run, `origin/development` for a pull request into `development`, the tip a push replaced for a push run, which the workflow hands over as `GATE_BASE_BEFORE`, and `origin/main` for a local, nightly or manual run; row `R-GATE-RATCHET-BASE`): a row may not vanish, a cell may not drop from `hold` or `stale` to `owed`, from `owed` to `n/a`, or from any stated cell back to `-`, and a killer the base named (not owed) may not disappear. A claim (`hold`, `owed`) outranks `n/a`, so a rule cannot leave a column's denominator by giving a reason; `n/a` to `owed` or `hold` is growth. A rule is retired with `retired_by`, into live rows, and the gate prints the retirement. A git failure is red.
 
 ## What counts as a name
 

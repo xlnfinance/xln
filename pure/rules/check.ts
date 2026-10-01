@@ -3,7 +3,7 @@
 //   --who <id>               list the names that carry an id, per layer
 //   --names-json             dump every name the scanners read, as JSON (to write or audit register rows)
 //   --layer-root <l>=<dir>   read layer l from another checkout (project the matrix onto a spec branch)
-//   --base <ref>             the ref the register may only grow from (default origin/main)
+//   --base <ref>             the ref the register may only grow from (default: the target branch of a pull request run, the replaced tip of a push run, else origin/main)
 //   --register-only          run only the register gate
 //   --style-only             run only the style gate of the new tree (kernel/, chain/), see rules/tree/gate.ts
 //   --width-only             run only folder width (rules/checks/folder-width.ts)
@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
 import { LAYERS, type Layer } from "./model.ts";
-import { readBase } from "./base.ts";
+import { commitExists, defaultBase, readBase } from "./base.ts";
 import { readRegisterFolder } from "./layout/store.ts";
 import { ratchet } from "./ratchet.ts";
 import { renderMarkdown, renderText } from "./render.ts";
@@ -88,9 +88,12 @@ const runContractsVm = (): boolean => {
 const flagValues = (flag: string): readonly string[] =>
   args.flatMap((arg, index) => (arg === flag ? [args[index + 1] ?? ""] : []));
 
+// The ref the register and the findings registry may only grow from: --base, else the target of the pull request or the tip a push replaced (see defaultBase).
+const baseRef = (): string => flagValues("--base")[0] ?? defaultBase(process.env, (sha) => commitExists(repoRoot, sha));
+
 // The rig's registry of known findings may only shrink; its own script holds the rules (diff/findings/check.ts) and its output is ours.
 const runFindings = (): boolean => {
-  const child = Bun.spawnSync([process.execPath, `${here}/../diff/findings/check.ts`, "--base", flagValues("--base")[0] ?? "origin/main"], { cwd: `${here}/..` });
+  const child = Bun.spawnSync([process.execPath, `${here}/../diff/findings/check.ts`, "--base", baseRef()], { cwd: `${here}/..` });
   process.stdout.write(child.stdout);
   process.stderr.write(child.stderr);
   return child.exitCode === 0;
@@ -131,7 +134,7 @@ const runRegister = (): boolean => {
     process.exit(0);
   }
 
-  const base = readBase(repoRoot, flagValues("--base")[0] ?? "origin/main");
+  const base = readBase(repoRoot, baseRef());
   if (!base.ok) {
     console.error(`FAIL ${base.error.detail}`);
     process.exit(1);
