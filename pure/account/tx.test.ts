@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { clockParams } from "./clause/clock.ts";
 import { holdOf, secretOf, viewOf } from "./fixtures.ts";
-import { MAX_HOLDS } from "./ledger.ts";
-import { holdId, tokenId, type AccountFault, type AccountState, type Hold, type Side, type TokenId } from "./model.ts";
-import { emptyAccount, ledgerOf, openHolds } from "./state.ts";
+import { allocation, emptyLedger, MAX_HOLDS } from "./ledger.ts";
+import {
+  holdId, other, tokenId, type AccountFault, type AccountState, type Hold, type Ledger, type Side, type TokenId,
+} from "./model.ts";
+import { emptyAccount, ledgerOf, openHolds, withLedger } from "./state.ts";
 import { applyTx, type AccountTx, type Judge } from "./tx.ts";
 
 const refused = (fault: AccountFault): Result<never, AccountFault> => err(fault);
@@ -108,5 +110,56 @@ describe("account/tx caps that span tokens", () => {
     const tried = applyTx(full, judge, "left", lockOn(OIL, holdOf("left", 1n, 500n, DEADLINE, 500)));
     expect(tried.ok).toBe(false);
     expect(openHolds(full)).toHaveLength(MAX_HOLDS);
+  });
+});
+
+/** What `side` has of its own to pay: its share of the collateral, less what it has held (credit is not its own). */
+const freeFunds = (l: Ledger, side: Side): bigint => {
+  const held = l.holds.filter((h) => h.payer === side).reduce((sum, h) => sum + h.amount, 0n);
+  return side === "left" ? allocation(l) - held : l.collateral - allocation(l) - held;
+};
+
+/** A deterministic pick in 0 .. n-1 for step `i` and slot `k`, so a failing run names its step. */
+const pick = (i: number, k: number, n: number): number =>
+  ((Math.imul(i + 1, 2654435761) ^ Math.imul(k + 7, 1597334677)) >>> 0) % n;
+
+const TOKENS: readonly TokenId[] = [GOLD, OIL];
+
+/** Both tokens hold collateral and credit, so the random txs are admitted often enough to matter. */
+const shared: Ledger = { ...emptyLedger, collateral: 100n, ondelta: 40n, limit: { left: 30n, right: 30n } };
+const funded: AccountState = TOKENS.reduce((s, token) => withLedger(s, token, shared), emptyAccount);
+
+const randomTx = (i: number): AccountTx => {
+  const token = TOKENS[pick(i, 1, 2)] ?? GOLD;
+  const slot = BigInt(1 + pick(i, 2, 5));
+  const n = 1 + pick(i, 3, 5);
+  const payer: Side = pick(i, 6, 2) === 0 ? "left" : "right";
+  const kinds: readonly AccountTx[] = [
+    { _tag: "pay", token, amount: BigInt(1 + pick(i, 4, 25)) },
+    { _tag: "set_credit", token, limit: BigInt(pick(i, 5, 60)) },
+    { _tag: "lock", token, hold: holdOf(payer, BigInt(1 + pick(i, 7, 12)), slot, 104n, n) },
+    { _tag: "resolve", token, id: holdId(slot), secret: secretOf(n) },
+    { _tag: "cancel", token, id: holdId(slot) },
+    { _tag: "expire", token, id: holdId(slot) },
+  ];
+  return kinds[pick(i, 8, kinds.length)] ?? expect.unreachable("a kind");
+};
+
+describe("account/tx authority", () => {
+  test("R-AUTH a committed tx never lowers the other side's own funds or changes its author's credit", () => {
+    const steps = Array.from({ length: 4000 }, (_, i) => i);
+    const final = steps.reduce<{ s: AccountState; applied: number }>(({ s, applied }, i) => {
+      const author: Side = pick(i, 0, 2) === 0 ? "left" : "right";
+      const late: Judge = { ...judge, view: viewOf(BigInt(100 + pick(i, 9, 12))) };
+      const next = applyTx(s, late, author, randomTx(i));
+      if (!next.ok) return { s, applied };
+      TOKENS.forEach((token) => {
+        const [before, after] = [ledgerOf(s, token), ledgerOf(next.value, token)];
+        expect(freeFunds(after, other(author))).toBeGreaterThanOrEqual(freeFunds(before, other(author)));
+        expect(after.limit[author]).toBe(before.limit[author]);
+      });
+      return { s: next.value, applied: applied + 1 };
+    }, { s: funded, applied: 0 });
+    expect(final.applied).toBeGreaterThan(300);
   });
 });

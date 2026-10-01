@@ -73,7 +73,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -92,6 +92,51 @@
      "layer": "quint",
      "name": "tie-break-reversed",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left ignores Right's frame and keeps its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Right rolls its frame back, commits Left's and acks it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left commits on the ack, and Right proposes its txs again at the next height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 the rolled-back txs go ahead of what Right queued later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 each side's txs commit in submission order, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
     }
    ]
   },
@@ -924,7 +969,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -932,6 +977,11 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-BODY after my frame is acked, a different frame on the same parent gets no ack"
     }
    ]
   },
@@ -1261,7 +1311,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1275,6 +1325,16 @@
      "layer": "quint",
      "name": "reack-open-only",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REACK a repeat of the frame at my head is answered with the same ack, in any replica state"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
     }
    ]
   },
@@ -1453,7 +1513,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1478,6 +1538,36 @@
      "layer": "quint",
      "name": "rollback-drops-txs",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a queued tx that stops applying is refused with its fault at propose, never dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame of only refused txs sends nothing and leaves no pending frame"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a rolled-back tx whose ground moved is refused at the next propose, with notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no submitted tx is lost: committed, held, or refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no tx is both committed and refused, in every state of the page"
     }
    ]
   },
@@ -1490,7 +1580,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1504,6 +1594,26 @@
      "layer": "quint",
      "name": "queue-guard-reads-committed-only",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx is checked at the door against the committed state plus everything queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx behind a pending frame is checked against the state that frame makes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT no committed tx is invalid against the history before it, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
     }
    ]
   },
@@ -1516,7 +1626,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1530,6 +1640,26 @@
      "layer": "quint",
      "name": "accept-wrong-parent",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-PARENT a frame whose parent is not my head is refused and changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
     }
    ]
   },
@@ -1542,7 +1672,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1550,6 +1680,11 @@
      "layer": "arrival",
      "name": "reorder",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
     }
    ]
   },
@@ -1562,7 +1697,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1570,6 +1705,11 @@
      "layer": "quint",
      "name": "authority",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a committed tx never lowers the other side's own funds or changes its author's credit"
     }
    ]
   },
