@@ -2020,6 +2020,83 @@
      "owed": "#44"
     }
    ]
+  },
+  {
+   "id": "R-IMPLICIT-NONCE-FROM-CHAIN",
+   "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
+   "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "owed: the cut (Account and Runtime slices)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: TRAP a Right-authored signed frame at stored + 1 cannot outrank the implicit proof: the payee of that frame loses it"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: the same frame at stored + 2 is safe (the Runtime rule)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: a Left-authored frame at stored + 1 does outrank it (so the trap is the Right author alone)"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "post-nonce-low (retargeted to the trap)",
+     "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing a proof at stored + 1",
+     "owed": "the cut (Account and Runtime slices)"
+    }
+   ]
+  },
+  {
+   "id": "R-WINDOWS-NEVER-SHORTEN",
+   "statement": "Inside an epoch the response windows of a dispute never decrease: a counter and a signed final body may carry longer windows than the dispute started with, never shorter ones (E9).",
+   "source": "contracts-decisions.md R-IMPLICIT-BASELINE item 5 (coordinator 09-30)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: TRAP a policy that lowers its windows inside an epoch: the stale start with the long windows cannot be answered (E9)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: the survivor of the author's mutation run is not equivalent: the immediate-close path (a signed final body, no registered counter) is guarded by the FINAL window check alone"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "counter-shortens-window",
+     "owed": "#41"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "a mutant that shortens the windows",
+     "owed": "#44"
+    }
+   ]
   }
  ]
 }
