@@ -73,12 +73,11 @@ export const GAPS = {
     supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
     landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
   },
-  swapTx: {
-    id: "swap-tx", kind: "missing", layer: "Account",
-    piece: "Swap inside an Account: AccountTx has pay, set_credit, lock, resolve, cancel, expire and nothing for swap offer, partial fill or cancel; the clause shape the ledger keeps for an open offer does not exist, so no proof body can carry a swap clause (R-SWAP-CLAUSE-WITH-FILL).",
-    supplier: "#111 (kernel thread swap step, on top of #97); spec: plan/swap-onchain.md",
-    // The word "swap" is already in pure/account/proof/body.ts (`swaps: []`) at #97, so look for the tx itself.
-    landed: () => mentions("account", /Tagged<"(swap|offer)"/),
+  entitySwapCommands: {
+    id: "entity-swap-commands", kind: "missing", layer: "Entity",
+    piece: "Swap inside an Account through a Runtime: AccountTx has offer, fill, retract and lapse (#111, pure/account/swap), but the Entity takes no command that queues them, so no swap offer, partial fill or cancel can go through a Runtime and nothing on the Account's frames is signed for one. The proof body carries the swap clause already; the chain side is plan/swap-onchain.md.",
+    supplier: "kernel thread (swap on the Account, #111) then the cut thread (Entity commands offer, fill, retract)",
+    landed: () => mentions("entity", /Tagged<"(offer|fill|retract)"/),
   },
   disputeWithClause: {
     id: "dispute-with-clause", kind: "missing", layer: "Runtime",

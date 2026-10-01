@@ -362,7 +362,7 @@ const reveal: Step<World> = {
 
 const swap: Step<World> = {
   id: "swap", title: "Two-party swap inside an Account: offer, partial fill, cancel", needs: ["open"],
-  run: async () => { throw new Blocked(["swapTx", "hubMatching"], `AccountTx has no swap offer, fill or cancel (pure/account/tx.ts lists pay, set_credit, lock, resolve, cancel, expire), so there is nothing to commit in a frame and nothing for a proof body to carry; ${GAPS.swapTx.supplier}`); },
+  run: async () => { throw new Blocked(["entitySwapCommands", "hubMatching"], `AccountTx has offer, fill, retract and lapse (pure/account/swap, #111), but the Entity has no command that queues them and no hub turns a matched pair into them, so a Runtime cannot make a swap frame: ${GAPS.entitySwapCommands.supplier}`); },
 };
 
 // ---- S8 ----------------------------------------------------------------------------------------------------------
