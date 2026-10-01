@@ -1,0 +1,10 @@
+{
+ "source": "ruleset 'one gate' (id 24299958) on the default branch, required_status_checks of review/branch-protection/after.json, 10-01 09:31. Change the ruleset and this list together: pure/rules/ci/ci-checks.ts pins the workflow's job names to it.",
+ "contexts": [
+  "One gate (tsc, rules, frozen, style)",
+  "One gate (bun test)",
+  "One gate (seed 0)",
+  "One gate (seed 12345)",
+  "One gate (seed 987654)"
+ ]
+}
