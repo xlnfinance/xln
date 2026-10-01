@@ -99,6 +99,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE Bob's frame with an attempt of -1 is refused to Alice with the outcome, and changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a tx that no longer applies when the view rises is refused with notice in that height's row"
   }
  ]
 }

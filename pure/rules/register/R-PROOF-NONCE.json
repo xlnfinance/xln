@@ -1,12 +1,12 @@
 {
  "id": "R-PROOF-NONCE",
- "statement": "The proof nonce is its own counter; a committed frame signs at a slot above every slot either side signed, in its author's lane (Left's an even distance above the committed slot, Right's an odd one), so no two frames of one Account ever share a nonce (a gap appears wherever the other side's slot, or an abandoned attempt's, goes unused); signatures are one per (signer, nonce, author side).",
+ "statement": "The proof nonce is its own counter (a frame's slot); gaps appear only after a refused attempt (R-RETRY-NEW-NONCE, the retry signs at a fresh slot) and between the two sides' lanes (Left's first slot is the last committed one + 2, Right's + 1, Q-A-14); signatures are one per (signer, nonce, author side). The Arrival cell holds this on spec/account/frames.scm through the slot lane (bugs retry-reuses-the-nonce, slots-shared-lane).",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
  "layers": {
-  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "rig": "owed: test rig (P4b every signature made counts, including a proposal later rolled back; P4f the proof nonce climbs by one)",
   "ts": "hold"
  },
  "killers": [
@@ -16,10 +16,20 @@
    "name": "proposer-may-skip-nonces"
   },
   {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a second proof signed for a rolled-back frame, and a nonce that skips, are red",
+   "owed": "test rig"
+  },
+  {
    "kind": "bug",
    "layer": "arrival",
-   "name": "baseline-too-low",
-   "owed": "spec thread, next Arrival page"
+   "name": "retry-reuses-the-nonce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "slots-shared-lane"
   },
   {
    "kind": "test",

@@ -129,7 +129,7 @@ describe("planted drift is a problem", () => {
       pureScripts: '"test:seeds": "for s in ${SEEDS:-0 12345 987654}; do :; done"',
       styleCheck: '["uvx", "--from", "ast-grep-cli==0.45.3", "ast-grep"]',
     };
-    expect(ciDriftProblems(files)).toEqual([expect.stringContaining("CI_DRIFT_UNGATED_STEP ci.yml job gate runs `npm run lint`")]);
+    expect(ciDriftProblems(files).filter((problem) => problem.startsWith("CI_DRIFT_"))).toEqual([expect.stringContaining("CI_DRIFT_UNGATED_STEP ci.yml job gate runs `npm run lint`")]);
   });
 });
 

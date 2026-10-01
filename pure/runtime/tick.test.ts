@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { emptyEntity, type EntityInput, type Outbound } from "../entity/model.ts";
 import type { FrameHash } from "../account/frame/frame.ts";
-import type { Row } from "./model.ts";
+import type { Input, Row } from "./model.ts";
+import type { JHeight } from "../account/clause/clock.ts";
 import { timestamp } from "./model.ts";
 import { apply, commit, flush, messageId, recover } from "./tick.ts";
-import { credit, entityOf, GOLD, inputFor, open, pay, setup, stamp, started, tick, unhalted } from "./fixtures.ts";
+import {
+  credit, entityOf, GOLD, heightAt, inputFor, open, pay, setup, stamp, started, tick, unhalted,
+} from "./fixtures.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
@@ -96,8 +99,14 @@ describe("runtime/tick the stamp", () => {
   const stampsOf = (ats: readonly bigint[]) =>
     ats.reduce((rt, at) => tick(rt, inputFor(BOB, at, open(ALICE))).runtime, started(BOB)).wal.map((row) => row.stamp);
 
-  test("a frame's stamp is the later of the Runtime's and the input's, and never goes back", () => {
+  test("R-CLOCK a frame's stamp is the later of the Runtime's and the input's, and never goes back", () => {
     expect(stampsOf([5n, 3n, 9n, 9n, 2n])).toEqual([5n, 5n, 9n, 9n, 9n].map(stamp));
+  });
+
+  test("R-CLOCK a new height of J moves the stamp: a later input stamped earlier does not go back", () => {
+    const risen = tick(started(BOB), heightAt(500n, 111n)).runtime;
+    const later = tick(risen, inputFor(BOB, 10n, open(ALICE))).runtime;
+    expect(later.wal.map((row) => row.stamp)).toEqual([500n, 500n].map(stamp));
   });
 
   test("R-CLOCK the stamp decides nothing: the same inputs at other stamps make the same Entities", () => {
@@ -110,7 +119,15 @@ describe("runtime/tick the stamp", () => {
     expect(outputsOf(late.wal)).toEqual(outputsOf(early.wal));
   });
 
-  test("a stamp is not negative", () => {
+  test("R-CLOCK a peer input with no Host timestamp does not type: the Runtime reads no clock of its own", () => {
+    // @ts-expect-error an input carries the Host's stamp, made by `timestamp`; a bare number is not one
+    const bare: Input = { _tag: "j_height", at: 5n, height: 3n as JHeight };
+    // @ts-expect-error and an entity batch without `at` is not a batch
+    const unstamped: Input = { _tag: "entity", to: BOB, inputs: [] };
+    expect([bare, unstamped]).toHaveLength(2);
+  });
+
+  test("R-CLOCK a stamp is not negative: the Host cannot hand over a time before the epoch", () => {
     expect(timestamp(0n).ok).toBe(true);
     expect(timestamp(-1n)).toEqual({ ok: false, error: { _tag: "bad_timestamp", ms: -1n } });
   });
@@ -133,7 +150,7 @@ describe("runtime/tick recovery", () => {
     });
   });
 
-  test("a row whose stamp goes back halts", () => {
+  test("R-CLOCK a row whose stamp goes back halts the replay", () => {
     const [first, ...rest] = rows();
     const back = rest.map((row): Row => ({ ...row, stamp: stamp(0n) }));
     expect(recover(setup, genesis, first === undefined ? back : [first, ...back])).toEqual({
@@ -156,14 +173,14 @@ describe("runtime/tick recovery", () => {
 });
 
 describe("runtime/tick review A: stamps, and what a replay compares", () => {
-  test("a WAL whose rows share a stamp replays: a Host stamps in milliseconds, equal stamps are usual", () => {
+  test("R-CLOCK a WAL whose rows share a stamp replays: a Host stamps in milliseconds, equal stamps are usual", () => {
     const rt = [open(ALICE), credit(ALICE, 100n), credit(ALICE, 200n)]
       .reduce((acc, c) => tick(acc, inputFor(BOB, 7n, c)).runtime, started(BOB));
     expect(rt.wal.map((row) => row.stamp)).toEqual([7n, 7n, 7n].map(stamp));
     expect(unhalted(recover(setup, genesis, rt.wal)).entities).toEqual(rt.entities);
   });
 
-  test("a refused input moves the stamp like any other: a later input stamped earlier never sends the WAL back", () => {
+  test("R-CLOCK a refused input moves the stamp like any other: a later one stamped earlier does not go back", () => {
     const refused = tick(started(BOB), inputFor(entityOf(7), 100n, open(BOB))).runtime;
     const later = tick(refused, inputFor(BOB, 50n, open(ALICE))).runtime;
     expect(later.wal.map((row) => row.stamp)).toEqual([100n, 100n].map(stamp));
