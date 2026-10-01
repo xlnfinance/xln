@@ -24,6 +24,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-LOCK-ROUTE a lock's route is a list of entity ids at most MAX_ROUTE_HOPS long, and nothing else"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LOCK-ROUTE a row that holds a lock with a route and the paybook's commands comes back unchanged"
   }
  ]
 }
