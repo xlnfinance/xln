@@ -1,6 +1,7 @@
 // Spec self-test: the Account frames page checks clean, and each planted bug is caught
 // by the property it breaks. Run from spec/: node test.mjs
 import { evaluate, lib } from "./tools/run.mjs";
+import { casesOfShard, parseShard } from "./tools/shard.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra]
 const planted = (page, name, file, violated, config) => ({
   page,
   name: `planted: ${name}`,
-  extra: [...(config ? [config] : []), `${pages[page].files.at(-1).split("/")[0]}/bugs/${file}.scm`],
+  extra: [...(config ? [config].flat() : []), `${pages[page].files.at(-1).split("/")[0]}/bugs/${file}.scm`],
   expect: (r) => assert.equal(r.violated, violated),
 });
 
@@ -32,17 +33,38 @@ const PREFIX = "the receiver's frames are never contradicted by the sender's com
 const BELIEF = "the sender never believes the peer holds more than the peer applied: only a genuine ack moves the belief";
 const HALT = "no peer message halts a node: a refusal changes nothing and never stops the Runtime (R-X1; a halt is also a dead end for liveness)";
 const cases = [
-  { page: "account", name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3651, transitions: 11335, goals: 16 }) },
-  { page: "account", name: "account frames, the link may also reorder (Quint's network, R-NET)", extra: ["account/configs/reorder.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 7312, transitions: 33183, goals: 16 }) },
-  { page: "account", name: "account frames, Right's txs conflict with each other", extra: ["account/configs/same-side-conflict.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 3423, transitions: 10383, goals: 24 }) },
+  { page: "account", name: "account frames: the J clock moves between a frame's proposal and its receipt, no lost message (R-FRAME-REFUSAL)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4563, transitions: 18600, goals: 44 }) },
+  { page: "account", name: "account frames, the first page's bound: conflicts, a lost and a repeated message", extra: ["account/configs/lossy.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4405, transitions: 13955, goals: 16 }) },
+  { page: "account", name: "account frames, the link may also reorder (Quint's network, R-NET)", extra: ["account/configs/reorder.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 8397, transitions: 38801, goals: 16 }) },
+  { page: "account", name: "account frames, Right's txs conflict with each other", extra: ["account/configs/same-side-conflict.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5650, transitions: 17489, goals: 26 }) },
+  { page: "account", name: "account frames, a repeated message and the attempt number (stale_attempt)", extra: ["account/configs/repeats.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5821, transitions: 23318, goals: 28 }) },
+  { page: "account", name: "account frames, the link hands a replica its own frame back (frame author)", extra: ["account/configs/reflect.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4614, transitions: 18844, goals: 28 }) },
+  { page: "account", name: "account frames, a lock beyond the horizon: the other retryable fault (deadline_too_far)", extra: ["account/configs/far-lock.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 9135, transitions: 38325, goals: 123 }) },
+  { page: "account", name: "account frames, the clock and a lost message together (the default world with one loss)", extra: ["account/configs/lossy-clock.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 11677, transitions: 52730, goals: 105 }) },
+  { page: "account", name: "account frames, Right holds the clock-dependent tx: its retry signs a fresh slot above the refused one, a collision is won by the higher slot (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED)", extra: ["account/configs/right-expire.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 2675, transitions: 10638, goals: 44 }) },
+  { page: "account", name: "account frames, a settlement co-signed: both sides freeze, a peer frame is refused as frozen and retried (R-COSIGN-FREEZE)", extra: ["account/configs/freeze.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 1192, transitions: 2829, goals: 9 }) },
+  { page: "account", name: "account frames, a Byzantine peer's frame at a slot far beyond reach is refused at the door (R-PROOF-NONCE-ABOVE-SIGNED)", extra: ["account/configs/slot-jump.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 376, transitions: 833, goals: 4 }) },
   planted("account", "the validator ignores the txs ahead in the same frame (a6, Byzantine frame)", "frame-order", "no committed tx is invalid against the history before it", "account/configs/same-side-conflict.scm"),
-  planted("account", "drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused"),
-  planted("account", "rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order"),
-  planted("account", "no tie-break", "no-tie-break", "committed histories agree: one extends the other"),
-  planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish"),
-  planted("account", "a duplicate is re-acked only while Open (Quint's rule, R-REACK)", "reack-open-only", "can always still finish"),
-  planted("account", "commit a frame that skips ahead", "commit-any-frame", "no tx is both committed and refused"),
-  planted("account", "skip re-validation", "skip-revalidation", "can always still finish"),
+  planted("account", "drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused", "account/configs/lossy.scm"),
+  planted("account", "rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order", "account/configs/lossy.scm"),
+  planted("account", "no tie-break: both sides yield; the first yield already commits below the yielder's own proof (R-PROOF-NONCE-ABOVE-SIGNED), the fork follows", "no-tie-break", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included", "account/configs/lossy.scm"),
+  planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish", "account/configs/lossy.scm"),
+  planted("account", "a duplicate is re-acked only while Open (Quint's rule, R-REACK)", "reack-open-only", "can always still finish", "account/configs/lossy.scm"),
+  planted("account", "commit a frame that skips ahead: a duplicate of a committed frame is taken for the next one and refused at the slot door, and the proposer drops the tx of a frame the peer committed", "commit-any-frame", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)", "account/configs/lossy.scm"),
+  { page: "account", name: "account frames, the proposer skips re-validation: not a bug any more, the peer refuses the tx and the proposer drops it with notice (R-FRAME-REFUSAL, R-NOTICE)", extra: ["account/configs/lossy.scm", "account/bugs/skip-revalidation.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5377, transitions: 16817, goals: 16 }) },
+  planted("account", "the proposer ignores a refusal of its pending frame: the Account wedges (R-FRAME-REFUSAL)", "ignores-refusal", "can always still finish"),
+  planted("account", "the receiver forgets its refusal and commits the frame it refused: the peer holds a frame its proposer took back (attempt number)", "refusal-forgotten", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)"),
+  planted("account", "the proposer re-proposes at the same attempt after a refusal (attempt number)", "attempt-not-bumped", "can always still finish"),
+  planted("account", "a frame below the mark is judged afresh and commits (attempt number)", "below-mark-judged", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)", "account/configs/repeats.scm"),
+  planted("account", "a replica accepts its own frame as the peer's (frame author)", "accepts-own-frame", "a replica commits its own frame only after the peer did (frame author)", "account/configs/reflect.scm"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: the collision is decided by side, not by slot: Right signs a retry at slot 3 and yields to Left's first frame at slot 2", "yield-below-own-proof", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included", "account/configs/right-expire.scm"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a receiver with no frame out acks a slot at or below a proof it signed and left behind", "stale-slot-unchecked", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a retry signs the same slot as the refused attempt (R-RETRY-NEW-NONCE)", "retry-reuses-the-nonce", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: both sides in one lane propose at one slot, and the yielder signs two proofs at it (Review B of PR 97, finding 1)", "slots-shared-lane", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a refusal carries no floor", "refusal-without-floor", "R-PROOF-NONCE-ABOVE-SIGNED, the floor: a stale_slot refusal names a floor at or above the slot it refuses"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a slot beyond what an honest peer could reach is accepted: one frame moves the nonce space (Review B of PR 97, finding 3)", "slot-beyond-reach-accepted", "R-PROOF-NONCE-ABOVE-SIGNED, the door: a committed slot is at most one lane step above what its receiver knew either side signed", "account/configs/slot-jump.scm"),
+  planted("account", "R-SIGNED-IS-LIVE: a refusal releases the hold on a lock that sits in a signed proof the peer still holds", "refusal-releases-signed-lock", "R-SIGNED-IS-LIVE: a lock in a signed, unsuperseded proof is not released by a refusal"),
+  planted("account", "R-COSIGN-FREEZE: a frozen side accepts a peer frame that moves offdelta after the fold was signed", "frozen-accepts", "R-COSIGN-FREEZE: while a settlement is signed, its fold equals the off-chain offdelta of the head", "account/configs/freeze.scm"),
   { page: "clock", name: "account clock (R-CLOCK, R-HTLC-CLOCK)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 2730, transitions: 10546, goals: 260 }) },
   { page: "clock", name: "account clock, the payee holds no secret", extra: ["account/configs/no-secret.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 173, transitions: 473, goals: 3 }) },
   planted("clock", "a stale stamp is refused, the signed frame is stuck (R-CLOCK)", "refuse-late", "no frame is refused for its age or its future date: a signed frame has an exit (R-CLOCK)"),
@@ -91,7 +113,13 @@ const cases = [
   planted("dispute", "a deposit advances the epoch (review B, finding 2)", "deposit-advances-epoch", "a deposit does not advance the epoch: the epoch, the chain nonce and every held proof stay"),
   planted("dispute", "an implicit dispute settles at the ondelta of the advance and ignores a deposit of the epoch (review B, finding 2)", "implicit-stale-ondelta", "a dispute from the implicit proof settles at the chain's ondelta now: the advance's plus a deposit of the epoch"),
   { page: "dispute", name: "dispute, a window policy that lengthens inside the epoch (N3, E9)", extra: ["dispute/configs/window-policy.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 12577, transitions: 23004, goals: 5868 }) },
-  planted("dispute", "a counter shortens the windows of the epoch (N3, E9)", "counter-shortens-window", "windows never shorten inside an epoch: a later proof carries at least the windows of an earlier one, and a counter or final body at least the started ones", "dispute/configs/window-policy.scm"),
+  planted("dispute", "a counter shortens the windows of the epoch: the signing guard drops (N3)", "counter-shortens-window", "windows never shorten inside an epoch: a later co-signed proof carries at least the windows of an earlier one (the signing guard)", "dispute/configs/window-policy.scm"),
+  { page: "dispute", name: "dispute, a Byzantine party signs a shorter-window proof alone (N3, E9)", extra: ["dispute/configs/byz-window.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 7812, transitions: 11503, goals: 4818 }) },
+  planted("dispute", "the chain's E9 check is dropped: a counter shortens the windows with a proof one party signed alone (N3, E9)", "e9-dropped", "a counter or final body carries at least the started windows: the chain's E9 check, whoever signed it", "dispute/configs/byz-window.scm"),
+  planted("dispute", "the implicit proof is offered at epoch 0 and ties a signed proof (review round 3, m4)", "implicit-at-epoch-0", "a dispute that settles on the implicit proof leaves no signed proof of its epoch at or above it"),
+  { page: "dispute", name: "dispute, a collateral-to-reserve withdrawal folds offdelta (R-C2R-FOLD)", extra: ["dispute/configs/withdraw.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5460, transitions: 10033, goals: 2528 }) },
+  planted("dispute", "a C2R is co-signed with a nonzero offdelta and nothing folds it (R-C2R-FOLD)", "c2r-unfolded", "R-C2R-FOLD: a withdrawal lowers Left's position by exactly the amount withdrawn and moves nothing else: Δ after = Δ before - 1, money unchanged", "dispute/configs/withdraw.scm"),
+
   planted("dispute", "the shared payment arithmetic moves Δ the wrong way (money/core.scm)", "core-pay-flipped", "a frame moves Δ as the ledger does: a payment moves the payer's allocation, a lock or a lapse leaves Δ"),
   planted("dispute", "the shared credit bound has no lower side (money/core.scm)", "core-rcpan-no-floor", "a frame that overdraws its proposer is never held: the receiver's own RCPAN check stands alone"),
   planted("dispute", "a responder with an unacked frame closes on a stale proof (B2)", "hasty-stale", "a hasty close still pays at least the newest frame both sides acked", "dispute/configs/no-rival.scm"),
@@ -295,15 +323,19 @@ if (only !== undefined) {
     });
   // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The slow cases start first.
   const rank = (c) => (c.heavy ? 0 : c.extra.length === 0 ? 1 : 2);
-  const order = cases.map((_, i) => i).sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
-  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${cases.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
+  const shard = parseShard(process.env.SHARD);
+  const mine = casesOfShard(cases, shard);
+  if (mine.length === 0) throw new Error(`shard ${shard.shard} of ${shard.shards} has no case to run`);
+  if (shard.shards > 1) say(`shard ${shard.shard} of ${shard.shards}: ${mine.length} of ${cases.length} cases`);
+  const order = mine.sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
+  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${mine.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
   const next = { i: 0 };
   const worker = async () => {
     for (let k = next.i++; k < order.length; k = next.i++) await run(order[k]);
   };
   await Promise.all(Array.from({ length: jobs }, worker));
   clearInterval(beat);
-  say(`${cases.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
+  say(`${mine.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
   outcome.failed.forEach((name) => say(`FAILED: ${name}`));
   if (outcome.failed.length) process.exitCode = 1;
 }

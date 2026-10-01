@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 import { contractTestProblems, contractTestsReport, HARDHAT_ONLY } from "./contract-tests.ts";
 import { isGateTest } from "../scan.ts";
 import { withoutComments } from "../ci/ci-drift.ts";
-import { jobBlocks, runCommands } from "../ci/ci-steps.ts";
+import { jobBlocks, runCommands } from "../ci/workflow/ci-steps.ts";
 
 const A_TEST = 'import { describe, test } from "bun:test";\ndescribe("x", () => { test("y", () => {}); });\n';
 const A_FOUNDRY_TEST = "contract T is Test { function test_y() public {} }\n";

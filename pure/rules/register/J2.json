@@ -44,6 +44,11 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "skip-read-as-started"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "J2: a dispute op the chain skipped is told to its Account, and the batch is done all the same"
   }
  ]
 }

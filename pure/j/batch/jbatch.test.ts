@@ -3,19 +3,18 @@ import { describe, expect, test } from "bun:test";
 import { deployment } from "../../chain/proof/deployment.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import {
-  advancesCommandNonce, openJBatch, queue, seal, type JBatch, type QueueOutcome, type SealContext,
+  advancesCommandNonce, drop, openJBatch, queue, seal, type JBatch, type QueueOutcome, type SealContext,
 } from "./jbatch.ts";
 import type { JOp } from "../op/ops.ts";
-import { MIN_GAS_BUDGET } from "./sealed.ts";
+import { budgetFor } from "../gas/gas.ts";
 import {
-  ME, LEFT_PEER, RIGHT_PEER, bigStart, counter, fundSpread, pick, deposit, finalize, fund, holdings, idOf,
-  reserveToReserve, reveal,
-  settle, start, withdraw,
+  GAS, ME, LEFT_PEER, RIGHT_PEER, bigStart, counter, drive, fundSpread, pick, deposit, finalize, fund, holdings, idOf,
+  reserveToReserve, reveal, settle, start, withdraw,
 } from "../fixtures.ts";
 
 const chain = unwrapOr(deployment(31337n, `0x${"0b".repeat(20)}`), (e) => expect.unreachable(JSON.stringify(e)));
 const ctx = (reserve = 100n): SealContext =>
-  ({ deployment: chain, treasury: holdings([1n, reserve, 0n]), gasBudget: MIN_GAS_BUDGET });
+  ({ deployment: chain, treasury: holdings([1n, reserve, 0n]), gas: GAS, answers: [] });
 
 const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
   ops.reduce((acc, op) => {
@@ -26,7 +25,7 @@ const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
 const tags = (ops: readonly JOp[]): readonly string[] => ops.map((op) => op._tag);
 
 const sealedOf = (j: JBatch, c = ctx()) => {
-  const outcome = seal(j, c);
+  const outcome = drive(j, c);
   return outcome._tag === "sealed" ? outcome : expect.unreachable(outcome._tag);
 };
 
@@ -316,5 +315,58 @@ describe("R-J3 payments waiting for funding never refuse a dispute step", () => 
     const hard = queued(openJBatch(ME, 0n), ...Array.from({ length: 50 }, (_, i) => deposit(BigInt(i + 1))));
     expect(queue(hard, deposit(99n))._tag).toBe("refused");
     expect(queue(hard, reserveToReserve(1n))._tag).toBe("queued");
+  });
+});
+
+describe("R-SIMULATE reaches seal: nothing is signed before the Host has simulated the batch", () => {
+  const j = queued(openJBatch(ME, 0n), reserveToReserve(1n));
+
+  test("the first outcome is a request to simulate, and it signs nothing and takes no nonce", () => {
+    const outcome = seal(j, ctx());
+    expect(outcome._tag).toBe("simulate");
+    expect(j.signedMax).toBe(0n);
+  });
+  test("the batch that is signed is the one that was simulated", () => {
+    const final = sealedOf(j);
+    const answered = drive(j, ctx(), (c) => ({ _tag: "ok", applyGas: 600_000n + BigInt(c.ops.length) }));
+    expect(final.batch.digest).not.toBe("");
+    expect(answered._tag === "sealed" && answered.batch.gasBudget).toBe(budgetFor(600_001n));
+  });
+  test("a batch that would revert is held, and the group behind it is tried instead", () => {
+    const both = queued(openJBatch(ME, 0n), finalize(LEFT_PEER, 1n), reserveToReserve(1n));
+    const gated = drive(both, ctx(), (c) => c.ops.some((op) => op._tag === "dispute_finalize")
+      ? { _tag: "reverts", reason: "0x00000002" } : { _tag: "ok", applyGas: 600_000n });
+    expect(gated._tag === "sealed" && gated.batch.ops.map((op) => op._tag)).toEqual(["reserve_to_reserve"]);
+    expect(gated._tag === "sealed" && gated.jbatch.draft.map((op) => op._tag)).toEqual(["dispute_finalize"]);
+  });
+  test("when every group would revert nothing is signed and the reasons are given", () => {
+    const outcome = drive(j, ctx(), () => ({ _tag: "reverts", reason: "0x00000003" }));
+    expect(outcome).toEqual({ _tag: "held", why: [{ _tag: "would_revert", reason: "0x00000003" }] });
+  });
+  test("a payment batch too heavy for the cap is signed in the part that fits, the rest waits", () => {
+    const many = queued(openJBatch(ME, 0n), ...Array.from({ length: 4 }, (_, i) => reserveToReserve(BigInt(i + 1))));
+    const heavy = drive(many, ctx(), (c) => ({ _tag: "ok", applyGas: 5_000_000n * BigInt(c.ops.length) }));
+    expect(heavy._tag === "sealed" && heavy.batch.ops.length).toBe(2);
+    expect(heavy._tag === "sealed" && heavy.jbatch.draft.length).toBe(2);
+  });
+});
+
+describe("drop: an Account withdraws a request that is still in the draft", () => {
+  test("a request waiting in the draft is removed, the others stay", () => {
+    const j = queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n), reserveToReserve(1n));
+    const out = drop(j, settle(LEFT_PEER, -2n, 4n));
+    expect(out._tag).toBe("dropped");
+    if (out._tag === "dropped") expect(out.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_reserve"]);
+  });
+  test("a request already signed into a batch cannot be recalled: the batch is named", () => {
+    const sealed = drive(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)), ctx());
+    if (sealed._tag !== "sealed") return expect.unreachable(sealed._tag);
+    const out = drop(sealed.jbatch, settle(LEFT_PEER, -2n, 4n));
+    expect(out).toEqual({ _tag: "on_its_way", sent: sealed.batch });
+  });
+  test("a request nobody queued is unknown, and an op without a name is never matched", () => {
+    const j = queued(openJBatch(ME, 0n), deposit(5n));
+    expect(drop(j, settle(LEFT_PEER, -2n, 4n))._tag).toBe("unknown");
+    expect(drop(j, deposit(5n))._tag).toBe("unknown");
   });
 });
