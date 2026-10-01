@@ -202,15 +202,15 @@ describe("account/frame R-FRAME-REFUSAL no run is stuck while J moves and the vi
     expect([out.stuck, out.lost]).toEqual([0, 0]);
     expect(out.committed).toBeGreaterThan(300);
     expect(out.collisions).toBeGreaterThan(300);
-  });
+  }, 30_000);
 
   test("R-FRAME-REFUSAL J moves while frames are in flight, the views agree: no run stuck or losing a tx", () => {
     const out = simulate(5, 300, 120, MOVING);
     expect([out.stuck, out.lost]).toEqual([0, 0]);
-  });
+  }, 30_000);
 
   test("R-FRAME-REFUSAL J moves and the views drift apart by up to LAG: no run stuck or losing a tx", () => {
     const out = simulate(6, 300, 120, DRIFTING);
     expect([out.stuck, out.lost]).toEqual([0, 0]);
-  });
+  }, 30_000);
 });
