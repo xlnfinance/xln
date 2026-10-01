@@ -3694,6 +3694,292 @@
      "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
     }
    ]
+  },
+  {
+   "id": "R-GATE-CONTRACTS-VM",
+   "statement": "The contracts/ BrowserVM and deploy-gate tests (contracts/test/vm/<area>/*.test.ts, contracts/test/gate/*.test.ts) run inside the one gate, one file per process after a rebuild that leaves the committed typechain-types as they were: `bun rules/check.ts` (and --contracts-only) is red when one is red, when the rebuild fails or changes typechain-types, or when no test file is found, and CI's contracts job runs that same command.",
+   "source": "coordinator 10-01 08:48 (a contracts/test/gate test went red on GitHub only: the local gate checked where such tests sit but never ran them)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red contracts/ BrowserVM or deploy-gate test, or a stale typechain, alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red gate test of contracts/ exits 1 and names the file"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the same test passing, with a quiet rebuild, passes the contracts part"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a rebuild that writes into typechain-types exits 1 as stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the files are CI's globs: vm/<area>/*.test.ts and gate/*.test.ts, sorted, nothing else"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a tree with no gate test is red, not an empty pass"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a green rebuild and green tests pass, the build first and each test file in a process of its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a red test file is named with its exit code and the end of its output, and the other files still run"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a test that did not start is red, not skipped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a failing rebuild is red and says so"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM a rebuild that changes typechain-types is red: the committed files are stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CONTRACTS-VM the digest is the same for the same files and differs for a changed, an added and a renamed file"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-STEPS",
+   "statement": "Every command of a job behind GitHub's `One gate` is a command of the local gate or listed set-up (installs, cd, the ast-grep script), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
+   "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS jobs are cut at their ids, and one-gate names the jobs it needs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a run is one line, or a block read to its dedent; && and ; split it, a continuation joins it, other keys are not read"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a command in a comment is not a command: the workflow is read without its comments"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a workflow whose gate jobs run exactly the gate commands, with set-up, agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a loop that runs tests in the workflow only is named, with its job and each command of it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS any other command in a gate job is named, a gate flag that is not a part flag included"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a command in a job that one-gate does not need is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a gate command that no gate job runs any more is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a one-gate that needs a job the workflow does not have is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS a workflow with no one-gate job is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the step comparison is part of the drift check"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the jobs behind One gate run the gate's commands and set-up only"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-STEPS the check is not vacuous: the real one-gate needs jobs, and they run the gate's commands"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-SETUP-RETRY",
+   "statement": "A gate lane does not go red because a package mirror timed out once: ast-grep and uv come from the CI cache when it holds the pinned version and are otherwise installed with up to three tries (.github/scripts/retry.sh, setup-ast-grep.sh), and the pins stay the workflow's only copy.",
+   "source": "coordinator 10-01 08:36 (the bun test lane died in setup on an ast-grep download timeout)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that fails once and then works is run twice and passes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that always fails is run three times, then fails and says so"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a command that works is run once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY what the cache restored is used: the pinned ast-grep answers offline, so nothing is installed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY with nothing cached, uv and then ast-grep are installed at their pins and the result is checked"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a download that times out once is retried, and the lane stays green"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY a download that never works fails the step after three tries, and the check at the end does not run"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-SETUP-RETRY the versions are arguments, so the workflow's pin is the only copy"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-TRIGGERS",
+   "statement": "GitHub's One gate starts on every pull request whatever base it targets or files it touches, and no job behind it can be skipped: the gate workflow runs on pull_request with no branches, branches-ignore, paths, paths-ignore or types filter, no gate job has a job-level if, and one-gate has none but always(). The five One gate checks are required, so a PR that never got them would stay blocked forever. Pushes to a PR branch that conflicts with its base get no pull_request run from GitHub itself; the conflict blocks the merge on its own and clears with the next push.",
+   "source": "coordinator 10-01 09:15 (PR 65 head 3cf41b4 got no checks; the five One gate checks are about to be required)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS pull_request with no filter, and a one-gate that always runs, agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the inline forms of on: that include pull_request agree, and a push filter on another event is none of its business"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a workflow with no one-gate job is not judged"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a workflow that does not run on pull_request is named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS every filter on pull_request is named: branches, branches-ignore, paths, paths-ignore, types"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a filter that sits under another event, after pull_request, is not read as pull_request's"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a filter after a blank line of the pull_request block is still named"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS only the on: block is read for the trigger: a job or a key that merely ends in pull_request is not one"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS a gate job with a job-level if is named, one-gate with any if but always() too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS an if on a step is not a skipped job"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the trigger check is part of the drift check"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the real workflows start on every pull request and cannot skip a gate job"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-TRIGGERS the check is not vacuous: the real One gate workflow is judged, and its pull_request trigger is there"
+    }
+   ]
   }
  ]
 }
