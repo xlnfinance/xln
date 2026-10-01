@@ -8,6 +8,7 @@ Everything here is prepared; nothing here deploys to a live network by itself. A
 | `sepolia.manifest.json` | The live record: what `deploy-set.ts --live` wrote on 2026-10-01 (chain 11155111, eight contracts, the faucet token as id 1). Never an input, never overwritten: a deploy refuses to write over it. |
 | `manifest.ts` | The manifest type and its validator. A deployed manifest must carry every contract with address, block, transaction hash, gas used and the code hash the chain holds. |
 | `deploy-set.ts` | Deploys the eight contracts, binds the Depository, lists the token through the Foundation, writes a deployed manifest. |
+| `verify.ts` | Read-only. Compares the deployed code with the current build: for each of the eight contracts and the faucet token it rebuilds the runtime code from the compiled artifact (library addresses substituted into the link slots, every immutable set to the value the deploy gave it), reads the code at the manifest's address through a public RPC, and prints `match` or `differ` per contract. Exit 0 only when every contract matches, 1 when any differs, 2 when the check could not be made. |
 | `smoke.ts` | Runs on a deployed manifest: fund and deposit, open, a cooperative signed batch, a dispute start and finalize from the implicit proof and from a signed proof. Any failed or skipped batch fails it. |
 | `dry-run.ts` | Starts a throw-away anvil, deploys, smoke-tests, stops anvil. `--fork <rpc>` makes it an anvil fork (reads only; every transaction stays in anvil's memory). |
 
@@ -20,6 +21,17 @@ bun contracts/deploy/dry-run.ts                # plain anvil, chain 31337
 bun contracts/deploy/dry-run.ts --fork https://ethereum-sepolia-rpc.publicnode.com   # anvil fork of Sepolia, chain 11155111
 bun test contracts/test/gate/deploy-guards.test.ts contracts/test/gate/deploy-dry-run.test.ts   # the refusals and the dry run, as tests (anvil needed, a missing anvil fails)
 ```
+
+Is what Sepolia holds the code of the current build? Read-only, no key, no `--live`:
+
+```sh
+bash contracts/scripts/build.sh                                    # the build to compare against (verify.ts refuses an artifact older than its source)
+bun contracts/deploy/verify.ts                                     # the manifest in this folder, https://ethereum-sepolia-rpc.publicnode.com
+bun contracts/deploy/verify.ts --rpc <any sepolia rpc> --manifest contracts/deploy/sepolia.manifest.json
+bun test contracts/test/gate/deploy-verify.test.ts                 # the comparison itself, against a fake node: every way a chain can differ, planted one at a time
+```
+
+A contract is `match` only when the chain's code equals the rebuilt code byte for byte (the first differing byte is named, as compiled code, as a link slot for a library, or as a named immutable) and its keccak256 equals the manifest's `codeHash`. `differ` has two causes that read differently: the chain differs from the manifest's own hash (the manifest does not describe that address), or the chain still equals the manifest and the current build has moved on (a contract changed after the deploy, so the deployed set is no longer the set `main` builds). The only calls it makes are `eth_chainId`, `eth_blockNumber` and `eth_getCode` (all pinned to one block); the test suite asserts no other method and no key is ever used.
 
 The live deploy, once Arthur says so (the only command here that sends a transaction to a real network):
 
