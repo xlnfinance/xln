@@ -1,35 +1,33 @@
 // The progress report: how much of the register each column holds, and which goal milestones that makes true.
 // Read-only and pure: names, git and files are read in rules/progress.ts, and the gate (rules/check.ts) is unchanged.
-import { layerCounts, type CellVerdict, type RowReport } from "../evaluate.ts";
+import { layerCounts, type RowReport } from "../evaluate.ts";
 import { LAYERS, type Layer, type Register, type Row } from "../model.ts";
 
-// One column of the register. `required` is what the column must carry (held plus owed plus a hold cell no name carries);
-// `unclaimed` is the live rules that do not claim this column at all, so a quiet column is not read as a finished one.
-export type Column = Readonly<{ layer: Layer; held: number; owed: number; required: number; unclaimed: number }>;
+// One column of the register. `required` is what the column must carry (held plus owed plus a hold cell no name carries); `na` is the
+// live rules whose cell says, with a reason, that the layer has no part in them (they leave `required`, and the report prints them so a
+// shrunk column shows); `unstated` is the live rules that say nothing here, so a quiet column is not read as a finished one.
+export type Column = Readonly<{ layer: Layer; held: number; owed: number; required: number; na: number; unstated: number }>;
 
 const isLive = (row: Row): boolean => row.retiredBy === undefined;
 
-const isUnclaimed = (verdict: CellVerdict): boolean => verdict === "unclaimed" || verdict === "unclaimed-but-present";
-
-export const columnsOf = (reports: readonly RowReport[]): readonly Column[] => {
-  const live = reports.filter((report) => isLive(report.row));
-  return layerCounts(live).map(({ layer, held, owed, required }) => ({
-    layer,
-    held,
-    owed,
-    required,
-    unclaimed: live.filter((report) => isUnclaimed(report.cells[layer].verdict)).length,
-  }));
-};
+export const columnsOf = (reports: readonly RowReport[]): readonly Column[] => layerCounts(reports);
 
 // A register read from another commit has no names to check, so its columns come from the cells: a `hold` cell counts as held
-// (the gate refuses a commit where no name carries it) and an `owed` cell as owed. On a green tree this equals `columnsOf`.
+// (the gate refuses a commit where no name carries it), an `owed` cell as owed, `n/a` as not applicable, `-` as unstated. On a green tree
+// this equals `columnsOf`.
 export const registerColumns = (register: Register): readonly Column[] => {
   const live = register.filter(isLive);
   return LAYERS.map((layer) => {
     const held = live.filter((row) => row.cells[layer]._tag === "hold").length;
     const owed = live.filter((row) => row.cells[layer]._tag === "owed").length;
-    return { layer, held, owed, required: held + owed, unclaimed: live.filter((row) => row.cells[layer]._tag === "absent").length };
+    return {
+      layer,
+      held,
+      owed,
+      required: held + owed,
+      na: live.filter((row) => row.cells[layer]._tag === "na").length,
+      unstated: live.filter((row) => row.cells[layer]._tag === "unstated").length,
+    };
   });
 };
 
@@ -69,18 +67,19 @@ export type Deployment = Readonly<{ recorded: boolean; detail: string }>;
 export type SpecAtMain = Readonly<{ ref: string; columns: readonly Column[] }>;
 
 const columnFor = (columns: readonly Column[], layer: Layer): Column =>
-  columns.find((column) => column.layer === layer) ?? { layer, held: 0, owed: 0, required: 0, unclaimed: 0 };
+  columns.find((column) => column.layer === layer) ?? { layer, held: 0, owed: 0, required: 0, na: 0, unstated: 0 };
 
-// Everything the column must carry is carried (required is held plus owed plus missing, so nothing is owed), and it must carry
-// something: an empty column has not finished anything.
-const isComplete = (column: Column): boolean => column.required > 0 && column.held === column.required;
+// Done when nothing in the column is owed, missing or unstated (required is held plus owed plus missing, so held equal to required leaves
+// none), and it must carry something: a column that is all "n/a" has finished nothing. A "n/a" cell has a reason in the register that the
+// PR which wrote it listed for review; the report prints how many there are.
+const isComplete = (column: Column): boolean => column.required > 0 && column.held === column.required && column.unstated === 0;
 
-const countsText = ({ held, required, owed, unclaimed }: Column): string =>
-  `${held} of ${required} held, ${owed} owed; ${unclaimed} of ${required + unclaimed} live rules claim no cell here`;
+const countsText = ({ held, required, owed, na, unstated }: Column): string =>
+  `${held} of ${required} held, ${owed} owed, ${na} not applicable; ${unstated} of ${required + na + unstated} live rules leave the cell unstated`;
 
 const BY_NAMES = "by names, not by a run";
 
-// The spec columns finish only when every live rule claims a cell there: a rule retired or blanked out of the column cannot finish it.
+// The spec columns finish only when every live rule states its cell there: a rule retired or blanked out of the column cannot finish it.
 const specMilestone = (name: string, layer: Layer, main: SpecAtMain | undefined): Milestone => {
   if (main === undefined) {
     return { name, status: "unchecked", by: BY_NAMES, detail: "origin/main is not fetched here, so the spec cannot be read from main" };
@@ -88,13 +87,13 @@ const specMilestone = (name: string, layer: Layer, main: SpecAtMain | undefined)
   const column = columnFor(main.columns, layer);
   return {
     name,
-    status: isComplete(column) && column.unclaimed === 0 ? "done" : "not done",
+    status: isComplete(column) ? "done" : "not done",
     by: BY_NAMES,
     detail: `${columnLabel(layer)} column on origin/main at ${main.ref}: ${countsText(column)}`,
   };
 };
 
-// The checkout's columns finish when what they must carry is carried; the milestone prints how many live rules claim nothing there.
+// The checkout's columns finish when what they must carry is carried and no rule leaves its cell unstated.
 const columnMilestone = (name: string, column: Column, note: string): Milestone => ({
   name,
   status: isComplete(column) ? "done" : "not done",
@@ -124,7 +123,7 @@ export const milestonesOf = (columns: readonly Column[], deployment: Deployment,
   specMilestone("Arrival on main", "arrival", main),
   specMilestone("Quint on main", "quint", main),
   contractsMilestone(columnFor(columns, "contract"), deployment),
-  columnMilestone("xln.ts cut to the spec", columnFor(columns, "ts"), " (every ts cell held)"),
+  columnMilestone("xln.ts cut to the spec", columnFor(columns, "ts"), " (every ts cell held or not applicable)"),
   columnMilestone("Walk checks the spec against the contracts", columnFor(columns, "rig"), " (the register does not say which contracts the walk ran on)"),
   { name: "End-to-end run on Sepolia", status: "unchecked", detail: `${SEPOLIA_STEPS}: this report has no check for it` },
 ];
@@ -167,12 +166,14 @@ export type Report = Readonly<{
 const MAX_LISTED = 10;
 
 const columnLine = (column: Column): string =>
-  `${columnLabel(column.layer).padEnd(10)} ${pad(column.held, 5)} ${pad(column.required, 8)} ${percentText(column.held, column.required).padStart(8)} ${pad(column.owed, 5)} ${pad(column.unclaimed, 9)}`;
+  `${columnLabel(column.layer).padEnd(10)} ${pad(column.held, 5)} ${pad(column.required, 8)} ${percentText(column.held, column.required).padStart(8)} ${pad(column.owed, 5)} ${pad(column.na, 15)} ${pad(column.unstated, 9)}`;
 
 const totalLine = (columns: readonly Column[]): string => {
   const { held, required } = totalOf(columns);
   const owed = columns.reduce((sum, column) => sum + column.owed, 0);
-  return `${"Total".padEnd(10)} ${pad(held, 5)} ${pad(required, 8)} ${percentText(held, required).padStart(8)} ${pad(owed, 5)}`;
+  const na = columns.reduce((sum, column) => sum + column.na, 0);
+  const unstated = columns.reduce((sum, column) => sum + column.unstated, 0);
+  return `${"Total".padEnd(10)} ${pad(held, 5)} ${pad(required, 8)} ${percentText(held, required).padStart(8)} ${pad(owed, 5)} ${pad(na, 15)} ${pad(unstated, 9)}`;
 };
 
 const countedRules = (ids: readonly string[], verb: string): string =>
@@ -212,7 +213,7 @@ export const renderProgress = ({ checkout, specFrom, liveRules, columns, milesto
       ? [`the register evaluation is red (${problems} problems); this report counts only the register, not the ratchet, style, folder width or forge parts: run bun rules/check.ts`]
       : []),
     "",
-    "Column      held  required  percent  owed  no cell here",
+    "Column      held  required  percent  owed  not applicable  unstated",
     ...DISPLAY_ORDER.map((layer) => columnLine(columnFor(columns, layer))),
     totalLine(columns),
     ...(since === undefined ? [] : sinceLines(since, columns)),

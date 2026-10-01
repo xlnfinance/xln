@@ -1,5 +1,6 @@
 // A register may only grow. Compared with the register at the base commit: a row may not vanish, a cell may not
-// drop from hold to owed or from owed to absent, and a killer the base named may not disappear. A rule is retired
+// drop from hold to owed, from owed to not applicable, or from a stated cell back to unstated, and a killer the base named may not disappear.
+// A claim (hold, owed) outranks "n/a", so a rule cannot leave a column's denominator by giving a reason. A rule is retired
 // with retired_by, which the gate prints so the diff is reviewed.
 import type { Cell, Problem, Register, Row } from "./model.ts";
 import { LAYERS } from "./model.ts";
@@ -7,10 +8,12 @@ import { LAYERS } from "./model.ts";
 const strength = (cell: Cell): number => {
   switch (cell._tag) {
     case "hold":
-      return 2;
+      return 3;
     case "owed":
+      return 2;
+    case "na":
       return 1;
-    case "absent":
+    case "unstated":
       return 0;
   }
 };

@@ -5,13 +5,14 @@ import { addedSince, columnsOf, milestonesOf, percentOf, registerColumns, render
 
 const held: Cell = { _tag: "hold" };
 const owed: Cell = { _tag: "owed", by: "someone" };
-const absent: Cell = { _tag: "absent" };
+const unstated: Cell = { _tag: "unstated" };
+const na: Cell = { _tag: "na", reason: "no part in this rule" };
 
 const row = (id: string, cells: Partial<Record<Layer, Cell>>, overrides: Partial<Row> = {}): Row => ({
   id,
   statement: "s",
   source: "src",
-  cells: { arrival: absent, quint: absent, contract: absent, rig: absent, ts: absent, ...cells },
+  cells: { arrival: unstated, quint: unstated, contract: unstated, rig: unstated, ts: unstated, ...cells },
   killers: [{ kind: "test", layer: "ts", name: "the killer" }],
   ...overrides,
 });
@@ -37,12 +38,16 @@ describe("a column counts the rules it holds out of the rules it must carry", ()
     expect(columnOf(register, names, "ts")).toMatchObject({ held: 2, owed: 1, required: 3 });
     expect(columnOf(register, names, "arrival")).toMatchObject({ held: 1, owed: 1, required: 2 });
   });
-  test("a rule whose cell is `-` is not required and is counted apart, so a quiet column is not read as a finished one", () => {
-    expect(columnOf(register, names, "ts")?.unclaimed).toBe(1);
-    expect(columnOf(register, names, "quint")).toMatchObject({ held: 0, owed: 0, required: 0, unclaimed: 4 });
+  test("a rule whose cell is left unstated is not required and is counted apart, so a quiet column is not read as a finished one", () => {
+    expect(columnOf(register, names, "ts")?.unstated).toBe(1);
+    expect(columnOf(register, names, "quint")).toMatchObject({ held: 0, owed: 0, required: 0, na: 0, unstated: 4 });
   });
-  test("a `-` cell stays unclaimed when a name already carries the id there: nothing is required of it yet", () => {
-    expect(columnOf(register, [carrier("quint", "R-ONE")], "quint")).toMatchObject({ required: 0, unclaimed: 4 });
+  test("an unstated cell stays unstated when a name already carries the id there: nothing is required of it yet", () => {
+    expect(columnOf(register, [carrier("quint", "R-ONE")], "quint")).toMatchObject({ required: 0, unstated: 4 });
+  });
+  test("a not-applicable cell is counted apart: not held, not owed, not required, and not unstated", () => {
+    const withNa: Register = [...register, row("R-FIVE", { ts: na })];
+    expect(columnOf(withNa, names, "ts")).toMatchObject({ held: 2, owed: 1, required: 3, na: 1, unstated: 1 });
   });
   test("a hold cell no name carries is required but not held (the gate is red there)", () => {
     expect(columnOf(register, [], "ts")).toMatchObject({ held: 0, owed: 1, required: 3 });
@@ -52,7 +57,7 @@ describe("a column counts the rules it holds out of the rules it must carry", ()
   });
   test("a retired rule is in no column, in the numerator or the denominator", () => {
     const withRetired: Register = [...register, row("R-OLD", { ts: held }, { retiredBy: ["R-ONE"] })];
-    expect(columnOf(withRetired, names, "ts")).toMatchObject({ held: 2, required: 3, unclaimed: 1 });
+    expect(columnOf(withRetired, names, "ts")).toMatchObject({ held: 2, required: 3, unstated: 1 });
   });
   test("every layer has a column, in the register's own order", () => {
     expect(columnsOf(reportsOf(register, names)).map((column) => column.layer)).toEqual([...LAYERS]);
@@ -69,8 +74,8 @@ describe("percent and total", () => {
   });
   test("the total adds held cells and required cells across every column", () => {
     const columns = [
-      { layer: "arrival", held: 19, owed: 45, required: 64, unclaimed: 0 },
-      { layer: "ts", held: 40, owed: 9, required: 49, unclaimed: 0 },
+      { layer: "arrival", held: 19, owed: 45, required: 64, na: 0, unstated: 0 },
+      { layer: "ts", held: 40, owed: 9, required: 49, na: 0, unstated: 0 },
     ] as const;
     expect(totalOf(columns)).toEqual({ held: 59, required: 113 });
   });
@@ -82,10 +87,10 @@ describe("a register read from a commit has no names, so its columns come from t
     row("R-TWO", { ts: owed }),
     row("R-OLD", { ts: held }, { retiredBy: ["R-ONE"] }),
   ];
-  test("a hold cell counts as held, an owed cell as owed, a `-` as unclaimed, a retired row not at all", () => {
-    const columns = registerColumns(register);
-    expect(columns.find((column) => column.layer === "ts")).toEqual({ layer: "ts", held: 1, owed: 1, required: 2, unclaimed: 0 });
-    expect(columns.find((column) => column.layer === "arrival")).toEqual({ layer: "arrival", held: 0, owed: 1, required: 1, unclaimed: 1 });
+  test("a hold cell counts as held, an owed cell as owed, n/a as not applicable, a `-` as unstated, a retired row not at all", () => {
+    const columns = registerColumns([...register, row("R-THREE", { ts: na })]);
+    expect(columns.find((column) => column.layer === "ts")).toEqual({ layer: "ts", held: 1, owed: 1, required: 2, na: 1, unstated: 0 });
+    expect(columns.find((column) => column.layer === "arrival")).toEqual({ layer: "arrival", held: 0, owed: 1, required: 1, na: 0, unstated: 2 });
   });
   test("on a green tree the cell columns equal the columns the names give", () => {
     const names = [carrier("ts", "R-ONE")];
@@ -117,8 +122,8 @@ describe("rules added and retired since a commit", () => {
   });
 });
 
-const column = (layer: Layer, heldCount: number, owedCount: number, unclaimed = 0) =>
-  ({ layer, held: heldCount, owed: owedCount, required: heldCount + owedCount, unclaimed }) as const;
+const column = (layer: Layer, heldCount: number, owedCount: number, unstated = 0, na = 0) =>
+  ({ layer, held: heldCount, owed: owedCount, required: heldCount + owedCount, na, unstated }) as const;
 
 const allDone = LAYERS.map((layer) => column(layer, 4, 0));
 const recorded: Deployment = { recorded: true, detail: "status deployed on ethereum-sepolia" };
@@ -159,7 +164,7 @@ describe("the six goal milestones, each decided by a check that exists", () => {
     expect(statusOf("Quint on main", allDone, recorded, undefined)).toBe("unchecked");
     expect(milestone("Quint on main", allDone, recorded, undefined)?.detail).toContain("origin/main");
   });
-  test("Arrival and Quint are done only when every live rule claims a cell there: retiring or blanking rows cannot finish them", () => {
+  test("Arrival and Quint are done only when every live rule states its cell there: retiring or blanking rows cannot finish them", () => {
     const blanked = allDone.map((each) => (each.layer === "quint" ? column("quint", 4, 0, 1) : each));
     expect(statusOf("Quint on main", allDone, recorded, onMain(blanked))).toBe("not done");
     expect(statusOf("Arrival on main", allDone, recorded, onMain(blanked))).toBe("done");
@@ -177,11 +182,29 @@ describe("the six goal milestones, each decided by a check that exists", () => {
     const columns = allDone.map((each) => (each.layer === "ts" ? { ...each, held: 3, required: 4 } : each));
     expect(statusOf("xln.ts cut to the spec", columns, recorded)).toBe("not done");
   });
-  test("ts, contracts and the walk may be done with rules that claim no cell, and the milestone says how many", () => {
+  test("a cell left unstated keeps ts and the walk from done, whatever else the column holds", () => {
     const wide = allDone.map((each) => (each.layer === "ts" ? column("ts", 4, 0, 70) : each));
+    const open = milestone("xln.ts cut to the spec", wide, recorded);
+    expect(open?.status).toBe("not done");
+    expect(open?.detail).toContain("70 of 74 live rules leave the cell unstated");
+    const rig = allDone.map((each) => (each.layer === "rig" ? column("rig", 4, 0, 1) : each));
+    expect(statusOf("Walk checks the spec against the contracts", rig, recorded)).toBe("not done");
+  });
+  test("rules that say not applicable, with a reason, do not keep a milestone from done, and the milestone says how many", () => {
+    const wide = allDone.map((each) => (each.layer === "ts" ? column("ts", 4, 0, 0, 70) : each));
     const done = milestone("xln.ts cut to the spec", wide, recorded);
     expect(done?.status).toBe("done");
-    expect(done?.detail).toContain("70 of 74 live rules claim no cell here");
+    expect(done?.detail).toContain("70 not applicable");
+    const onMainWide = allDone.map((each) => (each.layer === "quint" ? column("quint", 4, 0, 0, 3) : each));
+    expect(statusOf("Quint on main", allDone, recorded, onMain(onMainWide))).toBe("done");
+  });
+  test("a column where every rule says not applicable has finished nothing", () => {
+    const empty = allDone.map((each) => (each.layer === "rig" ? column("rig", 0, 0, 0, 12) : each));
+    expect(statusOf("Walk checks the spec against the contracts", empty, recorded)).toBe("not done");
+  });
+  test("contracts: an unstated cell in the column is not done, like an owed one", () => {
+    const open = allDone.map((each) => (each.layer === "contract" ? column("contract", 22, 0, 1) : each));
+    expect(statusOf("Contracts reviewed and deployed", open, recorded)).toBe("not done");
   });
   test("contracts: an incomplete column or a manifest that is not deployed is not done", () => {
     expect(statusOf("Contracts reviewed and deployed", allDone, notRecorded)).toBe("not done");
@@ -211,7 +234,7 @@ describe("the six goal milestones, each decided by a check that exists", () => {
   });
 });
 
-const columns = [column("arrival", 19, 45), column("quint", 0, 67), column("ts", 40, 9, 3), column("contract", 22, 0), column("rig", 1, 2)];
+const columns = [column("arrival", 19, 45), column("quint", 0, 67), column("ts", 40, 9, 3, 2), column("contract", 22, 0), column("rig", 1, 2)];
 const checkout = { branch: "claude/x", sha: "abc1234", changed: 0 } as const;
 const report = (over: Partial<Parameters<typeof renderProgress>[0]> = {}) =>
   renderProgress({
@@ -234,6 +257,13 @@ describe("the printed report", () => {
     expect(lines.find((line) => line.startsWith("ts code"))).toMatch(/40\s+49\s+81\.6%/);
     expect(lines.find((line) => line.startsWith("contracts"))).toMatch(/22\s+22\s+100\.0%/);
     expect(lines.find((line) => line.startsWith("walk"))).toMatch(/1\s+3\s+33\.3%/);
+  });
+  test("prints how many cells are not applicable and how many are unstated in each column, so a shrunk denominator shows", () => {
+    const lines = text.split("\n");
+    expect(lines.find((line) => line.startsWith("Column"))).toContain("not applicable");
+    expect(lines.find((line) => line.startsWith("Column"))).toContain("unstated");
+    expect(lines.find((line) => line.startsWith("ts code"))).toMatch(/40\s+49\s+81\.6%\s+9\s+2\s+3$/);
+    expect(lines.find((line) => line.startsWith("Arrival"))).toMatch(/19\s+64\s+29\.7%\s+45\s+0\s+0$/);
   });
   test("prints the total over every column", () => {
     expect(text.split("\n").find((line) => line.startsWith("Total"))).toMatch(/82\s+205\s+40\.0%/);
