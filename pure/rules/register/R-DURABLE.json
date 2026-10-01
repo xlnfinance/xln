@@ -1,0 +1,109 @@
+{
+ "id": "R-DURABLE",
+ "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
+ "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "send-before-persist"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "ack-before-persist"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "send-before-persist"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "ack-before-persist"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a staged row sends nothing: its outputs leave once it is committed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the outputs of committed rows leave once each, in row order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash before flush loses the belief, not the outputs: they all leave again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash between apply and commit loses the staged frame and nothing durable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE every world nothing can move in is the finished one, and a finished world is reached"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is caught"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: a flush that never marks its rows sent repeats them without end"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: a recovery that forgets the last row is caught"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: a shell that sends a row's outputs when it asks for the write, not after"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the sender never believes the peer holds more than the peer made durable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: an ack that leaves with the write request gives Alice a head Bob lacks"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a frame that has begun asks for its row to be made durable, sends nothing and holds the Host"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the outputs of a row leave only once the row is durable, once, and never an earlier row's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE after a crash the Host is the durable rows alone, and every committed output leaves again"
+  }
+ ]
+}
