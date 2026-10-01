@@ -5,8 +5,8 @@
  "layers": {
   "arrival": "owed: spec thread, swap page",
   "quint": "owed: spec thread",
-  "contract": "-",
-  "rig": "-",
+  "contract": "owed: contracts review (R-SWAP-ONCHAIN: a finalize at the same ratio moves the same amounts as this rule; plan/swap-onchain.md)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
  },
  "killers": [

@@ -5,8 +5,8 @@
  "layers": {
   "arrival": "owed: spec thread, swap page",
   "quint": "owed: spec thread",
-  "contract": "-",
-  "rig": "-",
+  "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
   "ts": "hold"
  },
  "killers": [
