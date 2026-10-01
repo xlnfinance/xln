@@ -1,62 +1,22 @@
-// The batch encoder against the contract's own ABI: the Batch type as the compiler emitted it (typechain), filled with
-// sample values in every slot of every operation, encoded by ethers, compared byte for byte; and the batches the real
-// Depository accepted in contracts/vectors/lifecycle.json, decoded and encoded again.
+// The batch encoder against the vectors the deployed contracts produced (contracts/vectors): batch.json holds, for
+// every slot of every operation, the input, the bytes the compiler's ABI gives for it and whether the deployed
+// Depository's bounds accepted them; lifecycle.json holds the batches the Depository executed. The input is
+// recorded, so nothing here re-derives a sample and compares the encoder with itself.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
-import { DeltaTransformer__factory, DepositoryBounds__factory } from "../../../contracts/typechain-types/index.ts";
+import { DepositoryBounds__factory } from "../../../contracts/typechain-types/index.ts";
 import { encode } from "../../kernel/encoding/abi.ts";
 import { bytesToHex } from "../../kernel/encoding/bytes.ts";
 import { unwrapOr, type Result } from "../../kernel/core/result.ts";
 import { emptyBatch, encodeBatch, type Batch } from "./batch.ts";
-import { encodeDeltaBatch } from "./clauses.ts";
 import { signedAmountAbi } from "../money.ts";
 
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const batchParam = DepositoryBounds__factory.createInterface().getFunction("assertBatch")!.inputs[0]!;
 const must = <T, E>(r: Result<T, E>): T => unwrapOr(r, (e) => expect.unreachable(JSON.stringify(e)));
-
-// ---- samples, derived from the ABI ----
-
-type Mode = "small" | "wide" | "mixed";
-const digest = (path: string): string => ethers.keccak256(ethers.toUtf8Bytes(path));
-const distinct = (path: string, bits: number): bigint =>
-  (BigInt(digest(path)) % (1n << BigInt(Math.min(bits, 20)))) + 1n;
-/** The value a sample takes in each mode: the smallest that is legal, the widest that fits, a distinct one. */
-const byMode = <T>(mode: Mode, values: Readonly<Record<Mode, T>>): T => values[mode];
-const bitsOf = (baseType: string): number => Number(/\d+$/.exec(baseType)?.[0] ?? 256);
-
-const sample = (p: ethers.ParamType, path: string, mode: Mode): unknown => {
-  switch (true) {
-    case p.baseType === "array": {
-      const fixed = p.arrayLength !== null && p.arrayLength >= 0 ? p.arrayLength : null;
-      const length = fixed ?? byMode(mode, { small: 1, wide: 2, mixed: 2 });
-      return Array.from({ length }, (_, i) => sample(p.arrayChildren!, `${path}[${i}]`, mode));
-    }
-    case p.baseType === "tuple":
-      return Object.fromEntries(p.components!.map((c, i) => {
-        const name = c.name || `f${i}`;
-        return [name, sample(c, `${path}.${name}`, mode)];
-      }));
-    case p.baseType === "bool":
-      return byMode(mode, { small: false, wide: true, mixed: BigInt(digest(path)) % 2n === 0n });
-    case p.baseType === "address": return ethers.getAddress(`0x${digest(path).slice(26)}`);
-    case p.baseType === "bytes32": return digest(path);
-    case p.baseType === "bytes": {
-      const filled = `0x${digest(path).slice(2, 76)}`;
-      return byMode(mode, { small: "0x", wide: filled, mixed: filled });
-    }
-    case p.baseType.startsWith("uint"): {
-      const bits = bitsOf(p.baseType);
-      return byMode(mode, { small: 7n, wide: (1n << BigInt(bits)) - 1n, mixed: distinct(path, bits) });
-    }
-    case p.baseType.startsWith("int"): {
-      const bits = bitsOf(p.baseType) - 1;
-      return byMode(mode, { small: -7n, wide: -(1n << BigInt(bits)), mixed: -distinct(path, bits) });
-    }
-    default: return expect.unreachable(`no sample for ${p.baseType}`);
-  }
-};
+const committed = (name: string) =>
+  JSON.parse(readFileSync(new URL(`../../../contracts/vectors/${name}.json`, import.meta.url), "utf8"));
 
 // ---- the contract's values to the encoder's types ----
 
@@ -86,29 +46,62 @@ const batchOf = (j: Plain): Batch => ({
   disputeFinalizations: j.disputeFinalizations.map((d: Plain) => ({ ...d, finalProofbody: bodyOf(d.finalProofbody) })),
 });
 
-describe("R-J2 encodeBatch equals the compiled ABI", () => {
-  (["small", "wide", "mixed"] as const).forEach((mode) => {
-    test(`${mode} sample: every slot of every operation`, () => {
-      const value = sample(batchParam, "batch", mode);
-      expect(must(encodeBatch(batchOf(value)))).toBe(coder.encode([batchParam], [value]));
+/** A vector's input (decimal strings) back to the values the encoder takes: a bigint in every integer slot. */
+const revive = (value: Plain, p: ethers.ParamType): Plain => {
+  switch (p.baseType) {
+    case "array": return (value as unknown[]).map((x) => revive(x, p.arrayChildren!));
+    case "tuple": return Object.fromEntries(p.components!.map((c) => [c.name, revive(value[c.name], c)]));
+    default: return /^u?int/.test(p.baseType) ? BigInt(value) : value;
+  }
+};
+
+type Layout = Readonly<{ label: string; input: Plain; encodedBatch: string; accepted: boolean; rejectedWith?: string }>;
+const batch = committed("batch");
+const layouts: readonly Layout[] = batch.layout.cases.filter((c: Plain) => c.input !== undefined);
+/** Bytes the contract decodes: the accepted ones, and the one its bounds (E10) refuse after decoding. */
+const accepted = layouts.filter((c) => c.accepted || c.rejectedWith === "E10");
+const inputOf = (label: string): Plain => revive(layouts.find((c) => c.label === label)?.input, batchParam);
+
+describe("R-J2 encodeBatch equals the bytes the compiled ABI gave for each recorded input (batch.json)", () => {
+  test("the vector records every field of the contract's Batch, in the encoder's order", () => {
+    expect(batch.layout.fields).toEqual(Object.keys(emptyBatch(0n)));
+    expect(batchParam.components!.map((c) => c.name)).toEqual(batch.layout.fields);
+  });
+
+  accepted.forEach((c) => {
+    test(`${c.label}: input to bytes`, () => {
+      expect(must(encodeBatch(batchOf(revive(c.input, batchParam))))).toBe(c.encodedBatch);
+    });
+    test(`${c.label}: the bytes decode and encode back to themselves`, () => {
+      const decoded = plain(coder.decode([batchParam], c.encodedBatch)[0], batchParam);
+      expect(must(encodeBatch(batchOf(decoded)))).toBe(c.encodedBatch);
     });
   });
 
-  test("the sample touches every operation list the contract's Batch has", () => {
-    const names = batchParam.components!.map((c) => c.name);
-    expect(names).toEqual(Object.keys(emptyBatch(0n)));
+  test("an empty batch is the gas budget and eleven empty lists", () => {
+    const empty = layouts.find((c) => c.label === "no ops, the minimum gas budget")!;
+    expect(must(encodeBatch(emptyBatch(BigInt(empty.input.gasBudget))))).toBe(empty.encodedBatch);
   });
 
-  test("an empty batch is the gas budget and eleven empty lists", () => {
-    const value = sample(batchParam, "empty", "small") as Record<string, unknown>;
-    const empty = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, Array.isArray(v) ? [] : v]));
-    expect(must(encodeBatch(emptyBatch(7n)))).toBe(coder.encode([batchParam], [empty]));
+  test("one-hot cases set exactly one boolean, so a swap of two boolean slots changes the bytes", () => {
+    const hot = accepted.filter((c) => c.label.startsWith("one-hot: only "));
+    expect(hot.length).toBeGreaterThanOrEqual(10);
+    expect(new Set(hot.map((c) => c.encodedBatch)).size).toBe(hot.length);
+  });
+});
+
+describe("R-J2 the operations the deployed Depository executed (batch.json ops)", () => {
+  Object.entries(batch.ops).forEach(([name, op]) => {
+    test(`${name}: the executed bytes decode and encode back to themselves`, () => {
+      const bytes = (op as Plain).encodedBatch;
+      const decoded = plain(coder.decode([batchParam], bytes)[0], batchParam);
+      expect(must(encodeBatch(batchOf(decoded)))).toBe(bytes);
+    });
   });
 });
 
 describe("R-J2 the batches the deployed Depository accepted (contracts/vectors/lifecycle.json)", () => {
-  const lifecyclePath = new URL("../../../contracts/vectors/lifecycle.json", import.meta.url);
-  const lifecycle = JSON.parse(readFileSync(lifecyclePath, "utf8"));
+  const lifecycle = committed("lifecycle");
   (["deposit", "settle", "disputeStart", "disputeFinalize"] as const).forEach((step) => {
     test(`${step}: decode the accepted bytes, encode them again, get the same bytes`, () => {
       const accepted: string = lifecycle[step].encodedBatch;
@@ -123,35 +116,19 @@ describe("R-J2 the batches the deployed Depository accepted (contracts/vectors/l
 });
 
 describe("a value the contract would refuse to decode is refused here", () => {
-  test("a token type past uint8, inside an external token deposit", () => {
-    const value = sample(batchParam, "tokenType", "small") as Plain;
-    const [deposit] = value.externalTokenToReserve;
-    const tooBig = { ...value, externalTokenToReserve: [{ ...deposit, tokenType: 256n }] };
-    expect(encodeBatch(batchOf(tooBig))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint8" } });
-  });
-  test("a gas budget past uint64", () => {
-    expect(encodeBatch(emptyBatch(1n << 64n))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint64" } });
-  });
-  test("a hash-ladder fill ratio past uint16, deep inside the batch", () => {
-    const value = sample(batchParam, "ratio", "small") as Plain;
-    const [registration] = value.hashLadderRegistrations;
-    const witness = { ...registration.witness, fillRatio: 65_536n };
-    const tooBig = { ...value, hashLadderRegistrations: [{ ...registration, witness }] };
-    expect(encodeBatch(batchOf(tooBig))).toEqual({ ok: false, error: { _tag: "out_of_range", type: "uint16" } });
-  });
-});
+  const pastType = layouts.filter((c) => c.rejectedWith === "revert with no data");
+  const typeOf = (label: string): string => /\((u?int\d+|bool)\)/.exec(label)?.[1] ?? expect.unreachable(label);
 
-describe("R-J2 the transformer clause payload equals the compiled DeltaTransformer ABI in every slot", () => {
-  const clauseParam = DeltaTransformer__factory.createInterface().getFunction("encodeBatch")!.inputs[0]!;
-  const clauseOf = (j: Plain) => ({
-    payments: j.payment.map((p: Plain) => ({ ...p, amount: signed(p.amount) })),
-    swaps: j.swap,
-    pulls: j.pull.map((p: Plain) => ({ ...p, amount: signed(p.amount) })),
+  test("the vector records a value one past each type, for a gas budget, a token type, a ratio and a bool", () => {
+    expect(pastType.map((c) => typeOf(c.label))).toEqual(["uint64", "uint8", "uint16", "bool"]);
   });
-  (["small", "wide", "mixed"] as const).forEach((mode) => {
-    test(`${mode} sample`, () => {
-      const value = sample(clauseParam, "clause", mode);
-      expect(must(encodeDeltaBatch(clauseOf(value)))).toBe(coder.encode([clauseParam], [value]));
+
+  const refusedAs = { uint64: "uint64", uint8: "uint8", uint16: "uint16" } as const;
+  type RefusedType = keyof typeof refusedAs;
+  pastType.filter((c) => typeOf(c.label) !== "bool").forEach((c) => {
+    test(`${c.label}`, () => {
+      expect(encodeBatch(batchOf(revive(c.input, batchParam))))
+        .toEqual({ ok: false, error: { _tag: "out_of_range", type: refusedAs[typeOf(c.label) as RefusedType] } });
     });
   });
 });
@@ -165,7 +142,7 @@ describe("R-J2 a zero amount is never negative (WideMath.NonCanonicalSign)", () 
     });
   });
   test("a settlement diff of zeros encodes as positive zeros", () => {
-    const value = sample(batchParam, "zeros", "small") as Plain;
+    const value = inputOf("every array, small values");
     const zero = { negative: false, magnitude: 0n };
     const diff = {
       ...value.settlements[0].diffs[0], leftDiff: zero, rightDiff: zero, collateralDiff: zero, ondeltaDiff: zero,
