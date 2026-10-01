@@ -31,11 +31,11 @@ const mentions = (dir: string, pattern: RegExp): boolean =>
   sourcesUnder(join(PURE, dir)).some((file) => pattern.test(readFileSync(file, "utf8")));
 
 export const GAPS = {
-  entityRuntime: {
-    id: "entity-runtime", kind: "missing", layer: "Entity + Runtime",
-    piece: "Entity frame (arrivals, hooks, commands, proposals), Runtime tick and WAL: pure/entity/, pure/runtime/ (EntityState, EntityInput, Runtime.apply). Main has the Account replicas only, so the harness drives them directly.",
-    supplier: "cut stack #93, #94, #96, #99, #100, #106 (Entity and Runtime cut)",
-    landed: () => has("entity/model.ts") && has("runtime/tick.ts"),
+  entityChainFacts: {
+    id: "entity-chain-facts", kind: "missing", layer: "Entity",
+    piece: "What the Entity learns from the chain and does about it: the deposit command, JEvent (j_epoch, j_dispute, j_dispute_over, j_op_lapsed), ChainFacts (epoch, stored nonce, windows, freeze), the co-sign freeze. Main's Entity takes open_account, set_credit and pay only, so a Runtime cannot be told that 100 USDT of collateral sits behind an Account; the harness copies deposits into the Account ledgers by hand and the Runtime payment runs on credit.",
+    supplier: "#99 (chain facts, dispute watch, deposit gate), #100 (C2R folds offdelta, co-sign freeze)",
+    landed: () => mentions("entity", /j_epoch/),
   },
   jBatchBuilder: {
     id: "j-batch-builder", kind: "scaffold", layer: "J",
@@ -63,8 +63,8 @@ export const GAPS = {
   },
   htlcRoute: {
     id: "htlc-route", kind: "scaffold", layer: "Entity",
-    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
-    supplier: "no owner yet: the cut stack's htlc tests lock and resolve across one Account only (Review B of #113); hold duty is the A4b Runtime slice after #97",
+    piece: "HTLC through the Runtime: the Entity takes no lock, resolve, cancel or expire command on main (open_account, set_credit, pay only), and nothing forwards: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness walks the route by hand, hop by hop.",
+    supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
     landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
   },
   onChainReveal: {
@@ -89,9 +89,9 @@ export const GAPS = {
   },
   disputeRebase: {
     id: "dispute-rebase", kind: "missing", layer: "Entity",
-    piece: "After a dispute finalizes, the Account's ledger must be rebased from the J event (collateral paid out, epoch advanced, frames reset). Main has no event-to-Account path; the harness only checks the chain's payout against the ledger as it stood.",
-    supplier: "#99 (chain facts, dispute watch) plus the J batch planner",
-    landed: () => has("entity/chain.ts"),
+    piece: "After a dispute finalizes, the Account's ledger must be rebased from the J event (collateral paid out, epoch advanced, frames reset), and the Entity's dispute duties (counter, hold) must run. Main has no event-to-Account path; the harness only checks the chain's payout against the ledger as it stood.",
+    supplier: "#99 (chain facts, dispute watch); the counter and dispute duties move onto the committed slot when #97 merges (per the cut thread)",
+    landed: () => mentions("entity", /counterFor/),
   },
   hostTransport: {
     id: "host-transport", kind: "missing", layer: "Host",

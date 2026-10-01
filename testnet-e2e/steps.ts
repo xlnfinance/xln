@@ -19,6 +19,9 @@ import {
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
+import { startRuntime, apply, commit as commitRow, flush } from "../pure/runtime/tick.ts";
+import type { Input, Runtime, Timestamp } from "../pure/runtime/model.ts";
+import { emptyEntity, entityId, type EntityId, type EntityInput, type Outbound } from "../pure/entity/model.ts";
 import { commit, creditDeposit, ledgerIn, openPair, sideOfParty, type Pair, type View } from "./lib/pair.ts";
 
 export type Options = Readonly<{ rpc: string | null; fork: string }>;
@@ -164,7 +167,7 @@ const open: Step<World> = {
     const parties = Object.values(partiesOf(w));
     w.held = await heldBy(chain, parties, legs.map(([, a, b]) => [a, b] as const));
     if (w.held !== BigInt(parties.length) * DEPOSIT * unit(chain)) throw new Error(`reserves plus collateral are ${w.held}, the deposits were ${BigInt(parties.length) * DEPOSIT * unit(chain)}`);
-    return { checks: [...opened.checks, `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`], gaps: ["entityRuntime", "jBatchBuilder", "jEvents", "hostTransport"] };
+    return { checks: [...opened.checks, `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`], gaps: ["entityChainFacts", "jBatchBuilder", "jEvents"] };
   },
 };
 
@@ -175,7 +178,7 @@ const view = async (chain: Chain): Promise<View> => {
 };
 
 const pay: Step<World> = {
-  id: "pay", title: "alice pays hubX 30; bob extends hubY credit (frames of the Account layer)", needs: ["open"],
+  id: "pay", title: "alice pays hubX 30; bob extends hubY credit (Account frames, driven directly)", needs: ["open"],
   run: async (w) => {
     const chain = chainOf(w);
     const { alice, bob, hubY } = partiesOf(w);
@@ -197,12 +200,75 @@ const pay: Step<World> = {
         `alice-hubX: one frame (pay 30), both replicas committed head ${paid.replicas.left.head.slice(0, 12)}, allocation moved ${moved} for the Left side, so Left ${expected < 0n ? "paid" : "was paid"}`,
         `hubY-bob: one frame (set_credit 50 by bob), hubY may owe bob ${limit}`,
       ],
-      gaps: ["entityRuntime", "signedFrames", "hostTransport"],
+      gaps: ["signedFrames"],
     };
   },
 };
 
+
 // ---- S5 ----------------------------------------------------------------------------------------------------------
+type Cluster = { readonly hosts: ReadonlyMap<EntityId, Runtime>; readonly inflight: readonly Outbound[]; readonly clock: bigint };
+
+const hostOf = (c: Cluster, id: EntityId): Runtime => c.hosts.get(id) ?? (() => { throw new Error(`no host ${id}`); })();
+
+/** One Host tick: apply, commit, flush. A Halt is a Host bug and stops the run. */
+const tick = (rt: Runtime, input: Input): { readonly runtime: Runtime; readonly leaving: readonly Outbound[] } => {
+  const staged = apply(rt, input);
+  if (!staged.ok) throw new Error(`runtime halted: ${staged.error._tag}`);
+  const committed = commitRow(staged.value);
+  if (!committed.ok) throw new Error(`runtime halted: ${committed.error._tag}`);
+  return flush(committed.value);
+};
+
+/** One input into one Runtime; what leaves it joins the in-memory link (gap `host-transport`). */
+const feed = (c: Cluster, to: EntityId, ...inputs: readonly EntityInput[]): Cluster => {
+  const ticked = tick(hostOf(c, to), { at: c.clock as Timestamp, to, inputs });
+  return { hosts: new Map([...c.hosts, [to, ticked.runtime]]), inflight: [...c.inflight, ...ticked.leaving], clock: c.clock + 1n };
+};
+
+/** The link delivers the oldest message, then whatever the receiver sent back, until nothing is in flight. */
+const settle = (c: Cluster): Cluster => {
+  const [next, ...rest] = c.inflight;
+  return next === undefined ? c : settle(feed({ ...c, inflight: rest }, next.to, { _tag: "peer_message", from: next.from, msg: next.msg }));
+};
+
+const payRuntime: Step<World> = {
+  id: "pay-runtime", title: "The same payment through two Runtimes: open, credit, pay over a link", needs: ["pay"],
+  run: async (w) => {
+    const chain = chainOf(w);
+    const { alice, hubX } = partiesOf(w);
+    const t = token(chain);
+    const v = w.view ?? (w.view = await view(chain));
+    const [a, x] = [must(entityId(alice.id), "alice id"), must(entityId(hubX.id), "hubX id")];
+    const setup = { clock: v.clock, view: v.view };
+    const start: Cluster = { hosts: new Map([[a, startRuntime(setup, [emptyEntity(a)])], [x, startRuntime(setup, [emptyEntity(x)])]]), inflight: [], clock: 1n };
+    const unit6 = unit(chain);
+    const opened = settle(feed(feed(start, a, { _tag: "open_account", peer: x }), x, { _tag: "open_account", peer: a }));
+    const credited = settle(feed(opened, x, { _tag: "set_credit", peer: a, token: t, limit: 100n * unit6 }));
+    const settled = settle(feed(credited, a, { _tag: "pay", peer: x, token: t, amount: 30n * unit6 }));
+    const ra = hostOf(settled, a).entities.get(a)?.accounts.get(x);
+    const rx = hostOf(settled, x).entities.get(x)?.accounts.get(a);
+    if (ra === undefined || rx === undefined) throw new Error("an Account is missing after the open");
+    if (ra.head !== rx.head || ra.pending !== undefined || rx.pending !== undefined) throw new Error("the two Runtimes do not hold the same committed head");
+    const mine = ledgerIn(pairsOf(w).ax, t).offdelta;
+    const theirs = ra.state.ledgers.get(t)?.offdelta;
+    const notices = [...hostOf(settled, a).wal, ...hostOf(settled, x).wal].flatMap((row) => row.notices);
+    if (theirs === undefined || notices.length > 0) throw new Error(`ledger ${String(theirs)}, notices ${JSON.stringify(notices.map((n) => n._tag))}`);
+    // alice-hubX had one pay of 30 plus an HTLC of 10 by now; the Runtime made only the 30.
+    const sideLeft = ra.side === "left";
+    if (theirs !== (sideLeft ? -30n : 30n) * unit6) throw new Error(`the Runtime's ledger moved ${theirs}, expected 30 for ${ra.side}`);
+    return {
+      checks: [
+        `alice and hubX each run a Runtime on an Entity (pure/runtime tick: apply, commit, flush); WAL heights ${hostOf(settled, a).wal.length} and ${hostOf(settled, x).wal.length}, no notice`,
+        `open_account on both, hubX set_credit 100, alice pay 30: both replicas committed head ${ra.head.slice(0, 12)}, offdelta ${theirs} (the Account-pair path of S4 had ${mine} after the 30 and the HTLC's 10)`,
+        "the Runtime knows nothing of the 100 USDT collateral the chain holds, so the payment runs on credit: it has no deposit command or JEvent",
+      ],
+      gaps: ["entityChainFacts", "hostTransport", "signedFrames"],
+    };
+  },
+};
+
+// ---- S6 ----------------------------------------------------------------------------------------------------------
 const htlc: Step<World> = {
   id: "htlc", title: "HTLC of 10 from alice across hubX and hubY to bob, resolved back", needs: ["pay"],
   run: async (w) => {
@@ -238,14 +304,14 @@ const htlc: Step<World> = {
       if (l.holds.length !== 0 || l.offdelta !== expected) throw new Error(`${k}: holds ${l.holds.length}, offdelta ${l.offdelta}, expected ${expected}`);
       return `${route[i]!.name} to ${route[i + 1]!.name}: clause deadline view+${deadlines[i]! - v.view}, resolved, payer's allocation fell by ${fmt(chain, amount)}`;
     });
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops, J view ${v.view}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["entityRuntime", "htlcRoute", "signedFrames", "hostTransport"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops, J view ${v.view}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "signedFrames"] };
   },
 };
 
 // ---- blocked steps -----------------------------------------------------------------------------------------------
 const reveal: Step<World> = {
   id: "reveal", title: "Payee reveals the secret on chain when its resolve is not acked in time", needs: ["htlc"],
-  run: async () => { throw new Blocked(["onChainReveal", "entityRuntime"], `no code decides when to reveal (view + LAG >= deadline) or builds the revealSecrets op: ${GAPS.onChainReveal.supplier}`); },
+  run: async () => { throw new Blocked(["onChainReveal"], `no code decides when to reveal (view + LAG >= deadline) or builds the revealSecrets op: ${GAPS.onChainReveal.supplier}`); },
 };
 
 const swap: Step<World> = {
@@ -323,12 +389,12 @@ const disputeClause: Step<World> = {
 
 const rebase: Step<World> = {
   id: "rebase", title: "Account ledgers follow the chain after the dispute pays out", needs: ["dispute"],
-  run: async () => { throw new Blocked(["disputeRebase", "entityRuntime"], `nothing turns the chain's DisputeFinalized into the Account's new epoch, ledger and frame counter: ${GAPS.disputeRebase.supplier}`); },
+  run: async () => { throw new Blocked(["disputeRebase", "entityChainFacts"], `nothing turns the chain's DisputeFinalized into the Account's new epoch, ledger and frame counter: ${GAPS.disputeRebase.supplier}`); },
 };
 
 const nodes: Step<World> = {
   id: "nodes", title: "Four nodes run the Runtime over a transport, survive a restart, and replay their WAL", needs: [],
-  run: async () => { throw new Blocked(["hostTransport", "entityRuntime"], `no Host: ${GAPS.hostTransport.piece} ${GAPS.entityRuntime.supplier}`); },
+  run: async () => { throw new Blocked(["hostTransport", "jEvents"], `no Host: ${GAPS.hostTransport.piece} ${GAPS.jEvents.supplier}`); },
 };
 
-export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, htlc, reveal, swap, dispute, disputeClause, rebase, nodes];
+export const STEPS: readonly Step<World>[] = [fork, world, deposits, open, pay, payRuntime, htlc, reveal, swap, dispute, disputeClause, rebase, nodes];
