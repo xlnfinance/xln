@@ -3,7 +3,7 @@
 // everything else is checked here, field by field, with exactly the keys the type has and the bounds the Runtime and
 // the ledger do not give (a count, a length). What the ledger judges (an amount, a deadline's meaning) stays the
 // ledger's: here a number is only a number of the right kind.
-import type { AccountTx } from "../../../account/tx.ts";
+import { MAX_ROUTE_HOPS, type AccountTx } from "../../../account/tx.ts";
 import type { Msg, Frame, FrameHash } from "../../../account/frame/frame.ts";
 import { jHeight, type JHeight } from "../../../account/clause/clock.ts";
 import {
@@ -51,6 +51,12 @@ const readHold: Reader<Hold> = (at, v) => flatMap(record(at, v, HOLD_KEYS), (o) 
     hashlock: field(at, o, "hashlock", hashlock), deadline: field(at, o, "deadline", height),
   }));
 
+/** The ids a lock's route names, at most MAX_ROUTE_HOPS of them: a longer one is not a lock a peer may send. */
+const readRoute: Reader<readonly string[]> = (at, v) => {
+  if (!Array.isArray(v) || v.length > MAX_ROUTE_HOPS) return bad(at, `at most ${MAX_ROUTE_HOPS} entity ids`);
+  return traverse(v, (id, i) => entity(`${at}[${i}]`, id));
+};
+
 const readLeg: Reader<Leg> = (at, v) => flatMap(record(at, v, ["token", "amount"]), (o) =>
   all({ token: field(at, o, "token", token), amount: field(at, o, "amount", big) }));
 
@@ -69,7 +75,11 @@ const txOf = (tag: string, at: string, o: Fields): Result<AccountTx, ReadFault> 
     case "pay": return all({ _tag: ok("pay" as const), token: f("token", token), amount: f("amount", big) });
     case "set_credit":
       return all({ _tag: ok("set_credit" as const), token: f("token", token), limit: f("limit", big) });
-    case "lock": return all({ _tag: ok("lock" as const), token: f("token", token), hold: f("hold", readHold) });
+    case "lock": return Object.hasOwn(o, "route")
+      ? all({
+        _tag: ok("lock" as const), token: f("token", token), hold: f("hold", readHold), route: f("route", readRoute),
+      })
+      : all({ _tag: ok("lock" as const), token: f("token", token), hold: f("hold", readHold) });
     case "resolve":
       return all({
         _tag: ok("resolve" as const), token: f("token", token), id: f("id", hold), secret: f("secret", secret),
@@ -89,8 +99,15 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   fill: ["id", "ratio"], retract: ["id"], lapse: ["id"],
 };
 
-const readTx: Reader<AccountTx> = (at, v) => flatMap(tagOf(at, v), (tag) => {
+/** The keys a tx has: a lock has a route too when it names one. */
+const keysOf = (tag: string, v: unknown): readonly string[] | undefined => {
   const keys = Object.hasOwn(KEYS, tag) ? KEYS[tag] : undefined;
+  const routed = tag === "lock" && typeof v === "object" && v !== null && Object.hasOwn(v, "route");
+  return routed ? [...(keys ?? []), "route"] : keys;
+};
+
+const readTx: Reader<AccountTx> = (at, v) => flatMap(tagOf(at, v), (tag) => {
+  const keys = keysOf(tag, v);
   return keys === undefined ? bad(at, "a tx") : flatMap(record(at, v, ["_tag", ...keys]), (o) => txOf(tag, at, o));
 });
 

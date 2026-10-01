@@ -1,0 +1,29 @@
+{
+ "id": "R-LOCK-ROUTE",
+ "statement": "A lock tx may carry a route: the entity ids of the hops after its payee, at most MAX_ROUTE_HOPS (16). The Account reads none of it and the proof body has none of it: it is in the frame's name, so both sides signed the same route or none, and a lock with a longer route is refused at the door (route_too_long). The wire reader takes only a list of entity ids of at most that length, and a lock without a route is as it was.",
+ "source": "testnet-e2e step S5 (gap htlc-route-source); og's HTLC lock envelope (xln-inventory-runs.md 4801-5306); the builder's route-source decision, 10-01",
+ "layers": {
+  "arrival": "owed: spec thread (the Arrival lock tx has no route field)",
+  "quint": "owed: spec thread (the Quint lock tx has no route field)",
+  "contract": "n/a: a route is not in the proof body, so no contract code reads it",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LOCK-ROUTE a lock's route is at most MAX_ROUTE_HOPS ids and changes nothing else about the lock"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LOCK-ROUTE a lock's route is in the frame's name: a different route, or none, is a different frame"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-LOCK-ROUTE a lock's route is a list of entity ids at most MAX_ROUTE_HOPS long, and nothing else"
+  }
+ ]
+}

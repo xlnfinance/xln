@@ -87,6 +87,7 @@ export type AccountFault =
   | Tagged<"hold_overflow", { held: bigint; requested: bigint }>
   | Tagged<"lock_exists", { id: HoldId }>
   | Tagged<"too_many_holds", { max: number }>
+  | Tagged<"route_too_long", { hops: number; max: number }>
   | Tagged<"credit_below_usage">
   | Tagged<"no_such_hold", { id: HoldId }>
   | Tagged<"withdrawal_beyond_collateral", { collateral: bigint; requested: bigint }>

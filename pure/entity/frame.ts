@@ -210,7 +210,9 @@ const txOf = (self: Side, command: AccountCommand): AccountTx => {
     case "set_credit":
       return { _tag: "set_credit", token: command.token, limit: command.limit };
     case "lock":
-      return { _tag: "lock", token: command.token, hold: command.hold };
+      return command.route === undefined || command.route.length === 0
+        ? { _tag: "lock", token: command.token, hold: command.hold }
+        : { _tag: "lock", token: command.token, hold: command.hold, route: command.route };
     case "resolve":
       return { _tag: "resolve", token: command.token, id: command.id, secret: command.secret };
     case "cancel":
@@ -298,7 +300,7 @@ const prepared = (w: Work, command: PaybookCommand): Work => {
     return refusedCommand(w, command, { _tag: "entry_exists", hashlock: command.hashlock });
   }
   const entry: Entry = command._tag === "forward"
-    ? { _tag: "forward", from: command.from, to: command.to }
+    ? { _tag: "forward", from: command.from, to: command.to, route: [] }
     : { _tag: "receive", from: command.from, token: command.token, amount: command.amount, secret: command.secret };
   return { ...w, state: { ...w.state, paybook: withEntry(w.state.paybook, command.hashlock, entry) } };
 };

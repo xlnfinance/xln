@@ -55,12 +55,13 @@ export const emptyEntity = (id: EntityId): EntityState =>
 /**
  * What the Entity does about an HTLC that is, or will be, locked to it, by hashlock (one is open per hashlock in an
  * Account, R-ONE-LOCK-PER-HASH). `forward` waits for a lock from `from` and then locks on `to` with a shorter
- * deadline; `locked` is that lock, queued, waiting for `to` to resolve or cancel; `pass` and `fail` are what `to`
- * answered, to be passed on to `from`; `receive` is a payment this Entity is the payee of, resolved on the lock of
- * `from` when it is for the token and amount that was asked.
+ * deadline and `route`, the hops after `to` (a lock that came with a route makes the entry itself); `locked` is that
+ * lock, queued, waiting for `to` to resolve or cancel; `pass` and `fail` are what `to` answered, to be passed on to
+ * `from`; `receive` is a payment this Entity is the payee of, resolved on the lock of `from` when it is for the token
+ * and amount that was asked.
  */
 export type Entry =
-  | Tagged<"forward", { from: EntityId; to: EntityId }>
+  | Tagged<"forward", { from: EntityId; to: EntityId; route: readonly EntityId[] }>
   | Tagged<"locked", { from: EntityId; to: EntityId; token: TokenId; id: HoldId }>
   | Tagged<"pass", { from: EntityId; secret: Uint8Array }>
   | Tagged<"fail", { from: EntityId }>
@@ -125,7 +126,7 @@ export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
-  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
+  | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold; route?: readonly EntityId[] }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
   | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>

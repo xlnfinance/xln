@@ -43,12 +43,6 @@ export const GAPS = {
     supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
     landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
-  htlcRouteSource: {
-    id: "htlc-route-source", kind: "scaffold", layer: "Entity",
-    piece: "The Entities forward an HTLC by themselves (pure/entity/paybook, R-HTLC-FORWARD), but each node is told its entry (which peer the lock came from, which it goes to) by a command before the lock is sent: the lock carries no route, so a payer's Runtime alone cannot start a payment across hubs. Also owed: a next hop that never answers (expiry, the on-chain reveal by a hub that learned the secret) and entries that outlive a payment.",
-    supplier: "the builder thread: a source route on the lock, outside the proof body (coordinator decides the format)",
-    landed: () => mentions("account", /route: readonly EntityId\[\]/),
-  },
   entitySwapCommands: {
     id: "entity-swap-commands", kind: "missing", layer: "Entity",
     piece: "Swap inside an Account through a Runtime: AccountTx has offer, fill, retract and lapse (#111, pure/account/swap), but the Entity takes no command that queues them, so no swap offer, partial fill or cancel can go through a Runtime and nothing on the Account's frames is signed for one. The proof body carries the swap clause already; the chain side is plan/swap-onchain.md.",

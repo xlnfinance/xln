@@ -331,13 +331,11 @@ const htlc: Step<World> = {
     const at = net.view();
     const deadline = at + 30n;
     const offBefore = hops.map(([a, b]) => ledgerOf(net.account(eid(a), eid(b)).state, t).offdelta);
-    // The route is told to each node (gap `htlc-route-source`: the lock does not carry it yet); after that alice's one
-    // lock is all that is sent, and each Entity forwards by itself.
-    await net.tell(eid(hubX), { _tag: "forward", hashlock, from: eid(alice), to: eid(hubY) });
-    await net.tell(eid(hubY), { _tag: "forward", hashlock, from: eid(hubX), to: eid(bob) });
+    // Bob asks for the payment (an invoice: the hashlock, his secret, what he wants and from whom), and alice's one lock,
+    // which names the route after its first hop, is all that is sent: each hub's Entity forwards by itself.
     await net.tell(eid(bob), { _tag: "expect", hashlock, from: eid(hubY), token: t, amount, secret });
     const hold = { id: holdId(1n), payer: net.account(eid(alice), eid(hubX)).side, amount, hashlock, deadline: must(jHeight(deadline), "deadline") };
-    await net.tell(eid(alice), { _tag: "lock", peer: eid(hubX), token: t, hold });
+    await net.tell(eid(alice), { _tag: "lock", peer: eid(hubX), token: t, hold, route: [eid(hubY), eid(bob)] });
     await net.settle();
     const checks = hops.map(([payer, payee], i) => {
       const [rp, rq] = [net.account(eid(payer), eid(payee)), net.account(eid(payee), eid(payer))];
@@ -349,7 +347,7 @@ const htlc: Step<World> = {
     const left = [hubX, hubY, bob].map((p) => net.entity(eid(p)).paybook.size);
     if (left.some((n) => n !== 0)) throw new Error(`paybook entries left after the payment: ${left.join(",")}`);
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)}: alice's one lock at J view ${at} (deadline view+${deadline - at}) became a lock on each hop through the hubs' Entities, each one hop sooner, and bob's resolve came back hop by hop`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRouteSource"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)}: alice's one lock at J view ${at} (deadline view+${deadline - at}) named the route hubY, bob and became a lock on each hop made by the hubs' own Entities, each one hop sooner, and bob's resolve came back hop by hop`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: [] };
   },
 };
 

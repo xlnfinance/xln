@@ -10,7 +10,10 @@ import { other, type Hold, type HoldId, type TokenId } from "../../account/model
 import { openHolds } from "../../account/state.ts";
 import type { AccountTx } from "../../account/tx.ts";
 import type { Of } from "../../kernel/core/tagged.ts";
-import { sideOf, type AccountCommand, type Entry, type EntityId, type EntityState, type Paybook } from "../model.ts";
+import { traverse } from "../../kernel/core/result.ts";
+import {
+  entityId, sideOf, type AccountCommand, type Entry, type EntityId, type EntityState, type Paybook,
+} from "../model.ts";
 
 /** A hop's deadline is earlier than the hop before it by what its payee needs to learn the secret and pass it on. */
 export const hopOf = (clock: ClockParams): bigint => clock.reserve + clock.lag;
@@ -70,11 +73,13 @@ const forwardOf = (
   const c = incoming(state, e.from, hashlock);
   if (c === undefined) return undefined;
   const deadline = nextDeadline(clock, view, c.hold);
-  if (deadline === undefined || !state.accounts.has(e.to)) return cancelUp(e.from, hashlock, c);
+  if (deadline === undefined || !state.accounts.has(e.to) || e.to === e.from) return cancelUp(e.from, hashlock, c);
   const id = freeSlot(state, e.to);
   const hold: Hold = { id, payer: sideOf(state.id, e.to), amount: c.hold.amount, hashlock, deadline };
   return {
-    hashlock, command: { _tag: "lock", peer: e.to, token: c.token, hold },
+    hashlock, command: e.route.length === 0
+      ? { _tag: "lock", peer: e.to, token: c.token, hold }
+      : { _tag: "lock", peer: e.to, token: c.token, hold, route: e.route },
     admitted: { _tag: "locked", from: e.from, to: e.to, token: c.token, id }, refused: { _tag: "fail", from: e.from },
   };
 };
@@ -120,9 +125,24 @@ export const withEntry = (book: Paybook, hashlock: string, entry: Entry | undefi
   return new Map([...book].filter(([key]) => key !== hashlock));
 };
 
-/** What `to` answered in a frame the Entity accepted: a resolve is the secret to pass up, a cancel is a failure. */
+/**
+ * A lock that names a route is the entry for its hashlock, unless the Entity has one already: the first of the route
+ * is the next hop. A route with an id that is not one is no route.
+ */
+const routedBy = (book: Paybook, peer: EntityId, tx: Extract<AccountTx, { _tag: "lock" }>): Paybook => {
+  const ids = traverse(tx.route ?? [], entityId);
+  const [to, ...route] = ids.ok ? ids.value : [];
+  return to === undefined || book.has(tx.hold.hashlock)
+    ? book : withEntry(book, tx.hold.hashlock, { _tag: "forward", from: peer, to, route });
+};
+
+/**
+ * What a frame the Entity accepted from `peer` tells the paybook: a lock with a route is an entry, a resolve is the
+ * secret to pass up, a cancel is a failure.
+ */
 export const learned = (book: Paybook, peer: EntityId, txs: readonly AccountTx[]): Paybook =>
   txs.reduce((acc, tx) => {
+    if (tx._tag === "lock") return routedBy(acc, peer, tx);
     if (tx._tag === "resolve") {
       const hashlock = keccakHex(tx.secret);
       const entry = acc.get(hashlock);
