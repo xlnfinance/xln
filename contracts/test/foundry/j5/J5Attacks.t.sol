@@ -117,6 +117,27 @@ contract J5SplitTest is XlnFixture {
     assertFalse(XlnHanko.batchFailed(vm.getRecordedLogs()), "no BatchFailed");
     assertEq(dep.entityNonces(entity[0]), 0);
   }
+
+  function _revealBatchWithFailingPayment() internal view returns (bytes memory) {
+    Batch memory b = XlnHanko.emptyBatch();
+    b.reserveToReserve = new ReserveToReserve[](1);
+    b.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[1], tokenId: 1, amount: 5_000 }); // reserve is 0
+    b.revealSecrets = new SecretReveal[](1);
+    b.revealSecrets[0] = SecretReveal({ transformer: address(deltaTransformer), secret: bytes32(uint256(7)) });
+    return abi.encode(b);
+  }
+
+  /// R-SPLIT for the reveal member: a secret reveal beside a failing payment reverts the batch, takes no nonce, and the reveal is not recorded.
+  function test_R_SPLIT_revealBesideFailingPaymentRevertsWhole() public {
+    bytes memory encoded = _revealBatchWithFailingPayment();
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[0], encoded, 1);
+    vm.recordLogs();
+    (bool ok,) = address(dep).call(abi.encodeCall(dep.processBatch, (entity[0], encoded, _hanko(0, h), 1)));
+    assertFalse(ok, "reverts, does not soft-fail");
+    assertFalse(XlnHanko.batchFailed(vm.getRecordedLogs()), "no BatchFailed");
+    assertEq(dep.entityNonces(entity[0]), 0, "no nonce taken");
+    assertEq(deltaTransformer.hashToTimestamp(keccak256(abi.encode(bytes32(uint256(7))))), 0, "the reveal is rolled back");
+  }
 }
 
 import {ERC721Mock} from "../../../contracts/ERC721Mock.sol";

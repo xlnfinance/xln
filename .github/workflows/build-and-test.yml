@@ -106,6 +106,10 @@ jobs:
             echo "::endgroup::"
           done
 
+      # The Foundry suite (test/foundry) counts as gated, so it runs here too; locally it is the forge part of `bun rules/check.ts`.
+      - name: Run the Foundry suite
+        run: cd contracts && bun run test:forge
+
   build-xln:
     name: Runtime Checks
     runs-on: ubuntu-latest
