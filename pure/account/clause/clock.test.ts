@@ -23,6 +23,11 @@ describe("account/clause/clock", () => {
     expect(clockParams(0n, 0n, 10n).ok).toBe(true);
   });
 
+  test("the largest height is the literal 2^256 - 1, the contract's uint256 ceiling", () => {
+    expect(MAX_HEIGHT).toBe(2n ** 256n - 1n);
+    expect(MAX_HEIGHT).toBe(115792089237316195423570985008687907853269984665640564039457584007913129639935n);
+  });
+
   test("a height is 0 .. 2^256-1: each edge is admitted and the step past it is refused", () => {
     expect(jHeight(0n)).toEqual(ok(heightOf(0n)));
     expect(jHeight(MAX_HEIGHT)).toEqual(ok(heightOf(MAX_HEIGHT)));

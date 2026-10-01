@@ -73,7 +73,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -92,6 +92,51 @@
      "layer": "quint",
      "name": "tie-break-reversed",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left ignores Right's frame and keeps its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Right rolls its frame back, commits Left's and acks it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left commits on the ack, and Right proposes its txs again at the next height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 the rolled-back txs go ahead of what Right queued later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 each side's txs commit in submission order, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
     }
    ]
   },
@@ -924,7 +969,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -932,6 +977,11 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-BODY after my frame is acked, a different frame on the same parent gets no ack"
     }
    ]
   },
@@ -944,7 +994,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
     {
@@ -958,6 +1008,12 @@
      "layer": "quint",
      "name": "accept-proof-nonce-leap",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
     }
    ]
   },
@@ -1261,7 +1317,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1275,6 +1331,16 @@
      "layer": "quint",
      "name": "reack-open-only",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REACK a repeat of the frame at my head is answered with the same ack, in any replica state"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
     }
    ]
   },
@@ -1446,14 +1512,14 @@
   },
   {
    "id": "R-NOTICE",
-   "statement": "A tx that stops applying is refused with notice to its owner and leaves the mempool; never dropped silently, never stuck.",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A frame the peer refuses is NOT covered: that pending frame stays until the peer acks it (owed: R-FRAME-REFUSAL).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1478,19 +1544,114 @@
      "layer": "quint",
      "name": "rollback-drops-txs",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a queued tx that stops applying is refused with its fault at propose, never dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame of only refused txs sends nothing and leaves no pending frame"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a rolled-back tx whose ground moved is refused at the next propose, with notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no submitted tx is lost: committed, held, or refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no tx is both committed and refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
+    }
+   ]
+  },
+  {
+   "id": "R-FRAME-HASH-SIGNED",
+   "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
+   "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (signed bytes) and T0 (wire)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (signed bytes) and T0 (wire)"
+    }
+   ]
+  },
+  {
+   "id": "R-REFUSED-RELEASES-PAYER",
+   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. Today the Account sends no refusal (a frame is answered with an ack or nothing); the refusal message is R-FRAME-REFUSAL (owed A4) and the release of the payer is an Entity/Runtime duty (owed to the cut).",
+   "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: Entity/Runtime cut"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "Entity/Runtime cut"
+    }
+   ]
+  },
+  {
+   "id": "R-FRAME-REFUSAL",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash and the first refused tx; the proposer, whose frame is pending and unacked, rolls it back, drops the refused tx and re-proposes the rest; a refusal for a committed frame is ignored; Left wins simultaneous proposals. Without it a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (frame exchange step)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (frame exchange step)"
     }
    ]
   },
   {
    "id": "R-ADMIT",
-   "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head.",
+   "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1504,6 +1665,26 @@
      "layer": "quint",
      "name": "queue-guard-reads-committed-only",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx is checked at the door against the committed state plus everything queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx behind a pending frame is checked against the state that frame makes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT no committed tx is invalid against the history before it, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
     }
    ]
   },
@@ -1516,7 +1697,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1530,6 +1711,26 @@
      "layer": "quint",
      "name": "accept-wrong-parent",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-PARENT a frame whose parent is not my head is refused and changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
     }
    ]
   },
@@ -1542,7 +1743,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1550,19 +1751,24 @@
      "layer": "arrival",
      "name": "reorder",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
     }
    ]
   },
   {
    "id": "R-AUTH",
-   "statement": "A committed frame never lowers what the other side has of its own to pay, and never changes the credit its author receives.",
+   "statement": "A committed frame never lowers what the other side has of its own to pay, and never changes the credit its author receives; a frame names its author, a frame handed back to its own author is refused, and the author is part of the frame hash (Quint acceptable: f.author != self).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-9",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1570,6 +1776,26 @@
      "layer": "quint",
      "name": "authority",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a committed tx never lowers the other side's own funds or changes its author's credit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a frame handed back to its own author is refused, not read as the peer's"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH the same txs written by the other side are another frame and mean another thing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH R-REACK a frame with another author is not a repeat of the frame at my head"
     }
    ]
   },
@@ -1618,7 +1844,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
     {
@@ -1632,6 +1858,12 @@
      "layer": "arrival",
      "name": "baseline-too-low",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
     }
    ]
   },
@@ -2103,7 +2335,7 @@
   },
   {
    "id": "R-HOLD-CAP",
-   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds the per-token check; the Account-level count is owed by A3 (the first AccountState transition).",
+   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds both halves: the per-token check (ledger.ts) and the Account-level count (state.ts, applied by tx.ts).",
    "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
    "layers": {
     "arrival": "-",
@@ -2121,8 +2353,17 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused",
-     "owed": "A3"
+     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a token that holds 32 alone refuses its own 33rd, and the other token is refused too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a hold that resolves, cancels or expires frees its place in the count, in any token"
     }
    ]
   },
@@ -2171,7 +2412,7 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account (the ts cell holds it per token ledger; the Account-wide count across tokens is owed by A3): a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
     "arrival": "owed: #41 (coordinator 09-30)",
@@ -2199,8 +2440,22 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone",
-     "owed": "A3"
+     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the very same hold locked into a second token is a second clause on the hashlock"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
     }
    ]
   },
