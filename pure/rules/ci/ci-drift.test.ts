@@ -122,7 +122,7 @@ describe("forms the comparison cannot read are problems, not passes", () => {
     const text = real.workflows["build-and-test.yml"] ?? "";
     const noVersion = text.replace(/^\s*bun-version:.*\n/m, "");
     expect(ciDriftProblems({ ...real, workflows: { "build-and-test.yml": noVersion } }).map((problem) => problem.split(" ")[0])).toEqual(["CI_DRIFT_BUN_UNSET"]);
-    const unpinned = text.replace("uv tool install ast-grep-cli==", "uv tool install ast-grep-cli #==");
+    const unpinned = text.replace("setup-ast-grep.sh uv==0.8.17 ast-grep-cli==", "setup-ast-grep.sh uv==0.8.17 ast-grep-cli #==");
     expect(unpinned).not.toBe(text);
     expect(ciDriftProblems({ ...real, workflows: { "build-and-test.yml": unpinned } }).map((problem) => problem.split(" ")[0])).toContain("CI_DRIFT_ASTGREP_UNPINNED");
     const byFile = text.replace(/^(\s*)bun-version:.*$/m, "$1bun-version-file: .bun-version");

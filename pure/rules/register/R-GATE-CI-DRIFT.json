@@ -5,7 +5,7 @@
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
   "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
-  "contract": "n/a: a gate over the repository (pure/rules); it is not contract code",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
   "rig": "n/a: a gate over the repository, with no system state for the walk",
   "ts": "hold"
  },

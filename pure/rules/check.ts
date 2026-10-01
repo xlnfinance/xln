@@ -10,13 +10,14 @@
 //   --forge-only             run only the Foundry suite (rules/checks/forge.ts): forge in PATH (export PATH=$PATH:/foundry), contracts/lib/forge-std checked out
 //   --tests-only             run only contract-test placement: every contract test runs in a gate (rules/checks/contract-tests.ts)
 //   --timeouts-only          run only the test-timeout check: a heavy test names its own timeout (rules/checks/timeouts/heavy-timeouts.ts)
+//   --contracts-only         run only the contracts/ BrowserVM and deploy-gate tests (rules/checks/contracts/contracts-vm.ts): rebuild, typechain-types unchanged, one test file per process
 //   --bun-only               run only the Bun version check (rules/checks/bun/bun-version.ts)
 // Runs the register gate, the style gate of the new tree, folder width (rules/checks/folder-width.ts), contract-test
-// placement (rules/checks/contract-tests.ts), test timeouts (rules/checks/timeouts/heavy-timeouts.ts), the Foundry suite (rules/checks/forge.ts) and the Bun version
+// placement (rules/checks/contract-tests.ts), test timeouts (rules/checks/timeouts/heavy-timeouts.ts), the Foundry suite (rules/checks/forge.ts), the contracts/ BrowserVM and deploy-gate tests (rules/checks/contracts/contracts-vm.ts) and the Bun version
 // (rules/checks/bun/bun-version.ts): one command, one exit code. The Bun version is judged first, so a Bun that is too old fails at
 // the start, not after the long parts.
 // Exit 1 when an id is missing from a layer that must hold it, an owed cell is already satisfied, a row has
-// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, a contract test sits in no gate folder, a heavy test names no timeout, or a forge test is red. See plan/first-moves.md, brief 3.
+// no killer, the new tree breaks a style rule, a folder holds more than its allowed source files, a contract test sits in no gate folder, a heavy test names no timeout, a forge test is red, a typechain-types rebuild changes the checkout, or a contracts/ BrowserVM or deploy-gate test is red. See plan/first-moves.md, brief 3.
 import { existsSync, readFileSync } from "node:fs";
 import { evaluate } from "./evaluate.ts";
 import { carries } from "./names/names.ts";
@@ -29,6 +30,7 @@ import { scanNames } from "./scan.ts";
 import { gateExit, isWanted, selectionOf, type Part } from "./checks/compose.ts";
 import { bunReport } from "./checks/bun/bun-version.ts";
 import { contractTestsReport } from "./checks/contract-tests.ts";
+import { contractsReport } from "./checks/contracts/contracts-vm.ts";
 import { forgeReport } from "./checks/forge.ts";
 import { timeoutsReport } from "./checks/timeouts/heavy-timeouts.ts";
 import { folderWidthReport } from "./checks/folder-width.ts";
@@ -72,6 +74,12 @@ const runTimeouts = (): boolean => {
 
 const runForgeSuite = (): boolean => {
   const report = forgeReport(repoRoot);
+  report.lines.forEach((line) => console.log(line));
+  return !report.failed;
+};
+
+const runContractsVm = (): boolean => {
+  const report = contractsReport(repoRoot);
   report.lines.forEach((line) => console.log(line));
   return !report.failed;
 };
@@ -137,11 +145,12 @@ const PARTS: Readonly<Record<Part, () => boolean>> = {
   tests: runContractTests,
   timeouts: runTimeouts,
   forge: runForgeSuite,
+  contracts: runContractsVm,
   bun: runBun,
 };
 const passes = (part: Part): boolean => !isWanted(part, selection) || PARTS[part]();
 
-// Object properties evaluate in order: bun first, then the quick parts, the Foundry suite last.
+// Object properties evaluate in order: bun first, then the quick parts, the Foundry suite and the contracts/ tests last.
 process.exit(
   gateExit({
     bun: passes("bun"),
@@ -151,5 +160,6 @@ process.exit(
     tests: passes("tests"),
     timeouts: passes("timeouts"),
     forge: passes("forge"),
+    contracts: passes("contracts"),
   }),
 );
