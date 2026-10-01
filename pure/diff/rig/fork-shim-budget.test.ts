@@ -37,7 +37,7 @@ const preludeBound = (signers: number): bigint => {
 
 const needed = (signers: number): bigint => (SHIM_GAS_BUDGET * 64n + 62n) / 63n + depositoryReserve() + preludeBound(signers);
 
-describe("J5: the shim's signed gas budget fits og's transaction gas limit", () => {
+describe("the shim's signed gas budget fits og's transaction gas limit", () => {
   test("the largest board of the walk's world leaves room", () => {
     const gas = ogTxGas();
     console.log(`og tx gas ${gas}; shim budget ${SHIM_GAS_BUDGET}; largest board ${MAX_BOARD_SIGNERS} signers needs at most ${needed(MAX_BOARD_SIGNERS)}`);

@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { GAS_HEADROOM, gasHeadroomLines } from "./sent-checks.ts";
 
-test("J5: the headroom is eight times, as the report says (the measured ratio is about 35, so a weaker bound hides a regression and a stronger one fails honest walks)", () => {
+test("the gas headroom is eight times, as the report says (the measured ratio is about 35, so a weaker bound hides a regression and a stronger one fails honest walks)", () => {
   expect(GAS_HEADROOM).toBe(8n);
   expect(gasHeadroomLines({ tag: "W", disputes: false, budget: 14_000_000n }, { peakGas: () => 1_750_000n })).toEqual([]);
   expect(gasHeadroomLines({ tag: "W", disputes: false, budget: 14_000_000n }, { peakGas: () => 1_750_001n })).toHaveLength(1);

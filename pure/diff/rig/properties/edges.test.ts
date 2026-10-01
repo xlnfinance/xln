@@ -328,7 +328,7 @@ test("P-BELIEF: every token is judged, not the first", async () => {
   expect(frame.violations[0]).toContain("token 2");
 });
 
-test("P-BELIEF at rest: every token is judged, and only an Account whose dispute is live or finalized is skipped (H4)", async () => {
+test("P-BELIEF at rest: every token is judged, and only an Account whose dispute is live or finalized is skipped", async () => {
   const chain = chainOfRows(rowsOf([T1, 100n, 0n], [T2, 100n, 0n]));
   const behind = rowsOf([T1, 100n, 0n], [T2, 0n, 0n]); // the second token lags
   const tagged = (tag: "open" | "proposed" | "received" | "preparing" | "disputed") => lagging(chain, withTagged(believing(behind), tag));

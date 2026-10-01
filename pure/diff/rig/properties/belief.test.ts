@@ -64,7 +64,7 @@ const withTag = (rt: Runtime, _tag: AccountReplica["_tag"]): Runtime => {
   return ({ entities: new Map([[`${L}:a`, { ...entity!, accountReplicas: new Map([[peer, { ...replica, _tag }]]) }]]) }) as unknown as Runtime;
 };
 
-test("P-BELIEF at rest, H4: an Account whose dispute is live or finalized, which takes no more J events, may sit behind the chain", async () => {
+test("P-BELIEF at rest: an Account whose dispute is live or finalized, which takes no more J events, may sit behind the chain", async () => {
   const chain = chainHolding(100n, 0n);
   expect(await lagging(chain, withTag(believing(0n, 0n), "disputed"))).toEqual([]);
 });

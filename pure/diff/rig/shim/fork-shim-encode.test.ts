@@ -1,4 +1,4 @@
-// encodeForkBatch (fork-shim.ts) puts the signed gas budget (J5) in front of og's batch and, in every dispute start, the Account epoch its signature was made at (C1).
+// encodeForkBatch (fork-shim.ts) puts the signed gas budget in front of og's batch and, in every dispute start, the Account epoch its signature was made at (C1).
 // The walks reach this through the moved-epoch dispute (walk.ts epochLines); this pins the two fields directly and fast, so the argument order and the
 // missing-field mutants of the shim (m1 epoch always 0, m6 budget dropped, m7 epoch of the wrong pair) fail here by name.
 import { describe, expect, test } from "bun:test";
@@ -18,7 +18,7 @@ const start = (counterentity: string) => ({
 });
 const decode = (encoded: string) => coder.decode([PARAM], encoded)[0] as { gasBudget: bigint; disputeStarts: { counterentity: string; ondeltaEpoch: bigint }[] };
 
-describe("J5 and C1: the fork's bytes for og's batch", () => {
+describe("C1 and the gas budget: the fork's bytes for og's batch", () => {
   test("the signed budget is in front, and each dispute start carries the epoch of the acting Entity's Account with ITS counterentity", () => {
     const epochs = new Map([[id(2), 7n], [id(3), 11n]]);
     // asked the wrong way round (counterentity first) the answer is 99, so the order is pinned as well

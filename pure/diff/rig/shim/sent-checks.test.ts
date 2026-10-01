@@ -25,11 +25,11 @@ describe("C1: a dispute start carries the epoch its Account holds", () => {
   });
 });
 
-describe("J5: the signed gas budget is a ceiling above every batch", () => {
+describe("the signed gas budget is a ceiling above every batch", () => {
   test("a budget far above the heaviest batch is clean", () => {
     expect(gasHeadroomLines(scope, { peakGas: () => 400_000n })).toEqual([]);
   });
-  test("J5: a budget within the headroom of the heaviest batch is red (the 500,000 shim mutant)", () => {
+  test("a budget within the headroom of the heaviest batch is red (the 500,000 shim mutant)", () => {
     expect(gasHeadroomLines({ ...scope, budget: 500_000n }, { peakGas: () => 400_000n })).toHaveLength(1);
   });
   test("the edge: exactly the headroom passes, one gas less room fails", () => {
