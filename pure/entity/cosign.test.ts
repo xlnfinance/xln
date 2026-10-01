@@ -138,6 +138,15 @@ describe("entity/cosign R-COSIGN-FREEZE after a signature the Account proposes n
     expect(faults).toEqual(["already_cosigned", "already_cosigned"]);
   });
 
+  test("R-COSIGN-FREEZE the peer's settlement and our withdrawal in one frame: the peer's wins, either order", () => {
+    const theirs: CosignOp = { _tag: "settle", token: GOLD, amount: 20n };
+    const signed: readonly JAction[] = [{ _tag: "settle", peer: BOB, token: GOLD, amount: 20n, folds: [OWED] }];
+    const raced = [[ask(theirs), withdraw(30n)], [withdraw(30n), ask(theirs)]].map((inputs) => run(owing, ...inputs));
+    expect(raced.map((r) => r.chain)).toEqual([signed, signed]);
+    expect(raced.map((r) => faultsOf(r.notices))).toEqual([["already_cosigned"], ["already_cosigned"]]);
+    expect(raced.map((r) => r.state.chain.get(BOB)?.frozen)).toEqual([true, true]);
+  });
+
   test("R-COSIGN-FREEZE nothing is signed over a frame still in flight: its ack may move the offdelta", () => {
     const inFlight = run(owing, pay(BOB, 1n));
     const refused = run(inFlight.state, withdraw(30n), ask(c2r));

@@ -1,5 +1,6 @@
 // Two Hosts, each with a Runtime and a durable WAL of its own, over a link that loses, repeats and reorders, with
-// random commands (open, credit, pay), random timers, random crashes (the staged row is lost, the Runtime comes back
+// random commands (open, credit, pay, and in the chain weather withdraw), random timers, random crashes (the staged
+// row is lost, the Runtime comes back
 // from its WAL alone and believes nothing was sent) and frames that carry several inputs at once. The Hosts' stamps
 // jump about. After every step: the two heads lie on one chain of frames, equal heads mean equal states, RCPAN holds,
 // nothing on the link is an output no WAL holds, every idle Host's WAL replays to the entities it holds, and the rows'
@@ -14,18 +15,20 @@ import type { Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { GOLD, entityOf } from "../entity/fixtures.ts";
-import { emptyEntity, type Command, type EntityId, type EntityInput } from "../entity/model.ts";
+import {
+  emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JAction,
+} from "../entity/model.ts";
 import type { Result } from "../kernel/core/result.ts";
 import type { Halt, Input, Row, Runtime } from "./model.ts";
 import { apply, commit, flush, messageId, recover, startRuntime } from "./tick.ts";
-import { setup, stamp } from "./fixtures.ts";
+import { heightAt, setup, stamp } from "./fixtures.ts";
 
 const NAMES = ["alice", "bob"] as const;
 type Name = (typeof NAMES)[number];
 const ID: Readonly<Record<Name, EntityId>> = { alice: entityOf(1), bob: entityOf(2) };
 const PEER: Readonly<Record<Name, Name>> = { alice: "bob", bob: "alice" };
 
-type Source = "command" | "link" | "timer";
+type Source = "command" | "link" | "timer" | "chain";
 type Host = Readonly<{ runtime: Runtime; staged: Source | undefined; ingress: readonly number[] }>;
 type Flight = Readonly<{ id: number; to: Name; msg: Msg<AccountTx> }>;
 type World = Readonly<{
@@ -37,7 +40,9 @@ type Ops = Readonly<{ apply: typeof apply; commit: typeof commit; flush: typeof 
 
 const REAL: Ops = { apply, commit, flush, recover };
 
-type Weather = Readonly<{ link: "reliable" | "lossy"; crashes: "never" | "sometimes" }>;
+type Weather = Readonly<{
+  link: "reliable" | "lossy"; crashes: "never" | "sometimes"; chain: "idle" | "collateral";
+}>;
 
 const startHost = (name: Name): Host =>
   ({ runtime: startRuntime(setup, [emptyEntity(ID[name])]), staged: undefined, ingress: [] });
@@ -147,6 +152,32 @@ const oneChain = (w: World): readonly string[] => {
   return forked ? ["the two sides committed different frames"] : [];
 };
 
+// ---- the chain: a signed operation waits for the chain, and the Account holds still until it lands (R-COSIGN-FREEZE)
+
+type Signed = Extract<JAction, { _tag: "c2r" | "settle" }>;
+
+const signing = (row: Row): readonly Signed[] =>
+  row.chain.filter((a): a is Signed => a._tag === "settle" || a._tag === "c2r");
+
+const landing = (row: Row): boolean =>
+  row.input._tag === "entity" && row.input.inputs.some((i) => i._tag === "j_epoch" || i._tag === "j_op_lapsed");
+
+/** What this Host co-signed and has not seen land or lapse: its newest signing row, when no landing came after it. */
+const outstanding = (h: Host): Signed | undefined => {
+  const rows = h.runtime.wal;
+  const signed = rows.findLastIndex((row) => signing(row).length > 0);
+  return signed > rows.findLastIndex(landing) ? signing(rows[signed] ?? expect.unreachable("no row"))[0] : undefined;
+};
+
+/** A Host that signed and waits commits no frame of the Account and proposes none: its head does not move. */
+const holdsStill = (before: World, after: World): readonly string[] =>
+  NAMES.flatMap((n) => {
+    const waiting = outstanding(before.hosts[n]) !== undefined && outstanding(after.hosts[n]) !== undefined;
+    const headMoved = accountOf(before, n)?.head !== accountOf(after, n)?.head;
+    const moved = headMoved || accountOf(after, n)?.pending !== undefined;
+    return waiting && moved ? [`${n} signed an operation and its Account moved before the chain did`] : [];
+  });
+
 const violations = (ops: Ops, w: World): readonly string[] => [
   ...w.halts.map((h) => `halted: ${h}`), ...leaks(w), ...replays(ops, w), ...equalHeads(w), ...oneChain(w),
   ...stampsOf(w), ...NAMES.flatMap((n) => withinCredit(w, n)),
@@ -187,7 +218,51 @@ const commandAt = (c: Chaos, w: World, step: number, name: Name): Command => {
   }
   if (kind < 4) return { _tag: "open_account", peer };
   if (kind < 22) return { _tag: "set_credit", peer, token: GOLD, limit: BigInt(10 + q(4, 70)) };
+  if (kind >= 75 && c.weather.chain === "collateral") {
+    return { _tag: "withdraw", peer, token: GOLD, amount: BigInt(1 + q(5, 5)) };
+  }
   return { _tag: "pay", peer, token: GOLD, amount: BigInt(1 + q(5, 15)) };
+};
+
+const factsOf = (w: World, name: Name) => w.hosts[name].runtime.entities.get(ID[name])?.chain.get(ID[PEER[name]]);
+
+const told = (ops: Ops, w: World, name: Name, input: EntityInput): World =>
+  commitHost(ops, feed(ops, w, name, "chain", [], inputOf(w, name, [input])), name);
+
+/** Every event of the chain is a new height of J for both Hosts: when an Account that was refused tries again. */
+const risen = (ops: Ops, w: World): World =>
+  NAMES.reduce((acc, n) => {
+    const at = BigInt((acc.hosts[n].runtime.wal.length * 37) % 101);
+    const fed = through(acc, ops.apply(acc.hosts[n].runtime, heightAt(at, BigInt(acc.hosts[n].runtime.view) + 1n)),
+      (runtime) => withHost(acc, n, { ...acc.hosts[n], runtime, staged: "chain" }));
+    return commitHost(ops, fed, n);
+  }, w);
+
+/** The chain moves the epoch on for both Hosts, which have to be between frames: whatever was signed has landed. */
+const landed = (ops: Ops, w: World): World => {
+  const epoch = 1n + NAMES.reduce((e, n) => (e > (factsOf(w, n)?.epoch ?? 0n) ? e : (factsOf(w, n)?.epoch ?? 0n)), 0n);
+  const event = (n: Name): EntityInput => ({ _tag: "j_epoch", peer: ID[PEER[n]], epoch, stored: epoch * 10n });
+  return risen(ops, NAMES.reduce((acc, n) => told(ops, acc, n, event(n)), w));
+};
+
+/** The Host of `signer` asks the other for the same signature, as its transport would. */
+const asked = (ops: Ops, w: World, signer: Name, op: Signed): World => {
+  const asking = { _tag: op._tag, token: op.token, amount: op.amount };
+  const ask: EntityInput = { _tag: "cosign_ask", from: ID[signer], op: asking };
+  return idle(w.hosts[PEER[signer]]) ? told(ops, w, PEER[signer], ask) : w;
+};
+
+/** The chain tells a Host something: the operation lands on both, lapses for its signer, or is asked of the other. */
+const chainStep = (c: Chaos, w: World, step: number): World => {
+  const signer = NAMES.find((n) => outstanding(w.hosts[n]) !== undefined);
+  const op = signer === undefined ? undefined : outstanding(w.hosts[signer]);
+  if (signer === undefined || op === undefined) return w;
+  const lapse: EntityInput = { _tag: "j_op_lapsed", peer: ID[PEER[signer]] };
+  switch (draw(c.seed, c.run, step, 9, 6)) {
+    case 0: return NAMES.every((n) => idle(w.hosts[n])) ? landed(c.ops, w) : w;
+    case 1: return NAMES.every((n) => idle(w.hosts[n])) ? risen(c.ops, told(c.ops, w, signer, lapse)) : w;
+    default: return asked(c.ops, w, signer, op);
+  }
 };
 
 /** Up to three messages for `name`, from where the link chose, and sometimes a command in the same frame. */
@@ -219,6 +294,12 @@ const repeat = (c: Chaos, w: World, step: number): World => {
   return c.weather.link === "lossy" ? { ...w, net: [...w.net, ...again], seq: w.seq + again.length } : w;
 };
 
+/** A timer, or in the chain weather sometimes the chain instead. */
+const ticks = (c: Chaos, w: World, step: number, name: Name): World => {
+  if (c.weather.chain === "collateral" && draw(c.seed, c.run, step, 8, 100) < 30) return chainStep(c, w, step);
+  return idle(w.hosts[name]) ? feed(c.ops, w, name, "timer", [], resendInput(w, name)) : w;
+};
+
 const randomStep = (c: Chaos, w: World, step: number): World => {
   const name: Name = draw(c.seed, c.run, step, 0, 2) === 0 ? "alice" : "bob";
   const h = w.hosts[name];
@@ -231,7 +312,7 @@ const randomStep = (c: Chaos, w: World, step: number): World => {
     case k < 80: return c.weather.crashes === "sometimes" ? crashHost(c.ops, w, name) : w;
     case k < 86: return lose(c, w, step);
     case k < 91: return repeat(c, w, step);
-    default: return idle(h) ? feed(c.ops, w, name, "timer", [], resendInput(w, name)) : w;
+    default: return ticks(c, w, step, name);
   }
 };
 
@@ -255,6 +336,8 @@ const round = (ops: Ops, w: World): World => {
     : NAMES.reduce((acc, n) => finishHost(ops, feed(ops, acc, n, "timer", [], resendInput(acc, n)), n), taken);
 };
 
+const finishAll = (ops: Ops, w: World): World => NAMES.reduce((acc, n) => finishHost(ops, acc, n), w);
+
 const openAll = (ops: Ops, w: World): World =>
   NAMES.reduce((acc, n) => {
     const open: Command = { _tag: "open_account", peer: ID[PEER[n]] };
@@ -272,8 +355,13 @@ const settled = (w: World): boolean => {
   return between && w.net.length === 0 && agree && empty;
 };
 
-const settle = (ops: Ops, w: World, rounds: number): World =>
-  (rounds === 0 || settled(w) ? w : settle(ops, round(ops, w), rounds - 1));
+/** With a chain in the weather, J goes on: each round of the settle phase is a new height too, as blocks are. */
+const settle = (c: Chaos, w: World, rounds: number): World => {
+  if (rounds === 0 || settled(w)) return w;
+  const next = round(c.ops, w);
+  const ticking = c.weather.chain === "collateral" && !settled(next);
+  return settle(c, ticking ? finishAll(c.ops, risen(c.ops, next)) : next, rounds - 1);
+};
 
 // ---- one run, and many
 
@@ -291,10 +379,12 @@ const runOne = (c: Chaos, steps: number): Run => {
   const steps0 = Array.from({ length: steps }, (_, i) => i);
   const walked = steps0.reduce<Readonly<{ w: World; failures: readonly string[] }>>((acc, i) => {
     const next = randomStep(c, acc.w, i);
-    return { w: next, failures: [...acc.failures, ...violations(c.ops, next).map((v) => `step ${i}: ${v}`)] };
+    const broken = [...holdsStill(acc.w, next), ...violations(c.ops, next)];
+    return { w: next, failures: [...acc.failures, ...broken.map((v) => `step ${i}: ${v}`)] };
   }, { w: START, failures: [] });
   const clean = NAMES.reduce((w, n) => (idle(w.hosts[n]) ? w : crashHost(c.ops, w, n)), walked.w);
-  const end = settle(c.ops, openAll(c.ops, clean), 400);
+  const open = openAll(c.ops, clean);
+  const end = settle(c, NAMES.some((n) => outstanding(open.hosts[n]) !== undefined) ? landed(c.ops, open) : open, 400);
   const unsettled = settled(end) ? [] : ["did not settle"];
   const money = settled(end) ? moneyFailures(end) : [];
   const failures = [...walked.failures, ...violations(c.ops, end), ...unsettled, ...money];
@@ -303,12 +393,16 @@ const runOne = (c: Chaos, steps: number): Run => {
   return { failures, settled: settled(end), frames: acks.length };
 };
 
+/** One of each kind of failure a run had (a kind is the failure without its step), so one noisy kind hides no other. */
+const kinds = (failures: readonly string[]): readonly string[] =>
+  [...new Map(failures.map((f) => [f.replace(/^step \d+: /, ""), f])).values()].slice(0, 4);
+
 type Verdict = Readonly<{ failures: readonly string[]; settledRuns: number; frames: number }>;
 
 const explore = (ops: Ops, weather: Weather, seed: number, runs: number): Verdict => {
   const each = Array.from({ length: runs }, (_, run) => runOne({ ops, weather, seed, run }, STEPS));
   return {
-    failures: [...new Set(each.flatMap((r, run) => r.failures.slice(0, 2).map((f) => `run ${run}: ${f}`)))].slice(0, 8),
+    failures: [...new Set(each.flatMap((r, run) => kinds(r.failures).map((f) => `run ${run}: ${f}`)))].slice(0, 16),
     settledRuns: each.filter((r) => r.settled).length,
     frames: each.reduce((n, r) => n + r.frames, 0),
   };
@@ -318,9 +412,10 @@ const SEED = process.env["SEEDX"] ? Number(process.env["SEEDX"]) : 7;
 const RUNS = process.env["RUNS"] ? Number(process.env["RUNS"]) : 60;
 const STEPS = process.env["STEPS"] ? Number(process.env["STEPS"]) : 220;
 
-const RELIABLE: Weather = { link: "reliable", crashes: "never" };
-const CRASHING: Weather = { link: "reliable", crashes: "sometimes" };
-const STORMY: Weather = { link: "lossy", crashes: "sometimes" };
+const RELIABLE: Weather = { link: "reliable", crashes: "never", chain: "idle" };
+const CRASHING: Weather = { link: "reliable", crashes: "sometimes", chain: "idle" };
+const STORMY: Weather = { link: "lossy", crashes: "sometimes", chain: "idle" };
+const WITHDRAWING: Weather = { link: "lossy", crashes: "sometimes", chain: "collateral" };
 
 /** A run of the explorer is seconds of CPU; Bun's 5 s default would make a slow machine the cause of a red gate. */
 const BUDGET_MS = 120_000;
@@ -356,5 +451,23 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
   test("R-X1 planted bug: a recovery that forgets the last row does not replay to what the Runtime holds", () => {
     const forgetful: Ops = { ...REAL, recover: (s, g, wal) => recover(s, g, wal.slice(0, -1)) };
     expect(explore(forgetful, CRASHING, SEED, RUNS).failures.join("\n")).toContain("does not replay");
+  }, BUDGET_MS);
+
+  test("R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still", () => {
+    const v = explore(REAL, WITHDRAWING, SEED, RUNS);
+    expect(v.failures).toEqual([]);
+    expect(v.settledRuns).toBe(RUNS);
+  }, BUDGET_MS);
+
+  test("R-COSIGN-FREEZE planted bug: a Runtime that forgets the freeze lets a signed Account move", () => {
+    const thawing: Ops = { ...REAL, apply: (rt, input) => {
+      const applied = apply(rt, input);
+      if (!applied.ok) return applied;
+      const thaw = (e: EntityState): EntityState =>
+        ({ ...e, chain: new Map([...e.chain].map(([peer, f]) => [peer, { ...f, frozen: false }])) });
+      const entities = new Map([...applied.value.entities].map(([id, e]) => [id, thaw(e)]));
+      return { ok: true, value: { ...applied.value, entities } };
+    }, };
+    expect(explore(thawing, WITHDRAWING, SEED, RUNS).failures.join("\n")).toContain("moved before the chain did");
   }, BUDGET_MS);
 });
