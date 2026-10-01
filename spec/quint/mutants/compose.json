@@ -1,0 +1,76 @@
+{
+  "files": [
+    "account_core.qnt",
+    "chain.qnt",
+    "compose.qnt"
+  ],
+  "mutants": [
+    {
+      "id": "rcpan-ignores-open-clauses",
+      "why": "P2: RCPAN checks the allocation only, not the worst case over the open clauses: a resolved clause pushes a side beyond the credit it was granted, and the chain books debt above the limit",
+      "file": "account_core.qnt",
+      "old": "    delta(b) - holds(b, Left) >= -b.limitLeft,\n    delta(b) + holds(b, Right) <= COLLATERAL + b.limitRight\n",
+      "new": "    true,\n    true\n",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "payout-forgets-the-debt",
+      "why": "P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
+      "file": "chain.qnt",
+      "old": "      if (d == 0) m1 else shortfall(m1, Left, -d)",
+      "new": "      m1",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "payout-pays-the-collateral-twice",
+      "why": "P3: the collateral is released to the winner and again to the other side",
+      "file": "chain.qnt",
+      "old": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + coll) }",
+      "killedBy": "test:accountCreditHoldsOnTheChainTest"
+    },
+    {
+      "id": "settlement-ignores-credit",
+      "why": "R-SETTLE-CREDIT: the approver co-signs a withdrawal without checking the credit bound after it (the test rig's Q-X-3 case: Left at delta -7,000,031 against credit 18,092)",
+      "file": "account_core.qnt",
+      "old": "      d >= -b.limitLeft,\n      d <= coll + b.limitRight,\n      d - holds(b, Left) >= -b.limitLeft,\n      d + holds(b, Right) <= coll + b.limitRight\n    }",
+      "new": "      true\n    }",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-ignores-open-clauses",
+      "why": "R-SETTLE-CREDIT: the bound after the withdrawal is checked on the allocation only, not in the worst case over the open clauses",
+      "file": "account_core.qnt",
+      "old": "      d - holds(b, Left) >= -b.limitLeft,\n      d + holds(b, Right) <= coll + b.limitRight\n    }",
+      "new": "      true\n    }",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-checks-the-old-collateral",
+      "why": "R-SETTLE-CREDIT: the worst-case upper bound over the open clauses is read over the collateral before the withdrawal, so a withdrawal that leaves a Right-payer clause uncovered is co-signed",
+      "file": "account_core.qnt",
+      "old": "      d + holds(b, Right) <= coll + b.limitRight",
+      "new": "      d + holds(b, Right) <= COLLATERAL + b.limitRight",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-left-keeps-its-claim",
+      "why": "R-SETTLE-CREDIT: a Left withdrawal is treated as leaving Left's allocation where it was, so Left can withdraw beyond its own claim",
+      "file": "account_core.qnt",
+      "old": "    val d = delta(b) - (if (by == Left) w else 0)\n    and {\n      w >= 1",
+      "new": "    val d = delta(b)\n    and {\n      w >= 1",
+      "killedBy": "test:settlementKeepsCreditTest"
+    },
+    {
+      "id": "settlement-withdraws-past-collateral",
+      "why": "R-SETTLE-CREDIT: the approver co-signs a withdrawal of more than the collateral (the bound w <= COLLATERAL is dropped)",
+      "file": "account_core.qnt",
+      "old": "      w >= 1, w <= COLLATERAL,\n",
+      "new": "      w >= 1,\n",
+      "killedBy": "test:noWithdrawalBeyondTheCollateralTest"
+    }
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "compose.qnt"
+}
