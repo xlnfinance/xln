@@ -1,0 +1,24 @@
+{
+ "id": "R-HOST-INBOX",
+ "statement": "The Host queues each peer's messages up to a bound and drops the rest with a notice; the Host's own commands and timers have no peer's bound; a bound below one is refused.",
+ "source": "spec/transport/link.scm (v1: a bounded inbound queue per peer, over the bound is loss); R-X1",
+ "layers": {
+  "arrival": "n/a: link.scm models no queue (a bound is loss, which its channel has) and spec/runtime/tick.scm has a lossless, unbounded queue with no sender's bound",
+  "quint": "n/a: spec/quint/runtime.qnt has a volatile inbox set (line 50), unbounded, not per sender, with no drop; a bound that drops is the Host's",
+  "contract": "n/a: a Host queue is off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOST-INBOX a sender over its bound is dropped with a notice; others and the Host's own queue on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOST-INBOX a bound below one is refused when the limits are made, since such a Host could never move"
+  }
+ ]
+}

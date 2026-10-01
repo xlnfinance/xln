@@ -10,5 +10,10 @@
  "planned": [
   "One gate"
  ],
- "planned_note": "The one name to require: the aggregate job `One gate` needs every gate job (rules/ci/workflow/ci-checks.ts keeps it that way), so a new gate job never needs a ruleset change. Arthur replaces the five contexts with it; move it to contexts once the ruleset says so. The workflow must report it already."
+ "planned_note": "The one name to require: the aggregate job `One gate` needs every gate job (rules/ci/workflow/ci-checks.ts keeps it that way), so a new gate job never needs a ruleset change. Arthur replaces the five contexts with it; move it to contexts once the ruleset says so. The workflow must report it already.",
+ "development": [
+  "One gate (tsc, rules, frozen, style)",
+  "One gate (bun test)"
+ ],
+ "development_note": "the ruleset on the development branch: a pull request and exactly these two checks. They are the only jobs that run on a pull request into development (rules/ci/split/ci-split.ts); the full set runs on every push to development and on a pull request into main."
 }

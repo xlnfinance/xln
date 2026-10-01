@@ -1,6 +1,6 @@
 {
  "id": "R-HTLC-CLOCK",
- "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut. The Quint cell holds (a) and (b) in the Account and (c) as the Entity's escalation ESC >= LAG before a deadline.",
+ "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
  "layers": {
   "arrival": "hold",
@@ -130,6 +130,51 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "escalation-too-late"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve unacked with the deadline more than LAG away asks nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK at the deadline minus LAG the payee asks for a reveal of the secret of the clause"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK the reveal is asked once however many heights follow, and never by the payer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve the payer acks in time asks nothing, whatever the height"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a Host that restarts after the reveal row was committed is asked again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a hashlock is forgotten once its hold is gone: its next clause is asked for again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve still in the queue behind a pending frame of its own is watched too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve that comes when the deadline is already near asks in the frame of its command"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HTLC-CLOCK a resolve names the hold of its own token: the same slot in another token is not it"
   }
  ]
 }

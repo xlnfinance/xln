@@ -1,0 +1,74 @@
+{
+ "id": "R-WATCH-TELL",
+ "statement": "A hosted Entity is told of a chain event only when it is a party to it, as the J event its side of the Account needs, with the epoch and stored nonce read from the chain at the end of the event's block and checked against the log; a missing or contradicting reading refuses the delivery.",
+ "source": "consolidation-plan.md D9 and J2; R-J1 (chain facts reach an Account only through J events)",
+ "layers": {
+  "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+  "quint": "n/a: the Quint model's JDispute and JStarted carry what j_dispute and `by` carry; reading the chain at a block is the Host's",
+  "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a reading names its block by number and hash, so the chain is asked for that block"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a row filed under another fork's block is no reading"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a finalize or a counter alone asks the chain for nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a reading behind the log is a fault as much as one ahead"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL an epoch advance is a j_epoch for each hosted party, with the nonce the chain stores"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL an Entity that is not hosted, or is not a party, hears nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a dispute start is a j_dispute naming the side that started it, in the chain's epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL an event's epoch is the end-of-block epoch less the advances logged after it in the block"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL an advance of another Account in the same block does not move this Account's epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a finalize is a j_dispute_over for each hosted party; a counter only for its registrar"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL a reading that is missing is a fault, and so is one that contradicts the log's epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-TELL readings are asked only for what a hosted Entity needs, once each, in event order"
+  }
+ ]
+}

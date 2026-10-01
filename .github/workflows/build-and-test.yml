@@ -2,7 +2,7 @@ name: build-and-test
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, development]
   # Every pull request, whatever base it targets or files it touches: the One gate checks are required, so a PR that never
   # got them would sit blocked forever. rules/ci/workflow/ci-triggers.ts refuses a branches, paths or types filter here.
   pull_request:
@@ -11,10 +11,11 @@ on:
     - cron: '17 2 * * *'
   workflow_dispatch:
 
-# A newer push cancels the PR's earlier run; a run on main is never cancelled, so its spec markers are saved.
+# Pull requests cancel their own earlier run. A push to main or development is never cancelled (a full run always finishes): a newer push
+# waits as the one pending run, and replaces an earlier pending one. rules/ci/split/ci-split.ts pins this.
 concurrency:
-  group: build-and-test-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: build-and-test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
@@ -176,6 +177,7 @@ jobs:
   # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
   gate-seeds:
     name: One gate (seed ${{ matrix.seed }})
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -240,6 +242,7 @@ jobs:
   # still reports success, so a PR that leaves spec/ alone costs about a minute and a required check is never missing.
   gate-quint:
     name: One gate (quint)
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -278,6 +281,7 @@ jobs:
   # about 85 minutes alone, so it is shard 0 by itself and shards 1 to 3 split the rest (spec/tools/shard.mjs). Memory is why the pool is two wide.
   gate-arrival:
     name: One gate (arrival shard ${{ matrix.shard }})
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -326,7 +330,8 @@ jobs:
         if: steps.marker.outputs.cache-hit != 'true'
         run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival
 
-  # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped.
+  # The single result to require. It fails when any part of the gate failed, was cancelled or was skipped, except on a pull request into
+  # development, where the slow parts are skipped by design (their `if`) and only the two fast parts, which never skip, must pass.
   one-gate:
     name: One gate
     if: ${{ always() }}
@@ -335,6 +340,7 @@ jobs:
     steps:
       - name: Every part passed
         env:
+          FAST: ${{ github.event_name == 'pull_request' && github.base_ref == 'development' }}
           STATIC: ${{ needs.gate-static.result }}
           TESTS: ${{ needs.gate-tests.result }}
           SEEDS: ${{ needs.gate-seeds.result }}
@@ -342,8 +348,13 @@ jobs:
           QUINT: ${{ needs.gate-quint.result }}
           ARRIVAL: ${{ needs.gate-arrival.result }}
         run: |
-          echo "static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK quint=$QUINT arrival=$ARRIVAL"
-          test "$STATIC" = success && test "$TESTS" = success && test "$SEEDS" = success && test "$FORK" = success && test "$QUINT" = success && test "$ARRIVAL" = success
+          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK quint=$QUINT arrival=$ARRIVAL"
+          test "$STATIC" = success
+          test "$TESTS" = success
+          test "$SEEDS" = success || test "$FAST:$SEEDS" = true:skipped
+          test "$FORK" = success || test "$FAST:$FORK" = true:skipped
+          test "$QUINT" = success || test "$FAST:$QUINT" = true:skipped
+          test "$ARRIVAL" = success || test "$FAST:$ARRIVAL" = true:skipped
 
   # og's inherited Hardhat suite is frozen at 566c850 and known red (122 pass, 79 fail). It is reported, never a gate:
   # no other job needs it, and continue-on-error keeps its red from failing the run that carries our own signals.
@@ -395,6 +406,7 @@ jobs:
 
   contracts-fork:
     name: Contracts (fork) BrowserVM
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -460,6 +472,7 @@ jobs:
 
   build-xln:
     name: Runtime Checks
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -505,6 +518,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build
+    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

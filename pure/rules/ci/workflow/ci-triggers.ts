@@ -1,12 +1,14 @@
 // Whether the workflow behind `One gate` can skip a pull request. The five `One gate` checks are required, and a required check that
 // never starts leaves the PR blocked forever, so the workflow must start on every PR whatever base it targets or files it touches:
 //   - `pull_request` is a trigger, with no `branches`, `branches-ignore`, `paths`, `paths-ignore` or `types` filter;
-//   - no job behind `one-gate` has a job-level `if` (a skipped job reports success to a required check);
+//   - no job behind `one-gate` has a job-level `if` but the slow-lane one (a skipped job reports success to a required check; the slow
+//     lane skips only on a pull request into development, where no slow job is required: split/ci-split.ts);
 //   - `one-gate` itself has no `if` but `${{ always() }}`, which makes it run and fail when a part failed instead of skipping with it.
 // `pull_request` and `on` are read in block form and in flow form (`pull_request: { paths: [a] }`, `on: { pull_request: { branches: [b] } }`);
 // a value of either that is neither is CI_TRIGGER_UNREADABLE, never a pass.
 // A workflow with no `one-gate` job is not judged. The workflow is given with its comments already removed.
 import { gateJobs, jobBlocks } from "./ci-steps.ts";
+import { expression, SLOW_IF } from "../split/ci-split.ts";
 
 const FILTERS = ["branches", "branches-ignore", "paths", "paths-ignore", "types"];
 
@@ -50,7 +52,7 @@ export const triggerProblems = (name: string, workflow: string): readonly string
     ...(listed ? [] : [`CI_TRIGGER_NO_PULL_REQUEST ${name} does not run on pull_request, so a PR never gets the One gate checks`]),
     ...(unreadable ? [`CI_TRIGGER_UNREADABLE ${name} writes pull_request as \`${inline}\`, a form this check cannot read for filters: write it as a block or \`{}\``] : []),
     ...filters.map((key) => `CI_TRIGGER_FILTER ${name} pull_request is filtered by ${key}, so a PR outside the filter never gets the One gate checks`),
-    ...gateJobs(workflow).flatMap((job) => (jobIf(job) === undefined ? [] : [`CI_TRIGGER_JOB_SKIPPED ${name} job ${job} has \`if: ${jobIf(job)}\`: a skipped job reports success to a required check`])),
+    ...gateJobs(workflow).flatMap((job) => (jobIf(job) === undefined || expression(jobIf(job)!) === SLOW_IF ? [] : [`CI_TRIGGER_JOB_SKIPPED ${name} job ${job} has \`if: ${jobIf(job)}\`: a skipped job reports success to a required check`])),
     ...(jobIf("one-gate") === undefined || /^\$\{\{\s*always\(\)\s*\}\}$/.test(jobIf("one-gate")!) ? [] : [`CI_TRIGGER_JOB_SKIPPED ${name} job one-gate has \`if: ${jobIf("one-gate")}\`; only \`\${{ always() }}\` is allowed`]),
   ];
 };

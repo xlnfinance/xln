@@ -5,8 +5,8 @@
  "layers": {
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
-  "contract": "owed: contracts thread (a test carrying the id; conservation is tested under other names, e.g. the DepositoryConservation invariants)",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "contract": "hold",
+  "rig": "owed: test rig (money conserved per frame over the real Depository's events; the specs' P3)",
   "ts": "hold"
  },
  "killers": [
@@ -20,6 +20,27 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "payout-forgets-the-debt"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_CONSERVE_aSplitPayoutMovesTheCollateralToTheTwoReservesAndNothingElse"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_CONSERVE_aShortfallThatTheReserveCannotCoverIsBookedAsExactlyThatDebt"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_CONSERVE_aShortfallIsPaidFromTheDebtorsReserveFirstAndTheRemainderIsBooked"
+  },
+  {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: reserves + collateral + debt per Account conserved after each frame",
+   "owed": "test rig"
   }
  ]
 }

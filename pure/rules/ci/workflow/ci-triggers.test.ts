@@ -108,7 +108,7 @@ describe("the real workflows", () => {
   test("R-GATE-CI-TRIGGERS the nightly run exists, a run on main is never cancelled, and og's informational suites run only nightly or by hand", () => {
     const gate = real.find(({ text }) => text.includes("one-gate:"))?.text ?? "";
     expect(gate).toMatch(/^\s+schedule:\s*\n\s+- cron:/m);
-    expect(gate).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}");
+    expect(gate).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
     ["contracts-test", "e2e-tests"].forEach((job) => expect(jobBlocks(gate)[job], job).toContain("if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"));
   });
 

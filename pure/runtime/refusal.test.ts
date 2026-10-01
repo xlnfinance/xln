@@ -29,7 +29,7 @@ const fromPeer = (from: EntityId, msg: Msg<AccountTx> | undefined): EntityInput 
 /** An Entity whose Account with `peer` is open and holds `limit` of credit extended to its Left. */
 const holdingCredit = (self: EntityId, peer: EntityId, side: "left" | "right", limit: bigint): EntityState => {
   const state = withLedger(emptyAccount, GOLD, { ...emptyLedger, limit: { left: limit, right: 0n } });
-  return { id: self, accounts: new Map([[peer, { ...emptyReplica(side), state }]]) };
+  return { ...emptyEntity(self), accounts: new Map([[peer, { ...emptyReplica(side), state }]]) };
 };
 
 const opened = (self: EntityId, peer: EntityId) => tick(started(self), inputFor(self, 1n, open(peer)));
