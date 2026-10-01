@@ -1,0 +1,24 @@
+{
+ "id": "R-E1",
+ "statement": "The Entity frame is a fixed pipeline: arrivals apply, then hooks and txs run over the post-arrival Accounts, then Account work is proposed.",
+ "source": "lessons.md section 0",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: the frame pipeline is off-chain Entity logic; no contract code takes part",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Entity and Runtime)"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "hooks-read-pre-arrival"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "arrivals-in-place"
+  }
+ ]
+}

@@ -1,0 +1,34 @@
+{
+ "id": "R-DURABLE",
+ "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
+ "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Runtime slice)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "send-before-persist"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "ack-before-persist"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "send-before-persist"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "ack-before-persist"
+  }
+ ]
+}

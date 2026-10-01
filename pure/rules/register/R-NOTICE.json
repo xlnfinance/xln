@@ -1,0 +1,84 @@
+{
+ "id": "R-NOTICE",
+ "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts. The Quint cell holds the drop with notice (every tx ends committed or refused, `refused` is a list of txs); the fault peer_refused and the peer's fault tag on the notice are not in the model.",
+ "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: a mempool rule of the off-chain Entity",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "drop-on-rollback"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "propose-drops-silently"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "dead-tx-stays"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "rollback-drops-txs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a queued tx that stops applying is refused with its fault at propose, never dropped"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a frame of only refused txs sends nothing and leaves no pending frame"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a rolled-back tx whose ground moved is refused at the next propose, with notice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE no submitted tx is lost: committed, held, or refused, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE no tx is both committed and refused, in every state of the page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "refusal-drops-without-notice"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "revise-loses-the-notice"
+  }
+ ]
+}
