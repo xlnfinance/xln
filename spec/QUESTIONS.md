@@ -203,28 +203,34 @@ keep it a client obligation and document it as a deployment requirement: window 
 coordinator prefers a contract rule, the candidate is "a counter may be registered until T + one message
 delay", which weakens the finalize timing for everyone; not recommended.
 
-**Q-D-4. Epoch advance and the pre-signed baseline (coordinator N1, revised 17:21).**
-Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872), with one exception: every frame
-is co-signed together with a baseline proof for epoch + 1 (offdelta 0, no clauses). Without it the
-honest side has no valid proof between the epoch advancing and a new baseline being co-signed, and
-the counterparty can stretch that gap by refusing to sign. The baseline nonce must be above the chain
-nonce after ANY event that opens the next epoch (the settlement update, or a timeout finalize, which
-leaves the chain nonce at n0 + 1). Proof nonce and frame height are separate counters.
-Choice: baseline nonce = frame nonce + 3. A proposer is at most one frame behind (its ack is in
-flight) and a timeout finalize on the newest initial proof leaves the chain nonce one above it; +2
-is not enough (planted bug `baseline-too-low`: the proposer holds no valid proof after finalize).
-The offset depends on the frame protocol allowing one unacked frame: pipelining k frames needs +2+k.
-A cooperative settlement carries the same baseline in its Lock frame and folds offdelta into
-ondeltaDiff; v1 requires no open clauses for it (in the page since 21:35, see Q-D-19).
-Source: coordinator decision, A:872, A:1315, D:843-856.
+**Q-D-4. Epoch advance: no proof is pre-signed, the implicit proof takes its place (coordinator N1, revised 17:21; CLOSED by decision D2, R-IMPLICIT-BASELINE).**
+Parties sign proofs only for the current ondeltaEpoch (A:1315, A:872). The N1 revision of 17:21 co-signed a baseline
+proof for epoch + 1 with every frame (nonce = frame nonce + 3), so that an epoch advance never left an honest side
+without a valid proof. That machinery is gone. Decision D2 (Q-D-21, contracts-decisions.md "R-IMPLICIT-BASELINE"):
+from ondelta epoch 1 a dispute may start from the IMPLICIT proof, which nobody signs because every field of it is on
+chain. The page carries it as `implicit-proofs`, the base of every epoch after the first (see Q-D-21 for the rule and
+the Right author). Nothing is co-signed ahead any more, so the nonce arithmetic it needed (frame + 3, the settlement
+baseline, the post-frame nonce above every baseline) is retired with its three planted bugs (`baseline-too-low`,
+`settle-nonce-high`, `settle-no-baseline`). What replaces the post-frame rule is the stored + 2 rule (Q-D-21).
+A cooperative settlement folds offdelta into ondeltaDiff; v1 requires no open clauses for it (in the page since
+21:35, see Q-D-19).
+Source: coordinator decision, A:872, A:1315, D:843-856; decision D2.
 
-**Q-D-5. Response windows (coordinator N3, floor H2).**
-The windows are constants of the Account, fixed at open; every proof carries the same values (A:1471-1474,
-GAP-5). The model has one pair of values and the floor check `window-floor-ok?`. The contract uses
-the windows only as a sum T = S + left + right (GAP-4): there is no per-side sub-window, and the
-non-starter may counter anywhere in [S, T). Options: (a) keep the sum; (b) give each side its own
-interval. Choice: (a), it is what the fixed contracts do.
-Source: A:1802-1805, A:1466, GAP-4, GAP-5.
+**Q-D-5. Response windows (coordinator N3, floor H2; revised by decision D2).**
+Each proof carries its own windows (the policy it was signed under); the floor is MIN_RESPONSE_SECONDS (60 s testnet, 6 h
+mainnet), and the implicit proof of an epoch names the floor. Inside an epoch the windows may LENGTHEN and never SHORTEN:
+a counter or a final body whose windows are below the started ones is refused (E9), so a policy that lowers its windows
+makes a newer frame uncounterable against a stale start with longer windows (review B, risk 5). The page: a proof is
+(nonce proposer off clause rival? epoch wl wr implicit?), `frame-extra` is the policy (the base signs at the floor, the
+config `window-policy` lengthens the later frames), `windows-keep-ok?` is the signing rule (neither side signs a frame
+that shortens the newest committed windows), `windows-ok?` the contract's E9 check on a counter and on the immediate
+close, and the property "windows never shorten inside an epoch" covers both; planted bug `counter-shortens-window` (with
+`window-policy`). Windows take two values at most (floor, floor + 1). The contract uses the windows only as a sum
+T = S + left + right (GAP-4): there is no per-side sub-window, and the non-starter may counter anywhere in [S, T).
+Options: (a) keep the sum; (b) give each side its own interval. Choice: (a), it is what the fixed contracts do. The floor
+is the real response guarantee: a Runtime must land its counter inside it (a Runtime duty to watch its own disputes
+within the floor window; watchtowers stay out of v1, D5).
+Source: A:1802-1805, A:1466, GAP-4, GAP-5; review B of PR 76 (finding 5); decision D2.
 
 **Q-D-6. Time.**
 An abstract integer clock, `tick` by one, bounded by `max-time` (default 2). A dispute may only
@@ -271,13 +277,17 @@ Source: coordinator decision H4, A:1216-1275, D:757-768.
 Pull clauses (5b and 5c must wait for T when one is present), swaps, the watchtower (it can only
 register a counter before T or run an already selected finalize, GAP-10), forgiving debts, several
 tokens. Model bounds: 5 scripted frames (one refused by RCPAN), one rival, one HTLC, two windows of 1,
-`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 5571 states,
-10196 transitions, 2562 goals, about 4 minutes alone (round 2: settlement, the post frame and the horizon are
-in; it was 9771 states before the payee's dispute ops carried the secret). Second bounds, all in
+`max-disputes` 1, `max-time` 2 (a dispute must start at the first tick). Capacity: 5397 states,
+9946 transitions, 2486 goals, about 4 minutes alone (round 2: settlement, the post frame and the horizon are
+in; it was 9771 states before the payee's dispute ops carried the secret; 5571 states before the implicit proof
+replaced the co-signed baselines, D2). The implicit-proof page adds `two-disputes` (5432 states, 7179 transitions,
+5333 goals, about 3 minutes: the second dispute starts from the implicit proof, a deposit of the new epoch is
+explored between the two) and `window-policy` (`max-time` 3, 12577 states, 23004 transitions, 5868 goals, about 11
+minutes). Second bounds, all in
 `dispute/configs/`: `far-deadline` (N2), `no-rival` (B2), `retired-left` and `retired-right` (H3),
-`right-reserve`, `two-disputes` and `implicit-baseline` (Q-D-21). The review measured
+`right-reserve`, `two-disputes` (Q-D-21) and `window-policy` (N3). The review measured
 `max-time 3` with the HTLC deadline at 2 on the 3-frame script (10120 states, 331 s). Not modelled yet:
-N2 tolerance, H3, and a second dispute after a dispute (`max-disputes` 2). Secrets in calldata (Q-D-18)
+N2 tolerance (H3 is in, Q-D-22; a second dispute after a dispute is in, `two-disputes`). Secrets in calldata (Q-D-18)
 and the settlement branch with nonce continuity (Q-D-19) are in.
 
 **Q-D-13. The proofs are built by the frame rules, not listed (review of PR #41).**
@@ -314,8 +324,8 @@ the assumption (a responder that may be late), which is what `no-floor` does.
 The contract lets the non-starter close before T (5b, 5c) while an ack of a frame it proposed is
 still on its way. Then it ends on the starter's older proof. The record marks it `:hasty` and the
 "pays what both sides had committed" property skips it; "after an epoch advance each side still
-holds a valid proof of the new epoch" covers it, and is what keeps the baseline nonce at frame + 3
-(planted bug `baseline-too-low`).
+holds a valid proof of the new epoch" covers it (the implicit proof is always there; planted bug
+`implicit-nonce-stale`: it carries the stored nonce itself, so it is not above it).
 
 **Q-D-17. Every dispute window is greater than LAG (R-C11, coordinator 18:57).**
 LAG is the time to read a J event and get an op included. The responder sees a start at S + LAG and
@@ -347,24 +357,16 @@ strictly above the stored nonce, the stored nonce is SET to it, offdelta is fold
 `ondeltaDiff`, and the epoch advances. The page adds `settle` (v1: no open clause; heights 1 and 2 of the
 script are offered), `post frame` (the first frame of the new epoch) and a dispute in the new epoch.
 Rules the page carries, each with a planted bug:
-- The settlement nonce is above the chain nonce and below the baselines already held for the epoch it opens
-  (frame height + 1; baselines sit at frame + 3). At the baseline nonce neither side holds a valid proof
-  (`settle-nonce-high`).
+- The settlement nonce is above the chain nonce (frame height + 1). It no longer has to stay below baselines: none is
+  co-signed (decision D2, Q-D-21).
 - A settlement moves no allocation: Δ and the money are the same before and after; offdelta folds into
   ondelta (`settle-drops-off`). It carries no open clause in v1 (`settle-with-clause`).
-- FINDING. The settlement must ALSO co-sign a baseline for the epoch AFTER the one it opens, at 3 above the
-  highest nonce valid in the new epoch (baselines included). Without it, a dispute in the new epoch before
-  another frame is signed leaves each side with no valid proof, and the counterparty can stretch the gap by
-  refusing to sign (`settle-no-baseline`, trace: propose, ack, settle, start on the old baseline, finalize).
-  The Lock frame carries the same baseline as every other frame (Q-D-4), and so must the settlement.
-- FINDING. Proof nonce and frame height are separate counters, and the first proof nonce of the new epoch
-  must clear every baseline of that epoch either side holds (baseline = old frame + 3, so it is above the
-  chain nonce the settlement leaves). If the runtime continues the frame counter from the chain nonce, a
-  baseline (offdelta 0) outranks the newest committed frame and a dispute pays from it
-  (`post-nonce-low`). Runtime rule: next proof nonce = 1 + the highest nonce of the epoch that any held
-  proof carries.
+- Proof nonce and frame height are separate counters. The settlement leaves the chain nonce at its own nonce, and the
+  first SIGNED proof of the new epoch takes nonce >= stored + 2 (Q-D-21): the page's `post-nonce` is chain + 2. At
+  chain + 1 a Right-authored frame only ties the implicit proof and a dispute pays the empty state, so Left's frame
+  is lost (planted bug `post-nonce-low`, the spec's killer for review B finding 3).
 Not modelled: several frames after a settlement, a settlement with open clauses (v2), several tokens, the
-finalize-then-continue path (the baseline check covers it, the frame after it is not walked).
+finalize-then-continue path (the implicit proof covers it, the frame after it is not walked).
 Source: Account.sol 1590-1690, 1354; coordinator N1 (revised), relay 21:35.
 
 **Q-D-20. MAX_LOCK_HORIZON (N2, coordinator 21:50).**
@@ -381,40 +383,59 @@ LOCAL policy (each party's own tolerance), not a value both sides must agree on;
 farther lock than its peer does simply gets refused by the peer at signing.
 Source: coordinator N2 (21:50); H1.
 
-**Q-D-21. Two disputes in a row leave no proof for the second new epoch (finding of `max-disputes` 2, round 2).**
-The base runs one dispute, so the pre-signed baseline (Q-D-4) was held but never presented. With `max-disputes` 2
-(`dispute/configs/two-disputes.scm`: a script of two frames, no settlement, a clock of 4 so both windows fit) the
-baseline IS presented, and the property "after an epoch advance each side still holds a valid proof of the new
-epoch" fails in five steps: propose n1, start n1R, finalize (epoch 1), start B3 (the baseline of epoch 1),
-finalize (epoch 2). A baseline is co-signed with every FRAME of the epoch before it; the second advance happens
-before any frame of epoch 1 exists, so nothing is co-signed for epoch 2. What is at stake is small (the first
-payout emptied the collateral and the baseline says offdelta 0) but not nothing: a unilateral deposit into
-epoch 2 (R2C needs no signature) has no proof to dispute with, and the counterparty can refuse to sign the first
-frame that would give one.
-Options: (a) co-sign baselines two epochs ahead (covers two advances, not three; the regress stays);
-(b) the implicit baseline: from the epoch after ANY advance the empty state (offdelta 0, no clause, one nonce above
-the chain nonce) is a valid proof for both sides without a signature, because every field of it is on chain
-(ondelta, collateral and the nonce are); a dispute from it settles at Delta = ondelta, which both sides agreed to at
-the advance, and a later signed frame outranks it through a counter as any newer proof does; (c) forbid a dispute
-from a baseline (no: it is the escape path for a deposit made after the advance).
-Recommendation (for the coordinator): (b). It removes the co-signed baselines and the nonce arithmetic they need
-(frame nonce + 3, the settlement baseline, the post-frame nonce), which produced two of the review's findings
-(Q-D-19), and it is the only option that holds for any number of disputes in a row. It needs a contract change
-(a start with no proof at the lowest valid nonce of the epoch). `dispute/configs/implicit-baseline.scm`
-(loaded after two-disputes) is the same bound with (b): the property holds. Until the coordinator decides, the
-spec keeps N1 as decided and the finding stays open; the two-dispute case is checked as a FINDING (its verdict is
-the expected failure), not as a pass.
-Source: review of PR #41 round 2 (item 6); coordinator N1.
+**Q-D-21. Two disputes in a row, and the implicit proof (finding of `max-disputes` 2, round 2; CLOSED by decision D2, R-IMPLICIT-BASELINE; the author is RIGHT).**
+Finding (round 2). The page used to co-sign a baseline with every frame. With `max-disputes` 2
+(`dispute/configs/two-disputes.scm`) the property "after an epoch advance each side still holds a valid proof of the
+new epoch" failed in five steps: the second advance happens before any frame of epoch 1 exists, so nothing was
+co-signed for epoch 2, and a unilateral deposit into epoch 2 (R2C needs no signature) had no proof to dispute with.
+Decision D2 (coordinator, contracts-decisions.md "R-IMPLICIT-BASELINE"; contract PR 76; Review A and Review B): from
+ondelta epoch 1 a dispute may start from the IMPLICIT proof: empty signature, and the body is the empty state of
+the Account, every field of it known on chain: offdelta 0, no clause, floor windows, nonce = stored + 1, authored by
+RIGHT, watchSeed 0, no starter arguments. It settles at Delta = ondelta. Any signed frame of the epoch outranks it through
+a counter. Epoch 0 is excluded (a fresh Account's first frames are its proofs). The spec's earlier draft wrote it
+with `:left`; that is superseded: at one nonce a Left-authored proof outranks a Right-authored one (A12; rank =
+2 * nonce + (Left ? 1 : 0)), so the Right-authored implicit proof has the lowest rank at stored + 1 and a signed Left
+proof of that nonce outranks it.
+Page: `implicit-proofs` is the base of epoch > 0 (nonce chain + 1, Right-authored, offdelta 0, no clause, the floor
+windows); the co-signed baselines are deleted. `two-disputes` is a plain pass (the second dispute starts from the
+implicit proof and is presented). Rules the page now carries, each with a planted bug:
+- **The first signed proof of an epoch takes nonce >= stored + 2** (review B finding 3, the trap). A Right-authored
+  signed proof at stored + 1 only TIES the implicit proof (same rank), a tie is a refused counter, and the dispute pays
+  the empty state: after a settlement (stored 5) Right signs the first frame at 6 with offdelta +40, opens the implicit
+  dispute at 6, Left's counter is skipped and at the timeout Delta = ondelta, so Left's 40 is lost. `post-nonce` is
+  chain + 2; planted bug `post-nonce-low` (chain + 1) is caught by "in the new epoch a dispute pays the newest committed
+  frame, never the implicit proof that ties it". `stored` is the value READ FROM THE CHAIN, never derived: a timeout
+  finalize leaves stored = initial + 1, a counter or signed branch leaves the proof's own nonce (R-IMPLICIT-NONCE-FROM-CHAIN,
+  a Runtime rule; the page's `chain-nonce` is that value and the property "a timeout finalize consumes exactly one nonce;
+  an adopted proof sets it" pins it).
+- **Windows may lengthen, never shorten, inside an epoch** (N3, E9; Q-D-5). The counter and the final body carry windows
+  at least the started ones; a body that shortens them is refused. Each proof carries its own windows; planted bug
+  `counter-shortens-window`.
+- **Floor windows are the real response guarantee.** The implicit proof names the floor (60 s on testnet, 6 h on mainnet),
+  so a side that starts from it gives its counterparty only the floor window to answer with a signed frame. Honest parties
+  are safe only if a Runtime lands the counter inside it: a Runtime duty to watch its own disputes within the floor
+  window (watchtowers stay out of v1, D5). Accepted risk, not a contract change.
+- **Deposits keep the epoch** (review B finding 2). Reserve-to-collateral does NOT advance the epoch: the epoch advances
+  only on a dispute finalize, a collateral-to-reserve withdrawal (co-signed) and a settlement. A deposit inside an epoch
+  keeps every signed frame valid, and an implicit dispute started afterwards settles at the NEW ondelta (a Left deposit
+  raises it by one). Page: the deposit rule is open inside an epoch after an advance (as well as during a dispute), the
+  step property "a deposit does not advance the epoch" and the property "a dispute from the implicit proof settles at the
+  chain's ondelta now"; planted bugs `deposit-advances-epoch` and `implicit-stale-ondelta`.
+- The implicit proof must carry a nonce above the stored one (planted bug `implicit-nonce-stale`, caught by "after an epoch
+  advance each side still holds a valid proof of the new epoch").
+Not modelled: the starter naming the tokens (one token), the seven contract reasons for refusing a non-canonical implicit
+proof (the page only builds the canonical one), a withdrawal (collateral-to-reserve) as an advance.
+Source: review of PR #41 round 2 (item 6); coordinator N1; decision D2; Review A and B of PR 76.
 
 **Q-D-22. H3: retired-board evidence is capped at collateral, in one direction only (coordinator H3, modelled).**
 The page has a rotating side (`rotating-side`, `rotations`, `rotation-at`): its board rotates once at an
-off-chain height, and every proof it signed up to then is retired-grade evidence (a baseline counts by the frame
-it accompanies; a proof after the rotation is current). The proof that settles carries the grade, whoever starts
+off-chain height, and every proof it signed up to then is retired-grade evidence (the implicit proof is unsigned,
+so never retired-grade; a proof after the rotation is current). The proof that settles carries the grade, whoever starts
 (a counter replaces it). Finalization clamps only what the retired side would pay from reserves: retired Left
 settles at Delta >= 0, retired Right at Delta <= collateral. What the retired side is owed is never clamped.
 Properties, written from the decision text and not through the clamp: "retired-board evidence never draws on the
 retired side's reserve" and "what the retired side is owed is paid as signed, whoever starts". Bounds:
-`dispute/configs/retired-left.scm`, `retired-right.scm` (8514 states each; the board rotates after frame 4, so
+`dispute/configs/retired-left.scm`, `retired-right.scm` (8340 states each; the board rotates after frame 4, so
 frame 4 (Delta -1) and frame 3 (Delta 3 over a collateral of 2) are retired). Planted bugs: `h3-no-clamp` (the
 contracts before H3) and `h3-symmetric` (the first, symmetric clamp of PR #42: a debtor erases what it owes a
 rotating entity). Not modelled: the seven-day grace window itself, the grade upgrade by re-registering the same
@@ -972,7 +993,7 @@ debt in the payout; the Entity side is not modelled.
 
 **Q-X-5. The Account after a dispute finalize.** `external_finality` (159-178) yields `disputed` from
 every phase; only preparing goes back to open. Recommendation: the Account closes to a fresh
-generation (N1: the new epoch needs a co-signed baseline) with clauses resolved by evidence. Page:
+generation (N1: from the new epoch a dispute may start from the implicit proof, D2) with clauses resolved by evidence. Page:
 dispute/dispute.scm ends at the epoch advance; the Account state after it is not modelled.
 
 **Q-X-6. entityCommand atomicity and nonce.** One command is all or nothing; the nonce is consumed on
@@ -1020,19 +1041,25 @@ Each line is what the first page would have to decide.
 
 ## Decided by the coordinator (rules the spec carries; not open)
 
-The N1 below is the FIRST version (15:19). The revised N1 (17:21) replaces it: a baseline proof for
-epoch + 1 is co-signed with every frame (offdelta 0, no clauses), nonce = frame nonce + 3, so an
-epoch advance never leaves an honest side without a valid proof and payments do not pause. See Q-D-4.
+The N1 below is the FIRST version (15:19). The revised N1 (17:21) replaced it with a baseline proof co-signed with
+every frame; decision D2 (R-IMPLICIT-BASELINE) replaces that in turn: from epoch 1 a dispute may start from the
+IMPLICIT proof (empty signature, Right-authored, nonce stored + 1), and the first signed proof of an epoch takes
+nonce >= stored + 2. See Q-D-4 and Q-D-21.
 
 Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 
 - **N1 (first version, replaced).** A party signs a proof only for the CURRENT on-chain
-  `ondeltaEpoch`; after an epoch advance payments pause until a new baseline is co-signed.
+  `ondeltaEpoch`; after an epoch advance payments pause until the epoch event is observed, then the first proof takes
+  nonce >= stored + 2 (decision D2, Q-D-21).
 - **N2. Deadlines.** One open HTLC deadline reverts a whole batch at finalize, so the runtime
   submits finalizes per Account, never bundled. A party refuses to sign an HTLC whose deadline is
   beyond its own tolerance (a named policy parameter, not a protocol constant).
-- **N3. Windows.** The response windows are fixed per Account at open; every proof of that Account
-  carries the same values. Both are at least MIN_RESPONSE_SECONDS (60 on testnet; contracts H2).
+- **N3. Windows.** Both response windows of a proof are at least MIN_RESPONSE_SECONDS (60 on testnet, 6 h on mainnet;
+  contracts H2). Each proof carries its own windows (D2 supersedes "every proof carries the same values"): they may
+  LENGTHEN and never SHORTEN inside an epoch, and the counter's and the final body's windows are at least the started
+  ones (E9). The floor is the real response guarantee (a Runtime duty to watch its own disputes within it). Page:
+  `windows-ok?`, `frame-extra`, the property "windows never shorten inside an epoch", planted bug
+  `counter-shortens-window`; Q-D-21.
 - **R-J2, R-C11, R-NONCE, R-DURABLE** (18:57): see Q-J-8, Q-D-17, Q-J-9, Q-R-7.
 - **R-J5** (20:29) and **R-SPLIT** (21:01): see Q-J-10.
 - **R1-R3** (18:10): see Q-RT-1 to Q-RT-3.
@@ -1045,5 +1072,8 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   one nonce and epoch have opposite proposers, and Left's outranks Right's" (killed by the existing
   `tie-break-inverted`, now caught here before the older "an honest starter never ends on a losing proposal").
 - **J6** (00:49): see Q-J-12. **J2 extended, R-COSIGN, gas starvation** (23:42): see Q-J-11. **J5 refined** (22:31): Q-J-10.
-- **H3** modelled: Q-D-22. **Baselines and a second dispute**: Q-D-21 (open for the coordinator, recommendation given).
+- **R-IMPLICIT-BASELINE** (decision D2; Review A and B of PR 76): the implicit proof, the Right author, the first signed
+  proof of an epoch >= stored + 2, windows lengthen and never shorten, floor windows are the response guarantee, deposits
+  keep the epoch. Page: Q-D-21 (closed). Quint #44 carries the same cells.
+- **H3** modelled: Q-D-22. **Baselines and a second dispute**: Q-D-21 (closed by D2).
   **Locked phase, quorum 3 of 3**: Q-E-8 (liveness finding, recommendation given).

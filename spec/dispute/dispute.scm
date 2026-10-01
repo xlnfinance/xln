@@ -9,21 +9,36 @@
 ;; A cross-open at one height leaves a second, losing proposal signed by Right (`rival`).
 ;;
 ;; On chain (Account.sol, Depository.sol; line numbers in QUESTIONS.md):
-;;   start    any held proof of the CURRENT epoch and a nonce above the chain nonce. Freezes the
-;;            windows; T = S + left + right (each window at least the floor: H2). No counterparty check.
+;;   start    any held proof of the CURRENT epoch and a nonce above the chain nonce, or, from epoch 1 on,
+;;            the IMPLICIT proof (R-IMPLICIT-BASELINE, Q-D-21, decision D2): empty signature, the empty state of
+;;            the Account (offdelta 0, no clause, floor windows, nonce = chain nonce + 1, authored by RIGHT).
+;;            Freezes the windows of the proof it starts from; T = S + left + right (each window at least the
+;;            floor: H2). No counterparty check.
 ;;   counter  only the NON-starter, only before T, only with a proof that ranks above the selected
-;;            one. Rank = nonce, then Left's proposal over Right's at an equal nonce (R-A1).
+;;            one. Rank = nonce, then Left's proposal over Right's at an equal nonce (R-A1). The counter's
+;;            windows are at least the started ones (they may lengthen, never shorten: E9).
 ;;   finalize 5a a counter is selected: at or after T, anyone.
 ;;            5c the initial proof stands: at or after T anyone; before T only the non-starter.
 ;;            5b no counter, the non-starter brings a higher-ranking proof and closes at once.
-;;            An HTLC clause whose secret is not public waits for its deadline (H1).
+;;            An HTLC clause whose secret is not public waits for its deadline (H1). The final body's windows
+;;            are at least the started ones too (E9).
 ;;   payout   Δ = ondelta + offdelta (+ the clause, if its secret was public by the deadline).
 ;;            Δ <= 0: Right takes the collateral and Left owes -Δ. 0 < Δ < c: Δ / c-Δ.
 ;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall is paid from the debtor's
 ;;            reserve first; the rest becomes debt. The epoch advances: every older proof dies (N1);
-;;            each side already holds the pre-signed baseline of the new epoch (see below).
+;;            each side holds the implicit proof of the new epoch (see start).
 ;;   deposit  R2C during a dispute is not blocked (H4, accepted): it changes the payout, and only
-;;            in favour of the beneficiary of the deposit.
+;;            in favour of the beneficiary of the deposit. A deposit does NOT advance the epoch: every signed
+;;            frame of the epoch stays valid, and an implicit dispute started afterwards settles at the NEW
+;;            ondelta (review B of PR 76, finding 2). The epoch advances only on a dispute finalize, a
+;;            co-signed collateral-to-reserve withdrawal and a settlement.
+;;   tie      At nonce stored + 1 a Right-authored SIGNED proof only ties the implicit proof (same rank), and a
+;;            tie is a refused counter: Left's frame would be lost (review B, finding 3). Rule for the Runtime
+;;            and the specs: the first signed proof of an epoch takes nonce >= stored + 2 (`post-nonce`).
+;;   windows  Each proof carries its own windows (the policy it was signed under). They may lengthen and never
+;;            shorten inside an epoch (E9 refuses a counter or a final body that shortens them). The floor
+;;            windows (60 s testnet, 6 h mainnet) are the real response guarantee: a Runtime duty to watch its
+;;            own disputes within the floor.
 ;;
 ;; ASSUMPTION the safety properties stand on (stated, not hidden): the non-starter ACTS INSIDE ITS
 ;; WINDOW. The clock may not reach T while the non-starter holds a proof that outranks the selected
@@ -33,10 +48,9 @@
 ;;            whichever proof it presents (lesson #37, R3): the calldata IS the reveal. `carry`.
 ;;   settle   cooperative settlement (Account.sol processSettlement): a bilateral update at a nonce above
 ;;            the chain nonce. It folds offdelta into ondelta (Δ and the money do not move), sets the chain
-;;            nonce to its own nonce and advances the epoch. v1: no open clause. It is co-signed with a
-;;            baseline for the epoch after the one it opens, like every frame (N1). After it the parties
-;;            sign one more frame, `post`, whose proof nonce must clear every baseline of its epoch (proof
-;;            nonce and frame height are separate counters), and a dispute may start in the new epoch.
+;;            nonce to its own nonce and advances the epoch. v1: no open clause. After it the parties sign
+;;            one more frame, `post`, Right-authored, whose proof nonce is the chain nonce + 2 (it must
+;;            outrank the implicit proof, not tie it), and a dispute may start in the new epoch.
 ;;
 ;;   horizon  N2 (coordinator 21:50): a party refuses a lock whose deadline is beyond MAX_LOCK_HORIZON. Under H1
 ;;            a lock years out blocks cooperative and dispute close until the secret appears. `horizon-ok?`.
@@ -51,6 +65,11 @@
 (define/overridable window-left    (s/number) 1)
 (define/overridable window-right   (s/number) 1)
 (define/overridable min-window     (s/number) 1)
+;; N3: each proof carries its own windows: the floor (window-left, window-right) plus `frame-extra`, a policy
+;; that may only lengthen them inside an epoch. The base signs every frame at the floor; the config
+;; `window-policy` lengthens the later frames (extra 1), so a stale start at the floor is answered by a frame
+;; with longer windows.
+(define (frame-extra nonce) 0)
 ;; LAG: the time to read a J event and get an op included (coordinator R-C11, 18:57). Every window
 ;; must be greater than LAG or a responder that sees the start at S + LAG has no time to counter.
 ;; The model's tick is the smallest window, so LAG is below one tick here; bug `window-below-lag`
@@ -77,6 +96,7 @@
 ;; ---- the domain
 (define sides (list :left :right))
 (define (peer side) (if (equal? side :left) :right :left))
+;; the FLOOR windows (H2): the implicit proof names them, and no signed proof goes below them
 (define (windows) (list window-left window-right))
 (define (window-floor-ok?)
   (and (every (lambda (x) (>= x min-window)) (windows))
@@ -84,27 +104,39 @@
 ;; a counter sent at `now` lands at now + LAG and must land before T
 (define (counter-window-open? w d) (< (+ (:now w) lag) (:timeout d)))
 
-;; A PROOF is what the counterparty signed: (nonce proposer off clause rival? epoch). `off` is the
+;; A PROOF is what the counterparty signed: (nonce proposer off clause rival? epoch wl wr implicit?). `off` is the
 ;; offdelta, `clause` is #f or (amount deadline): Left's HTLC payment to Right, paid out if the secret
-;; is public by `deadline`. `rival?` marks a losing proposal of a cross-open.
+;; is public by `deadline`. `rival?` marks a losing proposal of a cross-open. `wl` and `wr` are the response
+;; windows the proof carries (N3: the policy it was signed under). `implicit?` marks the IMPLICIT proof of
+;; an epoch (empty signature, built from chain state; R-IMPLICIT-BASELINE), which no one signed.
 ;; Proofs are BUILT by the frame rules from the previous committed proof and a tx; nothing here is
 ;; a table of states. Each side computes the body itself, so "both sides sign the same proof" and
 ;; "credit holds" are checked on what the rules produced, not on numbers the author chose.
-(define (make-proof nonce proposer off clause rival?) (list nonce proposer off clause rival? 0))
+(define (make-proof nonce proposer off clause rival?)
+  (list nonce proposer off clause rival? 0
+        (+ (car (windows)) (frame-extra nonce)) (+ (cadr (windows)) (frame-extra nonce)) #f))
 (define (p-nonce p) (car p))
 (define (p-proposer p) (cadr p))
 (define (p-off p) (caddr p))
 (define (p-clause p) (cadddr p))
 (define (p-rival? p) (list-ref p 4))
 (define (p-epoch p) (list-ref p 5))
+(define (p-wl p) (list-ref p 6))
+(define (p-wr p) (list-ref p 7))
+(define (p-implicit? p) (list-ref p 8))
+(define (p-span p) (+ (p-wl p) (p-wr p)))
+(define (with-epoch p e)
+  (list (p-nonce p) (p-proposer p) (p-off p) (p-clause p) (p-rival? p) e (p-wl p) (p-wr p) (p-implicit? p)))
+;; E9: a body's windows are at least another's (they may lengthen, never shorten)
+(define (windows-ge? p q) (and (>= (p-wl p) (p-wl q)) (>= (p-wr p) (p-wr q))))
 (define (htlc amount deadline) (list amount deadline))
 (define (clause-amount c) (car c))
 (define (clause-deadline c) (cadr c))
 (define (rank p) (+ (* 2 (p-nonce p)) (if (equal? (p-proposer p) :left) 1 0)))
 (define (proof-name p)
-  (if (= (p-epoch p) 1)
-      (str "B" (p-nonce p))
-      (str "n" (p-nonce p) (if (equal? (p-proposer p) :left) "L" "R") (if (p-rival? p) "'" ""))))
+  (if (p-implicit? p)
+      (str "I" (p-nonce p))
+      (str (if (> (p-epoch p) 0) "e" "") "n" (p-nonce p) (if (equal? (p-proposer p) :left) "L" "R") (if (p-rival? p) "'" ""))))
 
 ;; the tx of a frame (Δ = ondelta + offdelta, collateral 2, credit 1 each way):
 ;;   n1 Right pays Left 1 (Δ 1); n2 Left locks a 1-unit HTLC; n3 the lock is cancelled and Right pays
@@ -119,7 +151,7 @@
         (list :right (list :pay :left 3))))
 ;; a losing proposal at one nonce: Right proposed at the same height as Left and lost the tie
 (define rivals (list (list 2 (list :pay :right 2))))
-(define genesis (list 0 :left 0 #f #f 0))
+(define genesis (list 0 :left 0 #f #f 0 0 0 #f))
 
 ;; the new proof a tx makes on top of `tip`, or #f if the tx does not apply
 (define (apply-op tip op nonce proposer rival?)
@@ -138,22 +170,25 @@
 ;; N2: a lock whose deadline is beyond MAX_LOCK_HORIZON is refused by BOTH sides (bug `no-horizon`)
 (define (horizon-ok? w p)
   (or (not (p-clause p)) (<= (- (clause-deadline (p-clause p)) (:now w)) max-lock-horizon)))
-(define (frame-ok? w p) (and p (rcpan-ok? w p) (horizon-ok? w p)))
+;; N3: neither side signs a frame whose windows are below those of the newest committed proof (windows never
+;; shorten inside an epoch). Bug `counter-shortens-window` signs it, and nothing then refuses the counter.
+(define (windows-keep-ok? w p) (windows-ge? p (tip-of w :left)))
+(define (frame-ok? w p) (and p (rcpan-ok? w p) (horizon-ok? w p) (windows-keep-ok? w p)))
 ;; the receiver recomputes the body from ITS committed proof and signs only if it equals the
 ;; proposer's (bugs `blind-sign` and `no-rcpan` change these)
 (define (receiver-body tip op nonce proposer) (apply-op tip op nonce proposer #f))
 (define (receiver-accepts? mine theirs) (and mine theirs (equal? mine theirs)))
 
-;; A baseline is the pre-signed proof of the NEXT epoch (coordinator, revised N1): every frame is
-;; co-signed together with a proof for epoch + 1 (offdelta 0, no clauses) whose nonce is above the
-;; chain nonce that any event opening the next epoch can leave. So an epoch advance never leaves an
-;; honest side without a valid proof, and the counterparty cannot stretch a gap by refusing to sign.
-;; Nonce = frame nonce + 3: a proposer is at most one frame behind (its ack is in flight), and a
-;; timeout finalize on the initial proof leaves the chain nonce at n0 + 1, one above the newest
-;; frame the counterparty holds.
-(define (baseline-nonce k) (+ k 3))
-;; the baseline of `epoch` (the epoch that follows the one the frame was signed in)
-(define (baseline-of k epoch) (list (baseline-nonce k) :left 0 #f #f epoch))
+;; The IMPLICIT proof (R-IMPLICIT-BASELINE, Q-D-21, decision D2): from epoch 1 on, the empty state of the Account is a
+;; valid proof for both sides WITHOUT a signature, because every field of it is on chain: offdelta 0, no clause,
+;; the FLOOR windows, the nonce one above the chain nonce, authored by RIGHT (watchSeed 0, no starter arguments).
+;; No epoch advance leaves a side without a proof, however many disputes follow each other, and no co-signed
+;; baseline or nonce arithmetic is needed. At nonce chain + 1 the Right author gives it the LOWEST rank: a
+;; Left-authored signed proof of that nonce outranks it, a Right-authored one only TIES it, and a tie is a
+;; refused counter. So the first SIGNED proof of an epoch takes nonce chain + 2 (`post-nonce`).
+(define (implicit-proof w)
+  (list (+ (:chain-nonce w) 1) :right 0 #f #f (:epoch w) (car (windows)) (cadr (windows)) #t))
+(define (implicit-proofs w) (if (> (:epoch w) 0) (list (implicit-proof w)) (list)))
 (define (rival-at nonce) (find (lambda (r) (= (car r) nonce)) rivals))
 
 (define init
@@ -166,12 +201,14 @@
         :tip (dict :left genesis :right genesis)   ; the newest proof each side has committed
         :unacked #f                          ; #f, or (proposer's proof, receiver's proof): the proposer waits for the ack
         :proposed-rank 0                     ; rank of the newest frame proposed (the receiver committed it)
-        :held (dict :left (list (baseline-of 0 1)) :right (list (baseline-of 0 1)))  ; the genesis baseline is co-signed at open
+        :held (dict :left (list) :right (list))   ; the SIGNED proofs each side holds; the implicit one is derived
         :signed (list)                       ; (proof byz? rcpan-ok?) of every frame a proposer signed
         :knew-op #f                          ; the payee acted before the deadline knowing the secret
         :settlements (list)                  ; what each cooperative settlement did
         :post #f                             ; the frame signed after a settlement
-        :deposit #f                          ; (funder beneficiary) of the one R2C made during a dispute
+        :deposit #f                          ; (funder beneficiary) of the R2C made in this epoch or dispute (cleared at an advance)
+        :deposits 0                          ; how many R2C were made (one is the bound)
+        :adv-ondelta 0                       ; ondelta at the last epoch advance (before any deposit of the epoch)
         :rot #f                              ; #f, or the off-chain height when the rotating side's board rotated
         :dispute #f
         :results (list)))
@@ -182,12 +219,6 @@
 (define (tip-of w side) (get-in w (list :tip side)))
 (define (hold w side p) (update-in w (list :held side) (lambda (hs) (append hs (list p)))))
 (define (frozen? w) (:dispute w))
-
-;; a frame proof comes with the next epoch's baseline for the same frame
-(define (hold-frame w side p)
-  (if (p-rival? p)
-      (hold w side p)
-      (hold (hold w side p) side (baseline-of (p-nonce p) (+ (:epoch w) 1)))))
 
 ;; the next scripted frame as (proposer's proof, receiver's proof), or #f when it is not valid
 ;; the two bodies of the next scripted frame, before any check: (proposer's proof, receiver's proof)
@@ -227,7 +258,7 @@
                (let ((f (frame-parts w))) (and f (proposer-ok? w (car f))))))
     (then (let* ((f (frame-parts w)) (w1 (record-signed w (car f) #f)))
             (if (and (receiver-accepts? (car f) (cadr f)) (receiver-ok? w (cadr f)))
-                (proposed (hold-frame w1 (peer side) (car f)) f)
+                (proposed (hold w1 (peer side) (car f)) f)
                 w1)))))
 ;; a BYZANTINE proposer signs a frame that overdraws itself: only the receiver's check stands
 (define byz-propose
@@ -236,7 +267,7 @@
                (let ((f (frame-parts w))) (and f (not (frame-ok? w (car f)))))))
     (then (let* ((f (frame-parts w)) (w1 (record-signed w (car f) #t)))
             (if (and (receiver-accepts? (car f) (cadr f)) (receiver-ok? w (cadr f)))
-                (proposed (hold-frame w1 (peer side) (car f)) f)
+                (proposed (hold w1 (peer side) (car f)) f)
                 w1)))))
 
 ;; a cross-open: Right proposed at the same height. Left's frame wins; Right signed its own, so
@@ -249,21 +280,24 @@
     (when (and (equal? side :left) (proposal-enabled? w) (equal? (proposer-of-next w) :left)
                (frame-ok? w (rival-proof w))))
     (then (let ((f (next-frame w)))
-            (proposed (-> w (hold-frame :right (car f)) (hold-frame :left (rival-proof w))) f)))))
+            (proposed (-> w (hold :right (car f)) (hold :left (rival-proof w))) f)))))
 
 ;; the receiver's signature reaches the proposer, who commits
 (define ack
   (rule "ack" (w side)
     (when (and (:unacked w) (equal? (p-proposer (car (:unacked w))) side)))
-    (then (-> w (hold-frame side (cadr (:unacked w)))
+    (then (-> w (hold side (cadr (:unacked w)))
                 (assoc-in (list :tip side) (car (:unacked w)))
                 (assoc-in (list :unacked) #f)))))
 
 ;; ---- the dispute
 (define (selected d) (or (:counter d) (:initial d)))
 (define (responder-of d) (peer (:starter d)))
-(define (held-by w side) (get-in w (list :held side)))
+;; what a side may present: the proofs it holds (signed by the counterparty) and the implicit proof of the epoch
+(define (signed-held w side) (get-in w (list :held side)))
+(define (held-by w side) (append (signed-held w side) (implicit-proofs w)))
 (define (all-proofs w) (delete-duplicates (append (held-by w :left) (held-by w :right))))
+(define (signed-proofs w) (delete-duplicates (append (signed-held w :left) (signed-held w :right))))
 (define (outranks? p q) (> (rank p) (rank q)))
 (define (usable? w p) (and (= (p-epoch p) (:epoch w)) (> (p-nonce p) (:chain-nonce w))))
 (define (best-rank w side)
@@ -326,18 +360,21 @@
   (rule (str "start " (proof-name p)) (w side)
     (when (and (not (:dispute w)) (< (length (:results w)) max-disputes)
                (member p (held-by w side)) (usable? w p) (window-floor-ok?)
-               (<= (+ (:now w) (apply + (windows))) max-time)))
+               (<= (+ (:now w) (p-span p)) max-time)))
     (then (close-window
            (assoc-in (carry w side) (list :dispute)
-                     (dict :starter side :at (:now w) :timeout (+ (:now w) (apply + (windows)))
+                     (dict :starter side :at (:now w) :timeout (+ (:now w) (p-span p))
                            :initial p :counter #f :closed-best #f :closed-proposed #f :counter-at #f
                            :best-start? (= (rank p) (best-rank w side))))))))
 
+;; E9: a counter or a final body may lengthen the started windows, never shorten them (bug `counter-shortens-window`)
+(define (windows-ok? d p) (windows-ge? p (:initial d)))
 (define (counter-with p)
   (rule (str "counter " (proof-name p)) (w side)
     (when (and (:dispute w) (equal? side (responder-of (:dispute w)))
                (member p (held-by w side)) (usable? w p)
                (counter-window-open? w (:dispute w))
+               (windows-ok? (:dispute w) p)
                (outranks? p (selected (:dispute w)))))
     (then (assoc-in (assoc-in (carry w side) (list :dispute :counter) p) (list :dispute :counter-at) (:now w)))))
 
@@ -360,9 +397,10 @@
 ;; The grade belongs to the proof that settles (a counter replaces it), not to who starts.
 (define (rotating-side) :left)
 (define (signed-at w p)
-  (cond ((equal? p (:post w)) #f)
+  (cond ((p-implicit? p) #f)
+        ((equal? p (:post w)) #f)
         ((= (p-epoch p) 0) (p-nonce p))
-        (else (- (p-nonce p) 3))))
+        (else #f)))
 (define (retired-of w p)
   (let ((k (signed-at w p)))
     (if (and (:rot w) k (<= k (:rot w))) (rotating-side) :none)))
@@ -415,12 +453,15 @@
         :ondelta (:ondelta w) :secret (:secret w) :initial (:initial d) :counter-at (:counter-at d)
         :timeout (:timeout d) :adopted (adopted? d p)
         :knew-op (:knew-op w) :post (:post w)
+        :adv-ondelta (:adv-ondelta w) :dep-left (if (and (:deposit w) (equal? (cadr (:deposit w)) :left)) 1 0)
         :hasty (and (< (:now w) (:timeout d)) (own-ack-pending? w (responder-of d))))))
 
 (define (finalized w d p outcome path)
   (let ((paid (payout w (settled-delta w p outcome))))
     (-> paid
         (assoc-in (list :dispute) #f)
+        (assoc-in (list :deposit) #f)
+        (assoc-in (list :adv-ondelta) (:ondelta paid))
         (update-in (list :epoch) (lambda (e) (+ e 1)))
         (assoc-in (list :chain-nonce) (if (adopted? d p) (p-nonce p) (+ (p-nonce (:initial d)) 1)))
         (assoc-in (list :head) (length script))
@@ -452,25 +493,19 @@
   (rule (str "finalize with " (proof-name p)) (w side)
     (when (and (:dispute w) (not (:counter (:dispute w))) (equal? side (responder-of (:dispute w)))
                (member p (held-by w side)) (usable? w p) (outranks? p (:initial (:dispute w)))
+               (windows-ok? (:dispute w) p)
                (= (rank p) (best-rank w side))
                (not (equal? (clause-outcome w p) :wait))))
     (then (let ((d (:dispute w)))
             (finalized (carry w side) d p (clause-outcome (carry w side) p) "5b")))))
 
 ;; ---- cooperative settlement (Account.sol processSettlement) and the frame after it
-;; The settlement is the next frame: its nonce is above the chain nonce and below the baselines the
-;; parties already hold for the epoch it opens (baseline = frame nonce + 3). Bug `settle-nonce-high`.
+;; The settlement is the next frame: its nonce is above the chain nonce.
 (define (settle-nonce w) (+ (:head w) 1))
 ;; v1: a settlement carries no open clause (bug `settle-with-clause`)
 (define (settle-clause-ok? w) (not (p-clause (tip-of w :left))))
 ;; the offdelta folds into ondelta, so Δ does not move (bug `settle-drops-off`)
 (define (folded-off off) off)
-(define (best-nonce w)
-  (reduce (lambda (p acc) (if (= (p-epoch p) (:epoch w)) (max acc (p-nonce p)) acc)) (:chain-nonce w) (all-proofs w)))
-;; the baseline for the epoch after the one just opened: 3 above the highest nonce valid in it. The
-;; settlement co-signs it, so a dispute in the new epoch still leaves each side a valid proof (bug
-;; `settle-no-baseline`).
-(define (settle-baseline w) (baseline-of (best-nonce w) (+ (:epoch w) 1)))
 (define (hold-both w p) (hold (hold w :left p) :right p))
 
 (define (settle-enabled? w)
@@ -485,20 +520,20 @@
                            (assoc-in (list :chain-nonce) (settle-nonce w))
                            (update-in (list :ondelta) (lambda (o) (+ o (folded-off (p-off tip)))))
                            (assoc-in (list :head) (length script))))
-                 (w2 (hold-both w1 (settle-baseline w1))))
+                 (w2 (assoc-in w1 (list :adv-ondelta) (:ondelta w1))))
             (update-in w2 (list :settlements)
                        (lambda (ss) (cons (dict :delta-before delta-before :delta-after (:ondelta w2)
                                                 :money-before (total-funds w) :money-after (total-funds w2)
                                                 :had-clause (if (p-clause tip) #t #f))
                                           ss)))))))
 
-;; the first frame of the new epoch: Right pays Left 1. Its proof nonce clears every proof of the epoch
-;; either side holds, baselines included (proof nonce and frame height are separate counters). Bug
-;; `post-nonce-low` continues from the chain nonce: a baseline then outranks the newest frame.
-(define (post-nonce w) (+ 1 (best-nonce w)))
+;; the first SIGNED frame of the new epoch: Right pays Left 1. Right-authored, so at chain nonce + 1 it would only TIE
+;; the implicit proof (same rank) and a counter with it is refused: the dispute would pay the implicit proof and
+;; Left's frame would be lost (review B of PR 76, finding 3). The rule: the first signed proof of an epoch takes
+;; nonce >= stored + 2. Bug `post-nonce-low` takes chain + 1.
+(define (post-nonce w) (+ 2 (:chain-nonce w)))
 (define (post-proof w)
-  (let ((base (list (:chain-nonce w) :left 0 #f #f (:epoch w))))
-    (append (take (apply-op base (list :pay :right 1) (post-nonce w) :right #f) 5) (list (:epoch w)))))
+  (with-epoch (apply-op (implicit-proof w) (list :pay :right 1) (post-nonce w) :right #f) (:epoch w)))
 (define post-frame
   (rule "post frame" (w side)
     (when (and (equal? side :right) (= (:epoch w) 1) (null? (:results w)) (not (frozen? w)) (not (:post w))
@@ -507,18 +542,23 @@
             (-> w (assoc-in (list :post) p)
                   (assoc-in (list :proposed-rank) (rank p))
                   (assoc-in (list :tip :left) p) (assoc-in (list :tip :right) p)
-                  (hold-both p)
-                  (hold-both (baseline-of (p-nonce p) (+ (:epoch w) 1))))))))
+                  (hold-both p))))))
 
 ;; H4 (coordinator): R2C has no dispute check (Account.sol processR2C), so a deposit made while a
 ;; dispute is open changes the payout. Accepted: each deposit only raises its beneficiary's share.
-;; The receiving entity need not be the funder. One deposit of 1, during a dispute.
+;; The receiving entity need not be the funder. One deposit of 1, during a dispute, or (review B of PR 76,
+;; finding 2) inside an epoch after an advance and before a later dispute can start: a deposit does NOT advance the
+;; epoch, so the signed frames of the epoch stay valid and an implicit dispute started afterwards settles at the
+;; NEW ondelta (a Left deposit raises it by one). Bug `deposit-advances-epoch`.
+(define (deposit-open? w)
+  (or (:dispute w) (and (> (:epoch w) 0) (< (length (:results w)) max-disputes))))
 (define (deposit-rule funder beneficiary)
   (rule (str "deposit " funder "->" beneficiary) (w side)
-    (when (and (equal? side funder) (:dispute w) (not (:deposit w)) (>= (get-in w (list :reserve funder)) 1)))
+    (when (and (equal? side funder) (deposit-open? w) (= (:deposits w) 0) (>= (get-in w (list :reserve funder)) 1)))
     (then (-> w (update-in (list :collateral) (lambda (c) (+ c 1)))
                 (update-in (list :ondelta) (lambda (o) (ledger-deposit-ondelta o beneficiary 1)))
                 (add-reserve funder -1)
+                (update-in (list :deposits) (lambda (n) (+ n 1)))
                 (assoc-in (list :deposit) (list funder beneficiary))))))
 (define (undo-deposit w)
   (if (:deposit w)
@@ -556,7 +596,7 @@
      (and (<= (get-in w (list :debt :left)) credit-left)
           (<= (get-in w (list :debt :right)) credit-right)))
    (property "both sides sign the same proof: proofs of one nonce, proposer and kind have one body" (w)
-     (let ((ps (all-proofs w)))
+     (let ((ps (signed-proofs w)))
        (every (lambda (p)
                 (every (lambda (q)
                          (or (not (and (= (p-nonce p) (p-nonce q)) (equal? (p-proposer p) (p-proposer q))
@@ -604,8 +644,26 @@
      (every (lambda (s) (and (= (:delta-before s) (:delta-after s)) (= (:money-before s) (:money-after s)))) (:settlements w)))
    (property "a cooperative settlement carries no open clause (v1)" (w)
      (every (lambda (s) (not (:had-clause s))) (:settlements w)))
-   (property "in the new epoch a dispute pays the newest committed frame, never a baseline that outranks it" (w)
-     (every (lambda (r) (or (not (:post r)) (equal? (:proof r) (:post r)))) (:results w)))
+   ;; review B of PR 76, finding 3: a Right-authored signed frame at stored + 1 only TIES the implicit proof, a tie is a
+   ;; refused counter, and the dispute pays the implicit proof: the frame's offdelta is lost (bug `post-nonce-low`)
+   (property "in the new epoch a dispute pays the newest committed frame, never the implicit proof that ties it" (w)
+     (every (lambda (r) (or (not (:post r)) (not (= (:epoch r) (p-epoch (:post r)))) (equal? (:proof r) (:post r)))) (:results w)))
+   ;; R-IMPLICIT-BASELINE: the implicit proof is the empty state, so a dispute from it settles at the chain's ondelta now:
+   ;; the one of the advance, plus a Left deposit made inside the epoch (a deposit does not advance the epoch)
+   (property "a dispute from the implicit proof settles at the chain's ondelta now: the advance's plus a deposit of the epoch" (w)
+     (every (lambda (r)
+              (or (not (p-implicit? (:proof r)))
+                  (= (:raw-delta r) (+ (:adv-ondelta r) (:dep-left r)))))
+            (:results w)))
+   ;; N3 (review B, risk 5; E9): windows may lengthen and never shorten inside an epoch, on the proofs of the epoch and
+   ;; on the counter or the final body of a dispute against the windows it started with
+   (property "windows never shorten inside an epoch: a later proof carries at least the windows of an earlier one, and a counter or final body at least the started ones" (w)
+     (and (every (lambda (p)
+                   (every (lambda (q)
+                            (or (not (and (= (p-epoch p) (p-epoch q)) (< (p-nonce p) (p-nonce q)))) (windows-ge? q p)))
+                          (all-proofs w)))
+                 (all-proofs w))
+          (every (lambda (r) (windows-ge? (:proof r) (:initial r))) (:results w))))
    (property "no lock is signed beyond MAX_LOCK_HORIZON: every held clause is within the horizon of the clock (N2)" (w)
      (every (lambda (p) (or (not (p-clause p)) (<= (clause-deadline (p-clause p)) (+ (:now w) max-lock-horizon))))
             (all-proofs w)))
@@ -643,7 +701,7 @@
    ;; A12 (coordinator, 00:49): two co-signed proofs exist at one nonce only with opposite proposer flags, and LEFT's proposal
    ;; wins whoever starts or counters. Restated from the rule: proposers, then who ranks higher.
    (property "two proofs of one nonce and epoch have opposite proposers, and Left's outranks Right's (A12)" (w)
-     (let ((ps (all-proofs w)))
+     (let ((ps (signed-proofs w)))
        (every (lambda (p)
                 (every (lambda (q)
                          (or (not (and (= (p-nonce p) (p-nonce q)) (= (p-epoch p) (p-epoch q)) (not (equal? p q))))
@@ -678,6 +736,10 @@
              ((:lock) (and (= (p-off p) (p-off old)) (p-clause p) (= (clause-amount (p-clause p)) (cadr op))))
              ((:unlock-pay) (and (= (p-off p) (+ (p-off old) (* (payer-sign (cadr op)) (caddr op)))) (not (p-clause p))))
              (else #f)))))
+   ;; review B, finding 2: reserve-to-collateral does NOT advance the epoch, so every signed frame stays valid
+   (step-property "a deposit does not advance the epoch: the epoch, the chain nonce and every held proof stay" (w rname side w2)
+     (or (not (string-prefix? "deposit" rname))
+         (and (= (:epoch w2) (:epoch w)) (= (:chain-nonce w2) (:chain-nonce w)) (equal? (:held w2) (:held w)))))
    (step-property "a deposit moves one unit from the funder's reserve into the collateral; only a Left beneficiary's allocation rises" (w rname side w2)
      (or (not (string-prefix? "deposit" rname))
          (let ((beneficiary (cadr (:deposit w2))))

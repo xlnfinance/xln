@@ -19,9 +19,9 @@ spec/
   money/core.scm           the arithmetic both money pages share: payment, worst-case credit bound, deposit (composition)
   money/ledger.scm         the money of one Account: RCPAN credit bound in the worst case, conservation
   money/bugs/*.scm         planted money bugs
-  dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, settlement, H1-H4
+  dispute/dispute.scm      one dispute: stale start, counter, three finalize paths, payout, debt, epoch, the implicit proof of each new epoch (R-IMPLICIT-BASELINE), per-proof windows, settlement, deposits, H1-H4
   dispute/bugs/*.scm       planted dispute bugs
-  */configs/*.scm          second bounds and findings: extra files loaded after the page (dispute: retired boards, two disputes, ...)
+  */configs/*.scm          second bounds and findings: extra files loaded after the page (dispute: retired boards, two disputes in a row from the implicit proof, a window policy that lengthens, ...)
   entity/consensus.scm     Entity consensus: leader, quorum, own proposal vs certified frame (R-E3)
   entity/bugs/*.scm        planted consensus bugs
   entity/frame.scm         the Entity frame: four phases, one view, hooks before txs, first-touch proposals
