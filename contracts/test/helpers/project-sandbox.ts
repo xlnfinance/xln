@@ -16,7 +16,13 @@ import path from "node:path";
 const COPIED = ["contracts", "scripts", "deploy", "typechain-types", "vectors", "hardhat.config.ts", "package.json", "tsconfig.json"] as const;
 
 const made: string[] = [];
-process.on("exit", () => { for (const dir of made) rmSync(dir, { recursive: true, force: true }); });
+const sandboxes = new Map<string, string>();
+/** Remove every private copy made so far. `bun test` never emits the process "exit" event, so a test file calls this in its own afterAll; the exit hook covers plain node runs. */
+export const removeSandboxes = (): void => {
+  for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+  sandboxes.clear();
+};
+process.on("exit", removeSandboxes);
 
 /** A fresh private copy of `projectRoot`, returned as the copy's project root. Removed when the process exits. */
 export const copyProject = (projectRoot: string): string => {
@@ -30,8 +36,6 @@ export const copyProject = (projectRoot: string): string => {
   }
   return copy;
 };
-
-const sandboxes = new Map<string, string>();
 
 /** The one private copy of `projectRoot` for this test process: scripts that may compile run here, never in the real project. */
 export const sandboxOf = (projectRoot: string): string => {
@@ -50,6 +54,9 @@ export const sandboxOf = (projectRoot: string): string => {
 export const runInSandbox = (projectRoot: string, command: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; timeout?: number } = {}) =>
   spawnSync(command, [...args], { cwd: sandboxOf(projectRoot), encoding: "utf8", timeout: options.timeout ?? 240_000, env: { ...process.env, ...options.env } });
 
+/** What a compile writes and the tests read: the compiler's artifacts and the typechain plugin's output. (A compile that finds nothing to rebuild leaves artifacts/ alone but still rewrites .typechain-hardhat.) */
+const BUILD_OUTPUT = ["artifacts", ".typechain-hardhat"] as const;
+
 /** Every file under the build output, by path and content: any rewrite, addition or removal changes it. */
 export const buildFingerprint = (root: string): string => {
   const hash = createHash("sha256");
@@ -60,6 +67,6 @@ export const buildFingerprint = (root: string): string => {
       else hash.update(path.relative(root, full)).update(readFileSync(full));
     }
   };
-  walk(path.join(root, "artifacts"));
+  for (const output of BUILD_OUTPUT.filter((name) => existsSync(path.join(root, name)))) walk(path.join(root, output));
   return hash.digest("hex");
 };

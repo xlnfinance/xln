@@ -5,7 +5,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { buildFingerprint, runInSandbox, sandboxOf } from "../helpers/project-sandbox.ts";
+import { buildFingerprint, removeSandboxes, runInSandbox, sandboxOf } from "../helpers/project-sandbox.ts";
 // @ts-expect-error CommonJS script without types
 import gate from "../../scripts/deploy-gate.cjs";
 // @ts-expect-error CommonJS script without types
@@ -16,7 +16,18 @@ const contractsRoot = path.join(import.meta.dir, "..", "..");
 const scriptCwd = () => sandboxOf(contractsRoot);
 // Whatever else happens, this file must leave the real build exactly as it found it (a compile run in the real project would rewrite it mid-run).
 const buildBefore = existsSync(path.join(contractsRoot, "artifacts")) ? buildFingerprint(contractsRoot) : null;
-afterAll(() => { if (buildBefore !== null) expect(buildFingerprint(contractsRoot), "the real artifacts/ changed while the gate tests ran").toBe(buildBefore); });
+afterAll(() => {
+  removeSandboxes();
+  if (buildBefore !== null) expect(buildFingerprint(contractsRoot), "the real artifacts/ or .typechain-hardhat changed while the gate tests ran").toBe(buildBefore);
+});
+
+describe("the real build the gate tests read", () => {
+  // Sources moved since the last build: every test below that reads the build fails. This one says why, once, with the command.
+  test("matches the sources on disk (if not: bash scripts/build.sh)", () => {
+    const problem = (() => { try { gate.readCompiledFloor(); return null; } catch (error) { return error instanceof Error ? error.message : String(error); } })();
+    expect(problem, "the build in artifacts/ is stale: run `bash scripts/build.sh`, then run the gate tests again").toBeNull();
+  });
+});
 const literal = (value: string, subdenomination: string | null = null) => ({ nodeType: "Literal", kind: "number", value, subdenomination });
 const constantAst = (value: unknown) => ({ nodeType: "SourceUnit", nodes: [{ nodeType: "ContractDefinition", nodes: [{ nodeType: "VariableDeclaration", name: "MIN_RESPONSE_SECONDS", constant: true, value }] }] });
 const named = (chainId: number, id = "chain") => ({ id, chainId });
