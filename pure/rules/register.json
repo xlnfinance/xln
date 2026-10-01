@@ -3987,6 +3987,192 @@
      "name": "R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import"
     }
    ]
+  },
+  {
+   "id": "R-WATCH-DEPTH",
+   "statement": "J events are delivered only from blocks at least `depth` below the chain head, and a block that does not continue the delivered cursor is a reorg deeper than `depth`: a halt, never a rewrite.",
+   "source": "consolidation-plan.md D9 and Q-X-10 (act on J events only at depth; a deeper reorg is a halt)",
+   "layers": {
+    "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH a block is delivered once the head is depth above it, and not before"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH a chain younger than its depth has nothing final: only a batch with no blocks is allowed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH an empty batch is the cursor again: it announces the height it has and moves nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH a depth below zero is refused when the watch starts"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH a first block whose parent is not the cursor's block is a reorg deeper than the depth"
+    }
+   ]
+  },
+  {
+   "id": "R-WATCH-ORDER",
+   "statement": "A J event reaches a hosted Entity in the chain's order (block, then log index) and, across batches and a repeat from the old cursor, once in effect: a block that is missing, out of order or on another fork refuses the delivery and the cursor does not move.",
+   "source": "consolidation-plan.md D9 and J2 (events applied once and in order); R-HTLC-CLOCK (the delivered height is the Host's finalizedJHeight)",
+   "layers": {
+    "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER one delivery is the chain's events for each hosted Entity in order, to its last block"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER an Entity that is not hosted is told nothing, and the delivery still moves the cursor"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER a block that does not follow the one before it is a broken chain, a missing one is a gap"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER a log of a block the batch does not hold, or of another fork's block, is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER logs that run backwards or repeat are refused, not sorted or deduplicated"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER however the blocks are cut into batches, the events are the chain's, once each, in order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER a delivery repeated from the old cursor, as after a crash, is the same delivery"
+    }
+   ]
+  },
+  {
+   "id": "R-WATCH-CLOSED",
+   "statement": "The watcher reads a closed list of the Depository's events, checked against the deployed ABI: an event it does not know, a log of another address or a log of the wrong shape refuses the delivery and never reads as nothing.",
+   "source": "consolidation-plan.md D9 (no silent refusals); lessons.md (a check that lives only in a CLI looks gated but is not)",
+   "layers": {
+    "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED every event of the deployed Depository is read or named as ignored, and none is both"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED the topic 0 of each listed signature is the one the ABI computes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED every log of the real lifecycle decodes: the four events are read, the rest are ignored"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED an event the Depository has never emitted is a fault, not a miss"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED a log of another address is a fault: the node is asked for the Depository's logs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED an event the watcher does not know is a fault of the whole delivery and moves no cursor"
+    }
+   ]
+  },
+  {
+   "id": "R-WATCH-TELL",
+   "statement": "A hosted Entity is told of a chain event only when it is a party to it, as the J event its side of the Account needs, with the epoch and stored nonce read from the chain at the end of the event's block and checked against the log; a missing or contradicting reading refuses the delivery.",
+   "source": "consolidation-plan.md D9 and J2; R-J1 (chain facts reach an Account only through J events)",
+   "layers": {
+    "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL an epoch advance is a j_epoch for each hosted party, with the nonce the chain stores"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL an Entity that is not hosted, or is not a party, hears nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a dispute start is a j_dispute naming the side that started it, in the chain's epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL an event's epoch is the end-of-block epoch less the advances logged after it in the block"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL an advance of another Account in the same block does not move this Account's epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a finalize is a j_dispute_over for each hosted party; a counter only for its registrar"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a reading that is missing is a fault, and so is one that contradicts the log's epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL readings are asked only for what a hosted Entity needs, once each, in event order"
+    }
+   ]
   }
  ]
 }
