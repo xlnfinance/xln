@@ -1450,13 +1450,23 @@
    "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
    "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
     "ts": "-"
    },
    "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "send-before-persist"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ack-before-persist"
+    },
     {
      "kind": "mutant",
      "layer": "quint",
