@@ -1,0 +1,19 @@
+{
+ "id": "R-SWAP-EXPIRE",
+ "statement": "Expiry is off-chain only (the chain's clause has none): anyone lapses an offer by a frame once the deciding party's view is strictly past its deadline plus the reserve (R-HTLC-CLOCK rules); earlier is not_expired with the earliest height. A lapse removes the offer and its reservations, keeps what was filled, and no fill follows it.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "owed: spec thread, swap page",
+  "quint": "owed: spec thread",
+  "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-EXPIRE an offer expires off-chain: a frame lapses it once the view is past due"
+  }
+ ]
+}

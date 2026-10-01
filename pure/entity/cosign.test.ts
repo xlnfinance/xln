@@ -25,7 +25,8 @@ const ledger = (offdelta: bigint): Ledger =>
 /** Alice holds Accounts with Bob and Carol; the Account with Bob has these offdeltas by token (none for zero). */
 const aliceWith = (offdeltas: ReadonlyMap<TokenId, bigint>): EntityState => {
   const base = run(emptyEntity(ALICE), open(BOB), open(CAROL)).state;
-  const ledgers: AccountState = { ledgers: new Map([...offdeltas].map(([token, d]) => [token, ledger(d)])) };
+  const held = new Map([...offdeltas].map(([token, d]) => [token, ledger(d)]));
+  const ledgers: AccountState = { ledgers: held, offers: [] };
   const withBob = { ...emptyReplica("left"), state: ledgers };
   return { ...base, accounts: new Map([...base.accounts, [BOB, withBob]]) };
 };

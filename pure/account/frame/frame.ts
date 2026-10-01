@@ -76,8 +76,14 @@ export type Rules<Tx, S, F> = Readonly<{
 /** The peer refused the frame this tx was in and named it (R-FRAME-REFUSAL); `fault` is the tag the peer gave. */
 export type PeerRefused = Tagged<"peer_refused", { fault: string }>;
 
+/**
+ * This side has signed MAX_UNSUPERSEDED proofs (slots `first` to `last`) and none of them has been superseded by a
+ * commit: it signs no more, and the txs it was about to sign are refused with this notice (R-NOTICE) and not kept.
+ */
+export type SignedCap = Tagged<"signed_cap", { first: number; last: number }>;
+
 /** A tx that stopped applying, with the refusal its owner is told (R-NOTICE): it is never dropped silently. */
-export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused }>;
+export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused | SignedCap }>;
 
 /**
  * The highest attempt of the peer's that this replica refused on its current head, and why. A frame at or below it is
@@ -96,6 +102,12 @@ export type Signed<Tx> = Readonly<{ slot: number; txs: readonly Tx[] }>;
 
 /** The most signed-but-unsuperseded frames one side keeps: past it, it proposes nothing more until one commits. */
 export const MAX_UNSUPERSEDED = 64;
+
+/**
+ * Whether this side is at the cap (R-SIGNED-IS-LIVE): every proof it signed stays enforceable and none is superseded,
+ * so it signs nothing new until the peer commits a frame or the Runtime acts (a dispute, or the wait for the peer).
+ */
+export const stalled = <Tx, S, F>(r: Replica<Tx, S, F>): boolean => r.unsuperseded.length >= MAX_UNSUPERSEDED;
 
 /**
  * One side of the Account: its committed head and the state that head made, how many frames are committed (`height`),
@@ -194,8 +206,12 @@ const NO_MESSAGES: readonly never[] = [];
  * notice (R-NOTICE). The valid txs become one pending frame on the head and go to the peer; with none, nothing is sent.
  */
 export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>): Out<Tx, S, F> => {
-  if (r.pending !== undefined || r.mempool.length === 0 || r.unsuperseded.length >= MAX_UNSUPERSEDED) {
-    return { replica: r, sent: NO_MESSAGES };
+  if (r.pending !== undefined || r.mempool.length === 0) return { replica: r, sent: NO_MESSAGES };
+  if (stalled(r)) {
+    const slots = r.unsuperseded.map((x) => x.slot);
+    const fault: SignedCap = { _tag: "signed_cap", first: Math.min(...slots), last: Math.max(...slots) };
+    const refused = [...r.refused, ...r.mempool.map((tx): Refused<Tx, F> => ({ tx, fault }))];
+    return { replica: { ...r, mempool: [], refused }, sent: NO_MESSAGES };
   }
   const split = splitValid(rules, r.side, r.state, r.mempool);
   const slot = slotAbove(r.side, r.used, floorOf(r));
