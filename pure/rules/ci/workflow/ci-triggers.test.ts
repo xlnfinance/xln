@@ -1,10 +1,11 @@
 // The workflow behind One gate starts on every pull request and cannot skip a gate job: each way it could not, planted, and the real workflow.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "./ci-drift.ts";
+import { ciDriftProblems, isWorkflowFile, withoutComments, type CiFiles } from "../ci-drift.ts";
+import { jobBlocks } from "./ci-steps.ts";
 import { triggerProblems } from "./ci-triggers.ts";
 
-const repo = `${import.meta.dir}/../../..`;
+const repo = `${import.meta.dir}/../../../..`;
 const workflowDir = `${repo}/.github/workflows`;
 
 const workflow = (on: readonly string[], gateJob: readonly string[] = [], oneGate: readonly string[] = ["    if: ${{ always() }}"]): string =>
@@ -43,6 +44,24 @@ describe("planted skips are problems", () => {
       expect(found, filter).toEqual([expect.stringContaining(`CI_TRIGGER_FILTER ci.yml pull_request is filtered by ${filter.split(":")[0]}`)]);
     });
     expect(problems(workflow(["  pull_request:", "    branches: [main]", "    paths: [a]"]))).toHaveLength(2);
+  });
+
+  test("R-GATE-CI-TRIGGERS flow-style forms are read: a filter inside pull_request: { ... }, or inside on: { ... }, is named like a block one", () => {
+    expect(problems(workflow(["  pull_request: { paths: ['pure/**'] }"]))).toEqual([expect.stringContaining("filtered by paths")]);
+    expect(problems(workflow(["  pull_request: { branches: [main], types: [opened] }"]))).toHaveLength(2);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: { branches-ignore: [wip] }, push: {} }"))).toEqual([expect.stringContaining("filtered by branches-ignore")]);
+    expect(problems(workflow([]).replace("on:", "on: { push: { paths: [a] }, pull_request: { paths-ignore: [b] } }"))).toEqual([expect.stringContaining("filtered by paths-ignore")]);
+  });
+
+  test("R-GATE-CI-TRIGGERS flow-style forms without a filter agree, and a flow value that cannot be read for filters is a problem of its own", () => {
+    expect(problems(workflow(["  pull_request: {}"]))).toEqual([]);
+    expect(problems(workflow(["  pull_request: null"]))).toEqual([]);
+    expect(problems(workflow(["  pull_request: ~"]))).toEqual([]);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: null, push: {} }"))).toEqual([]);
+    expect(problems(workflow([]).replace("on:", "on: { push: {}, pull_request: {} }"))).toEqual([]);
+    expect(problems(workflow(["  pull_request: ${{ vars.TRIGGER }}"]))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE ci.yml writes pull_request as")]);
+    expect(problems(workflow(["  pull_request: &anchor"]))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE")]);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: anchored, push: {} }"))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE")]);
   });
 
   test("R-GATE-CI-TRIGGERS a filter that sits under another event, after pull_request, is not read as pull_request's", () => {
@@ -85,6 +104,13 @@ describe("the real workflows", () => {
   const real = readdirSync(workflowDir).filter(isWorkflowFile).map((name) => ({ name, text: withoutComments(readFileSync(`${workflowDir}/${name}`, "utf8")) }));
 
   test("R-GATE-CI-TRIGGERS the real workflows start on every pull request and cannot skip a gate job", () => expect(real.flatMap(({ name, text }) => triggerProblems(name, text))).toEqual([]));
+
+  test("R-GATE-CI-TRIGGERS the nightly run exists, a run on main is never cancelled, and og's informational suites run only nightly or by hand", () => {
+    const gate = real.find(({ text }) => text.includes("one-gate:"))?.text ?? "";
+    expect(gate).toMatch(/^\s+schedule:\s*\n\s+- cron:/m);
+    expect(gate).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+    ["contracts-test", "e2e-tests"].forEach((job) => expect(jobBlocks(gate)[job], job).toContain("if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"));
+  });
 
   test("R-GATE-CI-TRIGGERS the check is not vacuous: the real One gate workflow is judged, and its pull_request trigger is there", () => {
     const gate = real.find(({ text }) => text.includes("one-gate:"));
