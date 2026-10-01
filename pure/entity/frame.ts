@@ -6,7 +6,7 @@ import { emptyReplica } from "../account/frame/account.ts";
 import type { JView } from "../account/clause/clock.ts";
 import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } from "../account/frame/frame.ts";
 import { revealOnChainDue } from "../account/clause/clock.ts";
-import type { AccountState } from "../account/model.ts";
+import type { AccountState, Side } from "../account/model.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
@@ -161,8 +161,8 @@ const opened = (w: Work, command: Extract<Command, { _tag: "open_account" }>): W
   return withReplica(w, command.peer, emptyReplica(sideOf(w.state.id, command.peer)));
 };
 
-/** The tx a command asks its Account for. */
-const txOf = (command: AccountCommand): AccountTx => {
+/** The tx a command asks its Account for; an offer's maker is this node's side, whatever a caller would like. */
+const txOf = (self: Side, command: AccountCommand): AccountTx => {
   switch (command._tag) {
     case "pay":
       return { _tag: "pay", token: command.token, amount: command.amount };
@@ -176,6 +176,17 @@ const txOf = (command: AccountCommand): AccountTx => {
       return { _tag: "cancel", token: command.token, id: command.id };
     case "expire":
       return { _tag: "expire", token: command.token, id: command.id };
+    case "offer":
+      return {
+        _tag: "offer",
+        offer: { id: command.id, maker: self, give: command.give, want: command.want, deadline: command.deadline },
+      };
+    case "fill":
+      return { _tag: "fill", id: command.id, ratio: command.ratio };
+    case "retract":
+      return { _tag: "retract", id: command.id };
+    case "lapse":
+      return { _tag: "lapse", id: command.id };
   }
 };
 
@@ -183,7 +194,7 @@ const txOf = (command: AccountCommand): AccountTx => {
 const queued = (rules: Rulebook, w: Work, command: AccountCommand): Work => {
   const account = w.state.accounts.get(command.peer);
   if (account === undefined) return refusedCommand(w, command, { _tag: "no_account", peer: command.peer });
-  const admitted = submit(rules(w, command.peer), account, txOf(command));
+  const admitted = submit(rules(w, command.peer), account, txOf(sideOf(w.state.id, command.peer), command));
   return admitted.ok
     ? touching(withReplica(w, command.peer, admitted.value), command.peer)
     : refusedCommand(w, command, { _tag: "account_refused", fault: admitted.error });
