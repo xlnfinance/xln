@@ -53,6 +53,7 @@ export type Outcome<F> =
   | Tagged<"kept_own">
   | Tagged<"refused_invalid", { fault: F }>
   | Tagged<"refused_own">
+  | Tagged<"refused_empty">
   | Tagged<"refused_not_next">
   | Tagged<"committed_own">
   | Tagged<"ack_ignored">;
@@ -125,6 +126,7 @@ const accept = <Tx, S, F>(r: Replica<Tx, S, F>, hash: FrameHash, after: S): Hear
 
 const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Frame<Tx>): Heard<Tx, S, F> => {
   if (f.author === r.side) return heard(r, NO_MESSAGES, { _tag: "refused_own" });
+  if (f.txs.length === 0) return heard(r, NO_MESSAGES, { _tag: "refused_empty" });
   if (f.parent === r.head) {
     // Same-height collision: LEFT WINS (R-A1). Left keeps its own frame and ignores the peer's; Right yields.
     if (r.pending !== undefined && r.side === "left") return heard(r, NO_MESSAGES, { _tag: "kept_own" });

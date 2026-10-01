@@ -1506,7 +1506,7 @@
   },
   {
    "id": "R-NOTICE",
-   "statement": "A tx that stops applying is refused with notice to its owner and leaves the mempool; never dropped silently, never stuck.",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A frame the peer refuses is NOT covered: that pending frame stays until the peer acks it (owed: R-FRAME-REFUSAL).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1568,12 +1568,17 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE no tx is both committed and refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
     }
    ]
   },
   {
    "id": "R-FRAME-HASH-SIGNED",
-   "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign. Until then the TS hash is provisionalFrameHash, a stand-in that is deterministic and injective on the frame fields and nothing more; it must not be signed, sent on the wire or stored.",
+   "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
    "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
    "layers": {
     "arrival": "-",
@@ -1593,7 +1598,7 @@
   },
   {
    "id": "R-REFUSED-RELEASES-PAYER",
-   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked (an Entity/Runtime duty, the Account only sends the refusal with notice).",
+   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. Today the Account sends no refusal (a frame is answered with an ack or nothing); the refusal message is R-FRAME-REFUSAL (owed A4) and the release of the payer is an Entity/Runtime duty (owed to the cut).",
    "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
    "layers": {
     "arrival": "-",
@@ -1612,8 +1617,28 @@
    ]
   },
   {
+   "id": "R-FRAME-REFUSAL",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash and the first refused tx; the proposer, whose frame is pending and unacked, rolls it back, drops the refused tx and re-proposes the rest; a refusal for a committed frame is ignored; Left wins simultaneous proposals. Without it a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (frame exchange step)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (frame exchange step)"
+    }
+   ]
+  },
+  {
    "id": "R-ADMIT",
-   "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head.",
+   "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -2404,6 +2429,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order"
     }
    ]
   },

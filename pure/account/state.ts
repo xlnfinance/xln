@@ -16,11 +16,10 @@ export const withLedger = (s: AccountState, token: TokenId, l: Ledger): AccountS
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 
-/** The Account's caps, checked on a state a lock has just produced: nothing above the cap, no hashlock open twice. */
-export const withinAccountCaps = (s: AccountState): AccountFault | undefined => {
-  const holds = openHolds(s);
-  if (holds.length > MAX_HOLDS) return { _tag: "too_many_holds", max: MAX_HOLDS };
-  const holder = (h: Hold): Hold | undefined => holds.find((o) => o.hashlock === h.hashlock);
-  const twice = holds.find((h) => holder(h) !== h);
-  return twice === undefined ? undefined : { _tag: "lock_exists", id: holder(twice)?.id ?? twice.id };
-};
+/** The Account's hold cap, checked on a state a lock has just produced: no more than MAX_HOLDS open in all tokens. */
+export const withinHoldCap = (s: AccountState): AccountFault | undefined =>
+  openHolds(s).length > MAX_HOLDS ? { _tag: "too_many_holds", max: MAX_HOLDS } : undefined;
+
+/** The open clause that holds `hashlock`, in whatever token (R-ONE-LOCK-PER-HASH). */
+export const holderOf = (s: AccountState, hashlock: string): Hold | undefined =>
+  openHolds(s).find((h) => h.hashlock === hashlock);

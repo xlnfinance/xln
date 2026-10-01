@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { clockParams } from "./clause/clock.ts";
-import { holdOf, secretOf, viewOf } from "./fixtures.ts";
+import { holdOf, secretOf, tokenOf, viewOf } from "./fixtures.ts";
 import { allocation, emptyLedger, MAX_HOLDS } from "./ledger.ts";
 import {
-  holdId, other, tokenId, type AccountFault, type AccountState, type Hold, type Ledger, type Side, type TokenId,
+  holdId, MAX_TOKEN, other, tokenId, type AccountFault, type AccountState, type Hold, type Ledger, type Side,
+  type TokenId,
 } from "./model.ts";
 import { emptyAccount, ledgerOf, openHolds, withLedger } from "./state.ts";
 import { applyTx, type AccountTx, type Judge } from "./tx.ts";
@@ -20,8 +21,8 @@ const judge: Judge = {
 };
 const DEADLINE = 105n;
 
-const GOLD = tokenId(1n);
-const OIL = tokenId(2n);
+const GOLD = tokenOf(1n);
+const OIL = tokenOf(2n);
 
 const applyAll = (s: AccountState, author: Side, ...txs: readonly AccountTx[]): AccountState =>
   txs.reduce((acc, tx) => value(applyTx(acc, judge, author, tx)), s);
@@ -161,5 +162,43 @@ describe("account/tx authority", () => {
       return { s: next.value, applied: applied + 1 };
     }, { s: funded, applied: 0 });
     expect(final.applied).toBeGreaterThan(300);
+  });
+});
+
+describe("account/tx a hashlock open in another token", () => {
+  // Reviewer A of A3: the refusal names the clause that holds the hashlock, whichever token's ledger came first.
+  const secondFirst: AccountState = applyAll(bothTokens, "left", lockOn(OIL, holdOf("left", 1n, 3n, DEADLINE, 7)));
+  const goldFirst: AccountState = applyAll(bothTokens, "left", lockOn(GOLD, holdOf("left", 1n, 3n, DEADLINE, 7)));
+
+  test("R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order", () => {
+    expect(applyTx(secondFirst, judge, "left", lockOn(GOLD, holdOf("left", 1n, 9n, DEADLINE, 7)))).toEqual(
+      refused({ _tag: "lock_exists", id: holdId(3n) }));
+    expect(applyTx(goldFirst, judge, "left", lockOn(OIL, holdOf("left", 1n, 9n, DEADLINE, 7)))).toEqual(
+      refused({ _tag: "lock_exists", id: holdId(3n) }));
+  });
+
+  test("a slot is per token: resolve, cancel and expire in the other token find nothing", () => {
+    const late: Judge = { ...judge, view: viewOf(DEADLINE + 3n) };
+    const resolve: AccountTx = { _tag: "resolve", token: OIL, id: holdId(3n), secret: secretOf(7) };
+    const gold = applyAll(bothTokens, "left", lockOn(GOLD, holdOf("left", 1n, 3n, DEADLINE, 7)));
+    expect(applyTx(gold, judge, "right", resolve)).toEqual(refused({ _tag: "no_such_lock" }));
+    expect(applyTx(gold, judge, "right", cancelOn(OIL, 3n))).toEqual(refused({ _tag: "no_such_lock" }));
+    expect(applyTx(gold, late, "right", { _tag: "expire", token: OIL, id: holdId(3n) })).toEqual(
+      refused({ _tag: "no_such_lock" }));
+  });
+});
+
+describe("account/state a token and an unused ledger", () => {
+  test("a token id is 0 .. 2^256-1: each edge is admitted and the step past it is refused", () => {
+    expect(MAX_TOKEN).toBe(2n ** 256n - 1n);
+    expect(tokenId(0n).ok).toBe(true);
+    expect(tokenId(MAX_TOKEN).ok).toBe(true);
+    expect(tokenId(-1n)).toEqual(err({ _tag: "bad_token", token: -1n }));
+    expect(tokenId(MAX_TOKEN + 1n)).toEqual(err({ _tag: "bad_token", token: MAX_TOKEN + 1n }));
+  });
+
+  test("a token nobody has used holds the empty ledger: nothing collateral, no credit, no holds", () => {
+    expect(ledgerOf(emptyAccount, GOLD)).toEqual(emptyLedger);
+    expect(ledgerOf(withLedger(emptyAccount, OIL, emptyLedger), GOLD)).toEqual(emptyLedger);
   });
 });

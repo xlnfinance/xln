@@ -8,7 +8,7 @@ import { cancelClause, expireClause, lockClause, resolveClause } from "./clause/
 import type { ClockParams, JView } from "./clause/clock.ts";
 import { pay, setCredit } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, HoldId, Ledger, Side, TokenId } from "./model.ts";
-import { ledgerOf, withinAccountCaps, withLedger } from "./state.ts";
+import { holderOf, ledgerOf, withinHoldCap, withLedger } from "./state.ts";
 
 export type AccountTx =
   | Tagged<"pay", { token: TokenId; amount: bigint }>
@@ -26,10 +26,16 @@ type Step = Result<AccountState, AccountFault>;
 const onLedger = (s: AccountState, token: TokenId, next: Result<Ledger, AccountFault>): Step =>
   map(next, (l) => withLedger(s, token, l));
 
+/** The refusal the Account's own rules give a lock that its token's rules admitted, judged before the lock is in. */
+const accountRefusal = (s: AccountState, next: AccountState, hold: Hold): AccountFault | undefined => {
+  const open = holderOf(s, hold.hashlock);
+  return withinHoldCap(next) ?? (open === undefined ? undefined : { _tag: "lock_exists", id: open.id });
+};
+
 /** The token's lock rules first, then the caps that only the whole Account can see. */
 const locked = (s: AccountState, j: Judge, author: Side, tx: Extract<AccountTx, { _tag: "lock" }>): Step =>
   flatMap(onLedger(s, tx.token, lockClause(ledgerOf(s, tx.token), j.clock, j.view, author, tx.hold)), (next) => {
-    const refusal = withinAccountCaps(next);
+    const refusal = accountRefusal(s, next, tx.hold);
     return refusal === undefined ? ok(next) : err(refusal);
   });
 

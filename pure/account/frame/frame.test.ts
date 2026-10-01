@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { holdOf, secretOf, viewOf } from "../fixtures.ts";
-import { holdId, tokenId, type AccountFault } from "../model.ts";
+import { hashlockOf, heightOf, holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
+import { holdId, other, type AccountFault, type Hold } from "../model.ts";
 import { ledgerOf } from "../state.ts";
 import { type AccountTx, type Judge } from "../tx.ts";
 import { accountRules, emptyReplica, provisionalFrameHash, GENESIS, type AccountReplica } from "./account.ts";
 import { propose, queue, receive, resend, submit, type FrameHash, type Msg } from "./frame.ts";
 
-const GOLD = tokenId(1n);
+const GOLD = tokenOf(1n);
 const judge: Judge = {
   clock: unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params")),
   view: viewOf(100n),
@@ -200,24 +200,34 @@ describe("account/frame a frame has an author", () => {
   });
 });
 
+describe("account/frame an empty frame", () => {
+  test("R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height", () => {
+    const empty: Msg<AccountTx> = { _tag: "frame", frame: { author: "left", parent: GENESIS, txs: [] } };
+    const heard = receive(rules, emptyReplica("right"), empty);
+    expect(heard.outcome).toEqual({ _tag: "refused_empty" });
+    expect(heard.replica).toEqual(emptyReplica("right"));
+    expect(heard.sent).toEqual([]);
+  });
+});
+
 describe("account/frame a peer cannot halt a replica", () => {
   const busy = proposing(credited.left, pay(5n)).replica;
   const targets: readonly AccountReplica[] = [credited.left, credited.right, busy, left, right];
   const parents: readonly FrameHash[] = [GENESIS, credited.left.head, busy.head, `0x${"ab".repeat(32)}` as FrameHash];
   const amounts: readonly bigint[] = [-1n, 0n, 1n, 5n, 99n, 100n, 101n, 2n ** 256n, -(2n ** 200n)];
 
-  const randomMsg = (i: number): Msg<AccountTx> => {
+  const randomMsg = (i: number, target: AccountReplica): Msg<AccountTx> => {
     const txs: readonly AccountTx[] = Array.from({ length: pick(i, 1, 4) }, (_, j) =>
       pay(amounts[pick(i, 10 + j, amounts.length)] ?? 1n));
     const parent = parents[pick(i, 2, parents.length)] ?? GENESIS;
-    const author = pick(i, 5, 2) === 0 ? "left" : "right";
+    const author = pick(i, 5, 6) === 0 ? target.side : other(target.side);
     return pick(i, 3, 4) === 0 ? { _tag: "ack", hash: parent } : { _tag: "frame", frame: { author, parent, txs } };
   };
 
   test("R-X1 whatever a peer sends is answered with a replica, and a refusal changes nothing", () => {
     const outcomes = Array.from({ length: 3000 }, (_, i) => {
       const target = targets[pick(i, 4, targets.length)] ?? left;
-      const heard = receive(rules, target, randomMsg(i));
+      const heard = receive(rules, target, randomMsg(i, target));
       if (heard.outcome._tag.startsWith("refused") || heard.outcome._tag === "ack_ignored") {
         expect(heard.replica).toEqual(target);
         expect(heard.sent).toEqual([]);
@@ -225,8 +235,8 @@ describe("account/frame a peer cannot halt a replica", () => {
       return heard.outcome._tag;
     });
     const seen = new Set<string>(outcomes);
-    ["accepted", "kept_own", "refused_invalid", "refused_not_next", "ack_ignored"].forEach((tag) =>
-      expect(seen.has(tag)).toBe(true));
+    const refusals = ["refused_invalid", "refused_not_next", "refused_own", "refused_empty"];
+    ["accepted", "kept_own", "ack_ignored", ...refusals].forEach((tag) => expect(seen.has(tag)).toBe(true));
   });
 });
 
@@ -293,5 +303,36 @@ describe("account/frame clauses ride frames", () => {
     const timely = receive(rules, receive(rules, sent.replica, only(accepted.sent)).replica, only(asked.sent));
     expect(timely.outcome).toEqual({ _tag: "accepted" });
     expect(ledgerOf(timely.replica.state, GOLD).holds).toEqual([]);
+  });
+});
+
+describe("account/frame the name of a frame covers every field", () => {
+  // Reviewer A of A3: each field of each tx is in the name; a frame whose txs differ must not share a name.
+  const OIL = tokenOf(2n);
+  const lock = (over: Partial<Hold> = {}, token = GOLD): AccountTx =>
+    ({ _tag: "lock", token, hold: { ...holdOf("left", 5n, 1n, 105n, 1), ...over } });
+  const resolve = (id: bigint, n: number, token = GOLD): AccountTx =>
+    ({ _tag: "resolve", token, id: holdId(id), secret: secretOf(n) });
+  const variants: readonly AccountTx[] = [
+    pay(1n), pay(2n), { ...pay(1n), token: OIL },
+    credit(1n), credit(2n), { ...credit(1n), token: OIL },
+    lock(), lock({ payer: "right" }), lock({ amount: 6n }), lock({ id: holdId(2n) }),
+    lock({ hashlock: hashlockOf(secretOf(2)) }), lock({ deadline: heightOf(106n) }), lock({}, OIL),
+    resolve(1n, 1), resolve(2n, 1), resolve(1n, 2), resolve(1n, 1, OIL),
+    { _tag: "cancel", token: GOLD, id: holdId(1n) }, { _tag: "cancel", token: GOLD, id: holdId(2n) },
+    { _tag: "cancel", token: OIL, id: holdId(1n) },
+    { _tag: "expire", token: GOLD, id: holdId(1n) }, { _tag: "expire", token: GOLD, id: holdId(2n) },
+    { _tag: "expire", token: OIL, id: holdId(1n) },
+  ];
+  const name = (...txs: readonly AccountTx[]) => provisionalFrameHash({ author: "left", parent: GENESIS, txs });
+
+  test("every single-tx frame has its own name", () => {
+    expect(new Set(variants.map((tx) => name(tx))).size).toBe(variants.length);
+  });
+
+  test("the order of the txs is part of the name, and so is how many there are", () => {
+    expect(name(pay(1n), credit(1n))).not.toBe(name(credit(1n), pay(1n)));
+    expect(name(pay(1n))).not.toBe(name(pay(1n), pay(1n)));
+    expect(name()).not.toBe(name(pay(1n)));
   });
 });
