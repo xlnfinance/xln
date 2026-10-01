@@ -87,7 +87,7 @@ const history = (seed: number): readonly Snapshot[] => {
       const s = states.get(String(x.owner))!;
       const moves = add(add(s.moves, Number(x.gives.token), -x.gives.amount), Number(x.gets.token), x.gets.amount);
       const clauses = new Map(s.clauses);
-      if (x.remaining._tag === "open") clauses.set(String(x.order), x.remaining.clause);
+      if (x.after._tag === "open") clauses.set(String(x.order), x.after.clause);
       else clauses.delete(String(x.order));
       states.set(String(x.owner), { ...s, moves, clauses });
     }
@@ -189,8 +189,8 @@ describe("swap-book partial ratios on the real contracts", () => {
     const order: Order = { id: orderId("a"), owner: owner("ann"), side: "sell", price: 12n, lots: 5n, terms: "rest" };
     const placed = unwrapOr(place(book, order), () => { throw new Error("place"); });
     const x = executions(MARKET, order, placed)[0]!;
-    expect(x.remaining._tag).toBe("open");
-    const clause = (x.remaining as { clause: Clause }).clause;
+    expect(x.after._tag).toBe("open");
+    const clause = (x.after as { clause: Clause }).clause;
     const state: State = { moves: {}, clauses: new Map([["a", clause]]), believedExtra: {} };
     // the largest ratio at which the want leg still floors to 0: the hub takes base for free
     const freeRatio = Number((65535n - 1n) / clause.wants.amount);
