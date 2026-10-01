@@ -3,7 +3,7 @@
 // by the plain statement of price-time priority, and it shares none of the engine's structure. Only tests import this.
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  orderId, type CancelFault, type Fill, type Limits, type Market, type Order, type PlaceFault, type Remainder,
+  orderId, type CancelFault, type Fill, type Limits, type Market, type Order, type PlaceFault, type Unfilled,
   type Resting,
 } from "./model.ts";
 
@@ -20,7 +20,7 @@ export const tradeOf = (fill: Fill): Trade => [fill.maker.order, fill.lots, fill
 
 export type Expected =
   | Readonly<{ refused: PlaceFault["_tag"] }>
-  | Readonly<{ model: Model; trades: readonly Trade[]; remainder: Remainder }>;
+  | Readonly<{ model: Model; trades: readonly Trade[]; unfilled: Unfilled }>;
 
 /** Best first: the better price, then the earlier arrival. */
 const ahead = (side: Order["side"]) => (a: Open, b: Open): number => {
@@ -62,7 +62,7 @@ const afterTrades = (open: readonly Open[], trades: readonly Trade[]): readonly 
     return taken === o.offer.lots ? [] : [{ ...o, offer: { ...o.offer, lots: o.offer.lots - taken } }];
   });
 
-const remainderOf = (run: Run, how: Readonly<{ resting: boolean }>): Remainder => {
+const unfilledOf = (run: Run, how: Readonly<{ resting: boolean }>): Unfilled => {
   if (run.left === 0n) return { _tag: "none" };
   if (how.resting) return { _tag: "rested", lots: run.left };
   return { _tag: "dropped", lots: run.left, why: run.stopped === "own" ? "own_order" : "no_liquidity" };
@@ -85,7 +85,7 @@ export const modelPlace = (m: Model, order: Order): Expected => {
   const arrived: readonly Open[] = resting ? [{ offer, arrival: m.arrivals }] : [];
   const open = [...left, ...arrived];
   const model = { ...m, open, arrivals: m.arrivals + 1 };
-  return { model, trades: run.trades, remainder: remainderOf(run, { resting }) };
+  return { model, trades: run.trades, unfilled: unfilledOf(run, { resting }) };
 };
 
 export const modelCancel = (m: Model, id: string, who: string): CancelFault["_tag"] | Model => {
