@@ -57,7 +57,8 @@ cd spec
 npm install            # or: bun install    (MCP server dependencies)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
 npm run check          # about 2 minutes: {:ok #t :states 3651 :transitions 11335 :goals 16}
-npm test               # about 15 minutes (4 cores, a pool of TEST_JOBS=4): each page passes; each planted bug fails with its property
+npm test               # 167 cases, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+                       # Wall time 88.7 minutes on 4 cores (the J batch case with deposit legs alone takes 85); every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.

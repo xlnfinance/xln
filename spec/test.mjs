@@ -203,8 +203,8 @@ const cases = [
 
 // One process per case (the interpreter is single-threaded). `node test.mjs <n>` runs case n and prints its JSON verdict.
 // `node test.mjs` runs every case as its own child process in a pool, prints each verdict the moment its case finishes, and
-// exits non-zero if any case fails. Each case has a time budget (CASE_BUDGET_MIN, default 150 minutes, the slowest case today takes
-// about 60 on four loaded cores): a case that blows it is killed and fails BY NAME. The budget is a fixed property of the suite
+// exits non-zero if any case fails. Each case has a time budget (CASE_BUDGET_MIN, default 150 minutes, the slowest case today, the J batch with deposit legs, takes
+// about 85 on four loaded cores): a case that blows it is killed and fails BY NAME. The budget is a fixed property of the suite
 // and is not tuned to get green; the env override exists for slower machines only.
 const only = process.argv[2];
 if (only !== undefined) {
