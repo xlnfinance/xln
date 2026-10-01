@@ -24,13 +24,11 @@ export const bytes32 = (text: string): Result<Bytes32, BadHex> =>
 export const address = (text: string): Result<Address, BadHex> =>
   (/^0x[0-9a-f]{40}$/.test(text) ? ok(text as Address) : err({ _tag: "bad_hex", text, bytes: 20 }));
 
-/** Where a log sits on the chain: its block and its index among the block's logs. */
-export type Place = Readonly<{ block: bigint; index: bigint }>;
+/** Where a log sits on the chain: its block, that block's hash, and its index among the block's logs. */
+export type Place = Readonly<{ block: bigint; blockHash: Bytes32; index: bigint }>;
 
 /** A log as the node returns it, with its numbers parsed and its hex lowercased by the shell that fetched it. */
-export type RawLog = Readonly<Place & {
-  address: Address; blockHash: Bytes32; topics: readonly Bytes32[]; data: string;
-}>;
+export type RawLog = Readonly<Place & { address: Address; topics: readonly Bytes32[]; data: string }>;
 
 /** The two entities of a dispute event and the nonce it names: `sender` is the entity whose batch carried the op. */
 type Dispute = Readonly<Place & { sender: Bytes32; counter: Bytes32; nonce: bigint }>;
@@ -114,7 +112,12 @@ const READ: readonly Entry[] = [
   },
 ];
 
-/** The Depository's other events: reserves, batches, debt, tokens, secrets and the rest are no Account's chain fact. */
+/**
+ * The Depository's events the watcher does not read yet, each named so that the list is closed. Slice 1 reads the
+ * four that move an Account's epoch or dispute. The rest are owed (R-WATCH-READS-ALL, Q R7): `DisputeOpSkipped` and
+ * `BatchFailed` name an op that did not land, `SecretRevealed` is how a hub learns a payee's reveal, the Debt
+ * events and `AccountSettled` change what an Account holds. Reserves, tokens and the like are no Account's chain fact.
+ */
 export const IGNORED: readonly string[] = [
   "AccountSettled((bytes32,bytes32,(uint256,uint256,uint256,uint256,(int256,uint256))[],uint256)[])",
   "BatchFailed(bytes32,uint256,bytes4)",
@@ -140,7 +143,9 @@ export const topicOf = (signature: string): string => keccakHex(utf8(signature))
 const READERS: ReadonlyMap<string, Reader> = new Map(READ.map((entry) => [topicOf(entry.signature), entry.read]));
 const SKIPPED: ReadonlySet<string> = new Set(IGNORED.map(topicOf));
 
-const placeOf = (log: RawLog): Place => ({ block: log.block, index: log.index });
+const placeOf = (log: RawLog): Place => ({ block: log.block, blockHash: log.blockHash, index: log.index });
+
+const lowercaseBytes32 = (topics: readonly string[]): boolean => topics.every((t) => bytes32(t).ok);
 
 /**
  * One log of the Depository as a chain event, or none when it is an event no Account reads. A log from another
@@ -152,6 +157,7 @@ export const decodeLog = (depository: Address, log: RawLog): Result<Option<Chain
   const topic = log.topics[0] ?? "";
   const read = READERS.get(topic);
   if (log.address !== depository) return err({ _tag: "foreign_log", ...at, address: log.address });
+  if (!lowercaseBytes32(log.topics)) return err({ _tag: "bad_log", ...at, event: topic });
   if (read !== undefined) {
     const event = read(at, log.topics, log.data);
     return event._tag === "some" ? ok(event) : err({ _tag: "bad_log", ...at, event: topic });

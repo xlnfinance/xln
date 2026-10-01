@@ -28,10 +28,15 @@ export type Addressed = Readonly<{ to: Bytes32; event: JEvent }>;
 /** What the chain stores for an Account after a block: its `ondeltaEpoch` and its `nonce`. */
 export type AccountAt = Readonly<{ epoch: bigint; nonce: bigint }>;
 
-/** Which Account at the end of which block the chain is asked about. */
-export type Reading = Readonly<{ block: bigint; left: Bytes32; right: Bytes32 }>;
+/**
+ * Which Account at the end of which block the chain is asked about: the block by its hash, so the Host asks the node
+ * for that block (EIP-1898 with requireCanonical) and a block that is not on the chain is a node error, not a reading.
+ * The node must still hold the state of that block: the Host reads while the block is inside the recent-state window a
+ * node keeps (R-WATCH-WINDOW), and a node that no longer has it is the Host's fault naming the block.
+ */
+export type Reading = Readonly<{ block: bigint; blockHash: Bytes32; left: Bytes32; right: Bytes32 }>;
 
-export const readingKey = (r: Reading): string => `${r.block}:${r.left}:${r.right}`;
+export const readingKey = (r: Reading): string => `${r.block}:${r.blockHash}:${r.left}:${r.right}`;
 
 /** The readings of a delivery, by `readingKey`. */
 export type Accounts = ReadonlyMap<string, AccountAt>;
@@ -50,11 +55,11 @@ const partiesOf = (e: ChainEvent): Parties => {
 
 const readingOf = (e: ChainEvent): Reading => {
   const [left, right] = partiesOf(e);
-  return { block: e.block, left, right };
+  return { block: e.block, blockHash: e.blockHash, left, right };
 };
 
 const sameAccount = (a: Reading, b: Reading): boolean =>
-  a.block === b.block && a.left === b.left && a.right === b.right;
+  a.block === b.block && a.blockHash === b.blockHash && a.left === b.left && a.right === b.right;
 
 /** An epoch advance of the same Account, in the same block, logged after `e`. */
 const advancedAfter = (events: readonly ChainEvent[], e: ChainEvent): number =>

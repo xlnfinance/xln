@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { err, ok } from "../kernel/core/result.ts";
 import { decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
-import { DEPOSITORY, entityOf, hexOf, logOf, must } from "./fixtures.ts";
+import { DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -34,7 +34,7 @@ const eventsOf = (...logs: Parameters<typeof decodeLogs>[1]): readonly ChainEven
 type Row = readonly [string, { epoch: bigint; nonce: bigint }];
 
 const readAt = (block: bigint, epoch: bigint, nonce: bigint, left = LEFT, right = RIGHT): Row =>
-  [readingKey({ block, left, right }), { epoch, nonce }];
+  [readingKey({ block, blockHash: hashOf(block), left, right }), { epoch, nonce }];
 
 const accountsOf = (...rows: readonly Row[]): Accounts => new Map(rows);
 
@@ -102,7 +102,7 @@ describe("j/observe", () => {
   });
 
   test("R-WATCH-TELL a reading that is missing is a fault, and so is one that contradicts the log's epoch", () => {
-    const reading: Reading = { block: 2n, left: LEFT, right: RIGHT };
+    const reading: Reading = { block: 2n, blockHash: hashOf(2n), left: LEFT, right: RIGHT };
     expect(observe(eventsOf(advance(2n, 0n, 1n)), [LEFT], accountsOf())).toEqual(err({ _tag: "no_reading", reading }));
     expect(observe(eventsOf(started(2n, 0n)), [LEFT], accountsOf())).toEqual(err({ _tag: "no_reading", reading }));
     expect(observe(eventsOf(advance(2n, 0n, 1n)), [LEFT], accountsOf(readAt(2n, 3n, 5n)))).toEqual(
@@ -115,9 +115,10 @@ describe("j/observe", () => {
       advance(2n, 0n, 1n), started(2n, 1n), advance(2n, 2n, 2n, LEFT, THIRD), finalized(2n, 3n), countered(2n, 4n),
     );
     expect(readingsOf(events, [LEFT])).toEqual([
-      { block: 2n, left: LEFT, right: RIGHT }, { block: 2n, left: LEFT, right: THIRD },
+      { block: 2n, blockHash: hashOf(2n), left: LEFT, right: RIGHT },
+      { block: 2n, blockHash: hashOf(2n), left: LEFT, right: THIRD },
     ]);
-    expect(readingsOf(events, [THIRD])).toEqual([{ block: 2n, left: LEFT, right: THIRD }]);
+    expect(readingsOf(events, [THIRD])).toEqual([{ block: 2n, blockHash: hashOf(2n), left: LEFT, right: THIRD }]);
     expect(readingsOf(events, [])).toEqual([]);
   });
 });

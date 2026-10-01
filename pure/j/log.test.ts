@@ -5,7 +5,7 @@ import { none } from "../kernel/core/option.ts";
 import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
-import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hexOf, lifecyclePhases, logOf, must } from "./fixtures.ts";
+import { DEPOSITORY, DEPOSITORY_ABI, entityOf, hashOf, hexOf, lifecyclePhases, logOf, must } from "./fixtures.ts";
 
 const LEFT = entityOf(0x11n);
 const RIGHT = entityOf(0x52n);
@@ -44,7 +44,10 @@ describe("j/log", () => {
   test("an epoch advance reads its two entities from the topics and its epoch from the data", () => {
     const log = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 9n }, 4n, 2n);
     expect(decodeLog(DEPOSITORY, log)).toEqual(ok({
-      _tag: "some", value: { _tag: "epoch_advanced", block: 4n, index: 2n, left: LEFT, right: RIGHT, epoch: 9n },
+      _tag: "some",
+      value: {
+        _tag: "epoch_advanced", block: 4n, blockHash: hashOf(4n), index: 2n, left: LEFT, right: RIGHT, epoch: 9n,
+      },
     }));
   });
 
@@ -61,7 +64,7 @@ describe("j/log", () => {
     const finalized = logOf("DisputeFinalized", {
       ...disputeArgs, finalProofbodyHash: hexOf(5n), finalizationEvidenceHash: hexOf(6n),
     }, 3n, 2n);
-    const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n };
+    const fact = { sender: RIGHT, counter: LEFT, nonce: 7n, block: 3n, blockHash: hashOf(3n) };
     expect(decodeLogs(DEPOSITORY, [started, countered, finalized])).toEqual(ok([
       { _tag: "dispute_started", ...fact, index: 0n },
       { _tag: "dispute_countered", ...fact, index: 1n },
@@ -72,22 +75,25 @@ describe("j/log", () => {
   test("R-WATCH-CLOSED an event the Depository has never emitted is a fault, not a miss", () => {
     const reserve = logOf("ReserveUpdated", { entity: LEFT, tokenId: 1n, newBalance: 2n }, 1n, 0n);
     const log: RawLog = { ...reserve, topics: [LEFT] };
-    expect(decodeLog(DEPOSITORY, log)).toEqual(err({ _tag: "unknown_event", block: 1n, index: 0n, topic: LEFT }));
+    const at = { block: 1n, blockHash: hashOf(1n), index: 0n };
+    expect(decodeLog(DEPOSITORY, log)).toEqual(err({ _tag: "unknown_event", ...at, topic: LEFT }));
     const bare = { ...log, topics: [] };
-    expect(decodeLog(DEPOSITORY, bare)).toEqual(err({ _tag: "unknown_event", block: 1n, index: 0n, topic: "" }));
+    expect(decodeLog(DEPOSITORY, bare)).toEqual(err({ _tag: "unknown_event", ...at, topic: "" }));
   });
 
   test("R-WATCH-CLOSED a log of another address is a fault: the node is asked for the Depository's logs", () => {
     const stranger = must(address(hexOf(0xbadn, 20)));
     const log = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 2n, 0n);
-    const refused = err({ _tag: "foreign_log" as const, block: 2n, index: 0n, address: stranger });
+    const at = { block: 2n, blockHash: hashOf(2n), index: 0n };
+    const refused = err({ _tag: "foreign_log" as const, ...at, address: stranger });
     expect(decodeLog(DEPOSITORY, { ...log, address: stranger })).toEqual(refused);
   });
 
   test("a log that is not the shape its signature says is a fault: topics, data, and whole words", () => {
     const good = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 1n }, 2n, 0n);
     const bad = (log: RawLog) => decodeLog(DEPOSITORY, log);
-    const fault = err({ _tag: "bad_log" as const, block: 2n, index: 0n, event: topicOf(READ_SIGNATURES[0] ?? "") });
+    const at = { block: 2n, blockHash: hashOf(2n), index: 0n };
+    const fault = err({ _tag: "bad_log" as const, ...at, event: topicOf(READ_SIGNATURES[0] ?? "") });
     expect(bad({ ...good, topics: good.topics.slice(0, 2) })).toEqual(fault);
     expect(bad({ ...good, data: "0x" })).toEqual(fault);
     expect(bad({ ...good, data: `${good.data}00` })).toEqual(fault);

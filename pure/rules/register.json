@@ -4003,6 +4003,16 @@
     {
      "kind": "test",
      "layer": "ts",
+     "name": "R-WATCH-DEPTH a head behind the cursor with no new blocks is an empty batch, not a fault"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-DEPTH a head behind the cursor with a new block is too early"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
      "name": "R-WATCH-DEPTH a block is delivered once the head is depth above it, and not before"
     },
     {
@@ -4033,12 +4043,17 @@
    "source": "consolidation-plan.md D9 and J2 (events applied once and in order); R-HTLC-CLOCK (the delivered height is the Host's finalizedJHeight)",
    "layers": {
     "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
-    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "quint": "owed: spec thread (spec/quint/runtime.qnt part 3 `exactly_once_j` and its mutants in spec/quint/mutants/runtime.json, QUESTIONS R2, are the spec side; no name carries this id yet)",
     "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-ORDER a log that names a block of the batch by its hash but claims another number is refused"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -4082,12 +4097,37 @@
    "source": "consolidation-plan.md D9 (no silent refusals); lessons.md (a check that lives only in a CLI looks gated but is not)",
    "layers": {
     "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
-    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "quint": "n/a: which kinds of event are read is R-WATCH-READS-ALL (QUESTIONS R7); a closed list that refuses an unknown event is the Host's, which the Quint model does not have",
     "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED a topic that is not lowercase bytes32 is a fault, not an event of Entities nobody hosts"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED a topic more than the event has is a fault, for each of the four events"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED data of the wrong length is a fault for a counter and a finalize, a word more or fewer"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED a dispute start shorter than its slots is a fault, as is half a word"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-CLOSED an address is exactly twenty bytes"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -4126,12 +4166,32 @@
    "source": "consolidation-plan.md D9 and J2; R-J1 (chain facts reach an Account only through J events)",
    "layers": {
     "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
-    "quint": "n/a: the watcher is Host code that reads a node; the Quint model takes J events as given",
+    "quint": "n/a: the Quint model's JDispute and JStarted carry what j_dispute and `by` carry; reading the chain at a block is the Host's",
     "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
    },
    "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a reading names its block by number and hash, so the chain is asked for that block"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a row filed under another fork's block is no reading"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a finalize or a counter alone asks the chain for nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WATCH-TELL a reading behind the log is a fault as much as one ahead"
+    },
     {
      "kind": "test",
      "layer": "ts",
@@ -4171,6 +4231,51 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-WATCH-TELL readings are asked only for what a hosted Entity needs, once each, in event order"
+    }
+   ]
+  },
+  {
+   "id": "R-WATCH-READS-ALL",
+   "statement": "The watcher reads every kind of chain event an Entity can wait on, not only the kinds it thinks it waits for: DisputeOpSkipped and BatchFailed (an op that did not land), SecretRevealed (a hub learns a payee's reveal from the chain), the Debt events, and deposits and collateral changes (AccountSettled). Slice 1 reads four kinds and names the rest as ignored.",
+   "source": "spec/quint/QUESTIONS.md R7 (decided: the watcher does not choose which events to read, DisputeOpSkipped included); consolidation-plan.md J2; coordinator 2026-10-01 10:20 (deposit and SecretRevealed events are the watcher's, slice 2)",
+   "layers": {
+    "arrival": "n/a: spec/runtime/tick.scm has no watcher",
+    "quint": "owed: spec thread (QUESTIONS R7 and the mutant watcher-skips-the-skip-event are the spec side; no name carries this id yet)",
+    "contract": "n/a: the events are the contract's and this rule only reads them; no contract code takes part",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: transport thread, watcher slice 2 (decode and hand on each kind; none is read yet)"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "watcher-skips-the-skip-event"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "transport thread, watcher slice 2"
+    }
+   ]
+  },
+  {
+   "id": "R-WATCH-WINDOW",
+   "statement": "A reading of an Account at the end of an event's block is taken while that block is inside the recent-state window a normal node keeps; a node that no longer holds the state is a fault that names the block, never a substitute read at a later block. No archive node is required.",
+   "source": "coordinator 2026-10-01 10:20 (do not require an archive node; testnet RPCs mostly are not)",
+   "layers": {
+    "arrival": "n/a: the Arrival specs take J events as given",
+    "quint": "n/a: the Quint model takes J events as given",
+    "contract": "n/a: no contract code takes part; the window is a property of the node",
+    "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+    "ts": "owed: transport thread, the Host's J loop (the window is a Host setting; the pure core only names the block by hash)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "transport thread, the Host's J loop"
     }
    ]
   }
