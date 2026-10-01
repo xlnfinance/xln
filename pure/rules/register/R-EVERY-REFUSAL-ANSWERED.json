@@ -49,6 +49,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "Alice lost the refusal and what she re-sent: her resend timer brings it back and the round goes on"
   }
  ]
 }

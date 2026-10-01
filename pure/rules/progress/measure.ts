@@ -13,13 +13,13 @@ const isLive = (row: Row): boolean => row.retiredBy === undefined;
 export const columnsOf = (reports: readonly RowReport[]): readonly Column[] => layerCounts(reports);
 
 // A register read from another commit has no names to check, so its columns come from the cells: a `hold` cell counts as held
-// (the gate refuses a commit where no name carries it), an `owed` cell as owed, `n/a` as not applicable, `-` as unstated. On a green tree
+// (the gate refuses a commit where no name carries it), an `owed` or `stale` cell as owed, `n/a` as not applicable, `-` as unstated. On a green tree
 // this equals `columnsOf`.
 export const registerColumns = (register: Register): readonly Column[] => {
   const live = register.filter(isLive);
   return LAYERS.map((layer) => {
     const held = live.filter((row) => row.cells[layer]._tag === "hold").length;
-    const owed = live.filter((row) => row.cells[layer]._tag === "owed").length;
+    const owed = live.filter((row) => row.cells[layer]._tag === "owed" || row.cells[layer]._tag === "stale").length;
     return {
       layer,
       held,

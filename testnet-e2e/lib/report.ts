@@ -55,7 +55,7 @@ export const renderReport = (facts: RunFacts, steps: readonly StepResult[]): str
   return [
     "# Testnet end-to-end skeleton: status",
     "",
-    `Run ${facts.startedAt} on main ${facts.head}, ${facts.mode}, chain ${facts.chainId}, block ${facts.block}, ${facts.seconds.toFixed(1)} s.`,
+    `Run ${facts.startedAt} on ${facts.head}, ${facts.mode}, chain ${facts.chainId}, block ${facts.block}, ${facts.seconds.toFixed(1)} s.`,
     `Result: ${summary}. Exit ${exitCode(steps)} (0 only when every step is done; 1 blocked or scaffolded; 2 a check failed).`,
     "",
     "Scenario: two users and two hubs on the deployed Sepolia contracts (anvil fork, anvil dev keys only): deposit, open Accounts, pay, HTLC across both hubs, swap, forced dispute.",

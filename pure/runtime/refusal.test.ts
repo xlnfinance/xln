@@ -10,6 +10,7 @@ import { emptyAccount, withLedger } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
 import { emptyEntity, type EntityId, type EntityInput, type EntityState } from "../entity/model.ts";
+import { signing } from "../account/fixtures.ts";
 import { credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
 import { inputFor, setup, stamp, started, tick } from "./fixtures.ts";
 import { flush, recover, startRuntime } from "./tick.ts";
@@ -19,7 +20,10 @@ const ALICE = entityOf(1);
 const BOB = entityOf(2);
 
 const payFrame = (author: "left" | "right", amount: bigint): Msg<AccountTx> => {
-  const frame: Frame<AccountTx> = { author, parent: GENESIS, attempt: 0, txs: [{ _tag: "pay", token: GOLD, amount }] };
+  const slot = author === "left" ? 2 : 1;
+  const frame: Frame<AccountTx> = {
+    author, parent: GENESIS, attempt: 0, slot, txs: [{ _tag: "pay", token: GOLD, amount }],
+  };
   return { _tag: "frame", frame };
 };
 
@@ -29,7 +33,7 @@ const fromPeer = (from: EntityId, msg: Msg<AccountTx> | undefined): EntityInput 
 /** An Entity whose Account with `peer` is open and holds `limit` of credit extended to its Left. */
 const holdingCredit = (self: EntityId, peer: EntityId, side: "left" | "right", limit: bigint): EntityState => {
   const state = withLedger(emptyAccount, GOLD, { ...emptyLedger, limit: { left: limit, right: 0n } });
-  return { id: self, accounts: new Map([[peer, { ...emptyReplica(side), state }]]) };
+  return { ...emptyEntity(self), accounts: new Map([[peer, { ...emptyReplica(side), state }]]) };
 };
 
 const opened = (self: EntityId, peer: EntityId) => tick(started(self), inputFor(self, 1n, open(peer)));
@@ -103,7 +107,7 @@ describe("runtime/tick the order a Runtime keeps", () => {
       ...emptyEntity(ALICE),
       accounts: new Map([[BOB, { ...emptyReplica("left"), refused: [refused(1n), refused(2n)] }]]),
     };
-    const told = entityFrame(judge, holding, []);
+    const told = entityFrame(judge, signing, holding, []);
     const amounts = told.notices.flatMap((n) =>
       (n._tag === "tx_refused" && n.refused.tx._tag === "pay" ? [n.refused.tx.amount] : []));
     expect(amounts).toEqual([1n, 2n]);

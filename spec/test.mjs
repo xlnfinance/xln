@@ -1,6 +1,7 @@
 // Spec self-test: the Account frames page checks clean, and each planted bug is caught
 // by the property it breaks. Run from spec/: node test.mjs
 import { evaluate, lib } from "./tools/run.mjs";
+import { casesOfShard, parseShard } from "./tools/shard.mjs";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ const check = (page, extra) => evaluate([...lib, ...pages[page].files, ...extra]
 const planted = (page, name, file, violated, config) => ({
   page,
   name: `planted: ${name}`,
-  extra: [...(config ? [config] : []), `${pages[page].files.at(-1).split("/")[0]}/bugs/${file}.scm`],
+  extra: [...(config ? [config].flat() : []), `${pages[page].files.at(-1).split("/")[0]}/bugs/${file}.scm`],
   expect: (r) => assert.equal(r.violated, violated),
 });
 
@@ -32,17 +33,38 @@ const PREFIX = "the receiver's frames are never contradicted by the sender's com
 const BELIEF = "the sender never believes the peer holds more than the peer applied: only a genuine ack moves the belief";
 const HALT = "no peer message halts a node: a refusal changes nothing and never stops the Runtime (R-X1; a halt is also a dead end for liveness)";
 const cases = [
-  { page: "account", name: "account frames", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 3651, transitions: 11335, goals: 16 }) },
-  { page: "account", name: "account frames, the link may also reorder (Quint's network, R-NET)", extra: ["account/configs/reorder.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 7312, transitions: 33183, goals: 16 }) },
-  { page: "account", name: "account frames, Right's txs conflict with each other", extra: ["account/configs/same-side-conflict.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 3423, transitions: 10383, goals: 24 }) },
+  { page: "account", name: "account frames: the J clock moves between a frame's proposal and its receipt, no lost message (R-FRAME-REFUSAL)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 4563, transitions: 18600, goals: 44 }) },
+  { page: "account", name: "account frames, the first page's bound: conflicts, a lost and a repeated message", extra: ["account/configs/lossy.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4405, transitions: 13955, goals: 16 }) },
+  { page: "account", name: "account frames, the link may also reorder (Quint's network, R-NET)", extra: ["account/configs/reorder.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 8397, transitions: 38801, goals: 16 }) },
+  { page: "account", name: "account frames, Right's txs conflict with each other", extra: ["account/configs/same-side-conflict.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5650, transitions: 17489, goals: 26 }) },
+  { page: "account", name: "account frames, a repeated message and the attempt number (stale_attempt)", extra: ["account/configs/repeats.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5821, transitions: 23318, goals: 28 }) },
+  { page: "account", name: "account frames, the link hands a replica its own frame back (frame author)", extra: ["account/configs/reflect.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4614, transitions: 18844, goals: 28 }) },
+  { page: "account", name: "account frames, a lock beyond the horizon: the other retryable fault (deadline_too_far)", extra: ["account/configs/far-lock.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 9135, transitions: 38325, goals: 123 }) },
+  { page: "account", name: "account frames, the clock and a lost message together (the default world with one loss)", extra: ["account/configs/lossy-clock.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 11677, transitions: 52730, goals: 105 }) },
+  { page: "account", name: "account frames, Right holds the clock-dependent tx: its retry signs a fresh slot above the refused one, a collision is won by the higher slot (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED)", extra: ["account/configs/right-expire.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 2675, transitions: 10638, goals: 44 }) },
+  { page: "account", name: "account frames, a settlement co-signed: both sides freeze, a peer frame is refused as frozen and retried (R-COSIGN-FREEZE)", extra: ["account/configs/freeze.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 1192, transitions: 2829, goals: 9 }) },
+  { page: "account", name: "account frames, a Byzantine peer's frame at a slot far beyond reach is refused at the door (R-PROOF-NONCE-ABOVE-SIGNED)", extra: ["account/configs/slot-jump.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 376, transitions: 833, goals: 4 }) },
   planted("account", "the validator ignores the txs ahead in the same frame (a6, Byzantine frame)", "frame-order", "no committed tx is invalid against the history before it", "account/configs/same-side-conflict.scm"),
-  planted("account", "drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused"),
-  planted("account", "rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order"),
-  planted("account", "no tie-break", "no-tie-break", "committed histories agree: one extends the other"),
-  planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish"),
-  planted("account", "a duplicate is re-acked only while Open (Quint's rule, R-REACK)", "reack-open-only", "can always still finish"),
-  planted("account", "commit a frame that skips ahead", "commit-any-frame", "no tx is both committed and refused"),
-  planted("account", "skip re-validation", "skip-revalidation", "can always still finish"),
+  planted("account", "drop on rollback", "drop-on-rollback", "no submitted tx is lost: committed, held, or refused", "account/configs/lossy.scm"),
+  planted("account", "rollback after mempool", "rollback-after-mempool", "each side's txs commit in submission order", "account/configs/lossy.scm"),
+  planted("account", "no tie-break: both sides yield; the first yield already commits below the yielder's own proof (R-PROOF-NONCE-ABOVE-SIGNED), the fork follows", "no-tie-break", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included", "account/configs/lossy.scm"),
+  planted("account", "no re-ack of a duplicate", "no-reack", "can always still finish", "account/configs/lossy.scm"),
+  planted("account", "a duplicate is re-acked only while Open (Quint's rule, R-REACK)", "reack-open-only", "can always still finish", "account/configs/lossy.scm"),
+  planted("account", "commit a frame that skips ahead: a duplicate of a committed frame is taken for the next one and refused at the slot door, and the proposer drops the tx of a frame the peer committed", "commit-any-frame", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)", "account/configs/lossy.scm"),
+  { page: "account", name: "account frames, the proposer skips re-validation: not a bug any more, the peer refuses the tx and the proposer drops it with notice (R-FRAME-REFUSAL, R-NOTICE)", extra: ["account/configs/lossy.scm", "account/bugs/skip-revalidation.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5377, transitions: 16817, goals: 16 }) },
+  planted("account", "the proposer ignores a refusal of its pending frame: the Account wedges (R-FRAME-REFUSAL)", "ignores-refusal", "can always still finish"),
+  planted("account", "the receiver forgets its refusal and commits the frame it refused: the peer holds a frame its proposer took back (attempt number)", "refusal-forgotten", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)"),
+  planted("account", "the proposer re-proposes at the same attempt after a refusal (attempt number)", "attempt-not-bumped", "can always still finish"),
+  planted("account", "a frame below the mark is judged afresh and commits (attempt number)", "below-mark-judged", "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)", "account/configs/repeats.scm"),
+  planted("account", "a replica accepts its own frame as the peer's (frame author)", "accepts-own-frame", "a replica commits its own frame only after the peer did (frame author)", "account/configs/reflect.scm"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: the collision is decided by side, not by slot: Right signs a retry at slot 3 and yields to Left's first frame at slot 2", "yield-below-own-proof", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included", "account/configs/right-expire.scm"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a receiver with no frame out acks a slot at or below a proof it signed and left behind", "stale-slot-unchecked", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a retry signs the same slot as the refused attempt (R-RETRY-NEW-NONCE)", "retry-reuses-the-nonce", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: both sides in one lane propose at one slot, and the yielder signs two proofs at it (Review B of PR 97, finding 1)", "slots-shared-lane", "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a refusal carries no floor", "refusal-without-floor", "R-PROOF-NONCE-ABOVE-SIGNED, the floor: a stale_slot refusal names a floor at or above the slot it refuses"),
+  planted("account", "R-PROOF-NONCE-ABOVE-SIGNED: a slot beyond what an honest peer could reach is accepted: one frame moves the nonce space (Review B of PR 97, finding 3)", "slot-beyond-reach-accepted", "R-PROOF-NONCE-ABOVE-SIGNED, the door: a committed slot is at most one lane step above what its receiver knew either side signed", "account/configs/slot-jump.scm"),
+  planted("account", "R-SIGNED-IS-LIVE: a refusal releases the hold on a lock that sits in a signed proof the peer still holds", "refusal-releases-signed-lock", "R-SIGNED-IS-LIVE: a lock in a signed, unsuperseded proof is not released by a refusal"),
+  planted("account", "R-COSIGN-FREEZE: a frozen side accepts a peer frame that moves offdelta after the fold was signed", "frozen-accepts", "R-COSIGN-FREEZE: while a settlement is signed, its fold equals the off-chain offdelta of the head", "account/configs/freeze.scm"),
   { page: "clock", name: "account clock (R-CLOCK, R-HTLC-CLOCK)", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 2730, transitions: 10546, goals: 260 }) },
   { page: "clock", name: "account clock, the payee holds no secret", extra: ["account/configs/no-secret.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 173, transitions: 473, goals: 3 }) },
   planted("clock", "a stale stamp is refused, the signed frame is stuck (R-CLOCK)", "refuse-late", "no frame is refused for its age or its future date: a signed frame has an exit (R-CLOCK)"),
@@ -91,7 +113,13 @@ const cases = [
   planted("dispute", "a deposit advances the epoch (review B, finding 2)", "deposit-advances-epoch", "a deposit does not advance the epoch: the epoch, the chain nonce and every held proof stay"),
   planted("dispute", "an implicit dispute settles at the ondelta of the advance and ignores a deposit of the epoch (review B, finding 2)", "implicit-stale-ondelta", "a dispute from the implicit proof settles at the chain's ondelta now: the advance's plus a deposit of the epoch"),
   { page: "dispute", name: "dispute, a window policy that lengthens inside the epoch (N3, E9)", extra: ["dispute/configs/window-policy.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 12577, transitions: 23004, goals: 5868 }) },
-  planted("dispute", "a counter shortens the windows of the epoch (N3, E9)", "counter-shortens-window", "windows never shorten inside an epoch: a later proof carries at least the windows of an earlier one, and a counter or final body at least the started ones", "dispute/configs/window-policy.scm"),
+  planted("dispute", "a counter shortens the windows of the epoch: the signing guard drops (N3)", "counter-shortens-window", "windows never shorten inside an epoch: a later co-signed proof carries at least the windows of an earlier one (the signing guard)", "dispute/configs/window-policy.scm"),
+  { page: "dispute", name: "dispute, a Byzantine party signs a shorter-window proof alone (N3, E9)", extra: ["dispute/configs/byz-window.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 7812, transitions: 11503, goals: 4818 }) },
+  planted("dispute", "the chain's E9 check is dropped: a counter shortens the windows with a proof one party signed alone (N3, E9)", "e9-dropped", "a counter or final body carries at least the started windows: the chain's E9 check, whoever signed it", "dispute/configs/byz-window.scm"),
+  planted("dispute", "the implicit proof is offered at epoch 0 and ties a signed proof (review round 3, m4)", "implicit-at-epoch-0", "a dispute that settles on the implicit proof leaves no signed proof of its epoch at or above it"),
+  { page: "dispute", name: "dispute, a collateral-to-reserve withdrawal folds offdelta (R-C2R-FOLD)", extra: ["dispute/configs/withdraw.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5460, transitions: 10033, goals: 2528 }) },
+  planted("dispute", "a C2R is co-signed with a nonzero offdelta and nothing folds it (R-C2R-FOLD)", "c2r-unfolded", "R-C2R-FOLD: a withdrawal lowers Left's position by exactly the amount withdrawn and moves nothing else: Δ after = Δ before - 1, money unchanged", "dispute/configs/withdraw.scm"),
+
   planted("dispute", "the shared payment arithmetic moves Δ the wrong way (money/core.scm)", "core-pay-flipped", "a frame moves Δ as the ledger does: a payment moves the payer's allocation, a lock or a lapse leaves Δ"),
   planted("dispute", "the shared credit bound has no lower side (money/core.scm)", "core-rcpan-no-floor", "a frame that overdraws its proposer is never held: the receiver's own RCPAN check stands alone"),
   planted("dispute", "a responder with an unacked frame closes on a stale proof (B2)", "hasty-stale", "a hasty close still pays at least the newest frame both sides acked", "dispute/configs/no-rival.scm"),
@@ -101,6 +129,16 @@ const cases = [
   planted("dispute", "retired-board evidence settles in full (contracts before H3)", "h3-no-clamp", "retired-board evidence never draws on the retired side's reserve: retired Left settles at \u0394 >= 0, retired Right at \u0394 <= collateral (H3)", "dispute/configs/retired-left.scm"),
   planted("dispute", "the first, symmetric H3 clamp erases what a rotating entity is owed", "h3-symmetric", "what the retired side is owed is paid as signed, whoever starts (H3)", "dispute/configs/retired-right.scm"),
   { page: "dispute", name: "dispute, Right holds a reserve of 1 (H4)", extra: ["dispute/configs/right-reserve.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 8905, transitions: 16926, goals: 4074 }) },
+  { page: "dispute", name: "dispute, Left owes a third party from before: the payout enforces it first (R2C-DEBT-FIRST)", extra: ["dispute/configs/older-debt.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 2568, transitions: 4525, goals: 1243 }) },
+  { page: "dispute", name: "dispute, WITNESS: a shortfall finds an older debt", extra: ["dispute/configs/older-debt.scm", "dispute/configs/older-debt-witness.scm"], expect: (r) => assert.equal(r.violated, "witness: a shortfall finds an older debt") },
+  { page: "dispute", name: "dispute, Left's older debt is smaller than its reserve: the peer gets what is left spendable (R2C-DEBT-FIRST)", extra: ["dispute/configs/older-spend.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 2568, transitions: 4525, goals: 1243 }) },
+  { page: "dispute", name: "dispute, Right owes a third party from before: the payout enforces it first (R2C-DEBT-FIRST)", extra: ["dispute/configs/older-right.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 4232, transitions: 7687, goals: 2035 }) },
+  planted("dispute", "an enforcement call pays more older debt than its cap", "dispute-enforcement-uncapped", "one enforcement call pays at most the call's cap of older debt (R2C-DEBT-FIRST)", "dispute/configs/older-debt.scm"),
+  planted("dispute", "a shortfall never pays the peer from the reserve", "shortfall-never-pays", "a shortfall pays the peer all of the debtor's spendable reserve it can: the smaller of the amount and the reserve less its older debts (R2C-DEBT-FIRST)", "dispute/configs/older-spend.scm"),
+  planted("dispute", "a shortfall pays the peer one unit short", "shortfall-underpays", "a shortfall pays the peer all of the debtor's spendable reserve it can: the smaller of the amount and the reserve less its older debts (R2C-DEBT-FIRST)", "dispute/configs/older-spend.scm"),
+  planted("dispute", "only Left's older debts are enforced", "enforcement-left-only", "a shortfall enforces the debtor's older debts first: afterwards they are paid, its reserve is empty, or the call's cap was reached (R2C-DEBT-FIRST)", "dispute/configs/older-right.scm"),
+  planted("dispute", "a shortfall pays the peer ahead of the debtor's older debts", "shortfall-ahead-of-debt", "a shortfall pays the peer no more than the debtor's spendable reserve: its reserve less its older debts (R2C-DEBT-FIRST)", "dispute/configs/older-debt.scm"),
+  planted("dispute", "a shortfall does not enforce the older debts first", "shortfall-skips-enforcement", "a shortfall enforces the debtor's older debts first: afterwards they are paid, its reserve is empty, or the call's cap was reached (R2C-DEBT-FIRST)", "dispute/configs/older-debt.scm"),
   { page: "dispute", name: "dispute, two disputes in a row, the second from the implicit proof (Q-D-21, decision D2)", extra: ["dispute/configs/two-disputes.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 5432, transitions: 7179, goals: 5333 }) },
   { page: "entity", name: "entity consensus", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 9330, transitions: 37603, goals: 3072 }) },
   planted("entity", "own proposal kept on a conflicting certified frame (og today)", "commit-conflict", "can always still finish"),
@@ -145,7 +183,7 @@ const cases = [
   planted("j", "a bad counterparty signature reverts the batch without its nonce (contracts today)", "bad-sig-hard", "a failed batch of payment, settlement and reserve ops takes its nonce: the chain has moved past it (R-J5)", "j/configs/legs-and-signatures.scm"),
   planted("j", "a co-signed op is bundled with another Account's ops (R-COSIGN)", "cosign-bundle", "a batch with a co-signed op carries ops of that one Account only (R-COSIGN)", "j/configs/legs-and-signatures.scm"),
   { page: "j", name: "J batch, gas starvation and a co-signed batch", extra: ["j/configs/gas-starvation.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 6014, transitions: 17571, goals: 1544 }) },
-  planted("j", "gas starvation is reported as BatchFailed and takes the nonce", "gas-soft", "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (contracts #54)", "j/configs/gas-starvation.scm"),
+  planted("j", "gas starvation is reported as BatchFailed and takes the nonce", "gas-soft", "gas below the floor (budget*64/63 + 30,000) spends no nonce, whatever the batch carries (F16)", "j/configs/gas-starvation.scm"),
   { page: "j", name: "J batch, the counter lands before the finalize (J2 extended)", extra: ["j/configs/counter-first.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 291, transitions: 691, goals: 68 }) },
   planted("j", "a finalize prepared for the initial proof applies after a counter landed", "finalize-after-counter", "a finalize prepared for the initial proof never applies after a counter landed (J2 extended)", "j/configs/counter-first.scm"),
   { page: "j", name: "J batch, two deposit legs (J6)", extra: ["j/configs/two-legs.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 767, transitions: 2057, goals: 200 }) },
@@ -179,19 +217,36 @@ const cases = [
   planted("j", "a part-paid claim moves to the back of the queue", "partial-moves-back", "a part-paid claim stays at the head of the queue, reduced in place (contracts f996ff5)", "j/configs/debts-partial.scm"),
   { page: "j", name: "J batch, gas by batch kind: a starved payment emits BatchGasStarved, a starved deposit reverts whole (09-30 16:12)", extra: ["j/configs/gas-kinds.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 2365, transitions: 6586, goals: 492 }) },
   { page: "j", name: "J batch, WITNESS: a starved money-only batch emits BatchGasStarved", extra: ["j/configs/gas-kinds.scm", "j/configs/gas-kinds-witness.scm"], expect: (r) => assert.equal(r.violated, "witness: a starved money-only batch emits BatchGasStarved") },
-  planted("j", "a starved money-only batch emits nothing", "starved-silent", "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing (contracts #54)", "j/configs/gas-kinds.scm"),
-  planted("j", "a starved deposit batch emits BatchGasStarved", "hard-starved-event", "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute, reveal, ladder or deposit op reverts whole and emits nothing (contracts #54)", "j/configs/gas-kinds.scm"),
-  planted("j", "the floor itself counts as starved", "starved-at-floor", "a batch given at least the floor is never gas-starved: it runs, and a failure is BatchFailed with the nonce spent (contracts #54)", "j/configs/gas-kinds.scm"),
-  { page: "j", name: "J batch, a settlement forgives the head claim (09-30 16:12)", extra: ["j/configs/forgive-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  planted("j", "a starved money-only batch emits nothing", "starved-silent", "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute or deposit op reverts whole and emits nothing (F16)", "j/configs/gas-kinds.scm"),
+  planted("j", "a starved deposit batch emits BatchGasStarved", "hard-starved-event", "a money-only batch starved of gas emits BatchGasStarved; a batch with a dispute or deposit op reverts whole and emits nothing (F16)", "j/configs/gas-kinds.scm"),
+  planted("j", "the floor itself counts as starved", "starved-at-floor", "a batch given at least the floor is never gas-starved: it runs, and a failure is BatchFailed with the nonce spent (F16)", "j/configs/gas-kinds.scm"),
+  { page: "j", name: "J batch, a settlement forgives the head claim (token ids, 09-30 16:12, contract reading 10-01)", extra: ["j/configs/forgive-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
   { page: "j", name: "J batch, WITNESS: a settlement forgives the head claim", extra: ["j/configs/forgive-head.scm", "j/configs/forgive-head-witness.scm"], expect: (r) => assert.equal(r.violated, "witness: a settlement forgives the head claim") },
-  { page: "j", name: "J batch, a third party's claim at the head reverts the whole settlement (09-30 16:12)", extra: ["j/configs/forgive-third-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
+  { page: "j", name: "J batch, a settlement forgives each side's head claim owed to the other side", extra: ["j/configs/forgive-both.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, one direction blocked by a third party, the other forgiven: the settlement lands", extra: ["j/configs/forgive-one-blocked.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, WITNESS: a settlement lands with one direction forgiven and the other blocked", extra: ["j/configs/forgive-one-blocked.scm", "j/configs/forgive-one-blocked-witness.scm"], expect: (r) => assert.equal(r.violated, "witness: a settlement lands with one direction forgiven and the other blocked") },
+  { page: "j", name: "J batch, a third party's head claim and nothing forgiven reverts the whole settlement", extra: ["j/configs/forgive-third-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
   { page: "j", name: "J batch, WITNESS: a settlement failed on a third party's head claim", extra: ["j/configs/forgive-third-head.scm", "j/configs/forgive-third-head-witness.scm"], expect: (r) => assert.equal(r.violated, "witness: a settlement failed on a third party's head claim") },
-  { page: "j", name: "J batch, a settlement that lists more ids than the cap reverts whole (09-30 16:12)", extra: ["j/configs/forgive-cap.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
-  { page: "j", name: "J batch, a listed claim behind the head is not deleted (09-30 16:12)", extra: ["j/configs/forgive-past-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
-  planted("j", "a settlement deletes a claim owed to a third party", "forgives-third-party", "a settlement deletes only the head claim of the queue, and only when its creditor is the settling counterparty (contracts #54)", "j/configs/forgive-third-head.scm"),
-  planted("j", "a settlement deletes a claim behind the head", "forgives-past-head", "a settlement deletes only the head claim of the queue, and only when its creditor is the settling counterparty (contracts #54)", "j/configs/forgive-past-head.scm"),
-  planted("j", "a third party's head claim ends the walk instead of reverting", "forgiveness-skips-third-party", "a settlement whose forgiveness reaches a third party's claim at the head never lands: it reverts whole (contracts #54)", "j/configs/forgive-third-head.scm"),
-  planted("j", "a settlement lists more ids than the cap", "forgive-uncapped", "a settlement that lands lists at most the cap of claim ids (32 in the contract) (contracts #54)", "j/configs/forgive-cap.scm"),
+  { page: "j", name: "J batch, a settlement that lists more ids than the cap reverts whole (E10)", extra: ["j/configs/forgive-cap.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
+  { page: "j", name: "J batch, a settlement that lists a token twice reverts whole (E2)", extra: ["j/configs/forgive-repeat.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
+  { page: "j", name: "J batch, only the head claim of a token is deleted", extra: ["j/configs/forgive-past-head.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, the settlement lists a token without debts: the other token's head claim stays", extra: ["j/configs/forgive-other-token.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, the settlement lists a token and nobody has debts: it lands", extra: ["j/configs/forgive-no-debts.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, a list exactly at the cap lands and forgives", extra: ["j/configs/forgive-cap-exact.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 36, transitions: 73, goals: 12 }) },
+  { page: "j", name: "J batch, both sides' heads owed to third parties: the settlement reverts whole", extra: ["j/configs/forgive-both-blocked.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
+  { page: "j", name: "J batch, a token repeated with another between reverts whole (E2)", extra: ["j/configs/forgive-repeat-gap.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 52, transitions: 101, goals: 20 }) },
+  planted("j", "a settlement deletes a head claim owed to a third party", "forgives-third-party", "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to the other side of the Account (R-SETTLE-FORGIVE)", "j/configs/forgive-third-head.scm"),
+  planted("j", "a settlement forgives the entity's debt and not the counterparty's", "forgives-one-direction", "a settlement that lists a token forgives each side's head claim that is owed to the other side of the Account (R-SETTLE-FORGIVE)", "j/configs/forgive-both.scm"),
+  planted("j", "a settlement deletes a claim behind the head", "forgives-past-head", "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to the other side of the Account (R-SETTLE-FORGIVE)", "j/configs/forgive-past-head.scm"),
+  planted("j", "a settlement lands with nothing forgiven behind a third party's head claim", "forgive-blocked-lands", "a settlement that lists a token with debts and forgives nothing never lands: it reverts whole (R-SETTLE-FORGIVE)", "j/configs/forgive-third-head.scm"),
+  planted("j", "a settlement reverts when either side's head is owed to a third party", "reverts-on-either-block", "a settlement reverts on forgiveness only for a list over the cap, a repeated token, or a listed token whose heads cannot be forgiven (R-SETTLE-FORGIVE)", "j/configs/forgive-one-blocked.scm"),
+  planted("j", "a settlement lists more ids than the cap", "forgive-uncapped", "a settlement that lands lists at most the cap of token ids and none twice (E10, E2; R-SETTLE-FORGIVE)", "j/configs/forgive-cap.scm"),
+  planted("j", "a settlement lists a token twice", "forgive-repeat-ok", "a settlement that lands lists at most the cap of token ids and none twice (E10, E2; R-SETTLE-FORGIVE)", "j/configs/forgive-repeat.scm"),
+  planted("j", "a settlement forgives the debt token whatever tokens it lists", "forgive-ignores-token", "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to the other side of the Account (R-SETTLE-FORGIVE)", "j/configs/forgive-other-token.scm"),
+  planted("j", "a settlement reverts because a listed token has no debts", "forgive-nothing-reverts", "a settlement reverts on forgiveness only for a list over the cap, a repeated token, or a listed token whose heads cannot be forgiven (R-SETTLE-FORGIVE)", "j/configs/forgive-no-debts.scm"),
+  planted("j", "a settlement lists exactly the cap and reverts", "forgive-cap-off-by-one", "a settlement reverts on forgiveness only for a list over the cap, a repeated token, or a listed token whose heads cannot be forgiven (R-SETTLE-FORGIVE)", "j/configs/forgive-cap-exact.scm"),
+  planted("j", "a settlement deletes the counterparty's head claim owed to a third party", "forgives-cp-third", "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to the other side of the Account (R-SETTLE-FORGIVE)", "j/configs/forgive-both-blocked.scm"),
+  planted("j", "a settlement lists a token twice with another between", "repeat-adjacent-only", "a settlement that lands lists at most the cap of token ids and none twice (E10, E2; R-SETTLE-FORGIVE)", "j/configs/forgive-repeat-gap.scm"),
   { page: "routing", name: "routing", extra: [], expect: (r) => assert.deepEqual(r, { ok: true, states: 2779, transitions: 2853, goals: 0 }) },
   { page: "routing", name: "routing, inbound lock beyond MAX_LOCK_HORIZON (N2)", extra: ["entity/configs/far-inbound.scm"], expect: (r) => assert.deepEqual(r, { ok: true, states: 16, transitions: 15, goals: 0 }) },
   planted("routing", "a hub forwards a lock beyond MAX_LOCK_HORIZON (N2)", "no-horizon", "no lock is forwarded whose deadline is beyond MAX_LOCK_HORIZON (N2, deadline_too_far)", "entity/configs/far-inbound.scm"),
@@ -268,15 +323,19 @@ if (only !== undefined) {
     });
   // a pool, not all at once: three full suites at once ran a 16 GB container out of memory. The slow cases start first.
   const rank = (c) => (c.heavy ? 0 : c.extra.length === 0 ? 1 : 2);
-  const order = cases.map((_, i) => i).sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
-  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${cases.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
+  const shard = parseShard(process.env.SHARD);
+  const mine = casesOfShard(cases, shard);
+  if (mine.length === 0) throw new Error(`shard ${shard.shard} of ${shard.shards} has no case to run`);
+  if (shard.shards > 1) say(`shard ${shard.shard} of ${shard.shards}: ${mine.length} of ${cases.length} cases`);
+  const order = mine.sort((a, b) => rank(cases[a]) - rank(cases[b]) || a - b);
+  const beat = setInterval(() => say(`...  ${running.size} running, ${outcome.passed + outcome.failed.length}/${mine.length} done, ${minutes(Date.now() - started)} min: ${[...running.keys()].join(", ")}`), 10 * 60_000);
   const next = { i: 0 };
   const worker = async () => {
     for (let k = next.i++; k < order.length; k = next.i++) await run(order[k]);
   };
   await Promise.all(Array.from({ length: jobs }, worker));
   clearInterval(beat);
-  say(`${cases.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
+  say(`${mine.length} cases, ${outcome.passed} passed, ${outcome.failed.length} failed, wall time ${minutes(Date.now() - started)} minutes (${jobs} jobs)`);
   outcome.failed.forEach((name) => say(`FAILED: ${name}`));
   if (outcome.failed.length) process.exitCode = 1;
 }

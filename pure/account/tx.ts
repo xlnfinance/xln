@@ -1,4 +1,4 @@
-// The six txs an Account's frames carry, and the one function that applies them: AccountState -> Result<AccountState,
+// The ten txs an Account's frames carry, and the one function that applies them: AccountState -> Result<AccountState,
 // AccountFault>. Each is a token's Ledger transition (ledger.ts, clause/clause.ts) plus, for a lock, the Account's own
 // caps (state.ts). Deposits and withdrawals are not txs: they are J events and settlements, not something a frame says.
 import { err, flatMap, map, ok, type Result } from "../kernel/core/result.ts";
@@ -7,8 +7,9 @@ import { match } from "../kernel/core/tagged.ts";
 import { cancelClause, expireClause, lockClause, resolveClause } from "./clause/clause.ts";
 import type { ClockParams, JView } from "./clause/clock.ts";
 import { pay, setCredit } from "./ledger.ts";
-import type { AccountFault, AccountState, Hold, HoldId, Ledger, Side, TokenId } from "./model.ts";
+import type { AccountFault, AccountState, Hold, HoldId, Ledger, Offer, Side, TokenId } from "./model.ts";
 import { holderOf, ledgerOf, withinHoldCap, withLedger } from "./state.ts";
+import { fill, lapse, offer, retract } from "./swap/swap.ts";
 
 export type AccountTx =
   | Tagged<"pay", { token: TokenId; amount: bigint }>
@@ -16,7 +17,11 @@ export type AccountTx =
   | Tagged<"lock", { token: TokenId; hold: Hold }>
   | Tagged<"resolve", { token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { token: TokenId; id: HoldId }>
-  | Tagged<"expire", { token: TokenId; id: HoldId }>;
+  | Tagged<"expire", { token: TokenId; id: HoldId }>
+  | Tagged<"offer", { offer: Offer }>
+  | Tagged<"fill", { id: HoldId; ratio: number }>
+  | Tagged<"retract", { id: HoldId }>
+  | Tagged<"lapse", { id: HoldId }>;
 
 /** What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J. */
 export type Judge = Readonly<{ clock: ClockParams; view: JView }>;
@@ -48,4 +53,8 @@ export const applyTx = (s: AccountState, j: Judge, author: Side, tx: AccountTx):
     resolve: (t) => onLedger(s, t.token, resolveClause(ledgerOf(s, t.token), j.view, author, t.id, t.secret)),
     cancel: (t) => onLedger(s, t.token, cancelClause(ledgerOf(s, t.token), author, t.id)),
     expire: (t) => onLedger(s, t.token, expireClause(ledgerOf(s, t.token), j.clock, j.view, t.id)),
+    offer: (t) => offer(s, j.clock, j.view, author, t.offer),
+    fill: (t) => fill(s, j.view, author, t.id, t.ratio),
+    retract: (t) => retract(s, author, t.id),
+    lapse: (t) => lapse(s, j.clock, j.view, t.id),
   });

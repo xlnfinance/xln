@@ -16,8 +16,10 @@ import { newWorld, STEPS } from "./steps.ts";
 const argv = process.argv.slice(2);
 const flag = (name: string): string | null => { const at = argv.indexOf(name); return at >= 0 ? argv[at + 1] ?? null : null; };
 
-const head = (): string => Bun.spawnSync(["git", "rev-parse", "--short", "origin/main"], { cwd: REPO }).stdout.toString().trim()
-  || Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"], { cwd: REPO }).stdout.toString().trim();
+const git = (...args: string[]): string => Bun.spawnSync(["git", ...args], { cwd: REPO }).stdout.toString().trim();
+
+/** What was run: the branch checked out and its short commit (the integration branch is not main). */
+const head = (): string => `${git("rev-parse", "--abbrev-ref", "HEAD")} ${git("rev-parse", "--short", "HEAD")}`;
 
 const main = async (): Promise<number> => {
   const started = Date.now();

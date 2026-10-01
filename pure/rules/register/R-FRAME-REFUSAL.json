@@ -1,10 +1,10 @@
 {
  "id": "R-FRAME-REFUSAL",
- "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right. The Quint cell holds the refusal, the retry budget, the receiver's mark and the attempt number; the Runtime's duties (persisting the attempt count and the mark, spacing the retries) and the signed refusals of A4b are not in it.",
+ "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; The higher proof slot wins simultaneous proposals (R-A1: Left's, at the first collision on a head). The refusal also carries the refuser's floor, the highest slot it has signed (R-PROOF-NONCE-ABOVE-SIGNED). A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right. The Arrival cell holds the same on spec/account/frames.scm (refusal, the receiver's mark, attempt number, frame author); the retry budget (a bound on how often a retryable fault repeats) has no planted bug or property on the page, and the Runtime duties and A4b's signed refusals are on no page.",
  "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
  "layers": {
-  "arrival": "owed: spec thread (Account spec comparison)",
-  "quint": "hold",
+  "arrival": "stale: the Arrival page (spec/account/frames.scm) models the refusal without the floor and the higher-slot collision; the spec thread brings the current version",
+  "quint": "stale: Quint (#44) models the refusal without the floor and the higher-slot collision; the spec thread brings the current version",
   "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
@@ -65,6 +65,81 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "retry-budget-unbounded"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FRAME-REFUSAL a retryable refusal takes Alice's frame back, queues her tx and raises her attempt"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "retry pacing: Alice waits at the view she was refused at, and proposes again only when it is higher"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "retry pacing: a retry that Bob refuses again waits at the new view with the attempt raised again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the view only rises: a lower height from the Host leaves Alice's view where it was"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "once Bob's view has caught up the retry commits on both sides and the wait and the attempt are gone"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "Alice restarted after a refusal has the same attempt, the same wait and the same queued tx"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "Alice restarted keeps waiting: the same view proposes nothing, a higher one proposes with her attempt"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "Bob restarted after his view caught up still refuses the frame he refused, and says the same thing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "the head moving ends the wait: Bob's own frame commits and Alice proposes her queued lock at once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FRAME-REFUSAL no run is stuck while the heights rise: every world at rest has the lock open"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FRAME-REFUSAL the walk includes the refusal: its worlds are many and it ends before its limit"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "ignores-refusal"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "refusal-forgotten"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "below-mark-judged"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "attempt-not-bumped"
   }
  ]
 }

@@ -1,13 +1,13 @@
 {
  "id": "R-PROOF-NONCE",
- "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
+ "statement": "The proof nonce is its own counter; a committed frame signs at a slot above every slot either side signed, in its author's lane (Left's an even distance above the committed slot, Right's an odd one), so no two frames of one Account ever share a nonce (a gap appears wherever the other side's slot, or an abandoned attempt's, goes unused); signatures are one per (signer, nonce, author side). The Arrival pages (#121) hold the slot lane under R-PROOF-NONCE-ABOVE-SIGNED (slots-shared-lane, retry-reuses-the-nonce); no property names this id, so the cell is owed.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
  "layers": {
-  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "arrival": "owed: spec thread (the Arrival pages name R-PROOF-NONCE-ABOVE-SIGNED; the slot lane is held there by slots-shared-lane and retry-reuses-the-nonce, but no property names this id)",
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
-  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: A4 (the frame nonce is the signed body's)"
+  "rig": "owed: test rig (P4b every signature made counts, including a proposal later rolled back; P4f the proof nonce climbs by one)",
+  "ts": "hold"
  },
  "killers": [
   {
@@ -16,16 +16,25 @@
    "name": "proposer-may-skip-nonces"
   },
   {
+   "kind": "test",
+   "layer": "rig",
+   "name": "to be named: a second proof signed for a rolled-back frame, and a nonce that skips, are red",
+   "owed": "test rig"
+  },
+  {
    "kind": "bug",
    "layer": "arrival",
-   "name": "baseline-too-low",
-   "owed": "spec thread, next Arrival page"
+   "name": "retry-reuses-the-nonce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "slots-shared-lane"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "to be named",
-   "owed": "A4"
+   "name": "R-PROOF-NONCE a frame signs above every slot spent: Left's next is slot 4, no other slot is its digest"
   }
  ]
 }

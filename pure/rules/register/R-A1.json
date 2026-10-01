@@ -1,10 +1,10 @@
 {
  "id": "R-A1",
- "statement": "Same-height collision: Left wins; Right rolls back and re-proposes its txs at the next height.",
+ "statement": "Same-height collision: the frame with the higher proof slot wins, and at the first collision on a head that is Left's, so Left wins; the loser rolls back and re-proposes its txs at the next height.",
  "source": "lessons.md section 2",
  "layers": {
-  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
-  "quint": "hold",
+  "arrival": "owed: spec thread, next Arrival page (slots and higher slot wins)",
+  "quint": "stale: Quint (#44) models the slot-free collision (Left keeps its own frame); the spec thread brings the higher-slot rule",
   "contract": "n/a: simultaneous frame proposals are an off-chain Account rule; the chain sees only signed proofs",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"

@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { draw, holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
+import { draw, holdOf, secretOf, signing, tokenOf, viewOf } from "../fixtures.ts";
 import { emptyLedger, MAX_HOLDS } from "../ledger.ts";
 import { holdId, other, type Ledger, type Side } from "../model.ts";
 import { emptyAccount, openHolds, withLedger } from "../state.ts";
@@ -35,7 +35,8 @@ type World = Readonly<{
 }>;
 
 const viewOfSide = (w: World, side: Side): bigint => w.time + w.drift[side];
-const rulesOf = (w: World, side: Side) => accountRules({ clock, view: viewOf(viewOfSide(w, side)) } satisfies Judge);
+const rulesOf = (w: World, side: Side) =>
+  accountRules({ clock, view: viewOf(viewOfSide(w, side)) } satisfies Judge, signing);
 
 const funded = (side: Side): AccountReplica =>
   ({ ...emptyReplica(side), state: TOKENS.reduce((s, t) => withLedger(s, t, FUNDED), emptyAccount) });

@@ -3,6 +3,7 @@ import { emptyReplica } from "../account/frame/account.ts";
 import { queue, type FrameHash, type Msg } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
+import { signing } from "../account/fixtures.ts";
 import { credit, entityOf, GOLD, judge, open, pay } from "./fixtures.ts";
 import { entityFrame } from "./frame.ts";
 import { emptyEntity, entityId, sideOf, type EntityInput, type EntityState, type Outbound } from "./model.ts";
@@ -12,7 +13,7 @@ const BOB = entityOf(2);
 const CAROL = entityOf(3);
 const DAVE = entityOf(4);
 
-const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, state, inputs);
+const run = (state: EntityState, ...inputs: readonly EntityInput[]) => entityFrame(judge, signing, state, inputs);
 
 /** An Entity that has opened its Accounts with `peers`. */
 const opened = (self: typeof ALICE, ...peers: readonly typeof ALICE[]): EntityState =>
@@ -116,7 +117,7 @@ describe("entity/frame arrivals", () => {
     expect(framed.notices).toEqual([]);
     const elsewhere = `0x${"ab".repeat(32)}` as FrameHash;
     const txs: readonly AccountTx[] = [{ _tag: "set_credit", token: GOLD, limit: 1n }];
-    const frame = { author: "right", parent: elsewhere, attempt: 0, txs } as const;
+    const frame = { author: "right", parent: elsewhere, attempt: 0, slot: 1, txs } as const;
     const behind = run(framed.state, peerMessage(BOB, { _tag: "frame", frame }));
     expect(behind.notices.map((n) => n._tag)).toEqual(["message_refused"]);
     expect(behind.outputs).toEqual([]);
@@ -243,7 +244,7 @@ describe("entity/frame review A: order inside a phase, and what the owner is tol
 
   type Side = "left" | "right";
   const frameOf = (author: Side, parent: FrameHash, attempt: number, txs: readonly AccountTx[]): EntityInput =>
-    peerMessage(BOB, { _tag: "frame", frame: { author, parent, attempt, txs } });
+    peerMessage(BOB, { _tag: "frame", frame: { author, parent, attempt, slot: author === "left" ? 2 : 1, txs } });
 
   test("R-NOTICE every refusal of a peer's message reaches the owner with its peer and its outcome", () => {
     const head = aliceAndBob.accounts.get(BOB)?.head ?? expect.unreachable("no account");

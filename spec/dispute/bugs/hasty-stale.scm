@@ -3,4 +3,4 @@
 (define (responder-can-answer? w)
   (let ((d (:dispute w)))
     (and d (counter-window-open? w d) (not (own-ack-pending? w (responder-of d)))
-         (> (best-rank w (responder-of d)) (rank (selected d))))))
+         (> (best-counter-rank w d (responder-of d)) (rank (selected d))))))

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { hashlockOf, heightOf, holdOf, secretOf, tokenOf, viewOf } from "../fixtures.ts";
+import { hashlockOf, heightOf, holdOf, secretOf, signing, tokenOf, viewOf } from "../fixtures.ts";
 import { holdId, other, type AccountFault, type Hold } from "../model.ts";
 import { ledgerOf } from "../state.ts";
 import { type AccountTx, type Judge } from "../tx.ts";
-import { accountRules, emptyReplica, provisionalFrameHash, GENESIS, type AccountReplica } from "./account.ts";
+import { accountRules, emptyReplica, frameName, GENESIS, type AccountReplica } from "./account.ts";
 import {
   MAX_ATTEMPTS, propose, queue, receive, resend, STALE_ATTEMPT, submit, type FrameHash, type Msg,
 } from "./frame.ts";
@@ -15,10 +15,10 @@ const judge: Judge = {
   clock: unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params")),
   view: viewOf(100n),
 };
-const rules = accountRules(judge);
+const rules = accountRules(judge, signing);
 
-const credit = (limit: bigint): AccountTx => ({ _tag: "set_credit", token: GOLD, limit });
-const pay = (amount: bigint): AccountTx => ({ _tag: "pay", token: GOLD, amount });
+const credit = (limit: bigint, token = GOLD): AccountTx => ({ _tag: "set_credit", token, limit });
+const pay = (amount: bigint, token = GOLD): AccountTx => ({ _tag: "pay", token, amount });
 
 const left = emptyReplica("left");
 const right = emptyReplica("right");
@@ -59,15 +59,16 @@ describe("account/frame the round", () => {
   });
 
   test("a frame is named by its parent and its txs: equal frames agree and any difference changes the name", () => {
-    const f = { author: "left" as const, parent: GENESIS, attempt: 0, txs: [pay(1n)] };
-    expect(provisionalFrameHash({ ...f })).toBe(provisionalFrameHash(f));
-    expect(provisionalFrameHash({ ...f, txs: [pay(2n)] })).not.toBe(provisionalFrameHash(f));
-    expect(provisionalFrameHash({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(provisionalFrameHash(f));
-    expect(provisionalFrameHash({ ...f, parent: provisionalFrameHash(f) })).not.toBe(provisionalFrameHash(f));
-    expect(provisionalFrameHash({ ...f, author: "right" })).not.toBe(provisionalFrameHash(f));
-    const odd = { author: "left" as const, parent: GENESIS, attempt: 0, txs: [pay(-1n)] };
-    expect(provisionalFrameHash(odd)).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(provisionalFrameHash({ ...f, attempt: 1 })).not.toBe(provisionalFrameHash(f));
+    const f = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [pay(1n)] };
+    expect(frameName({ ...f })).toBe(frameName(f));
+    expect(frameName({ ...f, txs: [pay(2n)] })).not.toBe(frameName(f));
+    expect(frameName({ ...f, txs: [pay(1n), pay(1n)] })).not.toBe(frameName(f));
+    expect(frameName({ ...f, parent: frameName(f) })).not.toBe(frameName(f));
+    expect(frameName({ ...f, author: "right" })).not.toBe(frameName(f));
+    const odd = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [pay(-1n)] };
+    expect(frameName(odd)).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(frameName({ ...f, attempt: 1 })).not.toBe(frameName(f));
+    expect(frameName({ ...f, slot: 4 })).not.toBe(frameName(f));
   });
 });
 
@@ -80,14 +81,14 @@ describe("account/frame same-height collision", () => {
   test("R-A1 Left ignores Right's frame and keeps its own", () => {
     expect(leftHears.outcome).toEqual({ _tag: "kept_own" });
     expect(leftHears.sent).toEqual([]);
-    expect(leftHears.replica).toEqual(sentLeft.replica);
+    expect(leftHears.replica).toEqual({ ...sentLeft.replica, peerSigned: frameOf(only(sentRight.sent)).slot });
   });
 
   test("R-A1 Right rolls its frame back, commits Left's and acks it", () => {
     expect(rightHears.outcome).toEqual({ _tag: "accepted_over_own" });
     expect(rightHears.replica.pending).toBeUndefined();
     expect(rightHears.replica.mempool).toEqual([credit(500n)]);
-    expect(rightHears.replica.head).toBe(provisionalFrameHash(frameOf(only(sentLeft.sent))));
+    expect(rightHears.replica.head).toBe(sentLeft.replica.pending?.head ?? expect.unreachable("pending"));
     expect(rightHears.sent).toEqual([{ _tag: "ack", hash: rightHears.replica.head }]);
   });
 
@@ -132,7 +133,7 @@ describe("account/frame refusals are values, never a halt", () => {
     expect(stale.outcome).toEqual({ _tag: "refused_not_next" });
     expect(stale.sent).toEqual([]);
     expect(stale.replica).toEqual(accepted.replica);
-    const next = { ...first, parent: provisionalFrameHash(first) };
+    const next = { ...first, parent: frameName(first) };
     const future = receive(rules, credited.right, { _tag: "frame", frame: next });
     expect(future.outcome).toEqual({ _tag: "refused_not_next" });
     expect(future.replica).toEqual(credited.right);
@@ -153,13 +154,15 @@ describe("account/frame refusals are values, never a halt", () => {
     expect(heard.outcome).toEqual({
       _tag: "refused_invalid", fault: { _tag: "insufficient_capacity", available: 95n, requested: 500n },
     });
-    expect(heard.replica).toEqual({ ...credited.right, declined: heard.replica.declined });
+    expect(heard.replica).toEqual({ ...credited.right, declined: heard.replica.declined, peerSigned: bad.slot });
     const fault = "insufficient_capacity";
-    expect(heard.sent).toEqual([{ _tag: "refusal", hash: provisionalFrameHash(bad), index: 1, fault, mark: 0 }]);
+    expect(heard.sent).toEqual([
+      { _tag: "refusal", hash: frameName(bad), index: 1, fault, mark: 0, floor: credited.right.signed },
+    ]);
   });
 
   test("an ack of something I did not propose changes nothing", () => {
-    const other = provisionalFrameHash({ ...first, txs: [pay(1n)] });
+    const other = frameName({ ...first, txs: [pay(1n)] });
     const stray = receive(rules, sent.replica, { _tag: "ack", hash: other });
     expect(stray.outcome).toEqual({ _tag: "ack_ignored" });
     expect(stray.replica).toEqual(sent.replica);
@@ -193,7 +196,7 @@ describe("account/frame a frame has an author", () => {
     expect(theirs.outcome).toEqual({ _tag: "accepted" });
     expect(ledgerOf(theirs.replica.state, GOLD).limit).toEqual({ left: 500n, right: 0n });
     const asLeft = { ...frameOf(echo), author: "left" as const };
-    expect(provisionalFrameHash(asLeft)).not.toBe(theirs.replica.head);
+    expect(frameName(asLeft)).not.toBe(theirs.replica.head);
     expect(receive(rules, emptyReplica("right"), { _tag: "frame", frame: asLeft }).replica.state).not
       .toEqual(theirs.replica.state);
   });
@@ -207,7 +210,8 @@ describe("account/frame a frame has an author", () => {
 
 describe("account/frame an empty frame", () => {
   test("R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height", () => {
-    const empty: Msg<AccountTx> = { _tag: "frame", frame: { author: "left", parent: GENESIS, attempt: 0, txs: [] } };
+    const emptied = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, txs: [] };
+    const empty: Msg<AccountTx> = { _tag: "frame", frame: emptied };
     const heard = receive(rules, emptyReplica("right"), empty);
     expect(heard.outcome).toEqual({ _tag: "refused_empty" });
     expect(heard.replica).toEqual(emptyReplica("right"));
@@ -228,27 +232,35 @@ describe("account/frame a peer cannot halt a replica", () => {
     const author = pick(i, 5, 6) === 0 ? target.side : other(target.side);
     const kind = pick(i, 3, 5);
     if (kind === 0) return { _tag: "ack", hash: parent };
-    if (kind === 1) return { _tag: "refusal", hash: parent, index: pick(i, 6, 3), fault: "not_expired", mark: 0 };
-    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), txs } };
+    const fault = "not_expired";
+    if (kind === 1) return { _tag: "refusal", hash: parent, index: pick(i, 6, 3), fault, mark: 0, floor: 0 };
+    const slot = target.used + 1 + pick(i, 8, 3);
+    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), slot, txs } };
   };
 
   test("R-X1 whatever a peer sends is answered with a replica, and a refusal changes nothing", () => {
     const outcomes = Array.from({ length: 3000 }, (_, i) => {
       const target = targets[pick(i, 4, targets.length)] ?? left;
       const heard = receive(rules, target, randomMsg(i, target));
-      const silent = heard.outcome._tag.startsWith("refused") && heard.outcome._tag !== "refused_invalid";
+      const answered = ["refused_invalid", "refused_slot", "refused_stale"];
+      const silent = heard.outcome._tag.startsWith("refused") && !answered.includes(heard.outcome._tag);
       if (silent || heard.outcome._tag === "ack_ignored" || heard.outcome._tag === "refusal_ignored") {
         expect(heard.replica).toEqual(target);
         expect(heard.sent).toEqual([]);
       }
+      if (heard.outcome._tag === "refused_slot") {
+        expect(heard.replica).toEqual(target);
+        expect(heard.sent.map((m) => m._tag).length).toBeLessThanOrEqual(1);
+      }
       if (heard.outcome._tag === "refused_invalid") {
-        expect({ ...heard.replica, declined: [] }).toEqual({ ...target, declined: [] });
+        expect({ ...heard.replica, declined: [], peerSigned: 0 }).toEqual({ ...target, declined: [], peerSigned: 0 });
         expect(heard.sent.map((m) => m._tag)).toEqual(["refusal"]);
       }
       return heard.outcome._tag;
     });
     const seen = new Set<string>(outcomes);
-    const refusals = ["refused_invalid", "refused_not_next", "refused_own", "refused_empty", "refusal_ignored"];
+    const refusals =
+      ["refused_invalid", "refused_not_next", "refused_own", "refused_empty", "refusal_ignored", "refused_slot"];
     ["accepted", "kept_own", "ack_ignored", ...refusals].forEach((tag) => expect(seen.has(tag)).toBe(true));
   });
 });
@@ -310,7 +322,7 @@ describe("account/frame clauses ride frames", () => {
     expect(ledgerOf(accepted.replica.state, GOLD).holds).toHaveLength(1);
     const resolve: AccountTx = { _tag: "resolve", token: GOLD, id: holdId(1n), secret: secretOf(1) };
     const asked = proposing(accepted.replica, resolve);
-    const late = accountRules({ ...judge, view: viewOf(106n) });
+    const late = accountRules({ ...judge, view: viewOf(106n) }, signing);
     expect(receive(late, receive(rules, sent.replica, only(accepted.sent)).replica, only(asked.sent)).outcome)
       .toEqual({ _tag: "refused_invalid", fault: { _tag: "past_deadline", deadline: 105n, view: 106n } });
     const timely = receive(rules, receive(rules, sent.replica, only(accepted.sent)).replica, only(asked.sent));
@@ -327,8 +339,8 @@ describe("account/frame the name of a frame covers every field", () => {
   const resolve = (id: bigint, n: number, token = GOLD): AccountTx =>
     ({ _tag: "resolve", token, id: holdId(id), secret: secretOf(n) });
   const variants: readonly AccountTx[] = [
-    pay(1n), pay(2n), { ...pay(1n), token: OIL },
-    credit(1n), credit(2n), { ...credit(1n), token: OIL },
+    pay(1n), pay(2n), pay(1n, OIL),
+    credit(1n), credit(2n), credit(1n, OIL),
     lock(), lock({ payer: "right" }), lock({ amount: 6n }), lock({ id: holdId(2n) }),
     lock({ hashlock: hashlockOf(secretOf(2)) }), lock({ deadline: heightOf(106n) }), lock({}, OIL),
     resolve(1n, 1), resolve(2n, 1), resolve(1n, 2), resolve(1n, 1, OIL),
@@ -338,7 +350,7 @@ describe("account/frame the name of a frame covers every field", () => {
     { _tag: "expire", token: OIL, id: holdId(1n) },
   ];
   const name = (...txs: readonly AccountTx[]) =>
-    provisionalFrameHash({ author: "left", parent: GENESIS, attempt: 0, txs });
+    frameName({ author: "left", parent: GENESIS, attempt: 0, slot: 2, txs });
 
   test("every single-tx frame has its own name", () => {
     expect(new Set(variants.map((tx) => name(tx))).size).toBe(variants.length);
@@ -354,10 +366,10 @@ describe("account/frame the name of a frame covers every field", () => {
 describe("account/frame what the second review's mutants found", () => {
   test("a frame that does not apply, heard while my own frame is pending, leaves my frame pending", () => {
     const mine = proposing(credited.right, credit(500n));
-    const bad = { ...frameOf(only(mine.sent)), author: "left" as const, txs: [pay(500n)] };
+    const bad = { ...frameOf(only(mine.sent)), author: "left" as const, slot: mine.replica.used + 2, txs: [pay(500n)] };
     const heard = receive(rules, mine.replica, { _tag: "frame", frame: bad });
     expect(heard.outcome._tag).toBe("refused_invalid");
-    expect(heard.replica).toEqual({ ...mine.replica, declined: heard.replica.declined });
+    expect(heard.replica).toEqual({ ...mine.replica, declined: heard.replica.declined, peerSigned: bad.slot });
     expect(heard.replica.pending).toEqual(mine.replica.pending);
   });
 
@@ -394,13 +406,13 @@ describe("account/frame what the second review's mutants found", () => {
       [expire(GOLD, 1n), expire(GOLD, 2n)],
       [expire(GOLD, 1n), expire(GOLD2, 1n)],
     ];
-    const named = (tx: AccountTx) => provisionalFrameHash({ author: "left", parent: GENESIS, attempt: 0, txs: [tx] });
+    const named = (tx: AccountTx) => frameName({ author: "left", parent: GENESIS, attempt: 0, slot: 2, txs: [tx] });
     pairs.forEach(([a, b]) => expect(named(a)).not.toBe(named(b)));
   });
 });
 
 describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back", () => {
-  const rulesAt = (view: bigint) => accountRules({ ...judge, view: viewOf(view) });
+  const rulesAt = (view: bigint) => accountRules({ ...judge, view: viewOf(view) }, signing);
   const lock: AccountTx = { _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 1n, 101n, 1) };
   const resolve: AccountTx = { _tag: "resolve", token: GOLD, id: holdId(1n), secret: secretOf(1) };
   const expire: AccountTx = { _tag: "expire", token: GOLD, id: holdId(1n) };
@@ -416,13 +428,15 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
   /** Right resolves at its view 101 (the deadline: live); Left is one block ahead at 102, past it, and refuses. */
   const resolving = propose(rulesAt(101n), queue(queue(locked.right, resolve), credit(7n)));
   const refusedByLeft = receive(rulesAt(102n), locked.left, only(resolving.sent));
-  const name = provisionalFrameHash(frameOf(only(resolving.sent)));
+  const name = frameName(frameOf(only(resolving.sent)));
 
   test("the answer to a frame that does not apply names the frame and the first tx at fault", () => {
     expect(refusedByLeft.outcome).toEqual({
       _tag: "refused_invalid", fault: { _tag: "past_deadline", deadline: 101n, view: 102n },
     });
-    expect(refusedByLeft.sent).toEqual([{ _tag: "refusal", hash: name, index: 0, fault: "past_deadline", mark: 0 }]);
+    const floor = locked.left.signed;
+    const fault = "past_deadline";
+    expect(refusedByLeft.sent).toEqual([{ _tag: "refusal", hash: name, index: 0, fault, mark: 0, floor }]);
     expect(refusedByLeft.replica.head).toBe(locked.left.head);
     expect(refusedByLeft.replica.state).toEqual(locked.left.state);
   });
@@ -458,8 +472,8 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
     const sent = propose(rulesAt(100n), queue(locked.left, credit(9n)));
     const accepted = receive(rulesAt(100n), locked.right, only(sent.sent));
     const done = receive(rulesAt(100n), sent.replica, only(accepted.sent));
-    const hash = provisionalFrameHash(frameOf(only(sent.sent)));
-    const late: Msg<AccountTx> = { _tag: "refusal", hash, index: 0, fault: "x", mark: 0 };
+    const hash = frameName(frameOf(only(sent.sent)));
+    const late: Msg<AccountTx> = { _tag: "refusal", hash, index: 0, fault: "x", mark: 0, floor: 0 };
     const heard = receive(rulesAt(100n), done.replica, late);
     expect(heard.outcome).toEqual({ _tag: "refusal_ignored" });
     expect(heard.replica).toEqual(done.replica);
@@ -469,9 +483,9 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
   test("a refusal that names another frame, or a tx the pending frame does not have, is ignored", () => {
     const emptied = { ...frameOf(only(resolving.sent)), txs: [] };
     const strayName: Msg<AccountTx> =
-      { _tag: "refusal", hash: provisionalFrameHash(emptied), index: 0, fault: "x", mark: 0 };
-    const beyond: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 2, fault: "x", mark: 0 };
-    const negative: Msg<AccountTx> = { _tag: "refusal", hash: name, index: -1, fault: "x", mark: 0 };
+      { _tag: "refusal", hash: frameName(emptied), index: 0, fault: "x", mark: 0, floor: 0 };
+    const beyond: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 2, fault: "x", mark: 0, floor: 0 };
+    const negative: Msg<AccountTx> = { _tag: "refusal", hash: name, index: -1, fault: "x", mark: 0, floor: 0 };
     [strayName, beyond, negative].forEach((m) => {
       const heard = receive(rulesAt(101n), resolving.replica, m);
       expect(heard.outcome).toEqual({ _tag: "refusal_ignored" });
@@ -489,13 +503,13 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
     const own = propose(rulesAt(102n), queue(refusedByLeft.replica, credit(9n)));
     expect(own.replica.pending).toBeDefined();
     const again = receive(rulesAt(102n), own.replica, only(resolving.sent));
-    expect(again.sent).toEqual(refusedByLeft.sent);
+    expect(again.sent).toEqual(refusedByLeft.sent.map((m) => ({ ...m, floor: own.replica.signed })));
     expect(again.replica).toEqual(own.replica);
   });
 
   test("what a replica refused is forgotten when it commits its own frame too", () => {
     const mine = propose(rulesAt(100n), queue(refusedByLeft.replica, credit(9n)));
-    const ackHash = provisionalFrameHash(frameOf(only(mine.sent)));
+    const ackHash = mine.replica.pending?.head ?? expect.unreachable("nothing pending");
     const acked = receive(rulesAt(100n), mine.replica, { _tag: "ack", hash: ackHash });
     expect(acked.outcome).toEqual({ _tag: "committed_own" });
     expect(acked.replica.declined).toBeUndefined();
@@ -583,9 +597,9 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
     expect([repeat.outcome._tag, repeat.sent]).toEqual(["refused_invalid", refused.sent]);
     const stale = receive(rulesAt(104n), refused.replica, only(early.sent));
     expect(stale.outcome).toEqual({ _tag: "refused_stale" });
-    const name = provisionalFrameHash(frameOf(only(early.sent)));
+    const name = frameName(frameOf(only(early.sent)));
     expect(stale.sent).toEqual([
-      { _tag: "refusal", hash: name, index: 0, fault: STALE_ATTEMPT, mark: 1 },
+      { _tag: "refusal", hash: name, index: 0, fault: STALE_ATTEMPT, mark: 1, floor: refused.replica.signed },
     ]);
     expect(stale.replica).toEqual(refused.replica);
   });
@@ -609,16 +623,16 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
   test("R-EVERY-REFUSAL-ANSWERED a stale answer costs no tx, whatever the retry budget", () => {
     const spent = { ...queue(locked.right, expire), attempt: MAX_ATTEMPTS + 1 };
     const sent = propose(rulesAt(104n), spent);
-    const name = provisionalFrameHash(frameOf(only(sent.sent)));
-    const stale: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 0, fault: STALE_ATTEMPT, mark: 12 };
+    const name = frameName(frameOf(only(sent.sent)));
+    const stale: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 0, fault: STALE_ATTEMPT, mark: 12, floor: 0 };
     const told = receive(rulesAt(104n), sent.replica, stale);
     expect([told.replica.mempool, told.replica.refused, told.replica.attempt]).toEqual([[expire], [], 13]);
   });
 
   test("a refusal whose mark is not a count the proposer can use changes nothing", () => {
-    const name = provisionalFrameHash(frameOf(only(early.sent)));
+    const name = frameName(frameOf(only(early.sent)));
     [-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER, Number.POSITIVE_INFINITY].forEach((mark) => {
-      const refusal: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 0, fault: "not_expired", mark };
+      const refusal: Msg<AccountTx> = { _tag: "refusal", hash: name, index: 0, fault: "not_expired", mark, floor: 0 };
       const heard = receive(rulesAt(104n), early.replica, refusal);
       expect(heard.outcome).toEqual({ _tag: "refusal_ignored" });
       expect(heard.replica).toEqual(early.replica);
@@ -636,10 +650,10 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
   });
 
   test("a refusal whose index is not a whole number, or whose fault is not named, changes nothing", () => {
-    const name = provisionalFrameHash(frameOf(only(early.sent)));
+    const name = frameName(frameOf(only(early.sent)));
     ["0", "length", 0.5, Number.NaN, -1, 1].forEach((index) => {
       const refusal: Msg<AccountTx> =
-        { _tag: "refusal", hash: name, index: index as number, fault: "not_expired", mark: 0 };
+        { _tag: "refusal", hash: name, index: index as number, fault: "not_expired", mark: 0, floor: 0 };
       const heard = receive(rulesAt(104n), early.replica, refusal);
       expect(heard.outcome).toEqual({ _tag: "refusal_ignored" });
       expect(heard.replica).toEqual(early.replica);
@@ -648,7 +662,7 @@ describe("account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken b
 });
 
 describe("account/frame what Review B of PR 85 found in round 2", () => {
-  const rulesAt = (view: bigint) => accountRules({ ...judge, view: viewOf(view) });
+  const rulesAt = (view: bigint) => accountRules({ ...judge, view: viewOf(view) }, signing);
   const lock: AccountTx = { _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 1n, 101n, 1) };
   const resolve: AccountTx = { _tag: "resolve", token: GOLD, id: holdId(1n), secret: secretOf(1) };
   const expire: AccountTx = { _tag: "expire", token: GOLD, id: holdId(1n) };
@@ -661,8 +675,9 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
   test("R-FRAME-REFUSAL a refusal for the same attempt repeats the first one: the same tx and the same fault", () => {
     const sent = propose(rulesAt(101n), queue(queue(locked.right, credit(7n)), resolve));
     const first = receive(rulesAt(102n), locked.left, only(sent.sent));
-    const name = provisionalFrameHash(frameOf(only(sent.sent)));
-    expect(first.sent).toEqual([{ _tag: "refusal", hash: name, index: 1, fault: "past_deadline", mark: 0 }]);
+    const name = frameName(frameOf(only(sent.sent)));
+    const floor = locked.left.signed;
+    expect(first.sent).toEqual([{ _tag: "refusal", hash: name, index: 1, fault: "past_deadline", mark: 0, floor }]);
     const repeat = receive(rulesAt(100n), first.replica, only(sent.sent));
     expect(repeat.sent).toEqual(first.sent);
     expect(repeat.replica).toEqual(first.replica);
@@ -688,9 +703,10 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
     const restarted = { ...bad.replica, pending: undefined, attempt: 0, mempool: [credit(9n)] };
     const again = propose(rulesAt(101n), restarted);
     const answer = receive(rulesAt(102n), refusedBad.replica, only(again.sent));
-    const newName = provisionalFrameHash(frameOf(only(again.sent)));
-    expect(answer.sent).toEqual([{ _tag: "refusal", hash: newName, index: 0, fault: STALE_ATTEMPT, mark: 0 }]);
-    expect(answer.replica).toEqual(refusedBad.replica);
+    const newName = frameName(frameOf(only(again.sent)));
+    const floor = refusedBad.replica.signed;
+    expect(answer.sent).toEqual([{ _tag: "refusal", hash: newName, index: 0, fault: STALE_ATTEMPT, mark: 0, floor }]);
+    expect(answer.replica).toEqual({ ...refusedBad.replica, peerSigned: frameOf(only(again.sent)).slot });
     const rolled = receive(rulesAt(101n), again.replica, only(answer.sent));
     expect([rolled.outcome, rolled.replica.refused]).toEqual([{ _tag: "rolled_back" }, []]);
     const next = propose(rulesAt(101n), rolled.replica);
@@ -700,16 +716,19 @@ describe("account/frame what Review B of PR 85 found in round 2", () => {
 
   test("R-EVERY-REFUSAL-ANSWERED the attempt count stays a safe integer however the peer's marks climb", () => {
     const sent = propose(rulesAt(104n), queue(locked.right, expire));
-    const name = provisionalFrameHash(frameOf(only(sent.sent)));
+    const name = frameName(frameOf(only(sent.sent)));
     const told = (hash: FrameHash, mark: number): Msg<AccountTx> =>
-      ({ _tag: "refusal", hash, index: 0, fault: STALE_ATTEMPT, mark });
+      ({ _tag: "refusal", hash, index: 0, fault: STALE_ATTEMPT, mark, floor: 0 });
     const top = receive(rulesAt(104n), sent.replica, told(name, Number.MAX_SAFE_INTEGER - 1));
     expect([top.outcome, top.replica.attempt]).toEqual([{ _tag: "rolled_back" }, Number.MAX_SAFE_INTEGER]);
+    // the attempt is a label, not a nonce: the frame goes out at it, at a slot of its own above the refused one
     const again = propose(rulesAt(104n), top.replica);
-    const second = told(provisionalFrameHash(frameOf(only(again.sent))), 0);
-    const refused = receive(rulesAt(104n), again.replica, second);
-    expect(refused.outcome).toEqual({ _tag: "refusal_ignored" });
-    expect(refused.replica.attempt).toBe(Number.MAX_SAFE_INTEGER);
+    const slot = sent.replica.signed + 2;
+    expect(frameOf(only(again.sent))).toMatchObject({ attempt: Number.MAX_SAFE_INTEGER, slot });
+    // one more refusal would take the count past a safe integer: it is not believed, and the frame stays pending
+    const again2 = told(frameName(frameOf(only(again.sent))), Number.MAX_SAFE_INTEGER);
+    const beyond = receive(rulesAt(104n), again.replica, again2);
+    expect([beyond.outcome, beyond.replica]).toEqual([{ _tag: "refusal_ignored" }, again.replica]);
   });
 
   test("R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet", () => {

@@ -1,7 +1,7 @@
 {
  "id": "R-GATE-CI-STEPS",
- "statement": "Every command of a job behind GitHub's `One gate` is a command of the local gate or listed set-up (installs, cd, the ast-grep script), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
- "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop)",
+ "statement": "Every command of a job behind GitHub's `One gate` is a command of the gate or listed set-up (installs, cd, the ast-grep script, the spec dependencies and build, the spec pass marker), and every gate command (tsc, bun rules/check.ts, frozen, style, bun test, test:seeds, the Quint check.sh, the Arrival node test.mjs) runs in some such job, so a step only CI runs, such as a test loop, or a gate step CI drops, is a problem on the next run of the drift test.",
+ "source": "coordinator 10-01 08:48 (same hole: a CI-only test loop); 10:12 (Quint and Arrival join required CI)",
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
   "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
@@ -39,6 +39,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-GATE-CI-STEPS any other command in a gate job is named, a gate flag that is not a part flag included"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-STEPS set-up is exact too: a cd into a substitution, an install that adds a package, a script given other arguments"
   },
   {
    "kind": "test",

@@ -1,0 +1,74 @@
+{
+ "id": "R-SETTLE-FORGIVE",
+ "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts, so the per-token revert across two listed tokens (one forgiven, one blocked) is not modelled.",
+ "source": "coordinator 09-30 16:12 and 10-01 07:20; Depository._forgiveDebtsBetweenEntities, Account MAX_SETTLEMENT_FORGIVENESS_IDS",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: #44",
+  "contract": "owed: contracts thread (DebtForgiveness.test.ts holds the rule, but no name carries the id)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: a fact about the contract as built; the planner only lists the token ids the Account asks for"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgives-third-party"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgives-one-direction"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgives-past-head"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-blocked-lands"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "reverts-on-either-block"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-uncapped"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-repeat-ok"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-ignores-token"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-nothing-reverts"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgive-cap-off-by-one"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "forgives-cp-third"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "repeat-adjacent-only"
+  }
+ ]
+}

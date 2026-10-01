@@ -42,18 +42,18 @@ const stops = (gaps: readonly GapKey[]): Step<null> =>
 describe("a step judges itself", () => {
   test("a step with no stand-in is done, with one it is scaffolded, a stop is blocked", async () => {
     expect((await runStep(null, new Map(), ok([]), fake(false))).status).toBe("done");
-    expect((await runStep(null, new Map(), ok(["jBatchBuilder"]), fake(false))).status).toBe("scaffolded");
-    expect((await runStep(null, new Map(), stops(["swapTx"]), fake(false))).status).toBe("blocked");
+    expect((await runStep(null, new Map(), ok(["jLoop"]), fake(false))).status).toBe("scaffolded");
+    expect((await runStep(null, new Map(), stops(["entitySwapCommands"]), fake(false))).status).toBe("blocked");
   });
   test("a stand-in whose supplier has landed turns the step red", async () => {
-    const result = await runStep(null, new Map(), ok(["jBatchBuilder"]), fake(true));
+    const result = await runStep(null, new Map(), ok(["jLoop"]), fake(true));
     expect(result.status).toBe("failed");
     expect(result.problem).toMatch(/tripwire/);
   });
   test("a blocked step turns red only when nothing it waits on is missing any more", async () => {
-    const half = { ...fake(false), proofBody: { ...GAPS.proofBody, landed: () => true } };
-    expect((await runStep(null, new Map(), stops(["disputeWithClause", "proofBody"]), half)).status).toBe("blocked");
-    expect((await runStep(null, new Map(), stops(["disputeWithClause", "proofBody"]), fake(true))).status).toBe("failed");
+    const half = { ...fake(false), entitySwapCommands: { ...GAPS.entitySwapCommands, landed: () => true } };
+    expect((await runStep(null, new Map(), stops(["entitySwapCommands", "hubMatching"]), half)).status).toBe("blocked");
+    expect((await runStep(null, new Map(), stops(["entitySwapCommands", "hubMatching"]), fake(true))).status).toBe("failed");
   });
   test("a step whose predecessor did not finish is skipped, not run", async () => {
     const done = new Map([["fork", step("failed")]]);
@@ -68,17 +68,17 @@ describe("a step judges itself", () => {
 
 describe("report", () => {
   test("missing pieces come in the order the first step needs them, once each", () => {
-    const rows = gapsInMoneyOrder([step("done", ["jBatchBuilder"]), step("blocked", ["swapTx", "jBatchBuilder"])]);
-    expect(rows.map(([g]) => g.id)).toEqual(["j-batch-builder", "swap-tx"]);
+    const rows = gapsInMoneyOrder([step("done", ["jLoop"]), step("blocked", ["entitySwapCommands", "jLoop"])]);
+    expect(rows.map(([g]) => g.id)).toEqual(["j-loop", "entity-swap-commands"]);
     expect(rows[0]![1]).toEqual(["done", "blocked"]);
   });
   test("every gap names who is expected to supply it", () => {
     Object.values(GAPS).forEach((g) => { expect(g.supplier.length).toBeGreaterThan(10); expect(g.piece.length).toBeGreaterThan(30); });
   });
   test("the report states the exit code and lists the steps in order", () => {
-    const text = renderReport({ head: "abc", mode: "m", chainId: "1", block: "2", startedAt: "t", seconds: 1 }, [step("done"), step("blocked", ["swapTx"])]);
+    const text = renderReport({ head: "abc", mode: "m", chainId: "1", block: "2", startedAt: "t", seconds: 1 }, [step("done"), step("blocked", ["entitySwapCommands"])]);
     expect(text).toContain("Exit 1");
     expect(text.indexOf("S0")).toBeLessThan(text.indexOf("S1"));
-    expect(text).toContain("swap-tx");
+    expect(text).toContain("entity-swap-commands");
   });
 });
