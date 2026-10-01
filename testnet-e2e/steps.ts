@@ -15,12 +15,13 @@ import { accountMessageHash } from "../pure/chain/proof/payload.ts";
 import { keccakHex } from "../pure/kernel/encoding/bytes.ts";
 import { startAnvil, assertLoopback, scrubbedEnv, type Anvil } from "./lib/anvil.ts";
 import {
-  accountKeyOf, accountOnChain, advanceTime, asHex, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
+  accountKeyOf, accountOnChain, advanceTime, collateralOf, connect, hankoOf, heldBy, leftOf, must, partyOf, reserveOf, sendOps,
   unit, type Chain, type Manifest, type Party,
 } from "./lib/chain.ts";
 import { GAPS, REPO } from "./lib/gaps.ts";
 import { Blocked, type Step } from "./lib/runner.ts";
 import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
+import { opOf } from "../pure/host/ops.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
 import { JLoop } from "./lib/jloop.ts";
 import { Net } from "./lib/net.ts";
@@ -136,7 +137,7 @@ const deposits: Step<World> = {
       if (gained !== DEPOSIT * unit(chain)) throw new Error(`${p.name}: reserve rose by ${gained}, not ${DEPOSIT * unit(chain)}`);
       return [...lines, `${p.name}: externalTokenToReserve ${fmt(chain, gained)}, batch nonce ${sent.nonce}, gas ${sent.gasUsed}`];
     }, Promise.resolve([]));
-    return { checks, gaps: [] };
+    return { checks: [...checks, "each batch went through the J builder (queue, seal); the submit path around it (simulate on the fork, Hanko, send, read the events) is the harness's own"], gaps: ["hostShell"] };
   },
 };
 
@@ -162,6 +163,9 @@ const view = async (chain: Chain): Promise<View> => {
   const height = must(jHeight(BigInt(await chain.provider.getBlockNumber())), "height");
   return { clock: must(clockParams(2n, 4n, 100n), "clock params"), view: ownView(height, height) };
 };
+
+/** What the chain says that an Entity's action does not: the one transformer a reveal may name. */
+const chainWorld = (chain: Chain) => ({ transformer: chain.manifest.contracts.deltaTransformer.address });
 
 /** The JActions a node asked for since `from`: what its Runtime put into the WAL for the chain. */
 const askedSince = (net: Net, p: Party, from: number): readonly JAction[] => net.askedBy(eid(p)).slice(from);
@@ -209,10 +213,8 @@ const open: Step<World> = {
       if (asked.length !== 1 || action?._tag !== "deposit" || action.peer !== eid(peer) || action.token !== t || action.amount !== amount) {
         throw new Error(`${funder.name}'s deposit command did not ask the chain for exactly one deposit of ${amount} against ${peer.name}: ${JSON.stringify(asked, (_, x) => (typeof x === "bigint" ? x.toString() : x))}`);
       }
-      await sendOps(chain, funder, [{
-        _tag: "reserve_to_collateral",
-        funding: { tokenId: chain.tokenId, receivingEntity: funder.id, pairs: [{ entity: peer.id, amount: action.amount }] },
-      }], `fund ${funder.name}-${peer.name}`);
+      // The Host's op for the action (pure/host/ops.ts); the harness queues, simulates, signs and sends it (gap `host-shell`).
+      await sendOps(chain, funder, [must(opOf(eid(funder), action, chainWorld(chain)), "op of the deposit action")], `fund ${funder.name}-${peer.name}`);
       const side = net.account(eid(funder), eid(peer)).side;
       const base = expected.get(key) ?? ledgerOf(net.account(eid(funder), eid(peer)).state, t);
       const ledger = must(deposit(base, side, amount), "deposit rule");
@@ -233,7 +235,7 @@ const open: Step<World> = {
         `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`,
         "the Runtimes' ledgers hold collateral 0: nothing tells an Account about the chain's collateral, so the payments below run on credit",
       ],
-      gaps: ["jDepositFacts", "jActionOps", "jLoop", "hostShell", "perAccountSigning"],
+      gaps: ["jDepositFacts", "jLoop", "hostShell", "perAccountSigning"],
     };
   },
 };
@@ -335,11 +337,11 @@ const reveal: Step<World> = {
     const asked = askedSince(net, bob, sinceLock);
     const action = asked[0];
     if (asked.length !== 1 || action?._tag !== "reveal") throw new Error(`at view ${net.view()} bob should ask for exactly one reveal: ${JSON.stringify(asked.map((x) => x._tag))}`);
-    // The action becomes a revealSecrets op (gap `j-action-ops`) and the Depository's canonical transformer records the secret.
+    // The Host makes the revealSecrets op from the action (pure/host/ops.ts); the Depository's canonical transformer records the secret.
     const hash = ethers.keccak256(ethers.hexlify(action.secret));
     const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
     if ((await transformer.hashToTimestamp!(hash)) !== 0n) throw new Error("the secret was already revealed on chain before bob asked");
-    const sent = await sendOps(chain, bob, [{ _tag: "reveal_secret", reveal: { transformer: chain.manifest.contracts.deltaTransformer.address, secret: asHex(action.secret) } }], "bob reveals");
+    const sent = await sendOps(chain, bob, [must(opOf(b, action, chainWorld(chain)), "op of the reveal action")], "bob reveals");
     if (!sent.events.includes("SecretRevealed")) throw new Error(`no SecretRevealed in ${sent.events.join(", ")}`);
     const at = await transformer.hashToTimestamp!(hash);
     if (at === 0n) throw new Error("the transformer holds no reveal time for the secret after the batch");
@@ -355,7 +357,7 @@ const reveal: Step<World> = {
         `bob's reveal_secret batch (nonce ${sent.nonce}, gas ${sent.gasUsed}) emits SecretRevealed; the transformer holds the secret's hash from block time ${at}`,
         "after the resend timer hubY acks the resolve: the Account is at one head with no open clause",
       ],
-      gaps: ["jActionOps", "hostShell", "perAccountSigning"],
+      gaps: ["hostShell", "perAccountSigning"],
     };
   },
 };
