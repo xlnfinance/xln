@@ -173,7 +173,6 @@ describe("the real workflows", () => {
     expect(gateJobs(gate?.text ?? "").length).toBeGreaterThanOrEqual(4);
     expect(commands).toContain("bun test");
     expect(commands).toContain("bun rules/check.ts");
-    expect(commands).toContain("bun rules/check.ts --contracts-only");
     expect(commands).toContain("bash check.sh");
     expect(commands.some((command) => command.endsWith("node test.mjs"))).toBe(true);
   });

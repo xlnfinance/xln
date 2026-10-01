@@ -362,8 +362,11 @@ describe("the real tree", () => {
     const gateRows = register.filter((each) => each.id.startsWith("R-GATE-"));
     const killers = gateRows.flatMap((row) => row.killers.map((killer) => ({ row, name: killer.name })));
     expect(killers.length).toBeGreaterThan(20);
+    // A killer is found among the names of its own layer only (killerExists), so the other layers' names cannot change the verdict: leave them out, which is
+    // most of the work of each evaluation.
+    const layerNames = Object.fromEntries(LAYERS.map((layer) => [layer, names.filter((each) => each.layer === layer)]));
     const missing = killers.filter(({ row, name }) => {
-      const without = names.filter((each) => each.text !== name);
+      const without = [...new Set(row.killers.map((killer) => killer.layer))].flatMap((layer) => layerNames[layer] ?? []).filter((each) => each.text !== name);
       return !evaluate([row], without).problems.some((problem) => problem._tag === "KillerNotFound" && problem.id === row.id);
     });
     expect(missing.map(({ name }) => name)).toEqual([]);

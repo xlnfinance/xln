@@ -18,9 +18,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'promote/') }}
 
 jobs:
-  # The one gate: the same commands a contributor runs from pure/, in three parallel jobs. `one-gate` is the single
-  # result to require; it also holds the fork's contract job (contracts-fork: BrowserVM and deploy-gate tests). The
-  # Foundry suite joins the gate in `bun rules/check.ts` (PR 89), so gate-static sets Foundry and forge-std up.
+  # The one gate: the same commands a contributor runs from pure/, in parallel jobs. `one-gate` is the single
+  # result to require. The Foundry suite and the fork's BrowserVM and deploy-gate tests are parts of `bun rules/check.ts`, and
+  # that command runs each in a child process beside the quick parts, so gate-static sets Foundry and forge-std up and is the one
+  # job that runs them (a second job for them ran the same two parts again).
   # Bun is pinned to 1.4.0 in every job. pure/rules/ci/ci-drift.test.ts keeps each bun-version equal to the root
   # package.json's packageManager, and `bun rules/check.ts` refuses a Bun older than pure/package.json's engines.bun
   # (older Bun segfaults on Worker termination mid-run).
@@ -282,7 +283,7 @@ jobs:
         run: mkdir -p .spec-passed && echo ok > .spec-passed/quint
 
   # The Arrival spec: `node test.mjs` in spec/ runs every page and every planted bug, 167 cases. One case (J batch with deposit legs) takes
-  # about 85 minutes alone, so it is shard 0 by itself and shards 1 to 3 split the rest (spec/tools/shard.mjs). Memory is why the pool is two wide.
+  # about 85 minutes alone, so it is shard 0 by itself and shards 1 to 3 split the rest (spec/tools/shard.mjs). The pool is four wide, one case per core of the runner (a case takes up to about 1.5 GB).
   gate-arrival:
     name: One gate (arrival shard ${{ matrix.shard }})
     if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
@@ -327,7 +328,7 @@ jobs:
         if: steps.marker.outputs.cache-hit != 'true'
         working-directory: spec
         env:
-          TEST_JOBS: '2'
+          TEST_JOBS: '4'
         run: SHARD="${{ matrix.shard }}/4" node test.mjs
 
       - name: Record the pass
@@ -339,7 +340,7 @@ jobs:
   one-gate:
     name: One gate
     if: ${{ always() }}
-    needs: [gate-static, gate-tests, gate-seeds, contracts-fork, gate-quint, gate-arrival]
+    needs: [gate-static, gate-tests, gate-seeds, gate-quint, gate-arrival]
     runs-on: ubuntu-latest
     steps:
       - name: Every part passed
@@ -348,15 +349,13 @@ jobs:
           STATIC: ${{ needs.gate-static.result }}
           TESTS: ${{ needs.gate-tests.result }}
           SEEDS: ${{ needs.gate-seeds.result }}
-          FORK: ${{ needs.contracts-fork.result }}
           QUINT: ${{ needs.gate-quint.result }}
           ARRIVAL: ${{ needs.gate-arrival.result }}
         run: |
-          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS contracts-fork=$FORK quint=$QUINT arrival=$ARRIVAL"
+          echo "fast-lane=$FAST static=$STATIC tests=$TESTS seeds=$SEEDS quint=$QUINT arrival=$ARRIVAL"
           test "$STATIC" = success
           test "$TESTS" = success
           test "$SEEDS" = success || test "$FAST:$SEEDS" = true:skipped
-          test "$FORK" = success || test "$FAST:$FORK" = true:skipped
           test "$QUINT" = success || test "$FAST:$QUINT" = true:skipped
           test "$ARRIVAL" = success || test "$FAST:$ARRIVAL" = true:skipped
 
@@ -407,72 +406,6 @@ jobs:
 
       - name: Run full contract tests
         run: bun run test:contracts:full
-
-  contracts-fork:
-    name: Contracts (fork) BrowserVM
-    if: ${{ github.event_name != 'pull_request' || github.base_ref != 'development' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Setup Node 22
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22.13.0'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.0
-
-      - name: Cache dependencies
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock', '**/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # deploy-dry-run.test.ts starts anvil.
-      - name: Setup Foundry
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
-        with:
-          version: v1.7.1
-
-      # Hardhat downloads the solc named in contracts/hardhat.config.ts when it compiles.
-      - name: Cache solc
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/hardhat-nodejs
-          key: ${{ runner.os }}-solc-${{ hashFiles('contracts/hardhat.config.ts') }}
-
-      - name: Cache forge-std
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: contracts/lib/forge-std
-          key: ${{ runner.os }}-forge-std-${{ hashFiles('contracts/scripts/setup-forge-std.sh') }}
-
-      # The contracts/ part of the gate, the same command as locally: `bun rules/check.ts --contracts-only` rebuilds the fork (the
-      # committed typechain-types are its ABI and bytecode: a source change without a rebuild is red) and runs every BrowserVM and
-      # deploy-gate test, one file per process (several BrowserVM stacks in one process exhaust memory). Not a loop written here again:
-      # a test run only in this workflow went red on GitHub alone once.
-      - name: Run the contracts/ part of the gate
-        run: |
-          cd pure
-          bun install --frozen-lockfile
-          bun rules/check.ts --contracts-only
-
-      # The Foundry suite (test/foundry) counts as gated, so it runs here through the gate's own forge part (pin script for forge-std,
-      # then forge test, with the skip and test-count checks), the same command as locally: `bun rules/check.ts --forge-only`.
-      - name: Run the Foundry suite through the gate
-        run: |
-          cd contracts && bun run forge:setup
-          cd ../pure && bun install --frozen-lockfile && bun rules/check.ts --forge-only
 
   build-xln:
     name: Runtime Checks
