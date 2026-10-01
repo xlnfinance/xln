@@ -31,6 +31,27 @@ describe("the readers", () => {
     expect(gateJobs("jobs:\n  one-gate:\n    needs: [a, b-c,  d]\n")).toEqual(["a", "b-c", "d"]);
   });
 
+  test("R-GATE-CI-STEPS needs is read in its three forms: a flow list, a single job, a block list", () => {
+    const base = workflow(GATE);
+    expect(gateJobs(base)).toEqual(["gate"]);
+    expect(gateJobs(base.replace("needs: [gate]", "needs: gate"))).toEqual(["gate"]);
+    expect(gateJobs(base.replace("    needs: [gate]", "    needs:\n      - gate\n      - side"))).toEqual(["gate", "side"]);
+    expect(gateJobs(base.replace("    needs: [gate]", "    needs:\n    - gate"))).toEqual(["gate"]);
+    expect(gateJobs(base.replace("    needs: [gate]", "    needs:\n      - gate\n    steps: []\n    other:\n      - side"))).toEqual(["gate"]);
+  });
+
+  test("R-GATE-CI-STEPS a block-list needs does not silence the checks: a loop in a gate job is still named", () => {
+    const text = withoutComments(workflow([...GATE, "      - run: npm run lint"]).replace("    needs: [gate]", "    needs:\n      - gate"));
+    expect(stepProblems("ci.yml", text)).toEqual([expect.stringContaining("CI_DRIFT_UNGATED_STEP ci.yml job gate runs `npm run lint`")]);
+  });
+
+  test("R-GATE-CI-STEPS a one-gate whose needs cannot be read, or lists none, is a problem of its own and not a pass", () => {
+    ["needs: ${{ fromJson(vars.GATES) }}", "needs: []", "needs:", "needs: [gate"].forEach((needs) => {
+      const text = withoutComments(workflow(GATE).replace("needs: [gate]", needs));
+      expect(stepProblems("ci.yml", text), needs).toEqual([expect.stringContaining("CI_DRIFT_GATE_JOB ci.yml one-gate has no needs this check can read")]);
+    });
+  });
+
   test("R-GATE-CI-STEPS a run is one line, or a block read to its dedent; && and ; split it, a continuation joins it, other keys are not read", () => {
     const job = [
       "  gate:",

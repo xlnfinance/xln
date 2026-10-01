@@ -46,6 +46,24 @@ describe("planted skips are problems", () => {
     expect(problems(workflow(["  pull_request:", "    branches: [main]", "    paths: [a]"]))).toHaveLength(2);
   });
 
+  test("R-GATE-CI-TRIGGERS flow-style forms are read: a filter inside pull_request: { ... }, or inside on: { ... }, is named like a block one", () => {
+    expect(problems(workflow(["  pull_request: { paths: ['pure/**'] }"]))).toEqual([expect.stringContaining("filtered by paths")]);
+    expect(problems(workflow(["  pull_request: { branches: [main], types: [opened] }"]))).toHaveLength(2);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: { branches-ignore: [wip] }, push: {} }"))).toEqual([expect.stringContaining("filtered by branches-ignore")]);
+    expect(problems(workflow([]).replace("on:", "on: { push: { paths: [a] }, pull_request: { paths-ignore: [b] } }"))).toEqual([expect.stringContaining("filtered by paths-ignore")]);
+  });
+
+  test("R-GATE-CI-TRIGGERS flow-style forms without a filter agree, and a flow value that cannot be read for filters is a problem of its own", () => {
+    expect(problems(workflow(["  pull_request: {}"]))).toEqual([]);
+    expect(problems(workflow(["  pull_request: null"]))).toEqual([]);
+    expect(problems(workflow(["  pull_request: ~"]))).toEqual([]);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: null, push: {} }"))).toEqual([]);
+    expect(problems(workflow([]).replace("on:", "on: { push: {}, pull_request: {} }"))).toEqual([]);
+    expect(problems(workflow(["  pull_request: ${{ vars.TRIGGER }}"]))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE ci.yml writes pull_request as")]);
+    expect(problems(workflow(["  pull_request: &anchor"]))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE")]);
+    expect(problems(workflow([]).replace("on:", "on: { pull_request: anchored, push: {} }"))).toEqual([expect.stringContaining("CI_TRIGGER_UNREADABLE")]);
+  });
+
   test("R-GATE-CI-TRIGGERS a filter that sits under another event, after pull_request, is not read as pull_request's", () => {
     expect(problems(workflow(["  pull_request:", "  push:", "    branches: [main]", "    paths: [a]"]))).toEqual([]);
   });

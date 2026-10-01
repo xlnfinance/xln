@@ -56,10 +56,29 @@ export const jobBlocks = (workflow: string): Readonly<Record<string, string>> =>
   return Object.fromEntries(starts.map((start, at) => [JOB_START.exec(lines[start]!)![1]!, lines.slice(start, starts[at + 1] ?? lines.length).join("\n")]));
 };
 
-// The jobs the `one-gate` job needs: `needs: [a, b]`. A workflow with no `one-gate` job has none.
-export const gateJobs = (workflow: string): readonly string[] => {
-  const needs = /\bneeds:\s*\[([^\]]*)\]/.exec(jobBlocks(workflow)["one-gate"] ?? "")?.[1];
-  return needs === undefined ? [] : needs.split(",").map((job) => job.trim()).filter((job) => job !== "");
+// The jobs a job's `needs:` lists, in any of the three forms YAML has for it: `needs: [a, b]`, `needs: a`, or a block list. Undefined when
+// the job has no `needs` or writes it in a form this cannot read.
+const needsOf = (job: string): readonly string[] | undefined => {
+  const lines = job.split("\n");
+  const flow = /^ {4}needs:\s*\[([^\]]*)\]\s*$/m.exec(job)?.[1];
+  if (flow !== undefined) return flow.split(",").map((name) => name.trim()).filter((name) => name !== "");
+  const scalar = /^ {4}needs:\s*([\w-]+)\s*$/m.exec(job)?.[1];
+  if (scalar !== undefined) return [scalar];
+  const at = lines.findIndex((line) => /^ {4}needs:\s*$/.test(line));
+  if (at < 0) return undefined;
+  const items = lines.slice(at + 1).map((line) => /^ {4,6}-\s+([\w-]+)\s*$/.exec(line)?.[1]);
+  const end = items.findIndex((item) => item === undefined);
+  const listed = (end < 0 ? items : items.slice(0, end)).flatMap((item) => (item === undefined ? [] : [item]));
+  return listed.length === 0 ? undefined : listed;
+};
+
+// The jobs the `one-gate` job needs. A workflow with no `one-gate` job has none.
+export const gateJobs = (workflow: string): readonly string[] => needsOf(jobBlocks(workflow)["one-gate"] ?? "") ?? [];
+
+// A `one-gate` whose needs this cannot read is a problem of its own: every check that starts from its jobs would silently see none.
+export const gateNeedsUnreadable = (workflow: string): boolean => {
+  const job = jobBlocks(workflow)["one-gate"];
+  return job !== undefined && (needsOf(job)?.length ?? 0) === 0;
 };
 
 // Every simple command of every `run:` of a job: a one-line `run:` or a `run: |` block, backslash continuations joined,
@@ -88,6 +107,7 @@ const isOneOf = (command: string, patterns: readonly RegExp[]): boolean => patte
 
 // Problems of one workflow (comments already removed): a gate job command that is neither gate nor set-up, and a gate command no gate job runs.
 export const stepProblems = (name: string, workflow: string): readonly string[] => {
+  if (gateNeedsUnreadable(workflow)) return [`CI_DRIFT_GATE_JOB ${name} one-gate has no needs this check can read: write them as \`needs: [a, b]\`, \`needs: a\` or a block list`];
   const names = gateJobs(workflow);
   if (names.length === 0) return [];
   const blocks = jobBlocks(workflow);

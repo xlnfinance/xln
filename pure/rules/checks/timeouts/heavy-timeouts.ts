@@ -7,7 +7,7 @@
 // Heavy is read from the test's own code, never from its time: it starts a bun, forge, ast-grep, quint or uvx process
 // (every test that runs the gate on a tree does), opens og's world or lane (openWorld, createLane, bootChain, walk), calls
 // an explorer (a function named explore...), in the object form of a spawn or as a command line too, or lists or copies a
-// whole tree of files (existingFiles, cpSync, copyFileSync, a recursive readdirSync: a scratch copy of pure/ is about 3,800
+// whole tree of files (existingFiles, cpSync, copyFileSync, a recursive readdirSync, a Glob scan, a `cp` spawn: a scratch copy of pure/ is about 3,800
 // files and needs seconds on a loaded machine though it starts no process). A test, or a
 // beforeAll, beforeEach, afterAll or afterEach hook (hooks have the same 5 s default), that does this directly or through
 // a helper of its own file is heavy. What this cannot see: a heavy call that comes through a helper of another file or
@@ -20,9 +20,9 @@ import { existingFiles } from "../folder-width.ts";
 export type Offender = Readonly<{ line: number; title: string; why: string }>;
 
 const SUBPROCESS = /\b(?:Bun\.spawn(?:Sync)?|spawnSync|execFileSync|execSync|execFile|exec)\s*\(\s*(?:\{[^}]*?\bcmd:\s*)?\[?\s*(?:process\.execPath|"(?:bun|forge|ast-grep|quint|uvx)\b)/;
-const COMMAND_WORD = /^["'](?:bun|forge|ast-grep|quint|uvx)(?:["']$|\s)/;
+const COMMAND_WORD = /^["'](?:bun|forge|ast-grep|quint|uvx|cp)(?:["']$|\s)/;
 const WORLD = /(?<![.\w$])(?:openWorld|createLane|bootChain|walk|explore\w*)\s*\(/;
-const TREE = /(?<![.\w$])existingFiles\s*\(|\b(?:cpSync|copyFileSync)\s*\(|\breaddirSync\s*\([^)]*\brecursive\s*:\s*true/;
+const TREE = /(?<![.\w$])(?:existingFiles|globSync)\s*\(|\b(?:cpSync|copyFileSync)\s*\(|\breaddirSync\s*\([^;]{0,300}?\brecursive\s*:\s*true|\bBun\.Glob\b|\b(?:Bun\.spawn(?:Sync)?|spawnSync|execFileSync|execFile)\s*\(\s*(?:\{[^}]*?\bcmd:\s*)?\[?\s*"cp"/;
 const CALL = /(?<![.\w$])(?:(?:test|it)(?:\.only)?|(beforeAll|beforeEach|afterAll|afterEach))\s*\(/g;
 const STATEMENT_NAME = /^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([\w$]+)/;
 

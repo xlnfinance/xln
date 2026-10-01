@@ -48,6 +48,12 @@ describe("what is heavy", () => {
     const copy = 'const copyListed = (from, to) => existingFiles(from).forEach((file) => copyFileSync(from + file, to + file));\n';
     expect(offenders(`${copy}test("copies", () => { copyListed(a, b); });\n`)).toEqual([`2 "copies"`]);
     expect(offenders(`${copy}test("copies", () => { copyListed(a, b); }, 30_000);\n`)).toEqual([]);
+    ["readdirSync(join(a, b), { recursive: true })", "readdirSync(\n    join(a, b),\n    { recursive: true },\n  )", "globSync(\"**/*.ts\")", "new Bun.Glob(\"**\").scanSync(root)", "Bun.spawnSync([\"cp\", \"-r\", a, b])", "execFileSync(\"cp\", [\"-R\", a, b])", "Bun.spawnSync({ cmd: [\"cp\", \"-a\", a, b] })"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([`1 "t"`]),
+    );
+    ["readdirSync(join(a, b))", "readdirSync(a); const x = { recursive: true }", "Bun.spawnSync([\"cat\", a])", "Bun.spawnSync([\"cpx\", a])", "o.globSync(a)"].forEach((call) =>
+      expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]),
+    );
     ["readdirSync(root)", "readdirSync(root, { withFileTypes: true })", "readdirSync(root, { recursive: false })", "o.existingFiles(x)", "unlinkSync(a)", "copyFile(a, b)"].forEach((call) =>
       expect(offenders(`test("t", () => { ${call}; });\n`)).toEqual([]),
     );
