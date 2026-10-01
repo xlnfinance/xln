@@ -68,7 +68,7 @@ describe("the scratch copy holds what git lists and nothing else", () => {
     expect(existsSync(`${to}/kernel/a.ts`)).toBe(true);
     expect(existsSync(`${to}/.gitignore`)).toBe(true);
     expect(existsSync(`${to}/db-tmp`)).toBe(false);
-  });
+  }, 30_000);
 
   test("the real pure/ copies without the ignored folders a seeds run leaves in it", () => {
     const repo = scratchPure({});

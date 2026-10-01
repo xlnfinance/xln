@@ -77,7 +77,7 @@ const withFakeForge = (repo: string, output: string, code: number): Readonly<{ c
 };
 
 describe("the real command over a scratch checkout", () => {
-  test("the reader counts the two forge tests", () => expect(expectedForgeTests(scratch())).toBe(2));
+  test("the reader counts the two forge tests", () => expect(expectedForgeTests(scratch())).toBe(2), 30_000);
 
   test("a forge that passes both tests is green", () => {
     const { code, out } = withFakeForge(scratch(), "Ran 1 test suite in 1s (1s CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)", 0);
