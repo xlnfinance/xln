@@ -43,11 +43,11 @@ export const GAPS = {
     supplier: "the cut thread: settlement fold and epoch rebase, after multi-hop",
     landed: () => mentions("entity", /rebased|rebaseLedger/) || mentions("account", /rebased|rebaseLedger/),
   },
-  htlcRoute: {
-    id: "htlc-route", kind: "scaffold", layer: "Entity",
-    piece: "HTLC forwarding: on an incoming lock, open the next hop with a shorter deadline; on a resolve, pass the secret upstream; hold duty while a signed proof carries the lock (R-SIGNED-IS-LIVE). The harness decides each hop's lock and deadline and gives each resolve to the payee, hop by hop.",
-    supplier: "the cut thread's multi-hop slice (the coordinator gave it that owner); hold duty is the A4b Runtime slice after #97",
-    landed: () => has("runtime/htlc/route.ts") || has("entity/route.ts"),
+  htlcRouteSource: {
+    id: "htlc-route-source", kind: "scaffold", layer: "Entity",
+    piece: "The Entities forward an HTLC by themselves (pure/entity/paybook, R-HTLC-FORWARD), but each node is told its entry (which peer the lock came from, which it goes to) by a command before the lock is sent: the lock carries no route, so a payer's Runtime alone cannot start a payment across hubs. Also owed: a next hop that never answers (expiry, the on-chain reveal by a hub that learned the secret) and entries that outlive a payment.",
+    supplier: "the builder thread: a source route on the lock, outside the proof body (coordinator decides the format)",
+    landed: () => mentions("account", /route: readonly EntityId\[\]/),
   },
   entitySwapCommands: {
     id: "entity-swap-commands", kind: "missing", layer: "Entity",
