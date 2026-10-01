@@ -146,6 +146,19 @@ describe("owed cells and killers are open work, and go red once they are already
     expect(layerCounts(evaluation.reports).find((count) => count.layer === "arrival")).toEqual({ layer: "arrival", held: 0, owed: 1, required: 1, na: 0, unstated: 0 });
   });
 
+  test("stale is printed with its hits, its reason is trimmed, its problem names the layer, and a killer may sit in a stale layer", () => {
+    const staleCell = { ...row("J5").cells, arrival: { _tag: "stale", why: "old version" } } as const;
+    const carried = evaluate([row("J5", { cells: staleCell })], [carrier, killerName, name("property", "J5 holds", "arrival")]);
+    expect(renderText(carried)).toContain("stale 1");
+    expect(renderMarkdown(carried)).toContain("| stale 1 |");
+    expect(parseCell("x", "stale:  old version  ")).toEqual({ ok: true, value: { _tag: "stale", why: "old version" } });
+    const arrivalKiller = row("J5", { cells: staleCell, killers: [{ kind: "test", layer: "contract", name: "the killer test" }, { kind: "bug", layer: "arrival", name: "no-h1" }] });
+    expect(evaluate([arrivalKiller], [carrier, killerName, name("property", "J5 holds", "arrival"), name("bug", "no-h1", "arrival")]).problems).toEqual([]);
+    const absent = evaluate([row("J5", { cells: staleCell })], [carrier, killerName]).problems;
+    expect(absent).toEqual([{ _tag: "StaleButAbsent", id: "J5", layer: "arrival", why: "old version" }]);
+    expect(absent.map(describeProblem).join()).toContain("restore the name that carried it");
+  });
+
   test("red: a stale cell no name carries is an owed cell, and still counts as required", () => {
     const staleCell = { ...row("J5").cells, arrival: { _tag: "stale", why: "old version" } } as const;
     const evaluation = evaluate([row("J5", { cells: staleCell })], []);

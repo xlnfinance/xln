@@ -109,6 +109,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "a held cell may go stale when its rule is revised, and a stale cell may not fall back to owed; owed may become stale"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "stale is printed with its hits, its reason is trimmed, its problem names the layer, and a killer may sit in a stale layer"
   }
  ]
 }

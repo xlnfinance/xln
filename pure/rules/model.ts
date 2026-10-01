@@ -79,7 +79,7 @@ export const describeProblem = (problem: Problem): string => {
     case "OwedButPresent":
       return `${problem.id}: ${problem.layer} already carries the id; promote "owed: ${problem.by}" to "hold"`;
     case "StaleButAbsent":
-      return `${problem.id}: the ${problem.layer} cell says "stale: ${problem.why}", but no ${problem.layer} name carries the id; a layer with nothing named is "owed: <who brings it>"`;
+      return `${problem.id}: the ${problem.layer} cell says "stale: ${problem.why}", but no ${problem.layer} name carries the id; restore the name that carried it, or retire the row (a stale cell may not fall back to owed)`;
     case "UnstatedCell":
       return `${problem.id}: the ${problem.layer} cell is not stated; say "hold", "owed: <who brings it>", "stale: <what is out of date>" or "n/a: <why this layer has no part in the rule>"`;
     case "NotApplicableButPresent":
