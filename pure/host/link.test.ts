@@ -114,7 +114,7 @@ const commandAt = (c: Chaos, w: World, step: number, name: Name): EntityInput =>
 
 const payFrame = (parent: typeof GENESIS, attempt: number): Msg<AccountTx> => {
   const txs: readonly AccountTx[] = [{ _tag: "pay", token: GOLD, amount: 1n }];
-  const frame: Frame<AccountTx> = { author: "left", parent, attempt, slot: 2, epoch: 0n, txs };
+  const frame: Frame<AccountTx> = { author: "left", parent, attempt, slot: 2, epoch: 0n, firstNonce: 2n, txs };
   return { _tag: "frame", frame };
 };
 

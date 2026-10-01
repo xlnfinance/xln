@@ -79,9 +79,15 @@ const factsOf = (w: Work, peer: EntityId): ChainFacts => w.state.chain.get(peer)
 const withFacts = (w: Work, peer: EntityId, facts: ChainFacts): Work =>
   ({ ...w, state: { ...w.state, chain: mapSet(w.state.chain, peer, facts) } });
 
-/** A frame is co-signed when the peer's frame is taken or my own is acked: one more proof of the epoch. */
-const cosigned = (outcome: Outcome<PeerFault>): boolean =>
-  outcome._tag === "accepted" || outcome._tag === "accepted_over_own" || outcome._tag === "committed_own";
+/**
+ * A frame is co-signed when the peer's frame is taken or my own is acked: one more proof of the epoch. A frame of mine
+ * acked after my view of the chain moved on is committed but was sealed under the old epoch: it is no proof of the new
+ * one, and counts for nothing (R-FRAME-EPOCH). A peer's frame is taken only under my own view. (Within an epoch the
+ * stored nonce, and so the first nonce, does not change: a report of the same epoch is ignored.)
+ */
+const cosigned = (outcome: Outcome<PeerFault>, own: EntityReplica["pending"], facts: ChainFacts): boolean =>
+  outcome._tag === "accepted" || outcome._tag === "accepted_over_own"
+  || (outcome._tag === "committed_own" && own?.frame.epoch === facts.epoch);
 
 const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
@@ -90,7 +96,8 @@ const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work =>
   const refused = refusal(heard.outcome);
   const heardBy = sending(withReplica(w, a.from, heard.replica), a.from, heard.sent);
   const waiting = waitingForJ(heardBy, a.from, view, heard);
-  const counted = cosigned(heard.outcome) ? withFacts(waiting, a.from, framed(factsOf(waiting, a.from))) : waiting;
+  const facts = factsOf(waiting, a.from);
+  const counted = cosigned(heard.outcome, account.pending, facts) ? withFacts(waiting, a.from, framed(facts)) : waiting;
   return refused === undefined ? counted : noting(counted, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 

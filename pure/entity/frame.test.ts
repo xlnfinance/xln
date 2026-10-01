@@ -116,7 +116,7 @@ describe("entity/frame arrivals", () => {
     expect(framed.notices).toEqual([]);
     const elsewhere = `0x${"ab".repeat(32)}` as FrameHash;
     const txs: readonly AccountTx[] = [{ _tag: "set_credit", token: GOLD, limit: 1n }];
-    const frame = { author: "right", parent: elsewhere, attempt: 0, slot: 1, epoch: 0n, txs } as const;
+    const frame = { author: "right", parent: elsewhere, attempt: 0, slot: 1, epoch: 0n, firstNonce: 2n, txs } as const;
     const behind = run(framed.state, peerMessage(BOB, { _tag: "frame", frame }));
     expect(behind.notices.map((n) => n._tag)).toEqual(["message_refused"]);
     expect(behind.outputs).toEqual([]);
@@ -244,7 +244,8 @@ describe("entity/frame review A: order inside a phase, and what the owner is tol
   type Side = "left" | "right";
   const frameOf = (author: Side, parent: FrameHash, attempt: number, txs: readonly AccountTx[]): EntityInput =>
     peerMessage(BOB, {
-      _tag: "frame", frame: { author, parent, attempt, slot: author === "left" ? 2 : 1, epoch: 0n, txs },
+      _tag: "frame",
+      frame: { author, parent, attempt, slot: author === "left" ? 2 : 1, epoch: 0n, firstNonce: 2n, txs },
     });
 
   test("R-NOTICE every refusal of a peer's message reaches the owner with its peer and its outcome", () => {

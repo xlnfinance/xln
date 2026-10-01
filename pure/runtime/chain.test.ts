@@ -306,9 +306,10 @@ describe("runtime/chain review A: a replay sees every field of a C2R and of a se
   });
 });
 
-describe("runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch", () => {
+describe("runtime/chain R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce", () => {
   const heardByAlice = feed(opened, ALICE, epochOf(BOB, 1n, 5n));
   const proposed = settle(feed(heardByAlice, ALICE, credit(BOB, 100n)));
+  const due = (c: Cluster, id: EntityId, peer: EntityId): Cluster => feed(c, id, { _tag: "resend_due", peer });
   const replicaOf = (c: Cluster, id: EntityId) =>
     hostOf(c, id).entities.get(id)?.accounts.get(id === ALICE ? BOB : ALICE) ?? expect.unreachable("no Account");
 
@@ -317,15 +318,26 @@ describe("runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that s
     expect(replicaOf(proposed, BOB).height).toBe(0);
   });
 
-  test("Alice takes the frame back with its tx kept: nothing is dropped and nobody is told it failed", () => {
-    expect(replicaOf(proposed, ALICE).pending).toBeUndefined();
-    expect(replicaOf(proposed, ALICE).mempool).toHaveLength(1);
+  test("Alice parks the frame: it stays pending, its tx is neither dropped nor told to anyone", () => {
+    expect(replicaOf(proposed, ALICE).pending).toBeDefined();
+    expect(replicaOf(proposed, ALICE).mempool).toEqual([]);
     expect(replicaOf(proposed, ALICE).refused).toEqual([]);
     expect(noticesOf(proposed, ALICE)).toEqual([]);
   });
 
-  test("once Bob sees the epoch move too, Alice's retry commits on both sides under the Account's own context", () => {
-    const landed = settle(rise(feed(proposed, BOB, epochOf(ALICE, 1n, 5n)), ALICE, 111n));
+  test("a peer that lags for ninety J heights costs one signed proof: nothing is dropped, nothing is capped", () => {
+    const lagged = Array.from({ length: 90 }, (_, i) => 111n + BigInt(i))
+      .reduce((c, height) => settle(due(rise(c, ALICE, height), ALICE, BOB)), proposed);
+    expect(replicaOf(lagged, ALICE).unsuperseded).toHaveLength(1);
+    expect(replicaOf(lagged, ALICE).pending).toBeDefined();
+    expect(noticesOf(lagged, ALICE)).toEqual([]);
+    const landed = settle(due(feed(lagged, BOB, epochOf(ALICE, 1n, 5n)), ALICE, BOB));
+    const [alice, bob] = [replicaOf(landed, ALICE), replicaOf(landed, BOB)];
+    expect([alice.height, bob.height, alice.head === bob.head, alice.unsuperseded]).toEqual([1, 1, true, []]);
+  });
+
+  test("once Bob sees the epoch move too, the same frame sent again commits under the Account's own context", () => {
+    const landed = settle(due(feed(proposed, BOB, epochOf(ALICE, 1n, 5n)), ALICE, BOB));
     const [alice, bob] = [replicaOf(landed, ALICE), replicaOf(landed, BOB)];
     expect([alice.height, bob.height, alice.head === bob.head]).toEqual([1, 1, true]);
     const key = accountKey(ALICE, BOB);
@@ -333,5 +345,24 @@ describe("runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that s
     const context = { ...signing, accountKey: key.value, ondeltaEpoch: 1n, firstNonce: 7n };
     const digest = frameDigest(context, alice.used, "left", alice.state);
     expect(digest.ok && digest.value).toBe(alice.head);
+  });
+
+  test("the same epoch with another stored nonce: Bob refuses, Alice waits, no head splits", () => {
+    const split = feed(feed(opened, ALICE, epochOf(BOB, 1n, 5n)), BOB, epochOf(ALICE, 1n, 6n));
+    const sent = settle(due(settle(feed(split, ALICE, credit(BOB, 100n))), ALICE, BOB));
+    expect([replicaOf(sent, BOB).height, replicaOf(sent, BOB).head]).toEqual([0, replicaOf(opened, BOB).head]);
+    expect([replicaOf(sent, ALICE).height, replicaOf(sent, ALICE).pending === undefined]).toEqual([0, false]);
+    expect([noticesOf(sent, ALICE), noticesOf(sent, BOB)]).toEqual([[], []]);
+  });
+
+  test("a frame of mine acked after my view moved on is committed but is no proof of the new epoch", () => {
+    const learned = feed(feed(opened, BOB, credit(ALICE, 100n)), BOB, epochOf(ALICE, 1n, 5n));
+    const done = settle(learned);
+    expect([replicaOf(done, ALICE).height, replicaOf(done, BOB).height]).toEqual([1, 1]);
+    expect(replicaOf(done, ALICE).head).toBe(replicaOf(done, BOB).head);
+    expect(factsAt(done, BOB, ALICE)).toMatchObject({ epoch: 1n, stored: 5n, frames: 0n });
+    expect(counterActions(feed(done, BOB, disputeBy(ALICE, 1n, "left")))).toEqual([]);
+    const later = framed(feed(done, ALICE, epochOf(BOB, 1n, 5n)), 150n);
+    expect(factsAt(later, BOB, ALICE)).toMatchObject({ epoch: 1n, stored: 5n, frames: 1n });
   });
 });

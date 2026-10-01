@@ -21,7 +21,7 @@ const BOB = entityOf(2);
 const payFrame = (author: "left" | "right", amount: bigint): Msg<AccountTx> => {
   const slot = author === "left" ? 2 : 1;
   const frame: Frame<AccountTx> = {
-    author, parent: GENESIS, attempt: 0, slot, epoch: 0n, txs: [{ _tag: "pay", token: GOLD, amount }],
+    author, parent: GENESIS, attempt: 0, slot, epoch: 0n, firstNonce: 2n, txs: [{ _tag: "pay", token: GOLD, amount }],
   };
   return { _tag: "frame", frame };
 };

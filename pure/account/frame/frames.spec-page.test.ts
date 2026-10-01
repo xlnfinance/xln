@@ -48,6 +48,7 @@ const name = (f: Frame<Tx>): FrameHash => `${JSON.stringify(f.txs)}<${f.parent}`
 /** The page's world: a tx is valid unless a conflicting predecessor is committed; a frame names its whole history. */
 const rulesFor = (page: Page): Rules<Tx, History, Fault> => ({
   epoch: 0n,
+  firstNonce: 2n,
   apply: (before, _author, tx): Result<History, Fault> => {
     const pair = page.conflicts.find(([earlier, later]) => later === tx && before.includes(earlier));
     return pair === undefined ? ok([...before, tx]) : err({ _tag: "conflict", tx, predecessor: pair[0] });
@@ -87,8 +88,9 @@ const start = (page: Page): World => ({
 type Rule = Readonly<{ name: string; enabled: (w: World) => boolean; step: (w: World) => World }>;
 
 /** The page has no nonce slots or epochs: a slot, a floor and an epoch are not part of a world's identity. */
+const OMITTED = ["slot", "floor", "epoch", "firstNonce"];
 const bare = (x: unknown): string =>
-  JSON.stringify(x, (key, value) => (key === "slot" || key === "floor" || key === "epoch" ? undefined : value));
+  JSON.stringify(x, (key, value) => (OMITTED.includes(key) ? undefined : value));
 const msgKey = (m: M): string => bare(m);
 const replicaKey = (r: R) => [r.head, r.mempool, r.pending?.frame ?? null, r.refused.map((x) => x.tx)];
 /** The page's world identity: what the page keeps (a refusal's fault is derived, so it is not part of the identity). */
@@ -180,7 +182,8 @@ const byzFrame = (page: Page, side: Side): Rule => ({
   step: (w) => {
     const slot = w[other(side)].used + (side === "left" ? 2 : 1);
     const forged: M = {
-      _tag: "frame", frame: { author: side, parent: w[side].head, attempt: 0, slot, epoch: 0n, txs: w[side].mempool },
+      _tag: "frame",
+      frame: { author: side, parent: w[side].head, attempt: 0, slot, epoch: 0n, firstNonce: 2n, txs: w[side].mempool },
     };
     return { ...enqueue(w, other(side), [forged]), byz: w.byz + 1 };
   },

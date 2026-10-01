@@ -214,7 +214,8 @@ describe("runtime/tick review A: stamps, and what a replay compares", () => {
     const frame = (amount: bigint) => messageId({
       _tag: "frame",
       frame: {
-        author: "left", parent: h1, attempt: 0, slot: 2, epoch: 0n, txs: [{ _tag: "pay", token: GOLD, amount }],
+        author: "left", parent: h1, attempt: 0, slot: 2, epoch: 0n, firstNonce: 2n,
+        txs: [{ _tag: "pay", token: GOLD, amount }],
       },
     });
     expect(frame(1n)).not.toBe(frame(2n));

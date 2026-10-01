@@ -1,7 +1,7 @@
 {
  "id": "R-FRAME-EPOCH",
- "statement": "A frame names the epoch its proof is signed in, and a replica judges only frames of the epoch it signs in itself: a frame of another epoch is refused with wrong_epoch before any tx is looked at, the refuser notes the frame's slot and names its own floor and mark, and the proposer takes the frame back with every tx kept and tries again at a higher attempt and slot, without counting against MAX_ATTEMPTS. So the two sides never seal one frame under two epochs: a Host that hears the chain move on before its peer does costs a retry, not a head the two sides disagree on.",
- "source": "cut thread, from the per-Account signing context (R-FRAME-SIGNATURE-NAMES-ACCOUNT): an ack that carries a head sealed under another epoch is ignored, so the proposer would wait for ever",
+ "statement": "A frame names the epoch and the first nonce its proof is signed under, and a replica judges only frames of the pair it signs under itself: a frame of another pair is refused with wrong_epoch before any tx is looked at, and the refuser notes the frame's slot and names its own floor and mark. The proposer parks the frame as it is (every tx kept, the same slot, no new proof signed) and sends the same bytes again when the Host asks, so a peer that lags costs a resend, never a proof per try; a proposer whose own view moved since it sealed takes the frame back and seals it anew. A frame of mine acked after my view of the chain moved on is committed but is no proof of the new epoch: it is not counted. So the two sides never seal one frame under two contexts: a Host that hears the chain move on before its peer does costs a wait, not a head the two sides disagree on.",
+ "source": "cut thread, from the per-Account signing context (R-FRAME-SIGNATURE-NAMES-ACCOUNT); Review A of PR 135 (blockers B1, B2, B3)",
  "layers": {
   "arrival": "owed: spec thread (a frame carries an epoch; wrong_epoch is a retry that judges nothing)",
   "quint": "owed: spec thread, new Quint branch",
@@ -13,12 +13,12 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "account/frame R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch"
+   "name": "account/frame R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce"
   },
   {
    "kind": "test",
    "layer": "ts",
-   "name": "runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch"
+   "name": "runtime/chain R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce"
   }
  ]
 }

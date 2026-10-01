@@ -23,6 +23,7 @@ export const entityRules = (judge: Judge, signing: SigningContext, { self, froze
   const base = accountRules(judge, signing);
   return {
     epoch: base.epoch,
+    firstNonce: base.firstNonce,
     apply: (state, author, tx) => (frozen && author !== self ? err({ _tag: FROZEN }) : base.apply(state, author, tx)),
     name: base.name,
     seal: base.seal,

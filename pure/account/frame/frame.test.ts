@@ -38,7 +38,8 @@ const credited = (() => {
 })();
 
 /** The frame every name test starts from: Left's first frame on the genesis head, in the fixture's epoch. */
-const FIRST = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2, epoch: signing.ondeltaEpoch };
+const FIRST = { author: "left" as const, parent: GENESIS, attempt: 0, slot: 2,
+  epoch: signing.ondeltaEpoch, firstNonce: signing.firstNonce };
 
 describe("account/frame the round", () => {
   test("a proposed frame commits on the peer, then on the proposer when the ack comes back", () => {
@@ -238,7 +239,8 @@ describe("account/frame a peer cannot halt a replica", () => {
     const fault = "not_expired";
     if (kind === 1) return { _tag: "refusal", hash: parent, index: pick(i, 6, 3), fault, mark: 0, floor: 0 };
     const slot = target.used + 1 + pick(i, 8, 3);
-    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), slot, epoch: signing.ondeltaEpoch, txs } };
+    const { ondeltaEpoch: epoch, firstNonce } = signing;
+    return { _tag: "frame", frame: { author, parent, attempt: pick(i, 7, 3), slot, epoch, firstNonce, txs } };
   };
 
   test("R-X1 whatever a peer sends is answered with a replica, and a refusal changes nothing", () => {
