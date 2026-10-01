@@ -228,7 +228,7 @@ describe("R-J2 the verifier against the deployed EntityProvider", () => {
     accepted.forEach(({ n, i, r }) => {
       expect([n.name, verdicts[i]!.success, verdicts[i]!.entityId]).toEqual([n.name, true, r.value.entityId]);
     });
-  });
+  }, 30_000);
 
   test("what is refused here and accepted by the contract is only bytes the canonical spelling does not allow", () => {
     const stricter = suite.flatMap((n, i) => {
@@ -236,7 +236,7 @@ describe("R-J2 the verifier against the deployed EntityProvider", () => {
       return !r.ok && verdicts[i]!.success ? [[n.name, JSON.stringify(r.error)]] : [];
     });
     expect(stricter.map(([, fault]) => fault)).toEqual(stricter.map(() => '{"_tag":"non_canonical"}'));
-  });
+  }, 30_000);
 
   /** The rule each case is built to reach: the verdict the contract gives and the first refusal named here. */
   const reached: Readonly<Record<string, string | null>> = {

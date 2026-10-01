@@ -2689,7 +2689,7 @@
   },
   {
    "id": "R-GATE-TEST-TIMEOUTS",
-   "statement": "A heavy test (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout as the third argument, so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
+   "statement": "A heavy test or hook (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout (the third argument of a test, the second of a hook), so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
    "source": "coordinator 10-01 06:52 (two threads hit Bun's 5 s default on the rules tests and the chaos explorers and worked around it by hand with a flag)",
    "layers": {
     "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
@@ -2703,6 +2703,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-TEST-TIMEOUTS a test that starts a bun, forge, ast-grep, quint or uvx process, or process.execPath, is heavy"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too"
     },
     {
      "kind": "test",
@@ -2743,6 +2748,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none"
     },
     {
      "kind": "test",
