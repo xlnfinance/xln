@@ -192,11 +192,11 @@
     },
     {
       "id": "expire-before-deadline",
-      "why": "a lock expires before its deadline",
+      "why": "a lock expires before its deadline (a scenario test pins it: the simulator does not reach a lock, a drifted clock pair and an expiry together in 1500 traces, as for expire-at-deadline)",
       "file": "account_core.qnt",
       "old": "else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
       "new": "else if (false) Refused(\"not_expired\")",
-      "killedBy": "invariant:authority"
+      "killedBy": "test:htlcExpireAndCancelTest"
     },
     {
       "id": "resolve-at-deadline-refused",
@@ -330,7 +330,7 @@
       "id": "accept-proof-nonce-leap",
       "why": "N1: the receiver takes a frame whose proof nonce leaps ahead (burns the counter).",
       "file": "account_core.qnt",
-      "old": "    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP,               // and not a leap that burns the counter\n",
+      "old": "    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt    // and not a leap that burns the counter: only the refusals of its own proposer count (A16)\n",
       "new": "",
       "killedBy": "test:leapingProofNonceIsRefusedTest"
     },
@@ -362,8 +362,8 @@
       "id": "future-stamp-refused",
       "why": "the dropped stamp-window rule: a frame stamped ahead of the receiver's clock is refused, so a payer that stamps a day ahead blocks the payee's held reveal (#57)",
       "file": "account_core.qnt",
-      "old": "    f.height == r.height + 1,\n    f.nonce > r.pnonce, ",
-      "new": "    f.height == r.height + 1,\n    f.ts <= now + DRIFT,\n    f.nonce > r.pnonce, ",
+      "old": "    inLine(r, f, self),\n    match replay(r.tip, f.txs, f.author, now) {",
+      "new": "    inLine(r, f, self),\n    f.ts <= now + DRIFT,\n    match replay(r.tip, f.txs, f.author, now) {",
       "killedBy": "test:futureStampedFrameDoesNotBlockTheRevealTest"
     },
     {
@@ -421,6 +421,134 @@
       "old": "        else if (LOCK_SLOTS.exists(i => b.locks.get(i).on and b.locks.get(i).hashlock == l.hashlock)) Refused(\"lock_exists\")   // R-ONE-LOCK-PER-HASH: one open clause per hashlock, whoever the payer\n",
       "new": "",
       "killedBy": "test:oneLockPerHashlockTest"
+    },
+    {
+      "id": "proposer-ignores-refusal",
+      "why": "R-FRAME-REFUSAL: the proposer drops the refusal on the floor, so its pending frame stays and the Account wedges (a stuck Left frame blocks Right too)",
+      "file": "account.qnt",
+      "old": "replica' = replica.set(s, onRefusal(r, ref, frames.get(ref.fid))),",
+      "new": "replica' = replica,",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
+    },
+    {
+      "id": "receiver-commits-a-refused-frame",
+      "why": "R-FRAME-REFUSAL / A4a: the receiver keeps no mark, so when its view moves the same frame it refused applies and is held: it commits a frame the proposer dropped, and the replicas fork",
+      "file": "account_core.qnt",
+      "old": "r: { ...r, mark: Declined({ attempt: f.attempt, index: ff.index, fault: ff.fault }) },",
+      "new": "r: r,",
+      "killedBy": "test:refusedFrameIsNeverTakenWhileTheHeadLastsTest"
+    },
+    {
+      "id": "refused-frame-judged-afresh-at-same-attempt",
+      "why": "the mark covers only attempts below it: a frame at the very attempt it refused is judged again, and applies once the view has moved",
+      "file": "account_core.qnt",
+      "old": "else if (f.attempt == m.attempt) {",
+      "new": "else if (false) {",
+      "killedBy": "test:refusedFrameIsNeverTakenWhileTheHeadLastsTest"
+    },
+    {
+      "id": "stale-attempt-silent",
+      "why": "a frame below the mark gets no answer, so the proposer that sent it stays Proposed and unanswered (every refusal must be answered)",
+      "file": "account_core.qnt",
+      "old": "if (f.attempt < m.attempt) { ...keep, refused: true, say: refusalFor(fid, 0, \"stale_attempt\", m.attempt) }",
+      "new": "if (f.attempt < m.attempt) { ...keep, refused: true }",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "mark-kept-across-head-moves",
+      "why": "the mark survives a commit: the first frame of the next head, at attempt 0, is refused for ever by a mark of the last one",
+      "file": "account_core.qnt",
+      "old": "status: Open, attempt: 0, mark: NoMark,",
+      "new": "status: Open, attempt: 0,",
+      "killedBy": "test:markIsForgottenWhenTheHeadMovesTest"
+    },
+    {
+      "id": "retryable-fault-drops-the-tx",
+      "why": "a fault that passes with the peer's view drops the named tx with notice instead of sending every tx again",
+      "file": "account_core.qnt",
+      "old": "pure def retryable(fault: str): bool = fault == \"not_expired\" or fault == \"deadline_too_far\"",
+      "new": "pure def retryable(fault: str): bool = false",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
+    },
+    {
+      "id": "refusal-for-committed-frame-rolls-back",
+      "why": "a refusal counts for whatever the proposer has in flight, not only for the frame it names: a late refusal for a committed frame rolls the next frame back",
+      "file": "account_core.qnt",
+      "old": "if (not(isProposed(r) and statusFid(r) == ref.fid and named)) r",
+      "new": "if (not(isProposed(r) and named)) r",
+      "killedBy": "test:refusalForACommittedFrameIsIgnoredTest"
+    },
+    {
+      "id": "accept-own-frame",
+      "why": "C: a replica takes a frame whose author is itself",
+      "file": "account_core.qnt",
+      "old": "    f.author != self,\n",
+      "new": "",
+      "killedBy": "test:ownFrameIsNeverTakenTest"
+    },
+    {
+      "id": "retry-budget-unbounded",
+      "why": "a retryable fault is retried for ever: the budget (MAX_ATTEMPT) never runs out, so the tx is never dropped with notice",
+      "file": "account_core.qnt",
+      "old": "(retryable(ref.fault) and r.attempt < MAX_ATTEMPT)",
+      "new": "retryable(ref.fault)",
+      "killedBy": "test:retryBudgetIsSpentThenTheTxIsDroppedTest"
+    },
+    {
+      "id": "refusal-drops-the-first-tx",
+      "why": "the refusal's index is not read: the proposer drops the first tx of the frame, not the one the peer named",
+      "file": "account_core.qnt",
+      "old": "f.txs.slice(0, ref.index).concat(f.txs.slice(ref.index + 1, f.txs.length())).concat(r.mempool), refused: r.refused.append(f.txs[ref.index]) }",
+      "new": "f.txs.slice(1, f.txs.length()).concat(r.mempool), refused: r.refused.append(f.txs[0]) }",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "refusal-drops-without-notice",
+      "why": "R-NOTICE: the tx a refusal drops is not put on the refused list",
+      "file": "account_core.qnt",
+      "old": "refused: r.refused.append(f.txs[ref.index]) }",
+      "new": "refused: r.refused }",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "attempt-ignores-the-mark",
+      "why": "the next attempt is the proposer's own count plus one, not above the mark the refusal carries: a proposer behind the receiver's mark stays below it",
+      "file": "account_core.qnt",
+      "old": "attempt: imax(r.attempt, ref.mark) + 1 }",
+      "new": "attempt: r.attempt + 1 }",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "stale-attempt-drops-the-tx",
+      "why": "a stale-attempt answer is handled like a non-retryable fault: it costs the tx it names, though it says nothing about any tx",
+      "file": "account_core.qnt",
+      "old": "val again = ref.fault == \"stale_attempt\" or (",
+      "new": "val again = (",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "right-rolls-back-when-it-refuses",
+      "why": "a Right that refuses Left's frame in a collision gives its own frame up as well, though Left ignores it: nobody has a frame in flight",
+      "file": "account_core.qnt",
+      "old": "else { ...o, r: { ...r, mark: o.r.mark } }",
+      "new": "else { ...o }",
+      "killedBy": "test:rightKeepsItsFrameWhenItRefusesLeftsTest"
+    },
+    {
+      "id": "retry-reuses-the-nonce",
+      "why": "A16: a retry after a refusal signs its proof at the nonce of the abandoned frame, a second proof under one (signer, nonce, side) when a tx was dropped",
+      "file": "account_core.qnt",
+      "old": "nonce: r.pnonce + 1 + gap + r.attempt,",
+      "new": "nonce: r.pnonce + 1 + gap,",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "nonce-window-ignores-the-attempt",
+      "why": "A16: the receiver's nonce window is not widened by the frame's attempt, so a retry at its own next nonce is refused as a leap",
+      "file": "account_core.qnt",
+      "old": "f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt ",
+      "new": "f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP ",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
     }
   ],
   "testSamples": 50

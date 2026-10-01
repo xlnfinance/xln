@@ -76,6 +76,7 @@ module account_test {
       room(locked, Left) == 0,                                                       // the lock holds all of Left's room
       applyTx(locked, payL1, Left, 1) == Refused("insufficient_capacity"),
       applyTx(locked, lockL, Left, 1) == Refused("lock_exists"),                    // a slot holds one clause
+      applyTx(locked, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(2), deadline: 3 }), Left, 1) == Refused("lock_exists"),   // also for another hashlock (R-ONE-LOCK-PER-HASH alone would not refuse it)
       rcpan(locked)
     }
   })
@@ -251,17 +252,243 @@ module account_test {
     .expect(and { replica.get(Left).height == 1, replica.get(Right).height == 1, replica.get(Left).tip == replica.get(Right).tip, both_signed, safe })
 
   // R-CLOCK and F2 of the first review: the payer's clock is a tick ahead of the payee's (the drift the model allows). The payer's
-  // expiry is refused by the payee until the payee's own clock is past the deadline and the reserve, then accepted: no early expiry, and no deadlock.
-  run expiryWaitsForTheReceiversOwnClockTest = atHeight2
+  // expiry is refused by the payee until the payee's own clock is past the deadline and the reserve: no early expiry. The refusal names the frame, the
+  // index of the first tx it refused and the fault, and the receiver remembers it as its mark (R-FRAME-REFUSAL). What the proposer does with it: the tests below.
+  action lateExpiry = atHeight2
     .then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left))
     .then(enqueueTx(Left, HtlcExpire({ id: 1 })))                 // Left's clock is 4 > 2 + reserve 1
     .then(propose(Left))
     .then(deliverProposal(Right, 3))                              // Right's clock is 3, not past 3: refused
-    .expect(and { refusals == 1, replica.get(Right).tip.locks.get(1).on, isProposed(replica.get(Left)), safe })
+  val expireNack: Refusal = refusalFor(3, 0, "not_expired", 0)
+
+  run expiryWaitsForTheReceiversOwnClockTest = lateExpiry
+    .expect(and {
+      refusals == 1, replica.get(Right).tip.locks.get(1).on, isProposed(replica.get(Left)),
+      nacks == Set(expireNack), replica.get(Right).mark == Declined({ attempt: 0, index: 0, fault: "not_expired" }), authority, safe
+    })
+
+  // ---- R-FRAME-REFUSAL: the proposer's side, the attempt number and the receiver's mark --------------------------------------------
+
+  // (a) A deadline passes while the frame is in flight. The refusal is for the frame Left has pending and unacked: Left rolls it back, the fault is retryable, so
+  // the tx goes back to the mempool with no notice and the next attempt is 1. Right's view moves (the clock moves between propose and receive), Left proposes again, the
+  // new frame (attempt 1, above Right's mark) is judged afresh and accepted: the Account makes progress and both sides commit. A proposer that ignores the refusal
+  // keeps its frame for ever, and nothing answers (mutant `proposer-ignores-refusal`: the propose below is not enabled while a frame is pending).
+  run refusedFrameIsRetriedAtTheNextAttemptTest = lateExpiry
+    .then(deliverRefusal(Left, expireNack))
+    .expect(and {
+      isOpen(replica.get(Left)), replica.get(Left).attempt == 1, replica.get(Left).mempool == [HtlcExpire({ id: 1 })],
+      replica.get(Left).refused == [], no_tx_lost, safe
+    })
     .then(tick(Right))
-    .then(deliverProposal(Right, 3))                              // the same frame, Right's clock is 4: accepted
+    .then(propose(Left))
+    .expect(and { frames.get(4).attempt == 1, frames.get(4).txs == [HtlcExpire({ id: 1 })], isProposed(replica.get(Left)) })
+    .then(deliverProposal(Right, 4))
+    .then(ackReceived(Right)).then(deliverAck(Left, 4))
+    .expect(and {
+      replica.get(Left).height == 3, replica.get(Right).height == 3, replica.get(Left).tip == replica.get(Right).tip,
+      not(replica.get(Right).tip.locks.get(1).on), replica.get(Left).refused == [], replica.get(Left).attempt == 0, replica.get(Right).mark == NoMark,
+      authority, no_tx_lost, safe
+    })
+
+  // (b) A fault that does not pass drops the named tx WITH NOTICE and the rest of the frame goes out again. Right's view is a tick ahead (R = 1, L = 0): Left's
+  // lock for deadline 1 is not after it (deadline_past, at index 1, behind a credit tx that applies). Left drops the lock (refused, the payer is released),
+  // keeps the credit tx, and the next frame (attempt 1) commits.
+  run nonRetryableFaultDropsTheNamedTxTest = init
+    .then(enqueueTx(Right, SetCredit({ by: Right, limit: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+    .then(tick(Right))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(enqueueTx(Left, HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })))
+    .then(propose(Left))
+    .then(deliverProposal(Right, 2))
+    .expect(and { nacks == Set(refusalFor(2, 1, "deadline_past", 0)), isOpen(replica.get(Right)), refusals == 1, isProposed(replica.get(Left)) })
+    .then(deliverRefusal(Left, refusalFor(2, 1, "deadline_past", 0)))
+    .expect(and {
+      replica.get(Left).refused == [HtlcLock({ id: 1, payer: Left, amount: 1, hashlock: hashOf(1), deadline: 1 })],
+      replica.get(Left).mempool == [SetCredit({ by: Left, limit: 1 })], replica.get(Left).attempt == 1, isOpen(replica.get(Left)), no_tx_lost, safe
+    })
+    .then(propose(Left))
+    .then(deliverProposal(Right, 3))
     .then(ackReceived(Right)).then(deliverAck(Left, 3))
-    .expect(and { not(replica.get(Right).tip.locks.get(1).on), replica.get(Left).height == 3, authority, safe })
+    .expect(and {
+      replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip,
+      replica.get(Left).tip.limitRight == 1, replica.get(Left).refused.length() == 1, replica.get(Left).submitted == 2, replica.get(Left).done == 1, no_tx_lost, safe
+    })
+
+  // (c) A refusal for a frame already committed is ignored: here from a peer that acked frame 1 and then refused it (a Byzantine receiver; an honest one never
+  // does both). Left, Open, is unchanged; and with its next frame in flight it still keeps that frame (a refusal counts only for the pending frame).
+  run refusalForACommittedFrameIsIgnoredTest = init
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(propose(Left))
+    .then(turnByzantine(Right)).then(byzAck(Right, true))
+    .then(deliverAck(Left, 1))
+    .then(byzNack(Right, 1, 0, "not_expired", 0))
+    .then(deliverRefusal(Left, refusalFor(1, 0, "not_expired", 0)))
+    .expect(and {
+      replica.get(Left).height == 1, isOpen(replica.get(Left)), replica.get(Left).mempool == [], replica.get(Left).refused == [], replica.get(Left).attempt == 0, no_tx_lost, safe
+    })
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 2 })))
+    .then(propose(Left))
+    .then(deliverRefusal(Left, refusalFor(1, 0, "not_expired", 0)))
+    .expect(and {
+      isProposed(replica.get(Left)), statusFid(replica.get(Left)) == 2, replica.get(Left).mempool == [], replica.get(Left).attempt == 0, replica.get(Left).refused == [], no_tx_lost, safe
+    })
+
+  // A Byzantine receiver names any fault, index and mark. It can make the honest proposer drop the tx it names, with notice, and count its attempt up past the mark;
+  // never lose a tx, never commit it.
+  run byzantineRefusalOnlyCostsTheNamedTxTest = init
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 2 })))
+    .then(propose(Left))
+    .then(turnByzantine(Right)).then(byzNack(Right, 1, 1, "bad_state", 3))
+    .then(deliverRefusal(Left, refusalFor(1, 1, "bad_state", 3)))
+    .then(propose(Left))
+    .expect(and {
+      frames.get(2).attempt == 4, frames.get(2).txs == [SetCredit({ by: Left, limit: 1 })], replica.get(Left).refused == [SetCredit({ by: Left, limit: 2 })],
+      replica.get(Left).height == 0, no_tx_lost, safe
+    })
+
+  // Right locks 1 towards Left (deadline 2) at height 1: the base of the two tests that need room under MAX_HEIGHT for a second frame.
+  action lockedByRight = init
+    .then(enqueueTx(Right, HtlcLock({ id: 1, payer: Right, amount: 1, hashlock: hashOf(1), deadline: 2 })))
+    .then(propose(Right)).then(deliverProposal(Left, 1)).then(ackReceived(Left)).then(deliverAck(Right, 1))
+
+  // The same refusal while the receiver has its own frame out (a collision): Right keeps its frame in flight, remembers the mark, and answers Left. Left (clock 4,
+  // Right's 3) rolls its expiry back on the refusal; Right's frame, delivered to the now Open Left, commits on both sides; Left's expiry then goes out again.
+  run rightKeepsItsFrameWhenItRefusesLeftsTest = lockedByRight
+    .then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left))
+    .then(enqueueTx(Left, HtlcExpire({ id: 1 })))
+    .then(enqueueTx(Right, Pay({ from: Right, amount: 1 })))
+    .then(propose(Left)).then(propose(Right))
+    .then(deliverProposal(Right, 2))                              // Right has frame 3 out: it refuses Left's expiry (its clock is 3) and keeps its own
+    .expect(and { isProposed(replica.get(Right)), statusFid(replica.get(Right)) == 3, nacks == Set(refusalFor(2, 0, "not_expired", 0)), replica.get(Right).mempool == [], rollbacks == 0 })
+    .then(deliverProposal(Left, 3))                               // Left keeps its own frame (Left wins a collision)
+    .then(deliverRefusal(Left, refusalFor(2, 0, "not_expired", 0)))
+    .then(deliverProposal(Left, 3))                               // Left is Open now and takes Right's frame
+    .then(ackReceived(Left)).then(deliverAck(Right, 3))
+    .expect(and { replica.get(Left).height == 2, replica.get(Right).height == 2, replica.get(Left).tip == replica.get(Right).tip, replica.get(Left).mempool == [HtlcExpire({ id: 1 })], no_tx_lost, safe })
+    .then(tick(Right))
+    .then(propose(Left)).then(deliverProposal(Right, 4)).then(ackReceived(Right)).then(deliverAck(Left, 4))
+    .expect(and { replica.get(Left).height == 3, replica.get(Right).height == 3, not(replica.get(Right).tip.locks.get(1).on), refusals == 1, no_tx_lost, safe })
+
+  // Left sends the expiry at attempts 0, 1 and 2 and Right (its view still behind) refuses each; the third refusal finds the retry budget spent (MAX_ATTEMPT = 2), so the
+  // expiry is dropped with notice. This is the schedule of the fork the attempt number and the mark are there to prevent.
+  action budgetSpent = lateExpiry
+    .then(deliverRefusal(Left, expireNack))
+    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverRefusal(Left, refusalFor(4, 0, "not_expired", 1)))
+    .then(propose(Left)).then(deliverProposal(Right, 5)).then(deliverRefusal(Left, refusalFor(5, 0, "not_expired", 2)))
+
+  run retryBudgetIsSpentThenTheTxIsDroppedTest = budgetSpent
+    .expect(and {
+      replica.get(Left).refused == [HtlcExpire({ id: 1 })], replica.get(Left).mempool == [], isOpen(replica.get(Left)), replica.get(Left).attempt == 3,
+      frames.get(3).attempt == 0, frames.get(4).attempt == 1, frames.get(5).attempt == 2, replica.get(Right).mark == Declined({ attempt: 2, index: 0, fault: "not_expired" }),
+      no_tx_lost, safe
+    })
+
+  // (d) The fork schedule (A4a). Right refused the expiry, Left dropped it, and now Right's view of J moves past the deadline and the reserve, so that the SAME frame
+  // would apply. It must not be taken: the frame sits at the mark and is refused again (the answer repeats); the older ones are below it (stale). Right stays at
+  // height 2 with the lock, as Left does. Without the mark Right would hold frame 5, ack it, and commit an expiry that Left dropped: the replicas would fork.
+  run refusedFrameIsNeverTakenWhileTheHeadLastsTest = budgetSpent
+    .then(tick(Right))
+    .then(deliverProposal(Right, 5))
+    .expect(and {
+      isOpen(replica.get(Right)), replica.get(Right).height == 2, replica.get(Right).tip.locks.get(1).on, clock.get(Right) == 4,
+      nacks.contains(refusalFor(5, 0, "not_expired", 2)), refusals == 4, no_bad_accept, no_orphan, safe
+    })
+    .then(deliverProposal(Right, 3)).then(deliverProposal(Right, 4))
+    .expect(and {
+      isOpen(replica.get(Right)), replica.get(Right).height == 2, nacks.contains(refusalFor(3, 0, "stale_attempt", 2)), nacks.contains(refusalFor(4, 0, "stale_attempt", 2)),
+      replica.get(Left).height == 2, replica.get(Left).tip == replica.get(Right).tip, no_bad_accept, no_orphan, safe
+    })
+    .then(deliverRefusal(Left, refusalFor(3, 0, "stale_attempt", 2)))        // the answer reaches Left, which has nothing pending: ignored
+    .expect(and { replica.get(Left).refused == [HtlcExpire({ id: 1 })], replica.get(Left).mempool == [], isOpen(replica.get(Left)), no_tx_lost })
+
+  // (e) A frame below the mark is answered, with the mark (stale_attempt): the proposer moves its attempt to max(own, mark) + 1, keeps every tx (no notice) and the
+  // retry costs none. Left restarted behind (`forgetAttempt`: the attempt counter went back to 0 while Right still remembers the mark 1); its next frame goes out at
+  // attempt 2 and commits.
+  action forgetAttempt(s: Side): bool = all {
+    replica' = replica.set(s, { ...replica.get(s), attempt: 0 }),
+    frames' = frames, nextFid' = nextFid, proposals' = proposals, acks' = acks, nacks' = nacks, signed' = signed, clock' = clock, firstCommit' = firstCommit,
+    diverged' = diverged, equivocated' = equivocated, rollbacks' = rollbacks, refusals' = refusals, badAccept' = badAccept, badCommit' = badCommit, byz' = byz
+  }
+
+  run staleAttemptIsAnsweredWithTheMarkTest = lateExpiry
+    .then(deliverRefusal(Left, expireNack))
+    .then(propose(Left)).then(deliverProposal(Right, 4)).then(deliverRefusal(Left, refusalFor(4, 0, "not_expired", 1)))
+    .then(forgetAttempt(Left))
+    .then(propose(Left))
+    .expect(frames.get(5).attempt == 0)
+    .then(deliverProposal(Right, 5))
+    .expect(and { nacks.contains(refusalFor(5, 0, "stale_attempt", 1)), replica.get(Right).mark == Declined({ attempt: 1, index: 0, fault: "not_expired" }), isOpen(replica.get(Right)) })
+    .then(deliverRefusal(Left, refusalFor(5, 0, "stale_attempt", 1)))
+    .expect(and {
+      replica.get(Left).attempt == 2, replica.get(Left).mempool == [HtlcExpire({ id: 1 })], replica.get(Left).refused == [], isOpen(replica.get(Left)), no_tx_lost, safe
+    })
+    .then(tick(Right))
+    .then(propose(Left)).then(deliverProposal(Right, 6)).then(ackReceived(Right)).then(deliverAck(Left, 6))
+    .expect(and { frames.get(6).attempt == 2, replica.get(Left).height == 3, replica.get(Right).height == 3, replica.get(Left).tip == replica.get(Right).tip, no_tx_lost, safe })
+
+  // (f) The mark is forgotten when the head moves. Left refused Right's expiry (mark 0, Left's clock is behind), then Left's own frame commits on both sides (the head
+  // moves); Right's expiry, sent again at attempt 0 (its own count restarted with the head), is judged afresh and accepted. A receiver that kept the mark would
+  // refuse it for ever (mutant `mark-kept-across-head-moves`).
+  run markIsForgottenWhenTheHeadMovesTest = lockedByRight
+    .then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right)).then(tick(Left)).then(tick(Right))
+    .then(enqueueTx(Right, HtlcExpire({ id: 1 })))                // Right's clock is 4, Left's 3
+    .then(propose(Right))
+    .then(deliverProposal(Left, 2))
+    .expect(replica.get(Left).mark == Declined({ attempt: 0, index: 0, fault: "not_expired" }))
+    .then(deliverRefusal(Right, refusalFor(2, 0, "not_expired", 0)))
+    .then(enqueueTx(Left, SetCredit({ by: Left, limit: 1 })))
+    .then(propose(Left)).then(deliverProposal(Right, 3)).then(ackReceived(Right)).then(deliverAck(Left, 3))
+    .expect(and {
+      replica.get(Left).mark == NoMark, replica.get(Right).attempt == 0, replica.get(Left).height == 2, replica.get(Right).height == 2,
+      replica.get(Right).mempool == [HtlcExpire({ id: 1 })], safe
+    })
+    .then(tick(Left))
+    .then(propose(Right))
+    .then(deliverProposal(Left, 4)).then(ackReceived(Left)).then(deliverAck(Right, 4))
+    .expect(and { frames.get(4).attempt == 0, replica.get(Left).height == 3, replica.get(Right).height == 3, not(replica.get(Left).tip.locks.get(1).on), no_tx_lost, safe })
+
+  // The proposer's rule as a function: what it does with a refusal, by case.
+  run refusalHandlingTest = init.expect({
+    val a = SetCredit({ by: Left, limit: 1 })
+    val b = SetCredit({ by: Left, limit: 2 })
+    val c = SetCredit({ by: Left, limit: 3 })
+    val x = Pay({ from: Left, amount: 1 })
+    val f = { ...NO_FRAME, txs: [a, b, c] }
+    val pend = { ...EMPTY_REPLICA, status: Proposed(1), attempt: 1, mempool: [x] }
+    val retried = onRefusal(pend, refusalFor(1, 1, "not_expired", 1), f)
+    val spent = onRefusal({ ...pend, attempt: MAX_ATTEMPT }, refusalFor(1, 1, "not_expired", MAX_ATTEMPT), f)
+    val dropped = onRefusal(pend, refusalFor(1, 1, "deadline_past", 1), f)
+    val stale = onRefusal({ ...pend, attempt: MAX_ATTEMPT + 1 }, refusalFor(1, 0, "stale_attempt", 0), f)
+    and {
+      retried.mempool == [a, b, c, x], retried.refused == [], retried.attempt == 2, isOpen(retried),                  // every tx back, ahead of the mempool; no notice
+      spent.mempool == [a, c, x], spent.refused == [b], spent.attempt == MAX_ATTEMPT + 1,                              // the budget is spent: the named tx is dropped with notice
+      dropped.mempool == [a, c, x], dropped.refused == [b], dropped.attempt == 2,
+      stale.mempool == [a, b, c, x], stale.refused == [], stale.attempt == MAX_ATTEMPT + 2,                            // max(own, mark) + 1: the mark is below, so its own count decides
+      onRefusal(pend, refusalFor(1, 3, "bad_state", 0), f) == pend,                                                    // an index that names no tx of the frame: ignored
+      onRefusal(pend, refusalFor(1, -1, "bad_state", 0), f) == pend,
+      onRefusal(pend, refusalFor(2, 0, "not_expired", 0), f) == pend,                                                  // not the frame in flight
+      onRefusal({ ...pend, status: Open }, refusalFor(1, 0, "not_expired", 0), f) == { ...pend, status: Open }          // nothing in flight (committed, or rolled back already)
+    }
+  })
+
+  // A frame authored by this very replica is never taken, whatever it says (the frame is the next one and replays): `inLine` states it, a delivery never offers one.
+  run ownFrameIsNeverTakenTest = init.expect({
+    val f = { ...NO_FRAME, height: 1, nonce: 1, author: Left, txs: [SetCredit({ by: Left, limit: 1 })], after: { ...GENESIS, limitRight: 1 } }
+    and {
+      acceptable(EMPTY_REPLICA, 0, f, Right),
+      not(acceptable(EMPTY_REPLICA, 0, f, Left)),
+      isOpen(onPropose(EMPTY_REPLICA, 0, Left, 1, f, NO_FRAME).r)
+    }
+  })
+
+  // A frame that is not next in line is refused without an answer and leaves no mark (nothing honest sends one); the receiver's mark is only about frames it judged.
+  run frameNotInLineLeavesNoMarkTest = init.expect({
+    val f = { ...NO_FRAME, height: 2, nonce: 1, author: Left, txs: [HtlcExpire({ id: 1 })], after: GENESIS }
+    val o = onPropose(EMPTY_REPLICA, 0, Right, 1, f, NO_FRAME)
+    and { o.refused, o.say == NO_REFUSAL, o.r == EMPTY_REPLICA }
+  })
 
   // The Byzantine peer acks with a signature over a different proof: the honest proposer does not commit on it.
   run ackOverAnotherProofIsIgnoredTest = init

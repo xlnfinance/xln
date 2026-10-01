@@ -22,10 +22,14 @@ module account_core {
   // (settle.qnt `FIRST_GAP`: a Right-authored proof at stored + 1 only ties the implicit proof of the epoch, chain.qnt `implicitProof`), and the
   // epoch's own counter is gapless after it. That first nonce is read from the chain when an epoch opens, never derived from the Account's own frames.
   pure val MAX_NONCE_GAP = 0
-  pure val MAX_NONCE = MAX_HEIGHT * (1 + MAX_NONCE_GAP)
+  // R-FRAME-REFUSAL and N1 (A16): the one exception to "nothing skips the nonce". A proposer whose frame was refused signed a proof for it; a retry that
+  // dropped a tx has another proof, and a second proof under one (signer, nonce, side) is the equivocation P4b forbids. So the frame at attempt `a` is at
+  // nonce pnonce + 1 + a: every abandoned attempt keeps its own nonce, and the receiver's window is widened by the frame's own attempt and by nothing else.
+  pure val MAX_NONCE = MAX_HEIGHT * (1 + MAX_NONCE_GAP + MAX_FRAMES + MAX_ATTEMPT + 2)
   pure val MAX_LOCK_HORIZON = 4  // policy parameter (coordinator, N2: 7 days by default, never below the 24 h async window): a lock's deadline is at most this far after the frame that opens it, at admission and at forward (room for a two-hop chain)
   pure val LOCK_SLOTS = Set(1, 2) // open clauses per Account (the contract's bound is 32, see contracts-review.md)
   pure val SECRETS = Set(1, 2)   // the secrets that exist; a hashlock is hashOf(secret)
+  pure val MAX_ATTEMPT = 2       // R-FRAME-REFUSAL: a retryable refusal sends the frame's txs back for another attempt at most this many times per head (stands for 8 in the code); then the named tx is dropped with notice
 
   // ---------------------------------------------------------------------------------------------------------
   // Domain model
@@ -60,7 +64,9 @@ module account_core {
 
   // `prev` (the hash of the parent frame on the wire) is left out: a receiver replays `txs` on its own tip and compares
   // with `after`, which catches every fork a parent hash would (QUESTIONS.md Q-A6).
-  type Frame = { height: int, parent: int, nonce: int, ts: int, author: Side, txs: List[Tx], after: Body }   // parent: the id of the frame this one extends (0 = genesis), the wire's parent hash [R-PARENT]; ts: the proposer's view when it built the frame; no decision reads it [R-CLOCK]
+  // parent: the id of the frame this one extends (0 = genesis), the wire's parent hash [R-PARENT]; ts: the proposer's view when it built the frame; no decision reads it [R-CLOCK];
+  // attempt: the refusals its proposer has handled on this head, part of the frame's content: a retry of a refused frame is a different frame [R-FRAME-REFUSAL]
+  type Frame = { height: int, parent: int, nonce: int, ts: int, author: Side, txs: List[Tx], after: Body, attempt: int }
 
   // Frames live in one arena and are named by their id, the way the wire names them by hash. A message is a frame id:
   // a proposal goes to the author's peer, an ack goes to the author.
@@ -74,6 +80,14 @@ module account_core {
   // the frame it was made for, so it is stored as that frame's id (0 = no signature).
   type SigKey = (Side, int, bool)
 
+  // R-FRAME-REFUSAL: the receiver's memory of what it refused on this head, ONE mark per head: the highest attempt it refused, with the first
+  // refused tx's index and the fault. Forgotten whenever the head moves. A frame at or below the mark is not judged again.
+  type Mark = | NoMark | Declined({ attempt: int, index: int, fault: str })
+
+  // The answer to a frame the receiver cannot take: it names the frame (the wire's hash), the index of the first tx it refused and a fault tag, and carries the
+  // mark. A stale attempt is answered with fault `stale_attempt`, index 0 and the mark that outranks it.
+  type Refusal = { fid: int, index: int, fault: str, mark: int }
+
   type Replica = {
     height: int,
     refused: List[Tx],         // the txs this side proposed that no longer applied: refused with notice, never dropped silently [R-NOTICE]
@@ -83,7 +97,9 @@ module account_core {
     tip: Body,                 // the last committed body
     lastFid: int,              // the last committed frame (0 = none), kept to answer a repeated propose with the same ack
     status: Status,
-    mempool: List[Tx]
+    mempool: List[Tx],
+    attempt: int,              // as a proposer: the refusals handled on this head, the attempt of the next frame [R-FRAME-REFUSAL]
+    mark: Mark                 // as a receiver: what it refused on this head
   }
 
   type Res = | Ok(Body) | Refused(str)
@@ -253,10 +269,11 @@ module account_core {
 
   pure val SIDES = Set(Left, Right)
   pure val BRANCHES = Set(true, false)
-  pure val NO_FRAME: Frame = { height: 0, parent: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS }
+  pure val NO_FRAME: Frame = { height: 0, parent: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS, attempt: 0 }
+  pure val NO_REFUSAL: Refusal = { fid: 0, index: 0, fault: "", mark: 0 }   // frame ids start at 1: fid 0 is "no answer"
 
   pure val EMPTY_REPLICA: Replica =
-    { height: 0, refused: List(), submitted: 0, done: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List() }
+    { height: 0, refused: List(), submitted: 0, done: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List(), attempt: 0, mark: NoMark }
 
   // The state a side must plan against: the committed one, or the frame in flight / held [Q-E1: one view].
   pure def planning(r: Replica, frames: int -> Frame): Body = match r.status {
@@ -273,17 +290,38 @@ module account_core {
   // A frame the receiver accepts: the next height, and replaying on its own tip, at its own clock, to the claimed state. The frame's
   // timestamp is not read: a frame is never refused for its age (a signed frame refused without an exit deadlocks the Account: exact
   // retransmission must stay available after an arbitrary outage) or for its date, and no time rule trusts it [R-CLOCK].
-  pure def acceptable(r: Replica, now: int, f: Frame, self: Side): bool = and {
+  // `inLine`: the frame is the next one, from the peer, by the receiver's own head: the only frames that are judged and answered [R-FRAME-REFUSAL].
+  pure def inLine(r: Replica, f: Frame, self: Side): bool = and {
     f.author != self,
     f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)
     f.height == r.height + 1,
     f.nonce > r.pnonce,                                    // N1: a proof nonce above the last one, or the chain would refuse a start with it
-    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP,               // and not a leap that burns the counter
+    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt    // and not a leap that burns the counter: only the refusals of its own proposer count (A16)
+  }
+
+  pure def acceptable(r: Replica, now: int, f: Frame, self: Side): bool = and {
+    inLine(r, f, self),
     match replay(r.tip, f.txs, f.author, now) {
       | Ok(b) => b == f.after
       | Refused(_) => false
     }
   }
+
+  // The first tx of a frame that does not apply, and why: its index and the fault tag. A frame whose txs all apply but not to the state it claims is
+  // refused as a whole (index 0, fault `bad_state`).
+  pure def firstFault(b: Body, txs: List[Tx], author: Side, now: int): { index: int, fault: str } = {
+    val walk = txs.foldl({ body: b, bad: false, index: 0, fault: "" }, (acc, tx) =>
+      if (acc.bad) acc
+      else match applyTx(acc.body, tx, author, now) {
+        | Ok(nb) => { ...acc, body: nb, index: acc.index + 1 }
+        | Refused(why) => { ...acc, bad: true, fault: why }
+      })
+    if (walk.bad) { index: walk.index, fault: walk.fault } else { index: 0, fault: "bad_state" }
+  }
+
+  // A fault that passes as the peer's view of J moves: the proposer sends the frame's txs again, at the next attempt, and no tx is dropped. Any other
+  // fault does not: the named tx is dropped with notice. (A lock whose deadline is past, or a resolve past its deadline, only gets worse with the view.)
+  pure def retryable(fault: str): bool = fault == "not_expired" or fault == "deadline_too_far"
 
   // Queue a local tx. The guard sees the planning state plus everything already queued [Q-E1]: a tx that could never
   // apply is refused here and never enters the mempool.
@@ -298,7 +336,7 @@ module account_core {
   // The frame a proposer would send now: its mempool cut down to the txs that still apply, on its tip.
   pure def frameToPropose(r: Replica, now: int, s: Side, gap: int): Frame = {
     val sel = keepValid(r.tip, r.mempool, s, now)
-    { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1 + gap, ts: now, author: s, txs: sel.txs, after: sel.body }
+    { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1 + gap + r.attempt, ts: now, author: s, txs: sel.txs, after: sel.body, attempt: r.attempt }
   }
 
   pure def canPropose(r: Replica, now: int, s: Side): bool = and {
@@ -310,24 +348,49 @@ module account_core {
   pure def sigKey(signer: Side, f: Frame): SigKey = (signer, f.nonce, f.author == Left)
 
   // What a receiver does with a Propose. In order:
-  //   1. it extends our tip and we are Open -> hold it for our ack.
-  //   2. it is the frame we last committed (our ack was lost) -> send the same ack again (idempotent), in ANY state: a replica that has
+  //   1. it is the frame we last committed (our ack was lost) -> send the same ack again (idempotent), in ANY state: a replica that has
   //      already proposed its own next frame still re-acks, or one lost ack deadlocks both sides [R-REACK].
+  //   2. we are Open (or Right, rolling its own frame back on a collision, see 3) and it is next in line -> `judge` it: the mark first, then the txs.
   //   3. we also proposed at this height (collision): Left keeps its frame and ignores Right's;
-  //      Right discards its own frame, puts its txs back in the mempool, and takes Left's [R-A1].
-  //   4. anything else is stale, from the future, or refused: dropped and counted.
-  type Outcome = { r: Replica, ack: bool, rolled: bool, refused: bool }
+  //      Right discards its own frame, puts its txs back in the mempool, and judges Left's [R-A1].
+  //   4. anything else is stale, from the future, not next in line, or a second frame while one is held: dropped and counted.
+  // `say` is the refusal to send back to the author; fid 0 = nothing to say.
+  type Outcome = { r: Replica, ack: bool, rolled: bool, refused: bool, say: Refusal }
 
   pure def repeatOfLast(r: Replica, fid: int): bool = r.lastFid != 0 and r.lastFid == fid
 
+  pure def refusalFor(fid: int, index: int, fault: str, mark: int): Refusal = { fid: fid, index: index, fault: fault, mark: mark }
+
+  // [R-FRAME-REFUSAL] A frame that is next in line is answered, whatever it does to the replica:
+  //   at the mark   -> refused again, with the refusal that set the mark: a frame refused once is never judged again while the head lasts, so the sides cannot fork
+  //                    when the receiver's view moves and the same frame would now apply (the proposer has rolled it back and dropped a tx);
+  //   below the mark-> refused with `stale_attempt` and the mark, so that the proposer moves past it (every refusal is answered);
+  //   above, or no mark -> judged afresh: held for the ack, or refused with the first tx's index and fault, and that attempt becomes the mark.
+  // A frame that is not next in line is refused silently, as before (nothing honest sends one).
+  pure def judge(r: Replica, now: int, s: Side, fid: int, f: Frame): Outcome = {
+    val keep: Outcome = { r: r, ack: false, rolled: false, refused: false, say: NO_REFUSAL }
+    val ff = firstFault(r.tip, f.txs, f.author, now)
+    val refuseAfresh = { ...keep, refused: true, r: { ...r, mark: Declined({ attempt: f.attempt, index: ff.index, fault: ff.fault }) },
+                         say: refusalFor(fid, ff.index, ff.fault, f.attempt) }
+    if (not(inLine(r, f, s))) { ...keep, refused: true }
+    else match r.mark {
+      | Declined(m) =>
+          if (f.attempt < m.attempt) { ...keep, refused: true, say: refusalFor(fid, 0, "stale_attempt", m.attempt) }
+          else if (f.attempt == m.attempt) { ...keep, refused: true, say: refusalFor(fid, m.index, m.fault, m.attempt) }
+          else if (acceptable(r, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } }
+          else refuseAfresh
+      | NoMark =>
+          if (acceptable(r, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } }
+          else refuseAfresh
+    }
+  }
+
   pure def onPropose(r: Replica, now: int, s: Side, fid: int, f: Frame, own: Frame): Outcome = {
-    val keep: Outcome = { r: r, ack: false, rolled: false, refused: false }
+    val keep: Outcome = { r: r, ack: false, rolled: false, refused: false, say: NO_REFUSAL }
     val refuse: Outcome = { ...keep, refused: true }
     if (repeatOfLast(r, fid)) { ...keep, ack: true }
     else match r.status {
-      | Open =>
-          if (acceptable(r, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } }
-          else refuse
+      | Open => judge(r, now, s, fid, f)
       | Received(held) => if (held == fid) keep else refuse
       | Proposed(_) =>
           if (f.height == own.height and f.author != s) {
@@ -335,17 +398,32 @@ module account_core {
               | Left => keep
               | Right => {
                   val restored = { ...r, status: Open, mempool: own.txs.concat(r.mempool) }
-                  if (acceptable(restored, now, f, s)) { ...keep, r: { ...restored, status: Received(fid) }, rolled: true }
-                  else refuse
+                  val o = judge(restored, now, s, fid, f)
+                  if (isReceived(o.r)) { ...o, rolled: true }
+                  else { ...o, r: { ...r, mark: o.r.mark } }      // refused: it keeps its own frame in flight, and remembers the mark
                 }
             }
           } else refuse
     }
   }
 
+  // [R-FRAME-REFUSAL] The proposer receives a refusal. It counts only for the frame it has in flight, unacked, and only if the index names a tx of that frame:
+  // a refusal for a frame already committed (or rolled back, or never sent) changes nothing. Otherwise the frame is rolled back, its txs ahead of the mempool:
+  //   - a stale answer, or a retryable fault inside the budget: every tx is kept for another attempt, no notice;
+  //   - any other fault (or the budget spent): the named tx is dropped with notice [R-NOTICE], the rest is kept.
+  // The next attempt is above the refusal's mark and above its own: max(own, mark) + 1. The caller proposes again when the mempool has a tx that applies.
+  pure def onRefusal(r: Replica, ref: Refusal, f: Frame): Replica = {
+    val named = f.txs.length() > ref.index and ref.index >= 0
+    val again = ref.fault == "stale_attempt" or (retryable(ref.fault) and r.attempt < MAX_ATTEMPT)
+    val back = { ...r, status: Open, attempt: imax(r.attempt, ref.mark) + 1 }
+    if (not(isProposed(r) and statusFid(r) == ref.fid and named)) r
+    else if (again) { ...back, mempool: f.txs.concat(r.mempool) }
+    else { ...back, mempool: f.txs.slice(0, ref.index).concat(f.txs.slice(ref.index + 1, f.txs.length())).concat(r.mempool), refused: r.refused.append(f.txs[ref.index]) }
+  }
+
   // Commit frame `f` (id `fid`) on a replica.
   pure def commit(r: Replica, self: Side, fid: int, f: Frame): Replica =
-    { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open,
+    { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open, attempt: 0, mark: NoMark,      // the head moved: the attempt count and the mark are forgotten
       done: r.done + (if (f.author == self) f.txs.length() else 0) }
 
 }

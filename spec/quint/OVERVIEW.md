@@ -36,12 +36,16 @@ fails there.
 
 ## Account (`account_core.qnt`, `account.qnt`)
 
-State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool. A Body is
+State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool, `attempt` (as a proposer: the refusals handled on this head) and `mark` (as a receiver: the highest attempt it refused on this head). A Body is
 `{offdelta, limitLeft, limitRight, locks}`; a lock is a slot with payer, amount, hashlock, deadline.
 
 State machine of a replica: `Open` -- propose -> `Proposed(f)` -- ack -> `Open` (committed); `Open` -- peer's proposal -> `Received(f)`
 -- own ack -> `Open`; a collision (both propose at one height): Left keeps its frame, Right rolls back to its mempool and applies
-Left's (A1). A lost proposal or ack is recovered by resend. A refusal is a value, never a halt. The transition table (`applyTx`) has
+Left's (A1). A lost proposal or ack is recovered by resend. A refusal is a value, never a halt.
+R-FRAME-REFUSAL (A16, A17): a frame that is next in line and that the receiver cannot apply is answered with a refusal `{frame, index of the first refused tx, fault, mark}`; the proposer rolls its pending, unacked frame back
+(a refusal for any other frame is ignored), sends every tx again at the next attempt when the fault is retryable (`not_expired`, `deadline_too_far`, within a budget of `MAX_ATTEMPT`) and otherwise drops the named tx with notice, then proposes
+the rest. A frame carries its `attempt`; the receiver keeps one mark per head, the highest attempt it refused: a frame at the mark is refused again, one below it gets `stale_attempt` and the mark, one above is judged afresh; the mark is
+forgotten when the head moves, so a frame the receiver refused is never taken while the head lasts (no fork when its view of J moves). A retry is at proof nonce `pnonce + 1 + attempt` (A18, to confirm). The transition table (`applyTx`) has
 six transactions: SetCredit, Pay, HtlcLock, HtlcResolve, HtlcCancel, HtlcExpire.
 
 Time (R-CLOCK, A8): a frame's timestamp is informational; every time decision uses the deciding side's own clock. Resolve needs `now <= deadline`,
@@ -52,7 +56,7 @@ height, expiry stamped from the future, resolve stamped in the past, stale or le
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
 height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`. 41 scenario tests, 52 mutants.
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal). 53 scenario tests, 68 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
