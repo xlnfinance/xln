@@ -69,8 +69,8 @@ import {
 import { LIMITS } from "../../../core/config/constants.ts";
 import { unwrap } from "../../xln_run.ts";
 import { entityTransactionAction, type EntityTx, type ProposalAction } from "../../xln.ts";
-import { SIGNERS } from "../lane.ts";
-import { TOKEN, type World } from "../world.ts";
+import { SIGNERS } from "../rig/lane.ts";
+import { TOKEN, type World } from "../rig/world.ts";
 import { arises, drawn, pending, type Move, type Moves, type WorldMoves } from "./areas.ts";
 import { amount, one, PARTIES, pick } from "./world-view.ts";
 

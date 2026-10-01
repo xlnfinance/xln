@@ -1,6 +1,6 @@
 # cross-book: the cross-jurisdiction hub order book
 
-og (`core/` at 566c850) is the spec. Every row marked FIXED has a `MATCH:` test in `pure/diff/cross-book.test.ts` (or `entity-lane.test.ts` where noted) that runs live og.
+og (`core/` at 566c850) is the spec. Every row marked FIXED has a `MATCH:` test in `pure/diff/cross-j/cross-book.test.ts` (or `entity-lane.test.ts` where noted) that runs live og.
 
 | Area | og | rewrite before | Status |
 |---|---|---|---|
@@ -15,7 +15,7 @@ og (`core/` at 566c850) is the spec. Every row marked FIXED has a `MATCH:` test 
 | `removeCrossJurisdictionBookOrder` | route fences, admission-hash fence, row removal, an ack to the source hub carrying the book's own progress, and the admission close | missing | FIXED (b98ca65). 400 random cases match og, including the ack output. |
 | `crossJurisdictionFillNotice` | `applySourceHubCrossJurisdictionFillProgress`: duplicate, stale conflict, clear already requested, a terminal fill removing the local book row, and a self `requestCrossJurisdictionClear` output | missing | FIXED (b98ca65). 400 random mirrors match og. |
 | `crossJurisdictionBookOrderRemoved` (non-dispute) | `book-removal-ack.ts`: hub, state and hash fences; a terminal mirror is a no-op; the admission closes and the cancel progress runs from the later of the carried and mirrored progress | missing | FIXED (b98ca65 + test). 300 random acks match og. |
-| `crossJurisdictionBookOrderRemoved` (dispute branch) | when the Account is `dispute_preparing` with a pending removal: `confirmDisputeBookRemoval`, then `draftPreparedDisputeStartIfReady` | missing | FIXED (1abcef3). `disputeRemovalAck` confirms the removal, then `draftPreparedStart`. MATCH: 200 random ACKs (disputes-final.md, MATCH in diff/disputes-final.test.ts). |
+| `crossJurisdictionBookOrderRemoved` (dispute branch) | when the Account is `dispute_preparing` with a pending removal: `confirmDisputeBookRemoval`, then `draftPreparedDisputeStartIfReady` | missing | FIXED (1abcef3). `disputeRemovalAck` confirms the removal, then `draftPreparedStart`. MATCH: 200 random ACKs (disputes-final.md, MATCH in diff/disputes/disputes-final.test.ts). |
 | `routeRemoteCrossJurisdictionBookCancels` | a cancel whose book lives on a sibling hub becomes a `removeCrossJurisdictionBookOrder` to that hub, and the admission is marked resolving | missing | FIXED (b98ca65). 300 random source hubs match og's local cancels, outputs, admissions and halts. |
 | runtimeOutput authorization of the book txs | `auth/authorization.ts`: the semantic route is the stored swap by `orderId` for fillNotice, remove and requestClear; book owner and source hub authority; the `requestCrossJurisdictionClear` self-continuation lane | only the setup txs | FIXED (b98ca65). 600 random envelopes match og's exact error strings. |
 | `requestCrossJurisdictionClear` handler, clear materialization, `crossPullClose` followup, salvage, force sibling dispute, sweep | scheduler-driven cross-j txs | ported | FIXED. Clear, clear materialization, crossPullClose and sweep MATCH og (cross-j-final.md); salvage and force sibling dispute MATCH og (disputes-final.md). |

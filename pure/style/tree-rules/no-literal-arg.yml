@@ -1,0 +1,19 @@
+id: no-literal-arg
+language: TypeScript
+severity: error
+message: a bare true, false or undefined argument says nothing at the call site; name it with a constant or pass a record with a named field
+note: A value that a constructor wraps (ok, some, P.bool, A.bool) or a matcher compares (toBe, toEqual, toStrictEqual) is data, not a flag, and is allowed.
+rule:
+  all:
+    - any:
+        - { kind: "true" }
+        - { kind: "false" }
+        - { kind: undefined }
+    - inside:
+        kind: arguments
+        not:
+          inside:
+            kind: call_expression
+            has:
+              field: function
+              regex: '^(ok|some)$|\.(toBe|toEqual|toStrictEqual|bool)$'

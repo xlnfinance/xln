@@ -1,0 +1,9 @@
+id: no-problems-list
+language: TypeScript
+severity: error
+message: 'a list of conditional-or-undefined entries filtered for defined; use named checks that return a tagged error'
+rule:
+  kind: call_expression
+  regex: 'filter\(\(\w+\) => \w+ !== undefined\)'
+  has: { field: function, kind: member_expression, has: { field: object, kind: array } }
+files: [xln.ts]

@@ -1,0 +1,3412 @@
+{
+ "policy": "Rule ids are descriptive names (R-SOMETHING), never bare numbers, so ids from different sources cannot collide. Review-finding ids (F1, G1, S1, B1, ...) name findings only and are never rules. A rule is retired with retired_by, not deleted.",
+ "rows": [
+  {
+   "id": "R-E1",
+   "statement": "The Entity frame is a fixed pipeline: arrivals apply, then hooks and txs run over the post-arrival Accounts, then Account work is proposed.",
+   "source": "lessons.md section 0",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "hooks-read-pre-arrival",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "arrivals-in-place"
+    }
+   ]
+  },
+  {
+   "id": "R-X1",
+   "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts.",
+   "source": "lessons.md section 1",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "halt-on-refusal",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "full-halts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "bad-halts"
+    }
+   ]
+  },
+  {
+   "id": "R-X2",
+   "statement": "Every deadline is judged at the Entity frame's timestamp, never wall-clock time. RETIRED: refined into R-CLOCK and R-HTLC-CLOCK (J height, never the frame stamp).",
+   "source": "lessons.md section 1",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [],
+   "retired_by": [
+    "R-CLOCK",
+    "R-HTLC-CLOCK"
+   ]
+  },
+  {
+   "id": "R-A1",
+   "statement": "Same-height collision: Left wins; Right rolls back and re-proposes its txs at the next height.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "no-tie-break"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "collision-both-roll-back",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "tie-break-reversed",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left ignores Right's frame and keeps its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Right rolls its frame back, commits Left's and acks it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 Left commits on the ack, and Right proposes its txs again at the next height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 the rolled-back txs go ahead of what Right queued later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 each side's txs commit in submission order, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
+    }
+   ]
+  },
+  {
+   "id": "R-A2",
+   "statement": "Settlement ops are bounded by collateral where they are admitted, on both sides; a c2r above collateral is refused as malformed.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A2 a withdrawal cannot take more than the collateral, on either side"
+    }
+   ]
+  },
+  {
+   "id": "R-A3",
+   "statement": "A party signs a settlement approval only over a proof that no queued work can change; if queued work changes it, the approval expires and is signed again, never a halt.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-A4",
+   "statement": "A settlement transition aimed at a workspace that already settled on chain is stale and is dropped with a message.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-A5",
+   "statement": "Opening an Account that already exists is a refusal.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-A6",
+   "statement": "Credit is off-chain and enforced before signing: RCPAN (-leftCredit <= delta <= collateral + rightCredit, worst case over open clauses) is checked before a party signs.",
+   "source": "lessons.md section 2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "pay-ignores-capacity",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "credit-drop-unchecked",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "core-rcpan-no-floor"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a payment moves the payer's allocation and stops at the payer's room"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 a hold counts against its payer's room before it pays, and lapsing gives the room back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 credit holds in every state: RCPAN in the worst case over the open holds"
+    }
+   ]
+  },
+  {
+   "id": "R-E2",
+   "statement": "Txs a hook returns join the frame's Account work in a fixed order: the wake's approved txs first, then its returned Account txs; each Account is proposable at first touch.",
+   "source": "lessons.md section 3",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "txs-before-hooks"
+    }
+   ]
+  },
+  {
+   "id": "R-E3",
+   "statement": "A replica drops its own uncommitted proposal when a certified frame commits at that height.",
+   "source": "lessons.md section 3",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "right-drops-inflight-on-collision",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-E4",
+   "statement": "The publication order of Account work is first-touch, never Account id.",
+   "source": "lessons.md section 3",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "sorted-proposals"
+    }
+   ]
+  },
+  {
+   "id": "R-J1",
+   "statement": "Chain facts reach an Account only through J-events.",
+   "source": "lessons.md section 4",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-J2",
+   "statement": "There are two signed objects, the dispute proof and the cooperative update, and every encoding is the contract's.",
+   "source": "lessons.md section 4",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "DisputeHashVector"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 Account messages (HankoEncoding.sol: encodeDisputeProof, encodeCooperativeUpdate)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 batch payload (HankoEncoding.encodeBatch) and the hashes the Depository emitted"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 transformer clause payload (DeltaTransformer.encodeBatch)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 dispute hashes (Account.sol, HankoCodec)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 encodeBatch equals the bytes the compiled ABI gave for each recorded input (batch.json)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J2 the verifier against every verdict in hanko.json (the deployed EntityProvider's)"
+    }
+   ]
+  },
+  {
+   "id": "R-J3",
+   "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw.",
+   "source": "lessons.md section 4",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-R1",
+   "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock.",
+   "source": "lessons.md section 5",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "empty-frame",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "frame-in-arrival-order",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-P1",
+   "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>).",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-P2",
+   "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows.",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "no-hop-margin"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "forward-deadline-equal",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-P3",
+   "statement": "A dispute start carries every secret the starter knows for the locks in its proof.",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "omits-secret"
+    }
+   ]
+  },
+  {
+   "id": "R-P4",
+   "statement": "A party never disputes over a deadline that an ack arriving in the same frame already resolved (follows from R-E1).",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    }
+   ]
+  },
+  {
+   "id": "R-P5",
+   "statement": "An offer is resolved at most once (order book, v2).",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: v2 (no thread yet)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "v2, no thread yet"
+    }
+   ]
+  },
+  {
+   "id": "R-P6",
+   "statement": "A cancel for an unknown offer is dropped at the Account and never enters a frame (order book, v2).",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: v2 (no thread yet)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "v2, no thread yet"
+    }
+   ]
+  },
+  {
+   "id": "R-P7",
+   "statement": "A single loan never halts the hub: a default is settled, a repay of a non-active loan is refused and refunded (lending, v2).",
+   "source": "lessons.md section 6",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: v2 (no thread yet)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "v2, no thread yet"
+    }
+   ]
+  },
+  {
+   "id": "C1",
+   "statement": "AccountInfo.ondeltaEpoch advances on every cooperative settlement, C2R and dispute finalization (not on R2C); proofs and updates commit to it, so a proof for an earlier baseline fails E4.",
+   "source": "contracts-decisions.md C1",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "C1 ondelta epoch"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "c1-epoch-not-advanced",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "C1 the epoch is bound: a different epoch is a different digest"
+    }
+   ]
+  },
+  {
+   "id": "C2",
+   "statement": "processBatch takes the entityId; the batch payload commits to it and the hanko must verify to exactly that entity.",
+   "source": "contracts-decisions.md C2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "C2 batch hanko binds the entity"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "C2 the same batch for another Entity or nonce is another digest"
+    }
+   ]
+  },
+  {
+   "id": "C11",
+   "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it).",
+   "source": "contracts-decisions.md J2 (C11 pinned)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "hold",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "rig",
+     "name": "every dispute window stays above LAG (C11): the contracts' floor and the default terms"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "window-floor-below-react",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "H1",
+   "statement": "An unrevealed HTLC settles as unpaid only at its deadline: a finalize waits until block.timestamp passes the payment deadline unless the secret is already public.",
+   "source": "contracts-decisions.md H1",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "H1 unrevealed HTLC waits for its deadline"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "h1-wait-removed",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "no-h1"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-at-deadline"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-ignores-secret"
+    }
+   ]
+  },
+  {
+   "id": "H2",
+   "statement": "Response windows come from the starter's proof; the floor is 60 s on testnet (6 h on mainnet, gated by N3); zero is refused as ResponseWindowTooShort.",
+   "source": "contracts-decisions.md H2",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "H2 response window floor"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "h2-zero-window-allowed",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "H3",
+   "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed. The Arrival cell holds the one-way clamp only (spec/dispute/dispute.scm, bugs h3-no-clamp and h3-symmetric); the 7-day evidence window is on no spec page.",
+   "source": "contracts-decisions.md H3",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "H3 a retired board cannot be made to pay from reserves, and is never denied what it is owed"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h3-no-clamp"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h3-symmetric"
+    }
+   ]
+  },
+  {
+   "id": "H4",
+   "statement": "A deposit during an open dispute is accepted and raises only the depositor's side.",
+   "source": "contracts-decisions.md H4 (accepted as is)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "H4 a deposit during a dispute raises only the depositor's side"
+    }
+   ]
+  },
+  {
+   "id": "J2",
+   "statement": "A stale or already-applied dispute op is skipped inside processBatch with DisputeOpSkipped; the rest of the batch lands; the runtime reads the skip event.",
+   "source": "contracts-decisions.md J2",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "J2 a stale or already-applied dispute op is skipped, the rest of the batch lands"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "contract-reverts-on-moved-dispute",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "entity-ignores-the-skip-event",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "stale-reverts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-skip"
+    }
+   ]
+  },
+  {
+   "id": "J5",
+   "statement": "A batch with no dispute, reveal, ladder or deposit op that cannot apply fails soft: nothing else moves, the nonce is consumed, BatchFailed is emitted; the signed gas budget makes the outcome the signer's.",
+   "source": "contracts-decisions.md J5",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "J5 a failing payment batch consumes its nonce and the urgent batch above it lands"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "payment-revert-keeps-the-nonce",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "entity-ignores-batch-failed",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "failure-no-nonce"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-batch-failed"
+    }
+   ]
+  },
+  {
+   "id": "J6",
+   "statement": "A deposit leg hard-reverts on failure and travels alone in its batch.",
+   "source": "contracts-decisions.md J6",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_relayerWithoutAllowanceCannotBurnTheNonceOfADepositBatch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_J6_depositBatchWithAFailingPaymentRevertsWhole"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "deposit-signed-without-simulation",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "legs-bundled"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "leg-soft"
+    }
+   ]
+  },
+  {
+   "id": "R-FINAL-NONCE",
+   "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE).",
+   "source": "contracts-decisions.md F1",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "resign-at-a-signed-nonce",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "resign-at-nonce"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts"
+    }
+   ]
+  },
+  {
+   "id": "F16",
+   "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
+   "source": "contracts-decisions.md F16 (memory)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_gasSweep_erc20Deposit_depthTwo"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_F16_gasSweep_erc721Deposit_depthThree"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "F16 V revert-whole batches ignore the budget but keep the minimum"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "gas-fail-burns-an-urgent-batch",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "gas-fail-burns-a-deposit-batch",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "A12",
+   "statement": "Two co-signed proofs at one proof nonce: LEFT's proposal outranks RIGHT's, whoever presents first (accepted as is, pinned by tests).",
+   "source": "contracts-decisions.md A12",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "A12 two different co-signed proofs at one nonce: LEFT's proposal outranks RIGHT's, whoever presents first"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "supersession-reversed",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "tie-break-inverted"
+    }
+   ]
+  },
+  {
+   "id": "R-ONE-BODY",
+   "statement": "A side that already holds the peer's ack of its own frame at height h never acks a different frame at h (the contract cannot enforce it: a second acked body outranks the first if the peer proposes as LEFT).",
+   "source": "contracts-decisions.md A12 (Runtime and spec rule)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "to be named",
+     "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-BODY after my frame is acked, a different frame on the same parent gets no ack"
+    }
+   ]
+  },
+  {
+   "id": "N1",
+   "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter.",
+   "source": "contracts-decisions.md / Arrival Q-D-4, Q-D-19; Quint A13",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "baseline-too-low",
+     "owed": "#41"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "accept-proof-nonce-leap",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
+    }
+   ]
+  },
+  {
+   "id": "N2",
+   "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one.",
+   "source": "contracts-decisions.md H1 open point; Arrival Q-D-20; Quint A9",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "no-horizon"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "horizon-off",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "N3",
+   "statement": "The deploy gate refuses a chain that is not a named testnet while the response floor is under 6 hours, and checks the batch gas cap; keyed by chain id, read from the compiled build.",
+   "source": "contracts-decisions.md N3",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "deploy-gate"
+    }
+   ]
+  },
+  {
+   "id": "R-NONCE",
+   "statement": "Urgent ops go in a batch at a fresh nonce; signed batches never expire.",
+   "source": "contracts-decisions.md J2/F1",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "resign-at-nonce"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "resign-at-a-signed-nonce",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SPLIT",
+   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
+   "source": "contracts-decisions.md J5 (spec rule)",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "J5 review: a dispute start or counter beside a failing payment reverts the whole batch (R-SPLIT)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_revealBesideFailingPaymentRevertsWhole"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SPLIT_counterBesideFailingPaymentRevertsWhole"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "urgent-batch-carries-payments",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "mixed-batch"
+    }
+   ]
+  },
+  {
+   "id": "R-COSIGN",
+   "statement": "A batch with a co-signed op carries ops of that one Account only (a counterparty's state change can fail a batch, and failure burns the nonce).",
+   "source": "contracts-decisions.md B1 / R-COSIGN",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "cosign-bundle"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "cosign-batch-mixes-accounts",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SIMULATE",
+   "statement": "Sign a batch only after it simulates successfully at the head, at the final signed budget, sized from the applyBatch self-call gas plus a named margin.",
+   "source": "contracts-decisions.md third round of #54",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "signs-before-gate"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "signs-before-gate",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-OOG",
+   "statement": "Out-of-gas is never a normal outcome: no try/catch or low-level call may turn an out-of-gas into a normal outcome.",
+   "source": "contracts-decisions.md swallowed failures (PR 'Transformer decode gas guard', #64)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_unpaid_aliased_cap"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_belowTheFloorTheCallRevertsBeforeItBurnsTheGas"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_floorCoversEveryFillRatioSize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_OOG_floorCoversEverySecretSize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-OOG swallowed failures: every try/catch and low-level call is audited"
+    }
+   ]
+  },
+  {
+   "id": "R-CLOCK",
+   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
+   "source": "contracts-decisions.md (memory, #57)",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "expire-by-frame-stamp"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-judges-by-the-frame-stamp",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-late"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-future"
+    }
+   ]
+  },
+  {
+   "id": "R-FUNDED",
+   "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit.",
+   "source": "contracts-decisions.md (memory, #62)",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "unfunded-payments"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "unfunded-payment-is-signed",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R2C-DEBT-FIRST",
+   "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
+   "source": "contracts-decisions.md (memory)",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "r2c-skips-enforcement"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "r2c-skips-enforce",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-DURABLE",
+   "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
+   "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "send-before-persist",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "ack-before-persist",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-REACK",
+   "statement": "A repeat of the frame at my head is answered with the same ack in any replica state (Open, Proposed or Received).",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-1",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "reack-open-only"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "reack-open-only",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-REACK a repeat of the frame at my head is answered with the same ack, in any replica state"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
+    }
+   ]
+  },
+  {
+   "id": "R-HTLC-CLOCK",
+   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "expire-at-deadline"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "expire-no-reserve"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "resolve-by-chain-height"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "payee-idle"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "resolve-late-by-stamp"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "expire-by-frame-stamp"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "expire-at-deadline",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "expiry-reserve-off",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "resolve-after-deadline",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-judges-by-the-frame-stamp",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reserve is at least the lag, and the horizon is positive"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline, expirable strictly past deadline plus reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK and R-DRIFT views within the lag never see a clause both live and expirable"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a payee reveals on chain once its view reaches the deadline minus the lag"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a clause is live through its deadline height and refused one height later"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK an expiry needs the view strictly past the deadline plus the reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK b an expiry commits only when both parties' views are strictly past the deadline"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a a resolve is refused only when the payer's own view is past the deadline"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK c the replay harness blocks the expiry while the payee owes the on-chain reveal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK c a payee that owes the reveal has revealed before an expiry commits, in the Runtime walk",
+     "owed": "Runtime cut (R1), walk-level"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK a negative lag is refused, so no clause is ever live and expirable at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HTLC-CLOCK the reveal is due a lag before the deadline, not a reserve before it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
+    }
+   ]
+  },
+  {
+   "id": "R-DRIFT",
+   "statement": "The two views never differ by more than LAG; the goal is stated on its own: no expiry commits while either view is at or before the deadline.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-4",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "an expiry commits only when both views are strictly past the deadline",
+     "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "quint",
+     "name": "expiredEarly",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-NOTICE",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "drop-on-rollback"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "propose-drops-silently",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "dead-tx-stays",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "rollback-drops-txs",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a queued tx that stops applying is refused with its fault at propose, never dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame of only refused txs sends nothing and leaves no pending frame"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a rolled-back tx whose ground moved is refused at the next propose, with notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no submitted tx is lost: committed, held, or refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE no tx is both committed and refused, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+    }
+   ]
+  },
+  {
+   "id": "R-FRAME-HASH-SIGNED",
+   "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
+   "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (signed bytes) and T0 (wire)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (signed bytes) and T0 (wire)"
+    }
+   ]
+  },
+  {
+   "id": "R-REFUSED-RELEASES-PAYER",
+   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused and the peer's fault tag); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
+   "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: Entity/Runtime cut"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "Entity/Runtime cut"
+    }
+   ]
+  },
+  {
+   "id": "R-FRAME-REFUSAL",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a refused frame stays refused on its head"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4 (frame exchange step)"
+    }
+   ]
+  },
+  {
+   "id": "R-EVERY-REFUSAL-ANSWERED",
+   "statement": "A frame of the peer's at my head that I do not judge afresh is answered with a refusal that names it and carries my mark for this head (the highest attempt I refused), never with silence: a frame that does not apply, a repeat of the frame I refused (the same frame, and only it, gets the same index and fault again), and any other frame at or below my mark (the fault stale_attempt, index 0) all get one. A stale answer judged nothing, so it costs the proposer no tx and no retry budget, and its next attempt is above the mark, so a proposer whose attempt count is behind (a restart that dropped it) catches up in one round trip and is never left pending, whatever frame it sends. A mark is trusted only while the proposer's next attempt stays a safe integer; a forged mark can wedge the proposer, as withholding acks can, and signed refusals (A4b) are the remedy. Silent on purpose, because there is no honest proposer to tell or nothing to take back: my own frame, an empty frame, a frame whose attempt is not a countable number, and a frame not at my head (R-REACK answers the one at my head with its ack).",
+   "source": "coordinator 10-01 02:52 on Review A of PR 85 (N1, N2)",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a different frame at the refused attempt gets the stale answer, not a refusal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED the attempt count stays a safe integer however the peer's marks climb"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a Left proposer refused MAX_ATTEMPTS + 1 times does not block Right"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a frame at the mark is refused again, one below it is told the mark"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a proposer whose attempt count is behind is told the mark and commits next"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a stale answer costs no tx, whatever the retry budget"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
+    }
+   ]
+  },
+  {
+   "id": "R-ADMIT",
+   "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "skip-revalidation"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "queue-guard-reads-committed-only",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx is checked at the door against the committed state plus everything queued"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT a tx behind a pending frame is checked against the state that frame makes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ADMIT no committed tx is invalid against the history before it, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE R-ADMIT a refused tx has a conflicting predecessor in the submitted txs, in every state of the page"
+    }
+   ]
+  },
+  {
+   "id": "R-PARENT",
+   "statement": "A frame names its parent by hash; the receiver refuses a frame whose parent is not its head.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-7",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "commit-any-frame"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "accept-wrong-parent",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-PARENT a frame whose parent is not my head is refused and changes nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT committed histories agree: one extends the other, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT heights differ by at most one, in every state of the page"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A1 R-PARENT no tx committed twice, in every state of the page"
+    }
+   ]
+  },
+  {
+   "id": "R-NET",
+   "statement": "Arrival keeps a FIFO link with bounded loss and duplication (widening keeps every property); Quint keeps an unordered network with free redelivery as a recorded choice.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-8",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "reorder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
+    }
+   ]
+  },
+  {
+   "id": "R-AUTH",
+   "statement": "A committed frame never lowers what the other side has of its own to pay, and never changes the credit its author receives; a frame names its author, a frame handed back to its own author is refused, and the author is part of the frame hash (Quint acceptable: f.author != self).",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-9",
+   "layers": {
+    "arrival": "owed: Arrival ledger merge",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "quint",
+     "name": "authority",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a committed tx never lowers the other side's own funds or changes its author's credit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH a frame handed back to its own author is refused, not read as the peer's"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH the same txs written by the other side are another frame and mean another thing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-AUTH R-REACK a frame with another author is not a repeat of the frame at my head"
+    }
+   ]
+  },
+  {
+   "id": "R-CANCEL",
+   "statement": "Only the payee resolves (with the secret, in time) or cancels a lock; anyone expires it after the deadline plus reserve.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-10",
+   "layers": {
+    "arrival": "owed: Arrival ledger merge",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "cancel-by-anyone",
+     "owed": "#44"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "resolve-by-payer",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL only the payee resolves"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CANCEL the payee cancels and the allocation stays; the payer cannot"
+    }
+   ]
+  },
+  {
+   "id": "R-PROOF-NONCE",
+   "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "proposer-may-skip-nonces",
+     "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "baseline-too-low",
+     "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
+    }
+   ]
+  },
+  {
+   "id": "R-HORIZON-RESERVE",
+   "statement": "A lock is refused if deadline > own view + MAX_LOCK_HORIZON + reserve.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-12",
+   "layers": {
+    "arrival": "owed: Arrival aligns the constant at the ledger merge",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "horizon-off",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE and N2 a deadline is refused past the view plus the horizon plus the reserve"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HORIZON-RESERVE the latest admitted deadline is the view plus the horizon plus the reserve"
+    }
+   ]
+  },
+  {
+   "id": "R-CONSERVE",
+   "statement": "Reserves plus collateral never change on one Account, and any RCPAN body settled by the chain's payout keeps debt within the credit granted (two killers).",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-14",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "arrival",
+     "name": "money is conserved",
+     "owed": "#41"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "payout-forgets-the-debt",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-REGISTER",
+   "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-REGISTER it.skip, test.todo, it.skipIf and xit do not count"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "describe.skip drops itself and the tests inside it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an empty test file named after a rule carries nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: the owed cell is already carried, so it must be promoted to hold"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a named killer that no name matches"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: a row deleted"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "red: hold weakened to owed; owed weakened to absent"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-FROZEN",
+   "statement": "Nothing under core/ or jurisdictions/ differs from og 566c850 in any way, with an empty allowlist, and a failing git is red.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-FROZEN the allowlist is empty for good"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rename out of core/ is caught: the old path is listed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a deletion, a mode change, a dirty edit and an untracked file are caught"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing git is red, never ok: an unknown pin is an error"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-STYLE",
+   "statement": "The new tree sits at zero on every style rule except registered exceptions used exactly; a scan that did not run cannot pass, and a new directory under pure/ is gated until it is named as outside the gate.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-STYLE an ast-grep that exits 0 and prints nothing fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ast-grep killed by a signal fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ast-grep that prints the canary hit but exits 2 fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a directory under pure/ that is neither gated nor named as outside the gate is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw, a dead export and a positional boolean each fail by name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an exception fails unless its count is exactly used: too many hits, or a stale row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a bare true, false or undefined passed to a function is a hit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored folder under pure/ (a local db-* from a test run) does not turn the gate red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored file under kernel/ is not counted, and the same file untracked-not-ignored is"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a name in a comment or a string of another file is not a user"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "async function, interface, enum, let and declared forms are exports too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a column-0 comment in the body does not end the declaration"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a template literal whose lines start in column 0 does not end the declaration"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a same-spelled local in another file is not a user"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a file importing its own export is not its own user"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a bare specifier that spells a sibling file's name is a package, not that file"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "import * as ns of a gated file is a hit of its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a form the gate cannot name is a hit, not a silent pass"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a type named only in a comment, or only by itself, is dead"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a function whose body starts in column 0 is measured to its closing brace"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a union whose members start in column 0 is measured to its end"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw and a dead export in an .mts file fail by name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw, a long line and a dead export in a .tsx file fail by name"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a source file directly under pure/ that is neither gated nor named outside the gate is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ast-grep that answers the style canary but never the fact canary fails the gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file that is deleted, with its exception row and its use gone, turns the gate red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule that no longer matches its canary is silent, and the gate is red"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a canary that does not trigger its own rule is silent, even when that rule reports on another rule's canary"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a rule file without a canary is a failing row"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "every rule reports on its canary in both languages, so the real tree is clean"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an import without an extension, or of a directory, resolves to the file or to its index"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an interface that is not exported is measured like one that is"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-WIDTH",
+   "statement": "No folder holds more than ten direct source files except at its recorded debt, counted on the files git lists, and a directory that is not a git checkout is red.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-WIDTH a folder of 11 untracked source files is red and names the folder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "too wide without debt is red; the debt must match exactly; an unused debt is stale"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a directory that is not a git checkout is red, not an empty pass"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-COMPOSE",
+   "statement": "bun rules/check.ts is one command whose exit code is red when the register, the style gate or folder width is red, each alone.",
+   "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-COMPOSE a failing register alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing style gate alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a failing folder width alone is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw planted in kernel/ exits 1 and names the file"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a throw planted in chain/ exits 1 (chain is inside the gate)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a folder of 11 source files exits 1 and names the folder"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the register part alone turns the command red: a scratch copy has no contract tests to carry the ids"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "an ignored folder planted before the copy stays out of it, and what git lists comes along"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "the real pure/ copies without the ignored folders a seeds run leaves in it"
+    }
+   ]
+  },
+  {
+   "id": "R-GATE-CI-DRIFT",
+   "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
+   "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the planted baseline agrees"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
+    }
+   ]
+  },
+  {
+   "id": "R-SETTLE-CREDIT",
+   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner A1 cut)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal that leaves the allocation above the collateral is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a Left withdrawal that leaves Left past its credit is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SETTLE-CREDIT a withdrawal counts the open holds as paid"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-ignores-credit",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-CREDIT-REVOKE-FLOOR",
+   "statement": "A credit limit cannot be lowered below what the counterparty is currently using, open holds counted as used; the refusal is credit_below_usage.",
+   "source": "contracts-decisions.md, Account-layer decisions 09-30; rig finding (2) lending credit revoked below used",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44",
+    "contract": "-",
+    "rig": "owed: #69 (known finding, owner v2 lending)",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-A6 and R-CREDIT-REVOKE-FLOOR a credit limit cannot fall below what the other side is using"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-CREDIT-REVOKE-FLOOR an open hold is used credit too, and Right's side has its own floor"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "credit-drop-unchecked",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-HOLD-CAP",
+   "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds both halves: the per-token check (ledger.ts) and the Account-level count (state.ts, applied by tx.ts).",
+   "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a token that holds 32 alone refuses its own 33rd, and the other token is refused too"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-CAP a hold that resolves, cancels or expires frees its place in the count, in any token"
+    }
+   ]
+  },
+  {
+   "id": "R-LOCK-EXISTS",
+   "statement": "A hold whose slot is already open is refused with lock_exists; a slot freed by resolve or expire opens again (R-ONE-LOCK-PER-HASH adds the refusal for an open hashlock).",
+   "source": "Review B of PR 73; Quint HtlcLock lock_exists",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-LOCK-EXISTS a slot that is open is refused, and a freed slot opens again"
+    }
+   ]
+  },
+  {
+   "id": "R-HOLD-SLOT",
+   "statement": "A hold is addressed by the slot it sits in, never by position: resolving or expiring one hold leaves every other hold in its slot and in its order.",
+   "source": "Review B of PR 73 (coordinator decision 09-30); Quint HtlcResolve{id}, the contract's slot ids",
+   "layers": {
+    "arrival": "-",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT a hold keeps its slot while others come and go"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-HOLD-SLOT expiring a hold removes the one it names and keeps the others in order"
+    }
+   ]
+  },
+  {
+   "id": "R-ONE-LOCK-PER-HASH",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page.",
+   "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44 (coordinator 09-30)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a second lock on an open hashlock is refused, whichever slot or side it names"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock opens again once its clause is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH at most one open clause per hashlock in every state, and a second lock is refused"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH an open hashlock is refused in every token and opens again when it is gone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the very same hold locked into a second token is a second clause on the hashlock"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "duplicate-hashlock"
+    }
+   ]
+  },
+  {
+   "id": "R-IMPLICIT-BASELINE",
+   "statement": "From ondelta epoch 1 the empty state (offdelta 0, no clause, nonce = stored + 1, Right author, floor windows) is a valid dispute start proof with no signature and settles at ondelta; signed frames outrank it through counters; a counter's windows may lengthen, never shorten.",
+   "source": "contracts-decisions.md Q-D-21 (D2), PR 'Implicit baseline'",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: after a settlement a side with no signed proof of the new epoch can start, and the dispute settles at ondelta"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: two disputes in a row, and a third, each starts from nothing (Q-D-21)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a signed frame of the epoch outranks it through a counter, and it settles instead"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: at its own nonce a Left-authored signed proof outranks it, a Right-authored one ties and does not (the Runtime starts a new epoch's proofs at stored + 2)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter may carry longer windows than the implicit proof's, and the final body may too"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter may never SHORTEN the dispute's windows (a signed start at 300 s, a counter at 60 s)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a start at a dead epoch is still skipped with reason 11, a stale nonce and an open dispute as before"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: only the canonical implicit proof starts without a signature"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: at epoch 0 there is no implicit proof (a fresh account's first frames are its proofs)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a signed start is checked as before (a wrong signature is E4)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an immediate close with a fresh signed body that SHORTENS a window is refused (E9), at each window on its own"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the same immediate close with a LONGER final body lands (windows may lengthen)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter's IMMEDIATE close ranks like a counter: Left-authored at stored + 1 closes, Right-authored at stored + 1 does not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: stored + 2 outranks the implicit proof at either author, through a counter and through an immediate close"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: after a timeout close the next implicit start is at the NEW stored + 1, a Right-authored proof there only ties and the first signed proof is at the new stored + 2"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a counter at the implicit nonce with Left authorship replaces it, and a later Right-authored counter at stored + 2 replaces THAT (ordering of several counters)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every NON-canonical unsigned start on a stale epoch, a stale nonce or an open dispute is SKIPPED, never reverted"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a stranger with no co-signed history (epoch 0) cannot open a dispute against any entity, funded or not"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: an implicit start that names NO token, or a subset, settles only what it names and still ends the epoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the implicit proof cannot be replayed into a later epoch (its start is skipped once the Account has moved)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: a canonical body with a non-empty signature that does not verify reverts at every length (1, 32, 64, 65 bytes), never taken as the implicit proof"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: every token of the body is held to offdelta 0 (a nonzero in the middle of three is refused)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: the non-starter has exactly 2 x floor to counter (119 s lands, 120 s is skipped), and the starter cannot finalize before it"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta above the collateral (Right took more than its share) is paid from RIGHT's reserves, in full, by an implicit dispute started by either side"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-IMPLICIT-BASELINE: Delta = ondelta below zero (Left took more than its claim) is paid from LEFT's reserves, in full"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "a spec bug for the implicit start",
+     "owed": "#41"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "a mutant for the implicit start",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheCanonicalImplicitStart"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheImplicitStartAtAnyNonce"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_controlTheSameStartIsAcceptedAfterAnAdvance"
+    }
+   ]
+  },
+  {
+   "id": "R-IMPLICIT-NONCE-FROM-CHAIN",
+   "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
+   "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "owed: the cut (Account and Runtime slices)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: TRAP a Right-authored signed frame at stored + 1 cannot outrank the implicit proof: the payee of that frame loses it"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: the same frame at stored + 2 is safe (the Runtime rule)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: a Left-authored frame at stored + 1 does outrank it (so the trap is the Right author alone)"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "post-nonce-low (retargeted to the trap)",
+     "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing a proof at stored + 1",
+     "owed": "the cut (Account and Runtime slices)"
+    }
+   ]
+  },
+  {
+   "id": "R-WINDOWS-NEVER-SHORTEN",
+   "statement": "Inside an epoch the response windows of a dispute never decrease: a counter and a signed final body may carry longer windows than the dispute started with, never shorter ones (E9).",
+   "source": "contracts-decisions.md R-IMPLICIT-BASELINE item 5 (coordinator 09-30)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: TRAP a policy that lowers its windows inside an epoch: the stale start with the long windows cannot be answered (E9)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "REVIEW-B R-WINDOWS-NEVER-SHORTEN: the survivor of the author's mutation run is not equivalent: the immediate-close path (a signed final body, no registered counter) is guarded by the FINAL window check alone"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "counter-shortens-window"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "a mutant that shortens the windows",
+     "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-ONCHAIN",
+   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
+   "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_fullFillMovesTheWholeOrder"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyMakerGivesForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyTakerPaysForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65535IsOneOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65534IsZeroOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_zeroRatioMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_malformedArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheWantLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheGiveLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "swap-fill-rounds-up",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
+    }
+   ]
+  },
+  {
+   "id": "R-C2R-FOLD",
+   "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
+   "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "owed: the cut (Entity and Runtime)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+     "owed": "the cut (Entity and Runtime)"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-PRICE-TIME",
+   "statement": "An order trades against the best-priced resting offers it reaches, the earlier offer first within a price, and every trade is at the resting offer's price.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME the best price fills first, and the earlier offer first within a price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a trade is at the resting offer's price, so the taker gets any improvement"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a seller meets the highest bids first, and a bid below its limit is out of reach"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME a resting order joins behind the equal prices and in front of the worse ones"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-LOTS-CONSERVED",
+   "statement": "Every lot of an order is either filled (and leaves its maker's offer by the same lots), rests, or is dropped with a reason; no lot is created or lost.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a partial fill leaves the maker's rest in place, at the front of its price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED a taker's unfilled lots rest, and the fills plus the rest are the order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-LOTS-CONSERVED an offer that fills exactly leaves the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NEVER-CROSSED",
+   "statement": "After every order and cancel, the best buy in a hub book is priced below its best sell.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SELF-TRADE",
+   "statement": "An order never trades with an offer of its own owner: the sweep stops at it and the rest is dropped; an all-or-nothing order that would is refused.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE a taker never trades with its own offer: it stops there and the rest is dropped"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SELF-TRADE an all-or-nothing order that would meet itself is refused"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-NO-SILENT-DROP",
+   "statement": "Every lot an order does not trade is named in its result (rested or dropped with a reason), and every refusal carries a tagged fault.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an immediate order drops what it cannot trade, and says why"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP an id names one offer in the book"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-ALL-OR-NOTHING",
+   "statement": "An all-or-nothing order trades whole or is refused with the lots it could fill, and the book is unchanged.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-ALL-OR-NOTHING an order that cannot fill whole is refused with what it could fill"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-BOUNDED",
+   "statement": "A hub book holds at most maxOrders offers and an owner at most maxPerOwner; only an order that may rest needs room, and a cancel frees it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an owner holds at most maxPerOwner offers, and the book at most maxOrders"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-BOUNDED an order that cannot rest needs no room, and a cancel gives the room back"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CANCEL-OWN",
+   "statement": "Only an offer's owner takes it back, and the book returns what it took.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CANCEL-OWN only the owner takes an offer back, and what it took is returned"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-CLAUSE-LOCKSTEP",
+   "statement": "Every party that trades gets one execution: its Account moves by what it gave and got, and its swap clause is rebuilt from the lots still open at the offer's own price (or dropped when filled or withdrawn), never subtracted.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a partial fill re-signs the clause of the lots left, and a full fill drops it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a taker that rests keeps a clause for what is left, at its own limit price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-CLAUSE-LOCKSTEP a dropped remainder withdraws the clause, with its reason"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-PRICE-TIME R-BOOK-NEVER-CROSSED R-BOOK-CLAUSE-LOCKSTEP the book matches the oracle"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-EXACT-AMOUNTS",
+   "statement": "Every amount of a fill is an exact integer (lots times the lot, lots times price times the tick) and fits a uint256; across the parties of one order, what is given in each token is what is gotten in it.",
+   "source": "Hub matching engine thread, coordinator brief 10-01 02:56 (Arthur: the matching engine is a parallel job; the swap clause stays the Account's)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-NO-SILENT-DROP R-BOOK-EXACT-AMOUNTS an order has lots, a price, and amounts that fit a uint256"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS a buyer gives quote and gets base at the maker's price, each leg exact"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS the steps scale the amounts, and a clause is its lots at its own price"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-BOOK-EXACT-AMOUNTS what the parties give in each token is what they get in it"
+    }
+   ]
+  },
+  {
+   "id": "R-BOOK-DISPUTE-HONORS",
+   "statement": "A dispute opened from any Account state the book produced pays each side what both signed: the moved offdeltas, plus (when the taker fills the open clauses in full) exactly the lots still open at the owners' own prices.",
+   "source": "Hub matching engine review B (PR 92), on Arthur's 10-01 02:53 swap decision (a dispute honors what was filled) and plan/swap-onchain.md",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a dispute from any state the book put an Account in pays what both believed"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS a taker's partial ratio rounds each leg down, and the engine's remainder clause never needs one"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
+    }
+   ]
+  }
+ ]
+}

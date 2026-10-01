@@ -1,6 +1,6 @@
 # disputes-final: disputes and cross-j recovery
 
-og (core/ + jurisdictions/ at 566c850) is the spec. The tests are in `pure/diff/disputes-final.test.ts`. Run them from `pure/` with `bun test diff/disputes-final.test.ts`: 17 pass, 0 fail. Every test is `MATCH:` and runs live og on seeded random inputs.
+og (core/ + jurisdictions/ at 566c850) is the spec. The tests are in `pure/diff/disputes/disputes-final.test.ts`. Run them from `pure/` with `bun test diff/disputes/disputes-final.test.ts`: 17 pass, 0 fail. Every test is `MATCH:` and runs live og on seeded random inputs.
 
 ## Rows closed
 

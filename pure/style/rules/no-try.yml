@@ -1,0 +1,6 @@
+id: no-try
+language: TypeScript
+severity: error
+message: try/catch; return a Result at the boundary that can fail (register the boundary in style/README.md)
+rule: { kind: try_statement }
+files: [xln.ts]

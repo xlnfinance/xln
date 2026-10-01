@@ -1,6 +1,6 @@
 # runtime-2: Runtime input model, Runtime WAL, lending, oracle types
 
-og (`core/` at 566c850) is the spec. Tests: `pure/diff/runtime-2.test.ts`; every MATCH test there runs live og.
+og (`core/` at 566c850) is the spec. Tests: `pure/diff/runtime/runtime-2.test.ts`; every MATCH test there runs live og.
 
 | ID | og source | Finding | Test | Status |
 |---|---|---|---|---|

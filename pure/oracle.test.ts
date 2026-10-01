@@ -56,8 +56,8 @@ import {
   type FoldCtx,
 } from "./xln.ts";
 import { anvilKey, crypto, signerAddress } from "./xln_run.ts";
-import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og-author.ts";
-import { ogOf } from "./diff/og-state.ts";
+import { consensusBytes, ogAfterCommands, ogAuthored, ogAuthorVerdict, ogCommandState } from "./diff/og/og-author.ts";
+import { ogOf } from "./diff/og/og-state.ts";
 
 const word = (byte: string): string => `0x${byte.repeat(32)}`;
 /** og jBlockHash is a 0x-prefixed block hash; the rewrite's Hash brand has no 0x constructor, so this one fixture is branded directly. */
@@ -284,7 +284,7 @@ describe("oracle", () => {
     const secret = word("5a");
     const hashlock = hashHtlcSecret(secret);
     if (hashlock === null) throw new Error("secret");
-    const lock = { type: "htlc_lock" as const, lockId: hashlock, hashlock, timelock: 10n ** 15n, revealBeforeHeight: 5n, amount: 5n, tokenId: T0 };
+    const lock = { type: "htlc_lock" as const, lockId: hashlock, hashlock, timelock: 10n ** 8n, revealBeforeHeight: 5n, amount: 5n, tokenId: T0 };
     const locked = unwrap(applyAccountBody(body, lock, ctx)).state;
     expect(getDelta(locked.account, T0).offdelta).toBe(0n);
     expect(outCapacity(getDelta(locked.account, T0), true, holds(locked, T0, true))).toBe(15n);
