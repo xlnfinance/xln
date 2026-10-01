@@ -16,7 +16,7 @@ const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
   }, j);
 const empty = openJBatch(ME, 0n);
 
-describe("R-SAME-FRAME-SETTLE-PENDING every field of a request's key tells two requests apart", () => {
+describe("every field of a request's key tells two requests apart", () => {
   test("a withdrawal at another nonce, a start in another epoch, a finalize or a counter at another nonce", () => {
     expect(queue(queued(empty, withdraw(LEFT_PEER, 3n, 1n)), withdraw(LEFT_PEER, 3n, 2n))._tag).toBe("queued");
     const s = start(LEFT_PEER, 1n);

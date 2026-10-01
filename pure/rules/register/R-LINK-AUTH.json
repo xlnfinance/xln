@@ -1,0 +1,24 @@
+{
+ "id": "R-LINK-AUTH",
+ "statement": "The Host trusts a message's `from` only as the link-authenticated peer: the link authenticates its peer, the content authenticates itself.",
+ "source": "spec/QUESTIONS.md Q-T-5; spec/transport/bugs trust-frame-sender and trust-ack-sender; Review A of 118",
+ "layers": {
+  "arrival": "owed: spec thread, name the link page's sender-authentication bugs trust-frame-sender and trust-ack-sender under this id",
+  "quint": "owed: spec thread, say whether runtime.qnt models a forged sender or n/a with the reason",
+  "contract": "n/a: link authentication is off-chain",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: transport thread, the shell slice (pure/host/shell/): the link binds each message to the peer Entity's key, and a test shows a forged ack with a real frame hash over a wrong-peer link is refused before the Host; host.ts receive only trusts `from`"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "trust-frame-sender"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "trust-ack-sender"
+  }
+ ]
+}
