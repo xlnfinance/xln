@@ -321,25 +321,28 @@ const RELIABLE: Weather = { link: "reliable", crashes: "never" };
 const CRASHING: Weather = { link: "reliable", crashes: "sometimes" };
 const STORMY: Weather = { link: "lossy", crashes: "sometimes" };
 
+/** A run of the explorer is seconds of CPU; Bun's 5 s default would make a slow machine the cause of a red gate. */
+const BUDGET_MS = 120_000;
+
 describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, with crashes", () => {
   test("R-NET R-DURABLE a reliable link: every run settles and the money matches the notices", () => {
     const v = explore(REAL, RELIABLE, SEED, RUNS);
     expect(v.failures).toEqual([]);
     expect(v.settledRuns).toBe(RUNS);
-  });
+  }, BUDGET_MS);
 
   test("R-DURABLE R-X1 crashes at any step: every run settles and the money matches the notices", () => {
     const v = explore(REAL, CRASHING, SEED, RUNS);
     expect(v.failures).toEqual([]);
     expect(v.settledRuns).toBe(RUNS);
-  });
+  }, BUDGET_MS);
 
   test("R-NET R-DURABLE a link that loses, repeats and reorders, and crashes: every run settles, on one chain", () => {
     const v = explore(REAL, STORMY, SEED, RUNS);
     expect(v.failures).toEqual([]);
     expect(v.settledRuns).toBe(RUNS);
     expect(v.frames).toBeGreaterThan(RUNS * 4);
-  });
+  }, BUDGET_MS);
 
   test("R-DURABLE planted bug: a flush that lets a staged frame's outputs leave is a leak", () => {
     const leaking: Ops = { ...REAL, flush: (rt) => {
@@ -347,10 +350,10 @@ describe("runtime/chaos two Hosts over a link that loses, repeats and reorders, 
       return { ...flushed, leaving: [...flushed.leaving, ...(rt.staged?.outputs ?? [])] };
     } };
     expect(explore(leaking, CRASHING, SEED, RUNS).failures.join("\n")).toContain("an output no WAL holds");
-  });
+  }, BUDGET_MS);
 
   test("R-X1 planted bug: a recovery that forgets the last row does not replay to what the Runtime holds", () => {
     const forgetful: Ops = { ...REAL, recover: (s, g, wal) => recover(s, g, wal.slice(0, -1)) };
     expect(explore(forgetful, CRASHING, SEED, RUNS).failures.join("\n")).toContain("does not replay");
-  });
+  }, BUDGET_MS);
 });
