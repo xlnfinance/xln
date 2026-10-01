@@ -1,6 +1,6 @@
 # Rule register and its gate
 
-`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`) and folder width (below), so there is one gate command and one exit code (`--register-only`, `--style-only` and `--width-only` run just that part through the same table the plain command uses; `--matrix` prints only the matrix). Tests: `bun test rules`.
+`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`), folder width (below) and contract-test placement (below), so there is one gate command and one exit code (`--register-only`, `--style-only`, `--width-only` and `--tests-only` run just that part through the same table the plain command uses; `--matrix` prints only the matrix). Tests: `bun test rules`.
 
 **Id policy (coordinator, 09-30).** New rule ids are descriptive names (`R-SOMETHING`), never bare numbers, so ids from different sources cannot collide. Review-finding ids (`F1`, `G1`, `S1`, ...) name findings only and are never rules. The policy is also the `policy` field at the top of `register.json`. A rule is retired with `retired_by: [successor ids]`, not deleted; a retired row needs no killer and claims no layer.
 
@@ -29,7 +29,7 @@ Only checks that run count.
 - Foundry: public or external `test*` and `invariant*` functions in a concrete contract that inherits a base. Not internal or private functions, abstract contracts, `check*` or `prove*`.
 - Arrival: `property`, `step-property` and `liveness` strings and planted-bug file names. (Dead code such as a property inside an uncalled helper is not detected.)
 - Quint: `run` names, invariants a check script passes to `quint run --invariant`, and mutant ids (a mutant whose `why` opens with `R-A1:` also carries that tag). Not `val`, `def` or `action`.
-- Contract tests are read only from folders a gate runs: `contracts/test/vm/*/`, `contracts/test/gate/`, `contracts/test/foundry/`. A rule held only in `a12/`, `dispute/`, `governance/` or `protocol/` is owed until that test moves into a gated folder.
+- Contract tests are read only from folders a gate runs: `contracts/test/vm/<area>/`, `contracts/test/gate/`, `contracts/test/foundry/` (the same globs as the `contracts-fork` job; a file straight under `vm/` is in none). A rule held only in a Hardhat-only file (`dispute/`, `governance/`, `protocol/`) is owed until that test moves into a gated folder. `bun rules/check.ts --tests-only` keeps that honest: a contract test in any other folder is red (`UNGATED_CONTRACT_TEST`) unless it is on `HARDHAT_ONLY` in `rules/checks/contract-tests.ts`, and a listed file that is gone or now gated is red too (`STALE_HARDHAT_ONLY`).
 
 Comments and strings never count. An id is carried when its tokens sit next to each other in a name: `J5` is in `j5-gas-exact` and `J5 a failing batch...`, not in `J50`; `R-CLOCK` is not in `R-HTLC-CLOCK`. Titles and property strings are matched case-sensitively, identifiers in any case.
 

@@ -33,7 +33,7 @@ const constantAst = (value: unknown) => ({ nodeType: "SourceUnit", nodes: [{ nod
 const named = (chainId: number, id = "chain") => ({ id, chainId });
 const floorOf = (seconds: number | null) => () => seconds as number;
 
-describe("the floor is read from solc's AST", () => {
+describe("N3 the floor is read from solc's AST", () => {
   test("literals, units and arithmetic", () => {
     expect(gate.floorFromAst(constantAst(literal("60")))).toBe(60);
     expect(gate.floorFromAst(constantAst(literal("6", "hours")))).toBe(21600);
@@ -63,7 +63,7 @@ describe("the floor is read from solc's AST", () => {
   });
 });
 
-describe("the gate is keyed by chain id", () => {
+describe("N3 the gate is keyed by chain id", () => {
   test("named testnets and local nets may carry the testnet floor", () => {
     expect(gate.assertResponseFloor([named(31337), named(11155111), named(84532), named(3448148188)], floorOf(60))).toBeNull();
   });
@@ -90,7 +90,7 @@ describe("the gate is keyed by chain id", () => {
   });
 });
 
-describe("the batch gas budget fits the chain's transaction gas cap (J5)", () => {
+describe("N3 the batch gas budget fits the chain's transaction gas cap (J5)", () => {
   const gas = { minBudget: 500_000, reserve: 30_000 };
   const readGas = () => gas;
   const capsOf = (caps: Record<number, number>) => (chain: { chainId: number }) => caps[Number(chain.chainId)] ?? null;
@@ -130,7 +130,7 @@ describe("the batch gas budget fits the chain's transaction gas cap (J5)", () =>
   });
 });
 
-describe("every deploy path runs the gate", () => {
+describe("N3 every deploy path runs the gate", () => {
   const run = (args: string[], command = "bun") => runInSandbox(contractsRoot, command, args, {
     env: { DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
   });

@@ -11,9 +11,9 @@
 // the other side never signed the second one.
 // The contract's answer is a fixed order, not a race: at one nonce the LEFT proposer's proof outranks the RIGHT proposer's, whoever
 // starts the dispute and whoever counters. It never lets the loser's proof settle, and the equivocator cannot mint a third.
-// Real Depository stack in BrowserVM; one file per process: `bun test contracts/test/a12/a12-two-cosigned-proofs.test.ts`.
+// Real Depository stack in BrowserVM; one file per process: `bun test contracts/test/vm/disputes/a12-two-cosigned-proofs.test.ts`.
 import { describe, expect, test } from "bun:test";
-import { boot, party, type Body } from "../vm/rig.ts";
+import { boot, party, type Body } from "../rig.ts";
 
 const WINDOWS = 60;
 const N = 5; // the height both frames claim

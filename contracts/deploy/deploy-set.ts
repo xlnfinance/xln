@@ -2,7 +2,7 @@
 //
 //   bun contracts/deploy/deploy-set.ts --rpc http://127.0.0.1:8545 [--manifest deploy/sepolia.manifest.json] [--out <path>] [--live]
 //
-// What it refuses, before anything is sent (each is a test in test/deploy/guards.test.ts):
+// What it refuses, before anything is sent (each is a test in test/gate/deploy-guards.test.ts):
 //   - a node whose chain id is not the manifest's (a fork of Sepolia reports Sepolia's id, so a dry run on a fork passes the same gates);
 //   - a chain the deploy gate refuses (a floor below the mainnet one on a chain that is not a named testnet, an unknown tx gas cap);
 //   - a manifest whose floors or HANKO_PRELUDE_GAS differ from the compiled build, or whose batch gas total is above maxRequiredTxGas;

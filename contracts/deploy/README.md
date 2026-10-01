@@ -17,7 +17,7 @@ export PATH=$PATH:/foundry                     # anvil
 bash contracts/scripts/build.sh                # the build the manifest is checked against
 bun contracts/deploy/dry-run.ts                # plain anvil, chain 31337
 bun contracts/deploy/dry-run.ts --fork https://ethereum-sepolia-rpc.publicnode.com   # anvil fork of Sepolia, chain 11155111
-bun test contracts/test/deploy/                # the refusals and the dry run, as tests (anvil needed, a missing anvil fails)
+bun test contracts/test/gate/deploy-guards.test.ts contracts/test/gate/deploy-dry-run.test.ts   # the refusals and the dry run, as tests (anvil needed, a missing anvil fails)
 ```
 
 The live deploy, once Arthur says so (the only command here that sends a transaction to a real network):
