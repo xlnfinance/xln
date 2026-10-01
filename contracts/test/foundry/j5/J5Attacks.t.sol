@@ -118,6 +118,60 @@ contract J5SplitTest is XlnFixture {
     assertEq(dep.entityNonces(entity[0]), 0);
   }
 
+  function _splitBody(int256 offdelta) internal pure returns (ProofBody memory pb) {
+    pb.watchSeed = keccak256("r-split-counter");
+    pb.leftResponseSeconds = 60;
+    pb.rightResponseSeconds = 60;
+    pb.offdeltas = new Int512[](1);
+    pb.offdeltas[0] = WideMath.fromInt(offdelta);
+    pb.tokenIds = new uint256[](1);
+    pb.tokenIds[0] = 1;
+    pb.transformers = new TransformerClause[](0);
+  }
+
+  /// R-SPLIT for the counter-dispute member: a good counter beside a failing payment reverts the batch (E3, from the payment), takes no
+  /// nonce, and the same counter then lands alone. Needs a live dispute and a real newer state, so that the counter itself is good.
+  function test_R_SPLIT_counterBesideFailingPaymentRevertsWhole() public {
+    bytes memory key = XlnHanko.accountKey(entity[0], entity[1]);
+    ProofBody memory initial = _splitBody(0);
+    bytes32 initialHash = keccak256(abi.encode(initial));
+    bool bProposes = entity[1] < entity[0];
+    Batch memory start = XlnHanko.emptyBatch();
+    start.disputeStarts = new InitialDisputeProof[](1);
+    start.disputeStarts[0] = InitialDisputeProof({
+      counterentity: entity[1], nonce: 1, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key), proposerIsLeft: bProposes,
+      proofbodyHash: initialHash, initialProofbody: initial, watchSeed: initial.watchSeed,
+      sig: _hanko(1, XlnHanko.disputeProofHash(address(dep), key, 1, bProposes, initialHash, initial.watchSeed)),
+      starterInitialArguments: "", starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
+    });
+    assertTrue(_submit(0, start), "A starts the dispute");
+
+    ProofBody memory newer = _splitBody(30);
+    bytes32 newerHash = keccak256(abi.encode(newer));
+    Batch memory b = XlnHanko.emptyBatch();
+    b.counterDisputes = new CounterDisputeProof[](1);
+    b.counterDisputes[0] = CounterDisputeProof({
+      counterentity: entity[0], initialNonce: 1, initialProofbodyHash: initialHash, counterNonce: 3, proposerIsLeft: bProposes,
+      counterProofbody: newer,
+      sig: _hanko(0, XlnHanko.disputeProofHash(address(dep), key, 3, bProposes, newerHash, newer.watchSeed))
+    });
+    Batch memory withPayment = XlnHanko.emptyBatch(); // a new struct: `= b` would alias it
+    withPayment.counterDisputes = b.counterDisputes;
+    withPayment.reserveToReserve = new ReserveToReserve[](1);
+    withPayment.reserveToReserve[0] = ReserveToReserve({ receivingEntity: entity[0], tokenId: 1, amount: 5_000 }); // B's reserve is 0
+
+    bytes memory encoded = abi.encode(withPayment);
+    uint256 nonce = dep.entityNonces(entity[1]) + 1;
+    bytes32 h = XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[1], encoded, nonce);
+    vm.recordLogs();
+    (bool ok, bytes memory ret) = address(dep).call(abi.encodeCall(dep.processBatch, (entity[1], encoded, _hanko(1, h), nonce)));
+    assertFalse(ok, "reverts, does not soft-fail");
+    assertEq(bytes4(ret), bytes4(keccak256("E3()")), "the payment is what fails");
+    assertFalse(XlnHanko.batchFailed(vm.getRecordedLogs()), "no BatchFailed");
+    assertEq(dep.entityNonces(entity[1]), nonce - 1, "no nonce taken");
+    assertTrue(_submit(1, b), "the counter itself was good: it lands alone");
+  }
+
   function _revealBatchWithFailingPayment() internal view returns (bytes memory) {
     Batch memory b = XlnHanko.emptyBatch();
     b.reserveToReserve = new ReserveToReserve[](1);

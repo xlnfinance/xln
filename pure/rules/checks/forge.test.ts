@@ -1,5 +1,5 @@
-// Canary for the Foundry part: a red forge test, a skipped one, a forge that ran fewer tests than the register's reader counts, a missing forge and a
-// missing forge-std each turn the one command red, so a forge test cannot fail unseen the way test/deploy/guards.test.ts once did.
+// Canary for the Foundry part: a red forge test, a skipped one, a forge that ran fewer tests than the register's reader counts, a missing forge, a missing
+// forge-std and one that is not the pinned checkout each turn the one command red, so a forge test cannot fail unseen the way test/deploy/guards.test.ts once did.
 import { describe, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -62,6 +62,7 @@ const scratch = (): string => {
   };
   plant("contracts/test/foundry/units/T.t.sol", "contract T is Test { function test_a() public {} function test_b() public {} }\n");
   plant("contracts/lib/forge-std/src/Test.sol", "// stand-in\n");
+  plant("contracts/scripts/setup-forge-std.sh", "exit 0\n"); // stands in for the pin check: the real one needs the pinned git checkout
   Bun.spawnSync(["git", "init", "-q"], { cwd: repo });
   return repo;
 };
@@ -110,5 +111,14 @@ describe("the real command over a scratch checkout", () => {
     const done = Bun.spawnSync([process.execPath, `${repo}/pure/rules/check.ts`, "--forge-only"], { cwd: `${repo}/pure`, env: { ...process.env, PATH: "/usr/bin:/bin" } });
     expect(done.exitCode).toBe(1);
     expect(done.stdout.toString()).toContain("FORGE_STD_MISSING");
+  });
+
+  test("a forge-std that the pin check refuses turns the command red before forge runs", () => {
+    const repo = scratch();
+    writeFileSync(`${repo}/contracts/scripts/setup-forge-std.sh`, 'echo "FORGE_STD_TRACKED_WORKTREE_DIRTY:contracts/lib/forge-std" >&2\nexit 1\n');
+    const { code, out } = withFakeForge(repo, "Ran 1 test suite in 1s (1s CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)", 0);
+    expect(code).toBe(1);
+    expect(out).toContain("FORGE_STD_UNVERIFIED FORGE_STD_TRACKED_WORKTREE_DIRTY");
+    expect(out).not.toContain("FORGE_OK");
   });
 });

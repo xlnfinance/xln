@@ -55,10 +55,19 @@ const runForge = (repo: string): ForgeRun => {
 export type ForgeReport = Readonly<{ failed: boolean; lines: readonly string[] }>;
 
 // forge-std is a pinned checkout (contracts/scripts/setup-forge-std.sh), not a tracked file: without it forge cannot compile a single test.
+// Present is not enough: a stale or edited copy can turn a failing assert green, so the script that made the pin judges it (commit, origin,
+// a clean tree; with the checkout present it installs nothing and needs no network).
+const forgeStdProblem = (repo: string): string | null => {
+  const done = Bun.spawnSync(["bash", `${repo}/${FORGE_ROOT}/scripts/setup-forge-std.sh`], { cwd: repo, stdout: "pipe", stderr: "pipe" });
+  return done.exitCode === 0 ? null : `FORGE_STD_UNVERIFIED ${(done.stderr.toString() + done.stdout.toString()).trim().split("\n").at(-1)}`;
+};
+
 export const forgeReport = (repo: string): ForgeReport => {
   if (!existsSync(`${repo}/${FORGE_ROOT}/lib/forge-std/src/Test.sol`)) {
     return { failed: true, lines: ["FORGE_STD_MISSING contracts/lib/forge-std is not checked out (cd contracts && bun run forge:setup)", "FORGE_INVARIANT_FAILED"] };
   }
+  const unverified = forgeStdProblem(repo);
+  if (unverified !== null) return { failed: true, lines: [unverified, "FORGE_INVARIANT_FAILED"] };
   const expected = expectedForgeTests(repo);
   const problems = forgeProblems(runForge(repo), expected);
   return { failed: problems.length > 0, lines: [...problems, problems.length === 0 ? `FORGE_OK tests=${expected}` : "FORGE_INVARIANT_FAILED"] };
