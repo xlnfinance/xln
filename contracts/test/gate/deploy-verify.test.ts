@@ -2,7 +2,7 @@
 // address, and every way a chain can differ from it is planted one at a time. Nothing here reaches a real network or needs a key.
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ethers } from "ethers";
@@ -59,6 +59,13 @@ describe("verify.ts against a chain that holds exactly the build", () => {
     expect(ethers.getAddress(ethers.dataSlice(code, slotOf("depository", "link slot for library Account").start, slotOf("depository", "link slot for library Account").start + 20))).toBe(manifest.contracts!.account.address);
   });
 
+  test("R-DEPLOY-VERIFY the EntityProvider the fake chain serves holds the manifest's deployer in both foundationDeployer slots", () => {
+    const code = served().get(lower(addressOf("entityProvider")))!;
+    const slots = expectedRuntime(manifest, build, "entityProvider").slots.filter((slot) => slot.what === "immutable foundationDeployer");
+    expect(slots.length).toBe(2);
+    for (const { start } of slots) expect(ethers.getAddress(ethers.dataSlice(code, start + 12, start + 32))).toBe(manifest.deployer!);
+  });
+
   test("R-DEPLOY-VERIFY a library's own-address immutable is its deployed address; the token's immutable is its decimals", () => {
     const own = (subject: "account" | "hashLadderRegistry" | "nftCustody"): string => {
       const { code } = expectedRuntime(manifest, build, subject);
@@ -83,6 +90,17 @@ describe("verify.ts names every way the chain can differ", () => {
     const reasons = report.rows.find((row) => row.subject === "account")!.reasons.join("\n");
     expect(reasons).toContain(`first difference at byte ${at}, in compiled code`);
     expect(reasons).toContain("is not the manifest's codeHash");
+  });
+
+  test("R-DEPLOY-VERIFY a difference in the very last byte of any contract's code, the faucet token's included, is a differ at that byte", async () => {
+    for (const subject of SUBJECTS) {
+      const codes = served();
+      const code = codes.get(lower(addressOf(subject)))!;
+      code[code.length - 1] ^= 0x01;
+      const report = await verifyDeployment(manifest, build, chainOf(codes));
+      expect(report.rows.filter((row) => !row.match).map((row) => row.subject)).toEqual([subject]);
+      expect(report.rows.find((row) => row.subject === subject)!.reasons.join("\n")).toContain(`first difference at byte ${code.length - 1}, in compiled code`);
+    }
   });
 
   test("R-DEPLOY-VERIFY a wrong admin in the Depository's immutable slot is named as the admin immutable", async () => {
@@ -137,6 +155,34 @@ describe("verify.ts names every way the chain can differ", () => {
     expect(() => expectedRuntime(manifest, stale, "account")).toThrow("older than contracts/Account.sol: run bash contracts/scripts/build.sh");
   });
 
+  test("R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "xln-stale-"));
+    try {
+      // a copy of the project: artifacts/ points at the real build, contracts/ is a copy of the sources that can be edited
+      const contractsDir = path.join(import.meta.dir, "..", "..");
+      mkdirSync(path.join(dir, "artifacts"));
+      symlinkSync(path.join(contractsDir, "artifacts", "build-info"), path.join(dir, "artifacts", "build-info"));
+      symlinkSync(path.join(contractsDir, "artifacts", "contracts"), path.join(dir, "artifacts", "contracts"));
+      cpSync(path.join(contractsDir, "contracts"), path.join(dir, "contracts"), { recursive: true });
+      const copy = readBuild(path.join(dir, "artifacts"));
+      const staleOf = (subject: Subject): readonly string[] => copy.staleSources(copy.artifactOf(subject));
+      expect(staleOf("depository")).toEqual([]);
+      expect(staleOf("hashLadderRegistry")).toEqual([]);
+      // a file the Depository imports, directly or through another file
+      appendFileSync(path.join(dir, "contracts", "Depository.sol"), "\n// edited after the build\n");
+      expect(staleOf("depository")).toEqual(["contracts/Depository.sol"]);
+      expect(staleOf("hashLadderRegistry")).toEqual([]);
+      appendFileSync(path.join(dir, "contracts", "HashLadder.sol"), "\n// edited after the build\n");
+      expect(staleOf("hashLadderRegistry")).toEqual(["contracts/HashLadder.sol"]);
+      expect(staleOf("depository")).toEqual(expect.arrayContaining(["contracts/Depository.sol"]));
+      // a source that is gone counts as edited
+      rmSync(path.join(dir, "contracts", "Depository.sol"));
+      expect(staleOf("depository")).toContain("contracts/Depository.sol");
+      // and the comparison refuses to build code from such an artifact
+      expect(() => expectedRuntime(manifest, copy, "depository")).toThrow("the compiled artifact is older than");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test("R-DEPLOY-VERIFY an immutable the check does not know the value of is an error, not a pass", () => {
     const unknown: Build = { ...build, immutableName: () => "somethingNew" };
     expect(() => expectedRuntime(manifest, unknown, "depository")).toThrow('immutable "somethingNew" is not one this check knows');
@@ -149,20 +195,22 @@ describe("verify.ts as a command, against a throw-away JSON-RPC node on this mac
   const manifestFile = path.join(dir, "manifest.json");
   writeFileSync(manifestFile, JSON.stringify(manifest));
 
-  type Node = { readonly url: string; readonly methods: string[]; readonly stop: () => void };
+  type Node = { readonly url: string; readonly methods: string[]; readonly codeReads: unknown[][]; readonly stop: () => void };
   const startNode = (codes: ReadonlyMap<string, Uint8Array>, chainId = manifest.chainId): Node => {
     const methods: string[] = [];
+    const codeReads: unknown[][] = [];
     const server = Bun.serve({
       port: 0,
       fetch: async (request) => {
         const { id, method, params } = (await request.json()) as { id: number; method: string; params: unknown[] };
         methods.push(method);
+        if (method === "eth_getCode") codeReads.push(params);
         const result = method === "eth_chainId" ? ethers.toBeHex(chainId) : method === "eth_blockNumber" ? ethers.toBeHex(11_820_000)
           : method === "eth_getCode" ? ethers.hexlify(codes.get(lower(String(params[0]))) ?? new Uint8Array()) : null;
         return Response.json(result === null ? { jsonrpc: "2.0", id, error: { message: `${method} is not served` } } : { jsonrpc: "2.0", id, result });
       },
     });
-    return { url: `http://127.0.0.1:${server.port}`, methods, stop: () => server.stop(true) };
+    return { url: `http://127.0.0.1:${server.port}`, methods, codeReads, stop: () => server.stop(true) };
   };
   // The command is run asynchronously: spawnSync would block the event loop that serves the node.
   const run = async (args: readonly string[], env: Record<string, string> = {}) => {
@@ -180,6 +228,9 @@ describe("verify.ts as a command, against a throw-away JSON-RPC node on this mac
       expect(result.stdout.match(/ {2}match /g)?.length).toBe(9);
       expect(result.code).toBe(0);
       expect([...new Set(node.methods)].sort()).toEqual(["eth_blockNumber", "eth_chainId", "eth_getCode"]);
+      // every code read is for one of the nine addresses, once, at the block eth_blockNumber answered
+      expect(node.codeReads.map(([address]) => lower(String(address))).sort()).toEqual(SUBJECTS.map((subject) => lower(addressOf(subject))).sort());
+      expect([...new Set(node.codeReads.map(([, block]) => block))]).toEqual([ethers.toBeHex(11_820_000)]);
     } finally { node.stop(); }
   }, 60_000);
 
