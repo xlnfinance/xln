@@ -1,0 +1,29 @@
+{
+ "id": "R-GATE-QUIET-GATES",
+ "statement": "A gate whose test carries a fixed time limit inside frozen core, and that cannot be given more time, runs first and alone in tools/run-parallel-checks.ts, before the lanes start, so it never shares a machine with the Rust compile or the other gates; today that is check:canonical-payment-surface (15 s, 16 s beside the Rust build in Runtime Checks run 36901597856). It still ends the run red when it fails, and then no other gate starts. All other gates keep running side by side in their lanes. The real runner runs in the test over stub gates that log their starts and ends.",
+ "source": "merge thread 10-01 18:14 (Runtime Checks red on the development push run 36901597856)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (the check runner); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-QUIET-GATES a quiet gate ends before any other gate starts, wherever it stands in the list"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-QUIET-GATES the other gates still run side by side"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-QUIET-GATES a quiet gate that fails fails the run and no other gate starts"
+  }
+ ]
+}
