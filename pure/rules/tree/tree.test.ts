@@ -99,9 +99,9 @@ describe("the gate cannot be satisfied by doing nothing", () => {
 
   test("a directory under pure/ that is neither gated nor named as outside the gate is a failing row", () => {
     const root = scratch(clean);
-    mkdirSync(`${root}/entity`);
-    writeFileSync(`${root}/entity/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
-    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir entity");
+    mkdirSync(`${root}/stray`);
+    writeFileSync(`${root}/stray/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
+    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir stray");
   });
 });
 
