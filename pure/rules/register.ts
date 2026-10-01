@@ -12,12 +12,16 @@ const fail = (where: string, detail: string): Result<never, ParseError> => ({
 
 const pass = <T>(value: T): Result<T, never> => ({ ok: true, value });
 
-// "-" is absent, "hold" is hold, "owed: <who brings it>" is owed.
+// "-" is unstated (the gate is red on it for a live rule), "hold" is hold, "owed: <who brings it>" is owed, "n/a: <why>" is not applicable.
 export const parseCell = (where: string, text: unknown): Result<Cell, ParseError> => {
-  if (text === "-") return pass({ _tag: "absent" });
+  if (text === "-") return pass({ _tag: "unstated" });
   if (text === "hold") return pass({ _tag: "hold" });
   const owed = typeof text === "string" ? /^owed:\s*(\S.*)$/.exec(text) : null;
-  return owed?.[1] === undefined ? fail(where, `cell must be "-", "hold" or "owed: <by>", got ${JSON.stringify(text)}`) : pass({ _tag: "owed", by: owed[1] });
+  if (owed?.[1] !== undefined) return pass({ _tag: "owed", by: owed[1] });
+  const na = typeof text === "string" ? /^n\/a:\s*(\S.*)$/.exec(text) : null;
+  return na?.[1] === undefined
+    ? fail(where, `cell must be "hold", "owed: <by>", "n/a: <reason>" or "-", got ${JSON.stringify(text)}`)
+    : pass({ _tag: "na", reason: na[1].trim() });
 };
 
 const isLayer = (text: string): text is Layer => (LAYERS as readonly string[]).includes(text);
@@ -52,7 +56,7 @@ const parseCells = (where: string, raw: unknown): Result<Row["cells"], ParseErro
   if (failed !== undefined && !failed.ok) return failed;
   return pass(byLayer((layer) => {
     const each = parsed[layer];
-    return each.ok ? each.value : { _tag: "absent" };
+    return each.ok ? each.value : { _tag: "unstated" };
   }));
 };
 
