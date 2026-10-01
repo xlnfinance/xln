@@ -2,12 +2,17 @@
 // of its mempool on top of its head, the peer commits it and answers with an ack, and the proposer commits on the ack.
 // Every function takes a replica and returns a replica; none throws and none halts anything: a message that is not
 // the next one, or that does not apply, is refused and changes nothing (R-X1). What a tx is, how it applies and how a
-// frame is named come in as `Rules`, so the same round runs on the Account's txs and on the spec page's abstract ones.
+// frame is named and sealed come in as `Rules`, so the same round runs on the Account's txs and on the spec page's
+// abstract ones.
 import { foldResult, map, mapErr, type Result } from "../../kernel/core/result.ts";
 import { match, type Brand, type Tagged } from "../../kernel/core/tagged.ts";
 import { other, type Side } from "../model.ts";
 
-/** The name of a frame: equal frames have equal hashes, so equal heads mean equal histories. */
+/**
+ * A hash that names a frame. A frame's content name (`Rules.name`) says what was proposed and is what a refusal and a
+ * repeat are matched by; the head a committed frame gives (`Rules.seal`) is what its signers sign: equal heads mean
+ * equal histories.
+ */
 export type FrameHash = Brand<string, "FrameHash">;
 
 /**
@@ -32,7 +37,7 @@ export const STALE_ATTEMPT = "stale_attempt";
  * refused: the proposer's next attempt is above it, so a proposer whose count is behind (a restart) catches up in one
  * round trip.
  */
-type Refusal = Readonly<{ hash: FrameHash; index: number; fault: string; mark: number }>;
+export type Refusal = Readonly<{ hash: FrameHash; index: number; fault: string; mark: number }>;
 
 export type Msg<Tx> =
   | Tagged<"frame", { frame: Frame<Tx> }>
@@ -40,13 +45,19 @@ export type Msg<Tx> =
   | Tagged<"refusal", Refusal>;
 
 /**
- * What a frame is made of. `apply` is the author's tx on the judging replica's state, by that replica's view. `tag` is
- * what a refusal says of a fault, and `retryable` says whether a fault with that tag can pass with the peer's view of
- * the chain (a tx the peer finds too early or too far ahead), so the tx is tried again, and not for good.
+ * What a frame is made of. `apply` is the author's tx on the judging replica's state, by that replica's view. `name` is
+ * the frame's content, computable without applying it, so a frame that does not apply can still be named in a refusal.
+ * `seal` is the head the frame gives once it has made `after`, at nonce slot `slot` (the first is 1): the digest its
+ * signers sign (R-FRAME-HASH-SIGNED). The slot counts the frames committed, the nonces their refused attempts burned
+ * and the frame's own attempt, so a retry is never signed at a nonce an earlier attempt used (R-RETRY-NEW-NONCE). It
+ * fails when no such digest exists, and the round then refuses the frame.
+ * `tag` is what a refusal says of a fault, and `retryable` says whether a fault with that tag can pass with the peer's
+ * view of the chain (a tx the peer finds too early or too far ahead), so the tx is tried again, and not for good.
  */
 export type Rules<Tx, S, F> = Readonly<{
   apply: (state: S, author: Side, tx: Tx) => Result<S, F>;
-  hash: (frame: Frame<Tx>) => FrameHash;
+  name: (frame: Frame<Tx>) => FrameHash;
+  seal: (frame: Frame<Tx>, after: S, slot: number) => Result<FrameHash, F>;
   tag: (fault: F) => string;
   retryable: (tag: string) => boolean;
 }>;
@@ -63,12 +74,19 @@ export type Refused<Tx, F> = Readonly<{ tx: Tx; fault: F | PeerRefused }>;
  */
 type Declined<F> = Readonly<{ hash: FrameHash; attempt: number; index: number; fault: F }>;
 
-type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S }>;
+type Proposed<Tx, S> = Readonly<{ frame: Frame<Tx>; after: S; head: FrameHash }>;
 
-/** One side of the Account: its committed head and the state that head made, and the txs it has not committed yet. */
+/**
+ * One side of the Account: its committed head and the state that head made, how many frames are committed (`height`)
+ * and how many nonces their refused attempts burned (`burned`), the content name of the last one (`last`, to answer its
+ * repeat), and the txs it has not committed yet.
+ */
 export type Replica<Tx, S, F> = Readonly<{
   side: Side;
   head: FrameHash;
+  height: number;
+  burned: number;
+  last: FrameHash | undefined;
   state: S;
   mempool: readonly Tx[];
   pending: Proposed<Tx, S> | undefined;
@@ -79,8 +97,11 @@ export type Replica<Tx, S, F> = Readonly<{
   declined: Declined<F> | undefined;
 }>;
 
-export const replica = <Tx, S, F>(side: Side, head: FrameHash, state: S): Replica<Tx, S, F> =>
-  ({ side, head, state, mempool: [], pending: undefined, refused: [], attempt: 0, declined: undefined });
+/** A replica at the start of the Account's history: no frame committed, `head` the genesis. */
+export const replica = <Tx, S, F>(side: Side, head: FrameHash, state: S): Replica<Tx, S, F> => ({
+  side, head, height: 0, burned: 0, last: undefined, state, mempool: [], pending: undefined, refused: [], attempt: 0,
+  declined: undefined,
+});
 
 export type Out<Tx, S, F> = Readonly<{ replica: Replica<Tx, S, F>; sent: readonly Msg<Tx>[] }>;
 
@@ -148,8 +169,11 @@ export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>):
   if (r.pending !== undefined || r.mempool.length === 0) return { replica: r, sent: NO_MESSAGES };
   const split = splitValid(rules, r.side, r.state, r.mempool);
   const frame = { author: r.side, parent: r.head, attempt: r.attempt, txs: split.valid };
-  const pending = split.valid.length === 0 ? undefined : { frame, after: split.state };
-  const proposed = { ...r, mempool: [], refused: [...r.refused, ...split.refused], pending };
+  const sealed = split.valid.length === 0 ? undefined : rules.seal(frame, split.state, slotOf(r, frame));
+  // A state with no digest cannot be committed by anyone: its txs are refused with the reason, not left to wedge.
+  const unsealed = sealed?.ok === false ? split.valid.map((tx): Refused<Tx, F> => ({ tx, fault: sealed.error })) : [];
+  const pending = sealed?.ok === true ? { frame, after: split.state, head: sealed.value } : undefined;
+  const proposed = { ...r, mempool: [], refused: [...r.refused, ...split.refused, ...unsealed], pending };
   return { replica: proposed, sent: pending === undefined ? NO_MESSAGES : [frameMsg(pending.frame)] };
 };
 
@@ -165,11 +189,24 @@ const heard = <Tx, S, F>(
 const withoutPending = <Tx, S, F>(r: Replica<Tx, S, F>): Replica<Tx, S, F> =>
   ({ ...r, mempool: [...(r.pending?.frame.txs ?? []), ...r.mempool], pending: undefined });
 
-/** The peer's frame is the next one and holds: commit it (a pending frame of mine rolls back) and ack. */
-const accept = <Tx, S, F>(r: Replica<Tx, S, F>, hash: FrameHash, after: S): Heard<Tx, S, F> => {
-  const base = r.pending === undefined ? r : withoutPending(r);
-  const committed = { ...base, head: hash, state: after, attempt: 0, declined: undefined };
-  return heard(committed, [ack(hash)], r.pending === undefined ? { _tag: "accepted" } : { _tag: "accepted_over_own" });
+/** The nonce slot `frame` signs at on this head: after every nonce used, one more for each refused attempt. */
+const slotOf = <Tx, S, F>(r: Replica<Tx, S, F>, frame: Frame<Tx>): number =>
+  r.height + 1 + r.burned + frame.attempt;
+
+/** The frame `name` made `head` and `after`: commit it, forget what this head refused, count it and its burn. */
+const commit = <Tx, S, F>(
+  r: Replica<Tx, S, F>, frame: Frame<Tx>, name: FrameHash, head: FrameHash, after: S,
+): Replica<Tx, S, F> => ({
+  ...r, head, height: r.height + 1, burned: r.burned + frame.attempt, last: name, state: after, attempt: 0,
+  declined: undefined,
+});
+
+/** The peer's frame is the next one and holds: commit it (a pending frame of mine rolls back) and ack its head. */
+const accept = <Tx, S, F>(
+  r: Replica<Tx, S, F>, frame: Frame<Tx>, name: FrameHash, head: FrameHash, after: S,
+): Heard<Tx, S, F> => {
+  const committed = commit(r.pending === undefined ? r : withoutPending(r), frame, name, head, after);
+  return heard(committed, [ack(head)], r.pending === undefined ? { _tag: "accepted" } : { _tag: "accepted_over_own" });
 };
 
 const refuseWith = <Tx, S, F>(
@@ -203,10 +240,10 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Fram
   if (f.author === r.side) return heard(r, NO_MESSAGES, { _tag: "refused_own" });
   if (f.txs.length === 0) return heard(r, NO_MESSAGES, { _tag: "refused_empty" });
   if (!wellNumbered(f.attempt)) return heard(r, NO_MESSAGES, { _tag: "refused_attempt" });
-  const name = rules.hash(f);
+  const name = rules.name(f);
   if (f.parent !== r.head) {
-    // R-REACK: a repeat of the frame at my head is answered with the same ack, whatever else I hold.
-    return name === r.head
+    // R-REACK: a repeat of the last frame I committed is answered with the same ack, whatever else I hold.
+    return name === r.last
       ? heard(r, [ack(r.head)], { _tag: "re_acked" })
       : heard(r, NO_MESSAGES, { _tag: "refused_not_next" });
   }
@@ -222,15 +259,17 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, f: Fram
   // Same-height collision: LEFT WINS (R-A1). Left keeps its own frame and ignores the peer's; Right yields.
   if (r.pending !== undefined && r.side === "left") return heard(r, NO_MESSAGES, { _tag: "kept_own" });
   const after = applyAll(rules, r.state, f.author, f.txs);
-  return after.ok ? accept(r, name, after.value) : decline(rules, r, name, f, after.error);
+  if (!after.ok) return decline(rules, r, name, f, after.error);
+  const head = rules.seal(f, after.value, slotOf(r, f));
+  return head.ok
+    ? accept(r, f, name, head.value, after.value)
+    : decline(rules, r, name, f, { index: f.txs.length - 1, fault: head.error });
 };
 
 const onAck = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>, hash: FrameHash): Heard<Tx, S, F> => {
   const pending = r.pending;
-  if (pending === undefined || rules.hash(pending.frame) !== hash) {
-    return heard(r, NO_MESSAGES, { _tag: "ack_ignored" });
-  }
-  const committed = { ...r, head: hash, state: pending.after, pending: undefined, attempt: 0, declined: undefined };
+  if (pending === undefined || pending.head !== hash) return heard(r, NO_MESSAGES, { _tag: "ack_ignored" });
+  const committed = { ...commit(r, pending.frame, rules.name(pending.frame), hash, pending.after), pending: undefined };
   return heard(committed, NO_MESSAGES, { _tag: "committed_own" });
 };
 
@@ -250,7 +289,7 @@ const onRefusal = <Tx, S, F>(
   const named = Number.isInteger(index) ? pending?.frame.txs[index] : undefined;
   const attempt = Math.max(r.attempt, mark) + 1;
   const counted = Number.isSafeInteger(mark) && mark >= 0 && Number.isSafeInteger(attempt);
-  if (pending === undefined || named === undefined || !counted || rules.hash(pending.frame) !== hash) {
+  if (pending === undefined || named === undefined || !counted || rules.name(pending.frame) !== hash) {
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
   const retry = fault === STALE_ATTEMPT || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);

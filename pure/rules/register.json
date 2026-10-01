@@ -1601,21 +1601,25 @@
   },
   {
    "id": "R-FRAME-HASH-SIGNED",
-   "statement": "The hash a frame is acked and chained by is the hash of the bytes both sides sign, and those bytes bind the author side. Until then the TS hash is provisionalFrameHash, a stand-in that covers the author, parent and every field of every tx and nothing more; it must not be signed, sent on the wire or stored.",
+   "statement": "A frame has two names. Its head, the hash it is acked and chained by, is the digest of the dispute-proof message both sides sign: the Account's proof body after the frame, at the nonce the first signed frame's plus its height minus one, authored by the frame's proposer, so the bytes bind the author side, the state and the height. Its content name (author, parent, attempt, txs) needs no state, and a refusal, a repeat and the refusal memory use it, never the head; an ack names the head and one that names the content is ignored. A state that has no proof body is refused before anyone signs it (fault unsignable) and a frame whose digest cannot be made is refused with notice. Each replica builds both from its own state: nothing signed comes from the wire. Signing, and checking the signature before the memory is consulted, are the Runtime's (T0).",
    "source": "coordinator decision 10-01 on A3 (provisional frame hash)",
    "layers": {
     "arrival": "-",
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: A4 (signed bytes) and T0 (wire)"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "ts",
-     "name": "to be named",
-     "owed": "A4 (signed bytes) and T0 (wire)"
+     "name": "account/proof R-FRAME-HASH-SIGNED the head a frame gives is the digest its signers sign"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/proof R-FRAME-HASH-SIGNED a state with no proof body is refused before anyone signs it"
     }
    ]
   },
@@ -1917,14 +1921,14 @@
   },
   {
    "id": "R-PROOF-NONCE",
-   "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
+   "statement": "The proof nonce is its own counter; a committed frame signs at the nonce above the one before it, and only the refused attempts of a retry (R-RETRY-NEW-NONCE) leave a gap; signatures are one per (signer, nonce, author side).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: A4 (the frame nonce is the signed body's)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1942,8 +1946,26 @@
     {
      "kind": "test",
      "layer": "ts",
-     "name": "to be named",
-     "owed": "A4"
+     "name": "R-PROOF-NONCE the next frame signs at the next nonce: nothing skips one, and another height differs"
+    }
+   ]
+  },
+  {
+   "id": "R-RETRY-NEW-NONCE",
+   "statement": "A refused frame is retried at a fresh proof nonce: the frame at attempt a is signed at the nonce above every nonce a committed frame or an earlier attempt used (slot = frames committed + nonces burned + attempt + 1), never a second different proof at one nonce, because the peer holds the proposer's signature on the refused attempt's proof. The contract takes any nonce above the stored one (start nonce > stored, counter nonce >= the opening nonce, finalize by a newer signed proof), so a gap costs nothing; a nonce not below the JS-safe ceiling has no digest.",
+   "source": "contracts-decisions.md, R-RETRY-NEW-NONCE (coordinator 10-01 05:18); Account.sol _disputeStart, _registerCounterDispute",
+   "layers": {
+    "arrival": "owed: #41 (id not in a name yet)",
+    "quint": "owed: #44 (id not in a name yet)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-RETRY-NEW-NONCE the retry is signed one nonce above the refused attempt, at another digest"
     }
    ]
   },
@@ -2788,21 +2810,39 @@
   },
   {
    "id": "R-DEADLINE-TIMESTAMP",
-   "statement": "A hold's deadline is a J height (R-HTLC-CLOCK) and the contract judges a reveal by block timestamp in seconds (DeltaTransformer revealedUntilTimestamp). The body maps one to the other with an injected function, so what both parties sign is only as agreed as that function is. Open decision: what the function is (a table of anchors from the deploy manifest, or a seconds field both sign in the lock), and how the payee's reveal at deadline minus LAG stays inside it.",
-   "source": "Review A of PR 79 F6 (A2); A4b",
+   "statement": "A hold's deadline is a J height (R-HTLC-CLOCK) and the contract counts a reveal only if it reached the chain by the payment's revealedUntilTimestamp, in seconds. The body maps one to the other with one function, a line through an anchor block of the J chain: the anchor's second, a block time per block after it, and a slack on top, all fixed by the deployment (the manifest's values, measured, not chosen here). Every hop uses the same line, so an earlier deadline is an earlier second, strictly, and the order a forwarding hub relies on is kept; the slack errs in the payee's favour (more time to reveal, a longer wait to finalize, never a lost payment) and must cover the drift of real block times from the line, so the anchor must be recent. A map that could run backwards is refused, and a deadline that maps to no positive second has no body.",
+   "source": "Review A of PR 79 F6 (A2); A4b (the function is the A4b thread's proposal, for the reviewers to attack)",
    "layers": {
     "arrival": "-",
     "quint": "-",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: decision (coordinator or Arthur)"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "ts",
-     "name": "to be named",
-     "owed": "decision, then A4b2"
+     "name": "account/proof R-DEADLINE-TIMESTAMP a deadline in J height is one function of the time map"
+    }
+   ]
+  },
+  {
+   "id": "R-SIGNED-MESSAGES",
+   "statement": "A frame's content name and a refusal are signed under digests of their own, tagged with their kind and scoped to the deployment and the Account, so a signature on one is never valid as the other, as a dispute proof, or on another Account; every field is written as text and the fields cannot be shifted into one another, so a digest exists whatever a peer put on the wire. The Runtime signs these and checks the signature before the receiver's refusal memory or the proposer's rollback is consulted (R-FRAME-REFUSAL rests on an authenticated peer).",
+   "source": "Review B of PR 85 (finding 5, note 5); coordinator 10-01 04:24 (A4b: signed bytes for frames and refusals)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/proof R-SIGNED-MESSAGES a frame and a refusal are signed under digests of their own"
     }
    ]
   }

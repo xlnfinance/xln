@@ -15,7 +15,7 @@ import { err, ok, type Result } from "../../kernel/core/result.ts";
 import type { Tagged } from "../../kernel/core/tagged.ts";
 import { other, type Side } from "../model.ts";
 import {
-  propose, queue, receive, replica, resend, type FrameHash, type Msg, type Replica, type Rules,
+  propose, queue, receive, replica, resend, type Frame, type FrameHash, type Msg, type Replica, type Rules,
 } from "./frame.ts";
 
 /** A broken guard lets the walk run away; the page's own space is 3651 states, and past this the walk is a failure. */
@@ -43,13 +43,16 @@ type History = readonly Tx[];
 type R = Replica<Tx, History, Fault>;
 type M = Msg<Tx>;
 
+const name = (f: Frame<Tx>): FrameHash => `${JSON.stringify(f.txs)}<${f.parent}` as FrameHash;
+
 /** The page's world: a tx is valid unless a conflicting predecessor is committed; a frame names its whole history. */
 const rulesFor = (page: Page): Rules<Tx, History, Fault> => ({
   apply: (before, _author, tx): Result<History, Fault> => {
     const pair = page.conflicts.find(([earlier, later]) => later === tx && before.includes(earlier));
     return pair === undefined ? ok([...before, tx]) : err({ _tag: "conflict", tx, predecessor: pair[0] });
   },
-  hash: (f) => `${JSON.stringify(f.txs)}<${f.parent}` as FrameHash,
+  name,
+  seal: (f) => ok(name(f)),
   tag: (fault) => fault._tag,
   retryable: () => false,
 });

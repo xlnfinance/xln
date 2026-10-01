@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import { clockParams } from "../clause/clock.ts";
-import { tokenOf, viewOf } from "../fixtures.ts";
+import { signing, tokenOf, viewOf } from "../fixtures.ts";
 import { emptyLedger } from "../ledger.ts";
 import { type Ledger, type Side } from "../model.ts";
 import { emptyAccount, withLedger } from "../state.ts";
@@ -13,7 +13,7 @@ import { accountRules, emptyReplica, type AccountReplica } from "./account.ts";
 import { MAX_ATTEMPTS, propose, queue, receive, type Msg } from "./frame.ts";
 
 const clock = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params"));
-const rules = accountRules({ clock, view: viewOf(100n) });
+const rules = accountRules({ clock, view: viewOf(100n) }, signing);
 const GOLD = tokenOf(1n);
 const FUNDED: Ledger = { ...emptyLedger, collateral: 300n, ondelta: 150n, limit: { left: 60n, right: 60n } };
 const funded = (side: Side): AccountReplica =>
@@ -24,7 +24,7 @@ const pay: AccountTx = { _tag: "pay", token: GOLD, amount: 1n };
 const refusedAt = (attempt: number, mark: number) => {
   const proposed = propose(rules, queue({ ...funded("left"), attempt }, pay));
   const frame = proposed.replica.pending?.frame ?? expect.unreachable("nothing pending");
-  const refusal: Msg<AccountTx> = { _tag: "refusal", hash: rules.hash(frame), index: 0, fault: "not_expired", mark };
+  const refusal: Msg<AccountTx> = { _tag: "refusal", hash: rules.name(frame), index: 0, fault: "not_expired", mark };
   return receive(rules, proposed.replica, refusal).replica;
 };
 

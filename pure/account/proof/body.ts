@@ -12,6 +12,7 @@ import { proofBodyBytes, type Allowance, type ProofBody, type TransformerClause 
 import type { JHeight } from "../clause/clock.ts";
 import { MAX_HOLDS } from "../ledger.ts";
 import type { AccountState, Hold, Ledger, TokenId } from "../model.ts";
+import { openHolds } from "../state.ts";
 
 /** Account.sol limits on a proof body (`_validateProofBody`). */
 const MAX_PROOF_TOKENS = 128;
@@ -51,26 +52,36 @@ const allowanceOf = (deltaIndex: bigint, change: bigint): Allowance => ({
 });
 
 const clauseOf = (terms: ProofTerms, deltaIndex: bigint, h: Hold): Result<TransformerClause, ProofFault> => {
-  const seconds = terms.secondsOf(h.deadline);
-  if (seconds <= 0n) return err({ _tag: "deadline_not_positive", seconds });
-  const payment: Payment = { deltaIndex, amount: changeOf(h), revealedUntilTimestamp: seconds, hash: h.hashlock };
+  const payment: Payment = {
+    deltaIndex, amount: changeOf(h), revealedUntilTimestamp: terms.secondsOf(h.deadline), hash: h.hashlock,
+  };
   return map(encodeDeltaBatch({ payments: [payment], swaps: [], pulls: [] }), (encodedBatch) => ({
     transformerAddress: terms.transformer, encodedBatch, allowances: [allowanceOf(deltaIndex, payment.amount)],
   }));
 };
 
-const refusedByContract = (b: ProofBody): ProofFault | undefined => {
-  const total = b.leftResponseSeconds + b.rightResponseSeconds;
+/**
+ * Why no body can be signed for `state`, if so, without building one: more tokens or clauses than the Account contract
+ * allows, windows over a year, a deadline that maps to no positive second. It is the cheap half of `proofBodyOf`, and
+ * the Account's rules refuse a tx that would leave a state failing it, so a state two replicas hold has a body.
+ */
+export const unsignable = (terms: ProofTerms, state: AccountState): ProofFault | undefined => {
+  const total = terms.leftResponseSeconds + terms.rightResponseSeconds;
+  const holds = openHolds(state);
+  const unmapped = holds.map((h) => terms.secondsOf(h.deadline)).find((seconds) => seconds <= 0n);
   switch (true) {
     case total > MAX_RESPONSE_TOTAL: return { _tag: "response_windows_too_long", total };
-    case b.tokenIds.length > MAX_PROOF_TOKENS: return { _tag: "too_many_tokens", tokens: b.tokenIds.length };
-    case b.transformers.length > MAX_HOLDS: return { _tag: "too_many_clauses", clauses: b.transformers.length };
+    case state.ledgers.size > MAX_PROOF_TOKENS: return { _tag: "too_many_tokens", tokens: state.ledgers.size };
+    case holds.length > MAX_HOLDS: return { _tag: "too_many_clauses", clauses: holds.length };
+    case unmapped !== undefined: return { _tag: "deadline_not_positive", seconds: unmapped ?? 0n };
     default: return undefined;
   }
 };
 
 /** The body `state` signs to under `terms`, or the way the Account contract would refuse it. */
 export const proofBodyOf = (terms: ProofTerms, state: AccountState): Result<ProofBody, ProofFault> => {
+  const refusal = unsignable(terms, state);
+  if (refusal !== undefined) return err(refusal);
   const rows = byToken(state);
   const clauses = traverse(
     rows.flatMap(([, ledger], i) => bySlot(ledger.holds).map((h) => [BigInt(i), h] as const)),
@@ -85,7 +96,6 @@ export const proofBodyOf = (terms: ProofTerms, state: AccountState): Result<Proo
       tokenIds: rows.map(([t]) => t),
       transformers,
     };
-    const refusal = refusedByContract(body);
-    return refusal === undefined ? map(proofBodyBytes(body), () => body) : err(refusal);
+    return map(proofBodyBytes(body), () => body);
   });
 };
