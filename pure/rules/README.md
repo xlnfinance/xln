@@ -1,8 +1,8 @@
 # Rule register and its gate
 
-`register.json` has one row per rule id. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`), folder width (below) and contract-test placement (below), so there is one gate command and one exit code (`--register-only`, `--style-only`, `--width-only`, `--tests-only` and `--forge-only` run just that part through the same table the plain command uses; `--matrix` prints only the matrix). Tests: `bun test rules`.
+The register is the folder `register/`: one file per rule, `register/<id>.json`, holding that rule's row. Two changes that add or edit different rules touch different files, so they never conflict. Rows are read in id order. `bun rules/check.ts` (from `pure/`) reads the NAMES of things that check and fails when the register and the names disagree, then runs the style gate of the new tree (`kernel/`, `chain/`; see `style/README.md`), folder width (below) and contract-test placement (below), so there is one gate command and one exit code (`--register-only`, `--style-only`, `--width-only`, `--tests-only` and `--forge-only` run just that part through the same table the plain command uses; `--matrix` prints only the matrix). Tests: `bun test rules`.
 
-**Id policy (coordinator, 09-30).** New rule ids are descriptive names (`R-SOMETHING`), never bare numbers, so ids from different sources cannot collide. Review-finding ids (`F1`, `G1`, `S1`, ...) name findings only and are never rules. The policy is also the `policy` field at the top of `register.json`. A rule is retired with `retired_by: [successor ids]`, not deleted; a retired row needs no killer and claims no layer.
+**Id policy (coordinator, 09-30).** New rule ids are descriptive names (`R-SOMETHING`), never bare numbers, so ids from different sources cannot collide. Review-finding ids (`F1`, `G1`, `S1`, ...) name findings only and are never rules. This sentence is the policy; it used to be a field at the top of `register.json`. A rule is retired with `retired_by: [successor ids]`, not deleted; a retired row needs no killer and claims no layer.
 
 ## A row
 
@@ -83,3 +83,17 @@ Rows `R-GATE-REGISTER`, `R-GATE-FROZEN`, `R-GATE-STYLE`, `R-GATE-WIDTH` and `R-G
 - Dead code inside an Arrival helper, an `if false` branch in a Quint `.sh`, Scheme quoted data and `#| |#` blocks count as names.
 - A regex literal is found by where it can start (after an operator, `=>`, an opening bracket, or `return`); an unusual layout such as a regex after a `)` of an `if (...)` is read as division.
 - A retirement into any live row is a NOTE, not a failure: read the NOTE lines.
+
+## The register is a folder, one file per rule
+
+`register/<id>.json` holds one row (`id`, `statement`, `source`, `layers`, `killers`, and `retired_by` for a retired rule), printed with one space of indent. The file's name must be the row's id plus `.json`; nothing else may be in the folder (a stray directory, a README or a misnamed file is red, and so is a `register.json` beside the folder). The loader reads the files in id order, so the matrix lists rules alphabetically. The ratchet and the progress report read a base commit in either layout: the folder, or the single `register.json` of a commit from before the split.
+
+A branch that edited the old `register.json` and now meets the folder on merge converts its edits once, with the tool that did the split (from `pure/`):
+
+```
+git show <merge-base>:pure/rules/register.json > /tmp/base.json      # the file the branch started from
+git show <branch-tip>:pure/rules/register.json  > /tmp/theirs.json    # the branch's own version, before merging main
+bun rules/layout/register-split.ts port /tmp/base.json /tmp/theirs.json
+```
+
+Rows the branch added or changed are written, rows it removed are deleted, and a rule the folder changed since the branch started is reported as a conflict and left for the author. `register-split.ts split <old.json>` writes the whole folder from an old file, and `register-split.ts verify <old.json>` exits 0 only when the folder holds exactly those rules with identical data (the equality the split commit was checked with).
