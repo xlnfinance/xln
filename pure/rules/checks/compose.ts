@@ -1,11 +1,11 @@
 // How the parts of `bun rules/check.ts` become one exit code. A part that did not run (the matrix view skips the
-// style, width, tests, forge, bun and findings parts) is passed in as true; a part that ran and found something is false.
-export type GateParts = Readonly<{ register: boolean; style: boolean; width: boolean; tests: boolean; forge: boolean; bun: boolean; findings: boolean }>;
+// style, width, tests, timeouts, forge, bun and findings parts) is passed in as true; a part that ran and found something is false.
+export type GateParts = Readonly<{ register: boolean; style: boolean; width: boolean; tests: boolean; timeouts: boolean; forge: boolean; bun: boolean; findings: boolean }>;
 
 export const gateExit = (parts: GateParts): 0 | 1 =>
-  parts.register && parts.style && parts.width && parts.tests && parts.forge && parts.bun && parts.findings ? 0 : 1;
+  parts.register && parts.style && parts.width && parts.tests && parts.timeouts && parts.forge && parts.bun && parts.findings ? 0 : 1;
 
-export type Part = "register" | "style" | "width" | "tests" | "forge" | "bun" | "findings";
+export type Part = "register" | "style" | "width" | "tests" | "timeouts" | "forge" | "bun" | "findings";
 
 // Which parts a command line runs: the part a --X-only flag names, or (with no such flag) every part, except that the
 // matrix view keeps to the register. A part that is not wanted counts as passed in `gateExit`.
@@ -16,6 +16,7 @@ const ONLY_FLAGS: Readonly<Record<string, Part>> = {
   "--style-only": "style",
   "--width-only": "width",
   "--tests-only": "tests",
+  "--timeouts-only": "timeouts",
   "--forge-only": "forge",
   "--bun-only": "bun",
   "--findings-only": "findings",
