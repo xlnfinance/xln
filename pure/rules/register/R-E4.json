@@ -7,13 +7,23 @@
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the publication order of Account work is off-chain Entity logic",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (Entity and Runtime)"
+  "ts": "hold"
  },
  "killers": [
   {
    "kind": "bug",
    "layer": "arrival",
    "name": "sorted-proposals"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E4 Accounts propose in the order a command first touched them, then the rest by id"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E4 an Account touched twice proposes once, with both txs in one frame"
   }
  ]
 }

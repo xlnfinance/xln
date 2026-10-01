@@ -1,6 +1,6 @@
 {
  "id": "R-NOTICE",
- "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts. The Quint cell holds the drop with notice (every tx ends committed or refused, `refused` is a list of txs); the fault peer_refused and the peer's fault tag on the notice are not in the model.",
+ "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
@@ -79,6 +79,26 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "revise-loses-the-notice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE an Account opened twice, with oneself, or a command to a stranger is refused with notice"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a payment beyond the room is refused at the door with its fault, and nothing is queued"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a queued tx the Account refuses at propose is told to the Entity, and the Account forgets it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
   }
  ]
 }

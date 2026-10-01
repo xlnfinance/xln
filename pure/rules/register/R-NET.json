@@ -19,6 +19,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-NET reorder: the receiver may take any of the first three messages, every property and liveness hold"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-NET planted bug: with no timer, a frame refused before its peer opened wedges"
   }
  ]
 }

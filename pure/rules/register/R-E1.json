@@ -7,7 +7,7 @@
   "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
   "contract": "n/a: the frame pipeline is off-chain Entity logic; no contract code takes part",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: the cut (Entity and Runtime)"
+  "ts": "hold"
  },
  "killers": [
   {
@@ -19,6 +19,16 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "arrivals-in-place"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E1 a command sees what the arrivals of its own frame did, wherever the arrival sits among the inputs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-E1 the ack of an arrival goes out ahead of the frame the commands propose"
   }
  ]
 }

@@ -1,6 +1,6 @@
 {
  "id": "R-X1",
- "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts. The Quint cell holds the Entity part only: a refused peer frame is a value and never halts the Entity (refusalNeverHaltsTest, no_peer_halt); the Runtime's halt taxonomy (malformed or racing input is refused, only a broken local invariant halts) is a comment in runtime.qnt, not a modelled property.",
+ "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts.",
  "source": "lessons.md section 1",
  "layers": {
   "arrival": "hold",
@@ -24,6 +24,26 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "bad-halts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 no peer input halts the Runtime: strangers, stale acks and repeats are refused in place"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 an input for an Entity this Runtime does not host is refused with notice, as a row"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a message from a stranger is refused with notice and changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE R-X1 in every world: no halt, no leak, every WAL replays, equal heads mean equal states"
   }
  ]
 }
