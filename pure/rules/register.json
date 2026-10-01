@@ -2629,6 +2629,21 @@
      "layer": "quint",
      "name": "a mutant for the implicit start",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheCanonicalImplicitStart"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheImplicitStartAtAnyNonce"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_IMPLICIT_BASELINE_controlTheSameStartIsAcceptedAfterAnAdvance"
     }
    ]
   },
@@ -2706,6 +2721,31 @@
      "layer": "quint",
      "name": "a mutant that shortens the windows",
      "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-C2R-FOLD",
+   "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
+   "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "owed: the cut (Entity and Runtime)"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+     "owed": "the cut (Entity and Runtime)"
     }
    ]
   }
