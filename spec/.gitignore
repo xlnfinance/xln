@@ -1,3 +1,4 @@
 .scratch-*.scm
+.scratch-*
 # the root .gitignore ignores package-lock.json; spec/ pins its dependencies with it
 !package-lock.json

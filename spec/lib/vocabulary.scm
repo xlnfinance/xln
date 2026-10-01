@@ -16,3 +16,11 @@
   (syntax-rules ()
     ((_ name (w) holds)
      (dict :name name :holds (lambda (w) holds)))))
+
+;;   (step-property "name" (w rname side w2) holds?)
+;;     → (dict :name :holds (λ (w rname side w2) holds?)): a property of one transition, given the
+;;     world before, the name of the rule, the side that acted and the world after.
+(define-syntax step-property
+  (syntax-rules ()
+    ((_ name (w rname side w2) holds)
+     (dict :name name :holds (lambda (w rname side w2) holds)))))
