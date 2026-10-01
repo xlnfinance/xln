@@ -8,7 +8,7 @@ import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 import { HARDHAT_ONLY } from "./contract-tests.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
-  const green = { register: true, style: true, width: true, tests: true, timeouts: true, forge: true, bun: true, findings: true };
+  const green = { register: true, style: true, width: true, tests: true, timeouts: true, forge: true, contracts: true, bun: true, findings: true };
 
   test("all parts passing is 0", () => expect(gateExit(green)).toBe(0));
   test("R-GATE-COMPOSE a failing register alone is 1", () => expect(gateExit({ ...green, register: false })).toBe(1));
@@ -18,6 +18,7 @@ describe("the gate exits 1 when any one part fails", () => {
   test("a failing findings ratchet alone is 1", () => expect(gateExit({ ...green, findings: false })).toBe(1));
   test("R-GATE-TEST-TIMEOUTS a heavy test with no timeout alone is 1", () => expect(gateExit({ ...green, timeouts: false })).toBe(1));
   test("R-GATE-FORGE a red Foundry suite alone is 1", () => expect(gateExit({ ...green, forge: false })).toBe(1));
+  test("R-GATE-CONTRACTS-VM a red contracts/ BrowserVM or deploy-gate test, or a stale typechain, alone is 1", () => expect(gateExit({ ...green, contracts: false })).toBe(1));
   test("a failing Bun version alone is 1", () => expect(gateExit({ ...green, bun: false })).toBe(1));
 });
 
@@ -68,7 +69,7 @@ describe("the scratch copy holds what git lists and nothing else", () => {
     expect(existsSync(`${to}/kernel/a.ts`)).toBe(true);
     expect(existsSync(`${to}/.gitignore`)).toBe(true);
     expect(existsSync(`${to}/db-tmp`)).toBe(false);
-  });
+  }, 30_000);
 
   test("the real pure/ copies without the ignored folders a seeds run leaves in it", () => {
     const repo = scratchPure({});
@@ -117,6 +118,37 @@ describe("the real command over a scratch copy", () => {
     expect(code).toBe(0);
   }, 30_000);
 
+  // The contracts/ part over a scratch checkout: a build script that does nothing (or writes a file), and the gate tests planted beside pure/.
+  const withContractsVm = (build: string, tests: Readonly<Record<string, string>>): string => {
+    const repo = scratchPure({});
+    Object.entries({ "contracts/scripts/build.sh": build, ...tests }).forEach(([file, text]) => {
+      mkdirSync(dirname(`${repo}/${file}`), { recursive: true });
+      writeFileSync(`${repo}/${file}`, text);
+    });
+    return repo;
+  };
+  const PASSING = 'import { test } from "bun:test";\ntest("y", () => {});\n';
+  const FAILING = 'import { expect, test } from "bun:test";\ntest("y", () => { expect(1).toBe(2); });\n';
+
+  test("R-GATE-CONTRACTS-VM a red gate test of contracts/ exits 1 and names the file", () => {
+    const { code, out } = run(withContractsVm("exit 0\n", { "contracts/test/gate/planted.test.ts": FAILING }), "--contracts-only");
+    expect(code).toBe(1);
+    expect(out).toContain("CONTRACTS_TEST_FAILED contracts/test/gate/planted.test.ts exited 1");
+  }, 60_000);
+
+  test("R-GATE-CONTRACTS-VM the same test passing, with a quiet rebuild, passes the contracts part", () => {
+    const { code, out } = run(withContractsVm("exit 0\n", { "contracts/test/gate/planted.test.ts": PASSING }), "--contracts-only");
+    expect(out).toContain("ok   contracts: typechain current, 1 BrowserVM and gate test files");
+    expect(code).toBe(0);
+  }, 60_000);
+
+  test("R-GATE-CONTRACTS-VM a rebuild that writes into typechain-types exits 1 as stale", () => {
+    const build = 'cd "$(dirname "$0")/.."\nmkdir -p typechain-types\necho rebuilt > typechain-types/new.ts\n';
+    const { code, out } = run(withContractsVm(build, { "contracts/test/vm/planted/p.test.ts": PASSING, "contracts/typechain-types/old.ts": "old\n" }), "--contracts-only");
+    expect(code).toBe(1);
+    expect(out).toContain("TYPECHAIN_STALE");
+  }, 60_000);
+
   // The scratch copy holds pure/ only; the contract tests it is asked about are planted beside it, the Hardhat-only ones too.
   const withContractTests = (extra: Readonly<Record<string, string>>): string => {
     const repo = scratchPure({});
@@ -150,11 +182,11 @@ describe("the real command over a scratch copy", () => {
 });
 
 describe("which parts a command line runs", () => {
-  const PARTS: readonly Part[] = ["register", "style", "width", "tests", "timeouts", "forge", "bun", "findings"];
+  const PARTS: readonly Part[] = ["register", "style", "width", "tests", "timeouts", "forge", "contracts", "bun", "findings"];
   const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
 
   test("R-GATE-COMPOSE the plain command runs every part", () =>
-    expect(ran()).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "bun", "findings"]));
+    expect(ran()).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "contracts", "bun", "findings"]));
   test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
   test("each --X-only flag runs that part alone", () => {
     expect(ran("--register-only")).toEqual(["register"]);
@@ -163,9 +195,10 @@ describe("which parts a command line runs", () => {
     expect(ran("--tests-only")).toEqual(["tests"]);
     expect(ran("--timeouts-only")).toEqual(["timeouts"]);
     expect(ran("--forge-only")).toEqual(["forge"]);
+    expect(ran("--contracts-only")).toEqual(["contracts"]);
     expect(ran("--bun-only")).toEqual(["bun"]);
     expect(ran("--findings-only")).toEqual(["findings"]);
   });
   test("a flag that is not a part flag changes nothing", () =>
-    expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "bun", "findings"]));
+    expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "contracts", "bun", "findings"]));
 });
