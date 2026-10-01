@@ -5,7 +5,7 @@ import { err, flatMap, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import { match } from "../kernel/core/tagged.ts";
 import { cancelClause, expireClause, lockClause, resolveClause } from "./clause/clause.ts";
-import type { ClockParams } from "./clause/clock.ts";
+import type { ClockParams, JView } from "./clause/clock.ts";
 import { pay, setCredit } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, HoldId, Ledger, Side, TokenId } from "./model.ts";
 import { ledgerOf, withinAccountCaps, withLedger } from "./state.ts";
@@ -19,7 +19,7 @@ export type AccountTx =
   | Tagged<"expire", { token: TokenId; id: HoldId }>;
 
 /** What a tx is judged against besides the state: the clock's parameters and the judging party's own view of J. */
-export type Judge = Readonly<{ clock: ClockParams; view: bigint }>;
+export type Judge = Readonly<{ clock: ClockParams; view: JView }>;
 
 type Step = Result<AccountState, AccountFault>;
 

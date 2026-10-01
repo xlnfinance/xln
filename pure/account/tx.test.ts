@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { err, unwrapOr, type Result } from "../kernel/core/result.ts";
 import { clockParams } from "./clause/clock.ts";
-import { holdOf, secretOf } from "./fixtures.ts";
+import { holdOf, secretOf, viewOf } from "./fixtures.ts";
 import { MAX_HOLDS } from "./ledger.ts";
 import { holdId, tokenId, type AccountFault, type AccountState, type Hold, type Side, type TokenId } from "./model.ts";
 import { emptyAccount, ledgerOf, openHolds } from "./state.ts";
@@ -14,7 +14,7 @@ const value = (r: Result<AccountState, AccountFault>): AccountState =>
 
 const judge: Judge = {
   clock: unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params")),
-  view: 100n,
+  view: viewOf(100n),
 };
 const DEADLINE = 105n;
 
@@ -90,7 +90,7 @@ describe("account/tx caps that span tokens", () => {
     const freed = applyAll(full, "right", cancelOn(GOLD, 3n));
     expect(openHolds(freed)).toHaveLength(MAX_HOLDS - 1);
     expect(applyTx(freed, judge, "left", lockOn(OIL, holdOf("left", 1n, 500n, DEADLINE, 500))).ok).toBe(true);
-    const late: Judge = { ...judge, view: DEADLINE + 3n };
+    const late: Judge = { ...judge, view: viewOf(DEADLINE + 3n) };
     const expired = value(applyTx(full, late, "right", { _tag: "expire", token: OIL, id: holdId(101n) }));
     expect(openHolds(expired)).toHaveLength(MAX_HOLDS - 1);
   });
