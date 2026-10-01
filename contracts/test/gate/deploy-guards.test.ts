@@ -73,17 +73,27 @@ describe("assertTarget refuses before anything is sent", () => {
 });
 
 describe("the deployer key", () => {
-  test("comes from DEPLOYER_PRIVATE_KEY, with or without 0x", () => {
-    const key = "11".repeat(32);
-    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: key }, "https://sepolia.example.org")).toBe(`0x${key}`);
-    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: `0x${key}` }, LOOPBACK)).toBe(`0x${key}`);
+  const key = "11".repeat(32);
+
+  test("is read from DEPLOYER_PRIVATE_KEY, with or without 0x, only with --live", () => {
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: key }, "https://sepolia.example.org", true)).toBe(`0x${key}`);
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: `0x${key}` }, LOOPBACK, true)).toBe(`0x${key}`);
   });
 
-  test("anvil's dev key signs on a loopback node only; anywhere else no key means no deploy", () => {
-    expect(resolveDeployerKey({}, LOOPBACK)).toBe(ANVIL_DEV_KEY);
-    expect(resolveDeployerKey({}, "http://localhost:8545")).toBe(ANVIL_DEV_KEY);
-    expect(() => resolveDeployerKey({}, "https://sepolia.example.org")).toThrow("DEPLOYER_PRIVATE_KEY");
-    expect(() => resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: "  " }, "https://10.0.0.5:8545")).toThrow("DEPLOYER_PRIVATE_KEY");
+  test("without --live the variable is ignored: anvil's dev key signs on a loopback node, even when the variable is set", () => {
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: key }, LOOPBACK, false)).toBe(ANVIL_DEV_KEY);
+    expect(resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: `0x${key}` }, "http://localhost:8545", false)).toBe(ANVIL_DEV_KEY);
+    expect(resolveDeployerKey({}, LOOPBACK, false)).toBe(ANVIL_DEV_KEY);
+  });
+
+  test("a node that is not this machine gets no key without --live, whatever the environment holds", () => {
+    expect(() => resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: key }, "https://sepolia.example.org", false)).toThrow("--live");
+  });
+
+  test("with --live, anvil's dev key signs on a loopback node only; anywhere else no key means no deploy", () => {
+    expect(resolveDeployerKey({}, LOOPBACK, true)).toBe(ANVIL_DEV_KEY);
+    expect(() => resolveDeployerKey({}, "https://sepolia.example.org", true)).toThrow("DEPLOYER_PRIVATE_KEY");
+    expect(() => resolveDeployerKey({ DEPLOYER_PRIVATE_KEY: "  " }, "https://10.0.0.5:8545", true)).toThrow("DEPLOYER_PRIVATE_KEY");
   });
 });
 

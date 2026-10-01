@@ -33,7 +33,7 @@ A node whose chain id is not the manifest's; an RPC that is not this machine wit
 
 ## Keys
 
-None are stored. `DEPLOYER_PRIVATE_KEY` is read from the environment. On a loopback node with no key set, anvil's public dev account #0 signs; on any other RPC no key means no deploy. The Foundation board is the 1-of-1 deployer, so the deployer key is also the key that lists the token.
+None are stored. `DEPLOYER_PRIVATE_KEY` is read from the environment, and only with `--live`. Without `--live` (every dry run, every test) anvil's public dev account #0 signs on the loopback node and the variable is ignored even when it is set; with `--live` and no key a loopback node still gets the dev account and any other RPC gets no deploy. The Foundation board is the 1-of-1 deployer, so the deployer key is also the key that lists the token.
 
 ## Smoke test on a live network
 

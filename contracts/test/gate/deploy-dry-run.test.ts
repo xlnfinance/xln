@@ -16,20 +16,22 @@ const local: Manifest = { ...prepared, network: "anvil-local", chainId: 31337, p
 const ANVIL_DEV_KEY = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const EIP_170 = 24_576;
 
-// The throw-away node is signed for by anvil's own dev account, never by a real deployer key the environment may carry (the deploy reads
-// DEPLOYER_PRIVATE_KEY from process.env first): it would have no funds on the node, and a test must not depend on what a shell exports.
+// Without --live the deploy and the smoke test ignore DEPLOYER_PRIVATE_KEY and anvil's dev account signs. A dummy key (it has no funds on the node)
+// is exported for the whole file, so a deploy that read it would fail here; the real value of a shell is put back afterwards and never looked at.
 const ambientKey = process.env["DEPLOYER_PRIVATE_KEY"];
+const DUMMY_KEY = `0x${"11".repeat(32)}`;
 
 let node: Awaited<ReturnType<typeof startAnvil>>;
 let deployed: Manifest & { readonly contracts: NonNullable<Manifest["contracts"]> };
 beforeAll(async () => {
-  delete process.env["DEPLOYER_PRIVATE_KEY"];
+  process.env["DEPLOYER_PRIVATE_KEY"] = DUMMY_KEY;
   node = await startAnvil(null);
   deployed = deployedManifest(await deploySet({ rpcUrl: node.url, manifest: local }));
 }, 600_000);
 afterAll(() => {
   node?.stop();
-  if (ambientKey !== undefined) process.env["DEPLOYER_PRIVATE_KEY"] = ambientKey;
+  if (ambientKey === undefined) delete process.env["DEPLOYER_PRIVATE_KEY"];
+  else process.env["DEPLOYER_PRIVATE_KEY"] = ambientKey;
 });
 
 describe("deploy on a local anvil", () => {
