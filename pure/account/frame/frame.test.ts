@@ -17,8 +17,8 @@ const judge: Judge = {
 };
 const rules = accountRules(judge, signing);
 
-const credit = (limit: bigint): AccountTx => ({ _tag: "set_credit", token: GOLD, limit });
-const pay = (amount: bigint): AccountTx => ({ _tag: "pay", token: GOLD, amount });
+const credit = (limit: bigint, token = GOLD): AccountTx => ({ _tag: "set_credit", token, limit });
+const pay = (amount: bigint, token = GOLD): AccountTx => ({ _tag: "pay", token, amount });
 
 const left = emptyReplica("left");
 const right = emptyReplica("right");
@@ -327,8 +327,8 @@ describe("account/frame the name of a frame covers every field", () => {
   const resolve = (id: bigint, n: number, token = GOLD): AccountTx =>
     ({ _tag: "resolve", token, id: holdId(id), secret: secretOf(n) });
   const variants: readonly AccountTx[] = [
-    pay(1n), pay(2n), { ...pay(1n), token: OIL },
-    credit(1n), credit(2n), { ...credit(1n), token: OIL },
+    pay(1n), pay(2n), pay(1n, OIL),
+    credit(1n), credit(2n), credit(1n, OIL),
     lock(), lock({ payer: "right" }), lock({ amount: 6n }), lock({ id: holdId(2n) }),
     lock({ hashlock: hashlockOf(secretOf(2)) }), lock({ deadline: heightOf(106n) }), lock({}, OIL),
     resolve(1n, 1), resolve(2n, 1), resolve(1n, 2), resolve(1n, 1, OIL),

@@ -7,7 +7,7 @@ import { keccak256, bytesToHex, utf8 } from "../../kernel/encoding/bytes.ts";
 import { err, flatMap, map, mapErr, ok, type Result } from "../../kernel/core/result.ts";
 import { rlp, type Rlp } from "../../kernel/encoding/rlp.ts";
 import { match } from "../../kernel/core/tagged.ts";
-import type { AccountFault, AccountState, Hold, Side } from "../model.ts";
+import type { AccountFault, AccountState, Hold, Leg, Offer, Side } from "../model.ts";
 import { emptyAccount } from "../state.ts";
 import { unsignable } from "../proof/body.ts";
 import { frameDigest, type SigningContext, type SigningFault } from "../proof/signing.ts";
@@ -24,6 +24,10 @@ const text = (x: bigint | string): Rlp => utf8(x.toString());
 
 const holdItem = (h: Hold): Rlp => [text(h.id), text(h.payer), text(h.amount), text(h.hashlock), text(h.deadline)];
 
+const legItem = (l: Leg): Rlp => [text(l.token), text(l.amount)];
+
+const offerItem = (o: Offer): Rlp => [text(o.id), text(o.maker), legItem(o.give), legItem(o.want), text(o.deadline)];
+
 const txItem = (tx: AccountTx): Rlp =>
   match(tx, {
     pay: (t) => [text(t._tag), text(t.token), text(t.amount)],
@@ -32,6 +36,10 @@ const txItem = (tx: AccountTx): Rlp =>
     resolve: (t) => [text(t._tag), text(t.token), text(t.id), t.secret],
     cancel: (t) => [text(t._tag), text(t.token), text(t.id)],
     expire: (t) => [text(t._tag), text(t.token), text(t.id)],
+    offer: (t) => [text(t._tag), offerItem(t.offer)],
+    fill: (t) => [text(t._tag), text(t.id), text(String(t.ratio))],
+    retract: (t) => [text(t._tag), text(t.id)],
+    lapse: (t) => [text(t._tag), text(t.id)],
   });
 
 /** What a frame says, not what it signs: a refusal and a repeat name a frame by it (R-FRAME-REFUSAL, R-REACK). */
