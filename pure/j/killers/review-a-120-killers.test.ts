@@ -23,8 +23,10 @@ describe("R-SIMULATE the final simulation is a simulation: a revert at the final
     const final = stepFor(base, GAS, afterProbe, ops);
     if (final._tag !== "simulate") return expect.unreachable(final._tag);
     expect(final.candidate.gasBudget).not.toBe(probe.candidate.gasBudget);
-    const reverted = [...afterProbe, { digest: final.candidate.digest, outcome: { _tag: "reverts", reason: "0x00000004" } } as const];
-    expect(stepFor(base, GAS, reverted, ops)).toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004" } });
+    const outcome = { _tag: "reverts", reason: "0x00000004" } as const;
+    const finalReverts = { digest: final.candidate.digest, outcome } as const;
+    expect(stepFor(base, GAS, [...afterProbe, finalReverts], ops))
+      .toEqual({ _tag: "hold", why: { _tag: "would_revert", reason: "0x00000004" } });
   });
 });
 
@@ -64,4 +66,7 @@ describe("answers: a counter skip names the counter kind; a failure never moves 
 });
 
 const queueAll = (j: JBatch, ...more: Parameters<typeof queue>[1][]): JBatch =>
-  more.reduce((acc, op) => { const o = queue(acc, op); return o._tag === "refused" ? expect.unreachable("refused") : o.jbatch; }, j);
+  more.reduce((acc, op) => {
+    const outcome = queue(acc, op);
+    return outcome._tag === "refused" ? expect.unreachable("refused") : outcome.jbatch;
+  }, j);
