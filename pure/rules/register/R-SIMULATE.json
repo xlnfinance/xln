@@ -44,6 +44,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-SIMULATE gas numbers are the deployed contract's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE a batch that would revert is held: nothing is journaled, nothing is sent"
   }
  ]
 }

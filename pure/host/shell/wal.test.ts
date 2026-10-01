@@ -56,7 +56,8 @@ describe("host/shell/wal the rows of a file, and how it ended", () => {
 
   test("a record whose check holds but whose text is not a row is a fault, not a tear", () => {
     const stray = recordOf(Object.assign({}, last, { height: "not a bigint" }));
-    expect(stray.ok && scanWal(concat([prior, stray.value]))).toMatchObject({ ok: false, error: { _tag: "bad_row" } });
+    const scanned = stray.ok && scanWal(concat([prior, stray.value]));
+    expect(scanned).toMatchObject({ ok: false, error: { _tag: "bad_record" } });
   });
 
   test("a WAL longer than one batch of records is read through, in order", () => {

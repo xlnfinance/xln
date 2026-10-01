@@ -184,6 +184,76 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a bad record with a record after it is a damaged file: a fault, and no later row is believed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the sealed record is on the journal when the send is made, and the send is that batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a journal that cannot be written sends nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a landed deposit is known: the Runtime asking again queues nothing, nothing is sent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash after the send: the chain has not seen it, so the same batch goes out again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash between the journal and the send is the same: the journaled batch goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the Runtime's re-ask after that restart is the deposit already made: no second batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a deposit's row is known once queued; another row with the same deposit is another deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows of a signed batch are known; the sealed record names them, nonce, budget, digest"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a failed batch spent its nonce and forgot nothing: its work is in the draft at a new nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a batch signed and not answered is in flight again, byte for byte, and its row is known"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a landed batch is done after a restart and its row is still known: no second deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sealed record and an answer come back as written, in order, from a clean file"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a file cut inside its last record gives the records before it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bad record that has bytes after it is a damaged journal, not a tear"
   }
  ]
 }
