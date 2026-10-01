@@ -336,3 +336,50 @@ describe("account/frame the name of a frame covers every field", () => {
     expect(name()).not.toBe(name(pay(1n)));
   });
 });
+
+describe("account/frame what the second review's mutants found", () => {
+  test("a frame that does not apply, heard while my own frame is pending, leaves my frame pending", () => {
+    const mine = proposing(credited.right, credit(500n));
+    const bad = { ...frameOf(only(mine.sent)), author: "left" as const, txs: [pay(500n)] };
+    const heard = receive(rules, mine.replica, { _tag: "frame", frame: bad });
+    expect(heard.outcome._tag).toBe("refused_invalid");
+    expect(heard.replica).toEqual(mine.replica);
+  });
+
+  test("R-NOTICE several refused txs are noticed in the order they were queued", () => {
+    const three = [pay(500n), pay(600n), pay(700n)].reduce(queue, credited.left);
+    expect(propose(rules, three).replica.refused.map((x) => x.tx)).toEqual([pay(500n), pay(600n), pay(700n)]);
+  });
+
+  test("a frame name covers every field of every tx: changing any one of them changes the name", () => {
+    const GOLD2 = tokenOf(2n);
+    const lock = (token: typeof GOLD, hold: Hold): AccountTx => ({ _tag: "lock", token, hold });
+    const resolve = (token: typeof GOLD, id: bigint, n: number): AccountTx =>
+      ({ _tag: "resolve", token, id: holdId(id), secret: secretOf(n) });
+    const cancel = (token: typeof GOLD, id: bigint): AccountTx => ({ _tag: "cancel", token, id: holdId(id) });
+    const expire = (token: typeof GOLD, id: bigint): AccountTx => ({ _tag: "expire", token, id: holdId(id) });
+    const base = holdOf("left", 5n, 1n, 105n, 1);
+    const pairs: readonly (readonly [AccountTx, AccountTx])[] = [
+      [pay(1n), { _tag: "pay", token: GOLD2, amount: 1n }],
+      [credit(5n), { _tag: "set_credit", token: GOLD2, limit: 5n }],
+      [credit(5n), credit(6n)],
+      [credit(5n), pay(5n)],
+      [lock(GOLD, base), lock(GOLD, holdOf("right", 5n, 1n, 105n, 1))],
+      [lock(GOLD, base), lock(GOLD, holdOf("left", 6n, 1n, 105n, 1))],
+      [lock(GOLD, base), lock(GOLD, holdOf("left", 5n, 2n, 105n, 1))],
+      [lock(GOLD, base), lock(GOLD, holdOf("left", 5n, 1n, 106n, 1))],
+      [lock(GOLD, base), lock(GOLD, holdOf("left", 5n, 1n, 105n, 2))],
+      [lock(GOLD, base), lock(GOLD2, base)],
+      [resolve(GOLD, 1n, 1), resolve(GOLD, 1n, 2)],
+      [resolve(GOLD, 1n, 1), resolve(GOLD, 2n, 1)],
+      [resolve(GOLD, 1n, 1), resolve(GOLD2, 1n, 1)],
+      [cancel(GOLD, 1n), expire(GOLD, 1n)],
+      [cancel(GOLD, 1n), cancel(GOLD, 2n)],
+      [cancel(GOLD, 1n), cancel(GOLD2, 1n)],
+      [expire(GOLD, 1n), expire(GOLD, 2n)],
+      [expire(GOLD, 1n), expire(GOLD2, 1n)],
+    ];
+    const named = (tx: AccountTx) => provisionalFrameHash({ author: "left", parent: GENESIS, txs: [tx] });
+    pairs.forEach(([a, b]) => expect(named(a)).not.toBe(named(b)));
+  });
+});

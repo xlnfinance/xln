@@ -994,7 +994,7 @@
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
     {
@@ -1008,6 +1008,12 @@
      "layer": "quint",
      "name": "accept-proof-nonce-leap",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
     }
    ]
   },
@@ -1838,7 +1844,7 @@
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
-    "ts": "-"
+    "ts": "owed: A4 (the frame nonce is the signed body's)"
    },
    "killers": [
     {
@@ -1852,6 +1858,12 @@
      "layer": "arrival",
      "name": "baseline-too-low",
      "owed": "#41"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "to be named",
+     "owed": "A4"
     }
    ]
   },
@@ -2434,6 +2446,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH the fault names the open slot, never the new lock's own, in either token order"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH the very same hold locked into a second token is a second clause on the hashlock"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
     }
    ]
   },

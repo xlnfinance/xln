@@ -202,3 +202,27 @@ describe("account/state a token and an unused ledger", () => {
     expect(ledgerOf(withLedger(emptyAccount, OIL, emptyLedger), GOLD)).toEqual(emptyLedger);
   });
 });
+
+describe("account/tx what the second review's mutants found", () => {
+  test("R-ONE-LOCK-PER-HASH the very same hold locked into a second token is a second clause on the hashlock", () => {
+    const hold = holdOf("left", 1n, 1n, DEADLINE, 7);
+    const open = applyAll(bothTokens, "left", lockOn(GOLD, hold));
+    expect(applyTx(open, judge, "left", lockOn(OIL, hold))).toEqual(refused({ _tag: "lock_exists", id: holdId(1n) }));
+  });
+
+  test("R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds", () => {
+    const open = applyAll(bothTokens, "left", lockOn(GOLD, holdOf("left", 5n, 1n, DEADLINE, 7)));
+    const creditToRight = applyAll(open, "left", creditedTo(OIL));
+    const theirs = lockOn(OIL, holdOf("right", 3n, 9n, DEADLINE, 7));
+    expect(applyTx(creditToRight, judge, "right", theirs)).toEqual(refused({ _tag: "lock_exists", id: holdId(1n) }));
+  });
+
+  test("R-HTLC-CLOCK an expiry is judged by the view the tx is applied under: refused until the reserve passes", () => {
+    const s = applyAll(bothTokens, "left", lockOn(GOLD, holdOf("left", 1n, 1n, DEADLINE, 1)));
+    const expire: AccountTx = { _tag: "expire", token: GOLD, id: holdId(1n) };
+    const at = (n: bigint) => applyTx(s, { ...judge, view: viewOf(n) }, "right", expire);
+    expect(at(100n)).toEqual(refused({ _tag: "not_expired", deadline: DEADLINE, earliest: DEADLINE + 3n }));
+    expect(at(DEADLINE + 2n).ok).toBe(false);
+    expect(at(DEADLINE + 3n).ok).toBe(true);
+  });
+});
