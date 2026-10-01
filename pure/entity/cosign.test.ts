@@ -48,18 +48,19 @@ const tagsOf = (actions: readonly JAction[]) => actions.map((a) => a._tag);
 
 describe("entity/cosign R-C2R-FOLD the shortcut is only for an Account with nothing to fold", () => {
   test("R-C2R-FOLD a withdrawal from an Account with no offdelta goes as a C2R", () => {
-    expect(run(nothingOwed, withdraw(30n)).chain).toEqual([{ _tag: "c2r", peer: BOB, token: GOLD, amount: 30n }]);
+    const asC2r: JAction = { _tag: "c2r", peer: BOB, serial: 1n, token: GOLD, amount: 30n };
+    expect(run(nothingOwed, withdraw(30n)).chain).toEqual([asC2r]);
   });
 
   test("R-C2R-FOLD a withdrawal with an offdelta goes as a settlement that folds it, never as a C2R", () => {
     expect(run(owing, withdraw(30n)).chain).toEqual([
-      { _tag: "settle", peer: BOB, token: GOLD, amount: 30n, folds: [OWED] },
+      { _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount: 30n, folds: [OWED] },
     ]);
   });
 
   test("R-C2R-FOLD the settlement folds the offdelta of every token, not only the withdrawn one", () => {
     expect(run(owingTwo, withdraw(30n)).chain).toEqual([{
-      _tag: "settle", peer: BOB, token: GOLD, amount: 30n,
+      _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount: 30n,
       folds: [{ token: GOLD, offdelta: -10n }, { token: SILVER, offdelta: 7n }],
     }]);
   });
@@ -81,7 +82,7 @@ describe("entity/cosign R-C2R-FOLD the shortcut is only for an Account with noth
   test("R-C2R-FOLD a peer's C2R is signed with nothing to fold, a peer's settlement always", () => {
     expect(tagsOf(run(nothingOwed, ask(c2r)).chain)).toEqual(["c2r"]);
     expect(run(owing, ask(settle)).chain).toEqual([
-      { _tag: "settle", peer: BOB, token: GOLD, amount: 30n, folds: [OWED] },
+      { _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount: 30n, folds: [OWED] },
     ]);
   });
 });
@@ -125,7 +126,7 @@ describe("entity/cosign R-COSIGN-FREEZE after a signature the Account proposes n
   });
 
   test("R-COSIGN-FREEZE an operation that can no longer land ends it too, or the Account would wait for ever", () => {
-    const lapsed = run(queuedBehind.state, { _tag: "j_op_lapsed", peer: BOB });
+    const lapsed = run(queuedBehind.state, { _tag: "j_op_lapsed", peer: BOB, serial: 1n });
     expect(lapsed.state.chain.get(BOB)?.frozen).toBe(false);
     expect(lapsed.outputs.map((o) => o.to)).toEqual([BOB]);
   });
@@ -193,7 +194,7 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
     const rolled = run(sent.state, { _tag: "peer_message", from: ALICE, msg: refused }).state;
     const later = entityFrame({ ...judge, view: viewOf(101n) }, rolled, []);
     const retry = later.outputs[0]?.msg ?? expect.unreachable("Bob did not retry");
-    const lapsed = run(run(frozen, fromBob).state, { _tag: "j_op_lapsed", peer: BOB });
+    const lapsed = run(run(frozen, fromBob).state, { _tag: "j_op_lapsed", peer: BOB, serial: 1n });
     const again = run(lapsed.state, { _tag: "peer_message", from: BOB, msg: retry });
     expect(again.outputs.map((o) => o.msg._tag)).toEqual(["ack"]);
     const repeat = run(lapsed.state, fromBob);
@@ -205,5 +206,42 @@ describe("entity/cosign R-COSIGN-FREEZE the other way: the peer's frames are ref
     expect(rules.retryable("frozen")).toBe(true);
     expect(rules.retryable("not_expired")).toBe(true);
     expect(rules.retryable("insufficient_capacity")).toBe(false);
+  });
+});
+
+describe("entity/cosign R-COSIGN-FREEZE a lapse names its operation: only the one that is out can end the freeze", () => {
+  const lapse = (serial: bigint): EntityInput => ({ _tag: "j_op_lapsed", peer: BOB, serial });
+  const factsOf = (s: EntityState) => s.chain.get(BOB);
+  const first = run(owing, withdraw(30n));
+  const thawed = run(first.state, lapse(1n)).state;
+  const second = run(thawed, withdraw(20n));
+  const bob = run(emptyEntity(BOB), open(ALICE), credit(ALICE, 50n));
+  const frame = bob.outputs[0]?.msg ?? expect.unreachable("Bob proposed nothing");
+  const fromBob: EntityInput = { _tag: "peer_message", from: BOB, msg: frame };
+
+  test("R-COSIGN-FREEZE each operation of an Account has its own serial, counting from one", () => {
+    expect(first.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([1n]);
+    expect(second.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([2n]);
+  });
+
+  test("R-COSIGN-FREEZE the report that the first operation lapsed, repeated while the second is out, thaws nothing", () => {
+    const repeated = run(second.state, lapse(1n)).state;
+    expect(factsOf(repeated)?.frozen).toBe(true);
+    const heard = run(repeated, fromBob);
+    expect(heard.outputs.map((o) => o.msg._tag)).toEqual(["refusal"]);
+  });
+
+  test("R-COSIGN-FREEZE a report naming an operation never signed changes nothing, the right one thaws", () => {
+    expect(factsOf(run(second.state, lapse(3n)).state)).toEqual(factsOf(second.state));
+    expect(factsOf(run(second.state, lapse(2n)).state)?.frozen).toBe(false);
+  });
+
+  test("R-COSIGN-FREEZE the serial goes on when the epoch moves: the next operation is not the first again", () => {
+    const landed = run(second.state, { _tag: "j_epoch", peer: BOB, epoch: 1n, stored: 5n }).state;
+    expect(factsOf(landed)?.frozen).toBe(false);
+    expect(factsOf(landed)?.cosigned).toBe(2n);
+    const third = run(landed, withdraw(10n));
+    expect(third.chain.map((a) => (a._tag === "settle" ? a.serial : undefined))).toEqual([3n]);
+    expect(factsOf(run(third.state, lapse(2n)).state)?.frozen).toBe(true);
   });
 });

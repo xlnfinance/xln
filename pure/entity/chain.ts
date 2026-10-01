@@ -5,7 +5,7 @@ import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { ChainFacts, EntityFault, Windows } from "./model.ts";
 
 export const freshChain: ChainFacts =
-  { epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false };
+  { epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false, cosigned: 0n };
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.
@@ -51,7 +51,15 @@ export const withWindows = (f: ChainFacts, windows: Windows): Result<ChainFacts,
     : ok({ ...f, windows });
 };
 
-/** The node co-signed a settlement or a C2R: its Account proposes nothing until the operation lands or lapses. */
-export const cosignFrozen = (f: ChainFacts): ChainFacts => ({ ...f, frozen: true });
+/**
+ * The node co-signed a settlement or a C2R: its Account proposes nothing until the operation lands or lapses. The
+ * operation is the `cosigned`-th of this Account: its serial, which the Host echoes when the operation lapses.
+ */
+export const cosignFrozen = (f: ChainFacts): ChainFacts => ({ ...f, frozen: true, cosigned: f.cosigned + 1n });
 
-export const cosignLapsed = (f: ChainFacts): ChainFacts => ({ ...f, frozen: false });
+/** The serial the next operation of this Account will have. */
+export const nextSerial = (f: ChainFacts): bigint => f.cosigned + 1n;
+
+/** An operation lapsed: it ends the freeze only if it is the one that is out, so a repeated or older report is no-op. */
+export const cosignLapsed = (f: ChainFacts, serial: bigint): ChainFacts =>
+  (f.frozen && f.cosigned === serial ? { ...f, frozen: false } : f);

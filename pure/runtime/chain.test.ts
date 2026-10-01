@@ -211,7 +211,7 @@ describe("runtime/chain R-C2R-FOLD a withdrawal after payments is a settlement t
   test("R-C2R-FOLD with a payment made the withdrawal is a settlement carrying the payment's offdelta", () => {
     const sent = feed(afterPayment, ALICE, withdraw(30n));
     expect(sent.chain).toEqual([{
-      _tag: "settle", peer: BOB, token: GOLD, amount: 30n, folds: [{ token: GOLD, offdelta: -10n }],
+      _tag: "settle", peer: BOB, serial: 1n, token: GOLD, amount: 30n, folds: [{ token: GOLD, offdelta: -10n }],
     }]);
   });
 
