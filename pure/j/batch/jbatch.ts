@@ -31,18 +31,26 @@ export type JBatch = Readonly<{
   chainNonce: bigint;
   /** Batches given up on. They stay signed and may still land (F1), so they are never signed again. */
   abandoned: readonly SealedBatch[];
+  /** The last named requests that landed: a command replayed after a restart finds them done, not new. */
+  landed: readonly JOp[];
 }>;
+
+/** How many landed requests are remembered: the replay window of a restart, not a history. */
+export const LANDED_MEMORY = 64;
 
 /** An Entity with nothing queued, whose Depository entity nonce is `chainNonce`. */
 export const openJBatch = (entity: string, chainNonce: bigint): JBatch =>
-  ({ entity, draft: [], phase: { _tag: "idle" }, signedMax: chainNonce, chainNonce, abandoned: [] });
+  ({ entity, draft: [], phase: { _tag: "idle" }, signedMax: chainNonce, chainNonce, abandoned: [], landed: [] });
 
 const inFlight = (j: JBatch): readonly JOp[] =>
   [...(j.phase._tag === "inflight" ? j.phase.sent.ops : []), ...j.abandoned.flatMap((b) => b.ops)];
 
-/** The named requests the Entity already has on their way: in the draft, in the batch it sent or one given up on. */
+/**
+ * The named requests the Entity already has on their way or done: in the draft, in the batch it sent or one given up
+ * on, or landed lately. A request replayed after a restart is recognised here, wherever the restart cut it.
+ */
 export const submitted = (j: JBatch): ReadonlyMap<string, JOp> =>
-  new Map([...j.draft, ...inFlight(j)].flatMap((op): [string, JOp][] => {
+  new Map([...j.landed, ...j.draft, ...inFlight(j)].flatMap((op): [string, JOp][] => {
     const key = orElse(requestKey(op), "");
     return key === "" ? [] : [[key, op]];
   }));
@@ -87,6 +95,26 @@ export const queue = (j: JBatch, op: JOp): QueueOutcome => {
   const draft = [...j.draft, op];
   const fault = fitFault(j.entity, draft);
   return fault._tag === "some" ? { _tag: "refused", fault: fault.value } : { _tag: "queued", jbatch: { ...j, draft } };
+};
+
+export type DropOutcome =
+  | Tagged<"dropped", { jbatch: JBatch }>
+  | Tagged<"on_its_way", { sent: SealedBatch }>
+  | Tagged<"unknown">;
+
+/**
+ * An Account withdraws a request that is still in the draft (a settlement its counterparty replaced, a start that no
+ * longer applies). One already signed into a batch cannot be recalled: that batch may land, so the answer names it.
+ */
+export const drop = (j: JBatch, op: JOp): DropOutcome => {
+  const key = orElse(requestKey(op), "");
+  const waiting = j.draft.filter((d) => key !== "" && orElse(requestKey(d), "") === key);
+  const signed = [...(j.phase._tag === "inflight" ? [j.phase.sent] : []), ...j.abandoned]
+    .find((b) => b.ops.some((o) => key !== "" && orElse(requestKey(o), "") === key));
+  if (signed !== undefined) return { _tag: "on_its_way", sent: signed };
+  return waiting.length === 0
+    ? { _tag: "unknown" }
+    : { _tag: "dropped", jbatch: { ...j, draft: j.draft.filter((d) => !waiting.includes(d)) } };
 };
 
 /**

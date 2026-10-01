@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { deployment } from "../../chain/proof/deployment.ts";
 import { unwrapOr } from "../../kernel/core/result.ts";
 import {
-  advancesCommandNonce, openJBatch, queue, seal, type JBatch, type QueueOutcome, type SealContext,
+  advancesCommandNonce, drop, openJBatch, queue, seal, type JBatch, type QueueOutcome, type SealContext,
 } from "./jbatch.ts";
 import type { JOp } from "../op/ops.ts";
 import { budgetFor } from "../gas/gas.ts";
@@ -348,5 +348,25 @@ describe("R-SIMULATE reaches seal: nothing is signed before the Host has simulat
     const heavy = drive(many, ctx(), (c) => ({ _tag: "ok", applyGas: 5_000_000n * BigInt(c.ops.length) }));
     expect(heavy._tag === "sealed" && heavy.batch.ops.length).toBe(2);
     expect(heavy._tag === "sealed" && heavy.jbatch.draft.length).toBe(2);
+  });
+});
+
+describe("drop: an Account withdraws a request that is still in the draft", () => {
+  test("a request waiting in the draft is removed, the others stay", () => {
+    const j = queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n), reserveToReserve(1n));
+    const out = drop(j, settle(LEFT_PEER, -2n, 4n));
+    expect(out._tag).toBe("dropped");
+    if (out._tag === "dropped") expect(out.jbatch.draft.map((op) => op._tag)).toEqual(["reserve_to_reserve"]);
+  });
+  test("a request already signed into a batch cannot be recalled: the batch is named", () => {
+    const sealed = drive(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)), ctx());
+    if (sealed._tag !== "sealed") return expect.unreachable(sealed._tag);
+    const out = drop(sealed.jbatch, settle(LEFT_PEER, -2n, 4n));
+    expect(out).toEqual({ _tag: "on_its_way", sent: sealed.batch });
+  });
+  test("a request nobody queued is unknown, and an op without a name is never matched", () => {
+    const j = queued(openJBatch(ME, 0n), deposit(5n));
+    expect(drop(j, settle(LEFT_PEER, -2n, 4n))._tag).toBe("unknown");
+    expect(drop(j, deposit(5n))._tag).toBe("unknown");
   });
 });

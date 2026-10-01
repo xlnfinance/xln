@@ -97,6 +97,11 @@ describe("R-SIMULATE never sign above the chain's transaction gas cap: split ins
     const ops = payments(4);
     expect(signed(settled(ops, heavy)).ops).toEqual(ops.slice(0, 2));
   });
+  test("the split is a halving: the larger half is tried first, so few simulations are asked", () => {
+    const ops = payments(5);
+    const light = (b: SealedBatch): Simulation => ok(b.digest, 3_000_000n * BigInt(b.ops.length));
+    expect(signed(settled(ops, light)).ops).toEqual(ops.slice(0, 3));
+  });
   test("whatever the cap, a signable batch's transaction fits it", () => {
     [2_000_000n, 5_000_000n, 16_777_216n, 40_000_000n].forEach((txGasCap) => {
       const gas = { txGasCap, prelude: 300_000n };

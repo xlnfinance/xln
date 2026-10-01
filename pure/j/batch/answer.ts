@@ -13,7 +13,7 @@ import { none, orElse, some, type Option } from "../../kernel/core/option.ts";
 import { match, type Tagged } from "../../kernel/core/tagged.ts";
 import { fitFault, type FitFault } from "../plan/fit.ts";
 import { isCosigned, isIdempotent, requestKey, type JOp } from "../op/ops.ts";
-import { submitted, type JBatch } from "./jbatch.ts";
+import { LANDED_MEMORY, submitted, type JBatch } from "./jbatch.ts";
 import type { SealedBatch } from "./sealed.ts";
 
 /** `DisputeOpSkipped(sender, counterentity, op, reason, nonce)`: op 0 start, 1 counter, 2 finalize (3 is a ladder). */
@@ -70,14 +70,20 @@ const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCas
 const skippedIn = (batch: SealedBatch, skips: readonly SkipFact[]): readonly Skipped[] =>
   skips.flatMap((skip) => batch.ops.filter((op) => isSkip(op, skip)).map((op) => ({ op, reason: skip.reason })));
 
+/** The newest landed requests, the one landed again replacing its older copy. */
+const remembered = (j: JBatch, named: readonly JOp[]): readonly JOp[] =>
+  [...j.landed.filter((old) => !sameKey(old, new Set(named.map((op) => orElse(requestKey(op), ""))))), ...named]
+    .slice(-LANDED_MEMORY);
+
 const landed = (j: JBatch, a: Extract<JAnswer, { _tag: "landed" }>): Observed => {
   const synced = { ...j, chainNonce: larger(j.chainNonce, a.nonce) };
   const batch = signed(j).find((b) => same(b.digest, a.batchHash));
   if (batch === undefined) return unchanged(synced);
   const done = new Set(batch.ops.map((op) => orElse(requestKey(op), "")).filter((key) => key !== ""));
   const rest = without(synced, batch);
+  const named = batch.ops.filter((op) => sameKey(op, done));
   return {
-    jbatch: { ...rest, draft: rest.draft.filter((op) => !sameKey(op, done)) },
+    jbatch: { ...rest, draft: rest.draft.filter((op) => !sameKey(op, done)), landed: remembered(rest, named) },
     returned: [], skipped: skippedIn(batch, a.skipped),
   };
 };

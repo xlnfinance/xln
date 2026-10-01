@@ -26,6 +26,9 @@ describe("R-SIMULATE the budget is the self-call's gas plus a margin, never belo
   test("a large one is the measurement and the margin", () => {
     expect(budgetFor(3_000_000n)).toBe(3_000_000n + (3_000_000n * MARGIN_PERCENT) / 100n);
   });
+  test("the margin is the decided ten percent", () => {
+    expect(budgetFor(3_000_000n)).toBe(3_300_000n);
+  });
   test("it never signs less than the gas the self-call needed", () => {
     expect([0n, 1n, 499_999n, 500_000n, 1_000_001n, 15_000_000n].every((gas) => budgetFor(gas) >= gas)).toBe(true);
   });

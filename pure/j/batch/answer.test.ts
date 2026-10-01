@@ -173,6 +173,18 @@ describe("abort and R-FINAL-NONCE: a batch given up on stays signed and its nonc
   });
 });
 
+describe("R-J5 a failed batch does not bring back a request that is on its way in another batch", () => {
+  test("a reveal given up on and sent again, then failed in the first batch: it is not drafted a third time", () => {
+    const first = inflight(queued(openJBatch(ME, 0n), reveal(1)));
+    const aborted = abort(first.jbatch).jbatch;
+    expect(tags(aborted.draft)).toEqual(["reveal_secret"]);
+    const second = inflight(aborted);
+    expect(tags(second.batch.ops)).toEqual(["reveal_secret"]);
+    const seen = observe(second.jbatch, failedOf(first.batch));
+    expect([seen.jbatch.draft, seen.returned]).toEqual([[], []]);
+  });
+});
+
 describe("landable: the signed batch the chain accepts next", () => {
   test("the sent batch at the chain's next nonce is the one to resend", () => {
     const sent = inflight(queued(openJBatch(ME, 6n), deposit(1n)));
@@ -188,5 +200,56 @@ describe("landable: the signed batch the chain accepts next", () => {
   });
   test("with nothing signed there is nothing to land", () => {
     expect(landable(openJBatch(ME, 3n))).toEqual({ _tag: "none" });
+  });
+});
+
+// The Entity's J state as the Host reloads it, and the command its Account replays: a new object with the same bytes.
+describe("R-SAME-FRAME-SETTLE-PENDING a request replayed after a restart is the same request, wherever it cut", () => {
+  const replayed = (j: JBatch) => queue(j, settle(LEFT_PEER, -2n, 4n));
+
+  test("between queue and seal: the replay is skipped and the batch carries the settlement once", () => {
+    const j = queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n));
+    const again = replayed(j);
+    expect(again._tag).toBe("skipped");
+    const sent = inflight(again._tag === "skipped" ? again.jbatch : j);
+    expect(tags(sent.batch.ops)).toEqual(["settle"]);
+  });
+  test("between seal and the chain's answer: the replay is skipped and nothing is sent twice", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)));
+    const again = replayed(sent.jbatch);
+    expect(again._tag).toBe("skipped");
+    const after = observe(sent.jbatch, landedOf(sent.batch)).jbatch;
+    expect([after.draft, after.phase]).toEqual([[], { _tag: "idle" }]);
+  });
+  test("between a batch that was given up on and its landing: the replay is skipped", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)));
+    expect(replayed(abort(sent.jbatch).jbatch)._tag).toBe("skipped");
+  });
+  test("after the chain's answer: the replay is skipped, not sent again", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)));
+    const done = observe(sent.jbatch, landedOf(sent.batch)).jbatch;
+    expect(replayed(done)._tag).toBe("skipped");
+    expect(drive(done, ctx)._tag).toBe("nothing_to_send");
+  });
+  test("a replay with other content is refused as a conflict, landed or not", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), settle(LEFT_PEER, -2n, 4n)));
+    const done = observe(sent.jbatch, landedOf(sent.batch)).jbatch;
+    expect(queue(done, settle(LEFT_PEER, -9n, 4n))._tag).toBe("refused");
+  });
+  test("a failed batch is not done: its replay finds the op back in the draft and is skipped there", () => {
+    const sent = inflight(queued(openJBatch(ME, 0n), reveal(1)));
+    const back = observe(sent.jbatch, failedOf(sent.batch)).jbatch;
+    expect(tags(back.draft)).toEqual(["reveal_secret"]);
+    expect(queue(back, reveal(1))._tag).toBe("skipped");
+  });
+  test("only the newest 64 landed requests are remembered: a jbatch does not grow with its history", () => {
+    const run = (j: JBatch, nonce: bigint): JBatch => {
+      const sent = inflight(queued(j, settle(LEFT_PEER, -1n, nonce)));
+      return observe(sent.jbatch, landedOf(sent.batch)).jbatch;
+    };
+    const done = Array.from({ length: 70 }, (_, i) => BigInt(i + 1)).reduce(run, openJBatch(ME, 0n));
+    expect(done.landed.length).toBe(64);
+    expect(queue(done, settle(LEFT_PEER, -1n, 70n))._tag).toBe("skipped");
+    expect(queue(done, settle(LEFT_PEER, -1n, 1n))._tag).toBe("queued");
   });
 });
