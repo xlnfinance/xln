@@ -54,6 +54,10 @@ const NONCE = 32;
 const HANDSHAKE_BYTES = 4096;
 const ESCAPED = 6;
 const DATA_BYTES = ESCAPED * MAX_WIRE_BYTES + HANDSHAKE_BYTES;
+
+/** The longest line a connection carries: the bound the link reads a stranger's text to. */
+export const MAX_LINE = DATA_BYTES;
+
 const DOMAIN = "xln/link/v1";
 
 // The curve library's calls take a positional flag; every key in this tree is the 65-byte uncompressed point.

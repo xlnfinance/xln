@@ -4,13 +4,16 @@
 // who the hosted Entity is: the same log is `j_dispute` for the entity that was disputed and nothing for the one that
 // started it.
 //
+// `AccountSettled` is what the chain holds for an Account after an operation (a deposit, a withdrawal, a settlement):
+// one `j_collateral` per token it lists, the amounts as they stand, so an Entity that hears one twice is where it was.
+//
 // Two facts are not in the logs and are read from the chain at the end of the event's block: the Account's stored nonce
 // after an epoch moves (a finalized dispute stores a nonce no log names) and its epoch (`DisputeStarted` does not carry
 // one). The epoch at an event is the end-of-block epoch less the epoch advances of that Account later in the block, so
 // two events of one block still see their own epoch; the nonce is the end-of-block one.
 import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import type { Of, Tagged } from "../kernel/core/tagged.ts";
-import type { Side } from "../account/model.ts";
+import type { Side, TokenId } from "../account/model.ts";
 import type { Bytes32, ChainEvent } from "./log.ts";
 
 /**
@@ -20,7 +23,8 @@ import type { Bytes32, ChainEvent } from "./log.ts";
 export type JEvent =
   | Tagged<"j_epoch", { peer: Bytes32; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: Bytes32; epoch: bigint; by: Side }>
-  | Tagged<"j_dispute_over", { peer: Bytes32 }>;
+  | Tagged<"j_dispute_over", { peer: Bytes32 }>
+  | Tagged<"j_collateral", { peer: Bytes32; token: TokenId; collateral: bigint; ondelta: bigint }>;
 
 /** A J event for one hosted Entity. */
 export type Addressed = Readonly<{ to: Bytes32; event: JEvent }>;
@@ -49,7 +53,8 @@ type Parties = readonly [Bytes32, Bytes32];
 
 /** The Account of an event as (left, right): the smaller entity id is Left, as the contract's account key has it. */
 const partiesOf = (e: ChainEvent): Parties => {
-  const [a, b] = e._tag === "epoch_advanced" ? [e.left, e.right] : [e.sender, e.counter];
+  const named = e._tag === "epoch_advanced" || e._tag === "account_settled";
+  const [a, b] = named ? [e.left, e.right] : [e.sender, e.counter];
   return a < b ? [a, b] : [b, a];
 };
 
@@ -114,6 +119,7 @@ const eventFor = (
     case "dispute_started": return disputeStarted(events, e, peer, at);
     case "dispute_countered": return ok(e.sender === self ? [{ _tag: "j_dispute_over", peer }] : []);
     case "dispute_finalized": return ok([{ _tag: "j_dispute_over", peer }]);
+    case "account_settled": return ok(e.holdings.map((h): JEvent => ({ _tag: "j_collateral", peer, ...h })));
   }
 };
 

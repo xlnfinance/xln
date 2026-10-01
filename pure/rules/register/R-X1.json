@@ -119,6 +119,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-X1 a tx tag that is a property of every object is a wrong shape, never a thrown error"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 lines arrive whole and in order, and a write that holds a newline is two lines"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a line over the bound is cut off, and a peer that goes away ends the read"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-X1 a port nobody listens on is a fault the caller reads, not a throw"
   }
  ]
 }

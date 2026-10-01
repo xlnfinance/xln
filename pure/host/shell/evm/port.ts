@@ -39,16 +39,16 @@ export type PortConfig = Readonly<{
   depth: bigint;
 }>;
 
-const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
+export const bad = (why: string): ReplyFault => ({ _tag: "bad_reply", why });
 
-const portFault = (call: string, reason: string): PortFault => ({ _tag: "port", call, reason });
+export const portFault = (call: string, reason: string): PortFault => ({ _tag: "port", call, reason });
 
-type Fields = Readonly<Record<string, unknown>>;
+export type Fields = Readonly<Record<string, unknown>>;
 
-const fieldsOf = (raw: unknown): Result<Fields, ReplyFault> =>
+export const fieldsOf = (raw: unknown): Result<Fields, ReplyFault> =>
   (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? ok(raw as Fields) : err(bad("not an object")));
 
-const isText = (v: unknown): v is string => typeof v === "string";
+export const isText = (v: unknown): v is string => typeof v === "string";
 
 const textsOf = (raw: unknown): Result<readonly string[], ReplyFault> =>
   (Array.isArray(raw) && raw.every(isText) ? ok(raw) : err(bad("not a list of text")));
@@ -68,7 +68,7 @@ const placedOf = (raw: unknown): Result<Placed, ReplyFault> =>
     return isText(transaction) ? ok({ ...log, transaction, block }) : err(bad("a log without its transaction"));
   })));
 
-const listOf = <T>(
+export const listOf = <T>(
   raw: unknown, read: (item: unknown) => Result<T, ReplyFault>,
 ): Result<readonly T[], ReplyFault> => (Array.isArray(raw) ? traverse(raw, read) : err(bad("not a list")));
 
@@ -115,7 +115,7 @@ const skipOf = (log: Log): Result<SkipFact, ReplyFault> =>
 type Reply<T> = Result<T, ReplyFault>;
 
 /** What the port asks of the node, and how each kind of answer is read: every fault names the call that met it. */
-type Reads = Readonly<{
+export type Reads = Readonly<{
   ask: (call: string, method: string, params: readonly unknown[]) => Promise<Result<unknown, PortFault>>;
   read: <T>(
     call: string, method: string, params: readonly unknown[], parse: (raw: unknown) => Reply<T>,
@@ -126,7 +126,7 @@ type Reads = Readonly<{
   ) => Promise<Result<readonly Placed[], PortFault>>;
 }>;
 
-const readsOf = (rpc: Rpc, cfg: PortConfig): Reads => {
+export const readsOf = (rpc: Rpc, cfg: Pick<PortConfig, "depository">): Reads => {
   const ask: Reads["ask"] = async (call, method, params) =>
     mapErr(await rpc(method, params), (fault) => portFault(call, fault.reason));
   const read: Reads["read"] = async (call, method, params, parse) => {

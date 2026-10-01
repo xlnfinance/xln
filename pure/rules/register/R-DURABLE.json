@@ -334,6 +334,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a node that answers text, or is not there, is a fault the submit path reads"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a node whose WAL fails sends nothing more and answers every request with the fault"
   }
  ]
 }

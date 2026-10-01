@@ -24,8 +24,7 @@ import { Blocked, type Step } from "./lib/runner.ts";
 import { entityId, type EntityId, type JAction } from "../pure/entity/model.ts";
 import { opOf } from "../pure/host/ops.ts";
 import type { ClockParams, JView } from "../pure/account/clause/clock.ts";
-import { JLoop } from "./lib/jloop.ts";
-import { Net } from "./lib/net.ts";
+import { Cluster } from "./lib/cluster.ts";
 import { Seat } from "./lib/seat.ts";
 import { openWal } from "../pure/host/shell/disk/store.ts";
 import { fileDisk } from "../pure/host/shell/node/file-disk.ts";
@@ -42,9 +41,8 @@ export type World = {
   chain: Chain | null;
   facts: { mode: string; chainId: string; block: string };
   parties: Record<"alice" | "hubX" | "hubY" | "bob", Party> | null;
-  /** The four Runtimes on their Hosts, the J loop that feeds them, and where their frames are signed. */
-  net: Net | null;
-  loop: JLoop | null;
+  /** The four nodes, each with its own J loop, and where their frames are signed. */
+  net: Cluster | null;
   signing: SigningContext | null;
   held: bigint | null;
 };
@@ -57,11 +55,11 @@ const loadManifest = (): Manifest =>
   deployedManifest(JSON.parse(readFileSync(join(REPO, "contracts/deploy/sepolia.manifest.json"), "utf8")));
 
 export const newWorld = (options: Options): World =>
-  ({ options, anvil: null, manifest: loadManifest(), chain: null, facts: { mode: "", chainId: "", block: "" }, parties: null, net: null, loop: null, signing: null, held: null });
+  ({ options, anvil: null, manifest: loadManifest(), chain: null, facts: { mode: "", chainId: "", block: "" }, parties: null, net: null, signing: null, held: null });
 
 const chainOf = (w: World): Chain => w.chain ?? (() => { throw new Error("no chain: the fork step did not finish"); })();
 const partiesOf = (w: World) => w.parties ?? (() => { throw new Error("no parties"); })();
-const netOf = (w: World): Net => w.net ?? (() => { throw new Error("no Runtimes: the open step did not finish"); })();
+const netOf = (w: World): Cluster => w.net ?? (() => { throw new Error("no Runtimes: the open step did not finish"); })();
 const eid = (p: Party): EntityId => must(entityId(p.id), `entity id of ${p.name}`);
 const fmt = (chain: Chain, n: bigint): string => `${ethers.formatUnits(n, chain.manifest.token.decimals)} ${chain.manifest.token.symbol}`;
 const token = (chain: Chain): TokenId => must(tokenId(chain.tokenId), "token id");
@@ -202,13 +200,16 @@ const view = async (chain: Chain): Promise<View> => {
   return { clock: must(clockParams(2n, 4n, 100n), "clock params"), view: ownView(height, height) };
 };
 
-/** The JActions a node asked for since `from`: what its Runtime put into the WAL for the chain. */
-const askedSince = (net: Net, p: Party, from: number): readonly JAction[] => net.askedBy(eid(p)).slice(from);
+/** What a node's journal file holds, read back by the shell's own reader. */
+const journalOf = (dir: string, name: string): readonly JournalRecord[] =>
+  must(scanJournal(readFileSync(join(dir, "journal.log"))), `${name}'s journal`).items;
 
-const quiet = (net: Net, parties: readonly Party[], what: string): void => {
+const quiet = (net: Cluster, parties: readonly Party[], what: string): void => {
   const noticed = parties.flatMap((p) => net.noticesOf(eid(p)).map((n) => `${p.name}: ${n}`));
   if (noticed.length > 0) throw new Error(`${what}: the Runtimes noticed ${noticed.join(", ")}`);
-  if (net.inFlight() > 0) throw new Error(`${what}: ${net.inFlight()} messages are still on the link`);
+  const cut = parties.flatMap((p) => net.refusedBy(eid(p)).map((n) => `${p.name}: ${n}`));
+  if (cut.length > 0) throw new Error(`${what}: the nodes cut connections for ${cut.join(", ")}`);
+  if (net.inFlight() > 0) throw new Error(`${what}: ${net.inFlight()} lines are still on their way`);
 };
 
 const open: Step<World> = {
@@ -225,14 +226,14 @@ const open: Step<World> = {
     // harness keeps alice-hubX's context to rebuild the digest of the head that Account's chain proof names.
     const signing = await signingFor(chain, alice, hubX);
     w.signing = signing;
-    const net = w.net = new Net({ clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms } }, all.map(eid));
-    w.loop = await JLoop.at(chain, all);
-    legs.forEach(([a, b]) => { net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); });
-    net.settle();
+    const members = [{ party: alice, peers: [hubX] }, { party: hubX, peers: [alice, hubY] }, { party: hubY, peers: [hubX, bob] }, { party: bob, peers: [hubY] }];
+    const net = w.net = await Cluster.open(chain, { clock: v.clock, view: v.view, anchor: { deployment: signing.deployment, terms: signing.terms } }, members);
+    for (const [a, b] of legs) { await net.tell(eid(a), { _tag: "open_account", peer: eid(b) }); await net.tell(eid(b), { _tag: "open_account", peer: eid(a) }); }
+    await net.settle();
     // The first frame of each Account: credit from the receiving side (a deposit waits for the first co-signed frame, R-NO-DEPOSIT-BEFORE-COSIGN).
     const credits = [[hubX, alice, 100n], [hubY, hubX, 100n], [bob, hubY, 50n]] as const;
-    credits.forEach(([from, to, limit]) => { net.tell(eid(from), { _tag: "set_credit", peer: eid(to), token: t, limit: limit * unit(chain) }); net.settle(); });
-    // Fundings in order, each as the funder's Runtime asks for it: the deposit command becomes a JAction, the harness turns it into the op (gap `j-action-ops`).
+    for (const [from, to, limit] of credits) { await net.tell(eid(from), { _tag: "set_credit", peer: eid(to), token: t, limit: limit * unit(chain) }); await net.settle(); }
+    // Fundings in order, each as the funder's node is told: the deposit command becomes a chain action, the node's builder seals, signs and sends it, and the chain's answer closes it.
     // bob also funds 20 against hubY, so that one Account has a deposit from each side (the four ids sort alice < hubX < hubY < bob).
     const fundings = [...legs.map(([funder, peer]) => ({ funder, peer, amount: COLLATERAL * unit(chain) })), { funder: bob, peer: hubY, amount: 20n * unit(chain) }];
     const checks: string[] = [];
@@ -240,36 +241,47 @@ const open: Step<World> = {
     const expected = new Map<string, ReturnType<typeof ledgerOf>>();
     for (const { funder, peer, amount } of fundings) {
       const key = accountKeyOf(funder, peer);
-      const before = askedSince(net, funder, 0).length;
-      net.tell(eid(funder), { _tag: "deposit", peer: eid(peer), token: t, amount });
-      const asked = askedSince(net, funder, before);
+      const before = net.askedBy(eid(funder)).length;
+      const base = expected.get(key) ?? ledgerOf(net.account(eid(funder), eid(peer)).state, t);
+      await net.tell(eid(funder), { _tag: "deposit", peer: eid(peer), token: t, amount });
+      const asked = net.askedBy(eid(funder)).slice(before);
       const action = asked[0];
       if (asked.length !== 1 || action?._tag !== "deposit" || action.peer !== eid(peer) || action.token !== t || action.amount !== amount) {
         throw new Error(`${funder.name}'s deposit command did not ask the chain for exactly one deposit of ${amount} against ${peer.name}: ${JSON.stringify(asked, (_, x) => (typeof x === "bigint" ? x.toString() : x))}`);
       }
-      // The Host's op for the action (pure/host/ops.ts); the harness queues, simulates, signs and sends it (gap `host-shell`).
-      await sendOps(chain, funder, [must(opOf(eid(funder), action, worldOf(chain)), "op of the deposit action")], `fund ${funder.name}-${peer.name}`);
+      await net.settle();
+      // The Runtimes act on a chain fact only at the confirmation depth (D9): mine until the batch's block is final.
+      await net.reach(BigInt(await chain.provider.getBlockNumber()));
       const side = net.account(eid(funder), eid(peer)).side;
-      const base = expected.get(key) ?? ledgerOf(net.account(eid(funder), eid(peer)).state, t);
       const ledger = must(deposit(base, side, amount), "deposit rule");
       expected.set(key, ledger);
       const onChain = await collateralOf(chain, funder, peer);
       if (onChain.collateral !== ledger.collateral || onChain.ondelta !== ledger.ondelta) {
         throw new Error(`${funder.name}-${peer.name}: the ledger rule says collateral ${ledger.collateral} ondelta ${ledger.ondelta}, the Depository says ${onChain.collateral} and ${onChain.ondelta}`);
       }
-      checks.push(`${funder.name} deposit command (${side === "left" ? "Left" : "Right"}) asks for ${fmt(chain, amount)} against ${peer.name}; the Depository holds collateral ${onChain.collateral}, ondelta ${onChain.ondelta}, as the ledger rule says`);
+      const unlearned = [{ self: funder, other: peer }, { self: peer, other: funder }]
+        .map(({ self, other }) => ({ self, ledger: ledgerOf(net.account(eid(self), eid(other)).state, t) }))
+        .filter(({ ledger }) => ledger.collateral !== onChain.collateral || ledger.ondelta !== onChain.ondelta);
+      if (unlearned.length > 0) {
+        throw new Error(`${funder.name}-${peer.name}: the Depository holds collateral ${onChain.collateral} and ondelta ${onChain.ondelta}, but ${unlearned.map(({ self, ledger }) => `${self.name} holds ${ledger.collateral} and ${ledger.ondelta}`).join(" and ")}`);
+      }
+      checks.push(`${funder.name} deposit command (${side === "left" ? "Left" : "Right"}) asks for ${fmt(chain, amount)} against ${peer.name}; the Depository holds collateral ${onChain.collateral}, ondelta ${onChain.ondelta}, as the ledger rule says, and both Runtimes' ledgers hold the same, learned from the chain's AccountSettled event at the confirmation depth`);
     }
+    const journals = all.map((p) => ({ p, held: journalOf(net.dirOf(eid(p)), p.name) }));
+    const wrong = journals.filter(({ held }) => held.length === 0 || held.length % 2 !== 0 || held.some((r, i) => r._tag !== (i % 2 === 0 ? "sealed" : "answered") || (r._tag === "answered" && r.outcome !== "landed")));
+    if (wrong.length > 0) throw new Error(`a journal does not hold a sealed record and its landed answer, pair by pair: ${wrong.map(({ p, held }) => `${p.name} ${held.map((r) => r._tag).join(",")}`).join("; ")}`);
     w.held = await heldBy(chain, all, legs.map(([a, b]) => [a, b] as const));
     if (w.held !== BigInt(all.length) * DEPOSIT * unit(chain)) throw new Error(`reserves plus collateral are ${w.held}, the deposits were ${BigInt(all.length) * DEPOSIT * unit(chain)}`);
     quiet(net, all, "open");
     return {
       checks: [
-        `four Runtimes (Host core, in-memory shell): open_account on both sides of three Accounts, one set_credit frame each, no notice, ${all.map((p) => `${p.name} WAL ${net.rowsOf(eid(p)).length} rows`).join(", ")}`,
+        `four nodes of the Host shell (WAL and journal on real files, a key, a chain port, a listening port on loopback) linked as the three Accounts need: ${[...net.counts()].map(([name, c]) => `${name} ${c.sent} lines sent, ${c.heard} heard, ${c.dropped} dropped`).join("; ")}; no connection was cut, no notice`,
+        `open_account on both sides of three Accounts and one set_credit frame each, signed and acked over the sockets: ${all.map((p) => `${p.name} WAL ${net.rowsOf(eid(p)).length} rows`).join(", ")}`,
         ...checks,
+        `each deposit went from a Runtime command to a batch its node sealed, signed and sent, and read back as landed: every journal holds sealed then answered, pair by pair (${journals.map(({ p, held }) => `${p.name} ${held.length / 2}`).join(", ")})`,
         `money held for the four entities (reserves plus collateral) is ${fmt(chain, w.held)}, equal to what they deposited`,
-        "the Runtimes' ledgers hold collateral 0: nothing tells an Account about the chain's collateral, so the payments below run on credit",
       ],
-      gaps: ["jDepositFacts", "jLoop", "hostShell"],
+      gaps: [],
     };
   },
 };
@@ -284,8 +296,8 @@ const pay: Step<World> = {
     const t = token(chain);
     const [a, x] = [eid(alice), eid(hubX)];
     const before = allocation(ledgerOf(net.account(a, x).state, t));
-    net.tell(a, { _tag: "pay", peer: x, token: t, amount: 30n * unit(chain) });
-    net.settle();
+    await net.tell(a, { _tag: "pay", peer: x, token: t, amount: 30n * unit(chain) });
+    await net.settle();
     const [ra, rx] = [net.account(a, x), net.account(x, a)];
     if (ra.head !== rx.head || ra.pending !== undefined || rx.pending !== undefined) throw new Error("the two Runtimes do not hold the same committed head after the payment");
     const moved = allocation(ledgerOf(ra.state, t)) - before;
@@ -299,7 +311,7 @@ const pay: Step<World> = {
         `alice pay 30 to hubX: one frame, both Runtimes committed head ${ra.head.slice(0, 12)} (the digest of the dispute proof of the state, slot ${ra.used}), allocation moved ${moved} for the ${ra.side} side`,
         `hubY-bob: bob's credit of 50 from the opening frame is in both ledgers (hubY may owe bob ${limit})`,
       ],
-      gaps: ["jDepositFacts", "hostShell"],
+      gaps: [],
     };
   },
 };
@@ -320,18 +332,18 @@ const htlc: Step<World> = {
     const deadlines = [at + 30n, at + 20n, at + 10n];
     const offBefore = hops.map(([a, b]) => ledgerOf(net.account(eid(a), eid(b)).state, t).offdelta);
     // Forward: each payer locks on its hop with a shorter deadline than the hop before (a hand-written forwarder, gap `htlc-route`).
-    hops.forEach(([payer, payee], i) => {
+    for (const [i, [payer, payee]] of hops.entries()) {
       const hold = { id: holdId(1n), payer: net.account(eid(payer), eid(payee)).side, amount, hashlock, deadline: must(jHeight(deadlines[i]!), "deadline") };
-      net.tell(eid(payer), { _tag: "lock", peer: eid(payee), token: t, hold });
-      net.settle();
-    });
+      await net.tell(eid(payer), { _tag: "lock", peer: eid(payee), token: t, hold });
+      await net.settle();
+    }
     const open = hops.map(([a, b]) => ledgerOf(net.account(eid(a), eid(b)).state, t).holds.length);
     if (open.some((n) => n !== 1)) throw new Error(`expected one open clause on each hop, found ${open.join(",")}`);
     // Backward: the payee of each hop shows the secret, starting with bob.
-    [...hops].reverse().forEach(([payer, payee]) => {
-      net.tell(eid(payee), { _tag: "resolve", peer: eid(payer), token: t, id: holdId(1n), secret });
-      net.settle();
-    });
+    for (const [payer, payee] of [...hops].reverse()) {
+      await net.tell(eid(payee), { _tag: "resolve", peer: eid(payer), token: t, id: holdId(1n), secret });
+      await net.settle();
+    }
     const checks = hops.map(([payer, payee], i) => {
       const [rp, rq] = [net.account(eid(payer), eid(payee)), net.account(eid(payee), eid(payer))];
       const l = ledgerOf(rp.state, t);
@@ -340,13 +352,13 @@ const htlc: Step<World> = {
       return `${payer.name} to ${payee.name}: lock deadline view+${deadlines[i]! - at}, resolved by ${payee.name}, both Runtimes at head ${rp.head.slice(0, 12)}, payer's allocation fell by ${fmt(chain, amount)}`;
     });
     quiet(net, [alice, hubX, hubY, bob], "htlc");
-    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute", "jDepositFacts", "hostShell"] };
+    return { checks: [`hashlock ${hashlock.slice(0, 12)} on three hops through the Entities' lock and resolve commands, J view ${at}, deadlines step down toward bob`, ...checks, "hubs end flat: each received 10 on one Account and paid 10 on the next (no fee modelled)"], gaps: ["htlcRoute"] };
   },
 };
 
 // ---- S6 ----------------------------------------------------------------------------------------------------------
 const reveal: Step<World> = {
-  id: "reveal", title: "Payee reveals the secret on chain when its resolve is not acked in time", needs: ["htlc"],
+  id: "reveal", title: "Payee reveals the secret on chain when its resolve is not acked in time", needs: ["open"],
   run: async (w) => {
     const chain = chainOf(w);
     const net = netOf(w);
@@ -356,42 +368,47 @@ const reveal: Step<World> = {
     const secret = ethers.getBytes(ethers.keccak256(ethers.toUtf8Bytes("xln-testnet-e2e-skeleton/secret-2")));
     const amount = 5n * unit(chain);
     const deadline = net.view() + 30n;
-    const lag = w.net!.setup.clock.lag;
+    const lag = (await view(chain)).clock.lag;
     // hubY locks 5 for bob on hubY-bob; bob resolves, and the frame never reaches hubY.
-    net.tell(y, { _tag: "lock", peer: b, token: t, hold: { id: holdId(2n), payer: net.account(y, b).side, amount, hashlock: keccakHex(secret), deadline: must(jHeight(deadline), "deadline") } });
-    net.settle();
+    await net.tell(y, { _tag: "lock", peer: b, token: t, hold: { id: holdId(2n), payer: net.account(y, b).side, amount, hashlock: keccakHex(secret), deadline: must(jHeight(deadline), "deadline") } });
+    await net.settle();
     const sinceLock = net.askedBy(b).length;
-    net.tell(b, { _tag: "resolve", peer: y, token: t, id: holdId(2n), secret });
-    net.settle(() => true);
-    if (net.account(b, y).pending === undefined) throw new Error("bob's resolve frame is not pending: it was acked");
-    net.rise(must(jHeight(deadline - lag - 1n), "height"));
-    const early = askedSince(net, bob, sinceLock);
-    if (early.length !== 0) throw new Error(`bob asked the chain at view ${net.view()} (deadline ${deadline}, LAG ${lag}): ${JSON.stringify(early.map((x) => x._tag))}`);
-    net.rise(must(jHeight(deadline - lag), "height"));
-    const asked = askedSince(net, bob, sinceLock);
+    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
+    const hash = keccakHex(secret);
+    // Only bob's sends are lost, until the reveal is on the chain; every other node behaves normally: the node's resend timer would otherwise end the wait.
+    const asked = await net.losing((message) => message.from === b, async () => {
+      await net.tell(b, { _tag: "resolve", peer: y, token: t, id: holdId(2n), secret });
+      await net.settle({ pending: true });
+      if (net.account(b, y).pending === undefined) throw new Error("bob's resolve frame is not pending: it was acked");
+      await net.reach(deadline - lag - 1n, { pending: true });
+      const early = net.askedBy(b).slice(sinceLock);
+      if (early.length !== 0) throw new Error(`bob asked the chain at view ${net.view()} (deadline ${deadline}, LAG ${lag}): ${JSON.stringify(early.map((x) => x._tag))}`);
+      if ((await transformer.hashToTimestamp!(hash)) !== 0n) throw new Error("the secret was revealed on chain before bob asked");
+      // The row of this frame carries the reveal; bob's node seals, signs and sends it by itself, and settle waits for it to land.
+      await net.reach(deadline - lag, { pending: true });
+      return net.askedBy(b).slice(sinceLock);
+    });
     const action = asked[0];
     if (asked.length !== 1 || action?._tag !== "reveal") throw new Error(`at view ${net.view()} bob should ask for exactly one reveal: ${JSON.stringify(asked.map((x) => x._tag))}`);
-    // The Host makes the revealSecrets op from the action (pure/host/ops.ts); the Depository's canonical transformer records the secret.
-    const hash = ethers.keccak256(ethers.hexlify(action.secret));
-    const transformer = new ethers.Contract(chain.manifest.contracts.deltaTransformer.address, ["function hashToTimestamp(bytes32) view returns (uint256)"], chain.provider);
-    if ((await transformer.hashToTimestamp!(hash)) !== 0n) throw new Error("the secret was already revealed on chain before bob asked");
-    const sent = await sendOps(chain, bob, [must(opOf(b, action, worldOf(chain)), "op of the reveal action")], "bob reveals");
-    if (!sent.events.includes("SecretRevealed")) throw new Error(`no SecretRevealed in ${sent.events.join(", ")}`);
     const at = await transformer.hashToTimestamp!(hash);
-    if (at === 0n) throw new Error("the transformer holds no reveal time for the secret after the batch");
-    // The resend timer ends the wait: the peer that was out of reach acks, and the clause is resolved off chain too.
-    net.tell(b, { _tag: "resend_due", peer: y });
-    net.settle();
+    if (at === 0n) throw new Error("the transformer holds no reveal time for the secret after bob's node sent the batch");
+    const held = journalOf(net.dirOf(b), "bob");
+    const [sealed, answered] = held.slice(-2);
+    if (sealed?._tag !== "sealed" || answered?._tag !== "answered" || answered.outcome !== "landed" || sealed.digest !== answered.digest) {
+      throw new Error(`bob's journal ends with ${JSON.stringify(held.slice(-2), (_, x) => (typeof x === "bigint" ? x.toString() : x))}, not a sealed reveal and its landed answer`);
+    }
+    // The link works again, and the node's resend timer ends the wait: the peer that was out of reach acks, and the clause is resolved off chain too.
+    await net.settle();
     const [rb, ry] = [net.account(b, y), net.account(y, b)];
     if (rb.head !== ry.head || rb.pending !== undefined || ledgerOf(rb.state, t).holds.length !== 0) throw new Error("hubY-bob did not settle after the resend");
     return {
       checks: [
         `hubY locks 5 for bob (deadline ${deadline}); bob resolves and the frame is lost on the link, so it stays pending`,
         `at view ${deadline - lag - 1n} bob asks nothing; at view ${deadline - lag} (deadline minus LAG ${lag}) its WAL row carries one reveal action for the clause (R-HTLC-CLOCK c)`,
-        `bob's reveal_secret batch (nonce ${sent.nonce}, gas ${sent.gasUsed}) emits SecretRevealed; the transformer holds the secret's hash from block time ${at}`,
+        `bob's node sealed, signed and sent the reveal itself (journal: sealed then landed, nonce ${sealed.nonce}); the transformer holds the secret's hash from block time ${at}`,
         "after the resend timer hubY acks the resolve: the Account is at one head with no open clause",
       ],
-      gaps: ["hostShell"],
+      gaps: [],
     };
   },
 };
@@ -475,7 +492,7 @@ const dispute: Step<World> = {
         `after both ${floor} s windows (anvil clock jump) ${starter.name} finalized (gas ${end.gasUsed}); the chain paid alice ${fmt(chain, aliceGot)} and hubX ${fmt(chain, hubGot)}, which is what the chain's ondelta ${held.ondelta} plus the Runtimes' offdelta ${ledger.offdelta} says`,
         `collateral 0, epoch ${onChain.epoch} to ${after.epoch}, dispute closed; money held by the four entities is unchanged at ${fmt(chain, now)}`,
       ],
-      gaps: ["jDepositFacts", "hostShell"],
+      gaps: ["harnessSend"],
     };
   },
 };
@@ -491,12 +508,11 @@ const rebase: Step<World> = {
   run: async (w) => {
     const chain = chainOf(w);
     const net = netOf(w);
-    const loop = w.loop ?? (() => { throw new Error("no J loop"); })();
     const { alice, hubX } = partiesOf(w);
     const [a, x] = [eid(alice), eid(hubX)];
     const before = ledgerOf(net.account(a, x).state, token(chain)).offdelta;
     await chain.provider.send("evm_mine", []);
-    const delivery = await loop.poll(net);
+    await net.settle();
     const onChain = await accountOnChain(chain, alice, hubX);
     const facts = [a, x].map((id) => {
       const f = net.entity(id).chain.get(id === a ? x : a);
@@ -505,7 +521,9 @@ const rebase: Step<World> = {
     });
     const wrong = facts.filter((f) => f.epoch !== onChain.epoch || f.stored !== onChain.nonce || f.disputed || f.frames !== 0n);
     if (wrong.length > 0) throw new Error(`chain facts after the dispute: ${JSON.stringify(facts, (_, v) => (typeof v === "bigint" ? v.toString() : v))}; the chain: epoch ${onChain.epoch}, stored nonce ${onChain.nonce}`);
-    const names = delivery.events;
+    // What each node's own J loop told its Entity, from the WAL rows the events are in.
+    const told = (id: EntityId): readonly string[] => net.rowsOf(id).flatMap((r) => (r.input._tag === "entity" ? r.input.inputs.flatMap((i) => (i._tag.startsWith("j_") ? [i._tag] : [])) : []));
+    const names = [alice, hubX].flatMap((p) => told(eid(p)).map((tag) => `${p.name} ${tag}`));
     ["j_epoch", "j_dispute_over"].forEach((tag) => {
       [alice.name, hubX.name].forEach((who) => { if (!names.includes(`${who} ${tag}`)) throw new Error(`${who} was told no ${tag} (${names.join(", ")})`); });
     });
@@ -513,11 +531,11 @@ const rebase: Step<World> = {
     const after = ledgerOf(net.account(a, x).state, token(chain)).offdelta;
     return {
       checks: [
-        `the watcher core (pure/j/watch.ts: prepare, readings by block hash, advance) read the Depository's logs up to height ${delivery.height} at depth 1 and delivered ${names.length} J events: ${names.join(", ")}`,
+        `each node's own J loop (pure/host/shell/watch, the watcher core pure/j/watch.ts: blocks and logs by number, readings by block hash) read the Depository's logs at depth 1 up to height ${net.view()} and told its Entity ${names.length} J events, in the WAL before the height: ${names.join(", ")}`,
         `both Runtimes hold chain facts epoch ${onChain.epoch}, stored nonce ${onChain.nonce}, no dispute open, frames 0 for alice-hubX: the same as the chain`,
         `the Account itself is not rebased: its ledger still says offdelta ${after} (${after === before ? "as before" : `it was ${before}`}) with the chain's collateral at 0 and its frames not restarted for the new epoch`,
       ],
-      gaps: ["ledgerRebase", "jLoop", "hostShell", "jDepositFacts"],
+      gaps: ["ledgerRebase"],
     };
   },
 };
@@ -539,14 +557,14 @@ const nodes: Step<World> = {
     quiet(net, everyone, "nodes, before the crash");
     const noticed = everyone.map((p) => net.noticesOf(eid(p)).length);
     // hubY dies: its Host and queue are gone, only the rows its disk holds are left.
-    net.restart(y);
+    await net.restart(y);
     const resent = net.inFlight();
-    net.settle();
+    await net.settle();
     if (fingerprint(y) !== prints) throw new Error("hubY's Accounts after the replay differ from what they were before the crash");
     if (asked(y) !== actions) throw new Error("hubY was not asked again for every chain action of its committed rows");
     // The peers drop what they already hold, and the work goes on.
-    net.tell(b, { _tag: "set_credit", peer: y, token: t, limit: 60n * unit(chain) });
-    net.settle();
+    await net.tell(b, { _tag: "set_credit", peer: y, token: t, limit: 60n * unit(chain) });
+    await net.settle();
     const [rb, ry] = [net.account(b, y), net.account(y, b)];
     if (rb.head !== ry.head || ledgerOf(ry.state, t).limit[ry.side] !== 60n * unit(chain)) throw new Error("bob's new credit did not reach hubY after its restart");
     // A copy of a frame a peer already holds is refused in place with a notice that names it (refused_not_next), and nothing else is.
@@ -560,7 +578,7 @@ const nodes: Step<World> = {
         `the ${resent} committed outputs it re-sent were dropped by the peers as copies they already hold (${copies.length} refused_not_next notices, no other), and the link went quiet`,
         `bob then extended hubY 60 of credit over the link: one frame, both at head ${rb.head.slice(0, 12)}`,
       ],
-      gaps: ["hostShell"],
+      gaps: [],
     };
   },
 };

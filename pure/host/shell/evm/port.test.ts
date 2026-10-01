@@ -227,6 +227,8 @@ describe("host/shell/evm what became of a batch is read from the Depository's lo
     expect(await portOf(nodeOf(115n, [LANDED]), logOf(), deep).answer(BATCH)).toEqual(landed);
     expect(await portOf(nodeOf(114n, [LANDED]), logOf(), deep).answer(BATCH)).toEqual(ok(undefined));
     expect(await portOf(nodeOf(115n, [FAILED]), logOf(), deep).answer(BATCH)).toEqual(ok(undefined));
+    const atFrom = logAt(CONFIG.from, TX, [HANKO_PROCESSED, ENTITY, DIGEST], words(5n));
+    expect(await portOf(nodeOf(CONFIG.from + deep.depth, [atFrom]), logOf(), deep).answer(BATCH)).toEqual(landed);
     const log = logOf();
     expect(await portOf(nodeOf(104n, [LANDED]), log, deep).answer(BATCH)).toEqual(ok(undefined));
     expect(askedOf(log)).toEqual(["eth_blockNumber []"]);

@@ -6,7 +6,7 @@ import { emptyEntity, type Command, type EntityId } from "../../pure/entity/mode
 import { limits } from "../../pure/host/host.ts";
 import { command, pump, start, type Boot, type Shell, type Station, type Turn } from "../../pure/host/shell/drive/drive.ts";
 import { chainPort } from "../../pure/host/shell/evm/port.ts";
-import { keyOf } from "../../pure/host/shell/link/link.ts";
+import { keyOf, type Key } from "../../pure/host/shell/link/link.ts";
 import { fileDisk } from "../../pure/host/shell/node/file-disk.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
 import { lazySigner } from "../../pure/host/shell/submit/signer.ts";
@@ -20,6 +20,29 @@ const POLL_MS = 100;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** What a party's node is made of on this chain: the shell over real files, the Entity's boot and the signing key. */
+export type Rig = Readonly<{ shell: Shell; boot: Boot; key: Key }>;
+
+/** A rig over `dir`: the WAL and the journal are `wal.log` and `journal.log` there, read back if they are not empty; a batch's answer is looked for in the chain's logs from block `from`. */
+export const rigOf = async (
+  chain: Chain, party: Party, entity: EntityId, setup: Setup, dir: string, from: bigint,
+): Promise<Rig> => {
+  mkdirSync(dir, { recursive: true });
+  const wal = must(await fileDisk(`${dir}/wal.log`), `${party.name}'s WAL`);
+  const journal = must(await fileDisk(`${dir}/journal.log`), `${party.name}'s journal`);
+  const key = must(keyOf(must(hexToBytes(party.key), "key bytes")), `${party.name}'s key`);
+  const port = chainPort(httpRpc(chain.rpc), {
+    depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
+    tokens: [chain.tokenId], from, depth: 0n,
+  });
+  const shell: Shell = {
+    wal, io: { port, signer: lazySigner(entity, key), journal, gas: GAS },
+    now: () => must(timestamp(BigInt(Date.now())), "stamp"),
+  };
+  const boot: Boot = { setup, genesis: emptyEntity(entity), limits: must(limits(32, 8), "limits"), where: { entity, deployment: chain.dep, world: worldOf(chain) } };
+  return { shell, boot, key };
+};
+
 export class Seat {
   private constructor(
     readonly party: Party, readonly entity: EntityId, readonly dir: string, private readonly shell: Shell,
@@ -28,19 +51,7 @@ export class Seat {
 
   /** A seat over `dir`: the WAL and the journal are `wal.log` and `journal.log` there, read back if they are not empty. */
   static async open(chain: Chain, party: Party, entity: EntityId, setup: Setup, dir: string): Promise<Seat> {
-    mkdirSync(dir, { recursive: true });
-    const wal = must(await fileDisk(`${dir}/wal.log`), `${party.name}'s WAL`);
-    const journal = must(await fileDisk(`${dir}/journal.log`), `${party.name}'s journal`);
-    const key = must(keyOf(must(hexToBytes(party.key), "key bytes")), `${party.name}'s key`);
-    const port = chainPort(httpRpc(chain.rpc), {
-      depository: chain.manifest.contracts.depository.address, entity, chainId: chain.chainId, key,
-      tokens: [chain.tokenId], from: BigInt(await chain.provider.getBlockNumber()), depth: 0n,
-    });
-    const shell: Shell = {
-      wal, io: { port, signer: lazySigner(entity, key), journal, gas: GAS },
-      now: () => must(timestamp(BigInt(Date.now())), "stamp"),
-    };
-    const boot: Boot = { setup, genesis: emptyEntity(entity), limits: must(limits(32, 8), "limits"), where: { entity, deployment: chain.dep, world: worldOf(chain) } };
+    const { shell, boot } = await rigOf(chain, party, entity, setup, dir, BigInt(await chain.provider.getBlockNumber()));
     const started = must(await start(shell, boot), `${party.name}'s start`);
     return new Seat(party, entity, dir, shell, started.station);
   }

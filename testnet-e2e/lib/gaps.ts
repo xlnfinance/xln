@@ -31,23 +31,11 @@ const mentions = (dir: string, pattern: RegExp): boolean =>
   sourcesUnder(join(PURE, dir)).some((file) => pattern.test(readFileSync(file, "utf8")));
 
 export const GAPS = {
-  jDepositFacts: {
-    id: "j-deposit-facts", kind: "missing", layer: "J + Entity",
-    piece: "What the chain says about money, to the Entities: the watcher reads four events (epoch advanced, dispute started, countered, finalized) and none for a funding or a deposit, and no Account tx or JEvent sets an Account's collateral or ondelta. So a Runtime's Account holds collateral 0 after 100 USDT of collateral sits behind it, and every payment here runs on credit; the harness reads the chain and compares it with the ledger rule (pure/account/ledger deposit) instead.",
-    supplier: "transport thread: J watcher deposit and collateral events (slice 2); the cut thread: the Entity side that turns them into the Account's collateral and ondelta",
-    landed: () => mentions("entity", /j_deposit|j_collateral/) || mentions("j", /deposit_confirmed|collateral_funded/),
-  },
-  jLoop: {
-    id: "j-loop", kind: "scaffold", layer: "Host",
-    piece: "The J loop: fetch blocks and logs, answer the watcher's readings by block hash (EIP-1898), hand the Runtime the J events and then the height, and move the cursor only after a committed j_height row holds the height. pure/j/watch.ts is the core; the harness runs the loop in memory against anvil, at depth 1.",
-    supplier: "transport thread: J loop in the Host shell (after the shell's file and socket pieces)",
-    landed: () => mentions("host", /eth_getLogs|getLogs/),
-  },
-  hostShell: {
-    id: "host-shell", kind: "scaffold", layer: "Host",
-    piece: "The Host's shell: a disk that keeps rows before outputs leave, a link between peers, a peer table (Q-T-4), the keys that sign (R-LINK-AUTH), and the submit path to the chain: the `chain` effect queued in the J builder, the simulation answered at the head, the Hanko, the send, the events read back (the op itself is pure/host/ops.ts). The harness keeps rows in an array, the link is a list that loses nothing, it runs the submit path in lib/chain.ts, and it signs the digest of a frame head with a party's key when the chain needs the signature.",
-    supplier: "transport thread: file and socket shell in pure/host/shell/",
-    landed: () => has("host/shell"),
+  harnessSend: {
+    id: "harness-send", kind: "scaffold", layer: "Host",
+    piece: "Chain ops sent by the harness (`sendOps` in lib/chain.ts: queue in the J builder, simulate at the head, sign, send, read the events) instead of by a node's own submit path. A step that still calls it does what the Host's shell does for a deposit (S3) by hand: the reveal of a secret and the dispute start and finalize are ops the Runtime asks for or will ask for (reveal is a chain action of the Entity's WAL row; the dispute duty is the A4b slice), and their path through the node is that step's own work.",
+    supplier: "the e2e builder: the step that sends the op through the node's submit path removes its call to sendOps",
+    landed: () => !readFileSync(join(REPO, "testnet-e2e", "lib", "chain.ts"), "utf8").includes("export const sendOps"),
   },
   ledgerRebase: {
     id: "ledger-rebase", kind: "missing", layer: "Entity",

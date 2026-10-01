@@ -2,16 +2,32 @@
 // R-NO-DEPOSIT-BEFORE-COSIGN, R-WINDOWS-NEVER-SHORTEN). The facts come from the Host's events and from the Entity's own
 // committed frames; a proof's nonce is read off them and never derived from an earlier proof.
 import { err, ok, type Result } from "../kernel/core/result.ts";
+import { MAX_PROOF_TOKENS } from "../account/proof/body.ts";
+import type { TokenId } from "../account/model.ts";
+import type { Held } from "../account/state.ts";
 import type { ChainFacts, EntityFault, Windows } from "./model.ts";
 
 export const freshChain: ChainFacts =
-  { epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false, cosigned: 0n };
+  {
+    epoch: 0n, stored: 0n, frames: 0n, windows: undefined, disputed: false, frozen: false, cosigned: 0n,
+    held: new Map(),
+  };
 
 /**
  * The chain moved the epoch on: no proof of the new epoch is signed yet. An older or repeated report changes nothing.
  */
 export const epochAdvanced = (f: ChainFacts, epoch: bigint, stored: bigint): ChainFacts =>
   (epoch <= f.epoch ? f : { ...f, epoch, stored, frames: 0n, disputed: false, frozen: false });
+
+/**
+ * What the chain holds for a token, kept as it stands. The Entity keeps no more tokens than a proof body can carry,
+ * so a peer that puts dust in many tokens fills a row each and no more: the token past the cap is `undefined`, to be
+ * told.
+ */
+export const keepHolding = (f: ChainFacts, token: TokenId, held: Held): ChainFacts | undefined =>
+  (f.held.has(token) || f.held.size < MAX_PROOF_TOKENS
+    ? { ...f, held: new Map([...f.held, [token, held]]) }
+    : undefined);
 
 /** One more frame is co-signed in this epoch. */
 export const framed = (f: ChainFacts): ChainFacts => ({ ...f, frames: f.frames + 1n });

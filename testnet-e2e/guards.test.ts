@@ -42,11 +42,11 @@ const stops = (gaps: readonly GapKey[]): Step<null> =>
 describe("a step judges itself", () => {
   test("a step with no stand-in is done, with one it is scaffolded, a stop is blocked", async () => {
     expect((await runStep(null, new Map(), ok([]), fake(false))).status).toBe("done");
-    expect((await runStep(null, new Map(), ok(["jLoop"]), fake(false))).status).toBe("scaffolded");
+    expect((await runStep(null, new Map(), ok(["ledgerRebase"]), fake(false))).status).toBe("scaffolded");
     expect((await runStep(null, new Map(), stops(["entitySwapCommands"]), fake(false))).status).toBe("blocked");
   });
   test("a stand-in whose supplier has landed turns the step red", async () => {
-    const result = await runStep(null, new Map(), ok(["jLoop"]), fake(true));
+    const result = await runStep(null, new Map(), ok(["ledgerRebase"]), fake(true));
     expect(result.status).toBe("failed");
     expect(result.problem).toMatch(/tripwire/);
   });
@@ -68,8 +68,8 @@ describe("a step judges itself", () => {
 
 describe("report", () => {
   test("missing pieces come in the order the first step needs them, once each", () => {
-    const rows = gapsInMoneyOrder([step("done", ["jLoop"]), step("blocked", ["entitySwapCommands", "jLoop"])]);
-    expect(rows.map(([g]) => g.id)).toEqual(["j-loop", "entity-swap-commands"]);
+    const rows = gapsInMoneyOrder([step("done", ["ledgerRebase"]), step("blocked", ["entitySwapCommands", "ledgerRebase"])]);
+    expect(rows.map(([g]) => g.id)).toEqual(["ledger-rebase", "entity-swap-commands"]);
     expect(rows[0]![1]).toEqual(["done", "blocked"]);
   });
   test("every gap names who is expected to supply it", () => {

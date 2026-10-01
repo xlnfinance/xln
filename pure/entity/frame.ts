@@ -8,11 +8,11 @@ import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } 
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountState, Side } from "../account/model.ts";
 import { signingOf, type Anchor } from "./signing/signing.ts";
-import { holderOf, ledgerOf } from "../account/state.ts";
+import { holderOf, ledgerOf, withHeld } from "../account/state.ts";
 import { MAX_AMOUNT } from "../account/ledger.ts";
 import {
-  cosignFrozen, cosignLapsed, depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, nextSerial,
-  proofNonce,
+  cosignFrozen, cosignLapsed, depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, keepHolding,
+  nextSerial, proofNonce,
   withWindows,
 } from "./chain.ts";
 import { entityRules, type EntityRules } from "./rules.ts";
@@ -101,9 +101,37 @@ const hearing = (rules: Rulebook, view: JView, w: Work, a: PeerMessage): Work =>
   return refused === undefined ? counted : noting(counted, { _tag: "message_refused", from: a.from, outcome: refused });
 };
 
+/**
+ * Every token the Account has a ledger for takes what the chain holds for it, on the committed state and on the state a
+ * pending frame of mine would commit, so that the ack of that frame does not bring the old amounts back. Neither is in
+ * a proof, so the peer's own copy may be a step behind without a signature differing; its refusals are what pace
+ * the two views. A token the Account has no ledger for is not given one: the token list is in the proof, and only a
+ * frame both sides signed changes it (R-J-COLLATERAL-NO-LEDGER).
+ */
+const reconciled = (w: Work, peer: EntityId): Work => {
+  const account = w.state.accounts.get(peer);
+  const held = factsOf(w, peer).held;
+  return account === undefined ? w : withReplica(w, peer, {
+    ...account,
+    state: withHeld(account.state, held),
+    pending: account.pending === undefined
+      ? undefined
+      : { ...account.pending, after: withHeld(account.pending.after, held) },
+  });
+};
+
+/** The chain's collateral and ondelta for one token, kept; a token past the cap is told and dropped. */
+const holding = (w: Work, e: Extract<JEvent, { _tag: "j_collateral" }>): Work => {
+  const kept = keepHolding(factsOf(w, e.peer), e.token, { collateral: e.collateral, ondelta: e.ondelta });
+  return kept === undefined
+    ? noting(w, { _tag: "holding_dropped", peer: e.peer, token: e.token })
+    : reconciled(withFacts(w, e.peer, kept), e.peer);
+};
+
 /** What the chain did to the Account with `peer`; for an Account the Entity does not hold it is told and ignored. */
 const observed = (w: Work, e: JEvent): Work => {
-  if (!w.state.accounts.has(e.peer)) return noting(w, { _tag: "unknown_peer", from: e.peer });
+  const account = w.state.accounts.get(e.peer);
+  if (account === undefined) return noting(w, { _tag: "unknown_peer", from: e.peer });
   const facts = factsOf(w, e.peer);
   switch (e._tag) {
     case "j_epoch":
@@ -112,6 +140,8 @@ const observed = (w: Work, e: JEvent): Work => {
       return e.by === sideOf(w.state.id, e.peer) ? w : withFacts(w, e.peer, disputeOpened(facts, e.epoch));
     case "j_dispute_over":
       return withFacts(w, e.peer, disputeOver(facts));
+    case "j_collateral":
+      return holding(w, e);
     case "j_op_lapsed":
       return withFacts(w, e.peer, cosignLapsed(facts, e.serial));
   }
@@ -348,7 +378,7 @@ const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
 
 const isArrival = (i: EntityInput): i is Arrival =>
   i._tag === "peer_message" || i._tag === "cosign_ask" || i._tag === "j_epoch" || i._tag === "j_dispute"
-  || i._tag === "j_dispute_over" || i._tag === "j_op_lapsed";
+  || i._tag === "j_dispute_over" || i._tag === "j_collateral" || i._tag === "j_op_lapsed";
 
 const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 
@@ -377,6 +407,7 @@ export const entityFrame = (
   const propose = (w: Work, peer: EntityId): Work => proposing(rules, judge.view, w, peer);
   const proposed = proposalOrder(afterCommands).reduce(propose, afterCommands);
   const peers = [...proposed.state.accounts.keys()].toSorted();
-  const done = peers.reduce(dutiful(judge), peers.reduce(told, stillWaiting(proposed, judge.view)));
+  const owing = peers.reduce(dutiful(judge), peers.reduce(told, stillWaiting(proposed, judge.view)));
+  const done = peers.reduce(reconciled, owing);
   return { state: done.state, outputs: done.outputs, notices: done.notices, chain: done.chain };
 };
