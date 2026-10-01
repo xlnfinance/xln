@@ -1,167 +1,158 @@
-// A peer refuses a frame for a fault that can pass with its view of J (R-FRAME-REFUSAL): Alice's view of the chain is
-// ahead of Bob's, so Bob refuses her lock for a deadline too far out. What the Runtime owes: Alice waits for her view
-// to move before she tries again (retry pacing), a payer is released when the tx is dropped (R-REFUSED-RELEASES-PAYER),
-// and a restart on either side loses nothing of the round: the WAL replays the attempt, the wait and what was declined.
+// What a peer that cannot be followed does to a Runtime and what the Runtime says back (R-X1, R-NOTICE,
+// R-FRAME-REFUSAL), and the order a Runtime keeps (R-DURABLE rows leave in row order, R-CLOCK a stamp never goes back).
+// Review B of PR 93: the two ends of the refusal path were not reached by the slice's tests, and mutants that silenced
+// them, reversed the flush or dropped the stamp of a refused row lived.
 import { describe, expect, test } from "bun:test";
-import { holdOf, viewOf } from "../account/fixtures.ts";
-import { MAX_ATTEMPTS } from "../account/frame/frame.ts";
-import { ledgerOf } from "../account/state.ts";
-import type { Command, EntityId } from "../entity/model.ts";
-import {
-  type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
-} from "./fixtures.ts";
-import { messageId } from "./tick.ts";
+import { emptyReplica, GENESIS } from "../account/frame/account.ts";
+import type { Frame, Msg } from "../account/frame/frame.ts";
+import { emptyLedger } from "../account/ledger.ts";
+import { emptyAccount, withLedger } from "../account/state.ts";
+import type { AccountTx } from "../account/tx.ts";
+import { entityFrame } from "../entity/frame.ts";
+import { emptyEntity, type EntityId, type EntityInput, type EntityState } from "../entity/model.ts";
+import { credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
+import { inputFor, setup, stamp, started, tick } from "./fixtures.ts";
+import { flush, recover, startRuntime } from "./tick.ts";
+import type { Row } from "./model.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
 
-/** Alice sees the chain at 110, Bob at 100: 120 is within Alice's reach and beyond Bob's (100 + 10 + 2). */
-const DEADLINE = 120n;
+const payFrame = (author: "left" | "right", amount: bigint): Msg<AccountTx> => {
+  const frame: Frame<AccountTx> = { author, parent: GENESIS, attempt: 0, txs: [{ _tag: "pay", token: GOLD, amount }] };
+  return { _tag: "frame", frame };
+};
 
-const lock = (amount: bigint): Command =>
-  ({ _tag: "lock", peer: BOB, token: GOLD, hold: holdOf("left", amount, 1n, DEADLINE) });
+const fromPeer = (from: EntityId, msg: Msg<AccountTx> | undefined): EntityInput =>
+  ({ _tag: "peer_message", from, msg: msg ?? payFrame("left", 0n) });
 
-const opened = settle(feed(feed(start(viewOf(110n), viewOf(100n)), ALICE, open(BOB)), BOB, open(ALICE)));
-const credited = settle(feed(opened, BOB, credit(ALICE, 100n)));
+/** An Entity whose Account with `peer` is open and holds `limit` of credit extended to its Left. */
+const holdingCredit = (self: EntityId, peer: EntityId, side: "left" | "right", limit: bigint): EntityState => {
+  const state = withLedger(emptyAccount, GOLD, { ...emptyLedger, limit: { left: limit, right: 0n } });
+  return { ...emptyEntity(self), accounts: new Map([[peer, { ...emptyReplica(side), state }]]) };
+};
 
-/** Alice's lock reaches Bob and Bob's refusal reaches Alice: one refusal handled. */
-const refused = settle(feed(credited, ALICE, lock(100n)));
+const opened = (self: EntityId, peer: EntityId) => tick(started(self), inputFor(self, 1n, open(peer)));
 
-const accountOf = (c: Cluster, id: EntityId, peer: EntityId) =>
-  hostOf(c, id).entities.get(id)?.accounts.get(peer) ?? expect.unreachable("no account");
+const tagsOf = (outputs: readonly { msg: Msg<AccountTx> }[]) => outputs.map((o) => o.msg._tag);
 
-const waitingOf = (c: Cluster, id: EntityId) => hostOf(c, id).entities.get(id)?.waiting.get(id === ALICE ? BOB : ALICE);
-
-/** Alice's view rises one height and the link settles; `times` rounds of it, Bob's view where it was. */
-const climbing = (c: Cluster, view: bigint, times: number): Cluster =>
-  (times === 0 ? c : climbing(settle(rise(c, ALICE, view + 1n)), view + 1n, times - 1));
-
-const noticesOf = (c: Cluster, id: EntityId) => hostOf(c, id).wal.flatMap((row) => row.notices);
-
-describe("runtime/refusal a refused frame is taken back, waited out and tried again", () => {
-  test("R-FRAME-REFUSAL a retryable refusal takes Alice's frame back, queues her tx and raises her attempt", () => {
-    const alice = accountOf(refused, ALICE, BOB);
-    expect(alice.pending).toBeUndefined();
-    expect(alice.mempool.map((tx) => tx._tag)).toEqual(["lock"]);
-    expect(alice.attempt).toBe(1);
-    expect(refused.inflight).toEqual([]);
-    expect(noticesOf(refused, ALICE)).toEqual([]);
+describe("runtime/refusal a frame the Runtime cannot apply or does not own is refused in place", () => {
+  test("R-X1 R-NOTICE a frame that does not apply is refused to its sender, naming its first bad tx", () => {
+    const bob = opened(BOB, ALICE).runtime;
+    const heard = tick(bob, inputFor(BOB, 2n, fromPeer(ALICE, payFrame("left", 30n))));
+    const row = heard.runtime.wal[1];
+    expect(row?.notices.map((n) => n._tag)).toEqual(["message_refused"]);
+    expect(row?.notices[0]).toMatchObject({ from: ALICE, outcome: { _tag: "refused_invalid" } });
+    expect(heard.leaving).toHaveLength(1);
+    expect(heard.leaving[0]?.msg).toMatchObject({ _tag: "refusal", index: 0, fault: "insufficient_capacity", mark: 0 });
+    expect(heard.runtime.entities.get(BOB)?.accounts.get(ALICE)?.head).toBe(GENESIS);
   });
 
-  test("retry pacing: Alice waits at the view she was refused at, and proposes again only when it is higher", () => {
-    expect(waitingOf(refused, ALICE)).toBe(viewOf(110n));
-    const same = rise(refused, ALICE, 110n);
-    expect(same.inflight).toEqual([]);
-    const higher = rise(refused, ALICE, 111n);
-    expect(higher.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["frame"]);
-    expect(waitingOf(higher, ALICE)).toBeUndefined();
+  test("R-X1 R-NOTICE a frame written by the receiver's own side is refused with notice, and not answered", () => {
+    const bob = opened(BOB, ALICE).runtime;
+    const heard = tick(bob, inputFor(BOB, 2n, fromPeer(ALICE, payFrame("right", 30n))));
+    const notice = heard.runtime.wal[1]?.notices[0];
+    expect(notice).toMatchObject({ _tag: "message_refused", outcome: { _tag: "refused_own" } });
+    expect(heard.leaving).toEqual([]);
   });
 
-  test("the head moving ends the wait: Bob's own frame commits and Alice proposes her queued lock at once", () => {
-    const heard = deliver(feed(refused, BOB, credit(ALICE, 150n)));
-    expect(heard.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["ack", "frame"]);
-    expect(accountOf(heard, ALICE, BOB).attempt).toBe(0);
-  });
-
-  test("the view only rises: a lower height from the Host leaves Alice's view where it was", () => {
-    expect(hostOf(rise(refused, ALICE, 90n), ALICE).view).toBe(viewOf(110n));
-    expect(hostOf(rise(refused, ALICE, 115n), ALICE).view).toBe(viewOf(115n));
-  });
-
-  test("retry pacing: a retry that Bob refuses again waits at the new view with the attempt raised again", () => {
-    const again = settle(rise(refused, ALICE, 111n));
-    expect(accountOf(again, ALICE, BOB).attempt).toBe(2);
-    expect(waitingOf(again, ALICE)).toBe(viewOf(111n));
-    expect(accountOf(again, BOB, ALICE).declined?.attempt).toBe(1);
-  });
-
-  test("once Bob's view has caught up the retry commits on both sides and the wait and the attempt are gone", () => {
-    const caught = settle(rise(refused, BOB, 111n));
-    const done = settle(rise(caught, ALICE, 111n));
-    const alice = accountOf(done, ALICE, BOB);
-    const bob = accountOf(done, BOB, ALICE);
-    expect(alice.head).toBe(bob.head);
-    expect(alice.attempt).toBe(0);
-    expect(bob.declined).toBeUndefined();
-    expect(waitingOf(done, ALICE)).toBeUndefined();
-    expect(ledgerOf(bob.state, GOLD).holds.map((h) => h.deadline)).toEqual([DEADLINE as never]);
-    expect(ledgerOf(alice.state, GOLD).holds).toEqual(ledgerOf(bob.state, GOLD).holds);
+  test("R-FRAME-REFUSAL a payment the peer cannot apply is dropped with notice to its payer, no wedge", () => {
+    // Alice believes Bob extended her 100 of credit; Bob's own Account says he did not: a peer that diverged.
+    const alice = startRuntime(setup, [holdingCredit(ALICE, BOB, "left", 100n)]);
+    const bob = startRuntime(setup, [holdingCredit(BOB, ALICE, "right", 0n)]);
+    const paid = tick(alice, inputFor(ALICE, 1n, pay(BOB, 30n)));
+    expect(tagsOf(paid.leaving)).toEqual(["frame"]);
+    const refused = tick(bob, inputFor(BOB, 1n, fromPeer(ALICE, paid.leaving[0]?.msg)));
+    expect(tagsOf(refused.leaving)).toEqual(["refusal"]);
+    const refusal = fromPeer(BOB, refused.leaving[0]?.msg);
+    const told = tick(paid.runtime, inputFor(ALICE, 2n, refusal));
+    const account = told.runtime.entities.get(ALICE)?.accounts.get(BOB);
+    expect([account?.pending, account?.mempool, account?.attempt]).toEqual([undefined, [], 1]);
+    expect(told.leaving).toEqual([]);
+    expect(told.runtime.wal[1]?.notices).toMatchObject([
+      { _tag: "tx_refused", peer: BOB, refused: { tx: { _tag: "pay", amount: 30n }, fault: { _tag: "peer_refused" } } },
+    ]);
+    const again = tick(told.runtime, inputFor(ALICE, 3n, refusal));
+    expect(again.runtime.wal[2]?.notices).toEqual([]);
   });
 });
 
-describe("runtime/refusal a frame whose attempt nobody can count is refused with notice", () => {
-  test("R-NOTICE Bob's frame with an attempt of -1 is refused to Alice with the outcome, and changes nothing", () => {
-    const sent = feed(refused, BOB, credit(ALICE, 50n));
-    const [theirs] = sent.inflight;
-    const msg = theirs?.msg ?? expect.unreachable("no frame");
-    const bent = msg._tag === "frame" ? { ...msg, frame: { ...msg.frame, attempt: -1 } } : msg;
-    const heard = feed({ ...sent, inflight: [] }, ALICE, { _tag: "peer_message", from: BOB, msg: bent });
-    expect(noticesOf(heard, ALICE).map((n) => n._tag)).toEqual(["message_refused"]);
-    expect(accountOf(heard, ALICE, BOB).head).toBe(accountOf(refused, ALICE, BOB).head);
+describe("runtime/tick the order a Runtime keeps", () => {
+  test("R-DURABLE the outputs of committed rows leave in row order, and a row's own outputs in their order", () => {
+    // Bob's third row hears Alice's frame and proposes his own again: its ack goes out, then his frame.
+    const alice = tick(started(ALICE), inputFor(ALICE, 1n, open(BOB), credit(BOB, 50n)));
+    const bobOpened = opened(BOB, ALICE);
+    const bobProposed = tick(bobOpened.runtime, inputFor(BOB, 2n, credit(ALICE, 100n)));
+    const heard = tick(bobProposed.runtime, inputFor(BOB, 3n, fromPeer(ALICE, alice.leaving[0]?.msg)));
+    expect(tagsOf(heard.leaving)).toEqual(["ack", "frame"]);
+    const crashed = { ...heard.runtime, sent: 0 };
+    expect(tagsOf(flush(crashed).leaving)).toEqual(["frame", "ack", "frame"]);
+  });
+
+  test("R-CLOCK an input refused for an unknown Entity still moves the stamp: a later row never goes back", () => {
+    const bob = opened(BOB, ALICE).runtime;
+    const stray = tick(bob, inputFor(entityOf(9), 500n, open(ALICE)));
+    const later = tick(stray.runtime, inputFor(BOB, 10n, credit(ALICE, 1n)));
+    expect(later.runtime.wal.map((row) => row.stamp)).toEqual([stamp(1n), stamp(500n), stamp(500n)]);
+  });
+
+  test("R-NOTICE the txs an Account refused are told in the order it refused them, and it forgets them", () => {
+    const refused = (amount: bigint) =>
+      ({ tx: { _tag: "pay", token: GOLD, amount }, fault: { _tag: "bad_amount", amount } }) as const;
+    const holding: EntityState = {
+      ...emptyEntity(ALICE),
+      accounts: new Map([[BOB, { ...emptyReplica("left"), refused: [refused(1n), refused(2n)] }]]),
+    };
+    const told = entityFrame(judge, holding, []);
+    const amounts = told.notices.flatMap((n) =>
+      (n._tag === "tx_refused" && n.refused.tx._tag === "pay" ? [n.refused.tx.amount] : []));
+    expect(amounts).toEqual([1n, 2n]);
+    expect(told.state.accounts.get(BOB)?.refused).toEqual([]);
   });
 });
 
-describe("runtime/refusal R-REFUSED-RELEASES-PAYER a dropped tx gives its payer the capacity back", () => {
-  const dropped = climbing(refused, 110n, MAX_ATTEMPTS);
-
-  test("R-REFUSED-RELEASES-PAYER a lock waiting to be retried holds Alice's capacity against a payment", () => {
-    const tried = settle(feed(refused, ALICE, pay(BOB, 1n)));
-    expect(noticesOf(tried, ALICE).map((n) => n._tag)).toEqual(["command_refused"]);
+/** The WAL with the first output of row `at` made into another message of the same kind. */
+const tamperedFirstOutput = (rows: readonly Row[], at: number, change: (msg: Msg<AccountTx>) => Msg<AccountTx>) =>
+  rows.map((row, i) => {
+    const outputs = row.outputs.map((o, j) => (j === 0 ? { ...o, msg: change(o.msg) } : o));
+    return i === at ? { ...row, outputs } : row;
   });
 
-  test("R-REFUSED-RELEASES-PAYER MAX_ATTEMPTS refusals drop the lock with a notice and leave nothing queued", () => {
-    const alice = accountOf(dropped, ALICE, BOB);
-    expect(alice.mempool).toEqual([]);
-    expect(alice.pending).toBeUndefined();
-    expect(noticesOf(dropped, ALICE).map((n) => n._tag)).toEqual(["tx_refused"]);
-    expect(dropped.inflight).toEqual([]);
+describe("runtime/replay a replay that makes another output than the WAL holds has diverged", () => {
+  const alice = startRuntime(setup, [holdingCredit(ALICE, BOB, "left", 100n)]);
+  const aliceRow = tick(alice, inputFor(ALICE, 1n, pay(BOB, 30n))).runtime.wal;
+  const bobCredited = [holdingCredit(BOB, ALICE, "right", 100n)];
+  const aliceFrame = fromPeer(ALICE, aliceRow[0]?.outputs[0]?.msg);
+  const bobHears = tick(startRuntime(setup, bobCredited), inputFor(BOB, 1n, aliceFrame));
+  const bobDiverged = [holdingCredit(BOB, ALICE, "right", 0n)];
+  const bobRefuses = tick(startRuntime(setup, bobDiverged), inputFor(BOB, 1n, aliceFrame));
+  const diverges = (genesis: readonly EntityState[], rows: readonly Row[]) =>
+    expect(recover(setup, genesis, rows)).toEqual({ ok: false, error: { _tag: "replay_diverged", height: 1n } });
+
+  test("R-DURABLE the untouched WALs replay", () => {
+    expect(recover(setup, [holdingCredit(ALICE, BOB, "left", 100n)], aliceRow).ok).toBe(true);
+    expect(recover(setup, bobCredited, bobHears.runtime.wal).ok).toBe(true);
+    expect(recover(setup, bobDiverged, bobRefuses.runtime.wal).ok).toBe(true);
   });
 
-  test("R-REFUSED-RELEASES-PAYER the capacity is Alice's again and a payment commits on both sides", () => {
-    const paid = settle(feed(dropped, ALICE, pay(BOB, 100n)));
-    expect(ledgerOf(accountOf(paid, BOB, ALICE).state, GOLD).offdelta).toBe(-100n);
-    expect(accountOf(paid, ALICE, BOB).head).toBe(accountOf(paid, BOB, ALICE).head);
-    expect(accountOf(paid, ALICE, BOB).attempt).toBe(0);
-  });
-});
-
-describe("runtime/refusal a restart loses nothing of the refusal round", () => {
-  test("Alice restarted after a refusal has the same attempt, the same wait and the same queued tx", () => {
-    const back = settle(restarted(refused, ALICE));
-    expect(hostOf(back, ALICE).entities).toEqual(hostOf(refused, ALICE).entities);
-    expect(accountOf(back, ALICE, BOB).attempt).toBe(1);
-    expect(waitingOf(back, ALICE)).toBe(viewOf(110n));
+  test("R-DURABLE a frame with the same parent and other txs is another output", () => {
+    const txs: readonly AccountTx[] = [{ _tag: "pay", token: GOLD, amount: 31n }];
+    const other = (msg: Msg<AccountTx>): Msg<AccountTx> =>
+      (msg._tag === "frame" ? { ...msg, frame: { ...msg.frame, txs } } : msg);
+    diverges([holdingCredit(ALICE, BOB, "left", 100n)], tamperedFirstOutput(aliceRow, 0, other));
   });
 
-  test("Alice restarted keeps waiting: the same view proposes nothing, a higher one proposes with her attempt", () => {
-    const back = settle(restarted(refused, ALICE));
-    expect(rise(back, ALICE, 110n).inflight).toEqual([]);
-    expect(rise(back, ALICE, 111n).inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["frame"]);
+  test("R-DURABLE an ack of another frame is another output", () => {
+    const other = (msg: Msg<AccountTx>): Msg<AccountTx> => (msg._tag === "ack" ? { ...msg, hash: GENESIS } : msg);
+    diverges(bobCredited, tamperedFirstOutput(bobHears.runtime.wal, 0, other));
   });
 
-  test("Alice lost the refusal and what she re-sent: her resend timer brings it back and the round goes on", () => {
-    const asked = feed(credited, ALICE, lock(100n));
-    const [lockFrame] = asked.inflight;
-    const msg = lockFrame?.msg ?? expect.unreachable("no frame");
-    const answered = feed({ ...asked, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg });
-    expect(answered.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["refusal"]);
-    const crashed = { ...restarted(answered, ALICE), inflight: [] };
-    expect(accountOf(crashed, ALICE, BOB).pending).toBeDefined();
-    const resent = settle(feed(crashed, ALICE, { _tag: "resend_due", peer: BOB }));
-    expect(accountOf(resent, ALICE, BOB).attempt).toBe(1);
-    expect(accountOf(resent, ALICE, BOB).pending).toBeUndefined();
-    expect(accountOf(resent, ALICE, BOB).mempool.map((tx) => tx._tag)).toEqual(["lock"]);
-  });
-
-  test("Bob restarted after his view caught up still refuses the frame he refused, and says the same thing", () => {
-    const asked = feed(credited, ALICE, lock(100n));
-    const [lockFrame] = asked.inflight;
-    const msg = lockFrame?.msg ?? expect.unreachable("no frame");
-    const once = settle(asked);
-    const caught = settle(rise(once, BOB, 111n));
-    const back = settle(restarted(caught, BOB));
-    expect(hostOf(back, BOB).entities).toEqual(hostOf(caught, BOB).entities);
-    const again = feed({ ...back, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg });
-    expect(again.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["refusal"]);
+  test("R-DURABLE a refusal naming another tx is another output, and so is one carrying another mark", () => {
+    const index = (msg: Msg<AccountTx>): Msg<AccountTx> =>
+      (msg._tag === "refusal" ? { ...msg, index: msg.index + 1 } : msg);
+    const mark = (msg: Msg<AccountTx>): Msg<AccountTx> =>
+      (msg._tag === "refusal" ? { ...msg, mark: msg.mark + 1 } : msg);
+    diverges(bobDiverged, tamperedFirstOutput(bobRefuses.runtime.wal, 0, index));
+    diverges(bobDiverged, tamperedFirstOutput(bobRefuses.runtime.wal, 0, mark));
   });
 });

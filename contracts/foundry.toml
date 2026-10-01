@@ -23,6 +23,11 @@ remappings = [
 ignored_warnings_from = ["lib"]
 fs_permissions = [{ access = "read", path = "./forge-out" }]
 
+# A fixed seed: the gate runs this suite, and a fuzz run that rejects too many inputs (HalmosLemmas) must not turn it red at random.
+# A deeper sweep that wants fresh exploration sets FOUNDRY_FUZZ_SEED in the environment.
+[profile.default.fuzz]
+seed = "0x786c6e"
+
 [profile.default.invariant]
 runs = 128
 depth = 64
