@@ -1,7 +1,8 @@
-// The progress report. From pure/:   bun rules/progress.ts [--since <ref>]
+// The progress report. From pure/:   bun rules/progress.ts [--since <ref>] [--skip-verify]
 // For each register column (Arrival, Quint, ts code, contracts, walk): how many rules hold out of how many the column must carry,
 // and the total as a percent. The six goal milestones follow, each decided by a check that already exists (a register column, or the
-// Sepolia manifest); the one with no check yet prints as unchecked. The Arrival and Quint milestones are read from origin/main (its
+// Sepolia manifest and `bun contracts/deploy/verify.ts`, which reads the chain; --skip-verify leaves that call out); the one with no check
+// yet prints as unchecked. The Arrival and Quint milestones are read from origin/main (its
 // register and its spec), every other number from this checkout, whose branch and clean or dirty state the header prints. The report
 // also says how many rules the register gained and lost since a commit (default: the merge base with origin/main), so a growing or
 // shrinking denominator is visible.
@@ -15,7 +16,8 @@ import type { Layer, Register } from "./model.ts";
 import { parseJson, parseRegister } from "./register.ts";
 import { scanNames } from "./scan.ts";
 import {
-  addedSince, columnsOf, milestonesOf, registerColumns, renderProgress, retiredSince, type Checkout, type Deployment, type Since, type SpecAtMain,
+  addedSince, columnsOf, milestonesOf, registerColumns, renderProgress, retiredSince, verificationOf,
+  type Checkout, type Deployment, type Since, type SpecAtMain, type Verification,
 } from "./progress/measure.ts";
 
 const here = import.meta.dir;
@@ -23,6 +25,9 @@ const repoRoot = `${here}/../..`;
 const REGISTER_PATH = "pure/rules/register.json";
 const MANIFEST_PATH = `${repoRoot}/contracts/deploy/sepolia.manifest.json`;
 const MAIN = "origin/main";
+const VERIFY_PATH = `${repoRoot}/contracts/deploy/verify.ts`;
+// A public node answers in seconds; a run that has not finished by now is a check that could not be made.
+const VERIFY_TIMEOUT_MS = 120_000;
 
 const fail = (detail: string): never => {
   console.error(`FAIL ${detail}`);
@@ -34,11 +39,12 @@ const git = (args: readonly string[]): Readonly<{ code: number; out: string; err
   return { code: run.exitCode, out: run.stdout.toString().trim(), err: run.stderr.toString().trim() };
 };
 
-const args = process.argv.slice(2);
+const skipVerify = process.argv.slice(2).includes("--skip-verify");
+const args = process.argv.slice(2).filter((arg) => arg !== "--skip-verify");
 const sinceAt = args.indexOf("--since");
 const sinceRef = sinceAt === -1 ? undefined : args[sinceAt + 1];
 const known = sinceAt === -1 ? args.length === 0 : args.length === 2 && sinceRef !== undefined;
-if (!known) fail("usage: bun rules/progress.ts [--since <ref>]");
+if (!known) fail("usage: bun rules/progress.ts [--since <ref>] [--skip-verify]");
 
 const readRegister = (text: string, where: string): Register => {
   const parsed = parseRegister(text);
@@ -68,6 +74,13 @@ const deployment = (): Deployment => {
   return !verdict.ok
     ? { recorded: false, detail: `invalid (${verdict.problems.join("; ")})` }
     : { recorded: verdict.value.status === "deployed" && verdict.value.contracts !== null, detail: `status ${verdict.value.status} on ${verdict.value.network}` };
+};
+
+// The verifier is asked only about a deployment the manifest records, and only when the run is not offline: its exit code is the answer.
+const verification = (recorded: Deployment): Verification | undefined => {
+  if (skipVerify || !recorded.recorded) return undefined;
+  const run = Bun.spawnSync([process.execPath, VERIFY_PATH], { cwd: repoRoot, timeout: VERIFY_TIMEOUT_MS });
+  return verificationOf(run.exitCode, run.stdout.toString(), run.stderr.toString());
 };
 
 const SPEC_LAYERS: readonly Layer[] = ["arrival", "quint"];
@@ -122,7 +135,11 @@ const sinceReport = (): Since | "no base" => {
   return mergeBase.code === 0 && mergeBase.out !== "" ? since(mergeBase.out, `${MAIN} merge base`) : "no base";
 };
 
+// Everything that can fail on a bad argument or an unreadable ref comes before the verifier, which reads the chain over the network and may
+// take minutes: a mistyped --since must be an error at once, not after a node's timeout.
+const sinceFrom = sinceReport();
 const main = specAtMain();
+const recorded = deployment();
 
 console.log(
   renderProgress({
@@ -130,8 +147,8 @@ console.log(
     specFrom: main === undefined ? `nowhere (${MAIN} is not fetched here)` : `${MAIN} at ${main.ref}`,
     liveRules: register.filter((row) => row.retiredBy === undefined).length,
     columns,
-    milestones: milestonesOf(columns, deployment(), main),
-    since: sinceReport(),
+    milestones: milestonesOf(columns, recorded, main, verification(recorded)),
+    since: sinceFrom,
     problems: evaluation.problems.length,
   }),
 );

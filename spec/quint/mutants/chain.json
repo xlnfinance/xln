@@ -310,7 +310,7 @@
       "killedBy": "invariant:deposit_exact"
     },
     {
-      "id": "n3-counter-windows-unchecked",
+      "id": "r-windows-never-shorten-counter-windows-unchecked",
       "why": "a counter that shortens the windows is registered (no window check at all)",
       "file": "chain.qnt",
       "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
@@ -318,7 +318,7 @@
       "killedBy": "invariant:windows_never_shortened"
     },
     {
-      "id": "n3-path2-windows-unchecked",
+      "id": "r-windows-never-shorten-path2-windows-unchecked",
       "why": "a newer proof that shortens the windows settles at once (no window check at all)",
       "file": "chain.qnt",
       "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
@@ -438,7 +438,7 @@
       "killedBy": "test:longQueueReserveCannotBeDepositedTest"
     },
     {
-      "id": "n3-counter-shortens-left-window",
+      "id": "r-windows-never-shorten-counter-shortens-left-window",
       "why": "a counter may shorten the left window",
       "file": "chain.qnt",
       "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
@@ -446,7 +446,7 @@
       "killedBy": "test:counterThatShortensTheLeftWindowIsRefusedTest"
     },
     {
-      "id": "n3-counter-shortens-right-window",
+      "id": "r-windows-never-shorten-counter-shortens-right-window",
       "why": "a counter may shorten the right window",
       "file": "chain.qnt",
       "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
@@ -454,7 +454,7 @@
       "killedBy": "test:counterThatShortensTheRightWindowIsRefusedTest"
     },
     {
-      "id": "n3-counter-windows-frozen",
+      "id": "r-windows-never-shorten-counter-windows-frozen",
       "why": "a counter must carry exactly the started windows: lengthening is refused (the contract's old `!=` check)",
       "file": "chain.qnt",
       "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
@@ -462,7 +462,7 @@
       "killedBy": "test:counterThatLengthensTheWindowsLandsTest"
     },
     {
-      "id": "n3-path2-shortens-left-window",
+      "id": "r-windows-never-shorten-path2-shortens-left-window",
       "why": "a newer proof closes at once although it shortens the left window",
       "file": "chain.qnt",
       "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
@@ -470,7 +470,7 @@
       "killedBy": "test:nonStarterCannotCloseWithAShorterWindowTest"
     },
     {
-      "id": "n3-path2-shortens-right-window",
+      "id": "r-windows-never-shorten-path2-shortens-right-window",
       "why": "a newer proof closes at once although it shortens the right window",
       "file": "chain.qnt",
       "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
@@ -478,7 +478,7 @@
       "killedBy": "test:nonStarterCannotCloseWithAShorterRightWindowTest"
     },
     {
-      "id": "n3-path2-windows-frozen",
+      "id": "r-windows-never-shorten-path2-windows-frozen",
       "why": "an immediate close must carry exactly the started windows: lengthening is refused",
       "file": "chain.qnt",
       "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
