@@ -43,7 +43,7 @@
     },
     {
       "id": "no-failback-when-tight",
-      "why": "[R-P1] a lock that cannot be forwarded is left to expire",
+      "why": "R-P1: a lock that cannot be forwarded is left to expire",
       "file": "entity.qnt",
       "old": "      else\n        { ...sysQueue(s, IN, HtlcCancel({ id: k })), routes: s.routes.set(k, { st: Back, h: lock.hashlock, dIn: lock.deadline, dOut: 0, os: 0 }),\n          gh: { ...s.gh, failBacks: s.gh.failBacks + 1 } }\n",
       "new": "      else s\n",
@@ -67,7 +67,7 @@
     },
     {
       "id": "escalation-too-late",
-      "why": "[R-P3] the payee escalates only when the deadline is here, so the reveal lands after it",
+      "why": "R-P3: the payee escalates only when the deadline is here, so the reveal lands after it",
       "file": "entity.qnt",
       "old": "s.now + ESC >= lock.deadline",
       "new": "s.now >= lock.deadline",
@@ -75,7 +75,7 @@
     },
     {
       "id": "publish-first-slot-only",
-      "why": "[R-P3, #37] a dispute carries the secret of the first lock only",
+      "why": "R-P3: a dispute carries the secret of the first lock only (#37)",
       "file": "entity.qnt",
       "old": "    ORDER.foldl(s, (acc, k) => {\n      val lock = d.proof.locks.get(k)",
       "new": "    List(1).foldl(s, (acc, k) => {\n      val lock = d.proof.locks.get(k)",
@@ -83,7 +83,7 @@
     },
     {
       "id": "hooks-read-pre-arrival",
-      "why": "[R-P4] the escalation reads the links from before this frame's input",
+      "why": "R-P4: the escalation reads the links from before this frame's input",
       "file": "entity.qnt",
       "old": "val s2 = hooks(s1, s1.links)",
       "new": "val s2 = hooks(s1, s0.links)",

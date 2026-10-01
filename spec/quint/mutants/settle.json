@@ -166,7 +166,7 @@
     },
     {
       "id": "first-proof-nonce-derived-from-the-tip",
-      "why": "the first proof of an epoch takes its nonce from the Account's own tip (2 + 2) instead of the stored nonce read from the chain (R-IMPLICIT-NONCE-FROM-CHAIN)",
+      "why": "R-IMPLICIT-NONCE-FROM-CHAIN: the first proof of an epoch takes its nonce from the Account's own tip (2 + 2) instead of the stored nonce read from the chain (R-IMPLICIT-NONCE-FROM-CHAIN)",
       "file": "settle.qnt",
       "old": "val n = if (first) sv.nonce + FIRST_GAP else tp.nonce + 1",
       "new": "val n = if (first) tp.nonce + FIRST_GAP else tp.nonce + 1",

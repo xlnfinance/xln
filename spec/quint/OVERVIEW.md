@@ -56,7 +56,7 @@ height, expiry stamped from the future, resolve stamped in the past, stale or le
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
 height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal). 53 scenario tests, 68 mutants.
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal). 54 scenario tests, 68 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 
@@ -77,7 +77,7 @@ payee that learned the secret `LAG` before the deadline is paid), `p3_conserved`
 `no_double_settle`, `debt_only_when_broke`, `debt_means_broke` (after a payout that leaves debt the debtor has nothing spendable, and holds no reserve at all when its debt queue fitted in one enforcement call), `debt_queue_sums`, `r2c_enforces_first` (a deposit enforces the older debt first, F15), and the checks that state the payout on the outcome instead of through the guard: `pay_exact` (a finalize moves each
 side's worth, reserve less debt owed plus debt owed to it, by exactly its allocation), `deposit_exact`, `windows_never_shortened` (N3: windows may lengthen, never shorten, inside an epoch; over unequal windows),
 `closes_on_time` (both windows run in full), `nonce_rules` (a start needs a nonce above the stored one; a finalize stores the adopted nonce or one more). The `offline` flag is per dispute.
-65 scenario tests, 74 mutants.
+66 scenario tests, 80 mutants.
 
 ## Settlement (`settle.qnt`)
 
