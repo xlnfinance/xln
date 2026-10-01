@@ -14,12 +14,6 @@
    },
    "killers": [
     {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "hooks-read-pre-arrival",
-     "owed": "#44"
-    },
-    {
      "kind": "test",
      "layer": "ts",
      "name": "R-E1 a command sees what the arrivals of its own frame did, wherever the arrival sits among the inputs"
@@ -33,6 +27,11 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "arrivals-in-place"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "hooks-read-pre-arrival"
     }
    ]
   },
@@ -42,18 +41,12 @@
    "source": "lessons.md section 1",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
    },
    "killers": [
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "halt-on-refusal",
-     "owed": "#44"
-    },
     {
      "kind": "test",
      "layer": "ts",
@@ -83,6 +76,11 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "bad-halts"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "halt-on-refusal"
     }
    ]
   },
@@ -109,7 +107,7 @@
    "source": "lessons.md section 2",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -123,14 +121,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "collision-both-roll-back",
-     "owed": "#44"
+     "name": "collision-both-roll-back"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "tie-break-reversed",
-     "owed": "#44"
+     "name": "tie-break-reversed"
     },
     {
      "kind": "test",
@@ -176,6 +172,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "rollback-drops-txs"
     }
    ]
   },
@@ -270,7 +271,7 @@
    "source": "lessons.md section 2",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -279,14 +280,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "pay-ignores-capacity",
-     "owed": "#44"
+     "name": "pay-ignores-capacity"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "credit-drop-unchecked",
-     "owed": "#44"
+     "name": "credit-drop-unchecked"
     },
     {
      "kind": "bug",
@@ -312,6 +311,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-A6 credit holds in every state: RCPAN in the worst case over the open holds"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "room-ignores-clauses"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "spend-others-funds"
     }
    ]
   },
@@ -349,8 +358,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "right-drops-inflight-on-collision",
-     "owed": "#44"
+     "name": "right-drops-inflight-on-collision"
     }
    ]
   },
@@ -474,11 +482,11 @@
   },
   {
    "id": "R-R1",
-   "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock.",
+   "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock. The Quint cell holds the canonical order of a frame's inputs and the idle gate (a frame opens only when an input is due); that the same inputs at the same timestamps give the same state and outputs is not a property of the spec.",
    "source": "lessons.md section 5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -487,14 +495,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "empty-frame",
-     "owed": "#44"
+     "name": "empty-frame"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "frame-in-arrival-order",
-     "owed": "#44"
+     "name": "frame-in-arrival-order"
     }
    ]
   },
@@ -504,7 +510,7 @@
    "source": "lessons.md section 6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -515,16 +521,21 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "no-failback-when-tight"
     }
    ]
   },
   {
    "id": "R-P2",
-   "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows.",
+   "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows. The Quint cell holds the hop margin HOP = 2 * LAG between the inbound and the onward deadline; the dispute-window term of the rule is not modelled.",
    "source": "lessons.md section 6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -538,8 +549,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "forward-deadline-equal",
-     "owed": "#44"
+     "name": "forward-deadline-equal"
     }
    ]
   },
@@ -549,7 +559,7 @@
    "source": "lessons.md section 6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -559,6 +569,16 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "omits-secret"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "escalation-too-late"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "publish-first-slot-only"
     }
    ]
   },
@@ -568,7 +588,7 @@
    "source": "lessons.md section 6",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -579,6 +599,11 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "hooks-read-pre-arrival"
     }
    ]
   },
@@ -648,7 +673,7 @@
    "source": "contracts-decisions.md C1",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "hold"
@@ -662,13 +687,22 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "c1-epoch-not-advanced",
-     "owed": "#44"
+     "name": "c1-epoch-not-advanced"
     },
     {
      "kind": "test",
      "layer": "ts",
      "name": "C1 the epoch is bound: a different epoch is a different digest"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "c1-start-epoch-unchecked"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "update-ignores-epoch"
     }
    ]
   },
@@ -698,11 +732,11 @@
   },
   {
    "id": "C11",
-   "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it).",
+   "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it). The Quint cell holds the two windows together exceeding the honest side's answer time, REACT = 2 * LAG, in ticks; the 60 s floor is the Rig's.",
    "source": "contracts-decisions.md J2 (C11 pinned)",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "hold",
     "ts": "-"
@@ -716,8 +750,17 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "window-floor-below-react",
-     "owed": "#44"
+     "name": "window-floor-below-react"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "react-longer-than-windows"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "windows-shorter-than-answer"
     }
    ]
   },
@@ -727,7 +770,7 @@
    "source": "contracts-decisions.md H1",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -741,8 +784,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "h1-wait-removed",
-     "owed": "#44"
+     "name": "h1-wait-removed"
     },
     {
      "kind": "bug",
@@ -758,16 +800,26 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "h1-ignores-secret"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "h1-ignores-public-secret"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "h1-boundary-off"
     }
    ]
   },
   {
    "id": "H2",
-   "statement": "Response windows come from the starter's proof; the floor is 60 s on testnet (6 h on mainnet, gated by N3); zero is refused as ResponseWindowTooShort.",
+   "statement": "Response windows come from the starter's proof; the floor is 60 s on testnet (6 h on mainnet, gated by N3); zero is refused as ResponseWindowTooShort. The Quint cell holds the floor as a parameter in ticks (a zero window is refused, the windows come from the starter's proof); the 60 s testnet and 6 h mainnet values and the N3 mainnet gate are not in it.",
    "source": "contracts-decisions.md H2",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -781,8 +833,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "h2-zero-window-allowed",
-     "owed": "#44"
+     "name": "h2-zero-window-allowed"
     }
    ]
   },
@@ -840,7 +891,7 @@
    "source": "contracts-decisions.md J2",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -854,14 +905,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "contract-reverts-on-moved-dispute",
-     "owed": "#44"
+     "name": "contract-reverts-on-moved-dispute"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "entity-ignores-the-skip-event",
-     "owed": "#44"
+     "name": "entity-ignores-the-skip-event"
     },
     {
      "kind": "bug",
@@ -872,6 +921,16 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "ignores-skip"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "skip-outcome-not-read"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "skip-read-as-started"
     }
    ]
   },
@@ -881,7 +940,7 @@
    "source": "contracts-decisions.md J5",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -895,14 +954,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "payment-revert-keeps-the-nonce",
-     "owed": "#44"
+     "name": "payment-revert-keeps-the-nonce"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "entity-ignores-batch-failed",
-     "owed": "#44"
+     "name": "entity-ignores-batch-failed"
     },
     {
      "kind": "bug",
@@ -913,16 +970,21 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "ignores-batch-failed"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "no-gas-guard"
     }
    ]
   },
   {
    "id": "J6",
-   "statement": "A deposit leg hard-reverts on failure and travels alone in its batch.",
+   "statement": "A deposit leg hard-reverts on failure and travels alone in its batch. The Quint cell holds the hard revert and the sign-only-after-simulation rule with planted bugs; that a deposit leg travels alone in its batch is pinned by a scenario test (depositFundsThePaymentBehindItTest) with no planted bug.",
    "source": "contracts-decisions.md J6",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -941,8 +1003,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "deposit-signed-without-simulation",
-     "owed": "#44"
+     "name": "deposit-signed-without-simulation"
     },
     {
      "kind": "bug",
@@ -953,6 +1014,16 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "leg-soft"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "deposit-batch-soft-fails"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "deposit-ignores-the-token"
     }
    ]
   },
@@ -971,8 +1042,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "resign-at-a-signed-nonce",
-     "owed": "#44"
+     "name": "resign-at-a-signed-nonce"
     },
     {
      "kind": "bug",
@@ -992,7 +1062,7 @@
    "source": "contracts-decisions.md F16 (memory)",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -1016,14 +1086,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "gas-fail-burns-an-urgent-batch",
-     "owed": "#44"
+     "name": "gas-fail-burns-an-urgent-batch"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "gas-fail-burns-a-deposit-batch",
-     "owed": "#44"
+     "name": "gas-fail-burns-a-deposit-batch"
     }
    ]
   },
@@ -1033,7 +1101,7 @@
    "source": "contracts-decisions.md A12",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -1047,13 +1115,17 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "supersession-reversed",
-     "owed": "#44"
+     "name": "supersession-reversed"
     },
     {
      "kind": "bug",
      "layer": "arrival",
      "name": "tie-break-inverted"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "tie-break-reversed"
     }
    ]
   },
@@ -1084,11 +1156,11 @@
   },
   {
    "id": "N1",
-   "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter.",
+   "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter. The Quint cell holds signing only for the current epoch and the proof nonce as its own counter (stale and leaping nonces refused, no skips); it does not hold the co-signed baseline for epoch + 1 at frame nonce + 3: the spec models R-IMPLICIT-BASELINE instead, where no baseline is co-signed.",
    "source": "contracts-decisions.md / Arrival Q-D-4, Q-D-19; Quint A13",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "owed: A4 (the frame nonce is the signed body's)"
@@ -1103,24 +1175,43 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "accept-proof-nonce-leap",
-     "owed": "#44"
+     "name": "accept-proof-nonce-leap"
     },
     {
      "kind": "test",
      "layer": "ts",
      "name": "to be named",
      "owed": "A4"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "accept-stale-proof-nonce"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "commit-forgets-proof-nonce"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "payment-at-dead-epoch"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "no-pause-while-locked"
     }
    ]
   },
   {
    "id": "N2",
-   "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one.",
+   "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one. The Quint cell holds the Account-level refusal (deadline_too_far past view + horizon + reserve); a hub refusing to forward such a lock is not tested at the Entity layer.",
    "source": "contracts-decisions.md H1 open point; Arrival Q-D-20; Quint A9",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -1134,8 +1225,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "horizon-off",
-     "owed": "#44"
+     "name": "horizon-off"
     }
    ]
   },
@@ -1178,18 +1268,17 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "resign-at-a-signed-nonce",
-     "owed": "#44"
+     "name": "resign-at-a-signed-nonce"
     }
    ]
   },
   {
    "id": "R-SPLIT",
-   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
+   "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops. The Quint cell holds urgent ops apart from payments (urgent-batch-carries-payments); co-signed ops and deposits travel apart under R-COSIGN and J6, and reserve ops are not a kind in the model. The Arrival cell holds the J page's dispute, reveal and deposit ops against the soft ops (spec/j/batch.scm, bug mixed-batch); hash-ladder ops are not an op kind on any page.",
    "source": "contracts-decisions.md J5 (spec rule)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -1213,8 +1302,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "urgent-batch-carries-payments",
-     "owed": "#44"
+     "name": "urgent-batch-carries-payments"
     },
     {
      "kind": "bug",
@@ -1229,7 +1317,7 @@
    "source": "contracts-decisions.md B1 / R-COSIGN",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -1243,8 +1331,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "cosign-batch-mixes-accounts",
-     "owed": "#44"
+     "name": "cosign-batch-mixes-accounts"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "cosign-batch-carries-payments"
     }
    ]
   },
@@ -1268,8 +1360,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "signs-before-gate",
-     "owed": "#44"
+     "name": "signs-before-gate"
     }
    ]
   },
@@ -1314,11 +1405,11 @@
   },
   {
    "id": "R-CLOCK",
-   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
+   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Quint cell holds the receiver-side part only (a frame is judged by the receiver's own clock, never the proposer's stamp, with the reserve); the watermark cap, the host door and the Runtime's refusal of a peer input without a Host timestamp are not in the spec. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
    "source": "contracts-decisions.md (memory, #57)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "-"
@@ -1332,8 +1423,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "receiver-judges-by-the-frame-stamp",
-     "owed": "#44"
+     "name": "receiver-judges-by-the-frame-stamp"
     },
     {
      "kind": "bug",
@@ -1367,8 +1457,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "unfunded-payment-is-signed",
-     "owed": "#44"
+     "name": "unfunded-payment-is-signed"
     }
    ]
   },
@@ -1392,8 +1481,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "r2c-skips-enforce",
-     "owed": "#44"
+     "name": "r2c-skips-enforce"
     }
    ]
   },
@@ -1402,25 +1490,13 @@
    "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
    "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
    },
    "killers": [
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "send-before-persist",
-     "owed": "#44"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "ack-before-persist",
-     "owed": "#44"
-    },
     {
      "kind": "test",
      "layer": "ts",
@@ -1460,6 +1536,26 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-DURABLE planted bug: a recovery that forgets the last row is caught"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "send-before-persist"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ack-before-persist"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "send-before-persist"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "ack-before-persist"
     }
    ]
   },
@@ -1469,7 +1565,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-1",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -1483,8 +1579,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "reack-open-only",
-     "owed": "#44"
+     "name": "reack-open-only"
     },
     {
      "kind": "test",
@@ -1495,16 +1590,21 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-A1 R-REACK nothing wedges: a finished world is reachable from every state"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "no-reack-on-duplicate"
     }
    ]
   },
   {
    "id": "R-HTLC-CLOCK",
-   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
+   "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut. The Quint cell holds (a) and (b) in the Account and (c) as the Entity's escalation ESC >= LAG before a deadline.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -1543,26 +1643,22 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "expire-at-deadline",
-     "owed": "#44"
+     "name": "expire-at-deadline"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "expiry-reserve-off",
-     "owed": "#44"
+     "name": "expiry-reserve-off"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "resolve-after-deadline",
-     "owed": "#44"
+     "name": "resolve-after-deadline"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "receiver-judges-by-the-frame-stamp",
-     "owed": "#44"
+     "name": "receiver-judges-by-the-frame-stamp"
     },
     {
      "kind": "test",
@@ -1629,6 +1725,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-CLOCK a frame stamp is a bigint, and a view or a deadline has to be made: the types refuse the stamp"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "escalation-too-late"
     }
    ]
   },
@@ -1664,7 +1765,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -1674,24 +1775,6 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "drop-on-rollback"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "propose-drops-silently",
-     "owed": "#44"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "dead-tx-stays",
-     "owed": "#44"
-    },
-    {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "rollback-drops-txs",
-     "owed": "#44"
     },
     {
      "kind": "test",
@@ -1752,6 +1835,31 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE a payment before any credit is refused to Alice with its fault, and Bob never hears of it"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "propose-drops-silently"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "dead-tx-stays"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "rollback-drops-txs"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "refusal-drops-without-notice"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "revise-loses-the-notice"
     }
    ]
   },
@@ -1797,11 +1905,11 @@
   },
   {
    "id": "R-FRAME-REFUSAL",
-   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right. The Quint cell holds the refusal, the retry budget, the receiver's mark and the attempt number; the Runtime's duties (persisting the attempt count and the mark, spacing the retries) and the signed refusals of A4b are not in it.",
    "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
-    "quint": "owed: spec thread (Account spec comparison)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -1827,6 +1935,41 @@
      "layer": "ts",
      "name": "to be named",
      "owed": "A4 (frame exchange step)"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "proposer-ignores-refusal"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "receiver-commits-a-refused-frame"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "refused-frame-judged-afresh-at-same-attempt"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "stale-attempt-silent"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "mark-kept-across-head-moves"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "retryable-fault-drops-the-tx"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "retry-budget-unbounded"
     }
    ]
   },
@@ -1904,8 +2047,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "queue-guard-reads-committed-only",
-     "owed": "#44"
+     "name": "queue-guard-reads-committed-only"
     },
     {
      "kind": "test",
@@ -1935,7 +2077,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-7",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -1949,8 +2091,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "accept-wrong-parent",
-     "owed": "#44"
+     "name": "accept-wrong-parent"
     },
     {
      "kind": "test",
@@ -2058,14 +2199,12 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "cancel-by-anyone",
-     "owed": "#44"
+     "name": "cancel-by-anyone"
     },
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "resolve-by-payer",
-     "owed": "#44"
+     "name": "resolve-by-payer"
     },
     {
      "kind": "test",
@@ -2094,8 +2233,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "proposer-may-skip-nonces",
-     "owed": "#44"
+     "name": "proposer-may-skip-nonces"
     },
     {
      "kind": "bug",
@@ -2126,8 +2264,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "horizon-off",
-     "owed": "#44"
+     "name": "horizon-off"
     },
     {
      "kind": "test",
@@ -2162,8 +2299,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "payout-forgets-the-debt",
-     "owed": "#44"
+     "name": "payout-forgets-the-debt"
     }
    ]
   },
@@ -2613,11 +2749,11 @@
   },
   {
    "id": "R-SETTLE-CREDIT",
-   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4.",
+   "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4. The Quint cell holds the predicate `settlementOk`, checked against the chain's payout in compose.qnt; no Account or settle action calls it, so the co-signing path itself is not in the model.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "hold",
     "contract": "-",
     "rig": "owed: #69 (known finding, owner A1 cut)",
     "ts": "hold"
@@ -2641,8 +2777,27 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "settlement-ignores-credit",
-     "owed": "#44"
+     "name": "settlement-ignores-credit"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-ignores-open-clauses"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-checks-the-old-collateral"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-left-keeps-its-claim"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "settlement-withdraws-past-collateral"
     }
    ]
   },
@@ -2671,8 +2826,7 @@
     {
      "kind": "mutant",
      "layer": "quint",
-     "name": "credit-drop-unchecked",
-     "owed": "#44"
+     "name": "credit-drop-unchecked"
     }
    ]
   },
@@ -2755,11 +2909,11 @@
   },
   {
    "id": "R-ONE-LOCK-PER-HASH",
-   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page.",
+   "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account. The Arrival cell holds only that at most one clause is open per hashlock and a second lock is refused (spec/money/ledger.scm, bug duplicate-hashlock); that the refusal names the open slot and that a hashlock opens again are owed on the Arrival page. The Quint cell holds the lock_exists refusal only; it does not name the slot that holds the hashlock and has no test of the hashlock opening again.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (coordinator 09-30)",
+    "quint": "hold",
     "contract": "-",
     "rig": "-",
     "ts": "hold"
@@ -2804,6 +2958,11 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "duplicate-hashlock"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "duplicate-hashlock-allowed"
     }
    ]
   },
@@ -2813,7 +2972,7 @@
    "source": "contracts-decisions.md Q-D-21 (D2), PR 'Implicit baseline'",
    "layers": {
     "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "-"
@@ -2951,12 +3110,6 @@
      "owed": "#41"
     },
     {
-     "kind": "mutant",
-     "layer": "quint",
-     "name": "a mutant for the implicit start",
-     "owed": "#44"
-    },
-    {
      "kind": "test",
      "layer": "contract",
      "name": "test_R_IMPLICIT_BASELINE_epochZeroRefusesTheCanonicalImplicitStart"
@@ -2970,16 +3123,41 @@
      "kind": "test",
      "layer": "contract",
      "name": "test_R_IMPLICIT_BASELINE_controlTheSameStartIsAcceptedAfterAnAdvance"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "implicit-start-refused"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "implicit-path2-tie"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "first-proof-at-stored-plus-one"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "implicit-start-disabled"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "acker-signs-first-proof-at-stored-plus-one"
     }
    ]
   },
   {
    "id": "R-IMPLICIT-NONCE-FROM-CHAIN",
-   "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
+   "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it. The Quint cell holds the first signed proof of an epoch taking its nonce from the stored nonce read from the chain (settle.qnt, first-proof-nonce-derived-from-the-tip); the Runtime refusing to sign a proof at stored + 1 is the ts cell's.",
    "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
    "layers": {
     "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "quint": "hold",
     "contract": "hold",
     "rig": "-",
     "ts": "owed: the cut (Account and Runtime slices)"
@@ -3011,6 +3189,11 @@
      "layer": "ts",
      "name": "a Runtime test refusing a proof at stored + 1",
      "owed": "the cut (Account and Runtime slices)"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "first-proof-nonce-derived-from-the-tip"
     }
    ]
   },
@@ -3216,7 +3399,7 @@
   },
   {
    "id": "R-GATE-TEST-TIMEOUTS",
-   "statement": "A heavy test (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout as the third argument, so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
+   "statement": "A heavy test or hook (one that starts a bun, forge, ast-grep, quint or uvx process, opens og's world or lane, walks or calls an explorer, directly or through a helper of its file) names its own timeout (the third argument of a test, the second of a hook), so a loaded machine cannot turn the gate red, and the suite runs with no --timeout flag.",
    "source": "coordinator 10-01 06:52 (two threads hit Bun's 5 s default on the rules tests and the chaos explorers and worked around it by hand with a flag)",
    "layers": {
     "arrival": "-",
@@ -3230,6 +3413,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-TEST-TIMEOUTS a test that starts a bun, forge, ast-grep, quint or uvx process, or process.execPath, is heavy"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS the object form of a spawn, a command line given to execSync or exec, and a helper declared with let, var or class are heavy too"
     },
     {
      "kind": "test",
@@ -3270,6 +3458,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-GATE-TEST-TIMEOUTS testCalls says where each call is, whether it names a timeout, and where its callback ends"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-GATE-TEST-TIMEOUTS a heavy beforeAll, beforeEach, afterAll or afterEach hook needs a timeout as its second argument, a cheap hook needs none"
     },
     {
      "kind": "test",
@@ -3614,6 +3807,115 @@
      "kind": "test",
      "layer": "contract",
      "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
+    }
+   ]
+  },
+  {
+   "id": "R-DEPLOY-VERIFY",
+   "statement": "A deployed manifest is checked against its chain by one read-only command (contracts/deploy/verify.ts: eth_chainId, eth_blockNumber, eth_getCode, no key, nothing behind --live): each contract's runtime code is rebuilt from the compiled artifact with its library links and immutables filled, compared byte for byte with the chain's code and by keccak256 with the manifest's codeHash; any difference, an artifact older than the sources it imports, or a node on another chain is not a match, and the exit code is 0 only when every contract matches. The gate runs it against a fake node; whether main still equals Sepolia is the command's answer, not a gate test.",
+   "source": "coordinator 10-01 08:23 (the progress report cannot call the Sepolia deployment done while nothing compares the deployed code with the current build)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY every contract and the faucet token match, with the manifest's code hashes"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the immutables and link slots are rebuilt from the manifest: the Depository holds 8+4 deploy addresses, the admin once, and 14 library links"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a library's own-address immutable is its deployed address; the token's immutable is its decimals"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one flipped byte of compiled code: that contract differs at that byte, as compiled code, and no other contract does"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a wrong admin in the Depository's immutable slot is named as the admin immutable"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a different library address in a link slot is named as that library's link slot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an address with no code, and code that is cut short or has a tail added, differ"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY code that equals the build but not the manifest's code hash differs too (the manifest names another deployment)"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a manifest address that points at another contract's code differs, even though that code is a deployed contract of ours"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node on another chain is refused, not read"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an artifact older than its source is refused, not compared"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY an immutable the check does not know the value of is an error, not a pass"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a matching chain prints nine matches and exits 0; only the three read methods are ever called"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY one differing contract is printed as differ with its first differing byte, the others still match, and the exit is 1"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a node that cannot be read, and a node on the wrong chain, exit 2 and print no match"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY it never reads a key: the environment's DEPLOYER_PRIVATE_KEY does not reach its output, and its source holds no signer and no write call"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY the EntityProvider the fake chain serves holds the manifest's deployer in both foundationDeployer slots"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY a difference in the very last byte of any contract's code, the faucet token's included, is a differ at that byte"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "R-DEPLOY-VERIFY readBuild names a source that was edited after the build: the edited file, one it imports, and not one it does not import"
     }
    ]
   }

@@ -1,0 +1,555 @@
+{
+  "files": [
+    "account.qnt",
+    "account_core.qnt",
+    "account_test.qnt"
+  ],
+  "test": "account_test.qnt",
+  "mutants": [
+    {
+      "id": "collision-both-roll-back",
+      "why": "R-A1: on a same-height collision both sides give way, so each commits the other's frame",
+      "file": "account_core.qnt",
+      "old": "            match s {\n              | Left => keep\n              | Right => {",
+      "new": "            match Right {\n              | Left => keep\n              | Right => {",
+      "killedBy": "invariant:agreed"
+    },
+    {
+      "id": "pay-ignores-capacity",
+      "why": "R-A6: a payment is not checked against the payer's room",
+      "file": "account_core.qnt",
+      "old": "        else if (p.amount > room(b, p.from)) Refused(\"insufficient_capacity\")\n        else match p.from {",
+      "new": "        else match p.from {",
+      "killedBy": "invariant:credit_holds"
+    },
+    {
+      "id": "credit-drop-unchecked",
+      "why": "R-A6: a credit limit may be lowered below what is already owed",
+      "file": "account_core.qnt",
+      "old": "if (rcpan(nb)) Ok(nb) else Refused(\"credit_below_usage\")",
+      "new": "Ok(nb)",
+      "killedBy": "test:creditCannotDropBelowUsageTest"
+    },
+    {
+      "id": "room-ignores-clauses",
+      "why": "R-A6: open clauses do not hold the payer's room, so worst-case RCPAN breaks",
+      "file": "account_core.qnt",
+      "old": "    | Left => imax(0, delta(b) + b.limitLeft - holds(b, Left))",
+      "new": "    | Left => imax(0, delta(b) + b.limitLeft)",
+      "killedBy": "invariant:credit_holds"
+    },
+    {
+      "id": "propose-while-in-flight",
+      "why": "P4: a second proposal at the same height signs a second, different proof for one nonce",
+      "file": "account_core.qnt",
+      "old": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    isOpen(r),",
+      "new": "  pure def canPropose(r: Replica, now: int, s: Side): bool = and {\n    true,",
+      "killedBy": "invariant:no_equivocation"
+    },
+    {
+      "id": "ack-matches-any-frame",
+      "why": "P4: an ack commits whatever frame it names, not the frame in flight",
+      "file": "account.qnt",
+      "old": "    val fits = and { isProposed(r), statusFid(r) == fid, peer != 0,",
+      "new": "    val fits = and { isProposed(r), peer != 0,",
+      "killedBy": "test:oldAckDoesNotCommitTheFrameInFlightTest"
+    },
+    {
+      "id": "ack-without-own-signature",
+      "why": "P4: the receiver commits and acks without signing the proof it acknowledges",
+      "file": "account.qnt",
+      "old": "      signed' = signed.set(sigKey(s, f), fid),\n      equivocated' = (equivocated or clashes(signed, frames, sigKey(s, f), f)),\n      firstCommit' = if (firstCommit.get(f.height) == 0)",
+      "new": "      signed' = signed,\n      equivocated' = equivocated,\n      firstCommit' = if (firstCommit.get(f.height) == 0)",
+      "killedBy": "invariant:both_signed"
+    },
+    {
+      "id": "rollback-drops-txs",
+      "why": "R-A1: Right's rolled-back txs are not restored to its mempool",
+      "file": "account_core.qnt",
+      "old": "mempool: own.txs.concat(r.mempool) }",
+      "new": "mempool: r.mempool }",
+      "killedBy": "test:collisionLeftWinsTest"
+    },
+    {
+      "id": "resolve-after-deadline",
+      "why": "P5: a secret is accepted after the lock's deadline",
+      "file": "account_core.qnt",
+      "old": "          else if (now > l.deadline) Refused(\"past_deadline\")\n",
+      "new": "",
+      "killedBy": "test:htlcResolveMovesOffdeltaOnceTest"
+    },
+    {
+      "id": "expire-at-deadline",
+      "why": "P5: a lock expires while the deadline second is still open (R-HTLC-CLOCK b: the strict bound; pinned by a scenario test, since 1500 traces of 40 steps do not reach a lock, a drifted clock pair and an expiry together)",
+      "file": "account_core.qnt",
+      "old": "        else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
+      "new": "        else if (now < b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
+      "killedBy": "test:htlcExpireAndCancelTest"
+    },
+    {
+      "id": "spend-others-funds",
+      "why": "R-A6: a side may pay from the other side's funds",
+      "file": "account_core.qnt",
+      "old": "        if (p.from != author) Refused(\"not_own_funds\")\n        else if (p.amount < 1 or p.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (p.amount > room",
+      "new": "        if (p.amount < 1 or p.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (p.amount > room",
+      "killedBy": "test:payNeedsRoomTest"
+    },
+    {
+      "id": "no-reack-on-duplicate",
+      "why": "Q-A2 / R-REACK: a repeated proposal for an already committed frame is not answered, so a lost ack is never recovered",
+      "file": "account_core.qnt",
+      "old": "    if (repeatOfLast(r, fid)) { ...keep, ack: true }\n",
+      "new": "    if (false) { ...keep, ack: true }\n",
+      "killedBy": "test:lostAckIsRecoveredByResendTest"
+    },
+    {
+      "id": "lock-slot-overwrite",
+      "why": "an open clause in a slot is overwritten by a new lock, silently dropping the first",
+      "file": "account_core.qnt",
+      "old": "        else if (b.locks.get(l.id).on) Refused(\"lock_exists\")\n",
+      "new": "",
+      "killedBy": "test:htlcLockHoldsRoomTest"
+    },
+    {
+      "id": "queue-guard-reads-committed-only",
+      "why": "Q-E1: a local tx is admitted against the committed state, blind to what is already queued",
+      "file": "account_core.qnt",
+      "old": "    match replay(plan, r.mempool, s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
+      "new": "    match replay(plan, List(), s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
+      "killedBy": "test:queuedPaymentIsVisibleToAPaymentTest"
+    },
+    {
+      "id": "horizon-off",
+      "why": "N2: no bound on how far a lock's deadline lies after its frame (MAX_LOCK_HORIZON): a hub could be asked to hold a route for ever",
+      "file": "account_core.qnt",
+      "old": "        else if (l.deadline > now + MAX_LOCK_HORIZON + CLOCK_RESERVE) Refused(\"deadline_too_far\")\n",
+      "new": "",
+      "killedBy": "test:farDeadlineIsRefusedTest"
+    },
+    {
+      "id": "accept-forged-state",
+      "why": "a receiver holds a frame whose claimed state is not the replay of its txs: the two sides would sign a proof of a state nobody derived",
+      "file": "account_core.qnt",
+      "old": "      | Ok(b) => b == f.after\n",
+      "new": "      | Ok(b) => true\n",
+      "killedBy": "invariant:no_bad_accept"
+    },
+    {
+      "id": "accept-height-skip",
+      "why": "a receiver holds a frame two heights ahead of its tip",
+      "file": "account_core.qnt",
+      "old": "    f.height == r.height + 1,\n    f.nonce > r.pnonce,",
+      "new": "    f.height > r.height,\n    f.nonce > r.pnonce,",
+      "killedBy": "invariant:no_bad_accept"
+    },
+    {
+      "id": "receiver-judges-by-the-frame-stamp",
+      "why": "R-CLOCK: the receiver replays a frame at the proposer's stamp instead of its own clock: an expiry stamped in the future is accepted early, a resolve stamped in the past reaches back before the deadline",
+      "file": "account_core.qnt",
+      "old": "    match replay(r.tip, f.txs, f.author, now) {",
+      "new": "    match replay(r.tip, f.txs, f.author, f.ts) {",
+      "killedBy": "invariant:no_bad_accept"
+    },
+    {
+      "id": "expiry-reserve-off",
+      "why": "R-HTLC-CLOCK: b, expiry needs only the deadline to have passed on the receiver's own view, without the reserve: a payee whose view is a tick behind can still resolve (pinned by a scenario test; the invariant run over 1500 traces did not reach it)",
+      "file": "account_core.qnt",
+      "old": "else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
+      "new": "else if (now <= b.locks.get(r.id).deadline) Refused(\"not_expired\")",
+      "killedBy": "test:htlcExpireAndCancelTest"
+    },
+    {
+      "id": "cancel-by-anyone",
+      "why": "the payer can cancel its own lock: it takes back what the payee may already be owed",
+      "file": "account_core.qnt",
+      "old": "        else if (payee(b.locks.get(r.id)) != author) Refused(\"not_payee\")\n        else Ok(withLock(b, r.id, NO_LOCK))",
+      "new": "        else Ok(withLock(b, r.id, NO_LOCK))",
+      "killedBy": "test:htlcExpireAndCancelTest"
+    },
+    {
+      "id": "resolve-wrong-sign",
+      "why": "a resolve moves the allocation the wrong way",
+      "file": "account_core.qnt",
+      "old": "              | Left => b.offdelta - l.amount\n              | Right => b.offdelta + l.amount\n            }\n            Ok({ ...withLock",
+      "new": "              | Left => b.offdelta + l.amount\n              | Right => b.offdelta - l.amount\n            }\n            Ok({ ...withLock",
+      "killedBy": "test:htlcResolveMovesOffdeltaOnceTest"
+    },
+    {
+      "id": "resolve-no-hash-check",
+      "why": "a resolve with any secret is accepted",
+      "file": "account_core.qnt",
+      "old": "          else if (hashOf(r.secret) != l.hashlock) Refused(\"wrong_secret\")\n",
+      "new": "",
+      "killedBy": "test:htlcResolveMovesOffdeltaOnceTest"
+    },
+    {
+      "id": "resolve-by-payer",
+      "why": "the payer resolves its own lock",
+      "file": "account_core.qnt",
+      "old": "          if (payee(l) != author) Refused(\"not_payee\")\n          else if (hashOf",
+      "new": "          if (false) Refused(\"not_payee\")\n          else if (hashOf",
+      "killedBy": "test:htlcResolveMovesOffdeltaOnceTest"
+    },
+    {
+      "id": "expire-before-deadline",
+      "why": "a lock expires before its deadline (a scenario test pins it: the simulator does not reach a lock, a drifted clock pair and an expiry together in 1500 traces, as for expire-at-deadline)",
+      "file": "account_core.qnt",
+      "old": "else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
+      "new": "else if (false) Refused(\"not_expired\")",
+      "killedBy": "test:htlcExpireAndCancelTest"
+    },
+    {
+      "id": "resolve-at-deadline-refused",
+      "why": "the deadline second itself is refused for a resolve (the contract pays a reveal at `<= deadline`)",
+      "file": "account_core.qnt",
+      "old": "          else if (now > l.deadline) Refused(\"past_deadline\")",
+      "new": "          else if (now >= l.deadline) Refused(\"past_deadline\")",
+      "killedBy": "test:resolveAtTheDeadlineSecondTest"
+    },
+    {
+      "id": "rcpan-drops-high-side",
+      "why": "RCPAN forgets the clauses the Right side pays: Right can be over-committed",
+      "file": "account_core.qnt",
+      "old": "    delta(b) + holds(b, Right) <= COLLATERAL + b.limitRight",
+      "new": "    delta(b) <= COLLATERAL + b.limitRight",
+      "killedBy": "test:rcpanCoversTheWorstCaseOfOpenClausesTest"
+    },
+    {
+      "id": "rcpan-drops-low-side-holds",
+      "why": "RCPAN forgets the clauses the Left side pays",
+      "file": "account_core.qnt",
+      "old": "    delta(b) - holds(b, Left) >= -b.limitLeft,",
+      "new": "    delta(b) >= -b.limitLeft,",
+      "killedBy": "test:rcpanCoversTheWorstCaseOfOpenClausesTest"
+    },
+    {
+      "id": "room-right-ignores-clauses",
+      "why": "Right's room ignores what its open clauses hold",
+      "file": "account_core.qnt",
+      "old": "    | Right => imax(0, COLLATERAL + b.limitRight - delta(b) - holds(b, Right))",
+      "new": "    | Right => imax(0, COLLATERAL + b.limitRight - delta(b))",
+      "killedBy": "invariant:credit_holds"
+    },
+    {
+      "id": "lock-deadline-past-allowed",
+      "why": "a lock whose deadline is not after the deciding party's clock is admitted",
+      "file": "account_core.qnt",
+      "old": "        else if (l.deadline <= now) Refused(\"deadline_past\")\n",
+      "new": "",
+      "killedBy": "test:lockDeadlineBoundariesTest"
+    },
+    {
+      "id": "lock-for-other-payer",
+      "why": "a side locks the other side's funds (theft)",
+      "file": "account_core.qnt",
+      "old": "        else if (l.payer != author) Refused(\"not_own_funds\")\n        else if (l.amount < 1 or l.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (b.locks",
+      "new": "        else if (l.amount < 1 or l.amount > MAX_AMOUNT) Refused(\"bad_amount\")\n        else if (b.locks",
+      "killedBy": "invariant:authority"
+    },
+    {
+      "id": "setcredit-for-other",
+      "why": "a side grants itself credit",
+      "file": "account_core.qnt",
+      "old": "        if (c.by != author) Refused(\"not_own_credit\")\n        else if (c.limit < 0",
+      "new": "        if (false) Refused(\"not_own_credit\")\n        else if (c.limit < 0",
+      "killedBy": "invariant:authority"
+    },
+    {
+      "id": "sigkey-ignores-branch",
+      "why": "the signature key forgets which side authored the frame: the two branches of one nonce share a key",
+      "file": "account_core.qnt",
+      "old": "pure def sigKey(signer: Side, f: Frame): SigKey = (signer, f.nonce, f.author == Left)",
+      "new": "pure def sigKey(signer: Side, f: Frame): SigKey = (signer, f.nonce, true)",
+      "killedBy": "invariant:no_equivocation"
+    },
+    {
+      "id": "rollback-order",
+      "why": "on a collision Right puts its own txs back behind the newer ones",
+      "file": "account_core.qnt",
+      "old": "mempool: own.txs.concat(r.mempool) }",
+      "new": "mempool: r.mempool.concat(own.txs) }",
+      "killedBy": "test:rollbackKeepsTheOrderTest"
+    },
+    {
+      "id": "ack-skips-proof-match",
+      "why": "the proposer commits on any signature of the peer, whatever proof it covers",
+      "file": "account.qnt",
+      "old": "peer != 0, proofOf(frames.get(peer).after) == proofOf(f.after) }",
+      "new": "peer != 0 }",
+      "killedBy": "invariant:both_signed"
+    },
+    {
+      "id": "left-also-rolls-back",
+      "why": "Left also gives way on a collision: both sides give way and the frames cross",
+      "file": "account_core.qnt",
+      "old": "              | Left => keep\n              | Right => {",
+      "new": "              | Left => { ...keep, r: { ...r, status: Open, mempool: own.txs.concat(r.mempool) }, rolled: true }\n              | Right => {",
+      "killedBy": "invariant:agreed"
+    },
+    {
+      "id": "propose-empty-frame",
+      "why": "a side proposes a frame with nothing in it",
+      "file": "account_core.qnt",
+      "old": "    frameToPropose(r, now, s, 0).txs.length() > 0\n",
+      "new": "    true\n",
+      "killedBy": "test:emptyFrameIsNotProposedTest"
+    },
+    {
+      "id": "lock-amount-uncapped-by-room",
+      "why": "a lock may hold more than its payer can pay",
+      "file": "account_core.qnt",
+      "old": "        else if (l.amount > room(b, l.payer)) Refused(\"insufficient_capacity\")\n        else Ok(withLock",
+      "new": "        else Ok(withLock",
+      "killedBy": "invariant:credit_holds"
+    },
+    {
+      "id": "credit-limit-cap-off",
+      "why": "a credit limit above the cap is accepted",
+      "file": "account_core.qnt",
+      "old": "        else if (c.limit < 0 or c.limit > MAX_CREDIT) Refused(\"bad_credit\")\n",
+      "new": "        else if (c.limit < 0) Refused(\"bad_credit\")\n",
+      "killedBy": "test:creditAndAmountBoundsTest"
+    },
+    {
+      "id": "received-replaced-by-newer",
+      "why": "a receiver holding one frame for its ack drops it for a newer one",
+      "file": "account_core.qnt",
+      "old": "      | Received(held) => if (held == fid) keep else refuse",
+      "new": "      | Received(held) => if (held == fid) keep else if (acceptable({ ...r, status: Open }, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } } else refuse",
+      "killedBy": "test:receivedFrameIsNotReplacedTest"
+    },
+    {
+      "id": "accept-stale-proof-nonce",
+      "why": "N1: the receiver takes a frame whose proof nonce is not above the last committed one (a dispute start with it would be refused by the chain).",
+      "file": "account_core.qnt",
+      "old": "    f.nonce > r.pnonce,                                    // N1: a proof nonce above the last one, or the chain would refuse a start with it\n",
+      "new": "",
+      "killedBy": "test:staleProofNonceIsRefusedTest"
+    },
+    {
+      "id": "accept-proof-nonce-leap",
+      "why": "N1: the receiver takes a frame whose proof nonce leaps ahead (burns the counter).",
+      "file": "account_core.qnt",
+      "old": "    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt    // and not a leap that burns the counter: only the refusals of its own proposer count (A16)\n",
+      "new": "",
+      "killedBy": "test:leapingProofNonceIsRefusedTest"
+    },
+    {
+      "id": "proposer-may-skip-nonces",
+      "why": "N1: a proposer may skip a proof nonce on its own: an abandoned signed proposal then outranks the committed frame, and its next frame signs a second proof under a nonce it already used.",
+      "file": "account_core.qnt",
+      "old": "  pure val MAX_NONCE_GAP = 0\n",
+      "new": "  pure val MAX_NONCE_GAP = 1\n",
+      "killedBy": "invariant:no_equivocation"
+    },
+    {
+      "id": "commit-forgets-proof-nonce",
+      "why": "N1: a commit does not move the proof nonce counter.",
+      "file": "account_core.qnt",
+      "old": "{ ...r, height: f.height, pnonce: f.nonce, tip: f.after,",
+      "new": "{ ...r, height: f.height, tip: f.after,",
+      "killedBy": "invariant:nonce_climbs"
+    },
+    {
+      "id": "supersession-reversed",
+      "why": "A12: a Right-authored frame is taken to supersede a Left-authored one at the same height, the reverse of the chain rank (Left wins at one nonce).",
+      "file": "account.qnt",
+      "old": "not(byzOn and f.author == Left and frames.get(fc.get(f.height)).author == Right and f.nonce >= frames.get(fc.get(f.height)).nonce)",
+      "new": "not(byzOn and f.author == Right and frames.get(fc.get(f.height)).author == Left and f.nonce >= frames.get(fc.get(f.height)).nonce)",
+      "killedBy": "test:equivocatingLeftIsSupersededByRankTest"
+    },
+    {
+      "id": "future-stamp-refused",
+      "why": "the dropped stamp-window rule: a frame stamped ahead of the receiver's clock is refused, so a payer that stamps a day ahead blocks the payee's held reveal (#57)",
+      "file": "account_core.qnt",
+      "old": "    inLine(r, f, self),\n    match replay(r.tip, f.txs, f.author, now) {",
+      "new": "    inLine(r, f, self),\n    f.ts <= now + DRIFT,\n    match replay(r.tip, f.txs, f.author, now) {",
+      "killedBy": "test:futureStampedFrameDoesNotBlockTheRevealTest"
+    },
+    {
+      "id": "proposer-may-skip-nonces-seen-by-agreed",
+      "why": "F9: the same free nonce gap, caught by `agreed` itself (the A12 exemption compares proof ranks), not only by no_equivocation",
+      "file": "account_core.qnt",
+      "old": "  pure val MAX_NONCE_GAP = 0\n",
+      "new": "  pure val MAX_NONCE_GAP = 1\n",
+      "killedBy": "invariant:agreed"
+    },
+    {
+      "id": "reack-open-only",
+      "why": "R-REACK: (D-AC-1) a repeat of the committed frame is re-acked only while the receiver is Open, so a replica that already proposed its own next frame refuses it and one lost ack deadlocks both sides",
+      "file": "account_core.qnt",
+      "old": "    if (repeatOfLast(r, fid)) { ...keep, ack: true }\n",
+      "new": "    if (repeatOfLast(r, fid) and isOpen(r)) { ...keep, ack: true }\n",
+      "killedBy": "test:lostAckWhileHoldingOwnFrameTest"
+    },
+    {
+      "id": "accept-wrong-parent",
+      "why": "R-PARENT: (D-AC-7) the receiver does not check that the frame extends its head, only its height and replay",
+      "file": "account_core.qnt",
+      "old": "    f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)\n",
+      "new": "",
+      "killedBy": "test:wrongParentIsRefusedTest"
+    },
+    {
+      "id": "propose-drops-silently",
+      "why": "R-NOTICE (D-AC-5): a tx that no longer applies is cut from the frame at propose and nobody is told",
+      "file": "account.qnt",
+      "old": "refused: r.refused.concat(keepValid(r.tip, r.mempool, s, clock.get(s)).dropped) }),",
+      "new": "refused: r.refused }),",
+      "killedBy": "test:deadTxBesideALiveOneIsNoticedAtProposeTest"
+    },
+    {
+      "id": "dead-tx-stays",
+      "why": "R-NOTICE (D-AC-5): a dead tx that can never apply stays in the mempool, neither proposed nor reported",
+      "file": "account.qnt",
+      "old": "      sel.dropped.length() > 0,\n",
+      "new": "      sel.dropped.length() > 100,\n",
+      "killedBy": "test:deadTxIsRefusedWithNoticeTest"
+    },
+    {
+      "id": "revise-loses-the-notice",
+      "why": "R-NOTICE (D-AC-5): the dead tx leaves the mempool but no notice is kept",
+      "file": "account.qnt",
+      "old": "refused: r.refused.concat(sel.dropped) }),",
+      "new": "refused: r.refused }),",
+      "killedBy": "test:deadTxIsRefusedWithNoticeTest"
+    },
+    {
+      "id": "duplicate-hashlock-allowed",
+      "why": "R-ONE-LOCK-PER-HASH: a second open lock on a hashlock that is already open is co-signed (one secret would then pay two clauses)",
+      "file": "account_core.qnt",
+      "old": "        else if (LOCK_SLOTS.exists(i => b.locks.get(i).on and b.locks.get(i).hashlock == l.hashlock)) Refused(\"lock_exists\")   // R-ONE-LOCK-PER-HASH: one open clause per hashlock, whoever the payer\n",
+      "new": "",
+      "killedBy": "test:oneLockPerHashlockTest"
+    },
+    {
+      "id": "proposer-ignores-refusal",
+      "why": "R-FRAME-REFUSAL: the proposer drops the refusal on the floor, so its pending frame stays and the Account wedges (a stuck Left frame blocks Right too)",
+      "file": "account.qnt",
+      "old": "replica' = replica.set(s, onRefusal(r, ref, frames.get(ref.fid))),",
+      "new": "replica' = replica,",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
+    },
+    {
+      "id": "receiver-commits-a-refused-frame",
+      "why": "R-FRAME-REFUSAL / A4a: the receiver keeps no mark, so when its view moves the same frame it refused applies and is held: it commits a frame the proposer dropped, and the replicas fork",
+      "file": "account_core.qnt",
+      "old": "r: { ...r, mark: Declined({ attempt: f.attempt, index: ff.index, fault: ff.fault }) },",
+      "new": "r: r,",
+      "killedBy": "test:refusedFrameIsNeverTakenWhileTheHeadLastsTest"
+    },
+    {
+      "id": "refused-frame-judged-afresh-at-same-attempt",
+      "why": "the mark covers only attempts below it: a frame at the very attempt it refused is judged again, and applies once the view has moved",
+      "file": "account_core.qnt",
+      "old": "else if (f.attempt == m.attempt) {",
+      "new": "else if (false) {",
+      "killedBy": "test:refusedFrameIsNeverTakenWhileTheHeadLastsTest"
+    },
+    {
+      "id": "stale-attempt-silent",
+      "why": "a frame below the mark gets no answer, so the proposer that sent it stays Proposed and unanswered (every refusal must be answered)",
+      "file": "account_core.qnt",
+      "old": "if (f.attempt < m.attempt) { ...keep, refused: true, say: refusalFor(fid, 0, \"stale_attempt\", m.attempt) }",
+      "new": "if (f.attempt < m.attempt) { ...keep, refused: true }",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "mark-kept-across-head-moves",
+      "why": "the mark survives a commit: the first frame of the next head, at attempt 0, is refused for ever by a mark of the last one",
+      "file": "account_core.qnt",
+      "old": "status: Open, attempt: 0, mark: NoMark,",
+      "new": "status: Open, attempt: 0,",
+      "killedBy": "test:markIsForgottenWhenTheHeadMovesTest"
+    },
+    {
+      "id": "retryable-fault-drops-the-tx",
+      "why": "a fault that passes with the peer's view drops the named tx with notice instead of sending every tx again",
+      "file": "account_core.qnt",
+      "old": "pure def retryable(fault: str): bool = fault == \"not_expired\" or fault == \"deadline_too_far\"",
+      "new": "pure def retryable(fault: str): bool = false",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
+    },
+    {
+      "id": "refusal-for-committed-frame-rolls-back",
+      "why": "a refusal counts for whatever the proposer has in flight, not only for the frame it names: a late refusal for a committed frame rolls the next frame back",
+      "file": "account_core.qnt",
+      "old": "if (not(isProposed(r) and statusFid(r) == ref.fid and named)) r",
+      "new": "if (not(isProposed(r) and named)) r",
+      "killedBy": "test:refusalForACommittedFrameIsIgnoredTest"
+    },
+    {
+      "id": "accept-own-frame",
+      "why": "C: a replica takes a frame whose author is itself",
+      "file": "account_core.qnt",
+      "old": "    f.author != self,\n",
+      "new": "",
+      "killedBy": "test:ownFrameIsNeverTakenTest"
+    },
+    {
+      "id": "retry-budget-unbounded",
+      "why": "a retryable fault is retried for ever: the budget (MAX_ATTEMPT) never runs out, so the tx is never dropped with notice",
+      "file": "account_core.qnt",
+      "old": "(retryable(ref.fault) and r.attempt < MAX_ATTEMPT)",
+      "new": "retryable(ref.fault)",
+      "killedBy": "test:retryBudgetIsSpentThenTheTxIsDroppedTest"
+    },
+    {
+      "id": "refusal-drops-the-first-tx",
+      "why": "the refusal's index is not read: the proposer drops the first tx of the frame, not the one the peer named",
+      "file": "account_core.qnt",
+      "old": "f.txs.slice(0, ref.index).concat(f.txs.slice(ref.index + 1, f.txs.length())).concat(r.mempool), refused: r.refused.append(f.txs[ref.index]) }",
+      "new": "f.txs.slice(1, f.txs.length()).concat(r.mempool), refused: r.refused.append(f.txs[0]) }",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "refusal-drops-without-notice",
+      "why": "R-NOTICE: the tx a refusal drops is not put on the refused list",
+      "file": "account_core.qnt",
+      "old": "refused: r.refused.append(f.txs[ref.index]) }",
+      "new": "refused: r.refused }",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "attempt-ignores-the-mark",
+      "why": "the next attempt is the proposer's own count plus one, not above the mark the refusal carries: a proposer behind the receiver's mark stays below it",
+      "file": "account_core.qnt",
+      "old": "attempt: imax(r.attempt, ref.mark) + 1 }",
+      "new": "attempt: r.attempt + 1 }",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "stale-attempt-drops-the-tx",
+      "why": "a stale-attempt answer is handled like a non-retryable fault: it costs the tx it names, though it says nothing about any tx",
+      "file": "account_core.qnt",
+      "old": "val again = ref.fault == \"stale_attempt\" or (",
+      "new": "val again = (",
+      "killedBy": "test:staleAttemptIsAnsweredWithTheMarkTest"
+    },
+    {
+      "id": "right-rolls-back-when-it-refuses",
+      "why": "a Right that refuses Left's frame in a collision gives its own frame up as well, though Left ignores it: nobody has a frame in flight",
+      "file": "account_core.qnt",
+      "old": "else { ...o, r: { ...r, mark: o.r.mark } }",
+      "new": "else { ...o }",
+      "killedBy": "test:rightKeepsItsFrameWhenItRefusesLeftsTest"
+    },
+    {
+      "id": "retry-reuses-the-nonce",
+      "why": "A16: a retry after a refusal signs its proof at the nonce of the abandoned frame, a second proof under one (signer, nonce, side) when a tx was dropped",
+      "file": "account_core.qnt",
+      "old": "nonce: r.pnonce + 1 + gap + r.attempt,",
+      "new": "nonce: r.pnonce + 1 + gap,",
+      "killedBy": "test:nonRetryableFaultDropsTheNamedTxTest"
+    },
+    {
+      "id": "nonce-window-ignores-the-attempt",
+      "why": "A16: the receiver's nonce window is not widened by the frame's attempt, so a retry at its own next nonce is refused as a leap",
+      "file": "account_core.qnt",
+      "old": "f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt ",
+      "new": "f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP ",
+      "killedBy": "test:refusedFrameIsRetriedAtTheNextAttemptTest"
+    }
+  ],
+  "testSamples": 50
+}

@@ -1,0 +1,11 @@
+{
+  "name": "xln-quint-spec",
+  "private": true,
+  "description": "XLN protocol spec in Quint. Independent of the Arrival spec under ../ until both are complete.",
+  "scripts": {
+    "check": "bash check.sh"
+  },
+  "devDependencies": {
+    "@informalsystems/quint": "0.33.0"
+  }
+}

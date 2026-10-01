@@ -1,0 +1,654 @@
+{
+  "files": [
+    "chain.qnt",
+    "chain_test.qnt"
+  ],
+  "test": "chain_test.qnt",
+  "mutants": [
+    {
+      "id": "c1-start-epoch-unchecked",
+      "why": "C1: a dispute may start with a proof of an earlier epoch",
+      "file": "chain.qnt",
+      "old": "    r.epoch == w.a.epoch,             // C1\n",
+      "new": "",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "c1-start-epoch-unchecked-test",
+      "why": "C1: same mutant, judged by the scenario",
+      "file": "chain.qnt",
+      "old": "    r.epoch == w.a.epoch,             // C1\n",
+      "new": "",
+      "killedBy": "test:oldEpochProofIsDeadTest"
+    },
+    {
+      "id": "c1-epoch-not-advanced",
+      "why": "C1: finalize does not advance the epoch, so the same proofs stay valid",
+      "file": "chain.qnt",
+      "old": "acct' = { nonce: newNonce, epoch: acct.epoch + 1, coll: 0, ondelta: 0, via: 0 }",
+      "new": "acct' = { nonce: newNonce, epoch: acct.epoch, coll: 0, ondelta: 0, via: 0 }",
+      "killedBy": "test:oldEpochProofIsDeadTest"
+    },
+    {
+      "id": "h1-wait-removed",
+      "why": "H1: finalize does not wait for an open HTLC deadline",
+      "file": "chain.qnt",
+      "old": "      not(r.clause.on and not(revealed) and now <= r.clause.deadline),\n",
+      "new": "",
+      "killedBy": "test:finalizeWaitsForDeadlineTest"
+    },
+    {
+      "id": "h1-ignores-public-secret",
+      "why": "H1: the wait applies even when the secret is public",
+      "file": "chain.qnt",
+      "old": "not(r.clause.on and not(revealed) and now <= r.clause.deadline)",
+      "new": "not(r.clause.on and now <= r.clause.deadline)",
+      "killedBy": "test:revealedClausePaysTest"
+    },
+    {
+      "id": "h2-zero-window-allowed",
+      "why": "H2: a response window may be zero",
+      "file": "chain.qnt",
+      "old": "pure def windowsOk(r: SignedProof): bool = r.wl >= MIN_WINDOW and r.wr >= MIN_WINDOW",
+      "new": "pure def windowsOk(r: SignedProof): bool = true",
+      "killedBy": "test:zeroWindowIsRefusedTest"
+    },
+    {
+      "id": "tie-break-reversed",
+      "why": "R-A1: an equal nonce is won by Right, not Left",
+      "file": "chain.qnt",
+      "old": "pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 1 else 0)",
+      "new": "pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 0 else 1)",
+      "killedBy": "test:leftWinsEqualNonceTest"
+    },
+    {
+      "id": "starter-closes-early",
+      "why": "the starter may finalize its own initial proof before the window ends",
+      "file": "chain.qnt",
+      "old": "if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }",
+      "new": "if (path == 0) and { not(hasCounter) }",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "path2-by-starter",
+      "why": "the starter may close at once with a newer proof",
+      "file": "chain.qnt",
+      "old": "        not(hasCounter), isNonStarter, r.epoch == acct.epoch,",
+      "new": "        not(hasCounter), r.epoch == acct.epoch,",
+      "killedBy": "test:starterCannotUseNewerProofTest"
+    },
+    {
+      "id": "counter-after-window",
+      "why": "a counter-proof is accepted after the window",
+      "file": "chain.qnt",
+      "old": "      now < dispute.timeout,\n      rid >= 1, r.live,",
+      "new": "      rid >= 1, r.live,",
+      "killedBy": "test:counterAfterWindowRefusedTest"
+    },
+    {
+      "id": "counter-unsigned-by-starter",
+      "why": "a counter-proof need not be signed by the starter",
+      "file": "chain.qnt",
+      "old": "      signedBy(r, dispute.starter),\n      rank(r) > rank(dispute.p0),",
+      "new": "      rank(r) > rank(dispute.p0),",
+      "killedBy": "test:counterNeedsTheStartersSignatureTest"
+    },
+    {
+      "id": "start-unsigned-by-counterparty",
+      "why": "a dispute may start with a proof the counterparty never signed",
+      "file": "chain.qnt",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },\n",
+      "new": "",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "expired-clause-pays",
+      "why": "a clause whose secret came too late still moves money",
+      "file": "chain.qnt",
+      "old": "reg != 0 and reg <= r.clause.deadline,",
+      "new": "reg != 0,",
+      "killedBy": "test:lateSecretPaysNothingTest"
+    },
+    {
+      "id": "unrevealed-clause-pays",
+      "why": "a clause moves money whether or not the secret was shown",
+      "file": "chain.qnt",
+      "old": "if (r.clause.on and revealed)",
+      "new": "if (r.clause.on)",
+      "killedBy": "test:expiredClauseIsDroppedTest"
+    },
+    {
+      "id": "clause-sign-flipped",
+      "why": "a revealed clause moves offdelta the wrong way",
+      "file": "chain.qnt",
+      "old": "      (match r.clause.payer { | Left => r.offdelta - r.clause.amount | Right => r.offdelta + r.clause.amount })\n    else r.offdelta",
+      "new": "      (match r.clause.payer { | Left => r.offdelta + r.clause.amount | Right => r.offdelta - r.clause.amount })\n    else r.offdelta",
+      "killedBy": "test:revealedClausePaysTest"
+    },
+    {
+      "id": "split-loses-money",
+      "why": "the split payout forgets Right's share",
+      "file": "chain.qnt",
+      "old": "{ ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "{ ...m, res: m.res.set(Left, m.res.get(Left) + d) }",
+      "killedBy": "invariant:p3_conserved"
+    },
+    {
+      "id": "shortfall-all-debt",
+      "why": "a payout books everything as debt, paying nothing from reserve",
+      "file": "chain.qnt",
+      "old": "val pay = imin(amount, spendable(m, debtor))",
+      "new": "val pay = 0",
+      "killedBy": "test:shortfallBecomesDebtTest"
+    },
+    {
+      "id": "shortfall-all-debt-invariant",
+      "why": "same mutant, judged by the property",
+      "file": "chain.qnt",
+      "old": "val pay = imin(amount, spendable(m, debtor))",
+      "new": "val pay = 0",
+      "killedBy": "invariant:debt_only_when_broke"
+    },
+    {
+      "id": "nonce-goes-back",
+      "why": "finalize resets the stored nonce",
+      "file": "chain.qnt",
+      "old": "val newNonce = if (adopts) r.nonce else acct.nonce + 1",
+      "new": "val newNonce = if (adopts) r.nonce else 0",
+      "killedBy": "invariant:nonce_monotone"
+    },
+    {
+      "id": "deposit-ignored-in-dispute",
+      "why": "R2C forgets the collateral it added when a dispute is running",
+      "file": "chain.qnt",
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, coll: acct.coll + (if (dispute.on) 0 else amt), ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "killedBy": "invariant:deposit_exact"
+    },
+    {
+      "id": "honest-starts-with-older-proof",
+      "why": "the honest party starts with a co-signed proof that is not its newest",
+      "file": "chain.qnt",
+      "old": "startWith(honest, tipId(arena, acct.epoch), knows.get(honest) != 0, 0, false)",
+      "new": "startWith(honest, tipId(arena, acct.epoch) - 1, knows.get(honest) != 0, 0, false)",
+      "killedBy": "test:starterUsesNewestProofTest"
+    },
+    {
+      "id": "reveal-counts-only-if-start-in-time",
+      "why": "a secret on the chain in time pays only when the dispute also started in time",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg <= r.clause.deadline and d.t0 <= r.clause.deadline,",
+      "killedBy": "test:lateStartStillPaysARevealedClauseTest"
+    },
+    {
+      "id": "window-floor-below-react",
+      "why": "C11: the H2 floor lets both windows together be no longer than the honest side needs to answer (REACT)",
+      "file": "chain.qnt",
+      "old": "pure val MIN_WINDOW = 2 ",
+      "new": "pure val MIN_WINDOW = 1 ",
+      "killedBy": "invariant:p1_allowed"
+    },
+    {
+      "id": "react-longer-than-windows",
+      "why": "C11: the honest side needs as long as both windows together: its counter can land only after the timeout",
+      "file": "chain.qnt",
+      "old": "pure val REACT = 2 * LAG ",
+      "new": "pure val REACT = 6 * LAG ",
+      "killedBy": "test:counterAtTheReactionDeadlineStillLandsTest"
+    },
+    {
+      "id": "no-publish-tolerance",
+      "why": "the honest payee is expected to be paid even when it learned the secret at the deadline: publishing takes LAG, so the property must allow for it",
+      "file": "chain.qnt",
+      "old": "knows.get(honest) + LAG <= r.clause.deadline,",
+      "new": "knows.get(honest) <= r.clause.deadline,",
+      "killedBy": "test:secretLearnedAtTheDeadlineTickIsNotOwedTest"
+    },
+    {
+      "id": "publish-not-forced",
+      "why": "the honest payee may sit on the secret past the deadline",
+      "file": "chain.qnt",
+      "old": " and now >= knows.get(honest) + LAG\n",
+      "new": " and now >= knows.get(honest) + LAG + 3\n",
+      "killedBy": "test:payeePublishesWithinLagTest"
+    },
+    {
+      "id": "h1-boundary-off",
+      "why": "H1 at the boundary: finalize stops waiting at the deadline tick itself (`now < deadline`), though the contract keeps the clause open through it (`block.timestamp <= revealedUntil`): the payee's secret at the last tick is refused",
+      "file": "chain.qnt",
+      "old": "      not(r.clause.on and not(revealed) and now <= r.clause.deadline),",
+      "new": "      not(r.clause.on and not(revealed) and now < r.clause.deadline),",
+      "killedBy": "test:finalizeStillWaitsAtTheDeadlineTickTest"
+    },
+    {
+      "id": "split-swapped",
+      "why": "the split hands Left's share to Right and the other way round",
+      "file": "chain.qnt",
+      "old": "      { ...m, res: m.res.set(Left, m.res.get(Left) + d).set(Right, m.res.get(Right) + (coll - d)) }",
+      "new": "      { ...m, res: m.res.set(Right, m.res.get(Right) + d).set(Left, m.res.get(Left) + (coll - d)) }",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "debt-forgiven",
+      "why": "a shortfall books no debt: the creditor loses what the debtor could not pay",
+      "file": "chain.qnt",
+      "old": "      debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay))",
+      "new": "      debt: m.debt.set(debtor, m.debt.get(debtor))",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "enforce-burns",
+      "why": "enforcing a debt takes the reserve from the debtor and does not give it to the creditor",
+      "file": "chain.qnt",
+      "old": "      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),",
+      "new": "      res: m.res.set(debtor, r.left),",
+      "killedBy": "invariant:p3_conserved"
+    },
+    {
+      "id": "payout-ignores-ondelta",
+      "why": "the payout forgets the ondelta of the epoch",
+      "file": "chain.qnt",
+      "old": "    val d = acct.ondelta + settledOffdelta(r, revealed)",
+      "new": "    val d = settledOffdelta(r, revealed)",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "late-secret-tolerated",
+      "why": "a secret one tick after the deadline still pays: the registry's cutoff is one tick late",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg <= r.clause.deadline + 1,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "registry-excludes-deadline-second",
+      "why": "a secret on the chain at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    reg != 0 and reg <= r.clause.deadline,",
+      "new": "    reg != 0 and reg < r.clause.deadline,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "starter-args-exclude-deadline-second",
+      "why": "the starter's start-time secret at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    starterArgs and d.t0 <= r.clause.deadline,",
+      "new": "    starterArgs and d.t0 < r.clause.deadline,",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "other-args-exclude-deadline-second",
+      "why": "the non-starter's finalize-time secret at the deadline tick itself does not pay",
+      "file": "chain.qnt",
+      "old": "    otherArgs and now <= r.clause.deadline",
+      "new": "    otherArgs and now < r.clause.deadline",
+      "killedBy": "test:nonStarterSecretAtTheDeadlineTickPaysTest"
+    },
+    {
+      "id": "reveal-without-knowing",
+      "why": "a starter puts a secret in its start arguments that nobody knows",
+      "file": "chain.qnt",
+      "old": "    initArgs implies knows.get(s) != 0,\n",
+      "new": "",
+      "killedBy": "invariant:pay_exact"
+    },
+    {
+      "id": "nonstarter-args-by-starter",
+      "why": "the starter supplies finalize-time arguments as if it were the non-starter",
+      "file": "chain.qnt",
+      "old": "      otherArgs implies (isNonStarter and knows.get(f) != 0),",
+      "new": "      otherArgs implies (knows.get(f) != 0),",
+      "killedBy": "test:starterCannotSupplyTheNonStartersEvidenceTest"
+    },
+    {
+      "id": "r2c-credits-the-depositor",
+      "why": "a deposit raises ondelta when the depositor is Left, not when the credited side is",
+      "file": "chain.qnt",
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(s)) amt else 0) }",
+      "killedBy": "invariant:deposit_exact"
+    },
+    {
+      "id": "n3-counter-windows-unchecked",
+      "why": "a counter that shortens the windows is registered (no window check at all)",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "",
+      "killedBy": "invariant:windows_never_shortened"
+    },
+    {
+      "id": "n3-path2-windows-unchecked",
+      "why": "a newer proof that shortens the windows settles at once (no window check at all)",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "",
+      "killedBy": "invariant:windows_never_shortened"
+    },
+    {
+      "id": "counter-at-timeout-allowed",
+      "why": "a counter is accepted at the tick the windows end",
+      "file": "chain.qnt",
+      "old": "      now < dispute.timeout,\n",
+      "new": "      now <= dispute.timeout,\n",
+      "killedBy": "test:counterAfterWindowRefusedTest"
+    },
+    {
+      "id": "starter-closes-one-tick-early",
+      "why": "the starter settles its initial proof one tick before both windows have run",
+      "file": "chain.qnt",
+      "old": "if (path == 0) and { not(hasCounter), now >= dispute.timeout or isNonStarter }",
+      "new": "if (path == 0) and { not(hasCounter), now + 1 >= dispute.timeout or isNonStarter }",
+      "killedBy": "invariant:closes_on_time"
+    },
+    {
+      "id": "start-nonce-not-strict",
+      "why": "a dispute may start with the stored nonce, not only above it",
+      "file": "chain.qnt",
+      "old": "    r.nonce > w.a.nonce,",
+      "new": "    r.nonce >= w.a.nonce,",
+      "killedBy": "test:startNeedsANonceAboveTheStoredOneTest"
+    },
+    {
+      "id": "unilateral-finalize-keeps-nonce",
+      "why": "a finalize on the initial proof stores the stored nonce, not one more",
+      "file": "chain.qnt",
+      "old": "    val newNonce = if (adopts) r.nonce else acct.nonce + 1",
+      "new": "    val newNonce = if (adopts) r.nonce else acct.nonce",
+      "killedBy": "invariant:nonce_rules"
+    },
+    {
+      "id": "offline-flag-sticky",
+      "why": "the honest party's absence in one dispute switches P1 off for every later one",
+      "file": "chain.qnt",
+      "old": "        xWasOffline: false,                                    // per dispute: the next one is judged afresh",
+      "new": "        xWasOffline: ghost.xWasOffline,",
+      "killedBy": "test:offlinePartyCanLoseTest"
+    },
+    {
+      "id": "dead-epoch-start-applies",
+      "why": "a dispute start that names a dead ondelta epoch begins a dispute instead of being skipped",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: true }, acct' = acct,",
+      "killedBy": "test:deadEpochStartIsSkippedTest"
+    },
+    {
+      "id": "dead-epoch-skip-pays-out",
+      "why": "F11: a skipped dead-epoch start moves the ondelta",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = { ...acct, ondelta: acct.ondelta + 1 },",
+      "killedBy": "test:deadEpochSkipMovesNothingTest"
+    },
+    {
+      "id": "dead-epoch-skip-closes-dispute",
+      "why": "F11: a skipped dead-epoch start closes a dispute that is open in the live epoch",
+      "file": "chain.qnt",
+      "old": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = dispute, acct' = acct,",
+      "new": "ghost' = { ...ghost, staleSkips: ghost.staleSkips + 1 },\n    dispute' = { ...dispute, on: false }, acct' = acct,",
+      "killedBy": "test:deadEpochSkipLeavesALiveDisputeAloneTest"
+    },
+    {
+      "id": "shortfall-skips-enforce",
+      "why": "a payout's shortfall is measured without first paying the older debt out of the reserve: the debtor keeps reserve beside a growing debt",
+      "file": "chain.qnt",
+      "old": "    val m = enforce(m0, debtor)\n    val pay",
+      "new": "    val m = m0\n    val pay",
+      "killedBy": "test:olderDebtIsEnforcedBeforeAShortfallTest"
+    },
+    {
+      "id": "spendable-ignores-debt",
+      "why": "spendable reserve is the whole reserve, not the reserve net of outstanding debt",
+      "file": "chain.qnt",
+      "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
+      "new": "pure def spendable(m: Money, s: Side): int = m.res.get(s)",
+      "killedBy": "test:spendableIsReserveNetOfDebtTest"
+    },
+    {
+      "id": "enforce-has-no-call-bound",
+      "why": "one enforcement call clears the whole debt queue (Depository stops after 32 claims a call)",
+      "file": "chain.qnt",
+      "old": "  pure val DEBT_ENFORCE_MAX = 2",
+      "new": "  pure val DEBT_ENFORCE_MAX = 9",
+      "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
+    },
+    {
+      "id": "spendable-ignores-the-queue-tail",
+      "why": "spendable reserve nets only the claims one call reaches, not all outstanding debt",
+      "file": "chain.qnt",
+      "old": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - m.debt.get(s))",
+      "new": "pure def spendable(m: Money, s: Side): int = imax(0, m.res.get(s) - sumOf(m.dq.get(s).slice(0, DEBT_ENFORCE_MAX)))",
+      "killedBy": "test:enforcementReachesOnlyOneCallsWorthOfClaimsTest"
+    },
+    {
+      "id": "r2c-skips-enforce",
+      "why": "a deposit does not pay the older debt first (Depository._reserveToCollateral enforces before it moves reserve)",
+      "file": "chain.qnt",
+      "old": "    val m1 = enforce(money, s)\n    val mNew",
+      "new": "    val m1 = money\n    val mNew",
+      "killedBy": "invariant:r2c_enforces_first"
+    },
+    {
+      "id": "r2c-ignores-debt",
+      "why": "a deposit may move reserve that a queued claim beyond one enforcement call still owns",
+      "file": "chain.qnt",
+      "old": "amt >= 1, spendable(m1, s) >= amt,",
+      "new": "amt >= 1, m1.res.get(s) >= amt,",
+      "killedBy": "test:longQueueReserveCannotBeDepositedTest"
+    },
+    {
+      "id": "n3-counter-shortens-left-window",
+      "why": "a counter may shorten the left window",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wr >= dispute.wr,\n",
+      "killedBy": "test:counterThatShortensTheLeftWindowIsRefusedTest"
+    },
+    {
+      "id": "n3-counter-shortens-right-window",
+      "why": "a counter may shorten the right window",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wl >= dispute.wl,\n",
+      "killedBy": "test:counterThatShortensTheRightWindowIsRefusedTest"
+    },
+    {
+      "id": "n3-counter-windows-frozen",
+      "why": "a counter must carry exactly the started windows: lengthening is refused (the contract's old `!=` check)",
+      "file": "chain.qnt",
+      "old": "      r.wl >= dispute.wl, r.wr >= dispute.wr,        // N3: windows may lengthen inside an epoch, never shorten (E9)\n",
+      "new": "      r.wl == dispute.wl, r.wr == dispute.wr,\n",
+      "killedBy": "test:counterThatLengthensTheWindowsLandsTest"
+    },
+    {
+      "id": "n3-path2-shortens-left-window",
+      "why": "a newer proof closes at once although it shortens the left window",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wr >= dispute.wr,\n",
+      "killedBy": "test:nonStarterCannotCloseWithAShorterWindowTest"
+    },
+    {
+      "id": "n3-path2-shortens-right-window",
+      "why": "a newer proof closes at once although it shortens the right window",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wl >= dispute.wl,\n",
+      "killedBy": "test:nonStarterCannotCloseWithAShorterRightWindowTest"
+    },
+    {
+      "id": "n3-path2-windows-frozen",
+      "why": "an immediate close must carry exactly the started windows: lengthening is refused",
+      "file": "chain.qnt",
+      "old": "        r.wl >= dispute.wl, r.wr >= dispute.wr,\n",
+      "new": "        r.wl == dispute.wl, r.wr == dispute.wr,\n",
+      "killedBy": "test:nonStarterClosesWithALongerWindowTest"
+    },
+    {
+      "id": "implicit-start-refused",
+      "why": "R-IMPLICIT-BASELINE: a dispute cannot start from the implicit proof",
+      "file": "chain.qnt",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },\n",
+      "new": "    signedBy(r, other(s)),\n",
+      "killedBy": "test:newEpochImplicitStartsTest"
+    },
+    {
+      "id": "implicit-in-epoch-0",
+      "why": "epoch 0 has an implicit proof",
+      "file": "chain.qnt",
+      "old": "    a.epoch >= 1,\n    not(r.sigL), not(r.sigR),",
+      "new": "    not(r.sigL), not(r.sigR),",
+      "killedBy": "test:epoch0RefusesAnImplicitStartTest"
+    },
+    {
+      "id": "implicit-signature-ignored",
+      "why": "a signed proof with a canonical-looking body counts as the implicit proof, whoever signed it",
+      "file": "chain.qnt",
+      "old": "    not(r.sigL), not(r.sigR),\n    r.live,",
+      "new": "    r.live,",
+      "killedBy": "test:aBodySignedOnlyByItsStarterIsNotImplicitTest"
+    },
+    {
+      "id": "implicit-nonce-unchecked",
+      "why": "the implicit proof may carry any nonce above the stored one",
+      "file": "chain.qnt",
+      "old": "r.live, r.epoch == a.epoch, r.nonce == a.nonce + 1,",
+      "new": "r.live, r.epoch == a.epoch,",
+      "killedBy": "test:implicitAboveStoredPlusOneIsRefusedTest"
+    },
+    {
+      "id": "implicit-left-authored-allowed",
+      "why": "the implicit proof may be Left-authored (it would then outrank a Right-authored frame)",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitAuthoredByLeftIsRefusedTest"
+    },
+    {
+      "id": "implicit-offdelta-unchecked",
+      "why": "the implicit proof may carry an offdelta",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithNonzeroOffdeltaIsRefusedTest"
+    },
+    {
+      "id": "implicit-clause-allowed",
+      "why": "the implicit proof may carry a clause",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithAClauseIsRefusedTest"
+    },
+    {
+      "id": "implicit-left-window-longer",
+      "why": "the implicit proof may name a longer left window than the floor",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl >= MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithALongerLeftWindowIsRefusedTest"
+    },
+    {
+      "id": "implicit-right-window-longer",
+      "why": "the implicit proof may name a longer right window than the floor",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr >= MIN_WINDOW\n  }",
+      "killedBy": "test:implicitWithALongerRightWindowIsRefusedTest"
+    },
+    {
+      "id": "implicit-with-starter-arguments",
+      "why": "an implicit start may carry starter arguments",
+      "file": "chain.qnt",
+      "old": "(not(initArgs) and branch == 0 and not(counterArgs))",
+      "new": "(branch == 0 and not(counterArgs))",
+      "killedBy": "test:implicitWithStarterArgumentsIsRefusedTest"
+    },
+    {
+      "id": "implicit-with-counter-commitment",
+      "why": "an implicit start may name a newer branch",
+      "file": "chain.qnt",
+      "old": "(not(initArgs) and branch == 0 and not(counterArgs))",
+      "new": "(not(initArgs) and not(counterArgs))",
+      "killedBy": "test:implicitWithACounterCommitmentIsRefusedTest"
+    },
+    {
+      "id": "implicit-tie-is-a-counter",
+      "why": "a counter that only ties the initial proof (equal rank) is registered: the Right-authored frame at stored + 1 beats the implicit proof",
+      "file": "chain.qnt",
+      "old": "      rank(r) > rank(dispute.p0),",
+      "new": "      rank(r) >= rank(dispute.p0),",
+      "killedBy": "test:rightAuthoredFrameAtStoredPlusOneTiesAndIsRefusedTest"
+    },
+    {
+      "id": "implicit-allowed-over-a-signed-frame",
+      "why": "the honest party is taken to stand behind the implicit proof although it holds a both-signed frame of the epoch (the trap goes unseen)",
+      "file": "chain.qnt",
+      "old": "        not(r.sigL), not(r.sigR), e >= 1, tipRank(ar, e) == 0,",
+      "new": "        not(r.sigL), not(r.sigR), e >= 1,",
+      "killedBy": "test:theTrapLosesTheFramesValueTest"
+    },
+    {
+      "id": "deposit-advances-the-epoch",
+      "why": "a deposit opens a new epoch (it does not: only a finalize, a co-signed withdrawal and a settlement do)",
+      "file": "chain.qnt",
+      "old": "    val aNew = { ...acct, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "new": "    val aNew = { ...acct, epoch: acct.epoch + 1, coll: acct.coll + amt, ondelta: acct.ondelta + (if (isLeft(rcv)) amt else 0) }",
+      "killedBy": "test:depositInsideTheEpochKeepsTheFramesTest"
+    },
+    {
+      "id": "implicit-path2-tie",
+      "why": "R-IMPLICIT-BASELINE: the final-body door (path 2, the non-starter closes with a newer proof) takes a tie with the implicit proof (>= instead of >), so a Right-authored frame at stored + 1 settles over it",
+      "file": "chain.qnt",
+      "old": "        rank(r) > rank(dispute.p0)\n",
+      "new": "        rank(r) >= rank(dispute.p0)\n",
+      "killedBy": "test:rightAuthoredFrameAtStoredPlusOneIsRefusedAsAFinalBodyTest"
+    },
+    {
+      "id": "implicit-left-authored-allowed-from-epoch-1",
+      "why": "the implicit proof may be Left-authored (it would then outrank a Right-authored frame) [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-offdelta-unchecked-from-epoch-1",
+      "why": "the implicit proof may carry an offdelta [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-clause-allowed-from-epoch-1",
+      "why": "the implicit proof may carry a clause [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-left-window-longer-from-epoch-1",
+      "why": "the implicit proof may name a longer left window than the floor [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl >= MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    },
+    {
+      "id": "implicit-right-window-longer-from-epoch-1",
+      "why": "the implicit proof may name a longer right window than the floor [hunted by the invariant alone, from an Account that opened epoch 1 with no signed frame]",
+      "file": "chain.qnt",
+      "old": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr == MIN_WINDOW\n  }",
+      "new": "\n    not(r.leftAuthored), r.offdelta == 0, not(r.clause.on), r.wl == MIN_WINDOW, r.wr >= MIN_WINDOW\n  }",
+      "killedBy": "invariant:safe",
+      "init": "initE1"
+    }
+  ]
+}
