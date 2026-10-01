@@ -11,7 +11,7 @@
 import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { AccountReplica } from "../account/frame/account.ts";
-import type { Msg, Outcome, Refused } from "../account/frame/frame.ts";
+import type { FrameHash, Msg, Outcome, Refused } from "../account/frame/frame.ts";
 import type { JView } from "../account/clause/clock.ts";
 import type { AccountFault, Hold, HoldId, Side, TokenId } from "../account/model.ts";
 import type { AccountTx } from "../account/tx.ts";
@@ -39,25 +39,58 @@ export type EntityState = Readonly<{
   accounts: ReadonlyMap<EntityId, AccountReplica>;
   waiting: ReadonlyMap<EntityId, JView>;
   revealed: ReadonlyMap<EntityId, readonly string[]>;
+  chain: ReadonlyMap<EntityId, ChainFacts>;
 }>;
 
 export const emptyEntity = (id: EntityId): EntityState =>
-  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map() });
+  ({ id, accounts: new Map(), waiting: new Map(), revealed: new Map(), chain: new Map() });
+
+/** Response windows in seconds, one per side, as the signed proofs of an Account carry them. */
+export type Windows = Readonly<{ left: bigint; right: bigint }>;
+
+/**
+ * What an Entity knows of the chain for one Account, from what its Host reports and from its own frames (never derived
+ * from an earlier proof): the epoch and the stored nonce the chain is at, how many frames have been co-signed since the
+ * epoch began, the windows its signed proofs carry, and whether a dispute the peer started is open against it.
+ */
+export type ChainFacts = Readonly<{
+  epoch: bigint; stored: bigint; frames: bigint; windows: Windows | undefined; disputed: boolean;
+}>;
 
 // What a frame takes in.
-export type Arrival = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx> }>;
+export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<AccountTx> }>;
+
+/**
+ * What the Host saw on the J chain about the Account with `peer`. A repeat or an older report changes nothing, so the
+ * Host may deliver an event again: `j_epoch` is the chain moving the Account's epoch on (a settlement, a withdrawal
+ * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`;
+ * `j_dispute_over` is that dispute countered or finalized.
+ */
+export type JEvent =
+  | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
+  | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side }>
+  | Tagged<"j_dispute_over", { peer: EntityId }>;
+
+export type Arrival = PeerMessage | JEvent;
 
 /** The Host's timer for `peer`'s Account ran out: its pending frame is sent again, so a lost frame cannot wedge it. */
 export type Hook = Tagged<"resend_due", { peer: EntityId }>;
 
-export type Command =
-  | Tagged<"open_account", { peer: EntityId }>
+/** A command that becomes a tx of the Account's next frame. */
+export type AccountCommand =
   | Tagged<"set_credit", { peer: EntityId; token: TokenId; limit: bigint }>
   | Tagged<"pay", { peer: EntityId; token: TokenId; amount: bigint }>
   | Tagged<"lock", { peer: EntityId; token: TokenId; hold: Hold }>
   | Tagged<"resolve", { peer: EntityId; token: TokenId; id: HoldId; secret: Uint8Array }>
   | Tagged<"cancel", { peer: EntityId; token: TokenId; id: HoldId }>
   | Tagged<"expire", { peer: EntityId; token: TokenId; id: HoldId }>;
+
+/** A command that is about the chain, not the Account's frames. */
+export type ChainCommand =
+  | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"set_windows", { peer: EntityId; windows: Windows }>;
+
+export type Command = Tagged<"open_account", { peer: EntityId }> | AccountCommand | ChainCommand;
 
 export type EntityInput = Arrival | Hook | Command;
 
@@ -70,13 +103,18 @@ export type Outbound = Readonly<{ from: EntityId; to: EntityId; msg: Msg<Account
  * (R-HTLC-CLOCK c); `revealed` on the Entity keeps a hashlock asked once for as long as its hold is open.
  */
 export type JAction =
-  Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>;
+  | Tagged<"reveal", { peer: EntityId; token: TokenId; id: HoldId; hashlock: string; secret: Uint8Array }>
+  | Tagged<"deposit", { peer: EntityId; token: TokenId; amount: bigint }>
+  | Tagged<"counter", { peer: EntityId; nonce: bigint; head: FrameHash }>;
 
 export type EntityFault =
   | Tagged<"self_account">
   | Tagged<"account_exists", { peer: EntityId }>
   | Tagged<"no_account", { peer: EntityId }>
-  | Tagged<"account_refused", { fault: AccountFault }>;
+  | Tagged<"account_refused", { fault: AccountFault }>
+  | Tagged<"deposit_before_cosign">
+  | Tagged<"bad_windows", { windows: Windows }>
+  | Tagged<"windows_shorten", { current: Windows }>;
 
 /** What the owner of an input is told when it did not take effect. */
 export type Notice =

@@ -91,7 +91,11 @@ export const messageId = (msg: Msg<AccountTx>): string =>
 const outputIds = (row: Row): readonly string[] => row.outputs.map((o) => `${o.from} ${o.to} ${messageId(o.msg)}`);
 
 const chainId = (action: JAction): string =>
-  match(action, { reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}` });
+  match(action, {
+    reveal: (r) => `reveal ${r.peer} ${r.token} ${r.id} ${r.hashlock}`,
+    deposit: (d) => `deposit ${d.peer} ${d.token} ${d.amount}`,
+    counter: (c) => `counter ${c.peer} ${c.nonce} ${c.head}`,
+  });
 
 const chainIds = (row: Row): readonly string[] => row.chain.map(chainId);
 

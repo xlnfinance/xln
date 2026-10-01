@@ -8,10 +8,15 @@ import { propose, receive, resend, submit, type Heard, type Msg, type Outcome } 
 import { revealOnChainDue } from "../account/clause/clock.ts";
 import type { AccountFault, AccountState } from "../account/model.ts";
 import { holderOf, ledgerOf } from "../account/state.ts";
+import { MAX_AMOUNT } from "../account/ledger.ts";
+import {
+  depositable, disputeOpened, disputeOver, epochAdvanced, framed, freshChain, proofNonce, withWindows,
+} from "./chain.ts";
 import type { AccountTx, Judge } from "../account/tx.ts";
 import {
-  sideOf, type Arrival, type Command, type EntityFault, type EntityId, type EntityInput, type EntityState, type Hook,
-  type JAction, type Notice, type Outbound,
+  sideOf, type AccountCommand, type Arrival, type ChainCommand, type ChainFacts, type Command, type EntityFault,
+  type EntityId, type EntityInput, type EntityState, type Hook, type JAction, type JEvent, type Notice, type Outbound,
+  type PeerMessage,
 } from "./model.ts";
 
 export type Frame = Readonly<{
@@ -59,15 +64,42 @@ const waitingForJ = (w: Work, peer: EntityId, view: JView, heard: Heard<AccountT
     ? { ...w, state: { ...w.state, waiting: mapSet(w.state.waiting, peer, view) } }
     : w);
 
-const arrive = (rules: AccountRules, view: JView, w: Work, a: Arrival): Work => {
+const factsOf = (w: Work, peer: EntityId): ChainFacts => w.state.chain.get(peer) ?? freshChain;
+
+const withFacts = (w: Work, peer: EntityId, facts: ChainFacts): Work =>
+  ({ ...w, state: { ...w.state, chain: mapSet(w.state.chain, peer, facts) } });
+
+/** A frame is co-signed when the peer's frame is taken or my own is acked: one more proof of the epoch. */
+const cosigned = (outcome: Outcome<AccountFault>): boolean =>
+  outcome._tag === "accepted" || outcome._tag === "accepted_over_own" || outcome._tag === "committed_own";
+
+const hearing = (rules: AccountRules, view: JView, w: Work, a: PeerMessage): Work => {
   const account = w.state.accounts.get(a.from);
   if (account === undefined) return noting(w, { _tag: "unknown_peer", from: a.from });
   const heard = receive(rules, account, a.msg);
   const refused = refusal(heard.outcome);
   const heardBy = sending(withReplica(w, a.from, heard.replica), a.from, heard.sent);
   const waiting = waitingForJ(heardBy, a.from, view, heard);
-  return refused === undefined ? waiting : noting(waiting, { _tag: "message_refused", from: a.from, outcome: refused });
+  const counted = cosigned(heard.outcome) ? withFacts(waiting, a.from, framed(factsOf(waiting, a.from))) : waiting;
+  return refused === undefined ? counted : noting(counted, { _tag: "message_refused", from: a.from, outcome: refused });
 };
+
+/** What the chain did to the Account with `peer`; for an Account the Entity does not hold it is told and ignored. */
+const observed = (w: Work, e: JEvent): Work => {
+  if (!w.state.accounts.has(e.peer)) return noting(w, { _tag: "unknown_peer", from: e.peer });
+  const facts = factsOf(w, e.peer);
+  switch (e._tag) {
+    case "j_epoch":
+      return withFacts(w, e.peer, epochAdvanced(facts, e.epoch, e.stored));
+    case "j_dispute":
+      return e.by === sideOf(w.state.id, e.peer) ? w : withFacts(w, e.peer, disputeOpened(facts, e.epoch));
+    case "j_dispute_over":
+      return withFacts(w, e.peer, disputeOver(facts));
+  }
+};
+
+const arrive = (rules: AccountRules, view: JView, w: Work, a: Arrival): Work =>
+  (a._tag === "peer_message" ? hearing(rules, view, w, a) : observed(w, a));
 
 // ---- phase 2: hooks
 
@@ -89,10 +121,8 @@ const opened = (w: Work, command: Extract<Command, { _tag: "open_account" }>): W
   return withReplica(w, command.peer, emptyReplica(sideOf(w.state.id, command.peer)));
 };
 
-type OnAccount = Exclude<Command, { _tag: "open_account" }>;
-
 /** The tx a command asks its Account for. */
-const txOf = (command: OnAccount): AccountTx => {
+const txOf = (command: AccountCommand): AccountTx => {
   switch (command._tag) {
     case "pay":
       return { _tag: "pay", token: command.token, amount: command.amount };
@@ -110,7 +140,7 @@ const txOf = (command: OnAccount): AccountTx => {
 };
 
 /** The Account checks the tx against its planning state at the door (R-ADMIT); a refusal is the command's notice. */
-const queued = (rules: AccountRules, w: Work, command: OnAccount): Work => {
+const queued = (rules: AccountRules, w: Work, command: AccountCommand): Work => {
   const account = w.state.accounts.get(command.peer);
   if (account === undefined) return refusedCommand(w, command, { _tag: "no_account", peer: command.peer });
   const admitted = submit(rules, account, txOf(command));
@@ -119,8 +149,42 @@ const queued = (rules: AccountRules, w: Work, command: OnAccount): Work => {
     : refusedCommand(w, command, { _tag: "account_refused", fault: admitted.error });
 };
 
-const commanded = (rules: AccountRules, w: Work, command: Command): Work =>
-  (command._tag === "open_account" ? opened(w, command) : queued(rules, w, command));
+const asked = (w: Work, action: JAction): Work => ({ ...w, chain: [...w.chain, action] });
+
+/** A deposit waits for the first co-signed frame of an Account at epoch 0 (R-NO-DEPOSIT-BEFORE-COSIGN). */
+const deposited = (w: Work, command: Extract<ChainCommand, { _tag: "deposit" }>): Work => {
+  const { peer, token, amount } = command;
+  if (amount < 1n || amount > MAX_AMOUNT) {
+    return refusedCommand(w, command, { _tag: "account_refused", fault: { _tag: "bad_amount", amount } });
+  }
+  return depositable(factsOf(w, peer))
+    ? asked(w, { _tag: "deposit", peer, token, amount })
+    : refusedCommand(w, command, { _tag: "deposit_before_cosign" });
+};
+
+const windowed = (w: Work, command: Extract<ChainCommand, { _tag: "set_windows" }>): Work => {
+  const next = withWindows(factsOf(w, command.peer), command.windows);
+  return next.ok ? withFacts(w, command.peer, next.value) : refusedCommand(w, command, next.error);
+};
+
+/** A command about the chain needs an Account with the peer, as an Account command does. */
+const chained = (w: Work, command: ChainCommand): Work => {
+  const { peer } = command;
+  if (!w.state.accounts.has(peer)) return refusedCommand(w, command, { _tag: "no_account", peer });
+  return command._tag === "deposit" ? deposited(w, command) : windowed(w, command);
+};
+
+const commanded = (rules: AccountRules, w: Work, command: Command): Work => {
+  switch (command._tag) {
+    case "open_account":
+      return opened(w, command);
+    case "deposit":
+    case "set_windows":
+      return chained(w, command);
+    default:
+      return queued(rules, w, command);
+  }
+};
 
 // ---- phase 4: proposals
 
@@ -181,6 +245,16 @@ const asking = (judge: Judge, peer: EntityId, account: AccountReplica) => (acc: 
     : acc;
 };
 
+/**
+ * While a dispute the peer started is open against me, and I hold a co-signed proof of the epoch, I counter with it.
+ * The Host de-duplicates what is asked again, so each frame of the Entity restates it until the chain says the
+ * dispute is over: a batch the chain reverted or a Host that crashed cannot leave the dispute unanswered for good.
+ */
+const counterFor = (facts: ChainFacts, peer: EntityId, account: AccountReplica): readonly JAction[] => {
+  const nonce = proofNonce(facts);
+  return facts.disputed && nonce !== undefined ? [{ _tag: "counter", peer, nonce, head: account.head }] : [];
+};
+
 /** What the Entity owes the chain on `peer`'s Account; a hashlock whose hold is gone is forgotten. */
 const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
   const account = w.state.accounts.get(peer);
@@ -188,17 +262,20 @@ const dutiful = (judge: Judge) => (w: Work, peer: EntityId): Work => {
   const open = (w.state.revealed.get(peer) ?? []).filter((hashlock) => holderOf(account.state, hashlock) !== undefined);
   const asked = unackedResolves(account).reduce(asking(judge, peer, account), { hashlocks: open, actions: [] });
   const revealed = mapSet(w.state.revealed, peer, asked.hashlocks);
-  return { ...w, chain: [...w.chain, ...asked.actions], state: { ...w.state, revealed } };
+  const counters = counterFor(factsOf(w, peer), peer, account);
+  return { ...w, chain: [...w.chain, ...asked.actions, ...counters], state: { ...w.state, revealed } };
 };
 
-const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] =>
-  inputs.flatMap((i) => (i._tag === "peer_message" ? [i] : []));
+const isArrival = (i: EntityInput): i is Arrival =>
+  i._tag === "peer_message" || i._tag === "j_epoch" || i._tag === "j_dispute" || i._tag === "j_dispute_over";
+
+const arrivalsOf = (inputs: readonly EntityInput[]): readonly Arrival[] => inputs.filter(isArrival);
 
 const hooksOf = (inputs: readonly EntityInput[]): readonly Hook[] =>
   inputs.flatMap((i) => (i._tag === "resend_due" ? [i] : []));
 
 const commandsOf = (inputs: readonly EntityInput[]): readonly Command[] =>
-  inputs.flatMap((i) => (i._tag === "peer_message" || i._tag === "resend_due" ? [] : [i]));
+  inputs.flatMap((i) => (isArrival(i) || i._tag === "resend_due" ? [] : [i]));
 
 /**
  * The frame: arrivals, then hooks, then commands, then proposals, then the refusals the Accounts hold are told, then
