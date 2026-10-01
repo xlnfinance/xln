@@ -4,8 +4,8 @@
 ;; history (newest frame first), a mempool, at most one pending frame, the txs it refused,
 ;; its ATTEMPT number (the refusals it has handled on this head) and its refusal MARK (the
 ;; highest attempt it refused as a receiver on this head). A frame is (txs, prev, attempt,
-;; author); the frame hash is abstracted as the history of those entries, so equal heads
-;; mean equal hashes and the attempt and the author are part of the name.
+;; author, nonce); the frame hash is abstracted as the history of those entries, so equal
+;; heads mean equal hashes and the attempt, the author and the proof nonce are part of the name.
 ;;
 ;; The round: a replica proposes a frame of its mempool on top of its head; the peer
 ;; commits it and answers with an ack; the proposer commits on the ack. A peer that cannot
@@ -45,6 +45,18 @@
 ;;     refusal could commit a frame whose proposer already took it back (a fork).
 ;;   - FRAME AUTHOR: a frame names its author, in its hash. A replica refuses (silently) a
 ;;     frame whose author is itself, so it can never commit its own frame as the peer's.
+;;   - PROOFS (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED): each proposal signs a proof at a nonce, base + 1 +
+;;     attempt (a retry signs a FRESH nonce); a proof exists once signed, whether or not its frame commits. Proofs are
+;;     ranked by nonce, Left over Right. A committed frame must rank above every proof its replica signed before it,
+;;     yielded and refused attempts included: the receiver refuses (`stale_nonce`, `bad_nonce`) a frame that does not.
+;;   - SIGNED IS LIVE (R-SIGNED-IS-LIVE): what a side signed stays enforceable against it until a higher frame commits, so
+;;     a refusal does not release the payer of a lock that sits in a signed proof not yet superseded: the lock is
+;;     PARKED (still held) and released when a frame commits or the chain is past deadline + reserve (rule `lapse`).
+;;   - COSIGN FREEZE (R-COSIGN-FREEZE): when the two replicas co-sign a settlement (or a C2R) over the head they share, the
+;;     fold it signs is the off-chain offdelta of that head. From then on each side proposes no frames and refuses every
+;;     peer frame with a RETRYABLE `frozen` refusal (the attempt and mark rules of R-FRAME-REFUSAL: every tx goes back, no
+;;     notice, within the retry budget) until the operation lands or lapses (the host reports it). A frame accepted in
+;;     between would move offdelta away from the fold that was signed.
 ;;   - The link may lose and duplicate messages (bounded budgets); a proposer with a
 ;;     pending frame may always resend it (a timeout, abstracted as "at any time").
 ;;
@@ -62,7 +74,7 @@
 ;; for ever, the deadline is a J height); the view lag is 1 (LAG). The default world is Left's
 ;; lock and expire against Right's x, one lost message; the configs in account/configs widen it
 ;; one way at a time (lossy: the first page's conflicts, losses and repeats; repeats; reflect;
-;; far-lock; same-side-conflict; reorder).
+;; far-lock; right-expire; freeze; same-side-conflict; reorder).
 ;;
 ;; Abstractions (what this page does NOT cover):
 ;;   - a receiver commits a frame when it arrives; xln.ts holds it as a `received`
@@ -74,6 +86,8 @@
 ;;   - a Byzantine proposer (a frame that is invalid on content) is refused by the same
 ;;     path as a stale one; it is not a separate rule. Its forged frame is at attempt 0;
 ;;   - a refusal index that names no tx of the pending frame is ignored (kernel F3);
+;;   - the proofs are a nonce and a rank: no chain, no presenter, no signature, no epoch; the upstream hold of a lock is
+;;     the proposer's `:refused` notice (R-NOTICE) and the peer's enforcement is the property's reading of what is signed;
 ;;   - the kernel's attempt cap on the receiver side is not modelled: attempts keep counting.
 ;;
 ;; Needs lib/vocabulary.scm (rule, property) and lib/check.scm (successors).
@@ -100,6 +114,12 @@
 (define/overridable expire-txs   (s/array (s/string)) (list "expire"))
 (define/overridable lock-deadline (s/number) 1)
 (define/overridable lock-horizon  (s/number) 1)
+;; a hold on a lock in a signed proof is kept until a higher frame commits or the chain is past deadline + reserve (R-SIGNED-IS-LIVE)
+(define/overridable lock-reserve (s/number) 0)
+;; settlements co-signed in a run (R-COSIGN-FREEZE); 0 in the default world, 1 in the config freeze
+(define/overridable max-settles (s/number) 0)
+;; the txs that move offdelta, by one unit each (the fold of a settlement is the offdelta of the head it is signed over)
+(define/overridable pay-txs (s/array (s/string)) (list "x"))
 ;; the retry budget per head (MAX_ATTEMPTS is 8 in the kernel)
 (define/overridable max-attempt (s/number) 2)
 
@@ -108,7 +128,9 @@
 (define (peer side) (if (equal? side :left) :right :left))
 (define (txs-of side) (vector->list (if (equal? side :left) left-txs right-txs)))
 (define (conflict-pairs) (map vector->list (vector->list conflicts)))
-(define (replica) (dict :head (list) :mempool (list) :pending #f :refused (list) :attempt 0 :mark #f))
+(define (replica) (dict :head (list) :mempool (list) :pending #f :refused (list) :attempt 0 :mark #f
+                        :dead 0 :above #t :parked (list) :signed (list)
+                        :fold #f))
 (define init
   (dict :left   (replica)
         :right  (replica)
@@ -118,18 +140,44 @@
         :lost   0
         :dups   0
         :byz    0
-        :reflect 0))
+        :reflect 0
+        :settles 0))
 
 ;; ---- frames and messages
-;; the hash of a frame is the history it makes: its entry (txs, attempt, author) on top of its prev
-(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f)))
+;; the hash of a frame is the history it makes: its entry (txs, attempt, author, nonce) on top of its prev
+(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f) :nonce (:nonce f)))
 (define (frame-hash f) (cons (frame-entry f) (:prev f)))
 (define (frame-msg f) (dict :kind :frame :frame f))
 (define (ack-msg h) (dict :kind :ack :hash h))
 ;; a refusal names the frame hash, the index of the first tx refused, the fault, and the receiver's mark
 (define (refusal-msg f index fault mark) (dict :kind :refusal :hash (frame-hash f) :index index :fault fault :mark mark))
+;; ---- proofs: each proposal signs a proof at a NONCE (R-PROOF-NONCE). A proof exists once signed, whether
+;; or not its frame ever commits. The nonce of a frame on head h at attempt a is base(h) + 1 + a (R-RETRY-NEW-NONCE:
+;; a retry signs a fresh nonce), where base is the nonce of the newest committed frame (0 on the empty head).
+;; Proofs are ranked by (nonce, Left over Right), as the dispute page ranks them.
+(define (base-nonce r) (if (null? (:head r)) 0 (:nonce (car (:head r)))))
+(define (rank-of nonce author) (+ (* 2 nonce) (if (equal? author :left) 1 0)))
+(define (frame-rank f) (rank-of (:nonce f) (:author f)))
+(define (proposal-nonce r) (+ (base-nonce r) 1 (:attempt r)))
+;; the highest rank this replica signed since its head moved: the proofs of frames it took back (:dead)
+;; and of the frame it has out. A proof of an earlier head is below the head's frame, so the head moving resets it.
+(define (signed-top r) (max (:dead r) (if (:pending r) (frame-rank (:pending r)) 0)))
+;; the receiver commits only a frame that ranks above every proof it signed: otherwise it refuses with
+;; `stale_nonce`, carrying the attempt before the first one that would (a planted bug skips the check)
+(define (above-signed? r f) (> (frame-rank f) (signed-top r)))
+(define (first-attempt-above r author)
+  (let loop ((a 0)) (if (> (rank-of (+ (base-nonce r) 1 a) author) (signed-top r)) a (loop (+ a 1)))))
+;; a frame's nonce is in the window of its attempt: base < nonce <= base + 1 + attempt
+(define (nonce-in-window? r f) (and (> (:nonce f) (base-nonce r)) (<= (:nonce f) (+ (base-nonce r) 1 (:attempt f)))))
+
 ;; the faults that pass with the peer's view moving: the proposer retries them
-(define (retryable? fault) (and (member fault (list :not_expired :deadline_too_far)) #t))
+(define (retryable? fault) (and (member fault (list :not_expired :deadline_too_far :frozen)) #t))
+;; R-COSIGN-FREEZE: a replica is frozen from the co-signature of a settlement until it lands or lapses; `:fold` is the
+;; fold it signed (the off-chain offdelta of the head then), #f when nothing is signed
+(define (frozen? r) (not (equal? (:fold r) #f)))
+(define (offdelta r) (length (filter (lambda (tx) (member tx (vector->list pay-txs))) (committed r))))
+;; a frozen receiver refuses every peer frame (a planted bug accepts it)
+(define (refuses-frozen? r) (frozen? r))
 
 ;; ---- validity: a tx is valid unless a conflicting predecessor is already committed ...
 (define (committed r) (append-map (lambda (e) (:txs e)) (:head r)))
@@ -158,13 +206,34 @@
               (loop (cdr rest) (append before (list (car rest))) (+ i 1)))))))
 
 ;; ---- one replica receiving one message -> (dict :replica :sent)
-;; the head moves: the attempt and the refusal mark belong to a head, so both start again
+;; the head moves: the attempt and the refusal mark belong to a head, so both start again. R-PROOF-NONCE-ABOVE-SIGNED is
+;; checked here: the committed frame must rank above every proof this replica signed before it (:dead; the frame
+;; it commits as its own is the one proof it may equal), and `:above` remembers whether it did, for the property.
+;; The signed proofs of the earlier head are below the new frame, so they are forgotten.
+;; R-SIGNED-IS-LIVE: the locks held back by the proofs it superseded are released now (they enter :refused, with notice).
 (define (commit r head)
-  (-> r (assoc-in (list :head) head) (assoc-in (list :pending) #f)
+  (-> r (update-in (list :refused) (lambda (x) (append x (:parked r))))
+        (assoc-in (list :parked) (list)) (assoc-in (list :signed) (list))
+        (assoc-in (list :above) (and (:above r) (< (:dead r) (rank-of (:nonce (car head)) (:author (car head))))))
+        (assoc-in (list :dead) 0)
+        (assoc-in (list :head) head) (assoc-in (list :pending) #f)
         (assoc-in (list :attempt) 0) (assoc-in (list :mark) #f)))
+;; a frame taken back keeps its proof: it was signed, so the peer may still hold it, with its locks (:signed)
+(define (take-back r)
+  (-> r (assoc-in (list :dead) (max (:dead r) (frame-rank (:pending r))))
+        (assoc-in (list :signed)
+                  (delete-duplicates (append (:signed r) (filter (lambda (tx) (member tx lock-txs)) (:txs (:pending r))))))))
+;; R-SIGNED-IS-LIVE: a refusal, or a tx dropped with notice, releases the payer (R-NOTICE) EXCEPT for a lock that sits in a
+;; signed proof not yet superseded: the peer may enforce that proof, so the hold is parked until a higher frame commits
+;; (`commit`) or the chain is past deadline + reserve (rule `lapse`). A planted bug releases it at once.
+(define (holds-signed? r tx) (and (member tx lock-txs) (member tx (:signed r)) #t))
+(define (release r txs)
+  (-> r (update-in (list :parked) (lambda (p) (append p (filter (lambda (tx) (holds-signed? r tx)) txs))))
+        (update-in (list :refused) (lambda (x) (append x (filter (lambda (tx) (not (holds-signed? r tx))) txs))))))
 (define (roll-back r)
-  (-> r (update-in (list :mempool) (lambda (m) (append (:txs (:pending r)) m)))
-        (assoc-in (list :pending) #f)))
+  (-> (take-back r)
+      (update-in (list :mempool) (lambda (m) (append (:txs (:pending r)) m)))
+      (assoc-in (list :pending) #f)))
 
 (define (ignore r) (dict :replica r :sent (list)))
 (define (accept r f)
@@ -194,7 +263,11 @@
 (define (on-next-frame side r f view)
   (cond
     ((at-or-below-mark? r f) (answer-from-mark r f))
+    ((refuses-frozen? r) (refuse (remember r f 0 :frozen) f 0 :frozen (:attempt f)))
     ((keeps-own? side r) (ignore r))
+    ((not (nonce-in-window? r f)) (refuse r f 0 :bad_nonce (:attempt f)))
+    ((not (above-signed? r f))
+     (refuse r f 0 :stale_nonce (- (first-attempt-above r (:author f)) 1)))
     (else
      (let ((bad (frame-fault view (committed-in-order r) (:txs f))))
        (if bad
@@ -218,14 +291,15 @@
 ;; goes back, no notice); any other fault, or a spent budget, drops the named tx with notice.
 (define (drop-named r i)
   (let* ((txs (:txs (:pending r))) (tx (list-ref txs i)))
-    (-> r (update-in (list :mempool) (lambda (m) (append (take txs i) (list-tail txs (+ i 1)) m)))
-          (update-in (list :refused) (lambda (x) (append x (list tx))))
-          (assoc-in (list :pending) #f))))
+    (-> (take-back r)
+        (update-in (list :mempool) (lambda (m) (append (take txs i) (list-tail txs (+ i 1)) m)))
+        (assoc-in (list :pending) #f)
+        (release (list tx)))))
 ;; the next attempt: past my own and past the receiver's mark
 (define (next-attempt r m) (+ (max (:attempt r) (:mark m)) 1))
 (define (handle-refusal r m)
   (let* ((fault (:fault m))
-         (r2 (cond ((equal? fault :stale_attempt) (roll-back r))
+         (r2 (cond ((member fault (list :stale_attempt :stale_nonce)) (roll-back r))
                    ((and (retryable? fault) (< (:attempt r) max-attempt)) (roll-back r))
                    (else (drop-named r (:index m))))))
     (assoc-in r2 (list :attempt) (next-attempt r m))))
@@ -268,13 +342,14 @@
   (let ((split (split-proposal view (committed-in-order r) (:mempool r))))
     (-> r
         (assoc-in (list :mempool) (:waiting split))
-        (update-in (list :refused) (lambda (x) (append x (:refused split))))
+        (release (:refused split))
         (assoc-in (list :pending)
                   (if (null? (:valid split))
                       #f
-                      (dict :txs (:valid split) :prev (:head r) :attempt (:attempt r) :author side))))))
+                      (dict :txs (:valid split) :prev (:head r) :attempt (:attempt r) :author side
+                            :nonce (proposal-nonce r)))))))
 (define (can-propose? side r view)
-  (and (not (:pending r)) (pair? (:mempool r))
+  (and (not (:pending r)) (not (frozen? r)) (pair? (:mempool r))
        (let ((split (split-proposal view (committed-in-order r) (:mempool r))))
          (or (pair? (:valid split)) (pair? (:refused split))))))
 
@@ -350,7 +425,8 @@
                (pair? (:refused (split-valid (list) (get-in w (list side :mempool)))))))
     (then (-> (enqueue w (peer side)
                        (list (frame-msg (dict :txs (get-in w (list side :mempool)) :prev (get-in w (list side :head))
-                                              :attempt 0 :author side))))
+                                              :attempt 0 :author side
+                                              :nonce (+ (base-nonce (side w)) 1)))))
               (update-in (list :byz) (lambda (n) (+ n 1)))))))
 
 ;; the link hands a replica its OWN pending frame back, as if the peer had sent it (frame author)
@@ -360,7 +436,30 @@
     (then (-> (enqueue-copy w side (frame-msg (get-in w (list side :pending))))
               (update-in (list :reflect) (lambda (n) (+ n 1)))))))
 
-(define (base-rules) (list submit tick resend lose duplicate byz-frame reflect))
+;; the chain is past a signed lock's deadline + reserve: no proof carrying it is enforceable any more (R-SIGNED-IS-LIVE)
+(define lapse
+  (rule "release lapsed holds" (w side)
+    (when (and (pair? (get-in w (list side :parked))) (> (:clock w) (+ lock-deadline lock-reserve))))
+    (then (-> w (update-in (list side :refused) (lambda (x) (append x (get-in w (list side :parked)))))
+                (assoc-in (list side :parked) (list)) (assoc-in (list side :signed) (list))))))
+
+;; the two replicas co-sign a settlement over the head they share: the fold signed is its offdelta (R-COSIGN-FREEZE)
+(define cosign
+  (rule "co-sign a settlement" (w side)
+    (when (and (equal? side :left) (< (:settles w) max-settles)
+               (equal? (get-in w (list :left :head)) (get-in w (list :right :head)))
+               (not (frozen? (:left w))) (not (frozen? (:right w)))))
+    (then (let ((fold (offdelta (:left w))))
+            (-> w (assoc-in (list :left :fold) fold) (assoc-in (list :right :fold) fold)
+                  (update-in (list :settles) (lambda (n) (+ n 1))))))))
+
+;; the operation lands, is superseded, or the host reports it lapsed: both sides are free again
+(define unfreeze
+  (rule "the settlement lands or lapses" (w side)
+    (when (and (equal? side :left) (frozen? (:left w))))
+    (then (-> w (assoc-in (list :left :fold) #f) (assoc-in (list :right :fold) #f)))))
+
+(define (base-rules) (list submit tick resend lose duplicate byz-frame reflect lapse cosign unfreeze))
 (define (lag-rules)
   (append-map (lambda (k) (list (propose-lag k) (deliver-lag k))) (iota (+ view-lag 1))))
 (define (all-rules) (append (base-rules) (lag-rules)))
@@ -370,7 +469,7 @@
 (define (extends? long short)
   (and (>= (length long) (length short))
        (equal? (list-tail long (- (length long) (length short))) short)))
-(define (held r) (append (committed r) (:mempool r) (:refused r) (if (:pending r) (:txs (:pending r)) (list))))
+(define (held r) (append (committed r) (:mempool r) (:refused r) (:parked r) (if (:pending r) (:txs (:pending r)) (list))))
 (define (submitted w side) (take (txs-of side) (get-in w (list :count side))))
 (define (head-of w side) (get-in w (list side :head)))
 (define (all-txs) (append (txs-of :left) (txs-of :right)))
@@ -394,6 +493,27 @@
                              (extends? (head-of w (peer side)) (list-tail head i))))
                        (iota (length head)))))
             sides))
+   ;; R-PROOF-NONCE-ABOVE-SIGNED: a proof exists once signed, whether or not its frame commits, so a frame that
+   ;; yields or is refused still leaves its proof behind. Every committed frame must rank above all of them, and
+   ;; no two different proofs of one signer share a nonce (a retry signs a fresh one, R-RETRY-NEW-NONCE).
+   ;; Each replica records at its own commit whether the frame it committed was above what it signed before.
+   (property "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included" (w)
+     (every (lambda (side) (:above (side w))) sides))
+   ;; R-SIGNED-IS-LIVE: what a side signed stays enforceable against it until a higher frame commits (or the chain is past
+   ;; deadline + reserve), so a refusal does not release the payer of a lock that sits in such a proof. A released lock
+   ;; (in :refused) is in no signed proof still live: neither the frame out nor one taken back (:signed).
+   (property "R-SIGNED-IS-LIVE: a lock in a signed, unsuperseded proof is not released by a refusal" (w)
+     (every (lambda (side)
+              (let ((r (side w)))
+                (every (lambda (tx)
+                         (or (not (member tx lock-txs))
+                             (not (or (member tx (:signed r)) (and (:pending r) (member tx (:txs (:pending r))))))))
+                       (:refused r))))
+            sides))
+   ;; R-COSIGN-FREEZE, stated on the signed fold and the off-chain state, not through the freeze guard: while a
+   ;; settlement is signed, the fold it carries is the offdelta of the head both sides hold
+   (property "R-COSIGN-FREEZE: while a settlement is signed, its fold equals the off-chain offdelta of the head" (w)
+     (every (lambda (side) (or (not (frozen? (side w))) (= (:fold (side w)) (offdelta (side w))))) sides))
    (property "no submitted tx is lost: committed, held, or refused" (w)
      (every (lambda (side) (every (lambda (tx) (member tx (held (side w)))) (submitted w side)))
             sides))
@@ -431,6 +551,8 @@
   (and (equal? (head-of w :left) (head-of w :right))
        (every (lambda (side) (and (not (get-in w (list side :pending)))
                                   (null? (get-in w (list side :mempool)))
+                                  (null? (get-in w (list side :parked)))
+                                  (not (frozen? (side w)))
                                   (null? (inbox-of w side))
                                   (= (get-in w (list :count side)) (length (txs-of side)))))
               sides)

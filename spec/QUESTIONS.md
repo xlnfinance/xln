@@ -134,15 +134,15 @@ view moving). A receiver that cannot apply a frame answers with a refusal naming
 refused, the fault and its mark (Q-A-12). The proposer commits only on an ack, so on a refusal that names its pending frame
 it rolls the frame back and re-proposes: a retryable fault puts EVERY tx back with no notice, up to the budget
 (`max-attempt` = 2; MAX_ATTEMPTS is 8 in the kernel); any other fault, or a spent budget, drops the named tx WITH NOTICE
-(R-NOTICE, `:refused`; it releases the payer) and puts the rest back ahead of the mempool. A refusal that does not name the
+(R-NOTICE, `:refused`; it releases the payer, except a lock in a signed proof, R-SIGNED-IS-LIVE, Q-A-14) and puts the rest back ahead of the mempool. A refusal that does not name the
 pending frame (it committed, or was rolled back already), or whose index names no tx of it (kernel F3), is ignored. The
 proposer judges its own mempool by its own view at proposal: a tx with a non-retryable fault is refused with notice, one with
 a retryable fault WAITS and holds back the txs behind it (submission order). Left wins (R-A1) still decides simultaneous
 proposals, and the mark is checked before it (a refusal is answered even while Left holds its own frame out).
 Properties: the existing ones, and "can always still finish" now WITH the clock moving (default world: Left's lock and expire,
-Right's x; `lock` and `x` conflict; 3070 states, 12950 transitions, 32 goals). Planted bug `ignores-refusal` (the proposer
+Right's x; `lock` and `x` conflict; 6144 states, 27870 transitions, 52 goals with the proofs of Q-A-14). Planted bug `ignores-refusal` (the proposer
 ignores the refusal: the frame stays pending, the receiver refuses its resend again, the Account wedges): red on "can always
-still finish". Config `far-lock`: the other retryable fault (a lock beyond the horizon), 2711 states.
+still finish". Config `far-lock`: the other retryable fault (a lock beyond the horizon), 10503 states (the clock runs to 3 there, so that a lock held for a signed proof can lapse past deadline 2, Q-A-14).
 Not modelled: signed refusals and the signature-before-memory order (A4b, R-FRAME-HASH-SIGNED), pacing of retries by the Runtime
 (a retry is cheap only if the Runtime waits for the peer's view to move), the attempt cap on the receiver (attempts keep counting
 past `max-attempt`).
@@ -173,7 +173,12 @@ refused at the forged frame's attempt is never answered and Right's frame stays 
 `done` worlds, not liveness). (2) Leaving the mark out of the world key (what the replay seems to do, though it changes
 behaviour) gives 3164 / 9595 / 22, three states and eight transitions short of the replay's count: not an exact match,
 and the remaining difference is not explained from this side.
-Source: handoff-a4.md rounds 2 and 3 (F1, F4, N1, N2); review of PR 85 (Review B round 2).
+R-RETRY-NEW-NONCE (coordinator, A18): a retry at attempt a signs its proof at a FRESH proof nonce, pnonce + 1 + a, never two
+different proofs at one nonce by one proposer: the receiver already holds the proposer's signature on the refused attempt's
+proof, and with a reused nonce it could present whichever of two same-nonce proofs suits it, which the chain cannot order. The
+page models it since the proof notion of Q-A-14 (nonce in the frame and in its hash, planted bug `retry-reuses-the-nonce`).
+Gaps in the proof-nonce counter cost nothing: they appear only after a refused attempt (and the page carries no other gap).
+Source: handoff-a4.md rounds 2 and 3 (F1, F4, N1, N2); review of PR 85 (Review B round 2); coordinator A18 (R-RETRY-NEW-NONCE, Q-A-14).
 
 **Q-A-13. Frame author (kernel `refused_own`, Quint `f.author != self`).**
 Arrival's frames carried no author, so the page could not see a replica commit its OWN frame when it is handed back as the
@@ -186,6 +191,68 @@ history (the author commits on the peer's ack, and the peer acks after it commit
 (config `reflect`): red on that property. (The page has no ledger, so the flipped credit is not shown; the fork is the author
 holding the frame before its peer did.)
 Source: kernel `refused_own`; Quint account_core.qnt (`f.author != self`).
+
+**Q-A-14. Proofs on the frames page: R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE (coordinator 10-01; evidence review/a4b/reviewer-a-pr97).**
+The page had no proof, so none of the three rules could be stated. It now has the smallest notion that states them: every
+PROPOSAL signs a proof at a NONCE, and a proof exists once it is signed, whether or not its frame ever commits. A frame carries
+`:nonce` (in its hash, with the attempt and the author). The nonce of a frame on head h at attempt a is base(h) + 1 + a, where
+base is the nonce of the newest committed frame (0 on the empty head): a retry signs a fresh one (R-RETRY-NEW-NONCE). Proofs are
+ranked as the dispute page ranks them, by nonce and Left over Right at a tie (rank = 2 nonce + 1 for Left, 2 nonce for Right).
+A replica remembers the highest rank it signed and took back since its head moved (`:dead`; the frame it has out counts too).
+- **R-PROOF-NONCE-ABOVE-SIGNED.** Every committed frame's proof nonce is strictly above every proof nonce either side has
+  signed, the yielded and refused attempts included, and no two different proofs share a nonce. The receiver therefore checks
+  the frame against its own signed top: a nonce outside the window base < nonce <= base + 1 + attempt is refused with
+  `bad_nonce`; a frame that does not rank above the receiver's own signed top is refused with `stale_nonce`, carrying the
+  attempt before the first one that would rank above it, so the proposer takes the frame back at no cost (no tx, no retry
+  budget) and re-proposes at that attempt. A replica that yields (Right, to Left's frame) keeps the proof it signed in `:dead`.
+  Each replica records at its own commit whether the frame it commits ranks above its `:dead` (`:above`); the property "R-PROOF-
+  NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included" reads
+  it. The head moving resets `:dead`: the proofs of the earlier head are below the new frame. Planted bugs, each red on that
+  property in the default world: `yield-below-own-proof` (Right signs a retry at attempt 1, nonce base + 2, then yields to
+  Left's first frame at nonce base + 1 without asking whether it ranks above: the committed frame is below a proof Right
+  holds) and `retry-reuses-the-nonce` (R-RETRY-NEW-NONCE: Left's retry after Right's refusal signs at the SAME nonce as the
+  refused attempt, so the committed frame equals a dead proof). Right's refusal of an attempt does not sign anything; the
+  proof of the refused attempt is the proposer's.
+- **R-SIGNED-IS-LIVE.** Anything a side has signed stays enforceable against it until a higher-nonce frame commits, so a refusal
+  or a yield does not release the payer (the upstream hold) of a lock that sits in a signed, unsuperseded proof. Release only
+  on supersession or after deadline + reserve. This changes R-NOTICE for a lock: its notice (`:refused`, the release) is no
+  longer given at the refusal when the lock is in a proof the proposer signed (the refused frame, or an earlier attempt that
+  was taken back; `:signed`); the lock is PARKED (`:parked`, still held) and released when a frame commits (the next frame has
+  a higher nonce, so every proof it supersedes is dead) or by the rule `lapse` when the chain clock is past
+  `lock-deadline + lock-reserve` (`lock-reserve` is 0 here: the page's clock is the chain's own height and the lag is in the
+  views; the real reserve is at least LAG, R-HTLC-CLOCK b). A tx that was never signed (the proposer refused it at its own
+  proposal) is released at once. Property "R-SIGNED-IS-LIVE: a lock in a signed, unsuperseded proof is not released by a
+  refusal": no lock in `:refused` is in a proof still signed and live (`:signed` or the frame out). Planted bug
+  `refusal-releases-signed-lock`: the refusal releases the hold at once while the peer still holds the proof with the lock, and
+  the lock is enforceable on chain: red on that property. The page models the payer-side hop; the upstream account and the
+  peer's on-chain presentation are the property's reading of `:refused` and `:signed`, not separate rules.
+Not modelled: the chain nonce and the presenter, the peer's copy of the proof (a proof the peer never received is the
+proposer's own and still counts as signed), proofs of an earlier epoch.
+Source: coordinator 10-01 (A18 R-RETRY-NEW-NONCE; R-PROOF-NONCE-ABOVE-SIGNED; R-SIGNED-IS-LIVE); review/a4b/reviewer-a-pr97.
+
+**Q-A-15. R-COSIGN-FREEZE: a co-signed settlement or C2R freezes both sides (coordinator 10-01).**
+After a side co-signs a settlement or a C2R, it proposes no frames and refuses every peer frame with a RETRYABLE `frozen`
+refusal until the operation lands, is superseded, or the host reports it lapsed. The rule runs both ways: both sides
+co-sign, so both are frozen. The refusal follows the attempt and mark rules of R-FRAME-REFUSAL (Q-A-11, Q-A-12): `frozen` is in
+`retryable?`, so the proposer rolls the frame back and requeues every tx with no notice, within the budget, and the receiver
+remembers the refusal in its mark like any other. Why it is needed: the settlement folds offdelta (R-C2R-FOLD, Q-D-26) at the
+value it was signed over; a frame accepted afterwards moves offdelta away from that value, and the operation that lands folds a
+number the Account no longer has.
+The page: a world counter `:settles` and a bound `max-settles` (0 in the default world, 1 in the config `freeze`); the txs in
+`pay-txs` move offdelta by one unit each (`offdelta` is read off the committed history, no ledger); the rule `cosign` is enabled
+when the two replicas share a head and signs the fold = the offdelta of that head into both (`:fold`; #f when nothing is signed,
+so `frozen?` is "`:fold` is set"); `can-propose?` is false while frozen; `on-next-frame` refuses a peer frame as `frozen`
+(index 0, mark = the frame's attempt) after the mark check and before Left keeps its own; the rule `unfreeze` ("the settlement
+lands or lapses") frees both. The three exits of the operation (lands, superseded, lapsed) are one rule: the page has no chain, so
+what the fold does when it lands is not modelled, only that the freeze ends and that no frame moved the head while it stood.
+Property "R-COSIGN-FREEZE: while a settlement is signed, its fold equals the off-chain offdelta of the head", stated on the signed
+fold and the off-chain state and NOT through the freeze guard (`refuses-frozen?`). Planted bug `frozen-accepts` (the guard is
+off: the frozen side accepts a peer frame that moves offdelta after the fold was signed), config `freeze` (Left's p and Right's x
+move offdelta, no clock): red on that property. The config's clean run: 2392 states, 6982 transitions, 16 goals.
+Not modelled: the fold's landing, a settlement that also carries a C2R amount, the host's report as a separate event, and a
+frozen replica's own frame already out when it co-signed (it stays out; the frozen peer refuses it and the proposer retries it
+after the unfreeze).
+Source: coordinator 10-01 (R-COSIGN-FREEZE); R-C2R-FOLD (Q-D-26).
 
 ## Money (`money/ledger.scm`)
 
@@ -441,7 +508,12 @@ Rules the page carries, each with a planted bug:
 - Proof nonce and frame height are separate counters. The settlement leaves the chain nonce at its own nonce, and the
   first SIGNED proof of the new epoch takes nonce >= stored + 2 (Q-D-21): the page's `post-nonce` is chain + 2. At
   chain + 1 a Right-authored frame only ties the implicit proof and a dispute pays the empty state, so Left's frame
-  is lost (planted bug `post-nonce-low`, the spec's killer for review B finding 3).
+  is lost (planted bug `post-nonce-low`, the spec's killer for review B finding 3). The proof nonce is NOT required to be
+  gapless (R-PROOF-NONCE loosened, coordinator A18 and the kernel thread A4b): the contract never needs stored + 1 for a
+  SIGNED proof (a start needs a nonce above stored, a counter one at or above the opening nonce, a finalize one at or above
+  stored; only the unsigned implicit baseline uses stored + 1), so a signed proof may skip nonces, and the only gaps an
+  honest proposer leaves are after a refused attempt: a retry at attempt a signs at pnonce + 1 + a (R-RETRY-NEW-NONCE, Q-A-12).
+  The page's `post-nonce` (chain + 2) is a floor, not a counter.
 Not modelled: several frames after a settlement, a settlement with open clauses (v2), several tokens, the
 finalize-then-continue path (the implicit proof covers it, the frame after it is not walked).
 Source: Account.sol 1590-1690, 1354; coordinator N1 (revised), relay 21:35.
@@ -1177,7 +1249,8 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 
 - **N1 (first version, replaced).** A party signs a proof only for the CURRENT on-chain
   `ondeltaEpoch`; after an epoch advance payments pause until the epoch event is observed, then the first proof takes
-  nonce >= stored + 2 (decision D2, Q-D-21).
+  nonce >= stored + 2 (decision D2, Q-D-21). Signed proofs need not be gapless: the contract asks only for a nonce above
+  the stored one, and a gap appears only after a refused attempt (R-RETRY-NEW-NONCE, Q-A-12).
 - **N2. Deadlines.** One open HTLC deadline reverts a whole batch at finalize, so the runtime
   submits finalizes per Account, never bundled. A party refuses to sign an HTLC whose deadline is
   beyond its own tolerance (a named policy parameter, not a protocol constant).
@@ -1198,7 +1271,14 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   back, requeues every tx on a retryable fault (`not_expired`, `deadline_too_far`) up to the budget or drops the named tx with
   notice on any other, and re-proposes at attempt max(own, mark) + 1; the receiver keeps one mark per head, judges only frames
   above it and forgets it when the head moves; a frame names its author, in its hash, and a replica refuses its own. Page:
-  Q-A-11, Q-A-12, Q-A-13 (default world 3070 states, 12950 transitions, 32 goals; bounds: clock 0..2, lag 1, retry budget 2).
+  Q-A-11, Q-A-12, Q-A-13 (default world 6144 states, 27870 transitions, 52 goals; bounds: clock 0..2, lag 1, retry budget 2).
+- **R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE** (10-01, coordinator; A4b review): a retry signs its proof at
+  a fresh nonce (pnonce + 1 + attempt); every committed frame ranks above every proof either side signed, yielded and refused
+  attempts included; a lock in a signed, unsuperseded proof is not released by a refusal, only on supersession or after
+  deadline + reserve. Page: Q-A-14 (`yield-below-own-proof`, `retry-reuses-the-nonce`, `refusal-releases-signed-lock`).
+- **R-COSIGN-FREEZE** (10-01, coordinator): after a side co-signs a settlement or a C2R it proposes no frames and refuses every
+  peer frame with a retryable `frozen` refusal (the attempt and mark rules of R-FRAME-REFUSAL) until the operation lands, is
+  superseded or lapses. Page: Q-A-15 (config `freeze`, planted bug `frozen-accepts`, the property stated on the signed fold).
 - **R-C2R-FOLD** (10-01, coordinator; review round 3 of PR 41): a collateral-to-reserve withdrawal is co-signed only while
   offdelta is zero; otherwise it goes as a settlement that folds offdelta into ondelta. Page: Q-D-26 (`withdraw`, config
   `withdraw`, bug `c2r-unfolded`). The same review's other two follow-ups are Q-D-24 (the implicit-tie property) and Q-D-25 (E9
