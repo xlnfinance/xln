@@ -58,15 +58,21 @@ test("P3: an Account that never learns a deposit stays clean until it does (lag 
 });
 
 /** The same Account, whichever way its replica stands. */
-const withTag = (rt: Runtime, _tag: "open" | "disputed"): Runtime => {
+const withTag = (rt: Runtime, _tag: AccountReplica["_tag"]): Runtime => {
   const [entity] = [...rt.entities.values()];
   const [peer, replica] = [...entity!.accountReplicas][0]!;
   return ({ entities: new Map([[`${L}:a`, { ...entity!, accountReplicas: new Map([[peer, { ...replica, _tag }]]) }]]) }) as unknown as Runtime;
 };
 
-test("P3 at rest: an open Account behind the chain is red; a disputed one, which takes no more J events, is not", async () => {
+test("P3 at rest, H4: an Account a dispute froze or finalized, which takes no more J events, may sit behind the chain", async () => {
   const chain = chainHolding(100n, 0n);
-  expect(await lagging(chain, withTag(believing(0n, 0n), "open"))).toHaveLength(1);
+  expect(await lagging(chain, withTag(believing(0n, 0n), "preparing"))).toEqual([]);
   expect(await lagging(chain, withTag(believing(0n, 0n), "disputed"))).toEqual([]);
+});
+
+test("P3 at rest: the same mismatch on an Account outside a dispute is still red, whatever frame it is in", async () => {
+  const chain = chainHolding(100n, 0n);
+  const behind = await Promise.all((["open", "proposed", "received"] as const).map((tag) => lagging(chain, withTag(believing(0n, 0n), tag))));
+  expect(behind.map((lines) => lines.length)).toEqual([1, 1, 1]);
   expect(await lagging(chain, withTag(believing(100n, 0n), "open"))).toEqual([]);
 });
