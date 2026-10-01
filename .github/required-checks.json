@@ -6,5 +6,10 @@
   "One gate (seed 0)",
   "One gate (seed 12345)",
   "One gate (seed 987654)"
- ]
+ ],
+ "development": [
+  "One gate (tsc, rules, frozen, style)",
+  "One gate (bun test)"
+ ],
+ "development_note": "the ruleset on the development branch: a pull request and exactly these two checks. They are the only jobs that run on a pull request into development (rules/ci/split/ci-split.ts); the full set runs on every push to development and on a pull request into main."
 }
