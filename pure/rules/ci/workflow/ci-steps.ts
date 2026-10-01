@@ -11,7 +11,7 @@ export const GATE_COMMANDS: readonly RegExp[] = [
   /^bun rules\/check\.ts(?: --[a-z]+-only)?$/,
   /^bun rules\/checks\/frozen\.ts$/,
   /^bun style\/check\.ts$/,
-  /^bun test$/,
+  /^bun test(?: --parallel=\d+)?$/,
   /^(?:SEEDS="[^"]*" )?bun run test:seeds$/,
   // The spec suites, run from spec/ (spec/README.md): the Quint check and the Arrival cases (a shard of them in CI).
   /^bash check\.sh$/,
@@ -39,7 +39,7 @@ const REQUIRED: readonly Readonly<{ command: string; pattern: RegExp }>[] = [
   { command: "bun rules/check.ts", pattern: /^bun rules\/check\.ts$/ },
   { command: "bun rules/checks/frozen.ts", pattern: GATE_COMMANDS[2]! },
   { command: "bun style/check.ts", pattern: GATE_COMMANDS[3]! },
-  { command: "bun test", pattern: GATE_COMMANDS[4]! },
+  { command: "bun test --parallel=<n>", pattern: GATE_COMMANDS[4]! },
   { command: "bun run test:seeds", pattern: GATE_COMMANDS[5]! },
   { command: "bash check.sh", pattern: GATE_COMMANDS[6]! },
   { command: "node test.mjs", pattern: GATE_COMMANDS[7]! },

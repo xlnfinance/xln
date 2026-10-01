@@ -1,7 +1,7 @@
 // Every contract test runs in a gate, or is listed here as run by Hardhat only. A test file that holds a runnable check and
 // sits in no gate folder is red: it would pass or fail unseen, and the register's contract scan would never read it
 // (a rule held only there looks missing, or worse, a test that guards a refusal is never run). The gated folders are
-// the ones rules/scan.ts `isGateTest` accepts, the same globs as the contracts-fork job in the workflow.
+// the ones rules/scan.ts `isGateTest` accepts, the same globs as the contracts part of the gate.
 //   bun rules/check.ts --tests-only
 import { readFileSync } from "node:fs";
 import { posix } from "node:path";

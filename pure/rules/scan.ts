@@ -21,7 +21,7 @@ const testsIn = (layer: Layer, root: string, accepts: (file: string) => boolean)
 });
 
 // Only the contract tests a gate runs: the vm files in an area folder and the gate files (one per process, the same
-// globs as the contracts-fork job in .github/workflows/build-and-test.yml, which runs `*.test.ts` only) and the Foundry suite. Any other contract
+// globs as the contracts part of `bun rules/check.ts` (run by the gate-static job in .github/workflows/build-and-test.yml), which runs `*.test.ts` only) and the Foundry suite. Any other contract
 // test is in no gate, and rules/checks/contract-tests.ts turns that red unless the file is listed there as run by
 // Hardhat only; a rule held only in such a file is owed until its test moves into a folder a gate runs.
 export const isGateTest = (file: string): boolean =>

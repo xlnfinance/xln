@@ -204,18 +204,16 @@ describe("the aggregate, run", () => {
     const allowed = (fast: string, result: string): boolean => result === "success" || (fast === "true" && result === "skipped");
     for (const fast of ["true", "false"]) {
       for (const seeds of results) {
-        for (const fork of results) {
-          for (const quint of results) {
-            for (const arrival of results) {
-              const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, FORK: fork, QUINT: quint, ARRIVAL: arrival };
-              const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
-              expect({ fast, seeds, fork, quint, arrival, passed: status === 0 }).toEqual({ fast, seeds, fork, quint, arrival, passed: [seeds, fork, quint, arrival].every((result) => allowed(fast, result)) });
-            }
+        for (const quint of results) {
+          for (const arrival of results) {
+            const env = { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: "success", SEEDS: seeds, QUINT: quint, ARRIVAL: arrival };
+            const status = Bun.spawnSync(["bash", "-e", "-c", script], { env }).exitCode;
+            expect({ fast, seeds, quint, arrival, passed: status === 0 }).toEqual({ fast, seeds, quint, arrival, passed: [seeds, quint, arrival].every((result) => allowed(fast, result)) });
           }
         }
       }
       for (const result of results.filter((value) => value !== "success")) {
-        const slow = { SEEDS: "success", FORK: "success", QUINT: "success", ARRIVAL: "success" };
+        const slow = { SEEDS: "success", QUINT: "success", ARRIVAL: "success" };
         expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: result, TESTS: "success", ...slow } }).exitCode, `static ${result} fast=${fast}`).not.toBe(0);
         expect(Bun.spawnSync(["bash", "-e", "-c", script], { env: { PATH: process.env.PATH ?? "", FAST: fast, STATIC: "success", TESTS: result, ...slow } }).exitCode, `tests ${result} fast=${fast}`).not.toBe(0);
       }
