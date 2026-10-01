@@ -11,6 +11,8 @@ import { holdId, other, type AccountFault, type AccountState, type Offer, type S
 import { proofBodyOf, unsignable } from "../proof/body.ts";
 import { emptyAccount, ledgerOf, withLedger } from "../state.ts";
 import { applyTx, type AccountTx } from "../tx.ts";
+import { emptyReplica, frameName } from "../frame/account.ts";
+import type { Frame } from "../frame/frame.ts";
 import { FULL_FILL, fillOf } from "./swap.ts";
 
 const clock = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params"));
@@ -95,6 +97,32 @@ describe("account/swap R-SWAP-OFFER either side offers its funds for the other's
     expect(refusal(full, "left", lock(17n))).toEqual({ _tag: "too_many_holds", max: 32 });
     expect(unsignable(signing.terms, { ...full, offers: [...full.offers, offerOf("left", 1n, 1n, 17n)] }))
       .toEqual({ _tag: "too_many_clauses", clauses: 33 });
+  });
+
+  test("what a side has reserved plus a new give cannot pass the largest amount: hold_overflow, before room", () => {
+    const one = must(start, "left", tx.offer(offerOf("left", 1n, 1n)));
+    expect(refusal(one, "left", tx.offer(offerOf("left", MAX_AMOUNT, 1n, 2n))))
+      .toEqual({ _tag: "hold_overflow", held: 1n, requested: MAX_AMOUNT });
+  });
+
+  test("a frame's content name changes with every field of an offer, a fill and a withdrawal", () => {
+    const frameWith = (t: AccountTx): Frame<AccountTx> =>
+      ({ author: "left", parent: emptyReplica("left").head, attempt: 0, slot: 2, txs: [t] });
+    const nameOf = (t: AccountTx) => frameName(frameWith(t));
+    const base = offerOf("left", 10n, 5n);
+    const variants: readonly AccountTx[] = [
+      tx.offer(base),
+      tx.offer({ ...base, id: holdId(2n) }), tx.offer({ ...base, maker: "right" }),
+      tx.offer({ ...base, give: { ...base.give, token: OIL } }),
+      tx.offer({ ...base, give: { ...base.give, amount: 11n } }),
+      tx.offer({ ...base, want: { ...base.want, token: GOLD } }),
+      tx.offer({ ...base, want: { ...base.want, amount: 6n } }),
+      tx.offer({ ...base, deadline: heightOf(106n) }),
+      tx.take(1n, 100), tx.take(1n, 101), tx.take(2n, 100),
+      tx.retract(1n), tx.retract(2n), tx.lapse(1n), tx.lapse(2n),
+    ];
+    const names = variants.map(nameOf);
+    expect(new Set(names).size).toBe(variants.length);
   });
 });
 
@@ -322,11 +350,11 @@ describe("account/swap R-SWAP-ALLOWANCES the clause carries an allowance for bot
 
   test("swap clauses follow the payment clauses, each group in slot order", () => {
     const lock: AccountTx = { _tag: "lock", token: GOLD, hold: holdOf("left", 5n, 9n, 105n, 9) };
-    const offers = [7n, 3n].reduce((s, id) => must(s, "left", tx.offer(offerOf("left", 10n, 5n, id))), start);
+    const offers = [7n, 3n].reduce((s, id) => must(s, "left", tx.offer(offerOf("left", id * 10n, 5n, id))), start);
     const s = must(offers, "left", lock);
     const kinds = bodyOf(s).transformers.map((t) => swapsOf(t.encodedBatch).length);
     expect(kinds).toEqual([0, 1, 1]);
-    expect(bodyOf(s).transformers.slice(1).map((t) => swapsOf(t.encodedBatch)[0]?.addAmount)).toEqual([10n, 10n]);
+    expect(bodyOf(s).transformers.slice(1).map((t) => swapsOf(t.encodedBatch)[0]?.addAmount)).toEqual([30n, 70n]);
     expect(bodyOf(must(s, "left", tx.retract(3n))).transformers).toHaveLength(2);
   });
 });
