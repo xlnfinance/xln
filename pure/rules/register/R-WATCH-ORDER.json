@@ -1,0 +1,54 @@
+{
+ "id": "R-WATCH-ORDER",
+ "statement": "A J event reaches a hosted Entity in the chain's order (block, then log index) and, across batches and a repeat from the old cursor, once in effect: a block that is missing, out of order or on another fork refuses the delivery and the cursor does not move.",
+ "source": "consolidation-plan.md D9 and J2 (events applied once and in order); R-HTLC-CLOCK (the delivered height is the Host's finalizedJHeight)",
+ "layers": {
+  "arrival": "n/a: the watcher is Host code that reads a node; the Arrival specs take J events as given",
+  "quint": "owed: spec thread (spec/quint/runtime.qnt part 3 `exactly_once_j` and its mutants in spec/quint/mutants/runtime.json, QUESTIONS R2, are the spec side; no name carries this id yet)",
+  "contract": "n/a: no contract code takes part; the watcher reads the deployed Depository's events",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER a log that names a block of the batch by its hash but claims another number is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER one delivery is the chain's events for each hosted Entity in order, to its last block"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER an Entity that is not hosted is told nothing, and the delivery still moves the cursor"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER a block that does not follow the one before it is a broken chain, a missing one is a gap"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER a log of a block the batch does not hold, or of another fork's block, is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER logs that run backwards or repeat are refused, not sorted or deduplicated"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER however the blocks are cut into batches, the events are the chain's, once each, in order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-WATCH-ORDER a delivery repeated from the old cursor, as after a crash, is the same delivery"
+  }
+ ]
+}
