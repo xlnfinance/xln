@@ -120,6 +120,21 @@ describe("every deploy path runs the gate", () => {
   });
   const stack = (network: string) => () => run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", network], "bunx");
   const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
+  // The Sepolia deploy (deploy/) takes a manifest: a mainnet one must be refused by the gate before any RPC call (the RPC here is a closed port).
+  const mainnetDir = mkdtempSync(path.join(tmpdir(), "xln-gate-manifest-"));
+  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.manifest.json"), "utf8")) as Record<string, unknown>;
+  const mainnetPrepared = { ...sepolia, network: "ethereum-mainnet", chainId: 1 };
+  const address = "0x1111111111111111111111111111111111111111", hash = `0x${"22".repeat(32)}`;
+  const placed = { address, deploymentBlock: 1, transactionHash: hash, gasUsed: "1", codeHash: hash };
+  const mainnetDeployed = {
+    ...mainnetPrepared, status: "deployed", deployer: address, foundationRecipient: address, deploymentGasTotal: "1",
+    token: { symbol: "USDT", decimals: 6, address, deployFaucet: true, tokenId: 1 },
+    contracts: Object.fromEntries(["account", "hankoVerifier", "entityProvider", "deltaTransformer", "depositoryBounds", "hashLadderRegistry", "nftCustody", "depository"].map((name) => [name, placed])),
+  };
+  const manifestFile = (name: string, manifest: unknown) => { const file = path.join(mainnetDir, name); writeFileSync(file, JSON.stringify(manifest)); return file; };
+  const closedPort = "http://127.0.0.1:1";
+  const sepoliaDeploy = (name: string, manifest: unknown) => () => run(["deploy/deploy-set.ts", "--rpc", closedPort, "--manifest", manifestFile(name, manifest), "--out", path.join(mainnetDir, `${name}.out`)]);
+  const sepoliaSmoke = (name: string, manifest: unknown) => () => run(["deploy/smoke.ts", "--rpc", closedPort, "--manifest", manifestFile(name, manifest)]);
 
   // Every script that can deploy needs at least one entry here that runs it against a chain id the gate must refuse.
   // Importing the gate is not enough: a script that never calls it fails its entry, and a new deploy script fails the
@@ -134,18 +149,29 @@ describe("every deploy path runs the gate", () => {
       ["--network ethereum-mainnet (chain 1)", stack("ethereum-mainnet")],
       ["--network base-mainnet (chain 8453)", stack("base-mainnet")],
     ],
+    "deploy/deploy-set.ts": [
+      ["a prepared manifest for Ethereum mainnet (chain 1)", sepoliaDeploy("mainnet-prepared.json", mainnetPrepared)],
+      ["a prepared manifest for Ethereum mainnet under a testnet's name", sepoliaDeploy("mainnet-sepolia-name.json", { ...mainnetPrepared, network: "ethereum-sepolia" })],
+    ],
+    "deploy/smoke.ts": [
+      ["a deployed manifest for Ethereum mainnet (chain 1)", sepoliaSmoke("mainnet-deployed.json", mainnetDeployed)],
+    ],
   };
 
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
-  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts"];
+  const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts",
+    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json"];
   const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const full = path.join(dir, name);
     return statSync(full).isDirectory() ? filesUnder(full) : [full];
   });
-  const allScripts = filesUnder(scriptsRoot).map((file) => path.relative(scriptsRoot, file));
+  // The surfaces are scripts/ (keys relative to it) and deploy/ (keys "deploy/<file>", relative to contracts/).
+  const deployRoot = path.join(contractsRoot, "deploy");
+  const allScripts = [...filesUnder(scriptsRoot).map((file) => path.relative(scriptsRoot, file)), ...filesUnder(deployRoot).map((file) => path.relative(contractsRoot, file))];
+  const sourceOf = (file: string) => readFileSync(path.join(file.startsWith("deploy/") ? contractsRoot : scriptsRoot, file), "utf8");
 
   test("every file under scripts/ has an entry that exercises it or is on the non-deploying list", () => {
     expect(allScripts.filter((file) => !(file in entries) && !nonDeploying.includes(file))).toEqual([]);
@@ -154,19 +180,19 @@ describe("every deploy path runs the gate", () => {
   });
 
   test("a script on the non-deploying list contains no deploy or broadcast call", () => {
-    const offenders = nonDeploying.filter((file) => sinks.test(readFileSync(path.join(scriptsRoot, file), "utf8")));
+    const offenders = nonDeploying.filter((file) => sinks.test(sourceOf(file)));
     expect(offenders).toEqual([]);
   });
 
   test("every script with a deploy or broadcast call has an entry", () => {
-    const deployers = allScripts.filter((file) => sinks.test(readFileSync(path.join(scriptsRoot, file), "utf8")));
+    const deployers = allScripts.filter((file) => sinks.test(sourceOf(file)));
     expect(deployers.filter((file) => !(file in entries))).toEqual([]);
     expect(Object.keys(entries).filter((file) => !deployers.includes(file))).toEqual([]);
   });
 
   test("no other deploy surface exists: no ignition or deploy directory, and package.json only runs listed scripts", () => {
     expect(existsSync(path.join(contractsRoot, "ignition"))).toBe(false);
-    expect(existsSync(path.join(contractsRoot, "deploy"))).toBe(false);
+    // deploy/ is a deploy surface the coverage tests above cover file by file: an unlisted file, or a deploy call without an entry, fails there.
     const { scripts } = JSON.parse(readFileSync(path.join(contractsRoot, "package.json"), "utf8")) as { scripts: Record<string, string> };
     const commands = Object.values(scripts);
     expect(commands.filter((command) => /hardhat ignition/.test(command))).toEqual([]);
