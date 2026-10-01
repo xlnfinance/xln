@@ -4,17 +4,19 @@
 ;; history (newest frame first), a mempool, at most one pending frame, the txs it refused,
 ;; its ATTEMPT number (the refusals it has handled on this head) and its refusal MARK (the
 ;; highest attempt it refused as a receiver on this head). A frame is (txs, prev, attempt,
-;; author, nonce); the frame hash is abstracted as the history of those entries, so equal
-;; heads mean equal hashes and the attempt, the author and the proof nonce are part of the name.
+;; author, slot); the frame hash is abstracted as the history of those entries, so equal
+;; heads mean equal hashes and the attempt, the author and the proof slot are part of the name.
 ;;
 ;; The round: a replica proposes a frame of its mempool on top of its head; the peer
 ;; commits it and answers with an ack; the proposer commits on the ack. A peer that cannot
 ;; apply the frame answers with a REFUSAL instead.
 ;;
 ;; The rules that decide everything (sources in spec/QUESTIONS.md):
-;;   - Same-height collision: LEFT WINS (Types.sol:150, Account.sol:732; lessons R-A1).
-;;     Left ignores right's frame and keeps its own; right rolls its frame back (its txs go
-;;     back ahead of its mempool), commits left's, and acks.
+;;   - Same-height collision (R-A1, R-PROOF-NONCE-ABOVE-SIGNED): the frame with the HIGHER SLOT wins,
+;;     whoever it is. The replica whose frame has the higher slot ignores the peer's and keeps its own;
+;;     the other rolls its frame back (its txs go back ahead of its mempool), commits the winner's, and
+;;     acks. The two sides' slots are in different lanes, so they are never equal, and at the first
+;;     collision on a head Left's is the higher: Left wins (Types.sol:150, Account.sol:732).
 ;;   - A frame that is not the next one is IGNORED, never fatal (lessons R-X1): a stale or
 ;;     future frame changes nothing. A duplicate of the frame at my head is answered with
 ;;     the same ack again, so a lost ack cannot wedge the proposer.
@@ -45,10 +47,15 @@
 ;;     refusal could commit a frame whose proposer already took it back (a fork).
 ;;   - FRAME AUTHOR: a frame names its author, in its hash. A replica refuses (silently) a
 ;;     frame whose author is itself, so it can never commit its own frame as the peer's.
-;;   - PROOFS (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED): each proposal signs a proof at a nonce, base + 1 +
-;;     attempt (a retry signs a FRESH nonce); a proof exists once signed, whether or not its frame commits. Proofs are
-;;     ranked by nonce, Left over Right. A committed frame must rank above every proof its replica signed before it,
-;;     yielded and refused attempts included: the receiver refuses (`stale_nonce`, `bad_nonce`) a frame that does not.
+;;   - PROOF SLOTS (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED): a frame carries an explicit SLOT, the nonce its proof is
+;;     signed at, in its author's lane (Left's an even distance above the committed slot, Right's an odd one) and above
+;;     every slot its author has signed and every slot it knows the peer signed (its FLOOR): a retry signs a fresh one.
+;;     A proof exists once signed, whether or not its frame commits. A committed frame is above every proof either
+;;     side signed before it, yielded and refused attempts included. The receiver believes a slot only if an honest peer
+;;     could have taken it (lane, above the committed slot, at most one lane step above what it knows either side
+;;     signed), else `bad_slot`; it notes the slot (the peer signed it); it acks no slot at or below a proof it signed
+;;     (`stale_slot`). Every refusal carries the refuser's FLOOR, the highest slot it signed; the proposer's next frame
+;;     goes above it, and a floor beyond what an honest peer could reach is not believed.
 ;;   - SIGNED IS LIVE (R-SIGNED-IS-LIVE): what a side signed stays enforceable against it until a higher frame commits, so
 ;;     a refusal does not release the payer of a lock that sits in a signed proof not yet superseded: the lock is
 ;;     PARKED (still held) and released when a frame commits or the chain is past deadline + reserve (rule `lapse`).
@@ -72,9 +79,9 @@
 ;; Bounds that stand for the real ones: the attempt budget `max-attempt` is 2 (MAX_ATTEMPTS
 ;; is 8 in the kernel); the J clock runs 0..2 with a lock deadline of 1 (a real chain runs
 ;; for ever, the deadline is a J height); the view lag is 1 (LAG). The default world is Left's
-;; lock and expire against Right's x, one lost message; the configs in account/configs widen it
+;; lock and expire against Right's x, no loss; the configs in account/configs widen it
 ;; one way at a time (lossy: the first page's conflicts, losses and repeats; repeats; reflect;
-;; far-lock; right-expire; freeze; same-side-conflict; reorder).
+;; lossy-clock, far-lock; right-expire; freeze; slot-jump; same-side-conflict; reorder).
 ;;
 ;; Abstractions (what this page does NOT cover):
 ;;   - a receiver commits a frame when it arrives; xln.ts holds it as a `received`
@@ -86,8 +93,10 @@
 ;;   - a Byzantine proposer (a frame that is invalid on content) is refused by the same
 ;;     path as a stale one; it is not a separate rule. Its forged frame is at attempt 0;
 ;;   - a refusal index that names no tx of the pending frame is ignored (kernel F3);
-;;   - the proofs are a nonce and a rank: no chain, no presenter, no signature, no epoch; the upstream hold of a lock is
-;;     the proposer's `:refused` notice (R-NOTICE) and the peer's enforcement is the property's reading of what is signed;
+;;   - the proofs are a slot: no chain, no presenter, no signature, no epoch, no Account id (so the rule that a signature
+;;     names chain, depository, Account and epoch is an open point, Q-A-14); the upstream hold of a lock is the
+;;     proposer's `:refused` notice (R-NOTICE) and the peer's enforcement is the property's reading of what is signed;
+;;   - the nonce ceiling (the kernel refuses a frame it cannot sign at the contract's nonce limit) is not modelled;
 ;;   - the kernel's attempt cap on the receiver side is not modelled: attempts keep counting.
 ;;
 ;; Needs lib/vocabulary.scm (rule, property) and lib/check.scm (successors).
@@ -97,12 +106,14 @@
 (define/overridable right-txs  (s/array (s/string)) (list "x"))
 ;; (earlier later): `later` is invalid once `earlier` is committed
 (define/overridable conflicts  (s/array (s/array (s/string))) (list (list "lock" "x")))
-(define/overridable max-losses (s/number) 1)
+(define/overridable max-losses (s/number) 0)
 ;; repeated messages and reflected frames are bounded by configs (repeats, reflect): together with the clock
 ;; they multiply the state space by an order of magnitude
 (define/overridable max-dups   (s/number) 0)
 ;; frames a Byzantine proposer forges: its whole mempool as one frame, whatever it holds
 (define/overridable max-byz    (s/number) 1)
+;; frames a Byzantine peer sends at a slot far beyond what an honest peer could reach (R-PROOF-NONCE-ABOVE-SIGNED, config slot-jump)
+(define/overridable max-jumps  (s/number) 0)
 ;; times a replica is handed its own pending frame back as if the peer had sent it
 (define/overridable max-reflect (s/number) 0)
 ;; the J clock: it ticks 0..max-clock; a side's read lags it by 0..view-lag
@@ -129,7 +140,7 @@
 (define (txs-of side) (vector->list (if (equal? side :left) left-txs right-txs)))
 (define (conflict-pairs) (map vector->list (vector->list conflicts)))
 (define (replica) (dict :head (list) :mempool (list) :pending #f :refused (list) :attempt 0 :mark #f
-                        :dead 0 :above #t :parked (list) :signed (list)
+                        :dead 0 :above #t :peer-high 0 :reach #t :parked (list) :signed (list)
                         :fold #f))
 (define init
   (dict :left   (replica)
@@ -141,34 +152,47 @@
         :dups   0
         :byz    0
         :reflect 0
+        :jumps  0
         :settles 0))
 
 ;; ---- frames and messages
-;; the hash of a frame is the history it makes: its entry (txs, attempt, author, nonce) on top of its prev
-(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f) :nonce (:nonce f)))
+;; the hash of a frame is the history it makes: its entry (txs, attempt, author, slot) on top of its prev
+(define (frame-entry f) (dict :txs (:txs f) :attempt (:attempt f) :author (:author f) :slot (:slot f)))
 (define (frame-hash f) (cons (frame-entry f) (:prev f)))
 (define (frame-msg f) (dict :kind :frame :frame f))
 (define (ack-msg h) (dict :kind :ack :hash h))
-;; a refusal names the frame hash, the index of the first tx refused, the fault, and the receiver's mark
-(define (refusal-msg f index fault mark) (dict :kind :refusal :hash (frame-hash f) :index index :fault fault :mark mark))
-;; ---- proofs: each proposal signs a proof at a NONCE (R-PROOF-NONCE). A proof exists once signed, whether
-;; or not its frame ever commits. The nonce of a frame on head h at attempt a is base(h) + 1 + a (R-RETRY-NEW-NONCE:
-;; a retry signs a fresh nonce), where base is the nonce of the newest committed frame (0 on the empty head).
-;; Proofs are ranked by (nonce, Left over Right), as the dispute page ranks them.
-(define (base-nonce r) (if (null? (:head r)) 0 (:nonce (car (:head r)))))
-(define (rank-of nonce author) (+ (* 2 nonce) (if (equal? author :left) 1 0)))
-(define (frame-rank f) (rank-of (:nonce f) (:author f)))
-(define (proposal-nonce r) (+ (base-nonce r) 1 (:attempt r)))
-;; the highest rank this replica signed since its head moved: the proofs of frames it took back (:dead)
-;; and of the frame it has out. A proof of an earlier head is below the head's frame, so the head moving resets it.
-(define (signed-top r) (max (:dead r) (if (:pending r) (frame-rank (:pending r)) 0)))
-;; the receiver commits only a frame that ranks above every proof it signed: otherwise it refuses with
-;; `stale_nonce`, carrying the attempt before the first one that would (a planted bug skips the check)
-(define (above-signed? r f) (> (frame-rank f) (signed-top r)))
-(define (first-attempt-above r author)
-  (let loop ((a 0)) (if (> (rank-of (+ (base-nonce r) 1 a) author) (signed-top r)) a (loop (+ a 1)))))
-;; a frame's nonce is in the window of its attempt: base < nonce <= base + 1 + attempt
-(define (nonce-in-window? r f) (and (> (:nonce f) (base-nonce r)) (<= (:nonce f) (+ (base-nonce r) 1 (:attempt f)))))
+;; a refusal names the frame hash, the index of the first tx refused, the fault, the receiver's mark and its FLOOR: the
+;; highest slot it signed (a planted bug leaves it out)
+(define (refusal-msg f index fault mark floor)
+  (dict :kind :refusal :hash (frame-hash f) :index index :fault fault :mark mark :floor floor))
+;; ---- proofs: each proposal signs a proof at a SLOT (the proof nonce, R-PROOF-NONCE). A proof exists once signed, whether
+;; or not its frame ever commits. `used` is the slot of the newest committed frame (0 on the empty head). A slot is in the
+;; author's lane: Left's is an even distance above the committed slot, Right's an odd one, so the two sides never share a
+;; slot and at the first collision Left's is the higher. The slot of a frame is the lowest in its lane above its FLOOR: the
+;; highest slot either side is known to have signed.
+(define (used-slot r) (if (null? (:head r)) 0 (:slot (car (:head r)))))
+(define (lane author) (if (equal? author :left) 0 1))
+(define (slot-above author used floor) (+ floor 1 (modulo (+ (- (+ floor 1) used) (lane author)) 2)))
+;; the highest slot this replica signed since its head moved: the proofs of frames it took back (:dead), the frame it has out,
+;; and the committed one. A proof of an earlier head is below the head's frame, so the head moving resets :dead.
+(define (signed-high r) (max (:dead r) (if (:pending r) (:slot (:pending r)) 0) (used-slot r)))
+;; every slot either side is known to have signed (the peer's from its frames and its refusals' floors, `:peer-high`)
+(define (floor-of r) (max (signed-high r) (:peer-high r)))
+;; the slot a proposal takes (a planted bug takes the slot of the attempt it retries, ignoring its own signed proofs)
+(define (proposal-slot side r) (slot-above side (used-slot r) (floor-of r)))
+;; a slot an honest peer could take: in its lane, above the committed one, at most one lane step above what I know
+;; (a planted bug believes any slot in the lane)
+(define (honest-slot? r author slot)
+  (let ((used (used-slot r)))
+    (and (> slot used) (= (modulo (- slot used) 2) (lane author))
+         (<= slot (slot-above author used (floor-of r))))))
+;; the same bound for the property: it reads the committed slot against what the receiver knew, not through the guard
+(define (reach-ok? r f)
+  (<= (:slot f) (slot-above (:author f) (used-slot r) (floor-of r))))
+;; the floor a refusal carries (a planted bug carries none)
+(define (refusal-floor r) (signed-high r))
+;; the receiver acks no slot at or below a proof it signed and left behind (a planted bug does)
+(define (stale-slot? r f) (and (not (:pending r)) (<= (:slot f) (signed-high r))))
 
 ;; the faults that pass with the peer's view moving: the proposer retries them
 (define (retryable? fault) (and (member fault (list :not_expired :deadline_too_far :frozen)) #t))
@@ -207,20 +231,20 @@
 
 ;; ---- one replica receiving one message -> (dict :replica :sent)
 ;; the head moves: the attempt and the refusal mark belong to a head, so both start again. R-PROOF-NONCE-ABOVE-SIGNED is
-;; checked here: the committed frame must rank above every proof this replica signed before it (:dead; the frame
-;; it commits as its own is the one proof it may equal), and `:above` remembers whether it did, for the property.
+;; checked here: the committed frame must be above every proof this replica signed before it (:dead; the frame it
+;; commits as its own is the one proof it may equal), and `:above` remembers whether it did, for the property.
 ;; The signed proofs of the earlier head are below the new frame, so they are forgotten.
 ;; R-SIGNED-IS-LIVE: the locks held back by the proofs it superseded are released now (they enter :refused, with notice).
 (define (commit r head)
   (-> r (update-in (list :refused) (lambda (x) (append x (:parked r))))
         (assoc-in (list :parked) (list)) (assoc-in (list :signed) (list))
-        (assoc-in (list :above) (and (:above r) (< (:dead r) (rank-of (:nonce (car head)) (:author (car head))))))
-        (assoc-in (list :dead) 0)
+        (assoc-in (list :above) (and (:above r) (< (:dead r) (:slot (car head)))))
+        (assoc-in (list :dead) 0) (assoc-in (list :peer-high) 0)
         (assoc-in (list :head) head) (assoc-in (list :pending) #f)
         (assoc-in (list :attempt) 0) (assoc-in (list :mark) #f)))
 ;; a frame taken back keeps its proof: it was signed, so the peer may still hold it, with its locks (:signed)
 (define (take-back r)
-  (-> r (assoc-in (list :dead) (max (:dead r) (frame-rank (:pending r))))
+  (-> r (assoc-in (list :dead) (max (:dead r) (:slot (:pending r))))
         (assoc-in (list :signed)
                   (delete-duplicates (append (:signed r) (filter (lambda (tx) (member tx lock-txs)) (:txs (:pending r))))))))
 ;; R-SIGNED-IS-LIVE: a refusal, or a tx dropped with notice, releases the payer (R-NOTICE) EXCEPT for a lock that sits in a
@@ -236,8 +260,9 @@
       (assoc-in (list :pending) #f)))
 
 (define (ignore r) (dict :replica r :sent (list)))
-(define (accept r f)
-  (dict :replica (commit (if (:pending r) (roll-back r) r) (frame-hash f))
+;; `ok` says whether the frame was within reach of what the receiver knew when it arrived (for the property)
+(define (accept r f ok)
+  (dict :replica (assoc-in (commit (if (:pending r) (roll-back r) r) (frame-hash f)) (list :reach) (and (:reach r) ok))
         :sent    (list (ack-msg (frame-hash f)))))
 
 ;; the receiver's mark: the highest attempt it refused on this head, with the fault. A frame
@@ -245,7 +270,10 @@
 (define (remember r f index fault)
   (assoc-in r (list :mark) (dict :attempt (:attempt f) :index index :fault fault)))
 (define (refuse r f index fault mark)
-  (dict :replica r :sent (list (refusal-msg f index fault mark))))
+  (dict :replica r :sent (list (refusal-msg f index fault mark (refusal-floor r)))))
+(define (mark-attempt r) (if (:mark r) (:attempt (:mark r)) 0))
+;; the peer signed this slot: what I propose next goes above it, whatever else happens to the frame
+(define (note-peer r f) (assoc-in r (list :peer-high) (max (:peer-high r) (:slot f))))
 ;; a frame at or below the mark is not judged: the same refusal again, or `stale_attempt`
 (define (at-or-below-mark? r f) (and (:mark r) (<= (:attempt f) (:attempt (:mark r)))))
 (define (answer-from-mark r f)
@@ -255,24 +283,27 @@
         (refuse r f 0 :stale_attempt (:attempt m)))))
 
 (define (own-frame? side f) (equal? (:author f) side))
-;; Left wins a same-height collision: Left, with a frame out, ignores the peer's frame
-(define (keeps-own? side r) (and (:pending r) (equal? side :left)))
+;; a same-height collision: the frame with the higher slot wins, so a replica with a frame out ignores a peer's frame of
+;; a lower slot (a planted bug decides it by side, Left always winning, or not at all)
+(define (keeps-own? side r f) (and (:pending r) (> (:slot (:pending r)) (:slot f))))
 (define (extends-head? r f) (equal? (:prev f) (:head r)))
 (define (reack? r f) (equal? (frame-hash f) (:head r)))
 
-(define (on-next-frame side r f view)
+(define (on-next-frame side r0 f view)
+  (if (honest-slot? r0 (:author f) (:slot f))
+      (on-honest-frame side (note-peer r0 f) f view (reach-ok? r0 f))
+      (refuse r0 f 0 :bad_slot (mark-attempt r0))))
+
+(define (on-honest-frame side r f view reach)
   (cond
     ((at-or-below-mark? r f) (answer-from-mark r f))
     ((refuses-frozen? r) (refuse (remember r f 0 :frozen) f 0 :frozen (:attempt f)))
-    ((keeps-own? side r) (ignore r))
-    ((not (nonce-in-window? r f)) (refuse r f 0 :bad_nonce (:attempt f)))
-    ((not (above-signed? r f))
-     (refuse r f 0 :stale_nonce (- (first-attempt-above r (:author f)) 1)))
+    ((keeps-own? side r f) (ignore r))
     (else
      (let ((bad (frame-fault view (committed-in-order r) (:txs f))))
-       (if bad
-           (refuse (remember r f (car bad) (cdr bad)) f (car bad) (cdr bad) (:attempt f))
-           (accept r f))))))
+       (cond (bad (refuse (remember r f (car bad) (cdr bad)) f (car bad) (cdr bad) (:attempt f)))
+             ((stale-slot? r f) (refuse r f 0 :stale_slot (mark-attempt r)))
+             (else (accept r f reach)))))))
 
 (define (on-frame side r f view)
   (cond
@@ -299,13 +330,18 @@
 (define (next-attempt r m) (+ (max (:attempt r) (:mark m)) 1))
 (define (handle-refusal r m)
   (let* ((fault (:fault m))
-         (r2 (cond ((member fault (list :stale_attempt :stale_nonce)) (roll-back r))
+         (r2 (cond ((member fault (list :stale_attempt :stale_slot)) (roll-back r))
                    ((and (retryable? fault) (< (:attempt r) max-attempt)) (roll-back r))
                    (else (drop-named r (:index m))))))
-    (assoc-in r2 (list :attempt) (next-attempt r m))))
+    (-> r2 (assoc-in (list :attempt) (next-attempt r m))
+           (assoc-in (list :peer-high) (max (:peer-high r2) (:floor m))))))
+;; a floor is believed only if an honest peer could have signed it
+(define (floor-believed? r m)
+  (and (>= (:floor m) 0) (<= (:floor m) (slot-above (peer (:author (:pending r))) (used-slot r) (floor-of r)))))
 (define (on-refusal r m)
   (if (and (:pending r) (equal? (frame-hash (:pending r)) (:hash m))
-           (< (:index m) (length (:txs (:pending r)))))
+           (< (:index m) (length (:txs (:pending r))))
+           (floor-believed? r m))
       (dict :replica (handle-refusal r m) :sent (list))
       (ignore r)))
 
@@ -347,7 +383,7 @@
                   (if (null? (:valid split))
                       #f
                       (dict :txs (:valid split) :prev (:head r) :attempt (:attempt r) :author side
-                            :nonce (proposal-nonce r)))))))
+                            :slot (proposal-slot side r)))))))
 (define (can-propose? side r view)
   (and (not (:pending r)) (not (frozen? r)) (pair? (:mempool r))
        (let ((split (split-proposal view (committed-in-order r) (:mempool r))))
@@ -426,7 +462,7 @@
     (then (-> (enqueue w (peer side)
                        (list (frame-msg (dict :txs (get-in w (list side :mempool)) :prev (get-in w (list side :head))
                                               :attempt 0 :author side
-                                              :nonce (+ (base-nonce (side w)) 1)))))
+                                              :slot (proposal-slot side (side w))))))
               (update-in (list :byz) (lambda (n) (+ n 1)))))))
 
 ;; the link hands a replica its OWN pending frame back, as if the peer had sent it (frame author)
@@ -459,7 +495,20 @@
     (when (and (equal? side :left) (frozen? (:left w))))
     (then (-> w (assoc-in (list :left :fold) #f) (assoc-in (list :right :fold) #f)))))
 
-(define (base-rules) (list submit tick resend lose duplicate byz-frame reflect lapse cosign unfreeze))
+;; a BYZANTINE peer sends a valid frame at a slot far beyond what an honest peer could reach: one frame must not be able to
+;; move the nonce space (R-PROOF-NONCE-ABOVE-SIGNED, kernel finding 3). Nothing about it enters the sender's books.
+(define jump
+  (rule "byz slot jump" (w side)
+    (when (and (< (:jumps w) max-jumps) (pair? (get-in w (list side :mempool)))
+               (pair? (:valid (split-proposal (view-at w 0) (committed-in-order (side w)) (get-in w (list side :mempool)))))))
+    (then (let ((split (split-proposal (view-at w 0) (committed-in-order (side w)) (get-in w (list side :mempool)))))
+            (-> (enqueue w (peer side)
+                         (list (frame-msg (dict :txs (:valid split) :prev (get-in w (list side :head))
+                                                :attempt 0 :author side
+                                                :slot (+ (used-slot (side w)) 100 (lane side))))))
+                (update-in (list :jumps) (lambda (n) (+ n 1))))))))
+
+(define (base-rules) (list submit tick resend lose duplicate byz-frame jump reflect lapse cosign unfreeze))
 (define (lag-rules)
   (append-map (lambda (k) (list (propose-lag k) (deliver-lag k))) (iota (+ view-lag 1))))
 (define (all-rules) (append (base-rules) (lag-rules)))
@@ -499,6 +548,16 @@
    ;; Each replica records at its own commit whether the frame it committed was above what it signed before.
    (property "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included" (w)
      (every (lambda (side) (:above (side w))) sides))
+   ;; the door: a receiver commits only a slot an honest peer could have taken (one frame must not move the nonce space)
+   (property "R-PROOF-NONCE-ABOVE-SIGNED, the door: a committed slot is at most one lane step above what its receiver knew either side signed" (w)
+     (every (lambda (side) (:reach (side w))) sides))
+   ;; the floor: a refusal for a slot at or below a proof the refuser signed names a floor that clears it
+   (property "R-PROOF-NONCE-ABOVE-SIGNED, the floor: a stale_slot refusal names a floor at or above the slot it refuses" (w)
+     (every (lambda (side)
+              (every (lambda (m) (or (not (equal? (:kind m) :refusal)) (not (equal? (:fault m) :stale_slot))
+                                     (>= (:floor m) (:slot (car (:hash m))))))
+                     (inbox-of w side)))
+            sides))
    ;; R-SIGNED-IS-LIVE: what a side signed stays enforceable against it until a higher frame commits (or the chain is past
    ;; deadline + reserve), so a refusal does not release the payer of a lock that sits in such a proof. A released lock
    ;; (in :refused) is in no signed proof still live: neither the frame out nor one taken back (:signed).
@@ -529,6 +588,17 @@
    ;; restated through `split-valid`, not through `frame-fault` (a planted bug redefines that one)
    (property "no committed tx is invalid against the history before it" (w)
      (every (lambda (side) (null? (:refused (split-valid (list) (committed-in-order (side w)))))) sides))
+   ;; R-FRAME-REFUSAL: a refusal is final. The proposer takes its frame back on a refusal, so a peer that commits it later (it forgot
+   ;; its refusal, or judged a frame below its mark afresh) holds a frame its author no longer has out. When the peer is ahead
+   ;; of a replica by a frame, that frame is the replica's pending one (the peer acked and the ack is on its way).
+   ;; After the tx property on purpose: a Byzantine frame that a planted validator commits is also a frame its named author never
+   ;; had out, and the property of that bug (the tx, the slot door) must be the one reported.
+   (property "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)" (w)
+     (every (lambda (side)
+              (or (<= (length (head-of w (peer side))) (length (head-of w side)))
+                  (and (get-in w (list side :pending))
+                       (equal? (frame-hash (get-in w (list side :pending))) (head-of w (peer side))))))
+            sides))
    ;; a tx is refused only because a conflicting predecessor exists (one committed, or one ahead of it in
    ;; its own frame), or because it is clock-dependent. The predecessor may be rolled back afterwards (a
    ;; cross-open), and the refusal stays: final with notice, the sender resubmits (QUESTIONS Q-A-10). So the

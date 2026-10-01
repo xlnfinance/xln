@@ -5,3 +5,4 @@
 (define conflicts (vector))
 (define max-losses 0)
 (define max-reflect 1)
+(define max-attempt 1)

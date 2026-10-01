@@ -5,3 +5,5 @@
 (define conflicts (vector))
 (define max-losses 0)
 (define max-dups 1)
+;; one retry (the budget is 1): the state space of the repeat with the slots is an order larger otherwise
+(define max-attempt 1)

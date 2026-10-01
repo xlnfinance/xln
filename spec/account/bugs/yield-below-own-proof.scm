@@ -1,4 +1,4 @@
-;; Planted bug (R-PROOF-NONCE-ABOVE-SIGNED): a replica that yields (it has a frame out) commits the winner's frame without asking whether it
-;; ranks above the proof it signed itself. Right signs a retry at attempt 1 (nonce base + 2), then yields to Left's first frame (nonce base + 1):
-;; the committed frame is below a proof Right holds, and that proof could still be presented in its place. Config right-expire.
-(define (above-signed? r f) (or (and (:pending r) #t) (> (frame-rank f) (signed-top r))))
+;; Planted bug (R-PROOF-NONCE-ABOVE-SIGNED, R-A1): the collision is decided by SIDE, not by slot: Left, with a frame out, keeps it and ignores
+;; Right's whatever the slots, and Right yields to Left's. Right signs a retry at attempt 1 (slot 3) and meets Left's first frame (slot 2): it
+;; yields and commits at a slot below the proof it signed, and Left ignores the frame that ranks above its own. Config right-expire.
+(define (keeps-own? side r f) (and (:pending r) (equal? side :left)))

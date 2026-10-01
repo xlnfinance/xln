@@ -117,7 +117,7 @@ conflicting txs slips through). The refusal is final with notice. If the predece
 cross-open that Left wins), the refused tx would have been valid: the sender resubmits it. Choice: no
 re-admission (a refusal is an event, not a state), stated as the property "a refused tx has a conflicting
 predecessor among the submitted txs": it checks the pair, not the state at the time of the check.
-Bound: `account/configs/same-side-conflict.scm` (Right's own txs "x" then "y" conflict; 4694 states since the refusal
+Bound: `account/configs/same-side-conflict.scm` (Right's own txs "x" then "y" conflict; 5650 states since the refusal and the proof slots
 messages and the mark, Q-A-11, Q-A-12) and a
 Byzantine frame rule (`byz-frame`: a proposer sends its whole mempool as one invalid frame), so the receiver's
 validation is the only thing between the frame and the history. Planted bug `frame-order`.
@@ -140,9 +140,9 @@ proposer judges its own mempool by its own view at proposal: a tx with a non-ret
 a retryable fault WAITS and holds back the txs behind it (submission order). Left wins (R-A1) still decides simultaneous
 proposals, and the mark is checked before it (a refusal is answered even while Left holds its own frame out).
 Properties: the existing ones, and "can always still finish" now WITH the clock moving (default world: Left's lock and expire,
-Right's x; `lock` and `x` conflict; 6144 states, 27870 transitions, 52 goals with the proofs of Q-A-14). Planted bug `ignores-refusal` (the proposer
+Right's x; `lock` and `x` conflict, no lost message; 4563 states, 18600 transitions, 44 goals with the proof slots of Q-A-14). Planted bug `ignores-refusal` (the proposer
 ignores the refusal: the frame stays pending, the receiver refuses its resend again, the Account wedges): red on "can always
-still finish". Config `far-lock`: the other retryable fault (a lock beyond the horizon), 10503 states (the clock runs to 3 there, so that a lock held for a signed proof can lapse past deadline 2, Q-A-14).
+still finish". Config `far-lock`: the other retryable fault (a lock beyond the horizon), 9135 states (the clock runs to 3 there, so that a lock held for a signed proof can lapse past deadline 2, Q-A-14). Config `lossy-clock`: the default world with one lost message (the old default).
 Not modelled: signed refusals and the signature-before-memory order (A4b, R-FRAME-HASH-SIGNED), pacing of retries by the Runtime
 (a retry is cheap only if the Runtime waits for the peer's view to move), the attempt cap on the receiver (attempts keep counting
 past `max-attempt`).
@@ -159,13 +159,18 @@ frame at my head (the re-ack) does not touch it. The proposer sets its next atte
 no tx and no retry budget. Why: an honest proposer never sends two different frames at one attempt, so a forged frame refused at
 attempt 0 also refuses a genuine frame at attempt 0 on that head; and the mark makes a refusal final for its head, so a
 receiver whose view moves later cannot commit a frame whose proposer already took it back (it would fork from it).
-Planted bugs: `refusal-forgotten` (the receiver keeps no mark: it commits the frame it refused while its peer committed another at
-the same head, red on "committed histories agree"), `below-mark-judged` (config `repeats`: a late copy of an earlier attempt is
-judged afresh, the same fork), `attempt-not-bumped` (the proposer re-proposes at the same attempt: refused again for ever, red on
-"can always still finish").
+Property "R-FRAME-REFUSAL: a frame the proposer took back is never committed by the peer (a refusal is final)": when the peer's
+history is ahead of a replica's by a frame, that frame is the replica's pending one (the peer acked it and the ack is on its way);
+a frame the proposer no longer has out and the peer holds is the failure the mark exists to prevent. Planted bugs:
+`refusal-forgotten` (the receiver keeps no mark: it commits the frame it refused after its proposer took it back) and
+`below-mark-judged` (config `repeats`: a late copy of an earlier attempt is judged afresh and commits), both red on that property;
+`attempt-not-bumped` (the proposer re-proposes at the same attempt, the very frame refused: refused again for ever, red on "can
+always still finish"). Before the proof slots (Q-A-14) the first two forked the replicas, red on "committed histories agree": with
+the slots the fork is closed by another rule (the proposer's abandoned proof blocks acking the winner's lower frame, `stale_slot`), so
+what is left of the bug is the wedge, and the property that names it is the one above (the old ones went red on "at rest"). The property sits after "no committed tx is invalid" in the list on purpose: the checker reports the first violated property at the shallowest state, and a Byzantine frame a planted validator commits (`frame-order`) is also a frame its named author never had out, so the property that names that bug has to come first.
 Replay against the kernel thread's count: the kernel's same-side-conflict replay of the attempt rule is 3167 states / 9603
 transitions / 22 goals against the first page's 3423 / 10383 / 24. This page's same-side-conflict config
-(`account/configs/same-side-conflict.scm`, which is the first page's world with the clock off) is 4694 / 14434 / 26: it does NOT
+(`account/configs/same-side-conflict.scm`, which is the first page's world with the clock off) is 5650 / 17489 / 26 (4694 / 14434 / 26 before the proof slots, Q-A-14): it does NOT
 match, and the difference is known. (1) This page DELIVERS refusals (the proposer must handle them), so a refusal message is
 a state of the link; the kernel's replay filters refusal messages out of the link. With the refusals filtered out the page
 explores 3507 states / 10570 transitions / 22 goals (the goal count matches) and the liveness check FAILS: a genuine frame
@@ -176,8 +181,8 @@ and the remaining difference is not explained from this side.
 R-RETRY-NEW-NONCE (coordinator, A18): a retry at attempt a signs its proof at a FRESH proof nonce, pnonce + 1 + a, never two
 different proofs at one nonce by one proposer: the receiver already holds the proposer's signature on the refused attempt's
 proof, and with a reused nonce it could present whichever of two same-nonce proofs suits it, which the chain cannot order. The
-page models it since the proof notion of Q-A-14 (nonce in the frame and in its hash, planted bug `retry-reuses-the-nonce`).
-Gaps in the proof-nonce counter cost nothing: they appear only after a refused attempt (and the page carries no other gap).
+page models it since the proof notion of Q-A-14 (the slot in the frame and in its hash, planted bug `retry-reuses-the-nonce`).
+Gaps in the proof-nonce counter cost nothing: they appear after a refused attempt and between the two sides' lanes (a first slot of Left is the committed slot + 2, Q-A-14).
 Source: handoff-a4.md rounds 2 and 3 (F1, F4, N1, N2); review of PR 85 (Review B round 2); coordinator A18 (R-RETRY-NEW-NONCE, Q-A-14).
 
 **Q-A-13. Frame author (kernel `refused_own`, Quint `f.author != self`).**
@@ -192,33 +197,56 @@ history (the author commits on the peer's ack, and the peer acks after it commit
 holding the frame before its peer did.)
 Source: kernel `refused_own`; Quint account_core.qnt (`f.author != self`).
 
-**Q-A-14. Proofs on the frames page: R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE (coordinator 10-01; evidence review/a4b/reviewer-a-pr97).**
+**Q-A-14. Proofs on the frames page: R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE (coordinator 10-01; kernel PR 97 round 2, evidence review/a4b/reviewer-a-pr97 and reviewer-b-pr97).**
 The page had no proof, so none of the three rules could be stated. It now has the smallest notion that states them: every
-PROPOSAL signs a proof at a NONCE, and a proof exists once it is signed, whether or not its frame ever commits. A frame carries
-`:nonce` (in its hash, with the attempt and the author). The nonce of a frame on head h at attempt a is base(h) + 1 + a, where
-base is the nonce of the newest committed frame (0 on the empty head): a retry signs a fresh one (R-RETRY-NEW-NONCE). Proofs are
-ranked as the dispute page ranks them, by nonce and Left over Right at a tie (rank = 2 nonce + 1 for Left, 2 nonce for Right).
-A replica remembers the highest rank it signed and took back since its head moved (`:dead`; the frame it has out counts too).
-- **R-PROOF-NONCE-ABOVE-SIGNED.** Every committed frame's proof nonce is strictly above every proof nonce either side has
-  signed, the yielded and refused attempts included, and no two different proofs share a nonce. The receiver therefore checks
-  the frame against its own signed top: a nonce outside the window base < nonce <= base + 1 + attempt is refused with
-  `bad_nonce`; a frame that does not rank above the receiver's own signed top is refused with `stale_nonce`, carrying the
-  attempt before the first one that would rank above it, so the proposer takes the frame back at no cost (no tx, no retry
-  budget) and re-proposes at that attempt. A replica that yields (Right, to Left's frame) keeps the proof it signed in `:dead`.
-  Each replica records at its own commit whether the frame it commits ranks above its `:dead` (`:above`); the property "R-PROOF-
-  NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof signed before it, yielded and refused ones included" reads
-  it. The head moving resets `:dead`: the proofs of the earlier head are below the new frame. Planted bugs, each red on that
-  property in the default world: `yield-below-own-proof` (Right signs a retry at attempt 1, nonce base + 2, then yields to
-  Left's first frame at nonce base + 1 without asking whether it ranks above: the committed frame is below a proof Right
-  holds) and `retry-reuses-the-nonce` (R-RETRY-NEW-NONCE: Left's retry after Right's refusal signs at the SAME nonce as the
-  refused attempt, so the committed frame equals a dead proof). Right's refusal of an attempt does not sign anything; the
-  proof of the refused attempt is the proposer's.
+PROPOSAL signs a proof at a SLOT (the proof nonce), and a proof exists once it is signed, whether or not its frame ever commits.
+The shape follows the kernel's (pure/account/frame/frame.ts at 2f81bd4), not the first version of this page (a nonce computed from
+the attempt, which could not carry the rule across the two sides: Review B of PR 97, finding 1).
+- **The slot is carried in the frame** (`:slot`, in its hash with the attempt and the author). `used` is the slot of the newest
+  committed frame (0 on the empty head). A slot is in its author's LANE: Left's is an even distance above `used`, Right's an odd
+  one, so the two sides never share a slot, and at the first collision on a head Left's is the higher (Left 2, Right 1, then 4 and
+  3). A proposer takes the lowest slot in its lane above its FLOOR, the highest slot either side is known to have signed (its own:
+  `:dead`, the frame out, `used`; the peer's: `:peer-high`). A retry therefore signs a fresh slot above the refused one
+  (R-RETRY-NEW-NONCE), and the nonce of a proof is no longer a function of the attempt (the attempt stays a label for the receiver's
+  mark). Gaps in the proof-nonce counter cost nothing: they appear after a refused attempt and between the two lanes (Left's first slot is `used` + 2, Right's `used` + 1).
+- **R-PROOF-NONCE-ABOVE-SIGNED.** Every committed frame is strictly above every proof either side has signed, the yielded and
+  refused attempts included, and no two different proofs of one signer share a nonce. Each replica records at its own commit
+  whether the frame it commits is above the proofs it signed and took back (`:dead`; the frame it commits as its own is the one
+  proof it may equal): `:above`, read by the property "R-PROOF-NONCE-ABOVE-SIGNED: a committed frame's proof is above every proof
+  signed before it, yielded and refused ones included". The head moving resets `:dead` and `:peer-high` (the proofs of the
+  earlier head are below the new frame). The rules that keep it:
+  (1) THE DOOR: a receiver believes a slot only if an honest peer could have taken it: in the author's lane, above `used`, at
+  most one lane step above what the receiver knows either side signed; otherwise it refuses with `bad_slot`. A frame heard at an
+  honest slot is NOTED (`:peer-high`): the peer signed it, so what I propose next goes above it, whatever else happens to the frame
+  (without the note the page loses liveness: a proposer that does not know what the peer signed keeps colliding below it).
+  Property "..., the door: a committed slot is at most one lane step above what its receiver knew either side signed" (the receiver
+  records it at commit with the reach it computed before noting the frame). A Byzantine peer's one frame must not move the nonce
+  space (kernel finding 3): rule `jump`, bound `max-jumps`, config `slot-jump`.
+  (2) THE COLLISION: the frame with the HIGHER slot wins, whoever it is: a replica with a frame out ignores a peer's frame of a lower
+  slot and rolls its own back for a higher one. R-A1 (Left wins) is the special case of the first collision on a head.
+  (3) THE STALE SLOT: a replica with no frame out acks no slot at or below a proof it signed and left behind (its taken-back
+  frames): it refuses with `stale_slot`, which costs the proposer no tx and no retry budget, like `stale_attempt`.
+  (4) THE FLOOR: every refusal carries the refuser's floor, the highest slot it signed. The proposer adopts it (its next frame goes
+  above it) only if an honest peer could have signed it (the same reach), else the refusal is ignored. Property "..., the floor: a
+  stale_slot refusal names a floor at or above the slot it refuses": the floor is the slot that clears the refusal.
+  Planted bugs, each red on its property: `yield-below-own-proof` (the collision decided by side, not by slot: Right signs a retry at
+  slot 3 and yields to Left's first frame at slot 2; config `right-expire`; it is also "a collision won by the lower slot"),
+  `stale-slot-unchecked` (no `stale_slot`: a frame commits below a proof the receiver signed and left behind),
+  `retry-reuses-the-nonce` (R-RETRY-NEW-NONCE: the retry takes the slot above what the PEER signed and not above its own abandoned
+  proof, so it commits at a slot it already signed another proof at), `slots-shared-lane` (one lane for both sides: both propose at
+  the same slot, and the yielder signs two proofs at one nonce, Review B finding 1), `refusal-without-floor` (the floor property),
+  `slot-beyond-reach-accepted` (no limit on the jump: config `slot-jump`, the door property). The first four are red on "R-PROOF-NONCE-ABOVE-SIGNED:
+  a committed frame's proof ..."; `no-tie-break` now is as well (both sides yield: the first yield already commits below the
+  yielder's own proof, the fork is one step later). `attempt-not-bumped` is a retry that is the very frame refused (same attempt,
+  same slot), so its state space stays finite: red on "can always still finish". `commit-any-frame` (a duplicate of a committed frame is
+  taken for the next one) is now refused at the door and its proposer drops the tx of a frame the peer holds: red on "R-FRAME-REFUSAL: a
+  frame the proposer took back is never committed by the peer" (it was "no tx is both committed and refused" before the slots).
 - **R-SIGNED-IS-LIVE.** Anything a side has signed stays enforceable against it until a higher-nonce frame commits, so a refusal
   or a yield does not release the payer (the upstream hold) of a lock that sits in a signed, unsuperseded proof. Release only
   on supersession or after deadline + reserve. This changes R-NOTICE for a lock: its notice (`:refused`, the release) is no
   longer given at the refusal when the lock is in a proof the proposer signed (the refused frame, or an earlier attempt that
   was taken back; `:signed`); the lock is PARKED (`:parked`, still held) and released when a frame commits (the next frame has
-  a higher nonce, so every proof it supersedes is dead) or by the rule `lapse` when the chain clock is past
+  a higher slot, so every proof it supersedes is dead) or by the rule `lapse` when the chain clock is past
   `lock-deadline + lock-reserve` (`lock-reserve` is 0 here: the page's clock is the chain's own height and the lag is in the
   views; the real reserve is at least LAG, R-HTLC-CLOCK b). A tx that was never signed (the proposer refused it at its own
   proposal) is released at once. Property "R-SIGNED-IS-LIVE: a lock in a signed, unsuperseded proof is not released by a
@@ -226,9 +254,19 @@ A replica remembers the highest rank it signed and took back since its head move
   `refusal-releases-signed-lock`: the refusal releases the hold at once while the peer still holds the proof with the lock, and
   the lock is enforceable on chain: red on that property. The page models the payer-side hop; the upstream account and the
   peer's on-chain presentation are the property's reading of `:refused` and `:signed`, not separate rules.
+- **OPEN: R-FRAME-SIGNATURE-NAMES-ACCOUNT (kernel PR 97 round 2).** The bytes of a signed frame and of a signed refusal name
+  the chain, the depository, the Account and the epoch, so a signature does not replay across them: a frame or a refusal signed
+  for another Account or epoch is refused. NOT modelled: the page has one Account and one epoch, its frames carry no scope
+  (account id, epoch) and there is no signature, so a replay across Accounts or epochs cannot be stated, let alone planted. What
+  the page would need: a scope in the frame and in its hash, a replica that knows its own scope, a rule that hands a replica a
+  frame signed for another scope (a replay), the property "no committed frame carries another scope" and one planted bug (the
+  scope not checked). The epoch half belongs with the dispute page (epochs, Q-D-21) rather than here.
 Not modelled: the chain nonce and the presenter, the peer's copy of the proof (a proof the peer never received is the
-proposer's own and still counts as signed), proofs of an earlier epoch.
-Source: coordinator 10-01 (A18 R-RETRY-NEW-NONCE; R-PROOF-NONCE-ABOVE-SIGNED; R-SIGNED-IS-LIVE); review/a4b/reviewer-a-pr97.
+proposer's own and still counts as signed), the nonce ceiling (the kernel refuses a frame it cannot sign at the contract's limit;
+here slots are unbounded integers, finite only because every run is), a restarted proposer that lost its floor.
+Source: coordinator 10-01 (A18 R-RETRY-NEW-NONCE; R-PROOF-NONCE-ABOVE-SIGNED, round 2: slot in the frame, floor in the refusal, reach
+bound, collision by slot; R-SIGNED-IS-LIVE); kernel PR 97 (577a6d7, 2f81bd4) pure/account/frame/frame.ts and slot/*.test.ts;
+review/a4b/reviewer-a-pr97 and reviewer-b-pr97.
 
 **Q-A-15. R-COSIGN-FREEZE: a co-signed settlement or C2R freezes both sides (coordinator 10-01).**
 After a side co-signs a settlement or a C2R, it proposes no frames and refuses every peer frame with a RETRYABLE `frozen`
@@ -511,8 +549,9 @@ Rules the page carries, each with a planted bug:
   is lost (planted bug `post-nonce-low`, the spec's killer for review B finding 3). The proof nonce is NOT required to be
   gapless (R-PROOF-NONCE loosened, coordinator A18 and the kernel thread A4b): the contract never needs stored + 1 for a
   SIGNED proof (a start needs a nonce above stored, a counter one at or above the opening nonce, a finalize one at or above
-  stored; only the unsigned implicit baseline uses stored + 1), so a signed proof may skip nonces, and the only gaps an
-  honest proposer leaves are after a refused attempt: a retry at attempt a signs at pnonce + 1 + a (R-RETRY-NEW-NONCE, Q-A-12).
+  stored; only the unsigned implicit baseline uses stored + 1), so a signed proof may skip nonces: an honest proposer
+  leaves gaps after a refused attempt (a retry signs a fresh slot, R-RETRY-NEW-NONCE) and between the two sides' lanes (Left's first
+  slot on a head is the committed one + 2, Right's + 1; Q-A-12, Q-A-14).
   The page's `post-nonce` (chain + 2) is a floor, not a counter.
 Not modelled: several frames after a settlement, a settlement with open clauses (v2), several tokens, the
 finalize-then-continue path (the implicit proof covers it, the frame after it is not walked).
@@ -1250,7 +1289,7 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
 - **N1 (first version, replaced).** A party signs a proof only for the CURRENT on-chain
   `ondeltaEpoch`; after an epoch advance payments pause until the epoch event is observed, then the first proof takes
   nonce >= stored + 2 (decision D2, Q-D-21). Signed proofs need not be gapless: the contract asks only for a nonce above
-  the stored one, and a gap appears only after a refused attempt (R-RETRY-NEW-NONCE, Q-A-12).
+  the stored one, and a gap appears after a refused attempt and between the two sides' lanes (R-RETRY-NEW-NONCE, Q-A-12, Q-A-14).
 - **N2. Deadlines.** One open HTLC deadline reverts a whole batch at finalize, so the runtime
   submits finalizes per Account, never bundled. A party refuses to sign an HTLC whose deadline is
   beyond its own tolerance (a named policy parameter, not a protocol constant).
@@ -1271,11 +1310,15 @@ Relayed 2026-09-29 15:19 from the review of the contracts PR (#40).
   back, requeues every tx on a retryable fault (`not_expired`, `deadline_too_far`) up to the budget or drops the named tx with
   notice on any other, and re-proposes at attempt max(own, mark) + 1; the receiver keeps one mark per head, judges only frames
   above it and forgets it when the head moves; a frame names its author, in its hash, and a replica refuses its own. Page:
-  Q-A-11, Q-A-12, Q-A-13 (default world 6144 states, 27870 transitions, 52 goals; bounds: clock 0..2, lag 1, retry budget 2).
-- **R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE** (10-01, coordinator; A4b review): a retry signs its proof at
-  a fresh nonce (pnonce + 1 + attempt); every committed frame ranks above every proof either side signed, yielded and refused
-  attempts included; a lock in a signed, unsuperseded proof is not released by a refusal, only on supersession or after
-  deadline + reserve. Page: Q-A-14 (`yield-below-own-proof`, `retry-reuses-the-nonce`, `refusal-releases-signed-lock`).
+  Q-A-11, Q-A-12, Q-A-13 (default world 4563 states, 18600 transitions, 44 goals; bounds: clock 0..2, lag 1, retry budget 2).
+- **R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED, R-SIGNED-IS-LIVE** (10-01, coordinator; A4b review, kernel PR 97 round 2): a
+  frame carries an explicit slot (its proof nonce), in its author's lane and above every proof nonce either side signed in the
+  epoch, so a retry signs a fresh one; every refusal carries the refuser's signed floor; a slot or floor more than one lane step
+  beyond what an honest peer could reach is refused; a collision is won by the higher slot (Left's at the first); a lock in a
+  signed, unsuperseded proof is not released by a refusal, only on supersession or after deadline + reserve. Page: Q-A-14
+  (`yield-below-own-proof`, `retry-reuses-the-nonce`, `stale-slot-unchecked`, `slots-shared-lane`, `refusal-without-floor`,
+  `slot-beyond-reach-accepted`, `refusal-releases-signed-lock`). R-FRAME-SIGNATURE-NAMES-ACCOUNT (a signature names chain,
+  depository, Account and epoch): an open point, the page's frame has no scope (Q-A-14).
 - **R-COSIGN-FREEZE** (10-01, coordinator): after a side co-signs a settlement or a C2R it proposes no frames and refuses every
   peer frame with a retryable `frozen` refusal (the attempt and mark rules of R-FRAME-REFUSAL) until the operation lands, is
   superseded or lapses. Page: Q-A-15 (config `freeze`, planted bug `frozen-accepts`, the property stated on the signed fold).

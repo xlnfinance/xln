@@ -4,7 +4,7 @@
 (define left-txs  (vector "lock"))
 (define right-txs (vector "x"))
 (define conflicts (vector))
-(define max-losses 1)
+(define max-losses 0)
 (define lock-deadline 2)
 ;; a lock held for a signed proof is released once the chain is past its deadline (R-SIGNED-IS-LIVE): the clock must run one past deadline 2
 (define max-clock 3)
