@@ -9,27 +9,50 @@ import { frameName } from "../account/frame/account.ts";
 import type { Msg } from "../account/frame/frame.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
-import type { EntityState, Outbound } from "../entity/model.ts";
-import type { Halt, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
+import type { EntityId, EntityInput, EntityState, Outbound } from "../entity/model.ts";
+import type { Frame } from "../entity/frame.ts";
+import { ownView } from "../account/clause/clock.ts";
+import type { EntityBatch, Halt, NewHeight, Input, Row, Runtime, Setup, Timestamp } from "./model.ts";
 
 export const startRuntime = (setup: Setup, entities: readonly EntityState[]): Runtime => ({
-  setup, stamp: 0n as Timestamp, entities: new Map(entities.map((e) => [e.id, e])), wal: [], staged: undefined, sent: 0,
+  setup, stamp: 0n as Timestamp, view: setup.view, entities: new Map(entities.map((e) => [e.id, e])),
+  wal: [], staged: undefined, sent: 0,
 });
 
 const later = (a: Timestamp, b: Timestamp): Timestamp => (a > b ? a : b);
 
-/** The frame an input makes on the Runtime as it stands: the entity's next state and the row that records it. */
-const stage = (rt: Runtime, stamp: Timestamp, input: Input): Runtime => {
+const frameOf = (rt: Runtime, entity: EntityState, inputs: readonly EntityInput[]): Frame =>
+  entityFrame({ clock: rt.setup.clock, view: rt.view }, rt.setup.signing, entity, inputs);
+
+/** The frame an input makes on the Runtime as it stands: the entities' next states and the row that records it. */
+const stageEntity = (rt: Runtime, stamp: Timestamp, input: EntityBatch): Runtime => {
   const height = BigInt(rt.wal.length) + 1n;
   const entity = rt.entities.get(input.to);
   if (entity === undefined) {
     const refused: Row = { height, stamp, input, outputs: [], notices: [{ _tag: "unknown_entity", entity: input.to }] };
     return { ...rt, stamp, staged: refused };
   }
-  const frame = entityFrame({ clock: rt.setup.clock, view: rt.setup.view }, rt.setup.signing, entity, input.inputs);
+  const frame = frameOf(rt, entity, input.inputs);
   const row: Row = { height, stamp, input, outputs: frame.outputs, notices: frame.notices };
   return { ...rt, stamp, entities: mapSet(rt.entities, input.to, frame.state), staged: row };
 };
+
+const byId = ([a]: readonly [EntityId, unknown], [b]: readonly [EntityId, unknown]): number => (a < b ? -1 : 1);
+
+/** The view only rises; a frame of every Entity follows, in id order, so Accounts that waited for it propose. */
+const stageHeight = (rt: Runtime, stamp: Timestamp, input: NewHeight): Runtime => {
+  const view = input.height > rt.view ? ownView(input.height, input.height) : rt.view;
+  const raised = { ...rt, view };
+  const frames = [...rt.entities].toSorted(byId).map(([id, entity]) => [id, frameOf(raised, entity, [])] as const);
+  const row: Row = {
+    height: BigInt(rt.wal.length) + 1n, stamp, input,
+    outputs: frames.flatMap(([, f]) => f.outputs), notices: frames.flatMap(([, f]) => f.notices),
+  };
+  return { ...raised, stamp, entities: new Map(frames.map(([id, f]) => [id, f.state])), staged: row };
+};
+
+const stage = (rt: Runtime, stamp: Timestamp, input: Input): Runtime =>
+  (input._tag === "entity" ? stageEntity(rt, stamp, input) : stageHeight(rt, stamp, input));
 
 /** Takes the Host's next input. A bad input is a row that refuses it; only a Host that skips `commit` can halt. */
 export const apply = (rt: Runtime, input: Input): Result<Runtime, Halt> =>
