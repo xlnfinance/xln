@@ -119,7 +119,13 @@ export const verificationOf = (exitCode: number | null, stdout: string, stderr: 
       ? { result: "cannot-check", detail: "verify.ts exited 0 but printed no block number, so its answer cannot be quoted" }
       : { result: "match", ...block, detail: lastLine(stdout) };
   }
-  if (exitCode === 1) return { result: "differ", ...block, detail: lastLine(stdout) === "" ? "at least one contract differs" : lastLine(stdout) };
+  // Exit 1 is also what Bun itself exits with when the verifier cannot start (a missing module): only the block line, printed before
+  // any row, shows that the verifier ran and read the chain.
+  if (exitCode === 1) {
+    return found === undefined
+      ? { result: "cannot-check", detail: firstLine(stderr) || "verify.ts exited 1 before it read the chain" }
+      : { result: "differ", ...block, detail: lastLine(stdout) };
+  }
   if (exitCode === 2) return { result: "cannot-check", detail: firstLine(stderr).replace(/^verify: could not check: /, "") || "exit 2" };
   return { result: "cannot-check", detail: exitCode === null ? "verify.ts did not finish (killed or timed out)" : `verify.ts exited ${exitCode}, not 0, 1 or 2` };
 };

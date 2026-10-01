@@ -135,6 +135,9 @@ const sinceReport = (): Since | "no base" => {
   return mergeBase.code === 0 && mergeBase.out !== "" ? since(mergeBase.out, `${MAIN} merge base`) : "no base";
 };
 
+// Everything that can fail on a bad argument or an unreadable ref comes before the verifier, which reads the chain over the network and may
+// take minutes: a mistyped --since must be an error at once, not after a node's timeout.
+const sinceFrom = sinceReport();
 const main = specAtMain();
 const recorded = deployment();
 
@@ -145,7 +148,7 @@ console.log(
     liveRules: register.filter((row) => row.retiredBy === undefined).length,
     columns,
     milestones: milestonesOf(columns, recorded, main, verification(recorded)),
-    since: sinceReport(),
+    since: sinceFrom,
     problems: evaluation.problems.length,
   }),
 );

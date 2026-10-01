@@ -285,8 +285,12 @@ describe("what the deployment verifier's exit code and output say", () => {
   test("exit 0 without a block number is not a match: the answer cannot be quoted", () => {
     expect(verificationOf(0, "all match", "").result).toBe("cannot-check");
   });
-  test("exit 1 without a block number is still a difference", () => {
-    expect(verificationOf(1, "1 of 9 differ", "")).toMatchObject({ result: "differ", detail: "1 of 9 differ" });
+  test("exit 1 without the block line is Bun failing to start the verifier, not a difference: could not check, with its first stderr line", () => {
+    const crashed = verificationOf(1, "", "error: Cannot find module '@noble/hashes/crypto'\n  at verify.ts:1\n");
+    expect(crashed).toMatchObject({ result: "cannot-check", detail: "error: Cannot find module '@noble/hashes/crypto'" });
+    expect(crashed.block).toBeUndefined();
+    expect(verificationOf(1, "", "").result).toBe("cannot-check");
+    expect(verificationOf(1, "1 of 9 differ", "").result).toBe("cannot-check");
   });
 });
 
@@ -390,6 +394,7 @@ describe("the real tree", () => {
   }, 30_000);
   test("--since HEAD adds and retires no rules; a ref that is not there is an error, never an empty answer", () => {
     expect(run("--skip-verify", "--since", "HEAD").stdout.toString()).toContain("0 rules added, 0 rules retired");
+    // Without --skip-verify on purpose: a bad ref is refused before the verifier is asked, so it never waits for a node.
     const missing = run("--since", "no-such-ref-anywhere");
     expect(missing.exitCode).toBe(1);
     expect(missing.stderr.toString()).toContain("no-such-ref-anywhere");

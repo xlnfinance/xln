@@ -7,7 +7,7 @@
    "source": "lessons.md section 0",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the frame pipeline is off-chain Entity logic; no contract code takes part",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Entity and Runtime)"
@@ -76,7 +76,7 @@
    "statement": "Same-height collision: Left wins; Right rolls back and re-proposes its txs at the next height.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: simultaneous frame proposals are an off-chain Account rule; the chain sees only signed proofs",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -155,8 +155,8 @@
    "statement": "Settlement ops are bounded by collateral where they are admitted, on both sides; a c2r above collateral is refused as malformed.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: admission is checked off-chain before signing; the chain applies only what was signed",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -180,8 +180,8 @@
    "statement": "A party signs a settlement approval only over a proof that no queued work can change; if queued work changes it, the approval expires and is signed again, never a halt.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: when to sign a settlement approval is an off-chain decision",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Account slice)"
@@ -200,8 +200,8 @@
    "statement": "A settlement transition aimed at a workspace that already settled on chain is stale and is dropped with a message.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the stale transition is dropped off-chain; the chain's own refusal of an old-epoch proof is C1",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Account slice)"
@@ -220,8 +220,8 @@
    "statement": "Opening an Account that already exists is a refusal.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: opening an existing Account is refused off-chain, between the two sides",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Account slice)"
@@ -240,7 +240,7 @@
    "statement": "Credit is off-chain and enforced before signing: RCPAN (-leftCredit <= delta <= collateral + rightCredit, worst case over open clauses) is checked before a party signs.",
    "source": "lessons.md section 2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: credit is off-chain and checked before signing; the chain applies the signed result (R-CONSERVE)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -300,7 +300,7 @@
    "source": "lessons.md section 3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the order of Account work in a frame is off-chain Entity logic",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Entity and Runtime)"
@@ -318,8 +318,8 @@
    "statement": "A replica drops its own uncommitted proposal when a certified frame commits at that height.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: a replica dropping its own proposal is off-chain Entity logic",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Entity and Runtime)"
@@ -338,7 +338,7 @@
    "source": "lessons.md section 3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the publication order of Account work is off-chain Entity logic",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Entity and Runtime)"
@@ -356,9 +356,9 @@
    "statement": "Chain facts reach an Account only through J-events.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "n/a: the rule is what an off-chain Account accepts; the contracts only emit the events",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "owed: contracts thread (event completeness: every chain fact an Account needs is in an event; no test names it yet)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Account slice)"
    },
@@ -376,8 +376,8 @@
    "statement": "There are two signed objects, the dispute proof and the cooperative update, and every encoding is the contract's.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -425,9 +425,9 @@
    "statement": "A batch op checks the contract's batch limits when it is queued, and a full batch is a refusal, not a throw.",
    "source": "lessons.md section 4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
-    "contract": "n/a: the check is made off-chain when the op is queued; no contract code takes part",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+    "contract": "n/a: the check is made off-chain when the op is queued; the limits themselves are the contract's, held by J5 (the signed gas budget) and R-OOG (a cap bounds gas), tested in stress/BatchBounds.t.sol",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Runtime slice)"
    },
@@ -445,7 +445,7 @@
    "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock. The Quint cell holds the canonical order of a frame's inputs and the idle gate (a frame opens only when an input is due); that the same inputs at the same timestamps give the same state and outputs is not a property of the spec.",
    "source": "lessons.md section 5",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: determinism of the off-chain Runtime; no contract code takes part",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -469,7 +469,7 @@
    "statement": "A hub whose onward HTLC is refused fails the incoming lock back at once (outcome error, forward_failed:<reason>).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: forwarding and failing back an HTLC is hub behaviour, off-chain",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -494,7 +494,7 @@
    "statement": "HTLC deadlines chain across hops: the incoming revealBefore is at least the outgoing one plus the dispute windows. The Quint cell holds the hop margin HOP = 2 * LAG between the inbound and the onward deadline; the dispute-window term of the rule is not modelled.",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: the hop margin is off-chain policy; the chain's windows are H2",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -518,7 +518,7 @@
    "statement": "A dispute start carries every secret the starter knows for the locks in its proof.",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: what a starter puts into a dispute start is decided off-chain; the chain applies reveals as given (H1)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -547,7 +547,7 @@
    "statement": "A party never disputes over a deadline that an ack arriving in the same frame already resolved (follows from R-E1).",
    "source": "lessons.md section 6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: when to dispute is an off-chain decision",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -632,7 +632,7 @@
    "statement": "AccountInfo.ondeltaEpoch advances on every cooperative settlement, C2R and dispute finalization (not on R2C); proofs and updates commit to it, so a proof for an earlier baseline fails E4.",
    "source": "contracts-decisions.md C1",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -671,8 +671,8 @@
    "statement": "processBatch takes the entityId; the batch payload commits to it and the hanko must verify to exactly that entity.",
    "source": "contracts-decisions.md C2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -695,7 +695,7 @@
    "statement": "Every dispute window stays above LAG (the 60 s testnet floor of H2 meets it). The Quint cell holds the two windows together exceeding the honest side's answer time, REACT = 2 * LAG, in ticks; the 60 s floor is the Rig's.",
    "source": "contracts-decisions.md J2 (C11 pinned)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: the contracts' part is the floor itself, H2; C11 is the relation to LAG, held by Quint and the rig",
     "rig": "hold",
@@ -778,7 +778,7 @@
    "statement": "Response windows come from the starter's proof; the floor is 60 s on testnet (6 h on mainnet, gated by N3); zero is refused as ResponseWindowTooShort. The Quint cell holds the floor as a parameter in ticks (a zero window is refused, the windows come from the starter's proof); the 60 s testnet and 6 h mainnet values and the N3 mainnet gate are not in it.",
    "source": "contracts-decisions.md H2",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -803,7 +803,7 @@
    "source": "contracts-decisions.md H3",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "n/a: an on-chain payout rule; xln.ts reads its outcome as J-events (R-J1)"
@@ -992,8 +992,8 @@
    "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE).",
    "source": "contracts-decisions.md F1",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -1021,7 +1021,7 @@
    "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
    "source": "contracts-decisions.md F16 (memory)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -1094,8 +1094,8 @@
    "statement": "A side that already holds the peer's ack of its own frame at height h never acks a different frame at h (the contract cannot enforce it: a second acked body outranks the first if the peer proposes as LEFT).",
    "source": "contracts-decisions.md A12 (Runtime and spec rule)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the rule says the contract cannot enforce it: a second acked body outranks the first (A12)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -1119,7 +1119,7 @@
    "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter. The Quint cell holds signing only for the current epoch and the proof nonce as its own counter (stale and leaping nonces refused, no skips); it does not hold the co-signed baseline for epoch + 1 at frame nonce + 3: the spec models R-IMPLICIT-BASELINE instead, where no baseline is co-signed.",
    "source": "contracts-decisions.md / Arrival Q-D-4, Q-D-19; Quint A13",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: signing is off-chain; the chain's own epoch check is C1",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -1130,7 +1130,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "baseline-too-low",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "mutant",
@@ -1214,7 +1214,7 @@
    "source": "contracts-decisions.md J2/F1",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the contract's part (a signed batch never expires and is final at its nonce) is R-FINAL-NONCE, which widens this rule",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (J batch-planner slice)"
@@ -1305,8 +1305,8 @@
    "statement": "Sign a batch only after it simulates successfully at the head, at the final signed budget, sized from the applyBatch self-call gas plus a named margin.",
    "source": "contracts-decisions.md third round of #54",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: signing after a simulation is the planner's duty; the chain's gas behaviour is J5 and F16",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (J batch-planner slice)"
@@ -1403,7 +1403,7 @@
    "source": "contracts-decisions.md (memory, #62)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (J batch-planner slice)"
@@ -1427,7 +1427,7 @@
    "source": "contracts-decisions.md (memory)",
    "layers": {
     "arrival": "hold",
-    "quint": "owed: #44",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "owed: contracts thread (a test carrying the id; the debt queue is tested under other names, e.g. DebtChunking.t.sol)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (J batch-planner slice)"
@@ -1450,8 +1450,8 @@
    "statement": "A frame is persisted before any output leaves (durable before send and before ack).",
    "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Runtime slice)"
@@ -1474,7 +1474,7 @@
    "statement": "A repeat of the frame at my head is answered with the same ack in any replica state (Open, Proposed or Received).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-1",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: answering a repeated frame is off-chain Account behaviour",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -1648,8 +1648,8 @@
    "statement": "The two views never differ by more than LAG; the goal is stated on its own: no expiry commits while either view is at or before the deadline.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-4",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: a relation between two off-chain views",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -1659,13 +1659,13 @@
      "kind": "test",
      "layer": "arrival",
      "name": "an expiry commits only when both views are strictly past the deadline",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
      "layer": "quint",
      "name": "expiredEarly",
-     "owed": "#44"
+     "owed": "spec thread, new Quint branch"
     }
    ]
   },
@@ -1674,7 +1674,7 @@
    "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts. The Quint cell holds the drop with notice (every tx ends committed or refused, `refused` is a list of txs); the fault peer_refused and the peer's fault tag on the notice are not in the model.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: a mempool rule of the off-chain Entity",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -1922,8 +1922,8 @@
    "statement": "A local tx is checked at enqueue against the planning state plus everything queued, and again at propose against the committed head. A bound on the txs of one frame and on the tokens of an Account is not here: it belongs to the transport queue (Q-T-9) and the proof body (A4).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-6",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -1966,7 +1966,7 @@
    "statement": "A frame names its parent by hash; the receiver refuses a frame whose parent is not its head.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-7",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -2010,8 +2010,8 @@
    "statement": "Arrival keeps a FIFO link with bounded loss and duplication (widening keeps every property); Quint keeps an unordered network with free redelivery as a recorded choice.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-8",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: what the network may do is a modelling choice of the specs",
     "rig": "n/a: a modelling choice of the specs, with no system state for the walk",
     "ts": "hold"
@@ -2035,7 +2035,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-9",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2045,7 +2045,7 @@
      "kind": "test",
      "layer": "quint",
      "name": "authority",
-     "owed": "#44"
+     "owed": "spec thread, new Quint branch"
     },
     {
      "kind": "test",
@@ -2075,7 +2075,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-10",
    "layers": {
     "arrival": "owed: Arrival ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: an off-chain Account rule about who may resolve; the chain settles a lock by its secret and deadline (H1)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2108,8 +2108,8 @@
    "statement": "The proof nonce is its own counter; nothing skips it inside an epoch (MAX_NONCE_GAP = 0); signatures are one per (signer, nonce, author side).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-11",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the counter discipline is the signers'; the chain accepts a higher nonce and keeps its gap (A18)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: A4 (the frame nonce is the signed body's)"
@@ -2124,7 +2124,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "baseline-too-low",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
@@ -2140,7 +2140,7 @@
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-12",
    "layers": {
     "arrival": "owed: Arrival aligns the constant at the ledger merge",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the contracts have no lock horizon; it is an off-chain refusal",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2168,8 +2168,8 @@
    "statement": "Reserves plus collateral never change on one Account, and any RCPAN body settled by the chain's payout keeps debt within the credit granted (two killers).",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-14",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "owed: contracts thread (a test carrying the id; conservation is tested under other names, e.g. the DepositoryConservation invariants)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2179,7 +2179,7 @@
      "kind": "test",
      "layer": "arrival",
      "name": "money is conserved",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "mutant",
@@ -2806,7 +2806,7 @@
    "statement": "A settlement that takes collateral out (C2R) is co-signed only if both sides stay within their credit afterwards, the same RCPAN bound a payment meets; otherwise it is refused, never signed. The ts cell holds the ledger-level refusal; the approver that maps signed diffs to a withdrawal is owed A4. The Quint cell holds the predicate `settlementOk`, checked against the chain's payout in compose.qnt; no Account or settle action calls it, so the co-signing path itself is not in the model.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 (Q-X-3 closed)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
     "quint": "hold",
     "contract": "n/a: co-signing is an off-chain decision; the chain pays out the signed settlement (R-CONSERVE)",
     "rig": "owed: #69 (known finding, owner A1 cut)",
@@ -2860,8 +2860,8 @@
    "statement": "A credit limit cannot be lowered below what the counterparty is currently using, open holds counted as used; the refusal is credit_below_usage.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30; rig finding (2) lending credit revoked below used",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "n/a: credit limits are off-chain Account state",
     "rig": "owed: #69 (known finding, owner v2 lending)",
     "ts": "hold"
@@ -2890,7 +2890,7 @@
    "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
    "layers": {
     "arrival": "owed: spec thread (an Arrival page for the hold cap)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "owed: contracts thread (a test carrying the id; the E10 revert at 32 transformers is the contract side)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2924,7 +2924,7 @@
    "source": "Review B of PR 73; Quint HtlcLock lock_exists",
    "layers": {
     "arrival": "owed: spec thread (an Arrival page for a hold in an open slot)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: an off-chain Account refusal; the chain reads the holds of a proof body as signed",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -2943,7 +2943,7 @@
    "source": "Review B of PR 73 (coordinator decision 09-30); Quint HtlcResolve{id}, the contract's slot ids",
    "layers": {
     "arrival": "owed: spec thread (an Arrival page for addressing a hold by slot)",
-    "quint": "owed: #44 (id not in a name yet)",
+    "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: an off-chain Account addressing rule; the chain reads the holds of a proof body as signed",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "hold"
@@ -3025,7 +3025,7 @@
    "statement": "From ondelta epoch 1 the empty state (offdelta 0, no clause, nonce = stored + 1, Right author, floor windows) is a valid dispute start proof with no signature and settles at ondelta; signed frames outrank it through counters; a counter's windows may lengthen, never shorten.",
    "source": "contracts-decisions.md Q-D-21 (D2), PR 'Implicit baseline'",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "owed: spec thread, next Arrival page",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -3161,7 +3161,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "a spec bug for the implicit start",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
@@ -3210,7 +3210,7 @@
    "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it. The Quint cell holds the first signed proof of an epoch taking its nonce from the stored nonce read from the chain (settle.qnt, first-proof-nonce-derived-from-the-tip); the Runtime refusing to sign a proof at stored + 1 is the ts cell's.",
    "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "owed: spec thread, next Arrival page",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -3236,7 +3236,7 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "post-nonce-low (retargeted to the trap)",
-     "owed": "#41"
+     "owed": "spec thread, next Arrival page"
     },
     {
      "kind": "test",
@@ -3256,7 +3256,7 @@
    "statement": "Inside an epoch the response windows of a dispute never decrease: a counter and a signed final body may carry longer windows than the dispute started with, never shorter ones (E9).",
    "source": "contracts-decisions.md R-IMPLICIT-BASELINE item 5 (coordinator 09-30)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "owed: spec thread, next Arrival page",
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -3305,8 +3305,8 @@
    "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
    "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: kernel thread (the swap step)"
@@ -3381,7 +3381,7 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "swap-fill-rounds-up",
-     "owed": "#44"
+     "owed": "spec thread, new Quint branch"
     },
     {
      "kind": "test",
@@ -3440,8 +3440,8 @@
    "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
    "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
    "layers": {
-    "arrival": "owed: #41",
-    "quint": "owed: #44",
+    "arrival": "owed: spec thread, next Arrival page",
+    "quint": "owed: spec thread, new Quint branch",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
     "ts": "owed: the cut (Entity and Runtime)"
