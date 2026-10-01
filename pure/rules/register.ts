@@ -75,8 +75,9 @@ const parseRow = (raw: unknown, index: number): Result<Row, ParseError> => {
   return pass({ id, statement, source, cells: cells.value, killers: parsedKillers.value, retiredBy });
 };
 
-// The boundary where a JSON parse may throw (registered in style/README): bad text is a BadRegister, not a crash.
-const parseJson = (text: string): Result<unknown, ParseError> => {
+// The boundary where a JSON parse may throw (registered in style/README): bad text is a BadRegister, not a crash. rules/progress.ts reads the
+// deploy manifest through it too.
+export const parseJson = (text: string): Result<unknown, ParseError> => {
   try {
     return pass(JSON.parse(text));
   } catch (cause) {

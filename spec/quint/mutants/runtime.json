@@ -1,0 +1,75 @@
+{
+  "files": [
+    "runtime.qnt",
+    "runtime_test.qnt"
+  ],
+  "mutants": [
+    {
+      "id": "send-before-persist",
+      "why": "R3: the signed frame leaves before it is durable; a crash re-derives a different frame at the same height (equivocation)",
+      "file": "runtime.qnt",
+      "old": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked\n    }\n  }\n\n  // Step 2",
+      "new": "      disk' = disk, jhead' = jhead, net' = net.union(Set({ h: mem.h + 1, body: mem.applied.concat(batch) })), acked' = acked\n    }\n  }\n\n  // Step 2",
+      "killedBy": "invariant:no_equivocation"
+    },
+    {
+      "id": "ack-before-persist",
+      "why": "R3: a command is acknowledged to its user when applied in memory; a crash loses it",
+      "file": "runtime.qnt",
+      "old": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked\n    }\n  }\n\n  // Step 2",
+      "new": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked.union(batch.foldl(Set(), (a, k) => if (isCmd(k)) a.union(Set(k)) else a))\n    }\n  }\n\n  // Step 2",
+      "killedBy": "invariant:acked_durable"
+    },
+    {
+      "id": "cursor-moves-when-read",
+      "why": "R2: the J cursor is made durable when an event is read, not with the frame that applies it; a crash loses the event",
+      "file": "runtime.qnt",
+      "old": "    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),\n    mem' = mem, disk' = disk,",
+      "new": "    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),\n    mem' = { ...mem, cursor: mem.cursor + 1 }, disk' = { ...disk, cursor: mem.cursor + 1 },",
+      "killedBy": "invariant:exactly_once_j"
+    },
+    {
+      "id": "cursor-not-with-state",
+      "why": "R2: the durable write of a frame leaves the cursor behind the history it applied",
+      "file": "runtime.qnt",
+      "old": "    disk' = mem, phase' = Durable,",
+      "new": "    disk' = { ...mem, cursor: disk.cursor }, phase' = Durable,",
+      "killedBy": "invariant:exactly_once_j"
+    },
+    {
+      "id": "no-dedupe",
+      "why": "R2: an input that was applied is applied again when it arrives again",
+      "file": "runtime.qnt",
+      "old": "    val due = inbox.filter(k => not(has(mem.applied, k)))",
+      "new": "    val due = inbox",
+      "killedBy": "invariant:exactly_once_j"
+    },
+    {
+      "id": "frame-in-arrival-order",
+      "why": "R-R1: the frame applies its inputs in another order than the canonical one",
+      "file": "runtime.qnt",
+      "old": "    val batch = sorted(due)",
+      "new": "    val batch = sorted(due).foldl([], (acc, k) => [k].concat(acc))",
+      "killedBy": "invariant:canonical_frames"
+    },
+    {
+      "id": "empty-frame",
+      "why": "R-R1: a frame opens with nothing due (no idle gate)",
+      "file": "runtime.qnt",
+      "old": "      phase == Idle, due.size() > 0, frames < MAXF,",
+      "new": "      phase == Idle, frames < MAXF,",
+      "killedBy": "invariant:canonical_frames"
+    },
+    {
+      "id": "watcher-skips-the-skip-event",
+      "why": "R7: the watcher reads only the kinds it knows the Entity waits for and passes over DisputeOpSkipped; a node whose start was skipped waits forever for a DisputeStarted that never comes",
+      "file": "runtime.qnt",
+      "old": "    mem.cursor < jhead,\n    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),",
+      "new": "    mem.cursor < jhead, not(isSkipEvent(mem.cursor + 1)),\n    inbox' = inbox.union(Set(jKey(mem.cursor + 1))),",
+      "killedBy": "test:skipEventIsReadInOrderTest"
+    }
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "runtime_test.qnt"
+}
