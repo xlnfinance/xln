@@ -1,7 +1,7 @@
-// One Runtime's shell, running: the Host over its WAL and the chain (drive.ts), a listening port, the connections to its
-// peers (mesh.ts) and a timer. It is the one place that owns the clock of a node and the order things happen in: every
-// event (a command, a J height, a connection, a line, a tick) is a message in one queue, handled whole before the next,
-// so the Station is only ever touched by one move at a time (R-DURABLE).
+// One Runtime's shell, running: the Host over its WAL and the chain (drive.ts), a listening port, the connections to
+// its peers (mesh.ts) and a timer. It is the one place that owns the clock of a node and the order things happen in:
+// every event (a command, a J height, a connection, a line, a tick) is a message in one queue, handled whole before the
+// next, so the Station is only ever touched by one move at a time (R-DURABLE).
 //
 // The state is a value, and each move gives the next one. What leaves goes out only from a move that made its rows
 // durable; a message for a peer that has no connection up is dropped, and the timer is what sends it again: an Account
@@ -12,15 +12,19 @@
 import { EventEmitter, on } from "node:events";
 import type { JHeight } from "../../../account/clause/clock.ts";
 import type { EntityId, EntityInput, Outbound } from "../../../entity/model.ts";
+import type { WatchFault, Watch } from "../../../j/watch.ts";
 import { err, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";
 import { heard, submit } from "../../host.ts";
 import type { HostNotice } from "../../model.ts";
-import { command, drain, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn } from "../drive/drive.ts";
+import {
+  command, drain, pump, start, type Boot, type DriveFault, type Shell, type Station, type Turn,
+} from "../drive/drive.ts";
 import { MAX_LINE, type Key, type Peer, type RuntimeId } from "../link/link.ts";
 import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
+import { beginAt, poll, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
 import { dialTcp, type Listener, type SocketFault, type Wire } from "./socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
@@ -28,11 +32,16 @@ export type Config = Readonly<{
   shell: Shell; boot: Boot; key: Key; table: readonly Peer[]; tickMs: number; nonce: () => Uint8Array;
   /** A message the link is to lose on its way out: the chaos a test makes. A node that runs for real loses none. */
   lost: (message: Outbound) => boolean;
+  /** The chain's J events for the Entity, read at depth by the node's own loop; none when the node has no J loop. */
+  watch: WatchConfig | undefined;
 }>;
 
 export type Stopped = Tagged<"stopped">;
 
-export type Fault = DriveFault | Stopped;
+/** What ends a node's work: a disk, the chain's submit path, the Runtime, or a watcher invariant broken. */
+export type NodeFault = DriveFault | WatchFault | BadPeer;
+
+export type Fault = NodeFault | Stopped;
 
 /** Lines written and lines delivered to the Host, and messages dropped for want of a connection. */
 export type Counts = Readonly<{ sent: number; heard: number; dropped: number }>;
@@ -40,7 +49,9 @@ export type Counts = Readonly<{ sent: number; heard: number; dropped: number }>;
 /** What the node is, right now: the Station, the counts, the last notices and refusals, and who is connected. */
 export type Look = Readonly<{
   station: Station; counts: Counts; notices: readonly HostNotice[]; refused: readonly string[];
-  linked: readonly RuntimeId[]; fatal: DriveFault | undefined; busy: boolean;
+  linked: readonly RuntimeId[]; fatal: NodeFault | undefined; busy: boolean;
+  /** The block the J loop has delivered up to, and why its last poll failed (the next tick polls again). */
+  cursor: bigint | undefined; watchFault: string | undefined;
 }>;
 
 export type Daemon = Readonly<{
@@ -78,7 +89,9 @@ type State = Readonly<{
   counts: Counts;
   notices: readonly HostNotice[];
   refused: readonly string[];
-  fatal: DriveFault | undefined;
+  fatal: NodeFault | undefined;
+  cursor: Watch | undefined;
+  watchFault: string | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
 }>;
 
@@ -172,7 +185,10 @@ const arrived = (rig: Rig, state: State, wire: Wire): State =>
 
 // ---- what leaves
 
-/** The Host's messages, each on its peer's connection; one with no connection up is dropped, and the timer is its resend. */
+/**
+ * The Host's messages, each on its peer's connection; one with no connection up is dropped, and the timer is its
+ * resend.
+ */
 const leaving = async (rig: Rig, state: State, sent: readonly Outbound[]): Promise<State> => {
   const going = sent.filter((message) => !rig.config.lost(message));
   const routed = route(state.mesh, going);
@@ -200,7 +216,9 @@ const heardLine = async (rig: Rig, state: State, conn: ConnId, text: string): Pr
   const { mesh, host, notices, write, delivered } = got.value;
   if (write !== undefined) await put(state, write);
   const counts = { ...state.counts, heard: state.counts.heard + (delivered ? 1 : 0) };
-  const next = { ...state, mesh, counts, station: { ...state.station, host }, notices: recent([...state.notices, ...notices]) };
+  const next = {
+    ...state, mesh, counts, station: { ...state.station, host }, notices: recent([...state.notices, ...notices]),
+  };
   return delivered ? concluded(rig, next, await drain(rig.config.shell, next.station)) : next;
 };
 
@@ -215,13 +233,48 @@ const ran = async (rig: Rig, state: State, run: Run, reply: Reply<Result<Turn, F
   return next;
 };
 
+// ---- the J loop
+
+/** The cursor: the chain's own block at the Runtime's view, which the WAL holds, unless the node has one. */
+const cursorOf = (watch: WatchConfig, state: State): Promise<Result<Watch, JFault>> =>
+  (state.cursor === undefined
+    ? beginAt(watch, state.station.host.runtime.view)
+    : Promise.resolve(ok(state.cursor)));
+
+/** A fault of the node's reads of the chain is tried again at the next tick; one of the watcher's checks is final. */
+const heldUp = (state: State, fault: JFault): State =>
+  (fault._tag === "port" ? { ...state, watchFault: `${fault.call}: ${fault.reason}` } : { ...state, fatal: fault });
+
+/** The events are in the WAL before the height is; the cursor moves only after the height's row (R-HEIGHT-ORDER). */
+const delivered = async (rig: Rig, state: State, delivery: Delivery): Promise<State> => {
+  const { shell } = rig.config;
+  const queued = delivery.events.reduce((host, input) => submit(host, { to: rig.self, input }), state.station.host);
+  const first = await concluded(rig, state, await drain(shell, { ...state.station, host: queued }));
+  if (first.fatal !== undefined) return first;
+  const height = { ...first.station, host: heard(first.station.host, delivery.height) };
+  const second = await concluded(rig, first, await drain(shell, height));
+  return second.fatal === undefined ? { ...second, cursor: delivery.watch } : second;
+};
+
+const listening = async (rig: Rig, state: State): Promise<State> => {
+  const { watch } = rig.config;
+  if (watch === undefined) return state;
+  const cursor = await cursorOf(watch, state);
+  if (!cursor.ok) return heldUp(state, cursor.error);
+  const next = { ...state, cursor: cursor.value };
+  const got = await poll(watch.port, cursor.value, watch.hosted);
+  if (!got.ok) return heldUp(next, got.error);
+  const quiet = { ...next, watchFault: undefined };
+  return got.value === undefined ? quiet : delivered(rig, quiet, got.value);
+};
+
 const tick = async (rig: Rig, state: State): Promise<State> => {
   const now = waitingOn(state.station, rig.self);
   const due = [...now].filter(([peer, mark]) => state.stalled.get(peer) === mark).map(([peer]) => peer);
   const resent = resending({ ...state, stalled: now }, rig.self, due);
   const drained = await drain(rig.config.shell, resent.station);
   const made = drained.ok && busy(drained.value.station) ? await pump(rig.config.shell, drained.value) : drained;
-  const next = await concluded(rig, resent, made);
+  const next = await listening(rig, await concluded(rig, resent, made));
   const timer = setTimeout(() => { post(rig, { _tag: "tick" }); }, rig.config.tickMs);
   return { ...redialed(rig, next), timer };
 };
@@ -234,6 +287,7 @@ const replied = <T>(reply: Reply<T>, value: T, state: State): Promise<State> => 
 const looked = (state: State): Look => ({
   station: state.station, counts: state.counts, notices: state.notices, refused: state.refused,
   linked: linked(state.mesh), fatal: state.fatal, busy: busy(state.station),
+  cursor: state.cursor?.applied.number, watchFault: state.watchFault,
 });
 
 const handled = (rig: Rig, state: State, mail: Mail): Promise<State> => {
@@ -241,7 +295,9 @@ const handled = (rig: Rig, state: State, mail: Mail): Promise<State> => {
     case "look": return replied(mail.reply, looked(state), state);
     case "accepted": return Promise.resolve(arrived(rig, state, mail.wire));
     case "closed": return Promise.resolve(without(state, mail.conn));
-    case "tell": return ran(rig, state, (station) => command(rig.config.shell, station, rig.self, mail.input), mail.reply);
+    case "tell": return ran(
+      rig, state, (station) => command(rig.config.shell, station, rig.self, mail.input), mail.reply,
+    );
     case "rise": return ran(rig, state, (station) =>
       drain(rig.config.shell, { ...station, host: heard(station.host, mail.height) }), mail.reply);
     case "dialed": return connected(rig, state, mail.peer, mail.wire);
@@ -255,7 +311,7 @@ const answered = (rig: Rig, state: State, mail: Mail): Promise<State> => {
   if (state.fatal === undefined) return handled(rig, state, mail);
   switch (mail._tag) {
     case "tell": case "rise": return replied(mail.reply, err(state.fatal), state);
-    case "line": return replied(mail.done, undefined, state);
+    case "line": mail.done(); return Promise.resolve(state);
     case "look": case "accepted": case "closed": return handled(rig, state, mail);
     case "dialed": case "tick": return Promise.resolve(state);
   }
@@ -299,9 +355,10 @@ export const startDaemon = async (config: Config, listener: Listener): Promise<R
   const first: State = {
     station: started.value.station, mesh: startMesh(config.key, config.table), wires: new Map(), next: 1,
     dialing: new Set(), stalled: new Map(), counts: { sent: 0, heard: 0, dropped: 0 }, notices: [], refused: [],
-    fatal: undefined, timer: undefined,
+    fatal: undefined, cursor: undefined, watchFault: undefined, timer: undefined,
   };
-  const finished = leaving(rig, first, started.value.sent).then((state) => run(rig, mails, state)).then((state) => ended(rig, state));
+  const finished = leaving(rig, first, started.value.sent)
+    .then((state) => run(rig, mails, state)).then((state) => ended(rig, state));
   accepting(rig);
   post(rig, { _tag: "tick" });
   const asked = <T>(make: (reply: Reply<T>) => Mail, after: (state: State) => T): Promise<T> =>

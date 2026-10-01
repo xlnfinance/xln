@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { err, ok } from "../kernel/core/result.ts";
+import { tokenOf } from "../account/fixtures.ts";
 import { decodeLogs, type ChainEvent } from "./log.ts";
 import { observe, readingKey, readingsOf, type Accounts, type Addressed, type Reading } from "./observe.ts";
 import { DEPOSITORY, entityOf, hashOf, hexOf, logOf, must } from "./fixtures.ts";
@@ -26,6 +27,12 @@ const countered = (block: bigint, index: bigint, sender = LEFT, counterentity = 
 const finalized = (block: bigint, index: bigint, sender = RIGHT, counterentity = LEFT) =>
   logOf("DisputeFinalized", {
     sender, counterentity, nonce: 7n, finalProofbodyHash: hexOf(5n), finalizationEvidenceHash: hexOf(6n),
+  }, block, index);
+
+const settled = (block: bigint, index: bigint, rows: readonly (readonly [bigint, bigint, bigint])[], left = LEFT) =>
+  logOf("AccountSettled", {
+    settled: [[left, RIGHT, rows.map(([token, collateral, ondelta]) =>
+      [token, 1n, 2n, collateral, [0n, ondelta]]), 7n]],
   }, block, index);
 
 const eventsOf = (...logs: Parameters<typeof decodeLogs>[1]): readonly ChainEvent[] =>
@@ -120,5 +127,30 @@ describe("j/observe", () => {
     ]);
     expect(readingsOf(events, [THIRD])).toEqual([{ block: 2n, blockHash: hashOf(2n), left: LEFT, right: THIRD }]);
     expect(readingsOf(events, [])).toEqual([]);
+  });
+
+  test("R-J-COLLATERAL an AccountSettled is a j_collateral per token for each hosted party, no reading needed", () => {
+    const events = eventsOf(settled(5n, 0n, [[1n, 100n, 100n], [3n, 7n, 0n]]));
+    expect(readingsOf(events, [LEFT, RIGHT])).toEqual([]);
+    expect(observe(events, [LEFT, RIGHT], accountsOf())).toEqual(ok([
+      toward(LEFT, { _tag: "j_collateral", peer: RIGHT, token: tokenOf(1n), collateral: 100n, ondelta: 100n }),
+      toward(LEFT, { _tag: "j_collateral", peer: RIGHT, token: tokenOf(3n), collateral: 7n, ondelta: 0n }),
+      toward(RIGHT, { _tag: "j_collateral", peer: LEFT, token: tokenOf(1n), collateral: 100n, ondelta: 100n }),
+      toward(RIGHT, { _tag: "j_collateral", peer: LEFT, token: tokenOf(3n), collateral: 7n, ondelta: 0n }),
+    ]));
+    expect(observe(events, [RIGHT], accountsOf())).toEqual(ok([
+      toward(RIGHT, { _tag: "j_collateral", peer: LEFT, token: tokenOf(1n), collateral: 100n, ondelta: 100n }),
+      toward(RIGHT, { _tag: "j_collateral", peer: LEFT, token: tokenOf(3n), collateral: 7n, ondelta: 0n }),
+    ]));
+    expect(observe(events, [THIRD], accountsOf())).toEqual(ok([]));
+  });
+
+  test("R-J-COLLATERAL the snapshots of one Account stay in the chain's order among its other events", () => {
+    const events = eventsOf(
+      settled(5n, 0n, [[1n, 100n, 100n]]), advance(5n, 1n, 1n), settled(5n, 2n, [[1n, 90n, 90n]]),
+    );
+    const heard = observe(events, [LEFT], accountsOf(readAt(5n, 1n, 6n)));
+    expect(heard.ok && heard.value.map(({ event }) => (event._tag === "j_collateral" ? event.collateral : event._tag)))
+      .toEqual([100n, "j_epoch", 90n]);
   });
 });

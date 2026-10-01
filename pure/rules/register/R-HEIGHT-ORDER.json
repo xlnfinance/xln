@@ -7,14 +7,13 @@
   "quint": "owed: spec thread (spec/quint/runtime.qnt part 3 `exactly_once_j`, QUESTIONS R2, is the spec side; no name carries this id yet)",
   "contract": "n/a: no contract code takes part; it is the Host's order of two inputs",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-  "ts": "owed: transport thread, the J loop in the shell slice (pure/host/shell/): hands a height over after the J events of its delivery are in the WAL and moves the cursor once a committed j_height row holds it; host.ts heard only trusts that"
+  "ts": "hold"
  },
  "killers": [
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-HEIGHT-ORDER the J loop hands a height over only after the J events of its delivery are in the WAL",
-   "owed": "transport thread, the J loop in the shell slice"
+   "name": "R-HEIGHT-ORDER the events are in the WAL before the height, and the cursor is the height's"
   }
  ]
 }

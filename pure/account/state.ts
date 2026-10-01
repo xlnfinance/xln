@@ -3,7 +3,7 @@
 // transformers of every token (Account.sol MAX_DISPUTE_TRANSFORMERS), so the count that must stay at or below 32 is
 // the Account's, and one secret opens one clause in the whole Account (R-ONE-LOCK-PER-HASH).
 import { mapSet } from "../kernel/core/collections.ts";
-import { emptyLedger, MAX_HOLDS } from "./ledger.ts";
+import { emptyLedger, MAX_HOLDS, onChain } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, Ledger, TokenId } from "./model.ts";
 
 export const emptyAccount: AccountState = { ledgers: new Map(), quotes: [], offers: [] };
@@ -12,6 +12,10 @@ export const ledgerOf = (s: AccountState, token: TokenId): Ledger => s.ledgers.g
 
 export const withLedger = (s: AccountState, token: TokenId, l: Ledger): AccountState =>
   ({ ...s, ledgers: mapSet(s.ledgers, token, l) });
+
+/** The Account's token with the collateral and ondelta the chain holds for it (R-J-COLLATERAL). */
+export const withChain = (s: AccountState, token: TokenId, collateral: bigint, ondelta: bigint): AccountState =>
+  withLedger(s, token, onChain(ledgerOf(s, token), collateral, ondelta));
 
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);

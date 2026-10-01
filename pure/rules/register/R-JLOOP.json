@@ -1,0 +1,84 @@
+{
+ "id": "R-JLOOP",
+ "statement": "A node reads the Depository at each tick, from the cursor to the newest block that is the confirmation depth below the head and at most 64 blocks at a time; it hands the Entity the events of those blocks, then the height, and moves the cursor only after both are in the WAL; a restart begins at the view its WAL holds; a failed read is tried again at the next tick, and a broken chain (a reorg deeper than the depth) or a malformed log ends the node.",
+ "source": "plan/backlog/e2e.md S3; R-WATCH-ORDER, R-WATCH-DEPTH, R-HEIGHT-ORDER; D9 (act on J events only at a configured depth)",
+ "layers": {
+  "arrival": "n/a: the Arrival specs take J events and heights as given",
+  "quint": "n/a: the Quint model takes J events as given; reading a node is the Host's",
+  "contract": "n/a: no contract code takes part; the loop reads the deployed Depository's logs",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP the head is the node's block number"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a block is asked for by number, refused when it is another's or its hashes are no hashes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP the Depository's logs in a range come back whole, lowercase, and only those asked for"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a node tells its Entity what the chain's final blocks hold; its view moves up to them"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a restart begins the J loop at the view its WAL holds, not at the chain's start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a read of the chain that fails is tried again at the next tick, and the node goes on"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a block off the cursor's chain ends the node, and every request gets that answer"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a poll reads the final blocks, their logs and readings, and delivers events and height"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a block not buried yet is not read: nothing is delivered, nothing is asked past the head"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a node that was away reads a bounded number of blocks per poll and goes on at the next"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a block the node cannot give is the port's fault, and no log is read after it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP logs or a reading the node cannot give are the port's fault; nothing delivered"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP a block off the cursor is a reorg deeper than the depth; nothing is read for it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-JLOOP the cursor begins at the chain's own block, or at the port's fault"
+  }
+ ]
+}

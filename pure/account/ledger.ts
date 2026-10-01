@@ -122,6 +122,12 @@ export const deposit = (l: Ledger, side: Side, amount: bigint): Step =>
     ({ ...l, collateral: l.collateral + n, ondelta: side === "left" ? l.ondelta + n : l.ondelta }));
 
 /**
+ * What the chain holds for the token now: its collateral and ondelta are the chain's to say, so they are set as they
+ * stand and never worked out from a deposit (R-J-COLLATERAL). The off-chain fields are the Account's own and stay.
+ */
+export const onChain = (l: Ledger, collateral: bigint, ondelta: bigint): Ledger => ({ ...l, collateral, ondelta });
+
+/**
  * C2R: `side` takes `amount` out of the collateral; a Left withdrawal lowers ondelta with it. Smaller collateral can
  * leave a side outside its credit, which is the refusal (R-SETTLE-CREDIT).
  */

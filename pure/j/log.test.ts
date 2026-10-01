@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { EventFragment } from "ethers";
 import { err, ok } from "../kernel/core/result.ts";
 import { none } from "../kernel/core/option.ts";
+import { tokenOf } from "../account/fixtures.ts";
 import {
   bytes32, address, decodeLog, decodeLogs, IGNORED, READ_SIGNATURES, topicOf, type ChainEvent, type RawLog,
 } from "./log.ts";
@@ -27,11 +28,13 @@ describe("j/log", () => {
   });
 
   test("R-WATCH-CLOSED every log of the real lifecycle decodes: the four events are read, the rest are ignored", () => {
+    // AccountSettled is the fifth event read and has its own test below (R-J-COLLATERAL).
     const read = new Set(["AccountEpochAdvanced", "DisputeStarted", "CounterDisputeRegistered", "DisputeFinalized"]);
     const phases = Object.values(lifecyclePhases);
     const logged = (e: (typeof phases)[number]["events"][number], p: number) =>
       ({ e, log: logOf(e.name, e.args, BigInt(p + 1), BigInt(e.logIndex)) });
-    const seen = phases.flatMap((phase, p) => phase.events.map((e) => logged(e, p)));
+    const seen = phases.flatMap((phase, p) => phase.events.map((e) => logged(e, p)))
+      .filter(({ e }) => e.name !== "AccountSettled");
     expect(seen.length).toBeGreaterThan(10);
     seen.forEach(({ e, log }) => {
       const decoded = decodeLog(DEPOSITORY, log);
@@ -40,6 +43,68 @@ describe("j/log", () => {
     });
     expect(seen.filter(({ e }) => read.has(e.name)).length).toBeGreaterThanOrEqual(3);
   });
+
+  test("R-J-COLLATERAL the real deposit and settlement read the collateral and ondelta the contract stored", () => {
+    const settled = Object.values(lifecyclePhases)
+      .flatMap((phase) => phase.events.filter((e) => e.name === "AccountSettled"));
+    const read = settled.map((e, i) => must(decodeLog(DEPOSITORY, logOf(e.name, e.args, BigInt(i + 1), 0n))));
+    const holdings = read.map((found) => (found._tag === "some" && found.value._tag === "account_settled"
+      ? found.value.holdings.map(({ token, collateral, ondelta }) => [token, collateral, ondelta]) : []));
+    expect(holdings).toEqual([[[1n, 100n, 100n]], [[1n, 90n, 90n]]]);
+  });
+
+  type Row = Readonly<{ token: bigint; collateral: bigint; high: bigint; low: bigint }>;
+
+  const settledLog = (rows: readonly Row[], left = LEFT, right = RIGHT): RawLog =>
+    logOf("AccountSettled", {
+      settled: [[left, right, rows.map((r) => [r.token, 1n, 2n, r.collateral, [r.high, r.low]]), 7n]],
+    }, 6n, 1n);
+
+  const heldBy = (log: RawLog) => {
+    const found = must(decodeLog(DEPOSITORY, log));
+    return found._tag === "some" && found.value._tag === "account_settled" ? found.value : undefined;
+  };
+
+  test("R-J-COLLATERAL an AccountSettled is its entities and what it holds per token, an Int512 as words", () => {
+    const rows = [
+      { token: 1n, collateral: 100n, high: 0n, low: 100n },
+      { token: 3n, collateral: 5n, high: -1n, low: 2n ** 256n - 1n },
+      { token: 4n, collateral: 0n, high: 2n, low: 9n },
+    ];
+    expect(heldBy(settledLog(rows))).toEqual({
+      _tag: "account_settled", block: 6n, blockHash: hashOf(6n), index: 1n, left: LEFT, right: RIGHT,
+      holdings: [
+        { token: tokenOf(1n), collateral: 100n, ondelta: 100n },
+        { token: tokenOf(3n), collateral: 5n, ondelta: -1n },
+        { token: tokenOf(4n), collateral: 0n, ondelta: 2n * 2n ** 256n + 9n },
+      ],
+    });
+    expect(heldBy(settledLog([]))?.holdings).toEqual([]);
+  });
+
+  test("R-J-COLLATERAL an AccountSettled of a shape the Depository does not emit is a fault", () => {
+    const good = settledLog([{ token: 1n, collateral: 100n, high: 0n, low: 100n }]);
+    const word = (data: string, at: number, value: bigint): string =>
+      `${data.slice(0, 2 + at * 64)}${value.toString(16).padStart(64, "0")}${data.slice(2 + (at + 1) * 64)}`;
+    const at = { block: 6n, blockHash: hashOf(6n), index: 1n };
+    const fault = err({ _tag: "bad_log" as const, ...at, event: topicOf(READ_SIGNATURES[1] ?? "") });
+    const faulty = [
+      { ...good, topics: [...good.topics, LEFT] },
+      { ...good, data: good.data.slice(0, -64) },
+      { ...good, data: `${good.data}${"00".repeat(32)}` },
+      { ...good, data: `${good.data}${"00".repeat(32 * 6)}` },
+      { ...good, data: word(good.data, 0, 64n) },
+      { ...good, data: word(good.data, 1, 2n) },
+      { ...good, data: word(good.data, 2, 64n) },
+      { ...good, data: word(good.data, 5, 160n) },
+      { ...good, data: word(good.data, 7, 2n) },
+      { ...good, data: word(good.data, 7, 0n) },
+      settledLog([{ token: 1n, collateral: 1n, high: 0n, low: 1n }], RIGHT, LEFT),
+      settledLog([{ token: 1n, collateral: 1n, high: 0n, low: 1n }], LEFT, LEFT),
+    ];
+    faulty.forEach((log) => expect(decodeLog(DEPOSITORY, log)).toEqual(fault));
+  });
+
 
   test("an epoch advance reads its two entities from the topics and its epoch from the data", () => {
     const log = logOf("AccountEpochAdvanced", { left: LEFT, right: RIGHT, ondeltaEpoch: 9n }, 4n, 2n);

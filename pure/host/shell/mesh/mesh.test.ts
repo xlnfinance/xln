@@ -14,7 +14,7 @@ const BOB = entityOf(2);
 const keyFrom = (n: number): Key =>
   unwrapOr(keyOf(Uint8Array.from({ length: 32 }, () => n)), () => expect.unreachable("key"));
 
-const [LOW, HIGH] = [keyFrom(1), keyFrom(2)].sort((a, b) => (a.runtime < b.runtime ? -1 : 1)) as [Key, Key];
+const [LOW, HIGH] = [keyFrom(1), keyFrom(2)].toSorted((a, b) => (a.runtime < b.runtime ? -1 : 1)) as [Key, Key];
 
 const peer = (key: Key, ...entities: Peer["entities"]): Peer => ({ runtime: key.runtime, entities, endpoint: "tcp" });
 const TABLE = [peer(LOW, ALICE), peer(HIGH, BOB)];

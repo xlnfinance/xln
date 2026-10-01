@@ -13,7 +13,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-NODE nodes that are connected open an Account and commit a frame together without waiting for a tick"
+   "name": "R-NODE nodes that are connected open an Account and commit a frame together, no tick awaited"
   },
   {
    "kind": "test",

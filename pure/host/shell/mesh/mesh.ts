@@ -108,12 +108,14 @@ export const linked = (mesh: Mesh): readonly RuntimeId[] =>
 
 type Up = Readonly<{ conn: ConnId; link: Link }>;
 
+const NO_UP: Up | undefined = undefined;
+
 /** The connection a peer's messages go to: its newest one that is up. */
 const upTo = (mesh: Mesh, runtime: RuntimeId): Up | undefined =>
   [...mesh.conns].reduce<Up | undefined>((newest, [conn, link]) =>
     (link._tag === "up" && link.session.peer.runtime === runtime && (newest === undefined || conn > newest.conn)
       ? { conn, link }
-      : newest), undefined);
+      : newest), NO_UP);
 
 export type Routed = Readonly<{ mesh: Mesh; writes: readonly Write[]; dropped: readonly Outbound[] }>;
 

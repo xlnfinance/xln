@@ -2,124 +2,20 @@
 // and what a lost message or a dead peer costs (R-NODE, R-LINK-AUTH). The chain is a port that answers nothing, because
 // none of these commands asks the chain for anything.
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { type EntityId, emptyEntity, type Outbound } from "../../../entity/model.ts";
-import type { JAnswer } from "../../../j/batch/answer.ts";
-import { err, ok, unwrapOr, type Result } from "../../../kernel/core/result.ts";
-import { credit, entityOf, GOLD, open, pay } from "../../../runtime/fixtures.ts";
-import { setup, stamp } from "../../../runtime/fixtures.ts";
-import { limits } from "../../host.ts";
-import { DEPLOYED, GAS, TREASURY, WORLD } from "../fixtures.ts";
-import { keyOf, MAX_LINE, type Key, type Peer } from "../link/link.ts";
-import type { ChainPort, PortFault } from "../submit/chain.ts";
-import { lazySigner } from "../submit/signer.ts";
-import { type Config, type Daemon, type Look, startDaemon } from "./daemon.ts";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { err } from "../../../kernel/core/result.ts";
+import type { Outbound } from "../../../entity/model.ts";
+import { credit, GOLD, open, pay } from "../../../runtime/fixtures.ts";
 import type { Disk } from "../disk/disk.ts";
-import { fileDisk } from "./file-disk.ts";
-import { dialTcp, listenTcp, type Listener } from "./socket.ts";
-
-const ALICE = entityOf(1);
-const BOB = entityOf(2);
-const LOCAL = "127.0.0.1";
-
-const keyFrom = (seed: number): Key =>
-  unwrapOr(keyOf(Uint8Array.from({ length: 32 }, (_, i) => i + seed)), () => expect.unreachable("key"));
-
-const KEYS = new Map([[ALICE, keyFrom(1)], [BOB, keyFrom(40)]]);
-const keyOfEntity = (id: EntityId): Key => KEYS.get(id) ?? expect.unreachable("no key");
-
-const NO_CHAIN: PortFault = { _tag: "port", call: "send", reason: "no chain in this test" };
-
-const port: ChainPort = {
-  nonce: () => Promise.resolve(ok(4n)),
-  treasury: () => Promise.resolve(ok(new Map())),
-  simulate: () => Promise.resolve(err(NO_CHAIN)),
-  send: () => Promise.resolve(err(NO_CHAIN)),
-  answer: () => Promise.resolve(err(NO_CHAIN)),
-};
-
-/** A chain that takes a batch and says nothing of it until it is asked a second time, as a chain does for a block. */
-const slowChain = (log: string): ChainPort => ({
-  nonce: () => Promise.resolve(ok(4n)),
-  treasury: () => Promise.resolve(ok(TREASURY)),
-  simulate: () => Promise.resolve(ok({ _tag: "ok", applyGas: 100_000n })),
-  send: () => Promise.resolve(ok(undefined)),
-  answer: (batch) => {
-    appendFileSync(log, "asked\n");
-    const asked = readFileSync(log, "utf8").split("\n").length - 1;
-    const landed: JAnswer = { _tag: "landed", nonce: batch.nonce, batchHash: batch.digest, skipped: [] };
-    return Promise.resolve(ok(asked > 1 ? landed : undefined));
-  },
-});
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
-
-const until = async (check: () => Promise<boolean>, polls: number): Promise<boolean> =>
-  ((await check()) ? true : polls === 0 ? false : sleep(20).then(() => until(check, polls - 1)));
-
-const must = <T, E>(r: Result<T, E>): T => (r.ok ? r.value : expect.unreachable(JSON.stringify(r.error)));
-
-type Seat = Readonly<{ entity: EntityId; dir: string; listener: Listener }>;
-
-const peerOf = (seat: Seat): Peer =>
-  ({ runtime: keyOfEntity(seat.entity).runtime, entities: [seat.entity], endpoint: `${LOCAL}:${seat.listener.port}` });
-
-const seatOf = async (entity: EntityId, dir: string, at: number): Promise<Seat> =>
-  ({ entity, dir, listener: must(await listenTcp(LOCAL, at, MAX_LINE)) });
-
-const nonce = (): Uint8Array => crypto.getRandomValues(new Uint8Array(32));
-
-const keep = (): boolean => false;
-
-/** A node for `seat` that dials and answers `other`, its files in the seat's directory. */
-type Options = Readonly<{
-  tickMs: number; lost?: Config["lost"]; chain?: ChainPort; wrap?: (wal: Disk) => Disk;
-}>;
-
-const nodeOf = async (seat: Seat, other: Seat, options: Options): Promise<Daemon> => {
-  const { tickMs, lost = keep, chain = port, wrap = (disk) => disk } = options;
-  const wal = wrap(must(await fileDisk(`${seat.dir}/wal.log`)));
-  const journal = must(await fileDisk(`${seat.dir}/journal.log`));
-  const key = keyOfEntity(seat.entity);
-  const config: Config = {
-    shell: {
-      wal, io: { port: chain, signer: lazySigner(seat.entity, key), journal, gas: GAS },
-      now: () => stamp(BigInt(Date.now())),
-    },
-    boot: {
-      setup, genesis: emptyEntity(seat.entity), where: { entity: seat.entity, deployment: DEPLOYED, world: WORLD },
-      limits: unwrapOr(limits(32, 8), () => expect.unreachable("limits")),
-    },
-    key, table: [peerOf(other)], tickMs, nonce, lost,
-  };
-  return must(await startDaemon(config, seat.listener));
-};
-
-const fresh = (): string => mkdtempSync(`${tmpdir()}/daemon-`);
-
-const accountOf = (look: Look, self: EntityId, peer: EntityId) =>
-  look.station.host.runtime.entities.get(self)?.accounts.get(peer);
-
-const FIRST = 1;
-const SECOND = 2;
-
-/** Both sides hold the Account at the same committed head, with no frame waiting. */
-const agree = async (a: Daemon, b: Daemon, used = FIRST): Promise<boolean> => {
-  const [la, lb] = [accountOf(await a.look(), ALICE, BOB), accountOf(await b.look(), BOB, ALICE)];
-  return la !== undefined && lb !== undefined && la.head === lb.head && la.pending === undefined
-    && lb.pending === undefined && la.used >= used;
-};
-
-const WAIT = 150;
-const QUICK = 40;
-const SLOW = 60_000;
-
-const connected = async (a: Daemon, b: Daemon): Promise<boolean> =>
-  (await a.look()).linked.length === 1 && (await b.look()).linked.length === 1;
+import { MAX_LINE } from "../link/link.ts";
+import {
+  accountOf, ALICE, agree, BOB, connected, fresh, LOCAL, must, nodeOf, QUICK, SECOND, seatOf, sleep, slowChain, SLOW,
+  until, WAIT,
+} from "./scene.ts";
+import { dialTcp } from "./socket.ts";
 
 describe("host/shell/node two Runtimes over loopback sockets", () => {
-  test("R-NODE nodes that are connected open an Account and commit a frame together without waiting for a tick", async () => {
+  test("R-NODE nodes that are connected open an Account and commit a frame together, no tick awaited", async () => {
     const [a, b] = [await seatOf(ALICE, fresh(), 0), await seatOf(BOB, fresh(), 0)];
     const [alice, bob] = [await nodeOf(a, b, { tickMs: SLOW }), await nodeOf(b, a, { tickMs: SLOW })];
     expect(await until(() => connected(alice, bob), WAIT)).toBe(true);
@@ -185,7 +81,8 @@ describe("host/shell/node two Runtimes over loopback sockets", () => {
   test("R-LINK-AUTH a connection that does not open with the handshake is closed, and only that one", async () => {
     const [a, b] = [await seatOf(ALICE, fresh(), 0), await seatOf(BOB, fresh(), 0)];
     const alice = await nodeOf(a, b, { tickMs: SLOW });
-    const [first, second] = [must(await dialTcp(LOCAL, a.listener.port, MAX_LINE)), must(await dialTcp(LOCAL, a.listener.port, MAX_LINE))];
+    const first = must(await dialTcp(LOCAL, a.listener.port, MAX_LINE));
+    const second = must(await dialTcp(LOCAL, a.listener.port, MAX_LINE));
     await first.write("this is not a hello");
     expect(await first.next("")).toBeUndefined();
     expect((await alice.look()).refused).toHaveLength(1);
@@ -217,7 +114,8 @@ describe("host/shell/node two Runtimes over loopback sockets", () => {
     const full = `${a.dir}/full`;
     const failing = (disk: Disk): Disk => ({
       ...disk,
-      run: (ops) => (existsSync(full) ? Promise.resolve(err({ _tag: "disk", op: "write", reason: "full" })) : disk.run(ops)),
+      run: (ops) =>
+        (existsSync(full) ? Promise.resolve(err({ _tag: "disk", op: "write", reason: "full" })) : disk.run(ops)),
     });
     const [alice, bob] = [await nodeOf(a, b, { tickMs: QUICK, wrap: failing }), await nodeOf(b, a, { tickMs: QUICK })];
     await alice.tell(open(BOB));

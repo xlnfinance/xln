@@ -27,12 +27,13 @@ export type Wire = Readonly<{
 }>;
 
 const NEWLINE = "\n";
+const NO_LINE: Line | undefined = undefined;
 
 const lineFrom = (
   chunks: AsyncIterator<readonly unknown[]>, max: number, rest: string,
 ): Promise<Line | undefined> => {
   const cut = rest.indexOf(NEWLINE);
-  if (cut > max || (cut < 0 && rest.length > max)) return Promise.resolve(undefined);
+  if (cut > max || (cut < 0 && rest.length > max)) return Promise.resolve(NO_LINE);
   if (cut >= 0) return Promise.resolve({ line: rest.slice(0, cut), rest: rest.slice(cut + 1) });
   return chunks.next().then((got) => (got.done ? undefined : lineFrom(chunks, max, rest + String(got.value[0]))));
 };

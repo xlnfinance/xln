@@ -75,12 +75,14 @@ export type PeerMessage = Tagged<"peer_message", { from: EntityId; msg: Msg<Acco
  * or a finished dispute landed), with the nonce it stores now; `j_dispute` is a dispute started in `epoch` by `by`;
  * `j_dispute_over` is that dispute countered or finalized; `j_op_lapsed` is a co-signed settlement or withdrawal
  * that can no longer land (its batch reverted, its signatures ran out), named by the serial its action carried: a
- * report of an operation that is not the one out (a repeat, or an older one) changes nothing.
+ * report of an operation that is not the one out (a repeat, or an older one) changes nothing; `j_collateral` is what
+ * the chain holds for one token of the Account now (R-J-COLLATERAL): a state, not a change, so a repeat is a no-op.
  */
 export type JEvent =
   | Tagged<"j_epoch", { peer: EntityId; epoch: bigint; stored: bigint }>
   | Tagged<"j_dispute", { peer: EntityId; epoch: bigint; by: Side }>
   | Tagged<"j_dispute_over", { peer: EntityId }>
+  | Tagged<"j_collateral", { peer: EntityId; token: TokenId; collateral: bigint; ondelta: bigint }>
   | Tagged<"j_op_lapsed", { peer: EntityId; serial: bigint }>;
 
 /** What a peer asks the node to co-sign: a withdrawal of collateral as a shortcut (C2R) or as a settlement. */

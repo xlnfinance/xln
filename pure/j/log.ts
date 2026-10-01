@@ -1,13 +1,16 @@
-// What the J layer reads of the Depository's logs (R-WATCH-CLOSED, R-J1). The chain tells an Account four things, and
+// What the J layer reads of the Depository's logs (R-WATCH-CLOSED, R-J1). The chain tells an Account five things, and
 // each has one event: its epoch moved (`AccountEpochAdvanced`), a dispute was started, a counter was registered, a
-// dispute was finalized. Every other event the Depository can emit is named below as read by nobody. A log from the
-// Depository that is on neither list is a fault, so an event the contract adds is a decision here and never a silent
-// miss; log.test.ts holds both lists against the deployed ABI.
+// dispute was finalized, its collateral and ondelta stand at some amounts (`AccountSettled`). Every other event the
+// Depository can emit is named below as read by nobody. A log from the Depository that is on neither list is a fault,
+// so an event the contract adds is a decision here and never a silent miss; log.test.ts holds both lists against the
+// deployed ABI.
 //
-// A log is a list of topics and a data string. What this layer reads rides the indexed topics, but for the epoch.
+// A log is a list of topics and a data string. What this layer reads rides the indexed topics, but for the epoch and
+// for `AccountSettled`, whose entities and amounts are all in the data.
 import { err, map, ok, traverse, type Result } from "../kernel/core/result.ts";
 import { none, some, type Option } from "../kernel/core/option.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
+import type { TokenId } from "../account/model.ts";
 import { keccakHex, utf8 } from "../kernel/encoding/bytes.ts";
 
 /** `0x` and 64 lowercase hex digits: an entity id, a topic or a block hash. Their text order is their numeric order. */
@@ -33,8 +36,12 @@ export type RawLog = Readonly<Place & { address: Address; topics: readonly Bytes
 /** The two entities of a dispute event and the nonce it names: `sender` is the entity whose batch carried the op. */
 type Dispute = Readonly<Place & { sender: Bytes32; counter: Bytes32; nonce: bigint }>;
 
+/** What the chain holds for one token of an Account after an operation: its collateral and its ondelta. */
+export type Holding = Readonly<{ token: TokenId; collateral: bigint; ondelta: bigint }>;
+
 export type ChainEvent =
   | Tagged<"epoch_advanced", Place & { left: Bytes32; right: Bytes32; epoch: bigint }>
+  | Tagged<"account_settled", Place & { left: Bytes32; right: Bytes32; holdings: readonly Holding[] }>
   | Tagged<"dispute_started", Dispute>
   | Tagged<"dispute_countered", Dispute>
   | Tagged<"dispute_finalized", Dispute>;
@@ -69,6 +76,57 @@ const epochRead: Reader = (at, topics, data) =>
     ? some({ _tag: "epoch_advanced", ...at, left: topics[1], right: topics[2], epoch: BigInt(data) })
     : none);
 
+/**
+ * AccountSettled's data is `abi.encode(AccountSettlement[])`, and the Depository settles one Account per event: an
+ * array of one `(left, right, tokens, nonce)`, whose tokens are static rows of six words `(tokenId, leftReserve,
+ * rightReserve, collateral, ondelta.high, ondelta.low)`. Only that layout is read, so the words that say where things
+ * are (the offsets and the length of the array) are held to the values it has, and a count that the words do not
+ * fill is a fault. The ondelta is the Int512 `high * 2^256 + low`, `high` signed.
+ */
+const SETTLED_FIXED: readonly (readonly [number, bigint])[] = [[0, 0x20n], [1, 1n], [2, 0x20n], [5, 0x80n]];
+const SETTLED_LEFT = 3;
+const SETTLED_RIGHT = 4;
+const SETTLED_COUNT = 7;
+const SETTLED_ROWS = 8;
+const ROW_WORDS = 6;
+const COLLATERAL_AT = 3;
+const ONDELTA_HIGH_AT = 4;
+const ONDELTA_LOW_AT = 5;
+const WORD_BIT_COUNT = 256;
+const WORD_BITS = BigInt(WORD_BIT_COUNT);
+const HEX_PREFIX = 2;
+
+const wordText = (data: string, at: number): string =>
+  data.slice(HEX_PREFIX + at * WORD_HEX, HEX_PREFIX + (at + 1) * WORD_HEX);
+
+const wordAt = (data: string, at: number): bigint => BigInt(`0x${wordText(data, at)}`);
+
+/** A word of data that `wordsIn` has held to lowercase hex is a Bytes32. */
+const idAt = (data: string, at: number): Bytes32 => `0x${wordText(data, at)}` as Bytes32;
+
+const holdingAt = (data: string, row: number): Holding => ({
+  token: wordAt(data, row) as TokenId,
+  collateral: wordAt(data, row + COLLATERAL_AT),
+  ondelta: (BigInt.asIntN(WORD_BIT_COUNT, wordAt(data, row + ONDELTA_HIGH_AT)) << WORD_BITS)
+    + wordAt(data, row + ONDELTA_LOW_AT),
+});
+
+const settledShape = (data: string, words: number): boolean =>
+  words >= SETTLED_ROWS && SETTLED_FIXED.every(([at, value]) => wordAt(data, at) === value)
+  && BigInt(words - SETTLED_ROWS) === wordAt(data, SETTLED_COUNT) * BigInt(ROW_WORDS)
+  && idAt(data, SETTLED_LEFT) < idAt(data, SETTLED_RIGHT);
+
+const settledRead: Reader = (at, topics, data) => {
+  const words = wordsIn(data);
+  return topics.length === 1 && words._tag === "some" && settledShape(data, words.value)
+    ? some({
+      _tag: "account_settled", ...at, left: idAt(data, SETTLED_LEFT), right: idAt(data, SETTLED_RIGHT),
+      holdings: Array.from({ length: Number(wordAt(data, SETTLED_COUNT)) }, (_, i) =>
+        holdingAt(data, SETTLED_ROWS + i * ROW_WORDS)),
+    })
+    : none;
+};
+
 /** The dispute events carry `(sender, counterentity, nonce)` as topics 1 to 3. */
 const disputeIn = (at: Place, topics: Four): Dispute =>
   ({ ...at, sender: topics[1], counter: topics[2], nonce: BigInt(topics[3]) });
@@ -98,6 +156,10 @@ type Entry = Readonly<{ signature: string; read: Reader }>;
 const READ: readonly Entry[] = [
   { signature: "AccountEpochAdvanced(bytes32,bytes32,uint256)", read: epochRead },
   {
+    signature: "AccountSettled((bytes32,bytes32,(uint256,uint256,uint256,uint256,(int256,uint256))[],uint256)[])",
+    read: settledRead,
+  },
+  {
     signature:
       "DisputeStarted(bytes32,bytes32,uint256,bool,bytes32,bytes32,bytes,bytes,bytes32,uint256,uint256,uint32,uint32)",
     read: startedRead,
@@ -113,13 +175,13 @@ const READ: readonly Entry[] = [
 ];
 
 /**
- * The Depository's events the watcher does not read yet, each named so that the list is closed. Slice 1 reads the
- * four that move an Account's epoch or dispute. The rest are owed (R-WATCH-READS-ALL, Q R7): `DisputeOpSkipped` and
- * `BatchFailed` name an op that did not land, `SecretRevealed` is how a hub learns a payee's reveal, the Debt
- * events and `AccountSettled` change what an Account holds. Reserves, tokens and the like are no Account's chain fact.
+ * The Depository's events the watcher does not read yet, each named so that the list is closed. Slice 1 reads five:
+ * the four that move an Account's epoch or dispute and `AccountSettled`, which says what it holds. The rest are owed
+ * (R-WATCH-READS-ALL, Q R7): `DisputeOpSkipped` and `BatchFailed` name an op that did not land, `SecretRevealed` is
+ * how a hub learns a payee's reveal, the Debt events change what an Account owes. Reserves, tokens and the like are no
+ * Account's chain fact.
  */
 export const IGNORED: readonly string[] = [
-  "AccountSettled((bytes32,bytes32,(uint256,uint256,uint256,uint256,(int256,uint256))[],uint256)[])",
   "BatchFailed(bytes32,uint256,bytes4)",
   "CooperativeClose(bytes32,bytes32,uint256)",
   "DebtCreated(bytes32,bytes32,uint256,(uint256,uint256),uint256)",
