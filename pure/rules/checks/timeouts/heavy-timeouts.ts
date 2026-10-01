@@ -6,20 +6,22 @@
 //
 // Heavy is read from the test's own code, never from its time: it starts a bun, forge, ast-grep, quint or uvx process
 // (every test that runs the gate on a tree does), opens og's world or lane (openWorld, createLane, bootChain, walk) or
-// calls an explorer (a function named explore...). A test that reaches one of these through a helper of its own file is
-// heavy too. What this cannot see: a heavy call that comes through a helper of another file, test.each and other test
-// forms, and a slow test that makes none of these calls (so the tests that took over 1 s when measured carry a timeout
-// as well, see rules/README.md).   bun rules/check.ts --timeouts-only
+// calls an explorer (a function named explore...), in the object form of a spawn or as a command line too. A test, or a
+// beforeAll, beforeEach, afterAll or afterEach hook (hooks have the same 5 s default), that does this directly or through
+// a helper of its own file is heavy. What this cannot see: a heavy call that comes through a helper of another file or
+// one passed by name, a command held in a variable, test.each and other test forms, and a slow test that makes none of
+// these calls (so the tests that took over 1 s when measured carry a timeout as well, see rules/README.md).
+//   bun rules/check.ts --timeouts-only
 import { TYPESCRIPT_LANGUAGE, closeOf, depthsBefore } from "../../names/source.ts";
 import { existingFiles } from "../folder-width.ts";
 
 export type Offender = Readonly<{ line: number; title: string; why: string }>;
 
-const SUBPROCESS = /\b(?:Bun\.spawn(?:Sync)?|spawnSync|execFileSync|execSync)\s*\(\s*\[?\s*(?:process\.execPath|"(?:bun|forge|ast-grep|quint|uvx)")/;
-const COMMAND_WORD = /^["'](?:bun|forge|ast-grep|quint|uvx)["']$/;
+const SUBPROCESS = /\b(?:Bun\.spawn(?:Sync)?|spawnSync|execFileSync|execSync|execFile|exec)\s*\(\s*(?:\{[^}]*?\bcmd:\s*)?\[?\s*(?:process\.execPath|"(?:bun|forge|ast-grep|quint|uvx)\b)/;
+const COMMAND_WORD = /^["'](?:bun|forge|ast-grep|quint|uvx)(?:["']$|\s)/;
 const WORLD = /(?<![.\w$])(?:openWorld|createLane|bootChain|walk|explore\w*)\s*\(/;
-const CALL = /(?<![.\w$])(?:test|it)(?:\.only)?\s*\(/g;
-const STATEMENT_NAME = /^(?:export\s+)?(?:async\s+)?(?:const|function)\s+([\w$]+)/;
+const CALL = /(?<![.\w$])(?:(?:test|it)(?:\.only)?|(beforeAll|beforeEach|afterAll|afterEach))\s*\(/g;
+const STATEMENT_NAME = /^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([\w$]+)/;
 
 const spaced = (text: string): string => text.replace(/[^\n]/g, " ");
 
@@ -70,15 +72,17 @@ const lineOf = (source: string, at: number): number => source.slice(0, at).split
 
 export type TestCall = Readonly<{ line: number; title: string; why: string | undefined; timeout: boolean; end: number }>;
 
-// Every test( and it( call of a file: its first line, its title as written, why it is heavy (if it is), whether it names
-// a timeout, and where its callback ends. A timeout is a third argument of the call (a number, a constant, or
-// { timeout }); the second is the callback.
+// Every test( and it( call of a file, and every beforeAll, beforeEach, afterAll and afterEach hook (a hook has the same
+// 5 s default): its first line, its title as written (a hook's is its name), why it is heavy (if it is), whether it
+// names a timeout, and where its callback ends. A test's timeout is its third argument (a number, a constant, or
+// { timeout }) after the title and the callback; a hook's is its second after the callback.
 export const testCalls = (source: string): readonly TestCall[] => {
   const text = blanked(source, true);
   const skeleton = blanked(source, false);
   const depths = depthsBefore(skeleton);
   const helpers = heavyHelpers(text, statements(text, depths));
   return [...skeleton.matchAll(CALL)].map((found) => {
+    const hook = found[1];
     const open = found.index + found[0].length - 1;
     const close = closeOf(depths, open);
     const commas = [...skeleton.slice(open + 1, close).matchAll(/,/g)].map((comma) => open + 1 + comma.index).filter((at) => depths[at] === depths[open]! + 1);
@@ -86,12 +90,13 @@ export const testCalls = (source: string): readonly TestCall[] => {
     const parts = bounds.slice(0, -1).map((from, index) => ({ from: from + 1, to: bounds[index + 1]! })).filter((part) => text.slice(part.from, part.to).trim() !== "");
     const body = text.slice(open + 1, close);
     const through = callsAny(body, [...helpers.keys()]);
+    const callback = hook === undefined ? 1 : 0;
     return {
       line: lineOf(source, found.index),
-      title: source.slice(parts[0]?.from ?? open, parts[0]?.to ?? open).trim(),
+      title: hook ?? source.slice(parts[0]?.from ?? open, parts[0]?.to ?? open).trim(),
       why: isHeavyCode(body) ?? (through === undefined ? undefined : `calls ${through}, which ${helpers.get(through)}`),
-      timeout: parts.length >= 3,
-      end: parts[1]?.to ?? close,
+      timeout: parts.length > callback + 1,
+      end: parts[callback]?.to ?? close,
     };
   });
 };
@@ -108,7 +113,7 @@ const TEST_FILE = /\.test\.(?:ts|tsx|mts)$/;
 // that did not answer must not read as a pass.
 export const timeoutsReport = (pureRoot: string, read: (path: string) => string): TimeoutsReport => {
   const files = existingFiles(pureRoot).filter((file) => TEST_FILE.test(file));
-  const problems = files.flatMap((file) => heavyWithoutTimeout(read(`${pureRoot}/${file}`)).map((offender) => `TEST_TIMEOUT_MISSING pure/${file}:${offender.line} ${offender.title} ${offender.why}: give it a timeout as the third argument`));
+  const problems = files.flatMap((file) => heavyWithoutTimeout(read(`${pureRoot}/${file}`)).map((offender) => `TEST_TIMEOUT_MISSING pure/${file}:${offender.line} ${offender.title} ${offender.why}: give it a timeout (the third argument of a test, the second of a hook)`));
   if (files.length === 0) return { failed: true, lines: [`FAIL test-timeouts: git lists no test file under ${pureRoot}`] };
   return problems.length === 0
     ? { failed: false, lines: [`ok   test timeouts: every heavy test names its own (${files.length} test files)`] }

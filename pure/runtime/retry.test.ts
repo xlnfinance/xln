@@ -4,13 +4,15 @@
 // and a restart on either side loses nothing of the round: the WAL replays the attempt, the wait and what was declined.
 import { describe, expect, test } from "bun:test";
 import { holdOf, viewOf } from "../account/fixtures.ts";
-import { MAX_ATTEMPTS } from "../account/frame/frame.ts";
+import { provisionalFrameHash } from "../account/frame/account.ts";
+import { type FrameHash, MAX_ATTEMPTS } from "../account/frame/frame.ts";
 import { ledgerOf } from "../account/state.ts";
-import type { Command, EntityId } from "../entity/model.ts";
+import { type Command, emptyEntity, type EntityId } from "../entity/model.ts";
 import {
-  type Cluster, credit, deliver, entityOf, feed, GOLD, hostOf, open, pay, restarted, rise, settle, start,
+  type Cluster, credit, deliver, entityOf, feed, GOLD, heightAt, hostOf, inputFor, open, pay, restarted, rise, settle,
+  setup, stamp, start, tick,
 } from "./fixtures.ts";
-import { messageId } from "./tick.ts";
+import { messageId, startRuntime } from "./tick.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);
@@ -163,5 +165,48 @@ describe("runtime/refusal a restart loses nothing of the refusal round", () => {
     expect(hostOf(back, BOB).entities).toEqual(hostOf(caught, BOB).entities);
     const again = feed({ ...back, inflight: [] }, BOB, { _tag: "peer_message", from: ALICE, msg });
     expect(again.inflight.map((o) => messageId(o.msg).split(" ")[0])).toEqual(["refusal"]);
+  });
+});
+
+const CAROL = entityOf(3);
+
+describe("runtime/tick review A: a new height is a frame of every Entity", () => {
+  const lock: Command = { _tag: "lock", peer: BOB, token: GOLD, hold: holdOf("left", 100n, 1n, 120n) };
+  const opened = settle(feed(feed(start(viewOf(110n), viewOf(100n)), ALICE, open(BOB)), BOB, open(ALICE)));
+  const refused = settle(feed(settle(feed(opened, BOB, credit(ALICE, 100n))), ALICE, lock));
+
+  test("R-NOTICE a tx that no longer applies when the view rises is refused with notice in that height's row", () => {
+    const late = settle(rise(refused, ALICE, 125n));
+    const row = hostOf(late, ALICE).wal.at(-1) ?? expect.unreachable("no row");
+    expect(row.input._tag).toBe("j_height");
+    const told = row.notices.map((n) =>
+      (n._tag === "tx_refused" ? [n.peer, n.refused.tx._tag, n.refused.fault._tag] : [n._tag]));
+    expect(told).toEqual([[BOB, "lock", "deadline_past"]]);
+    expect(hostOf(late, ALICE).entities.get(ALICE)?.accounts.get(BOB)?.mempool).toEqual([]);
+  });
+
+  test("a Runtime that hosts two Entities gives both the frame of a new height, in id order", () => {
+    const hosted = startRuntime({ ...setup, view: viewOf(110n) }, [emptyEntity(CAROL), emptyEntity(ALICE)]);
+    const retryable = (owner: EntityId, hash: FrameHash) => inputFor(owner, 0n, {
+      _tag: "peer_message", from: BOB, msg: { _tag: "refusal", hash, index: 0, fault: "deadline_too_far", mark: 0 },
+    });
+    const waiting = [ALICE, CAROL].reduce((rt, owner) => {
+      const opened = tick(rt, inputFor(owner, 1n, open(BOB))).runtime;
+      const asked = tick(opened, inputFor(owner, 2n, credit(BOB, 5n))).runtime;
+      const pending = asked.entities.get(owner)?.accounts.get(BOB)?.pending ?? expect.unreachable("no pending");
+      return tick(asked, retryable(owner, provisionalFrameHash(pending.frame))).runtime;
+    }, hosted);
+    expect([...waiting.entities.values()].map((e) => e.waiting.size)).toEqual([1, 1]);
+    const risen = tick(waiting, heightAt(9n, 111n));
+    expect(risen.leaving.map((o) => [o.from, o.to])).toEqual([[ALICE, BOB], [CAROL, BOB]]);
+    expect([...risen.runtime.entities.values()].map((e) => e.waiting.size)).toEqual([0, 0]);
+    expect(stamp(9n)).toBe(risen.runtime.stamp);
+  });
+
+  test("a height row stamps like any other row: a later input stamped earlier keeps the WAL in order", () => {
+    const host = start(viewOf(110n), viewOf(110n)).hosts.get(ALICE) ?? expect.unreachable("no host");
+    const risen = tick(host, heightAt(50n, 111n)).runtime;
+    const rt = tick(risen, inputFor(ALICE, 40n, open(BOB))).runtime;
+    expect(rt.wal.map((row) => row.stamp)).toEqual([50n, 50n].map(stamp));
   });
 });
