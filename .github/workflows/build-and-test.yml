@@ -309,8 +309,9 @@ jobs:
       - name: Build Arrival
         if: steps.marker.outputs.cache-hit != 'true'
         working-directory: spec/arrival
+        # pnpm at the version spec/arrival/package.json pins, from npm: corepack of Node 22.13 fails its signature check ("Cannot find matching keyid").
         run: |
-          corepack enable
+          npm install --global "pnpm@$(node -p "require('./package.json').packageManager.replace('pnpm@','')")"
           pnpm install --frozen-lockfile
           pnpm build
 

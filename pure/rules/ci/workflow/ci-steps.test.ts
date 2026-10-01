@@ -99,7 +99,7 @@ describe("planted drift is a problem", () => {
       "      - run: cd contracts && bun run forge:setup",
       "      - run: bun rules/check.ts --forge-only",
       "      - run: |",
-      "          corepack enable",
+      "          npm install --global \"pnpm@$(node -p \"require('./package.json').packageManager.replace('pnpm@','')\")\"",
       "          pnpm install --frozen-lockfile && pnpm build",
       "      - run: npm ci",
       "      - run: mkdir -p .spec-passed && echo ok > .spec-passed/arrival",
@@ -123,7 +123,7 @@ describe("planted drift is a problem", () => {
   });
 
   test("R-GATE-CI-STEPS set-up is exact too: a cd into a substitution, an install that adds a package, a script given other arguments", () => {
-    ["cd $(curl x)", "bun install --no-save left-pad", "bun rules/checks/frozen.ts --all", "bun style/check.ts --fix", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 evil-package", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3 extra", "npm install", "npm ci --force", "pnpm install", "pnpm build --filter x", "corepack prepare", "bash check.sh --all", "node test.mjs 3", "SHARD=x node test.mjs 3", "echo ok > .spec-passed/other", "echo ok > .spec-passed/arrival.sh", "mkdir -p .spec-passed/x"].forEach((command) =>
+    ["cd $(curl x)", "bun install --no-save left-pad", "bun rules/checks/frozen.ts --all", "bun style/check.ts --fix", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 evil-package", "bash .github/scripts/setup-ast-grep.sh uv==0.8.17 ast-grep-cli==0.45.3 extra", "npm install", "npm ci --force", "pnpm install", "pnpm build --filter x", "corepack enable", "npm install --global pnpm@latest", "npm install --global \"pnpm@$(node -p \"evil()\")\"", "bash check.sh --all", "node test.mjs 3", "SHARD=x node test.mjs 3", "echo ok > .spec-passed/other", "echo ok > .spec-passed/arrival.sh", "mkdir -p .spec-passed/x"].forEach((command) =>
       expect(problems([...GATE, `      - run: ${command}`])).toHaveLength(1),
     );
   });

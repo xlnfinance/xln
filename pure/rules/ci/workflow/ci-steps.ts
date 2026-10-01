@@ -26,7 +26,7 @@ export const SETUP_COMMANDS: readonly RegExp[] = [
   /^bash \.github\/scripts\/setup-ast-grep\.sh uv==\S+ ast-grep-cli==\S+$/,
   // The spec jobs: dependencies, the Arrival build, and the marker of a pass kept in the Actions cache.
   /^npm ci$/,
-  /^corepack enable$/,
+  /^npm install --global "pnpm@\$\(node -p "require\('\.\/package\.json'\)\.packageManager\.replace\('pnpm@',''\)"\)"$/,
   /^pnpm install --frozen-lockfile$/,
   /^pnpm build$/,
   /^mkdir -p \.spec-passed$/,

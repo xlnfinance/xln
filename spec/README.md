@@ -50,7 +50,7 @@ spec/
 
 ## Run
 
-Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
+Needs Node 20+, pnpm (`npm install --global pnpm@<version in spec/arrival/package.json>`; corepack of Node 22.13 fails its signature check) and npm or bun.
 
 ```sh
 cd spec
