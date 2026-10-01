@@ -2934,7 +2934,7 @@
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
-    "ts": "owed: the cut (Account and Runtime slices)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -2963,6 +2963,31 @@
      "layer": "ts",
      "name": "a Runtime test refusing a proof at stored + 1",
      "owed": "the cut (Account and Runtime slices)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN no proof of an epoch is at stored + 1, whatever the stored nonce"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN an epoch with no co-signed frame has no proof; a new one forgets the old"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN a dispute the peer starts is countered at stored + 2, then + 3"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN the nonce is read from the chain again after an epoch ends, not derived"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-IMPLICIT-NONCE-FROM-CHAIN a report of an epoch the Entity already knows changes nothing"
     }
    ]
   },
@@ -2975,7 +3000,7 @@
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
-    "ts": "-"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -2999,6 +3024,26 @@
      "layer": "quint",
      "name": "a mutant that shortens the windows",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WINDOWS-NEVER-SHORTEN each window is held on its own"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WINDOWS-NEVER-SHORTEN windows may lengthen in an epoch and not shorten once a proof carries them"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WINDOWS-NEVER-SHORTEN before a proof carries them, and in a new epoch, the policy may be set freely"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-WINDOWS-NEVER-SHORTEN a window of zero seconds, or beyond the proof's uint32, is refused"
     }
    ]
   },
@@ -3039,6 +3084,74 @@
      "layer": "ts",
      "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
      "owed": "Entity/Runtime cut slice 3"
+    }
+   ]
+  },
+  {
+   "id": "R-NO-DEPOSIT-BEFORE-COSIGN",
+   "statement": "No deposit at epoch 0 before the first co-signed frame: epoch 0 has no implicit proof to fall back to. From epoch 1 on the implicit proof exists and a deposit goes at once. Deposits do not advance the epoch.",
+   "source": "contracts-decisions.md Runtime rules from Review A of PR 76, item 3 (coordinator 09-30 23:53)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NO-DEPOSIT-BEFORE-COSIGN only epoch 0 without a frame cannot take a deposit"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NO-DEPOSIT-BEFORE-COSIGN at epoch 0 a deposit is refused until a frame is co-signed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NO-DEPOSIT-BEFORE-COSIGN from epoch 1 on, the implicit proof is there: a deposit goes at once"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NO-DEPOSIT-BEFORE-COSIGN a deposit of nothing is refused, and so is one to an Account not held"
+    }
+   ]
+  },
+  {
+   "id": "R-DISPUTE-WATCH",
+   "statement": "The node watches the disputes its peer starts against it and counters with the newest co-signed proof of the epoch while the dispute is open, restating the counter at every frame of the Entity until the chain says the dispute is over, so that one counter lands inside the floor window (60 + 60 s on testnet). With no co-signed proof of the epoch there is nothing to counter with: the implicit proof is the best state there is. A dispute the node started itself, or one of another epoch, is not countered.",
+   "source": "contracts-decisions.md Runtime rules from Review A of PR 76, item 2 (coordinator 09-30 23:53)",
+   "layers": {
+    "arrival": "-",
+    "quint": "-",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DISPUTE-WATCH every frame of the Entity restates the counter while the dispute is open"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DISPUTE-WATCH the dispute being over, or the epoch moving on, ends it"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DISPUTE-WATCH a dispute Alice started, or one of another epoch, is not the Entity's to counter"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-DISPUTE-WATCH a Host that restarts keeps the dispute and is asked to counter again"
     }
    ]
   }
