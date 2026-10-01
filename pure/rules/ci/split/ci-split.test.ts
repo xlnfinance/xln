@@ -23,7 +23,7 @@ const workflow = (plant: Plant = {}): string =>
     "  pull_request:",
     "concurrency:",
     `  group: ${plant.group ?? "build-and-test-${{ github.event_name }}-${{ github.ref }}"}`,
-    `  cancel-in-progress: ${plant.cancel ?? "${{ github.event_name == 'pull_request' }}"}`,
+    `  cancel-in-progress: ${plant.cancel ?? "${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'promote/') }}"}`,
     "jobs:",
     "  gate-static:",
     "    name: One gate (static)",
@@ -66,7 +66,7 @@ describe("the canonical split agrees", () => {
     expect(problems(workflow())).toEqual([]);
     expect(problems(workflow({ push: "['main', \"development\", 'extra']" }))).toEqual([]);
     expect(problems(workflow({ slowIf: SLOW_IF.replace(/ /g, "  ") }))).toEqual([]);
-    expect(problems(workflow({ cancel: "${{github.event_name=='pull_request'}}".replace("=='", " == '") }))).toEqual([]);
+    expect(problems(workflow({ cancel: "${{  github.event_name == 'pull_request'   &&  !startsWith(github.head_ref, 'promote/') }}" }))).toEqual([]);
   });
 
   test("R-GATE-CI-SPLIT a workflow with no one-gate job is not judged", () => {
@@ -100,6 +100,10 @@ describe("planted changes of the split are problems", () => {
     expect(concurrency(workflow({ cancel: "false" }))).toHaveLength(1);
     expect(concurrency(workflow({ cancel: "${{ github.ref != 'refs/heads/main' }}" }))).toHaveLength(1);
     expect(concurrency(workflow({ cancel: "${{ github.event_name != 'pull_request' }}" }))).toHaveLength(1);
+    // A snapshot run is never cancelled: the exemption cannot be dropped, widened to other branches, or turned around.
+    expect(concurrency(workflow({ cancel: "${{ github.event_name == 'pull_request' }}" }))).toEqual([expect.stringContaining("is never cancelled")]);
+    expect(concurrency(workflow({ cancel: "${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'claude/') }}" }))).toHaveLength(1);
+    expect(concurrency(workflow({ cancel: "${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'promote/') }}" }))).toHaveLength(1);
     expect(concurrency(workflow().replace(/concurrency:\n.*\n.*\n/, ""))).toHaveLength(2);
   });
 
