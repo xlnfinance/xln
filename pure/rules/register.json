@@ -4373,10 +4373,10 @@
    "statement": "A spec job behind One gate (Quint, the Arrival shards) skips its work only on a marker of a pass in the Actions cache, and only soundly: the marker is keyed on a hash of every file the suite reads (spec/** for Arrival, spec/quint/** for Quint), every working step is guarded by the marker's cache-hit, and the pass is recorded by the last step after the suite, so it is saved only when the whole job passed. A PR that leaves spec/ alone reads main's marker and reports green without the 20 to 90 minutes; the nightly run ignores the marker.",
    "source": "process.md 10-01 (a check slower than 30 minutes runs for PRs that touch its own files, and nightly on main)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
@@ -4432,10 +4432,10 @@
    "statement": "The Arrival suite runs in CI as shards (SHARD=k/n node test.mjs): the shards together run every case exactly once, the heavy case (about 85 minutes alone) is shard 0 by itself, every other shard has cases of its own, n = 2 and a malformed SHARD are refused, and a shard with no case to run fails.",
    "source": "coordinator 10-01 09:42 (Arrival in required CI)",
    "layers": {
-    "arrival": "-",
-    "quint": "-",
-    "contract": "-",
-    "rig": "-",
+    "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+    "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+    "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+    "rig": "n/a: a gate over the repository, with no system state for the walk",
     "ts": "hold"
    },
    "killers": [
