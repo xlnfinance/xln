@@ -5,6 +5,7 @@ import { LAYERS, describeProblem, type Cell, type Name, type Register, type Row 
 import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
 import { parseCell, parseRegister } from "./register.ts";
 import { readBase } from "./base.ts";
+import { readRegisterFolder } from "./layout/store.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { ratchet } from "./ratchet.ts";
 import { scanNames } from "./scan.ts";
@@ -137,6 +138,34 @@ describe("owed cells and killers are open work, and go red once they are already
     expect(problems.map((problem) => problem._tag)).toEqual(["KillerOwedButPresent"]);
   });
 
+  test("stale: a name carries the id but the layer models an earlier rule; no problem, counted as owed and never as held", () => {
+    const staleCell = { ...row("J5").cells, arrival: { _tag: "stale", why: "models the rule before the revision; the spec thread brings the new page" } } as const;
+    const evaluation = evaluate([row("J5", { cells: staleCell })], [carrier, killerName, name("property", "J5 holds", "arrival")]);
+    expect(evaluation.problems).toEqual([]);
+    expect(evaluation.reports[0]?.cells.arrival.verdict).toBe("stale");
+    expect(layerCounts(evaluation.reports).find((count) => count.layer === "arrival")).toEqual({ layer: "arrival", held: 0, owed: 1, required: 1, na: 0, unstated: 0 });
+  });
+
+  test("stale is printed with its hits, its reason is trimmed, its problem names the layer, and a killer may sit in a stale layer", () => {
+    const staleCell = { ...row("J5").cells, arrival: { _tag: "stale", why: "old version" } } as const;
+    const carried = evaluate([row("J5", { cells: staleCell })], [carrier, killerName, name("property", "J5 holds", "arrival")]);
+    expect(renderText(carried)).toContain("stale 1");
+    expect(renderMarkdown(carried)).toContain("| stale 1 |");
+    expect(parseCell("x", "stale:  old version  ")).toEqual({ ok: true, value: { _tag: "stale", why: "old version" } });
+    const arrivalKiller = row("J5", { cells: staleCell, killers: [{ kind: "test", layer: "contract", name: "the killer test" }, { kind: "bug", layer: "arrival", name: "no-h1" }] });
+    expect(evaluate([arrivalKiller], [carrier, killerName, name("property", "J5 holds", "arrival"), name("bug", "no-h1", "arrival")]).problems).toEqual([]);
+    const absent = evaluate([row("J5", { cells: staleCell })], [carrier, killerName]).problems;
+    expect(absent).toEqual([{ _tag: "StaleButAbsent", id: "J5", layer: "arrival", why: "old version" }]);
+    expect(absent.map(describeProblem).join()).toContain("restore the name that carried it");
+  });
+
+  test("red: a stale cell no name carries is an owed cell, and still counts as required", () => {
+    const staleCell = { ...row("J5").cells, arrival: { _tag: "stale", why: "old version" } } as const;
+    const evaluation = evaluate([row("J5", { cells: staleCell })], []);
+    expect(evaluation.problems.filter((problem) => problem.id === "J5").map((problem) => problem._tag)).toContain("StaleButAbsent");
+    expect(layerCounts(evaluation.reports).find((count) => count.layer === "arrival")).toMatchObject({ held: 0, required: 1 });
+  });
+
   test("red: a killer in a layer the row does not hold (not applicable or unstated)", () => {
     const stray = row("J5", { killers: [{ kind: "test", layer: "ts", name: "the killer test" }] });
     const { problems } = evaluate([stray], [carrier, name("title", "the killer test", "ts")]);
@@ -158,6 +187,16 @@ describe("every live rule states every layer: held, owed, or not applicable with
     expect(problems.map((problem) => [problem._tag, "layer" in problem ? problem.layer : ""])).toEqual([["UnstatedCell", "quint"], ["UnstatedCell", "ts"]]);
     expect(describeProblem(problems[0]!)).toContain("J5");
     expect(describeProblem(problems[0]!)).toContain("quint");
+  });
+
+  test("a name that carries a longer rule's id is that rule's, not the shorter one it begins with", () => {
+    const cells = { ...stated.cells, contract: notApplicable, ts: { _tag: "owed", by: "the planner" } } as const;
+    const shorter = row("R-COSIGN", { cells });
+    const longer = row("R-COSIGN-FREEZE", { cells: { ...cells, ts: { _tag: "hold" } } });
+    const freeze = name("title", "R-COSIGN-FREEZE waits", "ts");
+    const verdictOf = (rows: readonly Row[]) => evaluate(rows, [freeze]).reports[0]?.cells.ts.verdict;
+    expect(verdictOf([shorter, longer])).toBe("owed");
+    expect(verdictOf([shorter])).toBe("stale-owed");
   });
 
   test("red: an unstated cell stays red when a name in that layer already carries the id", () => {
@@ -227,9 +266,8 @@ describe("a retired rule", () => {
   });
 });
 
-describe("register.json", () => {
-  const text = readFileSync(`${import.meta.dir}/register.json`, "utf8");
-  const parsed = parseRegister(text);
+describe("the register folder", () => {
+  const parsed = readRegisterFolder(`${import.meta.dir}/register`);
 
   test("parses", () => expect(parsed.ok).toBe(true));
 
@@ -238,6 +276,11 @@ describe("register.json", () => {
     expect(parseCell("x", "owed: #41").ok).toBe(true);
     expect(parseCell("x", "owed:").ok).toBe(false);
     expect(parseCell("x", "yes").ok).toBe(false);
+  });
+
+  test("stale takes a reason, and a bare stale is refused", () => {
+    expect(parseCell("x", "stale: models the rule before R-A1 was revised")).toEqual({ ok: true, value: { _tag: "stale", why: "models the rule before R-A1 was revised" } });
+    ["stale", "stale:", "stale:   "].forEach((text) => expect(parseCell("x", text).ok).toBe(false));
   });
 
   test("n/a takes a one-line reason, and a bare n/a is refused", () => {
@@ -263,8 +306,8 @@ describe("register.json", () => {
     expect(ids.filter((id) => /^R-[EXAJRP]\d$/.test(id)).length).toBe(23);
   });
 
-  test("carries the id policy: descriptive names, never bare numbers", () => {
-    expect(JSON.parse(text).policy).toContain("descriptive names");
+  test("the README carries the id policy: descriptive names, never bare numbers", () => {
+    expect(readFileSync(`${import.meta.dir}/README.md`, "utf8")).toContain("descriptive names");
   });
 
   test("F1 is a finding id, not a rule; the rule is R-FINAL-NONCE, and R-X2 is retired into R-CLOCK and R-HTLC-CLOCK", () => {
@@ -281,7 +324,7 @@ describe("register.json", () => {
 });
 
 describe("the real tree", () => {
-  const parsed = parseRegister(readFileSync(`${import.meta.dir}/register.json`, "utf8"));
+  const parsed = readRegisterFolder(`${import.meta.dir}/register`);
   const register = parsed.ok ? parsed.value : [];
   const names = scanNames(`${import.meta.dir}/../..`);
 
@@ -359,6 +402,15 @@ describe("the register may only grow (ratchet against the base register)", () =>
     expect(ratchet(owingBase, [row("H1", { cells: asNa })]).problems.map((problem) => problem._tag)).toEqual(["CellWeakened"]);
   });
 
+  test("a held cell may go stale when its rule is revised, and a stale cell may not fall back to owed; owed may become stale", () => {
+    const stale = { ...held.cells, contract: { _tag: "stale", why: "old version" } } as const;
+    const owedContract = { ...held.cells, contract: { _tag: "owed", by: "someone" } } as const;
+    expect(ratchet([held], [row("H1", { cells: stale })]).problems).toEqual([]);
+    expect(ratchet([row("H1", { cells: stale })], [held]).problems).toEqual([]);
+    expect(ratchet([row("H1", { cells: owedContract })], [row("H1", { cells: stale })]).problems).toEqual([]);
+    expect(ratchet([row("H1", { cells: stale })], [row("H1", { cells: owedContract })]).problems.map((problem) => problem._tag)).toEqual(["CellWeakened"]);
+  });
+
   test("growing is fine: owed becomes hold, unstated becomes not applicable or owed, not applicable becomes owed", () => {
     const owedContract = { ...held.cells, contract: { _tag: "owed", by: "someone" } } as const;
     expect(ratchet([row("H1", { cells: owedContract })], [held]).problems).toEqual([]);
@@ -415,5 +467,20 @@ describe("the base register is read from git, and a git failure is red", () => {
     const based = readBase(repo, "base2");
     expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
     expect(readBase(repo, "no-such-ref").ok).toBe(false);
+  });
+
+  test("a base that keeps the register as a folder of rule files is read the same way", () => {
+    const folder = mkdtempSync(`${tmpdir()}/rules-base-folder-`);
+    const run = (...args: string[]): void => void Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: folder });
+    run("init", "-q", "-b", "main");
+    mkdirSync(`${folder}/pure/rules/register`, { recursive: true });
+    const first = JSON.parse(rowsJson).rows[0];
+    writeFileSync(`${folder}/pure/rules/register/H1.json`, JSON.stringify(first, null, 1));
+    run("add", "-A");
+    run("commit", "-q", "-m", "one");
+    run("branch", "base");
+    run("commit", "-q", "--allow-empty", "-m", "two");
+    const based = readBase(folder, "base");
+    expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
   });
 });

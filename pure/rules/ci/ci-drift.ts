@@ -2,9 +2,18 @@
 // stays green in the other, so each copy is compared with its source and a mismatch is a problem:
 //   - every `bun-version` in a workflow equals `packageManager` in the root package.json (older Bun segfaults on Worker teardown);
 //   - the seed matrix of the gate equals the default seeds of `test:seeds` in pure/package.json;
-//   - the ast-grep-cli the workflow puts on PATH for rules/ is the one style/check.ts runs through uvx.
+//   - the ast-grep-cli the workflow puts on PATH for rules/ is the one style/check.ts runs through uvx;
+//   - every command of a job behind `One gate` is a gate command or set-up, and every gate command runs somewhere (rules/ci/workflow/ci-steps.ts);
+//   - the workflow starts on every pull request and no job behind `One gate` can be skipped (rules/ci/workflow/ci-triggers.ts);
+//   - the two lanes: a pull request into development runs the fast jobs only, everything else the whole gate (rules/ci/split/ci-split.ts);
+//   - a spec job that skips its work on a cache marker keys it on the files it reads, guards every run step, and records the pass last (rules/ci/workflow/ci-spec.ts).
 // Each copy is read from code, never from a comment: a comment that still names the pin must not stand in for it. A form
 // the comparison cannot read (a setup-bun with no bun-version, a bun-version-file) is a problem of its own, not a pass.
+import { stepProblems } from "./workflow/ci-steps.ts";
+import { specProblems } from "./workflow/ci-spec.ts";
+import { triggerProblems } from "./workflow/ci-triggers.ts";
+import { splitProblems } from "./split/ci-split.ts";
+
 export type CiFiles = Readonly<{
   workflows: Readonly<Record<string, string>>;
   rootPackageJson: string;
@@ -81,4 +90,7 @@ const astGrepProblems = (files: CiFiles): readonly string[] => {
   ]);
 };
 
-export const ciDriftProblems = (files: CiFiles): readonly string[] => [...bunProblems(files), ...seedProblems(files), ...astGrepProblems(files)];
+const stepsProblems = (files: CiFiles): readonly string[] =>
+  Object.entries(files.workflows).flatMap(([name, text]) => [...stepProblems(name, withoutComments(text)), ...triggerProblems(name, withoutComments(text)), ...splitProblems(name, withoutComments(text)), ...specProblems(name, withoutComments(text))]);
+
+export const ciDriftProblems = (files: CiFiles): readonly string[] => [...bunProblems(files), ...seedProblems(files), ...astGrepProblems(files), ...stepsProblems(files)];

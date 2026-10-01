@@ -1,0 +1,34 @@
+{
+ "id": "R-SWAP-FILL",
+ "statement": "The taker (not the maker) fills a whole ratio 1..65535 of what remains, while the offer is live in the judge's view. Each leg is floor(amount * ratio / 65535) on its own, the arithmetic of DeltaTransformer's applySwap, so a fill the chain would settle at the same ratio moves the same amounts. A fill that takes nothing of a leg is refused (fill_too_small): every fill is a trade. The whole fill (65535) drops the offer. The Arrival cell holds the fill ratio and the arithmetic: a whole ratio of what remains, each leg floor(remainder * ratio / 65535) on its own, the legs filled never exceeding the legs offered, nothing created or lost on the offdeltas, a whole fill dropping the offer; that only the taker fills, that a fill taking nothing of a leg is refused (fill_too_small) and that a fill is judged in the judge's view are guards on the page that no property or planted bug pins.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread",
+  "contract": "owed: contracts review (R-SWAP-ONCHAIN: a finalize at the same ratio moves the same amounts as this rule; plan/swap-onchain.md)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-FILL the taker fills a ratio of what remains, each leg rounded down on its own"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-beyond-remainder"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-leg-rounds-up"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-ratio-unchecked"
+  }
+ ]
+}

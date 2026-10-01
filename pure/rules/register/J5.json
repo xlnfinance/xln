@@ -1,0 +1,49 @@
+{
+ "id": "J5",
+ "statement": "A batch with no dispute, reveal, ladder or deposit op that cannot apply fails soft: nothing else moves, the nonce is consumed, BatchFailed is emitted; the signed gas budget makes the outcome the signer's.",
+ "source": "contracts-decisions.md J5",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk draw that submits a batch that cannot apply and asserts BatchFailed, the consumed nonce and an untouched Account)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "J5 a failing payment batch consumes its nonce and the urgent batch above it lands"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "payment-revert-keeps-the-nonce"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "entity-ignores-batch-failed"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "failure-no-nonce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "ignores-batch-failed"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "no-gas-guard"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J5: a failed batch applied nothing and spent its nonce"
+  }
+ ]
+}

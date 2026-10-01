@@ -2,6 +2,7 @@
 import { keccakHex } from "../kernel/encoding/bytes.ts";
 import type { JHeight, JView } from "./clause/clock.ts";
 import { holdId, type ClauseHold, type Hold, type Side, type TokenId } from "./model.ts";
+import type { SigningContext } from "./proof/signing.ts";
 
 /** A height, a view or a token, by a cast: small numbers in range; the real constructors have tests of their own. */
 export const heightOf = (n: bigint): JHeight => n as JHeight;
@@ -26,4 +27,16 @@ export const draw = (seed: number, run: number, step: number, k: number, n: numb
   const a = where ^ Math.imul(k + 7, 3266489917);
   const b = Math.imul(a ^ (a >>> 15), 2246822507);
   return (Math.imul(b ^ (b >>> 13), 3266489909) >>> 0) % n;
+};
+
+/** Where the account tests sign: a Sepolia-shaped deployment, one Account, a deadline read as 12 s a block. */
+export const signing: SigningContext = {
+  deployment: { chainId: 11155111n, depository: `0x${"ab".repeat(20)}` },
+  accountKey: `0x${"11".repeat(32)}${"22".repeat(32)}`,
+  ondeltaEpoch: 1n,
+  firstNonce: 3n,
+  terms: {
+    watchSeed: `0x${"9b".repeat(32)}`, leftResponseSeconds: 60n, rightResponseSeconds: 60n,
+    transformer: `0x${"bd".repeat(20)}`, secondsOf: (deadline) => 1_000n + 12n * deadline,
+  },
 };

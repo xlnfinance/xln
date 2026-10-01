@@ -1,0 +1,91 @@
+{
+ "id": "R-C2R-FOLD",
+ "statement": "The node co-signs a collateral-to-reserve only while the Account's offdelta is zero; otherwise it sends the withdrawal as a settlement that folds offdelta. The contract's processC2R applies only the withdrawn amount and does not fold offdelta, so a C2R co-signed with a nonzero offdelta lets a later dispute from the implicit proof erase the other side's payment. The Arrival cell holds it on the dispute page (spec/dispute/dispute.scm: a withdrawal lowers Left's position by exactly the amount withdrawn and moves nothing else; bug c2r-unfolded, config withdraw); the Runtime refusing to co-sign a C2R while offdelta is not zero is the ts cell's.",
+ "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test refusing to co-sign a C2R while offdelta is not zero",
+   "owed": "the cut (Entity and Runtime)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
+   "owed": "Entity/Runtime cut slice 3"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a withdrawal from an Account with no offdelta goes as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a withdrawal with an offdelta goes as a settlement that folds it, never as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD the settlement folds the offdelta of every token, not only the withdrawn one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD an offdelta in another token alone is enough: the shortcut would erase it too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a peer's ask for a C2R is refused with notice while there is an offdelta, and signs nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD a peer's C2R is signed with nothing to fold, a peer's settlement always"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD with no payment made a withdrawal goes as a C2R"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD with a payment made the withdrawal is a settlement carrying the payment's offdelta"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-C2R-FOLD Bob, asked by Alice for a C2R after a payment, refuses it with notice and signs nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "c2r-unfolded"
+  }
+ ]
+}

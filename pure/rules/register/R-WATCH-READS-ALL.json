@@ -1,0 +1,25 @@
+{
+ "id": "R-WATCH-READS-ALL",
+ "statement": "The watcher reads every kind of chain event an Entity can wait on, not only the kinds it thinks it waits for: DisputeOpSkipped and BatchFailed (an op that did not land), SecretRevealed (a hub learns a payee's reveal from the chain), the Debt events, and deposits and collateral changes (AccountSettled). Slice 1 reads four kinds and names the rest as ignored.",
+ "source": "spec/quint/QUESTIONS.md R7 (decided: the watcher does not choose which events to read, DisputeOpSkipped included); consolidation-plan.md J2; coordinator 2026-10-01 10:20 (deposit and SecretRevealed events are the watcher's, slice 2)",
+ "layers": {
+  "arrival": "n/a: spec/runtime/tick.scm has no watcher",
+  "quint": "owed: spec thread (QUESTIONS R7 and the mutant watcher-skips-the-skip-event are the spec side; no name carries this id yet)",
+  "contract": "n/a: the events are the contract's and this rule only reads them; no contract code takes part",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: transport thread, watcher slice 2 (decode and hand on each kind; none is read yet)"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "watcher-skips-the-skip-event"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "transport thread, watcher slice 2"
+  }
+ ]
+}

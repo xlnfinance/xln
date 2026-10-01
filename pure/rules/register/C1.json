@@ -1,0 +1,39 @@
+{
+ "id": "C1",
+ "statement": "AccountInfo.ondeltaEpoch advances on every cooperative settlement, C2R and dispute finalization (not on R2C); proofs and updates commit to it, so a proof for an earlier baseline fails E4.",
+ "source": "contracts-decisions.md C1",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "hold",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "C1 ondelta epoch"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "c1-epoch-not-advanced"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "C1 the epoch is bound: a different epoch is a different digest"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "c1-start-epoch-unchecked"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "update-ignores-epoch"
+  }
+ ]
+}

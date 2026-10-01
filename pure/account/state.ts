@@ -6,19 +6,22 @@ import { mapSet } from "../kernel/core/collections.ts";
 import { emptyLedger, MAX_HOLDS } from "./ledger.ts";
 import type { AccountFault, AccountState, Hold, Ledger, TokenId } from "./model.ts";
 
-export const emptyAccount: AccountState = { ledgers: new Map() };
+export const emptyAccount: AccountState = { ledgers: new Map(), offers: [] };
 
 export const ledgerOf = (s: AccountState, token: TokenId): Ledger => s.ledgers.get(token) ?? emptyLedger;
 
 export const withLedger = (s: AccountState, token: TokenId, l: Ledger): AccountState =>
-  ({ ledgers: mapSet(s.ledgers, token, l) });
+  ({ ...s, ledgers: mapSet(s.ledgers, token, l) });
 
 /** Every open hold of the Account, whatever its token, in token order of first use. */
 export const openHolds = (s: AccountState): readonly Hold[] => [...s.ledgers.values()].flatMap((l) => l.holds);
 
-/** The Account's hold cap, checked on a state a lock has just produced: no more than MAX_HOLDS open in all tokens. */
+/** Every open clause of the Account: its holds and its swap offers, each one clause of a proof body. */
+export const clauseCount = (s: AccountState): number => openHolds(s).length + s.offers.length;
+
+/** The Account's clause cap, checked on a state a lock or an offer has just produced: MAX_HOLDS in all, all tokens. */
 export const withinHoldCap = (s: AccountState): AccountFault | undefined =>
-  openHolds(s).length > MAX_HOLDS ? { _tag: "too_many_holds", max: MAX_HOLDS } : undefined;
+  clauseCount(s) > MAX_HOLDS ? { _tag: "too_many_holds", max: MAX_HOLDS } : undefined;
 
 /** The open clause that holds `hashlock`, in whatever token (R-ONE-LOCK-PER-HASH). */
 export const holderOf = (s: AccountState, hashlock: string): Hold | undefined =>

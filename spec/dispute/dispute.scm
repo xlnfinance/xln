@@ -24,8 +24,8 @@
 ;;            are at least the started ones too (E9).
 ;;   payout   Δ = ondelta + offdelta (+ the clause, if its secret was public by the deadline).
 ;;            Δ <= 0: Right takes the collateral and Left owes -Δ. 0 < Δ < c: Δ / c-Δ.
-;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall is paid from the debtor's
-;;            reserve first; the rest becomes debt. The epoch advances: every older proof dies (N1);
+;;            Δ >= c: Left takes c and Right owes Δ-c. A shortfall first enforces the debtor's
+;;            older debts, then is paid from what is left of its reserve; the rest becomes debt. The epoch advances: every older proof dies (N1);
 ;;            each side holds the implicit proof of the new epoch (see start).
 ;;   deposit  R2C during a dispute is not blocked (H4, accepted): it changes the payout, and only
 ;;            in favour of the beneficiary of the deposit. A deposit does NOT advance the epoch: every signed
@@ -55,6 +55,12 @@
 ;;   horizon  N2 (coordinator 21:50): a party refuses a lock whose deadline is beyond MAX_LOCK_HORIZON. Under H1
 ;;            a lock years out blocks cooperative and dispute close until the secret appears. `horizon-ok?`.
 ;;
+;;   withdraw R-C2R-FOLD (decision, review round 3 of PR 41): a collateral-to-reserve withdrawal is co-signed as a plain C2R
+;;            only while offdelta is zero; with offdelta nonzero it travels as a settlement that folds offdelta into
+;;            ondelta. Either way Δ falls by the amount withdrawn and nothing else moves. A C2R's own diff is only the
+;;            withdrawn amount (Account.sol processC2R: ondeltaDiff = -amount for Left, nothing folded), so a shortcut
+;;            co-signed with a nonzero offdelta erases the offdelta (config `withdraw`, bug `c2r-unfolded`).
+;;
 ;; Not modelled here: Pull clauses (5b/5c wait for T when one is present), swaps, the watchtower
 ;; (it can only run a counter or an already selected finalize), several tokens (GAP-7), a settlement
 ;; with open clauses (v2), more than one frame after a settlement. See QUESTIONS.md.
@@ -81,11 +87,21 @@
 ;; async window): a lock is refused when its deadline is further away than this from the clock
 (define/overridable max-lock-horizon (s/number) 1)
 (define/overridable max-disputes   (s/number) 1)
+;; a BYZANTINE signer (Right) signs a proof with shorter windows ALONE and hands it to Left (config `byz-window`): the
+;; chain's E9 check is then the only thing between it and the payout. 0 in the base.
+(define/overridable max-byz-windows (s/number) 0)
+;; R-C2R-FOLD: collateral-to-reserve withdrawals Left may make at a quiescent height (config `withdraw`). 0 in the base.
+(define/overridable max-withdrawals (s/number) 0)
 (define/overridable credit-left    (s/number) 1)   ; credit extended TO Left (Q-L-1)
 (define/overridable credit-right   (s/number) 1)
 (define/overridable collateral0    (s/number) 2)
 (define/overridable reserve-left0  (s/number) 1)
 (define/overridable reserve-right0 (s/number) 0)
+;; what each side already owes THIRD parties from earlier (its older debts, enforced first, Depository._settleShortfall)
+(define/overridable older-left0  (s/number) 0)
+(define/overridable older-right0 (s/number) 0)
+;; one enforcement call clears at most this much older debt (the contract visits at most 32 claims per call; a claim is 1 here)
+(define/overridable older-per-call (s/number) 32)
 ;; the frame heights at which a cooperative settlement is offered (height 2 holds an open clause)
 ;; H3: the board of one side rotates (0: never; the `retired-left` and `retired-right` configs set 1)
 (define/overridable rotations (s/number) 0)
@@ -196,6 +212,9 @@
         :collateral collateral0 :ondelta 0
         :reserve (dict :left reserve-left0 :right reserve-right0)
         :debt (dict :left 0 :right 0)        ; owed BY the side to its peer
+        :older (dict :left older-left0 :right older-right0)   ; owed BY the side to third parties, from before
+        :third-paid 0                        ; what enforcement has paid third parties out of the reserves
+        :shortfalls (list)                   ; what each shortfall did: reserve and older debt before and after, what the peer got
         :secret #f                           ; #f, or when the secret became public on chain
         :head 0                              ; off-chain height: how many script frames were proposed
         :tip (dict :left genesis :right genesis)   ; the newest proof each side has committed
@@ -211,6 +230,9 @@
         :adv-ondelta 0                       ; ondelta at the last epoch advance (before any deposit of the epoch)
         :rot #f                              ; #f, or the off-chain height when the rotating side's board rotated
         :dispute #f
+        :alone (list)                        ; proofs a Byzantine party signed ALONE (held by the honest side, never co-signed)
+        :byz-windows 0
+        :withdrawals (list)                  ; what each collateral-to-reserve withdrawal did (R-C2R-FOLD)
         :results (list)))
 
 ;; ---- off-chain: propose, cross-open, ack
@@ -270,6 +292,25 @@
                 (proposed (hold w1 (peer side) (car f)) f)
                 w1)))))
 
+;; a BYZANTINE signer (Right) signs a proof ALONE, with the FLOOR windows, on top of the newest committed state, and hands it to
+;; Left: Left holds a proof Right signed, Right holds nothing new, and no signing guard of Left's ever saw it (nobody
+;; co-signed it, so `windows-keep-ok?` has nothing to refuse). Under a window policy its windows are shorter than those
+;; of the frames before it, and only the chain's E9 check (`windows-ok?`, on a counter or a final body) stands
+;; between it and the payout (bug `e9-dropped`).
+(define (byz-window-proof w)
+  (let ((tip (tip-of w :left)))
+    (list (next-nonce w) :right (p-off tip) (p-clause tip) #f 0 (car (windows)) (cadr (windows)) #f)))
+(define byz-window
+  (rule "byz signs shorter windows alone" (w side)
+    (when (and (equal? side :right) (< (:byz-windows w) max-byz-windows) (> (:head w) 0)
+               (= (:epoch w) 0) (null? (:results w)) (not (frozen? w)) (not (:unacked w))
+               (not (member (byz-window-proof w) (held-by w :left)))))
+    (then (let ((p (byz-window-proof w)))
+            (-> (record-signed w p #t)
+                (hold :left p)
+                (update-in (list :alone) (lambda (a) (append a (list p))))
+                (update-in (list :byz-windows) (lambda (n) (+ n 1))))))))
+
 ;; a cross-open: Right proposed at the same height. Left's frame wins; Right signed its own, so
 ;; Left holds Right's losing proposal, Right holds Left's frame.
 (define (rival-proof w)
@@ -298,10 +339,18 @@
 (define (held-by w side) (append (signed-held w side) (implicit-proofs w)))
 (define (all-proofs w) (delete-duplicates (append (held-by w :left) (held-by w :right))))
 (define (signed-proofs w) (delete-duplicates (append (signed-held w :left) (signed-held w :right))))
+;; the proofs both parties signed: a Byzantine party's lone signature (`:alone`) is not one of them
+(define (co-signed? w p) (not (member p (:alone w))))
+(define (co-signed-proofs w) (filter (lambda (p) (co-signed? w p)) (all-proofs w)))
 (define (outranks? p q) (> (rank p) (rank q)))
 (define (usable? w p) (and (= (p-epoch p) (:epoch w)) (> (p-nonce p) (:chain-nonce w))))
 (define (best-rank w side)
   (reduce (lambda (q acc) (max acc (if (usable? w q) (rank q) -1))) -1 (held-by w side)))
+;; what the responder can actually answer with: a proof the chain would take as a counter (E9: its windows are at
+;; least the started ones). A proof it holds that E9 refuses does not make it a responder that must act.
+(define (counterable? w d p) (and (usable? w p) (windows-ok? d p)))
+(define (best-counter-rank w d side)
+  (reduce (lambda (q acc) (max acc (if (counterable? w d q) (rank q) -1))) -1 (held-by w side)))
 
 ;; the honest non-starter answers before the clock reaches T
 ;; A HASTY close: the non-starter closes before T while the ack of a frame it proposed is still on
@@ -312,7 +361,7 @@
   (and (:unacked w) (equal? (p-proposer (car (:unacked w))) side)))
 (define (responder-can-answer? w)
   (let ((d (:dispute w)))
-    (and d (counter-window-open? w d) (> (best-rank w (responder-of d)) (rank (selected d))))))
+    (and d (counter-window-open? w d) (> (best-counter-rank w d (responder-of d)) (rank (selected d))))))
 (define (blocked-by-response? w)
   (let ((d (:dispute w)))
     (and d (>= (+ (:now w) 1) (:timeout d))
@@ -324,7 +373,7 @@
 (define (close-window w)
   (let ((d (:dispute w)))
     (if (and d (not (:closed-best d)) (>= (:now w) (:timeout d)))
-        (assoc-in (assoc-in w (list :dispute :closed-best) (best-rank w (responder-of d)))
+        (assoc-in (assoc-in w (list :dispute :closed-best) (best-counter-rank w d (responder-of d)))
                   (list :dispute :closed-proposed) (:proposed-rank w))
         w)))
 
@@ -417,11 +466,25 @@
     (then (assoc-in w (list :rot) (:head w)))))
 
 (define (add-reserve w side amount) (update-in w (list :reserve side) (lambda (r) (+ r amount))))
-;; a shortfall is paid from the debtor's reserve first; the rest becomes debt
+;; a shortfall: the chain enforces the debtor's older debts first, from its reserve (`enforce-older`; bug
+;; `shortfall-skips-enforcement`), pays the peer out of the SPENDABLE reserve, the reserve less what is still owed (`payable`;
+;; bug `shortfall-ahead-of-debt`: the raw reserve), and books the rest as debt (Depository._settleShortfall)
+(define (older-of w side) (get-in w (list :older side)))
+(define (enforce-older w side)
+  (let ((pay (min (older-of w side) (get-in w (list :reserve side)) older-per-call)))
+    (-> w (add-reserve side (- pay)) (update-in (list :older side) (lambda (o) (- o pay)))
+          (update-in (list :third-paid) (lambda (t) (+ t pay))))))
+(define (payable w side) (max 0 (- (get-in w (list :reserve side)) (older-of w side))))
 (define (shortfall w debtor amount)
-  (let ((pay (min amount (get-in w (list :reserve debtor)))))
-    (-> w (add-reserve debtor (- pay)) (add-reserve (peer debtor) pay)
-          (update-in (list :debt debtor) (lambda (d) (+ d (- amount pay)))))))
+  (let* ((w0 (enforce-older w debtor))
+         (pay (min amount (payable w0 debtor)))
+         (w1 (-> w0 (add-reserve debtor (- pay)) (add-reserve (peer debtor) pay)
+                    (update-in (list :debt debtor) (lambda (d) (+ d (- amount pay)))))))
+    (update-in w1 (list :shortfalls)
+               (lambda (l) (append l (list (dict :amount amount :reserve (get-in w (list :reserve debtor)) :older (older-of w debtor)
+                                                 :got (- (get-in w1 (list :reserve (peer debtor))) (get-in w (list :reserve (peer debtor))))
+                                                 :reserve-after (get-in w1 (list :reserve debtor)) :older-after (older-of w1 debtor)
+                                                 :enforced (- (:third-paid w1) (:third-paid w)))))))))
 (define (payout w delta)
   (let ((c (:collateral w))
         (w0 (-> w (assoc-in (list :collateral) 0) (assoc-in (list :ondelta) 0))))
@@ -433,7 +496,7 @@
 
 ;; what a side owns outside the collateral: reserve, less what it owes, plus what it is owed
 (define (net w side)
-  (- (+ (get-in w (list :reserve side)) (get-in w (list :debt (peer side)))) (get-in w (list :debt side))))
+  (- (+ (get-in w (list :reserve side)) (get-in w (list :debt (peer side)))) (get-in w (list :debt side)) (older-of w side)))
 
 ;; the record the properties read: what was decided, on what, and what each side owned before and after
 (define (record w paid d p outcome path)
@@ -447,7 +510,7 @@
         :net-after-left (net paid :left) :net-after-right (net paid :right)
         :cf-net-left (net cf-paid :left) :cf-net-right (net cf-paid :right)
         :funded-left (funded w :left) :funded-right (funded w :right)
-        :best-held (or (:closed-best d) (best-rank w (responder-of d)))
+        :best-held (or (:closed-best d) (best-counter-rank w d (responder-of d)))
         :believed (or (:closed-proposed d) (:proposed-rank w))
         :acked (min (rank (tip-of w :left)) (rank (tip-of w :right)))
         :ondelta (:ondelta w) :secret (:secret w) :initial (:initial d) :counter-at (:counter-at d)
@@ -494,7 +557,7 @@
     (when (and (:dispute w) (not (:counter (:dispute w))) (equal? side (responder-of (:dispute w)))
                (member p (held-by w side)) (usable? w p) (outranks? p (:initial (:dispute w)))
                (windows-ok? (:dispute w) p)
-               (= (rank p) (best-rank w side))
+               (= (rank p) (best-counter-rank w (:dispute w) side))
                (not (equal? (clause-outcome w p) :wait))))
     (then (let ((d (:dispute w)))
             (finalized (carry w side) d p (clause-outcome (carry w side) p) "5b")))))
@@ -526,6 +589,28 @@
                                                 :money-before (total-funds w) :money-after (total-funds w2)
                                                 :had-clause (if (p-clause tip) #t #f))
                                           ss)))))))
+
+;; R-C2R-FOLD: Left withdraws one unit of collateral to its reserve at a quiescent height, the way processC2R does it: a
+;; co-signed advance whose diff is the withdrawn amount (Left: ondeltaDiff = -amount). With a nonzero offdelta the
+;; withdrawal must travel as a settlement that folds it (`withdraw-fold`); a C2R co-signed then drops the offdelta with the
+;; epoch (bug `c2r-unfolded`): the payments of the epoch are erased.
+(define (withdraw-fold off) off)
+(define withdraw
+  (rule "withdraw" (w side)
+    (when (and (equal? side :left) (< (length (:withdrawals w)) max-withdrawals) (settle-enabled? w) (>= (:collateral w) 1)))
+    (then (let* ((tip (tip-of w :left))
+                 (delta-before (+ (:ondelta w) (p-off tip)))
+                 (w1 (-> w (assoc-in (list :epoch) 1)
+                           (assoc-in (list :chain-nonce) (settle-nonce w))
+                           (update-in (list :collateral) (lambda (c) (- c 1)))
+                           (update-in (list :ondelta) (lambda (o) (- (+ o (withdraw-fold (p-off tip))) 1)))
+                           (add-reserve :left 1)
+                           (assoc-in (list :head) (length script))))
+                 (w2 (assoc-in w1 (list :adv-ondelta) (:ondelta w1))))
+            (update-in w2 (list :withdrawals)
+                       (lambda (ws) (cons (dict :delta-before delta-before :delta-after (:ondelta w2)
+                                                :money-before (total-funds w) :money-after (total-funds w2))
+                                          ws)))))))
 
 ;; the first SIGNED frame of the new epoch: Right pays Left 1. Right-authored, so at chain nonce + 1 it would only TIE
 ;; the implicit proof (same rank) and a counter with it is refused: the dispute would pay the implicit proof and
@@ -572,7 +657,7 @@
 
 (define (rules-for w)
   (let ((ps (all-proofs w)))
-    (append (list propose byz-propose collide ack tick reveal rotate settle post-frame finalize-counter finalize-initial
+    (append (list propose byz-propose byz-window collide ack tick reveal rotate settle withdraw post-frame finalize-counter finalize-initial
                   (deposit-rule :left :left) (deposit-rule :right :right)
                   (deposit-rule :left :right) (deposit-rule :right :left))
             (map start-with ps) (map counter-with ps) (map finalize-with ps))))
@@ -580,7 +665,7 @@
 
 ;; ---- properties
 (define (total-funds w)
-  (+ (get-in w (list :reserve :left)) (get-in w (list :reserve :right)) (:collateral w)))
+  (+ (get-in w (list :reserve :left)) (get-in w (list :reserve :right)) (:collateral w) (:third-paid w)))
 
 (define invariants
   (list
@@ -590,13 +675,22 @@
               (and (= (:net-after-left r)  (+ (:net-before-left r)  (:delta r)))
                    (= (:net-after-right r) (+ (:net-before-right r) (- (:collateral r) (:delta r))))))
             (:results w)))
+   ;; restated from the shortfall records, not through `payable` or `enforce-older` (a planted bug redefines those)
+   (property "a shortfall pays the peer no more than the debtor's spendable reserve: its reserve less its older debts (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (<= (:got s) (max 0 (- (:reserve s) (:older s))))) (:shortfalls w)))
+   (property "a shortfall enforces the debtor's older debts first: afterwards they are paid, its reserve is empty, or the call's cap was reached (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (or (= (:older-after s) 0) (= (:reserve-after s) 0) (>= (:enforced s) older-per-call))) (:shortfalls w)))
+   (property "a shortfall pays the peer all of the debtor's spendable reserve it can: the smaller of the amount and the reserve less its older debts (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (= (:got s) (min (:amount s) (max 0 (- (:reserve s) (:older s)))))) (:shortfalls w)))
+   (property "one enforcement call pays at most the call's cap of older debt (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (<= (:enforced s) older-per-call)) (:shortfalls w)))
    (property "money is conserved: reserves + collateral never change" (w)
      (= (total-funds w) (+ collateral0 reserve-left0 reserve-right0)))
    (property "credit holds: what a side owes never exceeds the credit extended to it" (w)
      (and (<= (get-in w (list :debt :left)) credit-left)
           (<= (get-in w (list :debt :right)) credit-right)))
    (property "both sides sign the same proof: proofs of one nonce, proposer and kind have one body" (w)
-     (let ((ps (signed-proofs w)))
+     (let ((ps (filter (lambda (p) (co-signed? w p)) (signed-proofs w))))
        (every (lambda (p)
                 (every (lambda (q)
                          (or (not (and (= (p-nonce p) (p-nonce q)) (equal? (p-proposer p) (p-proposer q))
@@ -657,13 +751,15 @@
             (:results w)))
    ;; N3 (review B, risk 5; E9): windows may lengthen and never shorten inside an epoch, on the proofs of the epoch and
    ;; on the counter or the final body of a dispute against the windows it started with
-   (property "windows never shorten inside an epoch: a later proof carries at least the windows of an earlier one, and a counter or final body at least the started ones" (w)
-     (and (every (lambda (p)
-                   (every (lambda (q)
-                            (or (not (and (= (p-epoch p) (p-epoch q)) (< (p-nonce p) (p-nonce q)))) (windows-ge? q p)))
-                          (all-proofs w)))
-                 (all-proofs w))
-          (every (lambda (r) (windows-ge? (:proof r) (:initial r))) (:results w))))
+   (property "windows never shorten inside an epoch: a later co-signed proof carries at least the windows of an earlier one (the signing guard)" (w)
+     (every (lambda (p)
+              (every (lambda (q)
+                       (or (not (and (= (p-epoch p) (p-epoch q)) (< (p-nonce p) (p-nonce q)))) (windows-ge? q p)))
+                     (co-signed-proofs w)))
+            (co-signed-proofs w)))
+   ;; E9, on the chain: whoever signed it, a counter or a final body carries at least the windows the dispute started with
+   (property "a counter or final body carries at least the started windows: the chain's E9 check, whoever signed it" (w)
+     (every (lambda (r) (windows-ge? (:proof r) (:initial r))) (:results w)))
    (property "no lock is signed beyond MAX_LOCK_HORIZON: every held clause is within the horizon of the clock (N2)" (w)
      (every (lambda (p) (or (not (p-clause p)) (<= (clause-deadline (p-clause p)) (+ (:now w) max-lock-horizon))))
             (all-proofs w)))
@@ -701,7 +797,7 @@
    ;; A12 (coordinator, 00:49): two co-signed proofs exist at one nonce only with opposite proposer flags, and LEFT's proposal
    ;; wins whoever starts or counters. Restated from the rule: proposers, then who ranks higher.
    (property "two proofs of one nonce and epoch have opposite proposers, and Left's outranks Right's (A12)" (w)
-     (let ((ps (signed-proofs w)))
+     (let ((ps (filter (lambda (p) (co-signed? w p)) (signed-proofs w))))
        (every (lambda (p)
                 (every (lambda (q)
                          (or (not (and (= (p-nonce p) (p-nonce q)) (= (p-epoch p) (p-epoch q)) (not (equal? p q))))
@@ -714,7 +810,21 @@
    (property "a timeout finalize consumes exactly one nonce; an adopted proof sets it" (w)
      (or (null? (:results w))
          (let ((r (car (:results w))))
-           (= (:chain-nonce w) (if (:adopted r) (p-nonce (:proof r)) (+ (p-nonce (:initial r)) 1))))))))
+           (= (:chain-nonce w) (if (:adopted r) (p-nonce (:proof r)) (+ (p-nonce (:initial r)) 1))))))
+   ;; review round 3 of PR 41 (x-implicit-tie): a dispute that settles on the implicit proof never leaves a signed proof of the
+   ;; same epoch that ranks at or above it. At a tie the counter is refused, so the signed proof is lost (the trap behind
+   ;; `post-nonce-low`, stated for every epoch and every holder, not only for the frame after a settlement). It also pins
+   ;; "the implicit proof exists from epoch 1 on" (bug `implicit-at-epoch-0`).
+   (property "a dispute that settles on the implicit proof leaves no signed proof of its epoch at or above it" (w)
+     (every (lambda (r)
+              (or (not (p-implicit? (:proof r)))
+                  (every (lambda (q) (or (not (= (p-epoch q) (:epoch r))) (< (rank q) (rank (:proof r)))))
+                         (signed-proofs w))))
+            (:results w)))
+   ;; R-C2R-FOLD: a withdrawal lowers Left's position by exactly what it withdrew and moves nothing else
+   (property "R-C2R-FOLD: a withdrawal lowers Left's position by exactly the amount withdrawn and moves nothing else: Δ after = Δ before - 1, money unchanged" (w)
+     (every (lambda (s) (and (= (:delta-after s) (- (:delta-before s) 1)) (= (:money-before s) (:money-after s))))
+            (:withdrawals w)))))
 
 ;; finished: a dispute was settled, or the model's clock has run out with none active (no window fits)
 (define (settled? w)

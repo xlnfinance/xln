@@ -1,0 +1,54 @@
+{
+ "id": "R-HOLD-CAP",
+ "statement": "Open holds are capped at 32 and the 33rd is refused with too_many_holds; a dispute proof with more reverts (E10), and a proof body carries the transformers of every token, so the decided rule counts open holds across every token of the Account. The ts cell holds both halves: the per-token check (ledger.ts) and the Account-level count (state.ts, applied by tx.ts).",
+ "source": "Review B of PR 73; contracts Account.sol MAX_DISPUTE_TRANSFORMERS = 32; Quint LOCK_SLOTS",
+ "layers": {
+  "arrival": "owed: spec thread (an Arrival page for the hold cap)",
+  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-CAP at most 32 holds are open, matching the contract's proof bound"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-CAP two tokens with 16 holds each: a 33rd lock in either token is refused"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-CAP a token that holds 32 alone refuses its own 33rd, and the other token is refused too"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-HOLD-CAP a hold that resolves, cancels or expires frees its place in the count, in any token"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aStartWithThirtyThreeTransformersRevertsAndWithThirtyTwoLands"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aCounterWithThirtyThreeTransformersReverts"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_aFinalizationWithThirtyThreeTransformersReverts"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_HOLD_CAP_theClausesOfAllTheTokensOfABodyCountTogether"
+  }
+ ]
+}

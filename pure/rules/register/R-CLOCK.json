@@ -1,0 +1,79 @@
+{
+ "id": "R-CLOCK",
+ "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page. The ts cell holds the Runtime's parts: the Host's stamp is the later of its last and the input's and never goes back (a replay of a row that goes back halts), a stamp is made (no negative, no bare number, an input without one does not type), and the stamp decides no Entity's state. The watermark cap is in no pure code yet.",
+ "source": "contracts-decisions.md (memory, #57)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: the clock rules are off-chain (watermark, receiver stamp, host door); the contract reads only block.timestamp (H1)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "expire-by-frame-stamp"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "receiver-judges-by-the-frame-stamp"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "refuse-late"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "refuse-future"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a frame's stamp is the later of the Runtime's and the input's, and never goes back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK the stamp decides nothing: the same inputs at other stamps make the same Entities"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a stamp is not negative: the Host cannot hand over a time before the epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a peer input with no Host timestamp does not type: the Runtime reads no clock of its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a row whose stamp goes back halts the replay"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a WAL whose rows share a stamp replays: a Host stamps in milliseconds, equal stamps are usual"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a refused input moves the stamp like any other: a later one stamped earlier does not go back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK an input refused for an unknown Entity still moves the stamp: a later row never goes back"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-CLOCK a new height of J moves the stamp: a later input stamped earlier does not go back"
+  }
+ ]
+}

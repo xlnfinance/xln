@@ -1,0 +1,74 @@
+{
+ "id": "R-GATE-CONTRACTS-VM",
+ "statement": "The contracts/ BrowserVM and deploy-gate tests (contracts/test/vm/<area>/*.test.ts, contracts/test/gate/*.test.ts) run inside the one gate, one file per process after a rebuild that leaves the committed typechain-types as they were: `bun rules/check.ts` (and --contracts-only) is red when one is red, when the rebuild fails or changes typechain-types, or when no test file is found, and CI's contracts job runs that same command.",
+ "source": "coordinator 10-01 08:48 (a contracts/test/gate test went red on GitHub only: the local gate checked where such tests sit but never ran them)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a red contracts/ BrowserVM or deploy-gate test, or a stale typechain, alone is 1"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a red gate test of contracts/ exits 1 and names the file"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM the same test passing, with a quiet rebuild, passes the contracts part"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a rebuild that writes into typechain-types exits 1 as stale"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM the files are CI's globs: vm/<area>/*.test.ts and gate/*.test.ts, sorted, nothing else"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a tree with no gate test is red, not an empty pass"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a green rebuild and green tests pass, the build first and each test file in a process of its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a red test file is named with its exit code and the end of its output, and the other files still run"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a test that did not start is red, not skipped"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a failing rebuild is red and says so"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM a rebuild that changes typechain-types is red: the committed files are stale"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CONTRACTS-VM the digest is the same for the same files and differs for a changed, an added and a renamed file"
+  }
+ ]
+}

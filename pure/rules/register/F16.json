@@ -1,0 +1,59 @@
+{
+ "id": "F16",
+ "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce. The Arrival J page models the dispute (start, counter, finalize) and deposit batches; reveal and ladder batches are held by the contract layer only.",
+ "source": "contracts-decisions.md F16 (memory)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: a fact about the contract as built; the planner's use of it is J5 and R-SIMULATE"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_gasSweep_erc20Deposit_depthTwo"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_F16_gasSweep_erc721Deposit_depthThree"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "F16 V revert-whole batches ignore the budget but keep the minimum"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "gas-soft"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "starved-silent"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "hard-starved-event"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "starved-at-floor"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "gas-fail-burns-an-urgent-batch"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "gas-fail-burns-a-deposit-batch"
+  }
+ ]
+}

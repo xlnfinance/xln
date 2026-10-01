@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { contractTestProblems, contractTestsReport, HARDHAT_ONLY } from "./contract-tests.ts";
 import { isGateTest } from "../scan.ts";
+import { withoutComments } from "../ci/ci-drift.ts";
+import { jobBlocks, runCommands } from "../ci/workflow/ci-steps.ts";
 
 const A_TEST = 'import { describe, test } from "bun:test";\ndescribe("x", () => { test("y", () => {}); });\n';
 const A_FOUNDRY_TEST = "contract T is Test { function test_y() public {} }\n";
@@ -105,14 +107,12 @@ describe("the placement rule itself", () => {
     expect(["vm/x.test.ts", "vm/a/b/x.test.ts", "vm/a/x.test.mjs", "gate/x.test.mjs", "gate/x.ts", "gate/sub/x.test.ts", "dispute/x.test.ts", "foundry/X.sol"].some(isGateTest)).toBe(false);
   });
 
-  // The folders are only gated if the workflow's loop really runs them: its globs are read from the workflow itself, so the two cannot drift.
-  test("R-GATE-CONTRACT-TESTS the vm and gate folders accepted are exactly the files the contracts-fork job's loop globs run", () => {
-    const workflow = readFileSync(`${import.meta.dir}/../../../.github/workflows/build-and-test.yml`, "utf8");
-    const loop = /for f in (.+); do/.exec(workflow)?.[1] ?? "";
-    const globs = loop.split(/\s+/).filter((glob) => glob.startsWith("contracts/test/")).map((glob) => glob.slice("contracts/test/".length));
-    expect(globs.length).toBeGreaterThan(0);
-    const matches = (file: string): boolean => globs.some((glob) => new RegExp(`^${glob.replaceAll(".", "\\.").replaceAll("*", "[^/]*")}$`).test(file));
-    const candidates = ["vm/a/x.test.ts", "vm/a/x.test.mjs", "vm/a/x.spec.ts", "vm/x.test.ts", "vm/a/b/x.test.ts", "gate/x.test.ts", "gate/x.test.mjs", "gate/x.ts", "gate/sub/x.test.ts"];
-    candidates.forEach((file) => expect(matches(file), file).toBe(isGateTest(file)));
+  // The folders are only gated if the workflow runs the gate part that lists them: the part uses isGateTest itself, so the workflow holds no glob that could drift from it.
+  test("R-GATE-CONTRACT-TESTS the contracts-fork job runs the --contracts-only part, which lists exactly the isGateTest files, and holds no glob loop of its own", () => {
+    const workflow = withoutComments(readFileSync(`${import.meta.dir}/../../../.github/workflows/build-and-test.yml`, "utf8"));
+    const job = jobBlocks(workflow)["contracts-fork"] ?? "";
+    expect(runCommands(job)).toContain("bun rules/check.ts --contracts-only");
+    expect(job).not.toContain("contracts/test/");
+    expect(job).not.toMatch(/for \w+ in /);
   });
 });

@@ -1,0 +1,39 @@
+{
+ "id": "R-BOOK-DISPUTE-HONORS",
+ "statement": "A dispute opened from any Account state the book produced pays each side what both signed: the moved offdeltas, plus (when the taker fills the open clauses in full) exactly the lots still open at the owners' own prices. The Arrival cell holds one Account of two parties: a dispute from any reachable state pays the moved offdeltas plus the taker's ratio of what the clauses still hold (killed by a dispute that forgets the filled part, and by a stale clause); hub lots, prices and dust are on no spec page.",
+ "source": "Hub matching engine review B (PR 92), on Arthur's 10-01 02:53 swap decision (a dispute honors what was filled) and plan/swap-onchain.md",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread (the swap step)",
+  "contract": "hold",
+  "rig": "owed: matching engine thread (when the engine is wired into money state)",
+  "ts": "owed: matching engine thread (when the engine is wired into the Account)"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-BOOK-DISPUTE-HONORS a dispute from any state the book put an Account in pays what both believed"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-BOOK-DISPUTE-HONORS a taker's partial ratio rounds each leg down, and the engine's remainder clause never needs one"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-BOOK-DISPUTE-HONORS fills as ratios would leave dust in most remainders; the engine lots leave none"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-dispute-drops-filled"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-leaves-clause"
+  }
+ ]
+}

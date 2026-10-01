@@ -1,0 +1,34 @@
+{
+ "id": "R-FINAL-NONCE",
+ "statement": "A signed batch is final at its nonce: anyone can land it (possibly as a no-op), so a replacement is always signed at a fresh nonce (widens R-NONCE).",
+ "source": "contracts-decisions.md F1",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "resign-at-a-signed-nonce"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "resign-at-nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "abort and R-FINAL-NONCE: a batch given up on stays signed and its nonce is never signed again"
+  }
+ ]
+}

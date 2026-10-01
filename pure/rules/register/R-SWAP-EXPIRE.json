@@ -1,0 +1,29 @@
+{
+ "id": "R-SWAP-EXPIRE",
+ "statement": "Expiry is off-chain only (the chain's clause has none): anyone lapses an offer by a frame once the deciding party's view is strictly past its deadline plus the reserve (R-HTLC-CLOCK rules); earlier is not_expired with the earliest height. A lapse removes the offer and its reservations, keeps what was filled, and no fill follows it. The Arrival cell holds the lapse: only once now is strictly past deadline + reserve (the R-HTLC-CLOCK rule), the signed clause live until then, the filled part kept and a lapsed offer never changing again; the not_expired fault with the earliest height is a guard on the page that no property pins.",
+ "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+ "layers": {
+  "arrival": "hold",
+  "quint": "owed: spec thread",
+  "contract": "n/a: an off-chain Account rule; the chain sees only the signed swap clause (R-SWAP-ONCHAIN)",
+  "rig": "n/a: an off-chain Account rule; the walk compares the spec with the contracts, and the chain has no part here",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/swap R-SWAP-EXPIRE an offer expires off-chain: a frame lapses it once the view is past due"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-lapse-early"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "swap-fill-after-lapse"
+  }
+ ]
+}

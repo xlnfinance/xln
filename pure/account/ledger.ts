@@ -13,14 +13,16 @@ export const MAX_AMOUNT = 2n ** 256n - 1n;
 /** The most open holds a ledger carries: a dispute proof with more reverts (Account.sol MAX_DISPUTE_TRANSFORMERS). */
 export const MAX_HOLDS = 32;
 
+const NOTHING_RESERVED = { left: 0n, right: 0n };
+
 export const emptyLedger: Ledger =
-  { collateral: 0n, ondelta: 0n, offdelta: 0n, limit: { left: 0n, right: 0n }, holds: [] };
+  { collateral: 0n, ondelta: 0n, offdelta: 0n, limit: { left: 0n, right: 0n }, holds: [], reserved: NOTHING_RESERVED };
 
 export const allocation = (l: Ledger): bigint => l.ondelta + l.offdelta;
 
-/** What `side` has open in holds: what the ledger must still be able to cover if they all pay. */
+/** What `side` has open in holds and swap offers: what the ledger must still be able to cover if they all pay. */
 const held = (l: Ledger, side: Side): bigint =>
-  l.holds.filter((h) => h.payer === side).reduce((sum, h) => sum + h.amount, 0n);
+  l.holds.filter((h) => h.payer === side).reduce((sum, h) => sum + h.amount, 0n) + l.reserved[side];
 
 /** RCPAN: in the worst case over every open hold, the allocation stays in [-limit.left, collateral + limit.right]. */
 const staysWithinCredit = (l: Ledger): boolean =>
@@ -83,6 +85,19 @@ const admitted = (l: Ledger, hold: Hold): Result<Hold, AccountFault> =>
 export const lock = (l: Ledger, hold: ClauseHold): Step =>
   flatMap(admitted(l, hold), () =>
     keptIfRcpan({ ...l, holds: [...l.holds, hold] }, lacksRoom(l, hold.payer, hold.amount)));
+
+/** A swap offer reserves `n` of what `side` may pay in this token: counted as held, kept only if RCPAN still holds. */
+export const reserve = (l: Ledger, side: Side, n: bigint): Step =>
+  (held(l, side) + n > MAX_AMOUNT
+    ? err({ _tag: "hold_overflow", held: held(l, side), requested: n })
+    : keptIfRcpan({ ...l, reserved: { ...l.reserved, [side]: l.reserved[side] + n } }, lacksRoom(l, side, n)));
+
+/** An offer gives up `n` of its reservation on `side` (it lapsed, was withdrawn, or `n` of it was filled). */
+export const release = (l: Ledger, side: Side, n: bigint): Ledger =>
+  ({ ...l, reserved: { ...l.reserved, [side]: l.reserved[side] - n } });
+
+/** A fill moves `n` from the payer's reservation into its payment: the worst case is unchanged. */
+export const payReserved = (l: Ledger, payer: Side, n: bigint): Ledger => afterPayment(release(l, payer, n), payer, n);
 
 const holdAt = (l: Ledger, id: HoldId): Result<Hold, AccountFault> => {
   const hold = l.holds.find((h) => h.id === id);

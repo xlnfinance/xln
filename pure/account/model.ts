@@ -41,6 +41,16 @@ export type Hold = Readonly<{ id: HoldId; payer: Side; amount: bigint; hashlock:
 /** A hold the clause rules have admitted: `lockClause` alone makes one, and the ledger opens no other (one door). */
 export type ClauseHold = Brand<Hold, "ClauseHold">;
 
+/** One side of a swap: an amount of a token. */
+export type Leg = Readonly<{ token: TokenId; amount: bigint }>;
+
+/**
+ * An open swap offer (R-SWAP-*): `maker` gives `give` for `want`, in whole or in parts, until its `deadline` in J
+ * height (off-chain only: the chain's clause has no expiry). It is a clause of its own, in a slot of its own among
+ * the offers of the Account. `give` and `want` are what remains: every fill shrinks them (R-SWAP-CLAUSE-WITH-FILL).
+ */
+export type Offer = Readonly<{ id: HoldId; maker: Side; give: Leg; want: Leg; deadline: JHeight }>;
+
 /**
  * `limit.left` is the credit extended TO Left (how far Left's allocation may fall below zero); Right is the side that
  * extends it. `limit.right` is the mirror: how far Left's allocation may rise above the collateral.
@@ -51,13 +61,16 @@ export type Ledger = Readonly<{
   offdelta: bigint;
   limit: Readonly<Record<Side, bigint>>;
   holds: readonly Hold[];
+  /** What each side's open swap offers could still take from it in this token: counted as held, like a hold. */
+  reserved: Readonly<Record<Side, bigint>>;
 }>;
 
 /**
- * Everything one Account agrees on: a Ledger per token it has used. A token with no entry reads as the empty ledger.
- * The caps that span tokens (open holds, open hashlocks) are the Account's, so they are read here and not in a Ledger.
+ * Everything one Account agrees on: a Ledger per token it has used, and the swap offers that span two of them. A token
+ * with no entry reads as the empty ledger. The caps that span tokens (open clauses, open hashlocks) are the Account's,
+ * so they are read here and not in a Ledger.
  */
-export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger> }>;
+export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger>; offers: readonly Offer[] }>;
 
 /** One case per refusal; none of them halts anything. */
 export type AccountFault =
@@ -81,4 +94,12 @@ export type AccountFault =
   | Tagged<"deadline_past", { deadline: bigint; view: bigint }>
   | Tagged<"deadline_too_far", { deadline: bigint; latest: bigint }>
   | Tagged<"past_deadline", { deadline: bigint; view: bigint }>
-  | Tagged<"not_expired", { deadline: bigint; earliest: bigint }>;
+  | Tagged<"not_expired", { deadline: bigint; earliest: bigint }>
+  | Tagged<"unsignable", { fault: string }>
+  | Tagged<"same_token", { token: TokenId }>
+  | Tagged<"offer_exists", { id: HoldId }>
+  | Tagged<"no_such_offer", { id: HoldId }>
+  | Tagged<"not_maker">
+  | Tagged<"not_taker">
+  | Tagged<"bad_ratio", { ratio: number }>
+  | Tagged<"fill_too_small", { give: bigint; want: bigint }>;

@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { parseManifest } from "../../contracts/deploy/manifest.ts";
 import { evaluate } from "./evaluate.ts";
 import type { Layer, Register } from "./model.ts";
-import { parseJson, parseRegister } from "./register.ts";
+import { parseJson, type ParseError, type Result } from "./register.ts";
+import { REGISTER_DIR, REGISTER_FILE, readRegisterAt, readRegisterFolder } from "./layout/store.ts";
 import { scanNames } from "./scan.ts";
 import {
   addedSince, columnsOf, milestonesOf, registerColumns, renderProgress, retiredSince, verificationOf,
@@ -22,7 +23,6 @@ import {
 
 const here = import.meta.dir;
 const repoRoot = `${here}/../..`;
-const REGISTER_PATH = "pure/rules/register.json";
 const MANIFEST_PATH = `${repoRoot}/contracts/deploy/sepolia.manifest.json`;
 const MAIN = "origin/main";
 const VERIFY_PATH = `${repoRoot}/contracts/deploy/verify.ts`;
@@ -46,10 +46,8 @@ const sinceRef = sinceAt === -1 ? undefined : args[sinceAt + 1];
 const known = sinceAt === -1 ? args.length === 0 : args.length === 2 && sinceRef !== undefined;
 if (!known) fail("usage: bun rules/progress.ts [--since <ref>] [--skip-verify]");
 
-const readRegister = (text: string, where: string): Register => {
-  const parsed = parseRegister(text);
-  return parsed.ok ? parsed.value : fail(`${where}: ${parsed.error.where}: ${parsed.error.detail}`);
-};
+const readRegister = (result: Result<Register, ParseError>, where: string): Register =>
+  result.ok ? result.value : fail(`${where}: ${result.error.where}: ${result.error.detail}`);
 
 // The commit a ref names, or nothing.
 const commitOf = (ref: string): string | undefined => {
@@ -57,12 +55,11 @@ const commitOf = (ref: string): string | undefined => {
   return found.code === 0 && found.out !== "" ? found.out : undefined;
 };
 
-// The register at a commit, exactly: the commit itself, not the merge base with HEAD.
+// The register at a commit, exactly: the commit itself, not the merge base with HEAD, in whichever layout that commit uses.
 const registerAt = (sha: string, ref: string): Register => {
-  const shown = git(["show", `${sha}:${REGISTER_PATH}`]);
-  return shown.code === 0
-    ? readRegister(shown.out, `the register at ${ref}`)
-    : fail(`${ref}: ${REGISTER_PATH} cannot be read at ${sha.slice(0, 7)}: ${shown.err}`);
+  const at = readRegisterAt(repoRoot, sha);
+  if (!at.ok) return fail(`${ref}: ${at.error.detail}`);
+  return at.value._tag === "Found" ? at.value.register : fail(`${ref}: no register at ${sha.slice(0, 7)} (neither ${REGISTER_DIR}/ nor ${REGISTER_FILE})`);
 };
 
 // A manifest that is missing, not JSON or invalid is a deployment that is not recorded, never a crash.
@@ -115,7 +112,7 @@ const checkoutState = (): Checkout => {
   };
 };
 
-const register = readRegister(readFileSync(`${here}/register.json`, "utf8"), "register.json");
+const register = readRegister(readRegisterFolder(`${here}/register`), "register/");
 const evaluation = evaluate(register, scanNames(repoRoot));
 const columns = columnsOf(evaluation.reports);
 

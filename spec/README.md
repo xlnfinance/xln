@@ -13,7 +13,7 @@ spec/
   arrival.config.json      arms define/overridable for the CLI (run from spec/)
   lib/vocabulary.scm       `rule` and `property`: how a page names its parts
   lib/check.scm            `check`: breadth-first walk of every reachable world
-  account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins)
+  account/frames.scm       Account frames: propose, ack, cross-open tie-break (Left wins); a coarse J clock that moves between a frame's proposal and its receipt, the receiver's refusal with a fault tag and the proposer's retry or drop (R-FRAME-REFUSAL), the attempt number and the receiver's mark, the frame author, a proof nonce per proposal (R-RETRY-NEW-NONCE, R-PROOF-NONCE-ABOVE-SIGNED), a lock held while its proof is signed (R-SIGNED-IS-LIVE) and the freeze after a co-signed settlement (R-COSIGN-FREEZE); the proof is a slot in the frame, the refusal carries a floor (R-PROOF-NONCE-ABOVE-SIGNED)
   account/clock.scm        a frame's timestamp carries no authority (R-CLOCK); every HTLC time judgment is in J height by the party's own view, strict expiry bound with a reserve >= LAG, payee reveals at deadline - LAG (R-HTLC-CLOCK)
   account/bugs/*.scm       deliberately broken variants; the checker must catch each
   account/swap.scm         a two-party swap inside an Account: offer, partial fill (a ratio of 65535, each leg floors), withdraw, lapse (off-chain expiry), the signed clause that shrinks with every fill (R-SWAP-CLAUSE-WITH-FILL), and a dispute that honours what was filled (R-SWAP-ONCHAIN)
@@ -52,16 +52,18 @@ spec/
 
 ## Run
 
-Needs Node 20+, pnpm (`corepack enable`) and npm or bun.
+Needs Node 20+, pnpm (`npm install --global pnpm@<version in spec/arrival/package.json>`; corepack of Node 22.13 fails its signature check) and npm or bun.
 
 ```sh
 cd spec
 npm install            # or: bun install    (MCP server dependencies; `npm ci` in a boot script)
 npm run setup          # pnpm install + build inside arrival/ (dist/ is not committed)
-npm run check          # about 2 minutes: {:ok #t :states 3651 :transitions 11335 :goals 16}
-npm test               # 208 cases, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
-                       # Wall time 88.7 minutes on 4 cores (the J batch case with deposit legs alone takes 85); every case has a fixed budget (150 minutes) and fails by name if it blows it
+npm run check          # about 11 minutes (650 s measured, three checks at once on a busy box): {:ok #t :states 4563 :transitions 18600 :goals 44}
+npm test               # 262 cases on this tree, one child process each (pool of TEST_JOBS=4), each verdict printed as its case finishes; exits non-zero if any case fails.
+                       # Wall time was 88.7 minutes on 4 cores before the refusal page (the J batch case with deposit legs alone takes 85); the 32 account cases alone now take about 70 minutes at TEST_JOBS=3 on a busy box (the heaviest, lossy clock, 35 minutes). Every case has a fixed budget (150 minutes) and fails by name if it blows it
 ```
+
+CI runs the suite in four shards, `SHARD=k/4 node test.mjs` (k = 0..3, `tools/shard.mjs`): shard 0 is the heavy J batch case alone, shards 1 to 3 split the rest. `SHARD=k/n` needs n = 1 or n >= 3.
 
 Run any file directly: `node arrival/packages/arrival-cli/dist/cli.js run <file.scm>` from `spec/`.
 `(require "lib/check.scm")` resolves against the directory of the entry file, so run from `spec/`.
@@ -167,7 +169,7 @@ If `node` is not on the app's PATH, put the absolute path of `node` in `command`
 ### Checking it works
 
 Ask the agent to call `arrival_run` with `file: "account-frames.check.scm"`; it should print
-`{:ok #t :states 3651 :transitions 11335 :goals 16}`. Without an MCP client:
+`{:ok #t :states 4563 :transitions 18600 :goals 44}`. Without an MCP client:
 
 ```sh
 npx @modelcontextprotocol/inspector node spec/mcp/server.mjs
