@@ -73,6 +73,41 @@
   {
    "kind": "test",
    "layer": "ts",
+   "name": "R-DURABLE R-X1 every run settles; nothing halts or leaves ahead of its disk, with junk hashes and ids"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: a shell that sends a row's outputs when it asks for the write, not after"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the sender never believes the peer holds more than the peer made durable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE planted bug: an ack that leaves with the write request gives Alice a head Bob lacks"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a frame that has begun asks for its row to be made durable, sends nothing and holds the Host"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the outputs of a row leave only once the row is durable, once, and never an earlier row's"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE after a crash the Host is the durable rows alone, and every committed output leaves again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
    "name": "R-DURABLE a staged row asks nothing of the chain: its actions leave once it is committed"
   },
   {
@@ -84,6 +119,16 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a flush after a crash asks for the rows in row order, each row's own actions in order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a frame that asks the chain for a reveal sends no chain action until its row is durable"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE after a crash every committed chain action is asked again, once"
   }
  ]
 }
