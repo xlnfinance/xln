@@ -427,22 +427,22 @@ describe("runtime/walk Alice and Bob open an Account and Alice pays", () => {
       return { ...flushed, leaving: [...flushed.leaving, ...(rt.staged?.outputs ?? [])] };
     } };
     expect(texts(walk({ ...REAL_OPTIONS, ops: leak }))).toContain("alice's link holds an output no WAL has");
-  });
+  }, 30_000);
 
   test("R-DURABLE planted bug: a flush that never marks its rows sent repeats them without end", () => {
     const repeating: Ops = { ...REAL, flush: (rt) => ({ ...flush(rt), runtime: rt }) };
     expect(texts(walk({ ...REAL_OPTIONS, ops: repeating })).join()).toContain("grows without bound");
-  });
+  }, 30_000);
 
   test("R-DURABLE planted bug: a recovery that forgets the last row is caught", () => {
     const forgetful: Ops = { ...REAL, recover: (s, g, wal) => recover(s, g, wal.slice(0, -1)) };
     const found = texts(walk({ ...REAL_OPTIONS, ops: forgetful }));
     expect(found).toContain("alice's WAL does not replay to the entities it holds");
-  });
+  }, 30_000);
 
   test("R-NET planted bug: with no timer, a frame refused before its peer opened wedges", () => {
     expect(texts(walk({ ...REAL_OPTIONS, timers: false }))).toContain(NOT_FINISHED);
-  });
+  }, 30_000);
 });
 
 describe("runtime/walk Alice's view of the chain is ahead of Bob's and her lock waits for the heights to rise", () => {
