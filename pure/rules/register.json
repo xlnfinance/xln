@@ -951,7 +951,7 @@
    "statement": "Contract as built: the soft gas path exists only for money-only batches; dispute, reveal, ladder and deposit batches revert whole on out-of-gas and keep their nonce.",
    "source": "contracts-decisions.md F16 (memory)",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -972,6 +972,26 @@
      "kind": "test",
      "layer": "contract",
      "name": "F16 V revert-whole batches ignore the budget but keep the minimum"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "gas-soft"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "starved-silent"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "hard-starved-event"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "starved-at-floor"
     },
     {
      "kind": "mutant",
@@ -1334,8 +1354,8 @@
   },
   {
    "id": "R2C-DEBT-FIRST",
-   "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
-   "source": "contracts-decisions.md (memory)",
+   "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page) and the dispute payout (dispute page); the other calls are the contract's and no layer here kills them yet.",
+   "source": "contracts-decisions.md (memory, #62); coordinator 10-01 07:20 (Depository._enforceDebts, _settleShortfall)",
    "layers": {
     "arrival": "hold",
     "quint": "owed: #44",
@@ -1350,10 +1370,69 @@
      "name": "r2c-skips-enforcement"
     },
     {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "shortfall-skips-enforcement"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "shortfall-ahead-of-debt"
+    },
+    {
      "kind": "mutant",
      "layer": "quint",
      "name": "r2c-skips-enforce",
      "owed": "#44"
+    }
+   ]
+  },
+  {
+   "id": "R-SETTLE-FORGIVE",
+   "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts.",
+   "source": "coordinator 09-30 16:12 and 10-01 07:20; Depository._forgiveDebtsBetweenEntities, Account MAX_SETTLEMENT_FORGIVENESS_IDS",
+   "layers": {
+    "arrival": "hold",
+    "quint": "owed: #44",
+    "contract": "owed: contracts thread (DebtForgiveness.test.ts holds the rule, but no name carries the id)",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgives-third-party"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgives-one-direction"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgives-past-head"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-blocked-lands"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "reverts-on-either-block"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-uncapped"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "forgive-repeat-ok"
     }
    ]
   },

@@ -86,6 +86,11 @@
 (define/overridable collateral0    (s/number) 2)
 (define/overridable reserve-left0  (s/number) 1)
 (define/overridable reserve-right0 (s/number) 0)
+;; what each side already owes THIRD parties from earlier (its older debts, enforced first, Depository._settleShortfall)
+(define/overridable older-left0  (s/number) 0)
+(define/overridable older-right0 (s/number) 0)
+;; one enforcement call clears at most this much older debt (the contract visits at most 32 claims per call; a claim is 1 here)
+(define/overridable older-per-call (s/number) 32)
 ;; the frame heights at which a cooperative settlement is offered (height 2 holds an open clause)
 ;; H3: the board of one side rotates (0: never; the `retired-left` and `retired-right` configs set 1)
 (define/overridable rotations (s/number) 0)
@@ -196,6 +201,9 @@
         :collateral collateral0 :ondelta 0
         :reserve (dict :left reserve-left0 :right reserve-right0)
         :debt (dict :left 0 :right 0)        ; owed BY the side to its peer
+        :older (dict :left older-left0 :right older-right0)   ; owed BY the side to third parties, from before
+        :third-paid 0                        ; what enforcement has paid third parties out of the reserves
+        :shortfalls (list)                   ; what each shortfall did: reserve and older debt before and after, what the peer got
         :secret #f                           ; #f, or when the secret became public on chain
         :head 0                              ; off-chain height: how many script frames were proposed
         :tip (dict :left genesis :right genesis)   ; the newest proof each side has committed
@@ -417,11 +425,25 @@
     (then (assoc-in w (list :rot) (:head w)))))
 
 (define (add-reserve w side amount) (update-in w (list :reserve side) (lambda (r) (+ r amount))))
-;; a shortfall is paid from the debtor's reserve first; the rest becomes debt
+;; a shortfall: the chain enforces the debtor's older debts first, from its reserve (`enforce-older`; bug
+;; `shortfall-skips-enforcement`), pays the peer out of the SPENDABLE reserve, the reserve less what is still owed (`payable`;
+;; bug `shortfall-ahead-of-debt`: the raw reserve), and books the rest as debt (Depository._settleShortfall)
+(define (older-of w side) (get-in w (list :older side)))
+(define (enforce-older w side)
+  (let ((pay (min (older-of w side) (get-in w (list :reserve side)) older-per-call)))
+    (-> w (add-reserve side (- pay)) (update-in (list :older side) (lambda (o) (- o pay)))
+          (update-in (list :third-paid) (lambda (t) (+ t pay))))))
+(define (payable w side) (max 0 (- (get-in w (list :reserve side)) (older-of w side))))
 (define (shortfall w debtor amount)
-  (let ((pay (min amount (get-in w (list :reserve debtor)))))
-    (-> w (add-reserve debtor (- pay)) (add-reserve (peer debtor) pay)
-          (update-in (list :debt debtor) (lambda (d) (+ d (- amount pay)))))))
+  (let* ((w0 (enforce-older w debtor))
+         (pay (min amount (payable w0 debtor)))
+         (w1 (-> w0 (add-reserve debtor (- pay)) (add-reserve (peer debtor) pay)
+                    (update-in (list :debt debtor) (lambda (d) (+ d (- amount pay)))))))
+    (update-in w1 (list :shortfalls)
+               (lambda (l) (append l (list (dict :reserve (get-in w (list :reserve debtor)) :older (older-of w debtor)
+                                                 :got (- (get-in w1 (list :reserve (peer debtor))) (get-in w (list :reserve (peer debtor))))
+                                                 :reserve-after (get-in w1 (list :reserve debtor)) :older-after (older-of w1 debtor)
+                                                 :enforced (- (:third-paid w1) (:third-paid w)))))))))
 (define (payout w delta)
   (let ((c (:collateral w))
         (w0 (-> w (assoc-in (list :collateral) 0) (assoc-in (list :ondelta) 0))))
@@ -433,7 +455,7 @@
 
 ;; what a side owns outside the collateral: reserve, less what it owes, plus what it is owed
 (define (net w side)
-  (- (+ (get-in w (list :reserve side)) (get-in w (list :debt (peer side)))) (get-in w (list :debt side))))
+  (- (+ (get-in w (list :reserve side)) (get-in w (list :debt (peer side)))) (get-in w (list :debt side)) (older-of w side)))
 
 ;; the record the properties read: what was decided, on what, and what each side owned before and after
 (define (record w paid d p outcome path)
@@ -580,7 +602,7 @@
 
 ;; ---- properties
 (define (total-funds w)
-  (+ (get-in w (list :reserve :left)) (get-in w (list :reserve :right)) (:collateral w)))
+  (+ (get-in w (list :reserve :left)) (get-in w (list :reserve :right)) (:collateral w) (:third-paid w)))
 
 (define invariants
   (list
@@ -590,6 +612,11 @@
               (and (= (:net-after-left r)  (+ (:net-before-left r)  (:delta r)))
                    (= (:net-after-right r) (+ (:net-before-right r) (- (:collateral r) (:delta r))))))
             (:results w)))
+   ;; restated from the shortfall records, not through `payable` or `enforce-older` (a planted bug redefines those)
+   (property "a shortfall pays the peer no more than the debtor's spendable reserve: its reserve less its older debts (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (<= (:got s) (max 0 (- (:reserve s) (:older s))))) (:shortfalls w)))
+   (property "a shortfall enforces the debtor's older debts first: afterwards they are paid, its reserve is empty, or the call's cap was reached (R2C-DEBT-FIRST)" (w)
+     (every (lambda (s) (or (= (:older-after s) 0) (= (:reserve-after s) 0) (>= (:enforced s) older-per-call))) (:shortfalls w)))
    (property "money is conserved: reserves + collateral never change" (w)
      (= (total-funds w) (+ collateral0 reserve-left0 reserve-right0)))
    (property "credit holds: what a side owes never exceeds the credit extended to it" (w)

@@ -747,6 +747,11 @@ opened), and split above the gas cap (`draft-cap`). Config `j/configs/simulate-f
 bug `signs-before-gate`: property "a finalize is signed only after its gate opened when the Entity simulates
 first (Runtime rule)". Not checked: the estimator itself (a simulation on a stale head can still fail; that
 failure is the soft path above).
+CLOSED 10-01 (coordinator): the question whether "every failure is BatchFailed once the gas budget is given" covers hard batches is
+answered by the deployed contract and the page matches it: a dispute, reveal, ladder or deposit batch reverts whole on out-of-gas
+and keeps its nonce; only a money-only batch has the soft path (Q-J-14 (1)). Evidence: the contract tests under register row F16
+(`test_gasSweep_erc20Deposit_depthTwo`, `test_F16_gasSweep_erc721Deposit_depthThree`, `F16 V revert-whole batches ignore the
+budget but keep the minimum`) and the Arrival bugs `gas-soft`, `starved-silent`, `hard-starved-event`, `starved-at-floor`.
 Source: coordinator 23:42.
 
 **Q-J-12. A deposit leg travels alone (J6, coordinator 00:49): modelled.**
@@ -810,6 +815,18 @@ VISITED, cleared or part-paid, per internal call. The spendable reserve nets the
 Not modelled: the exact visit order inside an internal call beyond FIFO with the head kept, a payment whose cost is not a whole
 unit, and what the chain does with a reserve op that arrives with less than its cost (it fails soft, R-J5).
 Source: coordinator 09-30 15:23.
+DECIDED 10-01 (coordinator, following the deployed contracts), the three open items above: (a) closed: the contract pays a part-paid
+claim in place at the head (`Account.enforceDebts`), as the page does. (b) the calls that enforce debts are listed in register row
+R2C-DEBT-FIRST: the permissionless `enforceDebts`, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve
+transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout; the Arrival pages hold the deposit and the
+dispute payout. (c) accepted as a gap and closed: the dispute payout (the dispute page, where the payout is; the J page has no
+payout) enforces the debtor's older debts first, from its reserve, then pays the peer out of the SPENDABLE reserve (reserve less
+what is still owed), then books the rest as debt (`Depository._settleShortfall`). `older-left0` and `older-right0` give a side
+older debts to third parties; the shortfall records what the peer got; properties "a shortfall pays the peer no more than the
+debtor's spendable reserve" and "a shortfall enforces the debtor's older debts first" (both R2C-DEBT-FIRST); money is conserved
+counting what enforcement paid third parties. Bound `dispute/configs/older-debt.scm` with witness `older-debt-witness.scm`;
+planted bugs `shortfall-ahead-of-debt` (the raw reserve) and `shortfall-skips-enforcement`. The J page's R2C already checks the
+spendable reserve (`spends-owed-reserve` is its bug).
 
 **Q-J-14. Gas by batch kind and settlement debt forgiveness (coordinator, 09-30 16:12, pinned against the contracts in #54): modelled.**
 (1) Gas failure is split by batch kind. A money-only batch (payments, settlements, no deposit leg) takes the soft path: given
@@ -825,20 +842,26 @@ and is resent at its own nonce. Planted bugs `gas-soft` (a gas revert takes the 
 2365 states) with a witness. This replaces the 01:16 wording "a gas revert is plain, whatever the batch carries" for money-only
 batches: the nonce is still unspent, but the chain now says so. It answers the Q-J-11 question about hard batches (they revert
 whole and keep the nonce).
-(2) Settlement debt forgiveness. A settlement (`stl-a`) may list claim ids to forgive (`forgive`). It deletes only the HEAD claim
-of the debt queue, and only if its creditor is the settling counterparty; a third party's claim at the head reverts the whole
-settlement (nothing of it applies: BatchFailed, reason "forgiveness", the settlement goes back to its Account like a bad
-signature); at most `forgive-cap` ids (32 in the contract). Properties: "a settlement deletes only the head claim of the queue,
-and only when its creditor is the settling counterparty", "a settlement whose forgiveness reaches a third party's claim at the
-head never lands: it reverts whole" and "a settlement that lands lists at most the cap of claim ids". Planted bugs
-`forgives-third-party`, `forgives-past-head`, `forgiveness-skips-third-party`, `forgive-uncapped`. Bounds and witnesses:
-`j/configs/forgive-head.scm`, `forgive-third-head.scm`, `forgive-cap.scm`, `forgive-past-head.scm`. Debts now carry a creditor
-(`:cp` the settling counterparty, `:third` anyone else). The debt accounting property counts forgiven debts.
-Open for the coordinator: how the contract reads "at most 32 ids" (the page reverts a settlement that lists more; the other
-reading is that only the first 32 are walked); what it does with a listed id that is not the head (the page stops the walk and
-leaves the rest: only the head claim is ever deleted, no revert); whether the forgiven amount is credited to anyone (the page
-only removes the claim); how a forgiven partly-paid head claim is counted. Not modelled: gas amounts beyond the floor, the
-size of the debt queue beyond the bound.
+(2) Settlement debt forgiveness, as the deployed contract reads it (10-01, coordinator: follow the contract; `Depository.sol`
+`_forgiveDebtsBetweenEntities` and the settlement loop, `Account.sol` `MAX_SETTLEMENT_FORGIVENESS_IDS`). A settlement (`stl-a`)
+lists TOKEN ids (`forgive`). For each listed token it looks at the current head debt of each side toward the other, the entity's
+debt to the counterparty (`:debts`) and the counterparty's debt to the entity (`:cp-debts`): a head owed to the other side of the
+Account is deleted (the amount is deleted and the debtor's outstanding debt reduced; nobody is credited; a part-paid head is
+forgiven for what is left), a head owed to a third party is left. The whole settlement reverts (E2, a soft failure: BatchFailed,
+reason "forgiveness", the settlement goes back to its Account) only when NOTHING was forgiven for a listed token and a debt
+exists there; so one direction blocked by a third party and the other forgiven still lands. More than `forgive-cap` ids revert it
+(E10, 32 in the contract) and so does a token listed twice (E2). One token (`debt-token`) carries debts; a listed token without
+debts changes nothing. Properties: "a settlement deletes only the head claim of a listed token's queue, and only when it is owed to
+the other side of the Account", "a settlement that lists a token forgives each side's head claim that is owed to the other side of
+the Account", "a settlement that lists a token with debts and forgives nothing never lands", "a settlement that lands lists at most
+the cap of token ids and none twice" and "a settlement reverts on forgiveness only for a list over the cap, a repeated token, or a
+listed token whose heads cannot be forgiven"; all restated from queue snapshots, not through `forgive-plan`. Planted bugs
+`forgives-third-party`, `forgives-one-direction`, `forgives-past-head`, `forgive-blocked-lands`, `reverts-on-either-block`,
+`forgive-uncapped`, `forgive-repeat-ok`. Bounds and witnesses: `j/configs/forgive-head.scm` (+ witness), `forgive-both.scm`,
+`forgive-one-blocked.scm` (+ witness), `forgive-third-head.scm` (+ witness), `forgive-cap.scm`, `forgive-repeat.scm`,
+`forgive-past-head.scm`. The first version of this page (09-30) took claim ids and one queue; the contract differs in four places
+(token ids, both directions, revert only when nothing was forgiven, E10 and E2), and the coordinator ruled that the contract wins.
+Not modelled: gas amounts beyond the floor, the size of the debt queue beyond the bound, debts in more than one token.
 Source: coordinator 09-30 16:12.
 
 **Q-R-1. When does an output leave (lessons R-X2 area, AGENTS.md).**
