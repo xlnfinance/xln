@@ -1,7 +1,7 @@
 // Moving rules between the one-file layout (register.json, { policy, rows }) and the folder (register/<id>.json). Pure: texts in, texts out;
 // rules/layout/register-split.ts reads and writes the files. The move is mechanical: a row's data is untouched, only its file changes.
 import { isDeepStrictEqual } from "node:util";
-import { parseJson, ruleFileName, type ParseError, type RegisterFile, type Result } from "../register.ts";
+import { isRuleId, parseJson, ruleFileName, sameWhenCaseIsIgnored, type ParseError, type RegisterFile, type Result } from "../register.ts";
 
 export type RawRow = Readonly<Record<string, unknown>>;
 
@@ -9,14 +9,17 @@ const failure = (detail: string): Result<never, ParseError> => ({ ok: false, err
 
 const isRawRow = (value: unknown): value is RawRow => typeof value === "object" && value !== null && !Array.isArray(value);
 
-// Rows of an old-layout file, as the JSON holds them. Every row needs a string id: it names the file.
+const hasRuleId = (value: unknown): value is RawRow => isRawRow(value) && typeof value["id"] === "string" && isRuleId(value["id"]);
+
+// Rows of an old-layout file, as the JSON holds them. Every row needs a plain id (letters, digits, hyphens): it names the file, and the file
+// of a branch's register is not trusted to stay inside the folder.
 export const oldRows = (text: string): Result<readonly RawRow[], ParseError> => {
   const json = parseJson(text);
   if (!json.ok) return json;
   const rows = isRawRow(json.value) ? json.value["rows"] : undefined;
   if (!Array.isArray(rows)) return failure('the file must be { "rows": [...] }');
-  const bad = rows.findIndex((row) => !isRawRow(row) || typeof row["id"] !== "string" || row["id"] === "");
-  return bad !== -1 ? failure(`rows[${bad}] has no id`) : { ok: true, value: rows as readonly RawRow[] };
+  const bad = rows.findIndex((row) => !hasRuleId(row));
+  return bad !== -1 ? failure(`rows[${bad}] has no id, or an id that is not letters, digits and hyphens`) : { ok: true, value: rows.filter(hasRuleId) };
 };
 
 // One rule's file: the row printed as the old file printed it (one space of indent), plus a final newline.
@@ -29,7 +32,11 @@ export const splitFiles = (text: string): Result<readonly RegisterFile[], ParseE
   const rows = oldRows(text);
   if (!rows.ok) return rows;
   const twice = duplicate(rows.value);
-  return twice !== undefined ? failure(`rule ${twice} appears twice in the old file`) : { ok: true, value: rows.value.map(fileOf) };
+  if (twice !== undefined) return failure(`rule ${twice} appears twice in the old file`);
+  const clash = sameWhenCaseIsIgnored(rows.value.map((row) => String(row["id"])));
+  return clash !== undefined
+    ? failure(`rules ${clash[0]} and ${clash[1]} differ only in case: on a case-insensitive file system their files are one file`)
+    : { ok: true, value: rows.value.map(fileOf) };
 };
 
 const dataOf = (text: string): unknown => {

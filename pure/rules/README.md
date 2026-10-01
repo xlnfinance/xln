@@ -86,16 +86,19 @@ Rows `R-GATE-REGISTER`, `R-GATE-FROZEN`, `R-GATE-STYLE`, `R-GATE-WIDTH` and `R-G
 
 ## The register is a folder, one file per rule
 
-`register/<id>.json` holds one row (`id`, `statement`, `source`, `layers`, `killers`, and `retired_by` for a retired rule), printed with one space of indent. The file's name must be the row's id plus `.json`; nothing else may be in the folder (a stray directory, a README or a misnamed file is red, and so is a `register.json` beside the folder). The loader reads the files in id order, so the matrix lists rules alphabetically. The ratchet and the progress report read a base commit in either layout: the folder, or the single `register.json` of a commit from before the split.
+`register/<id>.json` holds one row (`id`, `statement`, `source`, `layers`, `killers`, and `retired_by` for a retired rule), printed with one space of indent. The file's name must be the row's id plus `.json`; nothing else may be in the folder, except names that start with a dot (`.DS_Store`, an editor's swap file), which are ignored (a stray directory, a README or a misnamed file is red, and so is a `register.json` beside the folder). Ids are letters, digits and hyphens only, since an id names a file; two ids that differ only in case are refused, because on a case-insensitive file system (a Mac) they would be one file. The loader reads the files in id order, so the matrix lists rules alphabetically. The ratchet and the progress report read a base commit in either layout: the folder, or the single `register.json` of a commit from before the split.
 
-A branch that edited the old `register.json` meets the folder on merge as a modify/delete conflict on that file. Convert its edits once, with the tool that did the split (from the repository root; `:1:` is the version the branch started from, `:2:` is the branch's own):
+A branch that edited the old `register.json` meets the folder on merge as a conflict on that file, and the stage that holds the branch's own version depends on which side is merging (from the repository root; `:1:` is the version the branch started from):
 
 ```
 git show :1:pure/rules/register.json > /tmp/base.json
-git show :2:pure/rules/register.json > /tmp/theirs.json
+git show :2:pure/rules/register.json > /tmp/theirs.json     # the branch merges the split: its own file is stage 2 (modify/delete)
+git show :3:pure/rules/register.json > /tmp/theirs.json     # the branch already has the folder and merges main, which edited the old file: stage 3 (delete/modify)
 git rm -q pure/rules/register.json
 (cd pure && bun rules/layout/register-split.ts port /tmp/base.json /tmp/theirs.json)
 git add pure/rules/register
 ```
 
-Rows the branch added or changed are written, rows it removed are deleted, and a rule the folder changed since the branch started is reported as a conflict and left for the author. `register-split.ts split <old.json>` writes the whole folder from an old file, and `register-split.ts verify <old.json>` exits 0 only when the folder holds exactly those rules with identical data (the equality the split commit was checked with).
+Use one of the two `theirs` lines (`git ls-files -u pure/rules/register.json` says which stage exists). In the second case "theirs" is main's edited file and "base" is the old file the folder was split from; the port then brings main's edits into the folder.
+
+Rows the file's side added or changed are written, rows it removed are deleted, and a rule the folder changed since the branch started is reported as a conflict and left for the author. `register-split.ts split <old.json>` writes the whole folder from an old file, and `register-split.ts verify <old.json>` exits 0 only when the folder holds exactly those rules with identical data (the equality the split commit was checked with).

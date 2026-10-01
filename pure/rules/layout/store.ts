@@ -17,7 +17,8 @@ export const readRegisterFolder = (dir: string): Result<Register, ParseError> =>
   if (!existsSync(dir)) return failure(`${dir} does not exist`);
   // A register.json beside the folder is a second copy that would drift from it.
   if (existsSync(`${dir}.json`)) return failure(`${dir}.json still exists: the register is the folder (one <id>.json per rule), so the old file must be deleted`);
-  const entries = readdirSync(dir, { withFileTypes: true });
+  // A name that starts with a dot (.DS_Store, an editor's swap file) is local junk, never a rule: no rule id starts with one.
+  const entries = readdirSync(dir, { withFileTypes: true }).filter((entry) => !entry.name.startsWith("."));
   const stray = entries.find((entry) => !entry.isFile());
   return stray !== undefined
     ? failure(`${stray.name} is not a file: only <id>.json files belong in the register folder`)

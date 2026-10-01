@@ -24,6 +24,12 @@ describe("a rule is one file named by its id", () => {
     expect(parsed.ok && parsed.value.map((each) => each.id)).toEqual(["A1", "R-A", "R-B"]);
   });
 
+  test("two rule files whose ids differ only in case are refused", () => {
+    const clash = parseRegisterFiles([file(row("R-A")), file(row("r-a"))]);
+    expect(!clash.ok && clash.error.detail).toContain("R-A and r-a differ only in case");
+    expect(parseRegisterFiles([file(row("R-A")), file(row("R-AB"))]).ok).toBe(true);
+  });
+
   test("a file named for another id, a file that is not <id>.json, and a file that is not JSON are each refused, naming the file", () => {
     const misnamed = parseRegisterFiles([{ name: "R-B.json", text: file(row("R-A")).text }]);
     expect(!misnamed.ok && misnamed.error.where).toBe("R-B.json");
@@ -32,6 +38,11 @@ describe("a rule is one file named by its id", () => {
     expect(noExtension.ok).toBe(false);
     const readme = parseRegisterFiles([file(row("R-A")), { name: "README.md", text: "# rules" }]);
     expect(!readme.ok && readme.error.where).toBe("README.md");
+  });
+
+  test("a rule whose id would be a path is refused", () => {
+    const traversal = parseRegisterFiles([{ name: "x.json", text: JSON.stringify(row("../x")) }]);
+    expect(traversal.ok).toBe(false);
   });
 
   test("a bad row is refused with its file's name, and an empty folder is refused", () => {
@@ -78,10 +89,23 @@ describe("splitting the old file into rule files, and proving nothing moved", ()
     expect(differences(oldFile(row("R-B")), reordered)).toEqual(["R-B.json differs from its row"]);
   });
 
+  test("an id that is a path cannot be split or ported: it would name a file outside the folder", () => {
+    ["../../../escaped", "a/b", "..", ".hidden", "R A", "-x", ""].forEach((id) => {
+      expect(oldRows(oldFile(row(id))).ok).toBe(false);
+      expect(splitFiles(oldFile(row(id))).ok).toBe(false);
+    });
+    expect(oldRows(oldFile(row("R2C-DEBT-FIRST"), row("J5"))).ok).toBe(true);
+  });
+
   test("a row without an id, and an id that appears twice, cannot be split", () => {
     expect(oldRows(JSON.stringify({ rows: [{ statement: "s" }] })).ok).toBe(false);
     expect(splitFiles(oldFile(row("R-A"), row("R-A"))).ok).toBe(false);
     expect(oldRows("not json").ok).toBe(false);
+  });
+
+  test("two ids that differ only in case cannot be split: a case-insensitive file system would make them one file", () => {
+    const clash = splitFiles(oldFile(row("R-A"), row("r-a")));
+    expect(!clash.ok && clash.error.detail).toContain("differ only in case");
   });
 });
 
@@ -128,6 +152,8 @@ describe("the folder and the commits it is read from", () => {
     writeFileSync(`${folder}/R-A.json`, file(row("R-A")).text);
     const loaded = readRegisterFolder(folder);
     expect(loaded.ok && loaded.value.map((each) => each.id)).toEqual(["R-A"]);
+    writeFileSync(`${folder}/.DS_Store`, "junk");
+    expect(readRegisterFolder(folder).ok).toBe(true);
     mkdirSync(`${folder}/nested`);
     expect(readRegisterFolder(folder).ok).toBe(false);
     expect(readRegisterFolder(`${dir}/nowhere`).ok).toBe(false);

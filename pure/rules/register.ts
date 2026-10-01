@@ -63,7 +63,7 @@ const parseCells = (where: string, raw: unknown): Result<Row["cells"], ParseErro
 const parseRow = (raw: unknown, where: string): Result<Row, ParseError> => {
   if (!isRaw(raw)) return fail(where, "row must be an object");
   const { id, statement, source, layers, killers, retired_by: retiredBy } = raw;
-  if (typeof id !== "string" || id === "") return fail(where, "row needs an id");
+  if (typeof id !== "string" || !isRuleId(id)) return fail(where, `a rule id is letters, digits and hyphens, starting with a letter or digit (it names the file), got ${JSON.stringify(id)}`);
   if (typeof statement !== "string" || statement === "") return fail(id, "row needs a statement");
   if (typeof source !== "string" || source === "") return fail(id, "row needs a source decision");
   if (!Array.isArray(killers)) return fail(id, "killers must be a list (it may be empty; the gate then fails the row)");
@@ -99,6 +99,20 @@ export const parseRegister = (text: string): Result<Register, ParseError> => {
 // A rule on disk is one file named by its id, so two changes that add or edit different rules touch different files and cannot conflict.
 export type RegisterFile = Readonly<{ name: string; text: string }>;
 
+// An id names a file in the register folder, so it may not carry a path: letters, digits and hyphens only.
+export const isRuleId = (id: string): boolean => /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(id);
+
+// The first two ids that differ only in case, if there are any: a Mac or a Windows checkout would give both the same file.
+export const sameWhenCaseIsIgnored = (ids: readonly string[]): readonly [string, string] | undefined => {
+  const seen = new Map<string, string>();
+  for (const id of ids) {
+    const earlier = seen.get(id.toLowerCase());
+    if (earlier !== undefined && earlier !== id) return [earlier, id];
+    seen.set(id.toLowerCase(), id);
+  }
+  return undefined;
+};
+
 export const ruleFileName = (id: string): string => `${id}.json`;
 
 const parseRuleFile = (file: RegisterFile): Result<Row, ParseError> => {
@@ -117,5 +131,7 @@ const byId = (left: Row, right: Row): number => (left.id < right.id ? -1 : left.
 export const parseRegisterFiles = (files: readonly RegisterFile[]): Result<Register, ParseError> => {
   if (files.length === 0) return fail("register", "the register folder holds no rule");
   const rows = collect(files.map(parseRuleFile));
-  return rows.ok ? pass(rows.value.toSorted(byId)) : rows;
+  if (!rows.ok) return rows;
+  const clash = sameWhenCaseIsIgnored(rows.value.map((row) => row.id));
+  return clash !== undefined ? fail("register", `rules ${clash[0]} and ${clash[1]} differ only in case: on a case-insensitive file system their files are one file`) : pass(rows.value.toSorted(byId));
 };
