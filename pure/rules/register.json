@@ -2951,6 +2951,46 @@
      "owed": "#44"
     }
    ]
+  },
+  {
+   "id": "R-C2R-FOLD",
+   "statement": "The node co-signs a collateral-to-reserve only while the Account's offdelta is zero; otherwise it sends the withdrawal as a settlement that folds offdelta. The contract's processC2R applies only the withdrawn amount and does not fold offdelta, so a C2R co-signed with a nonzero offdelta lets a later dispute from the implicit proof erase the other side's payment.",
+   "source": "coordinator 10-01 04:34 on pr-41-review-2026-09-29.md Round 3 point 5",
+   "layers": {
+    "arrival": "owed: spec thread",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: Entity/Runtime cut slice 3"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test: a withdrawal with a nonzero offdelta is sent as a settlement that folds it, never as a C2R",
+     "owed": "Entity/Runtime cut slice 3"
+    }
+   ]
+  },
+  {
+   "id": "R-COSIGN-FREEZE",
+   "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded: the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands.",
+   "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
+   "layers": {
+    "arrival": "owed: spec thread",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "owed: Entity/Runtime cut slice 3"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "a Runtime test: after co-signing a settlement the Account proposes nothing until the settlement lands",
+     "owed": "Entity/Runtime cut slice 3"
+    }
+   ]
   }
  ]
 }
