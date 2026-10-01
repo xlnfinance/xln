@@ -1534,7 +1534,7 @@
   },
   {
    "id": "R-NOTICE",
-   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A frame the peer refuses is NOT covered: that pending frame stays until the peer acks it (owed: R-FRAME-REFUSAL).",
+   "statement": "A tx that stops applying while it waits in the mempool is refused with notice to its owner at propose and leaves the mempool; never dropped silently. A tx the peer refuses inside a frame (R-FRAME-REFUSAL) is either retried (a fault that passes with the peer's view) or dropped with notice (fault peer_refused, carrying the peer's fault tag): every tx that enters a mempool ends committed or refused with notice, which the liveness simulation counts.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-5",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -1601,6 +1601,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-NOTICE a frame with no txs is refused and moves nothing: the peer cannot spin the height"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
     }
    ]
   },
@@ -1626,7 +1631,7 @@
   },
   {
    "id": "R-REFUSED-RELEASES-PAYER",
-   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. Today the Account sends no refusal (a frame is answered with an ack or nothing); the refusal message is R-FRAME-REFUSAL (owed A4) and the release of the payer is an Entity/Runtime duty (owed to the cut).",
+   "statement": "A refused proposal releases the payer: when a counterparty refuses a proposed tx, the proposer's funds and the payment waiting on it are freed, never left locked. The Account does its part (R-FRAME-REFUSAL: the refusal message, the rollback, the refused tx noticed with fault peer_refused and the peer's fault tag); freeing the payer from that notice is an Entity/Runtime duty (owed to the cut).",
    "source": "coordinator decision 10-01 on A3 (R-NOTICE follow-up)",
    "layers": {
     "arrival": "-",
@@ -1646,21 +1651,90 @@
   },
   {
    "id": "R-FRAME-REFUSAL",
-   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash and the first refused tx; the proposer, whose frame is pending and unacked, rolls it back, drops the refused tx and re-proposes the rest; a refusal for a committed frame is ignored; Left wins simultaneous proposals. Without it a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
+   "statement": "The receiver of a frame it cannot apply answers with a refusal naming the frame hash, the first refused tx and the fault tag; the proposer, whose frame is pending and unacked, takes it back and, by the tag, either retries every tx at the next attempt (a fault that passes with the peer's view of J: an expiry not yet due, a lock too far ahead; at most MAX_ATTEMPTS retries per head, then a retryable fault is dropped like any other and the attempt keeps counting) or drops the refused tx with notice and re-proposes the rest; a refusal for a committed frame, or one whose index is not a tx of the frame, is ignored; Left wins simultaneous proposals. A frame carries its attempt number, the refusals its proposer has handled on this head. The receiver remembers one number per head, the highest attempt it refused, and refuses any frame at or below it without a look, answering with the refusal and the mark: a frame once refused is never committed later however its view of J moves (else the proposer, which took it back, and the peer would fork), and a retry, at a higher attempt, is judged afresh. The receiver judges any whole attempt number it can count, so a proposer past its retry budget is never ignored. The attempt count and that memory are Replica state: a Runtime that restarts must persist them. The Account has no clock: spacing the retries (propose again when a view of J moves, not back to back) is the Runtime's duty. The memory and the refusals are keyed by what a frame says, so they rest on the peer being authenticated: the transport authenticates it today, and A4b's signed frames and refusals, checked before the memory is consulted, take over. Without refusals a frame the peer refuses (an honest case: a deadline passing in flight) is stuck for good and a stuck Left frame blocks Right.",
    "source": "coordinator 10-01 01:03 on Review A of PR 82 (F2), contracts-decisions.md Account-layer decisions",
    "layers": {
     "arrival": "owed: spec thread (Account spec comparison)",
     "quint": "owed: spec thread (Account spec comparison)",
     "contract": "-",
     "rig": "-",
-    "ts": "owed: A4 (frame exchange step)"
+    "ts": "hold"
    },
    "killers": [
     {
      "kind": "test",
      "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a frame the peer cannot apply is taken back"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL a refused frame stays refused on its head"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-FRAME-REFUSAL no run is stuck while J moves and the views drift"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
      "name": "to be named",
      "owed": "A4 (frame exchange step)"
+    }
+   ]
+  },
+  {
+   "id": "R-EVERY-REFUSAL-ANSWERED",
+   "statement": "A frame of the peer's at my head that I do not judge afresh is answered with a refusal that names it and carries my mark for this head (the highest attempt I refused), never with silence: a frame that does not apply, a repeat of the frame I refused (the same frame, and only it, gets the same index and fault again), and any other frame at or below my mark (the fault stale_attempt, index 0) all get one. A stale answer judged nothing, so it costs the proposer no tx and no retry budget, and its next attempt is above the mark, so a proposer whose attempt count is behind (a restart that dropped it) catches up in one round trip and is never left pending, whatever frame it sends. A mark is trusted only while the proposer's next attempt stays a safe integer; a forged mark can wedge the proposer, as withholding acks can, and signed refusals (A4b) are the remedy. Silent on purpose, because there is no honest proposer to tell or nothing to take back: my own frame, an empty frame, a frame whose attempt is not a countable number, and a frame not at my head (R-REACK answers the one at my head with its ack).",
+   "source": "coordinator 10-01 02:52 on Review A of PR 85 (N1, N2)",
+   "layers": {
+    "arrival": "owed: spec thread (Account spec comparison)",
+    "quint": "owed: spec thread (Account spec comparison)",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a different frame at the refused attempt gets the stale answer, not a refusal"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED the attempt count stays a safe integer however the peer's marks climb"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a proposer refused MAX_ATTEMPTS + 1 times is answered and ends quiet"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a Left proposer refused MAX_ATTEMPTS + 1 times does not block Right"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a frame at the mark is refused again, one below it is told the mark"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a proposer whose attempt count is behind is told the mark and commits next"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED a stale answer costs no tx, whatever the retry budget"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-EVERY-REFUSAL-ANSWERED the frame after the budget is spent is judged, never left pending"
     }
    ]
   },
@@ -2725,6 +2799,141 @@
    ]
   },
   {
+   "id": "R-SWAP-ONCHAIN",
+   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
+   "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
+   "layers": {
+    "arrival": "owed: #41",
+    "quint": "owed: #44",
+    "contract": "hold",
+    "rig": "-",
+    "ts": "-"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_partialFillRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_fullFillMovesTheWholeOrder"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyMakerGivesForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_legsRoundDownIndependentlyTakerPaysForNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65535IsOneOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_oneUnitOfRatioOnAnOrderOf65534IsZeroOfEachLeg"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_zeroRatioMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_malformedArgumentIsZeroFill"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheWantLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_missingAllowanceOnTheGiveLegRevertsWholeFinalize"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize"
+    },
+    {
+     "kind": "mutant",
+     "layer": "quint",
+     "name": "swap-fill-rounds-up",
+     "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
+    }
+   ]
+  },
+  {
    "id": "R-C2R-FOLD",
    "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
    "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
@@ -2740,6 +2949,11 @@
      "kind": "test",
      "layer": "contract",
      "name": "test_R_C2R_FOLD_aWithdrawalErasesTheOffdeltaOfTheOldEpoch"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_C2R_FOLD_controlWithoutTheWithdrawalTheSignedOffdeltaIsHonored"
     },
     {
      "kind": "test",
