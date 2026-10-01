@@ -13,7 +13,7 @@
 import { err, map, ok, type Result } from "../kernel/core/result.ts";
 import type { Tagged } from "../kernel/core/tagged.ts";
 import type { JHeight } from "../account/clause/clock.ts";
-import type { EntityId, EntityState, JAction, Outbound } from "../entity/model.ts";
+import type { EntityId, EntityState, Outbound } from "../entity/model.ts";
 import type { Halt, Row, Runtime, Setup, Timestamp } from "../runtime/model.ts";
 import { apply, commit, flush, recover } from "../runtime/tick.ts";
 import type { Effect, Host, HostNotice, Item, Limits, Stepped } from "./model.ts";
@@ -103,16 +103,21 @@ export const begin = (host: Host, at: Timestamp, ops: Tick = TICK): Result<Stepp
   return first === undefined ? ok({ host, effects: [] }) : beginEntity(host, first, at, ops);
 };
 
-const leaves = (leaving: readonly Outbound[], chain: readonly JAction[]): readonly Effect[] => [
+/** The chain actions of the committed rows not yet flushed, each with the row it is in and its place there. */
+const asked = (runtime: Runtime): readonly Effect[] =>
+  runtime.wal.slice(runtime.sent).flatMap((row) =>
+    row.chain.map((action, index): Effect => ({ _tag: "chain", action, row: { height: row.height, index } })));
+
+const leaves = (runtime: Runtime, leaving: readonly Outbound[]): readonly Effect[] => [
   ...leaving.map((message): Effect => ({ _tag: "send", message })),
-  ...chain.map((action): Effect => ({ _tag: "chain", action })),
+  ...asked(runtime),
 ];
 
 /** The shell made the staged row durable: it is the WAL's now, and the outputs and chain actions not yet sent leave. */
 export const persisted = (host: Host, ops: Tick = TICK): Result<Stepped, Halt> =>
   map(ops.commit(host.runtime), (committed) => {
     const flushed = ops.flush(committed);
-    return { host: { ...host, runtime: flushed.runtime }, effects: leaves(flushed.leaving, flushed.chain) };
+    return { host: { ...host, runtime: flushed.runtime }, effects: leaves(committed, flushed.leaving) };
   });
 
 /** After a crash: the Runtime from the durable rows, an empty queue, and every committed output and action again. */
@@ -121,5 +126,5 @@ export const reopen = (
 ): Result<Stepped, Halt> =>
   map(ops.recover(setup, genesis, wal), (runtime) => {
     const flushed = ops.flush(runtime);
-    return { host: startHost(flushed.runtime, bounds), effects: leaves(flushed.leaving, flushed.chain) };
+    return { host: startHost(flushed.runtime, bounds), effects: leaves(runtime, flushed.leaving) };
   });

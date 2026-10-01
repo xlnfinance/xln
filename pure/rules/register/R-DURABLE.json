@@ -129,6 +129,161 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE after a crash every committed chain action is asked again, once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the operations that make a row durable are its record, then a sync, in that order"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE keep is not done until the disk says so, and the disk sees write then sync"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sync is never run before the write it covers, and nothing runs after a fault"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows kept come back, in order, from a file opened again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash inside the last record leaves the rows before it, and the file is cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows of two Runtimes, kept and read from files, replay and ask the chain as before"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE every row of two real Runtimes comes back equal, bigints and bytes and all"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows come back in order from a clean file, and an empty file has none"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a file cut anywhere inside its last record gives the rows before it, and says where they end"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a last record whole in length but wrong in its bytes is a tear, wherever the bit is"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bad record with a record after it is a damaged file: a fault, and no later row is believed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the sealed record is on the journal when the send is made, and the send is that batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a journal that cannot be written sends nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a landed deposit is known: the Runtime asking again queues nothing, nothing is sent"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash after the send: the chain has not seen it, so the same batch goes out again"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a crash between the journal and the send is the same: the journaled batch goes out"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the Runtime's re-ask after that restart is the deposit already made: no second batch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a deposit's row is known once queued; another row with the same deposit is another deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the rows of a signed batch are known; the sealed record names them, nonce, budget, digest"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a failed batch spent its nonce and forgot nothing: its work is in the draft at a new nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a batch signed and not answered is in flight again, byte for byte, and its row is known"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a landed batch is done after a restart and its row is still known: no second deposit"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sealed record and an answer come back as written, in order, from a clean file"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a file cut inside its last record gives the records before it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bad record that has bytes after it is a damaged journal, not a tear"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a length garbled in a MIDDLE record is a fault, and no durable row is cut away"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bit wrong in a record's header is a damaged file, last record or not: it is never a tear"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a length garbled to run past the file in a MIDDLE record is damage: no record is cut"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a write that faults half way stops the Disk: later rows refused, the tear cut at start"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a sync that faults stops the Disk too: not retried, nothing appended after it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE the file disk stops at its first fault: a write on a closed file, then runs refused"
   }
  ]
 }

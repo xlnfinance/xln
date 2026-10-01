@@ -19,6 +19,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "runtime/chain R-FRAME-EPOCH a frame is judged only under its own epoch and first nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-FRAME-EPOCH a frame changed in epoch or first nonce after signing is refused, the Account stays"
   }
  ]
 }
