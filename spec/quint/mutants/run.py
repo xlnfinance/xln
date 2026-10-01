@@ -19,6 +19,7 @@ ROOT = os.path.dirname(HERE)
 QUINT = os.path.join(ROOT, "node_modules", ".bin", "quint")
 SAMPLES = os.environ.get("MUTANT_SAMPLES", "1500")
 STEPS = os.environ.get("MUTANT_STEPS", "40")
+TIMEOUT = int(os.environ.get("MUTANT_TIMEOUT", "900"))      # seconds for one simulation run: a slow model needs more than 900 for 1500 traces
 
 
 def sh(args, cwd, timeout):
@@ -45,7 +46,7 @@ def check_invariant(d, main, inv, cfg, seeds=(1, 2, 3)):
     for seed in seeds:
         rc, out = sh([QUINT, "run", main, "--backend", "typescript", "--init", cfg.get("init", "init"),
                       "--step", cfg.get("step", "step"), "--invariant", inv, "--max-steps", steps,
-                      "--max-samples", samples, "--seed", hex(seed)], d, 900)
+                      "--max-samples", samples, "--seed", hex(seed)], d, TIMEOUT)
         if "Invariant violated" in out:
             return True, f"violated {inv} (seed {seed})"
         if rc not in (0,):

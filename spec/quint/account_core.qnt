@@ -22,9 +22,12 @@ module account_core {
   // (settle.qnt `FIRST_GAP`: a Right-authored proof at stored + 1 only ties the implicit proof of the epoch, chain.qnt `implicitProof`), and the
   // epoch's own counter is gapless after it. That first nonce is read from the chain when an epoch opens, never derived from the Account's own frames.
   pure val MAX_NONCE_GAP = 0
-  // R-FRAME-REFUSAL and N1 (A16): the one exception to "nothing skips the nonce". A proposer whose frame was refused signed a proof for it; a retry that
-  // dropped a tx has another proof, and a second proof under one (signer, nonce, side) is the equivocation P4b forbids. So the frame at attempt `a` is at
-  // nonce pnonce + 1 + a: every abandoned attempt keeps its own nonce, and the receiver's window is widened by the frame's own attempt and by nothing else.
+  // R-PROOF-NONCE-ABOVE-SIGNED (coordinator 10-01, A18/A19): every committed frame's proof nonce is strictly above every proof nonce either side signed in
+  // the epoch, the attempts that were yielded or refused included, because the peer holds those signed proofs and a stale one that outranks the
+  // committed head (by the chain's rank, nonce * 2 + leftAuthored) reverses what committed. So a proposer signs at one above the highest nonce it knows
+  // signed (`hi`: its own proofs, and the peer's it has seen in a frame that was next in line, refused ones included), never above the committed tip
+  // plus its attempt count; and a receiver acks a frame only if its rank is above the rank of every proof the receiver itself signed (`sig`), or answers
+  // with a refusal `nonce_low` carrying its `hi` so the proposer signs again above it. The counter has gaps, but only where a signed proof sits.
   pure val MAX_NONCE = MAX_HEIGHT * (1 + MAX_NONCE_GAP + MAX_FRAMES + MAX_ATTEMPT + 2)
   pure val MAX_LOCK_HORIZON = 4  // policy parameter (coordinator, N2: 7 days by default, never below the 24 h async window): a lock's deadline is at most this far after the frame that opens it, at admission and at forward (room for a two-hop chain)
   pure val LOCK_SLOTS = Set(1, 2) // open clauses per Account (the contract's bound is 32, see contracts-review.md)
@@ -85,8 +88,13 @@ module account_core {
   type Mark = | NoMark | Declined({ attempt: int, index: int, fault: str })
 
   // The answer to a frame the receiver cannot take: it names the frame (the wire's hash), the index of the first tx it refused and a fault tag, and carries the
-  // mark. A stale attempt is answered with fault `stale_attempt`, index 0 and the mark that outranks it.
-  type Refusal = { fid: int, index: int, fault: str, mark: int }
+  // mark. A stale attempt is answered with fault `stale_attempt`, index 0 and the mark that outranks it. A frame whose proof would not outrank a proof the
+  // receiver itself signed is answered with `nonce_low`, index 0, and `hi`: the highest proof nonce the receiver knows signed (R-PROOF-NONCE-ABOVE-SIGNED); every
+  // other refusal carries hi 0.
+  type Refusal = { fid: int, index: int, fault: str, mark: int, hi: int }
+
+  // A lock tx that is part of a proof this side signed and that is not superseded yet, with the rank of that proof [R-SIGNED-IS-LIVE].
+  type SigLock = { tx: Tx, rank: int }
 
   type Replica = {
     height: int,
@@ -99,7 +107,14 @@ module account_core {
     status: Status,
     mempool: List[Tx],
     attempt: int,              // as a proposer: the refusals handled on this head, the attempt of the next frame [R-FRAME-REFUSAL]
-    mark: Mark                 // as a receiver: what it refused on this head
+    mark: Mark,                // as a receiver: what it refused on this head
+    hi: int,                   // the highest proof nonce this side knows signed in the epoch: by itself, or by the peer in a frame that was next in line (refused ones too) [R-PROOF-NONCE-ABOVE-SIGNED]
+    sig: int,                  // the highest rank (nonce * 2 + leftAuthored) of a proof this side signed: as a proposer when it proposed, as a receiver when it acked
+    sigLocks: List[SigLock],   // the lock txs of the proofs it signed that no committed frame has superseded yet [R-SIGNED-IS-LIVE]
+    kept: List[Tx],            // txs cut with notice whose release waits: a lock in a signed, unsuperseded proof is not released by the refusal [R-SIGNED-IS-LIVE]
+    frozen: bool,              // R-COSIGN-FREEZE: this side co-signed a settlement or a reserve-to-collateral and the operation has not landed, been superseded or lapsed
+    foldH: int,                // the committed height the co-signed fold was taken at
+    fold: int                  // the offdelta the co-signed fold carries: the committed off-chain offdelta at that height
   }
 
   type Res = | Ok(Body) | Refused(str)
@@ -270,10 +285,10 @@ module account_core {
   pure val SIDES = Set(Left, Right)
   pure val BRANCHES = Set(true, false)
   pure val NO_FRAME: Frame = { height: 0, parent: 0, nonce: 0, ts: 0, author: Left, txs: List(), after: GENESIS, attempt: 0 }
-  pure val NO_REFUSAL: Refusal = { fid: 0, index: 0, fault: "", mark: 0 }   // frame ids start at 1: fid 0 is "no answer"
+  pure val NO_REFUSAL: Refusal = { fid: 0, index: 0, fault: "", mark: 0, hi: 0 }   // frame ids start at 1: fid 0 is "no answer"
 
   pure val EMPTY_REPLICA: Replica =
-    { height: 0, refused: List(), submitted: 0, done: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List(), attempt: 0, mark: NoMark }
+    { height: 0, refused: List(), submitted: 0, done: 0, pnonce: 0, tip: GENESIS, lastFid: 0, status: Open, mempool: List(), attempt: 0, mark: NoMark, hi: 0, sig: 0, sigLocks: List(), kept: List(), frozen: false, foldH: 0, fold: 0 }
 
   // The state a side must plan against: the committed one, or the frame in flight / held [Q-E1: one view].
   pure def planning(r: Replica, frames: int -> Frame): Body = match r.status {
@@ -296,11 +311,19 @@ module account_core {
     f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)
     f.height == r.height + 1,
     f.nonce > r.pnonce,                                    // N1: a proof nonce above the last one, or the chain would refuse a start with it
-    f.nonce <= r.pnonce + 1 + MAX_NONCE_GAP + f.attempt    // and not a leap that burns the counter: only the refusals of its own proposer count (A16)
+    f.nonce <= r.hi + 1 + MAX_NONCE_GAP                    // and not a leap that burns the counter: at most one above the highest nonce the receiver knows signed (A19)
   }
 
+  pure def proofRank(f: Frame): int = f.nonce * 2 + (if (f.author == Left) 1 else 0)     // the chain's order of proofs (chain.qnt `rank`)
+
+  // R-PROOF-NONCE-ABOVE-SIGNED: the receiver signs the proof of a frame only if it outranks every proof the receiver itself signed. Else the peer, holding the
+  // older proof, could start a dispute with it and erase the frame the receiver is about to commit.
+  pure def nonceOk(r: Replica, f: Frame): bool = proofRank(f) > r.sig
+
   pure def acceptable(r: Replica, now: int, f: Frame, self: Side): bool = and {
+    not(r.frozen),                                         // R-COSIGN-FREEZE: nor does it take a peer's frame: the fold it signed stands for the offdelta of the head, and a frame would move it
     inLine(r, f, self),
+    nonceOk(r, f),
     match replay(r.tip, f.txs, f.author, now) {
       | Ok(b) => b == f.after
       | Refused(_) => false
@@ -319,9 +342,9 @@ module account_core {
     if (walk.bad) { index: walk.index, fault: walk.fault } else { index: 0, fault: "bad_state" }
   }
 
-  // A fault that passes as the peer's view of J moves: the proposer sends the frame's txs again, at the next attempt, and no tx is dropped. Any other
+  // A fault that passes as the peer's view of J moves (or, for `frozen`, as the peer's co-signed settlement lands, is superseded or lapses: R-COSIGN-FREEZE): the proposer sends the frame's txs again, at the next attempt, and no tx is dropped. Any other
   // fault does not: the named tx is dropped with notice. (A lock whose deadline is past, or a resolve past its deadline, only gets worse with the view.)
-  pure def retryable(fault: str): bool = fault == "not_expired" or fault == "deadline_too_far"
+  pure def retryable(fault: str): bool = fault == "not_expired" or fault == "deadline_too_far" or fault == "frozen"
 
   // Queue a local tx. The guard sees the planning state plus everything already queued [Q-E1]: a tx that could never
   // apply is refused here and never enters the mempool.
@@ -336,11 +359,12 @@ module account_core {
   // The frame a proposer would send now: its mempool cut down to the txs that still apply, on its tip.
   pure def frameToPropose(r: Replica, now: int, s: Side, gap: int): Frame = {
     val sel = keepValid(r.tip, r.mempool, s, now)
-    { height: r.height + 1, parent: r.lastFid, nonce: r.pnonce + 1 + gap + r.attempt, ts: now, author: s, txs: sel.txs, after: sel.body, attempt: r.attempt }
+    { height: r.height + 1, parent: r.lastFid, nonce: imax(r.pnonce, r.hi) + 1 + gap, ts: now, author: s, txs: sel.txs, after: sel.body, attempt: r.attempt }
   }
 
   pure def canPropose(r: Replica, now: int, s: Side): bool = and {
     isOpen(r),
+    not(r.frozen),                                         // R-COSIGN-FREEZE: a side that co-signed a fold proposes nothing until it is released
     r.height < MAX_HEIGHT,
     frameToPropose(r, now, s, 0).txs.length() > 0
   }
@@ -359,7 +383,11 @@ module account_core {
 
   pure def repeatOfLast(r: Replica, fid: int): bool = r.lastFid != 0 and r.lastFid == fid
 
-  pure def refusalFor(fid: int, index: int, fault: str, mark: int): Refusal = { fid: fid, index: index, fault: fault, mark: mark }
+  pure def refusalFor(fid: int, index: int, fault: str, mark: int): Refusal = { fid: fid, index: index, fault: fault, mark: mark, hi: 0 }
+  // the answer a receiver sends: EVERY refusal carries the receiver's signed floor, the highest proof nonce it knows signed (R-PROOF-NONCE-ABOVE-SIGNED, coordinator
+  // 10-01 from the kernel's round 2): whatever the proposer's frame is refused for, the retry is signed above everything the refuser holds
+  pure def answerFor(r: Replica, fid: int, index: int, fault: str, mark: int): Refusal =
+    { ...refusalFor(fid, index, fault, mark), hi: r.hi }
 
   // [R-FRAME-REFUSAL] A frame that is next in line is answered, whatever it does to the replica:
   //   at the mark   -> refused again, with the refusal that set the mark: a frame refused once is never judged again while the head lasts, so the sides cannot fork
@@ -369,14 +397,14 @@ module account_core {
   // A frame that is not next in line is refused silently, as before (nothing honest sends one).
   pure def judge(r: Replica, now: int, s: Side, fid: int, f: Frame): Outcome = {
     val keep: Outcome = { r: r, ack: false, rolled: false, refused: false, say: NO_REFUSAL }
-    val ff = firstFault(r.tip, f.txs, f.author, now)
+    val ff = if (r.frozen) { index: 0, fault: "frozen" } else if (nonceOk(r, f)) firstFault(r.tip, f.txs, f.author, now) else { index: 0, fault: "nonce_low" }     // a proof that would not outrank the receiver's own signed ones is refused before any tx is looked at
     val refuseAfresh = { ...keep, refused: true, r: { ...r, mark: Declined({ attempt: f.attempt, index: ff.index, fault: ff.fault }) },
-                         say: refusalFor(fid, ff.index, ff.fault, f.attempt) }
+                         say: answerFor(r, fid, ff.index, ff.fault, f.attempt) }
     if (not(inLine(r, f, s))) { ...keep, refused: true }
     else match r.mark {
       | Declined(m) =>
-          if (f.attempt < m.attempt) { ...keep, refused: true, say: refusalFor(fid, 0, "stale_attempt", m.attempt) }
-          else if (f.attempt == m.attempt) { ...keep, refused: true, say: refusalFor(fid, m.index, m.fault, m.attempt) }
+          if (f.attempt < m.attempt) { ...keep, refused: true, say: answerFor(r, fid, 0, "stale_attempt", m.attempt) }
+          else if (f.attempt == m.attempt) { ...keep, refused: true, say: answerFor(r, fid, m.index, m.fault, m.attempt) }
           else if (acceptable(r, now, f, s)) { ...keep, r: { ...r, status: Received(fid) } }
           else refuseAfresh
       | NoMark =>
@@ -385,7 +413,7 @@ module account_core {
     }
   }
 
-  pure def onPropose(r: Replica, now: int, s: Side, fid: int, f: Frame, own: Frame): Outcome = {
+  pure def onProposeCore(r: Replica, now: int, s: Side, fid: int, f: Frame, own: Frame): Outcome = {
     val keep: Outcome = { r: r, ack: false, rolled: false, refused: false, say: NO_REFUSAL }
     val refuse: Outcome = { ...keep, refused: true }
     if (repeatOfLast(r, fid)) { ...keep, ack: true }
@@ -394,18 +422,42 @@ module account_core {
       | Received(held) => if (held == fid) keep else refuse
       | Proposed(_) =>
           if (f.height == own.height and f.author != s) {
-            match s {
-              | Left => keep
-              | Right => {
-                  val restored = { ...r, status: Open, mempool: own.txs.concat(r.mempool) }
-                  val o = judge(restored, now, s, fid, f)
-                  if (isReceived(o.r)) { ...o, rolled: true }
-                  else { ...o, r: { ...r, mark: o.r.mark } }      // refused: it keeps its own frame in flight, and remembers the mark
-                }
+            // R-A1 collision: the frame with the higher proof rank wins, so the higher slot, and at one slot the Left-authored one (the chain's order). The loser's proof
+            // stays signed below the winner's, which is what keeps every signed proof under the committed head [R-PROOF-NONCE-ABOVE-SIGNED]. The winner keeps its frame;
+            // the loser takes the other one (and, if it cannot apply it, keeps its own in flight and remembers the mark).
+            if (proofRank(f) < proofRank(own)) keep
+            else {
+              val restored = { ...r, status: Open, mempool: own.txs.concat(r.mempool) }
+              val o = judge(restored, now, s, fid, f)
+              if (isReceived(o.r)) { ...o, rolled: true }
+              else { ...o, r: { ...r, mark: o.r.mark } }      // refused: it keeps its own frame in flight, and remembers the mark
             }
           } else refuse
     }
   }
+
+  // Whatever the receiver does with a frame that is next in line (holds it, refuses it, ignores it in a collision), the proof the frame carries is signed
+  // by the peer and the peer holds it: the receiver now knows that nonce is taken, and signs its own next proof above it (`hi`) [R-PROOF-NONCE-ABOVE-SIGNED].
+  pure def onPropose(r: Replica, now: int, s: Side, fid: int, f: Frame, own: Frame): Outcome = {
+    val o = onProposeCore(r, now, s, fid, f, own)
+    if (not(repeatOfLast(r, fid)) and inLine(r, f, s)) { ...o, r: { ...o.r, hi: imax(o.r.hi, f.nonce) } } else o
+  }
+
+  // [R-SIGNED-IS-LIVE] A tx cut with notice is the payer's release: the Entity above fails the upstream hold back, or spends the room. A lock that sits in a proof
+  // this side signed and no committed frame has superseded is still enforceable against it: the peer holds that proof and can start a dispute with it, and
+  // the lock pays the peer if its secret reaches the chain in time. So its notice waits (`kept`) until a frame above that proof commits or the deadline plus the
+  // reserve has passed on this side's own clock (`releaseDue`). Any other tx is released at once.
+  pure def heldBySigned(r: Replica, tx: Tx): bool =
+    match tx { | HtlcLock(_) => r.sigLocks.indices().exists(i => r.sigLocks[i].tx == tx) | _ => false }
+
+  pure def withNotice(r: Replica, txs: List[Tx]): Replica =
+    { ...r, kept: r.kept.concat(txs.select(t => heldBySigned(r, t))), refused: r.refused.concat(txs.select(t => not(heldBySigned(r, t)))) }
+
+  pure def releasable(r: Replica, now: int, tx: Tx): bool =
+    match tx { | HtlcLock(l) => not(heldBySigned(r, tx)) or now > l.deadline + CLOCK_RESERVE | _ => true }
+
+  pure def releaseDue(r: Replica, now: int): Replica =
+    { ...r, kept: r.kept.select(t => not(releasable(r, now, t))), refused: r.refused.concat(r.kept.select(t => releasable(r, now, t))) }
 
   // [R-FRAME-REFUSAL] The proposer receives a refusal. It counts only for the frame it has in flight, unacked, and only if the index names a tx of that frame:
   // a refusal for a frame already committed (or rolled back, or never sent) changes nothing. Otherwise the frame is rolled back, its txs ahead of the mempool:
@@ -414,16 +466,28 @@ module account_core {
   // The next attempt is above the refusal's mark and above its own: max(own, mark) + 1. The caller proposes again when the mempool has a tx that applies.
   pure def onRefusal(r: Replica, ref: Refusal, f: Frame): Replica = {
     val named = f.txs.length() > ref.index and ref.index >= 0
-    val again = ref.fault == "stale_attempt" or (retryable(ref.fault) and r.attempt < MAX_ATTEMPT)
-    val back = { ...r, status: Open, attempt: imax(r.attempt, ref.mark) + 1 }
-    if (not(isProposed(r) and statusFid(r) == ref.fid and named)) r
+    // a stale answer and `nonce_low` cost no tx, whatever the budget: nothing is wrong with the txs
+    val again = ref.fault == "stale_attempt" or ref.fault == "nonce_low" or (retryable(ref.fault) and r.attempt < MAX_ATTEMPT)
+    // the refuser's signed floor raises our own `hi`: the retry is signed above it
+    val back = { ...r, status: Open, attempt: imax(r.attempt, ref.mark) + 1, hi: imax(r.hi, ref.hi) }
+    // A floor more than one step above what we know signed is more than an honest peer could hold (at most its own latest proof, which we have not seen): the refusal
+    // is refused, and the frame stays in flight. A Byzantine receiver cannot burn the counter, nor drop a tx, by a floor out of reach [R-PROOF-NONCE-ABOVE-SIGNED].
+    if (ref.hi > r.hi + 1 + MAX_NONCE_GAP) r
+    else if (not(isProposed(r) and statusFid(r) == ref.fid and named)) r
     else if (again) { ...back, mempool: f.txs.concat(r.mempool) }
-    else { ...back, mempool: f.txs.slice(0, ref.index).concat(f.txs.slice(ref.index + 1, f.txs.length())).concat(r.mempool), refused: r.refused.append(f.txs[ref.index]) }
+    else withNotice({ ...back, mempool: f.txs.slice(0, ref.index).concat(f.txs.slice(ref.index + 1, f.txs.length())).concat(r.mempool) }, [f.txs[ref.index]])
   }
 
   // Commit frame `f` (id `fid`) on a replica.
   pure def commit(r: Replica, self: Side, fid: int, f: Frame): Replica =
     { ...r, height: f.height, pnonce: f.nonce, tip: f.after, lastFid: fid, status: Open, attempt: 0, mark: NoMark,      // the head moved: the attempt count and the mark are forgotten
+      hi: imax(r.hi, f.nonce), sig: imax(r.sig, proofRank(f)),                                                  // the acker signs the frame's proof here; the proposer already did
+      sigLocks: r.sigLocks.select(e => e.rank > proofRank(f)),                                                  // a frame above them commits: the proofs it supersedes are no longer enforceable
       done: r.done + (if (f.author == self) f.txs.length() else 0) }
+
+  // The proposer signs the proof of the frame it sends: its rank is above everything it signed, and its locks are live until a frame above commits.
+  pure def signsFrame(r: Replica, f: Frame): Replica =
+    { ...r, hi: imax(r.hi, f.nonce), sig: imax(r.sig, proofRank(f)),
+      sigLocks: f.txs.foldl(r.sigLocks, (acc, t) => match t { | HtlcLock(_) => acc.append({ tx: t, rank: proofRank(f) }) | _ => acc }) }
 
 }

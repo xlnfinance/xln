@@ -36,7 +36,7 @@ fails there.
 
 ## Account (`account_core.qnt`, `account.qnt`)
 
-State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool, `attempt` (as a proposer: the refusals handled on this head) and `mark` (as a receiver: the highest attempt it refused on this head). A Body is
+State per replica: `height`, `pnonce` (the proof nonce of the last committed frame, its own counter: N1, A13), the committed `tip` Body, `status` (`Open | Proposed(f) | Received(f)`), a mempool, `attempt` (as a proposer: the refusals handled on this head), `mark` (as a receiver: the highest attempt it refused on this head), `hi` (the highest proof nonce it knows signed, its own and the peer's it has seen) and `sig` (the highest rank it signed), and `sigLocks` and `kept` (the locks in the proofs it signed, and the notices that wait for them: R-SIGNED-IS-LIVE). A Body is
 `{offdelta, limitLeft, limitRight, locks}`; a lock is a slot with payer, amount, hashlock, deadline.
 
 State machine of a replica: `Open` -- propose -> `Proposed(f)` -- ack -> `Open` (committed); `Open` -- peer's proposal -> `Received(f)`
@@ -45,7 +45,7 @@ Left's (A1). A lost proposal or ack is recovered by resend. A refusal is a value
 R-FRAME-REFUSAL (A16, A17): a frame that is next in line and that the receiver cannot apply is answered with a refusal `{frame, index of the first refused tx, fault, mark}`; the proposer rolls its pending, unacked frame back
 (a refusal for any other frame is ignored), sends every tx again at the next attempt when the fault is retryable (`not_expired`, `deadline_too_far`, within a budget of `MAX_ATTEMPT`) and otherwise drops the named tx with notice, then proposes
 the rest. A frame carries its `attempt`; the receiver keeps one mark per head, the highest attempt it refused: a frame at the mark is refused again, one below it gets `stale_attempt` and the mark, one above is judged afresh; the mark is
-forgotten when the head moves, so a frame the receiver refused is never taken while the head lasts (no fork when its view of J moves). A retry is at proof nonce `pnonce + 1 + attempt` (A18, to confirm). The transition table (`applyTx`) has
+forgotten when the head moves, so a frame the receiver refused is never taken while the head lasts (no fork when its view of J moves). A frame is signed at proof nonce `max(pnonce, hi) + 1`: above every proof either side signed in the epoch, a yielded or refused attempt included (R-PROOF-NONCE-ABOVE-SIGNED, A19); a receiver acks a frame only if its rank (`nonce * 2 + leftAuthored`) is above every proof it signed itself, else it answers `nonce_low` with its `hi` and the proposer signs again above it. A refusal or a yield does not release a lock that sits in a signed, unsuperseded proof: its notice waits (`kept`) until a frame above commits or the deadline plus the reserve has passed on the side's own clock (R-SIGNED-IS-LIVE, A20; the Entity layer has no place for it yet). A side that co-signed a settlement or a reserve-to-collateral is frozen: it proposes nothing and answers every peer frame with a retryable `frozen` refusal until the operation lands, is superseded or lapses (R-COSIGN-FREEZE, A21). A collision is won by the higher slot, and at one slot by the Left-authored frame (A19). The transition table (`applyTx`) has
 six transactions: SetCredit, Pay, HtlcLock, HtlcResolve, HtlcCancel, HtlcExpire.
 
 Time (R-CLOCK, A8): a frame's timestamp is informational; every time decision uses the deciding side's own clock. Resolve needs `now <= deadline`,
@@ -55,8 +55,8 @@ A Byzantine peer is part of the model: one side's key is taken at any moment and
 height, expiry stamped from the future, resolve stamped in the past, stale or leaping proof nonce, a wrong ack). The honest side is checked.
 
 Properties: `credit_holds` (RCPAN in the worst case over open clauses, stated on the outcomes by an independent oracle), `agreed` (no two committed bodies at one
-height, except that with a Byzantine peer a Left-authored frame supersedes a Right-authored one at one nonce, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
-`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal). 53 scenario tests, 68 mutants.
+height, except that with a Byzantine peer a later frame of higher rank supersedes the earlier commit, as the chain ranks them: A12), `no_equivocation`, `both_signed`, `no_bad_accept` (nothing is held for an ack that a correct receiver refuses),
+`authority` (no spending the other side's funds, no self-granted credit, no early expiry), `nonce_climbs`, `no_tx_lost`, `no_orphan` (a side never holds as committed a frame its author gave up on a refusal), `signed_above_head` (no signed proof outranks the committed head), `no_release_while_signed_live` (no hold released while a signed proof holds the lock), `refusal_floor_reachable` (a refusal's signed floor is at most one above what the proposer knows), `cosign_fold_holds` (R-COSIGN-FREEZE: a side frozen by a co-signed fold keeps the head's offdelta the fold carries and has nothing in flight). 74 scenario tests, 93 mutants.
 
 ## Chain, one Account (`chain.qnt`)
 

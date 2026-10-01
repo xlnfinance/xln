@@ -110,4 +110,69 @@ module compose {
   pure val NO_WITHDRAWAL_BEYOND_COLLATERAL: bool =
     forallBodies(b => not(a::rcpan(b)) or SIDES2.forall(by => not(a::settlementOk(b, by, a::COLLATERAL + 1))))
   run noWithdrawalBeyondTheCollateralTest = c::init.expect(NO_WITHDRAWAL_BEYOND_COLLATERAL)
+
+  // R-SIGNED-IS-LIVE (coordinator 10-01): what a refusal leaves behind. A hub (Left) proposed a frame that locks 1 towards the next hop (Right), the next hop refused it, and the
+  // hub released the payer's hold and the one above it. But the hub signed that frame's proof when it proposed it (A5) and the next hop holds it: a dispute start needs a
+  // proof signed by the OTHER party and nothing else (`canStart`), and the proof sits at a higher nonce than the committed tip, so the hub has nothing above it to answer with.
+  // The chain settles it, and the lock pays the next hop once it knows the secret: the hub owes 1 that no upstream payer covers. The bodies come from the Account layer
+  // (`applyTx` builds the locked state), the settlement from the chain's own game.
+  pure def chainSide(s: a::Side): c::Side = match s { | Left => c::Left | Right => c::Right }
+  pure def chainProof(b: a::Body, nonce: int, la: bool, sl: bool, sr: bool): c::SignedProof = {
+    val l = b.locks.get(1)
+    val clause: c::Clause = if (l.on) { on: true, payer: chainSide(l.payer), amount: l.amount, deadline: l.deadline } else c::NO_CLAUSE
+    c::mkProof(true, nonce, 0, la, b.offdelta, clause, sl, sr)
+  }
+  pure val TIP: a::Body = { ...a::GENESIS, limitLeft: 2 }                          // the committed state at nonce 1 (Right granted Left credit)
+  pure val LOCK: a::Tx = a::HtlcLock({ id: 1, payer: a::Left, amount: 1, hashlock: a::hashOf(1), deadline: 4 })
+  pure val LOCKED: a::Body = match a::applyTx(TIP, LOCK, a::Left, 1) { | Ok(b) => b | Refused(_) => TIP }
+  pure val TIP_PROOF = chainProof(TIP, 1, false, true, true)                       // both signed, Right-authored
+  pure val STALE_PROOF = chainProof(LOCKED, 2, true, true, false)                  // the refused frame (2, Left): signed by its author only, held by the next hop
+  pure val HUB_ARENA: int -> c::SignedProof = c::SLOTS.mapBy(_ => c::NO_PROOF).set(1, TIP_PROOF).set(4, STALE_PROOF)
+
+  run refusedProofWithTheLockIsEnforcedOnTheChainTest =
+    c::initFrom(HUB_ARENA, c::Left, 0, 0, a::COLLATERAL)
+    .expect(and { STALE_PROOF.clause.on, c::rank(STALE_PROOF) > c::rank(TIP_PROOF), c::signedBy(STALE_PROOF, c::Left), not(c::signedBy(STALE_PROOF, c::Right)) })
+    .then(c::learn(c::Right))                                                      // the next hop learned the secret downstream
+    .then(c::startWith(c::Right, 4, true, 0, false))                              // it starts with the proof the hub signed, revealing the secret in the start
+    .then(c::finalizeWith(c::Left, 0, 0, false))                                  // nothing above it exists to counter with: the hub, the non-starter, closes at once
+    .expect(and { c::money.debt.get(c::Left) == 1, c::money.debt.get(c::Right) == 0, c::acct.nonce == 3, c::safe })
+
+  // The same history with one frame above the stale proof (a both-signed state at nonce 3, the one a superseding commit makes): the hub's counter outranks the stale proof and the
+  // lock is gone. This is what "superseded" buys: the release of the hold is safe from then on.
+  pure val ABOVE_PROOF = chainProof(TIP, 3, false, true, true)
+  run supersededProofIsCounteredOnTheChainTest =
+    c::initFrom(HUB_ARENA.set(5, ABOVE_PROOF), c::Left, 0, 0, a::COLLATERAL)
+    .then(c::learn(c::Right))
+    .then(c::startWith(c::Right, 4, true, 0, false))
+    .then(c::honestCounter)
+    .then(c::tick).then(c::tick).then(c::tick).then(c::tick)
+    .then(c::honestFinalize)
+    .expect(and { c::money.debt.get(c::Left) == 0, c::money.debt.get(c::Right) == 0, c::money.res == Map(c::Left -> 0, c::Right -> 2), c::acct.nonce == 3, c::safe })
+
+  // R-PROOF-NONCE-ABOVE-SIGNED (coordinator 10-01), the chain side of Review A's schedule (b). Left signed a proof (nonce 2, Left-authored) that Right refused; Right then
+  // commits a payment of 1 to Left. If the committed frame is at the nonce of the stale proof (the nonce taken from the committed tip) the chain ranks the Left-authored proof
+  // above it (nonce * 2 + leftAuthored): Right, holding Left's signature, starts with it, Left has nothing above it to counter with, and the payment is erased (Left gets 0, not 1).
+  // With the committed frame above the signed nonce (3: what the Account layer now signs) Left's counter outranks the stale proof and the payment stands.
+  pure val PAID: a::Body = { ...TIP, offdelta: 1 }                                  // Right paid Left 1
+  pure val STALE_AT_2 = chainProof(TIP, 2, true, true, false)                       // Left's refused attempt: signed by Left, held by Right
+  pure def paymentCase(committedNonce: int): int -> c::SignedProof =
+    c::SLOTS.mapBy(_ => c::NO_PROOF).set(1, TIP_PROOF).set(2, chainProof(PAID, committedNonce, false, true, true)).set(4, STALE_AT_2)
+
+  run staleProofAtTheCommittedNonceErasesThePaymentTest =
+    c::initFrom(paymentCase(2), c::Left, 0, 0, a::COLLATERAL)
+    .expect(c::rank(STALE_AT_2) > c::rank(paymentCase(2).get(2)))
+    .then(c::startWith(c::Right, 4, false, 0, false))
+    .expect(c::honestCounterId(c::arena, c::acct, c::dispute, c::Left) == 0)       // Left holds a newer both-signed proof, but it does not outrank the stale one
+    .then(c::tick).then(c::tick).then(c::tick).then(c::tick)
+    .then(c::finalizeWith(c::Right, 0, 0, false))
+    .expect(and { c::money.res == Map(c::Left -> 0, c::Right -> 2), c::acct.nonce == 3 })
+
+  run staleProofBelowTheCommittedNonceIsCounteredTest =
+    c::initFrom(paymentCase(3), c::Left, 0, 0, a::COLLATERAL)
+    .expect(c::rank(STALE_AT_2) < c::rank(paymentCase(3).get(2)))
+    .then(c::startWith(c::Right, 4, false, 0, false))
+    .then(c::honestCounter)
+    .then(c::tick).then(c::tick).then(c::tick).then(c::tick)
+    .then(c::honestFinalize)
+    .expect(and { c::money.res == Map(c::Left -> 1, c::Right -> 1), c::acct.nonce == 3, c::safe })
 }
