@@ -337,10 +337,46 @@ export const baselineVectors = async () => {
   };
 };
 
+/**
+ * R-IMPLICIT-BASELINE (Q-D-21): from epoch 1 the empty state is a dispute proof with no signature. The contract's verdict on the
+ * canonical implicit proof (opens, settles at ondelta) and on each way of departing from it (NotTheImplicitBaseline), after a
+ * settlement that moved the epoch to 1 and the stored nonce to 5. The proof is Right-authored at nonce stored + 1, floor windows.
+ */
+export const implicitBaselineVectors = async () => {
+  const w = await boot("implicit-baseline");
+  await w.fundedAccount();
+  const e0 = await w.epochOf();
+  const diffs = [{ tokenId: w.TOKEN, leftDiff: 10n, rightDiff: 0n, collateralDiff: -10n, ondeltaDiff: -10n }];
+  const settle = await w.settle(w.L, w.R, 5, diffs, w.coopSig(w.R, e0, 5, diffs));
+  const epoch = await w.epochOf();
+  const storedNonce = (await w.chain.getAccountInfo(w.L.id, w.R.id)).nonce;
+  const body = { watchSeed: ethers.ZeroHash, leftResponseSeconds: 60, rightResponseSeconds: 60, offdeltas: [0n], tokenIds: [w.TOKEN] };
+  const reject = async (nonce: number, proposerIsLeft: boolean, b: typeof body) => outcome(w, await w.submit(w.R, { disputeStarts: [w.startOp(w.L, nonce, proposerIsLeft, b, "0x", epoch)] }));
+  const rejected = {
+    nonceAboveStoredPlusOne: await reject(7, false, body),
+    authoredByLeft: await reject(6, true, body),
+    offdeltaNotZero: await reject(6, false, { ...body, offdeltas: [1n] }),
+    leftWindowNotTheFloor: await reject(6, false, { ...body, leftResponseSeconds: 61 }),
+    rightWindowNotTheFloor: await reject(6, false, { ...body, rightResponseSeconds: 120 }),
+    watchSeedNotZero: await reject(6, false, { ...body, watchSeed: ethers.id("seed") }),
+  };
+  const start = outcome(w, await w.start(w.R, w.L, 6, false, body, "0x", epoch));
+  w.at(200);
+  const finalize = outcome(w, await w.finalize(w.R, w.L, { nonce: 6, body, startedByLeft: false }, { nonce: 6, proposerIsLeft: false, body, sig: "0x" }));
+  const after = await w.reserves();
+  return {
+    afterSettlement: { settle, epoch: epoch.toString(), storedNonce: storedNonce.toString() },
+    implicitProof: { epoch: epoch.toString(), nonce: 6, proposerIsLeft: false, proofBodyHash: bodyHash(body), proofHash: w.proofHash(epoch, 6, false, body), signature: "0x" },
+    rejected,
+    start, finalize,
+    settled: { L: after.L.toString(), R: after.R.toString(), collateral: after.collateral.toString(), epoch: (await w.epochOf()).toString() },
+  };
+};
+
 export const allVectors = async () => {
   const functions = await functionVectors(await boot("vectors-functions"));
   const lifecycle = await lifecycleVectors(await boot("vectors-lifecycle"));
-  const baseline = await baselineVectors();
+  const baseline = { ...(await baselineVectors()), implicitBaseline: await implicitBaselineVectors() };
   const batch = { layout: await layoutVectors(await boot("vectors-batch-layout")), ops: await opVectors() };
   const hanko = await hankoMultiVectors();
   return { functions, lifecycle, baseline, batch, hanko };

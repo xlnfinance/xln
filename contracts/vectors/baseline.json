@@ -80,5 +80,36 @@
       "collateral": "0",
       "nonce": "3"
     }
+  },
+  "implicitBaseline": {
+    "afterSettlement": {
+      "settle": "ok",
+      "epoch": "1",
+      "storedNonce": "5"
+    },
+    "implicitProof": {
+      "epoch": "1",
+      "nonce": 6,
+      "proposerIsLeft": false,
+      "proofBodyHash": "0x59922b0ae351bfba91340494991333e244188a3a73dde295f7eaf9782d99a87a",
+      "proofHash": "0xe16664877c7d57aad16571d7723393bb08386201a1c02b144fccc8dd6e4d17e6",
+      "signature": "0x"
+    },
+    "rejected": {
+      "nonceAboveStoredPlusOne": "REVERT NotTheImplicitBaseline()",
+      "authoredByLeft": "REVERT NotTheImplicitBaseline()",
+      "offdeltaNotZero": "REVERT NotTheImplicitBaseline()",
+      "leftWindowNotTheFloor": "REVERT NotTheImplicitBaseline()",
+      "rightWindowNotTheFloor": "REVERT NotTheImplicitBaseline()",
+      "watchSeedNotZero": "REVERT NotTheImplicitBaseline()"
+    },
+    "start": "ok",
+    "finalize": "ok",
+    "settled": {
+      "L": "1000",
+      "R": "1000",
+      "collateral": "0",
+      "epoch": "2"
+    }
   }
 }

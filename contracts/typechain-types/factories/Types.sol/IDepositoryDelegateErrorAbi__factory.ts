@@ -25,6 +25,11 @@ const _abi = [
     type: "error",
   },
   {
+    inputs: [],
+    name: "NotTheImplicitBaseline",
+    type: "error",
+  },
+  {
     inputs: [
       {
         internalType: "uint256",

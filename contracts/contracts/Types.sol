@@ -39,6 +39,7 @@ interface IDepositoryDelegateErrorAbi {
   error E6(); // DisputeInProgress
   error E9(); // HashMismatch
   error ResponseWindowTooShort(uint256 minSeconds); // a proof body's response window is below MIN_RESPONSE_SECONDS
+  error NotTheImplicitBaseline(); // a dispute start with no signature that is not the canonical implicit proof (R-IMPLICIT-BASELINE)
   error TransformerGasBudgetUnavailable();
   error TransformerExecutionFailed();
 }

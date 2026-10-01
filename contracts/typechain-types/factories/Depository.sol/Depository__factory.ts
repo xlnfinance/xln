@@ -108,6 +108,11 @@ const _abi = [
   },
   {
     inputs: [],
+    name: "NotTheImplicitBaseline",
+    type: "error",
+  },
+  {
+    inputs: [],
     name: "RepresentationOverflow",
     type: "error",
   },
