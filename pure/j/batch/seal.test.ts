@@ -151,12 +151,3 @@ describe("the call the Host sends", () => {
   });
 });
 
-describe("the call the Host sends", () => {
-  test("processBatch takes the entity, the encoded batch, the Hanko and the nonce, as sealed", () => {
-    const sealed = sealBatch({ deployment: chain, entity: ME, nonce: 4n, gasBudget: MIN_GAS_BUDGET }, [deposit(1n)]);
-    const call = sealed.ok ? processBatchCall(sealed.value, "0xabcd") : expect.unreachable("sealed");
-    const encodedBatch = sealed.ok ? sealed.value.encoded : "";
-    expect(call).toEqual({ entityId: ME, encodedBatch, hankoData: "0xabcd", nonce: 4n });
-  });
-});
-

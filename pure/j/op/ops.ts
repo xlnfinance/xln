@@ -45,6 +45,13 @@ export const isCosigned = (op: JOp): boolean => op._tag === "settle" || op._tag 
 export const isDispute = (op: JOp): boolean =>
   op._tag === "dispute_start" || op._tag === "dispute_counter" || op._tag === "dispute_finalize";
 
+/**
+ * Ops that are safe to send twice, so an abort puts them back in the draft: a second dispute step is skipped by the
+ * chain with a DisputeOpSkipped (J2), and `DeltaTransformer.revealSecret` returns when the hash is already revealed. A
+ * deposit, a payment and a settlement are not: if the batch given up on still lands, the copy would apply again.
+ */
+export const isIdempotent = (op: JOp): boolean => isDispute(op) || op._tag === "reveal_secret";
+
 const asId = (id: string): string => id.toLowerCase();
 
 /** The counterparty of `self` in a settlement: the side that is not `self`. */

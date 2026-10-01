@@ -946,6 +946,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "skip-read-as-started"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "J2: a dispute op the chain skipped is told to its Account, and the batch is done all the same"
     }
    ]
   },
@@ -990,6 +995,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "no-gas-guard"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J5: a failed batch applied nothing and spent its nonce"
     }
    ]
   },
@@ -1049,6 +1059,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "J6 reaches the wire: the sealed batch of a deposit is that deposit alone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE reaches seal: nothing is signed before the Host has simulated the batch"
     }
    ]
   },
@@ -1078,6 +1093,11 @@
      "kind": "test",
      "layer": "contract",
      "name": "R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "abort and R-FINAL-NONCE: a batch given up on stays signed and its nonce is never signed again"
     }
    ]
   },
@@ -1389,7 +1409,7 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: signing after a simulation is the planner's duty; the chain's gas behaviour is J5 and F16",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1401,6 +1421,31 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "signs-before-gate"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE nothing is signed before the Host has answered a simulation of the exact batch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE the final simulation runs at the final budget (a gasleft() reader answers by budget)"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE never sign above the chain's transaction gas cap: split instead"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE reaches seal: nothing is signed before the Host has simulated the batch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SIMULATE gas numbers are the deployed contract's"
     }
    ]
   },
