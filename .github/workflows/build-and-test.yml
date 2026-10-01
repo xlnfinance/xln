@@ -11,7 +11,7 @@ on:
     - cron: '17 2 * * *'
   workflow_dispatch:
 
-# A newer push cancels the older run of the same PR; a run on main is never cancelled, so its spec markers are saved.
+# A newer push cancels the PR's earlier run; a run on main is never cancelled, so its spec markers are saved.
 concurrency:
   group: build-and-test-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
