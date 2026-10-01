@@ -24,6 +24,11 @@
    "kind": "test",
    "layer": "contract",
    "name": "R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "abort and R-FINAL-NONCE: a batch given up on stays signed and its nonce is never signed again"
   }
  ]
 }

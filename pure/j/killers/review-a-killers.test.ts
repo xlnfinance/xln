@@ -1,13 +1,13 @@
 // Reviewer A: tests that kill the mutants of pure/j the PR's own tests let live (PR 114, head 2d6da44a9).
 import { describe, expect, test } from "bun:test";
-import { assemble } from "./op/assemble.ts";
-import { requestKey, type JOp } from "./op/ops.ts";
-import { fundedFirst } from "./plan/funded.ts";
-import { openJBatch, queue, type JBatch } from "./batch/jbatch.ts";
-import { MIN_GAS_BUDGET } from "./batch/sealed.ts";
+import { assemble } from "../op/assemble.ts";
+import { requestKey, type JOp } from "../op/ops.ts";
+import { fundedFirst } from "../plan/funded.ts";
+import { openJBatch, queue, type JBatch } from "../batch/jbatch.ts";
+import { MIN_GAS_BUDGET } from "../batch/sealed.ts";
 import {
   ME, LEFT_PEER, RIGHT_PEER, counter, finalize, holdings, reserveToReserve, reveal, settle, start, withdraw,
-} from "./fixtures.ts";
+} from "../fixtures.ts";
 
 const queued = (j: JBatch, ...ops: readonly JOp[]): JBatch =>
   ops.reduce((acc, op) => {

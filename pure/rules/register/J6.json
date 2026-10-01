@@ -54,6 +54,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "J6 reaches the wire: the sealed batch of a deposit is that deposit alone"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-SIMULATE reaches seal: nothing is signed before the Host has simulated the batch"
   }
  ]
 }

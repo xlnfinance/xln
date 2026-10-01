@@ -1,9 +1,9 @@
 {
  "id": "R-COSIGN-FREEZE",
- "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state.",
+ "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state. The Arrival cell holds the receiving half on spec/account/frames.scm: a frozen replica refuses every peer frame with a retryable frozen refusal, and while a settlement is signed its fold equals the head's off-chain offdelta (bug frozen-accepts, config freeze); that the frozen proposer stays silent has no planted bug on the page, and the signature's commitment to the epoch and nonce is on no page.",
  "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
  "layers": {
-  "arrival": "owed: spec thread, next Arrival page",
+  "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch",
   "contract": "n/a: the freeze is the node's off-chain duty after it signs; the contract only sees the landed batch",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
@@ -140,6 +140,11 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-COSIGN-FREEZE R-C2R-FOLD a storm of withdrawals, asks and landings: signed Accounts hold still"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "frozen-accepts"
   }
  ]
 }

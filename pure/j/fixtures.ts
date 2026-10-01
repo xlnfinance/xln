@@ -8,6 +8,9 @@ import { Depository__factory } from "../../contracts/typechain-types/factories/D
 import { unwrapOr, type Result } from "../kernel/core/result.ts";
 import type { ProofBody } from "../chain/proof/proof.ts";
 import type { SettlementDiff } from "../chain/money.ts";
+import { seal, type JBatch, type SealContext, type SealOutcome } from "./batch/jbatch.ts";
+import type { SealedBatch } from "./batch/sealed.ts";
+import type { Gas, Simulation } from "./gas/simulate.ts";
 import { address, bytes32, type Address, type Bytes32, type RawLog } from "./log.ts";
 import type { JOp } from "./op/ops.ts";
 import type { Treasury } from "./plan/funded.ts";
@@ -118,6 +121,23 @@ export const finalize = (peer: string, finalNonce = 1n): JOp => ({
 
 export const reveal = (n = 1): JOp =>
   ({ _tag: "reveal_secret", reveal: { transformer: TOKEN_ADDRESS, secret: idOf(n) } });
+
+/** A mainnet-like chain: the transaction gas cap of EIP-7825 and the outer Hanko check of a small board. */
+export const GAS: Gas = { txGasCap: 16_777_216n, prelude: 100_000n };
+
+export const APPLY_GAS = 700_000n;
+
+const succeeds = (): Simulation["outcome"] => ({ _tag: "ok", applyGas: APPLY_GAS });
+
+/** The Host's loop: answer each simulation `seal` asks for with `answer`, until it asks for no more. */
+export const drive = (
+  j: JBatch, ctx: SealContext, answer: (candidate: SealedBatch) => Simulation["outcome"] = succeeds,
+): SealOutcome => {
+  const outcome = seal(j, ctx);
+  if (outcome._tag !== "simulate") return outcome;
+  const simulated = { digest: outcome.candidate.digest, outcome: answer(outcome.candidate) };
+  return drive(j, { ...ctx, answers: [...ctx.answers, simulated] }, answer);
+};
 
 /** A dispute start whose proof body carries `kib` KiB of clause bytes, under the contract's per-body limit. */
 export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {

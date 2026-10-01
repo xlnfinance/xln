@@ -39,6 +39,11 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "no-gas-guard"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-J5: a failed batch applied nothing and spent its nonce"
   }
  ]
 }
