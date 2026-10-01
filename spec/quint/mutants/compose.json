@@ -15,7 +15,7 @@
     },
     {
       "id": "payout-forgets-the-debt",
-      "why": "P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
+      "why": "R-CONSERVE: P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
       "file": "chain.qnt",
       "old": "      if (d == 0) m1 else shortfall(m1, Left, -d)",
       "new": "      m1",
@@ -68,6 +68,22 @@
       "old": "      w >= 1, w <= COLLATERAL,\n",
       "new": "      w >= 1,\n",
       "killedBy": "test:noWithdrawalBeyondTheCollateralTest"
+    },
+    {
+      "id": "start-requires-both-signatures",
+      "why": "R-SIGNED-IS-LIVE: the chain refuses a dispute start with a proof only its author signed (the next hop could not enforce a refused frame's proof): the contract needs only the counterparty's signature",
+      "file": "chain.qnt",
+      "old": "    or { signedBy(r, other(s)), isImplicit(r, w.a) },",
+      "new": "    or { both(r), isImplicit(r, w.a) },",
+      "killedBy": "test:refusedProofWithTheLockIsEnforcedOnTheChainTest"
+    },
+    {
+      "id": "rank-ignores-the-author",
+      "why": "R-PROOF-NONCE-ABOVE-SIGNED: the chain orders proofs by nonce alone, so a Left-authored proof no longer outranks a Right-authored one at the same nonce",
+      "file": "chain.qnt",
+      "old": "  pure def rank(r: SignedProof): int = r.nonce * 2 + (if (r.leftAuthored) 1 else 0)",
+      "new": "  pure def rank(r: SignedProof): int = r.nonce * 2",
+      "killedBy": "test:staleProofAtTheCommittedNonceErasesThePaymentTest"
     }
   ],
   "init": "init",

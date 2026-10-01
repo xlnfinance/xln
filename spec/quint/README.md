@@ -23,8 +23,8 @@ dispute ops in a batch (J2), a failed batch that takes its nonce (J5, with the d
 |---|---|
 | `account.qnt` | Account layer: the state machine (propose, receive, ack, resend, loss) over `account_core.qnt`, and its properties |
 | `account_test.qnt` | scenario tests: exact schedules with exact expected results |
-| `chain.qnt` | J layer for one Account: reserves, collateral, epoch, debt, the dispute game (start, counter, three finalize paths), payout |
-| `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, the implicit proof of an epoch (R-IMPLICIT-BASELINE: start, outrank, the tie trap, deposits, non-canonical bodies), N3 windows never shorten, H1 wait, H2 floor, debt, deposits, absent party |
+| `chain.qnt` | J layer for one Account: reserves, collateral, epoch, debt (a queue of claims owed to the other side or to a third party), the dispute game (start, counter, three finalize paths), payout, settlement debt forgiveness |
+| `chain_test.qnt` | scenario tests for the dispute game: stale start, tie-break, C1 epoch, the implicit proof of an epoch (R-IMPLICIT-BASELINE: start, outrank, the tie trap, deposits, non-canonical bodies), N3 windows never shorten, H1 wait, H2 floor, debt (third-party claims paid out first), settlement debt forgiveness (R-SETTLE-FORGIVE: heads of both queues, revert only when nothing was forgiven, the id cap, no repeats), deposits, absent party |
 | `settle.qnt` | off-chain epoch lifecycle over `chain.qnt`: Pay and Lock frames, the N1 pause, the cooperative update (folds the offdelta), the first signed proof of an epoch at stored + 2 |
 | `settle_test.qnt` | scenario tests: pause while locked, the next epoch opens with no ceremony, first proof at stored + 2 (the trap refused), dead-epoch payment, update dies with a finalize |
 | `account_core.qnt` | the pure part of the Account layer (types, transition table, replica rules); `account.qnt` and `entity.qnt` build on it |
@@ -82,14 +82,18 @@ Apalache and Java 21 work.
 | id | property | module |
 |---|---|---|
 | P2 | credit holds: every committed and in-flight state satisfies RCPAN in the worst case over open clauses | `credit_holds` |
-| P4a | agreed: two sides never commit different bodies at one height, except that a Left-authored frame supersedes a Right-authored one at one nonce with a Byzantine peer, as the chain ranks them (A12) | `agreed` |
+| P4a | agreed: two sides never commit different bodies at one height, except that with a Byzantine peer a later frame whose rank (nonce * 2 + leftAuthored) is above the earlier commit's supersedes it, as the chain ranks them (A12) | `agreed` |
 | P4b | no equivocation: a signer never signs two different proofs for one (nonce, branch) | `no_equivocation` |
 | P4c | both sign the same proof: at each side's head, both signatures over the proof of the committed body exist | `both_signed` |
 | P4d | a frame is held for an ack only if a correct receiver would accept it (state replays on its own tip and clock, next height, proof nonce above the last) | `no_bad_accept` |
 | P4e | a committed frame never spends the other side's funds, raises its own credit, or expires a lock early (R-CLOCK) | `authority` |
-| P4f | the proof nonce is its own counter, one above the last committed (N1) | `nonce_climbs` |
+| P4f | the proof nonce is its own counter, above the last committed, skipping only nonces a signed proof occupies (N1, A18, A19) | `nonce_climbs` |
+| P4g | R-PROOF-NONCE-ABOVE-SIGNED: no proof signed in the epoch outranks the committed head (rank = nonce * 2 + leftAuthored), a yielded or refused attempt included, except the head's own proofs and live proposals on it (A19) | `signed_above_head` |
+| P4h | R-SIGNED-IS-LIVE: no lock's notice is released while a signed proof that no commit superseded still holds the lock, unless its deadline plus the reserve has passed (A20) | `no_release_while_signed_live` |
+| P4i | R-PROOF-NONCE-ABOVE-SIGNED, the floor a refusal carries: an honest refuser's floor is at most one above what the proposer knows signed (A19) | `refusal_floor_reachable` |
+| P4j | R-COSIGN-FREEZE: while a side is frozen by a co-signed fold, its head's offdelta is the fold's and it has no frame in flight (A21) | `cosign_fold_holds` |
 
-The Account model runs a Byzantine side (one key taken at any moment): P4c to P4f are checked on the honest side only. Each of the
+The Account model runs a Byzantine side (one key taken at any moment): P4c to P4g are checked on the honest side only. Each of the
 independent oracles (`netOf`, `own`/`creditFor`, `creditHolds`, `wellFormed`) states the rule on the effect, not through the guard it checks.
 
 P1 (a dispute pays what both sides believed) and P3 (money is conserved) need the chain and belong to `chain.qnt`.

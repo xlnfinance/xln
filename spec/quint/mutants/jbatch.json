@@ -46,7 +46,7 @@
     },
     {
       "id": "resign-at-a-signed-nonce",
-      "why": "F1: the fresh nonce ignores what is already signed, so a second batch with other content is signed at a nonce that one already holds; the adversary lands the old one and burns the new",
+      "why": "R-FINAL-NONCE: F1: the fresh nonce ignores what is already signed, so a second batch with other content is signed at a nonce that one already holds; the adversary lands the old one and burns the new",
       "file": "jbatch.qnt",
       "old": "    val f = topSigned(s) + 1",
       "new": "    val f = s.cnonce + 1",
@@ -182,7 +182,7 @@
     },
     {
       "id": "signs-before-gate",
-      "why": "the Runtime signs a time-gated op before its gate opens",
+      "why": "R-SIMULATE: the Runtime signs a time-gated op before its gate opens",
       "file": "jbatch.qnt",
       "old": "  pure val RESPECT_GATE = true",
       "new": "  pure val RESPECT_GATE = false",
@@ -254,7 +254,7 @@
     },
     {
       "id": "unfunded-payment-is-signed",
-      "why": "F14: a payment is signed although the reserve does not cover it (after a drain, or behind a paused deposit): it fails soft, burns a nonce and is signed again every round",
+      "why": "R-FUNDED: F14: a payment is signed although the reserve does not cover it (after a drain, or behind a paused deposit): it fails soft, burns a nonce and is signed again every round",
       "file": "jbatch.qnt",
       "old": "    val pn = OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)",
       "new": "    val pn = pn0",

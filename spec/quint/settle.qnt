@@ -133,7 +133,7 @@ module settle {
       honest' = hon,
       now' = 1,
       acct' = { nonce: 0, epoch: 0, coll: cl + cr, ondelta: cl, via: 0 },
-      money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0), dq: Map(Left -> [], Right -> []) },
+      money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0), dq: Map(Left -> [], Right -> []), out: 0 },
       total' = resL + resR + cl + cr,
       dispute' = NO_DISPUTE,
       registry' = 0,
@@ -273,7 +273,7 @@ module settle {
     val u = upds.get(uid)
     val dColl = -(u.dl + u.dr)
     val dOn = -u.dl + u.fold                            // the offdelta both agreed is folded into the ondelta: the implicit proof of the new epoch pays exactly that
-    val m2: Money = { res: money.res.set(Left, money.res.get(Left) + u.dl).set(Right, money.res.get(Right) + u.dr), debt: money.debt, dq: money.dq }
+    val m2: Money = { res: money.res.set(Left, money.res.get(Left) + u.dl).set(Right, money.res.get(Right) + u.dr), debt: money.debt, dq: money.dq, out: money.out }
     val offAfter = 0
     val a2: Acct = { nonce: u.nonce, epoch: acct.epoch + 1, coll: acct.coll + dColl, ondelta: acct.ondelta + dOn, via: uid }
     all {

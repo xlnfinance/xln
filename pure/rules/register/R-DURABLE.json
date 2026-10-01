@@ -4,7 +4,7 @@
  "source": "consolidation-plan.md section on the Runtime; Quint Runtime R3",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "quint": "hold",
   "contract": "n/a: persisting a frame is Runtime behaviour, off-chain",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"

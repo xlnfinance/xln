@@ -107,13 +107,19 @@ module chain {
     pubAt: int,           // ghost: the tick the secret first reached the chain (0 = never), kept apart from `registry`
     finalizes: int,
     lastApplied: int,
-    staleSkips: int       // dispute starts that named a dead ondelta epoch and were skipped (DisputeOpSkipped), moving nothing
+    staleSkips: int,      // dispute starts that named a dead ondelta epoch and were skipped (DisputeOpSkipped), moving nothing
+    forgiveBad: bool,     // a settlement's forgiveness did something the contract does not (R-SETTLE-FORGIVE): judged on the queues before and after, see `forgiveJudged`
+    forgiven: int,        // settlements that forgave at least one head claim
+    forgiveReverts: int,  // settlements that reverted on forgiveness
+    forgiveBoth: int,     // settlements that forgave the head claim of both sides
+    forgiveMixed: int     // settlements that landed having forgiven one head while the other head was owed to a third party
   }
 
   pure val NO_GHOST: Ghost = {
     badApply: false, clauseMiss: false, nonceBack: false, appliedTwice: false, freeDebt: false, r2cOwes: false, olderDebt: false, debtBesideReserve: false, xWasOffline: false,
     lostByAbsence: false, payBad: false, depositBad: false, windowsShortened: false, earlyClose: false, lateCounter: false,
-    nonceBad: false, implicitSettles: 0, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0
+    nonceBad: false, implicitSettles: 0, pubAt: 0, finalizes: 0, lastApplied: 0, staleSkips: 0,
+    forgiveBad: false, forgiven: 0, forgiveReverts: 0, forgiveBoth: 0, forgiveMixed: 0
   }
 
   pure val NO_CLAUSE: Clause = { on: false, payer: Left, amount: 0, deadline: 0 }
@@ -133,8 +139,18 @@ module chain {
   pure def imin(a: int, b: int): int = if (a < b) a else b
   pure def imax(a: int, b: int): int = if (a > b) a else b
 
-  // debt[s] is what s owes to the other side, in total; dq[s] is the same debt as the queue of separate claims Depository keeps, oldest first (debt[s] is its sum).
-  type Money = { res: Side -> int, debt: Side -> int, dq: Side -> List[int] }
+  // debt[s] is what s owes, in total (to the other side of this Account and to third parties); dq[s] is the same debt as the queue of separate claims Depository keeps, oldest first
+  // (debt[s] is its sum). A claim is owed to the other side of the Account or to a third party (an older debt from another Account of the entity); `out` is what enforcement has paid
+  // third parties out of the reserves, so that reserves, collateral and `out` stay what they were at the start.
+  type Claim = { amt: int, third: bool }
+  type Money = { res: Side -> int, debt: Side -> int, dq: Side -> List[Claim], out: int }
+
+  pure def peerClaim(a: int): Claim = { amt: a, third: false }
+  pure def thirdClaim(a: int): Claim = { amt: a, third: true }
+  pure def claimsOf(xs: List[int]): List[Claim] = xs.foldl([], (acc, x) => acc.append(peerClaim(x)))
+  pure def claimsSum(xs: List[Claim]): int = xs.foldl(0, (a, x) => a + x.amt)
+  // what `s` owes the other side of the Account (the debt its payout shortfall booked, and the peer-owed claims of an older debt)
+  pure def peerOwed(m: Money, s: Side): int = m.dq.get(s).foldl(0, (a, x) => if (x.third) a else a + x.amt)
 
   // Depository._enforceDebts pays at most 32 queued debts per call, oldest first. The model scales that bound down so that a search meets a queue longer than one call can clear.
   pure val DEBT_ENFORCE_MAX = 2
@@ -149,17 +165,19 @@ module chain {
   // Pay the first DEBT_ENFORCE_MAX claims in order, each with what the reserve still holds; a claim paid in full leaves the queue, a part-paid one stays, the rest are not touched.
   pure def enforce(m: Money, debtor: Side): Money = {
     val c = other(debtor)
-    val r = m.dq.get(debtor).foldl({ left: m.res.get(debtor), out: [], seen: 0 }, (acc, d) =>
+    val r = m.dq.get(debtor).foldl({ left: m.res.get(debtor), out: [], seen: 0, toPeer: 0, toThird: 0 }, (acc, d) =>
       if (acc.seen >= DEBT_ENFORCE_MAX) { ...acc, out: acc.out.append(d), seen: acc.seen + 1 }
       else {
-        val pay = imin(d, acc.left)
-        { left: acc.left - pay, out: if (d - pay > 0) acc.out.append(d - pay) else acc.out, seen: acc.seen + 1 }
+        val pay = imin(d.amt, acc.left)
+        { left: acc.left - pay, out: if (d.amt - pay > 0) acc.out.append({ ...d, amt: d.amt - pay }) else acc.out, seen: acc.seen + 1,
+          toPeer: acc.toPeer + (if (d.third) 0 else pay), toThird: acc.toThird + (if (d.third) pay else 0) }
       })
     val paid = m.res.get(debtor) - r.left
     {
-      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + paid),
+      res: m.res.set(debtor, r.left).set(c, m.res.get(c) + r.toPeer),
       debt: m.debt.set(debtor, m.debt.get(debtor) - paid),
-      dq: m.dq.set(debtor, r.out)
+      dq: m.dq.set(debtor, r.out),
+      out: m.out + r.toThird
     }
   }
 
@@ -169,9 +187,10 @@ module chain {
     val m = enforce(m0, debtor)
     val pay = imin(amount, spendable(m, debtor))
     {
+      ...m,
       res: m.res.set(debtor, m.res.get(debtor) - pay).set(c, m.res.get(c) + pay),
       debt: m.debt.set(debtor, m.debt.get(debtor) + (amount - pay)),
-      dq: m.dq.set(debtor, if (amount - pay > 0) m.dq.get(debtor).append(amount - pay) else m.dq.get(debtor))
+      dq: m.dq.set(debtor, if (amount - pay > 0) m.dq.get(debtor).append(peerClaim(amount - pay)) else m.dq.get(debtor))
     }
   }
 
@@ -261,6 +280,12 @@ module chain {
     nondet dq1 = 1.to(2).oneOf()
     nondet dq2 = 1.to(2).oneOf()
     nondet dq3 = 1.to(2).oneOf()
+    nondet th1 = Set(false, true).oneOf()      // a claim of an older debt is owed to the other side of this Account, or to a third party (R-SETTLE-FORGIVE)
+    nondet th2 = Set(false, true).oneOf()
+    nondet th3 = Set(false, true).oneOf()
+    nondet oLen = 0.to(1).oneOf()              // the other side may owe too, one claim, so that a settlement meets a head on each side
+    nondet oAmt = 1.to(2).oneOf()
+    nondet oTh = Set(false, true).oneOf()
     nondet resL = 0.to(RESERVE_MAX).oneOf()
     nondet resR = 0.to(RESERVE_MAX).oneOf()
     nondet coll = 0.to(2).oneOf()
@@ -274,7 +299,9 @@ module chain {
     // the clause, if any, rides in the tip and in the pending proposal (the same lock, still open)
     val clause: Clause = { on: cOn, payer: cPayer, amount: cAmt, deadline: cDl }
     val tipLeft = if (k == 1) la1 else if (k == 2) la2 else la3
-    initFromD(
+    val qDebtor: List[Claim] = [{ amt: dq1, third: th1 }, { amt: dq2, third: th2 }, { amt: dq3, third: th3 }].slice(0, dqLen)
+    val qOther: List[Claim] = if (oLen == 1) [{ amt: oAmt, third: oTh }] else []
+    initFromQ(
       Map(
         0 -> NO_PROOF,
         1 -> mkProofW(k >= 1, 1, 0, la1, o1, if (k == 1) clause else NO_CLAUSE, true, true, wl0, wr0),
@@ -285,7 +312,9 @@ module chain {
         6 -> mkProofW(true, FIRST_NONCE_E1, 1, baseLa, baseOff, NO_CLAUSE, true, true, wl6, wr6),
         7 -> mkProofW(pend2Live, FIRST_NONCE_E1 + 1, 1, isLeft(pend2Author), pend2Off, NO_CLAUSE, isLeft(pend2Author), not(isLeft(pend2Author)), wl6, wr6)
       ),
-      hon, resL, resR, coll, debtor, [dq1, dq2, dq3].slice(0, dqLen)      // an older debt: a queue of up to three claims, one more than a scaled call clears
+      hon, resL, resR, coll,
+      if (debtor == Left) qDebtor else qOther,      // an older debt: a queue of up to three claims, one more than a scaled call clears; the other side may owe one claim too
+      if (debtor == Left) qOther else qDebtor
     )
   }
 
@@ -307,13 +336,20 @@ module chain {
   // The state before anything happened, for a given arena: scenario tests start here with a hand-made history.
   action initFrom(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int): bool = initFromD(ar, hon, resL, resR, coll, Left, [])
   action initFromD(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool =
+    initFromC(ar, hon, resL, resR, coll, debtor, claimsOf(queue))
+  action initFromC(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[Claim]): bool =
     initAt({ nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 }, ar, hon, resL, resR, coll, debtor, queue)
-  action initAt(a: Acct, ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[int]): bool = all {
+  // both sides may owe: qL is what Left owes, oldest first, qR what Right owes
+  action initFromQ(ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, qL: List[Claim], qR: List[Claim]): bool =
+    initAtQ({ nonce: 0, epoch: 0, coll: coll, ondelta: 0, via: 0 }, ar, hon, resL, resR, coll, qL, qR)
+  action initAt(a: Acct, ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, debtor: Side, queue: List[Claim]): bool =
+    initAtQ(a, ar, hon, resL, resR, coll, if (debtor == Left) queue else [], if (debtor == Right) queue else [])
+  action initAtQ(a: Acct, ar: int -> SignedProof, hon: Side, resL: int, resR: int, coll: int, qL: List[Claim], qR: List[Claim]): bool = all {
     arena' = SLOTS.mapBy(i => if (ar.keys().contains(i)) ar.get(i) else NO_PROOF),      // slots a history does not use stay empty
     honest' = hon,
     now' = 1,
     acct' = a,
-    money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> 0, Right -> 0).set(debtor, sumOf(queue)), dq: Map(Left -> [], Right -> []).set(debtor, queue) },
+    money' = { res: Map(Left -> resL, Right -> resR), debt: Map(Left -> claimsSum(qL), Right -> claimsSum(qR)), dq: Map(Left -> qL, Right -> qR), out: 0 },
     total' = resL + resR + coll,
     dispute' = NO_DISPUTE,
     registry' = 0,
@@ -500,6 +536,87 @@ module chain {
     }
   }
 
+  // ---------------------------------------------------------------------------------------------------------
+  // Settlement debt forgiveness (R-SETTLE-FORGIVE; Depository._forgiveDebtsBetweenEntities, Arrival PR 108)
+  // ---------------------------------------------------------------------------------------------------------
+  // A co-signed settlement lists token ids. For each listed token the contract looks at the HEAD claim of each side's debt queue, in both directions: a head owed to the other side of this
+  // Account is deleted, a head owed to a third party (an older debt from another Account of the entity) is left. The settlement reverts only when nothing was forgiven for a listed token
+  // and a debt exists there; it also reverts when it lists more than the cap or lists a token twice. The model has one token, `DEBT_TOKEN`: a listed id that is not it carries no debt
+  // and changes nothing (the contract's per-token loop needs the multi-token Account, see QUESTIONS).
+  pure val DEBT_TOKEN = 1
+  pure val FORGIVE_MAX = 2      // the contract's 32 ids, scaled down so that a search lists more than a settlement may
+
+  // the head of a queue is owed to the other side of this Account
+  pure def headOwedToPeer(q: List[Claim]): bool = q.length() > 0 and not(q.nth(0).third)
+  pure def repeatsAnId(ids: List[int]): bool = ids.indices().exists(i => ids.indices().exists(j => i < j and ids.nth(i) == ids.nth(j)))
+  pure def forgiveOverCap(ids: List[int]): bool = ids.length() > FORGIVE_MAX
+  // the settlement lands unless something is owed and no head could be forgiven
+  pure def forgiveLands(m: Money, fL: bool, fR: bool): bool = fL or fR or (m.dq.get(Left).length() == 0 and m.dq.get(Right).length() == 0)
+  // what a settlement deletes from a queue whose head it forgives: the head, nothing behind it
+  pure def forgiveHeadOnly(q: List[Claim]): List[Claim] = q.slice(1, q.length())
+
+  pure def forgivePlan(m: Money, ids: List[int]): { lands: bool, left: bool, right: bool } =
+    if (forgiveOverCap(ids) or repeatsAnId(ids)) { lands: false, left: false, right: false }
+    else if (not(ids.indices().exists(i => ids.nth(i) == DEBT_TOKEN))) { lands: true, left: false, right: false }
+    else {
+      val fL = headOwedToPeer(m.dq.get(Left))
+      val fR = headOwedToPeer(m.dq.get(Right))
+      { lands: forgiveLands(m, fL, fR), left: fL, right: fR }
+    }
+
+  // delete the forgiven claims of one side's queue and take them off its debt total
+  pure def forgiveOne(m: Money, s: Side, on: bool): Money =
+    if (on) {
+      val q = m.dq.get(s)
+      val q2 = forgiveHeadOnly(q)
+      { ...m, dq: m.dq.set(s, q2), debt: m.debt.set(s, m.debt.get(s) - (claimsSum(q) - claimsSum(q2))) }
+    } else m
+
+  // The judge of a settlement, written from the contract's words and not from the mechanism above: from the queues before and after, whether it should have landed, whether it did,
+  // and whether each head claim and nothing else is gone, with the totals following.
+  pure def forgiveJudged(b: Money, a: Money, ids: List[int], landed: bool): bool = {
+    val listed = ids.indices().exists(i => ids.nth(i) == DEBT_TOKEN)
+    def peerHead(s) = b.dq.get(s).indices().exists(i => i == 0 and not(b.dq.get(s).nth(i).third))
+    val anyDebt = b.debt.get(Left) + b.debt.get(Right) > 0
+    val mustLand = and { ids.length() <= FORGIVE_MAX, ids.indices().map(i => ids.nth(i)).size() == ids.length(), not(listed) or peerHead(Left) or peerHead(Right) or not(anyDebt) }
+    def goes(s) = mustLand and listed and peerHead(s)
+    def expectQ(s) = if (goes(s)) b.dq.get(s).slice(1, b.dq.get(s).length()) else b.dq.get(s)
+    def expectDebt(s) = b.debt.get(s) - (if (goes(s)) b.dq.get(s).nth(0).amt else 0)
+    and {
+      landed == mustLand,
+      a.dq.get(Left) == expectQ(Left), a.dq.get(Right) == expectQ(Right),
+      a.debt.get(Left) == expectDebt(Left), a.debt.get(Right) == expectDebt(Right),
+      a.res == b.res, a.out == b.out
+    }
+  }
+
+  // A settlement that lists `ids`. It changes only the debt queues (the epoch update that rides with a settlement is settle.qnt's); when it reverts, nothing moves.
+  action settleForgiving(ids: List[int]): bool = {
+    val plan = forgivePlan(money, ids)
+    val m2 = if (plan.lands) forgiveOne(forgiveOne(money, Left, plan.left), Right, plan.right) else money
+    val goneL = m2.dq.get(Left).length() < money.dq.get(Left).length()
+    val goneR = m2.dq.get(Right).length() < money.dq.get(Right).length()
+    all {
+      money' = m2,
+      ghost' = { ...ghost,
+                 forgiveBad: ghost.forgiveBad or not(forgiveJudged(money, m2, ids, plan.lands)),
+                 forgiven: ghost.forgiven + (if (goneL or goneR) 1 else 0),
+                 forgiveReverts: ghost.forgiveReverts + (if (plan.lands) 0 else 1),
+                 forgiveBoth: ghost.forgiveBoth + (if (goneL and goneR) 1 else 0),
+                 forgiveMixed: ghost.forgiveMixed + (if ((goneL != goneR) and plan.lands and (money.dq.get(Left).length() > 0 and money.dq.get(Right).length() > 0) and (money.dq.get(Left).nth(0).third or money.dq.get(Right).nth(0).third)) 1 else 0) },
+      arena' = arena, honest' = honest, now' = now, acct' = acct, total' = total, dispute' = dispute, registry' = registry,
+      knows' = knows, offline' = offline, applied' = applied
+    }
+  }
+
+  action adversaryOrHonestSettle: bool = {
+    nondet n = 0.to(FORGIVE_MAX + 1).oneOf()
+    nondet i1 = 1.to(3).oneOf()      // token ids 1 to 3: three distinct ids exceed the scaled cap, which two ids and a repeat cannot show
+    nondet i2 = 1.to(3).oneOf()
+    nondet i3 = 1.to(3).oneOf()
+    settleForgiving([i1, i2, i3].slice(0, n))
+  }
+
   // disputeStart. The stored nonce becomes the proof's nonce. The starter freezes its arguments now: whether it
   // reveals the secret, and, for one named newer branch, its arguments for that branch.
   action startWith(s: Side, rid: int, initArgs: bool, branch: int, counterArgs: bool): bool = all {
@@ -605,7 +722,7 @@ module chain {
 
   // What a side is worth on the chain: its reserve, less what it owes, plus what the other side owes it. A payout moves it by exactly the
   // side's allocation, whatever is paid at once and whatever is booked as debt; enforcing a debt moves nothing (reserve and debt fall together).
-  pure def netOf(m: Money, s: Side): int = m.res.get(s) - m.debt.get(s) + m.debt.get(other(s))
+  pure def netOf(m: Money, s: Side): int = m.res.get(s) - m.debt.get(s) + peerOwed(m, other(s))
 
   // Whether the clause is paid, from the facts (when the secret reached the chain, who knew it) and not from `revealedBy`, which is the
   // mechanism this is checked against. The secret can come from the public registry by the deadline, from the starter's arguments frozen
@@ -690,7 +807,8 @@ module chain {
         finalizes: ghost.finalizes + 1,
         lastApplied: if (useId >= 1) useId else 0,
         implicitSettles: ghost.implicitSettles + (if (isImpl) 1 else 0),
-        staleSkips: ghost.staleSkips
+        staleSkips: ghost.staleSkips,
+        forgiveBad: ghost.forgiveBad, forgiven: ghost.forgiven, forgiveReverts: ghost.forgiveReverts, forgiveBoth: ghost.forgiveBoth, forgiveMixed: ghost.forgiveMixed
       },
       arena' = arena, honest' = honest, now' = now, total' = total, registry' = registry, knows' = knows,
       offline' = offline
@@ -722,7 +840,8 @@ module chain {
     { nondet a = 1.to(2).oneOf() nondet who = SIDES.oneOf() nondet rcv = SIDES.oneOf() r2c(who, rcv, a) },
     adversaryStart, adversaryStartImplicit, adversaryStartAtDeadEpoch, honestStart,
     adversaryCounter, honestCounter,
-    adversaryFinalize, honestFinalize
+    adversaryFinalize, honestFinalize,
+    adversaryOrHonestSettle
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -737,7 +856,7 @@ module chain {
   val p1_clause: bool = not(ghost.clauseMiss)
 
   // P3 conserving: reserves plus collateral never change except by the deposits made at init.
-  val p3_conserved: bool = money.res.get(Left) + money.res.get(Right) + acct.coll == total
+  val p3_conserved: bool = money.res.get(Left) + money.res.get(Right) + acct.coll + money.out == total
 
   // The stored nonce never goes down, and no arena record settles twice.
   val nonce_monotone: bool = not(ghost.nonceBack)
@@ -752,7 +871,7 @@ module chain {
   // Depository._reserveToCollateral enforces first: a depositor whose queue fitted in one call owes nothing after it (it had reserve to pay with, or nothing spendable to deposit)
   val r2c_enforces_first: bool = not(ghost.r2cOwes)
   // the queue and the total describe the same debt
-  val debt_queue_sums: bool = sumOf(money.dq.get(Left)) == money.debt.get(Left) and sumOf(money.dq.get(Right)) == money.debt.get(Right)
+  val debt_queue_sums: bool = claimsSum(money.dq.get(Left)) == money.debt.get(Left) and claimsSum(money.dq.get(Right)) == money.debt.get(Right)
 
   // P3 exact: a finalize moves each side's worth (reserve less debt owed plus debt owed to it) by exactly its allocation, and a deposit moves
   // exactly what it says. Whatever is paid at once and whatever is booked as debt, the amounts are the proof's and the secret evidence's.
@@ -772,9 +891,13 @@ module chain {
   // A start needs a nonce above the stored one; a finalize stores the adopted proof's nonce, or one more than the stored one.
   val nonce_rules: bool = not(ghost.nonceBad)
 
+  // R-SETTLE-FORGIVE: a settlement forgives each side's head claim owed to the other side and nothing else, lands unless something was owed and nothing could be forgiven, and reverts
+  // past the cap or on a repeated id (judged by `forgiveJudged`, on the queues before and after)
+  val forgive_ok: bool = not(ghost.forgiveBad)
+
   val safe: bool = and {
     p1_allowed, p1_clause, p3_conserved, nonce_monotone, no_double_settle, debt_only_when_broke, debt_means_broke, debt_queue_sums, r2c_enforces_first,
-    pay_exact, deposit_exact, windows_never_shortened, closes_on_time, nonce_rules
+    pay_exact, deposit_exact, windows_never_shortened, closes_on_time, nonce_rules, forgive_ok
   }
 
   // Coverage witnesses: false on purpose, each must be violated by some trace.
@@ -787,6 +910,10 @@ module chain {
   val w_no_implicit_settled: bool = ghost.implicitSettles == 0
   val w_no_debt: bool = money.debt.get(Left) == 0 and money.debt.get(Right) == 0
   val w_no_long_queue: bool = money.dq.get(Left).length() <= DEBT_ENFORCE_MAX and money.dq.get(Right).length() <= DEBT_ENFORCE_MAX      // witness: a queue beyond one call's reach exists
+  val w_no_forgiveness: bool = ghost.forgiven == 0      // witness: some settlement forgives a head claim
+  val w_no_forgive_revert: bool = ghost.forgiveReverts == 0      // witness: some settlement reverts on its forgiveness (over the cap, a repeat, or nothing forgivable)
+  val w_no_forgive_both: bool = ghost.forgiveBoth == 0      // witness: both directions at once
+  val w_no_forgive_mixed: bool = ghost.forgiveMixed == 0      // witness: one head forgiven, the other left because it is owed to a third party, and the settlement lands
   val w_no_clause_settled: bool = not(ghost.finalizes > 0 and arena.get(ghost.lastApplied).clause.on)
   // the exclusion for an absent honest party is not vacuous: some run settles a proof the honest party did not stand behind
   val w_offline_can_lose: bool = not(ghost.lostByAbsence)

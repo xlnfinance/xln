@@ -1,10 +1,10 @@
 {
  "id": "R-SETTLE-FORGIVE",
- "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts, so the per-token revert across two listed tokens (one forgiven, one blocked) is not modelled.",
+ "statement": "A settlement lists token ids, at most 32 and none twice; for each it forgives the current head debt of each side toward the other when that debt is owed to the other side of the Account, and a head owed to a third party is never touched; the whole settlement fails (BatchFailed, nothing of it applies) only when nothing was forgiven for a listed token and a debt exists there. The Arrival page models one token with debts, so the per-token revert across two listed tokens (one forgiven, one blocked) is not modelled. The Quint cell holds the same cut on one token: the head debt of each side forgiven in both directions, a head owed to a third party untouched, the revert only when nothing was forgiven and a debt exists, the cap on the listed tokens and no repeat, and the total reduced with the claims (the forgives-* and forgive-* mutants); the per-token revert across two listed tokens is not modelled there either.",
  "source": "coordinator 09-30 16:12 and 10-01 07:20; Depository._forgiveDebtsBetweenEntities, Account MAX_SETTLEMENT_FORGIVENESS_IDS",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: #44",
+  "quint": "hold",
   "contract": "owed: contracts thread (DebtForgiveness.test.ts holds the rule, but no name carries the id)",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "n/a: a fact about the contract as built; the planner only lists the token ids the Account asks for"
@@ -69,6 +69,71 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "repeat-adjacent-only"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgives-third-party"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgives-third-party-invariant"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgives-one-direction"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgives-past-head"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-blocked-lands"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-blocked-lands-invariant"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "reverts-on-either-block"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "reverts-when-no-debt"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-uncapped"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-cap-off-by-one"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-repeat-ok"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-ignores-the-token-list"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "forgive-keeps-the-total"
   }
  ]
 }
