@@ -35,6 +35,9 @@ describe("host/shell/journal what the journal file says was signed and what the 
   test("a record with an unknown tag, a missing or extra key, or a bad digest is refused, with where", () => {
     const refused = (value: unknown) => journalRecord(value);
     expect(refused({ _tag: "paid" })).toMatchObject({ ok: false });
+    ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"].forEach((tag) => {
+      expect(refused({ _tag: tag })).toMatchObject({ ok: false, error: { at: "$._tag" } });
+    });
     expect(refused({ ...ANSWERED, outcome: "pending" })).toMatchObject({ ok: false, error: { at: "$.outcome" } });
     expect(refused({ ...ANSWERED, digest: "0x12" })).toMatchObject({ ok: false, error: { at: "$.digest" } });
     expect(refused({ ...SEALED, extra: 1n })).toMatchObject({ ok: false });

@@ -36,9 +36,24 @@ describe("host/shell/wal the rows of a file, and how it ended", () => {
 
   test("R-DURABLE a last record whole in length but wrong in its bytes is a tear, wherever the bit is", () => {
     const flipped = (at: number) => concat([prior, final.map((byte, i) => (i === at ? byte ^ 1 : byte))]);
-    [4, 5, 40, final.length - 9, final.length - 1].forEach((at) => {
+    [12, 13, 40, final.length - 9, final.length - 1].forEach((at) => {
       expect(scanWal(flipped(at))).toEqual({ ok: true, value: { rows: before, valid: prior.length, tail: "torn" } });
     });
+  });
+
+  test("R-DURABLE a bit wrong in a record's header is a damaged file, last record or not: it is never a tear", () => {
+    const flipped = (at: number) => concat([prior, final.map((byte, i) => (i === at ? byte ^ 1 : byte))]);
+    Array.from({ length: 12 }, (_, at) => at).forEach((at) => {
+      expect(scanWal(flipped(at))).toMatchObject({ ok: false, error: { _tag: "corrupt", offset: prior.length } });
+    });
+  });
+
+  test("R-DURABLE a length garbled to run past the file in a MIDDLE record is damage: no record is cut", () => {
+    const [first, second, third] = rows.slice(-3).map(record);
+    const huge = concat([Uint8Array.of(0x7f, 0xff, 0xff, 0xff), (second as Uint8Array).slice(4)]);
+    const file = concat([first as Uint8Array, huge, third as Uint8Array]);
+    const offset = (first as Uint8Array).length;
+    expect(scanWal(file)).toMatchObject({ ok: false, error: { _tag: "corrupt", offset } });
   });
 
   test("a file that grew and was never written (zeros where the last record should be) is a tear", () => {

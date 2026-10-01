@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { holdOf, secretOf, viewOf } from "../account/fixtures.ts";
 import { holdId } from "../account/model.ts";
 import { emptyEntity, type Command, type EntityId, type JAction, type JEvent } from "../entity/model.ts";
-import { flush, recover } from "../runtime/tick.ts";
+import { commit, flush, recover } from "../runtime/tick.ts";
 import type { Row } from "../runtime/model.ts";
 import { type Cluster, credit, feed, GOLD, hostOf, open, pay, rise, settle, start } from "../runtime/fixtures.ts";
 import { begin, heard, limits, persisted, reopen, startHost, submit } from "./host.ts";
@@ -76,6 +76,13 @@ describe("host/rowid a chain effect carries the row and the place in the row it 
       const asked = row.chain.map((action, index) => ({ _tag: "chain" as const, action, row: idOf(row, index) }));
       expect(chainOf(done.effects)).toEqual(asked);
       expect(unhalted(begin(done.host, stamp(row.stamp + 1n))).effects).toEqual([]);
+    });
+
+    test(`R-DURABLE ${c.kind}: the actions asked are the ones flush says leave, no more and no fewer`, () => {
+      const begun = unhalted(begin(hostBefore(c, before, row), row.stamp));
+      const done = unhalted(persisted(begun.host));
+      const flushed = flush(unhalted(commit(begun.host.runtime)));
+      expect(chainOf(done.effects).map((e) => e.action)).toEqual([...flushed.chain]);
     });
 
     test(`R-DURABLE ${c.kind}: after a crash the same row identity is asked again`, () => {

@@ -25,7 +25,7 @@ import type { Tagged } from "../../kernel/core/tagged.ts";
 import { concat, hexToBytes, keccak256, utf8 } from "../../kernel/encoding/bytes.ts";
 import { bytesOf, count, field, record, text, type Fields, type ReadFault } from "./read.ts";
 import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
-import { readWire, writeOutbound } from "./wire.ts";
+import { MAX_WIRE_BYTES, readWire, writeOutbound } from "./wire.ts";
 import { receive } from "../host.ts";
 import type { Host, HostNotice } from "../model.ts";
 
@@ -48,6 +48,12 @@ export type LinkFault =
   | Tagged<"not_theirs", { from: EntityId; runtime: RuntimeId }>;
 
 const NONCE = 32;
+
+// A stranger's text is bounded before it is read: the handshake texts hold an address, nonces and a signature, and a
+// data record holds one wire text as a string, which JSON may spell with up to six characters for each of its own.
+const HANDSHAKE_BYTES = 4096;
+const ESCAPED = 6;
+const DATA_BYTES = ESCAPED * MAX_WIRE_BYTES + HANDSHAKE_BYTES;
 const DOMAIN = "xln/link/v1";
 
 // The curve library's calls take a positional flag; every key in this tree is the 65-byte uncompressed point.
@@ -124,8 +130,9 @@ const written = (value: unknown): string => {
 };
 
 const parsed = <T>(
-  wire: string, tag: string, keys: readonly string[], read: (o: Fields) => Result<T, ReadFault>,
+  wire: string, tag: string, keys: readonly string[], max: number, read: (o: Fields) => Result<T, ReadFault>,
 ): Result<T, LinkFault> => {
+  if (wire.length > max) return err({ _tag: "unreadable", fault: { _tag: "too_big", bytes: wire.length } });
   const value = decodeValue(wire);
   if (!value.ok) return err({ _tag: "unreadable", fault: value.error });
   const shape = record("$", value.value, ["_tag", ...keys]);
@@ -150,7 +157,7 @@ export const answer = (
   self: Key, table: readonly Peer[], nonce: Uint8Array, hello: string,
 ): Result<Readonly<{ link: Link; reply: string }>, LinkFault> =>
   flatMap(
-    parsed(hello, "hello", ["from", "nonce"], (o) =>
+    parsed(hello, "hello", ["from", "nonce"], HANDSHAKE_BYTES, (o) =>
       all({ from: field("$", o, "from", text), theirs: field("$", o, "nonce", bytesOf(NONCE)) })),
     ({ from, theirs }) => map(peerNamed(table, from), (peer) => {
       const proof = proofFor(peer, self, theirs, nonce);
@@ -167,7 +174,7 @@ const proofFor = (initiator: Named, responder: Named, initiatorNonce: Uint8Array
 /** The initiator takes the reply: the responder has proved itself over the challenge, and now it proves itself. */
 export const finish = (link: Link, reply: string): Result<Readonly<{ link: Link; finish: string }>, LinkFault> => {
   if (link._tag !== "dialing") return err({ _tag: "wrong_state", state: link._tag });
-  const read = parsed(reply, "reply", ["nonce", "sig"], (o) =>
+  const read = parsed(reply, "reply", ["nonce", "sig"], HANDSHAKE_BYTES, (o) =>
     all({ nonce: field("$", o, "nonce", bytesOf(NONCE)), sig: readSignature("$.sig", o["sig"]) }));
   return flatMap(read, ({ nonce, sig }) => {
     const proof = proofFor(link.self, link.peer, link.nonce, nonce);
@@ -181,7 +188,7 @@ export const finish = (link: Link, reply: string): Result<Readonly<{ link: Link;
 /** The responder takes the finish: the initiator signed over the challenge this connection gave it. */
 export const accept = (link: Link, finishing: string): Result<Link, LinkFault> => {
   if (link._tag !== "answered") return err({ _tag: "wrong_state", state: link._tag });
-  const read = parsed(finishing, "finish", ["sig"], (o) => readSignature("$.sig", o["sig"]));
+  const read = parsed(finishing, "finish", ["sig"], HANDSHAKE_BYTES, (o) => readSignature("$.sig", o["sig"]));
   return flatMap(read, (sig) => {
     const proof = proofFor(link.peer, link.self, link.theirs, link.ours);
     return map(provedBy(link.peer, "initiator", proof, sig), (theirKey) =>
@@ -221,7 +228,7 @@ export const seal = (
 export const open = (link: Link, data: string): Result<Readonly<{ link: Link; message: Outbound }>, LinkFault> => {
   if (link._tag !== "up") return err({ _tag: "wrong_state", state: link._tag });
   const { session } = link;
-  const sealed = parsed(data, "data", ["n", "body", "mac"], (o) =>
+  const sealed = parsed(data, "data", ["n", "body", "mac"], DATA_BYTES, (o) =>
     all({
       n: field("$", o, "n", count), body: field("$", o, "body", text), mac: field("$", o, "mac", bytesOf(NONCE)),
     }));

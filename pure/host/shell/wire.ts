@@ -90,7 +90,7 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
 };
 
 const readTx: Reader<AccountTx> = (at, v) => flatMap(tagOf(at, v), (tag) => {
-  const keys = KEYS[tag];
+  const keys = Object.hasOwn(KEYS, tag) ? KEYS[tag] : undefined;
   return keys === undefined ? bad(at, "a tx") : flatMap(record(at, v, ["_tag", ...keys]), (o) => txOf(tag, at, o));
 });
 

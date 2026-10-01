@@ -57,7 +57,7 @@ const tagOf = (value: unknown): Result<string, ReadFault> =>
 /** What a value in the journal file is: a record of one of the two kinds, with exactly its keys. */
 export const journalRecord = (value: unknown): Result<JournalRecord, ReadFault> =>
   flatMap(tagOf(value), (tag) => {
-    const keys = KEYS[tag];
+    const keys = Object.hasOwn(KEYS, tag) ? KEYS[tag] : undefined;
     if (keys === undefined) return bad("$._tag", "sealed|answered");
     return flatMap(record("$", value, ["_tag", ...keys]), (o) => (tag === "sealed" ? sealed(o) : answered(o)));
   });

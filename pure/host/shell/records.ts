@@ -6,8 +6,12 @@
 // believed. That fails closed: a tear that garbles the length of the last record into a shorter one reads as damage,
 // and the shell does not start until the file is looked at: dropping a synced record is worse than not starting.
 //
-//   record  = u32 length (big endian) of the text | the text of the value (value.ts, utf-8) | 8 bytes of keccak256
-//             over the length and the text
+//   record  = u32 length (big endian) of the text | 8 bytes of keccak256 over the length (the header check) |
+//             the text of the value (value.ts, utf-8) | 8 bytes of keccak256 over the length and the text
+//
+// The header check is what lets a length be believed: a record that runs past the end of the file is a tear only if
+// its header is whole and checks, or the file ends in zeros; a damaged length in the middle of the file fails the
+// header check and the file is refused, never read as a short file and cut.
 //
 // The WAL (wal.ts) and the chain journal (journal.ts) are files of such records; each says what a value is.
 import { err, flatMap, mapAccumResult, ok, type Result } from "../../kernel/core/result.ts";
@@ -22,15 +26,21 @@ export type RecordFault<E> =
 /** What a file's reader says a value is: the item it holds, or why it is none. */
 export type Parse<T, E> = (value: unknown) => Result<T, E>;
 
-const HEADER = 4;
+const LENGTH = 4;
 const CHECK = 8;
+const HEADER = LENGTH + CHECK;
 
 const checkOf = (framed: Uint8Array): Uint8Array => keccak256(framed).slice(0, CHECK);
 
 const lengthBytes = (length: number): Uint8Array => {
-  const header = new Uint8Array(HEADER);
-  new DataView(header.buffer).setUint32(0, length);
-  return header;
+  const bytes = new Uint8Array(LENGTH);
+  new DataView(bytes.buffer).setUint32(0, length);
+  return bytes;
+};
+
+const headerOf = (length: number): Uint8Array => {
+  const bytes = lengthBytes(length);
+  return concat([bytes, checkOf(bytes)]);
 };
 
 /** The bytes to append for one value. */
@@ -38,7 +48,7 @@ export const frame = (value: unknown): Result<Uint8Array, ValueFault> =>
   flatMap(encodeValue(value), (text) => {
     const body = utf8(text);
     const framed = concat([lengthBytes(body.length), body]);
-    return ok(concat([framed, checkOf(framed)]));
+    return ok(concat([headerOf(body.length), body, checkOf(framed)]));
   });
 
 type Over = "clean" | "torn";
@@ -58,17 +68,23 @@ const same = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length &&
 /** A file that grew before its data landed ends in zeros: that is a tear too, whatever the length there claims. */
 const unwritten = (bytes: Uint8Array, at: number): boolean => bytes.subarray(at).every((byte) => byte === 0);
 
+const torn = <T, E>(): Result<Read<T>, RecordFault<E>> => ok({ _tag: "over", over: "torn" });
+
 const readAt = <T, E>(bytes: Uint8Array, at: number, parse: Parse<T, E>): Result<Read<T>, RecordFault<E>> => {
   if (at === bytes.length) return ok({ _tag: "over", over: "clean" });
-  if (bytes.length - at < HEADER) return ok({ _tag: "over", over: "torn" });
-  const end = at + HEADER + new DataView(bytes.buffer, bytes.byteOffset + at, HEADER).getUint32(0) + CHECK;
-  if (end > bytes.length) return ok({ _tag: "over", over: "torn" });
-  if (same(checkOf(bytes.subarray(at, end - CHECK)), bytes.subarray(end - CHECK, end))) {
+  if (bytes.length - at < HEADER) return torn();
+  const length = bytes.subarray(at, at + LENGTH);
+  if (!same(checkOf(length), bytes.subarray(at + LENGTH, at + HEADER))) {
+    return unwritten(bytes, at) ? torn() : err({ _tag: "corrupt", offset: at });
+  }
+  const end = at + HEADER + new DataView(length.buffer, length.byteOffset, LENGTH).getUint32(0) + CHECK;
+  if (end > bytes.length) return torn();
+  const framed = concat([length, bytes.subarray(at + HEADER, end - CHECK)]);
+  if (same(checkOf(framed), bytes.subarray(end - CHECK, end))) {
     return flatMap(itemAt(bytes, at, end, parse), (item): Result<Read<T>, RecordFault<E>> =>
       ok({ _tag: "item", item, end }));
   }
-  const tail = end === bytes.length || unwritten(bytes, at);
-  return tail ? ok({ _tag: "over", over: "torn" }) : err({ _tag: "corrupt", offset: at });
+  return end === bytes.length ? torn() : err({ _tag: "corrupt", offset: at });
 };
 
 /** Where the scan is: the offset of the next record, and how the file ended once it has. */

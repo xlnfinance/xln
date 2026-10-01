@@ -76,6 +76,12 @@ describe("host/shell/wire what a stranger can write is refused at the first wron
     expect(first('{"__proto__":{"x":1}}')).toMatchObject({ _tag: "bad_shape" });
   });
 
+  test("R-X1 a tx tag that is a property of every object is a wrong shape, never a thrown error", () => {
+    ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"].forEach((tag) => {
+      expect(badTx({ _tag: tag })).toMatchObject({ _tag: "bad_shape", at: "$.msg.frame.txs[0]" });
+    });
+  });
+
   test("a missing key, an extra key and a key of the wrong kind are each named with their place", () => {
     const base = framed([{ _tag: "pay", token: GOLD, amount: 5n }]) as { msg: { frame: { txs: unknown[] } } };
     expect(badTx({ _tag: "pay", token: GOLD })).toMatchObject({ at: "$.msg.frame.txs[0]" });

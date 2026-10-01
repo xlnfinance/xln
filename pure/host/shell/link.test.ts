@@ -60,6 +60,17 @@ describe("host/shell/link the peer is proved, then a record is sealed to it", ()
     expect(must(openRecord(forth.link, back.data)).message).toEqual(ack(BOB, ALICE));
   });
 
+  test("R-X1 a hello, a reply and a finish nested thousands deep or far over the bound are refused, not thrown", () => {
+    const deep = "[".repeat(10_000) + "]".repeat(10_000);
+    const dialed = dial(KEY.alice, peer(KEY.bob, BOB), nonce(10));
+    expect(answer(KEY.bob, TABLE, nonce(11), deep)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    const long = "x".repeat(5000);
+    expect(answer(KEY.bob, TABLE, nonce(11), long)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    expect(finish(dialed.link, deep)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    const answered = must(answer(KEY.bob, TABLE, nonce(11), dialed.hello));
+    expect(accept(answered.link, deep)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+  });
+
   test("R-LINK-AUTH a hello from a Runtime that is not in the table is refused", () => {
     const hello = dial(KEY.stranger, peer(KEY.bob, BOB), nonce(1)).hello;
     const refused = err({ _tag: "unknown_runtime", runtime: KEY.stranger.runtime } as const);
@@ -163,6 +174,27 @@ describe("host/shell/link a record is the peer's own, once, and from an Entity t
     const claimed = must(seal(initiator, ack(MALLORY, BOB)));
     const refused = err({ _tag: "not_theirs", from: MALLORY, runtime: KEY.alice.runtime } as const);
     expect(openRecord(responder, claimed.data)).toEqual(refused);
+  });
+
+  test("R-X1 a text nested thousands deep, or far over the bound, is refused before anything is believed", () => {
+    const deep = "[".repeat(10_000) + "]".repeat(10_000);
+    expect(openRecord(responder, deep)).toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    const huge = "x".repeat(8 * 1024 * 1024);
+    const refused = { ok: false, error: { _tag: "unreadable", fault: { _tag: "too_big" } } };
+    expect(openRecord(responder, huge)).toMatchObject(refused);
+  });
+
+  test("R-X1 a tx tag that every object has is no message: refused, and the link still hears the next record", () => {
+    const hash = `0x${"ab".repeat(32)}`;
+    const forged = (tag: string) => ({
+      from: ALICE, to: BOB,
+      msg: { _tag: "frame", frame: { author: "left", parent: hash, attempt: 0, slot: 1, txs: [{ _tag: tag }] } },
+    }) as never;
+    ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"].forEach((tag) => {
+      expect(openRecord(responder, must(seal(initiator, forged(tag))).data))
+        .toMatchObject({ ok: false, error: { _tag: "unreadable" } });
+    });
+    expect(tagOf(openRecord(responder, sealed.data))).toBe("ok");
   });
 
   test("R-LINK-AUTH a key that is not a private key is not a key", () => {

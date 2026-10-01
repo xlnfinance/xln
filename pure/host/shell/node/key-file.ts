@@ -1,6 +1,8 @@
 // The one key the Host's shell signs with, read from a file only its owner can touch (R-LINK-AUTH, F1). The file holds
 // 32 bytes as hex, with or without a 0x prefix and a trailing newline. A key the group or others can read is refused:
-// a key that others could have read is not a key this Host can say is only its own.
+// a key that others could have read is not a key this Host can say is only its own. One key serves the link handshake
+// and the batch Hanko; the two never sign the same bytes, because the handshake digest begins with its own domain
+// string and a batch digest is a keccak256 hash.
 import { readFile, stat } from "node:fs/promises";
 import { err, flatMap, mapErr, ok, type Result } from "../../../kernel/core/result.ts";
 import type { Tagged } from "../../../kernel/core/tagged.ts";

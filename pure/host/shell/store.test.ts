@@ -122,6 +122,22 @@ describe("host/shell/store what a file gives back after a crash", () => {
     expect(readFileSync(path).equals(damaged)).toBe(true);
   });
 
+  test("R-DURABLE a length garbled in a MIDDLE record is a fault, and no durable row is cut away", async () => {
+    const path = scratch();
+    const three = rows.slice(-3);
+    await written(path, three);
+    const sizes = three.map((row) => {
+      const made = recordOf(row);
+      return made.ok ? made.value.length : expect.unreachable("record");
+    });
+    const start = sizes[0] ?? 0;
+    const huge = [0x7f, 0xff, 0xff, 0xff];
+    const garbled = Uint8Array.from(readFileSync(path), (byte, i) => huge[i - start] ?? byte);
+    writeFileSync(path, garbled);
+    expect(await readBack(path)).toMatchObject({ ok: false, error: { _tag: "corrupt", offset: sizes[0] } });
+    expect(readFileSync(path).equals(Buffer.from(garbled))).toBe(true);
+  });
+
   test("a file that cannot be opened is a fault with the step that failed", async () => {
     const disk = await fileDisk(`${tmpdir()}/no-such-folder-for-wal/wal.log`);
     expect(disk).toMatchObject({ ok: false, error: { _tag: "disk", op: "open" } });

@@ -1,7 +1,7 @@
 // The text of a row and back: nothing changes in the round trip, and what has no exact text is refused at the write.
 import { describe, expect, test } from "bun:test";
 import { aliceRun, ALICE, BOB, bobRun, walOf } from "./fixtures.ts";
-import { decodeValue, encodeValue } from "./value.ts";
+import { decodeValue, encodeValue, MAX_DEPTH } from "./value.ts";
 
 const roundTrip = (v: unknown) => {
   const text = encodeValue(v);
@@ -56,4 +56,18 @@ describe("host/shell/value what has no exact text is refused, at the place it is
     expect(decodeValue('{"a":{"$x":"0xzz"}}')).toEqual({ ok: false, error: { _tag: "bad_tag", at: "$.a" } });
     expect(decodeValue('{"$x":7}')).toMatchObject({ ok: false, error: { _tag: "bad_tag" } });
   });
+  test("R-X1 a text nested thousands deep is a fault, not a stack overflow, and the bound is exact", () => {
+    const nested = (n: number): string => "[".repeat(n) + "]".repeat(n);
+    expect(decodeValue(nested(10_000))).toMatchObject({ ok: false, error: { _tag: "too_deep" } });
+    const objects = `${'{"a":'.repeat(10_000)}1${"}".repeat(10_000)}`;
+    expect(decodeValue(objects)).toMatchObject({ ok: false, error: { _tag: "too_deep" } });
+    expect(decodeValue(nested(MAX_DEPTH + 1)).ok).toBe(true);
+    expect(decodeValue(nested(MAX_DEPTH + 2))).toMatchObject({ ok: false, error: { _tag: "too_deep" } });
+  });
+
+  test("R-X1 a value nested past the bound is refused at the write: no row is stored that cannot be read", () => {
+    const deep = Array.from({ length: MAX_DEPTH + 2 }).reduce<unknown>((inner) => [inner], 1);
+    expect(encodeValue(deep)).toMatchObject({ ok: false, error: { _tag: "too_deep" } });
+  });
+
 });

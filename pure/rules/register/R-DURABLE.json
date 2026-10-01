@@ -254,6 +254,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "R-DURABLE a bad record that has bytes after it is a damaged journal, not a tear"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a length garbled in a MIDDLE record is a fault, and no durable row is cut away"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a bit wrong in a record's header is a damaged file, last record or not: it is never a tear"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-DURABLE a length garbled to run past the file in a MIDDLE record is damage: no record is cut"
   }
  ]
 }
