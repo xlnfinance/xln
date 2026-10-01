@@ -6,7 +6,7 @@
    "statement": "The Entity frame is a fixed pipeline: arrivals apply, then hooks and txs run over the post-arrival Accounts, then Account work is proposed.",
    "source": "lessons.md section 0",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -18,6 +18,11 @@
      "layer": "quint",
      "name": "hooks-read-pre-arrival",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "arrivals-in-place"
     }
    ]
   },
@@ -26,7 +31,7 @@
    "statement": "No peer input can halt a Runtime: malformed, stale or racing input is refused, and only a broken local invariant halts.",
    "source": "lessons.md section 1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -42,8 +47,12 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "full-halts",
-     "owed": "#41"
+     "name": "full-halts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "bad-halts"
     }
    ]
   },
@@ -252,8 +261,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "core-rcpan-no-floor",
-     "owed": "#41"
+     "name": "core-rcpan-no-floor"
     },
     {
      "kind": "test",
@@ -282,7 +290,7 @@
    "statement": "Txs a hook returns join the frame's Account work in a fixed order: the wake's approved txs first, then its returned Account txs; each Account is proposable at first touch.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -290,10 +298,9 @@
    },
    "killers": [
     {
-     "kind": "test",
+     "kind": "bug",
      "layer": "arrival",
-     "name": "to be named",
-     "owed": "thread 'Account spec comparison'"
+     "name": "txs-before-hooks"
     }
    ]
   },
@@ -322,7 +329,7 @@
    "statement": "The publication order of Account work is first-touch, never Account id.",
    "source": "lessons.md section 3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -330,10 +337,9 @@
    },
    "killers": [
     {
-     "kind": "test",
+     "kind": "bug",
      "layer": "arrival",
-     "name": "to be named",
-     "owed": "thread 'Account spec comparison'"
+     "name": "sorted-proposals"
     }
    ]
   },
@@ -487,8 +493,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-hop-margin",
-     "owed": "#41"
+     "name": "no-hop-margin"
     },
     {
      "kind": "mutant",
@@ -513,8 +518,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "omits-secret",
-     "owed": "#41"
+     "name": "omits-secret"
     }
    ]
   },
@@ -682,7 +686,7 @@
    "statement": "An unrevealed HTLC settles as unpaid only at its deadline: a finalize waits until block.timestamp passes the payment deadline unless the secret is already public.",
    "source": "contracts-decisions.md H1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -703,8 +707,17 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-h1",
-     "owed": "#41"
+     "name": "no-h1"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-at-deadline"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "h1-ignores-secret"
     }
    ]
   },
@@ -738,7 +751,7 @@
    "statement": "A retired board keeps 7 days of dispute evidence, clamped one way only: what the retired side would pay from reserves is removed, what it is owed is paid as signed.",
    "source": "contracts-decisions.md H3",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "hold",
     "rig": "-",
@@ -753,14 +766,12 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "h3-no-clamp",
-     "owed": "#41"
+     "name": "h3-no-clamp"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "h3-symmetric",
-     "owed": "#41"
+     "name": "h3-symmetric"
     }
    ]
   },
@@ -788,7 +799,7 @@
    "statement": "A stale or already-applied dispute op is skipped inside processBatch with DisputeOpSkipped; the rest of the batch lands; the runtime reads the skip event.",
    "source": "contracts-decisions.md J2",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -811,6 +822,16 @@
      "layer": "quint",
      "name": "entity-ignores-the-skip-event",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "stale-reverts"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-skip"
     }
    ]
   },
@@ -819,7 +840,7 @@
    "statement": "A batch with no dispute, reveal, ladder or deposit op that cannot apply fails soft: nothing else moves, the nonce is consumed, BatchFailed is emitted; the signed gas budget makes the outcome the signer's.",
    "source": "contracts-decisions.md J5",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -842,6 +863,16 @@
      "layer": "quint",
      "name": "entity-ignores-batch-failed",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "failure-no-nonce"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "ignores-batch-failed"
     }
    ]
   },
@@ -850,7 +881,7 @@
    "statement": "A deposit leg hard-reverts on failure and travels alone in its batch.",
    "source": "contracts-decisions.md J6",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -872,6 +903,16 @@
      "layer": "quint",
      "name": "deposit-signed-without-simulation",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "legs-bundled"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "leg-soft"
     }
    ]
   },
@@ -896,8 +937,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resign-at-nonce",
-     "owed": "#41"
+     "name": "resign-at-nonce"
     },
     {
      "kind": "test",
@@ -952,7 +992,7 @@
    "statement": "Two co-signed proofs at one proof nonce: LEFT's proposal outranks RIGHT's, whoever presents first (accepted as is, pinned by tests).",
    "source": "contracts-decisions.md A12",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -969,6 +1009,11 @@
      "layer": "quint",
      "name": "supersession-reversed",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "tie-break-inverted"
     }
    ]
   },
@@ -1034,7 +1079,7 @@
    "statement": "MAX_LOCK_HORIZON: a party refuses a lock whose deadline is beyond its horizon (deadline_too_far), and a hub refuses to forward one.",
    "source": "contracts-decisions.md H1 open point; Arrival Q-D-20; Quint A9",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1044,8 +1089,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "no-horizon",
-     "owed": "#41"
+     "name": "no-horizon"
     },
     {
      "kind": "mutant",
@@ -1079,7 +1123,7 @@
    "statement": "Urgent ops go in a batch at a fresh nonce; signed batches never expire.",
    "source": "contracts-decisions.md J2/F1",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -1089,8 +1133,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resign-at-nonce",
-     "owed": "#41"
+     "name": "resign-at-nonce"
     },
     {
      "kind": "mutant",
@@ -1105,7 +1148,7 @@
    "statement": "Dispute, reveal, hash-ladder and deposit ops never share a batch with payment, settlement or reserve ops.",
    "source": "contracts-decisions.md J5 (spec rule)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "hold",
     "rig": "-",
@@ -1132,6 +1175,11 @@
      "layer": "quint",
      "name": "urgent-batch-carries-payments",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "mixed-batch"
     }
    ]
   },
@@ -1140,7 +1188,7 @@
    "statement": "A batch with a co-signed op carries ops of that one Account only (a counterparty's state change can fail a batch, and failure burns the nonce).",
    "source": "contracts-decisions.md B1 / R-COSIGN",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1150,8 +1198,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "cosign-bundle",
-     "owed": "#41"
+     "name": "cosign-bundle"
     },
     {
      "kind": "mutant",
@@ -1176,8 +1223,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "signs-before-gate",
-     "owed": "#41"
+     "name": "signs-before-gate"
     },
     {
      "kind": "mutant",
@@ -1228,10 +1274,10 @@
   },
   {
    "id": "R-CLOCK",
-   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp.",
+   "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
    "source": "contracts-decisions.md (memory, #57)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1241,14 +1287,23 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-by-frame-stamp",
-     "owed": "#41"
+     "name": "expire-by-frame-stamp"
     },
     {
      "kind": "mutant",
      "layer": "quint",
      "name": "receiver-judges-by-the-frame-stamp",
      "owed": "#44"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-late"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "refuse-future"
     }
    ]
   },
@@ -1257,7 +1312,7 @@
    "statement": "The planner signs a reserve payment only if the reserve covers it, always; oldest first, skipping one that does not fit.",
    "source": "contracts-decisions.md (memory, #62)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1267,8 +1322,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "unfunded-payments",
-     "owed": "#41"
+     "name": "unfunded-payments"
     },
     {
      "kind": "mutant",
@@ -1283,7 +1337,7 @@
    "statement": "A reserve-to-collateral deposit enforces the debt queue first: part-paid claim stays at the head, spendable nets all debt, 32 claims per call.",
    "source": "contracts-decisions.md (memory)",
    "layers": {
-    "arrival": "owed: #41",
+    "arrival": "hold",
     "quint": "owed: #44",
     "contract": "-",
     "rig": "-",
@@ -1293,8 +1347,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "r2c-skips-enforcement",
-     "owed": "#41"
+     "name": "r2c-skips-enforcement"
     },
     {
      "kind": "mutant",
@@ -1345,8 +1398,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "reack-open-only",
-     "owed": "#41"
+     "name": "reack-open-only"
     },
     {
      "kind": "mutant",
@@ -1371,7 +1423,7 @@
    "statement": "Every HTLC time judgment is made in J height: a lock is live through its deadline height; an expiry needs own view > deadline + reserve (reserve >= LAG >= 0); a payee with an unacked resolve reveals on chain at deadline - LAG. Part (c) is the payee's Runtime duty plus a J-layer fact: clause.ts has no input that says the payee knows the secret or has revealed, so the ts cell holds (a) and (b) and (c) is owed to the Runtime cut.",
    "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-2, D-AC-3",
    "layers": {
-    "arrival": "owed: #41 (id not in a name yet)",
+    "arrival": "hold",
     "quint": "owed: #44 (id not in a name yet)",
     "contract": "-",
     "rig": "-",
@@ -1381,38 +1433,32 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-at-deadline",
-     "owed": "#41"
+     "name": "expire-at-deadline"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-no-reserve",
-     "owed": "#41"
+     "name": "expire-no-reserve"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resolve-by-chain-height",
-     "owed": "#41"
+     "name": "resolve-by-chain-height"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "payee-idle",
-     "owed": "#41"
+     "name": "payee-idle"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "resolve-late-by-stamp",
-     "owed": "#41"
+     "name": "resolve-late-by-stamp"
     },
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "expire-by-frame-stamp",
-     "owed": "#41"
+     "name": "expire-by-frame-stamp"
     },
     {
      "kind": "mutant",
@@ -1753,8 +1799,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "skip-revalidation",
-     "owed": "#41"
+     "name": "skip-revalidation"
     },
     {
      "kind": "mutant",
@@ -1799,8 +1844,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "commit-any-frame",
-     "owed": "#41"
+     "name": "commit-any-frame"
     },
     {
      "kind": "mutant",
@@ -1845,8 +1889,7 @@
     {
      "kind": "test",
      "layer": "arrival",
-     "name": "reorder",
-     "owed": "#41"
+     "name": "reorder"
     },
     {
      "kind": "test",
@@ -2511,7 +2554,7 @@
    "statement": "One clause is open per hashlock in an Account: a second lock on a hashlock that is already open is refused with lock_exists (naming the slot that holds it), whichever slot or side it names; the slot id stays the address of a clause, and a hashlock opens again once its clause is resolved, cancelled or expired. Multi-path payments are unaffected: each path runs over a different Account.",
    "source": "coordinator 09-30 22:42 (A2 cross-check of Quint account_core.qnt against og xln.ts lockId == hashlock)",
    "layers": {
-    "arrival": "owed: #41 (coordinator 09-30)",
+    "arrival": "hold",
     "quint": "owed: #44 (coordinator 09-30)",
     "contract": "-",
     "rig": "-",
@@ -2552,6 +2595,11 @@
      "kind": "test",
      "layer": "ts",
      "name": "R-ONE-LOCK-PER-HASH a hashlock is one clause in the Account whoever locks it and whatever it holds"
+    },
+    {
+     "kind": "bug",
+     "layer": "arrival",
+     "name": "duplicate-hashlock"
     }
    ]
   },
@@ -2787,8 +2835,7 @@
     {
      "kind": "bug",
      "layer": "arrival",
-     "name": "counter-shortens-window",
-     "owed": "#41"
+     "name": "counter-shortens-window"
     },
     {
      "kind": "mutant",
