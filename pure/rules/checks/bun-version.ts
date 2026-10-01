@@ -31,6 +31,9 @@ export const requiredBun = (packageJson: string): Result<string, BunPin> => {
   return versionOf(need) === undefined ? bad(`package.json engines.bun must read ">=x.y.z", got ${JSON.stringify(asked)}`) : { ok: true, value: need };
 };
 
+// The one command that gets a passing Bun into ~/.bun/bin, where a default container finds it first on PATH.
+export const installLine = (version: string): string => `curl -fsSL https://bun.sh/install | bash -s "bun-v${version}"`;
+
 export type BunReport = Readonly<{ failed: boolean; line: string }>;
 
 export const bunReport = (have: string, packageJson: string): BunReport => {
@@ -40,5 +43,5 @@ export const bunReport = (have: string, packageJson: string): BunReport => {
   const ok = haveVersion !== undefined && atLeast(haveVersion, versionOf(need.value)!);
   return ok
     ? { failed: false, line: `ok   bun ${have} satisfies >=${need.value}` }
-    : { failed: true, line: `FAIL bun ${have} is older than the required >=${need.value} (1.3.11 segfaults on Worker termination mid-run): install bun >=${need.value}` };
+    : { failed: true, line: `FAIL bun ${have} is older than the required >=${need.value} (older Bun segfaults on Worker termination mid-run). Install it:  ${installLine(need.value)}` };
 };

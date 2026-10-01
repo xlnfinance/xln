@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname } from "node:path";
-import { atLeast, bunReport, requiredBun } from "./bun-version.ts";
+import { atLeast, bunReport, installLine, requiredBun } from "./bun-version.ts";
 import { existingFiles } from "./folder-width.ts";
 
 const pureRoot = `${import.meta.dir}/../..`;
@@ -28,7 +28,9 @@ describe("the report", () => {
     expect(report.failed).toBe(true);
     expect(report.line).toContain(">=1.4.0");
     expect(report.line).toContain("1.3.11");
+    expect(report.line).toContain('curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"');
   });
+  test("the install line names the pinned version", () => expect(installLine("1.4.0")).toBe('curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.0"'));
   test("the pinned version and a newer one pass", () => {
     expect(bunReport("1.4.0", pkg(">=1.4.0")).failed).toBe(false);
     expect(bunReport("1.4.2", pkg(">=1.4.0")).failed).toBe(false);
