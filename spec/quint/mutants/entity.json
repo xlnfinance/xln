@@ -11,7 +11,7 @@
   "mutants": [
     {
       "id": "halt-on-refusal",
-      "why": "a refused peer frame halts the Entity [R-X1]",
+      "why": "R-X1: a refused peer frame halts the Entity",
       "file": "entity.qnt",
       "old": "pure val HALT_ON_REFUSAL = false",
       "new": "pure val HALT_ON_REFUSAL = true",
@@ -27,7 +27,7 @@
     },
     {
       "id": "forward-deadline-equal",
-      "why": "[R-P2] the onward lock gets the inbound deadline: no time to claim after the reveal",
+      "why": "R-P2: the onward lock gets the inbound deadline: no time to claim after the reveal",
       "file": "entity.qnt",
       "old": "pure def outDeadline(dIn: int): int = dIn - HOP",
       "new": "pure def outDeadline(dIn: int): int = dIn",

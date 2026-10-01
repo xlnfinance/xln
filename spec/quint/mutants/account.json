@@ -152,7 +152,7 @@
     },
     {
       "id": "expiry-reserve-off",
-      "why": "R-HTLC-CLOCK b: expiry needs only the deadline to have passed on the receiver's own view, without the reserve: a payee whose view is a tick behind can still resolve (pinned by a scenario test; the invariant run over 1500 traces did not reach it)",
+      "why": "R-HTLC-CLOCK: b, expiry needs only the deadline to have passed on the receiver's own view, without the reserve: a payee whose view is a tick behind can still resolve (pinned by a scenario test; the invariant run over 1500 traces did not reach it)",
       "file": "account_core.qnt",
       "old": "else if (now <= b.locks.get(r.id).deadline + CLOCK_RESERVE) Refused(\"not_expired\")",
       "new": "else if (now <= b.locks.get(r.id).deadline) Refused(\"not_expired\")",
@@ -376,7 +376,7 @@
     },
     {
       "id": "reack-open-only",
-      "why": "R-REACK (D-AC-1): a repeat of the committed frame is re-acked only while the receiver is Open, so a replica that already proposed its own next frame refuses it and one lost ack deadlocks both sides",
+      "why": "R-REACK: (D-AC-1) a repeat of the committed frame is re-acked only while the receiver is Open, so a replica that already proposed its own next frame refuses it and one lost ack deadlocks both sides",
       "file": "account_core.qnt",
       "old": "    if (repeatOfLast(r, fid)) { ...keep, ack: true }\n",
       "new": "    if (repeatOfLast(r, fid) and isOpen(r)) { ...keep, ack: true }\n",
@@ -384,7 +384,7 @@
     },
     {
       "id": "accept-wrong-parent",
-      "why": "R-PARENT (D-AC-7): the receiver does not check that the frame extends its head, only its height and replay",
+      "why": "R-PARENT: (D-AC-7) the receiver does not check that the frame extends its head, only its height and replay",
       "file": "account_core.qnt",
       "old": "    f.parent == r.lastFid,                                 // R-PARENT: it extends the frame I committed last (the wire's parent hash)\n",
       "new": "",
