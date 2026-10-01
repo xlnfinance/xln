@@ -25,7 +25,7 @@ import {
   accepted, closed, dialed, line, linked, route, startMesh, wanted, type ConnId, type Mesh, type Refused, type Write,
 } from "../mesh/mesh.ts";
 import { beginAt, poll, type BadPeer, type Delivery, type JFault, type WatchConfig } from "../watch/loop.ts";
-import { dialTcp, type Listener, type SocketFault, type Wire } from "./socket.ts";
+import { dialTcp, type Listener, type SocketFault, type Wire } from "./link/socket.ts";
 
 /** What a node is made of: its shell, its Entity, its key, who its peers are, and how often its timer runs. */
 export type Config = Readonly<{

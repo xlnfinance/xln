@@ -1,13 +1,13 @@
 // What the chain holds for an Account reaches its ledgers (R-J-COLLATERAL) and never changes which tokens it has
 // (R-J-COLLATERAL-NO-LEDGER): two Entities that exchange every message they send, one hearing the chain first.
 import { describe, expect, test } from "bun:test";
-import { tokenOf, viewOf } from "../account/fixtures.ts";
-import { ledgerOf } from "../account/state.ts";
-import { anchor, entityOf, GOLD, judge, open } from "./fixtures.ts";
-import { entityFrame } from "./frame.ts";
+import { tokenOf, viewOf } from "../../account/fixtures.ts";
+import { ledgerOf } from "../../account/state.ts";
+import { anchor, entityOf, GOLD, judge, open } from "../fixtures.ts";
+import { entityFrame } from "../frame.ts";
 import {
   emptyEntity, type Command, type EntityId, type EntityInput, type EntityState, type JEvent, type Notice, type Outbound,
-} from "./model.ts";
+} from "../model.ts";
 
 const ALICE = entityOf(1);
 const BOB = entityOf(2);

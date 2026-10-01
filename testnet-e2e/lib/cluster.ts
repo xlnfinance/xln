@@ -11,7 +11,7 @@ import { entityId, type EntityId, type EntityInput, type EntityReplica, type Ent
 import { watchPort } from "../../pure/host/shell/evm/watch.ts";
 import { startDaemon, type Config, type Daemon, type Look } from "../../pure/host/shell/node/daemon.ts";
 import { httpRpc } from "../../pure/host/shell/node/rpc.ts";
-import { listenTcp, type Listener } from "../../pure/host/shell/node/socket.ts";
+import { listenTcp, type Listener } from "../../pure/host/shell/node/link/socket.ts";
 import { keyOf, MAX_LINE, type Peer } from "../../pure/host/shell/link/link.ts";
 import type { Turn } from "../../pure/host/shell/drive/drive.ts";
 import { address, bytes32 } from "../../pure/j/log.ts";
