@@ -1,0 +1,54 @@
+{
+ "id": "R-GATE-CI-SETUP-RETRY",
+ "statement": "A gate lane does not go red because a package mirror timed out once: ast-grep and uv come from the CI cache when it holds the pinned version and are otherwise installed with up to three tries (.github/scripts/retry.sh, setup-ast-grep.sh), and the pins stay the workflow's only copy.",
+ "source": "coordinator 10-01 08:36 (the bun test lane died in setup on an ast-grep download timeout)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY a command that fails once and then works is run twice and passes"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY a command that always fails is run three times, then fails and says so"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY a command that works is run once"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY what the cache restored is used: the pinned ast-grep answers offline, so nothing is installed"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY with nothing cached, uv and then ast-grep are installed at their pins and the result is checked"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY a download that times out once is retried, and the lane stays green"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY a download that never works fails the step after three tries, and the check at the end does not run"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-SETUP-RETRY the versions are arguments, so the workflow's pin is the only copy"
+  }
+ ]
+}

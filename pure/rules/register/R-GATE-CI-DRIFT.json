@@ -1,0 +1,99 @@
+{
+ "id": "R-GATE-CI-DRIFT",
+ "statement": "What GitHub CI repeats from files it cannot read (the Bun version, the seed matrix, the ast-grep version) is compared with its source from code, never from a comment, in every workflow file whatever its extension, and a form the comparison cannot read (a setup-bun step with no bun-version, a bun-version-file) is a problem, not a pass.",
+ "source": "coordinator 10-01 (PR #90 review: the reviewer planted four drifts that stayed green)",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (pure/rules and CI); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT packageManager, bun-version, the seed matrix, the default seeds and the pins are read from their own syntax"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT the real workflows, package.json files and style/check.ts agree"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT the real files hold at least one copy of each thing compared (the comparison is not vacuous)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT the planted baseline agrees"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a job on another Bun than packageManager"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a seed matrix that is not the default of test:seeds"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT an ast-grep on PATH that is not the one style/check.ts runs"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT an unpinned ast-grep in style/check.ts, a missing packageManager and a missing default are problems, not silence"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a setup-bun step with no bun-version is a problem, and a bun-version in another step does not rescue it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT bun-version-file is a problem: the file cannot be compared with packageManager"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a setup-bun step is found with its with-block, whatever else sits around it"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a workflow named .yaml is read, and so is every file in .github/workflows"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT an install that lost its pin is a problem even when a comment still names the pin"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a comment is never a copy: a commented bun-version, seed matrix or pin counts for nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT the same plants on the real build-and-test.yml go red (its own syntax, its own comments)"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT a comment that names ast-grep-cli without a pin is not an install, so it is no problem"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-CI-DRIFT the setup-bun action is found in any case, as GitHub reads action names without case"
+  }
+ ]
+}

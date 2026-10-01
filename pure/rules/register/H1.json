@@ -1,0 +1,49 @@
+{
+ "id": "H1",
+ "statement": "An unrevealed HTLC settles as unpaid only at its deadline: a finalize waits until block.timestamp passes the payment deadline unless the secret is already public.",
+ "source": "contracts-decisions.md H1",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "n/a: the wait is the contract's, in block time; the Runtime's own deadline judgments are R-HTLC-CLOCK"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "H1 unrevealed HTLC waits for its deadline"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "h1-wait-removed"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "no-h1"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "h1-at-deadline"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "h1-ignores-secret"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "h1-ignores-public-secret"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "h1-boundary-off"
+  }
+ ]
+}
