@@ -68,12 +68,17 @@ export const accountsOf = (self: string, op: JOp): readonly string[] => match(op
   reveal_secret: () => [],
 });
 
-const joined = (parts: readonly (string | bigint)[]): string => parts.map((p) => String(p).toLowerCase()).join("/");
+const joined = (parts: readonly (string | bigint | boolean)[]): string =>
+  parts.map((p) => String(p).toLowerCase()).join("/");
 
 /**
  * What makes two queued ops the same request. Signed, idempotent ops (a settlement, a withdrawal, a dispute step, a
  * reveal) are named by what they act on; a money movement (a deposit, a reserve transfer, a funding) is a request
  * of its own every time, so two of the same amount are two ops and never one.
+ *
+ * A dispute step is named by every field the contract ranks or acts on, who authored it and which kind of step it is:
+ * at an equal nonce a Left-authored counter outranks a Right-authored one (R-A1) and a cooperative finalize closes at
+ * once where a unilateral one waits, so none of those pairs may be merged into one.
  */
 export const requestKey = (op: JOp): Option<string> => match(op, {
   deposit: () => none,
@@ -82,8 +87,14 @@ export const requestKey = (op: JOp): Option<string> => match(op, {
   reserve_to_collateral: () => none,
   collateral_to_reserve: ({ withdrawal: w }) => some(joined(["c2r", w.counterparty, w.tokenId, w.nonce])),
   settle: ({ settlement: s }) => some(joined(["settle", s.leftEntity, s.rightEntity, s.nonce])),
-  dispute_start: ({ start: s }) => some(joined(["start", s.counterentity, s.nonce, s.ondeltaEpoch])),
-  dispute_counter: ({ counter: c }) => some(joined(["counter", c.counterentity, c.initialNonce, c.counterNonce])),
-  dispute_finalize: ({ finalization: f }) => some(joined(["finalize", f.counterentity, f.initialNonce, f.finalNonce])),
-  reveal_secret: ({ reveal }) => some(joined(["reveal", reveal.secret])),
+  dispute_start: ({ start: s }) =>
+    some(joined(["start", s.counterentity, s.nonce, s.ondeltaEpoch, s.proposerIsLeft, s.proofbodyHash])),
+  dispute_counter: ({ counter: c }) => some(joined([
+    "counter", c.counterentity, c.initialNonce, c.counterNonce, c.proposerIsLeft, c.initialProofbodyHash,
+  ])),
+  dispute_finalize: ({ finalization: f }) => some(joined([
+    "finalize", f.counterentity, f.initialNonce, f.finalNonce, f.proposerIsLeft, f.startedByLeft, f.cooperative,
+    f.initialProofbodyHash,
+  ])),
+  reveal_secret: ({ reveal }) => some(joined(["reveal", reveal.transformer, reveal.secret])),
 });

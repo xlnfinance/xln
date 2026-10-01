@@ -102,3 +102,12 @@ export const finalize = (peer: string, finalNonce = 1n): JOp => ({
 
 export const reveal = (n = 1): JOp =>
   ({ _tag: "reveal_secret", reveal: { transformer: TOKEN_ADDRESS, secret: idOf(n) } });
+
+/** A dispute start whose proof body carries `kib` KiB of clause bytes, under the contract's per-body limit. */
+export const bigStart = (peer: string, nonce: bigint, kib: number): JOp => {
+  const op = start(peer, nonce);
+  const clause = { transformerAddress: TOKEN_ADDRESS, encodedBatch: `0x${"ab".repeat(kib * 1024)}`, allowances: [] };
+  return op._tag === "dispute_start"
+    ? { ...op, start: { ...op.start, initialProofbody: { ...op.start.initialProofbody, transformers: [clause] } } }
+    : op;
+};

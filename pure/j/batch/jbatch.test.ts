@@ -8,7 +8,8 @@ import {
 import type { JOp } from "../op/ops.ts";
 import { MIN_GAS_BUDGET } from "./sealed.ts";
 import {
-  ME, LEFT_PEER, RIGHT_PEER, pick, deposit, finalize, fund, holdings, idOf, reserveToReserve, settle, start, withdraw,
+  ME, LEFT_PEER, RIGHT_PEER, bigStart, counter, pick, deposit, finalize, fund, holdings, idOf, reserveToReserve, reveal,
+  settle, start, withdraw,
 } from "../fixtures.ts";
 
 const chain = unwrapOr(deployment(31337n, `0x${"0b".repeat(20)}`), (e) => expect.unreachable(JSON.stringify(e)));
@@ -68,12 +69,27 @@ describe("R-SAME-FRAME-SETTLE-PENDING (nonce half): a request on its way is skip
 });
 
 describe("R-J3 a full draft refuses with a notice and keeps what it had", () => {
-  test("the 33rd settlement is refused with the fault and the draft is unchanged", () => {
-    const full = queued(openJBatch(ME, 0n), ...Array.from({ length: 32 }, (_, i) => settle(idOf(100 + i), -1n)));
-    const outcome = queue(full, settle(idOf(200), -1n));
-    const fault = { _tag: "too_many_of_kind" as const, kind: "settle" as const, count: 33, max: 32 };
-    expect(outcome).toEqual({ _tag: "refused", fault });
-    expect(full.draft.length).toBe(32);
+  const many = <T>(n: number, make: (i: number) => T): readonly T[] => Array.from({ length: n }, (_, i) => make(i));
+
+  test("the 51st op is refused with the total a batch may carry and the draft is unchanged", () => {
+    const full = queued(openJBatch(ME, 0n), ...many(50, (i) => reserveToReserve(BigInt(i + 1))));
+    const outcome = queue(full, reserveToReserve(99n));
+    expect(outcome).toEqual({ _tag: "refused", fault: { _tag: "too_many_ops", total: 51, max: 50 } });
+    expect(full.draft.length).toBe(50);
+  });
+  test("the ninth dispute start is refused: starts travel together and a batch carries eight", () => {
+    const full = queued(openJBatch(ME, 0n), ...many(8, (i) => start(LEFT_PEER, BigInt(i + 1))));
+    const fault = { _tag: "too_many_of_kind" as const, kind: "dispute_start" as const, count: 9, max: 8 };
+    expect(queue(full, start(LEFT_PEER, 9n))).toEqual({ _tag: "refused", fault });
+  });
+  test("the limits are per batch: two finalizes are two batches and both may wait in the draft", () => {
+    expect(queue(queued(openJBatch(ME, 0n), finalize(LEFT_PEER, 1n)), finalize(RIGHT_PEER, 1n))._tag).toBe("queued");
+  });
+  test("33 settlements are refused for one Account, and allowed for 33 Accounts (a batch each)", () => {
+    const one = queued(openJBatch(ME, 0n), ...many(32, (i) => settle(LEFT_PEER, -1n, BigInt(i + 1))));
+    expect(queue(one, settle(LEFT_PEER, -1n, 33n))._tag).toBe("refused");
+    const peers = queued(openJBatch(ME, 0n), ...many(32, (i) => settle(idOf(100 + i), -1n)));
+    expect(queue(peers, settle(idOf(200), -1n))._tag).toBe("queued");
   });
 });
 
@@ -132,8 +148,126 @@ describe("J6 reaches the wire: the sealed batch of a deposit is that deposit alo
     const sealed = sealedOf(queued(openJBatch(ME, 0n), deposit(1n), deposit(2n), reserveToReserve(1n)));
     expect(sealed.batch.ops.map((op) => op._tag)).toEqual(["deposit"]);
   });
-  test("a finalize waits behind urgent reveals, starts and counters and then goes alone", () => {
-    const first = sealedOf(queued(openJBatch(ME, 0n), finalize(LEFT_PEER), start(RIGHT_PEER, 1n)));
-    expect(first.batch.ops.map((op) => op._tag)).toEqual(["dispute_start"]);
+  test("a finalize goes first and alone, before the starts and counters (the J page's pick-ops)", () => {
+    const first = sealedOf(queued(openJBatch(ME, 0n), start(RIGHT_PEER, 1n), finalize(LEFT_PEER)));
+    expect(first.batch.ops.map((op) => op._tag)).toEqual(["dispute_finalize"]);
+    expect(first.jbatch.draft.map((op) => op._tag)).toEqual(["dispute_start"]);
+  });
+});
+
+describe("R-SAME-FRAME-SETTLE-PENDING a name is a duplicate only when the op is the same op", () => {
+  const empty = openJBatch(ME, 0n);
+
+  test("a settlement at the same Account nonce with other diffs is refused as conflicting, not skipped", () => {
+    const j = queued(empty, settle(LEFT_PEER, -2n, 4n));
+    const outcome = queue(j, settle(LEFT_PEER, -9n, 4n));
+    expect(outcome._tag).toBe("refused");
+    expect(outcome._tag === "refused" && outcome.fault._tag).toBe("conflicting_request");
+    expect(advancesCommandNonce(outcome)).toBe(false);
+  });
+  test("a conflicting request leaves the draft as it was", () => {
+    const j = queued(empty, settle(LEFT_PEER, -2n, 4n));
+    expect(j.draft.length).toBe(1);
+    expect(queue(j, settle(LEFT_PEER, -9n, 4n))).toMatchObject({ _tag: "refused" });
+  });
+  test("a reveal of one secret for another transformer is another request", () => {
+    const first = reveal(1);
+    const other: JOp = first._tag === "reveal_secret"
+      ? { ...first, reveal: { ...first.reveal, transformer: `0x${"33".repeat(20)}` } } : first;
+    expect(queue(queued(empty, first), other)._tag).toBe("queued");
+  });
+  test("the same settlement built twice is a skip: equal bytes are the same request", () => {
+    expect(queue(queued(empty, settle(LEFT_PEER, -2n, 4n)), settle(LEFT_PEER, -2n, 4n))._tag).toBe("skipped");
+  });
+});
+
+describe("R-SAME-FRAME-SETTLE-PENDING and R-A1 a dispute step is named by who authored it and which kind it is", () => {
+  const empty = openJBatch(ME, 0n);
+  const startBy = (patch: object): JOp => {
+    const op = start(LEFT_PEER, 3n);
+    return op._tag === "dispute_start" ? { ...op, start: { ...op.start, ...patch } } : op;
+  };
+  const counterBy = (patch: object): JOp => {
+    const op = counter(LEFT_PEER, 3n);
+    return op._tag === "dispute_counter" ? { ...op, counter: { ...op.counter, ...patch } } : op;
+  };
+  const finalBy = (patch: object): JOp => {
+    const op = finalize(LEFT_PEER, 3n);
+    return op._tag === "dispute_finalize" ? { ...op, finalization: { ...op.finalization, ...patch } } : op;
+  };
+  const after = (first: JOp, second: JOp): string => queue(queued(empty, first), second)._tag;
+  const otherHash = `0x${"ab".repeat(32)}`;
+
+  test("a start authored by Right, then one authored by Left at the same nonce, are two requests", () => {
+    expect(after(startBy({ proposerIsLeft: false }), startBy({ proposerIsLeft: true }))).toBe("queued");
+  });
+  test("a start with another proof body hash is another request", () => {
+    expect(after(startBy({}), startBy({ proofbodyHash: otherHash }))).toBe("queued");
+  });
+  test("a counter authored by Right, then one by Left at the same nonce, are two requests", () => {
+    expect(after(counterBy({ proposerIsLeft: false }), counterBy({ proposerIsLeft: true }))).toBe("queued");
+  });
+  test("a counter on another initial proof body is another request", () => {
+    expect(after(counterBy({}), counterBy({ initialProofbodyHash: otherHash }))).toBe("queued");
+  });
+  test("a unilateral finalize, then a cooperative one at the same nonces, are two requests", () => {
+    expect(after(finalBy({}), finalBy({ cooperative: true }))).toBe("queued");
+  });
+  test("a finalize authored by Right, then one by Left, are two requests", () => {
+    expect(after(finalBy({ proposerIsLeft: false }), finalBy({ proposerIsLeft: true }))).toBe("queued");
+  });
+  test("a finalize of a dispute started by the other side is another request", () => {
+    expect(after(finalBy({ startedByLeft: false }), finalBy({ startedByLeft: true }))).toBe("queued");
+  });
+  test("a finalize on another initial proof body is another request", () => {
+    expect(after(finalBy({}), finalBy({ initialProofbodyHash: otherHash }))).toBe("queued");
+  });
+  test("the same step twice is still one request", () => {
+    expect(after(counterBy({}), counterBy({}))).toBe("skipped");
+    expect(after(finalBy({}), finalBy({}))).toBe("skipped");
+    expect(after(startBy({}), startBy({}))).toBe("skipped");
+  });
+});
+
+describe("a queued op is sent once: the draft keeps every op it was not sealed with", () => {
+  test("one deposit object queued twice: sealing one leaves the other in the draft", () => {
+    const d = deposit(5n);
+    const sealed = sealedOf(queued(openJBatch(ME, 0n), d, d));
+    expect(sealed.batch.ops.length).toBe(1);
+    expect(sealed.jbatch.draft.length).toBe(1);
+  });
+  test("one payment object queued twice, the reserve covers one: the second waits in the draft", () => {
+    const p = reserveToReserve(60n);
+    const sealed = sealedOf(queued(openJBatch(ME, 0n), p, p), ctx(100n));
+    expect(sealed.batch.ops.length).toBe(1);
+    expect(sealed.jbatch.draft.length).toBe(1);
+  });
+});
+
+describe("R-J3 a group too large for one batch is refused when it is queued, so the draft can always be sealed", () => {
+  const empty = openJBatch(ME, 0n);
+
+  test("the second 140 KiB start is refused with the size, and the first stays", () => {
+    const first = queued(empty, bigStart(LEFT_PEER, 1n, 140));
+    const outcome = queue(first, bigStart(RIGHT_PEER, 1n, 140));
+    expect(outcome._tag === "refused" && outcome.fault._tag).toBe("group_too_large");
+    expect(first.draft.length).toBe(1);
+  });
+  test("what is behind such a refusal still seals: a reveal and a finalize go out", () => {
+    const j = queued(empty, bigStart(LEFT_PEER, 1n, 140), reveal(1), finalize(LEFT_PEER, 1n));
+    expect(sealedOf(j).batch.ops.map((op) => op._tag)).toEqual(["dispute_finalize"]);
+  });
+  test("an op that alone is too large never enters the draft", () => {
+    expect(queue(empty, bigStart(LEFT_PEER, 1n, 300))._tag).toBe("refused");
+  });
+  test("an op the Depository could not decode is refused, not queued to wedge the draft", () => {
+    const op = deposit(1n);
+    const bad: JOp = op._tag === "deposit" ? { ...op, leg: { ...op.leg, contractAddress: "0x12" } } : op;
+    const outcome = queue(empty, bad);
+    expect(outcome._tag === "refused" && outcome.fault._tag).toBe("unencodable");
+  });
+  test("a refusal is not a nonce for the command", () => {
+    const outcome = queue(queued(empty, bigStart(LEFT_PEER, 1n, 140)), bigStart(RIGHT_PEER, 1n, 140));
+    expect(advancesCommandNonce(outcome)).toBe(false);
   });
 });
