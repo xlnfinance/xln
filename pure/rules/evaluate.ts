@@ -2,7 +2,7 @@
 import { carries } from "./names/names.ts";
 import { LAYERS, byLayer, type Cell, type Killer, type Layer, type Name, type Problem, type Register, type Row } from "./model.ts";
 
-export type CellVerdict = "held" | "owed" | "missing" | "stale-owed" | "unstated" | "na" | "na-but-present";
+export type CellVerdict = "held" | "owed" | "missing" | "stale-owed" | "stale" | "stale-absent" | "unstated" | "na" | "na-but-present";
 
 export type KillerVerdict = "found" | "owed" | "missing" | "stale-owed";
 
@@ -26,6 +26,8 @@ const cellVerdict = (row: Row, layer: Layer, hits: number): CellVerdict => {
       return hits > 0 ? "held" : "missing";
     case "owed":
       return hits > 0 ? "stale-owed" : "owed";
+    case "stale":
+      return hits > 0 ? "stale" : "stale-absent";
   }
 };
 
@@ -65,6 +67,8 @@ const cellProblem = (report: RowReport, layer: Layer): readonly Problem[] => {
       return [{ _tag: "MissingInLayer", id, layer }];
     case "stale-owed":
       return [{ _tag: "OwedButPresent", id, layer, by: cell._tag === "owed" ? cell.by : "" }];
+    case "stale-absent":
+      return [{ _tag: "StaleButAbsent", id, layer, why: cell._tag === "stale" ? cell.why : "" }];
     case "unstated":
       return [{ _tag: "UnstatedCell", id, layer }];
     case "na-but-present":
@@ -127,8 +131,8 @@ export const layerCounts = (reports: readonly RowReport[]): readonly LayerCount[
   LAYERS.map((layer) => {
     const verdicts = reports.filter((report) => report.row.retiredBy === undefined).map((report) => report.cells[layer].verdict);
     const held = verdicts.filter((verdict) => verdict === "held").length;
-    const owed = verdicts.filter((verdict) => verdict === "owed" || verdict === "stale-owed").length;
-    const missing = verdicts.filter((verdict) => verdict === "missing").length;
+    const owed = verdicts.filter((verdict) => verdict === "owed" || verdict === "stale-owed" || verdict === "stale").length;
+    const missing = verdicts.filter((verdict) => verdict === "missing" || verdict === "stale-absent").length;
     return {
       layer,
       held,

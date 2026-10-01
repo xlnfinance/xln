@@ -5,7 +5,7 @@
  "layers": {
   "arrival": "hold",
   "quint": "owed: spec thread, new Quint branch",
-  "contract": "owed: contracts thread (a test carrying the id; the debt queue is tested under other names, e.g. DebtChunking.t.sol)",
+  "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "owed: the cut (J batch-planner slice)"
  },
@@ -19,6 +19,26 @@
    "kind": "mutant",
    "layer": "quint",
    "name": "r2c-skips-enforce"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_theCreditorIsPaidBeforeAnythingMovesToCollateral"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aCallPaysThirtyTwoClaimsAndTheRestStaysNetted"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aDepositAboveWhatIsSpendableAfterAllDebtIsRefused"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R2C_DEBT_FIRST_aPartPaidClaimStaysAtTheHeadUntilTheNextDepositPaysItOff"
   }
  ]
 }

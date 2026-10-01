@@ -54,7 +54,7 @@ const accountOf = (w: World, name: Name) =>
 
 /** The Host's clock is not monotone: stamps jump about, and the Runtime keeps its own from going back. */
 const inputOf = (w: World, name: Name, inputs: readonly EntityInput[]): Input =>
-  ({ at: stamp(BigInt((w.hosts[name].runtime.wal.length * 37) % 101)), to: ID[name], inputs });
+  ({ _tag: "entity", at: stamp(BigInt((w.hosts[name].runtime.wal.length * 37) % 101)), to: ID[name], inputs });
 
 const idle = (h: Host): boolean => h.staged === undefined;
 
@@ -160,7 +160,8 @@ const sum = (xs: readonly bigint[]): bigint => xs.reduce((a, b) => a + b, 0n);
 
 const tally = (h: Host): Tally =>
   h.runtime.wal.reduce<Tally>((t, row) => {
-    const asked = row.input.inputs.flatMap((i) => (i._tag === "pay" ? [i.amount] : []));
+    const inputs = row.input._tag === "entity" ? row.input.inputs : [];
+    const asked = inputs.flatMap((i) => (i._tag === "pay" ? [i.amount] : []));
     const turnedAway = row.notices.some((n) => n._tag === "command_refused");
     const refused = row.notices.flatMap((n) =>
       (n._tag === "tx_refused" && n.refused.tx._tag === "pay" ? [n.refused.tx.amount] : []));
