@@ -2030,7 +2030,7 @@
   },
   {
    "id": "R-PROOF-NONCE-ABOVE-SIGNED",
-   "statement": "Every committed frame's proof nonce is strictly above every proof nonce either side signed before it committed, yielded and refused attempts included, and no two different proofs share a nonce, so the Left-beats-Right tie rule never decides. Mechanism: a frame carries its slot; the slot is in its author's lane (Left's an even distance above the committed slot, Right's an odd one) and above the highest slot its proposer signed and the highest it knows the peer signed (`signed`, `peerSigned`, learned from the peer's frames and from the floor a refusal carries); a collision is won by the higher slot (R-A1: at the first collision on a head, Left's); a receiver acks no slot at or below one it signed (a stale refusal naming its floor), believes a peer slot only in the peer's lane, above the committed slot and at most one lane step above what it knows (else a bad-slot refusal), and believes a refusal's floor on the same terms, so one frame cannot spend the nonce space. The peer's proofs of frames that were children of the committed head (signed after it) are above it by nature: R-SIGNED-IS-LIVE.",
+   "statement": "Every committed frame's proof nonce is strictly above every proof nonce either side signed before it committed, yielded and refused attempts included, and no two different proofs share a nonce, so the Left-beats-Right tie rule never decides. Mechanism: a frame carries its slot; the slot is in its author's lane (Left's an even distance above the committed slot, Right's an odd one) and above the highest slot its proposer signed and the highest it knows the peer signed (`signed`, `peerSigned`, learned from the peer's frames and from the floor a refusal carries); a collision is won by the higher slot (R-A1: at the first collision on a head, Left's); a receiver acks no slot at or below one it signed (a stale refusal naming its floor), believes a peer slot only in the peer's lane, above the committed slot and at most one lane step above what it knows (else a bad-slot refusal), and believes a refusal's floor on the same terms, so one frame cannot spend the nonce space. The peer's proofs of frames that were children of the committed head (signed after it) are above it by nature: R-SIGNED-IS-LIVE. Persisting used, signed, peerSigned and unsuperseded together is a safety duty of the Runtime (cut thread): losing signed re-signs a slot, losing peerSigned makes an honest floor fall outside the reach.",
    "source": "coordinator 10-01 05:44 and 06:20 (Review A and Review B of PR 97); contracts-decisions.md, A4b section",
    "layers": {
     "arrival": "owed: #41 (id not in a name yet)",
@@ -2069,7 +2069,7 @@
   },
   {
    "id": "R-SIGNED-IS-LIVE",
-   "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED, past which it proposes nothing more) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty.",
+   "statement": "Anything a side has signed and sent stays enforceable against it until a frame at a higher slot commits: a refusal or a yield does not void the proof, so it does not release the payer or an upstream hold for a lock the proof carries. The replica keeps the signed, unsuperseded frames (bounded by MAX_UNSUPERSEDED: at the cap it signs nothing more, its txs are refused with notice `signed_cap` naming the slot range of the live proofs and are not kept, and `stalled` shows the stall so the Runtime can act: wait for the peer's commit or dispute) and `liveLocks` says which locks are still live; a lock is released when a higher-slot frame without it commits or after its deadline plus the reserve. R-REFUSED-RELEASES-PAYER is narrowed to that. Holding and releasing is the Runtime's duty.",
    "source": "coordinator 10-01 05:55 (Review A of PR 97, second finding)",
    "layers": {
     "arrival": "-",
@@ -2083,6 +2083,16 @@
      "kind": "test",
      "layer": "ts",
      "name": "account/frame R-SIGNED-IS-LIVE a lock in a signed proof stays live until a higher frame commits"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/frame R-NOTICE the cap on signed frames never leaves a tx silent"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "at the cap a side signs nothing more: its txs are refused with notice, and the stall shows"
     }
    ]
   },
