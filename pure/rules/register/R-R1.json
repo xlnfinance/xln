@@ -1,0 +1,24 @@
+{
+ "id": "R-R1",
+ "statement": "Determinism: the same inputs at the same frame timestamps give the same state and outputs; a frame opens only when work is due at the committed clock. The Quint cell holds the canonical order of a frame's inputs and the idle gate (a frame opens only when an input is due); that the same inputs at the same timestamps give the same state and outputs is not a property of the spec.",
+ "source": "lessons.md section 5",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: determinism of the off-chain Runtime; no contract code takes part",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: the cut (Runtime slice)"
+ },
+ "killers": [
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "empty-frame"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "frame-in-arrival-order"
+  }
+ ]
+}

@@ -5,6 +5,7 @@ import { LAYERS, describeProblem, type Cell, type Name, type Register, type Row 
 import { carries, arrivalNames, quintNames, testFileNames } from "./names/names.ts";
 import { parseCell, parseRegister } from "./register.ts";
 import { readBase } from "./base.ts";
+import { readRegisterFolder } from "./layout/store.ts";
 import { renderMarkdown, renderText } from "./render.ts";
 import { ratchet } from "./ratchet.ts";
 import { scanNames } from "./scan.ts";
@@ -237,9 +238,8 @@ describe("a retired rule", () => {
   });
 });
 
-describe("register.json", () => {
-  const text = readFileSync(`${import.meta.dir}/register.json`, "utf8");
-  const parsed = parseRegister(text);
+describe("the register folder", () => {
+  const parsed = readRegisterFolder(`${import.meta.dir}/register`);
 
   test("parses", () => expect(parsed.ok).toBe(true));
 
@@ -273,8 +273,8 @@ describe("register.json", () => {
     expect(ids.filter((id) => /^R-[EXAJRP]\d$/.test(id)).length).toBe(23);
   });
 
-  test("carries the id policy: descriptive names, never bare numbers", () => {
-    expect(JSON.parse(text).policy).toContain("descriptive names");
+  test("the README carries the id policy: descriptive names, never bare numbers", () => {
+    expect(readFileSync(`${import.meta.dir}/README.md`, "utf8")).toContain("descriptive names");
   });
 
   test("F1 is a finding id, not a rule; the rule is R-FINAL-NONCE, and R-X2 is retired into R-CLOCK and R-HTLC-CLOCK", () => {
@@ -291,7 +291,7 @@ describe("register.json", () => {
 });
 
 describe("the real tree", () => {
-  const parsed = parseRegister(readFileSync(`${import.meta.dir}/register.json`, "utf8"));
+  const parsed = readRegisterFolder(`${import.meta.dir}/register`);
   const register = parsed.ok ? parsed.value : [];
   const names = scanNames(`${import.meta.dir}/../..`);
 
@@ -425,5 +425,20 @@ describe("the base register is read from git, and a git failure is red", () => {
     const based = readBase(repo, "base2");
     expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
     expect(readBase(repo, "no-such-ref").ok).toBe(false);
+  });
+
+  test("a base that keeps the register as a folder of rule files is read the same way", () => {
+    const folder = mkdtempSync(`${tmpdir()}/rules-base-folder-`);
+    const run = (...args: string[]): void => void Bun.spawnSync(["git", "-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: folder });
+    run("init", "-q", "-b", "main");
+    mkdirSync(`${folder}/pure/rules/register`, { recursive: true });
+    const first = JSON.parse(rowsJson).rows[0];
+    writeFileSync(`${folder}/pure/rules/register/H1.json`, JSON.stringify(first, null, 1));
+    run("add", "-A");
+    run("commit", "-q", "-m", "one");
+    run("branch", "base");
+    run("commit", "-q", "--allow-empty", "-m", "two");
+    const based = readBase(folder, "base");
+    expect(based.ok && based.value._tag === "Base" && based.value.register.map((each) => each.id)).toEqual(["H1"]);
   });
 });

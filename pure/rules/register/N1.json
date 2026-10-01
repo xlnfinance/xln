@@ -1,0 +1,51 @@
+{
+ "id": "N1",
+ "statement": "Parties sign proofs only for the current epoch, each frame co-signed with a baseline proof for epoch+1 (nonce = frame nonce + 3); the proof nonce is its own counter. The Quint cell holds signing only for the current epoch and the proof nonce as its own counter (stale and leaping nonces refused, no skips); it does not hold the co-signed baseline for epoch + 1 at frame nonce + 3: the spec models R-IMPLICIT-BASELINE instead, where no baseline is co-signed.",
+ "source": "contracts-decisions.md / Arrival Q-D-4, Q-D-19; Quint A13",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
+  "quint": "hold",
+  "contract": "n/a: signing is off-chain; the chain's own epoch check is C1",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "owed: A4 (the frame nonce is the signed body's)"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "baseline-too-low",
+   "owed": "spec thread, next Arrival page"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "accept-proof-nonce-leap"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "to be named",
+   "owed": "A4"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "accept-stale-proof-nonce"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "commit-forgets-proof-nonce"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "payment-at-dead-epoch"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "no-pause-while-locked"
+  }
+ ]
+}

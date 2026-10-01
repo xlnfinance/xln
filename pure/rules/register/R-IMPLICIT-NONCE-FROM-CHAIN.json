@@ -1,0 +1,77 @@
+{
+ "id": "R-IMPLICIT-NONCE-FROM-CHAIN",
+ "statement": "The Runtime reads the account's stored nonce from the chain and never derives it, and refuses to sign any proof at stored + 1 (either author): the first signed proof of a new epoch takes nonce stored + 2 or higher, because a Right-authored proof at stored + 1 only ties the implicit proof and cannot outrank it.",
+ "source": "contracts-decisions.md R-IMPLICIT-BASELINE (Review B of PR 76, coordinator 09-30)",
+ "layers": {
+  "arrival": "owed: spec thread, next Arrival page",
+  "quint": "hold",
+  "contract": "hold",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: TRAP a Right-authored signed frame at stored + 1 cannot outrank the implicit proof: the payee of that frame loses it"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: the same frame at stored + 2 is safe (the Runtime rule)"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "REVIEW-B R-IMPLICIT-NONCE-FROM-CHAIN: a Left-authored frame at stored + 1 does outrank it (so the trap is the Right author alone)"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "post-nonce-low (retargeted to the trap)",
+   "owed": "spec thread, next Arrival page"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a Runtime test refusing a proof at stored + 1",
+   "owed": "the cut (Account and Runtime slices)"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "first-proof-nonce-derived-from-the-tip"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN no proof of an epoch is at stored + 1, whatever the stored nonce"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN an epoch with no co-signed frame has no proof; a new one forgets the old"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN a dispute the peer starts is countered at stored + 2, then + 3"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN the nonce is read from the chain again after an epoch ends, not derived"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN a report of an epoch the Entity already knows changes nothing"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-IMPLICIT-NONCE-FROM-CHAIN a counter after burned, yielded or refused nonces names the newest co-signed proof",
+   "owed": "the cut, after #97 (the counter nonce is firstNonce + used - 1, not stored + 1 + frames)"
+  }
+ ]
+}
