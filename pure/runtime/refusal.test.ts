@@ -10,8 +10,7 @@ import { emptyAccount, withLedger } from "../account/state.ts";
 import type { AccountTx } from "../account/tx.ts";
 import { entityFrame } from "../entity/frame.ts";
 import { emptyEntity, type EntityId, type EntityInput, type EntityState } from "../entity/model.ts";
-import { signing } from "../account/fixtures.ts";
-import { credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
+import { anchor, credit, entityOf, GOLD, judge, open, pay } from "../entity/fixtures.ts";
 import { inputFor, setup, stamp, started, tick } from "./fixtures.ts";
 import { flush, recover, startRuntime } from "./tick.ts";
 import type { Row } from "./model.ts";
@@ -22,7 +21,7 @@ const BOB = entityOf(2);
 const payFrame = (author: "left" | "right", amount: bigint): Msg<AccountTx> => {
   const slot = author === "left" ? 2 : 1;
   const frame: Frame<AccountTx> = {
-    author, parent: GENESIS, attempt: 0, slot, txs: [{ _tag: "pay", token: GOLD, amount }],
+    author, parent: GENESIS, attempt: 0, slot, epoch: 0n, txs: [{ _tag: "pay", token: GOLD, amount }],
   };
   return { _tag: "frame", frame };
 };
@@ -107,7 +106,7 @@ describe("runtime/tick the order a Runtime keeps", () => {
       ...emptyEntity(ALICE),
       accounts: new Map([[BOB, { ...emptyReplica("left"), refused: [refused(1n), refused(2n)] }]]),
     };
-    const told = entityFrame(judge, signing, holding, []);
+    const told = entityFrame(judge, anchor, holding, []);
     const amounts = told.notices.flatMap((n) =>
       (n._tag === "tx_refused" && n.refused.tx._tag === "pay" ? [n.refused.tx.amount] : []));
     expect(amounts).toEqual([1n, 2n]);

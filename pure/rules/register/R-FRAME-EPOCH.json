@@ -1,0 +1,24 @@
+{
+ "id": "R-FRAME-EPOCH",
+ "statement": "A frame names the epoch its proof is signed in, and a replica judges only frames of the epoch it signs in itself: a frame of another epoch is refused with wrong_epoch before any tx is looked at, the refuser notes the frame's slot and names its own floor and mark, and the proposer takes the frame back with every tx kept and tries again at a higher attempt and slot, without counting against MAX_ATTEMPTS. So the two sides never seal one frame under two epochs: a Host that hears the chain move on before its peer does costs a retry, not a head the two sides disagree on.",
+ "source": "cut thread, from the per-Account signing context (R-FRAME-SIGNATURE-NAMES-ACCOUNT): an ack that carries a head sealed under another epoch is ignored, so the proposer would wait for ever",
+ "layers": {
+  "arrival": "owed: spec thread (a frame carries an epoch; wrong_epoch is a retry that judges nothing)",
+  "quint": "owed: spec thread, new Quint branch",
+  "contract": "n/a: an off-chain Account rule; the chain sees only signed proofs",
+  "rig": "owed: test rig (a walk predicate: two replicas never commit one frame under two epochs)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "account/frame R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch"
+  }
+ ]
+}

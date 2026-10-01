@@ -113,7 +113,8 @@ describe("account/swap R-SWAP-OFFER either side quotes its funds for the other's
 
   test("a frame's content name changes with every field of an offer, a fill and a withdrawal", () => {
     const frameWith = (t: AccountTx): Frame<AccountTx> =>
-      ({ author: "left", parent: emptyReplica("left").head, attempt: 0, slot: 2, txs: [t] });
+      ({ author: "left", parent: emptyReplica("left").head, attempt: 0, slot: 2, epoch: signing.ondeltaEpoch,
+        txs: [t] });
     const nameOf = (t: AccountTx) => frameName(frameWith(t));
     const base = offerOf("left", 10n, 5n);
     const variants: readonly AccountTx[] = [

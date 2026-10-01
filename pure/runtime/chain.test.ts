@@ -2,7 +2,9 @@
 // the node watching its own disputes, R-NO-DEPOSIT-BEFORE-COSIGN, R-WINDOWS-NEVER-SHORTEN). Alice is the Left of the
 // Account and Bob its Right; Bob extends credit and each frame he proposes is one more co-signed proof of the epoch.
 import { describe, expect, test } from "bun:test";
-import { tokenOf, viewOf } from "../account/fixtures.ts";
+import { signing, tokenOf, viewOf } from "../account/fixtures.ts";
+import { frameDigest } from "../account/proof/signing.ts";
+import { accountKey } from "../chain/proof/deployment.ts";
 import {
   emptyEntity, type ChainFacts, type Command, type CosignOp, type EntityId, type JAction, type JEvent,
 } from "../entity/model.ts";
@@ -237,7 +239,7 @@ describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed 
   });
 
   test("R-COSIGN-FREEZE once the chain has moved the epoch on, the payment goes out and both sides commit it", () => {
-    const landed = settle(feed(queued, ALICE, epochOf(BOB, 1n, 6n)));
+    const landed = settle(atEpoch(queued, 1n, 6n));
     expect(committed(landed, ALICE)).toBe(committed(landed, BOB));
     expect(committed(landed, ALICE)).not.toBe(committed(queued, ALICE));
   });
@@ -246,7 +248,7 @@ describe("runtime/chain R-COSIGN-FREEZE after the signature nothing is proposed 
     const raced = settle(feed(signed, BOB, credit(ALICE, 150n)));
     expect(committed(raced, BOB)).toBe(committed(signed, BOB));
     expect(hostOf(raced, BOB).entities.get(BOB)?.accounts.get(ALICE)?.mempool).toHaveLength(1);
-    const landed = settle(rise(feed(raced, ALICE, epochOf(BOB, 1n, 6n)), BOB, 111n));
+    const landed = settle(rise(atEpoch(raced, 1n, 6n), BOB, 111n));
     expect(committed(landed, BOB)).toBe(committed(landed, ALICE));
     expect(committed(landed, BOB)).not.toBe(committed(raced, BOB));
   });
@@ -301,5 +303,35 @@ describe("runtime/chain review A: a replay sees every field of a C2R and of a se
   ] as const)("R-DURABLE a WAL whose settlement names another %s does not replay", (_field, change) => {
     const { height, result } = replayed(asSettle, change);
     expect(result).toEqual(diverged(height));
+  });
+});
+
+describe("runtime/chain R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch", () => {
+  const heardByAlice = feed(opened, ALICE, epochOf(BOB, 1n, 5n));
+  const proposed = settle(feed(heardByAlice, ALICE, credit(BOB, 100n)));
+  const replicaOf = (c: Cluster, id: EntityId) =>
+    hostOf(c, id).entities.get(id)?.accounts.get(id === ALICE ? BOB : ALICE) ?? expect.unreachable("no Account");
+
+  test("Bob, who has not seen the epoch move, refuses Alice's frame unjudged and keeps his head", () => {
+    expect(replicaOf(proposed, BOB).head).toBe(replicaOf(opened, BOB).head);
+    expect(replicaOf(proposed, BOB).height).toBe(0);
+  });
+
+  test("Alice takes the frame back with its tx kept: nothing is dropped and nobody is told it failed", () => {
+    expect(replicaOf(proposed, ALICE).pending).toBeUndefined();
+    expect(replicaOf(proposed, ALICE).mempool).toHaveLength(1);
+    expect(replicaOf(proposed, ALICE).refused).toEqual([]);
+    expect(noticesOf(proposed, ALICE)).toEqual([]);
+  });
+
+  test("once Bob sees the epoch move too, Alice's retry commits on both sides under the Account's own context", () => {
+    const landed = settle(rise(feed(proposed, BOB, epochOf(ALICE, 1n, 5n)), ALICE, 111n));
+    const [alice, bob] = [replicaOf(landed, ALICE), replicaOf(landed, BOB)];
+    expect([alice.height, bob.height, alice.head === bob.head]).toEqual([1, 1, true]);
+    const key = accountKey(ALICE, BOB);
+    if (!key.ok) return expect.unreachable("no account key");
+    const context = { ...signing, accountKey: key.value, ondeltaEpoch: 1n, firstNonce: 7n };
+    const digest = frameDigest(context, alice.used, "left", alice.state);
+    expect(digest.ok && digest.value).toBe(alice.head);
   });
 });

@@ -9,8 +9,8 @@ import { emptyLedger } from "../ledger.ts";
 import { type Ledger, type Side } from "../model.ts";
 import { emptyAccount, openHolds, withLedger } from "../state.ts";
 import type { AccountTx } from "../tx.ts";
-import { accountRules, emptyReplica, type AccountReplica } from "./account.ts";
-import { propose, queue, receive, type Msg } from "./frame.ts";
+import { accountRules, emptyReplica, frameName, type AccountReplica } from "./account.ts";
+import { MAX_ATTEMPTS, propose, queue, receive, type Msg } from "./frame.ts";
 
 const clock = unwrapOr(clockParams(1n, 2n, 10n), () => expect.unreachable("params"));
 const at = (view: bigint) => accountRules({ clock, view: viewOf(view) }, signing);
@@ -43,5 +43,44 @@ describe("account/frame R-FRAME-REFUSAL which faults are tried again", () => {
     const accepted = receive(at(102n), refused.replica, only(again.sent));
     expect(accepted.outcome._tag).toBe("accepted");
     expect(openHolds(accepted.replica.state)).toHaveLength(1);
+  });
+});
+
+describe("account/frame R-FRAME-EPOCH a frame is judged only by a replica that signs in its epoch", () => {
+  const inEpoch = (epoch: bigint) => accountRules({ clock, view: viewOf(100n) }, { ...signing, ondeltaEpoch: epoch });
+  const pay: AccountTx = { _tag: "pay", token: GOLD, amount: 5n };
+  const proposed = propose(inEpoch(2n), queue(funded("left"), pay));
+  const refused = receive(inEpoch(1n), funded("right"), only(proposed.sent));
+
+  test("the frame carries the epoch its proposer signs in, and its name says so", () => {
+    const frame = only(proposed.sent);
+    expect(frame._tag === "frame" && frame.frame.epoch).toBe(2n);
+    const named = (epoch: bigint) =>
+      frameName({ author: "left", parent: proposed.replica.head, attempt: 0, slot: 2, epoch, txs: [pay] });
+    expect(named(2n)).not.toBe(named(3n));
+  });
+
+  test("a receiver in another epoch refuses it unjudged, keeps its head and notes the slot", () => {
+    expect(refused.outcome._tag).toBe("refused_epoch");
+    expect(only(refused.sent)).toMatchObject({ _tag: "refusal", fault: "wrong_epoch", floor: 0 });
+    expect([refused.replica.head, refused.replica.height, refused.replica.declined])
+      .toEqual([funded("right").head, 0, undefined]);
+    expect(refused.replica.peerSigned).toBe(2);
+  });
+
+  test("the proposer takes the frame back with its tx kept, even past MAX_ATTEMPTS: nothing was judged", () => {
+    const worn = { ...proposed.replica, attempt: MAX_ATTEMPTS + 3 };
+    const back = receive(inEpoch(2n), worn, only(refused.sent));
+    expect(back.outcome._tag).toBe("rolled_back");
+    expect([back.replica.pending, back.replica.mempool, back.replica.refused]).toEqual([undefined, [pay], []]);
+  });
+
+  test("once the receiver signs in the frame's epoch the retry commits on both sides with one head", () => {
+    const back = receive(inEpoch(2n), proposed.replica, only(refused.sent));
+    const again = propose(inEpoch(2n), back.replica);
+    const accepted = receive(inEpoch(2n), refused.replica, only(again.sent));
+    expect(accepted.outcome._tag).toBe("accepted");
+    const acked = receive(inEpoch(2n), again.replica, only(accepted.sent));
+    expect([acked.outcome._tag, acked.replica.head === accepted.replica.head]).toEqual(["committed_own", true]);
   });
 });

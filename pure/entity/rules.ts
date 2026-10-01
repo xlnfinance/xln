@@ -22,6 +22,7 @@ export type Standing = Readonly<{ self: Side; frozen: boolean }>;
 export const entityRules = (judge: Judge, signing: SigningContext, { self, frozen }: Standing): EntityRules => {
   const base = accountRules(judge, signing);
   return {
+    epoch: base.epoch,
     apply: (state, author, tx) => (frozen && author !== self ? err({ _tag: FROZEN }) : base.apply(state, author, tx)),
     name: base.name,
     seal: base.seal,

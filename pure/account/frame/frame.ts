@@ -23,10 +23,11 @@ export type FrameHash = Brand<string, "FrameHash">;
  * a new frame, so the receiver can judge it afresh and still never commit one it refused. `slot` is the nonce slot its
  * proof is signed at (R-PROOF-NONCE-ABOVE-SIGNED): in the author's lane (Left's are an even distance above the
  * committed slot, Right's an odd one) and above every slot its author has signed. It is part of what a refusal names,
- * and no two frames share a nonce.
+ * and no two frames share a nonce. `epoch` is the Account's epoch its proof is signed in (R-FRAME-EPOCH): both sides
+ * seal a frame under the same epoch or the frame is not judged.
  */
 export type Frame<Tx> =
-  Readonly<{ author: Side; parent: FrameHash; attempt: number; slot: number; txs: readonly Tx[] }>;
+  Readonly<{ author: Side; parent: FrameHash; attempt: number; slot: number; epoch: bigint; txs: readonly Tx[] }>;
 
 /** A proposer that has had MAX_ATTEMPTS frames refused on one head stops retrying: that peer is not catching up. */
 export const MAX_ATTEMPTS = 8;
@@ -39,6 +40,12 @@ export const STALE_SLOT = "stale_slot";
 
 /** The fault a receiver names when a frame's slot is not one an honest proposer would take (lane, range, reach). */
 export const BAD_SLOT = "bad_slot";
+
+/**
+ * The fault a receiver names when a frame was proposed in another epoch than the one the receiver signs in
+ * (R-FRAME-EPOCH): the two views of the chain differ for now, so nothing of the frame was judged and its txs are kept.
+ */
+const WRONG_EPOCH = "wrong_epoch";
 
 /**
  * `refusal` is R-FRAME-REFUSAL: the answer to a frame the receiver cannot apply. It names the frame, the index of the
@@ -62,10 +69,13 @@ export type Msg<Tx> =
  * signers sign (R-FRAME-HASH-SIGNED). The round gives every frame a slot above every slot either side signed before
  * it, in its author's lane (R-PROOF-NONCE-ABOVE-SIGNED, R-RETRY-NEW-NONCE). It fails when no such digest exists, and
  * the round then refuses the frame.
+ * `epoch` is the Account's epoch this replica signs in: its frames are proposed in it, and a frame of another epoch is
+ * refused, not judged (R-FRAME-EPOCH).
  * `tag` is what a refusal says of a fault, and `retryable` says whether a fault with that tag can pass with the peer's
  * view of the chain (a tx the peer finds too early or too far ahead), so the tx is tried again, and not for good.
  */
 export type Rules<Tx, S, F> = Readonly<{
+  epoch: bigint;
   apply: (state: S, author: Side, tx: Tx) => Result<S, F>;
   name: (frame: Frame<Tx>) => FrameHash;
   seal: (frame: Frame<Tx>, after: S) => Result<FrameHash, F>;
@@ -156,6 +166,7 @@ export type Outcome<F> =
   | Tagged<"refused_not_next">
   | Tagged<"refused_attempt">
   | Tagged<"refused_slot">
+  | Tagged<"refused_epoch">
   | Tagged<"refused_stale">
   | Tagged<"committed_own">
   | Tagged<"ack_ignored">
@@ -215,7 +226,7 @@ export const propose = <Tx, S, F>(rules: Rules<Tx, S, F>, r: Replica<Tx, S, F>):
   }
   const split = splitValid(rules, r.side, r.state, r.mempool);
   const slot = slotAbove(r.side, r.used, floorOf(r));
-  const frame = { author: r.side, parent: r.head, attempt: r.attempt, slot, txs: split.valid };
+  const frame = { author: r.side, parent: r.head, attempt: r.attempt, slot, epoch: rules.epoch, txs: split.valid };
   const sealed = split.valid.length === 0 ? undefined : rules.seal(frame, split.state);
   // A state with no digest cannot be committed by anyone: its txs are refused with the reason, not left to wedge.
   const unsealed = sealed?.ok === false ? split.valid.map((tx): Refused<Tx, F> => ({ tx, fault: sealed.error })) : [];
@@ -303,6 +314,14 @@ const decline = <Tx, S, F>(
  */
 const wellNumbered = (attempt: number): boolean => Number.isSafeInteger(attempt) && attempt >= 0;
 
+/**
+ * R-FRAME-EPOCH: a frame of another epoch is not judged: the proposer keeps its txs and tries again when the two views
+ * of the chain agree. The slot is noted by the caller (the peer has signed it); the refusal names my floor and mark.
+ */
+const refuseEpoch = <Tx, S, F>(r: Replica<Tx, S, F>, name: FrameHash): Heard<Tx, S, F> =>
+  heard(r, [refusal<Tx>({ hash: name, index: 0, fault: WRONG_EPOCH, mark: r.declined?.attempt ?? 0, floor: r.signed })],
+    { _tag: "refused_epoch" });
+
 const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r0: Replica<Tx, S, F>, f: Frame<Tx>): Heard<Tx, S, F> => {
   if (f.author === r0.side) return heard(r0, NO_MESSAGES, { _tag: "refused_own" });
   if (f.txs.length === 0) return heard(r0, NO_MESSAGES, { _tag: "refused_empty" });
@@ -324,6 +343,7 @@ const onFrame = <Tx, S, F>(rules: Rules<Tx, S, F>, r0: Replica<Tx, S, F>, f: Fra
   }
   const r = { ...r0, peerSigned: Math.max(r0.peerSigned, f.slot) };
   const declined = r.declined;
+  if (f.epoch !== rules.epoch) return refuseEpoch(r, name);
   if (declined !== undefined && f.attempt <= declined.attempt) {
     // The index and the fault are those of the frame I refused: another frame at that attempt (a proposer that lost its
     // count) gets the stale answer, which carries the mark, not a refusal that names someone else's tx.
@@ -377,7 +397,8 @@ const onRefusal = <Tx, S, F>(
   if (pending === undefined || named === undefined || !counted || !floored || rules.name(pending.frame) !== hash) {
     return heard(r, NO_MESSAGES, { _tag: "refusal_ignored" });
   }
-  const retry = fault === STALE_ATTEMPT || fault === STALE_SLOT || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
+  const retry = fault === STALE_ATTEMPT || fault === STALE_SLOT || fault === WRONG_EPOCH
+    || (rules.retryable(fault) && r.attempt < MAX_ATTEMPTS);
   const kept = retry ? pending.frame.txs : pending.frame.txs.filter((_, i) => i !== index);
   const refused = retry ? r.refused : [...r.refused, { tx: named, fault: { _tag: "peer_refused", fault } as const }];
   const peerSigned = Math.max(r.peerSigned, floor);
