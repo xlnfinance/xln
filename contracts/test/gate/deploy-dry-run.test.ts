@@ -10,19 +10,29 @@ import { deploySet } from "../../deploy/deploy-set.ts";
 import { dryRun, startAnvil } from "../../deploy/dry-run.ts";
 import { smokeSet } from "../../deploy/smoke.ts";
 
-const prepared = JSON.parse(readFileSync(path.join(import.meta.dir, "..", "..", "deploy", "sepolia.manifest.json"), "utf8")) as Manifest;
+const prepared = JSON.parse(readFileSync(path.join(import.meta.dir, "..", "..", "deploy", "sepolia.prepared.manifest.json"), "utf8")) as Manifest;
 const peers = [{ entityId: `0x${"cd".repeat(32)}`, endpoint: "wss://hub.example.org/ws" }];
 const local: Manifest = { ...prepared, network: "anvil-local", chainId: 31337, peers };
 const ANVIL_DEV_KEY = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const EIP_170 = 24_576;
 
+// Without --live the deploy and the smoke test ignore DEPLOYER_PRIVATE_KEY and anvil's dev account signs. A dummy key (it has no funds on the node)
+// is exported for the whole file, so a deploy that read it would fail here; the real value of a shell is put back afterwards and never looked at.
+const ambientKey = process.env["DEPLOYER_PRIVATE_KEY"];
+const DUMMY_KEY = `0x${"11".repeat(32)}`;
+
 let node: Awaited<ReturnType<typeof startAnvil>>;
 let deployed: Manifest & { readonly contracts: NonNullable<Manifest["contracts"]> };
 beforeAll(async () => {
+  process.env["DEPLOYER_PRIVATE_KEY"] = DUMMY_KEY;
   node = await startAnvil(null);
   deployed = deployedManifest(await deploySet({ rpcUrl: node.url, manifest: local }));
 }, 600_000);
-afterAll(() => { node?.stop(); });
+afterAll(() => {
+  node?.stop();
+  if (ambientKey === undefined) delete process.env["DEPLOYER_PRIVATE_KEY"];
+  else process.env["DEPLOYER_PRIVATE_KEY"] = ambientKey;
+});
 
 describe("deploy on a local anvil", () => {
   test("the whole set is placed and the manifest is complete, with the parameters and the peer slot carried through", () => {
@@ -77,5 +87,18 @@ describe("dryRun", () => {
     expect(run.manifest.status).toBe("deployed");
     expect(run.smoke.final.epoch).toBe("3");
     expect(JSON.stringify(prepared)).toBe(before);
+  }, 600_000);
+
+  test("signs with anvil's key even when DEPLOYER_PRIVATE_KEY is set (the key exported for a live deploy never reaches a throw-away node)", async () => {
+    const other = `0x${"11".repeat(32)}`;
+    const kept = process.env["DEPLOYER_PRIVATE_KEY"];
+    process.env["DEPLOYER_PRIVATE_KEY"] = other;
+    try {
+      const run = await dryRun({ prepared, fork: null });
+      expect(run.manifest.deployer).toBe(ethers.getAddress("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"));
+      expect(run.manifest.deployer).not.toBe(new ethers.Wallet(other).address);
+    } finally {
+      if (kept === undefined) delete process.env["DEPLOYER_PRIVATE_KEY"]; else process.env["DEPLOYER_PRIVATE_KEY"] = kept;
+    }
   }, 600_000);
 });

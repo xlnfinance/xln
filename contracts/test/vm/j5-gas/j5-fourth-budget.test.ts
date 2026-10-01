@@ -89,7 +89,7 @@ describe("I inflated, huge and minimum budgets", () => {
   }, 600_000);
 });
 
-describe("V revert-whole batches ignore the budget but keep the minimum", () => {
+describe("F16 V revert-whole batches ignore the budget but keep the minimum", () => {
   test("reveal batch: outcome is the same for 500k and uint64 max, E10 under the minimum", async () => {
     const w = await boot("j5v");
     const E = party("j5v-entity");

@@ -82,7 +82,7 @@ describe("J5 a failing payment batch consumes its nonce and the urgent batch abo
     void balances;
   });
 
-  test("a failed batch does not replay: the same signed batch at the consumed nonce reverts", async () => {
+  test("R-FINAL-NONCE a failed batch does not replay: the same signed batch at the consumed nonce reverts", async () => {
     const { w, A, pay, failed } = await world();
     expect(await w.submit(A, { reserveToReserve: [pay(5000n)] })).toBe("ok");
     const { entityId, encodedBatch, nonce } = w.last.batch!;

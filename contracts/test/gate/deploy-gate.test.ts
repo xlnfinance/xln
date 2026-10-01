@@ -1,22 +1,39 @@
 // N3: the deploy gate refuses the testnet response-window floor on any chain that is not a named testnet, on every
 // deploy path, reading the floor from the compiled build.
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { buildFingerprint, removeSandboxes, runInSandbox, sandboxOf } from "../helpers/project-sandbox.ts";
 // @ts-expect-error CommonJS script without types
 import gate from "../../scripts/deploy-gate.cjs";
 // @ts-expect-error CommonJS script without types
 import matrixModule from "../../scripts/deploy-chain-matrix.cjs";
 
 const contractsRoot = path.join(import.meta.dir, "..", "..");
+// Scripts that may compile (hardhat run, the matrix) run in a private copy: they must never rewrite the build the other tests read.
+const scriptCwd = () => sandboxOf(contractsRoot);
+// Whatever else happens, this file must leave the real build exactly as it found it (a compile run in the real project would rewrite it mid-run).
+const buildBefore = existsSync(path.join(contractsRoot, "artifacts")) ? buildFingerprint(contractsRoot) : null;
+afterAll(() => {
+  removeSandboxes();
+  if (buildBefore !== null) expect(buildFingerprint(contractsRoot), "the real artifacts/ or .typechain-hardhat changed while the gate tests ran").toBe(buildBefore);
+});
+
+describe("the real build the gate tests read", () => {
+  // Sources moved since the last build: every test below that reads the build fails. This one says why, once, with the command.
+  test("matches the sources on disk (if not: bash scripts/build.sh)", () => {
+    const problem = (() => { try { gate.readCompiledFloor(); return null; } catch (error) { return error instanceof Error ? error.message : String(error); } })();
+    expect(problem, "the build in artifacts/ is stale: run `bash scripts/build.sh`, then run the gate tests again").toBeNull();
+  });
+});
 const literal = (value: string, subdenomination: string | null = null) => ({ nodeType: "Literal", kind: "number", value, subdenomination });
 const constantAst = (value: unknown) => ({ nodeType: "SourceUnit", nodes: [{ nodeType: "ContractDefinition", nodes: [{ nodeType: "VariableDeclaration", name: "MIN_RESPONSE_SECONDS", constant: true, value }] }] });
 const named = (chainId: number, id = "chain") => ({ id, chainId });
 const floorOf = (seconds: number | null) => () => seconds as number;
 
-describe("the floor is read from solc's AST", () => {
+describe("N3 the floor is read from solc's AST", () => {
   test("literals, units and arithmetic", () => {
     expect(gate.floorFromAst(constantAst(literal("60")))).toBe(60);
     expect(gate.floorFromAst(constantAst(literal("6", "hours")))).toBe(21600);
@@ -46,7 +63,7 @@ describe("the floor is read from solc's AST", () => {
   });
 });
 
-describe("the gate is keyed by chain id", () => {
+describe("N3 the gate is keyed by chain id", () => {
   test("named testnets and local nets may carry the testnet floor", () => {
     expect(gate.assertResponseFloor([named(31337), named(11155111), named(84532), named(3448148188)], floorOf(60))).toBeNull();
   });
@@ -73,7 +90,7 @@ describe("the gate is keyed by chain id", () => {
   });
 });
 
-describe("the batch gas budget fits the chain's transaction gas cap (J5)", () => {
+describe("N3 the batch gas budget fits the chain's transaction gas cap (J5)", () => {
   const gas = { minBudget: 500_000, reserve: 30_000 };
   const readGas = () => gas;
   const capsOf = (caps: Record<number, number>) => (chain: { chainId: number }) => caps[Number(chain.chainId)] ?? null;
@@ -113,16 +130,15 @@ describe("the batch gas budget fits the chain's transaction gas cap (J5)", () =>
   });
 });
 
-describe("every deploy path runs the gate", () => {
-  const run = (args: string[], command = "bun") => spawnSync(command, args, {
-    cwd: contractsRoot, encoding: "utf8", timeout: 240_000,
-    env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
+describe("N3 every deploy path runs the gate", () => {
+  const run = (args: string[], command = "bun") => runInSandbox(contractsRoot, command, args, {
+    env: { DEPLOYER_PRIVATE_KEY: "", ETH_MAINNET_RPC: "", ETH_SEPOLIA_RPC: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
   });
   const stack = (network: string) => () => run(["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", network], "bunx");
   const matrix = (...flags: string[]) => () => run(["scripts/deploy-chain-matrix.cjs", "--profile=mainnet", "--dry-run", ...flags]);
   // The Sepolia deploy (deploy/) takes a manifest: a mainnet one must be refused by the gate before any RPC call (the RPC here is a closed port).
   const mainnetDir = mkdtempSync(path.join(tmpdir(), "xln-gate-manifest-"));
-  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.manifest.json"), "utf8")) as Record<string, unknown>;
+  const sepolia = JSON.parse(readFileSync(path.join(contractsRoot, "deploy", "sepolia.prepared.manifest.json"), "utf8")) as Record<string, unknown>;
   const mainnetPrepared = { ...sepolia, network: "ethereum-mainnet", chainId: 1 };
   const address = "0x1111111111111111111111111111111111111111", hash = `0x${"22".repeat(32)}`;
   const placed = { address, deploymentBlock: 1, transactionHash: hash, gasUsed: "1", codeHash: hash };
@@ -161,7 +177,7 @@ describe("every deploy path runs the gate", () => {
   // Scripts that never deploy or broadcast. Each one is asserted below to match none of the sinks, so a script cannot
   // hide on this list after it grows a deploy path.
   const nonDeploying = ["build.sh", "compile-tron.cjs", "deploy-gate.cjs", "foundation-hanko.cjs", "generate-typechain.cjs", "setup-forge-std.sh", "write-vectors.ts",
-    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json"];
+    "deploy/README.md", "deploy/dry-run.ts", "deploy/manifest.ts", "deploy/sepolia.manifest.json", "deploy/sepolia.prepared.manifest.json"];
   const sinks = /\.deploy\(|getContractFactory\(|deployContract\(|createSmartContract\(|broadcastTronTransaction\(|\bbroadcast(?:Hex|Transaction)?\(|\{[^}]*\bbroadcast(?:Hex)?\b[^}]*\}\s*=|=\s*\w*\.trx\b|sendRawTransaction\(|sendHexTransaction\(|sendTransaction\(|eth_sendRawTransaction|eth_sendTransaction|\bcast (send|create)\b|forge (create|script)\b|hardhat (ignition|run)\b/;
   const scriptsRoot = path.join(contractsRoot, "scripts");
   const filesUnder = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
@@ -241,7 +257,7 @@ describe("every deploy path runs the gate", () => {
     try {
       const output = await new Promise<{ status: number | null; text: string }>((resolve) => {
         const child = spawn("bunx", ["--bun", "hardhat", "run", "scripts/deploy-stack.cjs", "--network", "stack-manager"], {
-          cwd: contractsRoot,
+          cwd: scriptCwd(),
           env: { ...process.env, DEPLOYER_PRIVATE_KEY: "", XLN_STACK_MANAGER_RPC_URL: `http://127.0.0.1:${server.port}`, XLN_STACK_MANAGER_CHAIN_ID: "", HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION: "true" },
         });
         let text = "";

@@ -5,12 +5,23 @@
 // by Right raises it. Credit is off-chain: each side states how far the other may owe it (`limit`), and the chain
 // never sees it. RCPAN is the rule that keeps credit true: in the worst case over every open hold, delta stays inside
 // [-limit.left, collateral + limit.right]. Every transition is a function Ledger -> Result<Ledger, AccountFault>.
+import { err, ok, type Result } from "../kernel/core/result.ts";
 import type { Brand, Tagged } from "../kernel/core/tagged.ts";
 import type { HeightFault, JHeight } from "./clause/clock.ts";
 
 export type Side = "left" | "right";
 
 export const other = (side: Side): Side => (side === "left" ? "right" : "left");
+
+/** A token of the Account; each has its own Ledger. */
+export type TokenId = Brand<bigint, "TokenId">;
+
+/** The contract's token id is a uint256. */
+export const MAX_TOKEN = 2n ** 256n - 1n;
+
+/** The one maker of a TokenId: a token is 0 .. 2^256-1, whatever a decoder was handed. */
+export const tokenId = (n: bigint): Result<TokenId, Tagged<"bad_token", { token: bigint }>> =>
+  (n >= 0n && n <= MAX_TOKEN ? ok(n as TokenId) : err({ _tag: "bad_token", token: n }));
 
 /** The slot a hold sits in: the caller names it, it stays while the hold is open, and no two open holds share one. */
 export type HoldId = Brand<bigint, "HoldId">;
@@ -41,6 +52,12 @@ export type Ledger = Readonly<{
   limit: Readonly<Record<Side, bigint>>;
   holds: readonly Hold[];
 }>;
+
+/**
+ * Everything one Account agrees on: a Ledger per token it has used. A token with no entry reads as the empty ledger.
+ * The caps that span tokens (open holds, open hashlocks) are the Account's, so they are read here and not in a Ledger.
+ */
+export type AccountState = Readonly<{ ledgers: ReadonlyMap<TokenId, Ledger> }>;
 
 /** One case per refusal; none of them halts anything. */
 export type AccountFault =
