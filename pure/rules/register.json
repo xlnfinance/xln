@@ -1865,6 +1865,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "revise-loses-the-notice"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-NOTICE a tx that no longer applies when the view rises is refused with notice in that height's row"
     }
    ]
   },
