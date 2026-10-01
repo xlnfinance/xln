@@ -3236,6 +3236,120 @@
    ]
   },
   {
+   "id": "R-SWAP-OFFER",
+   "statement": "Either side offers its own funds for the other's: `offer` names a maker, a give leg and a want leg in two different tokens (same_token), amounts in 1..MAX_AMOUNT, a slot of its own (offer_exists) and a deadline in range (N2). The maker's give is reserved against the maker in its token and the taker's want against the taker in the other, each only if its RCPAN still holds, so a fill can never fail on funds. An offer is one clause against R-HOLD-CAP together with the holds, across tokens.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-OFFER either side offers its funds for the other's and both legs are reserved"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-FILL",
+   "statement": "The taker (not the maker) fills a whole ratio 1..65535 of what remains, while the offer is live in the judge's view. Each leg is floor(amount * ratio / 65535) on its own, the arithmetic of DeltaTransformer's applySwap, so a fill the chain would settle at the same ratio moves the same amounts. A fill that takes nothing of a leg is refused (fill_too_small): every fill is a trade. The whole fill (65535) drops the offer.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-FILL the taker fills a ratio of what remains, each leg rounded down on its own"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-CLAUSE-WITH-FILL",
+   "statement": "The contract has no memory of fills, so the step that moves the offdeltas for a fill also shrinks the offer to its remainder (give and want, both reservations, the clause in the signed body), and a whole fill leaves no clause. The signed state never carries a clause that could fill what the offdeltas already hold: a dispute from it with the taker filling in full yields exactly the offer, never more, in any order of offers, fills, withdrawals and lapses.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-CLAUSE-WITH-FILL a state that holds a fill carries a clause for what is left"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-ALLOWANCES",
+   "statement": "Each swap clause in the proof body carries an allowance on both tokens, sized to what remains (a Left maker's give lowers Left's delta, its want raises it; a Right maker's the inverse), or the finalize would revert (R-SWAP-ONCHAIN). The clause follows the payment clauses, swap clauses in slot order, deltaIndex = token position, and shrinks with every fill.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-ALLOWANCES the clause carries an allowance for both tokens, sized to the rest"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-WITHDRAW",
+   "statement": "Only the maker withdraws what is left of its offer, at any time (a deadline long past included); the remainder and its reservations go, the offdeltas of what was filled stay, and a fill after it is refused.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-WITHDRAW the maker takes back what is left, and what was filled stays"
+    }
+   ]
+  },
+  {
+   "id": "R-SWAP-EXPIRE",
+   "statement": "Expiry is off-chain only (the chain's clause has none): anyone lapses an offer by a frame once the deciding party's view is strictly past its deadline plus the reserve (R-HTLC-CLOCK rules); earlier is not_expired with the earliest height. A lapse removes the offer and its reservations, keeps what was filled, and no fill follows it.",
+   "source": "Arthur 10-01 02:53 (D3: two-party swap inside an Account); plan/swap-onchain.md; coordinator 10-01",
+   "layers": {
+    "arrival": "owed: spec thread, swap page",
+    "quint": "owed: spec thread",
+    "contract": "-",
+    "rig": "-",
+    "ts": "hold"
+   },
+   "killers": [
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "account/swap R-SWAP-EXPIRE an offer expires off-chain: a frame lapses it once the view is past due"
+    }
+   ]
+  },
+  {
    "id": "R-C2R-FOLD",
    "statement": "A collateral-to-reserve shortcut advances the epoch without folding offdelta, so a payment still held as offdelta is erased: the node co-signs a C2R only while offdelta is zero, otherwise the withdrawal goes as a settlement that folds it.",
    "source": "contracts-decisions.md R-C2R-FOLD (coordinator 10-01 04:34, Arrival #41 review round 3)",
