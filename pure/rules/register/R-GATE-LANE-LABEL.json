@@ -1,6 +1,6 @@
 {
  "id": "R-GATE-LANE-LABEL",
- "statement": "One open pull request per lane. Every pull request into development carries exactly one of the labels core, chain, spec or process; a core, chain or spec pull request fails the check Lane label while an open pull request (a draft counts) into development with a lower number carries the same label, so the first one opened holds the lane until it closes; process, for CI and infra work, is exempt. Labels other than these four are ignored, and pull requests into main or already closed are not counted. The check runs again on every event that can change its answer (opened, reopened, synchronize, edited, labeled, unlabeled, ready for review, converted to draft), and when a pull request closes, the workflow runs the lane check again for each open pull request that carried its lane, so a pull request that waited turns green without a push. The real script runs in the test against lists shaped like the GitHub API's, and the workflow's events, check name and the permission of the re-run are pinned. The check is one small job named Lane label; it is added to the development ruleset by name once it has run green.",
+ "statement": "One open pull request per lane. Every pull request into development carries exactly one of the labels core, chain, spec or process; a core, chain or spec pull request fails the check Lane label while an open pull request (a draft counts) into development with a lower number carries the same label, so the first one opened holds the lane until it closes; process, for CI and infra work, is exempt. Labels other than these four are ignored, and pull requests into main or already closed are not counted. The check runs again on every event that can change its own answer (opened, reopened, synchronize, edited, labeled, unlabeled, ready for review, converted to draft, closed). Because what one pull request carries decides the answer for the others, a closed, reopened, labeled, unlabeled or edited event also runs the check again for every other open pull request into development with a lane label (waiting for a run still going, since GitHub does not re-run one), so a waiting pull request turns green without a push when its holder closes or is relabelled, and a pull request that already passed turns red when an older one takes its lane. A pull request with two lane labels is red and holds no lane for a later one. The real script runs in the test against lists shaped like the GitHub API's, and the workflow's events, check name and the permission of the re-run are pinned. The check is one small job named Lane label; it is added to the development ruleset by name once it has run green.",
  "source": "coordinator relay 10-01 16:10, from the three-lane plan (core, chain, spec; one writing thread per lane, one open pull request per lane)",
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
@@ -38,7 +38,12 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-GATE-LANE-LABEL once the holder closes, the waiting pull requests of its lane are named with their branch, and nothing for process or no lane"
+   "name": "R-GATE-LANE-LABEL a pull request with two lane labels is red and holds no lane for a later one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-LANE-LABEL the other open pull requests with a lane are named with their branch, whatever lane they hold, and never process, no label, main or the pull request itself"
   },
   {
    "kind": "test",
@@ -53,7 +58,7 @@
   {
    "kind": "test",
    "layer": "ts",
-   "name": "R-GATE-LANE-LABEL the check runs the script on the real number, is skipped only for a closed pull request, and a closed one re-runs the waiting ones with the permission that needs"
+   "name": "R-GATE-LANE-LABEL the check runs the script on the real number, and every event that can free or take a lane runs the check again for the other lane pull requests, with the permission that needs"
   },
   {
    "kind": "test",

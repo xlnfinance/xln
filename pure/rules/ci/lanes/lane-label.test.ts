@@ -38,9 +38,7 @@ const bash = (args: readonly string[]): Outcome => {
 
 const check = (pr: number, pulls: readonly Pull[]): Outcome => bash(["check", String(pr), file(apiShape(pulls))]);
 
-// The event of a closed pull request: its number and the labels it carried.
-const closing = (number: number, labels: readonly string[]): string => file(JSON.stringify({ pull_request: { number, labels: labels.map((name) => ({ name })) } }));
-const waiting = (event: string, pulls: readonly Pull[]): readonly string[] => bash(["waiting", event, file(apiShape(pulls))]).out.split("\n").filter((line) => line !== "");
+const others = (pr: number, pulls: readonly Pull[]): readonly string[] => bash(["others", String(pr), file(apiShape(pulls))]).out.split("\n").filter((line) => line !== "");
 
 describe("R-GATE-LANE-LABEL one open pull request per lane", () => {
   test("R-GATE-LANE-LABEL a pull request alone in its lane passes, for each of core, chain and spec", () => {
@@ -84,17 +82,24 @@ describe("R-GATE-LANE-LABEL one open pull request per lane", () => {
     expect(absent.err).toContain("not among the open pull requests into development");
   });
 
-  test("R-GATE-LANE-LABEL once the holder closes, the waiting pull requests of its lane are named with their branch, and nothing for process or no lane", () => {
-    const open: readonly Pull[] = [{ number: 8, labels: ["core"], head: "claude/eight" }, { number: 9, labels: ["chain"] }, { number: 12, labels: ["core"], head: "claude/twelve" }, { number: 13, labels: ["core"], base: "main" }];
-    expect(waiting(closing(5, ["core"]), open)).toEqual(["8 claude/eight", "12 claude/twelve"]);
-    expect(waiting(closing(5, ["process"]), open)).toEqual([]);
-    expect(waiting(closing(5, []), open)).toEqual([]);
-    expect(waiting(closing(8, ["core"]), open)).toEqual(["12 claude/twelve"]);
+  test("R-GATE-LANE-LABEL a pull request with two lane labels is red and holds no lane for a later one", () => {
+    const pulls: readonly Pull[] = [{ number: 5, labels: ["core", "chain"] }, { number: 8, labels: ["chain"] }, { number: 9, labels: ["core"] }];
+    expect(check(5, pulls).code).toBe(1);
+    expect(check(8, pulls).code).toBe(0);
+    expect(check(9, pulls).code).toBe(0);
+  });
+
+  test("R-GATE-LANE-LABEL the other open pull requests with a lane are named with their branch, whatever lane they hold, and never process, no label, main or the pull request itself", () => {
+    const open: readonly Pull[] = [{ number: 5, labels: ["core"], head: "claude/five" }, { number: 8, labels: ["chain"], head: "claude/eight" }, { number: 9, labels: ["process"] }, { number: 10, labels: ["bug"] }, { number: 12, labels: ["spec"], base: "main" }, { number: 13, labels: ["core", "chain"], head: "claude/thirteen" }];
+    expect(others(5, open)).toEqual(["8 claude/eight", "13 claude/thirteen"]);
+    expect(others(9, open)).toEqual(["5 claude/five", "8 claude/eight", "13 claude/thirteen"]);
+    expect(others(8, [{ number: 8, labels: ["chain"] }])).toEqual([]);
   });
 
   test("R-GATE-LANE-LABEL a missing argument or an unknown mode is an error, not a pass", () => {
     expect(bash([]).code).not.toBe(0);
     expect(bash(["check"]).code).not.toBe(0);
+    expect(bash(["others"]).code).not.toBe(0);
     expect(bash(["merge"]).code).toBe(2);
   });
 
@@ -108,12 +113,15 @@ describe("R-GATE-LANE-LABEL one open pull request per lane", () => {
     expect(text.match(/\n {2}[a-z-]+:\n {4}name:/g)?.length).toBe(1);
   });
 
-  test("R-GATE-LANE-LABEL the check runs the script on the real number, is skipped only for a closed pull request, and a closed one re-runs the waiting ones with the permission that needs", () => {
+  test("R-GATE-LANE-LABEL the check runs the script on the real number, and every event that can free or take a lane runs the check again for the other lane pull requests, with the permission that needs", () => {
     const text = withoutComments(workflow);
     expect(text).toContain("if: github.event.action != 'closed'\n        run: bash .github/scripts/lane-label.sh check \"${{ github.event.pull_request.number }}\" \"$RUNNER_TEMP/open-prs.json\"");
-    expect(text).toContain("if: github.event.action == 'closed'");
-    expect(text).toContain("lane-label.sh waiting");
+    const events = /fromJSON\('\[([^\]]*)\]'\)/.exec(text)?.[1]?.split(",").map((event) => event.trim().replaceAll('"', "")) ?? [];
+    ["closed", "reopened", "labeled", "unlabeled", "edited"].forEach((event) => expect(events, event).toContain(event));
+    expect(text).toContain("if: ${{ !cancelled() && contains(fromJSON(");
+    expect(text).toContain('lane-label.sh others "${{ github.event.pull_request.number }}"');
     expect(text).toContain("gh run rerun");
+    expect(text).toContain("gh run view");
     expect(text).toMatch(/permissions:[^]*?\n {2}actions: write/);
     expect(text).toMatch(/group: lane-label-\$\{\{ github\.event\.pull_request\.number \}\}\n\s+cancel-in-progress: true/);
     expect(existsSync(script)).toBe(true);

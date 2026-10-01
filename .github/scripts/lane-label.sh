@@ -3,8 +3,10 @@
 # process. A core, chain or spec pull request fails while a pull request with a lower number into development, open, draft
 # or not, carries the same label, so the first one opened holds the lane until it closes. process (CI and infra work) is exempt.
 #   lane-label.sh check <pr-number> <open-prs.json>      exit 1 and say why when the pull request breaks the rule
-#   lane-label.sh waiting <event.json> <open-prs.json>   after a pull request closes, print "<number> <head branch>" of each
-#                                                        open pull request that carries the lane it held (core, chain or spec)
+#   lane-label.sh others <pr-number> <open-prs.json>     print "<number> <head branch>" of every other open pull request into
+#                                                        development that carries core, chain or spec: the ones whose answer
+#                                                        may have changed when this pull request was labeled, closed or reopened.
+#                                                        A pull request with more than one lane label holds no lane (it is red).
 # <open-prs.json> is the list of open pull requests as the GitHub API returns it (number, labels, base.ref, head.ref, state).
 set -euo pipefail
 readonly LANES='["core","chain","spec"]'
@@ -13,7 +15,7 @@ readonly LABELS='["core","chain","spec","process"]'
 # Only open pull requests into development count, whatever the list holds.
 open_into_development() { jq -c '[.[] | select(.state == "open" and .base.ref == "development")]' "$1"; }
 
-mode="${1:?mode: check or waiting}"
+mode="${1:?mode: check or others}"
 case "$mode" in
   check)
     pr="${2:?pull request number}"
@@ -33,20 +35,17 @@ case "$mode" in
       echo "lane-label: pull request $pr is process, exempt"
       exit 0
     fi
-    holders=$(jq -r --argjson pr "$pr" --arg lane "$lane" '[.[] | select(.number < $pr and any(.labels[]; .name == $lane)) | "#\(.number)"] | join(", ")' <<<"$open")
+    holders=$(jq -r --argjson pr "$pr" --arg lane "$lane" --argjson known "$LABELS" '[.[] | select(.number < $pr and ([.labels[].name | select(. as $l | $known | index($l))] == [$lane])) | "#\(.number)"] | join(", ")' <<<"$open")
     if [ -n "$holders" ]; then
       echo "lane-label: lane $lane is held by $holders; pull request $pr waits until it closes (re-run this check then)" >&2
       exit 1
     fi
     echo "lane-label: pull request $pr holds lane $lane"
     ;;
-  waiting)
-    event="${2:?event json}"
+  others)
+    pr="${2:?pull request number}"
     open=$(open_into_development "${3:?open pull requests json}")
-    closed=$(jq -r '.pull_request.number' "$event")
-    lane=$(jq -r --argjson lanes "$LANES" '[.pull_request.labels[].name | select(. as $l | $lanes | index($l))][0] // empty' "$event")
-    [ -z "$lane" ] && exit 0
-    jq -r --argjson closed "$closed" --arg lane "$lane" '.[] | select(.number != $closed and any(.labels[]; .name == $lane)) | "\(.number) \(.head.ref)"' <<<"$open"
+    jq -r --argjson pr "$pr" --argjson lanes "$LANES" '.[] | select(.number != $pr and any(.labels[]; . as $l | $lanes | index($l.name))) | "\(.number) \(.head.ref)"' <<<"$open"
     ;;
   *)
     echo "lane-label: unknown mode $mode" >&2

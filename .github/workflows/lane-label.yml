@@ -2,6 +2,7 @@ name: lane-label
 
 # The lane rule: every pull request into development carries exactly one of core, chain, spec or process, and a core, chain or
 # spec pull request waits while an earlier one holds its lane (.github/scripts/lane-label.sh, pinned by rules/ci/lanes/).
+# Any labeled, unlabeled, reopened, edited or closed event also runs the check again for the other pull requests with a lane.
 # `Lane label` is the one check to require on development, next to the two fast gate checks.
 on:
   pull_request:
@@ -35,13 +36,21 @@ jobs:
         if: github.event.action != 'closed'
         run: bash .github/scripts/lane-label.sh check "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json"
 
-      # A closed pull request frees its lane: the pull requests that waited get their lane check run again.
-      - name: Run the lane check again for the pull requests that waited
-        if: github.event.action == 'closed'
+      # What this pull request now carries, or no longer holds, can change the answer for every other pull request with a
+      # lane label (a closed or relabelled holder frees its lane, a reopened or newly labeled one takes it): their lane check
+      # runs again. A run still going is waited for first, because GitHub does not re-run a run in progress; the re-run raises
+      # no label event, so this does not loop.
+      - name: Run the lane check again for the other pull requests with a lane
+        if: ${{ !cancelled() && contains(fromJSON('["closed", "reopened", "labeled", "unlabeled", "edited"]'), github.event.action) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bash .github/scripts/lane-label.sh waiting "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/open-prs.json" | while read -r number branch; do
-            run=$(gh run list --workflow lane-label.yml --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId')
-            gh run rerun "$run" || echo "lane-label: could not run the check again for pull request $number"
+          bash .github/scripts/lane-label.sh others "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/open-prs.json" | while read -r number branch; do
+            run=$(gh run list --workflow lane-label.yml --branch "$branch" --event pull_request --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            if [ -z "$run" ]; then echo "lane-label: pull request $number has no lane check run yet"; continue; fi
+            for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              [ "$(gh run view "$run" --json status --jq .status)" = completed ] && break
+              sleep 5
+            done
+            gh run rerun "$run" && echo "lane-label: ran the check again for pull request $number" || echo "lane-label: could not run the check again for pull request $number"
           done
