@@ -1696,6 +1696,17 @@ test.describe('E2E Swap Isolated Flow', () => {
           closeExpectedSwapCompletionModal(alicePage),
           closeExpectedSwapCompletionModal(bobPage),
         ]);
+        for (const userPage of [alicePage, bobPage]) {
+          await userPage.getByTestId('swap-orders-tab-closed').first().click();
+          const rows = userPage.getByTestId('swap-closed-order-row');
+          await expect(rows).toHaveCount(round);
+          await expect(rows.first()).toContainText('Filled');
+          await expect(rows.first().getByTestId('swap-closed-execution')).toContainText(
+            userPage === alicePage ? /0\.01 WETH.*25 USDC/ : /25 USDC.*0\.01 WETH/,
+          );
+          await expect(rows.first().getByTestId('swap-closed-fee')).toBeVisible();
+          await userPage.getByTestId('swap-orders-tab-open').first().click();
+        }
       }
 
       await Promise.all([

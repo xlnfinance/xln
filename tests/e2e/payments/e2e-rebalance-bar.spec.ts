@@ -1851,6 +1851,19 @@ test.describe('Rebalance E2E', () => {
     expect(h1Before?.pid, 'H1 PID must be observable').toBeGreaterThan(0);
     const oldPid = Number(h1Before!.pid);
     const oldRestartCount = Number(h1Before!.restartCount || 0);
+    const h1RuntimeId = healthBefore?.hubs?.find((hub) => hub.name === 'H1')?.runtimeId;
+    const userRuntimeId = await page.evaluate(() => {
+      const view = window as typeof window & { isolatedEnv: { runtimeId: string } };
+      return view.isolatedEnv.runtimeId;
+    });
+    expect(h1RuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(userRuntimeId).toMatch(/^0x[0-9a-f]{40}$/);
+    // SIGKILL makes this one peer undeliverable. Retention is expected only for
+    // that offline target; the queue and bilateral ACK must drain before reload.
+    allowBrowserIssue({
+      type: 'console', severity: 'warning',
+      message: new RegExp(`^\\[WARN\\]\\[network\\.route\\] output\\.retained \\{"retained":\\d+,"runtimeId":"${userRuntimeId}","targets":\\[\\{"count":\\d+,"deliverable":false,"runtimeId":"${h1RuntimeId}"\\}\\]\\}$`),
+    });
     const crashBoundary = await timedStep('rebalance_persist.mine_then_crash_h1', async () => {
       let h1Frozen = false;
       let automineDisabled = false;
@@ -1928,6 +1941,20 @@ test.describe('Rebalance E2E', () => {
     const chainAfterRestart = await readActiveChainRebalanceState(page, entityId, hubId);
     expect(BigInt(chainAfterRestart.collateral) - BigInt(chainBefore.collateral)).toBe(crashBoundary.requestedAmount);
     expect(await countExactHankoBatchLogs(page, chainBefore.depository, hubId, crashBoundary.pending.batchHash)).toBe(1);
+
+    await expect.poll(() => page.evaluate(({ entityId, hubId }) => {
+      const view = window as typeof window & { isolatedEnv: {
+        pendingNetworkOutputs?: unknown[];
+        state: { eReplicas: Map<string, { state: {
+          entityId: string; accounts: Map<string, { pendingFrame?: unknown }>;
+        } }> };
+      } };
+      const env = view.isolatedEnv;
+      const replica = [...env.state.eReplicas.values()].find((entry) => entry.state.entityId === entityId);
+      const account = replica?.state.accounts.get(hubId);
+      if (!account) throw new Error('REBALANCE_RECOVERED_ACCOUNT_MISSING');
+      return { retained: env.pendingNetworkOutputs?.length ?? 0, pendingAck: Boolean(account.pendingFrame) };
+    }, { entityId, hubId }), { timeout: 15_000, intervals: [100, 250, 500] }).toEqual({ retained: 0, pendingAck: false });
 
     await reloadRuntimeAndWaitReady(page, criticalConsole, 'rebalance_persist.reload_user_after_finality');
     let finalState: Awaited<ReturnType<typeof readRebalanceState>> = null;

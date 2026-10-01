@@ -783,7 +783,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
     expect(smoke).toContain('await acquireLocalTestPortLease({');
-    expect(smoke).toContain('requiredOffsets: [0, 1, 4, 7, 8, 10, 11, 12, 13]');
+    expect(smoke).toContain('requiredOffsets: [0, 1, 2, 3, 4, 7, 8, 10, 11, 12, 13]');
     expect(smoke).toContain('buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot)');
     expect(smoke).toContain('assertLocalTestPortsFree(localTestLease.ports);');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_PORT_OVERRIDE_FORBIDDEN');
@@ -1339,7 +1339,7 @@ describe('production startup wiring', () => {
     expect(quotePipeline).toContain('job.targetHubs,');
     expect(quotePipeline).toContain("if (input.mode === 'bootstrap') {");
     expect(quotePipeline).toContain('await submitCrossJurisdictionIntents(input.deps.env, routes);');
-    expect(quotePipeline).toContain('input.state.bootstrapCrossBatchSubmitted = true;');
+    expect(quotePipeline).toContain('input.state.bootstrapCrossBatchExpiresAt = Math.min(...routes.map(route => route.expiresAt));');
     expect(meshCommon).toContain(
       'const queuedEntityTxsFor = (env: RuntimeReplica, targetEntityId: string): EntityTx[] => {',
     );

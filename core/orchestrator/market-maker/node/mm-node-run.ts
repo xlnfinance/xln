@@ -1337,7 +1337,8 @@ type BootstrapProgressMonitorDeps = {
  *
  * A busy Runtime is not stalled merely because market depth is unchanged: its
  * accepted inputs may still be advancing toward a durable frame. Conversely,
- * unchanged health and Runtime checkpoints mean startup is truly stuck.
+ * unchanged causal checkpoints mean startup is truly stuck; health read detail
+ * is diagnostic only.
  */
 const createBootstrapProgressMonitor = (deps: BootstrapProgressMonitorDeps) => {
   let lastProgressAt = Date.now();
@@ -1350,7 +1351,7 @@ const createBootstrapProgressMonitor = (deps: BootstrapProgressMonitorDeps) => {
     health: MarketMakerHealth | null,
   ): ReturnType<typeof evaluateBootstrapProgressDeadline> => {
     const checkpoint = deps.checkpoint();
-    const signature = marketMakerBootstrapProgressSignature(health, checkpoint);
+    const signature = marketMakerBootstrapProgressSignature(checkpoint);
     const evaluation = evaluateBootstrapProgressDeadline(
       { signature: lastProgressSignature, lastProgressAt },
       signature,
@@ -1772,7 +1773,7 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
 type MarketMakerQuoteEngineState = {
   inFlight: boolean;
   steadyCrossCursor: number;
-  bootstrapCrossBatchSubmitted: boolean;
+  bootstrapCrossBatchExpiresAt: number | null;
 };
 
 type MarketMakerQuoteEngineDeps = {
@@ -1852,9 +1853,53 @@ type SelectedCrossQuoteInput = {
   shouldContinue: () => boolean;
 };
 
+export const submitMarketMakerBootstrapCrossQuotes = async (
+  input: Pick<SelectedCrossQuoteInput, 'state' | 'selected' | 'shouldContinue'> & { deps: Pick<MarketMakerQuoteEngineDeps, 'env'> },
+): Promise<boolean> => {
+  // The same generation is submitted once. A UTC expiry during bootstrap closes
+  // its old pulls normally; the next generation must still enter canonical admission.
+  if (
+    input.state.bootstrapCrossBatchExpiresAt !== null &&
+    input.deps.env.state.timestamp < input.state.bootstrapCrossBatchExpiresAt
+  ) return false;
+  const routesById = new Map<string, ReturnType<typeof planMarketMakerBootstrapCrossQuoteRoutes>[number]>();
+  for (const { job } of input.selected) {
+    const routes = planMarketMakerBootstrapCrossQuoteRoutes(
+      input.deps.env,
+      job.sourceContext,
+      job.targetContext,
+      job.sourceHubs,
+      job.targetHubs,
+      job.sourceTokenIds,
+      job.targetTokenIds,
+      input.shouldContinue,
+    );
+    for (const route of routes) {
+      const existing = routesById.get(route.orderId);
+      if (existing && existing.routeHash !== route.routeHash) {
+        throw new Error(`MARKET_MAKER_CROSS_BATCH_ROUTE_COLLISION:${route.orderId}`);
+      }
+      routesById.set(route.orderId, route);
+    }
+  }
+  const routes = [...routesById.values()].sort((left, right) =>
+    compareStableText(left.orderId, right.orderId));
+  if (routes.length === 0) return false;
+  const expiresAt = Math.min(...routes.map(route => {
+    if (route.expiresAt === undefined || !Number.isSafeInteger(route.expiresAt)) {
+      throw new Error(`MARKET_MAKER_CROSS_EXPIRY_INVALID:${route.orderId}:${String(route.expiresAt)}`);
+    }
+    return route.expiresAt;
+  }));
+  // One canonical cross-J RuntimeInput. Runtime keeps each target/source
+  // cohort adjacent and atomically promotes every cohort in this R-frame.
+  await submitCrossJurisdictionIntents(input.deps.env, routes);
+  input.state.bootstrapCrossBatchExpiresAt = expiresAt;
+  return true;
+};
+
 const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Promise<boolean> => {
   if (input.mode === 'bootstrap') {
-    if (input.state.bootstrapCrossBatchSubmitted) return false;
     // Connectivity must already be committed before quote planning. It is
     // separate setup state, so admit at most one connectivity batch and let
     // the next bootstrap pass re-read canonical Account state.
@@ -1877,34 +1922,7 @@ const maintainSelectedCrossQuotes = async (input: SelectedCrossQuoteInput): Prom
         input.connectivityBudget,
       )) return true;
     }
-    const routesById = new Map<string, ReturnType<typeof planMarketMakerBootstrapCrossQuoteRoutes>[number]>();
-    for (const { job } of input.selected) {
-      const routes = planMarketMakerBootstrapCrossQuoteRoutes(
-        input.deps.env,
-        job.sourceContext,
-        job.targetContext,
-        job.sourceHubs,
-        job.targetHubs,
-        job.sourceTokenIds,
-        job.targetTokenIds,
-        input.shouldContinue,
-      );
-      for (const route of routes) {
-        const existing = routesById.get(route.orderId);
-        if (existing && existing.routeHash !== route.routeHash) {
-          throw new Error(`MARKET_MAKER_CROSS_BATCH_ROUTE_COLLISION:${route.orderId}`);
-        }
-        routesById.set(route.orderId, route);
-      }
-    }
-    const routes = [...routesById.values()].sort((left, right) =>
-      compareStableText(left.orderId, right.orderId));
-    if (routes.length === 0) return false;
-    // One canonical cross-J RuntimeInput. Runtime keeps each target/source
-    // cohort adjacent and atomically promotes every cohort in this R-frame.
-    await submitCrossJurisdictionIntents(input.deps.env, routes);
-    input.state.bootstrapCrossBatchSubmitted = true;
-    return true;
+    return submitMarketMakerBootstrapCrossQuotes(input);
   }
   for (const { index, job } of input.selected) {
     await yieldMarketMakerApi();
@@ -2274,7 +2292,7 @@ const createMarketMakerQuoteLifecycle = (
   const quoteEngineState: MarketMakerQuoteEngineState = {
     inFlight: false,
     steadyCrossCursor: 0,
-    bootstrapCrossBatchSubmitted: false,
+    bootstrapCrossBatchExpiresAt: null,
   };
   const quoteEngineDeps: MarketMakerQuoteEngineDeps = {
     env,

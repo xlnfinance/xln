@@ -68,6 +68,9 @@ import {
 } from '../routed-swap-planner';
 import {
   buildClosedOrderViews,
+  observeSwapCompletion,
+  hasCompleteSwapCompletion,
+  type LiveSwapCompletion,
   buildOfferPriceImprovementByKey,
   buildTotalPriceImprovementSummary,
   closedOrderStatusLabel,
@@ -159,6 +162,7 @@ let lastAutoAmountContextSignature = '';
 let lastAutoAmountCapacity = -1n;
 let submitError = '';
 let pendingSwapFeedbackOfferId = '';
+let pendingSwapFeedback: { entityId: string; lifecycle: LiveSwapCompletion } | null = null;
 let swapCompletionModal: SwapCompletionModal | null = null;
 let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
 let hasAutoSuggestedInitialPrice = false;
@@ -2379,7 +2383,22 @@ $: totalPriceImprovementSummary = buildTotalPriceImprovementSummary(offerLifecyc
   tokenSymbol,
 });
 $: if (pendingSwapFeedbackOfferId) {
-  const closed = closedOrderViews.find((order) => order.offerId === pendingSwapFeedbackOfferId);
+  if (pendingSwapFeedback && pendingSwapFeedback.entityId === sourceEntityIdValue) {
+    const account = currentReplica?.state.accounts.get(pendingSwapFeedback.lifecycle.accountId);
+    if (account) pendingSwapFeedback = {
+      ...pendingSwapFeedback,
+      lifecycle: observeSwapCompletion(
+        pendingSwapFeedback.lifecycle, account.currentFrame,
+        !account.state.swapOffers.has(pendingSwapFeedbackOfferId),
+      ),
+    };
+  }
+  const observedClosed = pendingSwapFeedback?.lifecycle.closed && hasCompleteSwapCompletion(pendingSwapFeedback.lifecycle)
+    ? buildClosedOrderViews([pendingSwapFeedback.lifecycle], {
+        ...orderHistoryDeps(), tokenSymbol, filledDisplayPpmThreshold: FILLED_DISPLAY_PPM_THRESHOLD,
+      })
+    : [];
+  const closed = [...closedOrderViews, ...observedClosed].find((order) => order.offerId === pendingSwapFeedbackOfferId);
   if (closed) {
     const stpBlockingOrderId = extractStpBlockingOrderId(closed.closeComment);
     if (closed.status === 'filled' && closed.filledPercent >= 99.99) {
@@ -2424,6 +2443,11 @@ $: if (pendingSwapFeedbackOfferId) {
       }
     }
     pendingSwapFeedbackOfferId = '';
+    pendingSwapFeedback = null;
+  } else if (pendingSwapFeedback?.lifecycle.closed && !pendingSwapFeedback.lifecycle.complete) {
+    toasts.info('Order closed. Open Closed orders for exact execution and fees.');
+    pendingSwapFeedbackOfferId = '';
+    pendingSwapFeedback = null;
   }
 }
 async function placeSwapOffer() {
@@ -2584,6 +2608,18 @@ async function placeSwapOffer() {
     effectiveWantAmount = commandPlan.preparedOrder.effectiveWant;
     canonicalPriceTicks = commandPlan.preparedOrder.priceTicks;
     const crossJurisdiction = commandPlan.crossJurisdictionIntent;
+    pendingSwapFeedback = commandPlan.mode === 'same'
+      ? { entityId: sourceEntityId, lifecycle: {
+          key: offerLifecycleKey(resolvedCounterparty, offerId), offerId, accountId: resolvedCounterparty,
+          giveTokenId: giveToken, wantTokenId: wantToken,
+          giveAmount: effectiveGiveAmount, wantAmount: effectiveWantAmount, priceTicks: canonicalPriceTicks,
+          createdAt: logicalNow, lastUpdatedAt: logicalNow,
+          closed: false, resolves: [], cancelRequested: false,
+          observedHeight: committedSourceReplica.state.accounts.get(resolvedCounterparty)!.currentHeight,
+          complete: true, seenOpen: false,
+        } }
+      : null;
+    pendingSwapFeedbackOfferId = offerId;
     if (commandPlan.mode === 'cross') {
       if (!targetRoute) throw new Error('SWAP_COMMAND_TARGET_REQUIRED');
       const crossSubmitStartedAt = performance.now();
@@ -2623,7 +2659,6 @@ async function placeSwapOffer() {
       await submitRuntimeInput(commandPlan.runtimeInput);
     }
     orderbookRefreshNonce += 1;
-    pendingSwapFeedbackOfferId = offerId;
     if (crossJurisdiction) {
       toasts.success('Cross-j swap preparation submitted');
     }
@@ -2631,6 +2666,8 @@ async function placeSwapOffer() {
     setOrderAmountInputValue('');
     priceRatioInput = '';
   } catch (error) {
+    pendingSwapFeedbackOfferId = '';
+    pendingSwapFeedback = null;
     logSwapDiagnostic('Swap offer placement failed', error);
     submitError = `Failed to place swap: ${toErrorMessage(error)}`;
   } finally {

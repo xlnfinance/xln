@@ -596,8 +596,9 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
 
 const getConnectedMarketHubEntityIds = (): string[] => listConnectedMarketHubEntityIds(hubChildren);
 
-const getHealthyHubChild = (): HubChild | null =>
+const getHealthyHubChild = (requiredEngine?: HubChild['engine']): HubChild | null =>
   hubChildren.find((candidate) =>
+    (requiredEngine === undefined || candidate.engine === requiredEngine) &&
     candidate.proc?.exitCode === null &&
     candidate.proc?.signalCode === null &&
     candidate.lastHealth &&

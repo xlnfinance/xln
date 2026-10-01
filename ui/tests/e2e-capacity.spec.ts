@@ -208,7 +208,9 @@ test(
     await expect(page.getByTestId('move-to-account')).toHaveClass(/active/);
     await expect(page.getByTestId('move-from-reserve')).toHaveClass(/active/);
     await expect(page.getByTestId('move-target-hub')).toHaveValue(hubId);
-    await expect(page.getByTestId('move-amount')).toHaveValue('25.000025');
+    // The recipient is this Account's hub: there is no intermediary to earn
+    // a routing fee. Fund exactly the principal, then verify its live quote.
+    await expect(page.getByTestId('move-amount')).toHaveValue('25');
     await expect(page.getByTestId('move-now')).toBeEnabled({ timeout: 10_000 });
     await page.getByTestId('move-draft').click();
     await expect(page.getByTestId('pending-batch')).toHaveAttribute('data-mode', 'draft');
@@ -223,6 +225,9 @@ test(
     await expect(page.getByTestId('pay-amount')).toHaveValue(String(payAmount));
     await expect(page.getByPlaceholder('What is this for?')).toHaveValue('saved payment after top-up');
     await expect(page.getByTestId('pay-submit')).toBeEnabled({ timeout: 10_000 });
+    await expect(page.getByTestId('pay-quote')).toHaveAttribute('data-sender-amount', '25000000');
+    await expect(page.getByTestId('pay-quote')).toHaveAttribute('data-recipient-amount', '25000000');
+    await expect(page.getByTestId('pay-quote')).toHaveAttribute('data-fee-amount', '0');
     await expect(page.getByTestId('payment-receipt')).toHaveCount(0);
     await expect
       .poll(
@@ -242,9 +247,9 @@ test(
         { timeout: 15_000 },
       )
       .toEqual({
-        reserve: (BigInt(beforeFunding.reserve) - 25_000_025n).toString(),
-        collateral: (BigInt(beforeFunding.collateral) + 25_000_025n).toString(),
-        ownValue: (BigInt(beforeFunding.ownValue) + 25_000_025n).toString(),
+        reserve: (BigInt(beforeFunding.reserve) - 25_000_000n).toString(),
+        collateral: (BigInt(beforeFunding.collateral) + 25_000_000n).toString(),
+        ownValue: (BigInt(beforeFunding.ownValue) + 25_000_000n).toString(),
         pending: false,
         mempool: 0,
         locks: 0,

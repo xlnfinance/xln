@@ -1138,7 +1138,14 @@ textarea.input.boxed {
 	}
 }
 
+.sheet::backdrop { background: var(--scrim); }
+
 .sheet {
+	width: auto;
+	max-width: none;
+	margin: 0;
+	padding: 0;
+	color: inherit;
 	position: fixed;
 	z-index: 61;
 	background: var(--surface);

@@ -105,7 +105,7 @@ fn validate_limits(batch: &JBatch) -> Result<(), JSubmitError> {
         return Err(JSubmitError::Batch("operation-limit"));
     }
     if batch.settlements.len() > 32
-        || batch.dispute_starts.len() > 8
+        || batch.dispute_starts.len() > super::MAX_DISPUTE_STARTS
         || batch.counter_disputes.len() > 8
         || batch.dispute_finalizations.len() > 1
         || batch.reveal_secrets.len() > 32

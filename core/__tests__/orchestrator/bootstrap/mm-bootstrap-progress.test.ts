@@ -86,13 +86,7 @@ test('ready snapshot advances only at a newer finalized runtime height', () => {
     .toThrow('MARKET_MAKER_READY_SNAPSHOT_STORAGE_POSITION_MISMATCH');
 });
 
-test('background runtime bookkeeping neither blocks quotes nor fakes semantic progress', () => {
-  const health = {
-    hubs: [{ hubEntityId: 'hub-1', offers: 60, depthReady: true, blockers: [] }],
-    cross: { expectedRoutes: 6, routes: [] },
-  };
-  const signature = marketMakerBootstrapProgressSignature(health);
-
+test('background runtime bookkeeping does not block quote production', () => {
   for (const runtimeTxs of [0, 2, 4]) {
     expect(runtimeBacklogBlocksMarketMakerQuotes({
       processing: runtimeTxs !== 0,
@@ -101,21 +95,16 @@ test('background runtime bookkeeping neither blocks quotes nor fakes semantic pr
       inFlightEntityInputs: 0,
       jInputs: 0,
     })).toBe(false);
-    expect(marketMakerBootstrapProgressSignature(health)).toBe(signature);
   }
 });
 
 test('durable frontier movement is semantic bootstrap progress before book depth changes', () => {
-  const health = {
-    hubs: [{ hubEntityId: 'hub-1', offers: 60, depthReady: true, blockers: [] }],
-    cross: { expectedRoutes: 6, routes: [] },
-  };
-  const before = marketMakerBootstrapProgressSignature(health, {
+  const before = marketMakerBootstrapProgressSignature({
     pendingReliable: [{ lane: 'generic', sequence: 1n }],
     terminalReceipts: [],
     consumptionRoots: ['0xroot-1'],
   });
-  const after = marketMakerBootstrapProgressSignature(health, {
+  const after = marketMakerBootstrapProgressSignature({
     pendingReliable: [],
     terminalReceipts: [{ lane: 'generic', sequence: 1n }],
     consumptionRoots: ['0xroot-2'],
@@ -124,30 +113,31 @@ test('durable frontier movement is semantic bootstrap progress before book depth
   expect(after).not.toBe(before);
 });
 
-test('market-maker health collection order does not fabricate progress', () => {
-  const hub = (hubEntityId: string) => ({
-    hubEntityId,
-    offers: 60,
-    depthReady: true,
-    blockers: [],
-  });
-  const route = (sourceHubEntityId: string, targetHubEntityId: string) => ({
-    sourceHubEntityId,
-    targetHubEntityId,
-    offers: 20,
-    depthReady: true,
-    blockers: [],
-  });
-  const before = marketMakerBootstrapProgressSignature({
-    hubs: [hub('h2'), hub('h1')],
-    cross: { expectedRoutes: 2, routes: [route('h2', 'h1'), route('h1', 'h2')] },
-  });
-  const after = marketMakerBootstrapProgressSignature({
-    hubs: [hub('h1'), hub('h2')],
-    cross: { expectedRoutes: 2, routes: [route('h1', 'h2'), route('h2', 'h1')] },
-  });
-
-  expect(after).toBe(before);
+test('alternating cheap and full cross health cannot renew a stalled bootstrap deadline', () => {
+  const checkpoint = { entities: [{ entityId: 'mm', accounts: [{ currentHeight: 48 }] }] };
+  const cheap = { cross: { expectedRoutes: 1, routes: [] } };
+  const full = { cross: { expectedRoutes: 1, routes: [{
+    sourceHubEntityId: 'h1', targetHubEntityId: 'h2', offers: 0,
+    depthReady: false, blockers: ['missing-depth'],
+  }] } };
+  let previous = { signature: marketMakerBootstrapProgressSignature(checkpoint), lastProgressAt: 0 };
+  for (const [index, observation] of [full, cheap, full, cheap]
+    .map(health => ({ health, checkpoint })).entries()) {
+    const evaluation = evaluateBootstrapProgressDeadline(
+      previous, marketMakerBootstrapProgressSignature(observation.checkpoint), (index + 1) * 15_000, 60_000,
+    );
+    expect(evaluation.progressed).toBe(false);
+    expect(evaluation.idleMs).toBe((index + 1) * 15_000);
+    expect(evaluation.stalled).toBe(index === 3);
+    previous = evaluation;
+  }
+  const advanced = { entities: [{ entityId: 'mm', accounts: [{ currentHeight: 49 }] }] };
+  const progress = evaluateBootstrapProgressDeadline(
+    previous, marketMakerBootstrapProgressSignature(advanced), 61_000, 60_000,
+  );
+  expect(progress.progressed).toBe(true);
+  expect(progress.idleMs).toBe(0);
+  expect(progress.stalled).toBe(false);
 });
 
 test('queued entity inputs retain quote backpressure until the prior quote batch is admitted', () => {

@@ -1,16 +1,13 @@
+import { readMarketRoutes } from './cross-market';
 import { expect, test, type Page } from '@playwright/test';
 import { formatUnits, JsonRpcProvider, parseUnits, ZeroHash } from 'ethers';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { RuntimeAdapterViewFrame, RuntimeReplica, XLNModule } from '../../core/api/public/runtime-module';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
-import { RemoteRuntimeAdapter } from '../../core/api/runtime-adapter/remote';
 import { getCrossJurisdictionRouteRemainingAmounts } from '../../core/extensions/cross-j/orderbook';
 import { requantizeRemainingSwapAtPriceForDimensions } from '../../core/orderbook';
 import { computeAccountKey } from '../../core/jurisdiction/adapter/events/contract-codec';
 import { safeStringify } from '../../core/protocol/serialization';
-import { decodeRuntimeManifestEntries } from '../../core/scripts/operations/hlt/boundary/worker-boundary';
-import { decodeCommittedCrossRoutes, selectMarketMakerCrossRoutes } from '../../core/scripts/operations/hlt/cross/cross-boundary';
+import { selectMarketMakerCrossRoutes } from '../../core/scripts/operations/hlt/cross/cross-boundary';
 import { LOCAL_TEST_STACK_BASES } from '../../core/scripts/e2e/harness/local-test-port-lease';
 import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository.sol/Depository__factory';
 import { enterStack, readWalletCheckpoint, reopenStack } from './stack';
@@ -115,20 +112,12 @@ async function moveReserve(page: Page, hub: string, amount: bigint) {
   await expect(page.getByTestId('home-total')).toBeVisible(WAIT);
 }
 async function oppositeQuote(label: string, sourceHub: string, targetHub: string, decimals: number) {
-  const root = process.env['XLN_RDB_ROOT'];
-  if (!root) throw new Error('Journey market manifest unavailable');
-  const entry = decodeRuntimeManifestEntries(JSON.parse(readFileSync(join(root, 'prod-mesh/runtime-import-manifest.json'), 'utf8'))).find(row => row.label === label);
-  if (!entry) throw new Error('Journey market maker unavailable');
-  const adapter = new RemoteRuntimeAdapter();
-  try {
-    await adapter.connect({ mode: 'remote', wsUrl: entry.wsUrl, authKey: entry.token, requestTimeoutMs: 5000 });
-    const routes = decodeCommittedCrossRoutes(await adapter.read<unknown>(`entity/${targetHub}`));
-    const maker = selectMarketMakerCrossRoutes(routes, targetHub, sourceHub).find(route => route.status === 'resting' && route.target.tokenId === 1 && route.source.tokenId === 3 && getCrossJurisdictionRouteRemainingAmounts(route).targetRemaining > 20_000_000n);
-    if (!maker || maker.priceTicks === undefined) throw new Error('Journey executable cross USDC/USDT quote unavailable');
-    const take = requantizeRemainingSwapAtPriceForDimensions(1, 3, 20_000_000n, maker.priceTicks, { giveTokenDecimals: 6, wantTokenDecimals: decimals });
-    if (!take || take.effectiveGive <= 0n || take.effectiveWant <= 0n || take.effectiveWant >= getCrossJurisdictionRouteRemainingAmounts(maker).sourceRemaining) throw new Error('Journey cross quote has insufficient liquidity');
-    return take;
-  } finally { adapter.disconnect(); }
+  const routes = await readMarketRoutes(targetHub, label);
+  const maker = selectMarketMakerCrossRoutes(routes, targetHub, sourceHub).find(route => route.status === 'resting' && route.target.tokenId === 1 && route.source.tokenId === 3 && getCrossJurisdictionRouteRemainingAmounts(route).targetRemaining > 20_000_000n);
+  if (!maker || maker.priceTicks === undefined) throw new Error('Journey executable cross USDC/USDT quote unavailable');
+  const take = requantizeRemainingSwapAtPriceForDimensions(1, 3, 20_000_000n, maker.priceTicks, { giveTokenDecimals: 6, wantTokenDecimals: decimals });
+  if (!take || take.effectiveGive <= 0n || take.effectiveWant <= 0n || take.effectiveWant >= getCrossJurisdictionRouteRemainingAmounts(maker).sourceRemaining) throw new Error('Journey cross quote has insufficient liquidity');
+  return take;
 }
 
 // Same private-chain requirement as the dispute finality test, plus the

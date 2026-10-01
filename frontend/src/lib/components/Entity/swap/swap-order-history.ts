@@ -1,6 +1,6 @@
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './../token-metadata';
-import type { SwapBookEntry } from '@xln/core/api/public/runtime-module';
+import type { AccountFrame, SwapBookEntry } from '@xln/core/api/public/runtime-module';
 import { toBigIntSafe } from './../swap-formatting';
 import { requireExactKeys as requireExactKeysWithOptional, requireUnknownRecord as requireRecord } from '$lib/utils/boundary';
 
@@ -34,6 +34,64 @@ export type OfferLifecycle = {
   resolves: ResolveRecord[];
   cancelRequested: boolean;
 };
+
+export type LiveSwapCompletion = OfferLifecycle & {
+  observedHeight: number;
+  complete: boolean;
+  seenOpen: boolean;
+};
+
+/** Observe the submitted order's committed frame, never a mempool/proposal or history scan. */
+export function observeSwapCompletion(
+  lifecycle: LiveSwapCompletion,
+  frame: AccountFrame,
+  closed: boolean,
+): LiveSwapCompletion {
+  if (frame.height <= lifecycle.observedHeight) return lifecycle;
+  const resolves: ResolveRecord[] = frame.accountTxs.flatMap((tx) => {
+    if (tx.type !== 'swap_resolve' || tx.data.offerId !== lifecycle.offerId) return [];
+    return [{
+      fillRatio: tx.data.fillRatio,
+      fillNumerator: tx.data.fillNumerator ?? null,
+      fillDenominator: tx.data.fillDenominator ?? null,
+      cancelRemainder: tx.data.cancelRemainder,
+      height: frame.height,
+      executionGiveAmount: tx.data.executionGiveAmount ?? null,
+      executionWantAmount: tx.data.executionWantAmount ?? null,
+      feeTokenId: tx.data.feeTokenId ?? null,
+      feeAmount: tx.data.feeAmount ?? null,
+      comment: tx.data.comment ?? '',
+    }];
+  });
+  return {
+    ...lifecycle,
+    // The projection contains at most 20 trailing transactions. At the cap,
+    // completeness is unknowable even when consecutive heights were observed.
+    complete: lifecycle.complete && frame.height === lifecycle.observedHeight + 1 && frame.accountTxs.length < 20,
+    observedHeight: frame.height,
+    seenOpen: lifecycle.seenOpen || !closed,
+    closed: closed && (lifecycle.seenOpen || resolves.length > 0),
+    lastUpdatedAt: frame.timestamp,
+    resolves: [...lifecycle.resolves, ...resolves],
+  };
+}
+
+/** Exact give inventory exhaustion proves all positive fills even if unrelated frames were coalesced. */
+export function hasCompleteSwapCompletion(lifecycle: LiveSwapCompletion): boolean {
+  if (lifecycle.complete) return true;
+  if (!lifecycle.closed) return false;
+  const target = lifecycle.giveAmount;
+  let executed = 0n;
+  for (const resolve of lifecycle.resolves) {
+    if (resolve.fillRatio === 0) continue;
+    if (resolve.executionGiveAmount === null || resolve.executionWantAmount === null) return false;
+    if (resolve.executionGiveAmount <= 0n || resolve.executionWantAmount <= 0n) return false;
+    executed += resolve.executionGiveAmount;
+  }
+  // Equality is exact: a display threshold or fillRatio on the remaining
+  // order cannot rule out an omitted earlier fill (and its fee).
+  return target > 0n && executed === target;
+}
 
 export type ClosedOrderView = {
   offerId: string;

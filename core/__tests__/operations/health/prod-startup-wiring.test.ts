@@ -1098,7 +1098,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (state.phase === previousPhase) return;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(mmNode).toContain("state.phase = 'bootstrap-cross';");
-    expect(mmNode).toContain('input.state.bootstrapCrossBatchSubmitted = true;');
+    expect(mmNode).toContain('input.state.bootstrapCrossBatchExpiresAt = Math.min(...routes.map(route => route.expiresAt));');
     expect(mmNode).not.toContain('bootstrapCrossCursor');
     expect(mmNode).toContain("if (mode === 'steady') state.steadyCrossCursor = selection.nextCursor;");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');

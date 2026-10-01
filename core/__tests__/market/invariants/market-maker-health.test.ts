@@ -25,6 +25,7 @@ import {
   type MarketMakerHealth,
   type MarketMakerTokenIdsByContext,
 } from '../../../orchestrator/mm-node';
+import { submitMarketMakerBootstrapCrossQuotes } from '../../../orchestrator/market-maker/node/mm-node-run';
 import { MARKET_MAKER_LEVELS_PER_SIDE } from '../../../orchestrator/market-maker/node/mm-node-core';
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../../../orchestrator/mesh/mesh-common';
 import { createEmptyEnv } from '../../../runtime';
@@ -39,7 +40,7 @@ import {
 } from '../../../account/state/persistent-state-map';
 import { PersistentEntityCollectionMap } from '../../../entity/state/persistent-collection-map';
 import { LIMITS } from '../../../config/constants';
-import { makeAccount as makeCanonicalAccount } from '../../helpers/cross-j';
+import { makeAccount as makeCanonicalAccount, registerTestSigner } from '../../helpers/cross-j';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -212,13 +213,14 @@ test('market snapshots expose order counts for aggregated price levels', () => {
 
   const snapshot = buildMarketSnapshotForReplica({
     state: {
-      orderbookExt: { books: new Map([['cross:a/b', book]]) },
+      orderbookExt: { books: new Map([['cross:a/b', book]]), hubProfile: { minTradeSize: HUB_DEFAULT_MIN_TRADE_SIZE } },
       config: { jurisdiction: { chainId: 31337, depositoryAddress: addr('aa') } },
       height: 3,
       timestamp: 100,
     },
   } as any, `0x${'a'.repeat(64)}`, 'cross:a/b', 20);
 
+  expect(snapshot.minTradeSize).toBe(HUB_DEFAULT_MIN_TRADE_SIZE.toString());
   expect(snapshot.asks).toHaveLength(1);
   expect(snapshot.asks[0]).toMatchObject({ price: '4', size: '25', total: '25', orderCount: 2 });
 });
@@ -1018,4 +1020,56 @@ test('market maker bootstrap fingerprint is stable across repeated and shuffled 
   expect(renamed.hash).toBe(first.hash);
   expect(withPairShard.hash).toMatch(/^[0-9a-f]{64}$/);
   expect(withPairShard.hash).not.toBe(first.hash);
+});
+
+
+test('bootstrap cross quotes enqueue exactly once again after the submitted UTC generation expires', async () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  env.infrastructure.lifecyclePhase = 'running';
+  env.scenarioMode = true;
+  const [sourceContext, targetContext] = contexts;
+  const [sourceHub, targetHub] = visibleHubs;
+  for (const [index, context] of contexts.entries()) {
+    context.signerId = registerTestSigner(env, 'mm-bootstrap-midnight', String(index + 1));
+    env.infrastructure.verifiedProfileRoutes!.get(context.entityId)!.runtimeSignerId = context.signerId;
+  }
+  addReplica(env, sourceContext!.entityId, sourceContext!.signerId,
+    new Map([[sourceHub!.entityId, makeAccount(sourceContext!.entityId, sourceHub!.entityId)]]));
+  addReplica(env, targetContext!.entityId, targetContext!.signerId,
+    new Map([[targetHub!.entityId, makeAccount(targetContext!.entityId, targetHub!.entityId)]]));
+  const state = { inFlight: false, steadyCrossCursor: 0, bootstrapCrossBatchExpiresAt: null as number | null };
+  const input = {
+    deps: { env }, state, shouldContinue: () => true,
+    selected: [{ index: 0, job: {
+      sourceContext: sourceContext!, targetContext: targetContext!,
+      sourceHubs: [sourceHub!], targetHubs: [targetHub!], sourceTokenIds: [1], targetTokenIds: [1],
+    } }],
+  };
+  const midnight = Date.UTC(2026, 9, 1);
+  env.state.timestamp = midnight - 4_000;
+  expect(await submitMarketMakerBootstrapCrossQuotes(input)).toBe(true);
+  const oldInputs = structuredClone(env.runtimeMempool!.entityInputs);
+  expect(oldInputs).toHaveLength(2);
+  const oldRoutes = oldInputs[0]!.entityTxs!.map(tx => (tx.data as { route: { orderId: string; expiresAt: number } }).route);
+  expect(oldRoutes.length).toBeGreaterThan(0);
+  expect(oldRoutes.every(route => route.expiresAt === midnight)).toBe(true);
+  expect(state.bootstrapCrossBatchExpiresAt).toBe(midnight);
+  expect(await submitMarketMakerBootstrapCrossQuotes(input)).toBe(false);
+  expect(env.runtimeMempool!.entityInputs).toEqual(oldInputs);
+  // The production caller waits for canonical Account expiry/ACK quiescence.
+  // Start the next producer pass with that drained ingress and closed-pull state.
+  env.runtimeMempool!.entityInputs = [];
+  env.state.timestamp = midnight - 1;
+  expect(await submitMarketMakerBootstrapCrossQuotes(input)).toBe(false);
+  expect(env.runtimeMempool!.entityInputs).toHaveLength(0);
+  env.state.timestamp = midnight;
+  expect(await submitMarketMakerBootstrapCrossQuotes(input)).toBe(true);
+  const nextInputs = structuredClone(env.runtimeMempool!.entityInputs);
+  expect(nextInputs).toHaveLength(2);
+  const nextRoutes = nextInputs[0]!.entityTxs!.map(tx => (tx.data as { route: { orderId: string; expiresAt: number } }).route);
+  expect(nextRoutes).toHaveLength(oldRoutes.length);
+  expect(nextRoutes.every(route => route.expiresAt === midnight + 86_400_000)).toBe(true);
+  expect(nextRoutes.every(route => !oldRoutes.some(old => old.orderId === route.orderId))).toBe(true);
+  expect(await submitMarketMakerBootstrapCrossQuotes(input)).toBe(false);
+  expect(env.runtimeMempool!.entityInputs).toEqual(nextInputs);
 });

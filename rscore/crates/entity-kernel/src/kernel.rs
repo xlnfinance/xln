@@ -3,9 +3,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use num_bigint::BigInt;
-use xln_rscore_engine::{
-    AccountOutput, AccountTx, HtlcResolveOutcome, HtlcResolveTx, SwapOfferSnapshot, TokenId,
-};
+use xln_rscore_engine::{AccountOutput, AccountTx, HtlcResolveOutcome, SwapOfferSnapshot, TokenId};
 use xln_rscore_protocol::CanonicalValue;
 
 use crate::commitment::compute_commitments;
@@ -21,12 +19,12 @@ use crate::paybook::{
 };
 use crate::types::{AccountProposalWork, TargetedAccountTx};
 use crate::{
-    CanonicalEntityTx, DeterministicContext, EntityFrameEvent, EntityKernelError,
-    EntityKernelOutput, EntityKernelResult, EntityStateSlice, EntityTxKind, JurisdictionScope,
-    OrderedAccountCommit, SchedulerCommand,
+    DeterministicContext, EntityFrameEvent, EntityKernelError, EntityKernelOutput,
+    EntityKernelResult, EntityStateSlice, JurisdictionScope, OrderedAccountCommit,
+    SchedulerCommand,
 };
 use crate::{
-    LocalEntityOutput, LocalEntityOutputTx, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
+    LocalEntityOutput, LocalEntityTx, apply_cross_jurisdiction_entity_txs,
     apply_local_entity_control_tx, authorize_runtime_output,
 };
 
@@ -714,9 +712,8 @@ fn group_proposal_work(account_txs: Vec<TargetedAccountTx>) -> Vec<AccountPropos
     grouped
 }
 
-/// Emission order is the `commands` order, not the order of the arms below:
-/// `execute_crontab` builds the list in TypeScript's execution order (expired
-/// HTLC locks before overdue lending). Change it there, with its test.
+/// Nested collective Account admissions already precede this wake-owned
+/// lending work, matching TypeScript applyRegularEntityTx ordering.
 fn append_scheduled_account_txs(
     state: &mut EntityStateSlice,
     commands: &[SchedulerCommand],
@@ -727,92 +724,13 @@ fn append_scheduled_account_txs(
             SchedulerCommand::SettleOverdueLending { loans } => {
                 crate::lending::settle_overdue_lending_loans(state, loans, account_txs)?;
             }
-            SchedulerCommand::ProcessHtlcTimeouts { expired_locks } => {
-                account_txs.extend(expired_locks.iter().map(|(account_id, lock_id)| {
-                    (
-                        account_id.clone(),
-                        AccountTx::HtlcResolve(HtlcResolveTx {
-                            lock_id: lock_id.clone(),
-                            outcome: HtlcResolveOutcome::Error {
-                                reason: Some("timeout".to_string()),
-                            },
-                        }),
-                    )
-                }));
-            }
-            SchedulerCommand::AutoFinalizeDispute { .. }
+            SchedulerCommand::ProcessHtlcTimeouts { .. }
+            | SchedulerCommand::PrepareDisputes { .. }
+            | SchedulerCommand::AutoFinalizeDispute { .. }
             | SchedulerCommand::BroadcastQueuedDisputeFinalization
             | SchedulerCommand::CrossJOrderbookSweep { .. }
             | SchedulerCommand::HubRebalance => {}
         }
-    }
-    Ok(())
-}
-
-fn append_scheduled_entity_outputs(
-    state: &EntityStateSlice,
-    commands: &[SchedulerCommand],
-    outputs: &mut Vec<LocalEntityOutput>,
-) -> Result<(), EntityKernelError> {
-    let mut entity_txs = Vec::new();
-    let mut broadcast = false;
-    for command in commands {
-        match command {
-            SchedulerCommand::AutoFinalizeDispute {
-                counterparty_entity_id,
-            } => {
-                entity_txs.push(LocalEntityOutputTx::Projected(
-                    CanonicalEntityTx::from_frame_projection(
-                        EntityTxKind::DisputeFinalize,
-                        CanonicalValue::Object(vec![
-                            (
-                                "counterpartyEntityId".into(),
-                                CanonicalValue::String(counterparty_entity_id.clone()),
-                            ),
-                            (
-                                "description".into(),
-                                CanonicalValue::String("auto-finalize-after-timeout".into()),
-                            ),
-                            ("useOnchainRegistry".into(), CanonicalValue::Bool(true)),
-                        ]),
-                    )
-                    .map_err(|error| {
-                        EntityKernelError::local("scheduledWake", error.to_string())
-                    })?,
-                ));
-                broadcast = true;
-            }
-            SchedulerCommand::BroadcastQueuedDisputeFinalization => broadcast = true,
-            // Resident admission already applied the cross-j collective action
-            // in this frame, before dispatching the canonical Book jobs.
-            SchedulerCommand::ProcessHtlcTimeouts { .. }
-            | SchedulerCommand::SettleOverdueLending { .. }
-            | SchedulerCommand::CrossJOrderbookSweep { .. }
-            | SchedulerCommand::HubRebalance => {}
-        }
-    }
-    if broadcast
-        && !outputs.iter().any(|output| {
-            output.entity_id.eq_ignore_ascii_case(&state.entity_id)
-                && output.entity_txs.iter().any(|tx| {
-                    matches!(tx, LocalEntityOutputTx::Projected(tx) if tx.kind == EntityTxKind::JBroadcast)
-                })
-        })
-    {
-        entity_txs.push(LocalEntityOutputTx::Projected(
-            CanonicalEntityTx::from_frame_projection(
-                EntityTxKind::JBroadcast,
-                CanonicalValue::Object(Vec::new()),
-            )
-            .map_err(|error| EntityKernelError::local("scheduledWake", error.to_string()))?,
-        ));
-    }
-    if !entity_txs.is_empty() {
-        outputs.push(LocalEntityOutput {
-            entity_id: state.entity_id.clone(),
-            target_signer_id: None,
-            entity_txs,
-        });
     }
     Ok(())
 }
@@ -1257,11 +1175,6 @@ pub(crate) fn finish_orderbook_stage(
         }
     }
     append_scheduled_account_txs(&mut result.state, scheduled_commands, &mut account_txs)?;
-    append_scheduled_entity_outputs(
-        &result.state,
-        scheduled_commands,
-        &mut result.routed_entity_outputs,
-    )?;
     for appended in group_proposal_work(account_txs) {
         if let Some(existing) = result
             .proposal_work

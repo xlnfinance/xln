@@ -28,6 +28,10 @@ pub enum CrossJurisdictionStateResponse {
 }
 
 pub enum RuntimeHttpCommand {
+    LendingState {
+        query: crate::lending_http::LendingStateQuery,
+        response: SyncSender<Result<Option<Value>, String>>,
+    },
     CrossJurisdictionState {
         entity_id: [u8; 32],
         response: SyncSender<Result<CrossJurisdictionStateResponse, String>>,
@@ -518,6 +522,40 @@ fn serve(stream: &mut TcpStream, state: &RuntimeHttpState) -> Result<(), String>
                 .map_err(|_| "RRS_RUNTIME_HTTP_COMMAND_SEND".to_string())?;
             command_response(stream, result)
         }
+        ("GET", "/api/lending/state") => {
+            let query = match crate::lending_http::LendingStateQuery::parse(target) {
+                Ok(query) => query,
+                Err(error) => {
+                    return response(stream, 400, &json!({"success":false,"error":error}));
+                }
+            };
+            let hub = query.hub_entity_id_text.clone();
+            let commands = state
+                .commands
+                .as_ref()
+                .ok_or_else(|| "RRS_RUNTIME_HTTP_COMMANDS_UNAVAILABLE".to_string())?;
+            let (reply, result) = sync_channel(1);
+            commands
+                .send(RuntimeHttpCommand::LendingState {
+                    query,
+                    response: reply,
+                })
+                .map_err(|_| "RRS_RUNTIME_HTTP_COMMAND_SEND".to_string())?;
+            match result.recv_timeout(Duration::from_secs(2)) {
+                Ok(Ok(Some(value))) => response(stream, 200, &value),
+                Ok(Ok(None)) => response(
+                    stream,
+                    404,
+                    &json!({"success":false,"error":"Requested hub is not available","hubEntityId":hub}),
+                ),
+                Ok(Err(error)) => response(stream, 503, &json!({"success":false,"error":error})),
+                Err(_) => response(
+                    stream,
+                    503,
+                    &json!({"success":false,"error":"query timeout"}),
+                ),
+            }
+        }
         ("GET", "/api/tokens") => {
             let commands = state
                 .commands
@@ -934,6 +972,49 @@ mod tests {
         assert!(status.starts_with("HTTP/1.1 200"), "{status}");
         assert!(status.contains("\"success\":true"), "{status}");
         worker.join().expect("status worker");
+    }
+
+    #[test]
+    fn lending_http_routes_query_and_rejects_malformed_filters() {
+        let (sender, receiver) = runtime_http_command_channel();
+        let state =
+            RuntimeHttpState::with_commands(json!({"info":{},"health":{},"metrics":{}}), sender)
+                .unwrap();
+        let worker = std::thread::spawn(move || {
+            let RuntimeHttpCommand::LendingState { query, response } = receiver.recv().unwrap()
+            else {
+                panic!("lending command");
+            };
+            assert_eq!(query.hub_entity_id, [0x11; 32]);
+            assert_eq!(query.token_id, Some(1.0));
+            response
+                .send(crate::lending_http::lending_state_response(None, &query).map(Some))
+                .unwrap();
+            let RuntimeHttpCommand::LendingState { response, .. } = receiver.recv().unwrap() else {
+                panic!("lending command");
+            };
+            response.send(Ok(None)).unwrap();
+        });
+        let server = RuntimeHttpServer::bind("127.0.0.1:0".parse().unwrap(), state).unwrap();
+        let get = |query: &str| {
+            request(
+                server.local_address(),
+                &format!("GET /api/lending/state?{query} HTTP/1.1\r\nhost: local\r\n\r\n"),
+            )
+        };
+        let hub = format!("hubEntityId=0x{}", "11".repeat(32));
+        let invalid = get(&format!("{hub}&tokenId=bad"));
+        assert!(invalid.starts_with("HTTP/1.1 400"), "{invalid}");
+        let valid = get(&format!("{hub}&tokenId=1"));
+        assert!(valid.starts_with("HTTP/1.1 200"), "{valid}");
+        assert!(valid.contains("\"pools\":[]"), "{valid}");
+        let missing = get(&hub);
+        assert!(missing.starts_with("HTTP/1.1 404"), "{missing}");
+        assert!(
+            missing.contains("Requested hub is not available"),
+            "{missing}"
+        );
+        worker.join().unwrap();
     }
 
     #[test]

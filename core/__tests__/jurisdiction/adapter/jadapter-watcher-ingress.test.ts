@@ -874,6 +874,7 @@ describe('JAdapter watcher ingress', () => {
 
     expect(range.scannedReplicaKeys).toEqual([replicaKey]);
     expect(range.finalityReplicaKeys).toEqual([replicaKey]);
+    expect(env.runtimeMempool?.runtimeTxs).toEqual([observedEvent]);
     // A signer cannot replace its own current-round head. The independent
     // finality fence remains until the next round certifies this event block.
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
@@ -971,6 +972,63 @@ describe('JAdapter watcher ingress', () => {
     const catchup = enqueueJHistoryRange(env, [], 256, blockHash(256), undefined,
       Array.from({ length: 256 }, (_, i) => ({ jHeight: i + 1, jBlockHash: blockHash(i + 1) })));
     expect(catchup.scannedReplicaKeys).toEqual([`${entityId}:${signerId}`]);
+  });
+
+  describe('idempotent authenticated scan admission', () => {
+    const hash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const setup = async () => {
+      const env = createEmptyEnv('committed-scan-retry');
+      const id = `0x${'7b'.repeat(32)}`;
+      const signer = deriveSignerAddressSync('committed-scan-retry', '1').toLowerCase();
+      const replica = makeReplica(id, signer, true);
+      replica.state.config.jurisdiction = makeJurisdiction('Scan retry', 31338, `0x${'7c'.repeat(20)}`);
+      const key = `${id}:${signer}`;
+      env.state.eReplicas.set(key, replica);
+      const commit = async () => {
+        for (const tx of env.runtimeMempool!.runtimeTxs) await applyRuntimeTx(env, tx);
+        env.runtimeMempool!.runtimeTxs = [];
+      };
+      enqueueJHistoryRange(env, [], 10, hash(10), undefined,
+        [1, 10].map(jHeight => ({ jHeight, jBlockHash: hash(jHeight) })));
+      await commit();
+      return { env, key, commit };
+    };
+
+    test('committed header retry never enqueues another Runtime frame', async () => {
+      const { env, key } = await setup();
+      const history = env.state.eReplicas.get(key)!.jHistory;
+      const result = enqueueJHistoryRange(env, [], 10, hash(10), undefined,
+        [{ jHeight: 10, jBlockHash: hash(10) }]);
+      expect(result).toEqual({ scannedReplicaKeys: [], finalityReplicaKeys: [] });
+      expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
+      expect(env.runtimeMempool!.entityInputs).toEqual([]);
+      expect(env.state.eReplicas.get(key)!.jHistory).toBe(history);
+    });
+
+    test('older implicit tip and gap headers remain new evidence until committed', async () => {
+      const { env, key, commit } = await setup();
+      expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([key]);
+      await commit();
+      const history = env.state.eReplicas.get(key)!.jHistory!;
+      expect(history.scannedThroughHeight).toBe(10);
+      expect(history.contiguousThroughHeight).toBe(1);
+      expect(history.blockHashes.get(5)).toBe(hash(5));
+      expect(enqueueJHistoryRange(env, [], 5, hash(5)).scannedReplicaKeys).toEqual([]);
+      expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
+      expect(enqueueJHistoryRange(env, [], 5, hash(5), undefined,
+        [{ jHeight: 3, jBlockHash: hash(3) }]).scannedReplicaKeys).toEqual([key]);
+      await commit();
+      expect(env.state.eReplicas.get(key)!.jHistory!.blockHashes.get(3)).toBe(hash(3));
+    });
+
+    test('known scan retries still reject conflicting and malformed headers', async () => {
+      const { env } = await setup();
+      expect(() => enqueueJHistoryRange(env, [], 10, hash(10), undefined,
+        [{ jHeight: 10, jBlockHash: hash(11) }])).toThrow('J_HISTORY_LOCAL_REORG_AT_BLOCK:10');
+      expect(() => enqueueJHistoryRange(env, [], 10, hash(10), undefined,
+        [{ jHeight: Number.NaN, jBlockHash: hash(10) }])).toThrow('J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID');
+      expect(env.runtimeMempool!.runtimeTxs).toEqual([]);
+    });
   });
 
   test('authenticated empty watcher progress below liveness records evidence without Entity work', () => {

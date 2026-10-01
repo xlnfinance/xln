@@ -1,3 +1,4 @@
+import type { AccountFrame } from '../core/types/account';
 import { Wallet } from 'ethers';
 import { crossJurisdictionBookQtyLots } from '../core/orderbook';
 import {
@@ -561,10 +562,28 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         'spend',
         'partial source Account',
       );
-      const targetOffdeltaMovement = BigInt(partialTargetAfter.deltas[String(USDC)].offdelta) -
-        BigInt(partialTargetBefore.deltas[String(USDC)].offdelta);
-      const partialTargetRebalanceFee = BigInt(partialTargetRoute!.filledTargetAmount) -
-        (targetOffdeltaMovement < 0n ? -targetOffdeltaMovement : targetOffdeltaMovement);
+      // Independent fee oracle: signed committed request payloads, never the balance delta under test.
+      const signedFees = await page.evaluate(async ({ entityId, hubId, fromHeight, throughHeight, tokenId }) => {
+        const runtime = window as CrossRuntimeWindow;
+        const api = runtime.__xln?.instance;
+        if (!runtime.isolatedEnv || !api?.readPersistedAccountFrameHistory) {
+          throw new Error('COMMITTED_ACCOUNT_HISTORY_UNAVAILABLE');
+        }
+        const frames: AccountFrame[] = await api.readPersistedAccountFrameHistory(
+          runtime.isolatedEnv, entityId, hubId, throughHeight - fromHeight,
+          { maxAccountHeight: throughHeight },
+        );
+        const txs = frames.filter(frame => frame.height > fromHeight).flatMap(frame => frame.accountTxs);
+        if (txs.some(tx => tx.type === 'rebalance_refund')) throw new Error('UNEXPECTED_REBALANCE_REFUND');
+        return txs.flatMap(tx => tx.type === 'request_collateral' &&
+          (tx.data.feeTokenId ?? tx.data.tokenId) === tokenId ? [tx.data.feeAmount.toString()] : []);
+      }, {
+        entityId: target.entityId, hubId: targetHub.entityId,
+        fromHeight: partialTargetBefore.currentHeight, throughHeight: partialTargetAfter.currentHeight,
+        tokenId: USDC,
+      });
+      expect(signedFees, 'exactly one committed rebalance fee request in this partial-fill interval').toHaveLength(1);
+      const partialTargetRebalanceFee = BigInt(signedFees[0]!);
       expect(partialTargetRebalanceFee, 'partial target signed rebalance fee').toBeGreaterThan(0n);
       expect(partialTargetRebalanceFee, 'rebalance fee must remain below the received amount').toBeLessThan(
         BigInt(partialTargetRoute!.filledTargetAmount),

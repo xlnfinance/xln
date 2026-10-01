@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { formatUnits } from 'ethers';
 import type { RuntimeReplica } from '../../core/api/public/runtime-module';
-import { enterStack } from './stack';
+import { enterStack, readWalletCheckpoint } from './stack';
+import { readCommittedPayment } from './payment-evidence';
 
 test('a funded wallet pays H3 twice without leaving held funds', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(150_000);
@@ -8,7 +10,7 @@ test('a funded wallet pays H3 twice without leaving held funds', { tag: '@functi
   page.on('console', message => {
     if (message.type() === 'error' || message.type() === 'warning') console.log(message.text());
   });
-  await enterStack(page);
+  const wallet = await enterStack(page);
   await page.getByTestId('home-faucet').click();
   await expect(page.getByTestId('test-money-status')).toContainText('100 USDC received', { timeout: 20_000 });
   console.log(
@@ -22,6 +24,7 @@ test('a funded wallet pays H3 twice without leaving held funds', { tag: '@functi
       }));
     }),
   );
+  let expectedOwned = 100_000_000n;
   for (let i = 0; i < 2; i++) {
     if (i === 1) {
       console.log('IDLE: waiting 90 seconds before the repeat payment');
@@ -33,12 +36,26 @@ test('a funded wallet pays H3 twice without leaving held funds', { tag: '@functi
     await page.locator('[data-testid^=pay-suggestion-H3]').first().click();
     await page.getByTestId('pay-amount').fill('25');
     await expect(page.getByTestId('pay-submit')).toBeEnabled();
+    const quote = page.getByTestId('pay-quote');
+    const sender = await quote.getAttribute('data-sender-amount');
+    const recipient = await quote.getAttribute('data-recipient-amount');
+    const fee = await quote.getAttribute('data-fee-amount');
+    if (!sender || !recipient || !fee) throw new Error('Exact payment quote unavailable');
+    expect(BigInt(recipient)).toBe(25_000_000n);
+    expect(BigInt(sender)).toBe(25_000_000n + BigInt(fee));
+    const before = await readWalletCheckpoint(page);
     await page.getByTestId('pay-submit').click();
     await expect(page.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 15_000 });
+    const payment = await readCommittedPayment(page, wallet.entityId, before.latestHeight + 1);
+    expect(payment.amount).toBe(recipient);
+    expect(BigInt(payment.senderAmount)).toBe(25_000_000n + BigInt(payment.fee));
+    // The displayed quote authorizes a maximum; admission commits the exact debit.
+    expect(BigInt(payment.senderAmount)).toBeLessThanOrEqual(BigInt(sender));
+    expectedOwned -= BigInt(payment.senderAmount);
     await page.getByTestId('receipt-done').click();
     await page.getByTestId('nav-home').locator('visible=true').first().click();
     await expect(page.getByTestId('home-balance-asset')).toHaveValue('1');
-    await expect(page.getByTestId('home-total')).toHaveText(i === 0 ? '75' : '50');
+    await expect(page.getByTestId('home-total')).toHaveText(formatUnits(expectedOwned, 6).replace(/\.0$/, ''));
   }
   await expect
     .poll(() =>

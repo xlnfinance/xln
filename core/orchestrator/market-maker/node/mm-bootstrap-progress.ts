@@ -77,26 +77,6 @@ export const assertMarketMakerReadySnapshotParity = (
   return persistedFrame.canonicalStateHash;
 };
 
-type BootstrapHealthLike = {
-  hubs?: Array<{
-    hubEntityId: string;
-    offers: number;
-    depthReady: boolean;
-    blockers?: unknown[];
-  }>;
-  cross?: {
-    expectedRoutes?: number;
-    routeCount?: number;
-    routes?: Array<{
-      sourceHubEntityId: string;
-      targetHubEntityId: string;
-      offers: number;
-      depthReady: boolean;
-      blockers?: unknown[];
-    }>;
-  };
-};
-
 /**
  * Runtime-only bookkeeping may overlap quote production. Entity work may not:
  * once a runtime frame detaches its batch, the live mempool is empty even
@@ -131,34 +111,7 @@ export const resolveMarketMakerReadySnapshotAction = (
   );
 };
 
-export const marketMakerBootstrapProgressSignature = (
-  health: BootstrapHealthLike | null,
-  causalCheckpoint: unknown = null,
-): string =>
-  safeStringify({
-    same: (health?.hubs ?? [])
-      .map(hub => ({
-        hubEntityId: hub.hubEntityId,
-        offers: hub.offers,
-        depthReady: hub.depthReady,
-        blockers: hub.blockers?.length ?? 0,
-      }))
-      .sort((left, right) => compareStableText(left.hubEntityId, right.hubEntityId)),
-    cross: {
-      expectedRoutes: health?.cross?.expectedRoutes ?? 0,
-      routeCount: health?.cross?.routeCount ?? health?.cross?.routes?.length ?? 0,
-      routes: (health?.cross?.routes ?? [])
-        .map(route => ({
-          sourceHubEntityId: route.sourceHubEntityId,
-          targetHubEntityId: route.targetHubEntityId,
-          offers: route.offers,
-          depthReady: route.depthReady,
-          blockers: route.blockers?.length ?? 0,
-        }))
-        .sort((left, right) => compareStableText(
-          `${left.sourceHubEntityId}:${left.targetHubEntityId}`,
-          `${right.sourceHubEntityId}:${right.targetHubEntityId}`,
-        )),
-    },
-    causalCheckpoint,
-  });
+// Health reads may alternate between planned summaries and full route detail.
+// Only the canonical causal checkpoint can renew the bootstrap idle deadline.
+export const marketMakerBootstrapProgressSignature = (causalCheckpoint: unknown): string =>
+  safeStringify(causalCheckpoint);

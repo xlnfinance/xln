@@ -53,14 +53,14 @@ canonical_dev_data_root() {
     }
   else
     cursor="$requested"
-    local missing_parts=()
+    local missing_suffix=""
     while [[ ! -e "$cursor" ]]; do
       leaf="$(basename "$cursor")"
       [[ -n "$leaf" && "$leaf" != "." && "$leaf" != ".." && "$leaf" != *$'\t'* && "$leaf" != *$'\n'* ]] || {
         echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
         return 1
       }
-      missing_parts=("$leaf" "${missing_parts[@]}")
+      missing_suffix="/$leaf$missing_suffix"
       parent="$(dirname "$cursor")"
       [[ "$parent" != "$cursor" ]] || {
         echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
@@ -72,7 +72,7 @@ canonical_dev_data_root() {
       echo "DEV_DATA_ROOT_INVALID:${requested}" >&2
       return 1
     }
-    for leaf in "${missing_parts[@]}"; do canonical="$canonical/$leaf"; done
+    canonical="$canonical$missing_suffix"
   fi
   case "$canonical" in
     /*/*/*) printf '%s' "$canonical" ;;

@@ -12,13 +12,13 @@ type WalletGate = {
   start(name: string, command: string, args: string[], env: Record<string, string>): ChildProcess;
 };
 
-const waitForWallet = async (child: ChildProcess, origin: string): Promise<void> => {
+const waitForService = async (child: ChildProcess, url: string): Promise<void> => {
   const deadline = Date.now() + 20_000;
   let last = 'wallet server has not answered';
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error('WALLET_SERVER_EXITED');
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`WALLET_GATE_SERVICE_EXITED:${url}`);
     try {
-      const response = await fetch(`${origin}/api/jurisdictions`, { signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
       if (response.ok) return;
       last = `HTTP ${response.status}`;
     } catch (error) {
@@ -26,7 +26,7 @@ const waitForWallet = async (child: ChildProcess, origin: string): Promise<void>
     }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`WALLET_SERVER_NOT_READY:${last}`);
+  throw new Error(`WALLET_GATE_SERVICE_NOT_READY:${url}:${last}`);
 };
 
 const waitForBrowser = (child: ChildProcess): Promise<void> =>
@@ -56,8 +56,18 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   const port = input.rpcPort + 2;
   const origin = `http://127.0.0.1:${port}`;
   const report = join(input.workDir, 'wallet-results.json');
+  const towerPort = input.rpcPort + 3;
+  const towerOrigin = `http://127.0.0.1:${towerPort}`;
+  const tower = input.start('wallet-tower', process.execPath, [
+    join(input.repoRoot, 'core/watchtower/standalone-server.ts'),
+    '--host', '127.0.0.1', '--port', String(towerPort),
+    '--db', join(input.workDir, 'watchtower'), '--quota-bytes', '4194304', '--max-bundles', '3',
+  ], {});
+  await waitForService(tower, `${towerOrigin}/api/tower/healthz`);
   const env = {
     NODE_ENV: 'development',
+    VITE_XLN_WATCHTOWER_URL: towerOrigin,
+    UI_E2E_TOWER_URL: towerOrigin,
     XLN_UI_STACK_ORIGIN: `http://127.0.0.1:${input.apiPort}`,
     XLN_UI_RUNTIME_BUNDLE_DIR: join(input.repoRoot, 'frontend/static'),
     UI_E2E_BASE_URL: origin,
@@ -81,7 +91,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     ],
     env,
   );
-  await waitForWallet(server, origin);
+  await waitForService(server, `${origin}/api/jurisdictions`);
   await waitForBrowser(
     input.start(
       'wallet-browser',

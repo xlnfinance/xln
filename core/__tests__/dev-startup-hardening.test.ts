@@ -296,7 +296,7 @@ test('canonical dev data root supports a clean checkout without a db parent', as
   const requested = join(root, 'db', 'dev');
   const result = await run('bash', [
     '-c',
-    'source scripts/dev/process-owner.sh; canonical_dev_data_root "$1"',
+    'set -euo pipefail; source scripts/dev/process-owner.sh; canonical_dev_data_root "$1"',
     'canonical-root-test',
     requested,
   ]);

@@ -19,6 +19,7 @@ const OPTIONAL = [
   'targetHubSignerId', 'targetSignerId', 'bookHubSignerId', 'sourcePull', 'targetPull',
   'sourceCloseProof', 'targetCloseProof', 'priceTicks', 'fillSeq', 'cumulativeFillRatio',
   'fillNumerator', 'fillDenominator', 'filledSourceAmount', 'filledTargetAmount',
+  'executionSourceAmount', 'executionTargetAmount',
   'pendingClearRequestedAt', 'domain',
   'timePolicy', 'clearingPolicy', 'riskMode', 'claimedRatio',
   'sourceRegistryFillRatio', 'targetRegistryFillRatio', 'sourceRegistryRecord',
@@ -38,6 +39,7 @@ const integerFields = [
 const bigintFields = [
   'priceTicks', 'fillNumerator', 'fillDenominator', 'filledSourceAmount',
   'filledTargetAmount', 'sourceClaimed', 'targetClaimed',
+  'executionSourceAmount', 'executionTargetAmount',
 ] as const;
 
 const requireLiteral = (value: unknown, allowed: readonly string[], code: string): void => {

@@ -7,6 +7,8 @@ mod checkpoint_wire;
 #[path = "wire/entity.rs"]
 mod entity_wire;
 mod error;
+#[path = "http/lending.rs"]
+pub mod lending_http;
 pub mod native_genesis;
 #[path = "runtime_replay/native_restart.rs"]
 pub mod native_runtime;

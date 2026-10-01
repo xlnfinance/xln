@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import { SwapHistory } from '../components/history/SwapHistory';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Sheet } from '../components/Sheet';
 import { ActivityRow } from '../components/history/ActivityRow';
 import { MovementDetail } from '../components/history/MovementDetail';
@@ -55,7 +55,13 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 	const more = nextBeforeHeight !== null;
 	const movements = loaded;
 	// Desktop shows the latest movement's receipt until the user picks another; on a phone the sheet opens only on tap.
-	const desktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1101px)').matches;
+	const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1101px)').matches);
+	useEffect(() => {
+		const media = window.matchMedia('(min-width: 1101px)');
+		const changed = () => setDesktop(media.matches);
+		media.addEventListener('change', changed);
+		return () => media.removeEventListener('change', changed);
+	}, []);
 	const selected = filter === 'swaps' ? null : movements.find(movement => movement.id === selectedId) ?? (desktop ? (movements[0] ?? null) : null);
 
 	// The day at a glance, for whoever closes the till: what came in, what went out, how many movements.
@@ -170,7 +176,7 @@ function EntityActivity({ entityId }: { entityId: string | null }) {
 					)}
 				</div>}
 			</div>
-			{selected && (
+			{selected && !desktop && (
 				<div className="mobile-only">
 					<Sheet title="Receipt" onClose={() => setSelectedId(null)}>
 						<MovementDetail movement={selected} names={wallet.names} />

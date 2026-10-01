@@ -105,6 +105,7 @@ describe('orchestrator proxy security', () => {
   });
 
   test('on-chain faucet allows mining without weakening the generic hub timeout', async () => {
+    const requestedEngines: Array<string | undefined> = [];
     const previousHubTimeout = process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
     const previousFaucetTimeout = process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
     const server = Bun.serve({
@@ -122,7 +123,10 @@ describe('orchestrator proxy security', () => {
         defaultRpcUrl: '',
         pollAllHubHealth: async () => {},
         getHubChildByEntityId: () => null,
-        getHealthyHub: () => ({ apiPort: server.port }) as any,
+        getHealthyHub: requiredEngine => {
+          requestedEngines.push(requiredEngine);
+          return { apiPort: server.port } as any;
+        },
       });
       const request = (endpoint: string) => new Request(`http://xln.local${endpoint}`, {
         method: 'POST',
@@ -140,6 +144,7 @@ describe('orchestrator proxy security', () => {
       );
       expect(faucetResponse.status).toBe(200);
       expect(await faucetResponse.json()).toEqual({ success: true });
+      expect(requestedEngines).toEqual([undefined, 'typescript']);
     } finally {
       if (previousHubTimeout === undefined) delete process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
       else process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = previousHubTimeout;

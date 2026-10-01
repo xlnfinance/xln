@@ -56,6 +56,7 @@ const {
   getPersistedLatestHeight,
   loadEnvFromStorageByReplay,
   readPersistedFrameJournals,
+  readPersistedStorageHead,
   readPersistedStorageFramePayloads,
   readPersistedStorageFrameRecord,
   validateRuntimeRecoveryBundle,
@@ -123,8 +124,17 @@ try {
         `expected=${expectedFrames}:actual=${frames.length}`,
     );
   }
-  const periodicCheckpointHeight = baseHeight + HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES;
+  // Storage retains the latest materialized machine. A long production run
+  // can cross several periods; an older checkpoint record still exists but
+  // its machine payload is no longer the current recovery authority.
+  const storageHead = await readPersistedStorageHead(env);
+  const periodicCheckpointHeight = storageHead?.latestMaterializedHeight ?? 0;
   if (requireCompleteAuthorityEvidence) {
+    if (
+      periodicCheckpointHeight < baseHeight + HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES ||
+      periodicCheckpointHeight > targetHeight ||
+      targetHeight - periodicCheckpointHeight >= HLT_AUTHORITY_CHECKPOINT_PERIOD_FRAMES
+    ) throw new Error(`HLT_HUB_RECORDING_CHECKPOINT_CADENCE_INVALID:${periodicCheckpointHeight}:${targetHeight}`);
     const periodicCheckpoint = await readPersistedStorageFrameRecord(env, periodicCheckpointHeight);
     const periodicCheckpointPayloads =
       periodicCheckpoint?.materializedState === true

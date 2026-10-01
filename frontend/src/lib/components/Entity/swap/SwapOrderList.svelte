@@ -179,6 +179,8 @@
               <th>Pair</th>
               <th>Price</th>
               <th>Filled</th>
+              <th>Executed</th>
+              <th>Fee</th>
               <th>Price Improvement</th>
               <th>Closed At</th>
               <th>Hub</th>
@@ -202,6 +204,8 @@
                   {order.filledPercent.toFixed(2)}%
                   ({formatAmount(order.filledBaseAmount, pairView.baseTokenId)} {tokenSymbol(pairView.baseTokenId)})
                 </td>
+                <td data-testid="swap-closed-execution">{formatAmount(order.filledGiveAmount, order.giveTokenId)} {tokenSymbol(order.giveTokenId)} → {formatAmount(order.filledWantAmount, order.wantTokenId)} {tokenSymbol(order.wantTokenId)}</td>
+                <td data-testid="swap-closed-fee">{order.feeTokenId === null ? '—' : `${formatAmount(order.feeAmount, order.feeTokenId)} ${tokenSymbol(order.feeTokenId)}`}</td>
                 <td>{formatPriceImprovement(order.priceImprovementAmount, order.priceImprovementTokenId)}</td>
                 <td>{formatOrderTime(order.closedAt)}</td>
                 <td>{order.accountId.slice(0, 10)}...</td>

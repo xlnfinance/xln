@@ -15,7 +15,7 @@ use crate::{DeterministicContext, EntityKernelError, OrderedAccountCommit};
 
 const MIN_TIMELOCK_DELTA_MS: u64 = 10_000;
 const MIN_REVEAL_HEIGHT_DELTA_BLOCKS: u64 = 3;
-const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
+pub(crate) const SECRET_ACK_TIMEOUT_MS: u64 = 120_000;
 
 /// Paybook paths are the raw 32-byte hashlock. A length-prefixed text key puts
 /// every canonical `0x…` hashlock under the same Patricia prefix and defeats

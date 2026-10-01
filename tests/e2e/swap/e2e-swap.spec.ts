@@ -1599,6 +1599,10 @@ async function executeOrderbookClickFill(
       )
       .toBe(true);
     const clickToClosedStateMs = Date.now() - swapClickStartedAt;
+    const fillModal = page.locator('.swap-modal').first();
+    await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
+    await fillModal.getByRole('button', { name: /Close/i }).click();
+    await expect(fillModal).toBeHidden();
     const closedTab = page.getByTestId('swap-orders-tab-closed').first();
     await expect(closedTab).toBeVisible({ timeout: 10_000 });
     await closedTab.click();
@@ -1701,15 +1705,6 @@ async function executeOrderbookClickFill(
       })
       .toBe(0);
     await expect(closedTab).toBeVisible({ timeout: 10_000 });
-    const fillModal = page.locator('.swap-modal').first();
-    const fillModalVisible = await fillModal
-      .waitFor({ state: 'visible', timeout: 2_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (fillModalVisible) {
-      await expect(fillModal).toContainText(/Swap Filled/i, { timeout: 10_000 });
-      await fillModal.getByRole('button', { name: /Close/i }).click();
-    }
     await closedTab.click();
     const closedOrdersTable = page.getByTestId('swap-closed-orders').first();
     await expect(closedOrdersTable).toBeVisible({ timeout: 10_000 });

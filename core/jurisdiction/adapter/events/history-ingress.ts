@@ -161,28 +161,32 @@ export function buildJHistoryRangeRuntimeInput(
       tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data, replica.state);
     }
     const normalizedTipBlockHash = String(tipBlockHash).toLowerCase();
+    const scanTipData = {
+      entityId,
+      signerId,
+      jurisdictionRef,
+      scannedThroughHeight,
+      tipBlockHash: normalizedTipBlockHash,
+      ...(headers.length > 0 ? { headers } : {}),
+      blocks: [],
+    };
+    // RPC may finish after this signer already committed the same scan. Validate
+    // every header before omitting an exact retry: a conflicting hash must still
+    // reject, while older missing headers (including the implicit tip) remain new evidence.
+    const scannedHistory = recordValidatorJHistory(tentativeHistory, scanTipData, replica.state);
+    const addsHeader = (height: number): boolean =>
+      scannedHistory.blockHashes.get(height) !== tentativeHistory?.blockHashes.get(height);
     const shouldRecordScanTip =
-      headers.length > 0 ||
       !tentativeHistory ||
-      tentativeHistory.scannedThroughHeight !== scannedThroughHeight ||
-      tentativeHistory.tipBlockHash !== normalizedTipBlockHash;
+      tentativeHistory.scannedThroughHeight !== scannedHistory.scannedThroughHeight ||
+      tentativeHistory.contiguousThroughHeight !== scannedHistory.contiguousThroughHeight ||
+      tentativeHistory.tipBlockHash !== scannedHistory.tipBlockHash ||
+      addsHeader(scannedThroughHeight) ||
+      headers.some(header => addsHeader(header.jHeight));
     const scanTipObservation: Extract<RuntimeTx, { type: 'observeJRange' }> | null = shouldRecordScanTip
-      ? {
-        type: 'observeJRange',
-        data: {
-          entityId,
-          signerId,
-          jurisdictionRef,
-          scannedThroughHeight,
-          tipBlockHash: normalizedTipBlockHash,
-          ...(headers.length > 0 ? { headers } : {}),
-          blocks: [],
-        },
-      }
+      ? { type: 'observeJRange', data: scanTipData }
       : null;
-    if (scanTipObservation) {
-      tentativeHistory = recordValidatorJHistory(tentativeHistory, scanTipObservation.data, replica.state);
-    }
+    if (scanTipObservation) tentativeHistory = scannedHistory;
     const hasDuePrefixAdvance = hasDueLocalJPrefixAdvance(replica.state, tentativeHistory);
     // Authenticated progress must reach the WAL before the next financial input.
     // Throttling it by 100 blocks can age a new 50-block HTLC past a peer's head.
@@ -220,7 +224,10 @@ export function buildJHistoryRangeRuntimeInput(
       jPrefixAttestations: new Map([[signerId, attestation]]),
     });
   }
-  if (runtimeTxs.length === 0 && entityInputs.length === 0) return null;
+  // An observed event can already carry every header while this validator has
+  // signed the current round. Preserve its finality fence without adding a
+  // duplicate scan transaction; callers merge this with that observed input.
+  if (runtimeTxs.length === 0 && entityInputs.length === 0 && finalityReplicaKeys.length === 0) return null;
   return {
     input: { timestamp: scannedThroughHeight, runtimeTxs, entityInputs },
     scannedReplicaKeys: scannedReplicaKeys.sort(),

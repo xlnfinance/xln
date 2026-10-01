@@ -215,7 +215,7 @@ if (standLock) {
   process.on('exit', () => releaseStandLock(standLock));
 }
 const localTestLease = await acquireLocalTestPortLease({
-  requiredOffsets: [0, 1, 2, 4, 7, 8, 10, 11, 12, 13],
+  requiredOffsets: [0, 1, 2, 3, 4, 7, 8, 10, 11, 12, 13],
 });
 const inheritedProcessEnv = stripAmbientLocalStackEnv(process.env);
 const hltUsers = Number(process.env['XLN_HLT_USERS'] || '0');
@@ -1418,6 +1418,7 @@ const main = async (): Promise<void> => {
   await waitForRpc(rpc2Port, '0x7a6a', 'Tron');
 
   startManaged('server', 'scripts/operations/start-server.sh', [], {
+    XLN_WATCHTOWER_PROXY_PORTS: String(rpcPort + 3),
     ...buildInheritedLocalTestLeaseEnv(localTestLease, repoRoot),
     // Perf-diagnostics passthrough: explicit allowlist only, so a polluted
     // parent environment cannot silently change hub behavior between runs.

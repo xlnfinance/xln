@@ -95,7 +95,7 @@ export function Swap() {
 		ownEntityId: wallet.entityId,
 		baseDecimals: getTokenMeta(xln?.getSwapPairOrientation?.(giveTokenId, wantTokenId).baseTokenId ?? Math.max(giveTokenId, wantTokenId)).decimals,
 	});
-	const pickLevel = (side: BookSide, level: BookLevel): void => {
+	const pickLevel = (side: BookSide, level: Pick<BookLevel, 'priceTicks' | 'size'>): void => {
 		const base = getTokenMeta(book.baseTokenId);
 		const quote = getTokenMeta(book.quoteTokenId);
 		const quoteAmount = quoteForBase(level.size, level.priceTicks, base.decimals, quote.decimals);
@@ -130,9 +130,15 @@ export function Swap() {
 		const side = params.get('side');
 		const price = params.get('price');
 		const size = params.get('size');
-		if ((side !== 'ask' && side !== 'bid') || !price || !size) return;
+		if (side === null && price === null && size === null) return;
 		deskPick.current = true;
-		pickLevel(side, { priceTicks: BigInt(price), size: BigInt(size) } as BookLevel);
+		// A shared Desk URL is untrusted input, not an admitted market level.
+		// Reject malformed or nonpositive quotes before BigInt can crash the wallet.
+		if ((side !== 'ask' && side !== 'bid') || !price || !size || !/^[1-9]\d*$/.test(price) || !/^[1-9]\d*$/.test(size)) {
+			toast('Invalid swap link. Choose a price from the order book.', 'danger');
+			return;
+		}
+		pickLevel(side, { priceTicks: BigInt(price), size: BigInt(size) });
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [hub, params]);
 

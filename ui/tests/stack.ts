@@ -1,5 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { HDNodeWallet } from 'ethers';
+import { attachRustH1 } from '../../core/scripts/operations/hlt/rust/rust-h1';
+import { LOCAL_TEST_STACK_BASES } from '../../core/scripts/e2e/harness/local-test-port-lease';
 import type { RuntimeAdapterViewFrame } from '../../core/api/public/runtime-module';
 import type { StorageHead } from '../../core/storage/types';
 import type { RuntimeAdapter } from '../../core/api/runtime-adapter/types';
@@ -16,6 +18,25 @@ type DebugWindow = Window & {
 };
 
 export type StackWallet = Readonly<{ phrase: string; runtimeId: string; entityId: string; vaultId: string }>;
+
+/** A Rust-selected browser gate must trade with the actual native H1, never a healthy TS fallback. */
+export async function assertSelectedNativeHub(hubId: string): Promise<void> {
+  if (process.env['XLN_HLT_ENGINE'] !== 'rust') return;
+  const privateRpc = process.env['XLN_UI_DISPUTE_PRIVATE_RPC'];
+  if (!privateRpc) throw new Error('NATIVE_UI_GATE_PRIVATE_STACK_MISSING');
+  const url = new URL(privateRpc);
+  const portBase = Number(url.port);
+  if (url.hostname !== '127.0.0.1' || !LOCAL_TEST_STACK_BASES.includes(portBase)) throw new Error('NATIVE_UI_GATE_PRIVATE_STACK_INVALID');
+  // Native H1 deliberately has no TS runtime-import entry; attach to its
+  // canonical supervised API and validate the native committed identity.
+  const native = await attachRustH1(`http://127.0.0.1:${portBase + 10}`);
+  try {
+    expect(hubId.toLowerCase(), 'Selected browser Account must belong to native H1').toBe(native.ready.entityId);
+    console.log(`NATIVE_UI_GATE_SOURCE engine=rust label=H1 entityId=${hubId} runtimeId=${native.ready.runtimeId} workers=${native.ready.workers}`);
+  } finally {
+    await native.stop();
+  }
+}
 
 /** Import through the public wallet UI, including production builds without diagnostics. */
 export async function importStackPhraseUi(page: Page, phrase: string): Promise<void> {
@@ -56,6 +77,13 @@ export async function enterStack(page: Page, providedPhrase?: string): Promise<S
   if (!phrase) throw new Error('TEST_WALLET_MNEMONIC_MISSING');
   const identity = await importStackPhrase(page, phrase);
   await expect(page.getByTestId('account-row').first()).toBeVisible({ timeout: 90_000 });
+  if (process.env['XLN_HLT_ENGINE'] === 'rust') {
+    const checkpoint = await readWalletCheckpoint(page);
+    expect(checkpoint.accounts, 'Fresh wallet must select exactly one native H1 Account').toHaveLength(1);
+    const account = checkpoint.accounts[0]!;
+    const hubId = account.leftEntity === identity.entityId ? account.rightEntity : account.leftEntity;
+    await assertSelectedNativeHub(hubId);
+  }
   return { phrase, ...identity };
 }
 

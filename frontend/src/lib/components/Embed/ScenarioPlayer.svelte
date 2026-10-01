@@ -9,7 +9,7 @@
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { errorLog } from '$lib/stores/errorLogStore';
-  import type { RuntimeReplica, EnvSnapshot, XLNModule } from '@xln/core/api/public/runtime-module';
+  import type { RuntimeReplica, EnvSnapshot, EntityReplica, EntityState, XLNModule } from '@xln/core/api/public/runtime-module';
 
   type ScenarioOption = {
     id: string;
@@ -172,9 +172,9 @@
     return profile?.metadata?.isHub === true || /hub/i.test(displayedName);
   }
 
-  function countDebts(state: Record<string, unknown>): number {
+  function countDebts(state: EntityState): number {
     let count = 0;
-    for (const family of ['outDebtsByToken', 'inDebtsByToken']) {
+    for (const family of ['outDebtsByToken', 'inDebtsByToken'] as const) {
       for (const [, byDebtId] of mapEntries(state[family])) {
         count += mapSize(byDebtId);
       }
@@ -182,9 +182,8 @@
     return count;
   }
 
-  function readPosition(replica: Record<string, unknown>, index: number, total: number): { x: number; y: number; raw: boolean } {
-    const state = asRecord(replica['state']);
-    const raw = (replica['position'] || state['position']) as { x?: unknown; y?: unknown } | undefined;
+  function readPosition(replica: EntityReplica, index: number, total: number): { x: number; y: number; raw: boolean } {
+    const raw = replica.position;
     const x = Number(raw?.x);
     const y = Number(raw?.y);
     if (Number.isFinite(x) && Number.isFinite(y)) return { x, y, raw: true };
@@ -226,13 +225,13 @@
   function buildFrameVisual(frame: EnvSnapshot, option: ScenarioOption): FrameVisual {
     const rawNodes: Array<FrameNode & { rawX: number; rawY: number }> = [];
     const nodeById = new Map<string, FrameNode & { rawX: number; rawY: number }>();
-    const replicaEntries = mapEntries<Record<string, unknown>>(frame.state.eReplicas);
+    const replicaEntries = Array.from(frame.state.eReplicas.entries());
 
     replicaEntries.forEach(([replicaKey, replica], index) => {
-      const state = asRecord(replica['state']);
+      const state = replica.state;
       const entityId = normalizeId(replica['entityId'] || state['entityId'] || replicaKey.split(':')[0]);
       if (!entityId || nodeById.has(entityId)) return;
-      const accounts = mapEntries<Record<string, unknown>>(state['accounts']);
+      const accounts = Array.from(state.accounts.entries());
       const disputed = accounts.some(([, account]) => Boolean(account?.['activeDispute']));
       const debtCount = countDebts(state);
       const label = profileName(frame, entityId);
@@ -261,11 +260,11 @@
     let accountCount = 0;
 
     for (const [, replica] of replicaEntries) {
-      const state = asRecord(replica['state']);
+      const state = replica.state;
       const sourceId = normalizeId(replica['entityId'] || state['entityId']);
       if (!sourceId) continue;
       debtCount += countDebts(state);
-      for (const [counterpartyIdRaw, account] of mapEntries<Record<string, unknown>>(state['accounts'])) {
+      for (const [counterpartyIdRaw, account] of state.accounts) {
         const counterpartyId = normalizeId(counterpartyIdRaw);
         const from = normalizedNodeById.get(sourceId);
         const to = normalizedNodeById.get(counterpartyId);

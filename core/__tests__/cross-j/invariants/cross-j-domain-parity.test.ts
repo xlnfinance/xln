@@ -29,6 +29,18 @@ const SOURCE = 'stack:999:0x9999999999999999999999999999999999999999';
 const TARGET = 'stack:888:0x8888888888888888888888888888888888888888';
 const HASH = '0x12695b780b36925998983227c333dd8759116e980a88ce3df85a6f598dc70d90';
 
+test('committed cross-j routes retain exact execution amounts at the boundary', () => {
+  const committed = {
+    ...route(), status: 'settled' as const,
+    executionSourceAmount: 999_000_000_000_000_000n, executionTargetAmount: 2_000_000n,
+  };
+  expect(() => assertCrossJurisdictionSwapRoute(committed, 'TEST_ROUTE')).not.toThrow();
+  for (const field of ['executionSourceAmount', 'executionTargetAmount']) {
+    expect(() => assertCrossJurisdictionSwapRoute({ ...committed, [field]: '2000000' }, 'TEST_ROUTE')).toThrow();
+  }
+  expect(() => assertCrossJurisdictionSwapRoute({ ...committed, executionUnknown: 1n }, 'TEST_ROUTE')).toThrow('extra=executionUnknown');
+});
+
 test('cross-j domain overrides preserve the TS/Rust signed route hash', () => {
   const baseline = withCanonicalCrossJurisdictionRouteHash(route());
   expect(baseline.routeHash).toBe('0xc7256dc31e315883c77c1743527b1a8b5b4966db203cecb91cfbfeab7c444f03');

@@ -606,6 +606,7 @@ fn native_market_snapshots(
                 "depth":depth,
                 "displayDecimals":4,
                 "priceScale":ORDERBOOK_PRICE_SCALE.to_string(),
+                "minTradeSize":entity_state.entity.orderbook_metadata.as_ref().map(|metadata| metadata.hub_profile.min_trade_size.to_string()),
                 "bucketWidthTicks":book.map(|book| book.bucket_width_ticks.to_string()),
                 "bids":market_levels(bid_rows),
                 "asks":market_levels(ask_rows),
@@ -1476,6 +1477,27 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
                         depth,
                     );
                     let _ = response.send(snapshots);
+                    return Ok(None);
+                }
+                Some(RuntimeHttpCommand::LendingState { query, response }) => {
+                    let value = (|| {
+                        let replica = service
+                            .processor()
+                            .replica()
+                            .map_err(|error| error.to_string())?;
+                        let key =
+                            RuntimeEntityKey::new(query.hub_entity_id, &local_entity_signer_id)
+                                .map_err(|error| error.to_string())?;
+                        let Some(state) = replica.state.e_replicas.get(&key) else {
+                            return Ok(None);
+                        };
+                        xln_rscore_process::lending_http::lending_state_response(
+                            state.entity.lending.as_ref(),
+                            &query,
+                        )
+                        .map(Some)
+                    })();
+                    let _ = response.send(value);
                     return Ok(None);
                 }
                 Some(RuntimeHttpCommand::Tokens { response }) => {

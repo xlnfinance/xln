@@ -43,8 +43,6 @@ async function canonicalRoot(page: Page, height: number): Promise<string> {
   }, { height, moduleUrl });
 }
 
-const TOWER = 'http://127.0.0.1:9100';
-
 test('tower backup restores funded Account proofs on a clean device and refuses local overwrite', { tag: '@resilience' }, async ({ browser }) => {
 	test.setTimeout(60_000);
 	const source = await browser.newContext();
@@ -52,10 +50,15 @@ test('tower backup restores funded Account proofs on a clean device and refuses 
 	try {
 		const page = await source.newPage();
 		const wallet = await enterStack(page);
+		const tower = await page.evaluate(async () => {
+			const modulePath = '/src/native/backup.ts';
+			const { nativeBackupAddress } = await import(modulePath);
+			return nativeBackupAddress() as string;
+		});
 		await fundFromHub(page);
 		await expect.poll(async () => (await readWalletCheckpoint(page)).accounts.every(account => !account.pending && account.mempool === 0)).toBe(true);
 		await page.getByTestId('home-sovereignty').click();
-		await page.getByTestId('watchtower-url').fill(TOWER);
+		await page.getByTestId('watchtower-url').fill(tower);
 		await page.getByTestId('watchtower-add').click();
 		await expect(page.getByTestId('sovereignty-watchtower')).toHaveAttribute('data-covered', 'yes', { timeout: 20_000 });
 		const coverage = await page.getByTestId('watchtower-coverage-backup').innerText();
@@ -74,7 +77,7 @@ test('tower backup restores funded Account proofs on a clean device and refuses 
 			await restoredPage.getByRole('button', { name: /Restore a wallet/ }).click();
 			await restoredPage.locator('textarea').fill(wallet.phrase);
 			await restoredPage.getByTestId('restore-from-tower').check();
-			await restoredPage.getByTestId('restore-tower-url').fill(TOWER);
+			await restoredPage.getByTestId('restore-tower-url').fill(tower);
 			await restoredPage.getByRole('button', { name: 'Restore wallet', exact: true }).click();
 		};
 		await restore();

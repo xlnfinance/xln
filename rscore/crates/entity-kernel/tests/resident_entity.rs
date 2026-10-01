@@ -1,5 +1,9 @@
 #[path = "resident/cross_j_expiry.rs"]
 mod cross_j_expiry;
+#[path = "resident/scheduled_dispute.rs"]
+mod scheduled_dispute;
+#[path = "resident/secret_ack.rs"]
+mod secret_ack;
 mod support;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -335,6 +339,154 @@ fn cross_j_r4_h34_credit_before_inbound_proposal_order() {
             vec![credit_id, peer_id],
             "Local ExtendCredit precedes the later inbound Account ACK at W{workers}",
         );
+    }
+}
+
+#[test]
+fn scheduled_wake_preserves_credit_before_inbound_order_and_evidence() {
+    let hub_label = "h34-proposal-order-hub";
+    let hub = entity(&identity(hub_label));
+    let first_label = "h34-proposal-order-first";
+    let second_label = "h34-proposal-order-second";
+    let first = entity(&identity(first_label));
+    let second = entity(&identity(second_label));
+    let (credit, inbound_label) = if first > second {
+        (first, second_label)
+    } else {
+        (second, first_label)
+    };
+    let (inbound_seed, inbound_row, peer) = peer_proposal(
+        inbound_label,
+        &hub,
+        0,
+        AccountTx::AddDelta {
+            token_id: TokenId::new(7).expect("token"),
+        },
+    );
+    let credit_id = AccountId::from_bytes(*credit.as_bytes());
+    let peer_id = inbound_seed.account_id;
+    assert!(
+        credit_id > peer_id,
+        "fixture order must oppose Account id order",
+    );
+    let seeds = vec![
+        AccountSeed {
+            account_id: credit_id,
+            replica: AccountReplica::new(hub.clone(), account_state(&hub, &credit))
+                .expect("local credit account"),
+            consensus: None,
+        },
+        inbound_seed,
+    ];
+
+    let mut expected_evidence = None;
+    for (with_wake, workers) in [(false, 1), (true, 1), (true, 4)] {
+        let mut accounts = ResidentConsensusEngine::restore(
+            EngineGeneration::from_bytes([0x34; 8]),
+            workers,
+            0,
+            derive_signer_key(SEED, hub_label).expect("hub key"),
+            hub_label.to_string(),
+            support::market(),
+            seeds.clone(),
+        )
+        .expect("resident accounts");
+        let mut state = EntityStateSlice::empty(hub.to_string(), TIMESTAMP);
+        state.known_accounts = BTreeSet::from([credit.to_string(), peer.to_string()]).into();
+        let scheduled_wake = if with_wake {
+            // A genuine due hook with no active dispute consumes itself and
+            // produces no economic work; following input evidence must remain exact.
+            let mut crontab = CrontabState::default();
+            crontab.tasks.clear();
+            xln_rscore_entity_kernel::schedule_hook(
+                &mut crontab,
+                ScheduledHook {
+                    id: format!("dispute-deadline:{credit}"),
+                    trigger_at: TIMESTAMP,
+                    kind: xln_rscore_entity_kernel::ScheduledHookKind::DisputeDeadline {
+                        account_id: credit.to_string(),
+                    },
+                },
+            )
+            .unwrap();
+            let jobs = collect_due_scheduled_wake_jobs(&crontab, TIMESTAMP, false).unwrap();
+            state.crontab = Some(crontab);
+            Some(ScheduledWake {
+                version: 1,
+                proposer_signer_id: hub_label.into(),
+                due_at: TIMESTAMP,
+                jobs,
+            })
+        } else {
+            None
+        };
+        let expected_accounts_root = accounts.accounts_root();
+        let result = apply_resident_entity_round_core(
+            &mut accounts,
+            state,
+            ResidentEntityRequest {
+                inbound: EntityInboundRequest {
+                    owner_entity_id: *hub.as_bytes(),
+                    owning_entity_is_hub: false,
+                    expected_accounts_root,
+                    clock: ReceiverClock {
+                        entity_timestamp: TIMESTAMP,
+                        finalized_j_height: 100,
+                    },
+                    rows: vec![inbound_row.clone()],
+                    post_accounts: false,
+                },
+                local_certified_board_authority: xln_rscore_batch::AccountInputBoardAuthority::Lazy,
+                entity_height: 1,
+                outbound_timestamp: TIMESTAMP,
+                outbound_j_height: 100,
+                checkpoint_due: false,
+                post_accounts: false,
+                runtime_seed: None,
+                scheduled_wake,
+                propose_accounts_now: Vec::new(),
+                expected_proposer_signer_id: hub_label.into(),
+                finalized_j_events: None,
+                entity_authority: Some(single_signer_authority(hub_label)),
+                local_account_genesis_policy: None,
+                cross_j_opening_sibling_views: Vec::new(),
+                operations: vec![
+                    ResidentEntityOperation::Local(vec![AdmittedLocalEntityTx {
+                        signer_id: hub_label.into(),
+                        board_epoch: 0,
+                        tx: LocalEntityTx::Financial(LocalEntityFinancialTx::ExtendCredit(
+                            ExtendCreditEntityTx {
+                                counterparty_entity_id: credit.to_string(),
+                                token_id: TokenId::new(1).expect("token"),
+                                amount: BigInt::from(7),
+                            },
+                        )),
+                    }]),
+                    ResidentEntityOperation::AccountRange { start: 0, len: 1 },
+                ],
+            },
+            &DeterministicContext::hlt_default(),
+        )
+        .expect("local credit followed by inbound Account proposal");
+        let outgoing_accounts = result
+            .outbound
+            .proposals
+            .iter()
+            .filter(|row| row.outbound_input.is_some())
+            .map(|row| row.account_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outgoing_accounts,
+            vec![credit_id, peer_id],
+            "Local ExtendCredit precedes the later inbound Account ACK at W{workers}",
+        );
+        assert_eq!(result.account_touch_order, vec![credit_id, peer_id]);
+        let evidence = (result.entity_frame_events, result.secondary_hashes);
+        if let Some(expected) = &expected_evidence {
+            assert_eq!(&evidence, expected);
+        } else {
+            expected_evidence = Some(evidence);
+        }
     }
 }
 

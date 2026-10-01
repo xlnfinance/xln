@@ -1786,9 +1786,9 @@ fn local_account_views(
         .collect())
 }
 
-fn project_dispute_lifecycle_mutations(
+fn project_dispute_lifecycle_mutations<'a>(
     views: &mut BTreeMap<String, LocalAccountFinancialView>,
-    mutations: &[(String, crate::AccountEnvelopeMutation)],
+    mutations: impl IntoIterator<Item = &'a (String, crate::AccountEnvelopeMutation)>,
 ) -> Result<(), EntityKernelError> {
     for (account, mutation) in mutations {
         let crate::AccountEnvelopeMutation::ReplaceDisputeLifecycle {
@@ -1983,6 +1983,80 @@ fn is_scheduled_collective_output(owner: &str, output: &crate::LocalEntityOutput
         })
 }
 
+fn append_scheduled_dispute_outputs(
+    state: &EntityStateSlice,
+    commands: &[SchedulerCommand],
+    outputs: &mut Vec<crate::LocalEntityOutput>,
+    manual_broadcast_in_input: bool,
+) -> Result<(), EntityKernelError> {
+    let mut entity_txs = Vec::new();
+    let mut broadcast = false;
+    for command in commands {
+        match command {
+            SchedulerCommand::AutoFinalizeDispute {
+                counterparty_entity_id,
+            } => {
+                entity_txs.push(crate::LocalEntityOutputTx::Projected(
+                    crate::CanonicalEntityTx::from_frame_projection(
+                        crate::EntityTxKind::DisputeFinalize,
+                        CanonicalValue::Object(vec![
+                            (
+                                "counterpartyEntityId".into(),
+                                CanonicalValue::String(counterparty_entity_id.clone()),
+                            ),
+                            (
+                                "description".into(),
+                                CanonicalValue::String("auto-finalize-after-timeout".into()),
+                            ),
+                            ("useOnchainRegistry".into(), CanonicalValue::Bool(true)),
+                        ]),
+                    )
+                    .map_err(|error| {
+                        EntityKernelError::local("scheduledWake", error.to_string())
+                    })?,
+                ));
+                broadcast = true;
+            }
+            SchedulerCommand::BroadcastQueuedDisputeFinalization => {
+                if !manual_broadcast_in_input {
+                    broadcast = true;
+                }
+            }
+            // Resident admission already applied the cross-j collective action
+            // in this frame, before dispatching the canonical Book jobs.
+            SchedulerCommand::ProcessHtlcTimeouts { .. }
+            | SchedulerCommand::PrepareDisputes { .. }
+            | SchedulerCommand::SettleOverdueLending { .. }
+            | SchedulerCommand::CrossJOrderbookSweep { .. }
+            | SchedulerCommand::HubRebalance => {}
+        }
+    }
+    if broadcast
+        && !outputs.iter().any(|output| {
+            output.entity_id.eq_ignore_ascii_case(&state.entity_id)
+                && output.entity_txs.iter().any(|tx| {
+                    matches!(tx, crate::LocalEntityOutputTx::Projected(tx) if tx.kind == crate::EntityTxKind::JBroadcast)
+                })
+        })
+    {
+        entity_txs.push(crate::LocalEntityOutputTx::Projected(
+            crate::CanonicalEntityTx::from_frame_projection(
+                crate::EntityTxKind::JBroadcast,
+                CanonicalValue::Object(Vec::new()),
+            )
+            .map_err(|error| EntityKernelError::local("scheduledWake", error.to_string()))?,
+        ));
+    }
+    if !entity_txs.is_empty() {
+        outputs.push(crate::LocalEntityOutput {
+            entity_id: state.entity_id.clone(),
+            target_signer_id: None,
+            entity_txs,
+        });
+    }
+    Ok(())
+}
+
 fn scheduled_collective_txs(
     state: &EntityStateSlice,
     request: &ResidentEntityRequest,
@@ -2062,6 +2136,7 @@ fn apply_scheduled_wake(
         .filter(|(account, _)| state.known_accounts.contains(account))
         .collect::<Vec<_>>();
 
+    let due_secret_acks = paybook.due_secret_acks(state, now)?;
     let dispute_account_ids = state
         .crontab
         .as_ref()
@@ -2072,6 +2147,7 @@ fn apply_scheduled_wake(
             ScheduledHookKind::DisputeDeadline { account_id } => Some(account_id.clone()),
             _ => None,
         })
+        .chain(due_secret_acks.iter().map(|(_, account)| account.clone()))
         .filter(|account| state.known_accounts.contains(account))
         .collect::<BTreeSet<_>>();
     let dispute_views = accounts
@@ -2096,7 +2172,6 @@ fn apply_scheduled_wake(
     // Secret-ack deadlines are derived from paybook entries (frame-local
     // writes included). A deadline whose lock is still active needs a
     // dispute; one whose lock is gone just terminates the route.
-    let due_secret_acks = paybook.due_secret_acks(state, now)?;
     let mut requested_locks = BTreeMap::<AccountId, Vec<String>>::new();
     for (hashlock, counterparty) in &due_secret_acks {
         if state.known_accounts.contains(counterparty) {
@@ -2115,13 +2190,45 @@ fn apply_scheduled_wake(
         .iter()
         .map(|(account, lock_id)| (account_text(*account), lock_id.clone()))
         .collect::<BTreeSet<_>>();
-    let mut secret_acks_requiring_dispute = BTreeSet::new();
+    let mut dispute_prepare_counterparties = Vec::new();
+    let mut planned = BTreeSet::new();
+    let queued_starts = state
+        .j_batch_state
+        .as_ref()
+        .map_or(0, |batch| batch.batch.dispute_starts.len());
+    // Membership is unordered; emission retains (deadline, hashlock) order.
+    // The certified wake admits ordinary prepareDispute in this same frame.
     for (hashlock, counterparty) in due_secret_acks {
-        if active_text.contains(&(counterparty, hashlock.clone())) {
-            secret_acks_requiring_dispute.insert(hashlock);
-        } else {
-            terminate_route_in_frame(state, paybook, &hashlock)?;
+        if !state.known_accounts.contains(&counterparty) {
+            continue;
         }
+        if !active_text.contains(&(counterparty.clone(), hashlock.clone())) {
+            terminate_route_in_frame(state, paybook, &hashlock)?;
+            continue;
+        }
+        if dispute_views
+            .get(&counterparty)
+            .is_some_and(|view| view.active_dispute.is_some())
+        {
+            continue;
+        }
+        if planned.contains(&counterparty) {
+            continue;
+        }
+        if queued_starts + planned.len() >= crate::j_batch::MAX_DISPUTE_STARTS {
+            let mut entry = paybook
+                .entry(state, &hashlock)?
+                .cloned()
+                .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_ROUTE_MISSING"))?;
+            entry.secret_ack_deadline_at = Some(
+                now.checked_add(crate::paybook::SECRET_ACK_TIMEOUT_MS)
+                    .ok_or_else(|| EntityKernelError::htlc("HTLC_SECRET_ACK_DEADLINE_OVERFLOW"))?,
+            );
+            paybook.put(entry)?;
+            continue;
+        }
+        planned.insert(counterparty.clone());
+        dispute_prepare_counterparties.push(counterparty);
     }
 
     // Overdue loans are derived from committed lending state exactly like
@@ -2172,7 +2279,7 @@ fn apply_scheduled_wake(
             now: state.timestamp,
             expired_htlc_locks: &expired_locks,
             overdue_lending_loans: &overdue_lending_loans,
-            secret_acks_requiring_dispute: &secret_acks_requiring_dispute,
+            dispute_prepare_counterparties: &dispute_prepare_counterparties,
             dispute_views: &dispute_views,
             j_batch_state: state.j_batch_state.as_ref(),
             dispute_auto_finalize: state
@@ -2514,6 +2621,242 @@ fn apply_resident_entity_round_core_attempt(
     // Already-proposable Accounts retain their separately captured prefix.
     let mut input_touch_positions = Vec::<(AccountId, Option<usize>)>::new();
 
+    let (scheduled_commands, scheduled_account_envelope_mutations) = apply_scheduled_wake(
+        accounts,
+        &mut state,
+        &mut accumulated.paybook_changes,
+        request.scheduled_wake.as_ref(),
+        &request.expected_proposer_signer_id,
+    )?;
+    accumulated
+        .account_envelope_mutations
+        .extend(scheduled_account_envelope_mutations);
+    // A certified wake admits due cross-j hooks before periodic self-actions,
+    // using the current board and proposer. Like TS handleScheduledWakeEntityTx,
+    // these actions share this signed frame and need no new command nonce.
+    // Routing them back through Runtime would consume the hook before its
+    // expiry transition and let unrelated frames overtake the clear request.
+    let mut scheduled_outputs = Vec::new();
+    for command in &scheduled_commands {
+        if let SchedulerCommand::CrossJOrderbookSweep { reason } = command {
+            scheduled_outputs.push(crate::LocalEntityOutput {
+                entity_id: state.entity_id.clone(),
+                target_signer_id: Some(request.expected_proposer_signer_id.clone()),
+                entity_txs: vec![crate::LocalEntityOutputTx::Projected(
+                    crate::CanonicalEntityTx::from_frame_projection(
+                        crate::EntityTxKind::OrderbookSweepCrossJurisdiction,
+                        CanonicalValue::Object(vec![(
+                            "reason".into(),
+                            CanonicalValue::String(reason.clone()),
+                        )]),
+                    )
+                    .map_err(|error| {
+                        EntityKernelError::local("scheduledWake", error.to_string())
+                    })?,
+                )],
+            });
+        }
+    }
+    // Batched hook actions precede periodic work. Use the same collective
+    // decoder and transition as an explicit command, without an extra Runtime
+    // frame or command nonce. HTLC timeout admissions must precede prepare.
+    for command in &scheduled_commands {
+        let txs = match command {
+            SchedulerCommand::ProcessHtlcTimeouts { expired_locks } => {
+                vec![crate::CanonicalEntityTx::from_frame_projection(
+                    crate::EntityTxKind::ProcessHtlcTimeouts,
+                    CanonicalValue::Object(vec![(
+                        "expiredLocks".into(),
+                        CanonicalValue::Array(
+                            expired_locks
+                                .iter()
+                                .map(|(account, lock)| {
+                                    CanonicalValue::Object(vec![
+                                        (
+                                            "accountId".into(),
+                                            CanonicalValue::String(account.clone()),
+                                        ),
+                                        ("lockId".into(), CanonicalValue::String(lock.clone())),
+                                    ])
+                                })
+                                .collect(),
+                        ),
+                    )]),
+                )]
+            }
+            SchedulerCommand::PrepareDisputes { counterparties } => counterparties
+                .iter()
+                .map(|account| {
+                    crate::CanonicalEntityTx::from_frame_projection(
+                        crate::EntityTxKind::PrepareDispute,
+                        CanonicalValue::Object(vec![
+                            (
+                                "counterpartyEntityId".into(),
+                                CanonicalValue::String(account.clone()),
+                            ),
+                            (
+                                "description".into(),
+                                CanonicalValue::String(
+                                    "auto-prepare-dispute-after-secret-ack-timeout".into(),
+                                ),
+                            ),
+                        ]),
+                    )
+                })
+                .collect(),
+            _ => continue,
+        };
+        scheduled_outputs.push(crate::LocalEntityOutput {
+            entity_id: state.entity_id.clone(),
+            target_signer_id: Some(request.expected_proposer_signer_id.clone()),
+            entity_txs: txs
+                .into_iter()
+                .map(|tx| tx.map(crate::LocalEntityOutputTx::Projected))
+                .collect::<Result<_, _>>()
+                .map_err(|error| EntityKernelError::local("scheduledWake", error.to_string()))?,
+        });
+    }
+    // TS batches due finalize actions after timeout/prepare and before periodic
+    // actions. Consume them here, inside this certified Entity frame, rather
+    // than appending a stale self-output during the later Book stage.
+    append_scheduled_dispute_outputs(
+        &state,
+        &scheduled_commands,
+        &mut scheduled_outputs,
+        manual_broadcast_in_input,
+    )?;
+    let mut scheduled_local_txs =
+        scheduled_collective_txs(&state, &request, &mut scheduled_outputs)?;
+    accumulated
+        .routed_entity_outputs
+        .append(&mut scheduled_outputs);
+    if scheduled_commands
+        .iter()
+        .any(|command| matches!(command, SchedulerCommand::HubRebalance))
+    {
+        let account_ids = accounts.rebalance_account_ids()?;
+        let views = accounts
+            .hub_rebalance_views(account_ids)?
+            .into_iter()
+            .map(|(account_id, view)| {
+                Ok(crate::hub_rebalance::HubRebalanceAccountView {
+                    account_id: account_text(account_id),
+                    owner_side: view.owner_side,
+                    pending_frame: view.pending_frame,
+                    settlement_transition_pending: view.settlement_transition_pending,
+                    settlement_workspace: view.settlement_workspace,
+                    requested_rebalance: view.requested_rebalance.into_iter().collect(),
+                    fee_state: view
+                        .requested_fee_state
+                        .into_iter()
+                        .map(|(token_id, fee)| {
+                            (
+                                token_id,
+                                crate::hub_rebalance::HubRebalanceFeeState {
+                                    request_id: fee.request_id,
+                                    fee_paid_upfront: fee.fee_paid_upfront,
+                                    policy_version: fee.policy_version,
+                                    requested_at: fee.requested_at,
+                                    refund: fee.refund,
+                                    refunded_amount: fee.refunded_amount,
+                                },
+                            )
+                        })
+                        .collect(),
+                    submitted_at_by_token: view
+                        .submitted_at_by_token
+                        .into_iter()
+                        .map(|(token_id, submitted_at)| {
+                            Ok((
+                                xln_rscore_engine::TokenId::new(token_id).map_err(|error| {
+                                    EntityKernelError::local("hubRebalance", error.to_string())
+                                })?,
+                                submitted_at,
+                            ))
+                        })
+                        .collect::<Result<_, EntityKernelError>>()?,
+                    deltas: view
+                        .deltas
+                        .into_iter()
+                        .map(|delta| (delta.token_id(), delta))
+                        .collect(),
+                })
+            })
+            .collect::<Result<Vec<_>, EntityKernelError>>()?;
+        let mut rebalance = crate::hub_rebalance::apply_hub_rebalance(
+            &mut state,
+            &views,
+            manual_broadcast_in_input,
+        )?;
+        // The scheduled rebalance explicitly returns submitted Accounts in
+        // TS accountChanges. Other envelope writes (such as prepareDispute)
+        // still do not create Account-history rows merely because a leaf moved.
+        let submitted_accounts = rebalance
+            .envelope_mutations
+            .iter()
+            .filter(|(_, update)| {
+                matches!(
+                    update,
+                    crate::AccountEnvelopeMutation::SetRebalanceSubmittedAt { .. }
+                )
+            })
+            .map(|(account, _)| account_id(account))
+            .collect::<Result<Vec<_>, _>>()?;
+        touch_candidates.extend(canonical_entity_tx_account_changes(submitted_accounts));
+        scheduled_local_txs.extend(scheduled_collective_txs(
+            &state,
+            &request,
+            &mut rebalance.outputs,
+        )?);
+        accumulated
+            .routed_entity_outputs
+            .append(&mut rebalance.outputs);
+        accumulated
+            .account_envelope_mutations
+            .append(&mut rebalance.envelope_mutations);
+        accumulated.outputs.append(&mut rebalance.effects);
+    }
+    let mut scheduled_views =
+        local_account_views(accounts, &state, &scheduled_local_txs, &[], &[], context)?;
+    let visible_mutations = accumulated
+        .account_envelope_mutations
+        .iter()
+        .filter(|(account, _)| {
+            scheduled_views
+                .get(account)
+                .is_some_and(|view| view.dispute.is_some())
+        })
+        .collect::<Vec<_>>();
+    project_dispute_lifecycle_mutations(&mut scheduled_views, visible_mutations)?;
+    let phase_started = Instant::now();
+    let mut scheduled_transition = apply_entity_transitions(
+        state,
+        std::mem::take(&mut accumulated.paybook_changes),
+        Vec::new(),
+        &BTreeSet::new(),
+        scheduled_local_txs,
+        &scheduled_views,
+        request.local_account_genesis_policy.as_ref(),
+        request.entity_authority.as_ref(),
+        request.runtime_seed.as_deref(),
+        context,
+    )?;
+    entity_apply_micros = entity_apply_micros.saturating_add(phase_started.elapsed().as_micros());
+    // Wake is the canonical first EntityTx after physical Account ingress.
+    // Keep its evidence before the untouched positional local/Account fold.
+    for work in &scheduled_transition.proposal_work {
+        input_touch_positions.push((account_id(&work.account_id)?, None));
+    }
+    input_touch_positions.extend(
+        scheduled_transition
+            .account_creates
+            .iter()
+            .map(|seed| (seed.account_id, None)),
+    );
+    ordered_events.append(&mut scheduled_transition.local_events);
+    ordered_hashes.append(&mut scheduled_transition.local_hashes_to_sign);
+    state = accumulated.merge(scheduled_transition);
+
     for (operation_index, operation) in operations.into_iter().enumerate() {
         match operation {
             ResidentEntityOperation::AccountRange { start, len } => {
@@ -2574,6 +2917,16 @@ fn apply_resident_entity_round_core_attempt(
                 }
                 let mut views =
                     local_account_views(accounts, &state, &[], &commits, &unsafe_frames, context)?;
+                let visible_mutations = accumulated
+                    .account_envelope_mutations
+                    .iter()
+                    .filter(|(account, _)| {
+                        views
+                            .get(account)
+                            .is_some_and(|view| view.dispute.is_some())
+                    })
+                    .collect::<Vec<_>>();
+                project_dispute_lifecycle_mutations(&mut views, visible_mutations)?;
                 commits_micros = commits_micros.saturating_add(phase_started.elapsed().as_micros());
                 let empty_created_accounts = BTreeSet::new();
                 let mut base_transition_pending = true;
@@ -2689,7 +3042,18 @@ fn apply_resident_entity_round_core_attempt(
                 ordered_applied.append(&mut segment.applied);
             }
             ResidentEntityOperation::Local(local_txs) => {
-                let views = local_account_views(accounts, &state, &local_txs, &[], &[], context)?;
+                let mut views =
+                    local_account_views(accounts, &state, &local_txs, &[], &[], context)?;
+                let visible_mutations = accumulated
+                    .account_envelope_mutations
+                    .iter()
+                    .filter(|(account, _)| {
+                        views
+                            .get(account)
+                            .is_some_and(|view| view.dispute.is_some())
+                    })
+                    .collect::<Vec<_>>();
+                project_dispute_lifecycle_mutations(&mut views, visible_mutations)?;
                 let phase_started = Instant::now();
                 let mut next = apply_entity_transitions(
                     state,
@@ -2736,143 +3100,15 @@ fn apply_resident_entity_round_core_attempt(
     }
     inbound.applied = ordered_applied;
     let forced_acks = forced_ack_accounts(&inbound.applied);
-    let (scheduled_commands, scheduled_account_envelope_mutations) = apply_scheduled_wake(
-        accounts,
-        &mut state,
-        &mut accumulated.paybook_changes,
-        request.scheduled_wake.as_ref(),
-        &request.expected_proposer_signer_id,
-    )?;
-    accumulated
-        .account_envelope_mutations
-        .extend(scheduled_account_envelope_mutations);
-    // A certified wake admits due cross-j hooks before periodic self-actions,
-    // using the current board and proposer. Like TS handleScheduledWakeEntityTx,
-    // these actions share this signed frame and need no new command nonce.
-    // Routing them back through Runtime would consume the hook before its
-    // expiry transition and let unrelated frames overtake the clear request.
-    let mut scheduled_outputs = Vec::new();
-    for command in &scheduled_commands {
-        if let SchedulerCommand::CrossJOrderbookSweep { reason } = command {
-            scheduled_outputs.push(crate::LocalEntityOutput {
-                entity_id: state.entity_id.clone(),
-                target_signer_id: Some(request.expected_proposer_signer_id.clone()),
-                entity_txs: vec![crate::LocalEntityOutputTx::Projected(
-                    crate::CanonicalEntityTx::from_frame_projection(
-                        crate::EntityTxKind::OrderbookSweepCrossJurisdiction,
-                        CanonicalValue::Object(vec![(
-                            "reason".into(),
-                            CanonicalValue::String(reason.clone()),
-                        )]),
-                    )
-                    .map_err(|error| {
-                        EntityKernelError::local("scheduledWake", error.to_string())
-                    })?,
-                )],
-            });
-        }
-    }
-    let mut scheduled_local_txs =
-        scheduled_collective_txs(&state, &request, &mut scheduled_outputs)?;
-    accumulated
-        .routed_entity_outputs
-        .append(&mut scheduled_outputs);
-    if scheduled_commands
-        .iter()
-        .any(|command| matches!(command, SchedulerCommand::HubRebalance))
-    {
-        let account_ids = accounts.rebalance_account_ids()?;
-        let views = accounts
-            .hub_rebalance_views(account_ids)?
-            .into_iter()
-            .map(|(account_id, view)| {
-                Ok(crate::hub_rebalance::HubRebalanceAccountView {
-                    account_id: account_text(account_id),
-                    owner_side: view.owner_side,
-                    pending_frame: view.pending_frame,
-                    settlement_transition_pending: view.settlement_transition_pending,
-                    settlement_workspace: view.settlement_workspace,
-                    requested_rebalance: view.requested_rebalance.into_iter().collect(),
-                    fee_state: view
-                        .requested_fee_state
-                        .into_iter()
-                        .map(|(token_id, fee)| {
-                            (
-                                token_id,
-                                crate::hub_rebalance::HubRebalanceFeeState {
-                                    request_id: fee.request_id,
-                                    fee_paid_upfront: fee.fee_paid_upfront,
-                                    policy_version: fee.policy_version,
-                                    requested_at: fee.requested_at,
-                                    refund: fee.refund,
-                                    refunded_amount: fee.refunded_amount,
-                                },
-                            )
-                        })
-                        .collect(),
-                    submitted_at_by_token: view
-                        .submitted_at_by_token
-                        .into_iter()
-                        .map(|(token_id, submitted_at)| {
-                            Ok((
-                                xln_rscore_engine::TokenId::new(token_id).map_err(|error| {
-                                    EntityKernelError::local("hubRebalance", error.to_string())
-                                })?,
-                                submitted_at,
-                            ))
-                        })
-                        .collect::<Result<_, EntityKernelError>>()?,
-                    deltas: view
-                        .deltas
-                        .into_iter()
-                        .map(|delta| (delta.token_id(), delta))
-                        .collect(),
-                })
-            })
-            .collect::<Result<Vec<_>, EntityKernelError>>()?;
-        let mut rebalance = crate::hub_rebalance::apply_hub_rebalance(
-            &mut state,
-            &views,
-            manual_broadcast_in_input,
-        )?;
-        // The scheduled rebalance explicitly returns submitted Accounts in
-        // TS accountChanges. Other envelope writes (such as prepareDispute)
-        // still do not create Account-history rows merely because a leaf moved.
-        let submitted_accounts = rebalance
-            .envelope_mutations
-            .iter()
-            .filter(|(_, update)| {
-                matches!(
-                    update,
-                    crate::AccountEnvelopeMutation::SetRebalanceSubmittedAt { .. }
-                )
-            })
-            .map(|(account, _)| account_id(account))
-            .collect::<Result<Vec<_>, _>>()?;
-        touch_candidates.extend(canonical_entity_tx_account_changes(submitted_accounts));
-        scheduled_local_txs.extend(scheduled_collective_txs(
-            &state,
-            &request,
-            &mut rebalance.outputs,
-        )?);
-        accumulated
-            .routed_entity_outputs
-            .append(&mut rebalance.outputs);
-        accumulated
-            .account_envelope_mutations
-            .append(&mut rebalance.envelope_mutations);
-        accumulated.outputs.append(&mut rebalance.effects);
-    }
-    let scheduled_views =
-        local_account_views(accounts, &state, &scheduled_local_txs, &[], &[], context)?;
+    let final_views = BTreeMap::new();
     let phase_started = Instant::now();
     let final_transition = apply_entity_transitions(
         state,
         std::mem::take(&mut accumulated.paybook_changes),
         Vec::new(),
         &BTreeSet::new(),
-        scheduled_local_txs,
-        &scheduled_views,
+        Vec::new(),
+        &final_views,
         request.local_account_genesis_policy.as_ref(),
         request.entity_authority.as_ref(),
         request.runtime_seed.as_deref(),

@@ -21,7 +21,7 @@ type OrchestratorProxyDeps = {
   defaultRpcUrl: string;
   pollAllHubHealth: () => Promise<void>;
   getHubChildByEntityId: (hubEntityId: string) => HubChild | null;
-  getHealthyHub: () => HubChild | null;
+  getHealthyHub: (requiredEngine?: HubChild['engine']) => HubChild | null;
 };
 
 const CORS_JSON_HEADERS = {
@@ -41,6 +41,11 @@ const PUBLIC_HUB_PROXY_MARKER = { forwarded: 'for=_xln_public_proxy' } as const;
 const LONG_RUNNING_HUB_ENDPOINTS = new Set([
   '/api/faucet/erc20',
   '/api/faucet/gas',
+]);
+// Chain funding is served by the existing TS faucet service. This capability
+// selection never changes the Account authority used by offchain operations.
+const CHAIN_FAUCET_ENDPOINTS = new Set([
+  '/api/faucet/erc20', '/api/faucet/gas', '/api/faucet/reserve',
 ]);
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -418,7 +423,10 @@ const proxyAnyHubRequest = async (
   endpointWithQuery: string,
 ): Promise<Response> => {
     await deps.pollAllHubHealth();
-    const child = deps.getHealthyHub();
+    const queryStart = endpointWithQuery.indexOf('?');
+    const endpoint = queryStart < 0 ? endpointWithQuery : endpointWithQuery.slice(0, queryStart);
+    const chainFaucet = CHAIN_FAUCET_ENDPOINTS.has(endpoint);
+    const child = deps.getHealthyHub(chainFaucet ? 'typescript' : undefined);
     if (!child) {
       return new Response(safeStringify(proxyFailureBody({
         code: 'NO_HEALTHY_HUB_API_AVAILABLE',

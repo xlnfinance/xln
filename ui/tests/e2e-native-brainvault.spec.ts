@@ -10,7 +10,9 @@ test('native BrainVault without verified recovery never creates an empty runtime
     const { openNativeBrainvault } = await import(nativePath);
     const { towerHealth } = await import(recoveryPath);
     const { getEmbeddedEnv } = await import(adapterPath);
-    const address = 'http://127.0.0.1:9100';
+    const backupPath = '/src/native/backup.ts';
+    const { nativeBackupAddress } = await import(backupPath);
+    const address = nativeBackupAddress();
     await towerHealth(address);
     const before = await indexedDB.databases();
     const identities: string[] = [];

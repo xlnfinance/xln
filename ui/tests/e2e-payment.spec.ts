@@ -223,3 +223,69 @@ test.describe('wallet UI payment', () => {
     },
   );
 });
+
+test('payment receipts and recovery dialogs keep keyboard focus inside and restore it on close', { tag: '@functional' }, async ({ page }) => {
+  test.setTimeout(60_000);
+  await enterStack(page);
+  await page.getByTestId('nav-settings').first().click();
+  const reveal = page.getByRole('button', { name: 'Reveal recovery phrase', exact: true });
+  await reveal.focus();
+  await page.keyboard.press('Enter');
+  const recovery = page.getByRole('dialog', { name: 'Recovery phrase', exact: true });
+  const close = recovery.getByRole('button', { name: 'Close', exact: true });
+  await expect(close).toBeFocused();
+  for (const key of ['Shift+Tab', 'Tab', 'Tab', 'Tab']) {
+    await page.keyboard.press(key);
+    const focus = await recovery.evaluate(node => ({
+      inside: node.contains(document.activeElement),
+      browserBoundary: document.activeElement === document.body,
+      nativeModal: node.matches(':modal'),
+      activeTag: document.activeElement?.tagName,
+      documentFocused: document.hasFocus(),
+    }));
+    console.log('RECOVERY_MODAL_FOCUS', key, focus);
+    expect(focus.nativeModal).toBe(true);
+    expect(focus.inside || focus.browserBoundary).toBe(true);
+  }
+  await page.getByTestId('nav-home').first().focus();
+  await expect(page.getByTestId('nav-home').first()).not.toBeFocused();
+  expect(await recovery.evaluate(node => node.matches(':modal'))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(recovery).toHaveCount(0);
+  await expect(reveal).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(close).toBeFocused();
+  await page.mouse.click(5, 5);
+  await expect(recovery).toHaveCount(0);
+  await expect(reveal).toBeFocused();
+
+  await page.getByTestId('nav-home').first().click();
+  await page.getByTestId('home-faucet').click();
+  await expect(page.getByTestId('test-money-status')).toContainText('100 USDC received', { timeout: 20_000 });
+  await page.getByTestId('home-pay').click();
+  await page.getByTestId('pay-to').fill('H2');
+  await page.getByTestId('pay-amount').fill('25');
+  await expect(page.getByTestId('pay-submit')).toBeEnabled();
+  await page.getByTestId('pay-submit').click();
+  const payment = page.getByTestId('payment-receipt');
+  await expect(payment.getByTestId('receipt-kicker')).toHaveText('Paid', { timeout: 15_000 });
+  expect(await payment.evaluate(node => node.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(payment).toHaveCount(0);
+  await page.getByTestId('nav-activity').first().click();
+  const movement = page.getByTestId('activity-row').filter({ hasText: 'Sent' }).first().getByRole('button');
+  await movement.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const receipt = page.getByRole('dialog', { name: 'Receipt', exact: true });
+  await expect(receipt.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Tab');
+    expect(await receipt.evaluate(node => node.matches(':modal') &&
+      (node.contains(document.activeElement) || document.activeElement === document.body))).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(receipt).toHaveCount(0);
+  await expect(movement).toBeFocused();
+});

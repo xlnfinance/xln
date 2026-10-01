@@ -1,3 +1,5 @@
+pub(crate) const MAX_DISPUTE_STARTS: usize = 8;
+
 mod decode;
 mod encode;
 mod reserve;
