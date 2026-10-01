@@ -7,8 +7,8 @@
 // peer that goes away are values (`SocketFault`, an ended read), never thrown.
 import { on, once } from "node:events";
 import { connect, createServer, type Socket } from "node:net";
-import { err, ok, type Result } from "../../../kernel/core/result.ts";
-import type { Tagged } from "../../../kernel/core/tagged.ts";
+import { err, ok, type Result } from "../../../../kernel/core/result.ts";
+import type { Tagged } from "../../../../kernel/core/tagged.ts";
 
 export type SocketFault = Tagged<"socket", { reason: string }>;
 

@@ -17,7 +17,7 @@ import type { WatchConfig } from "../watch/loop.ts";
 import type { Disk } from "../disk/disk.ts";
 import { type Config, type Daemon, type Look, startDaemon } from "./daemon.ts";
 import { fileDisk } from "./file-disk.ts";
-import { listenTcp, type Listener } from "./socket.ts";
+import { listenTcp, type Listener } from "./link/socket.ts";
 
 export const ALICE = entityOf(1);
 export const BOB = entityOf(2);

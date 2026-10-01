@@ -12,7 +12,7 @@ import {
   accountOf, ALICE, agree, BOB, connected, fresh, LOCAL, must, nodeOf, QUICK, SECOND, seatOf, sleep, slowChain, SLOW,
   until, WAIT,
 } from "./scene.ts";
-import { dialTcp } from "./socket.ts";
+import { dialTcp } from "./link/socket.ts";
 
 describe("host/shell/node two Runtimes over loopback sockets", () => {
   test("R-NODE nodes that are connected open an Account and commit a frame together, no tick awaited", async () => {
