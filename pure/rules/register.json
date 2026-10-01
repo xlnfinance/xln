@@ -469,7 +469,7 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the check is made off-chain when the op is queued; the limits themselves are the contract's, held by J5 (the signed gas budget) and R-OOG (a cap bounds gas), tested in stress/BatchBounds.t.sol",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (Runtime slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -477,6 +477,21 @@
      "layer": "arrival",
      "name": "to be named",
      "owed": "thread 'Account spec comparison'"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 the limits are the ones DepositoryBounds and the Depository carry"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 a full draft is a refusal, never a throw"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-J3 a full draft refuses with a notice and keeps what it had"
     }
    ]
   },
@@ -987,7 +1002,7 @@
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1024,6 +1039,16 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "deposit-ignores-the-token"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "J6 a deposit leg travels alone"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "J6 reaches the wire: the sealed batch of a deposit is that deposit alone"
     }
    ]
   },
@@ -1257,7 +1282,7 @@
     "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
     "contract": "n/a: the contract's part (a signed batch never expires and is final at its nonce) is R-FINAL-NONCE, which widens this rule",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1269,6 +1294,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "resign-at-a-signed-nonce"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FINAL-NONCE and R-NONCE: a batch is signed at a nonce above every nonce this Entity ever signed"
     }
    ]
   },
@@ -1281,7 +1311,7 @@
     "quint": "hold",
     "contract": "hold",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1308,6 +1338,11 @@
      "kind": "bug",
      "layer": "arrival",
      "name": "mixed-batch"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-SPLIT dispute, reveal and deposit ops never share a batch with payment, settlement or reserve ops"
     }
    ]
   },
@@ -1320,7 +1355,7 @@
     "quint": "hold",
     "contract": "n/a: the chain applies a batch as given; keeping co-signed ops to one Account is the planner's choice (the burnt nonce is J5)",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1337,6 +1372,11 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "cosign-batch-carries-payments"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-COSIGN a batch with a co-signed op carries ops of that one Account only"
     }
    ]
   },
@@ -1446,7 +1486,7 @@
     "quint": "owed: spec thread, new Quint branch",
     "contract": "n/a: a planner choice made before signing; the chain's debt handling is R2C-DEBT-FIRST",
     "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
-    "ts": "owed: the cut (J batch-planner slice)"
+    "ts": "hold"
    },
    "killers": [
     {
@@ -1458,6 +1498,26 @@
      "kind": "mutant",
      "layer": "quint",
      "name": "unfunded-payment-is-signed"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FUNDED the spendable reserve nets every outstanding debt"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FUNDED oldest first, and one that does not fit waits while a younger one that fits goes"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FUNDED every reserve outflow is judged, not only a payment to another entity"
+    },
+    {
+     "kind": "test",
+     "layer": "ts",
+     "name": "R-FUNDED the reserve is judged in the order the contract applies the ops"
     }
    ]
   },
