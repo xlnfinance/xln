@@ -1,6 +1,6 @@
 // Each test plants a fool in a scratch tree and asks the gate whether it notices.
 import { describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { compare, isOff, longLines } from "./counts.ts";
 import { treeStyle } from "./gate.ts";
@@ -99,9 +99,9 @@ describe("the gate cannot be satisfied by doing nothing", () => {
 
   test("a directory under pure/ that is neither gated nor named as outside the gate is a failing row", () => {
     const root = scratch(clean);
-    mkdirSync(`${root}/entity`);
-    writeFileSync(`${root}/entity/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
-    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir entity");
+    mkdirSync(`${root}/stray`);
+    writeFileSync(`${root}/stray/bad.ts`, "export const bad = () => { throw new Error('x'); };\n");
+    expect(treeStyle(root).rows.filter(isOff).map((row) => `${row.rule} ${row.file}`)).toContain("unlisted-dir stray");
   });
 });
 
@@ -138,6 +138,21 @@ describe("every style rule has a canary that it must report", () => {
   test("every rule reports on its canary in both languages, so the real tree is clean", () => {
     expect(offRows(scratch(clean))).toEqual([]);
   });
+});
+
+describe("the gate leaves nothing behind", () => {
+  test("a run removes the canary files it planted: the temp folder holds no tree-canary directory afterwards", () => {
+    const root = scratch({ "a.ts": "export const a = 1;\n", ...used("a") });
+    const tmp = mkdtempSync(`${tmpdir()}/tree-leftovers-`);
+    const before = process.env["TMPDIR"];
+    process.env["TMPDIR"] = tmp;
+    try {
+      expect(treeStyle(root).failed).toBe(false);
+      expect(readdirSync(tmp).filter((entry) => entry.startsWith("tree-canary-"))).toEqual([]);
+    } finally {
+      process.env["TMPDIR"] = before ?? "/tmp";
+    }
+  }, 120_000);
 });
 
 describe("the gate reads the files git lists, never the disk", () => {

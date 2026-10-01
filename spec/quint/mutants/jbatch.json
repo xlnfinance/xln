@@ -1,0 +1,283 @@
+{
+  "files": [
+    "jbatch.qnt",
+    "jbatch_test.qnt"
+  ],
+  "mutants": [
+    {
+      "id": "pack-everything",
+      "why": "J3: one batch of everything queued, one outstanding: a payment that cannot run takes the urgent ops down with it, and an outstanding payment batch delays them",
+      "file": "jbatch.qnt",
+      "old": "pure val STRAT = 4",
+      "new": "pure val STRAT = 0",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "contract-reverts-on-moved-dispute",
+      "why": "J2: the batch reverts as a whole when a dispute op cannot apply (Depository today): the secret reveal in the same batch is lost with it",
+      "file": "jbatch.qnt",
+      "old": "pure val TOLERANT = true",
+      "new": "pure val TOLERANT = false",
+      "killedBy": "test:revealSurvivesAMovedDisputeInOneFrameTest"
+    },
+    {
+      "id": "drop-every-op-of-a-failed-batch",
+      "why": "Q-J1: the Entity abandons all ops of a batch that reverted, but the signed batch can still land later",
+      "file": "jbatch.qnt",
+      "old": "dropped: OPIDS.mapBy(i => s.dropped.get(i) or dead.contains(i)),",
+      "new": "dropped: OPIDS.mapBy(i => s.dropped.get(i) or x.b.ids.contains(i)),",
+      "killedBy": "invariant:dropped_only_dead"
+    },
+    {
+      "id": "entity-ignores-the-skip-event",
+      "why": "J2: the Entity does not read DisputeOpSkipped, so a skipped start stays pending: it waits for a DisputeStarted that never comes and signs the op again",
+      "file": "jbatch.qnt",
+      "old": "    val dead = (if (TOLERANT) x.b.ids.filter(i => s1.skipped.get(i)) else",
+      "new": "    val dead = (if (TOLERANT) x.b.ids.filter(i => false) else",
+      "killedBy": "invariant:skip_read"
+    },
+    {
+      "id": "urgent-waits-for-outstanding",
+      "why": "J3: the urgent batch waits until nothing is outstanding, so it is signed one round late",
+      "file": "jbatch.qnt",
+      "old": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]",
+      "new": "      if (fresh.size() > 0 and nothingAlive(s)) [{ nonce: f, ids: fresh }]",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "resign-at-a-signed-nonce",
+      "why": "F1: the fresh nonce ignores what is already signed, so a second batch with other content is signed at a nonce that one already holds; the adversary lands the old one and burns the new",
+      "file": "jbatch.qnt",
+      "old": "    val f = topSigned(s) + 1",
+      "new": "    val f = s.cnonce + 1",
+      "killedBy": "invariant:nonce_final"
+    },
+    {
+      "id": "urgent-batch-carries-payments",
+      "why": "R-SPLIT: a payment rides in the urgent batch; when it cannot run the mixed batch reverts whole and keeps its nonce open (J5 as built covers only a batch with no dispute, reveal or hash-ladder op), so the urgent op is lost with it and blocks every batch above it",
+      "file": "jbatch.qnt",
+      "old": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh }]",
+      "new": "      if (fresh.size() > 0) [{ nonce: f, ids: fresh.union(p) }]",
+      "killedBy": "invariant:urgent_lands"
+    },
+    {
+      "id": "payment-revert-keeps-the-nonce",
+      "why": "J5: the failed batch is caught but the transaction still reverts, so the nonce write is lost and the nonce stays open (today's contract): it blocks every batch above it, urgent ones included, and F1 forbids signing other content at that nonce",
+      "file": "jbatch.qnt",
+      "old": "pure val NONCE_ON_FAIL = true",
+      "new": "pure val NONCE_ON_FAIL = false",
+      "killedBy": "test:revertedPaymentDoesNotBlockTheUrgentOpTest"
+    },
+    {
+      "id": "chain-accepts-old-nonces",
+      "why": "E2: the chain accepts a nonce at or below the stored one, so a signed batch sent again runs its payment again",
+      "file": "jbatch.qnt",
+      "old": "    b.nonce == s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "new": "    b.nonce <= s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "entity-ignores-batch-failed",
+      "why": "J5: the Entity does not read BatchFailed, so the failed payment is never queued again",
+      "file": "jbatch.qnt",
+      "old": "      failSeen: OPIDS.mapBy(i => if (x.b.ids.contains(i)) s1.failedEv.get(i) else s.failSeen.get(i)),",
+      "new": "      failSeen: s.failSeen,",
+      "killedBy": "invariant:failed_read"
+    },
+    {
+      "id": "no-gas-guard",
+      "why": "J5 as built: without the 1/32 gas rule a relayer that starves the call burns a good payment batch: it is failed at its nonce though it would have applied",
+      "file": "jbatch.qnt",
+      "old": "  pure val GAS_GUARD = true",
+      "new": "  pure val GAS_GUARD = false",
+      "killedBy": "invariant:no_burn"
+    },
+    {
+      "id": "abort-requeues-payments-at-once",
+      "why": "F1 with the coordinator's abort rule: after the Entity gives a signed draft up, its payment goes back into the draft at once, though the abandoned batch can still land: the payment runs twice",
+      "file": "jbatch.qnt",
+      "old": "pure val PAY_HELD_AFTER_ABORT = true",
+      "new": "pure val PAY_HELD_AFTER_ABORT = false",
+      "killedBy": "invariant:pay_once"
+    },
+    {
+      "id": "deposit-batch-soft-fails",
+      "why": "A batch with a deposit leg that fails takes its nonce and emits BatchFailed, like a payment batch: a paused token burns the nonce.",
+      "file": "jbatch.qnt",
+      "old": "pure val DEP_SOFT_FAILS = false",
+      "new": "pure val DEP_SOFT_FAILS = true",
+      "killedBy": "test:failedDepositBatchRevertsWholeTest"
+    },
+    {
+      "id": "deposit-ignores-the-token",
+      "why": "The chain lands a deposit leg although the token transfer fails.",
+      "file": "jbatch.qnt",
+      "old": "    not(hasDep(s, b.ids)) or s.ext,\n",
+      "new": "    true,\n",
+      "killedBy": "test:failedDepositBatchRevertsWholeTest"
+    },
+    {
+      "id": "deposit-runs-after-payments",
+      "why": "The payments of a batch run before its deposit legs, so a deposit cannot fund the payment behind it.",
+      "file": "jbatch.qnt",
+      "old": "payTotal(s, b.ids) <= s.reserve + depTotal(s, b.ids),",
+      "new": "payTotal(s, b.ids) <= s.reserve,",
+      "killedBy": "test:depositLegsRunBeforePaymentsTest"
+    },
+    {
+      "id": "bad-cp-signature-reverts",
+      "why": "A settlement with a stale counterparty signature reverts the batch whole (nonce stays open) instead of failing softly.",
+      "file": "jbatch.qnt",
+      "old": "b.ids.forall(i => isMoney(s, i)) and (DEP_SOFT_FAILS",
+      "new": "b.ids.forall(i => isMoney(s, i) and not(isSettle(s, i))) and (DEP_SOFT_FAILS",
+      "killedBy": "test:staleSettlementFailsSoftTest"
+    },
+    {
+      "id": "forged-batch-lands",
+      "why": "A batch with a bad hanko is executed and takes a nonce.",
+      "file": "jbatch.qnt",
+      "old": "    st' = react({ ...st, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "new": "    st' = react({ ...st, cnonce: st.cnonce + 1, gh: { ...st.gh, landed: st.gh.landed + 1, forgedLanded: true } })\n  }\n\n  // The token behind",
+      "killedBy": "invariant:only_signed_land"
+    },
+    {
+      "id": "bad-auth-takes-the-nonce",
+      "why": "A batch that fails its own authorisation reverts but still stores its nonce.",
+      "file": "jbatch.qnt",
+      "old": "    st' = react({ ...st, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "new": "    st' = react({ ...st, cnonce: st.cnonce + 1, gh: { ...st.gh, reverts: st.gh.reverts + 1 } })\n  }\n\n  // The token behind",
+      "killedBy": "invariant:nonce_sequential"
+    },
+    {
+      "id": "chain-accepts-nonce-above-stored",
+      "why": "The chain lands a batch whose nonce is anything above the stored one (a relayer skips ahead and strands the batches below).",
+      "file": "jbatch.qnt",
+      "old": "    b.nonce == s.cnonce + 1,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "new": "    b.nonce > s.cnonce,\n    b.ids.forall(i => gateOpen(s, i)),",
+      "killedBy": "invariant:nonce_sequential"
+    },
+    {
+      "id": "cosign-batch-carries-payments",
+      "why": "R-COSIGN: a co-signed op (a settlement) shares its batch with unrelated payments, so a counterparty change or a gas choice that fails it takes the payments down too.",
+      "file": "jbatch.qnt",
+      "old": "[{ nonce: f, ids: coSigned(s, pn) }]",
+      "new": "[{ nonce: f, ids: pn }]",
+      "killedBy": "test:coSignedOpsTravelAloneTest"
+    },
+    {
+      "id": "cosign-batch-mixes-accounts",
+      "why": "R-COSIGN: co-signed ops of two Accounts share a batch.",
+      "file": "jbatch.qnt",
+      "old": "    cs.filter(i => acctOf(i) == a)\n",
+      "new": "    cs\n",
+      "killedBy": "test:coSignedOpsOfTwoAccountsDoNotShareABatchTest"
+    },
+    {
+      "id": "deposit-signed-without-simulation",
+      "why": "J6: the Runtime signs a deposit batch while the token is paused, so the batch sits at the next nonce and holds everything above it.",
+      "file": "jbatch.qnt",
+      "old": "  pure val SIMULATE_DEPOSITS = true",
+      "new": "  pure val SIMULATE_DEPOSITS = false",
+      "killedBy": "test:depositIsNotSignedWhileTheTokenIsPausedTest"
+    },
+    {
+      "id": "signs-before-gate",
+      "why": "the Runtime signs a time-gated op before its gate opens",
+      "file": "jbatch.qnt",
+      "old": "  pure val RESPECT_GATE = true",
+      "new": "  pure val RESPECT_GATE = false",
+      "killedBy": "test:gatedOpIsNotSignedBeforeItsGateTest"
+    },
+    {
+      "id": "chain-ignores-the-gate",
+      "why": "the chain runs a gated op before its gate opens",
+      "file": "jbatch.qnt",
+      "old": "    b.ids.forall(i => gateOpen(s, i)),                         // a time-gated op fails",
+      "new": "    true,                         // a time-gated op fails",
+      "killedBy": "test:earlyGatedBatchRevertsTest"
+    },
+    {
+      "id": "over-cap-batch-lands",
+      "why": "the chain has no gas cap: a batch above it lands",
+      "file": "jbatch.qnt",
+      "old": "    batchCost(s, b.ids) <= TX_GAS_CAP,                        // a batch above",
+      "new": "    true,                        // a batch above",
+      "killedBy": "test:overCapBatchNeverLandsTest"
+    },
+    {
+      "id": "over-cap-batch-soft-fails",
+      "why": "a batch above the gas cap fails softly and takes its nonce, though the transaction itself ran out of gas",
+      "file": "jbatch.qnt",
+      "old": "NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and batchCost(s, b.ids) <= TX_GAS_CAP and",
+      "new": "NONCE_ON_FAIL and b.nonce == s.cnonce + 1 and",
+      "killedBy": "test:overCapBatchNeverLandsTest"
+    },
+    {
+      "id": "gas-fail-keeps-the-nonce",
+      "why": "a batch that fails inside its budget does not take its nonce",
+      "file": "jbatch.qnt",
+      "old": "    val s1 = { ...st, cnonce: b.nonce,\n               failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),\n               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails",
+      "new": "    val s1 = { ...st, cnonce: st.cnonce,\n               failedEv: OPIDS.mapBy(i => st.failedEv.get(i) + (if (b.ids.contains(i)) 1 else 0)),\n               gh: { ...st.gh, landed: st.gh.landed + 1, failed: st.gh.failed + 1, gasFails",
+      "killedBy": "test:gasFailInsideTheBudgetSpendsTheNonceTest"
+    },
+    {
+      "id": "gas-fail-not-read",
+      "why": "the Entity never reads the BatchFailed of a gas failure: the payment is not signed again",
+      "file": "jbatch.qnt",
+      "old": "      st' = react({ ...s1, failSeen: OPIDS.mapBy(i => if (b.ids.contains(i)) s1.failedEv.get(i) else st.failSeen.get(i)) })\n    }\n  }\n\n  // The Entity gives a signed draft up",
+      "new": "      st' = react({ ...s1, failSeen: st.failSeen })\n    }\n  }\n\n  // The Entity gives a signed draft up",
+      "killedBy": "test:gasFailInsideTheBudgetSpendsTheNonceTest"
+    },
+    {
+      "id": "payments-wait-behind-a-paused-deposit",
+      "why": "F8: a queued deposit that cannot be signed (token paused) freezes every payment behind it",
+      "file": "jbatch.qnt",
+      "old": "      else if (nothingAlive(s) and pn.size() > 0) [{ nonce: f, ids: firstChunk(s, pn) }]",
+      "new": "      else if (nothingAlive(s) and pn.size() > 0 and p.size() == pn.size()) [{ nonce: f, ids: firstChunk(s, pn) }]",
+      "killedBy": "test:paymentGoesOutBehindAPausedDepositTest"
+    },
+    {
+      "id": "first-chunk-takes-everything",
+      "why": "F10: the split at the gas cap returns every op",
+      "file": "jbatch.qnt",
+      "old": "    if (not(SPLIT_AT_CAP)) ids\n",
+      "new": "    if (true) ids\n",
+      "killedBy": "test:firstChunkSplitsAtTheCapTest"
+    },
+    {
+      "id": "first-chunk-skips-the-full-check",
+      "why": "F10: a cheaper op behind one that does not fit jumps the queue (the chunk is not a prefix)",
+      "file": "jbatch.qnt",
+      "old": "      if (not(ids.contains(i)) or acc.full) acc\n",
+      "new": "      if (not(ids.contains(i))) acc\n",
+      "killedBy": "test:firstChunkIsAPrefixTest"
+    },
+    {
+      "id": "unfunded-payment-is-signed",
+      "why": "F14: a payment is signed although the reserve does not cover it (after a drain, or behind a paused deposit): it fails soft, burns a nonce and is signed again every round",
+      "file": "jbatch.qnt",
+      "old": "    val pn = OPIDS.fold(Set(), (acc, i) => if (pn0.contains(i) and payTotal(s, acc.union(Set(i))) <= s.reserve) acc.union(Set(i)) else acc)",
+      "new": "    val pn = pn0",
+      "killedBy": "invariant:no_unfunded_signed"
+    },
+    {
+      "id": "gas-fail-burns-an-urgent-batch",
+      "why": "F16: an out-of-gas dispute, reveal or ladder batch is BatchFailed with the nonce spent, though the contract reverts it whole and keeps the nonce",
+      "file": "jbatch.qnt",
+      "old": "      b.ids.forall(i => isMoney(st, i)), not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "new": "      not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "killedBy": "test:gasFailOnAnUrgentBatchRevertsWholeAndKeepsTheNonceTest"
+    },
+    {
+      "id": "gas-fail-burns-a-deposit-batch",
+      "why": "F16: an out-of-gas batch with a deposit leg is BatchFailed with the nonce spent, though the contract reverts it whole",
+      "file": "jbatch.qnt",
+      "old": "      b.ids.forall(i => isMoney(st, i)), not(hasDep(st, b.ids)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "new": "      b.ids.forall(i => isMoney(st, i)),       // F16: a batch with a dispute, reveal, ladder or deposit op runs in processBatch's own frame, so out of gas there reverts the transaction (no nonce); only money-only batches take the soft path",
+      "killedBy": "test:gasFailOnADepositBatchIsNotBatchFailedTest"
+    }
+  ],
+  "init": "init",
+  "step": "step",
+  "test": "jbatch_test.qnt"
+}
