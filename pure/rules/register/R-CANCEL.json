@@ -1,10 +1,10 @@
 {
  "id": "R-CANCEL",
- "statement": "Only the payee resolves (with the secret, in time) or cancels a lock; anyone expires it after the deadline plus reserve.",
+ "statement": "Only the payee resolves (with the secret, in time) or cancels a lock; anyone expires it after the deadline plus reserve. The Quint cell holds the two refusals: the payer cannot cancel its own lock and cannot resolve it (cancel-by-anyone, resolve-by-payer); the expiry by anyone after the deadline plus the reserve is held there under R-HTLC-CLOCK, not under this id.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-10",
  "layers": {
   "arrival": "owed: Arrival ledger merge",
-  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "quint": "hold",
   "contract": "n/a: an off-chain Account rule about who may resolve; the chain settles a lock by its secret and deadline (H1)",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"

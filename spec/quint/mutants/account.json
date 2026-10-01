@@ -24,7 +24,7 @@
     },
     {
       "id": "credit-drop-unchecked",
-      "why": "R-A6: a credit limit may be lowered below what is already owed",
+      "why": "R-CREDIT-REVOKE-FLOOR: R-A6: a credit limit may be lowered below what is already owed",
       "file": "account_core.qnt",
       "old": "if (rcpan(nb)) Ok(nb) else Refused(\"credit_below_usage\")",
       "new": "Ok(nb)",
@@ -112,7 +112,7 @@
     },
     {
       "id": "queue-guard-reads-committed-only",
-      "why": "Q-E1: a local tx is admitted against the committed state, blind to what is already queued",
+      "why": "R-ADMIT: Q-E1: a local tx is admitted against the committed state, blind to what is already queued",
       "file": "account_core.qnt",
       "old": "    match replay(plan, r.mempool, s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
       "new": "    match replay(plan, List(), s, now) {\n      | Ok(b) => match applyTx(b, tx, s, now)",
@@ -160,7 +160,7 @@
     },
     {
       "id": "cancel-by-anyone",
-      "why": "the payer can cancel its own lock: it takes back what the payee may already be owed",
+      "why": "R-CANCEL: the payer can cancel its own lock: it takes back what the payee may already be owed",
       "file": "account_core.qnt",
       "old": "        else if (payee(b.locks.get(r.id)) != author) Refused(\"not_payee\")\n        else Ok(withLock(b, r.id, NO_LOCK))",
       "new": "        else Ok(withLock(b, r.id, NO_LOCK))",
@@ -184,7 +184,7 @@
     },
     {
       "id": "resolve-by-payer",
-      "why": "the payer resolves its own lock",
+      "why": "R-CANCEL: the payer resolves its own lock",
       "file": "account_core.qnt",
       "old": "          if (payee(l) != author) Refused(\"not_payee\")\n          else if (hashOf",
       "new": "          if (false) Refused(\"not_payee\")\n          else if (hashOf",
@@ -336,7 +336,7 @@
     },
     {
       "id": "proposer-may-skip-nonces",
-      "why": "N1: a proposer may skip a proof nonce on its own: an abandoned signed proposal then outranks the committed frame, and its next frame signs a second proof under a nonce it already used.",
+      "why": "R-PROOF-NONCE: N1: a proposer may skip a proof nonce on its own: an abandoned signed proposal then outranks the committed frame, and its next frame signs a second proof under a nonce it already used.",
       "file": "account_core.qnt",
       "old": "  pure val MAX_NONCE_GAP = 0\n",
       "new": "  pure val MAX_NONCE_GAP = 1\n",

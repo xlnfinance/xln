@@ -423,7 +423,7 @@
     },
     {
       "id": "r2c-skips-enforce",
-      "why": "a deposit does not pay the older debt first (Depository._reserveToCollateral enforces before it moves reserve)",
+      "why": "R2C-DEBT-FIRST: a deposit does not pay the older debt first (Depository._reserveToCollateral enforces before it moves reserve)",
       "file": "chain.qnt",
       "old": "    val m1 = enforce(money, s)\n    val mNew",
       "new": "    val m1 = money\n    val mNew",

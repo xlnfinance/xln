@@ -1,10 +1,10 @@
 {
  "id": "R-CONSERVE",
- "statement": "Reserves plus collateral never change on one Account, and any RCPAN body settled by the chain's payout keeps debt within the credit granted (two killers).",
+ "statement": "Reserves plus collateral never change on one Account, and any RCPAN body settled by the chain's payout keeps debt within the credit granted (two killers). The Quint cell holds the payout half: the shortfall of the side that ends outside the collateral is booked as debt (payout-forgets-the-debt); no mutant carries this id for the first half, reserves plus collateral never changing.",
  "source": "contracts-decisions.md, Account-layer decisions 09-30 D-AC-14",
  "layers": {
   "arrival": "owed: spec thread, next Arrival page (id not in a name yet)",
-  "quint": "owed: spec thread, new Quint branch (id not in a name yet)",
+  "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (money conserved per frame over the real Depository's events; the specs' P3)",
   "ts": "hold"

@@ -1,10 +1,10 @@
 {
  "id": "R2C-DEBT-FIRST",
- "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page: cap, oldest first, part-paid stays at the head) and the dispute payout (dispute page, one older-debt amount per side in both directions: enforcement before payment, the per-call cap, the peer paid all of the spendable reserve it can); the other calls are the contract's and no layer here kills them yet.",
+ "statement": "Every outflow of a debtor's reserve enforces its debt queue first, oldest first and at most 32 claims per call, and what is spendable is the reserve less all outstanding debt; a part-paid claim stays at the head. The calls that enforce are the permissionless enforceDebts, and inside a batch a reserve-to-external-token transfer, a reserve-to-reserve transfer, a reserve-to-collateral deposit, a settlement outflow and a dispute payout. The Arrival pages hold the reserve-to-collateral deposit (J page: cap, oldest first, part-paid stays at the head) and the dispute payout (dispute page, one older-debt amount per side in both directions: enforcement before payment, the per-call cap, the peer paid all of the spendable reserve it can); the other calls are the contract's and no layer here kills them yet. The Quint cell holds the reserve-to-collateral deposit (r2c-skips-enforce) and the third-party claims of an enforcement (enforce-pays-third-party-claims-to-the-peer, enforce-skips-third-party-claims).",
  "source": "contracts-decisions.md (memory, #62); coordinator 10-01 07:20 (Depository._enforceDebts, _settleShortfall)",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: spec thread, new Quint branch",
+  "quint": "hold",
   "contract": "hold",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "owed: the cut (J batch-planner slice)"
@@ -84,6 +84,16 @@
    "kind": "test",
    "layer": "contract",
    "name": "test_R2C_DEBT_FIRST_aPartPaidClaimStaysAtTheHeadUntilTheNextDepositPaysItOff"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "enforce-pays-third-party-claims-to-the-peer"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "enforce-skips-third-party-claims"
   }
  ]
 }

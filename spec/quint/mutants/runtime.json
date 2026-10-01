@@ -6,7 +6,7 @@
   "mutants": [
     {
       "id": "send-before-persist",
-      "why": "R3: the signed frame leaves before it is durable; a crash re-derives a different frame at the same height (equivocation)",
+      "why": "R-DURABLE: R3: the signed frame leaves before it is durable; a crash re-derives a different frame at the same height (equivocation)",
       "file": "runtime.qnt",
       "old": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked\n    }\n  }\n\n  // Step 2",
       "new": "      disk' = disk, jhead' = jhead, net' = net.union(Set({ h: mem.h + 1, body: mem.applied.concat(batch) })), acked' = acked\n    }\n  }\n\n  // Step 2",
@@ -14,7 +14,7 @@
     },
     {
       "id": "ack-before-persist",
-      "why": "R3: a command is acknowledged to its user when applied in memory; a crash loses it",
+      "why": "R-DURABLE: R3: a command is acknowledged to its user when applied in memory; a crash loses it",
       "file": "runtime.qnt",
       "old": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked\n    }\n  }\n\n  // Step 2",
       "new": "      disk' = disk, jhead' = jhead, net' = net, acked' = acked.union(batch.foldl(Set(), (a, k) => if (isCmd(k)) a.union(Set(k)) else a))\n    }\n  }\n\n  // Step 2",

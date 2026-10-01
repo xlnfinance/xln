@@ -1,10 +1,10 @@
 {
  "id": "R-COSIGN-FREEZE",
- "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state. The Arrival cell holds the receiving half on spec/account/frames.scm: a frozen replica refuses every peer frame with a retryable frozen refusal, and while a settlement is signed its fold equals the head's off-chain offdelta (bug frozen-accepts, config freeze); that the frozen proposer stays silent has no planted bug on the page, and the signature's commitment to the epoch and nonce is on no page.",
+ "statement": "Once the node co-signs a settlement or collateral-to-reserve it proposes no new frames on that Account until the operation lands on chain or is superseded, and it refuses every frame its peer proposes meanwhile (R-FRAME-REFUSAL, fault frozen, retryable; coordinator 10-01 06:18): the signature commits to the epoch and the nonce, not to the off-chain height, so frames signed after it would be lost when it lands, and a peer frame accepted after the fold was signed makes the fold disagree with the off-chain state. The Arrival cell holds the receiving half on spec/account/frames.scm: a frozen replica refuses every peer frame with a retryable frozen refusal, and while a settlement is signed its fold equals the head's off-chain offdelta (bug frozen-accepts, config freeze); that the frozen proposer stays silent has no planted bug on the page, and the signature's commitment to the epoch and nonce is on no page. The Quint cell holds the freeze and the guard before it: a frozen side proposes nothing (frozen-side-proposes), refuses a peer frame with a retryable frozen refusal and does not take it (frozen-side-accepts-the-peer-frame, frozen-refusal-is-not-retryable), and a fold is co-signed only with no frame in flight (cosign-with-a-frame-in-flight).",
  "source": "coordinator 10-01 04:54 (answer to pr-41-review Round 3 item 4.2)",
  "layers": {
   "arrival": "hold",
-  "quint": "owed: spec thread, new Quint branch",
+  "quint": "hold",
   "contract": "n/a: the freeze is the node's off-chain duty after it signs; the contract only sees the landed batch",
   "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
   "ts": "hold"
@@ -145,6 +145,26 @@
    "kind": "bug",
    "layer": "arrival",
    "name": "frozen-accepts"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "frozen-side-accepts-the-peer-frame"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "frozen-side-proposes"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "frozen-refusal-is-not-retryable"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "cosign-with-a-frame-in-flight"
   }
  ]
 }

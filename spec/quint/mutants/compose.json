@@ -15,7 +15,7 @@
     },
     {
       "id": "payout-forgets-the-debt",
-      "why": "P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
+      "why": "R-CONSERVE: P3: the shortfall of the side that ends outside the collateral is not booked as debt, so the creditor's claim vanishes",
       "file": "chain.qnt",
       "old": "      if (d == 0) m1 else shortfall(m1, Left, -d)",
       "new": "      m1",
