@@ -52,6 +52,13 @@ describe("a column counts the rules it holds out of the rules it must carry", ()
   test("a hold cell no name carries is required but not held (the gate is red there)", () => {
     expect(columnOf(register, [], "ts")).toMatchObject({ held: 0, owed: 1, required: 3 });
   });
+  test("a stale cell is required and counts as owed, never as held, on the names and on the cells of another commit", () => {
+    const stale: Cell = { _tag: "stale", why: "models the rule before it was revised" };
+    const trailing: Register = [row("R-ONE", { ts: held }), row("R-TWO", { ts: stale })];
+    const named = [carrier("ts", "R-ONE"), carrier("ts", "R-TWO")];
+    expect(columnOf(trailing, named, "ts")).toMatchObject({ held: 1, owed: 1, required: 2 });
+    expect(registerColumns(trailing).find((column) => column.layer === "ts")).toMatchObject({ held: 1, owed: 1, required: 2 });
+  });
   test("an owed cell the code already satisfies still counts as owed until it is promoted", () => {
     expect(columnOf(register, [carrier("ts", "R-TWO")], "ts")).toMatchObject({ held: 0, owed: 1 });
   });

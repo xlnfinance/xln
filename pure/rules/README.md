@@ -14,10 +14,11 @@ The register is the folder `register/`: one file per rule, `register/<id>.json`,
 | `layers` | one cell per layer: `arrival`, `quint`, `contract`, `rig`, `ts` |
 | `killers` | what fails when the rule is broken: a `test`, a planted `bug` or a `mutant`, each with its layer and name |
 
-**Every live rule states every layer.** A cell is one of four things:
+**Every live rule states every layer.** A cell is one of five things:
 
 - `"hold"`: a name in this layer must carry the id; the gate fails when none does.
 - `"owed: <who>"`: the layer must hold it and a named PR or slice brings the name. It is shown as open, and the gate fails once a name already carries the id, so the waiver cannot outlive the work.
+- `"stale: <what is out of date and who brings the current version>"`: a name in this layer carries the id, but the layer models an earlier version of the rule (the rule was revised and the layer has not caught up). It counts as owed, never as held, so the progress report does not claim more than the layer says. The gate fails when no name carries the id (then the cell is `owed`), and a stale cell may be promoted to `hold` once the layer models the current rule; the gate cannot see that, so the PR that revises a rule flips the layers that trail it to `stale` and the PR that catches a layer up flips it back, each stating the cell for review.
 - `"n/a: <why>"`: the layer has no part in this rule, said in one line from what the rule says (`"n/a: an off-chain rule; no contract code takes part in it"`). A bare `n/a` is refused. The gate fails when a name in that layer already carries the id (the layer plainly has a part), and a killer may not sit in an `n/a` layer. An `n/a` cell leaves the layer's required count, so the progress report prints how many there are, and the PR that writes one lists it for review.
 - `"-"`, or a layer left out: unstated. The gate fails on it for every live rule (`UnstatedCell`); only a retired row may leave a layer unstated.
 
@@ -25,7 +26,7 @@ A killer may carry `"owed": "<who>"` the same way as an owed cell.
 
 The gate is a naming gate: it never runs the specs, the mutants or the tests, so `found` means a named killer exists, not that the bug is killed. Walks and mutant runs are the other half.
 
-**The register only grows.** `bun rules/check.ts` also compares the register with the one at the merge base with `origin/main` (`--base <ref>`): a row may not vanish, a cell may not drop from `hold` to `owed`, from `owed` to `n/a`, or from any stated cell back to `-`, and a killer the base named (not owed) may not disappear. A claim (`hold`, `owed`) outranks `n/a`, so a rule cannot leave a column's denominator by giving a reason; `n/a` to `owed` or `hold` is growth. A rule is retired with `retired_by`, into live rows, and the gate prints the retirement. A git failure is red.
+**The register only grows.** `bun rules/check.ts` also compares the register with the one at the merge base with `origin/main` (`--base <ref>`): a row may not vanish, a cell may not drop from `hold` or `stale` to `owed`, from `owed` to `n/a`, or from any stated cell back to `-`, and a killer the base named (not owed) may not disappear. A claim (`hold`, `owed`) outranks `n/a`, so a rule cannot leave a column's denominator by giving a reason; `n/a` to `owed` or `hold` is growth. A rule is retired with `retired_by`, into live rows, and the gate prints the retirement. A git failure is red.
 
 ## What counts as a name
 

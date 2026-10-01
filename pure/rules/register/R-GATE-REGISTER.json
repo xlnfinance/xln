@@ -1,6 +1,6 @@
 {
  "id": "R-GATE-REGISTER",
- "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow. A live rule states every layer as held, owed or not applicable with a reason: a cell left unstated is red, and so is an n/a cell in a layer where a name already carries the id.",
+ "statement": "The register gate reads only names of checks that run (never comments, strings, skipped or unreachable tests), finds each killer by its whole name in a layer the row claims, and only lets the register grow. A live rule states every layer as held, owed, stale (a name carries the id but the layer models an earlier version of the rule; counted as owed) or not applicable with a reason: a cell left unstated is red, and so is an n/a cell in a layer where a name already carries the id.",
  "source": "coordinator 09-30 (PR #71 review: a skipped or deleted gate test must turn the gate red)",
  "layers": {
   "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
@@ -94,6 +94,21 @@
    "kind": "test",
    "layer": "ts",
    "name": "the matrix prints UNSTATED for an unstated cell and n/a for a not-applicable one"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "stale: a name carries the id but the layer models an earlier rule; no problem, counted as owed and never as held"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "red: a stale cell no name carries is an owed cell, and still counts as required"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "a held cell may go stale when its rule is revised, and a stale cell may not fall back to owed; owed may become stale"
   }
  ]
 }

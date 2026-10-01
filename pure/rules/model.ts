@@ -10,11 +10,13 @@ export const LAYERS: readonly Layer[] = ["arrival", "quint", "contract", "rig", 
 //   na        the layer has no part in this rule, and the cell says why in one line; a name that carries the id here is red
 //   hold      a name in this layer must carry the id; the gate fails when none does
 //   owed      the layer must hold it, but a named PR or slice brings the name; shown as open, never hidden
+//   stale     a name in this layer carries the id, but the layer models an earlier version of the rule; counted as owed, never as held
 export type Cell =
   | Readonly<{ _tag: "unstated" }>
   | Readonly<{ _tag: "na"; reason: string }>
   | Readonly<{ _tag: "hold" }>
-  | Readonly<{ _tag: "owed"; by: string }>;
+  | Readonly<{ _tag: "owed"; by: string }>
+  | Readonly<{ _tag: "stale"; why: string }>;
 
 export type KillerKind = "test" | "bug" | "mutant";
 
@@ -56,6 +58,7 @@ export type Problem =
   | Readonly<{ _tag: "DuplicateId"; id: string }>
   | Readonly<{ _tag: "MissingInLayer"; id: string; layer: Layer }>
   | Readonly<{ _tag: "OwedButPresent"; id: string; layer: Layer; by: string }>
+  | Readonly<{ _tag: "StaleButAbsent"; id: string; layer: Layer; why: string }>
   | Readonly<{ _tag: "UnstatedCell"; id: string; layer: Layer }>
   | Readonly<{ _tag: "NotApplicableButPresent"; id: string; layer: Layer; reason: string }>
   | Readonly<{ _tag: "NoKiller"; id: string }>
@@ -75,8 +78,10 @@ export const describeProblem = (problem: Problem): string => {
       return `${problem.id}: no ${problem.layer} name carries the id (cell is "hold")`;
     case "OwedButPresent":
       return `${problem.id}: ${problem.layer} already carries the id; promote "owed: ${problem.by}" to "hold"`;
+    case "StaleButAbsent":
+      return `${problem.id}: the ${problem.layer} cell says "stale: ${problem.why}", but no ${problem.layer} name carries the id; a layer with nothing named is "owed: <who brings it>"`;
     case "UnstatedCell":
-      return `${problem.id}: the ${problem.layer} cell is not stated; say "hold", "owed: <who brings it>" or "n/a: <why this layer has no part in the rule>"`;
+      return `${problem.id}: the ${problem.layer} cell is not stated; say "hold", "owed: <who brings it>", "stale: <what is out of date>" or "n/a: <why this layer has no part in the rule>"`;
     case "NotApplicableButPresent":
       return `${problem.id}: the ${problem.layer} cell says "n/a: ${problem.reason}", but a ${problem.layer} name carries the id; make the cell "hold"`;
     case "NoKiller":
