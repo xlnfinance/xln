@@ -12,12 +12,8 @@ import {
 import { entityId, type EntityId, type Outbound } from "../../entity/model.ts";
 import { all, err, flatMap, mapErr, ok, traverse, type Result } from "../../kernel/core/result.ts";
 import type { Tagged } from "../../kernel/core/tagged.ts";
+import { bad, big, bytesOf, count, field, record, text, type Fields, type Reader, type ReadFault } from "./read.ts";
 import { decodeValue, encodeValue, type ValueFault } from "./value.ts";
-
-export type WireFault =
-  | Tagged<"too_big", { bytes: number }>
-  | Tagged<"bad_text", { fault: ValueFault }>
-  | Tagged<"bad_shape", { at: string; want: string }>;
 
 /** The most a message may be, as text, and the most txs a frame may carry: bounds of the link, not of the Account. */
 export const MAX_WIRE_BYTES = 1 << 20;
@@ -25,24 +21,6 @@ export const MAX_FRAME_TXS = 256;
 const MAX_FAULT_TAG = 64;
 const SECRET_BYTES = 32;
 const HEX32 = /^0x[0-9a-f]{64}$/;
-
-const bad = (at: string, want: string): Result<never, WireFault> => err({ _tag: "bad_shape", at, want });
-
-type Reader<T> = (at: string, v: unknown) => Result<T, WireFault>;
-
-type Fields = Readonly<Record<string, unknown>>;
-
-const record = (at: string, v: unknown, keys: readonly string[]): Result<Fields, WireFault> => {
-  const isRecord = typeof v === "object" && v !== null && !Array.isArray(v) && !(v instanceof Uint8Array);
-  const held = isRecord ? Object.keys(v) : [];
-  const exact = held.length === keys.length && keys.every((key) => held.includes(key));
-  return isRecord && exact ? ok(v as Readonly<Record<string, unknown>>) : bad(at, `{${keys.join(",")}}`);
-};
-
-const text: Reader<string> = (at, v) => (typeof v === "string" ? ok(v) : bad(at, "string"));
-const big: Reader<bigint> = (at, v) => (typeof v === "bigint" ? ok(v) : bad(at, "bigint"));
-const count: Reader<number> = (at, v) =>
-  (typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? ok(v) : bad(at, "count"));
 
 const hash: Reader<FrameHash> = (at, v) =>
   (typeof v === "string" && HEX32.test(v) ? ok(v as FrameHash) : bad(at, "hash"));
@@ -63,11 +41,7 @@ const height: Reader<JHeight> = (at, v) =>
 const entity: Reader<EntityId> = (at, v) =>
   flatMap(text(at, v), (t) => mapErr(entityId(t), () => ({ _tag: "bad_shape", at, want: "entity id" }) as const));
 
-const secret: Reader<Uint8Array> = (at, v) =>
-  (v instanceof Uint8Array && v.length === SECRET_BYTES ? ok(v) : bad(at, `${SECRET_BYTES} bytes`));
-
-const field = <T>(at: string, o: Fields, key: string, read: Reader<T>) =>
-  read(`${at}.${key}`, o[key]);
+const secret = bytesOf(SECRET_BYTES);
 
 const HOLD_KEYS = ["id", "payer", "amount", "hashlock", "deadline"];
 
@@ -86,10 +60,10 @@ const readOffer: Reader<Offer> = (at, v) => flatMap(record(at, v, ["id", "maker"
     want: field(at, o, "want", readLeg), deadline: field(at, o, "deadline", height),
   }));
 
-const tagOf = (at: string, v: unknown): Result<string, WireFault> =>
+const tagOf = (at: string, v: unknown): Result<string, ReadFault> =>
   (typeof v === "object" && v !== null && "_tag" in v ? text(`${at}._tag`, v._tag) : bad(at, "tagged"));
 
-const txOf = (tag: string, at: string, o: Fields): Result<AccountTx, WireFault> => {
+const txOf = (tag: string, at: string, o: Fields): Result<AccountTx, ReadFault> => {
   const f = <T>(key: string, read: Reader<T>) => field(at, o, key, read);
   switch (tag) {
     case "pay": return all({ _tag: ok("pay" as const), token: f("token", token), amount: f("amount", big) });
@@ -135,7 +109,7 @@ const readFrame: Reader<Frame<AccountTx>> = (at, v) => flatMap(record(at, v, FRA
 const faultTag: Reader<string> = (at, v) =>
   flatMap(text(at, v), (t) => (t.length <= MAX_FAULT_TAG ? ok(t) : bad(at, `at most ${MAX_FAULT_TAG} characters`)));
 
-const readMsg: Reader<Msg<AccountTx>> = (at, v) => flatMap(tagOf(at, v), (tag): Result<Msg<AccountTx>, WireFault> => {
+const readMsg: Reader<Msg<AccountTx>> = (at, v) => flatMap(tagOf(at, v), (tag): Result<Msg<AccountTx>, ReadFault> => {
   switch (tag) {
     case "frame": return flatMap(record(at, v, ["_tag", "frame"]), (o) =>
       all({ _tag: ok("frame" as const), frame: field(at, o, "frame", readFrame) }));
@@ -157,7 +131,7 @@ const readOutbound: Reader<Outbound> = (at, v) => flatMap(record(at, v, ["from",
 export const writeOutbound = (message: Outbound): Result<string, ValueFault> => encodeValue(message);
 
 /** The message in `text`, or why it is not one: over the bound, not text of ours, or not the shape of a message. */
-export const readWire = (wire: string): Result<Outbound, WireFault> => {
+export const readWire = (wire: string): Result<Outbound, ReadFault> => {
   if (wire.length > MAX_WIRE_BYTES) return err({ _tag: "too_big", bytes: wire.length });
   const value = decodeValue(wire);
   return value.ok ? readOutbound("$", value.value) : err({ _tag: "bad_text", fault: value.error });
