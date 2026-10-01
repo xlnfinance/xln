@@ -8,13 +8,14 @@ import { gateExit, isWanted, selectionOf, type Part } from "./compose.ts";
 import { HARDHAT_ONLY } from "./contract-tests.ts";
 
 describe("the gate exits 1 when any one part fails", () => {
-  const green = { register: true, style: true, width: true, tests: true, forge: true, bun: true };
+  const green = { register: true, style: true, width: true, tests: true, timeouts: true, forge: true, bun: true };
 
   test("all parts passing is 0", () => expect(gateExit(green)).toBe(0));
   test("R-GATE-COMPOSE a failing register alone is 1", () => expect(gateExit({ ...green, register: false })).toBe(1));
   test("a failing style gate alone is 1", () => expect(gateExit({ ...green, style: false })).toBe(1));
   test("a failing folder width alone is 1", () => expect(gateExit({ ...green, width: false })).toBe(1));
   test("a failing contract-test placement alone is 1", () => expect(gateExit({ ...green, tests: false })).toBe(1));
+  test("R-GATE-TEST-TIMEOUTS a heavy test with no timeout alone is 1", () => expect(gateExit({ ...green, timeouts: false })).toBe(1));
   test("R-GATE-FORGE a red Foundry suite alone is 1", () => expect(gateExit({ ...green, forge: false })).toBe(1));
   test("a failing Bun version alone is 1", () => expect(gateExit({ ...green, bun: false })).toBe(1));
 });
@@ -72,25 +73,25 @@ describe("the scratch copy holds what git lists and nothing else", () => {
     const repo = scratchPure({});
     expect(existsSync(`${repo}/pure/node_modules`)).toBe(false);
     expect(run(repo, "--style-only").out).not.toContain("unlisted-dir db-");
-  });
+  }, 60_000);
 });
 
 describe("the real command over a scratch copy", () => {
   const THROWS = "export const bad = () => { throw new Error('x'); };\n";
 
-  test("a clean copy passes the style part", () => expect(run(scratchPure({}), "--style-only").code).toBe(0));
+  test("a clean copy passes the style part", () => expect(run(scratchPure({}), "--style-only").code).toBe(0), 30_000);
 
   test("a throw planted in kernel/ exits 1 and names the file", () => {
     const { code, out } = run(scratchPure({ "kernel/bad.ts": THROWS }), "--style-only");
     expect(code).toBe(1);
     expect(out).toContain("kernel/bad.ts");
-  });
+  }, 30_000);
 
   test("a throw planted in chain/ exits 1 (chain is inside the gate)", () => {
     const { code, out } = run(scratchPure({ "chain/bad.ts": THROWS }), "--style-only");
     expect(code).toBe(1);
     expect(out).toContain("chain/bad.ts");
-  });
+  }, 30_000);
 
   test("the register part alone turns the command red: a scratch copy has no contract tests to carry the ids", () => {
     const repo = scratchPure({});
@@ -99,7 +100,21 @@ describe("the real command over a scratch copy", () => {
     const done = Bun.spawnSync(["bun", `${repo}/pure/rules/check.ts`, "--register-only", "--base", "HEAD"], { cwd: `${repo}/pure` });
     expect(done.exitCode).toBe(1);
     expect(done.stdout.toString()).toContain("no contract name carries the id");
-  });
+  }, 30_000);
+
+  const HEAVY = 'import { test } from "bun:test";\n\ntest("runs the gate", () => { Bun.spawnSync(["bun", "x"]); });\n';
+
+  test("R-GATE-TEST-TIMEOUTS a heavy test with no timeout exits 1 and names the file and line", () => {
+    const { code, out } = run(scratchPure({ "planted/heavy.test.ts": HEAVY }), "--timeouts-only");
+    expect(code).toBe(1);
+    expect(out).toContain("TEST_TIMEOUT_MISSING pure/planted/heavy.test.ts:3");
+  }, 30_000);
+
+  test("R-GATE-TEST-TIMEOUTS the same test with a timeout passes the timeouts part", () => {
+    const { code, out } = run(scratchPure({ "planted/heavy.test.ts": HEAVY.replace("); });", "); }, 30_000);") }), "--timeouts-only");
+    expect(out).toContain("ok   test timeouts");
+    expect(code).toBe(0);
+  }, 30_000);
 
   // The scratch copy holds pure/ only; the contract tests it is asked about are planted beside it, the Hardhat-only ones too.
   const withContractTests = (extra: Readonly<Record<string, string>>): string => {
@@ -117,37 +132,38 @@ describe("the real command over a scratch copy", () => {
     const { code, out } = run(withContractTests({ "deploy/guards.test.ts": A_TEST }), "--tests-only");
     expect(code).toBe(1);
     expect(out).toContain("UNGATED_CONTRACT_TEST contracts/test/deploy/guards.test.ts");
-  });
+  }, 30_000);
 
   test("the same test under gate/ passes the tests part", () => {
     const { code, out } = run(withContractTests({ "gate/deploy-guards.test.ts": A_TEST }), "--tests-only");
     expect(out).toContain("CONTRACT_TESTS_OK");
     expect(code).toBe(0);
-  });
+  }, 30_000);
 
   test("a folder of 11 source files exits 1 and names the folder", () => {
     const files = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`w/f${index}.ts`, "export {};\n"]));
     const { code, out } = run(scratchPure(files), "--width-only");
     expect(code).toBe(1);
     expect(out).toContain("FOLDER_TOO_WIDE pure/w:11 > 10");
-  });
+  }, 30_000);
 });
 
 describe("which parts a command line runs", () => {
-  const PARTS: readonly Part[] = ["register", "style", "width", "tests", "forge", "bun"];
+  const PARTS: readonly Part[] = ["register", "style", "width", "tests", "timeouts", "forge", "bun"];
   const ran = (...args: readonly string[]): readonly Part[] => PARTS.filter((part) => isWanted(part, selectionOf(args)));
 
   test("R-GATE-COMPOSE the plain command runs every part", () =>
-    expect(ran()).toEqual(["register", "style", "width", "tests", "forge", "bun"]));
+    expect(ran()).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "bun"]));
   test("the matrix view keeps to the register", () => expect(ran("--matrix")).toEqual(["register"]));
   test("each --X-only flag runs that part alone", () => {
     expect(ran("--register-only")).toEqual(["register"]);
     expect(ran("--style-only")).toEqual(["style"]);
     expect(ran("--width-only")).toEqual(["width"]);
     expect(ran("--tests-only")).toEqual(["tests"]);
+    expect(ran("--timeouts-only")).toEqual(["timeouts"]);
     expect(ran("--forge-only")).toEqual(["forge"]);
     expect(ran("--bun-only")).toEqual(["bun"]);
   });
   test("a flag that is not a part flag changes nothing", () =>
-    expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests", "forge", "bun"]));
+    expect(ran("--base", "HEAD")).toEqual(["register", "style", "width", "tests", "timeouts", "forge", "bun"]));
 });

@@ -220,7 +220,7 @@ describe("the real tree", () => {
     const run = Bun.spawnSync(["bun", "rules/check.ts", "--layer-root", "arrival=/no/such/dir"], { cwd: `${import.meta.dir}/..` });
     expect(run.exitCode).toBe(1);
     expect(run.stderr.toString()).toContain("no such directory");
-  });
+  }, 30_000);
 
   test("the gate turns red when the names carrying C1 disappear from the contract tests", () => {
     const without = names.filter((each) => !(each.layer === "contract" && carries("C1", each)));

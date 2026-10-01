@@ -51,6 +51,11 @@ import { CallCtx } from "../../run/CallCtx.js";
 import { type, typeErrorMessage } from "../../membrane/typecheck.js";
 import { attachOffendingValue } from "../../errors.js";
 import { APair } from "../../values/primitives/APair.js";
+import { AString } from "../../values/primitives/AString.js";
+import { ASymbol } from "../../values/primitives/ASymbol.js";
+import { ACharacter } from "../../values/primitives/ACharacter.js";
+import { ADict, foldKeyName, type DictKey } from "../../values/primitives/ADict.js";
+import type { AValue } from "../../values/primitives/AValue.js";
 import { ANil, nil } from "../../values/primitives/ANil.js";
 import { theVoid } from "../../values/primitives/AVoid.js";
 import type { SchemeValue } from "../../values/types.js";
@@ -396,14 +401,51 @@ export default EnvCapability.define("scheme/polyglot-clojure", {
       // same key — a plain `equal?` scan couldn't catch that (a pluck closure is never
       // `equal?` to a string), but dict's fold-name dedup does.
       "%dict-set":
-        symbol.define`%dict-set: a NEW dict with key k set to v, everything else preserved; applied to nil it mints a fresh single-key dict (private helper)`(
+        symbol.native`%dict-set: a NEW dict with key k set to v, everything else preserved; applied to nil it mints a fresh single-key dict (private helper)`(
           // k: keyword/symbol/string (dict's own normalization is the semantics);
           // v: anything. Output IS unconditionally a dict.
+          //
+          // Native, not a Scheme lambda: `assoc-in`/`update-in` call this once per path
+          // level, and a state-space checker calls them millions of times. The Scheme
+          // form (`@keys` + a `map` of `@` + `apply dict`) cost ~0.8 ms on a 17-field
+          // dict; this one walks the entries once. Semantics are those of the form it
+          // replaced: an existing fold-name keeps its iteration position and takes the
+          // new key object and value; a new key goes last.
           { input: [z.schemeValue, z.schemeValue, z.schemeValue], output: [z.dict()] },
-          `(lambda (d k v)
-         (let* ((ks (vector->list (@keys d)))
-                (vs (map (lambda (key) (@ d key)) ks)))
-           (apply dict (append (%interleave ks vs) (list k v)))))`,
+          function (this: CallCtx, d: unknown, k: unknown, v: unknown): ADict {
+            const key: DictKey =
+              k instanceof ASymbol || k instanceof AString || k instanceof ACharacter
+                ? k
+                : new AString(String(k).replace(/^:/, ""));
+            const name = foldKeyName(key);
+            const pairs: Array<[DictKey, SchemeValue | Promise<SchemeValue>]> = [];
+            let replaced = false;
+            if (d instanceof ADict) {
+              for (const existing of d.keyObjects()) {
+                const existingName = foldKeyName(existing);
+                if (existingName === name) {
+                  pairs.push([key, v as SchemeValue]);
+                  replaced = true;
+                } else {
+                  pairs.push([existing, d.get(existingName)]);
+                }
+              }
+            } else if (d != null) {
+              const keysOf = (d as Partial<AValue>)["arrival/tagless-final/keys"];
+              const getOf = (d as Partial<AValue>)["arrival/tagless-final/get"];
+              const names: string[] = typeof keysOf === "function" ? keysOf.call(d, this.runCtx) : [];
+              for (const existingName of names) {
+                if (existingName === name) {
+                  pairs.push([key, v as SchemeValue]);
+                  replaced = true;
+                } else {
+                  pairs.push([new AString(existingName), (getOf as Function).call(d, existingName, this.runCtx)]);
+                }
+              }
+            }
+            if (!replaced) pairs.push([key, v as SchemeValue]);
+            return new ADict(pairs);
+          } as unknown as (...args: SchemeValue[]) => ADict,
         ),
     };
   },

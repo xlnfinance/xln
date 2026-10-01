@@ -1,0 +1,863 @@
+{
+ "#meta": {
+  "format": "ITF",
+  "format-description": "https://apalache-mc.org/docs/adr/015adr-trace.html",
+  "source": "arrival spec account-frames",
+  "description": "a complete run: every tx committed or refused, links empty"
+ },
+ "vars": [
+  "left",
+  "right",
+  "inbox",
+  "unsent",
+  "lost",
+  "dups",
+  "mbt::actionTaken"
+ ],
+ "states": [
+  {
+   "#meta": {
+    "index": 0
+   },
+   "mbt::actionTaken": "init",
+   "left": {
+    "head": [],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": []
+   },
+   "unsent": {
+    "left": [
+     "a"
+    ],
+    "right": [
+     "x",
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 1
+   },
+   "mbt::actionTaken": "submit :left",
+   "left": {
+    "head": [],
+    "mempool": [
+     "a"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": [
+     "x",
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 2
+   },
+   "mbt::actionTaken": "submit :right",
+   "left": {
+    "head": [],
+    "mempool": [
+     "a"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [
+     "x"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": [
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 3
+   },
+   "mbt::actionTaken": "propose :right",
+   "left": {
+    "head": [],
+    "mempool": [
+     "a"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "x"
+     ],
+     "prev": []
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [
+     {
+      "kind": "frame",
+      "frame": {
+       "txs": [
+        "x"
+       ],
+       "prev": []
+      }
+     }
+    ],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": [
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 4
+   },
+   "mbt::actionTaken": "deliver :left",
+   "left": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [
+     "a"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "x"
+     ],
+     "prev": []
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "x"
+       ]
+      ]
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": [
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 5
+   },
+   "mbt::actionTaken": "propose :left",
+   "left": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "a"
+     ],
+     "prev": [
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "x"
+     ],
+     "prev": []
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "x"
+       ]
+      ]
+     },
+     {
+      "kind": "frame",
+      "frame": {
+       "txs": [
+        "a"
+       ],
+       "prev": [
+        [
+         "x"
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": [
+     "y"
+    ]
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 6
+   },
+   "mbt::actionTaken": "submit :right",
+   "left": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "a"
+     ],
+     "prev": [
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "right": {
+    "head": [],
+    "mempool": [
+     "y"
+    ],
+    "pending": {
+     "txs": [
+      "x"
+     ],
+     "prev": []
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "x"
+       ]
+      ]
+     },
+     {
+      "kind": "frame",
+      "frame": {
+       "txs": [
+        "a"
+       ],
+       "prev": [
+        [
+         "x"
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 7
+   },
+   "mbt::actionTaken": "deliver :right",
+   "left": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "a"
+     ],
+     "prev": [
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [
+     "y"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "frame",
+      "frame": {
+       "txs": [
+        "a"
+       ],
+       "prev": [
+        [
+         "x"
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 8
+   },
+   "mbt::actionTaken": "deliver :right",
+   "left": {
+    "head": [
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "a"
+     ],
+     "prev": [
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [
+     "y"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "a"
+       ],
+       [
+        "x"
+       ]
+      ]
+     }
+    ],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 9
+   },
+   "mbt::actionTaken": "deliver :left",
+   "left": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [
+     "y"
+    ],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 10
+   },
+   "mbt::actionTaken": "propose :right",
+   "left": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "y"
+     ],
+     "prev": [
+      [
+       "a"
+      ],
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [
+     {
+      "kind": "frame",
+      "frame": {
+       "txs": [
+        "y"
+       ],
+       "prev": [
+        [
+         "a"
+        ],
+        [
+         "x"
+        ]
+       ]
+      }
+     }
+    ],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 11
+   },
+   "mbt::actionTaken": "deliver :left",
+   "left": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "y"
+     ],
+     "prev": [
+      [
+       "a"
+      ],
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "y"
+       ],
+       [
+        "a"
+       ],
+       [
+        "x"
+       ]
+      ]
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 0
+  },
+  {
+   "#meta": {
+    "index": 12
+   },
+   "mbt::actionTaken": "duplicate :right",
+   "left": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": {
+     "txs": [
+      "y"
+     ],
+     "prev": [
+      [
+       "a"
+      ],
+      [
+       "x"
+      ]
+     ]
+    },
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "y"
+       ],
+       [
+        "a"
+       ],
+       [
+        "x"
+       ]
+      ]
+     },
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "y"
+       ],
+       [
+        "a"
+       ],
+       [
+        "x"
+       ]
+      ]
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 1
+  },
+  {
+   "#meta": {
+    "index": 13
+   },
+   "mbt::actionTaken": "deliver :right",
+   "left": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": [
+     {
+      "kind": "ack",
+      "hash": [
+       [
+        "y"
+       ],
+       [
+        "a"
+       ],
+       [
+        "x"
+       ]
+      ]
+     }
+    ]
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 0,
+   "dups": 1
+  },
+  {
+   "#meta": {
+    "index": 14
+   },
+   "mbt::actionTaken": "lose :right",
+   "left": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "right": {
+    "head": [
+     [
+      "y"
+     ],
+     [
+      "a"
+     ],
+     [
+      "x"
+     ]
+    ],
+    "mempool": [],
+    "pending": false,
+    "refused": []
+   },
+   "inbox": {
+    "left": [],
+    "right": []
+   },
+   "unsent": {
+    "left": [],
+    "right": []
+   },
+   "lost": 1,
+   "dups": 1
+  }
+ ]
+}
