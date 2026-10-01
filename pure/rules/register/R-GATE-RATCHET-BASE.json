@@ -1,0 +1,39 @@
+{
+ "id": "R-GATE-RATCHET-BASE",
+ "statement": "The register ratchet and the findings ratchet hold a run to the right base. A pull request is held to its own target branch (origin/development for a pull request into development, origin/main for one into main, a promotion snapshot included), so a rename that development already carries is not read against a main that is behind it. A push is held to the tip it replaced (the workflow hands it github.event.before as GATE_BASE_BEFORE), because the pushed commit itself would be a base of nothing; with no usable earlier tip (zero, not a sha, not in the clone) it falls back to origin/main. A local run, the nightly run and a manual run are held to origin/main, and an explicit --base always wins. The gate step passes no --base of its own, and the choice is a function with the environment as its argument, tested for each event.",
+ "source": "coordinator relay 10-01 17:54: development was red for every pull request after the promotion snapshot (R-SWAP-OFFER killer renamed on development, base read at main's merge base); cut thread's reproduction",
+ "layers": {
+  "arrival": "n/a: a repository gate rule, not protocol behaviour; no spec page models it",
+  "quint": "n/a: a repository gate rule, not protocol behaviour; no spec models it",
+  "contract": "n/a: a gate over the repository (the register); it is not contract code",
+  "rig": "n/a: a gate over the repository, with no system state for the walk",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-RATCHET-BASE a pull request is held to its own target branch, development or main, never to main by default"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-RATCHET-BASE a push is held to the tip it replaced, and to origin/main when that tip is missing, zero or not a sha"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-RATCHET-BASE a local run, the nightly run and a manual run are held to origin/main, whatever else the environment holds"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-RATCHET-BASE the gate step that runs rules/check.ts hands it the tip a push replaced, and passes no --base of its own"
+  },
+  {
+   "kind": "test",
+   "layer": "ts",
+   "name": "R-GATE-RATCHET-BASE a commit is found by its sha in a clone, and an unknown one is not"
+  }
+ ]
+}
