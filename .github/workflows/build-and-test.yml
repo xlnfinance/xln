@@ -126,7 +126,7 @@ jobs:
 
       - name: Test
         working-directory: pure
-        run: bun test --timeout 600000
+        run: bun test
 
   # `bun run test:seeds` runs these three seeds in turn (pure/package.json); one job per seed makes them parallel.
   gate-seeds:
