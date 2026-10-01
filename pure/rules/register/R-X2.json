@@ -1,0 +1,17 @@
+{
+ "id": "R-X2",
+ "statement": "Every deadline is judged at the Entity frame's timestamp, never wall-clock time. RETIRED: refined into R-CLOCK and R-HTLC-CLOCK (J height, never the frame stamp).",
+ "source": "lessons.md section 1",
+ "layers": {
+  "arrival": "-",
+  "quint": "-",
+  "contract": "-",
+  "rig": "-",
+  "ts": "-"
+ },
+ "killers": [],
+ "retired_by": [
+  "R-CLOCK",
+  "R-HTLC-CLOCK"
+ ]
+}

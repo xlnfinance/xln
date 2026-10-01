@@ -1,0 +1,34 @@
+{
+ "id": "R-CLOCK",
+ "statement": "The watermark is capped at proposer clock + 30 s; a receiver stamps inbound inputs with its own clock; the host door is max(host.finalizedJHeight, ctx.jHeight); the Runtime refuses a peer input without a Host timestamp. The Quint cell holds the receiver-side part only (a frame is judged by the receiver's own clock, never the proposer's stamp, with the reserve); the watermark cap, the host door and the Runtime's refusal of a peer input without a Host timestamp are not in the spec. The Arrival cell holds the receiver-side parts only (no frame is refused for its age or date, a frame stamp is never the time, the max(host.finalizedJHeight, ctx.jHeight) door, spec/account/clock.scm); the proposer clock + 30 s watermark cap and the Runtime refusing a peer input without a Host timestamp are on no spec page.",
+ "source": "contracts-decisions.md (memory, #57)",
+ "layers": {
+  "arrival": "hold",
+  "quint": "hold",
+  "contract": "n/a: the clock rules are off-chain (watermark, receiver stamp, host door); the contract reads only block.timestamp (H1)",
+  "rig": "owed: test rig (a walk predicate for this rule; none is named yet)",
+  "ts": "hold"
+ },
+ "killers": [
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "expire-by-frame-stamp"
+  },
+  {
+   "kind": "mutant",
+   "layer": "quint",
+   "name": "receiver-judges-by-the-frame-stamp"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "refuse-late"
+  },
+  {
+   "kind": "bug",
+   "layer": "arrival",
+   "name": "refuse-future"
+  }
+ ]
+}

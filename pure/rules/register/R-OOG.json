@@ -1,0 +1,39 @@
+{
+ "id": "R-OOG",
+ "statement": "Out-of-gas is never a normal outcome: no try/catch or low-level call may turn an out-of-gas into a normal outcome.",
+ "source": "contracts-decisions.md swallowed failures (PR 'Transformer decode gas guard', #64)",
+ "layers": {
+  "arrival": "n/a: a property of the contract source (no try/catch may swallow out-of-gas), not of the protocol model",
+  "quint": "n/a: a property of the contract source, not of the protocol model",
+  "contract": "hold",
+  "rig": "n/a: a property of the contract source, checked by the contract tests; the walk picks no gas",
+  "ts": "n/a: the rule is about contract code; xln.ts runs none"
+ },
+ "killers": [
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_unpaid_aliased_cap"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_OOG_belowTheFloorTheCallRevertsBeforeItBurnsTheGas"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_OOG_floorCoversEveryFillRatioSize"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "test_R_OOG_floorCoversEverySecretSize"
+  },
+  {
+   "kind": "test",
+   "layer": "contract",
+   "name": "R-OOG swallowed failures: every try/catch and low-level call is audited"
+  }
+ ]
+}
