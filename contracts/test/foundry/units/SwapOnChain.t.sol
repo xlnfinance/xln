@@ -5,6 +5,7 @@ import {XlnFixture} from "../helpers/XlnFixture.sol";
 import {XlnHanko} from "../helpers/XlnHanko.sol";
 import {DeltaTransformer} from "../../../contracts/DeltaTransformer.sol";
 import "../../../contracts/Types.sol";
+import {WideMath} from "../../../contracts/math/WideMath.sol";
 
 /// R-SWAP-ONCHAIN: a two-party swap inside an Account, run through a real dispute finalize on the deployed contracts. The maker
 /// signs a Swap clause (give ADD of token 1 for SUB of token 2); the taker, as the non-starter, picks the fill ratio at finalize.
@@ -60,8 +61,17 @@ contract SwapOnChainTest is XlnFixture {
   }
 
   function _proofBody(bool makerIsLeft, uint256 give, uint256 want, bool withGiveAllowance, bool withWantAllowance)
-    internal view returns (ProofBody memory pb)
+    internal view returns (ProofBody memory)
   {
+    return _proofBodyWith(_oneSwap(makerIsLeft, give, want), _allowances(makerIsLeft, give, want, withGiveAllowance, withWantAllowance));
+  }
+
+  function _oneSwap(bool makerIsLeft, uint256 give, uint256 want) internal pure returns (DeltaTransformer.Swap[] memory swaps) {
+    swaps = new DeltaTransformer.Swap[](1);
+    swaps[0] = DeltaTransformer.Swap({ ownerIsLeft: makerIsLeft, addDeltaIndex: 0, addAmount: give, subDeltaIndex: 1, subAmount: want });
+  }
+
+  function _proofBodyWith(DeltaTransformer.Swap[] memory swaps, Allowance[] memory allowances) internal view returns (ProofBody memory pb) {
     pb.watchSeed = keccak256("swap-onchain");
     pb.leftResponseSeconds = LEFT_RESPONSE_SECONDS;
     pb.rightResponseSeconds = RIGHT_RESPONSE_SECONDS;
@@ -70,38 +80,49 @@ contract SwapOnChainTest is XlnFixture {
     pb.tokenIds[0] = GIVE_TOKEN;
     pb.tokenIds[1] = WANT_TOKEN;
     DeltaTransformer.Batch memory tb;
-    tb.swap = new DeltaTransformer.Swap[](1);
-    tb.swap[0] = DeltaTransformer.Swap({ ownerIsLeft: makerIsLeft, addDeltaIndex: 0, addAmount: give, subDeltaIndex: 1, subAmount: want });
+    tb.swap = swaps;
     pb.transformers = new TransformerClause[](1);
     pb.transformers[0] = TransformerClause({
       transformerAddress: address(deltaTransformer),
       encodedBatch: deltaTransformer.encodeBatch(tb),
-      allowances: _allowances(makerIsLeft, give, want, withGiveAllowance, withWantAllowance)
+      allowances: allowances
     });
   }
 
   /// @dev The maker starts the dispute with the state the taker signed.
   function _start(uint256 maker, uint256 taker, ProofBody memory pb) internal returns (uint256 nonce, bytes32 hash) {
+    return _startBy(maker, taker, pb, "");
+  }
+
+  /// @dev `starter` starts the dispute with the state `signer` signed; `starterArgs` are committed at the start.
+  function _startBy(uint256 starter, uint256 signer, ProofBody memory pb, bytes memory starterArgs)
+    internal returns (uint256 nonce, bytes32 hash)
+  {
     hash = keccak256(abi.encode(pb));
-    nonce = _accountNonce(entity[maker], entity[taker]) + 1;
-    bool proposerIsLeft = entity[taker] < entity[maker];
-    bytes memory key = XlnHanko.accountKey(entity[maker], entity[taker]);
+    nonce = _accountNonce(entity[starter], entity[signer]) + 1;
+    bool proposerIsLeft = entity[signer] < entity[starter];
+    bytes memory key = XlnHanko.accountKey(entity[starter], entity[signer]);
     bytes32 signed_ = XlnHanko.disputeProofHash(address(dep), key, nonce, proposerIsLeft, hash, pb.watchSeed);
     Batch memory b = XlnHanko.emptyBatch();
     b.disputeStarts = new InitialDisputeProof[](1);
     b.disputeStarts[0] = InitialDisputeProof({
-      counterentity: entity[taker], nonce: nonce, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
+      counterentity: entity[signer], nonce: nonce, ondeltaEpoch: XlnHanko.currentEpoch(address(dep), key),
       proposerIsLeft: proposerIsLeft, proofbodyHash: hash, initialProofbody: pb, watchSeed: pb.watchSeed,
-      sig: _hanko(taker, signed_), starterInitialArguments: "", starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
+      sig: _hanko(signer, signed_), starterInitialArguments: starterArgs, starterCounterArguments: "", starterCounterProofCommitment: bytes32(0)
     });
-    assertTrue(_submit(maker, b));
+    assertTrue(_submit(starter, b));
   }
 
   /// @dev The taker's argument blob for the one clause: the wrapper `bytes[]`, one entry per clause, each an `Arguments`.
   function _takerArguments(uint16 ratio) internal pure returns (bytes memory) {
-    bytes[] memory perClause = new bytes[](1);
     uint16[] memory ratios = new uint16[](1);
     ratios[0] = ratio;
+    return _takerArgumentsList(ratios);
+  }
+
+  /// @dev The same for a clause holding several swaps of one owner: the n-th ratio is for the n-th such swap.
+  function _takerArgumentsList(uint16[] memory ratios) internal pure returns (bytes memory) {
+    bytes[] memory perClause = new bytes[](1);
     perClause[0] = abi.encode(DeltaTransformer.Arguments({ fillRatios: ratios, secrets: new bytes32[](0) }));
     return abi.encode(perClause);
   }
@@ -109,12 +130,19 @@ contract SwapOnChainTest is XlnFixture {
   function _finalizeBatch(uint256 maker, uint256 taker, uint256 nonce, bytes32 hash, ProofBody memory pb, bytes memory takerArgs)
     internal view returns (Batch memory b)
   {
+    return _finalizeBatchBy(maker, taker, nonce, hash, pb, "", takerArgs);
+  }
+
+  /// @dev The finalize of a dispute that `starter` started on a state `signer` signed: the starter's arguments must be the committed ones.
+  function _finalizeBatchBy(
+    uint256 starter, uint256 signer, uint256 nonce, bytes32 hash, ProofBody memory pb, bytes memory starterArgs, bytes memory otherArgs
+  ) internal view returns (Batch memory b) {
     b = XlnHanko.emptyBatch();
     b.disputeFinalizations = new FinalDisputeProof[](1);
     b.disputeFinalizations[0] = FinalDisputeProof({
-      counterentity: entity[maker], initialNonce: nonce, finalNonce: nonce, proposerIsLeft: entity[taker] < entity[maker],
-      initialProofbodyHash: hash, finalProofbody: pb, starterArguments: "", otherArguments: takerArgs, sig: "",
-      startedByLeft: entity[maker] < entity[taker], cooperative: false
+      counterentity: entity[starter], initialNonce: nonce, finalNonce: nonce, proposerIsLeft: entity[signer] < entity[starter],
+      initialProofbodyHash: hash, finalProofbody: pb, starterArguments: starterArgs, otherArguments: otherArgs, sig: "",
+      startedByLeft: entity[starter] < entity[signer], cooperative: false
     });
   }
 
@@ -244,5 +272,143 @@ contract SwapOnChainTest is XlnFixture {
 
   function test_R_SWAP_ONCHAIN_noAllowanceAtAllRevertsWholeFinalize() public {
     _assertMissingAllowanceRevertsWhole(false, false);
+  }
+
+  // ─────────────── an Allowance below the fill caps the delta (clamp, not revert) ───────────────
+
+  function _leftMakerSwap(uint256 give, uint256 want, Allowance[] memory allowances, bytes memory takerArgs)
+    internal returns (uint256 maker, uint256 taker)
+  {
+    maker = _leftActor();
+    taker = 1 - maker;
+    _fundBoth(maker, taker);
+    ProofBody memory pb = _proofBodyWith(_oneSwap(true, give, want), allowances);
+    (uint256 nonce, bytes32 hash) = _startBy(maker, taker, pb, "");
+    assertTrue(_submit(taker, _finalizeBatch(maker, taker, nonce, hash, pb, takerArgs)), "taker finalizes with its fill");
+  }
+
+  function _giveAndWantAllowances(uint256 giveRight, uint256 giveLeft, uint256 wantRight, uint256 wantLeft)
+    internal pure returns (Allowance[] memory out)
+  {
+    out = new Allowance[](2);
+    out[0] = Allowance({ deltaIndex: 0, rightAllowance: giveRight, leftAllowance: giveLeft });
+    out[1] = Allowance({ deltaIndex: 1, rightAllowance: wantRight, leftAllowance: wantLeft });
+  }
+
+  /// The allowance is the maker's loss limit: a full fill of 1000 against a give allowance of 400 moves 400, the want leg still moves its 333.
+  function test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives() public {
+    (uint256 maker, uint256 taker) = _leftMakerSwap(1000, 333, _giveAndWantAllowances(400, 0, 0, 333), _takerArguments(FULL));
+    _assertSettled(maker, taker, 400, 333);
+  }
+
+  /// The want leg is capped on its own: a want allowance of 100 against a fill of 333 gives the maker 100, the give leg still moves its 1000.
+  function test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives() public {
+    (uint256 maker, uint256 taker) = _leftMakerSwap(1000, 333, _giveAndWantAllowances(1000, 0, 0, 100), _takerArguments(FULL));
+    _assertSettled(maker, taker, 1000, 100);
+  }
+
+  /// An allowance on the wrong side of a delta allows no movement that way: the give leg of a left maker lowers the delta, so a left-side
+  /// allowance (which only raises it) clamps the give leg to nothing, the want leg (right way round) moves its 333.
+  function test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing() public {
+    (uint256 maker, uint256 taker) = _leftMakerSwap(1000, 333, _giveAndWantAllowances(0, 1000, 0, 333), _takerArguments(FULL));
+    _assertSettled(maker, taker, 0, 333);
+  }
+
+  // ─────────────── several swaps of one owner in a clause: the n-th ratio is for the n-th swap ───────────────
+
+  function _twoSwaps(bool makerIsLeft, uint16 firstRatio, uint16 secondRatio) internal returns (uint256 maker, uint256 taker) {
+    maker = makerIsLeft ? _leftActor() : 1 - _leftActor();
+    taker = 1 - maker;
+    _fundBoth(maker, taker);
+    DeltaTransformer.Swap[] memory swaps = new DeltaTransformer.Swap[](2);
+    swaps[0] = DeltaTransformer.Swap({ ownerIsLeft: makerIsLeft, addDeltaIndex: 0, addAmount: 1000, subDeltaIndex: 1, subAmount: 300 });
+    swaps[1] = DeltaTransformer.Swap({ ownerIsLeft: makerIsLeft, addDeltaIndex: 0, addAmount: 500, subDeltaIndex: 1, subAmount: 100 });
+    ProofBody memory pb = _proofBodyWith(swaps, _allowances(makerIsLeft, 1500, 400, true, true));
+    (uint256 nonce, bytes32 hash) = _startBy(maker, taker, pb, "");
+    uint16[] memory ratios = new uint16[](2);
+    ratios[0] = firstRatio;
+    ratios[1] = secondRatio;
+    assertTrue(_submit(taker, _finalizeBatch(maker, taker, nonce, hash, pb, _takerArgumentsList(ratios))), "taker finalizes with its fills");
+  }
+
+  function test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot() public {
+    (uint256 maker, uint256 taker) = _twoSwaps(true, FULL, 0);
+    _assertSettled(maker, taker, 1000, 300);
+  }
+
+  function test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot() public {
+    (uint256 maker, uint256 taker) = _twoSwaps(true, 0, FULL);
+    _assertSettled(maker, taker, 500, 100);
+  }
+
+  function test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot() public {
+    (uint256 maker, uint256 taker) = _twoSwaps(false, FULL, 0);
+    _assertSettled(maker, taker, 1000, 300);
+  }
+
+  function test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot() public {
+    (uint256 maker, uint256 taker) = _twoSwaps(false, 0, FULL);
+    _assertSettled(maker, taker, 500, 100);
+  }
+
+  // ─────────────── the taker is the dispute starter: its ratio is committed at the start ───────────────
+
+  function _takerStarts(bool makerIsLeft, uint16 committed, uint16 shown) internal returns (uint256 maker, uint256 taker, bytes memory encoded, bytes32 openDispute) {
+    maker = makerIsLeft ? _leftActor() : 1 - _leftActor();
+    taker = 1 - maker;
+    _fundBoth(maker, taker);
+    ProofBody memory pb = _proofBody(makerIsLeft, 1000, 333, true, true);
+    (uint256 nonce, bytes32 hash) = _startBy(taker, maker, pb, _takerArguments(committed));
+    encoded = abi.encode(_finalizeBatchBy(taker, maker, nonce, hash, pb, _takerArguments(shown), ""));
+    openDispute = _disputeHashOf(entity[maker], entity[taker]);
+  }
+
+  function _makerFinalizes(uint256 maker, bytes memory encoded) internal {
+    (uint256 batchNonce, bytes memory hanko) = _signedBatch(maker, encoded);
+    dep.processBatch(entity[maker], encoded, hanko, batchNonce);
+  }
+
+  function _signedBatch(uint256 actor, bytes memory encoded) internal view returns (uint256 batchNonce, bytes memory hanko) {
+    batchNonce = dep.entityNonces(entity[actor]) + 1;
+    hanko = _hanko(actor, XlnHanko.batchHash(dep.DOMAIN_SEPARATOR(), address(dep), entity[actor], encoded, batchNonce));
+  }
+
+  /// The taker starts on the state the maker signed and commits 32768/65535; the maker, as the non-starter, accepts the exact state at once.
+  function test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker() public {
+    (uint256 maker, uint256 taker, bytes memory encoded,) = _takerStarts(true, 32_768, 32_768);
+    _makerFinalizes(maker, encoded);
+    _assertSettled(maker, taker, 500, 166);
+  }
+
+  function test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker() public {
+    (uint256 maker, uint256 taker, bytes memory encoded,) = _takerStarts(false, 32_768, 32_768);
+    _makerFinalizes(maker, encoded);
+    _assertSettled(maker, taker, 500, 166);
+  }
+
+  /// The maker cannot swap in another ratio for the one the taker committed: the starter's arguments are checked against the start.
+  function test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused() public {
+    (uint256 maker, uint256 taker, bytes memory encoded, bytes32 openDispute) = _takerStarts(true, 32_768, 0);
+    (uint256 batchNonce, bytes memory hanko) = _signedBatch(maker, encoded);
+    vm.expectRevert(IDepositoryDelegateErrorAbi.E9.selector);
+    dep.processBatch(entity[maker], encoded, hanko, batchNonce);
+    assertEq(_disputeHashOf(entity[maker], entity[taker]), openDispute, "the dispute stays open");
+  }
+
+  // ─────────────── what the contract does not know: an off-chain fill ───────────────
+
+  /// The contract keeps no memory of an off-chain fill. A state whose offdeltas already hold a fill of 500 and 166, signed with the clause
+  /// still in it, fills again at the dispute: the maker ends up giving 1500. So the Account must drop or shrink the clause in the same
+  /// frame that moves the offdeltas (Runtime/Account duty), and this test is the on-chain evidence for that rule.
+  function test_R_SWAP_ONCHAIN_aClauseLeftInAStateThatAlreadyHoldsTheFillFillsAgain() public {
+    uint256 maker = _leftActor();
+    uint256 taker = 1 - maker;
+    _fundBoth(maker, taker);
+    ProofBody memory pb = _proofBody(true, 1000, 333, true, true);
+    pb.offdeltas[0] = WideMath.fromInt(-500);
+    pb.offdeltas[1] = WideMath.fromInt(166);
+    (uint256 nonce, bytes32 hash) = _startBy(maker, taker, pb, "");
+    assertTrue(_submit(taker, _finalizeBatch(maker, taker, nonce, hash, pb, _takerArguments(FULL))), "taker finalizes with its fill");
+    _assertSettled(maker, taker, 1500, 499);
   }
 }

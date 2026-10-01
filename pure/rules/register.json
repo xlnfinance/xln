@@ -2711,7 +2711,7 @@
   },
   {
    "id": "R-SWAP-ONCHAIN",
-   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, and a clause that moves a delta it has no allowance for reverts the whole finalize.",
+   "statement": "A swap clause in a signed ProofBody settles in a dispute finalize at the taker's fill ratio: each leg is floor(amount * ratio / 65535) on its own, a missing or malformed taker argument is a 0% fill, a clause that moves a delta it has no allowance for reverts the whole finalize, an allowance below the fill caps that delta (clamp, no revert), the n-th ratio is for the n-th swap of its owner, and a ratio the taker committed at the start is the one applied (another is refused).",
    "source": "plan/swap-onchain.md (coordinator decision 10-01 03:11: stock DeltaTransformer, no contract change, expiry off-chain)",
    "layers": {
     "arrival": "owed: #41",
@@ -2791,6 +2791,56 @@
      "layer": "quint",
      "name": "swap-fill-rounds-up",
      "owed": "#44"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_giveAllowanceBelowTheFillCapsWhatTheMakerGives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_wantAllowanceBelowTheFillCapsWhatTheMakerReceives"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_allowanceInTheWrongDirectionMovesNothing"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsLeftMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheFirstFillsAndTheSecondDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_twoSwapsRightMakerTheSecondFillsAndTheFirstDoesNot"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedLeftMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_takerWhoStartsFillsAtTheRatioItCommittedRightMaker"
+    },
+    {
+     "kind": "test",
+     "layer": "contract",
+     "name": "test_R_SWAP_ONCHAIN_aRatioOtherThanTheCommittedOneIsRefused"
     }
    ]
   }
